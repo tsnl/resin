@@ -1,0 +1,10 @@
+[package]
+name = "resin-codegen"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+resin-common = { workspace = true }
+resin-lir = { workspace = true }
+resin-lir-verifier = { workspace = true }

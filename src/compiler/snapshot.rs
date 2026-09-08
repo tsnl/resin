@@ -1,9 +1,10 @@
 //! A compiler result retained for executable generation and source queries.
 use super::syntax::Document;
+use crate::lir_verifier;
 use crate::{
     ast::{self, SourceLocation, SourceNote, SourceProvider, Span},
-    ir,
-    ir::generate::semantic::SemanticData,
+    hir::analysis::Analysis as SemanticData,
+    lir,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -25,7 +26,8 @@ pub struct Snapshot {
     pub dependencies: BTreeSet<PathBuf>,
     pub(crate) semantics: SemanticData,
     program: Result<ast::Program, ast::SourceError>,
-    module: Result<ir::verify::VerifiedModule, ast::SourceError>,
+    hir: Result<crate::hir::Module, ast::SourceError>,
+    module: Result<lir_verifier::VerifiedModule, ast::SourceError>,
 }
 
 impl Snapshot {
@@ -41,7 +43,7 @@ impl Snapshot {
     ) -> Self {
         let mut documents = BTreeMap::new();
         let loaded = ast::load_parsed(entry, stdlib, sources, &mut |path, text| {
-            let document = if let Some(old) = parsed.get(path).filter(|d| d.text == text) {
+            let document = if let Some(old) = parsed.get(path).filter(|d| d.source() == text) {
                 old.clone()
             } else {
                 Arc::new(Document::reparse(
@@ -56,7 +58,17 @@ impl Snapshot {
             (file, errors)
         });
         let load_error = loaded.errors.first().cloned();
-        let checked = ir::analyze_program(&loaded.program);
+        let mut checked = crate::hir::analyze_program(&loaded.program);
+        let hir_error = load_error
+            .clone()
+            .or_else(|| checked.diagnostics.first().cloned());
+        let mut lowered = None;
+        if let Some(hir) = &checked.module {
+            match super::passes::lower(&loaded.program, hir) {
+                Ok(module) => lowered = Some(module),
+                Err(errors) => checked.diagnostics.extend(errors),
+            }
+        }
         let errors = loaded
             .errors
             .into_iter()
@@ -79,12 +91,9 @@ impl Snapshot {
             dependencies: loaded.dependencies,
             semantics: checked.semantics,
             program: load_error.map_or(Ok(loaded.program), Err),
+            hir: hir_error.map_or_else(|| Ok(checked.module.expect("successful HIR")), Err),
             module: compile_error.map_or_else(
-                || {
-                    Ok(checked
-                        .module
-                        .expect("successful compilation has verified IR"))
-                },
+                || Ok(lowered.expect("successful compilation has verified LIR")),
                 Err,
             ),
         }
@@ -99,24 +108,29 @@ impl Snapshot {
         self.program.as_ref().map_err(Clone::clone)
     }
 
-    pub fn module(&self) -> Result<&ir::Module, ast::SourceError> {
+    /// Resolved tree before storage and control-flow lowering.
+    pub fn hir(&self) -> Result<&crate::hir::Module, ast::SourceError> {
+        self.hir.as_ref().map_err(Clone::clone)
+    }
+
+    pub fn module(&self) -> Result<&lir::Module, ast::SourceError> {
         self.module
             .as_ref()
             .map(|checked| checked.view().module())
             .map_err(Clone::clone)
     }
 
-    pub(crate) fn verified(&self) -> Result<ir::verify::Verified<'_>, crate::backend::Error> {
+    pub(crate) fn verified(&self) -> Result<lir_verifier::Verified<'_>, crate::codegen::Error> {
         Ok(self.module.as_ref().map_err(Clone::clone)?.view())
     }
 
-    pub fn syntax_tree(&self, path: &Path) -> Option<&tree_sitter::Tree> {
-        self.documents.get(path).map(|d| &d.tree)
+    pub fn syntax_tree(&self, path: &Path) -> Option<&crate::cst::Tree> {
+        self.documents.get(path).map(|d| d.tree())
     }
 
     pub fn sources(&self) -> impl Iterator<Item = (&Path, &str)> {
         self.documents
             .iter()
-            .map(|(path, doc)| (path.as_path(), doc.text.as_str()))
+            .map(|(path, doc)| (path.as_path(), doc.source()))
     }
 }

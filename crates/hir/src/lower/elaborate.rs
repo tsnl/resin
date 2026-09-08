@@ -1,0 +1,401 @@
+//! Discard source contexts and express sugar using the HIR language.
+mod conversions;
+use super::functions::annotation;
+use super::{GenerateError, GenerateErrorKind, Generator, eval::Evaluator, typed};
+use crate::ReceiverConversion;
+use crate::ast::{Ident, Span};
+use crate::lower::namespaces::FunctionBody;
+use crate::types::{Case, FunctionId, Intrinsic, Ty, Value};
+use crate::{Arguments, MatchArm, Statement, Term, TermKind};
+type Result<T> = std::result::Result<T, GenerateError>;
+
+impl Generator {
+    pub(super) fn elaborate(&mut self, source: &typed::Term) -> Result<Term> {
+        let before = self.environment.context.select(source.context);
+        let kind = self.elaborate_kind(source);
+        self.environment.context.select(before);
+        Ok(Term {
+            span: source.span,
+            ty: source.ty.clone(),
+            kind: kind?,
+        })
+    }
+
+    fn boxed(&mut self, source: &typed::Term) -> Result<Box<Term>> {
+        self.elaborate(source).map(Box::new)
+    }
+
+    fn elaborate_kind(&mut self, source: &typed::Term) -> Result<TermKind> {
+        use typed::TermKind as S;
+        Ok(match &source.kind {
+            S::Error(error) => return Err(error.clone()),
+            S::Unit => TermKind::Constant(Value::Unit),
+            S::None => TermKind::Constant(Value::None),
+            S::Num { value } => self.number(source, value)?,
+            S::String { value } => TermKind::Constant(Value::Bytes {
+                value: value.as_bytes().into(),
+            }),
+            S::Type { ty } => TermKind::Constant(Value::Type { ty: ty.ty.clone() }),
+            S::Var { name } => self.reference(name)?,
+            S::Layout { ty, size } => self.layout(ty, *size)?,
+            S::Unwrap { value } => TermKind::Unwrap {
+                value: self.boxed(value)?,
+            },
+            S::Try { value } => TermKind::Try {
+                value: self.boxed(value)?,
+            },
+            S::Match { value, arms } => self.match_expression(source.span, value, arms)?,
+            S::If { cond, then, els } => TermKind::If {
+                cond: self.boxed(cond)?,
+                then: self.boxed(then)?,
+                els: self.boxed(els)?,
+            },
+            S::While { cond, body } => TermKind::While {
+                cond: self.boxed(cond)?,
+                body: self.boxed(body)?,
+            },
+            S::Block { stmts, tail } => TermKind::Block {
+                stmts: stmts
+                    .iter()
+                    .filter_map(|stmt| self.statement(stmt).transpose())
+                    .collect::<Result<_>>()?,
+                tail: self.boxed(tail)?,
+            },
+            S::Record { fields } => TermKind::Record {
+                fields: fields
+                    .iter()
+                    .map(|(name, value)| Ok((name.clone(), self.elaborate(value)?)))
+                    .collect::<Result<_>>()?,
+            },
+            S::Array { elems } => TermKind::Array {
+                elems: elems
+                    .iter()
+                    .map(|e| self.elaborate(e))
+                    .collect::<Result<_>>()?,
+            },
+            S::Builtin { name, args } => self.builtin(source, name, args)?,
+            S::MethodCall {
+                receiver,
+                receiver_type,
+                name,
+                arg,
+            } => self.method(receiver.as_deref(), &receiver_type.ty, name, arg)?,
+            S::Call { func, arg } => self.call(func, arg)?,
+            S::Ascribe { ty, arg } => self.ascription(source.span, &ty.ty, arg)?,
+            S::Result { failure, arg } => TermKind::Result {
+                failure: *failure,
+                arg: self.boxed(arg)?,
+            },
+            S::Absurd { arg } => TermKind::Absurd {
+                arg: self.boxed(arg)?,
+            },
+            S::Assign { place, value } => TermKind::Assign {
+                place: self.boxed(place)?,
+                value: self.boxed(value)?,
+            },
+            S::Address { place } => TermKind::Address {
+                place: self.boxed(place)?,
+            },
+            S::Deref { pointer } => TermKind::Deref {
+                pointer: self.boxed(pointer)?,
+            },
+            S::Field { base, name } => self.field(source.span, base, name)?,
+        })
+    }
+
+    fn reference(&self, name: &Ident) -> Result<TermKind> {
+        let binding = self
+            .environment
+            .context
+            .lookup(&name.val, false)
+            .ok_or_else(|| GenerateError {
+                span: name.span,
+                kind: GenerateErrorKind::UnboundValue {
+                    name: name.val.clone(),
+                },
+            })?;
+        Ok(match self.environment.binding(binding) {
+            Some(function) => TermKind::Function { function },
+            None => TermKind::Local {
+                binding,
+                name: name.clone(),
+            },
+        })
+    }
+
+    fn number(&self, source: &typed::Term, text: &str) -> Result<TermKind> {
+        let evaluator = Evaluator {
+            scopes: &self.environment.context,
+            typer: &self.typer,
+        };
+        let (value, _) = evaluator.number(source.span, text, Some(&source.ty))?;
+        Ok(TermKind::Constant(value))
+    }
+
+    fn layout(&self, ty: &typed::Annotation, size: bool) -> Result<TermKind> {
+        let layout = crate::types::layout::layout(self.typer.definitions(), &ty.ty)
+            .map_err(|e| GenerateError::inference(ty.span, e.to_string()))?;
+        Ok(TermKind::Constant(Value::UInt64 {
+            value: if size { layout.size } else { layout.align } as u64,
+        }))
+    }
+
+    fn builtin(
+        &mut self,
+        source: &typed::Term,
+        name: &str,
+        args: &[typed::Term],
+    ) -> Result<TermKind> {
+        if matches!(name, "&&" | "||") {
+            return self.short_circuit(source.span, name, args);
+        }
+        if matches!(name, "+" | "-")
+            && let [
+                typed::Term {
+                    kind: typed::TermKind::Num { value },
+                    ..
+                },
+            ] = args
+        {
+            return self.number(
+                source,
+                &format!("{}{value}", if name == "-" { "-" } else { "" }),
+            );
+        }
+        Ok(TermKind::Builtin {
+            name: name.into(),
+            args: args
+                .iter()
+                .map(|arg| self.elaborate(arg))
+                .collect::<Result<_>>()?,
+        })
+    }
+
+    fn short_circuit(&mut self, span: Span, name: &str, args: &[typed::Term]) -> Result<TermKind> {
+        let fixed = Box::new(Term {
+            span,
+            ty: Ty::Bool,
+            kind: TermKind::Constant(Value::Bool {
+                value: name == "||",
+            }),
+        });
+        let right = self.boxed(&args[1])?;
+        let (then, els) = if name == "&&" {
+            (right, fixed)
+        } else {
+            (fixed, right)
+        };
+        Ok(TermKind::If {
+            cond: self.boxed(&args[0])?,
+            then,
+            els,
+        })
+    }
+
+    fn field(&mut self, span: Span, base: &typed::Term, name: &Ident) -> Result<TermKind> {
+        let base = self.boxed(base)?;
+        if name.val.as_ref() == "spirv"
+            && let TermKind::Function { function } = base.kind
+        {
+            return self.shader(span, function);
+        }
+        let mut shape = &base.ty;
+        while let Some(pointee) = shape.deref_target() {
+            shape = pointee;
+        }
+        let access = self
+            .typer
+            .type_field(shape, &name.val)
+            .map_err(|e| GenerateError::typing(span, e))?;
+        Ok(TermKind::Field { base, access })
+    }
+
+    fn shader(&mut self, span: Span, function: FunctionId) -> Result<TermKind> {
+        let entry = self
+            .module
+            .shaders
+            .get_mut(&function)
+            .ok_or_else(|| GenerateError {
+                span,
+                kind: GenerateErrorKind::InvalidShader {
+                    message: "`.spirv` requires a function with a shader decorator".into(),
+                },
+            })?;
+        entry.embedded = true;
+        Ok(TermKind::Shader {
+            function,
+            stage: entry.stage.clone(),
+        })
+    }
+
+    fn method(
+        &mut self,
+        receiver: Option<&typed::Term>,
+        receiver_ty: &Ty,
+        name: &Ident,
+        argument: &typed::Term,
+    ) -> Result<TermKind> {
+        let declaration = self
+            .typer
+            .method(receiver_ty, &name.val)
+            .ok_or_else(|| GenerateError::inference(name.span, "unknown method"))?;
+        let receiver = receiver
+            .map(|r| self.adapt(r, receiver_ty, &declaration.params[0]))
+            .transpose()?;
+        let params = declaration.params[usize::from(receiver.is_some())..].to_vec();
+        let args = Arguments {
+            receiver,
+            argument: self.boxed(argument)?,
+            params,
+        };
+        Ok(match declaration.body {
+            FunctionBody::Intrinsic(op) => TermKind::Intrinsic { op, args },
+            FunctionBody::Defined(function) => {
+                let param = Ty::parameter(&declaration.params);
+                let ty = Ty::Function {
+                    param: Box::new(param.clone()),
+                    result: Box::new(declaration.result),
+                };
+                let func = Box::new(Term {
+                    span: name.span,
+                    ty,
+                    kind: TermKind::Function { function },
+                });
+                let arg = if args.receiver.is_some() {
+                    Box::new(Term {
+                        span: argument.span,
+                        ty: param,
+                        kind: TermKind::Pack(args),
+                    })
+                } else {
+                    args.argument
+                };
+                TermKind::Call { func, arg }
+            }
+        })
+    }
+
+    fn adapt(&mut self, source: &typed::Term, from: &Ty, to: &Ty) -> Result<Box<Term>> {
+        let conversion = ReceiverConversion::between(from, to).expect("checked receiver");
+        Ok(Box::new(Term {
+            span: source.span,
+            ty: to.clone(),
+            kind: TermKind::Adapt {
+                conversion,
+                arg: self.boxed(source)?,
+            },
+        }))
+    }
+
+    fn call(&mut self, func: &typed::Term, arg: &typed::Term) -> Result<TermKind> {
+        let shape = self
+            .typer
+            .body(&func.ty)
+            .map_err(|e| GenerateError::typing(func.span, e))?;
+        let to = match shape {
+            Ty::Array { .. } => Some(Ty::Pointer {
+                pointee: Box::new(func.ty.clone()),
+            }),
+            Ty::Span { .. } => Some(func.ty.clone()),
+            _ => None,
+        };
+        if let Some(to) = to {
+            let args = Arguments {
+                receiver: Some(self.adapt(func, &func.ty, &to)?),
+                argument: self.boxed(arg)?,
+                params: vec![arg.ty.clone()],
+            };
+            return Ok(TermKind::Intrinsic {
+                op: Intrinsic::Index,
+                args,
+            });
+        }
+        Ok(TermKind::Call {
+            func: self.boxed(func)?,
+            arg: self.boxed(arg)?,
+        })
+    }
+
+    fn statement(&mut self, stmt: &typed::Statement) -> Result<Option<Statement>> {
+        use typed::StatementKind as S;
+        Ok(Some(match &stmt.kind {
+            S::Error(error) => return Err(error.clone()),
+            S::TypeDefinition => return Ok(None),
+            S::Define {
+                binding,
+                name,
+                init,
+            } => Statement::Define {
+                binding: binding.expect("checked declaration"),
+                name: name.clone(),
+                init: self.elaborate(init)?,
+            },
+            S::Declare { binding, name, ty } => Statement::Declare {
+                binding: *binding,
+                name: name.clone(),
+                ty: annotation(ty),
+            },
+            S::Expr { term } => Statement::Expr {
+                term: self.elaborate(term)?,
+            },
+        }))
+    }
+
+    fn match_expression(
+        &mut self,
+        span: Span,
+        value: &typed::Term,
+        arms: &[typed::MatchArm],
+    ) -> Result<TermKind> {
+        let tags = match &value.ty {
+            Ty::Result { .. } => vec![Case::Ok, Case::Err],
+            ty => ty.members().into_iter().map(Case::Type).collect(),
+        };
+        let mut seen = vec![];
+        let mut checked = vec![];
+        for arm in arms {
+            let tag = pattern(arm, &value.ty)?;
+            if !tags.contains(&tag) || seen.contains(&tag) {
+                return Err(GenerateError::inference(
+                    arm.body.span,
+                    "unknown or duplicate match variant",
+                ));
+            }
+            seen.push(tag.clone());
+            checked.push(MatchArm {
+                tag,
+                binding: arm.binding,
+                body: self.elaborate(&arm.body)?,
+            });
+        }
+        if tags.len() != seen.len() || tags.is_empty() {
+            return Err(GenerateError::inference(
+                span,
+                "match must cover every variant exactly once",
+            ));
+        }
+        Ok(TermKind::Match {
+            value: self.boxed(value)?,
+            arms: checked,
+        })
+    }
+}
+
+fn pattern(arm: &typed::MatchArm, ty: &Ty) -> Result<Case> {
+    match (&arm.variant, ty) {
+        (None, Ty::Result { .. }) => Ok(if arm.failure { Case::Err } else { Case::Ok }),
+        (Some(ann), ty) if !matches!(ty, Ty::Result { .. }) => {
+            if matches!(ann.ty, Ty::Union { .. }) {
+                return Err(GenerateError::inference(
+                    ann.span,
+                    "union patterns must name a single member type",
+                ));
+            }
+            Ok(Case::Type(ann.ty.clone()))
+        }
+        _ => Err(GenerateError::inference(
+            arm.body.span,
+            "pattern does not belong to this match type",
+        )),
+    }
+}

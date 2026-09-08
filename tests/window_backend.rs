@@ -306,9 +306,9 @@ fn run_example(name: &str) {
     };
     // Close through the runtime after three frames; leave the interactive demo unbounded.
     stmts.extend(support::statements("test_frames := test_frames + 1; if (test_frames == 3) { window.set_should_close(1 == 1)?; } else { () };"));
-    let module = resin::ir::generate_program(&ast).unwrap();
-    let shaders = resin::backend::build_shaders(&module, &config::glsl(&compiler)).unwrap();
-    let c = resin::backend::c::emit_with_shaders(&module, "main", &shaders).unwrap();
+    let module = resin::compiler::generate_program(&ast).unwrap();
+    let shaders = resin::compiler::build_shaders(&module, &config::glsl(&compiler)).unwrap();
+    let c = resin::c::emit_with_shaders(&module, "main", &shaders).unwrap();
     compile(&c, &executable);
     if !display_available() {
         return;

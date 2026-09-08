@@ -1,6 +1,6 @@
 use resin::{
     ast::{self, StmtKind, TypeKind},
-    ir::{self, Ty},
+    lir::{self, Ty},
 };
 
 mod support;
@@ -16,7 +16,9 @@ fn result(source: &str, name: &str) -> Ty {
 }
 
 fn rejects(source: &str, message: &str) {
-    let error = ir::generate(&parse(source)).unwrap_err().to_string();
+    let error = resin::compiler::generate(&parse(source))
+        .unwrap_err()
+        .to_string();
     assert!(error.contains(message), "{source}\n{error}");
 }
 
@@ -115,7 +117,7 @@ fn casts_do_not_choose_an_unrelated_nominal_type_for_a_hole() {
             "value"
         ),
         Ty::Defined {
-            definition: ir::TypeId::from_index(1)
+            definition: lir::TypeId::from_index(1)
         }
     );
 }
@@ -222,7 +224,7 @@ fn distinct_nodes_with_identical_spans_do_not_share_inference_variables() {
         panic!()
     };
     fields[1].1.span = fields[0].1.span;
-    let m = ir::generate(&file).unwrap();
+    let m = resin::compiler::generate(&file).unwrap();
     let Ty::Record { fields } = &m.functions[0].result else {
         panic!()
     };
@@ -286,7 +288,10 @@ fn numeric_suffixes_select_exact_types() {
         "def value() -> _ = { 42_ul + 1_l };",
         "def value() -> float64 = { 1.5_f };",
     ] {
-        assert!(ir::generate(&parse(source)).is_err(), "{source}");
+        assert!(
+            resin::compiler::generate(&parse(source)).is_err(),
+            "{source}"
+        );
     }
 }
 
@@ -346,7 +351,7 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
         let source = format!(
             "def consume(p: Ptr<ubyte>) = {{}}; def main() = {{ {marker} var value = 0; consume(&value); }};"
         );
-        let module = ir::generate(&parse(&source)).unwrap();
+        let module = resin::compiler::generate(&parse(&source)).unwrap();
         let value = module
             .functions
             .iter()
@@ -358,11 +363,13 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
         let source = format!(
             "def consume(p: Ptr<ubyte>) = {{}}; def main() = {{ {marker} var value = 0_i; consume(&value); }};"
         );
-        let error = ir::generate(&parse(&source)).unwrap_err();
+        let error = resin::compiler::generate(&parse(&source)).unwrap_err();
         assert!(
             matches!(
                 error.kind,
-                ir::GenerateErrorKind::Type(ir::TypeErrorKind::TypeMismatch { .. })
+                resin::diagnostic::GenerateErrorKind::Type(
+                    resin::types::TypeErrorKind::TypeMismatch { .. }
+                )
             ),
             "{source}: {error}"
         );
@@ -370,7 +377,7 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
         let source = format!(
             "def main() -> int = {{ {marker} var values = [10, 20]; var data = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }}; data.at(1).* }};"
         );
-        ir::generate(&parse(&source)).unwrap();
+        resin::compiler::generate(&parse(&source)).unwrap();
     }
 }
 
@@ -447,7 +454,7 @@ fn numeric_conversions_do_not_choose_source_storage_types() {
             .blocks
             .iter()
             .flat_map(|b| &b.instrs)
-            .any(|i| matches!(i, ir::Instr::NumericCast { ty: Ty::UInt8 }))
+            .any(|i| matches!(i, lir::Instr::NumericCast { ty: Ty::UInt8 }))
     );
 }
 
@@ -489,7 +496,7 @@ fn layout_operands_check_nested_declarations_without_emitting_them() {
             .blocks
             .iter()
             .flat_map(|b| &b.instrs)
-            .all(|instr| !matches!(instr, ir::Instr::Call | ir::Instr::MakeRecord { .. }))
+            .all(|instr| !matches!(instr, lir::Instr::Call | lir::Instr::MakeRecord { .. }))
     );
 
     rejects(

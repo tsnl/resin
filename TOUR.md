@@ -4,7 +4,8 @@ Resin is a systems language for host CPUs and Vulkan GPUs. This is a reading
 path through its implementation, not a language reference; keep the
 [README](README.md) nearby for syntax and command-line options.
 
-The workspace has four Rust crates: the compiler at the root, the native
+The workspace contains the compiler driver at the root, seven unpublished compiler
+phase crates in [crates/](crates/) (including shared types and verification), the native
 runtime in [resin-runtime/](resin-runtime/), the parser in
 [tree-sitter-resin/](tree-sitter-resin/), and the language server in
 [resin-lsp/](resin-lsp/). The [Zed extension](zed-resin/) is a separate Cargo
@@ -39,7 +40,7 @@ A few language choices explain much of the implementation:
 - Value binding statements use `var`, including uninitialized locals; nominal
   records use `struct`, and `type` creates transparent aliases. Record fields remain
   `name = value`; parameters remain `name: Type`.
-- `A | B` is a structural union of nominal structs. `Result<T, E>` is first-class;
+- `A | B` is a structural union of value types. `Result<T, E>` is first-class;
   `ok` and `err` construct it, `match` handles variants, and postfix `?` propagates errors.
 - `Arc<T>` and `Weak<T>` provide shared ownership. Value reads copy; fresh results
   transfer into consumers. `impl` defines inherent methods and destruction hooks.
@@ -48,7 +49,8 @@ A few language choices explain much of the implementation:
 - Files have private scopes and explicit exports. Imports expose only exported
   names, and never execute code. There are no runtime global variables.
 - Entry points are ordinary exported functions. `main` is only the default
-  name; host entries take unit and return unit, `int`, or a Result with either success type.
+  name; host entries take unit or the argc/argv/envp tuple, and return unit, `int`,
+  or a Result with either success type.
 
 [examples/eg009_imports.resin](examples/eg009_imports.resin) and
 [its counter module](examples/lib/counter.resin) demonstrate modules and
@@ -69,7 +71,7 @@ in shared owners. Scope cleanup releases them automatically.
 The main path is short enough to keep in mind:
 
 ```text
-source files -> Tree-sitter -> AST -> typed stack IR
+source files -> CST -> AST -> HIR -> LIR -> verified LIR
                                             |
                                             v
                                  requested shaders' GLSL
@@ -109,7 +111,7 @@ same captured environment.
 [compiler::Request::new](src/compiler.rs) validates the input/output combination and
 resolves native directory destinations, rejecting outputs that would overwrite the
 source. `Session::compile(&request)` analyzes through the caller's session, then passes
-verified IR to [backend/build.rs](src/backend/build.rs). Every compilation follows the
+verified LIR to [compiler/build.rs](src/compiler/build.rs). Every compilation follows the
 same recipe: generate GLSL for all requested shaders, compile it to SPIR-V, embed the bytes
 in generated C, then compile and link the executable. `Session::compile` returns an
 `Executable` that keeps the build-cache lock while the caller runs it. Execution remains
@@ -117,17 +119,17 @@ a separate step. Generated C, GLSL, and SPIR-V remain in the build cache for ins
 
 The session owns source overlays, cached parses, import dependencies, and
 immutable [compilation snapshots](src/compiler/snapshot.rs). A snapshot retains
-the AST, declaration contexts, type facts, diagnostics, and verified IR when
+the AST, resolved HIR, opaque editor analysis, diagnostics, and verified LIR when
 compilation succeeds. The CLI uses one session for its invocation; the language
 server retains one across edits.
 
-The compiler stages are library modules exposed by [src/lib.rs](src/lib.rs),
-so tests and editor adapters can inspect the AST and verified IR through
+The compiler stages are separate crates re-exported by [src/lib.rs](src/lib.rs),
+so tests and editor adapters can inspect the AST, HIR, and verified LIR through
 `Session::analyze` without building an executable.
 
 Formatting takes a separate path from `main` through
 [format.rs](src/cli/format.rs) to the shared
-[formatting.rs](src/formatting.rs) library module. `--format` (or `-f`) formats
+[CST formatter](crates/cst/src/print.rs) library module. `--format` (or `-f`) formats
 files in place and searches directories recursively for `.resin` files;
 `--format --check` reports differences without writing and exits with status 1
 on differences or file/syntax errors. In the development environment, try:
@@ -140,138 +142,76 @@ The formatter uses Tree-sitter syntax, changes only whitespace outside comments
 and literals, and indents with hard tabs. It rejects invalid syntax without
 modifying the file and needs no semantic analysis or entry point.
 
-### The grammar and AST describe source, not execution
+### Read each language, then its incoming pass
 
-[grammar.js](tree-sitter-resin/grammar.js) is the source of truth for concrete
-syntax. Skip the generated `src/parser.c` on a first read.
+The [architecture guide](doc/architecture.md) gives the full crate graph and pass
+contracts. Every phase follows the same path: `language.rs` describes its data,
+`lower` produces it from the preceding language, and `print` renders it.
 
-[src/ast/mod.rs](src/ast/mod.rs) defines the small set of source constructs:
-files, statements, terms, and types, annotated with byte spans for diagnostics.
-[generate.rs](src/ast/generate.rs) translates Tree-sitter nodes into these
-structures, decodes literals, inserts the unit branch for one-armed `if`, and lowers operators into builtin
-applications. Malformed expressions become holes alongside syntax diagnostics;
-strict parsing checks those diagnostics before returning the same AST.
+[grammar.js](tree-sitter-resin/grammar.js) defines concrete syntax. The
+[CST document](crates/cst/src/language.rs) pairs a Tree-sitter tree with source
+text; [CST lowering](crates/cst/src/lower.rs) reparses it incrementally. Skip the
+generated `src/parser.c` on a first read.
 
-[load.rs](src/ast/load.rs) builds a `Program` of source modules in dependency
-order, with the entry file last. It resolves relative imports and `std/` paths,
-deduplicates canonical paths, and reports import cycles. The shared loading
-traversal retains accessible modules and failed dependencies after errors.
-Loading files and deciding which names are visible are separate jobs: visibility is handled later
-by [IR module lowering](src/ir/generate/modules.rs).
+[AST language](crates/ast/src/language.rs) defines source files, declarations,
+terms, and type syntax with byte spans. [AST lowering](crates/ast/src/lower.rs)
+translates CST nodes, decodes strings, inserts the unit branch of one-armed `if`,
+and represents operators as builtin applications. It also preserves incomplete
+expressions as holes for editor recovery. [Module loading](crates/ast/src/load.rs)
+builds a `Program` in dependency order and resolves relative and `std/` imports.
 
-### Learn the IR's vocabulary before its generator
+[HIR language](crates/hir/src/language.rs) is a self-contained, typed tree. Start
+at [HIR lowering](crates/hir/src/lower/mod.rs), then follow
+[checking a file](crates/hir/src/lower/check/file.rs): declare signatures, check
+bodies, solve dependency groups, and replace inference variables with concrete types.
+The [solver](crates/hir/src/lower/infer/solver.rs) handles numeric constraints
+and recursive error sets. It stays private to this crate.
 
-Read these small definitions first:
+[Elaboration](crates/hir/src/lower/elaborate.rs) resolves lexical bindings,
+method calls, field projections, conversions, and shader references. Short-circuit
+operators become conditionals and layout queries become constants. The public HIR
+contains neither AST nodes nor scope cursors. The temporary checking tree in
+[typed.rs](crates/hir/src/lower/typed.rs) is an internal construction step.
 
-- [ir/mod.rs](src/ir/mod.rs): a `Module` owns types, functions, and a map of
-  function names exported by the entry file.
-- [ir/instr.rs](src/ir/instr.rs): functions contain locals and basic blocks;
-  blocks contain instructions followed by a terminator.
-- [ir/value.rs](src/ir/value.rs) and [ir/types/mod.rs](src/ir/types/mod.rs):
-  values, identifiers, and types used by those instructions.
-
-This is a typed operand-stack IR, not SSA. Instructions consume and produce
-stack values; terminators connect blocks or return from a function. Local
-storage is explicit, with separate address, load, and store instructions. Local zero
-is always the function parameter, including unit and tuple parameters and foreign
-declarations; there is no configurable parameter index.
-The C and GLSL backends translate this stack model into target-language
-variables and control flow; they do not execute the IR.
-
-### Checking produces a typed tree; lowering emits IR
-
-[ir/generate/check/expressions.rs](src/ir/generate/check/expressions.rs) walks
-source expressions, resolves declarations, and adds constraints through the shared
-[inference services](src/ir/typecheck/infer/). It builds an explicit expression
-and statement tree instead of scheduling emission callbacks. Each equation has a
-`Rule` owner identifying the inference variables invalidated if the operation fails.
-
-[ir/typecheck/](src/ir/typecheck/) contains the shared operation rules.
-[TyperContext](src/ir/typecheck/mod.rs) owns type definitions and method namespaces;
-[builtin.rs](src/ir/typecheck/builtin.rs) classifies builtin names and arities,
-[rules.rs](src/ir/typecheck/rules.rs) checks their signatures, and
-[convert.rs](src/ir/typecheck/convert.rs) classifies explicit conversions.
-These services do not traverse syntax or own lexical scopes. Checking, lowering,
-and the independent IR verifier reuse the concrete rules.
-[annotation.rs](src/ir/generate/annotation.rs) decodes type syntax and explicit holes
-with an injected name resolver. A failed decode publishes neither; function result
-inference owns its holes so a failed body preserves concrete annotations.
-
-[check/mod.rs](src/ir/generate/check/mod.rs) resolves function dependency groups.
-The private [solver](src/ir/typecheck/infer/solver.rs) delays numeric choices and
-accumulates error sets to a fixed point, including mutually recursive functions.
-Errors retain valid declarations and independent expression facts; failed relations
-are removed and surviving constraints are retried from a solver checkpoint.
-[check/resolve.rs](src/ir/generate/check/resolve.rs) finishes this pass by replacing
-inference handles throughout the tree with concrete types. Invalid bodies are
-withheld from lowering while editor facts remain available.
-
-[typed.rs](src/ir/generate/typed.rs) defines the pass boundary: ordinary data for
-expressions, statements, annotations, and signatures. The checker builds this shape
-with inference types and returns it with concrete `Ty` values. The generator owns
-no inference solver. [lower.rs](src/ir/generate/lower.rs) performs the second
-expression traversal, dispatching the typed nodes to the storage, control-flow,
-call, conversion, and cleanup helpers.
-
-In [scope.rs](src/ir/generate/scope.rs), `Scopes` constructs declarations and
-parent links and owns pending type facts until they resolve. Its retained
-`ContextView` provides lookup at a captured declaration prefix. Lowering uses
-an `Environment` mapping declaration IDs to storage; it cannot declare names or
-rebuild scopes. Typed terms and statements carry context cursors, so an earlier
-expression cannot see later declarations. Inherent methods retain canonical
-declaration IDs in their receiver namespace.
-
-Local structs reserve their nominal identity during checking. Layout queries
-check their operands but retain only the queried type in the typed tree, so
-lowering cannot execute the operand. Ownership cleanup tracks initialized locals
-and destroys them in reverse scope order, preserving outgoing values first.
-The [builder](src/ir/generate/builder.rs) assembles concrete stack IR, which the
-independent [verifier](src/ir/verify/) checks before any backend consumes it.
-
-The neighboring files separate the questions asked during that process:
+[LIR language](crates/lir/src/language.rs) defines a typed operand stack machine.
+Functions own locals and basic blocks; instructions consume and produce stack
+values, and terminators connect blocks. Local zero is always the parameter,
+including unit, tuples, and foreign declarations. [LIR lowering](crates/lir/src/lower/mod.rs)
+consumes only HIR and shared concrete types. It chooses storage, checks definite
+initialization, makes evaluation order explicit, and inserts cleanup.
 
 | Question | Start reading here |
 | --- | --- |
-| Which imported or exported declaration does a name mean? | [modules.rs](src/ir/generate/modules.rs) |
-| Which declarations are visible, and where are their types and origins? | [scope.rs](src/ir/generate/scope.rs), [semantic.rs](src/ir/generate/semantic.rs) |
-| Where is a binding stored, and is it initialized? | [bindings.rs](src/ir/generate/bindings.rs), [builder.rs](src/ir/generate/builder.rs) |
-| How is an expression checked, then lowered? | [check/expressions.rs](src/ir/generate/check/expressions.rs), [typed.rs](src/ir/generate/typed.rs), [lower.rs](src/ir/generate/lower.rs) |
-| Which storage location does an assignment or address refer to? | [places.rs](src/ir/generate/places.rs) |
-| How do branches, loops, and short-circuit operators join? | [flow.rs](src/ir/generate/flow.rs) |
-| How do Results, exhaustive matches, and early error returns lower? | [sums.rs](src/ir/generate/sums.rs) |
-| How are inherent and builtin methods declared and called? | [methods.rs](src/ir/generate/methods.rs), [builtin_methods.rs](src/ir/generate/builtin_methods.rs), [typecheck/methods.rs](src/ir/typecheck/methods.rs) |
-| How are owned locals destroyed at scope exits? | [cleanup.rs](src/ir/generate/cleanup.rs) |
-| How are blocks, locals, and instructions assembled? | [builder.rs](src/ir/generate/builder.rs) |
+| Which imported declaration does a name mean? | [HIR modules](crates/hir/src/lower/modules.rs) |
+| Which names are visible at this source position? | [HIR scopes](crates/hir/src/lower/scope.rs) |
+| How are a function's constraints solved? | [HIR checking](crates/hir/src/lower/check/file.rs) |
+| How does a method become an ordinary call? | [HIR elaboration](crates/hir/src/lower/elaborate.rs) |
+| Where is a binding stored, and is it initialized? | [LIR bindings](crates/lir/src/lower/bindings.rs) |
+| Which storage location does an assignment address? | [LIR places](crates/lir/src/lower/places.rs) |
+| How do branches and loops join? | [LIR control flow](crates/lir/src/lower/flow.rs) |
+| How are Result propagation and cleanup lowered? | [LIR sums](crates/lir/src/lower/sums.rs), [cleanup](crates/lir/src/lower/cleanup.rs) |
+| How are concrete instructions assembled? | [LIR builder](crates/lir/src/lower/builder.rs) |
 
-The distinction between a value and a place is worth following through one
-pointer example: reading `x`, taking `&x`, and assigning to `x` share a name but
-require different instructions.
+### Verification is a separate crate
 
-### Verification is an independent boundary
+[resin-lir-verifier](crates/lir-verifier/src/lib.rs) checks definitions, instruction
+operands, block-edge stack types, and returns. LIR has no dependency on this crate.
+Its `VerifiedModule` owns LIR and the analysis that certifies it behind private
+fields. Native builds borrow an immutable `Verified` view. Consuming `into_module`
+returns mutable LIR and discards the certificate; changes require verification again.
 
-[ir/verify/](src/ir/verify/) checks instruction operands, block-edge stack
-types, returns, and type definitions. Its `VerifiedModule` owns the checked
-module, function typing results, and canonical type table behind private fields. Snapshots retain
-this product, and native builds borrow a `Verified` view of it. Public backend
-entry points accepting arbitrary IR use `with_verified` to validate their input
-and borrow the resulting analysis for emission. Consuming `into_module` returns
-ordinary IR and explicitly drops its verification proof.
-
-[verify/flow.rs](src/ir/verify/flow.rs) propagates stack types through existing
-blocks and checks that incoming edges agree. [generate/flow.rs](src/ir/generate/flow.rs)
-creates those blocks and branches from source expressions.
-
-[ir/types/definitions.rs](src/ir/types/definitions.rs) holds definition checks
-shared by the type checker and verifier, including invalid references and recursive
-inline layouts. This is why those checks live beside the type representation,
-not exclusively inside the source-language type checker.
+The [concrete type rules](crates/common/src/types/check/mod.rs) and
+[layout checks](crates/common/src/types/definitions.rs) live in `resin-common`.
+They depend on no compiler phase. HIR adds inference and method namespaces privately;
+the verifier applies concrete rules to instructions independently of source checking.
 
 ### C emission and native builds are separate
 
-[backend/c/mod.rs](src/backend/c/mod.rs) assembles a C translation unit:
-types, declarations, function bodies, embedded shaders, and a C `main` wrapper
-calling the selected Resin entry. [function.rs](src/backend/c/function.rs)
-lowers instructions and block edges; [foreign.rs](src/backend/c/foreign.rs)
+[C lowering](crates/codegen/src/c/lower/mod.rs) produces a
+[C source tree](crates/codegen/src/c/language.rs): declarations, embedded shaders,
+functions, blocks, and a `main` wrapper. [The printer](crates/codegen/src/c/print.rs)
+formats that tree without accessing LIR or typechecking facts. [function.rs](crates/codegen/src/c/lower/function.rs)
+lowers instructions and block edges; [foreign.rs](crates/codegen/src/c/lower/foreign.rs)
 bridges Resin's unary calls to conventional C argument lists.
 
 [toolchain/c.rs](src/toolchain/c.rs) invokes the C compiler and statically links
@@ -299,8 +239,8 @@ changes with `file_changed`. Overlays take precedence over disk. Changes
 invalidate dependent entries; retained snapshots remain valid for their readers.
 
 [compiler/source.rs](src/compiler/source.rs) handles source lookup and path
-normalization; [compiler/syntax.rs](src/compiler/syntax.rs) caches ASTs and
-incrementally reparses Tree-sitter trees. [snapshot.rs](src/compiler/snapshot.rs)
+normalization; [compiler/syntax.rs](src/compiler/syntax.rs) caches CST and AST
+products together. The CST crate performs incremental reparsing. [snapshot.rs](src/compiler/snapshot.rs)
 builds the common result for compilation and editor queries. Parsing is
 incremental per file; semantic checking reruns an affected entry's import
 closure. This is separate from the native artifact cache.
@@ -311,12 +251,12 @@ recovers unfinished scopes without clearing the original syntax diagnostics.
 Invalid declarations still shadow outer names, and healthy siblings retain
 their types. Unknown types display as `?`; errors prevent executable generation.
 
-[analysis.rs](src/analysis.rs) implements editor queries on the compiler's
-snapshot, also exposed under the compatibility name `Analysis`. Queries select
+[analysis.rs](src/analysis.rs) adapts compiler snapshots to the opaque
+[HIR analysis API](crates/hir/src/analysis.rs). Queries select
 the source context view and look up declarations on demand. Member observations
 retain available fields, signatures, and canonical method origins even when later code fails.
-Hover and member completion use these facts and shared formatting from
-[generate/semantic.rs](src/ir/generate/semantic.rs). There is no separate
+Hover and member completion use these facts and
+[shared type formatting](crates/common/src/types/print.rs). There is no separate
 recovery compiler or fallback declaration index.
 
 The [language server](resin-lsp/README.md) adapts that compiler state to the
@@ -327,7 +267,7 @@ handles requests, document versions, and file notifications;
 the background, coalesces edits, and discards obsolete results. Editor analysis
 never compiles C/GLSL, initializes a GPU, or executes Resin programs.
 
-`textDocument/formatting` uses the same [formatter](src/formatting.rs) as the
+`textDocument/formatting` uses the same [formatter](crates/cst/src/print.rs) as the
 CLI. The server formats the open document's current text and returns a text edit
 for the changed region. See the [formatting rules](resin-lsp/README.md#formatting)
 for layout conventions.
@@ -352,19 +292,19 @@ cargo run -- examples/gradient.resin -o dist/
 Read `build/shaders/<hash>/shader.glsl` and `shader.spv` after the build.
 
 `@compute_shader`, `@vertex_shader`, and `@fragment_shader` register and validate
-shader entry declarations. [ir/shader.rs](src/ir/shader.rs) defines their metadata
+shader entry declarations. [shader interfaces](crates/common/src/types/shader.rs) defines their metadata
 and signature contracts. Decorated functions and their unannotated helpers remain
 host-callable. Accessing `function.spirv` requests a static `Span<ubyte>` artifact;
-[backend/shaders.rs](src/backend/shaders.rs) enumerates those declaration
+[shader build orchestration](src/compiler/shaders.rs) enumerates those declaration
 requests and emits GLSL. [toolchain/shaders.rs](src/toolchain/shaders.rs) caches the
 external compiler output, supplying SPIR-V for embedding in C.
 No runtime function-value analysis is involved. The runtime receives bytes, not a
 host function pointer or source-file path.
 
-[backend/glsl/mod.rs](src/backend/glsl/mod.rs) collects reachable shader
-functions. [entry.rs](src/backend/glsl/entry.rs) adapts regular Resin function
+[GLSL lowering](crates/codegen/src/glsl/lower/mod.rs) collects reachable shader
+functions. [entry.rs](crates/codegen/src/glsl/lower/entry.rs) adapts regular Resin function
 signatures to compute, vertex, or fragment interfaces, and
-[function.rs](src/backend/glsl/function.rs) lowers their bodies. The GLSL
+[function.rs](crates/codegen/src/glsl/lower/function.rs) lowers their bodies. The GLSL
 backend supports a subset of the host language; it rejects operations such as
 foreign calls and recursion rather than making them work on the device.
 
@@ -397,7 +337,7 @@ Use `buffer(index).*` to read or write it. Raw pointer arithmetic requires an ex
 conversion to `ulong` and operates on byte addresses. The host allocates memory,
 writes root data, and passes its device address when dispatching or drawing.
 Shader entry wrappers interpret that root according to their supported
-interface. [backend/layout.rs](src/backend/layout.rs) keeps supported buffer
+interface. [target layout helpers](crates/codegen/src/layout.rs) keeps supported buffer
 layouts consistent between C and GLSL; start there when investigating a field
 offset or alignment mismatch.
 
@@ -427,7 +367,7 @@ Tests are executable descriptions of the boundaries above:
 | Syntax or AST shape | [parser corpus](tree-sitter-resin/test/corpus/), [mutation_ast.rs](tests/mutation_ast.rs) |
 | Grammar JavaScript types, lint, or formatting | Run `npm run check` in [tree-sitter-resin/](tree-sitter-resin/README.md) |
 | Imports, exports, or entry visibility | [modules.rs](tests/modules.rs), [cli.rs](tests/cli.rs) |
-| Typing, conversions, or IR invariants | [nominal_types.rs](tests/nominal_types.rs), [typing-rule tests](src/ir/typecheck/tests.rs), [verifier tests](src/ir/verify/tests.rs) |
+| Typing, conversions, or IR invariants | [nominal_types.rs](tests/nominal_types.rs), [typing-rule tests](crates/common/src/types/check/tests.rs), [verifier tests](crates/lir-verifier/src/tests.rs) |
 | Explicit type holes and return inference | [inference.rs](tests/inference.rs), [inference example](examples/inference.resin) |
 | Structs, aliases, unions, and typed errors | [results.rs](tests/results.rs), [errors example](examples/errors.resin) |
 | Automatic destruction, scope exits, and copying | [shared.rs](tests/shared.rs), [ownership example](examples/ownership.resin), [C execution tests](tests/c_backend.rs) |

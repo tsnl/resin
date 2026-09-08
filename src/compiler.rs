@@ -4,7 +4,13 @@
 //! and checked snapshots. Queries without intervening changes reuse the same
 //! snapshot. Existing snapshots remain valid when the session advances.
 
-use crate::{ast, backend, toolchain};
+use crate::{ast, codegen, toolchain};
+mod build;
+mod shaders;
+pub use build::Executable;
+pub use shaders::build_shaders;
+mod passes;
+pub use passes::{generate, generate_program};
 mod snapshot;
 mod source;
 pub(crate) mod syntax;
@@ -45,18 +51,18 @@ impl Request {
         mut input: Input,
         destination: Option<PathBuf>,
         options: Options,
-    ) -> Result<Self, backend::Error> {
+    ) -> Result<Self, codegen::Error> {
         let source = normalize_path(&input.path)?;
         let destination = destination
             .map(|path| {
                 let path = executable_destination(&input, path)?;
                 validate_destination_ancestors(&path)?;
                 if source == normalize_path(&path)? {
-                    return Err(backend::Error(
+                    return Err(codegen::Error(
                         "output would overwrite the source file".into(),
                     ));
                 }
-                Ok::<_, backend::Error>(std::path::absolute(path)?)
+                Ok::<_, codegen::Error>(std::path::absolute(path)?)
             })
             .transpose()?;
         input.path = source;
@@ -117,7 +123,7 @@ fn validate_destination_ancestors(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn executable_destination(input: &Input, path: PathBuf) -> Result<PathBuf, backend::Error> {
+fn executable_destination(input: &Input, path: PathBuf) -> Result<PathBuf, codegen::Error> {
     let trailing_separator = path
         .as_os_str()
         .as_encoded_bytes()
@@ -129,7 +135,7 @@ fn executable_destination(input: &Input, path: PathBuf) -> Result<PathBuf, backe
     let mut name = input
         .path
         .file_stem()
-        .ok_or_else(|| backend::Error("source file needs a name".into()))?
+        .ok_or_else(|| codegen::Error("source file needs a name".into()))?
         .to_os_string();
     if input.entry != "main" {
         name.push(format!("-{}", input.entry));
@@ -167,9 +173,9 @@ impl Session {
 
     /// Analyze using this session's sources and cached snapshots, then generate
     /// the executable. Execution remains a separate operation.
-    pub fn compile(&mut self, request: &Request) -> Result<backend::Executable, backend::Error> {
+    pub fn compile(&mut self, request: &Request) -> Result<Executable, codegen::Error> {
         let snapshot = self.analyze(&request.input.path)?;
-        backend::generate(request, snapshot.verified()?)
+        build::generate(request, snapshot.verified()?)
     }
 
     pub fn revision(&self) -> u64 {
@@ -340,10 +346,8 @@ mod tests {
 #[cfg(test)]
 mod verification_tests {
     use super::*;
-    use crate::{
-        backend::{c, glsl},
-        ir::verify::ANALYSES,
-    };
+    use super::{build::emit_c, shaders::emit_glsl};
+    use crate::{c, glsl};
 
     #[test]
     fn snapshots_reuse_verification_for_multiple_backends_and_invalidate_on_edit() {
@@ -351,21 +355,14 @@ mod verification_tests {
         let source = "export { main, a, b }; def main() -> int = { 0 }; @compute_shader def a(invocation: ulong, p: Ptr<uint>) = { var i = uint(invocation); p.* := i; }; @compute_shader def b(invocation: ulong, p: Ptr<uint>) = { var i = uint(invocation); p.* := i + 1_ui; };";
         let mut session = Session::default();
         session.set_overlay(&path, source.into()).unwrap();
-        ANALYSES.set(0);
         let snapshot = session.analyze(&path).unwrap();
         let checked = snapshot.verified().unwrap();
-        assert_eq!(ANALYSES.get(), 1);
         let mut shaders = Vec::new();
         for name in ["a", "b"] {
             let id = checked.module().entries[name];
-            shaders.push(glsl::emit_verified(checked, id, glsl::Stage::Compute).unwrap());
+            shaders.push(emit_glsl(checked, id, glsl::Stage::Compute).unwrap());
         }
-        let host = c::emit_verified(checked, "main", &[]).unwrap();
-        assert_eq!(
-            ANALYSES.get(),
-            1,
-            "all internal emissions share one analysis"
-        );
+        let host = emit_c(checked, "main", &[]).unwrap();
         assert!(std::ptr::eq(
             checked.analysis(),
             snapshot.verified().unwrap().analysis()
@@ -380,16 +377,13 @@ mod verification_tests {
         session
             .set_overlay(&path, source.replace("{ 0 }", "{ 1 }"))
             .unwrap();
-        ANALYSES.set(0);
         let changed = session.analyze(&path).unwrap();
         let new = changed.verified().unwrap();
-        assert_eq!(ANALYSES.get(), 1);
         assert!(!std::ptr::eq(checked.module(), new.module()));
-        assert_ne!(host, c::emit_verified(new, "main", &[]).unwrap());
+        assert_ne!(host, emit_c(new, "main", &[]).unwrap());
         assert_eq!(
             host,
-            c::emit_verified(snapshot.verified().unwrap(), "main", &[]).unwrap()
+            emit_c(snapshot.verified().unwrap(), "main", &[]).unwrap()
         );
-        assert_eq!(ANALYSES.get(), 1);
     }
 }

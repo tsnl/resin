@@ -1,6 +1,6 @@
 #[path = "support/toolchain.rs"]
 mod config;
-use resin::{ast, backend::c, ir, toolchain};
+use resin::{ast, c, lir, toolchain};
 use std::{fs, path::Path, process::Command};
 
 fn run(source: &str, native: &str) -> std::process::Output {
@@ -8,7 +8,7 @@ fn run(source: &str, native: &str) -> std::process::Output {
     let path = temp.path().join("main.resin");
     fs::write(&path, source).unwrap();
     let program = ast::load(&path).unwrap();
-    let module = ir::generate_program(&program).unwrap();
+    let module = resin::compiler::generate_program(&program).unwrap();
     let c = format!("{native}\n{}", c::emit(&module, "main").unwrap());
     let executable = temp
         .path()
@@ -36,11 +36,12 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
     let source = toolchain::TempDir::new(&std::env::temp_dir()).unwrap();
     let path = source.path().join("main.resin");
     fs::write(&path, "import { \"std/gpu.resin\", \"std/window.resin\", \"std/image.resin\", \"std/console.resin\" };").unwrap();
-    let module = ir::generate_program(&ast::load(&path).unwrap()).unwrap();
+    let module = resin::compiler::generate_program(&ast::load(&path).unwrap()).unwrap();
     for name in ["gpu", "window", "image", "console"] {
-        let public =
-            ir::generate_program(&ast::load(&root.join(format!("stdlib/{name}.resin"))).unwrap())
-                .unwrap();
+        let public = resin::compiler::generate_program(
+            &ast::load(&root.join(format!("stdlib/{name}.resin"))).unwrap(),
+        )
+        .unwrap();
         assert!(
             public.entries.is_empty(),
             "operations are methods, not free function exports"
@@ -99,7 +100,7 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
                 .find(|function| function.name.as_deref() == Some(qualified.as_str()))
                 .unwrap_or_else(|| panic!("missing lowered function {qualified}"));
             assert!(function.foreign.is_none(), "{name}");
-            assert!(matches!(function.result, ir::Ty::Result { .. }), "{name}");
+            assert!(matches!(function.result, lir::Ty::Result { .. }), "{name}");
             checked += 1;
         }
         assert!(checked > 0 || name == "console");

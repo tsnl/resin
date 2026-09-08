@@ -2,7 +2,7 @@
 #[path = "support/toolchain.rs"]
 mod config;
 
-use resin::backend::glsl::{self, Stage};
+use resin::glsl::{self, Stage};
 use resin::toolchain::TempDir;
 use resin_runtime::{
     ResinGpu, ResinMemory, ResinStatus, image_read_png, image_write_png, testing::lock_gpu,
@@ -65,7 +65,7 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
         };
     "#,
     );
-    let c = resin::backend::c::emit(&module, "main").unwrap();
+    let c = resin::c::emit(&module, "main").unwrap();
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let executable = temp
         .path()
@@ -165,7 +165,7 @@ fn particles_compute_then_render_from_the_same_buffer() {
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/particles.resin");
-    let module = resin::ir::generate_program(&resin::ast::load(&source).unwrap()).unwrap();
+    let module = resin::compiler::generate_program(&resin::ast::load(&source).unwrap()).unwrap();
     let compile = |stage: Stage| {
         let glsl = glsl::emit(&module, stage.entry(), stage).unwrap();
         resin::toolchain::compile_glsl(&glsl, stage, &config::glsl(&compiler)).unwrap()
@@ -355,7 +355,7 @@ fn fragment_shaders_read_typed_root_parameters() {
         )
         .stmts,
     );
-    let module = resin::ir::generate_program(&ast).unwrap();
+    let module = resin::compiler::generate_program(&ast).unwrap();
     let compile = |stage: Stage| {
         let glsl = glsl::emit(&module, stage.entry(), stage).unwrap();
         resin::toolchain::compile_glsl(&glsl, stage, &config::glsl(&compiler)).unwrap()
@@ -510,11 +510,10 @@ fn compute_values(source: &str, expected: fn(u32) -> u32) {
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
     let module = support::module(source);
-    let glsl = resin::backend::glsl::emit(&module, "kernel", resin::backend::glsl::Stage::Compute)
-        .unwrap();
+    let glsl = resin::glsl::emit(&module, "kernel", resin::glsl::Stage::Compute).unwrap();
     let spv = resin::toolchain::compile_glsl(
         &glsl,
-        resin::backend::glsl::Stage::Compute,
+        resin::glsl::Stage::Compute,
         &config::glsl(&compiler),
     )
     .unwrap();

@@ -1,0 +1,11 @@
+[package]
+name = "resin-hir"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+resin-common = { workspace = true }
+resin-cst = { workspace = true }
+resin-ast = { workspace = true }
+sexpfmt = { workspace = true }

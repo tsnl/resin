@@ -1,0 +1,37 @@
+use super::super::semantic::DefinitionKind;
+use super::{Checker, GenerateError, Result, Type};
+use crate::lower::infer::check_binding_name;
+use crate::{ast::Ident, diagnostic::GenerateErrorKind};
+impl Checker<'_> {
+    pub fn bind(
+        &mut self,
+        name: &Ident,
+        ty: Type,
+        kind: DefinitionKind,
+    ) -> Result<super::super::scope::DeclarationId> {
+        check_binding_name(name)?;
+        self.scopes
+            .define_inferred(name, ty, kind)
+            .map_err(|duplicate| GenerateError {
+                span: name.span,
+                kind: GenerateErrorKind::DuplicateValue { name: duplicate },
+            })
+    }
+
+    pub fn value(&mut self, name: &Ident) -> Result<Type> {
+        self.scopes
+            .lookup_inferred(&name.val)
+            .map(|(ty, function)| {
+                if function {
+                    self.dependencies.insert(name.val.clone());
+                }
+                ty
+            })
+            .ok_or_else(|| GenerateError {
+                span: name.span,
+                kind: GenerateErrorKind::UnboundValue {
+                    name: name.val.clone(),
+                },
+            })
+    }
+}

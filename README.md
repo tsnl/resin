@@ -5,7 +5,8 @@ CUDA for graphics. A simple systems programming language targeting host CPUs and
 Builds target 64-bit Linux, macOS, and Windows. GPU execution requires a compatible Vulkan
 driver; host-only programs do not require Vulkan or a GPU.
 
-New to the implementation? Start with the [guided repository tour](TOUR.md).
+New to the implementation? Start with the [guided repository tour](TOUR.md) and the
+[compiler architecture](doc/architecture.md), including the phase crates and their public APIs.
 
 ## Development
 

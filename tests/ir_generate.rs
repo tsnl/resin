@@ -1,23 +1,15 @@
-use resin::{
-    ast::generate::AstGen,
-    ir::{
-        GenerateErrorKind, Instr, Terminator, Ty, TypeErrorKind, format_module, generate, verify,
-    },
-};
-use tree_sitter::Parser;
+use resin::compiler::generate;
+use resin::diagnostic::GenerateErrorKind;
+use resin::lir::{Instr, Terminator, Ty, format_module};
+use resin::lir_verifier::verify;
+use resin::types::TypeErrorKind;
 
 fn parse(src: &str) -> resin::ast::SourceFile {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_resin::LANGUAGE.into())
-        .expect("failed to load Resin grammar");
-    let tree = parser.parse(src, None).expect("parser returned no tree");
-    AstGen::new(src)
-        .gen_source_file(tree.root_node())
+    resin::ast::lower::generate(&resin::cst::Document::reparse(src.to_string(), None))
         .unwrap_or_else(|err| panic!("{err}"))
 }
 
-fn compile(src: &str) -> resin::ir::Module {
+fn compile(src: &str) -> resin::lir::Module {
     generate(&parse(src)).unwrap_or_else(|err| panic!("{err}"))
 }
 
@@ -95,7 +87,7 @@ fn examples_generate_verified_ir() {
         }
         found += 1;
         let ast = resin::ast::load(&path).unwrap();
-        let module = resin::ir::generate_program(&ast)
+        let module = resin::compiler::generate_program(&ast)
             .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
         verify(&module).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
     }
@@ -251,7 +243,7 @@ def from_meters (m: Meters) -> int = { m.value };
     );
     verify(&module).unwrap();
     let meters = Ty::Defined {
-        definition: resin::ir::TypeId::from_index(1),
+        definition: resin::lir::TypeId::from_index(1),
     };
     assert_eq!(
         module.functions[0].ty().unwrap(),
@@ -337,7 +329,7 @@ def main() -> () = {
     assert_eq!(
         module.functions[0].locals[1].ty,
         Ty::Defined {
-            definition: resin::ir::TypeId::from_index(2),
+            definition: resin::lir::TypeId::from_index(2),
         }
     );
     assert_eq!(
@@ -361,7 +353,7 @@ def nil (p: Ptr<List>) -> List = { List { value = 0, next = p } };
     );
     verify(&module).unwrap();
     let list = Ty::Defined {
-        definition: resin::ir::TypeId::from_index(1),
+        definition: resin::lir::TypeId::from_index(1),
     };
     assert_eq!(
         module.functions[0].ty().unwrap(),

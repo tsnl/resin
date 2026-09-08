@@ -1,21 +1,17 @@
+use resin::lir_verifier::VerifyErrorKind;
+use resin::lir_verifier::VerifyLocation;
+use resin::lir_verifier::verify;
+use resin::types::TyperContext;
 use resin::{
-    ast::{StmtKind, TypeKind, generate::AstGen, print},
-    ir::{
+    ast::{StmtKind, TypeKind, print},
+    lir::{
         BasicBlock, BlockId, Function, Instr, Local, LocalId, Module, RecordField, Terminator, Ty,
-        TypeDef, TypeId, TyperContext, Value, VerifyErrorKind, VerifyLocation, format_module,
-        verify,
+        TypeDef, TypeId, Value, format_module,
     },
 };
-use tree_sitter::Parser;
 
 fn parse(src: &str) -> resin::ast::SourceFile {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_resin::LANGUAGE.into())
-        .expect("failed to load Resin grammar");
-    let tree = parser.parse(src, None).expect("parser returned no tree");
-    AstGen::new(src)
-        .gen_source_file(tree.root_node())
+    resin::ast::lower::generate(&resin::cst::Document::reparse(src.to_string(), None))
         .unwrap_or_else(|err| panic!("{err}"))
 }
 

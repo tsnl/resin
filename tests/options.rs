@@ -3,8 +3,7 @@ mod config;
 mod support;
 
 use resin::{
-    backend::c,
-    ir,
+    c, lir,
     toolchain::{self, TempDir},
 };
 use std::{
@@ -90,7 +89,7 @@ fn none_elimination_preserves_all_other_union_members() {
     );
     assert_eq!(
         module.functions[0].result,
-        ir::Ty::union_of([ir::Ty::None, ir::Ty::Int32])
+        lir::Ty::union_of([lir::Ty::None, lir::Ty::Int32])
     );
 }
 
@@ -194,6 +193,9 @@ fn optional_patterns_and_unwrap_are_checked() {
         "def f(x: int | None) = { match (x) { int(n) => {}, None => {}, None => {} } };",
         "type Both = int | bool; def f(x: Both) = { match (x) { Both(v) => {} } };",
     ] {
-        assert!(ir::generate(&support::parse(source)).is_err(), "{source}");
+        assert!(
+            resin::compiler::generate(&support::parse(source)).is_err(),
+            "{source}"
+        );
     }
 }

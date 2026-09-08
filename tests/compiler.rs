@@ -175,8 +175,7 @@ fn compiler_processes_use_the_supplied_environment_and_working_directory() {
     );
     let c = resin::toolchain::compile_c("", &temp.path().join("output"), &settings).unwrap_err();
     let shader =
-        resin::toolchain::compile_glsl("", resin::backend::glsl::Stage::Compute, &settings)
-            .unwrap_err();
+        resin::toolchain::compile_glsl("", resin::glsl::Stage::Compute, &settings).unwrap_err();
     for error in [c, shader] {
         assert!(error.to_string().contains(&expected), "{error}");
     }
