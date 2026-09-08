@@ -6,21 +6,18 @@ use std::{cell::RefCell, rc::Rc};
 use std::{collections::BTreeMap, sync::Arc};
 
 use crate::ast::{Program, SourceError, SourceFile, Span, StmtKind};
-use crate::ir::{FunctionId, Module};
+use crate::ir::{
+    FunctionId, Module,
+    typer::{SourceModuleId, SourceOrigin},
+};
 
 use super::{
     GenerateError, GenerateErrorKind, Generator, Scopes,
     scope::{Symbol, ValueBindingKind},
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Origin {
-    module: crate::ir::typer::SourceModuleId,
-    span: Span,
-}
-
 struct Export {
-    origin: Origin,
+    origin: SourceOrigin,
     symbol: Symbol,
 }
 
@@ -45,7 +42,7 @@ fn generate_program_with(
     let mut exports = Vec::<Exports>::new();
     for (index, source) in program.modules.iter().enumerate() {
         generator.source_path = source.path.clone();
-        generator.source_module = crate::ir::typer::SourceModuleId::from_index(index);
+        generator.source_module = SourceModuleId::from_index(index);
         generator
             .module
             .origins
@@ -84,7 +81,7 @@ fn generate_program_with(
                 | StmtKind::Declare { name, .. } => name,
                 StmtKind::Impl { .. } | StmtKind::Expr { .. } | StmtKind::Defer { .. } => continue,
             };
-            let origin = Origin {
+            let origin = SourceOrigin {
                 module: generator.source_module,
                 span: name.span,
             };
@@ -123,9 +120,9 @@ fn generate_program_with(
 fn bind(
     program: &Program,
     module: usize,
-    names: &mut BTreeMap<Arc<str>, Origin>,
+    names: &mut BTreeMap<Arc<str>, SourceOrigin>,
     name: &Arc<str>,
-    origin: Origin,
+    origin: SourceOrigin,
     span: Span,
 ) -> Result<bool, SourceError> {
     if let Some(previous) = names.get(name) {
@@ -133,7 +130,7 @@ fn bind(
             return Ok(false);
         }
         let location =
-            |origin: &Origin| program.modules[origin.module.index()].location(origin.span);
+            |origin: &SourceOrigin| program.modules[origin.module.index()].location(origin.span);
         let mut error = program.modules[module].error(
             span,
             format!(

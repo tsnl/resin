@@ -78,7 +78,9 @@ impl Scan {
                 self.locals = before;
             }
             TermKind::MethodCall {
-                base: func, arg, ..
+                receiver: func,
+                arg,
+                ..
             }
             | TermKind::Call { func, arg } => {
                 self.term(func);

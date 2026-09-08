@@ -379,7 +379,22 @@ impl Analysis {
                 text: help.to_string(),
             });
         }
-        let origin = self.definition(path, offset)?;
+        let Some(origin) = self.definition(path, offset) else {
+            let location = SourceLocation {
+                path: path.to_path_buf(),
+                span: span(token),
+            };
+            let member = self
+                .semantics
+                .fields
+                .get(&location)?
+                .iter()
+                .find(|member| member.name == text)?;
+            return Some(Hover {
+                span: span(token),
+                text: format!("{}: {}", member.name, member.ty),
+            });
+        };
         let definition = self
             .documents
             .get(&origin.path)?
@@ -516,7 +531,7 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ),
     (
         "Span",
-        "Span<T>\n\nA pointer and length describing elements of T. Calling span(index) returns a bounds-checked Ptr<T>.",
+        "Span<T>\n\nA pointer and length describing elements of T. Calling span.at(index) returns Ptr<T>; shader indexing is unchecked.",
         DefinitionKind::Type,
     ),
     (

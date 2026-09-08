@@ -89,17 +89,31 @@ impl Checker<'_> {
 
     fn constraint(&mut self, constraint: &Constraint, span: Span) -> Result<bool> {
         match constraint {
-            Constraint::Method(base, name, arg, out, associated) => {
-                let Some(base) = self.solver.resolve(base) else {
+            Constraint::Method(receiver_type, name, arg, out, associated) => {
+                if !associated
+                    && name.as_ref() == "at"
+                    && matches!(
+                        self.shape(receiver_type, false, span)?,
+                        Type::Node(Head::Span | Head::Array(_), _)
+                    )
+                {
+                    return self.constraint(
+                        &Constraint::Call(receiver_type.clone(), arg.clone(), out.clone()),
+                        span,
+                    );
+                }
+                let Some(receiver_type) = self.solver.resolve(receiver_type) else {
                     return Ok(false);
                 };
                 let method = self
                     .typer
-                    .method(&base, name)
+                    .method(&receiver_type, name)
                     .ok_or_else(|| error(span, format!("unknown method `{name}`")))?;
-                let params = method.arguments(&base, *associated).ok_or_else(|| {
-                    error(span, "method receiver does not match the first parameter")
-                })?;
+                let params = method
+                    .arguments(&receiver_type, *associated)
+                    .ok_or_else(|| {
+                        error(span, "method receiver does not match the first parameter")
+                    })?;
                 let a = self
                     .solver
                     .coerce(arg, &Ty::parameter(params).into(), span)?;

@@ -21,7 +21,12 @@ impl Generator {
             let Some(Ty::Defined { definition }) = self.scopes.lookup_type(&receiver.val) else {
                 return Err(error(receiver.span, "impl requires a nominal struct type"));
             };
-            if self.typer.type_origin(definition) != Some(self.source_module) {
+            if self
+                .typer
+                .type_origin(definition)
+                .map(|origin| origin.module)
+                != Some(self.source_module)
+            {
                 return Err(error(
                     receiver.span,
                     "impl requires a type defined in this module",
@@ -42,25 +47,33 @@ impl Generator {
 
     pub(super) fn gen_method_call(
         &mut self,
-        base: &Term,
+        receiver: &Term,
         name: &Ident,
         arg: &Term,
     ) -> Result<Ty, GenerateError> {
-        let (receiver, associated) = if let TermKind::Type { ty } = &base.val {
+        let (receiver_type, associated) = if let TermKind::Type { ty } = &receiver.val {
             (self.evaluator().ty(ty)?, true)
         } else {
             (
-                self.checked.expressions[&std::ptr::from_ref(base)].clone(),
+                self.checked.expressions[&std::ptr::from_ref(receiver)].clone(),
                 false,
             )
         };
+        if let Some(result) = self
+            .typer
+            .index_method(&receiver_type, &name.val, associated)
+        {
+            self.scopes
+                .record_method(name, &receiver_type, associated, &self.typer);
+            return self.gen_call(name.span, receiver, arg, &result);
+        }
         let function = self
             .typer
-            .method(&receiver, &name.val)
+            .method(&receiver_type, &name.val)
             .cloned()
             .ok_or_else(|| error(name.span, "unknown method"))?;
         self.scopes
-            .record_method(name, &receiver, associated, &self.typer);
+            .record_method(name, &receiver_type, associated, &self.typer);
         self.emit(Instr::Function {
             function: function.function,
         });
@@ -71,7 +84,7 @@ impl Generator {
                 .params
                 .split_first()
                 .expect("checked receiver parameter");
-            self.gen_receiver(base, &receiver, first)?;
+            self.gen_receiver(receiver, &receiver_type, first)?;
             self.gen_method_arguments(arg, remaining)?;
             if !remaining.is_empty() {
                 self.emit(Instr::MakeRecord {
@@ -85,17 +98,17 @@ impl Generator {
         Ok(function.result)
     }
 
-    fn gen_receiver(&mut self, base: &Term, from: &Ty, to: &Ty) -> Result<(), GenerateError> {
+    fn gen_receiver(&mut self, receiver: &Term, from: &Ty, to: &Ty) -> Result<(), GenerateError> {
         match ReceiverConversion::between(from, to).expect("checked receiver conversion") {
             ReceiverConversion::Value => {
-                self.gen_term(base, Some(to))?;
+                self.gen_term(receiver, Some(to))?;
             }
             ReceiverConversion::Address => {
-                self.check_place_initialized(base)?;
-                self.gen_place(base)?;
+                self.check_place_initialized(receiver)?;
+                self.gen_place(receiver)?;
             }
             ReceiverConversion::Load => {
-                self.gen_term(base, None)?;
+                self.gen_term(receiver, None)?;
                 self.emit(Instr::Load);
             }
         }

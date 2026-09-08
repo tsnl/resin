@@ -8,7 +8,7 @@ use crate::ir::{Ty, TypeDef, TypeId, TypeTable};
 mod convert;
 mod error;
 mod methods;
-pub(crate) use methods::{FunctionDecl, ReceiverConversion, SourceModuleId};
+pub(crate) use methods::{FunctionDecl, ReceiverConversion, SourceModuleId, SourceOrigin};
 mod rules;
 
 pub use convert::{Conv, Converted};

@@ -55,6 +55,13 @@ impl Trace {
         typer: &TyperContext,
     ) {
         let mut members = Vec::new();
+        if let Some(result) = typer.index_method(ty, "at", associated) {
+            members.push(Member {
+                name: "at".into(),
+                ty: format!("(integer) -> {}", format_type(&result, typer)),
+                kind: super::DefinitionKind::Function,
+            });
+        }
         if !associated
             && let Ok(converted) = typer.as_record(ty)
             && let Ty::Record { fields } = converted.ty.span_record().unwrap_or(converted.ty)

@@ -60,8 +60,11 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Their signatures are checked at declaration; helpers need no decoration and remain host-callable.
   `function.spirv` requests embedded `Span<ubyte>` bytes from a decorated declaration, never
   from a runtime function alias. Keep shader definitions inline in examples.
-- Arrays and `Span<T>` use call syntax for checked indexing: `items(index)` returns `Ptr<T>`;
-  use `items(index).*` to read or write. Spans have `data` and `length` fields. Pointer arithmetic
+- Arrays and `Span<T>` provide indexing with `items.at(index)`, returning `Ptr<T>`;
+  use `items.at(index).*` to read or write. The earlier `items(index)` spelling remains supported.
+  Bounds checking is not part of the indexing contract. Host indexing diagnoses invalid indices;
+  shader indexing is unchecked, and callers must stay within valid storage.
+  Spans have `data` and `length` fields. Pointer arithmetic
   is forbidden; explicit pointer/`ulong` casts permit low-level byte arithmetic. The C ABI retains
   pointer/length pairs; language-facing pipeline creation accepts spans.
 - Unions contain value types and use module-wide u32 type IDs, not variant positions.

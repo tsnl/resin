@@ -417,7 +417,7 @@ impl<'a> AstGen<'a> {
                     };
                     base = Spanned::new(
                         TermKind::MethodCall {
-                            base: Box::new(base),
+                            receiver: Box::new(base),
                             name,
                             arg: Box::new(arg),
                         },

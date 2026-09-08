@@ -13,11 +13,15 @@ use super::{
 };
 use crate::{
     ast::{self, Ident, Span, StmtKind, Term, TermKind, TypeKind},
-    ir::{Ty, TypeId, TyperContext},
+    ir::{
+        Ty, TypeId, TyperContext,
+        typer::{SourceModuleId, SourceOrigin},
+    },
 };
 
 pub(super) struct Checker<'a> {
     pub typer: &'a mut TyperContext,
+    source_module: SourceModuleId,
     pub solver: Solver,
     scopes: Scopes,
     locals: Vec<BTreeMap<Arc<str>, Type>>,
@@ -31,9 +35,10 @@ pub(super) struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
-    pub fn new(typer: &'a mut TyperContext, scopes: Scopes) -> Self {
+    pub fn new(typer: &'a mut TyperContext, scopes: Scopes, source_module: SourceModuleId) -> Self {
         Self {
             typer,
+            source_module,
             scopes,
             solver: Solver::default(),
             locals: vec![],
@@ -246,7 +251,13 @@ impl<'a> Checker<'a> {
                             self.bind(name, ty)?;
                         }
                         StmtKind::Struct { name, body: init } => {
-                            let definition = self.typer.reserve_type(name.val.clone());
+                            let definition = self.typer.declare_type(
+                                name.val.clone(),
+                                SourceOrigin {
+                                    module: self.source_module,
+                                    span: name.span,
+                                },
+                            );
                             self.scopes
                                 .define_type(name.val.clone(), definition)
                                 .map_err(|name| GenerateError {
@@ -312,16 +323,26 @@ impl<'a> Checker<'a> {
                 self.constraints
                     .push((span, Constraint::Builtin(name.clone(), args, out.clone())));
             }
-            TermKind::MethodCall { base, name, arg } => {
-                let (receiver, associated) = if let TermKind::Type { ty } = &base.val {
+            TermKind::MethodCall {
+                receiver,
+                name,
+                arg,
+            } => {
+                let (receiver_type, associated) = if let TermKind::Type { ty } = &receiver.val {
                     (self.annotation(ty, false)?, true)
                 } else {
-                    (self.term(base, None)?, false)
+                    (self.term(receiver, None)?, false)
                 };
                 let arg = self.term(arg, None)?;
                 self.constraints.push((
                     span,
-                    Constraint::Method(receiver, name.val.clone(), arg, out.clone(), associated),
+                    Constraint::Method(
+                        receiver_type,
+                        name.val.clone(),
+                        arg,
+                        out.clone(),
+                        associated,
+                    ),
                 ));
             }
             TermKind::Call { func, arg } => {

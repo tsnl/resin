@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use crate::ast::{SourceFile, Span, Stmt, StmtKind, Term, TermKind};
+use crate::ir::typer::SourceModuleId;
 use crate::ir::{BlockId, Instr, LocalId, Module, Terminator, Ty, TyperContext, Value};
 
 mod bindings;
@@ -49,7 +50,7 @@ pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
 struct Generator {
     module: Module,
     source_path: std::path::PathBuf,
-    source_module: crate::ir::typer::SourceModuleId,
+    source_module: SourceModuleId,
     source_span: Span,
     function_id: Option<crate::ir::FunctionId>,
     typer: TyperContext,
@@ -64,7 +65,7 @@ impl Generator {
         Self {
             module: Module::default(),
             source_path: "<source>".into(),
-            source_module: crate::ir::typer::SourceModuleId::from_index(0),
+            source_module: SourceModuleId::from_index(0),
             source_span: Span { start: 0, end: 0 },
             function_id: None,
             typer: TyperContext::new(),
@@ -117,7 +118,7 @@ impl Generator {
             }
         }
         self.declare_methods(file)?;
-        self.checked = check::file(file, &mut self.typer, &self.scopes)?;
+        self.checked = check::file(file, &mut self.typer, &self.scopes, self.source_module)?;
         for stmt in file.declarations() {
             if let StmtKind::Function {
                 name,
@@ -307,7 +308,11 @@ impl Generator {
             TermKind::Array { elems } => self.gen_array(elems, expected),
             TermKind::Record { fields } => self.gen_record(fields, expected),
             TermKind::Block { stmts, tail } => self.gen_block(stmts, tail, expected),
-            TermKind::MethodCall { base, name, arg } => self.gen_method_call(base, name, arg),
+            TermKind::MethodCall {
+                receiver,
+                name,
+                arg,
+            } => self.gen_method_call(receiver, name, arg),
             TermKind::Call { func, arg } => self.gen_call(term.span, func, arg, expected),
             TermKind::Builtin { name, args } => self.gen_builtin(term.span, name, args, expected),
             TermKind::Assign { place, value } => self.gen_assign(place, value),

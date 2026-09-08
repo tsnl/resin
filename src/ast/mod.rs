@@ -117,7 +117,7 @@ pub enum TermKind {
     Unit,
     None,
     MethodCall {
-        base: Box<Term>,
+        receiver: Box<Term>,
         name: Ident,
         arg: Box<Term>,
     },

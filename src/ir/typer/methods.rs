@@ -1,6 +1,7 @@
 //! Source-level function namespaces. None of this metadata is part of IR.
 use super::TyperContext;
 use crate::{
+    ast::Span,
     ir::{FunctionId, Ty, TypeId},
     util::define_id,
 };
@@ -11,6 +12,12 @@ use std::{
 
 define_id! { pub(crate) struct SourceModuleId(usize); }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SourceOrigin {
+    pub module: SourceModuleId,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct FunctionDecl {
     pub function: FunctionId,
@@ -20,7 +27,7 @@ pub(crate) struct FunctionDecl {
 
 #[derive(Debug, Clone)]
 pub(super) struct Namespace {
-    module: SourceModuleId,
+    origin: SourceOrigin,
     functions: BTreeMap<Arc<str>, FunctionId>,
 }
 
@@ -46,6 +53,12 @@ impl ReceiverConversion {
 }
 
 impl FunctionDecl {
+    pub fn ty(&self) -> Ty {
+        Ty::Function {
+            param: Box::new(Ty::parameter(&self.params)),
+            result: Box::new(self.result.clone()),
+        }
+    }
     pub fn arguments(&self, receiver: &Ty, associated: bool) -> Option<&[Ty]> {
         if associated {
             return Some(&self.params);
@@ -57,14 +70,33 @@ impl FunctionDecl {
 }
 
 impl TyperContext {
-    pub(crate) fn record_type_origin(&mut self, ty: TypeId, module: SourceModuleId) {
-        self.namespaces.entry(ty).or_insert_with(|| Namespace {
-            module,
-            functions: BTreeMap::new(),
-        });
+    /// Indexing uses the ordinary integer-index and pointer-result
+    /// rules. It is a builtin method so a field receiver needs no parentheses.
+    pub(crate) fn index_method(&self, receiver: &Ty, name: &str, associated: bool) -> Option<Ty> {
+        if associated || name != "at" {
+            return None;
+        }
+        match self.body(receiver).ok()? {
+            Ty::Array { element, .. } | Ty::Span { element } => {
+                Some(Ty::Pointer { pointee: element })
+            }
+            _ => None,
+        }
     }
-    pub(crate) fn type_origin(&self, ty: TypeId) -> Option<SourceModuleId> {
-        self.namespaces.get(&ty).map(|scope| scope.module)
+
+    pub(crate) fn declare_type(&mut self, name: Arc<str>, origin: SourceOrigin) -> TypeId {
+        let ty = self.definitions.reserve(name);
+        self.namespaces.insert(
+            ty,
+            Namespace {
+                origin,
+                functions: BTreeMap::new(),
+            },
+        );
+        ty
+    }
+    pub(crate) fn type_origin(&self, ty: TypeId) -> Option<SourceOrigin> {
+        self.namespaces.get(&ty).map(|scope| scope.origin)
     }
     pub(crate) fn register_function(&mut self, function: FunctionId, params: Vec<Ty>, result: Ty) {
         self.functions.insert(
@@ -109,5 +141,26 @@ impl TyperContext {
             .into_iter()
             .flat_map(|scope| scope.functions.iter())
             .map(|(name, id)| (name, &self.functions[id]))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_declarations_have_an_origin_before_the_body_is_defined() {
+        let mut typer = TyperContext::new();
+        let origin = SourceOrigin {
+            module: SourceModuleId::from_index(3),
+            span: Span { start: 17, end: 21 },
+        };
+        let id = typer.declare_type("Node".into(), origin);
+        assert_eq!(typer.type_origin(id), Some(origin));
+        assert_eq!(typer.definitions()[id.index()].body(), None);
+        typer
+            .define_type(id, Ty::Record { fields: vec![] })
+            .unwrap();
+        assert_eq!(typer.type_origin(id), Some(origin));
     }
 }

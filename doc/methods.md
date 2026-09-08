@@ -39,6 +39,15 @@ The distinction also applies when a field and method have the same name. Methods
 can return ordinary pointers, including wrappers around array indexing. Parameter
 and result types are explicit; an omitted result means unit.
 
+Arrays and spans provide the builtin `.at(index)` method for indexing.
+It accepts any integer index and returns `Ptr<T>`, so a field can be indexed as
+`root.particles.at(i).*`. Use `items.at(i).* := value` to update an element.
+The receiver and index are evaluated once; indexing an array place keeps its
+storage address instead of copying the array. The existing `items(i)` spelling
+remains supported. Neither spelling guarantees bounds checking. Host indexing
+diagnoses invalid indices; shader indexing is unchecked, so callers must stay
+within valid storage.
+
 Method resolution and module origins belong to the frontend. Lowering emits
 ordinary function values and calls; IR types have no method tables, and the IR
 verifier checks these functions and calls using its existing rules.

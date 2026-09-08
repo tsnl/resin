@@ -621,6 +621,51 @@ fn indexing_returns_pointers_and_evaluates_receiver_and_index_once() {
 }
 
 #[test]
+fn at_indexing_borrows_array_places_and_supports_field_receivers() {
+    runs(
+        r#"export { main };
+        struct Holder { values: Span<int> };
+        def view(p: Ptr<int>, calls: Ptr<int>) -> Holder = {
+            calls.* := calls.* + 1;
+            Holder { values = Span<int> { data = p, length = 3L } }
+        };
+        def index(calls: Ptr<int>) -> int = { calls.* := calls.* + 1; 1 };
+        def element(s: Span<int>, i: int) -> Ptr<int> = { s.at(i) };
+        def main() -> int = {
+            var values = [10, 20, 30]; var calls = 0;
+            var p = view(Ptr<int>(&values), &calls).values.at(index(&calls));
+            p.* := 42;
+            var record = { values = [3, 4] };
+            record.values.at(0).* := 8;
+            var holder = view(Ptr<int>(&values), &calls);
+            element(holder.values, 0).* := 11;
+            var temporary = [7, 8].at(1).*;
+            if (calls == 3 && values.at(1).* == 42 && values.at(0).* == 11 && record.values.at(0).* == 8 && temporary == 8) { 0 } else { 1 }
+        };"#,
+        0,
+    );
+}
+
+#[test]
+fn at_indexing_checks_bounds_before_later_effects() {
+    for receiver in ["values", "holder.values"] {
+        for index in ["-1", "2", "18446744073709551615L"] {
+            let output = run_module(&module(&format!(
+                r#"export {{ main }}; def main() -> int = {{
+                    var values = [1, 2];
+                    var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2L }} }};
+                    {receiver}.at({index}).* := 9;
+                    print("after", ()); 0
+                }};"#
+            )));
+            assert!(!output.status.success());
+            assert!(output.stdout.is_empty());
+            assert!(String::from_utf8_lossy(&output.stderr).contains("index out of bounds"));
+        }
+    }
+}
+
+#[test]
 fn array_and_span_indexing_fail_before_out_of_bounds_access() {
     for source in [
         "export { main }; def main() -> int = { var xs = [1, 2]; xs(-1).* };",

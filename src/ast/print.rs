@@ -205,9 +205,17 @@ fn sexp_term(term: &Term) -> SExp {
         }
         TermKind::None => symbol("None"),
         TermKind::Unit => list_sp("unit", term.span, vec![]),
-        TermKind::MethodCall { base, name, arg } => list(
+        TermKind::MethodCall {
+            receiver,
+            name,
+            arg,
+        } => list(
             "method-call",
-            vec![sexp_term(base), symbol(name.val.as_ref()), sexp_term(arg)],
+            vec![
+                sexp_term(receiver),
+                symbol(name.val.as_ref()),
+                sexp_term(arg),
+            ],
         ),
         TermKind::Call { func, arg } => {
             list_sp("call", term.span, vec![sexp_term(func), sexp_term(arg)])

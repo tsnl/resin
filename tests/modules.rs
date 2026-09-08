@@ -753,6 +753,19 @@ fn method_syntax_and_field_calls_have_distinct_meanings() {
 }
 
 #[test]
+fn indexing_methods_require_one_integer_and_do_not_replace_nominal_methods() {
+    for arg in ["1f", "1 == 1", "", "0, 1"] {
+        let source = format!("def f() = {{ var values = [1, 2]; values.at({arg}); }};");
+        assert!(ir::generate(&support::parse(&source)).is_err(), "{source}");
+    }
+    let project = Project::new(&[(
+        "main.resin",
+        "export { main }; struct Item { value: int }; impl Item { def at(item: Item, flag: bool) -> int = { if (flag) { item.value } else { 0 } }; } def main() -> int = { var item = Item { value = 42 }; item.at(1 == 1) };",
+    )]);
+    assert_eq!(project.run().status.code(), Some(42));
+}
+
+#[test]
 fn aliases_share_the_nominal_namespace_and_origin() {
     let project = Project::new(&[
         (

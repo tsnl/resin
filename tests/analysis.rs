@@ -129,6 +129,44 @@ fn inherent_methods_have_navigation_hover_and_member_completion() {
 }
 
 #[test]
+fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
+    for receiver in ["values", "holder.values"] {
+        for tail in ["", " values.;", " holder.values.;", " holder.values.at(; "] {
+            let source = format!(
+                "def main() = {{ var values = [1, 2]; var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2L }} }}; {receiver}.at(0).* := 3;{tail} }};"
+            );
+            let project = Project::new(&[("main.resin", &source)]);
+            let analysis = project.analyze();
+            let path = project.path("main.resin");
+            assert_eq!(
+                analysis.diagnostics.is_empty(),
+                tail.is_empty(),
+                "{:?}",
+                analysis.diagnostics
+            );
+            let offset = source.find(".at(0)").unwrap() + 1;
+            assert_eq!(
+                analysis.hover(&path, offset).unwrap().text,
+                "at: (integer) -> Ptr<int>"
+            );
+            let items = analysis.completions(&path, offset);
+            assert!(
+                items.iter().any(|item| item.name == "at"
+                    && item.kind == resin::analysis::DefinitionKind::Function)
+            );
+            if !tail.is_empty() {
+                let offset = source.rfind(".;").or_else(|| source.rfind(".at(")).unwrap() + 1;
+                let items = analysis.completions(&path, offset);
+                assert!(
+                    items.iter().any(|item| item.name == "at"),
+                    "{source}\n{items:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn deferred_bindings_keep_navigation_types_and_local_scopes() {
     let source = "def main() = { var value = 1; { defer { var inner: _; inner := value; print(\"{0}\", (inner,)); }; var value = 2; () }; };";
     let project = Project::new(&[("main.resin", source)]);

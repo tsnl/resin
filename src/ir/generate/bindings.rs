@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::ast::{Ident, Term, Type};
-use crate::ir::{Instr, Ty, TypeId};
+use crate::ir::{Instr, Ty, TypeId, typer::SourceOrigin};
 
 use super::scope::{Initialization, ValueBinding, ValueBindingKind};
 use super::{GenerateError, GenerateErrorKind, Generator};
@@ -45,9 +45,13 @@ impl Generator {
             self.evaluator().ty(init)?;
             return Ok(());
         }
-        let definition = self.typer.reserve_type(name.val.clone());
-        self.typer
-            .record_type_origin(definition, self.source_module);
+        let definition = self.typer.declare_type(
+            name.val.clone(),
+            SourceOrigin {
+                module: self.source_module,
+                span: name.span,
+            },
+        );
         self.bind_type(name, definition)?;
         let body = self.evaluator().ty(init)?;
         self.typer
