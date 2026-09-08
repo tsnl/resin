@@ -155,7 +155,7 @@ fn byte_input_distinguishes_bytes_from_eof() {
 
 #[test]
 fn greeting_example_and_eof_error() {
-    let program = Program::new(include_str!("../examples/input.resin"));
+    let program = Program::new(include_str!("../../../examples/input.resin"));
     let output = program.run(b"Ada\n");
     assert!(output.status.success());
     assert_eq!(output.stdout, b"What is your name? Hello, Ada!\n");

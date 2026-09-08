@@ -1,0 +1,23 @@
+[package]
+name = "resin"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[features]
+gpu = []
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+resin-runtime = { workspace = true }
+resin-common = { workspace = true }
+resin-cst = { workspace = true }
+resin-ast = { workspace = true }
+resin-hir = { workspace = true }
+resin-lir = { workspace = true }
+resin-lir-verifier = { workspace = true }
+resin-codegen = { workspace = true }
+
+[dev-dependencies]
+tree-sitter = { workspace = true }
+tree-sitter-resin = { workspace = true }

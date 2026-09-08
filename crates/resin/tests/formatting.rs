@@ -170,7 +170,7 @@ fn repository_sources_preserve_syntax_and_are_idempotent() {
             }
         }
     }
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     let mut count = 0;
     for folder in ["examples", "stdlib"] {
         visit(&root.join(folder), &mut count);

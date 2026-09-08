@@ -10,7 +10,7 @@ Tracking issue: [tsnl/resin#75](https://github.com/tsnl/resin/issues/75).
 
 The grammar migration is complete in commit `2a39afd`. Editor implementation is
 on the stack above; see the [extension setup](README.md) and
-[compiler/server architecture](../resin-lsp/README.md).
+[compiler/server architecture](../../crates/lsp/README.md).
 
 The compiler is now designed around a long-lived `compiler::Session`, shared by
 the CLI and the LSP. The session owns overlays, incremental syntax trees, cached
@@ -34,7 +34,7 @@ Changed Rust files pass rustfmt; the pre-existing formatting difference in
 ## Repository layout
 
 ```text
-zed-resin/
+editors/zed/
   extension.toml
   Cargo.toml
   src/lib.rs
@@ -47,25 +47,25 @@ zed-resin/
     overrides.scm
     textobjects.scm
   README.md
-resin-lsp/
+crates/lsp/
   Cargo.toml
   src/
   tests/
-src/analysis/
-tree-sitter-resin/          # grammar tracked directly in this repository
+crates/resin/src/analysis.rs
+crates/tree-sitter-resin/          # grammar tracked directly in this repository
 ```
 
-`zed-resin/` is an ordinary directory tracked in the Resin repository. Give its
+`editors/zed/` is an ordinary directory tracked in the Resin repository. Give its
 Rust package an independent Cargo workspace and exclude it from the native root
 workspace: its WebAssembly build should only depend on Zed's extension API.
 No separate extension repository is needed: Zed's registry supports a repository
-subdirectory through `path = "zed-resin"` in its registry entry. See the
+subdirectory through `path = "editors/zed"` in its registry entry. See the
 [publishing guide](https://zed.dev/docs/extensions/publishing/publishing-guide).
 Add `resin-lsp` as a native workspace member depending on the Resin library.
 Keep compiler state and shared analysis in that library, with no Zed or LSP protocol types.
 
 Use the grammar in `https://github.com/tsnl/resin` with
-`path = "tree-sitter-resin"` and pin a Resin commit containing the required parser.
+`path = "crates/tree-sitter-resin"` and pin a Resin commit containing the required parser.
 Put Zed queries in the extension. Commit grammar fixes and generated files in
 Resin, then update the extension pin to that commit. Ordinary worktrees contain
 their own grammar files without submodule initialization.
@@ -157,13 +157,13 @@ imports and inferred record-field completion are outside this first version.
 
 ## 5. Connect Zed and validate the complete workflow
 
-Register the language server in `zed-resin/extension.toml`. The Rust adapter
+Register the language server in `editors/zed/extension.toml`. The Rust adapter
 launches a configured executable or finds `resin-lsp` through Zed's worktree PATH
 API. Preserve the worktree environment, including `RESIN_STDLIB` and Nix library
 paths. Provide an actionable installation message when the executable is missing.
 
 Document building/installing the native server inside `nix-shell`, installing
-`zed-resin/` as a dev extension, specifying a binary path, and checking Zed/LSP logs.
+`editors/zed/` as a dev extension, specifying a binary path, and checking Zed/LSP logs.
 Use the Zed extension API and WASI target supported by the Zed version being tested;
 current development docs specify `wasm32-wasip2` and a WASI SDK for grammar builds.
 

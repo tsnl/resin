@@ -164,7 +164,7 @@ fn particles_compute_then_render_from_the_same_buffer() {
     };
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/particles.resin");
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/particles.resin");
     let module = resin::compiler::generate_program(&resin::ast::load(&source).unwrap()).unwrap();
     let compile = |stage: Stage| {
         let glsl = glsl::emit(&module, stage.entry(), stage).unwrap();
@@ -345,7 +345,7 @@ fn fragment_shaders_read_typed_root_parameters() {
     };
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/triangle.resin");
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/triangle.resin");
     let mut ast = resin::ast::load(&source).unwrap();
     let file = &mut ast.modules.last_mut().unwrap().file;
     file.stmts.retain(|stmt| !matches!(&stmt.val, resin::ast::StmtKind::Function { name, .. } if name.val.as_ref() == "fragment"));
@@ -568,7 +568,7 @@ fn ordinary_resin_programs_render_and_write_pngs() {
         ("triangle", None),
     ] {
         let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("examples")
+            .join("../../examples")
             .join(format!("{name}.resin"));
         let source = if let Some((width, height)) = dimensions {
             let text = std::fs::read_to_string(source)
@@ -636,7 +636,7 @@ fn ordinary_resin_programs_render_and_write_pngs() {
     let reference = image_read_png(
         concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/resin-runtime/tests/hello_triangle.png"
+            "/../runtime/tests/hello_triangle.png"
         ),
         4,
     )

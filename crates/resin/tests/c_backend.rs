@@ -28,7 +28,8 @@ fn run_entry(module: &lir::Module, entry: &str) -> std::process::Output {
 
 #[test]
 fn ownership_example_releases_memory_on_success_and_failure() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/ownership.resin");
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/ownership.resin");
     let m = resin::compiler::generate_program(&resin::ast::load(&path).unwrap()).unwrap();
     let success = run_entry(&m, "main");
     assert!(
@@ -142,7 +143,7 @@ fn array_and_span_indexing_use_element_sizes() {
 
 #[test]
 fn numbered_examples_compile_as_strict_c11() {
-    for entry in fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/examples")).unwrap() {
+    for entry in fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples")).unwrap() {
         let path = entry.unwrap().path();
         if path.extension().is_some_and(|ext| ext == "resin")
             && path
@@ -592,7 +593,8 @@ fn decorated_functions_and_their_helpers_remain_host_callable() {
 
 #[test]
 fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/particles.resin");
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/particles.resin");
     let mut program = resin::ast::load(&path).unwrap();
     let file = &mut program.modules.last_mut().unwrap().file;
     file.stmts.retain(|s| !matches!(&s.val, resin::ast::StmtKind::Function { name, .. } if name.val.as_ref() == "main"));

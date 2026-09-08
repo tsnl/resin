@@ -270,7 +270,7 @@ fn run_example(name: &str) {
         return;
     };
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("examples/{name}.resin"));
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../examples/{name}.resin"));
     let executable = temp
         .path()
         .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
