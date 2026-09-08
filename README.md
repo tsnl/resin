@@ -440,14 +440,14 @@ def main() -> Result<(), _> = {
     print("Name: ", ());
     var name = Console.read_line()?;
     print("Hello, ", ());
-    name.print()?;
+    Console.print(name)?;
     print("!\n", ());
     ok(())
 };
 ```
 
 The result is a shared `InputLine` owner exposing `data: Ptr<ubyte>` and `length: ulong`.
-Copies retain its allocation; the final owner frees it. `line.print()` prints the bytes without adding a newline. Empty lines succeed, EOF before any
+Copies retain its allocation; the final owner frees it. `Console.print(line)` prints the bytes without adding a newline. Empty lines succeed, EOF before any
 bytes returns `EndOfInput`, and a final line without a newline succeeds. Read and allocation
 failures are also explicit errors. See [the console API](stdlib/README.md#console-input) for
 ownership and byte semantics, or run `cargo run -- examples/input.resin`.
@@ -494,7 +494,7 @@ to those modules. Public operations are static constructors and instance methods
 - `std/image.resin`: PNG reading and writing.
 - `std/status.resin`: `RuntimeStatus` conversion methods and the `RuntimeError` union and its variants.
 - `std/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
-- `std/console.resin`: `Console.read_byte()`, `Console.read_line()`, and shared `InputLine` owners with `line.print()`.
+- `std/console.resin`: `Console.read_byte()`, `Console.read_line()`, and shared `InputLine` owners with `Console.print(line)`.
 
 The polymorphic `print` operation is a compiler builtin; decorated shaders expose `.spirv`.
 Runtime flags are static methods, such as `Memory.default()`.

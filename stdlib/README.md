@@ -61,7 +61,7 @@ dropping one already consumed does not cancel it again. Submission waits for GPU
 | `GpuCommands` | `gpu.start_command_recording()`, `commands.set_pipeline(...)`, `commands.dispatch(...)`, `commands.submit()`, `commands.cancel()` |
 | `Window` | `Window.new(...)`, `window.poll_events()`, `window.framebuffer_size()`, input and cursor methods |
 | `ImageData` | `ImageData.read_png(path, channels)`, `image.write_png(path)` |
-| `Console` / `InputLine` | `Console.read_byte()`, `Console.read_line()`, `line.print()` |
+| `Console` / `InputLine` | `Console.read_byte()`, `Console.read_line()`, `Console.print(line)` |
 | `Memory` | `Memory.default()`, `Memory.gpu()`, `Memory.readback()` |
 | `RuntimeStatus` | `RuntimeStatus.from_code(code)`, `RuntimeStatus.code(error)`, `RuntimeStatus.message(error)` |
 
@@ -105,7 +105,7 @@ def main() -> Result<(), _> = {
     print("Name: ", ());
     var name = Console.read_line()?;
     print("Hello, ", ());
-    name.print()?;
+    Console.print(name)?;
     print("!\n", ());
     ok(())
 };
@@ -124,7 +124,7 @@ variants are `InputReadError` and `InputOutOfMemory`. Failure frees any partial 
 stdin bytes are not restored. Errors remain subject to C's stream error state.
 
 Copying a line retains shared ownership; the final owner frees its allocation. Raw pointers
-into that allocation do not retain it. `line.print()` writes all `length` bytes, adds no
+into that allocation do not retain it. `Console.print(line)` writes all `length` bytes, adds no
 newline, flushes stdout, and returns `Result<(), InputWriteError>`. The builtin `print` does
 not accept `InputLine` values.
 

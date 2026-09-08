@@ -7,7 +7,7 @@ def main() -> Result<(), _> = {
 	var name = Console.read_line()?;
 
 	print("Hello, ", ());
-	name.print()?;
+	Console.print(name)?;
 	print("!\n", ());
 	ok(())
 };

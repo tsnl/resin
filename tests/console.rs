@@ -76,7 +76,7 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
                             print("missing terminator", ());
                         } else {};
                         print("[{0}:", (line.length,));
-                        line.print()?;
+                        Console.print(line)?;
                         print("]", ());
                     },
                     err(error) => {
@@ -191,7 +191,7 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
                 match (Console.read_line()) {{
                     ok(line) => {{
 
-                        match (line.print()) {{
+                        match (Console.print(line)) {{
                             ok(unit) => {{ if (mode == 6 && line.length == ulong(300)) {{ 0 }} else {{ 1 }} }},
                             err(error) => {{ if (mode == 4 || mode == 5) {{ 0 }} else {{ 2 }} }},
                         }}
