@@ -563,10 +563,25 @@ fn ordinary_resin_programs_render_and_write_pngs() {
     let Some(gpu) = gpu() else { return };
     drop(gpu);
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    for name in ["gradient", "triangle"] {
+    for (name, dimensions) in [
+        ("gradient", Some((256, 256))),
+        ("gradient", Some((17, 9))),
+        ("triangle", None),
+    ] {
         let source = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
             .join(format!("{name}.resin"));
+        let source = if let Some((width, height)) = dimensions {
+            let text = std::fs::read_to_string(source)
+                .unwrap()
+                .replace("width = 256_ui", &format!("width = {width}_ui"))
+                .replace("height = 256_ui", &format!("height = {height}_ui"));
+            let source = temp.path().join("gradient.resin");
+            std::fs::write(&source, text).unwrap();
+            source
+        } else {
+            source
+        };
         let executable = temp
             .path()
             .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
@@ -603,12 +618,20 @@ fn ordinary_resin_programs_render_and_write_pngs() {
             String::from_utf8(output.stdout).unwrap(),
             format!("wrote {name}.png\n")
         );
-    }
-    let image = image_read_png(temp.path().join("gradient.png"), 4).unwrap();
-    assert_eq!((image.width, image.height), (256, 256));
-    assert_eq!(image.pixels.len(), 256 * 256 * 4);
-    for (i, pixel) in image.pixels.chunks_exact(4).enumerate() {
-        assert_eq!(pixel, &[i as u8, (i >> 8) as u8, 64, 255], "pixel {i}");
+        if let Some((width, height)) = dimensions {
+            let path = temp.path().join("gradient.png");
+            let image = image_read_png(&path, 4).unwrap();
+            assert_eq!((image.width, image.height), (width, height));
+            assert_eq!(image.pixels.len(), (width * height * 4) as usize);
+            for (i, pixel) in image.pixels.chunks_exact(4).enumerate() {
+                assert_eq!(
+                    pixel,
+                    &[i as u8, (i >> 8) as u8, 64, 255],
+                    "{width}x{height} pixel {i}"
+                );
+            }
+            std::fs::remove_file(path).unwrap();
+        }
     }
     let image = image_read_png(temp.path().join("triangle.png"), 4).unwrap();
     let reference = image_read_png(

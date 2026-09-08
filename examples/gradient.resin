@@ -2,7 +2,7 @@ export { kernel, main };
 
 import { "std/gpu.resin", "std/image.resin" };
 
-struct Root { pixels: Span<uint> };
+struct Root { width: uint, height: uint, pixels: Span<uint> };
 
 def pixel(index: uint) -> uint = {
 	0xff400000_ui | (index & 0xffff_ui)
@@ -10,7 +10,7 @@ def pixel(index: uint) -> uint = {
 
 @compute_shader
 def kernel(index: ulong, root: Ptr<Root>) = {
-	if (index < root.pixels.length) {
+	if (index < ulong(root.width) * ulong(root.height) && index < root.pixels.length) {
 		root.pixels.at(index).* := pixel(uint(index));
 	};
 };
@@ -20,15 +20,17 @@ def main() -> Result<(), _> = {
 
 	var pipeline = gpu.create_compute_pipeline(kernel.spirv)?;
 
-	var width = 256_ui;
-	var height = 256_ui;
-	var count = ulong(width) * ulong(height);
-	var pixels = gpu.malloc(count * size_of(uint), align_of(uint), Memory.default())?;
-
 	var root = gpu.malloc(size_of(Root), align_of(Root), Memory.default())?;
-
 	var data = Ptr<Root>(root.host_pointer());
-	data.* := Root { pixels = Span<uint> { data = Ptr<uint>(pixels.device_pointer()), length = count } };
+	data.* := Root {
+		width = 256_ui,
+		height = 256_ui,
+		pixels = Span<uint> { data = Ptr<uint>(0_ul), length = 0_ul },
+	};
+
+	var count = ulong(data.width) * ulong(data.height);
+	var pixels = gpu.malloc(count * size_of(uint), align_of(uint), Memory.default())?;
+	data.pixels := Span<uint> { data = Ptr<uint>(pixels.device_pointer()), length = count };
 	var commands = gpu.start_command_recording()?;
 
 	commands.set_pipeline(pipeline)?;
@@ -38,7 +40,7 @@ def main() -> Result<(), _> = {
 	commands.submit()?;
 
 	var path = "gradient.png";
-	ImageData.write_pixels(path.data, width, height, 4, pixels.host_pointer(), 0)?;
+	ImageData.write_pixels(path.data, data.width, data.height, 4, pixels.host_pointer(), 0)?;
 	print("wrote gradient.png\n");
 	ok(())
 };
