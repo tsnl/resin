@@ -6,14 +6,26 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
     let id = module.entries.get(entry)
         .ok_or_else(|| Error(format!("entry function `{entry}` is not exported; add `export {{ {entry} }};` to the entry file")))?;
     let function = &module.functions[id.index()];
+    let parameter = &function.locals[0].ty;
+    let process_inputs = matches!(parameter, Ty::Record { fields } if fields.len() == 3
+        && fields[0].ty == Ty::Int32 && string_array(&fields[1].ty) && string_array(&fields[2].ty));
     if function.foreign.is_some()
-        || function.locals[0].ty != Ty::Unit
+        || !(parameter == &Ty::Unit || process_inputs)
         || !matches!(function.result, Ty::Unit | Ty::Int32 | Ty::Result { .. })
     {
         return Err(Error(format!(
-            "entry function `{entry}` must be a Resin function, take (), and return int, (), or Result of either"
+            "entry function `{entry}` must be a Resin function, take () or (int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>), and return int, (), or Result of either"
         )));
     }
+    let setup = if process_inputs {
+        format!(
+            "  char **r_arguments, **r_environment;\n  r_argc = resin_process_init(r_argc, (const char *const *)r_argv, &r_arguments, &r_environment);\n  {} r_entry_arg = {{r_argc, (void *)r_arguments, (void *)r_environment}};\n",
+            types.name(parameter)
+        )
+    } else {
+        String::new()
+    };
+    let argument = if process_inputs { "r_entry_arg" } else { "0" };
     if let Ty::Result { value, error } = &function.result {
         if !matches!(value.as_ref(), Ty::Unit | Ty::Int32) {
             return Err(Error(
@@ -40,15 +52,15 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
         let mut cleanup = String::new();
         types.drop_value(&function.result, "r_result", &mut cleanup);
         return Ok(format!(
-            "  {} r_result = r_fn{}(0);\n  if (r_result.tag == 1u) {{ fprintf(stderr, \"unhandled error: %s\\n\", {error_name}); {cleanup} return 1; }}\n  return {success};\n",
+            "{setup}  {} r_result = r_fn{}({argument});\n  if (r_result.tag == 1u) {{ fprintf(stderr, \"unhandled error: %s\\n\", {error_name}); {cleanup} return 1; }}\n  return {success};\n",
             types.name(&function.result),
             id.index()
         ));
     }
     Ok(if function.result == Ty::Unit {
-        format!("  r_fn{}(0);\n  return 0;\n", id.index())
+        format!("{setup}  r_fn{}({argument});\n  return 0;\n", id.index())
     } else {
-        format!("  return r_fn{}(0);\n", id.index())
+        format!("{setup}  return r_fn{}({argument});\n", id.index())
     })
 }
 
@@ -61,4 +73,8 @@ fn quoted(text: &str) -> String {
         })
         .collect();
     format!("\"{escaped}\"")
+}
+
+fn string_array(ty: &Ty) -> bool {
+    matches!(ty, Ty::Pointer { pointee } if matches!(pointee.as_ref(), Ty::Pointer { pointee } if pointee.as_ref() == &Ty::UInt8))
 }

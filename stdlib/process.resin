@@ -1,0 +1,36 @@
+export { arguments, environment, argument, c_string, environment_get, EnvironmentVariableNotFound };
+
+struct EnvironmentVariableNotFound {};
+
+// Views borrow the startup snapshot until process exit. Do not free their data.
+def arguments(argc: int, argv: Ptr<Ptr<ubyte>>) -> Span<Ptr<ubyte>> = {
+	Span<Ptr<ubyte>> { data = argv, length = ulong(argc) }
+};
+
+def environment(envp: Ptr<Ptr<ubyte>>) -> Span<Ptr<ubyte>> = {
+	Span<Ptr<ubyte>> { data = envp, length = resin_string_array_length(envp) }
+};
+
+// NUL-terminated strings become length-delimited views without copying.
+def c_string(text: Ptr<ubyte>) -> Span<ubyte> = {
+	Span<ubyte> { data = text, length = strlen(text) }
+};
+
+def argument(args: Span<Ptr<ubyte>>, index: ulong) -> Span<ubyte> = {
+	c_string(args(index).*)
+};
+
+// Exact case-sensitive name lookup in the frozen snapshot, including on Windows.
+// A present empty value succeeds with length zero; absence is a distinct error.
+def environment_get(envp: Ptr<Ptr<ubyte>>, name: Ptr<ubyte>) -> Result<Span<ubyte>, EnvironmentVariableNotFound> = {
+	var value = resin_environment_get(envp, name);
+	if (ulong(value) == 0_ul) {
+		err(EnvironmentVariableNotFound {})
+	} else {
+		ok(c_string(value))
+	}
+};
+
+extern "string.h" def strlen(text: Ptr<ubyte>) -> ulong;
+extern "resin_runtime.h" def resin_string_array_length(values: Ptr<Ptr<ubyte>>) -> ulong;
+extern "resin_runtime.h" def resin_environment_get(envp: Ptr<Ptr<ubyte>>, name: Ptr<ubyte>) -> Ptr<ubyte>;

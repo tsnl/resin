@@ -378,9 +378,9 @@ fn from_str_copies_unterminated_spans_verbatim_and_owns_the_result() {
         export { main };
         type Caption = String;
         def copied() -> String = {
-            var source = [65B, 0B, 66B, 99B];
-            var result = Caption.from_str(Span<ubyte> { data = Ptr<ubyte>(&source), length = 3L });
-            source(0L).* := 90B;
+            var source = [65_ub, 0_ub, 66_ub, 99_ub];
+            var result = Caption.from_str(Span<ubyte> { data = Ptr<ubyte>(&source), length = 3_ul });
+            source(0_ul).* := 90_ub;
             result
         };
         def main() -> int = {
@@ -392,10 +392,10 @@ fn from_str_copies_unterminated_spans_verbatim_and_owns_the_result() {
                 text := String.from_str("{0}} braces");
                 print(alias);
                 print(text);
-                var end = Ptr<ubyte>(ulong(alias.bytes.data) + 3L);
-                if (alias.bytes.length != 3L || end.* != 0B) { print("bad terminator"); };
-                var empty = String.from_str(Span<ubyte> { data = Ptr<ubyte>(0L), length = 0L });
-                if (empty.bytes.length != 0L || empty.bytes.data.* != 0B) { print("bad empty string"); };
+                var end = Ptr<ubyte>(ulong(alias.bytes.data) + 3_ul);
+                if (alias.bytes.length != 3_ul || end.* != 0_ub) { print("bad terminator"); };
+                var empty = String.from_str(Span<ubyte> { data = Ptr<ubyte>(0_ul), length = 0_ul });
+                if (empty.bytes.length != 0_ul || empty.bytes.data.* != 0_ub) { print("bad empty string"); };
             };
             match (weak.upgrade()) {
                 None => { 0 },
@@ -404,5 +404,18 @@ fn from_str_copies_unterminated_spans_verbatim_and_owns_the_result() {
         };
     "#,
         b"A\0B{0}} braces",
+    );
+}
+
+#[test]
+fn byte_spans_print_their_length_including_nuls_and_empty_views() {
+    prints(
+        r#"export { main }; def main() = {
+            var bytes = [65_ub, 0_ub, 66_ub, 67_ub];
+            var view = Span<ubyte> { data = bytes(0), length = 3_ul };
+            var empty = Span<ubyte> { data = Ptr<ubyte>(0_ul), length = 0_ul };
+            print(fmt("[{0}][{1}]", (view, empty)));
+        };"#,
+        b"[A\0B][]",
     );
 }

@@ -577,8 +577,8 @@ fn window_constructor_accepts_owned_titles_until_the_native_call_returns() {
             {
                 var title = String.from_str("named {0}");
                 weak := title.bytes.downgrade();
-                var a = Window.new(32I, 24I, title)?;
-                var b = Window.new(32I, 24I, String.from_str("temporary"))?;
+                var a = Window.new(32_ui, 24_ui, title)?;
+                var b = Window.new(32_ui, 24_ui, String.from_str("temporary"))?;
                 print(title);
             };
             var released = match (weak.upgrade()) {
