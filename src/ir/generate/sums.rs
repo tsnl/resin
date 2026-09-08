@@ -1,9 +1,9 @@
-use super::plan::{MatchArm, Term};
+use super::typed::{MatchArm, Term};
 use crate::ast::Span;
 use crate::ir::{Case, Instr, Terminator, Ty};
 
 use super::scope::{Initialization, ValueBinding, ValueBindingKind};
-use super::{GenerateError, Generator, plan::error};
+use super::{GenerateError, Generator};
 
 impl Generator {
     pub(super) fn coerce(&mut self, span: Span, from: Ty, to: &Ty) -> Result<Ty, GenerateError> {
@@ -36,7 +36,7 @@ impl Generator {
             error: errors,
         } = expected
         else {
-            return Err(error(
+            return Err(GenerateError::inference(
                 span,
                 "cannot infer Result; annotate its value and error types",
             ));
@@ -56,14 +56,20 @@ impl Generator {
             error: errors,
         } = &ty
         else {
-            return Err(error(span, "postfix ? requires a Result value"));
+            return Err(GenerateError::inference(
+                span,
+                "postfix ? requires a Result value",
+            ));
         };
         let result = self.function().result_type().clone();
         let Ty::Result { error: target, .. } = &result else {
-            return Err(error(span, "postfix ? requires a Result return type"));
+            return Err(GenerateError::inference(
+                span,
+                "postfix ? requires a Result return type",
+            ));
         };
         if !errors.widens_to(target) {
-            return Err(error(
+            return Err(GenerateError::inference(
                 span,
                 "the return type does not include every propagated error",
             ));
@@ -121,9 +127,9 @@ impl Generator {
                     }
                 }
                 (Some(ann), ty) if !matches!(ty, Ty::Result { .. }) => {
-                    let member = ann.resolve(self)?;
+                    let member = ann.ty.clone();
                     if matches!(member, Ty::Union { .. }) {
-                        return Err(error(
+                        return Err(GenerateError::inference(
                             ann.span,
                             "union patterns must name a single member type",
                         ));
@@ -131,19 +137,25 @@ impl Generator {
                     Case::Type(member)
                 }
                 _ => {
-                    return Err(error(
+                    return Err(GenerateError::inference(
                         arm.body.span,
                         "pattern does not belong to this match type",
                     ));
                 }
             };
             if !tags.contains(&tag) || patterns.contains(&tag) {
-                return Err(error(arm.body.span, "unknown or duplicate match variant"));
+                return Err(GenerateError::inference(
+                    arm.body.span,
+                    "unknown or duplicate match variant",
+                ));
             }
             patterns.push(tag);
         }
         if tags.len() != patterns.len() || tags.is_empty() {
-            return Err(error(span, "match must cover every variant exactly once"));
+            return Err(GenerateError::inference(
+                span,
+                "match must cover every variant exactly once",
+            ));
         }
         let saved = self.save_top(&ty);
         let before = self.environment.clone();

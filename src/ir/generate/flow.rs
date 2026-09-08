@@ -1,6 +1,6 @@
 //! Emit blocks and branches for source-level control-flow expressions.
 
-use super::plan::{Statement, Term};
+use super::typed::{Statement, Term};
 use crate::ir::{Instr, Terminator, Ty, Value};
 
 use super::{GenerateError, Generator};
@@ -71,7 +71,7 @@ impl Generator {
     ) -> Result<Ty, GenerateError> {
         self.owned.push(vec![]);
         for stmt in stmts {
-            stmt(self)?;
+            self.lower_statement(stmt)?;
         }
         let ty = self.gen_term(tail, Some(expected))?;
         self.cleanup(self.owned.len() - 1, &ty);

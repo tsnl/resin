@@ -1,8 +1,8 @@
 //! Type checking: concrete typing rules and source-level inference.
 //!
 //! `TyperContext` owns nominal definitions and the rules shared by inference,
-//! generation, and IR verification. Generation injects the private inference
-//! services while planning expressions; type checking does not traverse the AST.
+//! generation, and IR verification. The source checker injects the private inference
+//! services while constructing a typed tree; these services do not traverse the AST.
 
 use std::{collections::BTreeMap, sync::Arc};
 

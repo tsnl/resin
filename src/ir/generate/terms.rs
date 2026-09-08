@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use super::plan::{Form, Term};
+use super::typed::{Term, TermKind};
 use crate::ast::{Ident, Span};
 use crate::ir::{Conv, Instr, Ty};
 
@@ -17,7 +17,7 @@ impl Generator {
             .typer
             .body(ty)
             .map_err(|e| GenerateError::typing(span, e))?;
-        if matches!(init.form, Form::Unit)
+        if matches!(init.kind, TermKind::Unit)
             && matches!(&body, Ty::Record { fields } if fields.is_empty())
         {
             self.emit(Instr::MakeRecord { fields: vec![] });
@@ -138,7 +138,7 @@ impl Generator {
     ) -> Result<Ty, GenerateError> {
         let ascribed = ty.clone();
         if let Ty::Arc { pointee } = &ascribed {
-            if matches!(arg.form, Form::Record | Form::Unit) {
+            if matches!(arg.kind, TermKind::Record { .. } | TermKind::Unit) {
                 self.gen_shared_payload(span, pointee, arg)?;
             } else {
                 self.gen_term(arg, Some(pointee))?;
@@ -147,7 +147,7 @@ impl Generator {
             return Ok(ascribed);
         }
         if let Ty::Weak { pointee } = &ascribed
-            && matches!(arg.form, Form::Unit)
+            && matches!(arg.kind, TermKind::Unit)
         {
             self.emit(Instr::WeakEmpty {
                 pointee: *pointee.clone(),
@@ -161,7 +161,7 @@ impl Generator {
             .map_err(|err| GenerateError::typing(span, err))?;
         let context = context.span_record().unwrap_or(context);
         let found = if matches!(&context, Ty::Record { fields } if fields.is_empty())
-            && matches!(arg.form, Form::Unit)
+            && matches!(arg.kind, TermKind::Unit)
         {
             self.emit(Instr::MakeRecord { fields: vec![] });
             context
@@ -183,7 +183,7 @@ impl Generator {
             }),
             ExplicitConversion::Ascribe(steps) => {
                 if steps.iter().any(|step| matches!(step, Conv::Unwrap { definition } if self.typer.definition(*definition).unwrap().drop_hook().is_some())) {
-                    return Err(super::plan::error(span, "cannot unwrap a type with drop; access its fields through a pointer or use Ptr.replace"));
+                    return Err(GenerateError::inference(span, "cannot unwrap a type with drop; access its fields through a pointer or use Ptr.replace"));
                 }
                 if !steps.is_empty() {
                     self.emit(Instr::Ascribe {
@@ -208,7 +208,7 @@ impl Generator {
         if matches!(name, "+" | "-")
             && let [
                 Term {
-                    form: Form::Num { value },
+                    kind: TermKind::Num { value },
                     ..
                 },
             ] = args

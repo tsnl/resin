@@ -1,5 +1,5 @@
-//! Typing services used while generation plans expressions.
-//! Inference handles never escape into the final IR.
+//! Typing services used by the source-checking pass.
+//! Inference handles are resolved before the typed tree reaches IR lowering.
 
 pub(in crate::ir) mod constraints;
 pub(in crate::ir) mod solver;
@@ -45,7 +45,7 @@ pub(in crate::ir) struct Equation {
     relation: Constraint,
 }
 
-/// Constraint services injected into generation; this layer never traverses expressions.
+/// Constraint services injected into source checking; this layer never traverses expressions.
 pub(in crate::ir) struct Inference<'a> {
     pub typer: &'a mut TyperContext,
     pub solver: Solver,

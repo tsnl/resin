@@ -178,53 +178,53 @@ declarations; there is no configurable parameter index.
 The C and GLSL backends translate this stack model into target-language
 variables and control flow; they do not execute the IR.
 
-### Generation composes typing and emission
+### Checking produces a typed tree; lowering emits IR
 
-[ir/generate/plan/expressions.rs](src/ir/generate/plan/expressions.rs) walks each
-expression once. Its `Expression` builder plans children through `child` and
-type annotations through `annotation`, automatically registering dependencies
-on both. The builder passes their type handles to the injected
-[inference services](src/ir/typecheck/infer/) and selects an emission operation.
-Each equation has an explicit `Rule` owner, which identifies the inference
-variables invalidated if that operation fails. Adding an expression composes
-these methods; the typing layer does not traverse syntax or own lexical scopes.
+[ir/generate/check/expressions.rs](src/ir/generate/check/expressions.rs) walks
+source expressions, resolves declarations, and adds constraints through the shared
+[inference services](src/ir/typecheck/infer/). It builds an explicit expression
+and statement tree instead of scheduling emission callbacks. Each equation has a
+`Rule` owner identifying the inference variables invalidated if the operation fails.
 
 [ir/typecheck/](src/ir/typecheck/) contains the shared operation rules.
 [TyperContext](src/ir/typecheck/mod.rs) owns type definitions and method namespaces;
 [builtin.rs](src/ir/typecheck/builtin.rs) classifies builtin names and arities,
 [rules.rs](src/ir/typecheck/rules.rs) checks their signatures, and
 [convert.rs](src/ir/typecheck/convert.rs) classifies explicit conversions.
-Inference, emission, and the independent IR verifier use these same rules.
-[literal.rs](src/ir/literal.rs) shares numeric suffixes and literal classification.
-[annotation.rs](src/ir/generate/annotation.rs) evaluates type syntax with an
-injected name resolver. Its decoder returns the type and its explicit hole
-handles together, publishing neither after a failed decode. Function result
-inference owns those holes, so a failed body preserves concrete annotations.
+These services do not traverse syntax or own lexical scopes. Checking, lowering,
+and the independent IR verifier reuse the concrete rules.
+[annotation.rs](src/ir/generate/annotation.rs) decodes type syntax and explicit holes
+with an injected name resolver. A failed decode publishes neither; function result
+inference owns its holes so a failed body preserves concrete annotations.
 
-[plan/mod.rs](src/ir/generate/plan/mod.rs) resolves function dependency groups
-before executing their emission operations. Errors retain valid declarations
-and independent expression facts. Failed relations are removed and surviving
-constraints are retried from a solver checkpoint, without repeating the source
-traversal. The private
-[solver](src/ir/typecheck/infer/solver.rs) delays numeric choices and accumulates
-error sets to a fixed point, including mutually recursive functions. Final IR
-contains only concrete types. There is no AST-node-keyed type table or second
-expression AST walk for instruction generation.
+[check/mod.rs](src/ir/generate/check/mod.rs) resolves function dependency groups.
+The private [solver](src/ir/typecheck/infer/solver.rs) delays numeric choices and
+accumulates error sets to a fixed point, including mutually recursive functions.
+Errors retain valid declarations and independent expression facts; failed relations
+are removed and surviving constraints are retried from a solver checkpoint.
+[check/resolve.rs](src/ir/generate/check/resolve.rs) finishes this pass by replacing
+inference handles throughout the tree with concrete types. Invalid bodies are
+withheld from lowering while editor facts remain available.
+
+[typed.rs](src/ir/generate/typed.rs) defines the pass boundary: ordinary data for
+expressions, statements, annotations, and signatures. The checker builds this shape
+with inference types and returns it with concrete `Ty` values. The generator owns
+no inference solver. [lower.rs](src/ir/generate/lower.rs) performs the second
+expression traversal, dispatching the typed nodes to the storage, control-flow,
+call, conversion, and cleanup helpers.
 
 In [scope.rs](src/ir/generate/scope.rs), `Scopes` constructs declarations and
 parent links and owns pending type facts until they resolve. Its retained
 `ContextView` provides lookup at a captured declaration prefix. Lowering uses
-an `Environment` that maps declaration IDs to storage; it cannot declare names
-or rebuild scopes. Planned terms and statements carry their context cursors,
-so an earlier expression cannot see later declarations. Inherent methods keep
-canonical declaration IDs in their receiver namespace; they do not become
-ordinary lexical bindings. Instance and associated calls use the same method
-signatures, with explicit receiver conversions during lowering.
+an `Environment` mapping declaration IDs to storage; it cannot declare names or
+rebuild scopes. Typed terms and statements carry context cursors, so an earlier
+expression cannot see later declarations. Inherent methods retain canonical
+declaration IDs in their receiver namespace.
 
-Local structs reserve their nominal identity while planning. Ownership cleanup
-tracks initialized locals and destroys them in reverse scope order at each exit,
-preserving returned values first. Layout queries plan their operands for typing
-but never execute their runtime operations.
+Local structs reserve their nominal identity during checking. Layout queries
+check their operands but retain only the queried type in the typed tree, so
+lowering cannot execute the operand. Ownership cleanup tracks initialized locals
+and destroys them in reverse scope order, preserving outgoing values first.
 The [builder](src/ir/generate/builder.rs) assembles concrete stack IR, which the
 independent [verifier](src/ir/verify/) checks before any backend consumes it.
 
@@ -235,7 +235,7 @@ The neighboring files separate the questions asked during that process:
 | Which imported or exported declaration does a name mean? | [modules.rs](src/ir/generate/modules.rs) |
 | Which declarations are visible, and where are their types and origins? | [scope.rs](src/ir/generate/scope.rs), [semantic.rs](src/ir/generate/semantic.rs) |
 | Where is a binding stored, and is it initialized? | [bindings.rs](src/ir/generate/bindings.rs), [builder.rs](src/ir/generate/builder.rs) |
-| How are typing and emission composed for an expression? | [plan/expressions.rs](src/ir/generate/plan/expressions.rs), [terms.rs](src/ir/generate/terms.rs) |
+| How is an expression checked, then lowered? | [check/expressions.rs](src/ir/generate/check/expressions.rs), [typed.rs](src/ir/generate/typed.rs), [lower.rs](src/ir/generate/lower.rs) |
 | Which storage location does an assignment or address refer to? | [places.rs](src/ir/generate/places.rs) |
 | How do branches, loops, and short-circuit operators join? | [flow.rs](src/ir/generate/flow.rs) |
 | How do Results, exhaustive matches, and early error returns lower? | [sums.rs](src/ir/generate/sums.rs) |

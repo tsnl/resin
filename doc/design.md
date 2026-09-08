@@ -92,12 +92,16 @@ exporting unfinished tables are errors; failed validation remains retryable. The
 one context and moves its completed definition table into the IR module without cloning.
 Standalone clients can start with `TyperContext::new()` or take ownership of an existing table
 with `from_definitions`.
-The evaluator resolves type expressions and literals. Functions needing inference first collect
-constraints, unify ordinary type holes, and solve error-set inclusion to a fixed point. Concrete
-node-keyed results guide lowering; inference variables never enter the IR. A generator can then
-interleave scope resolution, typing, evaluation, and emission without coupling the reusable typing
-rules to a particular backend. Errors propagate
-immediately and compilation stops after the first useful diagnostic.
+The evaluator resolves type expressions and literals. Source checking in
+`generate/check/` collects constraints, unifies ordinary type holes, and solves error-set
+inclusion to a fixed point in function dependency order. It builds the explicit tree in
+`generate/typed.rs` and resolves all of its inference handles before returning it.
+The second pass in `generate/lower.rs` traverses that concrete typed tree and emits IR;
+its generator holds no inference solver or deferred emission callbacks. Source contexts
+captured on typed nodes preserve declaration visibility across the passes.
+Failed constraints are isolated and retried so healthy declarations and expressions retain
+editor information. Invalid bodies are withheld from lowering; any diagnostics prevent
+publishing executable IR.
 
 Lowering records owned locals per lexical scope and emits conditional destruction at
 normal and error exits. Copy operations retain shared fields; compiler-owned temporary

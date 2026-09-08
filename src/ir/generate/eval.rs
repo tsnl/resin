@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::ast::{Span, Type};
+use crate::ast::{Ident, Span, Type};
 use crate::ir::{Ty, TyperContext, Value};
 
 use super::scope::ContextView;
@@ -12,6 +12,11 @@ pub(in crate::ir) struct Evaluator<'a> {
 }
 
 impl Evaluator<'_> {
+    pub(super) fn type_name(&self, name: &Ident) -> Result<Ty, GenerateError> {
+        let ty = self.scopes.resolve_type(name)?;
+        crate::ir::typecheck::infer::solver::Solver::default().require(&ty, name.span)
+    }
+
     pub(super) fn number(
         &self,
         span: Span,

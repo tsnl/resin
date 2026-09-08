@@ -1,8 +1,8 @@
 use super::super::semantic::DefinitionKind;
-use super::{GenerateError, Planner, Result, Type};
+use super::{Checker, GenerateError, Result, Type};
 use crate::ir::typecheck::check_binding_name;
 use crate::{ast::Ident, ir::GenerateErrorKind};
-impl Planner<'_> {
+impl Checker<'_> {
     pub fn bind(
         &mut self,
         name: &Ident,
