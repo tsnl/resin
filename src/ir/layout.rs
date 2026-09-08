@@ -18,7 +18,7 @@ pub struct Layout {
 pub fn layout(definitions: &[TypeDef], ty: &Ty) -> Result<Layout, Error> {
     let scalar = match ty {
         Ty::Int32 | Ty::UInt32 | Ty::Float32 => Some(4),
-        Ty::UInt64 | Ty::Pointer { .. } => Some(8),
+        Ty::UInt64 | Ty::Pointer { .. } | Ty::Arc { .. } | Ty::Weak { .. } => Some(8),
         _ => None,
     };
     if let Some(size) = scalar {

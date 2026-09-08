@@ -17,6 +17,24 @@ fn option_payload_fields_remain_available_in_incomplete_code() {
 }
 
 #[test]
+fn weak_upgrade_recovery_exposes_the_shared_payload_and_handle_operations() {
+    let source = "struct Item { count: int }; def f(weak: Weak<Item>) = { weak.upgrade()!.; };";
+    let project = Project::new(&[("main.resin", source)]);
+    let items = project
+        .analyze()
+        .completions(&project.path("main.resin"), source.find("!.").unwrap() + 2);
+    assert!(
+        items.iter().any(|item| item.detail == "count: int"),
+        "{items:?}"
+    );
+    assert!(items.iter().any(|item| item.name == "get"), "{items:?}");
+    assert!(
+        items.iter().any(|item| item.name == "downgrade"),
+        "{items:?}"
+    );
+}
+
+#[test]
 fn pointer_hover_and_completion_use_angle_bracket_types() {
     let source = "def main (value: Ptr<Span<int>>) -> Ptr<Span<int>> = { value };";
     let project = Project::new(&[("main.resin", source)]);
@@ -147,7 +165,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
             let offset = source.find(".at(0)").unwrap() + 1;
             assert_eq!(
                 analysis.hover(&path, offset).unwrap().text,
-                "at: (integer) -> Ptr<int>"
+                "at: (ulong) -> Ptr<int>"
             );
             let items = analysis.completions(&path, offset);
             assert!(
@@ -167,63 +185,42 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
 }
 
 #[test]
-fn deferred_bindings_keep_navigation_types_and_local_scopes() {
-    let source = "def main() = { var value = 1; { defer { var inner: _; inner := value; print(\"{0}\", (inner,)); }; var value = 2; () }; };";
-    let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics.is_empty(),
-        "{:?}",
-        analysis.diagnostics
-    );
-    let path = project.path("main.resin");
-    let reference = source.find("inner := value").unwrap() + 9;
-    assert_eq!(
-        analysis.definition(&path, reference).unwrap().span.start,
-        source.find("value").unwrap()
-    );
-    assert_eq!(analysis.hover(&path, reference).unwrap().text, "value: int");
-    assert!(
-        analysis
-            .completions(&path, source.rfind("var value").unwrap())
-            .iter()
-            .all(|item| item.name != "inner")
-    );
-    assert!(
-        analysis
-            .completions(&path, source.find("defer").unwrap())
-            .iter()
-            .any(|item| item.name == "defer")
-    );
-}
-
-#[test]
-fn deferred_expressions_keep_lexical_navigation_and_recover_fields() {
-    let source = "def main() = { var value = 1; { defer value + 1; var value = 2; }; };";
-    let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics.is_empty(),
-        "{:?}",
-        analysis.diagnostics
-    );
-    let path = project.path("main.resin");
-    let reference = source.find("defer value").unwrap() + 6;
-    assert_eq!(
-        analysis.definition(&path, reference).unwrap().span.start,
-        source.find("value").unwrap()
-    );
-    assert_eq!(analysis.hover(&path, reference).unwrap().text, "value: int");
-
-    let source = "def main() = { var point = { count = 42 }; defer point.; };";
-    let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
-    let items = analysis.completions(
-        &project.path("main.resin"),
-        source.find("point.").unwrap() + 6,
-    );
-    assert_eq!(items.len(), 1);
-    assert_eq!(items[0].detail, "count: int");
+fn shared_receiver_completion_and_navigation_include_ordinary_drop_methods() {
+    let library = "export { Counter }; struct Counter { count: int }; impl Counter { def drop(self: Ptr<Counter>) = {}; def read(self: Ptr<Counter>) -> int = { self.count }; }";
+    for tail in ["", "c.;"] {
+        let source =
+            format!("import {{ \"lib.resin\" }}; def f(c: Arc<Counter>) = {{ c.read(); {tail} }};");
+        let project = Project::new(&[("main.resin", &source), ("lib.resin", library)]);
+        let analysis = project.analyze();
+        let path = project.path("main.resin");
+        let call = source.find("c.read").unwrap() + 2;
+        assert_eq!(
+            analysis
+                .definition(&path, call)
+                .unwrap_or_else(|| panic!(
+                    "{:?}\n{:?}",
+                    analysis.diagnostics,
+                    analysis.recovered_file(&path)
+                ))
+                .path,
+            project.path("lib.resin")
+        );
+        assert!(
+            analysis
+                .hover(&path, call)
+                .unwrap()
+                .text
+                .starts_with("def read(")
+        );
+        let offset = if tail.is_empty() {
+            call
+        } else {
+            source.rfind("c.;").unwrap() + 2
+        };
+        let items = analysis.completions(&path, offset);
+        assert!(items.iter().any(|item| item.name == "read"));
+        assert!(items.iter().any(|item| item.name == "drop"));
+    }
 }
 
 #[test]
@@ -345,6 +342,7 @@ fn field_completion_uses_receiver_types_and_replaces_only_the_field() {
                 .completions(&project.path("main.resin"), offset);
             let names = items
                 .iter()
+                .filter(|item| item.kind == resin::analysis::DefinitionKind::Field)
                 .map(|item| item.name.as_str())
                 .collect::<Vec<_>>();
             assert_eq!(
@@ -950,8 +948,8 @@ fn editor_analysis_tolerates_truncation_and_deleted_tokens() {
         "export { main }; struct Point { x: int }; def main(arg: Ptr<Point>) = { var value = arg.x + 1; print(\"{}\", value); };",
         "def main(arg: int) -> int = { var pair = { left = arg, right = 1 }; if (arg == 0) (pair.left) else (pair.right) };",
         "def main() = { var values = [1, 2]; while (1 == 1) { var missing: Ptr<int>; }; };",
-        "def main() = { var n = 42; defer { defer {}; print(\"{0}\", (n,)); }; };",
-        "def main() = { var n = 42; defer if (n == 42) { print(\"{0}\", (n,)); } else {}; defer n := n + 1; };",
+        "struct Cleanup { value: Ptr<int> }; impl Cleanup { def drop(self: Ptr<Cleanup>) = { self.value.* := 42; }; } def main() = { var n = 0; var cleanup = Cleanup { value = &n }; };",
+        "struct Item { value: int }; def main() = { var owner = Arc<Item> { value = 42 }; var weak = owner.downgrade(); match (weak.upgrade()) { Arc<Item>(item) => { item.value; }, None => {} }; };",
     ] {
         for end in 0..=source.len() {
             let project = Project::new(&[("main.resin", &source[..end])]);
@@ -1083,4 +1081,38 @@ fn incomplete_impls_and_method_arguments_keep_editor_recovery() {
             .definition(&project.path("main.resin"), offset)
             .is_some()
     );
+}
+
+#[test]
+fn pointer_replace_has_ordinary_method_hover_and_recovery() {
+    for tail in ["", "p.;"] {
+        let source = format!("def f(p: Ptr<int>) = {{ p.replace(3); {tail} }};");
+        let project = Project::new(&[("main.resin", &source)]);
+        let analysis = project.analyze();
+        let path = project.path("main.resin");
+        assert_eq!(
+            analysis.diagnostics.is_empty(),
+            tail.is_empty(),
+            "{:?}",
+            analysis.diagnostics
+        );
+        let offset = source.find("replace").unwrap();
+        assert_eq!(
+            analysis.hover(&path, offset).unwrap().text,
+            "replace: (int) -> int"
+        );
+        let items = analysis.completions(
+            &path,
+            if tail.is_empty() {
+                offset
+            } else {
+                source.rfind("p.;").unwrap() + 2
+            },
+        );
+        assert!(
+            items.iter().any(|item| item.name == "replace"
+                && item.kind == resin::analysis::DefinitionKind::Function),
+            "{items:?}"
+        );
+    }
 }

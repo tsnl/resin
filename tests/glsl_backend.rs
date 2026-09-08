@@ -18,20 +18,13 @@ fn example(name: &str) -> ir::Module {
 }
 
 #[test]
-fn defer_lowers_to_shader_control_flow_including_error_exits() {
-    let m = module(
-        "export { kernel }; struct E {}; struct Root { trace: uint }; def fail() -> Result<uint, E> = { err(E {}) }; def work(i: uint, root: Ptr<Root>) -> Result<uint, _> = { defer { root.trace := root.trace + uint(1); }; var n = fail()?; ok(n + i) }; def kernel(i: uint, root: Ptr<Root>) = { match (work(i, root)) { ok(n) => { root.trace := n; }, err(e) => {} }; };",
-    );
-    let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
-    if let Some(compiler) = shaders::compiler() {
-        toolchain::compile_glsl(&source, Stage::Compute, &config::glsl(&compiler))
-            .unwrap_or_else(|error| panic!("{error}\n{source}"));
-    }
-}
-
-#[test]
 fn shader_indexing_emits_no_bounds_checks() {
-    for indexing in ["values(i)", "values.at(i)", "view(i)", "view.at(i)"] {
+    for indexing in [
+        "values(i)",
+        "values.at(ulong(i))",
+        "view(i)",
+        "view.at(ulong(i))",
+    ] {
         let m = module(&format!(
             "export {{ kernel }}; def kernel(i: uint, output: Ptr<uint>) = {{ var values = [1I, 2I]; var view = Span<uint> {{ data = output, length = 2L }}; output.* := {indexing}.*; }};"
         ));
@@ -277,12 +270,12 @@ fn compound_control_flow_compiles_to_spirv() {
 }
 
 #[test]
-fn imported_deferred_backend_errors_retain_expression_origins() {
+fn imported_backend_errors_retain_expression_origins() {
     let temp = toolchain::TempDir::new(&std::env::temp_dir()).unwrap();
     let helper = temp.path().join("helper.resin");
     let entry = temp.path().join("main.resin");
     let mut session = resin::compiler::Session::default();
-    session.set_overlay(&helper, "export { helper }; struct E {}; def helper(n: uint) -> Result<uint, E> = { defer n / 2I; var r: Result<(), E>; r := if (n == 0I) { err(E {}) } else { ok(()) }; r?; ok(n) };".into()).unwrap();
+    session.set_overlay(&helper, "export { helper }; struct E {}; def helper(n: uint) -> Result<uint, E> = { n / 2I; var r: Result<(), E>; r := if (n == 0I) { err(E {}) } else { ok(()) }; r?; ok(n) };".into()).unwrap();
     session.set_overlay(&entry, "export { kernel }; import { \"helper.resin\" }; def kernel(i: uint, p: Ptr<uint>) = { match (helper(i)) { ok(n) => { p.* := n; }, err(e) => {} }; };".into()).unwrap();
     let snapshot = session.analyze(&entry).unwrap();
     let m = snapshot.module().unwrap();
@@ -298,8 +291,8 @@ fn imported_deferred_backend_errors_retain_expression_origins() {
         })
         .collect();
     assert!(
-        origins.len() >= 2,
-        "both cleanup exits retain their original expression"
+        !origins.is_empty(),
+        "the operation retains its original expression"
     );
     let error = glsl::emit(m, "kernel", Stage::Compute)
         .unwrap_err()
@@ -322,4 +315,43 @@ fn imported_deferred_backend_errors_retain_expression_origins() {
         error.contains("block") && error.contains("instruction"),
         "{error}"
     );
+}
+
+#[test]
+fn managed_fields_are_opaque_until_consumed_by_a_shader() {
+    let prefix = "export { kernel }; struct Host { value: float64 }; struct Root { owner: Arc<Host>, weak: Weak<Host>, result: uint };";
+    let m = module(&format!(
+        "{prefix} def kernel(i: uint, root: Ptr<Root>) = {{ root.result := i; var address = &root.owner; }};"
+    ));
+    let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
+    if let Some(compiler) = shaders::compiler() {
+        toolchain::compile_glsl(&source, Stage::Compute, &config::glsl(&compiler)).unwrap();
+    }
+    for body in [
+        "var value = root.owner;",
+        "root.owner := root.owner;",
+        "var result = root.weak.upgrade();",
+    ] {
+        let m = module(&format!(
+            "{prefix} def kernel(i: uint, root: Ptr<Root>) = {{ {body} }};"
+        ));
+        let error = glsl::emit(&m, "kernel", Stage::Compute)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("shader cannot consume a managed value"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn options_of_plain_values_work_in_shaders() {
+    let m = module(
+        "export { kernel }; def kernel(i: uint, output: Ptr<uint>) = { var value: uint | None; value := if (i == 0I) { 42I } else { None }; output.* := match (value) { uint(n) => { n }, None => { 0I } }; };",
+    );
+    let source = glsl::emit(&m, "kernel", Stage::Compute).unwrap();
+    if let Some(compiler) = shaders::compiler() {
+        toolchain::compile_glsl(&source, Stage::Compute, &config::glsl(&compiler)).unwrap();
+    }
 }

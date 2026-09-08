@@ -75,11 +75,11 @@ fn declaration_keywords_are_visible_in_outlines_and_struct_textobjects() {
 
 #[test]
 fn reserved_words_have_highlight_rules() {
-    let source = "export { f }; import { \"x.resin\" }; extern type Handle; struct S { value: int }; type T = S; def f() -> Result<(), Never> = { var x: Span<Ptr<ubyte>>; defer free(x); while (0 < 1) { if (0 == 1) { () } else { () }; }; match (value) { ok(v) => { ok(v) }, err(e) => { err(e) } } };";
+    let source = "export { f }; import { \"x.resin\" }; extern type Handle; struct S { value: int }; type T = S; def f() -> Result<(), Never> = { var x: Span<Ptr<ubyte>>; free(x); while (0 < 1) { if (0 == 1) { () } else { () }; }; match (value) { ok(v) => { ok(v) }, err(e) => { err(e) } } };";
     let highlighted = captures(QUERIES[0].1, source);
     for word in [
         "export", "import", "extern", "type", "struct", "def", "var", "if", "else", "while",
-        "match", "defer",
+        "match",
     ] {
         assert!(
             highlighted.contains(&("keyword".into(), word.into())),
@@ -126,12 +126,6 @@ fn inference_holes_are_highlighted_as_types() {
     let source = "def f(p: Ptr<int>) -> Ptr<_> = { var value: _; value := p; value };";
     let captured = captures(QUERIES[0].1, source);
     assert!(captured.contains(&("type.builtin".into(), "_".into())));
-}
-
-#[test]
-fn defer_is_highlighted_as_a_keyword() {
-    let source = "def f() = { defer print(\"done\", ()); };";
-    assert!(captures(QUERIES[0].1, source).contains(&("keyword".into(), "defer".into())));
 }
 
 #[test]

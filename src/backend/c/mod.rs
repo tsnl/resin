@@ -17,6 +17,9 @@ mod value;
 struct Slot {
     ty: Ty,
     expr: String,
+    // Optional C pointer to the initialization flag of the addressed local.
+    // A null pointer at a control-flow join denotes ordinary initialized storage.
+    live: Option<String>,
 }
 
 pub struct Shader {
@@ -86,6 +89,7 @@ pub(crate) fn emit_verified(
         )
         .unwrap();
     }
+    out.push_str(&types.lifecycle());
     for (index, flow) in analysis.functions.iter().enumerate() {
         out.push_str(&function::emit(&types, index, flow)?);
     }

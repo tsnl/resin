@@ -76,9 +76,9 @@ fn omitted_unit_returns_run_and_reject_non_unit_tails() {
 }
 
 #[test]
-fn defer_runs_when_native_status_propagates_to_the_entry() {
+fn destruction_runs_when_native_status_propagates_to_the_entry() {
     let output = cli(
-        "export { main }; import { \"std/status.resin\" }; def main() -> Result<(), _> = { status(0)?; defer print(\"cleanup\\n\", ()); status(8)?; defer print(\"not reached\\n\", ()); ok(()) };",
+        "export { main }; import { \"std/status.resin\" }; struct Cleanup {}; impl Cleanup { def drop(self: Ptr<Cleanup>) = { print(\"cleanup\\n\", ()); }; } def main() -> Result<(), _> = { status(0)?; var cleanup = Cleanup {}; status(8)?; ok(()) };",
         &[],
     );
     assert_eq!(output.status.code(), Some(1));

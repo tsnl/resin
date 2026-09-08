@@ -366,18 +366,36 @@ impl Solver {
 
     pub fn default_numbers(&mut self) -> bool {
         let before = self.revision;
-        for variable in &mut self.variables {
-            if variable.value.is_none() {
-                let ty = match variable.class {
-                    Class::Any | Class::Errors => continue,
-                    Class::Number => Ty::Int32,
-                    Class::Float => Ty::Float64,
-                };
-                variable.value = Some(ty.into());
-                self.revision += 1;
+        for id in 0..self.variables.len() {
+            self.default_number(id);
+        }
+        self.revision != before
+    }
+
+    pub fn default_numbers_in(&mut self, ty: &Type) -> bool {
+        let before = self.revision;
+        match self.head(ty) {
+            Type::Variable(id) => self.default_number(id),
+            Type::Node(_, children) => {
+                for child in &children {
+                    self.default_numbers_in(child);
+                }
             }
         }
         self.revision != before
+    }
+
+    fn default_number(&mut self, id: usize) {
+        let variable = &mut self.variables[id];
+        if variable.value.is_none() {
+            let ty = match variable.class {
+                Class::Any | Class::Errors => return,
+                Class::Number => Ty::Int32,
+                Class::Float => Ty::Float64,
+            };
+            variable.value = Some(ty.into());
+            self.revision += 1;
+        }
     }
 }
 

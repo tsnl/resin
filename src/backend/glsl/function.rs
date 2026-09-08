@@ -81,7 +81,10 @@ pub(super) fn emit(
                         && matches!(
                             instr,
                             Instr::Load
+                                | Instr::TransferLoad
+                                | Instr::IsVariant { .. }
                                 | Instr::Store
+                                | Instr::Replace
                                 | Instr::AccessStatic { .. }
                                 | Instr::AccessDynamic
                         ))
@@ -101,6 +104,28 @@ pub(super) fn emit(
                 || matches!(instr, Instr::AccessStatic { .. } | Instr::AccessDynamic)
                     && args[0].local;
             let result = flow.results[b][i].as_ref();
+            if args.iter().any(|a| a.ty.needs_drop(&types.module.types))
+                || result.is_some_and(|t| t.needs_drop(&types.module.types))
+                || matches!(
+                    instr,
+                    Instr::ArcNew
+                        | Instr::ArcData
+                        | Instr::Downgrade
+                        | Instr::Upgrade
+                        | Instr::WeakEmpty { .. }
+                        | Instr::DropLocal { .. }
+                )
+            {
+                return Err(Error::at(
+                    types.module,
+                    index,
+                    Some((b, i)),
+                    Error(
+                        "shader cannot consume a managed value or invoke automatic destruction"
+                            .into(),
+                    ),
+                ));
+            }
             if matches!(instr, Instr::ExcludeNone) {
                 let condition =
                     is_variant(types, &args[0].ty, &Case::Type(Ty::None), &args[0].expr);
@@ -295,13 +320,23 @@ fn instruction(
     out: &mut String,
 ) -> Result<Option<String>, Error> {
     let expr = match instr {
+        Instr::ForgetLocal { .. } => return Ok(None),
+        Instr::TransferLoad => dereference(types, &args[0])?,
+        Instr::TakeLocal { local } => format!("r_l{}", local.index()),
         Instr::SetLocal { local } => {
             writeln!(out, "      r_l{} = {};", local.index(), args[0].expr).unwrap();
             return Ok(None);
         }
         Instr::MakeVariant { ty, tag } => variant(types, ty, tag, &args[0].expr),
         Instr::ExcludeNone => widen(types, &args[0].ty, result.unwrap(), &args[0].expr),
-        Instr::IsVariant { tag } => is_variant(types, &args[0].ty, tag, &args[0].expr),
+        Instr::IsVariant { tag } => {
+            let (ty, expr) = if let Ty::Pointer { pointee } = &args[0].ty {
+                (pointee.as_ref(), dereference(types, &args[0])?)
+            } else {
+                (&args[0].ty, args[0].expr.clone())
+            };
+            is_variant(types, ty, tag, &expr)
+        }
         Instr::VariantPayload { tag } => {
             if matches!(tag, Case::Type(member) if member == &args[0].ty) {
                 args[0].expr.clone()
@@ -315,6 +350,13 @@ fn instruction(
         Instr::Push { value } => literal(types, result.unwrap(), value)?,
         Instr::LocalAddress { local } => format!("r_l{}", local.index()),
         Instr::Load => dereference(types, &args[0])?,
+        Instr::Replace => {
+            let target = dereference(types, &args[0])?;
+            let old = format!("r_replaced_{}", out.len());
+            writeln!(out, "      {} {old} = {target};", types.name(&args[1].ty)).unwrap();
+            writeln!(out, "      {target} = {};", args[1].expr).unwrap();
+            old
+        }
         Instr::Store => {
             writeln!(
                 out,
@@ -363,9 +405,9 @@ fn instruction(
                     let size = crate::backend::layout::layout(types.module, element)?.size;
                     format!("({}).f0 + uint64_t({index}) * uint64_t({size})", base.expr)
                 }
-                Ty::Array { .. } => format!("({}).items[{index}]", base.expr),
+                Ty::Array { .. } => format!("({}).items[uint({index})]", base.expr),
                 Ty::Pointer { .. } if base.local => {
-                    format!("({}).items[{index}]", base.expr)
+                    format!("({}).items[uint({index})]", base.expr)
                 }
                 Ty::Pointer { pointee } => {
                     let Ty::Array { element, .. } = types.shape(pointee) else {

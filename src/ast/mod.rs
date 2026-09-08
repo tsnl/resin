@@ -207,10 +207,6 @@ pub enum StmtKind {
         name: Ident,
         ann: Type,
     },
-    Defer {
-        // Shared so repeated cleanup lowering preserves inference's node identities.
-        body: Arc<Term>,
-    },
     /// `term;`
     Expr {
         term: Term,

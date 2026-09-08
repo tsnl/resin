@@ -409,56 +409,6 @@ fn shader_results_propagate_and_match_union_payloads_on_device() {
 }
 
 #[test]
-fn shader_defer_preserves_values_and_runs_each_iteration() {
-    compute_values(
-        "export { kernel }; struct PixelRoot { count: uint, pixels: Ptr<uint> }; def kernel(i: uint, root: Ptr<PixelRoot>) = { if (i < root.count) { var output = Span<uint> { data = root.pixels, length = 67L }; output(i).* := { var n = uint(0); var total = uint(0); var saved = { defer { total := total * uint(2); }; while (n < i) { defer { total := total + n; }; n := n + uint(1); }; total }; saved + total }; }; };",
-        |index| 3 * index * (index + 1) / 2,
-    );
-}
-
-#[test]
-fn shader_defer_delays_conditions_and_discards_expression_values() {
-    compute_values(
-        "export { kernel }; struct PixelRoot { count: uint, pixels: Ptr<uint> }; def kernel(i: uint, root: Ptr<PixelRoot>) = { if (i < root.count) { var output = Span<uint> { data = root.pixels, length = 67L }; output(i).* := { var n = uint(0); var total = uint(0); var saved = { defer if (n == i) { total := total * uint(2) } else { total := uint(999) }; defer while (n < i) { defer total := total + n; n := n + uint(1); }; total }; saved + total }; }; };",
-        |index| index * (index + 1),
-    );
-}
-
-#[test]
-fn shader_defer_unwinds_errors_on_device() {
-    compute_values(
-        r#"export { kernel };
-        struct Root { count: uint, pixels: Ptr<uint> };
-        struct Odd { index: uint };
-        def checked(i: uint) -> Result<uint, Odd> = {
-            if ((i & uint(1)) == uint(1)) { err(Odd { index = i }) } else { ok(i) }
-        };
-        def work(i: uint, p: Ptr<uint>) -> Result<uint, _> = {
-            defer p.* := p.* * uint(10) + uint(3);
-            var n = {
-                defer p.* := p.* * uint(10) + uint(2);
-                var value = checked(i)?;
-                defer p.* := uint(1);
-                value
-            };
-            ok(n)
-        };
-        def kernel(i: uint, root: Ptr<Root>) = {
-            if (i < root.count) {
-                var p = (Span<uint> { data = root.pixels, length = ulong(67) })(i);
-                p.* := uint(0);
-                match (work(i, p)) {
-                    ok(n) => { p.* := p.* + n; },
-                    err(e) => { p.* := p.* + e.index; },
-                };
-                ()
-            } else { () }
-        };"#,
-        |index| index + if index % 2 == 1 { 23 } else { 123 },
-    );
-}
-
-#[test]
 fn optional_unwrap_stops_shader_callers_on_none() {
     compute_values(
         r#"export { kernel };
@@ -510,19 +460,19 @@ fn inherent_methods_execute_in_shader_helpers() {
         struct Counter { value: uint };
         impl Counter {
             def new(value: uint) -> Counter = { Counter { value = value } };
-            def add(self: Counter, n: uint) -> Counter = { Counter { value = self.value + n } };
+            def add(self: Counter, n: uint, m: uint) -> Counter = { Counter { value = self.value + n + m } };
             def read(self: Counter) -> uint = { self.value };
         }
         def kernel(id: uint, root: Ptr<Root>) = {
             if (id < root.count) {
                 var counter = Counter.new(id);
-                var incremented = counter.add(1I);
+                var incremented = counter.add(1I, 2I);
                 var output = Span<uint> { data = root.pixels, length = 67L };
                 output(id).* := incremented.read();
             };
         };
         "#,
-        |index| index + 1,
+        |index| index + 3,
     );
 }
 
@@ -533,15 +483,15 @@ fn at_indexing_mutates_shader_arrays_and_span_fields() {
         struct Root { count: uint, pixels: Ptr<uint> };
         def read(i: uint) -> uint = {
             var values = [10I, 20I];
-            values.at(0I).* := i;
-            values.at(i & 1I).* + values.at(i & 1I).*
+            var previous = values.at(0L).replace(i);
+            values.at(ulong(i & 1I)).* + values.at(ulong(i & 1I)).* + previous - 10I
         };
         def kernel(i: uint, root: Ptr<Root>) = {
             if (i < root.count) {
                 var holder = { values = Span<uint> { data = root.pixels, length = 67L } };
-                holder.values.at(i).* := 7I;
+                holder.values.at(ulong(i)).* := 7I;
                 var value = read(i);
-                holder.values.at(i).* := value;
+                holder.values.at(ulong(i)).* := value;
             };
         };"#,
         |i| if i % 2 == 0 { 2 * i } else { 40 },

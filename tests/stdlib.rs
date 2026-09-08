@@ -31,6 +31,30 @@ fn success(output: &std::process::Output) {
 }
 
 #[test]
+fn buffer_address_accessors_require_a_borrowed_owner() {
+    let temp = toolchain::TempDir::new(&std::env::temp_dir()).unwrap();
+    let path = temp.path().join("main.resin");
+    for accessor in ["allocation_host_pointer", "allocation_device_pointer"] {
+        fs::write(
+            &path,
+            format!(
+                r#"
+            import {{ "std/gpu.resin" }};
+            def bad(gpu: Gpu) -> Result<(), _> = {{
+                {accessor}(gpu_malloc(gpu, 4L, 4L, memory_default())?);
+                ok(())
+            }};
+        "#
+            ),
+        )
+        .unwrap();
+        let program = ast::load(&path).unwrap();
+        let error = ir::generate_program(&program).unwrap_err().to_string();
+        assert!(error.contains("TypeMismatch"), "{error}");
+    }
+}
+
+#[test]
 fn every_native_status_operation_has_a_public_result_wrapper() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for name in ["gpu", "window", "image", "console"] {
@@ -126,7 +150,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
             var pixels = [ubyte(1), ubyte(2), ubyte(3), ubyte(255)];
             image_write_png(Ptr<ubyte>(&path), 1, 1, 4, Ptr<ubyte>(&pixels), 0)?;
             var image = image_read_png(Ptr<ubyte>(&path), 0)?;
-            defer image_free(image.pixels);
+
             ok(if (image.width == uint(1) && image.height == uint(1) && image.channels == uint(4)
                 && image.pixels.* == ubyte(1) && Ptr<ubyte>(ulong(image.pixels) + ulong(3)).* == ubyte(255)) { 0 } else { 1 })
         };
@@ -140,7 +164,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     ] {
         let output = run(
             &format!(
-                "export {{ main }}; import {{ \"std/image.resin\" }}; def main() -> Result<(), _> = {{ var path = \"missing/pixel.png\"; var pixels = [uint(0)]; defer print(\"cleanup\\n\", ()); {call}; ok(()) }};"
+                "export {{ main }}; import {{ \"std/image.resin\" }}; struct Cleanup {{}}; impl Cleanup {{ def drop(self: Ptr<Cleanup>) = {{ print(\"cleanup\\n\", ()); }}; }} def main() -> Result<(), _> = {{ var path = \"missing/pixel.png\"; var pixels = [uint(0)]; var cleanup = Cleanup {{}}; {call}; ok(()) }};"
             ),
             "",
         );
@@ -160,12 +184,12 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
         extern "resin_runtime.h" def test_verify(code: int);
         def work() -> Result<(), _> = {
             var gpu = gpu_create()?;
-            defer gpu_destroy(gpu);
+
             var allocation = gpu_malloc(gpu, 16, 8, memory_default())?;
-            defer gpu_free(gpu, allocation);
+
             var commands = gpu_start_command_recording(gpu)?;
-            defer gpu_cancel_command_buffer(gpu, &commands);
-            gpu_set_pipeline(commands, Ptr<ResinPipeline>(ulong(0)))?;
+
+            gpu_set_pipeline(commands, GpuPipeline { handle = Ptr<ResinPipeline>(0L), gpu = gpu })?;
             gpu_submit(gpu, &commands)?;
             ok(())
         };
@@ -254,8 +278,8 @@ fn presentation_distinguishes_skipped_frames_from_errors_without_opening_windows
         export { main };
         import { "std/gpu.resin", "std/window.resin", "std/status.resin" };
         def main() -> int = {
-            var gpu = Ptr<ResinGpu>(ulong(0));
-            var image = Ptr<ResinImage>(ulong(0));
+            var gpu = Gpu { handle = Ptr<ResinGpu>(0L), window = None };
+            var image = GpuImage { handle = Ptr<ResinImage>(0L), gpu = gpu };
             var first = match (gpu_present(gpu, image)) { ok(shown) => { shown }, err(e) => { 1 == 0 } };
             var second = match (gpu_present(gpu, image)) { ok(shown) => { !shown }, err(e) => { 1 == 0 } };
             var third = match (gpu_present(gpu, image)) { ok(shown) => { 0 }, err(e) => { runtime_error_code(e) } };
@@ -288,8 +312,8 @@ fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
             width == uint(640) && height == uint(480)
         };
         def main() -> Result<int, _> = {
-            var gpu = Ptr<ResinGpu>(ulong(0));
-            var window = Ptr<ResinWindow>(ulong(0));
+            var gpu = Gpu { handle = Ptr<ResinGpu>(0L), window = None };
+            var window = Window { handle = Ptr<ResinWindow>(0L) };
             var count = gpu_device_count()?;
             var address = gpu_host_to_device_pointer(gpu, Ptr<ubyte>(ulong(0)))?;
             var size = window_framebuffer_size(window)?;
@@ -354,8 +378,10 @@ fn byte_input_reports_stream_errors_instead_of_eof() {
         r#"
         export { main };
         import { "std/console.resin" };
+        struct Cleanup {};
+        impl Cleanup { def drop(self: Ptr<Cleanup>) = { print("cleanup\n", ()); }; }
         def main() -> Result<(), _> = {
-            defer print("cleanup\n", ());
+            var cleanup = Cleanup {};
             read_byte()?;
             ok(())
         };
@@ -384,10 +410,10 @@ fn pipeline_wrappers_unpack_shader_spans_at_the_c_boundary() {
             var b = [ubyte(3), ubyte(4), ubyte(5)];
             var vertex = Span<ubyte> { data = Ptr<ubyte>(&a), length = ulong(2) };
             var fragment = Span<ubyte> { data = Ptr<ubyte>(&b), length = ulong(3) };
-            var gpu = Ptr<ResinGpu>(ulong(0));
+            var gpu = Gpu { handle = Ptr<ResinGpu>(0L), window = None };
             var compute = gpu_create_compute_pipeline(gpu, vertex)?;
             var graphics = gpu_create_graphics_pipeline(gpu, vertex, fragment)?;
-            ok(if (ulong(compute) == ulong(1) && ulong(graphics) == ulong(2)) { 0 } else { 1 })
+            ok(if (ulong(compute.handle) == ulong(1) && ulong(graphics.handle) == ulong(2)) { 0 } else { 1 })
         };
     "#,
         r#"
@@ -403,6 +429,10 @@ fn pipeline_wrappers_unpack_shader_spans_at_the_c_boundary() {
             *out = (ResinPipeline *)(uintptr_t)2;
             return RESIN_STATUS_SUCCESS;
         }
+        static void mock_free_pipeline(ResinGpu *gpu, ResinPipeline *pipeline) {
+            assert(!gpu && ((uintptr_t)pipeline == 1 || (uintptr_t)pipeline == 2));
+        }
+        #define resin_gpu_free_pipeline mock_free_pipeline
         #define resin_gpu_create_compute_pipeline mock_compute
         #define resin_gpu_create_graphics_pipeline mock_graphics
     "#,
@@ -418,7 +448,7 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
         import { "std/window.resin" };
         def coordinates(x: float64, y: float64) -> bool = { x == 12.5d && y == -3.25d };
         def main() -> Result<int, _> = {
-            var window = Ptr<ResinWindow>(0L);
+            var window = Window { handle = Ptr<ResinWindow>(0L) };
             var key = window_key_state(window, keys().w);
             var mouse = window_mouse_button_state(window, mouse_buttons().left);
             var valid = !key.down && key.pressed && key.released && mouse.down && mouse.pressed && !mouse.released;
@@ -454,6 +484,51 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
         #define resin_window_scroll_delta mock_coordinates
         #define resin_window_focused mock_focus
         #define resin_window_capture_cursor mock_capture
+        "#,
+    );
+    success(&output);
+}
+
+#[test]
+fn buffer_address_accessors_borrow_the_callers_owners() {
+    let output = run(
+        r#"
+        export { main };
+        import { "std/gpu.resin" };
+        extern "resin_runtime.h" def test_frees() -> int;
+        def main() -> int = {
+            var gpu = Gpu { handle = Ptr<ResinGpu>(0L), window = None };
+            var valid = {
+                var host_buffer = GpuBuffer { handle = Ptr<ResinAllocation>(1L), gpu = gpu };
+                var host = allocation_host_pointer(&host_buffer);
+                var device_buffer = GpuBuffer { handle = Ptr<ResinAllocation>(2L), gpu = gpu };
+                var device = allocation_device_pointer(&device_buffer);
+                test_frees() == 0 && host.* == 42B && device == 101L
+            };
+            if (valid && test_frees() == 2) { 0 } else { 1 }
+        };
+        "#,
+        r#"
+        #include <resin_runtime.h>
+        #include <assert.h>
+        static int freed;
+        static int test_frees(void) { return freed; }
+        static void *mock_host(const ResinAllocation *allocation) {
+            assert((uintptr_t)allocation == 1 && freed == 0);
+            static uint8_t byte = 42;
+            return &byte;
+        }
+        static ResinDeviceAddress mock_device(const ResinAllocation *allocation) {
+            assert((uintptr_t)allocation == 2 && freed == 0);
+            return 101;
+        }
+        static void mock_free(ResinGpu *gpu, ResinAllocation *allocation) {
+            assert(!gpu && ((uintptr_t)allocation == 1 || (uintptr_t)allocation == 2));
+            ++freed;
+        }
+        #define resin_allocation_host_pointer mock_host
+        #define resin_allocation_device_pointer mock_device
+        #define resin_gpu_free mock_free
         "#,
     );
     success(&output);

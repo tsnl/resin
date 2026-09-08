@@ -1,0 +1,185 @@
+==================
+Inherent destruction and shared ownership
+==================
+
+struct Item { value: int };
+impl Item {
+    def drop(self: Ptr<Item>) = {};
+}
+def main() = {
+    var owner = Arc<Item> { value = 42 };
+    var weak: Weak<Item>;
+    weak := owner.downgrade();
+    var maybe: Arc<Item> | None;
+    maybe := weak.upgrade();
+    match (maybe) {
+        Arc<Item>(item) => { item.value; },
+        None => {},
+    };
+};
+
+---
+
+(source_file
+  (struct_definition
+    (uid)
+    (declare
+      (lid)
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (primary_type
+                (builtin_type))))))))
+  (impl_definition
+    (uid)
+    (function_definition
+      (lid)
+      (declare
+        (lid)
+        (type
+          (infix_type
+            (union_type
+              (unary_type
+                (type
+                  (infix_type
+                    (union_type
+                      (unary_type
+                        (primary_type
+                          (uid)))))))))))
+      (block_body)))
+  (function_definition
+    (lid)
+    (block_body
+      (statement
+        (define
+          (term_define
+            (lid)
+            (term
+              (assignment_term
+                (binary_term
+                  (unary_term
+                    (postfix_term
+                      (primary_term
+                        (unary_type
+                          (type
+                            (infix_type
+                              (union_type
+                                (unary_type
+                                  (primary_type
+                                    (uid))))))))
+                      (closed_term
+                        (record_term
+                          (term_define
+                            (lid)
+                            (term
+                              (assignment_term
+                                (binary_term
+                                  (unary_term
+                                    (postfix_term
+                                      (primary_term
+                                        (number))))))))))))))))))
+      (statement
+        (declare
+          (lid)
+          (type
+            (infix_type
+              (union_type
+                (unary_type
+                  (type
+                    (infix_type
+                      (union_type
+                        (unary_type
+                          (primary_type
+                            (uid))))))))))))
+      (statement
+        (term
+          (assignment_term
+            (binary_term
+              (unary_term
+                (postfix_term
+                  (primary_term
+                    (lid)))))
+            (assignment_term
+              (binary_term
+                (unary_term
+                  (postfix_term
+                    (primary_term
+                      (lid))
+                    (method_call
+                      (lid)
+                      (unit_term)))))))))
+      (statement
+        (declare
+          (lid)
+          (type
+            (infix_type
+              (union_type
+                (union_type
+                  (unary_type
+                    (type
+                      (infix_type
+                        (union_type
+                          (unary_type
+                            (primary_type
+                              (uid))))))))
+                (unary_type
+                  (primary_type
+                    (builtin_type))))))))
+      (statement
+        (term
+          (assignment_term
+            (binary_term
+              (unary_term
+                (postfix_term
+                  (primary_term
+                    (lid)))))
+            (assignment_term
+              (binary_term
+                (unary_term
+                  (postfix_term
+                    (primary_term
+                      (lid))
+                    (method_call
+                      (lid)
+                      (unit_term)))))))))
+      (statement
+        (term
+          (assignment_term
+            (binary_term
+              (unary_term
+                (postfix_term
+                  (primary_term
+                    (match_term
+                      (term
+                        (assignment_term
+                          (binary_term
+                            (unary_term
+                              (postfix_term
+                                (primary_term
+                                  (lid)))))))
+                      (match_arm
+                        (type
+                          (infix_type
+                            (union_type
+                              (unary_type
+                                (type
+                                  (infix_type
+                                    (union_type
+                                      (unary_type
+                                        (primary_type
+                                          (uid))))))))))
+                        (lid)
+                        (block_body
+                          (statement
+                            (term
+                              (assignment_term
+                                (binary_term
+                                  (unary_term
+                                    (postfix_term
+                                      (primary_term
+                                        (lid))
+                                      (field_access
+                                        (lid))))))))))
+                      (match_arm
+                        (block_body)))))))))))))

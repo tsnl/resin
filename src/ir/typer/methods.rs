@@ -20,10 +20,21 @@ pub(crate) struct SourceOrigin {
 
 #[derive(Debug, Clone)]
 pub(crate) struct FunctionDecl {
-    pub function: FunctionId,
+    pub body: FunctionBody,
     pub params: Vec<Ty>,
     pub result: Ty,
 }
+
+/// Ordinary signatures can have a source body or a compiler-provided definition.
+#[derive(Debug, Clone)]
+pub(crate) enum FunctionBody {
+    Defined(FunctionId),
+    /// IR body with one stack input per parameter and one result. Expanded at
+    /// the call site, preserving addresses that cannot cross shader calls.
+    Generated(Vec<crate::ir::Instr>),
+}
+
+pub(crate) type MethodDefinitions = fn(&Ty) -> Vec<(Arc<str>, FunctionDecl)>;
 
 #[derive(Debug, Clone)]
 pub(super) struct Namespace {
@@ -36,6 +47,8 @@ pub(crate) enum ReceiverConversion {
     Value,
     Address,
     Load,
+    ArcAddress,
+    ArcLoad,
 }
 
 impl ReceiverConversion {
@@ -46,6 +59,11 @@ impl ReceiverConversion {
             Some(Self::Address)
         } else if matches!(from, Ty::Pointer { pointee } if pointee.as_ref() == to) {
             Some(Self::Load)
+        } else if matches!(from, Ty::Arc { pointee } if to == &Ty::Pointer { pointee: pointee.clone() })
+        {
+            Some(Self::ArcAddress)
+        } else if matches!(from, Ty::Arc { pointee } if pointee.as_ref() == to) {
+            Some(Self::ArcLoad)
         } else {
             None
         }
@@ -70,18 +88,8 @@ impl FunctionDecl {
 }
 
 impl TyperContext {
-    /// Indexing uses the ordinary integer-index and pointer-result
-    /// rules. It is a builtin method so a field receiver needs no parentheses.
-    pub(crate) fn index_method(&self, receiver: &Ty, name: &str, associated: bool) -> Option<Ty> {
-        if associated || name != "at" {
-            return None;
-        }
-        match self.body(receiver).ok()? {
-            Ty::Array { element, .. } | Ty::Span { element } => {
-                Some(Ty::Pointer { pointee: element })
-            }
-            _ => None,
-        }
+    pub(crate) fn define_drop(&mut self, ty: TypeId, function: FunctionId) {
+        self.definitions.set_drop(ty, function);
     }
 
     pub(crate) fn declare_type(&mut self, name: Arc<str>, origin: SourceOrigin) -> TypeId {
@@ -102,7 +110,7 @@ impl TyperContext {
         self.functions.insert(
             function,
             FunctionDecl {
-                function,
+                body: FunctionBody::Defined(function),
                 params,
                 result,
             },
@@ -131,16 +139,33 @@ impl TyperContext {
             Entry::Occupied(_) => false,
         }
     }
-    pub(crate) fn method(&self, ty: &Ty, name: &str) -> Option<&FunctionDecl> {
-        let namespace = self.namespaces.get(&self.receiver_definition(ty)?)?;
-        self.functions.get(namespace.functions.get(name)?)
+    pub(crate) fn register_method_definitions(&mut self, definitions: MethodDefinitions) {
+        self.method_definitions.push(definitions);
     }
-    pub(crate) fn methods(&self, ty: TypeId) -> impl Iterator<Item = (&Arc<str>, &FunctionDecl)> {
-        self.namespaces
-            .get(&ty)
+
+    pub(crate) fn method(&self, ty: &Ty, name: &str) -> Option<FunctionDecl> {
+        self.methods(ty)
             .into_iter()
-            .flat_map(|scope| scope.functions.iter())
-            .map(|(name, id)| (name, &self.functions[id]))
+            .find_map(|(n, method)| (n.as_ref() == name).then_some(method))
+    }
+
+    pub(crate) fn methods(&self, ty: &Ty) -> Vec<(Arc<str>, FunctionDecl)> {
+        let mut methods = BTreeMap::new();
+        if let Some(namespace) = self
+            .receiver_definition(ty)
+            .and_then(|id| self.namespaces.get(&id))
+        {
+            for (name, id) in &namespace.functions {
+                methods.insert(name.clone(), self.functions[id].clone());
+            }
+        }
+        for definitions in &self.method_definitions {
+            if let Ty::Pointer { pointee } = ty {
+                methods.extend(definitions(pointee));
+            }
+            methods.extend(definitions(ty));
+        }
+        methods.into_iter().collect()
     }
 }
 

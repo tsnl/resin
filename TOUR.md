@@ -41,9 +41,10 @@ A few language choices explain much of the implementation:
   `name = value`; parameters remain `name: Type`.
 - `A | B` is a structural union of nominal structs. `Result<T, E>` is first-class;
   `ok` and `err` construct it, `match` handles variants, and postfix `?` propagates errors.
-- `defer expression;` is a prefix statement that runs cleanup in reverse order on scope
-  exit, including through `?`, and discards its value. It does not introduce automatic
-  ownership or destruction. Statement-only chain blocks yield unit.
+- `Arc<T>` and `Weak<T>` provide shared ownership. Value reads copy; fresh results
+  transfer into consumers. `impl` defines inherent methods and destruction hooks.
+  Initialized owners are released in reverse scope order, including through `?`.
+  There is no static move checking. Statement-only chain blocks yield unit.
 - Files have private scopes and explicit exports. Imports expose only exported
   names, and never execute code. There are no runtime global variables.
 - Entry points are ordinary exported functions. `main` is only the default
@@ -60,9 +61,8 @@ cargo run -- examples/eg009_imports.resin:independent
 For a host-only standard-library example, read
 [examples/input.resin](examples/input.resin) alongside
 [stdlib/console.resin](stdlib/console.resin). The module builds a growing line
-buffer on top of C's `getchar`, returns typed errors, and exposes explicit
-cleanup through `free_input`. The example registers that cleanup with `defer`
-after a successful read.
+buffer on top of C's `getchar`, returns typed errors, and wraps successful lines
+in shared owners. Scope cleanup releases them automatically.
 
 ## 2. Follow the host compilation path
 
@@ -211,7 +211,7 @@ The neighboring files separate the questions asked during that process:
 | Which storage location does an assignment or address refer to? | [places.rs](src/ir/generate/places.rs) |
 | How do branches, loops, and short-circuit operators join? | [flow.rs](src/ir/generate/flow.rs) |
 | How do Results, exhaustive matches, and early error returns lower? | [sums.rs](src/ir/generate/sums.rs) |
-| How does deferred cleanup retain bindings and run at scope exits? | [cleanup.rs](src/ir/generate/cleanup.rs) |
+| How are owned locals destroyed at scope exits? | [cleanup.rs](src/ir/generate/cleanup.rs) |
 | How are blocks, locals, and instructions assembled? | [builder.rs](src/ir/generate/builder.rs) |
 
 The distinction between a value and a place is worth following through one
@@ -360,9 +360,10 @@ offset or alignment mismatch.
 
 These APIs expose resource lifetimes explicitly. The C API and its unsafe Rust
 convenience API are not ownership-safe GPU abstractions: resources must remain
-alive while commands use them. The examples register releases with `defer` after
-successful acquisition and propagate failures with `?`. `gpu_submit(gpu, &commands)`
-and cancellation clear the handle, so deferred cancellation also works after submission.
+alive while commands use them. Standard-library wrappers retain shared owners and
+propagate failures with `?`. `gpu_submit(gpu, &commands)` and cancellation clear the
+shared native handle; automatic destruction cancels unfinished recordings.
+Raw shader root addresses do not retain their backing allocations.
 Shader bodies describe individual invocations;
 the compiler does not synthesize workgroup-local storage or barriers.
 
@@ -386,7 +387,7 @@ Tests are executable descriptions of the boundaries above:
 | Typing, conversions, or IR invariants | [nominal_types.rs](tests/nominal_types.rs), [typer tests](src/ir/typer/tests.rs), [verifier tests](src/ir/verify/tests.rs) |
 | Explicit type holes and return inference | [inference.rs](tests/inference.rs), [inference example](examples/inference.resin) |
 | Structs, aliases, unions, and typed errors | [results.rs](tests/results.rs), [errors example](examples/errors.resin) |
-| Deferred cleanup, scope exits, and initialization | [defer.rs](tests/defer.rs), [defer example](examples/defer.resin), [C execution tests](tests/c_backend.rs) |
+| Automatic destruction, scope exits, and copying | [shared.rs](tests/shared.rs), [ownership example](examples/ownership.resin), [C execution tests](tests/c_backend.rs) |
 | Host code generation or C interop | [c_backend.rs](tests/c_backend.rs), [foreign.rs](tests/foreign.rs), [printing.rs](tests/printing.rs) |
 | Standard-library Results and native failure cleanup | [stdlib.rs](tests/stdlib.rs) (no GPU or windows required) |
 | Console input, byte handling, and allocation failures | [console.rs](tests/console.rs), [input example](examples/input.resin) |

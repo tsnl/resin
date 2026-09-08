@@ -345,7 +345,7 @@ fn one_armed_if_infers_unit_and_requires_a_unit_body() {
 
 #[test]
 fn checking_does_not_depend_on_inference_trigger_syntax() {
-    for marker in ["", "defer ();", "var unused: _; unused := 1;"] {
+    for marker in ["", "{ var unused = (); };", "var unused: _; unused := 1;"] {
         let source = format!(
             "def consume(p: Ptr<ubyte>) = {{}}; def main() = {{ {marker} var value = 0; consume(&value); }};"
         );
@@ -384,7 +384,7 @@ fn pointer_reinterpretation_does_not_narrow_source_storage() {
         "var n: _; n := 300; var bytes = Ptr<ubyte>(&n);",
         "var n: int; n := 300; var source: Ptr<int>; source := &n; var bytes = Ptr<ubyte>(source);",
     ] {
-        for marker in ["", "defer ();"] {
+        for marker in ["", "{ var unused = (); };"] {
             let source = format!("export {{ main }}; def main() = {{ {bindings} {marker} }};");
             let m = module(&source);
             let n = m

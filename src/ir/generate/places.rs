@@ -115,7 +115,13 @@ impl Generator {
                 self.gen_field_operand(term.span, base, name)
             }
             TermKind::Deref { pointer } => {
-                let pointer_ty = self.gen_term(pointer, None)?;
+                let checked =
+                    self.checked.expressions[&std::ptr::from_ref(pointer.as_ref())].clone();
+                let pointer_ty = if matches!(checked, Ty::Arc { .. }) {
+                    self.hold_arc_address(pointer)?
+                } else {
+                    self.gen_term(pointer, None)?
+                };
                 let pointee = self
                     .typer
                     .type_deref(&pointer_ty)
@@ -132,10 +138,33 @@ impl Generator {
         base: Operand,
         name: &Ident,
     ) -> Result<Operand, GenerateError> {
-        let (base_ty, mut is_place) = match base {
+        let (mut base_ty, mut is_place) = match base {
             Operand::Value(ty) => (ty, false),
             Operand::Place(ty) => (ty, true),
         };
+        loop {
+            if let Ty::Pointer { pointee } = &base_ty {
+                let pointee = *pointee.clone();
+                if is_place {
+                    self.emit(Instr::Load);
+                }
+                base_ty = pointee;
+                is_place = true;
+                continue;
+            }
+            let Ty::Arc { pointee } = &base_ty else {
+                break;
+            };
+            let pointee = *pointee.clone();
+            if is_place {
+                self.emit(Instr::Load);
+            }
+            let owner = self.save_top(&base_ty);
+            self.load_local(owner);
+            self.emit(Instr::ArcData);
+            base_ty = pointee;
+            is_place = true;
+        }
         self.scopes.record_fields(name, &base_ty, &self.typer);
         let access = self
             .typer
@@ -151,9 +180,9 @@ impl Generator {
             // Keep the last address so pointer-valued expressions have writable fields.
             self.emit_value_conv(&access.steps[..last_deref]);
             is_place = true;
-        } else {
-            self.emit_value_conv(&access.steps);
         }
+        // AccessStatic projects nominal layouts itself. Preserve the value's
+        // nominal type so consuming a temporary invokes its destruction hook.
         self.emit(Instr::AccessStatic {
             index: access.index,
         });

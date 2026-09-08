@@ -66,23 +66,21 @@ def fragment(color: Color) -> Color = {
 def main() -> Result<(), _> = {
 	var title = "Resin triangle";
 	var window = window_create(640, 480, Ptr<ubyte>(&title))?;
-	defer window_destroy(window);
+
 	var gpu = gpu_create_for_window(window)?;
-	defer gpu_destroy(gpu);
 
 	var pipeline = gpu_create_graphics_pipeline(
 		gpu,
 		vertex.spirv,
 		fragment.spirv,
 	)?;
-	defer gpu_free_pipeline(gpu, pipeline);
+
 	var image = gpu_create_image(gpu, 640, 480)?;
-	defer gpu_free_image(gpu, image);
 
 	window_poll_events(window)?;
 	while (!window_should_close(window) && !window_key_pressed(window, key_escape())) {
 		var commands = gpu_start_command_recording(gpu)?;
-		defer gpu_cancel_command_buffer(gpu, &commands);
+
 		gpu_begin_rendering(commands, image, 0.0, 0.0, 0.0, 1.0)?;
 		gpu_set_pipeline(commands, pipeline)?;
 		gpu_draw(commands, 0, 3)?;

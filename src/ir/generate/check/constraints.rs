@@ -54,6 +54,16 @@ impl Checker<'_> {
                     seeded = true;
                 }
             }
+            if seeded {
+                continue;
+            }
+            // Resolve receiver literals before defaulting call arguments: the
+            // selected declaration supplies those arguments' expected types.
+            for (_, constraint) in &self.constraints {
+                if let Constraint::Method(receiver, ..) = constraint {
+                    seeded |= self.solver.default_numbers_in(receiver);
+                }
+            }
             if seeded || self.solver.default_numbers() {
                 continue;
             }
@@ -73,8 +83,8 @@ impl Checker<'_> {
     fn shape(&self, ty: &Type, deref: bool, span: Span) -> Result<Type> {
         let mut ty = self.solver.shape_hint(ty);
         if deref {
-            while let Type::Node(Head::Pointer, children) = &ty {
-                ty = self.solver.shape_hint(&children[0]);
+            while let Some(pointee) = ty.deref_target() {
+                ty = self.solver.shape_hint(pointee);
             }
         }
         if let Type::Node(Head::Atom(t @ Ty::Defined { .. }), _) = &ty {
@@ -90,18 +100,6 @@ impl Checker<'_> {
     fn constraint(&mut self, constraint: &Constraint, span: Span) -> Result<bool> {
         match constraint {
             Constraint::Method(receiver_type, name, arg, out, associated) => {
-                if !associated
-                    && name.as_ref() == "at"
-                    && matches!(
-                        self.shape(receiver_type, false, span)?,
-                        Type::Node(Head::Span | Head::Array(_), _)
-                    )
-                {
-                    return self.constraint(
-                        &Constraint::Call(receiver_type.clone(), arg.clone(), out.clone()),
-                        span,
-                    );
-                }
                 let Some(receiver_type) = self.solver.resolve(receiver_type) else {
                     return Ok(false);
                 };
@@ -162,13 +160,13 @@ impl Checker<'_> {
 
             Constraint::Deref(input, out) => {
                 let shape = self.shape(input, false, span)?;
-                match shape {
-                    Type::Variable(_) => return Ok(false),
-                    Type::Node(Head::Pointer, children) => {
-                        self.solver.unify(out, &children[0], span)?
-                    }
-                    _ => return Err(error(span, "dereference requires a pointer")),
+                if matches!(shape, Type::Variable(_)) {
+                    return Ok(false);
                 }
+                let pointee = shape
+                    .deref_target()
+                    .ok_or_else(|| error(span, "dereference requires a pointer"))?;
+                self.solver.unify(out, pointee, span)?;
             }
             Constraint::Field(input, name, out) => {
                 let shape = self.shape(input, true, span)?;
@@ -251,6 +249,11 @@ impl Checker<'_> {
                 return Ok(complete);
             }
             Constraint::Ascribe(from, to, literal) => {
+                if matches!(self.solver.head(to), Type::Node(Head::Weak, _))
+                    && self.solver.resolve(from) == Some(Ty::Unit)
+                {
+                    return Ok(true);
+                }
                 if let Type::Node(Head::Span, children) = self.solver.head(to) {
                     if matches!(self.solver.head(from), Type::Node(Head::Span, _)) {
                         return self.solver.unify(from, to, span).map(|_| true);

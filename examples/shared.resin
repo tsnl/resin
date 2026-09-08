@@ -1,0 +1,28 @@
+export { main };
+
+struct Tracked { value: int };
+impl Tracked {
+	def read(self: Ptr<Tracked>) -> int = {
+		self.value
+	};
+	def drop(self: Ptr<Tracked>) = {
+		print("released {0}\n", (self.value,));
+	};
+}
+
+def main() = {
+	var weak = {
+		var shared = Arc<Tracked> { value = 42 };
+		var alias = shared;
+		print("{0}\n", (alias.read(),));
+		alias.downgrade()
+	};
+	match (weak.upgrade()) {
+		Arc<Tracked>(owner) => {
+			print("still alive: {0}\n", (owner.read(),));
+		},
+		None => {
+			print("expired\n", ());
+		},
+	};
+};

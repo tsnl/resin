@@ -30,7 +30,7 @@ On systems whose executable is named `zeditor`, use `nix-shell --run 'zeditor .'
 Zed compiles the extension and downloads the WASI SDK to build the grammar.
 Rebuild it from Zed's Extensions view after changing the adapter or queries.
 Restarting `resin-lsp` alone does not reload highlighting queries or the pinned
-Tree-sitter grammar. If `struct`, `match`, or `defer` still look like ordinary
+Tree-sitter grammar. If `struct`, `match`, or `impl` still look like ordinary
 identifiers, rebuild/reinstall the dev extension from this checkout's `zed-resin/`.
 See [Zed's extension development guide](https://zed.dev/docs/extensions/developing-extensions).
 
@@ -146,15 +146,12 @@ Queries highlight the new syntax and include structs in the outline; semantic te
 cover inferred error sets and match-payload navigation/completion. Rebuild the language
 server and reinstall the dev extension together. No new editor smoke test was run.
 
-The grammar revision at `bba45b9` added scoped `defer { ... };` statements. Parser and query tests
-cover the keyword and block syntax; compiler analysis tests cover deferred bindings,
-inferred local types, and navigation. No window or editor was opened for this change.
-
-The current pin at `7c92c1b` lets `defer expression;` accept any expression and discard its value, while remaining
-statement-only. Chain blocks may omit their unit tail. Parser, compiler, query, and
-recovery tests cover both forms without launching an editor.
+The ownership grammar adds inherent `impl` methods, `Arc<T>`, `Weak<T>`, and
+`Option<T>`, and removes the legacy cleanup statement. Parser, compiler, query,
+and recovery tests cover the updated syntax. Reinstall the dev extension after
+updating so the grammar and queries stay in sync.
 
 Current queries highlight all declaration and control keywords, label top-level
 structs and aliases with `struct`/`type` in the outline, and expose struct bodies
 through Zed's class text objects. Query tests cover these captures, including
-`Result`, inference holes, `match`, and `defer`.
+`Result`, inference holes, `match`, and `impl`.

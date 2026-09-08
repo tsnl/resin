@@ -6,6 +6,29 @@ use crate::ir::{Conv, Instr, Ty, TypeError, TypeErrorKind};
 use super::{GenerateError, Generator};
 
 impl Generator {
+    pub(super) fn gen_shared_payload(
+        &mut self,
+        span: Span,
+        ty: &Ty,
+        init: &Term,
+    ) -> Result<(), GenerateError> {
+        let body = self
+            .typer
+            .body(ty)
+            .map_err(|e| GenerateError::typing(span, e))?;
+        if matches!(init.val, TermKind::Unit)
+            && matches!(&body, Ty::Record { fields } if fields.is_empty())
+        {
+            self.emit(Instr::MakeRecord { fields: vec![] });
+        } else {
+            self.gen_term(init, Some(&body))?;
+        }
+        if &body != ty {
+            self.emit(Instr::Ascribe { ty: ty.clone() });
+        }
+        Ok(())
+    }
+
     pub(super) fn gen_array(&mut self, elems: &[Term], ty: &Ty) -> Result<Ty, GenerateError> {
         let Ty::Array { element, length } = ty else {
             unreachable!("checked array")
@@ -39,19 +62,26 @@ impl Generator {
                 .find(|field| field.name == name.val)
                 .unwrap();
             let local = self.alloc_local(field.ty.clone(), None);
-            self.emit(Instr::LocalAddress { local });
-            self.gen_term(value, Some(&field.ty))?;
-            self.emit(Instr::Store);
-            self.emit(Instr::Discard);
+            if field.ty.needs_drop(self.typer.definitions()) {
+                self.gen_term(value, Some(&field.ty))?;
+                self.emit(Instr::SetLocal { local });
+            } else {
+                self.emit(Instr::LocalAddress { local });
+                self.gen_term(value, Some(&field.ty))?;
+                self.emit(Instr::Store);
+                self.emit(Instr::Discard);
+            }
             values.insert(name.val.clone(), local);
         }
         let names = expected_fields
             .iter()
             .map(|field| {
-                self.emit(Instr::LocalAddress {
-                    local: values[&field.name],
-                });
-                self.emit(Instr::Load);
+                let local = values[&field.name];
+                if field.ty.needs_drop(self.typer.definitions()) {
+                    self.emit(Instr::TakeLocal { local });
+                } else {
+                    self.load_local(local);
+                }
                 field.name.clone()
             })
             .collect();
@@ -161,6 +191,23 @@ impl Generator {
 
     fn gen_ascription(&mut self, span: Span, ty: &Type, arg: &Term) -> Result<Ty, GenerateError> {
         let ascribed = self.evaluator().ty(ty)?;
+        if let Ty::Arc { pointee } = &ascribed {
+            if matches!(arg.val, TermKind::Record { .. } | TermKind::Unit) {
+                self.gen_shared_payload(span, pointee, arg)?;
+            } else {
+                self.gen_term(arg, Some(pointee))?;
+            }
+            self.emit(Instr::ArcNew);
+            return Ok(ascribed);
+        }
+        if let Ty::Weak { pointee } = &ascribed
+            && matches!(arg.val, TermKind::Unit)
+        {
+            self.emit(Instr::WeakEmpty {
+                pointee: *pointee.clone(),
+            });
+            return Ok(ascribed);
+        }
         let context = self
             .typer
             .body(&ascribed)
@@ -241,6 +288,9 @@ impl Generator {
             .typer
             .ascribe(&found, expected)
             .map_err(|err| GenerateError::typing(span, err))?;
+        if steps.iter().any(|step| matches!(step, Conv::Unwrap { definition } if self.typer.definition(*definition).unwrap().drop_hook().is_some())) {
+            return Err(super::check::error(span, "cannot unwrap a type with drop; access its fields through a pointer or use Ptr.replace"));
+        }
         if steps
             .iter()
             .any(|s| matches!(s, Conv::MakeSpan | Conv::SpanRecord))

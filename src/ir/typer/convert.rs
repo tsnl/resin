@@ -73,9 +73,9 @@ impl TyperContext {
     pub fn as_record(&self, ty: &Ty) -> Result<Converted, TypeError> {
         let mut current = ty.clone();
         let mut steps = Vec::new();
-        while let Ty::Pointer { pointee } = current {
+        while let Some(pointee) = current.deref_target() {
             steps.push(Conv::Deref);
-            current = *pointee;
+            current = pointee.clone();
         }
         if let Ty::Defined { definition } = current {
             steps.push(Conv::Unwrap { definition });

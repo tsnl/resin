@@ -1,8 +1,8 @@
 export { kernel, main };
 def infallible(n: uint, p: Ptr<uint>) -> Result<uint, Never> = {
-    defer p.* := p.* + 1I;
     var r: Result<uint, Never>; r := ok(n);
     var saved = r?;
+    p.* := p.* + 1I;
     ok(saved)
 };
 def unwrap(r: Result<uint, Never>) -> uint = {

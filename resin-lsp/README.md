@@ -14,8 +14,6 @@ inferred results from imported modules. Incomplete-source recovery remains
 best-effort and may show `?` when a complete program would infer a type.
 Result error sets appear in hover as nominal names joined by `|` (or `Never` when empty).
 Match-arm bindings are scoped to their arm and expose the selected payload's fields.
-Deferred expressions retain lexical name resolution and inferred local types; navigation and
-completion use the bindings visible at registration, not later declarations.
 
 ## Build and run
 

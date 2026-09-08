@@ -18,6 +18,7 @@ mod gpu;
 mod host;
 mod image;
 mod print;
+mod shared;
 mod window;
 
 pub const INCLUDE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/include");

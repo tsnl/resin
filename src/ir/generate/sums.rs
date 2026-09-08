@@ -68,7 +68,7 @@ impl Generator {
             ));
         }
         let saved = self.save_top(&ty);
-        self.load_local(saved);
+        self.emit(Instr::LocalAddress { local: saved });
         self.emit(Instr::IsVariant { tag: Case::Ok });
         let success = self.new_block("try.ok");
         let failure = self.new_block("try.err");
@@ -80,7 +80,7 @@ impl Generator {
         for _ in 0..self.function().stack_len() {
             self.emit(Instr::Discard);
         }
-        self.load_local(saved);
+        self.emit(Instr::TakeLocal { local: saved });
         self.emit(Instr::VariantPayload { tag: Case::Err });
         self.coerce(span, *errors.clone(), target)?;
         self.emit(Instr::MakeVariant {
@@ -88,11 +88,11 @@ impl Generator {
             tag: Case::Err,
         });
         let before_cleanup = self.scopes.clone();
-        self.cleanup(0, &result)?;
+        self.cleanup(0, &result);
         self.terminate(Terminator::Return);
         self.scopes = before_cleanup;
         self.switch(success);
-        self.load_local(saved);
+        self.emit(Instr::TakeLocal { local: saved });
         self.emit(Instr::VariantPayload { tag: Case::Ok });
         Ok(*value.clone())
     }
@@ -146,7 +146,7 @@ impl Generator {
         let join = self.new_block("match.join");
         for (i, (arm, tag)) in arms.iter().zip(patterns).enumerate() {
             let next = if i + 1 < arms.len() {
-                self.load_local(saved);
+                self.emit(Instr::LocalAddress { local: saved });
                 self.emit(Instr::IsVariant { tag: tag.clone() });
                 let body = self.new_block("match.arm");
                 let next = self.new_block("match.next");
@@ -161,7 +161,8 @@ impl Generator {
             };
             self.scopes = before.clone();
             self.scopes.push();
-            self.load_local(saved);
+            self.owned.push(vec![]);
+            self.emit(Instr::TakeLocal { local: saved });
             self.emit(Instr::VariantPayload { tag: tag.clone() });
             let payload = ty.payload(&tag).unwrap();
             let local = self.save_top(&payload);
@@ -177,6 +178,8 @@ impl Generator {
                 )?;
             }
             result = Some(self.gen_term(&arm.body, result.as_ref())?);
+            self.cleanup(self.owned.len() - 1, result.as_ref().unwrap());
+            self.owned.pop();
             self.scopes.pop();
             if let Some(previous) = &after {
                 self.scopes.intersect_initialization(previous);

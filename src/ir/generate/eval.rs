@@ -94,6 +94,12 @@ impl Evaluator<'_> {
             TypeKind::App { head, arg } => {
                 let arg = self.ty(arg)?;
                 match head.val.as_ref() {
+                    "Arc" => Ok(Ty::Arc {
+                        pointee: Box::new(arg),
+                    }),
+                    "Weak" => Ok(Ty::Weak {
+                        pointee: Box::new(arg),
+                    }),
                     "Ptr" => Ok(Ty::Pointer {
                         pointee: Box::new(arg),
                     }),

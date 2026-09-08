@@ -58,7 +58,9 @@ pub(crate) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), D
                 return Err(DefinitionError::NonRecord(*definition));
             }
         }
-        Ty::Pointer { pointee } => check_references(definitions, pointee)?,
+        Ty::Pointer { pointee } | Ty::Arc { pointee } | Ty::Weak { pointee } => {
+            check_references(definitions, pointee)?
+        }
         Ty::Span { element } | Ty::Array { element, .. } => check_references(definitions, element)?,
         Ty::Record { fields } => {
             for field in fields {
@@ -129,6 +131,7 @@ mod tests {
         let table = [TypeDef::Nominal {
             name: "Pending".into(),
             body: None,
+            drop: None,
         }];
         assert!(get(&table, id).is_ok());
         assert_eq!(body(&table, id), Err(DefinitionError::Incomplete(id)));

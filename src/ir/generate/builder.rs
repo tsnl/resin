@@ -47,6 +47,10 @@ impl FunctionBuilder {
         self.function.result = ty;
     }
 
+    pub(super) fn local_type(&self, id: LocalId) -> &Ty {
+        &self.function.locals[id.index()].ty
+    }
+
     pub(super) fn result_type(&self) -> &Ty {
         &self.function.result
     }

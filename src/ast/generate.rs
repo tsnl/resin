@@ -245,14 +245,6 @@ impl<'a> AstGen<'a> {
             );
         }
         assert_eq!(node.kind(), "statement");
-        if let Some(body) = node.child_by_field_name("defer") {
-            return Spanned::new(
-                StmtKind::Defer {
-                    body: Arc::new(self.trailing_errors(self.gen_term(body), node)),
-                },
-                self.span(node),
-            );
-        }
         if let Some(define) = node.child_by_field_name("define") {
             let mut stmt = self.gen_define(define, self.span(node));
             if let StmtKind::Define { init, .. } = &mut stmt.val {
@@ -926,8 +918,10 @@ impl<'a> AstGen<'a> {
     fn ident(&self, node: Node) -> Ident {
         let text = if self.recovering
             && (node.is_missing()
-                || !matches!(node.kind(), "lid" | "uid" | "builtin_type" | "Ptr" | "Span"))
-        {
+                || !matches!(
+                    node.kind(),
+                    "lid" | "uid" | "builtin_type" | "Ptr" | "Span" | "Arc" | "Weak"
+                )) {
             ""
         } else {
             self.text(node)

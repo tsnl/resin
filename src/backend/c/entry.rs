@@ -37,8 +37,10 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
         } else {
             "r_result.payload.v0"
         };
+        let mut cleanup = String::new();
+        types.drop_value(&function.result, "r_result", &mut cleanup);
         return Ok(format!(
-            "  {} r_result = r_fn{}(0);\n  if (r_result.tag == 1u) {{ fprintf(stderr, \"unhandled error: %s\\n\", {error_name}); return 1; }}\n  return {success};\n",
+            "  {} r_result = r_fn{}(0);\n  if (r_result.tag == 1u) {{ fprintf(stderr, \"unhandled error: %s\\n\", {error_name}); {cleanup} return 1; }}\n  return {success};\n",
             types.name(&function.result),
             id.index()
         ));

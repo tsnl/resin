@@ -71,7 +71,7 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
             while (reading) {
                 match (input()) {
                     ok(line) => {
-                        defer free_input(line);
+
                         if (Ptr<ubyte>(ulong(line.data) + line.length).* != ubyte(0)) {
                             print("missing terminator", ());
                         } else {};
@@ -190,7 +190,7 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
                 var mode = console_test_mode();
                 match (input()) {{
                     ok(line) => {{
-                        defer free_input(line);
+
                         match (print_input(line)) {{
                             ok(unit) => {{ if (mode == 6 && line.length == ulong(300)) {{ 0 }} else {{ 1 }} }},
                             err(error) => {{ if (mode == 4 || mode == 5) {{ 0 }} else {{ 2 }} }},

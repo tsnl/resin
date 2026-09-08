@@ -64,6 +64,28 @@ impl Function {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instr {
+    /// Transfer a prepared payload directly into a new shared allocation.
+    ArcNew,
+    /// Internal field transfer during parameter destructuring.
+    TransferLoad,
+    ForgetLocal {
+        local: LocalId,
+    },
+    /// Borrow a payload address; the generator retains the owner for the access.
+    ArcData,
+    Downgrade,
+    Upgrade,
+    WeakEmpty {
+        pointee: Ty,
+    },
+    /// Transfer a compiler temporary without introducing a source-level move.
+    TakeLocal {
+        local: LocalId,
+    },
+    /// Destroy an initialized local and clear its initialization flag.
+    DropLocal {
+        local: LocalId,
+    },
     SetLocal {
         local: LocalId,
     },
@@ -109,6 +131,9 @@ pub enum Instr {
 
     /// `[address, value] -> [value]`: preserves the assigned value.
     Store,
+
+    /// Exchange a live pointee with an owned replacement, returning the old value.
+    Replace,
 
     /// `ty` must match the top value's type or differ by exactly one nominal layer.
     Ascribe {
@@ -175,11 +200,18 @@ pub struct StackEffect {
 impl Instr {
     pub fn stack_effect(&self) -> StackEffect {
         match self {
-            Self::Shader { .. }
+            Self::WeakEmpty { .. }
+            | Self::TakeLocal { .. }
+            | Self::Shader { .. }
             | Self::Push { .. }
             | Self::Function { .. }
             | Self::LocalAddress { .. } => StackEffect { pops: 0, pushes: 1 },
-            Self::AccessStatic { .. }
+            Self::TransferLoad
+            | Self::ArcNew
+            | Self::ArcData
+            | Self::Downgrade
+            | Self::Upgrade
+            | Self::AccessStatic { .. }
             | Self::MakeVariant { .. }
             | Self::ExcludeNone
             | Self::IsVariant { .. }
@@ -190,7 +222,8 @@ impl Instr {
             | Self::Eliminate { .. }
             | Self::NumericCast { .. }
             | Self::PointerCast { .. } => StackEffect { pops: 1, pushes: 1 },
-            Self::AccessDynamic | Self::Store => StackEffect { pops: 2, pushes: 1 },
+            Self::AccessDynamic | Self::Store | Self::Replace => StackEffect { pops: 2, pushes: 1 },
+            Self::ForgetLocal { .. } | Self::DropLocal { .. } => StackEffect { pops: 0, pushes: 0 },
             Self::Discard | Self::SetLocal { .. } => StackEffect { pops: 1, pushes: 0 },
             Self::MakeRecord { fields } => StackEffect {
                 pops: fields.len(),

@@ -2,6 +2,8 @@ use std::fmt::Write;
 
 use crate::ir::{Case, Module, Ty, TypeTable};
 
+mod lifecycle;
+
 pub(super) struct Types<'a> {
     pub table: &'a TypeTable,
     pub module: &'a Module,
@@ -172,6 +174,7 @@ impl<'a> Types<'a> {
 
 fn scalar(ty: &Ty) -> Option<&'static str> {
     Some(match ty {
+        Ty::Arc { .. } | Ty::Weak { .. } => "ResinArc *",
         Ty::Unit | Ty::None => "uint8_t",
         Ty::Type => "size_t",
         Ty::Bool => "bool",

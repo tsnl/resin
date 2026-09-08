@@ -106,8 +106,11 @@ impl Generator {
         self.function = Some(FunctionBuilder::new(Some(name.val.clone())));
         self.function().result(result.clone());
         self.scopes.push();
+        self.owned.push(vec![LocalId::from_index(0)]);
         self.bind_params(params)?;
         self.gen_term(body, Some(&result))?;
+        self.cleanup(0, &result);
+        self.owned.pop();
         self.function().result(result);
         self.terminate(Terminator::Return);
         self.module.functions[id.index()] = self.function.take().unwrap().finish();
@@ -136,12 +139,19 @@ impl Generator {
                 parameter
             } else {
                 let local = self.alloc_local(ty.clone(), Some(name.val.clone()));
-                self.emit(Instr::LocalAddress { local });
-                self.emit(Instr::LocalAddress { local: parameter });
-                self.emit(Instr::AccessStatic { index });
-                self.emit(Instr::Load);
-                self.emit(Instr::Store);
-                self.emit(Instr::Discard);
+                if ty.needs_drop(self.typer.definitions()) {
+                    self.emit(Instr::LocalAddress { local: parameter });
+                    self.emit(Instr::AccessStatic { index });
+                    self.emit(Instr::TransferLoad);
+                    self.emit(Instr::SetLocal { local });
+                } else {
+                    self.emit(Instr::LocalAddress { local });
+                    self.emit(Instr::LocalAddress { local: parameter });
+                    self.emit(Instr::AccessStatic { index });
+                    self.emit(Instr::Load);
+                    self.emit(Instr::Store);
+                    self.emit(Instr::Discard);
+                }
                 local
             };
             self.bind_value(
@@ -153,6 +163,9 @@ impl Generator {
                     initialization: Initialization::Initialized,
                 },
             )?;
+        }
+        if params.len() > 1 && param_ty.needs_drop(self.typer.definitions()) {
+            self.emit(Instr::ForgetLocal { local: parameter });
         }
         Ok(param_ty)
     }

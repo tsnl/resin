@@ -39,7 +39,15 @@ impl<'a> Types<'a> {
                 }
                 self.records.push(ty.clone());
             }
-            Ty::Unit | Ty::None | Ty::Bool | Ty::Int32 | Ty::UInt32 | Ty::UInt64 | Ty::Float32 => {}
+            Ty::Arc { .. }
+            | Ty::Weak { .. }
+            | Ty::Unit
+            | Ty::None
+            | Ty::Bool
+            | Ty::Int32
+            | Ty::UInt32
+            | Ty::UInt64
+            | Ty::Float32 => {}
             Ty::Span { element } => {
                 self.buffer(element)?;
                 self.records.push(ty.clone());
@@ -87,7 +95,7 @@ impl<'a> Types<'a> {
     pub fn name(&self, ty: &Ty) -> String {
         match ty {
             Ty::Unit | Ty::None | Ty::UInt32 => "uint".into(),
-            Ty::UInt64 | Ty::Pointer { .. } => "uint64_t".into(),
+            Ty::UInt64 | Ty::Pointer { .. } | Ty::Arc { .. } | Ty::Weak { .. } => "uint64_t".into(),
             Ty::Int32 => "int".into(),
             Ty::Bool => "bool".into(),
             Ty::Float32 => "float".into(),

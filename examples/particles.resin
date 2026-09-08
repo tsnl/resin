@@ -39,7 +39,7 @@ def advance(p: Particle, dt: float32) -> Particle = {
 @compute_shader
 def kernel(index: uint, root: Ptr<Params>) -> () = {
 	if (index < root.count) {
-		var p = root.particles.at(index);
+		var p = root.particles.at(ulong(index));
 		p.* := advance(advance(p.*, root.dt), root.dt);
 	}
 };
@@ -123,7 +123,7 @@ def vertex(index: int, root: Ptr<Params>) -> Vertex = {
 	var local = index - particle * 24;
 	var sector = int(float32(local) / 3.0f);
 	var corner = local - sector * 3;
-	var p = root.particles.at(particle).*;
+	var p = root.particles.at(ulong(particle)).*;
 	var horizontal_depth = -p.x * root.yaw_sin + p.y * root.yaw_cos;
 	var height = (p.z - 25.0f) * 0.9f;
 	var depth = horizontal_depth * root.pitch_cos - height * root.pitch_sin;
@@ -261,23 +261,22 @@ def main() -> Result<(), _> = {
 	var count = 1000000I;
 	var title = "Resin | 1,000,000 particles | Drag: orbit | Scroll: zoom | Home: reset view | Space: pause | R: reseed | Esc: quit";
 	var window = window_create(1280, 800, Ptr<ubyte>(&title))?;
-	defer window_destroy(window);
+
 	var gpu = gpu_create_for_window(window)?;
-	defer gpu_destroy(gpu);
 
 	var compute = gpu_create_compute_pipeline(gpu, kernel.spirv)?;
-	defer gpu_free_pipeline(gpu, compute);
+
 	var graphics = gpu_create_graphics_pipeline(gpu, vertex.spirv, fragment.spirv)?;
-	defer gpu_free_pipeline(gpu, graphics);
+
 	// One shared 24 MB buffer: initialization writes host memory; compute and graphics use its device address.
 	var particles = gpu_malloc(gpu, ulong(count) * size_of(Particle), align_of(Particle), memory_default())?;
-	defer gpu_free(gpu, particles);
+
 	var root = gpu_malloc(gpu, size_of(Params), align_of(Params), memory_default())?;
-	defer gpu_free(gpu, root);
-	var host_particles = Span<Particle> { data = Ptr<Particle>(allocation_host_pointer(particles)), length = ulong(count) };
+
+	var host_particles = Span<Particle> { data = Ptr<Particle>(allocation_host_pointer(&particles)), length = ulong(count) };
 	var seed = 0x9e3779b9I;
 	initialize(host_particles, seed);
-	var params = Ptr<Params>(allocation_host_pointer(root));
+	var params = Ptr<Params>(allocation_host_pointer(&root));
 	params.* := Params {
 		count = count,
 		dt = 0.005f,
@@ -288,11 +287,11 @@ def main() -> Result<(), _> = {
 		zoom = 1.0f,
 		aspect = 0.625f,
 		radius = 0.004f,
-		particles = Span<Particle> { data = Ptr<Particle>(allocation_device_pointer(particles)), length = ulong(count) },
+		particles = Span<Particle> { data = Ptr<Particle>(allocation_device_pointer(&particles)), length = ulong(count) },
 	};
-	var address = allocation_device_pointer(root);
+	var address = allocation_device_pointer(&root);
 	var image = gpu_create_image(gpu, 1280, 800)?;
-	defer gpu_free_image(gpu, image);
+
 	var paused = 1 == 0;
 	var camera = default_camera();
 	var automatic = 1 == 1;
@@ -335,7 +334,7 @@ def main() -> Result<(), _> = {
 		was_dragging := dragging;
 		apply_camera(camera, params);
 		var commands = gpu_start_command_recording(gpu)?;
-		defer gpu_cancel_command_buffer(gpu, &commands);
+
 		if (!paused) {
 			gpu_set_pipeline(commands, compute)?;
 			gpu_dispatch(commands, address, (count + 63I) / 64I, 1, 1)?;

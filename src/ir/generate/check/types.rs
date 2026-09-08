@@ -6,6 +6,8 @@ use crate::ir::{RecordField, Ty};
 pub(super) enum Head {
     Atom(Ty),
     Pointer,
+    Arc,
+    Weak,
     Span,
     Array(usize),
     Record(Vec<Arc<str>>),
@@ -20,6 +22,14 @@ pub(super) enum Type {
 }
 
 impl Type {
+    /// The inference representation of Ty::deref_target; Weak is not dereferenceable.
+    pub fn deref_target(&self) -> Option<&Type> {
+        match self {
+            Self::Node(Head::Pointer | Head::Arc, children) => children.first(),
+            _ => None,
+        }
+    }
+
     pub fn result(value: Type, error: Type) -> Self {
         Self::Node(Head::Result, vec![value, error])
     }
@@ -54,6 +64,8 @@ impl Type {
 impl From<Ty> for Type {
     fn from(ty: Ty) -> Self {
         match ty {
+            Ty::Arc { pointee } => Self::Node(Head::Arc, vec![(*pointee).into()]),
+            Ty::Weak { pointee } => Self::Node(Head::Weak, vec![(*pointee).into()]),
             Ty::Pointer { pointee } => Self::pointer((*pointee).into()),
             Ty::Span { element } => Self::Node(Head::Span, vec![(*element).into()]),
             Ty::Array { element, length } => {
@@ -74,6 +86,12 @@ impl Head {
         let mut children = children.into_iter();
         match self {
             Self::Atom(ty) => ty.clone(),
+            Self::Arc => Ty::Arc {
+                pointee: Box::new(children.next().unwrap()),
+            },
+            Self::Weak => Ty::Weak {
+                pointee: Box::new(children.next().unwrap()),
+            },
             Self::Pointer => Ty::Pointer {
                 pointee: Box::new(children.next().unwrap()),
             },

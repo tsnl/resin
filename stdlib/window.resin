@@ -1,4 +1,5 @@
 export {
+	Window,
 	ResinWindow,
 	key_escape,
 	keys,
@@ -11,7 +12,6 @@ export {
 	window_focused,
 	window_capture_cursor,
 	window_create,
-	window_destroy,
 	window_poll_events,
 	window_should_close,
 	window_set_should_close,
@@ -22,36 +22,30 @@ export {
 	gpu_present,
 };
 
-import { "gpu.resin", "status.resin" };
-
-extern type ResinWindow;
+import { "gpu.resin", "status.resin", "resources.resin" };
 
 def key_escape() -> int = {
 	256
 };
 
-def window_create(width: uint, height: uint, title: Ptr<ubyte>) -> Result<Ptr<ResinWindow>, RuntimeError> = {
+def window_create(width: uint, height: uint, title: Ptr<ubyte>) -> Result<Window, RuntimeError> = {
 	var window = Ptr<ResinWindow>(ulong(0));
 	status(resin_window_create(width, height, title, &window))?;
-	ok(window)
+	ok(Window { handle = window })
 };
 
-def window_destroy(window: Ptr<ResinWindow>) = {
-	resin_window_destroy(window)
+def window_poll_events(window: Window) -> Result<(), RuntimeError> = {
+	status(resin_window_poll_events(window.handle))
 };
 
-def window_poll_events(window: Ptr<ResinWindow>) -> Result<(), RuntimeError> = {
-	status(resin_window_poll_events(window))
+def window_should_close(window: Window) -> bool = {
+	resin_window_should_close(window.handle) != 0
 };
 
-def window_should_close(window: Ptr<ResinWindow>) -> bool = {
-	resin_window_should_close(window) != 0
-};
-
-def window_set_should_close(window: Ptr<ResinWindow>, close: bool) -> Result<(), RuntimeError> = {
+def window_set_should_close(window: Window, close: bool) -> Result<(), RuntimeError> = {
 	status(
 		resin_window_set_should_close(
-			window,
+			window.handle,
 			if (close) {
 				1
 			} else {
@@ -61,19 +55,19 @@ def window_set_should_close(window: Ptr<ResinWindow>, close: bool) -> Result<(),
 	)
 };
 
-def window_framebuffer_size(window: Ptr<ResinWindow>) -> Result<(uint, uint), RuntimeError> = {
+def window_framebuffer_size(window: Window) -> Result<(uint, uint), RuntimeError> = {
 	var width = uint(0);
 	var height = uint(0);
-	status(resin_window_framebuffer_size(window, &width, &height))?;
+	status(resin_window_framebuffer_size(window.handle, &width, &height))?;
 	ok((width, height))
 };
 
-def window_set_size(window: Ptr<ResinWindow>, width: uint, height: uint) -> Result<(), RuntimeError> = {
-	status(resin_window_set_size(window, width, height))
+def window_set_size(window: Window, width: uint, height: uint) -> Result<(), RuntimeError> = {
+	status(resin_window_set_size(window.handle, width, height))
 };
 
-def window_key_pressed(window: Ptr<ResinWindow>, key: int) -> bool = {
-	resin_window_key_pressed(window, key) != 0
+def window_key_pressed(window: Window, key: int) -> bool = {
+	resin_window_key_pressed(window.handle, key) != 0
 };
 
 struct ButtonState { down: bool, pressed: bool, released: bool };
@@ -82,36 +76,36 @@ def button_state(bits: uint) -> ButtonState = {
 	ButtonState { down = (bits & 1I) != 0I, pressed = (bits & 2I) != 0I, released = (bits & 4I) != 0I }
 };
 
-def window_key_state(window: Ptr<ResinWindow>, key: int) -> ButtonState = {
-	button_state(resin_window_key_state(window, key))
+def window_key_state(window: Window, key: int) -> ButtonState = {
+	button_state(resin_window_key_state(window.handle, key))
 };
 
-def window_mouse_button_state(window: Ptr<ResinWindow>, button: int) -> ButtonState = {
-	button_state(resin_window_mouse_button_state(window, button))
+def window_mouse_button_state(window: Window, button: int) -> ButtonState = {
+	button_state(resin_window_mouse_button_state(window.handle, button))
 };
 
-def window_cursor_position(window: Ptr<ResinWindow>) -> Result<(float64, float64), RuntimeError> = {
+def window_cursor_position(window: Window) -> Result<(float64, float64), RuntimeError> = {
 	var x = 0.0d;
 	var y = 0.0d;
-	status(resin_window_cursor_position(window, &x, &y))?;
+	status(resin_window_cursor_position(window.handle, &x, &y))?;
 	ok((x, y))
 };
 
-def window_scroll_delta(window: Ptr<ResinWindow>) -> Result<(float64, float64), RuntimeError> = {
+def window_scroll_delta(window: Window) -> Result<(float64, float64), RuntimeError> = {
 	var x = 0.0d;
 	var y = 0.0d;
-	status(resin_window_scroll_delta(window, &x, &y))?;
+	status(resin_window_scroll_delta(window.handle, &x, &y))?;
 	ok((x, y))
 };
 
-def window_focused(window: Ptr<ResinWindow>) -> bool = {
-	resin_window_focused(window) != 0
+def window_focused(window: Window) -> bool = {
+	resin_window_focused(window.handle) != 0
 };
 
-def window_capture_cursor(window: Ptr<ResinWindow>, capture: bool) -> Result<(), RuntimeError> = {
+def window_capture_cursor(window: Window, capture: bool) -> Result<(), RuntimeError> = {
 	status(
 		resin_window_capture_cursor(
-			window,
+			window.handle,
 			if (capture) {
 				1
 			} else {
@@ -121,14 +115,14 @@ def window_capture_cursor(window: Ptr<ResinWindow>, capture: bool) -> Result<(),
 	)
 };
 
-def gpu_create_for_window(window: Ptr<ResinWindow>) -> Result<Ptr<ResinGpu>, RuntimeError> = {
+def gpu_create_for_window(window: Window) -> Result<Gpu, RuntimeError> = {
 	var gpu = Ptr<ResinGpu>(ulong(0));
-	status(resin_gpu_create_for_window(window, &gpu))?;
-	ok(gpu)
+	status(resin_gpu_create_for_window(window.handle, &gpu))?;
+	ok(Gpu { handle = gpu, window = window })
 };
 
-def gpu_present(gpu: Ptr<ResinGpu>, image: Ptr<ResinImage>) -> Result<bool, RuntimeError> = {
-	var code = resin_gpu_present(gpu, image);
+def gpu_present(gpu: Gpu, image: GpuImage) -> Result<bool, RuntimeError> = {
+	var code = resin_gpu_present(gpu.handle, image.handle);
 	if (code == 7) {
 		ok(1 == 0)
 	} else {

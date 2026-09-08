@@ -55,3 +55,7 @@ verifier checks these functions and calls using its existing rules.
 Methods cannot be shader entry points, but shader helpers can call them.
 Pointer receivers follow the existing GPU address restrictions: a shader-local
 address cannot escape into a callee.
+
+Shared owners also support `self: Arc<T>`, and Arc receivers can call pointee
+methods through their address. The compiler invokes the reserved
+`drop(self: Ptr<T>)` hook during cleanup; see [lifetimes](lifetimes.md).

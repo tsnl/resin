@@ -99,6 +99,24 @@ fn sexp_function(names: &Names, index: usize, function: &Function) -> SExp {
 
 fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
     match instr {
+        Instr::TransferLoad => symbol("transfer-load"),
+        Instr::ForgetLocal { local } => list(
+            "forget-local",
+            vec![symbol(fn_names.locals[local.index()].as_ref())],
+        ),
+        Instr::ArcNew => symbol("arc-new"),
+        Instr::ArcData => symbol("arc-data"),
+        Instr::Downgrade => symbol("downgrade"),
+        Instr::Upgrade => symbol("upgrade"),
+        Instr::WeakEmpty { pointee } => list("weak-empty", vec![sexp_ty(names, pointee)]),
+        Instr::TakeLocal { local } => list(
+            "take-local",
+            vec![symbol(fn_names.locals[local.index()].as_ref())],
+        ),
+        Instr::DropLocal { local } => list(
+            "drop-local",
+            vec![symbol(fn_names.locals[local.index()].as_ref())],
+        ),
         Instr::SetLocal { local } => list(
             "set-local",
             vec![symbol(fn_names.locals[local.index()].as_ref())],
@@ -130,6 +148,7 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
         Instr::AccessDynamic => symbol("access-dynamic"),
         Instr::Load => symbol("load"),
         Instr::Store => symbol("store"),
+        Instr::Replace => symbol("replace"),
         Instr::Discard => symbol("discard"),
         Instr::Ascribe { ty } => list("ascribe", vec![sexp_ty(names, ty)]),
         Instr::MakeRecord { fields } => list(
@@ -254,6 +273,8 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
             .map(|name| symbol(name.as_ref()))
             .unwrap_or_else(|| symbol(format!("type.{}", definition.index()))),
         Ty::Pointer { pointee } => list("ptr", vec![sexp_ty(names, pointee)]),
+        Ty::Arc { pointee } => list("arc", vec![sexp_ty(names, pointee)]),
+        Ty::Weak { pointee } => list("weak", vec![sexp_ty(names, pointee)]),
         Ty::Span { element } => list("span", vec![sexp_ty(names, element)]),
         Ty::Array { element, length } => list(
             "array",
