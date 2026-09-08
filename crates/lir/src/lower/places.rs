@@ -1,5 +1,4 @@
 use crate::hir::{Term, TermKind};
-use crate::source::Span;
 use crate::types::{Conv, TypeError, TypeErrorKind};
 use crate::{Instr, Ty};
 
@@ -35,13 +34,12 @@ impl Generator {
 
     pub(super) fn gen_field_value(
         &mut self,
-        span: Span,
         base: &Term,
         access: &crate::types::FieldAccess,
     ) -> Result<Ty, GenerateError> {
         self.check_place_initialized(base)?;
         let base = self.gen_operand(base)?;
-        match self.gen_field_operand(span, base, access)? {
+        match self.gen_field_operand(base, access)? {
             Operand::Place(ty) => {
                 self.emit(Instr::Load);
                 Ok(ty)
@@ -77,7 +75,7 @@ impl Generator {
             TermKind::Field { base, access } => {
                 self.check_place_initialized(base)?;
                 let base = self.gen_operand(base)?;
-                self.gen_field_operand(term.span, base, access)
+                self.gen_field_operand(base, access)
             }
             TermKind::Deref { pointer } => {
                 let checked = &pointer.ty;
@@ -95,7 +93,6 @@ impl Generator {
 
     fn gen_field_operand(
         &mut self,
-        _span: Span,
         base: Operand,
         access: &crate::types::FieldAccess,
     ) -> Result<Operand, GenerateError> {

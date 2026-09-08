@@ -83,7 +83,7 @@ fn lir_lowering_needs_only_the_resolved_tree() {
 fn target_trees_outlive_lir_and_its_verification_certificate() {
     let module = hir(r#"
         export { main, kernel };
-        @compute_shader def kernel(i: uint, output: Ptr<uint>) = { output.* := i; };
+        @compute_shader def kernel(i: ulong, output: Ptr<ulong>) = { output.* := i; };
         def main() -> int = { 42 };
     "#);
     let checked =

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::hir::Term;
-use crate::source::{Ident, Span};
+use crate::source::Ident;
 use crate::types::Conv;
 use crate::{Instr, Ty};
 
@@ -102,7 +102,6 @@ impl Generator {
 
     pub(super) fn gen_builtin(
         &mut self,
-        _span: Span,
         name: &str,
         args: &[Term],
         expected: &Ty,

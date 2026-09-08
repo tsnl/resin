@@ -25,14 +25,14 @@ impl Generator {
                 self.emit(Instr::ExcludeNone);
             }
             TermKind::Try { value } => return self.gen_try(span, value),
-            TermKind::Match { value, arms } => return self.gen_match(span, value, arms, expected),
+            TermKind::Match { value, arms } => return self.gen_match(value, arms, expected),
             TermKind::If { cond, then, els } => return self.gen_if(cond, then, els, expected),
             TermKind::While { cond, body } => return self.gen_while(cond, body),
             TermKind::Block { stmts, tail } => return self.gen_block(stmts, tail, expected),
             TermKind::Record { fields } => return self.gen_record(fields, expected),
             TermKind::Array { elems } => return self.gen_array(elems, expected),
             TermKind::Builtin { name, args } => {
-                return self.gen_builtin(span, name, args, expected);
+                return self.gen_builtin(name, args, expected);
             }
             TermKind::Call { func, arg } => return self.gen_call(func, arg),
             TermKind::Pack(args) => self.gen_pack(args)?,
@@ -70,7 +70,7 @@ impl Generator {
                 }
                 self.emit(Instr::Load);
             }
-            TermKind::Field { base, access } => return self.gen_field_value(span, base, access),
+            TermKind::Field { base, access } => return self.gen_field_value(base, access),
         }
         Ok(expected.clone())
     }

@@ -106,7 +106,6 @@ impl Generator {
 
     pub(super) fn gen_match(
         &mut self,
-        _span: Span,
         term: &Term,
         arms: &[MatchArm],
         expected: &Ty,
