@@ -478,7 +478,7 @@ functions within one file remain supported.
 
 Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `impl`, `def`, `var`, `if`,
 `else`, `while`, and `match`), primitive type names, `Never`, and
-`Ptr`/`Span`/`Arc`/`Weak`/`Option`/`Result` are reserved, including in parameters and field names.
+`Ptr`/`Span`/`Arc`/`Weak`/`Result`/`None` are reserved, including in parameters and field names.
 Names such as `if_value` are ordinary identifiers. `print`, `ok`, `err`, `some`, `none`,
 `replace`, `size_of`, `align_of`, and `absurd` are unshadowable compiler builtins, not syntax
 keywords: definitions and parameters cannot use those names, but record fields can.

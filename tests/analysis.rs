@@ -17,6 +17,24 @@ fn option_payload_fields_remain_available_in_incomplete_code() {
 }
 
 #[test]
+fn weak_upgrade_recovery_exposes_the_shared_payload_and_handle_operations() {
+    let source = "struct Item { count: int }; def f(weak: Weak<Item>) = { weak.upgrade()!.; };";
+    let project = Project::new(&[("main.resin", source)]);
+    let items = project
+        .analyze()
+        .completions(&project.path("main.resin"), source.find("!.").unwrap() + 2);
+    assert!(
+        items.iter().any(|item| item.detail == "count: int"),
+        "{items:?}"
+    );
+    assert!(items.iter().any(|item| item.name == "get"), "{items:?}");
+    assert!(
+        items.iter().any(|item| item.name == "downgrade"),
+        "{items:?}"
+    );
+}
+
+#[test]
 fn pointer_hover_and_completion_use_angle_bracket_types() {
     let source = "def main (value: Ptr<Span<int>>) -> Ptr<Span<int>> = { value };";
     let project = Project::new(&[("main.resin", source)]);

@@ -75,7 +75,7 @@ reassignment destroys the previous initialized destination.
 | `Weak<T>` | Retain weak ownership bookkeeping |
 | Struct or tuple | Recursively copy its fields |
 | Array | Recursively copy its elements |
-| `Option`, `Result`, union | Recursively copy the active payload |
+| `Result`, union | Recursively copy the active payload |
 
 `Ptr<Arc<T>>` points to an Arc handle; `Ptr<T>` points to a `T`. Neither `Ptr<T>`
 nor `Span<T>` owns or destroys its pointee. Copying an Arc never copies its pointee.

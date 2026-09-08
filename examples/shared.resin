@@ -18,7 +18,7 @@ def main() = {
 		alias.downgrade()
 	};
 	match (weak.upgrade()) {
-		Arc<Resource>(owner) => {
+		Arc<Tracked>(owner) => {
 			print("still alive: {0}\n", (owner.read(),));
 		},
 		None => {

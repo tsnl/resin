@@ -356,3 +356,44 @@ fn all_functions_require_parameter_local_zero() {
         );
     }
 }
+
+#[test]
+fn destruction_hooks_reference_a_function_with_the_nominal_pointer_signature() {
+    let mut definition = TypeDef::new("Resource", record());
+    if let crate::ir::TypeDef::Nominal { drop, .. } = &mut definition {
+        *drop = Some(FunctionId::from_index(0));
+    }
+    let mut module = Module {
+        types: vec![definition],
+        ..Default::default()
+    };
+    assert_eq!(
+        verify(&module).unwrap_err().kind,
+        VerifyErrorKind::InvalidDropHook
+    );
+    module.functions.push(Function {
+        name: None,
+        foreign: None,
+        result: Ty::Unit,
+        locals: vec![Local {
+            name: None,
+            ty: Ty::Unit,
+        }],
+        entry: BlockId::from_index(0),
+        blocks: vec![BasicBlock {
+            name: None,
+            instrs: vec![Instr::Push { value: Value::Unit }],
+            terminator: Terminator::Return,
+        }],
+    });
+    assert_eq!(
+        verify(&module).unwrap_err().kind,
+        VerifyErrorKind::InvalidDropHook
+    );
+    module.functions[0].locals[0].ty = Ty::Pointer {
+        pointee: Box::new(Ty::Defined {
+            definition: TypeId::from_index(0),
+        }),
+    };
+    verify(&module).unwrap();
+}

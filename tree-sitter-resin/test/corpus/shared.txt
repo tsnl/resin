@@ -106,9 +106,8 @@ def main() = {
                   (postfix_term
                     (primary_term
                       (lid))
-                    (field_access
-                      (lid))
-                    (closed_term
+                    (method_call
+                      (lid)
                       (unit_term)))))))))
       (statement
         (declare
@@ -116,17 +115,17 @@ def main() = {
           (type
             (infix_type
               (union_type
+                (union_type
+                  (unary_type
+                    (type
+                      (infix_type
+                        (union_type
+                          (unary_type
+                            (primary_type
+                              (uid))))))))
                 (unary_type
-                  (type
-                    (infix_type
-                      (union_type
-                        (unary_type
-                          (type
-                            (infix_type
-                              (union_type
-                                (unary_type
-                                  (primary_type
-                                    (uid))))))))))))))))
+                  (primary_type
+                    (builtin_type))))))))
       (statement
         (term
           (assignment_term
@@ -141,9 +140,8 @@ def main() = {
                   (postfix_term
                     (primary_term
                       (lid))
-                    (field_access
-                      (lid))
-                    (closed_term
+                    (method_call
+                      (lid)
                       (unit_term)))))))))
       (statement
         (term
@@ -161,6 +159,16 @@ def main() = {
                                 (primary_term
                                   (lid)))))))
                       (match_arm
+                        (type
+                          (infix_type
+                            (union_type
+                              (unary_type
+                                (type
+                                  (infix_type
+                                    (union_type
+                                      (unary_type
+                                        (primary_type
+                                          (uid))))))))))
                         (lid)
                         (block_body
                           (statement
@@ -174,5 +182,4 @@ def main() = {
                                       (field_access
                                         (lid))))))))))
                       (match_arm
-                        (lid)
                         (block_body)))))))))))))

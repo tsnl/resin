@@ -11,12 +11,12 @@ use std::{ffi::OsString, process::Command};
 
 const RESOURCE: &str = r#"
 struct Resource { trace: Ptr<int>, digit: int };
-type OptionalResource = Resource | None;
-type OptionalShared = Arc<Resource> | None;
-type OptionalInt = int | None;
+def optional_resource(trace: Ptr<int>, digit: int) -> Resource | None = { Resource.make(trace, digit) };
+def optional_shared(trace: Ptr<int>, digit: int) -> Arc<Resource> | None = { Arc<Resource> { trace = trace, digit = digit } };
+def optional_int(value: int) -> int | None = { value };
 impl Resource {
-    def drop(self: Ptr<Resource>) = {
-        if (self.digit != 0) { self.trace.* := self.trace.* * 10 + self.digit; };
+    def drop(dying: Ptr<Resource>) = {
+        if (dying.digit != 0) { dying.trace.* := dying.trace.* * 10 + dying.digit; };
     };
     def read(self: Ptr<Resource>) -> int = { self.digit };
     def make(trace: Ptr<int>, digit: int) -> Resource = { Resource { trace = trace, digit = digit } };
@@ -62,9 +62,9 @@ fn assignment_branches_preserve_initialization_and_overwrite_cleanup() {
         while (index < 2) {
             var value: Tracked;
             value := if (index == 0) { Tracked { drops = &drops, value = 1 } } else { Tracked { drops = &drops, value = 1 } };
-            value := match (some(index)) {
-                some(n) => { Tracked { drops = &drops, value = 2 } },
-                none(n) => { Tracked { drops = &drops, value = 3 } }
+            value := match (optional_int(index)) {
+                int(n) => { Tracked { drops = &drops, value = 2 } },
+                None => { Tracked { drops = &drops, value = 3 } }
             };
             valid := valid && value.value == 2;
             index := index + 1;
@@ -82,13 +82,13 @@ fn shared_assignment_branches_release_every_owner() {
         {
             var value: Arc<Resource>;
             value := if (trace == 0) { Arc<Resource> { trace = &trace, digit = 1 } } else { Arc<Resource> { trace = &trace, digit = 9 } };
-            value := match (some(2)) {
-                some(n) => { Arc<Resource> { trace = &trace, digit = n } },
-                none(n) => { Arc<Resource> { trace = &trace, digit = 9 } }
+            value := match (optional_int(2)) {
+                int(n) => { Arc<Resource> { trace = &trace, digit = n } },
+                None => { Arc<Resource> { trace = &trace, digit = 9 } }
             };
             weak := value.downgrade();
         };
-        var expired = match (weak.upgrade()) { some(owner) => { 1 == 0 }, none(n) => { 1 == 1 } };
+        var expired = match (weak.upgrade()) { Arc<Resource>(owner) => { 1 == 0 }, None => { 1 == 1 } };
         if (expired && trace == 12) { 0 } else { 1 }
     };
     "#);
@@ -143,7 +143,7 @@ fn function_fields_named_drop_remain_callable() {
     def main() -> int = {
         var record = { drop = increment };
         var nominal = Callback { drop = increment };
-        if (record.drop(20) + nominal.drop(20) == 42) { 0 } else { 1 }
+        if ((record.drop)(20) + (nominal.drop)(20) == 42) { 0 } else { 1 }
     };
     "#);
 }
@@ -255,7 +255,7 @@ fn arrays_options_and_methods_consume_fresh_payloads() {
         {
             var pair = Pair { value = Resource.make(&trace, 1) };
             var array = [Resource.make(&trace, 2), Resource.make(&trace, 3)];
-            var option: Resource | None = Resource.make(&trace, 4);
+            var option = optional_resource(&trace, 4);
             // Reading this named union copies its payload. Both copies are destroyed.
             match (option) { Resource(value) => {}, None => {} };
             var sink = Sink {};
@@ -302,7 +302,7 @@ fn destruction_preserves_results_and_runs_per_scope_and_iteration() {
             index := index + 1;
         };
         if (1 == 1) { var branch = Resource.make(&trace, 7); };
-        match (OptionalInt(8)) {
+        match (optional_int(8)) {
             int(n) => { var arm = Resource.make(&trace, n); },
             None => { var unused = Resource.make(&trace, 9); }
         };
@@ -399,14 +399,14 @@ fn option_unwrap_transfers_fresh_payloads_and_copies_named_options() {
     run(r#"
     def main() -> int = {
         var trace = 0;
-        { var unwrapped = OptionalResource(Resource.make(&trace, 1))!; };
+        { var unwrapped = optional_resource(&trace, 1)!; };
         {
-            var named: Resource | None = Resource.make(&trace, 2);
+            var named = optional_resource(&trace, 2);
             { var copied = named!; };
         };
         var weak = Weak<Resource>();
         {
-            var shared = OptionalShared(Arc<Resource> { trace = &trace, digit = 3 })!;
+            var shared = optional_shared(&trace, 3)!;
             weak := shared.downgrade();
             { var upgraded = weak.upgrade()!; };
             if (trace != 122) { trace := 9; };

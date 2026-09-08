@@ -505,6 +505,11 @@ impl Recovery<'_> {
                 self.trace.record_method(name, &ty, associated, self.typer);
                 if let Some(result) = self.typer.index_method(&ty, &name.val, associated) {
                     self.term(arg, None).filter(Ty::is_integer).map(|_| result)
+                } else if !associated
+                    && let Some((_, result)) = crate::ir::typer::shared_method(&ty, &name.val)
+                {
+                    self.term(arg, Some(&Ty::Unit))?;
+                    Some(result)
                 } else {
                     let method = self.typer.method(&ty, &name.val)?.clone();
                     let params = method.arguments(&ty, associated)?;

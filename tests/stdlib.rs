@@ -497,7 +497,7 @@ fn buffer_address_accessors_borrow_the_callers_owners() {
         import { "std/gpu.resin" };
         extern "resin_runtime.h" def test_frees() -> int;
         def main() -> int = {
-            var gpu = Gpu { handle = Ptr<ResinGpu>(0L), window = none() };
+            var gpu = Gpu { handle = Ptr<ResinGpu>(0L), window = None };
             var valid = {
                 var host_buffer = GpuBuffer { handle = Ptr<ResinAllocation>(1L), gpu = gpu };
                 var host = allocation_host_pointer(&host_buffer);
