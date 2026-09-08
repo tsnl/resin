@@ -14,6 +14,7 @@ import { "std/gpu.resin", "std/status.resin" };
 - `graphics.resin`: shared shader input/output types.
 - `io.resin`: stdout and stderr streams with string-only `write` methods.
 - `console.resin`: byte and line input, and shared input-line ownership and printing.
+- `process.resin`: checked argument views and lookups in the frozen startup environment.
 
 Public operations use static and instance methods on the corresponding types. Fallible runtime operations return
 `Result<T, RuntimeError>`; console operations use their own error sets. Infallible queries

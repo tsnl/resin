@@ -29,11 +29,11 @@ pub fn main() -> ! {
 
 fn run(Invocation { mode, stdlib }: Invocation) -> Result<i32> {
     match &mode {
-        Mode::Compiler(request) | Mode::Interpreter(request) => {
+        Mode::Compiler(request) | Mode::Interpreter { request, .. } => {
             let mut session = Session::new(stdlib);
             let executable = session.compile(request)?;
-            if matches!(mode, Mode::Interpreter(_)) {
-                return Ok(executable.run()?);
+            if let Mode::Interpreter { args, .. } = &mode {
+                return Ok(executable.run_with_args(args)?);
             }
             Ok(0)
         }

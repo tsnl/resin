@@ -18,6 +18,7 @@ mod gpu;
 mod host;
 mod image;
 mod print;
+mod process;
 mod shared;
 mod window;
 

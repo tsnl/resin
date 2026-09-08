@@ -406,3 +406,16 @@ fn from_str_copies_unterminated_spans_verbatim_and_owns_the_result() {
         b"A\0B{0}} braces",
     );
 }
+
+#[test]
+fn byte_spans_print_their_length_including_nuls_and_empty_views() {
+    prints(
+        r#"export { main }; def main() = {
+            var bytes = [65_ub, 0_ub, 66_ub, 67_ub];
+            var view = Span<ubyte> { data = bytes(0), length = 3_ul };
+            var empty = Span<ubyte> { data = Ptr<ubyte>(0_ul), length = 0_ul };
+            print(fmt("[{0}][{1}]", (view, empty)));
+        };"#,
+        b"[A\0B][]",
+    );
+}

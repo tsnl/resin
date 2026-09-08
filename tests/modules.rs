@@ -619,7 +619,7 @@ fn declarations_do_not_create_a_module_initializer() {
     assert_eq!(module.functions[0].name.as_deref(), Some("answer"));
     assert_eq!(module.entries.len(), 1);
     let source = c::emit(&module, "answer").unwrap();
-    assert!(source.contains("int main(void) {\n  atexit(resin_cleanup);\n  return r_fn0(0);\n}"));
+    assert!(source.contains("int main(int r_argc, char **r_argv) {\n  (void)r_argc; (void)r_argv;\n  atexit(resin_cleanup);\n  return r_fn0(0);\n}"));
 }
 
 #[test]

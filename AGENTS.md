@@ -27,6 +27,10 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Keep the native C ABI in `resin-runtime/` and language-facing modules in `stdlib/`.
   Examples import standard-library functionality through `std/` paths. Each file has a private
   scope with explicit exports; do not reintroduce textual inclusion.
+- Host entries take unit or `(int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>)` for argc/argv/envp.
+  Startup inputs are deep-copied before Resin entry and borrowed until process exit; treat
+  them as read-only. Keep environment lookups on the supplied snapshot, not live OS state.
+  `--` separates run arguments from compiler options; execution arguments stay out of build requests.
 - Source files contain declarations only; keep runtime state inside functions and pass it
   explicitly. `FILE:ENTRY` selects an exported entry (default `main`); imports never run code.
 - Keep `src/bin/resin.rs` as a wrapper around `cli::main`; argument-to-`Mode` dispatch

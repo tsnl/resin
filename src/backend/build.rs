@@ -1,5 +1,5 @@
 //! Artifact generation from checked IR and explicit build settings.
-use std::{path::Path, process::Command};
+use std::{ffi::OsString, path::Path, process::Command};
 
 use super::{Error, c};
 use crate::{compiler::Request, ir, toolchain};
@@ -15,7 +15,16 @@ impl Executable {
     }
 
     pub fn run(&self) -> Result<i32, Error> {
-        Ok(Command::new(self.path()).status()?.code().unwrap_or(1))
+        self.run_with_args(&[])
+    }
+
+    /// Execute with literal OS arguments, retaining the build-cache lock throughout.
+    pub fn run_with_args(&self, args: &[OsString]) -> Result<i32, Error> {
+        Ok(Command::new(self.path())
+            .args(args)
+            .status()?
+            .code()
+            .unwrap_or(1))
     }
 }
 

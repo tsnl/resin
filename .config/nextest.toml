@@ -1,0 +1,10 @@
+[test-groups]
+gpu = { max-threads = 1 }
+
+[[profile.default.overrides]]
+# These suites share testing::lock_gpu(). Queue them here so workers remain
+# available for host tests instead of blocking on the process-wide file lock.
+filter = 'binary(gpu_backend) | binary(window_backend) | package(resin-runtime)'
+test-group = 'gpu'
+# Start this serial work early and overlap it with the independent host tests.
+priority = 100
