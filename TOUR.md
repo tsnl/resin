@@ -175,31 +175,37 @@ declarations; there is no configurable parameter index.
 The C and GLSL backends translate this stack model into target-language
 variables and control flow; they do not execute the IR.
 
-### Typing and lowering work together
+### Generation composes typing and emission
 
-[TyperContext](src/ir/typer/mod.rs) owns the nominal type-definition table.
-A type's identity can be reserved before its body is defined; the completed
-table moves into the IR module. Type IDs belong to that table, not to a global
-registry. [literal.rs](src/ir/literal.rs) shares the case-sensitive numeric suffix
-mapping between inference and literal evaluation. [rules.rs](src/ir/typer/rules.rs)
-describes operations on types, while
-[convert.rs](src/ir/typer/convert.rs) describes allowed conversions.
+[ir/generate/plan/expressions.rs](src/ir/generate/plan/expressions.rs) walks each
+expression once. It plans the children, passes their type handles to the injected
+[inference services](src/ir/typecheck/infer/), and selects the corresponding
+emission operation alongside those constraints. The typing layer does not walk
+expressions or own lexical scopes.
 
-[ir/generate/mod.rs](src/ir/generate/mod.rs) orchestrates source-to-IR lowering.
-It establishes types and function signatures before lowering function bodies.
-For every function, [check/](src/ir/generate/check/) first collects constraints and
-resolves them in dependency groups. There is no separate path for functions without
-inference holes. Start with
-[solver.rs](src/ir/generate/check/solver.rs) for inference variables and
-unification and error-set inclusion, then [expressions.rs](src/ir/generate/check/expressions.rs) and
-[constraints.rs](src/ir/generate/check/constraints.rs) for expression constraints.
-The result is a mandatory node-keyed type table. Lowering uses its resolved types
-for literals, arrays, records, operators, and calls; it does not infer missing types.
-It still tracks places and definite initialization and emits explicit conversions.
-The independent IR verifier checks the generated instructions. These explicit holes are separate from editor recovery holes.
-Error-set variables collect their lower bounds to a fixed point before becoming
-concrete unions; this also handles mutually recursive functions. Struct tags come
-from their module-wide nominal identity, so widening a union never renumbers its variants.
+[ir/typecheck/](src/ir/typecheck/) contains the shared operation rules.
+[TyperContext](src/ir/typecheck/mod.rs) owns nominal definitions;
+[builtin.rs](src/ir/typecheck/builtin.rs) classifies builtin names and arities,
+[rules.rs](src/ir/typecheck/rules.rs) checks their signatures, and
+[convert.rs](src/ir/typecheck/convert.rs) classifies explicit conversions.
+Inference, emission, and the independent IR verifier use these same rules.
+[literal.rs](src/ir/literal.rs) shares numeric suffixes and literal classification.
+[annotation.rs](src/ir/generate/annotation.rs) evaluates type syntax with an
+injected name resolver, supporting both concrete annotations and explicit holes.
+
+[plan/mod.rs](src/ir/generate/plan/mod.rs) resolves function dependency groups
+before executing their emission operations. The private
+[solver](src/ir/typecheck/infer/solver.rs) delays numeric choices and accumulates
+error sets to a fixed point, including mutually recursive functions. Final IR
+contains only concrete types. There is no AST-node-keyed type table or second
+expression AST walk for instruction generation.
+
+Local structs reserve their nominal identity while planning. Ownership cleanup
+tracks initialized locals and destroys them in reverse scope order at each exit,
+preserving returned values first. Layout queries plan their operands for typing
+but never execute their runtime operations.
+The [builder](src/ir/generate/builder.rs) assembles concrete stack IR, which the
+independent [verifier](src/ir/verify/) checks before any backend consumes it.
 
 The neighboring files separate the questions asked during that process:
 
@@ -207,7 +213,7 @@ The neighboring files separate the questions asked during that process:
 | --- | --- |
 | Which imported or exported declaration does a name mean? | [modules.rs](src/ir/generate/modules.rs) |
 | Which local names exist, and are they initialized? | [scope.rs](src/ir/generate/scope.rs), [bindings.rs](src/ir/generate/bindings.rs) |
-| What value does an expression produce? | [terms.rs](src/ir/generate/terms.rs) |
+| How are typing and emission composed for an expression? | [plan/expressions.rs](src/ir/generate/plan/expressions.rs), [terms.rs](src/ir/generate/terms.rs) |
 | Which storage location does an assignment or address refer to? | [places.rs](src/ir/generate/places.rs) |
 | How do branches, loops, and short-circuit operators join? | [flow.rs](src/ir/generate/flow.rs) |
 | How do Results, exhaustive matches, and early error returns lower? | [sums.rs](src/ir/generate/sums.rs) |
@@ -225,10 +231,14 @@ types, returns, and type definitions. It must also reject malformed IR built
 directly by a caller, without trusting the AST generator. Its type analysis is
 reused by the backends.
 
+[verify/flow.rs](src/ir/verify/flow.rs) propagates stack types through existing
+blocks and checks that incoming edges agree. [generate/flow.rs](src/ir/generate/flow.rs)
+creates those blocks and branches from source expressions.
+
 [ir/types/definitions.rs](src/ir/types/definitions.rs) holds definition checks
-shared by the typer and verifier, including invalid references and recursive
+shared by the type checker and verifier, including invalid references and recursive
 inline layouts. This is why those checks live beside the type representation,
-not exclusively inside the source-language typer.
+not exclusively inside the source-language type checker.
 
 ### C emission and native builds are separate
 
@@ -384,7 +394,7 @@ Tests are executable descriptions of the boundaries above:
 | Syntax or AST shape | [parser corpus](tree-sitter-resin/test/corpus/), [mutation_ast.rs](tests/mutation_ast.rs) |
 | Grammar JavaScript types, lint, or formatting | Run `npm run check` in [tree-sitter-resin/](tree-sitter-resin/README.md) |
 | Imports, exports, or entry visibility | [modules.rs](tests/modules.rs), [cli.rs](tests/cli.rs) |
-| Typing, conversions, or IR invariants | [nominal_types.rs](tests/nominal_types.rs), [typer tests](src/ir/typer/tests.rs), [verifier tests](src/ir/verify/tests.rs) |
+| Typing, conversions, or IR invariants | [nominal_types.rs](tests/nominal_types.rs), [typing-rule tests](src/ir/typecheck/tests.rs), [verifier tests](src/ir/verify/tests.rs) |
 | Explicit type holes and return inference | [inference.rs](tests/inference.rs), [inference example](examples/inference.resin) |
 | Structs, aliases, unions, and typed errors | [results.rs](tests/results.rs), [errors example](examples/errors.resin) |
 | Automatic destruction, scope exits, and copying | [shared.rs](tests/shared.rs), [ownership example](examples/ownership.resin), [C execution tests](tests/c_backend.rs) |

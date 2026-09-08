@@ -11,14 +11,14 @@ pub mod value;
 
 pub mod generate;
 pub mod print;
-pub mod typer;
+pub mod typecheck;
 pub mod verify;
 
 pub use generate::{GenerateError, GenerateErrorKind, generate, generate_program};
 pub(crate) use generate::{analyze_program, analyze_recovering};
 pub use instr::{BasicBlock, BlockId, Foreign, Function, Instr, Local, StackEffect, Terminator};
 pub use print::format_module;
-pub use typer::{
+pub use typecheck::{
     BuiltinCall, Conv, Converted, FieldAccess, TypeError, TypeErrorKind, TyperContext,
 };
 pub use types::{Case, RecordField, Ty, TypeDef, TypeId, TypeTable};

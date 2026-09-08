@@ -1,4 +1,5 @@
-use crate::ast::{Ident, Span, Term, TermKind};
+use super::plan::{Form, Term};
+use crate::ast::{Ident, Span};
 use crate::ir::{Conv, Instr, Ty, TypeError, TypeErrorKind};
 
 use super::scope::{Initialization, ValueBindingKind};
@@ -26,7 +27,7 @@ impl Generator {
             .type_assign(&pointee, &value_ty)
             .map_err(|err| GenerateError::typing(place.span, err))?;
         self.emit(Instr::Store);
-        if let TermKind::Var { name } = &place.val {
+        if let Form::Var { name } = &place.form {
             self.scopes
                 .lookup_value_mut(&name.val)
                 .expect("assigned binding")
@@ -42,9 +43,9 @@ impl Generator {
         name: &Ident,
     ) -> Result<Ty, GenerateError> {
         if name.val.as_ref() == "spirv"
-            && let TermKind::Var {
+            && let Form::Var {
                 name: function_name,
-            } = &base.val
+            } = &base.form
         {
             let binding = self.resolve_value(function_name)?;
             if let ValueBindingKind::Function(function) = binding.kind {
@@ -93,8 +94,8 @@ impl Generator {
     // Lower once, preserving an address when available. Speculatively generating
     // a place and then retrying as a value can evaluate side effects twice.
     pub(super) fn gen_operand(&mut self, term: &Term) -> Result<Operand, GenerateError> {
-        match &term.val {
-            TermKind::Var { name } => {
+        match &term.form {
+            Form::Var { name } => {
                 let binding = self.resolve_binding(name, false)?;
                 if matches!(binding.kind, ValueBindingKind::Function(_)) {
                     return self.gen_var(name).map(Operand::Value);
@@ -103,20 +104,19 @@ impl Generator {
                 self.emit_binding_address(&binding);
                 Ok(Operand::Place(ty))
             }
-            TermKind::Field { base, name }
+            Form::Field { base, name }
                 if name.val.as_ref() == "spirv"
-                    && matches!(&base.val, TermKind::Var { name } if self.scopes.lookup_value(&name.val).is_some_and(|binding| matches!(binding.kind, ValueBindingKind::Function(_)))) =>
+                    && matches!(&base.form, Form::Var { name } if self.scopes.lookup_value(&name.val).is_some_and(|binding| matches!(binding.kind, ValueBindingKind::Function(_)))) =>
             {
                 self.gen_term(term, None).map(Operand::Value)
             }
-            TermKind::Field { base, name } => {
+            Form::Field { base, name } => {
                 self.check_place_initialized(base)?;
                 let base = self.gen_operand(base)?;
                 self.gen_field_operand(term.span, base, name)
             }
-            TermKind::Deref { pointer } => {
-                let checked =
-                    self.checked.expressions[&std::ptr::from_ref(pointer.as_ref())].clone();
+            Form::Deref { pointer } => {
+                let checked = self.solver.require(&pointer.ty, pointer.span)?;
                 let pointer_ty = if matches!(checked, Ty::Arc { .. }) {
                     self.hold_arc_address(pointer)?
                 } else {
@@ -202,11 +202,11 @@ impl Generator {
     }
 
     pub(super) fn check_place_initialized(&self, term: &Term) -> Result<(), GenerateError> {
-        match &term.val {
-            TermKind::Var { name } => {
+        match &term.form {
+            Form::Var { name } => {
                 self.resolve_value(name)?;
             }
-            TermKind::Field { base, .. } => self.check_place_initialized(base)?,
+            Form::Field { base, .. } => self.check_place_initialized(base)?,
             _ => {}
         }
         Ok(())

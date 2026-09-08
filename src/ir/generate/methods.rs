@@ -1,9 +1,12 @@
-use super::{GenerateError, Generator, check::error};
+use super::{
+    GenerateError, Generator,
+    plan::{Annotation, Signature, Term, error},
+};
 use crate::{
-    ast::{Ident, SourceFile, StmtKind, Term, TermKind},
+    ast::{Ident, SourceFile, StmtKind},
     ir::{
         Instr, Ty,
-        typer::{FunctionBody, ReceiverConversion},
+        typecheck::{FunctionBody, ReceiverConversion},
     },
 };
 
@@ -38,7 +41,27 @@ impl Generator {
             if !decorators.is_empty() {
                 return Err(error(name.span, "methods cannot be shader entries"));
             }
-            let function = self.declare_function(name, params, result)?;
+            let signature = Signature {
+                params: params
+                    .iter()
+                    .map(|(name, ann)| {
+                        Ok((
+                            name.clone(),
+                            Annotation {
+                                ty: self.evaluator().ty(ann)?.into(),
+                                span: ann.span,
+                                references: vec![],
+                            },
+                        ))
+                    })
+                    .collect::<Result<_, GenerateError>>()?,
+                result: Annotation {
+                    ty: self.evaluator().ty(result)?.into(),
+                    span: result.span,
+                    references: vec![],
+                },
+            };
+            let function = self.declare_function(name, &signature)?;
             let short = name.val.rsplit('.').next().unwrap();
             if !self.typer.define_method(definition, short.into(), function) {
                 return Err(error(name.span, "duplicate method"));
@@ -79,24 +102,18 @@ impl Generator {
 
     pub(super) fn gen_method_call(
         &mut self,
-        receiver: &Term,
+        receiver: Option<&Term>,
+        receiver_type: &Ty,
         name: &Ident,
         arg: &Term,
     ) -> Result<Ty, GenerateError> {
-        let (receiver_type, associated) = if let TermKind::Type { ty } = &receiver.val {
-            (self.evaluator().ty(ty)?, true)
-        } else {
-            (
-                self.checked.expressions[&std::ptr::from_ref(receiver)].clone(),
-                false,
-            )
-        };
+        let associated = receiver.is_none();
         let function = self
             .typer
-            .method(&receiver_type, &name.val)
+            .method(receiver_type, &name.val)
             .ok_or_else(|| error(name.span, "unknown method"))?;
         self.scopes
-            .record_method(name, &receiver_type, associated, &self.typer);
+            .record_method(name, receiver_type, associated, &self.typer);
         if let FunctionBody::Defined(function) = &function.body {
             self.emit(Instr::Function {
                 function: *function,
@@ -113,7 +130,7 @@ impl Generator {
                 .params
                 .split_first()
                 .expect("checked receiver parameter");
-            self.gen_receiver(receiver, &receiver_type, first)?;
+            self.gen_receiver(receiver.unwrap(), receiver_type, first)?;
             self.gen_method_arguments(arg, remaining)?;
             if !remaining.is_empty() && matches!(function.body, FunctionBody::Defined(_)) {
                 self.emit(Instr::MakeRecord {

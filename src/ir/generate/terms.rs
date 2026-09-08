@@ -1,7 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::ast::{Ident, Span, Term, TermKind, Type};
-use crate::ir::{Conv, Instr, Ty, TypeError, TypeErrorKind};
+use super::plan::{Form, Term};
+use crate::ast::{Ident, Span};
+use crate::ir::{Conv, Instr, Ty};
 
 use super::{GenerateError, Generator};
 
@@ -16,7 +17,7 @@ impl Generator {
             .typer
             .body(ty)
             .map_err(|e| GenerateError::typing(span, e))?;
-        if matches!(init.val, TermKind::Unit)
+        if matches!(init.form, Form::Unit)
             && matches!(&body, Ty::Record { fields } if fields.is_empty())
         {
             self.emit(Instr::MakeRecord { fields: vec![] });
@@ -89,54 +90,7 @@ impl Generator {
         Ok(ty.clone())
     }
 
-    pub(super) fn gen_call(
-        &mut self,
-        span: Span,
-        func: &Term,
-        arg: &Term,
-        expected: &Ty,
-    ) -> Result<Ty, GenerateError> {
-        if let TermKind::Type { ty } = &func.val {
-            return self.gen_ascription(span, ty, arg);
-        }
-        if let TermKind::Var { name } = &func.val {
-            match name.val.as_ref() {
-                "absurd" => {
-                    self.gen_term(arg, Some(&Ty::union([])))?;
-                    self.emit(Instr::Eliminate {
-                        result: expected.clone(),
-                    });
-                    return Ok(expected.clone());
-                }
-                "size_of" | "align_of" => {
-                    let ty = if let TermKind::Type { ty } = &arg.val {
-                        self.evaluator().ty(ty)?
-                    } else {
-                        self.checked.expressions[&std::ptr::from_ref(arg)].clone()
-                    };
-                    let layout = crate::ir::layout::layout(self.typer.definitions(), &ty)
-                        .map_err(|e| super::check::error(span, e.to_string()))?;
-                    self.emit(Instr::Push {
-                        value: crate::ir::Value::UInt64 {
-                            value: if name.val.as_ref() == "size_of" {
-                                layout.size
-                            } else {
-                                layout.align
-                            } as u64,
-                        },
-                    });
-                    return Ok(Ty::UInt64);
-                }
-                "ok" | "err" => {
-                    return self.gen_result(span, name.val.as_ref() == "err", arg, expected);
-                }
-                "print" | "fmt" => {
-                    return self.gen_builtin(span, &name.val, std::slice::from_ref(arg), expected);
-                }
-                _ => {}
-            }
-        }
-
+    pub(super) fn gen_call(&mut self, func: &Term, arg: &Term) -> Result<Ty, GenerateError> {
         use super::places::Operand;
         self.check_place_initialized(func)?;
         let operand = self.gen_operand(func)?;
@@ -158,15 +112,7 @@ impl Generator {
                 self.emit(Instr::SetLocal { local });
                 self.emit(Instr::LocalAddress { local });
             }
-            let index_ty = self.gen_term(arg, None)?;
-            if !index_ty.is_integer() {
-                return Err(GenerateError::typing(
-                    arg.span,
-                    TypeError {
-                        kind: TypeErrorKind::ExpectedInteger { found: index_ty },
-                    },
-                ));
-            }
+            self.gen_term(arg, None)?;
             self.emit(Instr::AccessDynamic);
             return Ok(Ty::Pointer {
                 pointee: element.clone(),
@@ -174,12 +120,7 @@ impl Generator {
         }
 
         let Ty::Function { param, .. } = &callee_ty else {
-            return Err(GenerateError::typing(
-                func.span,
-                TypeError {
-                    kind: TypeErrorKind::ExpectedFunction { found: callee_ty },
-                },
-            ));
+            unreachable!("inferred callable type")
         };
         self.gen_term(arg, Some(param))?;
         self.emit(Instr::Call);
@@ -189,10 +130,15 @@ impl Generator {
         Ok(*result)
     }
 
-    fn gen_ascription(&mut self, span: Span, ty: &Type, arg: &Term) -> Result<Ty, GenerateError> {
-        let ascribed = self.evaluator().ty(ty)?;
+    pub(super) fn gen_ascription(
+        &mut self,
+        span: Span,
+        ty: &Ty,
+        arg: &Term,
+    ) -> Result<Ty, GenerateError> {
+        let ascribed = ty.clone();
         if let Ty::Arc { pointee } = &ascribed {
-            if matches!(arg.val, TermKind::Record { .. } | TermKind::Unit) {
+            if matches!(arg.form, Form::Record | Form::Unit) {
                 self.gen_shared_payload(span, pointee, arg)?;
             } else {
                 self.gen_term(arg, Some(pointee))?;
@@ -201,42 +147,52 @@ impl Generator {
             return Ok(ascribed);
         }
         if let Ty::Weak { pointee } = &ascribed
-            && matches!(arg.val, TermKind::Unit)
+            && matches!(arg.form, Form::Unit)
         {
             self.emit(Instr::WeakEmpty {
                 pointee: *pointee.clone(),
             });
             return Ok(ascribed);
         }
+
         let context = self
             .typer
             .body(&ascribed)
             .map_err(|err| GenerateError::typing(span, err))?;
         let context = context.span_record().unwrap_or(context);
         let found = if matches!(&context, Ty::Record { fields } if fields.is_empty())
-            && matches!(arg.val, TermKind::Unit)
+            && matches!(arg.form, Form::Unit)
         {
             self.emit(Instr::MakeRecord { fields: vec![] });
             context
         } else {
             self.gen_term(arg, None)?
         };
-        if found != ascribed && found.widens_to(&ascribed) {
-            return self.coerce(span, found, &ascribed);
-        }
-        if found != ascribed && found.is_numeric() && ascribed.is_numeric() {
-            self.emit(Instr::NumericCast {
+        use crate::ir::typecheck::ExplicitConversion;
+        match self
+            .typer
+            .explicit_conversion(&found, &ascribed)
+            .map_err(|err| GenerateError::typing(span, err))?
+        {
+            ExplicitConversion::Widen => return self.coerce(span, found, &ascribed),
+            ExplicitConversion::NumericCast => self.emit(Instr::NumericCast {
                 ty: ascribed.clone(),
-            });
-            return Ok(ascribed);
-        }
-        if found.pointer_cast(&ascribed) {
-            self.emit(Instr::PointerCast {
+            }),
+            ExplicitConversion::PointerCast => self.emit(Instr::PointerCast {
                 ty: ascribed.clone(),
-            });
-            return Ok(ascribed);
+            }),
+            ExplicitConversion::Ascribe(steps) => {
+                if steps.iter().any(|step| matches!(step, Conv::Unwrap { definition } if self.typer.definition(*definition).unwrap().drop_hook().is_some())) {
+                    return Err(super::plan::error(span, "cannot unwrap a type with drop; access its fields through a pointer or use Ptr.replace"));
+                }
+                if !steps.is_empty() {
+                    self.emit(Instr::Ascribe {
+                        ty: ascribed.clone(),
+                    });
+                }
+            }
         }
-        self.apply_ascription(span, &ascribed, found)
+        Ok(ascribed)
     }
 
     pub(super) fn gen_builtin(
@@ -247,12 +203,12 @@ impl Generator {
         expected: &Ty,
     ) -> Result<Ty, GenerateError> {
         if name == "&&" || name == "||" {
-            return self.gen_short_circuit(span, name, args);
+            return self.gen_short_circuit(name, args);
         }
         if matches!(name, "+" | "-")
             && let [
                 Term {
-                    val: TermKind::Num { value },
+                    form: Form::Num { value },
                     ..
                 },
             ] = args
@@ -275,32 +231,6 @@ impl Generator {
             params: arg_tys,
             result: expected.clone(),
         });
-        Ok(expected.clone())
-    }
-
-    pub(super) fn apply_ascription(
-        &mut self,
-        span: Span,
-        expected: &Ty,
-        found: Ty,
-    ) -> Result<Ty, GenerateError> {
-        let steps = self
-            .typer
-            .ascribe(&found, expected)
-            .map_err(|err| GenerateError::typing(span, err))?;
-        if steps.iter().any(|step| matches!(step, Conv::Unwrap { definition } if self.typer.definition(*definition).unwrap().drop_hook().is_some())) {
-            return Err(super::check::error(span, "cannot unwrap a type with drop; access its fields through a pointer or use Ptr.replace"));
-        }
-        if steps
-            .iter()
-            .any(|s| matches!(s, Conv::MakeSpan | Conv::SpanRecord))
-        {
-            self.emit(Instr::Ascribe {
-                ty: expected.clone(),
-            });
-        } else {
-            self.emit_value_conv(&steps);
-        }
         Ok(expected.clone())
     }
 

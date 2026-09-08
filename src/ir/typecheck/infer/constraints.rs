@@ -1,14 +1,12 @@
 use std::{collections::HashSet, sync::Arc};
 
-use super::super::GenerateError;
 use super::{
-    Result, error,
-    expressions::Checker,
+    GenerateError, Inference, Result, error,
     types::{Head, Type},
 };
 use crate::{ast::Span, ir::Ty};
 
-pub(super) enum Constraint {
+pub(in crate::ir) enum Constraint {
     Coerce(Type, Type),
     ExcludeNone(Type, Type),
     Layout(Type),
@@ -24,13 +22,13 @@ pub(super) enum Constraint {
     Builtin(Arc<str>, Vec<Type>, Type),
 }
 
-pub(super) enum Pattern {
+pub(in crate::ir) enum Pattern {
     Ok,
     Err,
     Type(Type),
 }
 
-impl Checker<'_> {
+impl Inference<'_> {
     pub fn solve(&mut self, roots: &[Type]) -> Result<()> {
         loop {
             let before = self.solver.revision;
@@ -57,14 +55,14 @@ impl Checker<'_> {
             if seeded {
                 continue;
             }
-            // Resolve receiver literals before defaulting call arguments: the
-            // selected declaration supplies those arguments' expected types.
+            // A receiver's default selects the method whose parameter types
+            // must constrain arguments before ordinary literal defaults run.
             for (_, constraint) in &self.constraints {
                 if let Constraint::Method(receiver, ..) = constraint {
-                    seeded |= self.solver.default_numbers_in(receiver);
+                    seeded |= self.solver.default_numbers(std::slice::from_ref(receiver));
                 }
             }
-            if seeded || self.solver.default_numbers() {
+            if seeded || self.solver.default_numbers(roots) {
                 continue;
             }
             if self.solver.finish_errors(roots) {
@@ -272,13 +270,9 @@ impl Checker<'_> {
                 {
                     let empty = from == Ty::Unit
                         && matches!(self.typer.body(&to), Ok(Ty::Record { fields }) if fields.is_empty());
-                    if !(empty
-                        || from.pointer_cast(&to)
-                        || from.widens_to(&to)
-                        || from.is_numeric() && to.is_numeric())
-                    {
+                    if !empty {
                         self.typer
-                            .ascribe(&from, &to)
+                            .explicit_conversion(&from, &to)
                             .map_err(|e| GenerateError::typing(span, e))?;
                     }
                 } else {
@@ -312,10 +306,12 @@ impl Checker<'_> {
                 }
             }
             Constraint::Builtin(name, args, out) => {
-                if name.as_ref() == "print" {
-                    self.solver.unify(out, &Ty::Unit.into(), span)?;
-                } else if name.as_ref() == "fmt" {
-                    self.solver.unify(
+                use crate::ir::typecheck::BuiltinRule;
+                let rule = BuiltinRule::lookup(name, args.len())
+                    .map_err(|e| GenerateError::typing(span, e))?;
+                match rule {
+                    BuiltinRule::Print => self.solver.unify(out, &Ty::Unit.into(), span)?,
+                    BuiltinRule::Format => self.solver.unify(
                         out,
                         &self
                             .typer
@@ -324,23 +320,24 @@ impl Checker<'_> {
                             .expect("builtin String")
                             .into(),
                         span,
-                    )?;
-                } else if matches!(name.as_ref(), "&&" | "||" | "!") {
-                    self.solver.unify(out, &Ty::Bool.into(), span)?;
-                    for arg in args {
-                        if !self.constraint(&Constraint::Boolean(arg.clone()), span)? {
-                            return Ok(false);
+                    )?,
+                    BuiltinRule::Boolean => {
+                        self.solver.unify(out, &Ty::Bool.into(), span)?;
+                        for arg in args {
+                            if !self.constraint(&Constraint::Boolean(arg.clone()), span)? {
+                                return Ok(false);
+                            }
                         }
                     }
-                } else {
-                    let comparison = matches!(name.as_ref(), "==" | "!=" | "<" | "<=" | ">" | ">=");
-                    if comparison {
-                        self.solver.unify(out, &Ty::Bool.into(), span)?;
-                    } else if let Some(first) = args.first() {
-                        self.solver.unify(out, first, span)?;
-                    }
-                    if let [left, right] = args.as_slice() {
-                        self.solver.unify(left, right, span)?;
+                    BuiltinRule::Arithmetic | BuiltinRule::Comparison => {
+                        if rule == BuiltinRule::Comparison {
+                            self.solver.unify(out, &Ty::Bool.into(), span)?;
+                        } else {
+                            self.solver.unify(out, &args[0], span)?;
+                        }
+                        for arg in &args[1..] {
+                            self.solver.unify(&args[0], arg, span)?;
+                        }
                     }
                 }
                 let Some(args) = args

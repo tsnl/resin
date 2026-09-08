@@ -1,8 +1,9 @@
-use crate::ast::{MatchArm, MatchVariant, Span, Term};
+use super::plan::{MatchArm, Term};
+use crate::ast::Span;
 use crate::ir::{Case, Instr, Terminator, Ty};
 
 use super::scope::{Initialization, ValueBinding, ValueBindingKind};
-use super::{GenerateError, Generator, check::error};
+use super::{GenerateError, Generator, plan::error};
 
 impl Generator {
     pub(super) fn coerce(&mut self, span: Span, from: Ty, to: &Ty) -> Result<Ty, GenerateError> {
@@ -111,11 +112,16 @@ impl Generator {
         };
         let mut patterns = vec![];
         for arm in arms {
-            let tag = match &arm.variant {
-                MatchVariant::Ok if matches!(ty, Ty::Result { .. }) => Case::Ok,
-                MatchVariant::Err if matches!(ty, Ty::Result { .. }) => Case::Err,
-                MatchVariant::Type(ann) if !matches!(ty, Ty::Result { .. }) => {
-                    let member = self.evaluator().ty(ann)?;
+            let tag = match (&arm.variant, &ty) {
+                (None, Ty::Result { .. }) => {
+                    if arm.failure {
+                        Case::Err
+                    } else {
+                        Case::Ok
+                    }
+                }
+                (Some(ann), ty) if !matches!(ty, Ty::Result { .. }) => {
+                    let member = ann.resolve(self)?;
                     if matches!(member, Ty::Union { .. }) {
                         return Err(error(
                             ann.span,

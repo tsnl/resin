@@ -36,6 +36,7 @@ pub enum VerifyErrorKind {
     OpaqueValue { ty: Ty },
     InvalidShader,
     PointerArithmetic,
+    InvalidBuiltin(crate::ir::typecheck::TypeError),
     InvalidPointerCast { from: Ty, to: Ty },
     InvalidTypeDefinition { definition: usize },
     IncompleteTypeDefinition { definition: TypeId },

@@ -254,17 +254,22 @@ pub(super) fn check_instr(
             params,
             result,
         } => {
-            if matches!(
-                name.as_ref(),
-                "+" | "-" | "~" | "*" | "/" | "%" | "<<" | ">>" | "&" | "|" | "^"
-            ) && params.iter().any(|ty| matches!(ty, Ty::Pointer { .. }))
-            {
-                return Err(location.error(VerifyErrorKind::PointerArithmetic));
-            }
             for param in params {
                 check_type(&module.types, param, location)?;
             }
             check_type(&module.types, result, location)?;
+            let signature = crate::ir::TyperContext::from_definitions(module.types.clone())
+                .type_builtin_call(name, params)
+                .map_err(|error| {
+                    location.error(
+                        if error.kind == crate::ir::TypeErrorKind::PointerArithmetic {
+                            VerifyErrorKind::PointerArithmetic
+                        } else {
+                            VerifyErrorKind::InvalidBuiltin(error)
+                        },
+                    )
+                })?;
+            expect_type(signature.result, result.clone(), location)?;
             let values = pop(stack, params.len(), location)?;
             expect_types(params, &values, location)?;
             stack.push(result.clone());

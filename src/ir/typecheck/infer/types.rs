@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::ir::{RecordField, Ty};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum Head {
+pub(in crate::ir) enum Head {
     Atom(Ty),
     Pointer,
     Arc,
@@ -16,7 +16,7 @@ pub(super) enum Head {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum Type {
+pub(in crate::ir) enum Type {
     Variable(usize),
     Node(Head, Vec<Type>),
 }

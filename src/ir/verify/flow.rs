@@ -1,3 +1,5 @@
+//! Verify stack types across an existing IR function's control-flow graph.
+
 use std::collections::VecDeque;
 
 use crate::ir::{BlockId, Function, FunctionId, Module, Terminator, Ty};

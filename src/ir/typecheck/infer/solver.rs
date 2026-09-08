@@ -4,8 +4,7 @@ use crate::{
 };
 
 use super::{
-    super::GenerateError,
-    Result, error,
+    GenerateError, Result, error,
     types::{Head, Type},
 };
 
@@ -24,7 +23,7 @@ struct Variable {
 }
 
 #[derive(Default)]
-pub(super) struct Solver {
+pub(in crate::ir) struct Solver {
     variables: Vec<Variable>,
     pub revision: usize,
 }
@@ -38,9 +37,11 @@ impl Solver {
         if let (_, Some(ty)) = crate::ir::literal::split(text) {
             return ty.into();
         }
-        let hex = text.starts_with("0x") || text.starts_with("0X");
-        let float = !hex && (text.contains('.') || text.contains(['e', 'E']));
-        self.variable(if float { Class::Float } else { Class::Number })
+        self.variable(if crate::ir::literal::unsuffixed_type(text).is_integer() {
+            Class::Number
+        } else {
+            Class::Float
+        })
     }
 
     fn variable(&mut self, class: Class) -> Type {
@@ -174,10 +175,10 @@ impl Solver {
         }
     }
 
-    pub fn finish_errors(&mut self, roots: &[Type]) -> bool {
+    fn variables_in(&self, roots: &[Type]) -> Vec<usize> {
         fn collect(solver: &Solver, ty: &Type, ids: &mut Vec<usize>) {
             match solver.head(ty) {
-                Type::Variable(id) if solver.variables[id].class == Class::Errors => {
+                Type::Variable(id) => {
                     if !ids.contains(&id) {
                         ids.push(id);
                     }
@@ -187,19 +188,25 @@ impl Solver {
                         collect(solver, &arg, ids);
                     }
                 }
-                _ => {}
             }
         }
         let mut ids = vec![];
         for root in roots {
             collect(self, root, &mut ids);
         }
-        for id in &ids {
-            let variable = &mut self.variables[*id];
-            variable.value = Some(Ty::union(variable.variants.clone()).into());
-            self.revision += 1;
+        ids
+    }
+
+    pub fn finish_errors(&mut self, roots: &[Type]) -> bool {
+        let before = self.revision;
+        for id in self.variables_in(roots) {
+            let variable = &mut self.variables[id];
+            if variable.class == Class::Errors {
+                variable.value = Some(Ty::union(variable.variants.clone()).into());
+                self.revision += 1;
+            }
         }
-        !ids.is_empty()
+        self.revision != before
     }
 
     pub fn head(&self, ty: &Type) -> Type {
@@ -364,23 +371,10 @@ impl Solver {
         }
     }
 
-    pub fn default_numbers(&mut self) -> bool {
+    pub fn default_numbers(&mut self, roots: &[Type]) -> bool {
         let before = self.revision;
-        for id in 0..self.variables.len() {
+        for id in self.variables_in(roots) {
             self.default_number(id);
-        }
-        self.revision != before
-    }
-
-    pub fn default_numbers_in(&mut self, ty: &Type) -> bool {
-        let before = self.revision;
-        match self.head(ty) {
-            Type::Variable(id) => self.default_number(id),
-            Type::Node(_, children) => {
-                for child in &children {
-                    self.default_numbers_in(child);
-                }
-            }
         }
         self.revision != before
     }
@@ -434,9 +428,11 @@ mod tests {
         let mut solver = Solver::default();
         let literal = solver.number("1");
         let other = solver.number("1.0");
+        let hex = solver.number("-0xdead");
         solver.unify(&literal, &Ty::UInt64.into(), SPAN).unwrap();
-        solver.default_numbers();
+        solver.default_numbers(&[literal.clone(), other.clone(), hex.clone()]);
         assert_eq!(solver.resolve(&literal), Some(Ty::UInt64));
         assert_eq!(solver.resolve(&other), Some(Ty::Float64));
+        assert_eq!(solver.resolve(&hex), Some(Ty::Int32));
     }
 }

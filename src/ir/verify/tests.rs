@@ -3,82 +3,44 @@ use crate::ir::{BasicBlock, Local, LocalId, TypeDef};
 use crate::ir::{BlockId, Function, Instr, Module, Terminator, Ty, TypeId, Value};
 
 #[test]
-fn ascribe_wraps_a_representation() {
+fn ascribe_wraps_and_unwraps_a_nominal_representation() {
     let meters = Ty::Defined {
         definition: TypeId::from_index(0),
     };
-    let function = Function {
-        foreign: None,
-        name: None,
-        result: meters.clone(),
-        locals: vec![Local {
-            name: None,
-            ty: Ty::Unit,
-        }],
-        entry: BlockId::from_index(0),
-        blocks: vec![BasicBlock {
-            name: None,
-            instrs: vec![
-                Instr::Push {
-                    value: Value::Int32 { value: 3 },
-                },
-                Instr::MakeRecord {
-                    fields: vec!["value".into()],
-                },
-                Instr::Ascribe { ty: meters },
-            ],
-            terminator: Terminator::Return,
-        }],
-    };
-
-    verify(&Module {
-        shaders: Default::default(),
-        origins: Default::default(),
-        entries: Default::default(),
-        types: vec![TypeDef::new("Meters", record())].into(),
-        functions: vec![function],
-    })
-    .unwrap();
-}
-
-#[test]
-fn ascribe_unwraps_one_nominal_layer() {
-    let meters = Ty::Defined {
-        definition: TypeId::from_index(0),
-    };
-    let function = Function {
-        foreign: None,
-        name: None,
-        result: record(),
-        locals: vec![Local {
-            name: None,
-            ty: Ty::Unit,
-        }],
-        entry: BlockId::from_index(0),
-        blocks: vec![BasicBlock {
-            name: None,
-            instrs: vec![
-                Instr::Push {
-                    value: Value::Int32 { value: 3 },
-                },
-                Instr::MakeRecord {
-                    fields: vec!["value".into()],
-                },
-                Instr::Ascribe { ty: meters },
-                Instr::Ascribe { ty: record() },
-            ],
-            terminator: Terminator::Return,
-        }],
-    };
-
-    verify(&Module {
-        shaders: Default::default(),
-        origins: Default::default(),
-        entries: Default::default(),
-        types: vec![TypeDef::new("Meters", record())].into(),
-        functions: vec![function],
-    })
-    .unwrap();
+    for result in [meters.clone(), record()] {
+        let mut instrs = vec![
+            Instr::Push {
+                value: Value::Int32 { value: 3 },
+            },
+            Instr::MakeRecord {
+                fields: vec!["value".into()],
+            },
+            Instr::Ascribe { ty: meters.clone() },
+        ];
+        if result != meters {
+            instrs.push(Instr::Ascribe { ty: result.clone() });
+        }
+        verify(&Module {
+            types: vec![TypeDef::new("Meters", record())].into(),
+            functions: vec![Function {
+                foreign: None,
+                name: None,
+                result,
+                locals: vec![Local {
+                    name: None,
+                    ty: Ty::Unit,
+                }],
+                entry: BlockId::from_index(0),
+                blocks: vec![BasicBlock {
+                    name: None,
+                    instrs,
+                    terminator: Terminator::Return,
+                }],
+            }],
+            ..Default::default()
+        })
+        .unwrap();
+    }
 }
 
 fn record() -> Ty {
@@ -127,11 +89,8 @@ fn chained_assignment_preserves_the_value() {
     };
 
     verify(&Module {
-        shaders: Default::default(),
-        origins: Default::default(),
-        entries: Default::default(),
-        types: vec![].into(),
         functions: vec![function],
+        ..Default::default()
     })
     .unwrap();
 }
@@ -185,11 +144,8 @@ fn conflicting_join_stacks_are_rejected() {
     };
 
     let error = verify(&Module {
-        shaders: Default::default(),
-        origins: Default::default(),
-        entries: Default::default(),
-        types: vec![].into(),
         functions: vec![function],
+        ..Default::default()
     })
     .unwrap_err();
 
@@ -246,11 +202,8 @@ fn indirect_calls_use_the_callee_on_the_stack() {
     };
 
     verify(&Module {
-        shaders: Default::default(),
-        origins: Default::default(),
-        entries: Default::default(),
-        types: vec![].into(),
         functions: vec![target, caller],
+        ..Default::default()
     })
     .unwrap();
 }
@@ -300,11 +253,8 @@ fn loop_backedges_must_match_the_header_stack() {
     };
 
     verify(&Module {
-        shaders: Default::default(),
-        origins: Default::default(),
-        entries: Default::default(),
-        types: vec![].into(),
         functions: vec![function],
+        ..Default::default()
     })
     .unwrap();
 }
@@ -353,6 +303,175 @@ fn all_functions_require_parameter_local_zero() {
                 param: Box::new(Ty::Unit),
                 result: Box::new(Ty::Unit)
             })
+        );
+    }
+}
+
+fn builtin_module(name: &str, params: &[Ty], result: Ty) -> Module {
+    let mut instrs: Vec<_> = params
+        .iter()
+        .enumerate()
+        .flat_map(|(index, _)| {
+            [
+                Instr::LocalAddress {
+                    local: LocalId::from_index(index + 1),
+                },
+                Instr::Load,
+            ]
+        })
+        .collect();
+    instrs.push(Instr::CallBuiltin {
+        name: name.into(),
+        params: params.to_vec(),
+        result: result.clone(),
+    });
+    Module {
+        functions: vec![Function {
+            foreign: None,
+            name: None,
+            result,
+            locals: std::iter::once(Ty::Unit)
+                .chain(params.iter().cloned())
+                .map(|ty| Local { name: None, ty })
+                .collect(),
+            entry: BlockId::from_index(0),
+            blocks: vec![BasicBlock {
+                name: None,
+                instrs,
+                terminator: Terminator::Return,
+            }],
+        }],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn builtin_instructions_check_names_arity_and_operand_rules() {
+    for (name, params, result) in [
+        ("unknown", vec![], Ty::Unit),
+        ("==", vec![Ty::Int32], Ty::Bool),
+        ("+", vec![], Ty::Int32),
+        ("+", vec![Ty::Int32, Ty::Float64], Ty::Int32),
+        ("&&", vec![Ty::Int32, Ty::Int32], Ty::Bool),
+        ("print", vec![Ty::Int32], Ty::Unit),
+    ] {
+        assert!(
+            matches!(
+                verify(&builtin_module(name, &params, result))
+                    .unwrap_err()
+                    .kind,
+                VerifyErrorKind::InvalidBuiltin(_)
+            ),
+            "{name} {params:?}"
+        );
+    }
+}
+
+#[test]
+fn builtin_results_are_derived_from_the_operation() {
+    for (name, params, result, expected) in [
+        ("==", vec![Ty::Int32, Ty::Int32], Ty::Int32, Ty::Bool),
+        ("+", vec![Ty::Int32, Ty::Int32], Ty::Bool, Ty::Int32),
+        ("!", vec![Ty::Bool], Ty::Unit, Ty::Bool),
+    ] {
+        assert_eq!(
+            verify(&builtin_module(name, &params, result.clone()))
+                .unwrap_err()
+                .kind,
+            VerifyErrorKind::TypeMismatch {
+                expected,
+                found: result
+            }
+        );
+    }
+}
+
+#[test]
+fn builtin_pointer_comparison_is_valid_but_arithmetic_is_not() {
+    let pointer = Ty::Pointer {
+        pointee: Box::new(Ty::Int32),
+    };
+    verify(&builtin_module(
+        "==",
+        &[pointer.clone(), pointer.clone()],
+        Ty::Bool,
+    ))
+    .unwrap();
+    assert_eq!(
+        verify(&builtin_module(
+            "+",
+            &[pointer.clone(), pointer.clone()],
+            pointer
+        ))
+        .unwrap_err()
+        .kind,
+        VerifyErrorKind::PointerArithmetic
+    );
+}
+
+#[test]
+fn builtin_verification_preserves_arithmetic_without_numeric_traits() {
+    verify(&builtin_module("+", &[record(), record()], record())).unwrap();
+}
+
+#[test]
+fn ascription_cannot_stand_in_for_cast_or_widen_instructions() {
+    let first = TypeId::from_index(0);
+    let second = TypeId::from_index(1);
+    for (from, to) in [
+        (Ty::Int32, Ty::Float64),
+        (
+            Ty::Defined { definition: first },
+            Ty::union([first, second]),
+        ),
+        (
+            Ty::UInt64,
+            Ty::Pointer {
+                pointee: Box::new(Ty::Int32),
+            },
+        ),
+        (
+            Ty::Defined { definition: first },
+            Ty::Defined { definition: second },
+        ),
+    ] {
+        let function = Function {
+            foreign: None,
+            name: None,
+            result: to.clone(),
+            locals: vec![Local {
+                name: None,
+                ty: from.clone(),
+            }],
+            entry: BlockId::from_index(0),
+            blocks: vec![BasicBlock {
+                name: None,
+                instrs: vec![
+                    Instr::LocalAddress {
+                        local: LocalId::from_index(0),
+                    },
+                    Instr::Load,
+                    Instr::Ascribe { ty: to.clone() },
+                ],
+                terminator: Terminator::Return,
+            }],
+        };
+        let error = verify(&Module {
+            types: vec![
+                TypeDef::new("First", record()),
+                TypeDef::new("Second", record()),
+            ]
+            .into(),
+            functions: vec![function],
+            ..Default::default()
+        })
+        .unwrap_err();
+        assert_eq!(
+            error.kind,
+            VerifyErrorKind::TypeMismatch {
+                expected: to,
+                found: from
+            }
         );
     }
 }

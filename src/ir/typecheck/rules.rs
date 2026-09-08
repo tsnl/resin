@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use crate::ir::{RecordField, Ty};
 
-use super::{Conv, TypeError, TypeErrorKind, TyperContext};
+use super::{BuiltinRule, Conv, TypeError, TypeErrorKind, TyperContext};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldAccess {
@@ -23,16 +23,9 @@ impl TyperContext {
     }
 
     pub fn type_num(&self, value: &str) -> Ty {
-        if let (_, Some(ty)) = crate::ir::literal::split(value) {
-            return ty;
-        }
-        let value = value.strip_prefix('-').unwrap_or(value);
-        let is_hex = value.starts_with("0x") || value.starts_with("0X");
-        if value.contains('.') || (!is_hex && value.contains(['e', 'E'])) {
-            Ty::Float64
-        } else {
-            Ty::Int32
-        }
+        crate::ir::literal::split(value)
+            .1
+            .unwrap_or_else(|| crate::ir::literal::unsuffixed_type(value))
     }
 
     pub const fn type_type(&self, _value: &Ty) -> Ty {
@@ -151,53 +144,35 @@ impl TyperContext {
     }
 
     pub fn type_builtin_call(&self, name: &str, args: &[Ty]) -> Result<BuiltinCall, TypeError> {
-        if matches!(
-            name,
-            "+" | "-" | "~" | "*" | "/" | "%" | "<<" | ">>" | "&" | "|" | "^"
-        ) && args.iter().any(|ty| matches!(ty, Ty::Pointer { .. }))
-        {
-            return Err(TypeError::new(TypeErrorKind::PointerArithmetic));
-        }
-        let result = match (name, args) {
-            ("print", [arg]) if self.is_string(arg) => Ty::Unit,
-            ("print", [arg]) => {
+        let rule = BuiltinRule::lookup(name, args.len())?;
+        let result = match rule {
+            BuiltinRule::Print if self.is_string(&args[0]) => Ty::Unit,
+            BuiltinRule::Print => {
                 return Err(TypeError::new(TypeErrorKind::InvalidPrintArguments {
-                    found: arg.clone(),
+                    found: args[0].clone(),
                 }));
             }
-            ("fmt", [arg]) => self.type_format(arg)?,
-            ("+" | "-" | "~", [arg]) => arg.clone(),
-            ("!", [arg]) => {
-                self.as_bool(arg)?;
+            BuiltinRule::Format => self.type_format(&args[0])?,
+            BuiltinRule::Boolean => {
+                for arg in args {
+                    self.as_bool(arg)?;
+                }
                 Ty::Bool
             }
-            ("+" | "-" | "*" | "/" | "%" | "<<" | ">>" | "&" | "|" | "^", [left, right]) => {
-                self.same(left, right)?;
-                left.clone()
-            }
-            ("==" | "!=" | "<" | "<=" | ">" | ">=", [left, right]) => {
-                self.same(left, right)?;
-                Ty::Bool
-            }
-            ("&&" | "||", [left, right]) => {
-                self.as_bool(left)?;
-                self.as_bool(right)?;
-                Ty::Bool
-            }
-            (
-                "+" | "-" | "~" | "!" | "*" | "/" | "%" | "<<" | ">>" | "&" | "|" | "^" | "=="
-                | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||" | "print" | "fmt",
-                _,
-            ) => {
-                return Err(TypeError::new(TypeErrorKind::InvalidBuiltinArgumentCount {
-                    name: Arc::from(name),
-                    found: args.len(),
-                }));
-            }
-            _ => {
-                return Err(TypeError::new(TypeErrorKind::UnknownBuiltin {
-                    name: Arc::from(name),
-                }));
+            BuiltinRule::Arithmetic | BuiltinRule::Comparison => {
+                if rule == BuiltinRule::Arithmetic
+                    && args.iter().any(|ty| matches!(ty, Ty::Pointer { .. }))
+                {
+                    return Err(TypeError::new(TypeErrorKind::PointerArithmetic));
+                }
+                for arg in &args[1..] {
+                    self.same(&args[0], arg)?;
+                }
+                if rule == BuiltinRule::Comparison {
+                    Ty::Bool
+                } else {
+                    args[0].clone()
+                }
             }
         };
         Ok(BuiltinCall {

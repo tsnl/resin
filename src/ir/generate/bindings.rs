@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use crate::ast::{Ident, Term, Type};
-use crate::ir::{Instr, Ty, TypeId, typer::SourceOrigin};
+use super::plan::Term;
+use crate::ast::{Ident, Type};
+use crate::ir::{Instr, Ty, TypeId, typecheck::check_binding_name};
 
 use super::scope::{Initialization, ValueBinding, ValueBindingKind};
 use super::{GenerateError, GenerateErrorKind, Generator};
@@ -28,10 +29,19 @@ impl Generator {
         init: &Type,
     ) -> Result<(), GenerateError> {
         let ty = self.evaluator().ty(init)?;
+        self.bind_alias(name, init.span, ty)
+    }
+
+    pub(super) fn bind_alias(
+        &mut self,
+        name: &Ident,
+        span: crate::ast::Span,
+        ty: Ty,
+    ) -> Result<(), GenerateError> {
         self.scopes
             .define_alias(name.val.clone(), ty.clone())
             .map_err(|name| GenerateError {
-                span: init.span,
+                span,
                 kind: GenerateErrorKind::DuplicateType { name },
             })?;
         self.scopes
@@ -40,14 +50,9 @@ impl Generator {
     }
 
     pub(super) fn gen_struct(&mut self, name: &Ident, init: &Type) -> Result<(), GenerateError> {
-        if let Some(&definition) = self.checked.definitions.get(&std::ptr::from_ref(name)) {
-            self.bind_type(name, definition)?;
-            self.evaluator().ty(init)?;
-            return Ok(());
-        }
         let definition = self.typer.declare_type(
             name.val.clone(),
-            SourceOrigin {
+            crate::ir::typecheck::SourceOrigin {
                 module: self.source_module,
                 span: name.span,
             },
@@ -59,8 +64,7 @@ impl Generator {
             .map_err(|err| GenerateError::typing(init.span, err))
     }
 
-    pub(super) fn gen_declare(&mut self, name: &Ident, ann: &Type) -> Result<(), GenerateError> {
-        let ty = self.evaluator().ty(ann)?;
+    pub(super) fn gen_declare(&mut self, name: &Ident, ty: Ty) -> Result<(), GenerateError> {
         let local = self.alloc_local(ty.clone(), Some(name.val.clone()));
         let binding = ValueBinding {
             shader: false,
@@ -134,7 +138,7 @@ impl Generator {
         name: &Ident,
         binding: ValueBinding,
     ) -> Result<(), GenerateError> {
-        Self::check_binding_name(name)?;
+        check_binding_name(name)?;
         let ty = binding.ty.clone();
         self.scopes
             .define_value(name.val.clone(), binding)
@@ -147,22 +151,11 @@ impl Generator {
         Ok(())
     }
 
-    pub(super) fn check_binding_name(name: &Ident) -> Result<(), GenerateError> {
-        if matches!(
-            name.val.as_ref(),
-            "fmt" | "print" | "ok" | "err" | "size_of" | "align_of" | "absurd"
-        ) {
-            return Err(GenerateError {
-                span: name.span,
-                kind: GenerateErrorKind::ReservedBuiltin {
-                    name: name.val.clone(),
-                },
-            });
-        }
-        Ok(())
-    }
-
-    fn bind_type(&mut self, name: &Ident, definition: TypeId) -> Result<(), GenerateError> {
+    pub(super) fn bind_type(
+        &mut self,
+        name: &Ident,
+        definition: TypeId,
+    ) -> Result<(), GenerateError> {
         self.scopes
             .define_type(name.val.clone(), definition)
             .map_err(|dup| GenerateError {

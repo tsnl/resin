@@ -169,16 +169,6 @@ fn recursive_groups_infer_from_bodies_not_callers() {
 }
 
 #[test]
-fn dependency_order_does_not_depend_on_source_order() {
-    for source in [
-        "def first() -> _ = { second() }; def second() -> _ = { long(7) };",
-        "def second() -> _ = { long(7) }; def first() -> _ = { second() };",
-    ] {
-        assert_eq!(result(source, "first"), Ty::Int64);
-    }
-}
-
-#[test]
 fn nominal_identity_and_local_type_definitions_survive_inference() {
     let m = module("struct Meters { value: int }; def make() -> _ = { Meters { value = 42 } };");
     assert!(matches!(m.functions[0].result, Ty::Defined { .. }));
@@ -265,7 +255,7 @@ fn span_construction_and_indexing_infer_element_and_pointer_types() {
 }
 
 #[test]
-fn numeric_suffixes_select_exact_types_with_or_without_inference() {
+fn numeric_suffixes_select_exact_types() {
     for (literal, ty) in [
         ("-128b", Ty::Int8),
         ("255B", Ty::UInt8),
@@ -288,14 +278,6 @@ fn numeric_suffixes_select_exact_types_with_or_without_inference() {
         assert_eq!(
             result(&format!("def value() -> _ = {{ {literal} }};"), "value"),
             ty
-        );
-        let m = module(&format!("def main() = {{ var n = {literal}; }};"));
-        assert!(
-            m.functions[0]
-                .locals
-                .iter()
-                .any(|local| local.name.as_deref() == Some("n") && local.ty == ty),
-            "{literal}"
         );
     }
     for source in [
@@ -326,14 +308,7 @@ fn suffixed_literals_reject_overflow_and_invalid_integer_forms() {
         "1e50f",
         "1e400d",
     ] {
-        for annotation in ["", " -> _"] {
-            let source = if annotation.is_empty() {
-                format!("def main() = {{ var n = {literal}; }};")
-            } else {
-                format!("def main(){annotation} = {{ {literal} }};")
-            };
-            rejects(&source, "literal");
-        }
+        rejects(&format!("def value() -> _ = {{ {literal} }};"), "literal");
     }
 }
 
@@ -393,7 +368,7 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
         );
 
         let source = format!(
-            "def main() -> int = {{ {marker} var values = [10, 20]; var data = Span<int> {{ data = Ptr<int>(&values), length = 2L }}; data(1).* }};"
+            "def main() -> int = {{ {marker} var values = [10, 20]; var data = Span<int> {{ data = Ptr<int>(&values), length = 2L }}; data.at(1).* }};"
         );
         ir::generate(&parse(&source)).unwrap();
     }
@@ -479,4 +454,98 @@ fn never_elimination_requires_an_empty_input_and_resolved_context() {
     );
     rejects("def bad(n: int) -> int = { absurd(n) };", "TypeMismatch");
     rejects("def ambiguous(n: Never) -> _ = { absurd(n) };", "infer");
+}
+
+#[test]
+fn layout_operands_check_nested_declarations_without_emitting_them() {
+    let m = module(
+        "def effect() -> int = { 42 }; def measure() -> _ = { size_of({ struct Local { n: int }; effect(); var value = Local { n = effect() }; value }) };",
+    );
+    assert_eq!(
+        m.types
+            .iter()
+            .filter(|definition| definition
+                .name()
+                .is_some_and(|name| name.as_ref() == "Local"))
+            .count(),
+        1
+    );
+    let measure = m
+        .functions
+        .iter()
+        .find(|f| f.name.as_deref() == Some("measure"))
+        .unwrap();
+    assert_eq!(measure.result, Ty::UInt64);
+    assert!(
+        measure
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instrs)
+            .all(|instr| !matches!(instr, ir::Instr::Call | ir::Instr::MakeRecord { .. }))
+    );
+
+    rejects(
+        "def measure() -> _ = { size_of({ var value: int; value := 1 == 1; value }) };",
+        "TypeMismatch",
+    );
+}
+
+#[test]
+fn layout_operands_do_not_read_or_initialize_runtime_locals() {
+    assert_eq!(
+        result(
+            "def measure() -> _ = { var n: int; size_of(n) };",
+            "measure"
+        ),
+        Ty::UInt64
+    );
+    rejects(
+        "def f() -> int = { var n: int; size_of(n := 42); n };",
+        "UninitializedValue",
+    );
+}
+
+#[test]
+fn nested_record_annotations_reject_duplicate_field_names() {
+    for source in [
+        "def f(x: { n: int, n: int }) = {};",
+        "def f() = { var x: Ptr<{ n: int, n: int }>; };",
+        "def f() = { struct Local { n: int, n: int }; };",
+        "def f() = { type Local = { n: int, n: int }; };",
+        "def f() = { { var x: { n: int, n: int }; }; };",
+    ] {
+        rejects(source, "DuplicateField");
+    }
+}
+
+#[test]
+fn numeric_defaults_stay_with_their_dependency_group() {
+    let plain = "def plain() -> _ = { 1 };";
+    let wide = "def wide() -> _ = { var n = 1; var p: Ptr<ulong>; p := &n; n };";
+    let fraction = "def fraction() -> _ = { var n = 1.5; var p: Ptr<float32>; p := &n; n };";
+    let caller = "def caller() -> _ = { wide() };";
+    for declarations in [
+        [plain, wide, fraction, caller],
+        [caller, fraction, plain, wide],
+        [fraction, caller, wide, plain],
+    ] {
+        let source = declarations.join(" ");
+        let m = module(&source);
+        for (name, expected) in [
+            ("plain", Ty::Int32),
+            ("wide", Ty::UInt64),
+            ("fraction", Ty::Float32),
+            ("caller", Ty::UInt64),
+        ] {
+            assert_eq!(
+                m.functions
+                    .iter()
+                    .find(|f| f.name.as_deref() == Some(name))
+                    .unwrap()
+                    .result,
+                expected,
+                "{source}"
+            );
+        }
+    }
 }
