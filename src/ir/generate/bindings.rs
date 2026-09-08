@@ -1,14 +1,17 @@
-use std::sync::Arc;
-
 use super::plan::Term;
-use crate::ast::{Ident, Type};
-use crate::ir::{Instr, Ty, TypeId, typecheck::check_binding_name};
+use crate::ast::{Ident, SourceFile, StmtKind, Type};
+use crate::ir::{Instr, Ty, TyperContext};
 
-use super::scope::{Initialization, ValueBinding, ValueBindingKind};
+use super::scope::{DeclarationId, Initialization, Scopes, ValueBinding, ValueBindingKind};
 use super::{GenerateError, GenerateErrorKind, Generator};
 
 impl Generator {
-    pub(super) fn gen_define(&mut self, name: &Ident, init: &Term) -> Result<(), GenerateError> {
+    pub(super) fn gen_define(
+        &mut self,
+        declaration: DeclarationId,
+        name: &Ident,
+        init: &Term,
+    ) -> Result<(), GenerateError> {
         let local = self.alloc_local(Ty::Unit, Some(name.val.clone()));
         let binding = ValueBinding {
             shader: false,
@@ -16,63 +19,19 @@ impl Generator {
             ty: None,
             initialization: Initialization::Initializing,
         };
-        self.bind_value(name, binding.clone())?;
+        self.environment.bind(declaration, binding);
         let ty = self.gen_term(init, None)?;
-        self.complete_value(&name.val, ty);
+        self.complete_value(declaration, ty);
         self.emit(Instr::SetLocal { local });
         Ok(())
     }
 
-    pub(super) fn gen_define_type(
+    pub(super) fn gen_declare(
         &mut self,
+        declaration: DeclarationId,
         name: &Ident,
-        init: &Type,
-    ) -> Result<(), GenerateError> {
-        self.scopes.push_at(init.span);
-        let ty = self.evaluator().ty(init);
-        self.scopes.pop();
-        let ty = ty.inspect_err(|_| {
-            self.scopes.define_invalid_type(name);
-        })?;
-        self.bind_alias(name, init.span, ty)
-    }
-
-    pub(super) fn bind_alias(
-        &mut self,
-        name: &Ident,
-        span: crate::ast::Span,
         ty: Ty,
     ) -> Result<(), GenerateError> {
-        self.scopes
-            .define_alias(name.val.clone(), ty.clone())
-            .map_err(|name| GenerateError {
-                span,
-                kind: GenerateErrorKind::DuplicateType { name },
-            })?;
-        self.scopes
-            .record_definition(name, true, Some(&ty), &self.typer);
-        Ok(())
-    }
-
-    pub(super) fn gen_struct(&mut self, name: &Ident, init: &Type) -> Result<(), GenerateError> {
-        let definition = self.typer.declare_type(
-            name.val.clone(),
-            crate::ir::typecheck::SourceOrigin {
-                module: self.source_module,
-                span: name.span,
-            },
-        );
-        self.bind_type(name, definition)?;
-        self.scopes.push_at(init.span);
-        let body = self.evaluator().ty(init);
-        self.scopes.pop();
-        let body = body?;
-        self.typer
-            .define_type(definition, body)
-            .map_err(|err| GenerateError::typing(init.span, err))
-    }
-
-    pub(super) fn gen_declare(&mut self, name: &Ident, ty: Ty) -> Result<(), GenerateError> {
         let local = self.alloc_local(ty.clone(), Some(name.val.clone()));
         let binding = ValueBinding {
             shader: false,
@@ -80,7 +39,8 @@ impl Generator {
             ty: Some(ty),
             initialization: Initialization::Uninitialized,
         };
-        self.bind_value(name, binding)
+        self.environment.bind(declaration, binding);
+        Ok(())
     }
 
     pub(super) fn gen_var(&mut self, name: &Ident) -> Result<Ty, GenerateError> {
@@ -112,7 +72,7 @@ impl Generator {
         read: bool,
     ) -> Result<ValueBinding, GenerateError> {
         let binding = self
-            .scopes
+            .environment
             .lookup_value(&name.val)
             .cloned()
             .ok_or_else(|| GenerateError {
@@ -140,44 +100,12 @@ impl Generator {
         Ok(binding)
     }
 
-    pub(super) fn bind_value(
-        &mut self,
-        name: &Ident,
-        binding: ValueBinding,
-    ) -> Result<(), GenerateError> {
-        check_binding_name(name)?;
-        let ty = binding.ty.clone();
-        self.scopes
-            .define_value(name.val.clone(), binding)
-            .map_err(|dup| GenerateError {
-                span: name.span,
-                kind: GenerateErrorKind::DuplicateValue { name: dup },
-            })?;
-        self.scopes
-            .record_definition(name, false, ty.as_ref(), &self.typer);
-        Ok(())
-    }
-
-    pub(super) fn bind_type(
-        &mut self,
-        name: &Ident,
-        definition: TypeId,
-    ) -> Result<(), GenerateError> {
-        self.scopes
-            .define_type(name.val.clone(), definition)
-            .map_err(|dup| GenerateError {
-                span: name.span,
-                kind: GenerateErrorKind::DuplicateType { name: dup },
-            })?;
-        self.scopes
-            .record_definition(name, true, Some(&Ty::Defined { definition }), &self.typer);
-        Ok(())
-    }
-
-    fn complete_value(&mut self, name: &Arc<str>, ty: Ty) {
-        self.scopes.record_binding_type(name, &ty, &self.typer);
+    fn complete_value(&mut self, declaration: DeclarationId, ty: Ty) {
         let kind = {
-            let binding = self.scopes.lookup_value_mut(name).expect("defined binding");
+            let binding = self
+                .environment
+                .binding_mut(declaration)
+                .expect("defined binding");
             binding.ty = Some(ty.clone());
             binding.initialization = Initialization::Initialized;
             binding.kind
@@ -203,5 +131,92 @@ impl Generator {
                 name: name.val.clone(),
             },
         })
+    }
+}
+
+impl Scopes {
+    pub(super) fn prepare(
+        &mut self,
+        file: &SourceFile,
+        typer: &mut TyperContext,
+        source_module: crate::ir::typecheck::SourceModuleId,
+    ) -> Vec<GenerateError> {
+        let mut errors = Vec::new();
+        for stmt in file.declarations() {
+            let result = match &stmt.val {
+                StmtKind::Define { .. } | StmtKind::Declare { .. } | StmtKind::Expr { .. } => {
+                    Err(GenerateError {
+                        span: stmt.span,
+                        kind: GenerateErrorKind::InvalidModuleItem,
+                    })
+                }
+                StmtKind::ForeignType { name } => self
+                    .define_alias(
+                        name,
+                        Ty::Foreign {
+                            name: name.val.clone(),
+                        },
+                    )
+                    .map(|_| ())
+                    .map_err(|name| GenerateError {
+                        span: stmt.span,
+                        kind: GenerateErrorKind::DuplicateType { name },
+                    }),
+                _ => Ok(()),
+            };
+            if let Err(error) = result {
+                errors.push(error);
+            }
+        }
+        for stmt in file.declarations() {
+            let result = match &stmt.val {
+                StmtKind::DefineType { name, init } => match self.annotation(init, typer) {
+                    Ok(ty) => {
+                        self.define_alias(name, ty)
+                            .map(|_| ())
+                            .map_err(|name| GenerateError {
+                                span: init.span,
+                                kind: GenerateErrorKind::DuplicateType { name },
+                            })
+                    }
+                    Err(error) => {
+                        self.define_invalid_type(name);
+                        Err(error)
+                    }
+                },
+                StmtKind::Struct { name, body } => (|| {
+                    let id = typer.declare_type(
+                        name.val.clone(),
+                        crate::ir::typecheck::SourceOrigin {
+                            module: source_module,
+                            span: name.span,
+                        },
+                    );
+                    self.define_type(name, id).map_err(|name| GenerateError {
+                        span: stmt.span,
+                        kind: GenerateErrorKind::DuplicateType { name },
+                    })?;
+                    let ty = self.annotation(body, typer)?;
+                    typer
+                        .define_type(id, ty)
+                        .map_err(|error| GenerateError::typing(body.span, error))
+                })(),
+                _ => Ok(()),
+            };
+            if let Err(error) = result {
+                errors.push(error);
+            }
+        }
+        errors
+    }
+    fn annotation(&mut self, ann: &Type, typer: &TyperContext) -> Result<Ty, GenerateError> {
+        self.push_at(ann.span);
+        let result = super::eval::Evaluator {
+            scopes: self.view(),
+            typer,
+        }
+        .ty(ann);
+        self.pop();
+        result
     }
 }

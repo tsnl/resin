@@ -6,21 +6,14 @@ use crate::{
 };
 
 pub fn build_shaders(module: &Module, settings: &Settings) -> Result<Vec<Shader>, Error> {
-    let analysis = crate::ir::verify::analyze(module)?;
-    build_verified(
-        crate::ir::verify::Verified {
-            module,
-            analysis: &analysis,
-        },
-        settings,
-    )
+    crate::ir::verify::with_verified(module, |checked| build_verified(checked, settings))
 }
 
 pub(crate) fn build_verified(
     checked: crate::ir::verify::Verified<'_>,
     settings: &Settings,
 ) -> Result<Vec<Shader>, Error> {
-    let module = checked.module;
+    let module = checked.module();
     let sources = module
         .shaders
         .iter()

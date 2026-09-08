@@ -24,8 +24,7 @@ struct Export {
 type Exports = BTreeMap<Arc<str>, Export>;
 
 pub(crate) struct Compilation {
-    pub module: Option<Module>,
-    pub verification: crate::ir::verify::ModuleTypes,
+    pub module: Option<crate::ir::verify::VerifiedModule>,
     pub diagnostics: Vec<SourceError>,
     pub semantics: SemanticData,
 }
@@ -35,7 +34,10 @@ pub fn generate_program(program: &Program) -> Result<Module, SourceError> {
     if !compilation.diagnostics.is_empty() {
         Err(compilation.diagnostics.remove(0))
     } else {
-        Ok(compilation.module.expect("successful compilation"))
+        Ok(compilation
+            .module
+            .expect("successful compilation")
+            .into_module())
     }
 }
 
@@ -52,7 +54,7 @@ pub(crate) fn analyze_program(program: &Program) -> Compilation {
             .origins
             .sources
             .insert(source.path.clone(), source.source.as_str().into());
-        generator.scopes = Scopes::for_source(source.path.clone(), data.clone());
+        let mut scopes = Scopes::for_source(source.path.clone(), data.clone());
         let mut names = BTreeMap::new();
         for &(span, dependency) in &source.imports {
             data.borrow_mut().imports.insert(
@@ -68,7 +70,7 @@ pub(crate) fn analyze_program(program: &Program) -> Compilation {
                     Err(error) => diagnostics.push(error),
                     Ok(true) => {}
                 }
-                generator.scopes.import(name.clone(), export.symbol.clone());
+                scopes.import(name.clone(), export.symbol);
             }
         }
         for stmt in source.file.declarations() {
@@ -96,7 +98,7 @@ pub(crate) fn analyze_program(program: &Program) -> Compilation {
                 diagnostics.push(error);
             }
         }
-        generator.generate_file(&source.file);
+        generator.generate_file(&source.file, scopes);
         diagnostics.extend(
             std::mem::take(&mut generator.errors)
                 .into_iter()
@@ -123,13 +125,9 @@ pub(crate) fn analyze_program(program: &Program) -> Compilation {
         }
     }
     let mut module = None;
-    let mut verification = crate::ir::verify::ModuleTypes::default();
     if diagnostics.is_empty() {
         match generator.finish() {
-            Ok((ir, checked)) => {
-                module = Some(ir);
-                verification = checked;
-            }
+            Ok(checked) => module = Some(checked),
             Err(e) => diagnostics.push(if let Some(source) = program.modules.last() {
                 source.error(e.span, e)
             } else {
@@ -139,7 +137,6 @@ pub(crate) fn analyze_program(program: &Program) -> Compilation {
     }
     Compilation {
         module,
-        verification,
         diagnostics,
         semantics: data.borrow().clone(),
     }
@@ -193,10 +190,12 @@ impl Generator {
         }
         Ok(symbols
             .into_iter()
-            .filter_map(|(name, symbol)| match symbol.binding?.kind {
-                ValueBindingKind::Function(id) => Some((name, id)),
-                ValueBindingKind::Local(_) => None,
-            })
+            .filter_map(
+                |(name, symbol)| match self.environment.binding(symbol.definition)?.kind {
+                    ValueBindingKind::Function(id) => Some((name, id)),
+                    ValueBindingKind::Local(_) => None,
+                },
+            )
             .collect())
     }
     pub(super) fn exports(
@@ -213,7 +212,7 @@ impl Generator {
                         name: name.val.clone(),
                     },
                 });
-            } else if let Some(symbol) = self.scopes.symbol(&name.val) {
+            } else if let Some(symbol) = self.environment.symbol(&name.val) {
                 exports.insert(name.val.clone(), symbol);
             } else {
                 errors.push(GenerateError {

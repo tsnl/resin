@@ -6,9 +6,11 @@ fn infer_relation(
     relation: impl FnOnce(infer::types::Type) -> infer::constraints::Constraint,
 ) -> Result<Ty, crate::ir::GenerateError> {
     let mut inference = infer::Inference::new(typer);
-    let out = inference.solver.fresh();
-    inference.output = out.clone();
-    inference.constrain((crate::ast::Span { start: 0, end: 0 }, relation(out.clone())));
+    let (rule, out) = inference.expression();
+    inference.constrain(
+        rule,
+        (crate::ast::Span { start: 0, end: 0 }, relation(out.clone())),
+    );
     if let Some(error) = inference
         .solve(std::slice::from_ref(&out))
         .into_iter()

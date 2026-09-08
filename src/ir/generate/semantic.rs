@@ -1,5 +1,6 @@
 //! Retained compiler contexts and their resolved typing facts.
 
+use super::scope::DeclarationId;
 use crate::{
     ast::SourceLocation,
     ir::{Ty, TypeId, TyperContext},
@@ -29,7 +30,7 @@ pub(crate) struct SemanticData {
     pub imports: BTreeMap<SourceLocation, PathBuf>,
     pub contexts: crate::ir::generate::scope::Contexts,
     pub fields: BTreeMap<SourceLocation, Vec<Member>>,
-    pub method_origins: BTreeMap<(TypeId, String), usize>,
+    pub method_origins: BTreeMap<(TypeId, String), DeclarationId>,
     pub typer: TyperContext,
 }
 #[derive(Debug, Clone)]
@@ -37,7 +38,7 @@ pub(crate) struct Member {
     pub name: String,
     pub ty: String,
     pub kind: DefinitionKind,
-    pub origin: Option<usize>,
+    pub origin: Option<DeclarationId>,
 }
 impl SemanticData {
     pub(crate) fn record_members(

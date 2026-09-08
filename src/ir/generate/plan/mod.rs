@@ -3,11 +3,15 @@
 mod context;
 mod expressions;
 mod groups;
-use super::{GenerateError, Generator, scope::Scopes};
+use super::semantic::DefinitionKind;
+use super::{
+    GenerateError, Generator,
+    scope::{ContextView, Cursor, DeclarationId, Scopes},
+};
 use crate::ir::typecheck::SourceModuleId;
 use crate::ir::typecheck::infer::{
-    Inference,
-    solver::Solver,
+    Inference, Rule,
+    solver::{Solver, VariableId},
     types::{Head, Type},
 };
 use crate::{
@@ -16,7 +20,6 @@ use crate::{
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
-    ops::{Deref, DerefMut},
     rc::Rc,
     sync::Arc,
 };
@@ -28,7 +31,9 @@ type Emit = Rc<dyn Fn(&mut Generator, &Ty) -> Result<Ty>>;
 pub(super) type Statement = Rc<dyn Fn(&mut Generator) -> Result<()>>;
 #[derive(Clone)]
 pub(super) struct Term {
+    rule: Rule,
     pub span: Span,
+    pub context: Cursor,
     pub ty: Type,
     pub form: Form,
     pub emit: Emit,
@@ -48,19 +53,29 @@ pub(super) enum Form {
 pub(super) struct MatchArm {
     pub variant: Option<Annotation>,
     pub failure: bool,
-    pub name: Option<Ident>,
+    pub binding: Option<DeclarationId>,
     pub body: Term,
 }
 pub(super) struct Annotation {
+    holes: Vec<(Span, VariableId)>,
     pub ty: Type,
     pub span: Span,
 }
 impl Annotation {
+    pub(super) fn concrete(ty: Ty, span: Span) -> Self {
+        Self {
+            ty: ty.into(),
+            span,
+            holes: vec![],
+        }
+    }
     pub(super) fn resolve(&self, g: &Generator) -> Result<Ty> {
         g.solver.require(&self.ty, self.span)
     }
 }
 pub(super) struct Signature {
+    pub declaration: Option<DeclarationId>,
+    pub parameters: Vec<Option<DeclarationId>>,
     pub params: Vec<(Ident, Annotation)>,
     pub result: Annotation,
 }
@@ -70,26 +85,43 @@ impl Planner<'_> {
         if scoped {
             self.scopes.push_at(ann.span);
         }
-        let checkpoint = self.solver.clone();
-        let holes = self.holes.len();
-        let result = self.annotation(ann, infer);
+        let checkpoint = self.typing.solver.clone();
+        let result = super::annotation::Decoder {
+            solver: &mut self.typing.solver,
+            holes: Vec::new(),
+            resolve: &mut |name| {
+                if name.val.as_ref() == "String" {
+                    return Ok(self
+                        .typing
+                        .typer
+                        .string_type
+                        .clone()
+                        .expect("builtin String")
+                        .into());
+                }
+                self.scopes.resolve_type(name)
+            },
+        }
+        .decode(ann, infer);
         if scoped {
             self.scopes.pop();
         }
-        let ty = result.unwrap_or_else(|error| {
+        let decoded = result.unwrap_or_else(|error| {
             self.errors.push(error);
             self.typing.solver = checkpoint;
-            self.holes.truncate(holes);
-            Type::Invalid
+            super::annotation::Decoded {
+                ty: Type::Invalid,
+                holes: Vec::new(),
+            }
         });
-        if self.output != Type::Invalid {
-            self.constrain((
-                ann.span,
-                crate::ir::typecheck::infer::constraints::Constraint::Depends(ty.clone()),
-            ));
+        self.holes.extend_from_slice(&decoded.holes);
+        Annotation {
+            ty: decoded.ty,
+            holes: decoded.holes,
+            span: ann.span,
         }
-        Annotation { ty, span: ann.span }
     }
+
     fn signature(
         &mut self,
         params: &[(Ident, ast::Type)],
@@ -101,11 +133,17 @@ impl Planner<'_> {
             .map(|(name, ann)| (name.clone(), self.ann(ann, false)))
             .collect();
         let result = self.ann(result, infer);
-        Signature { params, result }
+        Signature {
+            params,
+            result,
+            declaration: None,
+            parameters: vec![],
+        }
     }
 }
 
 pub(super) struct PlannedFile {
+    pub context: ContextView,
     pub signatures: BTreeMap<Arc<str>, Signature>,
     pub bodies: BTreeMap<Arc<str>, Term>,
     pub solver: Solver,
@@ -116,7 +154,7 @@ struct Planner<'a> {
     scopes: Scopes,
     errors: Vec<GenerateError>,
     dependencies: BTreeSet<Arc<str>>,
-    holes: Vec<(Span, Type)>,
+    holes: Vec<(Span, VariableId)>,
     expressions: Vec<(Span, Type)>,
     result: Type,
     source_module: SourceModuleId,
@@ -135,24 +173,14 @@ impl<'a> Planner<'a> {
         }
     }
 }
-impl<'a> Deref for Planner<'a> {
-    type Target = Inference<'a>;
-    fn deref(&self) -> &Self::Target {
-        &self.typing
-    }
-}
-impl DerefMut for Planner<'_> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.typing
-    }
-}
 pub(super) fn file(
     file: &SourceFile,
     typer: &mut TyperContext,
-    scopes: &Scopes,
+    scopes: Scopes,
     source_module: SourceModuleId,
+    mut methods: BTreeMap<Arc<str>, DeclarationId>,
 ) -> PlannedFile {
-    let mut planner = Planner::new(typer, scopes.planning(), source_module);
+    let mut planner = Planner::new(typer, scopes, source_module);
     let mut signatures = BTreeMap::new();
     let mut functions = vec![];
     for stmt in file.declarations() {
@@ -172,7 +200,7 @@ pub(super) fn file(
             } => (name, params, result, None),
             _ => continue,
         };
-        let signature = planner.signature(params, result, body.is_some());
+        let mut signature = planner.signature(params, result, body.is_some());
         let ty = Type::function(
             Type::parameter(
                 signature
@@ -183,18 +211,26 @@ pub(super) fn file(
             ),
             signature.result.ty.clone(),
         );
-        let declared = crate::ir::typecheck::check_binding_name(name).and_then(|()| {
-            planner
-                .scopes
-                .define_inferred(name, ty, true)
-                .map_err(|duplicate| GenerateError {
-                    span: name.span,
-                    kind: crate::ir::GenerateErrorKind::DuplicateValue { name: duplicate },
-                })
-        });
-        if let Err(error) = declared {
-            planner.errors.push(error);
-            continue;
+        let declared = if let Some(id) = methods.remove(&name.val) {
+            planner.scopes.set_inferred(id, ty);
+            Ok(id)
+        } else {
+            crate::ir::typecheck::check_binding_name(name).and_then(|()| {
+                planner
+                    .scopes
+                    .define_inferred(name, ty, DefinitionKind::Function)
+                    .map_err(|duplicate| GenerateError {
+                        span: name.span,
+                        kind: crate::ir::GenerateErrorKind::DuplicateValue { name: duplicate },
+                    })
+            })
+        };
+        match declared {
+            Ok(id) => signature.declaration = Some(id),
+            Err(error) => {
+                planner.errors.push(error);
+                continue;
+            }
         }
         if matches!(&stmt.val, StmtKind::Function { decorators, .. }
             if decorators.len() == 1 && matches!(decorators[0].val.as_ref(),
@@ -217,31 +253,27 @@ pub(super) fn file(
     let mut constraints = vec![];
     let mut expressions = vec![];
     for (name, body) in &functions {
-        let signature = &signatures[&name.val];
+        let signature = signatures.get_mut(&name.val).unwrap();
         let errors_before = planner.errors.len();
         planner.scopes.push_at(body.span);
         planner.result = signature.result.ty.clone();
         for (name, ann) in &signature.params {
-            if let Err(error) = planner.bind(name, ann.ty.clone()) {
-                planner.errors.push(error);
-            }
-            planner.scopes.set_definition_kind(
-                name,
-                crate::ir::generate::semantic::DefinitionKind::Parameter,
-            );
+            let binding = planner
+                .bind(name, ann.ty.clone(), DefinitionKind::Parameter)
+                .map_err(|error| planner.errors.push(error))
+                .ok();
+            signature.parameters.push(binding);
         }
         let term = planner.term(body, Some(signature.result.ty.clone()));
         planner.scopes.pop();
         if planner.errors.len() != errors_before {
-            planner.solver.invalidate(&term.ty);
+            planner.typing.fail(term.rule);
         }
-        // Signature holes belong to the body that proves them, even when a
-        // recursive caller has already constrained those holes on a prior attempt.
-        planner.constraints.push((
+        planner.typing.infer_from(
+            &signature.result.holes,
             signature.result.span,
-            signature.result.ty.clone(),
-            crate::ir::typecheck::infer::constraints::Constraint::Depends(term.ty.clone()),
-        ));
+            term.ty.clone(),
+        );
         bodies.insert(name.val.clone(), term);
         edges.push(
             std::mem::take(&mut planner.dependencies)
@@ -249,28 +281,31 @@ pub(super) fn file(
                 .filter_map(|name| names.get(name).copied())
                 .collect(),
         );
-        constraints.push(std::mem::take(&mut planner.constraints));
+        constraints.push(std::mem::take(&mut planner.typing.constraints));
         expressions.push(std::mem::take(&mut planner.expressions));
     }
     for group in groups::groups(&edges) {
         let mut roots = vec![];
         for &i in &group {
-            planner.constraints.append(&mut constraints[i]);
+            planner.typing.constraints.append(&mut constraints[i]);
             roots.extend(expressions[i].iter().map(|(_, ty)| ty.clone()));
             roots.push(signatures[&functions[i].0.val].result.ty.clone());
         }
-        let errors = planner.solve(&roots);
+        let errors = planner.typing.solve(&roots);
         planner.errors.extend(errors);
         for &i in &group {
             let result = &signatures[&functions[i].0.val].result;
             for (span, ty) in
                 std::iter::once(&(result.span, result.ty.clone())).chain(expressions[i].iter())
             {
-                if planner.solver.invalid(ty) {
+                if planner.typing.solver.invalid(ty) {
                     continue;
                 }
-                if let Err(mut error) = planner.solver.require(ty, *span) {
-                    if matches!(planner.solver.head(ty), Type::Node(Head::Array(0), _)) {
+                if let Err(mut error) = planner.typing.solver.require(ty, *span) {
+                    if matches!(
+                        planner.typing.solver.head(ty),
+                        Type::Node(Head::Array(0), _)
+                    ) {
                         error = GenerateError::typing(
                             *span,
                             crate::ir::TypeError {
@@ -280,23 +315,27 @@ pub(super) fn file(
                     }
                     planner.errors.push(error);
                     if ty == &result.ty {
-                        planner.solver.invalidate(&result.ty);
+                        for (_, variable) in &result.holes {
+                            planner.typing.solver.invalidate(*variable);
+                        }
                     }
                 }
             }
         }
     }
-    for (span, ty) in &planner.holes {
-        if !planner.solver.invalid(ty)
-            && let Err(error) = planner.solver.require(ty, *span)
+    for (span, variable) in &planner.holes {
+        let ty = variable.ty();
+        if !planner.typing.solver.invalid(&ty)
+            && let Err(error) = planner.typing.solver.require(&ty, *span)
         {
             planner.errors.push(error);
         }
     }
     planner
         .scopes
-        .resolve_inferred(&planner.solver, planner.typer);
+        .resolve_inferred(&planner.typing.solver, planner.typing.typer);
     PlannedFile {
+        context: planner.scopes.finish(),
         signatures,
         bodies,
         solver: planner.typing.solver,

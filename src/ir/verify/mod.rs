@@ -20,11 +20,57 @@ pub fn verify(module: &Module) -> Result<(), VerifyError> {
 
 #[derive(Clone, Copy)]
 pub(crate) struct Verified<'a> {
-    pub module: &'a Module,
-    pub analysis: &'a ModuleTypes,
+    module: &'a Module,
+    analysis: &'a ModuleTypes,
 }
 
-#[derive(Default)]
+impl<'a> Verified<'a> {
+    pub fn module(self) -> &'a Module {
+        self.module
+    }
+
+    pub fn analysis(self) -> &'a ModuleTypes {
+        self.analysis
+    }
+}
+
+/// The checked module and the analysis that certifies this exact immutable IR.
+pub(crate) struct VerifiedModule {
+    module: Module,
+    analysis: ModuleTypes,
+}
+
+impl VerifiedModule {
+    pub fn new(mut module: Module) -> Result<Self, VerifyError> {
+        let analysis = analyze(&module)?;
+        module.types = analysis.types.clone();
+        Ok(Self { module, analysis })
+    }
+
+    pub fn view(&self) -> Verified<'_> {
+        Verified {
+            module: &self.module,
+            analysis: &self.analysis,
+        }
+    }
+
+    pub fn into_module(self) -> Module {
+        self.module
+    }
+}
+
+/// Direct IR clients borrow their module only for the duration of validation/use.
+pub(crate) fn with_verified<T, E: From<VerifyError>>(
+    module: &Module,
+    use_module: impl FnOnce(Verified<'_>) -> Result<T, E>,
+) -> Result<T, E> {
+    let analysis = analyze(module)?;
+    use_module(Verified {
+        module,
+        analysis: &analysis,
+    })
+}
+
 pub(crate) struct ModuleTypes {
     pub functions: Vec<FunctionTypes>,
     pub types: crate::ir::TypeTable,
@@ -35,7 +81,7 @@ pub(crate) struct FunctionTypes {
     pub results: Vec<Vec<Option<Ty>>>,
 }
 
-pub(crate) fn analyze(module: &Module) -> Result<ModuleTypes, VerifyError> {
+fn analyze(module: &Module) -> Result<ModuleTypes, VerifyError> {
     #[cfg(test)]
     ANALYSES.set(ANALYSES.get() + 1);
     for &function in module.entries.values() {

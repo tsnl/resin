@@ -38,15 +38,7 @@ pub fn emit_with_shaders(
     entry: &str,
     shaders: &[Shader],
 ) -> Result<String, Error> {
-    let analysis = ir::verify::analyze(module)?;
-    emit_verified(
-        ir::verify::Verified {
-            module,
-            analysis: &analysis,
-        },
-        entry,
-        shaders,
-    )
+    ir::verify::with_verified(module, |checked| emit_verified(checked, entry, shaders))
 }
 
 pub(crate) fn emit_verified(
@@ -54,7 +46,8 @@ pub(crate) fn emit_verified(
     entry: &str,
     shaders: &[Shader],
 ) -> Result<String, Error> {
-    let ir::verify::Verified { module, analysis } = checked;
+    let module = checked.module();
+    let analysis = checked.analysis();
     let types = Types::new(module, &analysis.types, shaders);
     let entry = entry::emit(&types, entry)?;
     let mut out =

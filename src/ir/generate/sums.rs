@@ -88,10 +88,10 @@ impl Generator {
             ty: result.clone(),
             tag: Case::Err,
         });
-        let before_cleanup = self.scopes.clone();
+        let before_cleanup = self.environment.clone();
         self.cleanup(0, &result);
         self.terminate(Terminator::Return);
-        self.scopes = before_cleanup;
+        self.environment = before_cleanup;
         self.switch(success);
         self.emit(Instr::TakeLocal { local: saved });
         self.emit(Instr::VariantPayload { tag: Case::Ok });
@@ -146,7 +146,7 @@ impl Generator {
             return Err(error(span, "match must cover every variant exactly once"));
         }
         let saved = self.save_top(&ty);
-        let before = self.scopes.clone();
+        let before = self.environment.clone();
         let mut after = None;
         let mut result = Some(expected.clone());
         let join = self.new_block("match.join");
@@ -165,38 +165,36 @@ impl Generator {
             } else {
                 None
             };
-            self.scopes = before.clone();
-            self.scopes.push_at(arm.body.span);
+            self.environment = before.clone();
             self.owned.push(vec![]);
             self.emit(Instr::TakeLocal { local: saved });
             self.emit(Instr::VariantPayload { tag: tag.clone() });
             let payload = ty.payload(&tag).unwrap();
             let local = self.save_top(&payload);
-            if let Some(name) = &arm.name {
-                self.bind_value(
-                    name,
+            if let Some(binding) = arm.binding {
+                self.environment.bind(
+                    binding,
                     ValueBinding {
                         shader: false,
                         kind: ValueBindingKind::Local(local),
                         ty: Some(payload),
                         initialization: Initialization::Initialized,
                     },
-                )?;
+                );
             }
             result = Some(self.gen_term(&arm.body, result.as_ref())?);
             self.cleanup(self.owned.len() - 1, result.as_ref().unwrap());
             self.owned.pop();
-            self.scopes.pop();
             if let Some(previous) = &after {
-                self.scopes.intersect_initialization(previous);
+                self.environment.intersect_initialization(previous);
             }
-            after = Some(self.scopes.clone());
+            after = Some(self.environment.clone());
             self.terminate(Terminator::Break { target: join });
             if let Some(next) = next {
                 self.switch(next);
             }
         }
-        self.scopes = after.unwrap();
+        self.environment = after.unwrap();
         self.switch(join);
         Ok(result.unwrap())
     }

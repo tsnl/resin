@@ -357,7 +357,7 @@ mod verification_tests {
         assert_eq!(ANALYSES.get(), 1);
         let mut shaders = Vec::new();
         for name in ["a", "b"] {
-            let id = checked.module.entries[name];
+            let id = checked.module().entries[name];
             shaders.push(glsl::emit_verified(checked, id, glsl::Stage::Compute).unwrap());
         }
         let host = c::emit_verified(checked, "main", &[]).unwrap();
@@ -367,14 +367,14 @@ mod verification_tests {
             "all internal emissions share one analysis"
         );
         assert!(std::ptr::eq(
-            checked.analysis,
-            snapshot.verified().unwrap().analysis
+            checked.analysis(),
+            snapshot.verified().unwrap().analysis()
         ));
-        assert_eq!(host, c::emit(checked.module, "main").unwrap());
+        assert_eq!(host, c::emit(checked.module(), "main").unwrap());
         for (name, expected) in ["a", "b"].into_iter().zip(shaders) {
             assert_eq!(
                 expected,
-                glsl::emit(checked.module, name, glsl::Stage::Compute).unwrap()
+                glsl::emit(checked.module(), name, glsl::Stage::Compute).unwrap()
             );
         }
         session
@@ -384,7 +384,7 @@ mod verification_tests {
         let changed = session.analyze(&path).unwrap();
         let new = changed.verified().unwrap();
         assert_eq!(ANALYSES.get(), 1);
-        assert!(!std::ptr::eq(checked.module, new.module));
+        assert!(!std::ptr::eq(checked.module(), new.module()));
         assert_ne!(host, c::emit_verified(new, "main", &[]).unwrap());
         assert_eq!(
             host,

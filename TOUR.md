@@ -181,20 +181,25 @@ variables and control flow; they do not execute the IR.
 ### Generation composes typing and emission
 
 [ir/generate/plan/expressions.rs](src/ir/generate/plan/expressions.rs) walks each
-expression once. It plans the children, passes their type handles to the injected
-[inference services](src/ir/typecheck/infer/), and selects the corresponding
-emission operation alongside those constraints. The typing layer does not walk
-expressions or own lexical scopes.
+expression once. Its `Expression` builder plans children through `child` and
+type annotations through `annotation`, automatically registering dependencies
+on both. The builder passes their type handles to the injected
+[inference services](src/ir/typecheck/infer/) and selects an emission operation.
+Each equation has an explicit `Rule` owner, which identifies the inference
+variables invalidated if that operation fails. Adding an expression composes
+these methods; the typing layer does not traverse syntax or own lexical scopes.
 
 [ir/typecheck/](src/ir/typecheck/) contains the shared operation rules.
-[TyperContext](src/ir/typecheck/mod.rs) owns nominal definitions;
+[TyperContext](src/ir/typecheck/mod.rs) owns type definitions and method namespaces;
 [builtin.rs](src/ir/typecheck/builtin.rs) classifies builtin names and arities,
 [rules.rs](src/ir/typecheck/rules.rs) checks their signatures, and
 [convert.rs](src/ir/typecheck/convert.rs) classifies explicit conversions.
 Inference, emission, and the independent IR verifier use these same rules.
 [literal.rs](src/ir/literal.rs) shares numeric suffixes and literal classification.
 [annotation.rs](src/ir/generate/annotation.rs) evaluates type syntax with an
-injected name resolver, supporting both concrete annotations and explicit holes.
+injected name resolver. Its decoder returns the type and its explicit hole
+handles together, publishing neither after a failed decode. Function result
+inference owns those holes, so a failed body preserves concrete annotations.
 
 [plan/mod.rs](src/ir/generate/plan/mod.rs) resolves function dependency groups
 before executing their emission operations. Errors retain valid declarations
@@ -206,10 +211,15 @@ error sets to a fixed point, including mutually recursive functions. Final IR
 contains only concrete types. There is no AST-node-keyed type table or second
 expression AST walk for instruction generation.
 
-Lexical [contexts](src/ir/generate/scope.rs) retain declarations and parent links.
-A context view includes its visible declaration prefix, so lookup at an earlier
-expression cannot see later declarations. Type facts enrich these declarations;
-lowering adds storage for the current expansion.
+In [scope.rs](src/ir/generate/scope.rs), `Scopes` constructs declarations and
+parent links and owns pending type facts until they resolve. Its retained
+`ContextView` provides lookup at a captured declaration prefix. Lowering uses
+an `Environment` that maps declaration IDs to storage; it cannot declare names
+or rebuild scopes. Planned terms and statements carry their context cursors,
+so an earlier expression cannot see later declarations. Inherent methods keep
+canonical declaration IDs in their receiver namespace; they do not become
+ordinary lexical bindings. Instance and associated calls use the same method
+signatures, with explicit receiver conversions during lowering.
 
 Local structs reserve their nominal identity while planning. Ownership cleanup
 tracks initialized locals and destroys them in reverse scope order at each exit,
@@ -229,6 +239,7 @@ The neighboring files separate the questions asked during that process:
 | Which storage location does an assignment or address refer to? | [places.rs](src/ir/generate/places.rs) |
 | How do branches, loops, and short-circuit operators join? | [flow.rs](src/ir/generate/flow.rs) |
 | How do Results, exhaustive matches, and early error returns lower? | [sums.rs](src/ir/generate/sums.rs) |
+| How are inherent and builtin methods declared and called? | [methods.rs](src/ir/generate/methods.rs), [builtin_methods.rs](src/ir/generate/builtin_methods.rs), [typecheck/methods.rs](src/ir/typecheck/methods.rs) |
 | How are owned locals destroyed at scope exits? | [cleanup.rs](src/ir/generate/cleanup.rs) |
 | How are blocks, locals, and instructions assembled? | [builder.rs](src/ir/generate/builder.rs) |
 
@@ -239,11 +250,12 @@ require different instructions.
 ### Verification is an independent boundary
 
 [ir/verify/](src/ir/verify/) checks instruction operands, block-edge stack
-types, returns, and type definitions. It must also reject malformed IR built
-directly by a caller, without trusting the AST generator. Compilation retains
-its verification results with the module, and the native build reuses them
-instead of verifying again. Public backend entry points accepting arbitrary IR
-still validate their inputs.
+types, returns, and type definitions. Its `VerifiedModule` owns the checked
+module, function typing results, and canonical type table behind private fields. Snapshots retain
+this product, and native builds borrow a `Verified` view of it. Public backend
+entry points accepting arbitrary IR use `with_verified` to validate their input
+and borrow the resulting analysis for emission. Consuming `into_module` returns
+ordinary IR and explicitly drops its verification proof.
 
 [verify/flow.rs](src/ir/verify/flow.rs) propagates stack types through existing
 blocks and checks that incoming edges agree. [generate/flow.rs](src/ir/generate/flow.rs)
@@ -301,8 +313,9 @@ their types. Unknown types display as `?`; errors prevent executable generation.
 
 [analysis.rs](src/analysis.rs) implements editor queries on the compiler's
 snapshot, also exposed under the compatibility name `Analysis`. Queries select
-the source context view and look up declarations on demand. Hover and field
-completion use retained type facts and shared formatting from
+the source context view and look up declarations on demand. Member observations
+retain available fields, signatures, and canonical method origins even when later code fails.
+Hover and member completion use these facts and shared formatting from
 [generate/semantic.rs](src/ir/generate/semantic.rs). There is no separate
 recovery compiler or fallback declaration index.
 
