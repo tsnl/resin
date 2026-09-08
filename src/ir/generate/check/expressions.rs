@@ -152,7 +152,9 @@ impl<'a> Checker<'a> {
             }
             TermKind::Unit => equate = Some(Ty::Unit.into()),
             TermKind::Unwrap { value } => {
-                self.term(value, Some(Type::Node(Head::Option, vec![out.clone()])))?;
+                let payload = self.solver.fresh();
+                self.term(value, Some(Type::Node(Head::Option, vec![payload.clone()])))?;
+                equate = Some(payload);
             }
             TermKind::Try { value } => {
                 if self.in_defer {

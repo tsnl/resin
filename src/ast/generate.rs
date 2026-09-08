@@ -869,8 +869,10 @@ impl<'a> AstGen<'a> {
     fn ident(&self, node: Node) -> Ident {
         let text = if self.recovering
             && (node.is_missing()
-                || !matches!(node.kind(), "lid" | "uid" | "builtin_type" | "Ptr" | "Span"))
-        {
+                || !matches!(
+                    node.kind(),
+                    "lid" | "uid" | "builtin_type" | "Ptr" | "Span" | "Option"
+                )) {
             ""
         } else {
             self.text(node)
