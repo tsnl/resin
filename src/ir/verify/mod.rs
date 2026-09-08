@@ -24,6 +24,7 @@ pub(crate) struct Verified<'a> {
     pub analysis: &'a ModuleTypes,
 }
 
+#[derive(Default)]
 pub(crate) struct ModuleTypes {
     pub functions: Vec<FunctionTypes>,
     pub types: crate::ir::TypeTable,

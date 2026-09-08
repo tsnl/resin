@@ -69,7 +69,7 @@ impl Generator {
         tail: &Term,
         expected: &Ty,
     ) -> Result<Ty, GenerateError> {
-        self.scopes.push();
+        self.scopes.push_at(self.source_span);
         self.owned.push(vec![]);
         for stmt in stmts {
             stmt(self)?;

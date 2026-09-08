@@ -116,9 +116,10 @@ in generated C, then compile and link the executable. `Session::compile` returns
 a separate step. Generated C, GLSL, and SPIR-V remain in the build cache for inspection.
 
 The session owns source overlays, cached parses, import dependencies, and
-immutable [analysis snapshots](src/analysis/mod.rs). A snapshot exposes the
-AST, verified IR when compilation succeeds, and editor queries. The CLI uses
-one session for its invocation; the language server retains one across edits.
+immutable [compilation snapshots](src/compiler/snapshot.rs). A snapshot retains
+the AST, declaration contexts, type facts, diagnostics, and verified IR when
+compilation succeeds. The CLI uses one session for its invocation; the language
+server retains one across edits.
 
 The compiler stages are library modules exposed by [src/lib.rs](src/lib.rs),
 so tests and editor adapters can inspect the AST and verified IR through
@@ -148,12 +149,14 @@ syntax. Skip the generated `src/parser.c` on a first read.
 files, statements, terms, and types, annotated with byte spans for diagnostics.
 [generate.rs](src/ast/generate.rs) translates Tree-sitter nodes into these
 structures, decodes literals, inserts the unit branch for one-armed `if`, and lowers operators into builtin
-applications.
+applications. Malformed expressions become holes alongside syntax diagnostics;
+strict parsing checks those diagnostics before returning the same AST.
 
 [load.rs](src/ast/load.rs) builds a `Program` of source modules in dependency
 order, with the entry file last. It resolves relative imports and `std/` paths,
-deduplicates canonical paths, and rejects import cycles. Loading files and
-deciding which names are visible are separate jobs: visibility is handled later
+deduplicates canonical paths, and reports import cycles. The shared loading
+traversal retains accessible modules and failed dependencies after errors.
+Loading files and deciding which names are visible are separate jobs: visibility is handled later
 by [IR module lowering](src/ir/generate/modules.rs).
 
 ### Learn the IR's vocabulary before its generator
@@ -194,11 +197,19 @@ Inference, emission, and the independent IR verifier use these same rules.
 injected name resolver, supporting both concrete annotations and explicit holes.
 
 [plan/mod.rs](src/ir/generate/plan/mod.rs) resolves function dependency groups
-before executing their emission operations. The private
+before executing their emission operations. Errors retain valid declarations
+and independent expression facts. Failed relations are removed and surviving
+constraints are retried from a solver checkpoint, without repeating the source
+traversal. The private
 [solver](src/ir/typecheck/infer/solver.rs) delays numeric choices and accumulates
 error sets to a fixed point, including mutually recursive functions. Final IR
 contains only concrete types. There is no AST-node-keyed type table or second
 expression AST walk for instruction generation.
+
+Lexical [contexts](src/ir/generate/scope.rs) retain declarations and parent links.
+A context view includes its visible declaration prefix, so lookup at an earlier
+expression cannot see later declarations. Type facts enrich these declarations;
+lowering adds storage for the current expansion.
 
 Local structs reserve their nominal identity while planning. Ownership cleanup
 tracks initialized locals and destroys them in reverse scope order at each exit,
@@ -212,7 +223,8 @@ The neighboring files separate the questions asked during that process:
 | Question | Start reading here |
 | --- | --- |
 | Which imported or exported declaration does a name mean? | [modules.rs](src/ir/generate/modules.rs) |
-| Which local names exist, and are they initialized? | [scope.rs](src/ir/generate/scope.rs), [bindings.rs](src/ir/generate/bindings.rs) |
+| Which declarations are visible, and where are their types and origins? | [scope.rs](src/ir/generate/scope.rs), [semantic.rs](src/ir/generate/semantic.rs) |
+| Where is a binding stored, and is it initialized? | [bindings.rs](src/ir/generate/bindings.rs), [builder.rs](src/ir/generate/builder.rs) |
 | How are typing and emission composed for an expression? | [plan/expressions.rs](src/ir/generate/plan/expressions.rs), [terms.rs](src/ir/generate/terms.rs) |
 | Which storage location does an assignment or address refer to? | [places.rs](src/ir/generate/places.rs) |
 | How do branches, loops, and short-circuit operators join? | [flow.rs](src/ir/generate/flow.rs) |
@@ -228,8 +240,10 @@ require different instructions.
 
 [ir/verify/](src/ir/verify/) checks instruction operands, block-edge stack
 types, returns, and type definitions. It must also reject malformed IR built
-directly by a caller, without trusting the AST generator. Its type analysis is
-reused by the backends.
+directly by a caller, without trusting the AST generator. Compilation retains
+its verification results with the module, and the native build reuses them
+instead of verifying again. Public backend entry points accepting arbitrary IR
+still validate their inputs.
 
 [verify/flow.rs](src/ir/verify/flow.rs) propagates stack types through existing
 blocks and checks that incoming edges agree. [generate/flow.rs](src/ir/generate/flow.rs)
@@ -272,19 +286,25 @@ text through `set_overlay`, removes it with `remove_overlay`, and reports disk
 changes with `file_changed`. Overlays take precedence over disk. Changes
 invalidate dependent entries; retained snapshots remain valid for their readers.
 
-Within [analysis/](src/analysis/), [source.rs](src/analysis/source.rs) handles
-source lookup and path normalization, [syntax.rs](src/analysis/syntax.rs) caches
-ASTs and incrementally reparses Tree-sitter trees, and
-[semantic.rs](src/analysis/semantic.rs) records types and resolved references.
-Parsing is incremental per file; semantic checking still reruns an affected
-entry's entire import closure. This is separate from the native artifact cache.
+[compiler/source.rs](src/compiler/source.rs) handles source lookup and path
+normalization; [compiler/syntax.rs](src/compiler/syntax.rs) caches ASTs and
+incrementally reparses Tree-sitter trees. [snapshot.rs](src/compiler/snapshot.rs)
+builds the common result for compilation and editor queries. Parsing is
+incremental per file; semantic checking reruns an affected entry's import
+closure. This is separate from the native artifact cache.
 
-Incomplete code gets an editor AST with expression, type, and missing-field
-holes. [ir/generate/recover.rs](src/ir/generate/recover.rs) walks it using the
-compiler's scopes and type rules, preserving useful information after errors.
-Unknown types remain unknown, displayed as `?`; this pass emits no IR. Strict
-compilation still rejects incomplete programs, and its observations take
-precedence over recovered information.
+Incomplete code goes through the same compiler traversal. Expression, type,
+and missing-field holes preserve useful children; bounded delimiter repair
+recovers unfinished scopes without clearing the original syntax diagnostics.
+Invalid declarations still shadow outer names, and healthy siblings retain
+their types. Unknown types display as `?`; errors prevent executable generation.
+
+[analysis.rs](src/analysis.rs) implements editor queries on the compiler's
+snapshot, also exposed under the compatibility name `Analysis`. Queries select
+the source context view and look up declarations on demand. Hover and field
+completion use retained type facts and shared formatting from
+[generate/semantic.rs](src/ir/generate/semantic.rs). There is no separate
+recovery compiler or fallback declaration index.
 
 The [language server](resin-lsp/README.md) adapts that compiler state to the
 Language Server Protocol over stdio. [server.rs](resin-lsp/src/server.rs)

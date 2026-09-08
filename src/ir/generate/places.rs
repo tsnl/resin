@@ -21,11 +21,7 @@ impl Generator {
                 },
             ));
         };
-        let value_ty = self.gen_term(value, Some(&pointee))?;
-        let ty = self
-            .typer
-            .type_assign(&pointee, &value_ty)
-            .map_err(|err| GenerateError::typing(place.span, err))?;
+        let ty = self.gen_term(value, Some(&pointee))?;
         self.emit(Instr::Store);
         if let Form::Var { name } = &place.form {
             self.scopes
@@ -62,8 +58,6 @@ impl Generator {
                         })?;
                 entry.embedded = true;
                 let stage = entry.stage.clone();
-                self.scopes
-                    .record_fields(name, &Ty::shader_properties(), &self.typer);
                 self.emit(Instr::Shader { function, stage });
                 return Ok(Ty::shader());
             }
@@ -117,15 +111,12 @@ impl Generator {
             }
             Form::Deref { pointer } => {
                 let checked = self.solver.require(&pointer.ty, pointer.span)?;
-                let pointer_ty = if matches!(checked, Ty::Arc { .. }) {
+                if matches!(checked, Ty::Arc { .. }) {
                     self.hold_arc_address(pointer)?
                 } else {
                     self.gen_term(pointer, None)?
                 };
-                let pointee = self
-                    .typer
-                    .type_deref(&pointer_ty)
-                    .map_err(|err| GenerateError::typing(term.span, err))?;
+                let pointee = self.solver.require(&term.ty, term.span)?;
                 Ok(Operand::Place(pointee))
             }
             _ => self.gen_term(term, None).map(Operand::Value),
@@ -165,7 +156,6 @@ impl Generator {
             base_ty = pointee;
             is_place = true;
         }
-        self.scopes.record_fields(name, &base_ty, &self.typer);
         let access = self
             .typer
             .type_field(&base_ty, &name.val)

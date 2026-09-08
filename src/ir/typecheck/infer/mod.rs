@@ -38,7 +38,8 @@ use types::{Head, Type};
 pub(in crate::ir) struct Inference<'a> {
     pub typer: &'a mut TyperContext,
     pub solver: Solver,
-    pub constraints: Vec<(Span, Constraint)>,
+    pub constraints: Vec<(Span, Type, Constraint)>,
+    pub output: Type,
 }
 impl<'a> Inference<'a> {
     pub fn new(typer: &'a mut TyperContext) -> Self {
@@ -46,7 +47,12 @@ impl<'a> Inference<'a> {
             typer,
             solver: Solver::default(),
             constraints: vec![],
+            output: Type::Invalid,
         }
+    }
+    pub fn constrain(&mut self, (span, constraint): (Span, Constraint)) {
+        self.constraints
+            .push((span, self.output.clone(), constraint));
     }
     pub fn result_parts(&mut self, ty: &Type, span: Span) -> Result<(Type, Type)> {
         match self.solver.head(ty) {
@@ -55,9 +61,10 @@ impl<'a> Inference<'a> {
                 let value = self.solver.fresh();
                 let errors = self.solver.fresh();
                 self.solver.errors(&errors, span)?;
-                self.solver
-                    .unify(ty, &Type::result(value.clone(), errors.clone()), span)
-                    .map_err(|_| error(span, "ok, err, and ? require a Result type"))?;
+                self.constrain((
+                    span,
+                    Constraint::Equal(ty.clone(), Type::result(value.clone(), errors.clone())),
+                ));
                 Ok((value, errors))
             }
             _ => Err(error(

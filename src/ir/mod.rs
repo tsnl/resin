@@ -14,8 +14,8 @@ pub mod print;
 pub mod typecheck;
 pub mod verify;
 
+pub(crate) use generate::analyze_program;
 pub use generate::{GenerateError, GenerateErrorKind, generate, generate_program};
-pub(crate) use generate::{analyze_program, analyze_recovering};
 pub use instr::{BasicBlock, BlockId, Foreign, Function, Instr, Local, StackEffect, Terminator};
 pub use print::format_module;
 pub use typecheck::{

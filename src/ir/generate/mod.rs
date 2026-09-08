@@ -20,9 +20,8 @@ mod modules;
 mod places;
 mod plan;
 use plan::Term;
-mod recover;
-pub(crate) use recover::analyze as analyze_recovering;
-pub(super) mod scope;
+pub(crate) mod scope;
+pub(crate) mod semantic;
 mod sums;
 mod terms;
 
@@ -46,9 +45,12 @@ pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
         });
     }
     let mut generator = Generator::new();
-    generator.generate_file(file)?;
+    generator.generate_file(file);
+    if let Some(error) = std::mem::take(&mut generator.errors).into_iter().next() {
+        return Err(error);
+    }
     generator.module.entries = generator.exported_functions(file)?;
-    generator.finish()
+    generator.finish().map(|(module, _)| module)
 }
 
 struct Generator {
@@ -62,6 +64,7 @@ struct Generator {
     scopes: Scopes,
     solver: crate::ir::typecheck::infer::solver::Solver,
     owned: Vec<Vec<LocalId>>,
+    errors: Vec<GenerateError>,
 }
 
 impl Generator {
@@ -77,132 +80,173 @@ impl Generator {
             scopes: Scopes::new(),
             solver: Default::default(),
             owned: vec![],
+            errors: vec![],
         }
     }
 
-    fn generate_file(&mut self, file: &SourceFile) -> Result<(), GenerateError> {
+    fn generate_file(&mut self, file: &SourceFile) {
         for stmt in file.declarations() {
-            if matches!(
-                stmt.val,
-                StmtKind::Define { .. } | StmtKind::Declare { .. } | StmtKind::Expr { .. }
-            ) {
-                return Err(GenerateError {
-                    span: stmt.span,
-                    kind: GenerateErrorKind::InvalidModuleItem,
-                });
-            }
-        }
-        for stmt in file.declarations() {
-            if let StmtKind::ForeignType { name } = &stmt.val {
-                self.scopes
-                    .define_foreign_type(name.val.clone())
-                    .map_err(|name| GenerateError {
+            let result = match &stmt.val {
+                StmtKind::Define { .. } | StmtKind::Declare { .. } | StmtKind::Expr { .. } => {
+                    Err(GenerateError {
                         span: stmt.span,
-                        kind: GenerateErrorKind::DuplicateType { name },
-                    })?;
-                self.scopes.record_definition(
-                    name,
-                    true,
-                    Some(&Ty::Foreign {
-                        name: name.val.clone(),
-                    }),
-                    &self.typer,
-                );
+                        kind: GenerateErrorKind::InvalidModuleItem,
+                    })
+                }
+                StmtKind::ForeignType { name } => {
+                    let result =
+                        self.scopes
+                            .define_foreign_type(name.val.clone())
+                            .map_err(|name| GenerateError {
+                                span: stmt.span,
+                                kind: GenerateErrorKind::DuplicateType { name },
+                            });
+                    self.scopes.record_definition(
+                        name,
+                        true,
+                        Some(&Ty::Foreign {
+                            name: name.val.clone(),
+                        }),
+                        &self.typer,
+                    );
+                    result
+                }
+                _ => Ok(()),
+            };
+            if let Err(error) = result {
+                self.errors.push(error);
             }
         }
         for stmt in file.declarations() {
-            match &stmt.val {
-                StmtKind::DefineType { name, init } => self.gen_define_type(name, init)?,
-                StmtKind::Struct { name, body } => self.gen_struct(name, body)?,
-                _ => {}
+            let result = match &stmt.val {
+                StmtKind::DefineType { name, init } => self.gen_define_type(name, init),
+                StmtKind::Struct { name, body } => self.gen_struct(name, body),
+                _ => Ok(()),
+            };
+            if let Err(error) = result {
+                self.errors.push(error);
             }
         }
-        self.declare_methods(file)?;
-        let planned = plan::file(file, &mut self.typer, &self.scopes, self.source_module)?;
+        self.declare_methods(file);
+        let planned = plan::file(file, &mut self.typer, &self.scopes, self.source_module);
         self.solver = planned.solver;
+        self.errors.extend(planned.errors);
+        self.scopes.lowering();
+        let mut declared = std::collections::BTreeSet::new();
         for stmt in file.declarations() {
-            if let StmtKind::Function {
-                name, decorators, ..
-            } = &stmt.val
-            {
-                let id = if !name.val.contains('.') {
-                    self.declare_function(name, &planned.signatures[&name.val])?
-                } else {
-                    let ValueBindingKind::Function(id) = self.resolve_value(name)?.kind else {
-                        unreachable!()
-                    };
-                    id
-                };
-                for decorator in decorators {
-                    let stage = match decorator.val.as_ref() {
-                        "compute_shader" => "compute",
-                        "vertex_shader" => "vertex",
-                        "fragment_shader" => "fragment",
-                        _ => {
-                            return Err(GenerateError {
+            let result = (|| {
+                match &stmt.val {
+                    StmtKind::Function {
+                        name, decorators, ..
+                    } => {
+                        let Some(signature) = planned.signatures.get(&name.val) else {
+                            return Ok(());
+                        };
+                        if !declared.insert(name.val.clone()) {
+                            return Ok(());
+                        }
+                        let id = if name.val.contains('.') {
+                            let Some(binding) = self.scopes.lookup_value(&name.val) else {
+                                return Ok(());
+                            };
+                            let ValueBindingKind::Function(id) = binding.kind else {
+                                return Ok(());
+                            };
+                            id
+                        } else {
+                            self.declare_function(name, signature)?
+                        };
+                        for decorator in decorators {
+                            let stage = match decorator.val.as_ref() {
+                                "compute_shader" => "compute",
+                                "vertex_shader" => "vertex",
+                                "fragment_shader" => "fragment",
+                                _ => {
+                                    return Err(GenerateError {
+                                        span: decorator.span,
+                                        kind: GenerateErrorKind::InvalidShader {
+                                            message: "unknown decorator".into(),
+                                        },
+                                    });
+                                }
+                            };
+                            if self.module.shaders.contains_key(&id) {
+                                return Err(GenerateError {
+                                    span: decorator.span,
+                                    kind: GenerateErrorKind::InvalidShader {
+                                        message: "a function can have only one shader decorator"
+                                            .into(),
+                                    },
+                                });
+                            }
+                            crate::ir::shader::validate(
+                                &self.typer,
+                                &self.module.functions[id.index()],
+                                stage,
+                            )
+                            .map_err(|message| GenerateError {
                                 span: decorator.span,
                                 kind: GenerateErrorKind::InvalidShader {
-                                    message: "unknown decorator".into(),
+                                    message: message.into(),
                                 },
-                            });
+                            })?;
+                            self.scopes.lookup_value_mut(&name.val).unwrap().shader = true;
+                            self.module.shaders.insert(
+                                id,
+                                crate::ir::shader::ShaderEntry {
+                                    stage: stage.into(),
+                                    embedded: false,
+                                },
+                            );
                         }
-                    };
-                    if self.module.shaders.contains_key(&id) {
-                        return Err(GenerateError {
-                            span: decorator.span,
-                            kind: GenerateErrorKind::InvalidShader {
-                                message: "a function can have only one shader decorator".into(),
-                            },
-                        });
                     }
-                    crate::ir::shader::validate(
-                        &self.typer,
-                        &self.module.functions[id.index()],
-                        stage,
-                    )
-                    .map_err(|message| GenerateError {
-                        span: decorator.span,
-                        kind: GenerateErrorKind::InvalidShader {
-                            message: message.into(),
-                        },
-                    })?;
-                    self.scopes.lookup_value_mut(&name.val).unwrap().shader = true;
-                    self.module.shaders.insert(
-                        id,
-                        crate::ir::shader::ShaderEntry {
-                            stage: stage.into(),
-                            embedded: false,
-                        },
-                    );
+                    StmtKind::ForeignFunction { header, name, .. } => {
+                        if let Some(signature) = planned.signatures.get(&name.val)
+                            && declared.insert(name.val.clone())
+                        {
+                            self.declare_foreign(header, name, signature)?;
+                        }
+                    }
+                    _ => {}
                 }
-            }
-            if let StmtKind::ForeignFunction { header, name, .. } = &stmt.val {
-                self.declare_foreign(header, name, &planned.signatures[&name.val])?;
+                Ok(())
+            })();
+            if let Err(error) = result {
+                self.errors.push(error);
             }
         }
         for stmt in file.declarations() {
-            if let StmtKind::Function { name, .. } = &stmt.val {
-                self.gen_function(
-                    name,
-                    &planned.signatures[&name.val],
-                    &planned.bodies[&name.val],
-                )?;
+            if let StmtKind::Function { name, .. } = &stmt.val
+                && let Some(body) = planned.bodies.get(&name.val)
+                && self.scopes.lookup_value(&name.val).is_some()
+                && !self.solver.invalid(&body.ty)
+            {
+                let scopes = self.scopes.clone();
+                if let Err(error) = self.gen_function(name, &planned.signatures[&name.val], body) {
+                    if !self.errors.contains(&error) {
+                        self.errors.push(error);
+                    }
+                    self.scopes = scopes;
+                    self.function = None;
+                    self.function_id = None;
+                    self.owned.clear();
+                }
             }
         }
-        Ok(())
     }
 
-    fn finish(mut self) -> Result<Module, GenerateError> {
+    fn finish(mut self) -> Result<(Module, crate::ir::verify::ModuleTypes), GenerateError> {
         self.module.types = self.typer.into_definitions().map_err(|err| GenerateError {
             span: Span { start: 0, end: 0 },
             kind: GenerateErrorKind::Type(err.kind),
         })?;
-        let analysis = crate::ir::verify::analyze(&self.module).map_err(|err| GenerateError {
-            span: Span { start: 0, end: 0 },
-            kind: GenerateErrorKind::InvalidIr(err),
-        })?;
-        self.module.types = analysis.types;
-        Ok(self.module)
+        let verification =
+            crate::ir::verify::analyze(&self.module).map_err(|err| GenerateError {
+                span: Span { start: 0, end: 0 },
+                kind: GenerateErrorKind::InvalidIr(err),
+            })?;
+        self.module.types = verification.types.clone();
+        Ok((self.module, verification))
     }
 
     // `to` requests an emitted value conversion, never a typing context.

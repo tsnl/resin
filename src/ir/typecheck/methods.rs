@@ -71,12 +71,6 @@ impl ReceiverConversion {
 }
 
 impl FunctionDecl {
-    pub fn ty(&self) -> Ty {
-        Ty::Function {
-            param: Box::new(Ty::parameter(&self.params)),
-            result: Box::new(self.result.clone()),
-        }
-    }
     pub fn arguments(&self, receiver: &Ty, associated: bool) -> Option<&[Ty]> {
         if associated {
             return Some(&self.params);

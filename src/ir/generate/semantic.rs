@@ -1,54 +1,47 @@
-//! Optional observations of the compiler's own binding and typing decisions.
+//! Retained compiler contexts and their resolved typing facts.
 
 use crate::{
-    ast::{SourceLocation, Span},
+    ast::SourceLocation,
     ir::{Ty, TypeId, TyperContext},
 };
-use std::{cell::RefCell, collections::BTreeMap, path::PathBuf, rc::Rc};
+use std::{collections::BTreeMap, path::PathBuf};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefinitionKind {
+    Function,
+    Variable,
+    Parameter,
+    Type,
+    Keyword,
+    Field,
+}
+#[derive(Debug, Clone)]
+pub struct Definition {
+    pub name: String,
+    pub location: SourceLocation,
+    pub kind: DefinitionKind,
+    pub label: String,
+    pub(crate) ty: Option<Ty>,
+    pub(crate) member: bool,
+}
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SemanticData {
-    pub types: BTreeMap<SourceLocation, String>,
-    pub references: BTreeMap<SourceLocation, SourceLocation>,
+    pub imports: BTreeMap<SourceLocation, PathBuf>,
+    pub contexts: crate::ir::generate::scope::Contexts,
     pub fields: BTreeMap<SourceLocation, Vec<Member>>,
-    pub method_origins: BTreeMap<(TypeId, String), SourceLocation>,
+    pub method_origins: BTreeMap<(TypeId, String), usize>,
+    pub typer: TyperContext,
 }
-
 #[derive(Debug, Clone)]
 pub(crate) struct Member {
     pub name: String,
     pub ty: String,
-    pub kind: super::DefinitionKind,
+    pub kind: DefinitionKind,
+    pub origin: Option<usize>,
 }
-
-#[derive(Clone)]
-pub(crate) struct Trace {
-    pub path: PathBuf,
-    pub data: Rc<RefCell<SemanticData>>,
-}
-
-impl Trace {
-    pub fn location(&self, span: Span) -> SourceLocation {
-        SourceLocation {
-            path: self.path.clone(),
-            span,
-        }
-    }
-
-    pub fn typed(&self, location: SourceLocation, ty: &Ty, typer: &TyperContext) {
-        self.record_fields(location.clone(), ty, typer);
-        self.data
-            .borrow_mut()
-            .types
-            .insert(location, format_type(ty, typer));
-    }
-
-    pub fn record_fields(&self, location: SourceLocation, ty: &Ty, typer: &TyperContext) {
-        self.record_members(location, ty, false, typer);
-    }
-
-    pub fn record_members(
-        &self,
+impl SemanticData {
+    pub(crate) fn record_members(
+        &mut self,
         location: SourceLocation,
         ty: &Ty,
         associated: bool,
@@ -62,51 +55,38 @@ impl Trace {
             members.extend(fields.into_iter().map(|field| Member {
                 name: field.name.to_string(),
                 ty: format_type(&field.ty, typer),
-                kind: super::DefinitionKind::Field,
+                kind: DefinitionKind::Field,
+                origin: None,
             }));
         }
         for (name, method) in typer.methods(ty) {
             let Some(params) = method.arguments(ty, associated) else {
                 continue;
             };
-            let ty = Ty::Function {
+            let signature = Ty::Function {
                 param: Box::new(Ty::parameter(params)),
                 result: Box::new(method.result.clone()),
+            };
+            let origin = if matches!(method.body, crate::ir::typecheck::FunctionBody::Defined(_)) {
+                typer.receiver_definition(ty).and_then(|receiver| {
+                    self.method_origins
+                        .get(&(receiver, name.to_string()))
+                        .copied()
+                })
+            } else {
+                None
             };
             members.retain(|member| member.name != name.as_ref());
             members.push(Member {
                 name: name.to_string(),
-                ty: format_type(&ty, typer),
-                kind: super::DefinitionKind::Function,
+                ty: format_type(&signature, typer),
+                kind: DefinitionKind::Function,
+                origin,
             });
         }
-        self.data.borrow_mut().fields.insert(location, members);
-    }
-
-    pub fn record_method(
-        &self,
-        name: &crate::ast::Ident,
-        ty: &Ty,
-        associated: bool,
-        typer: &TyperContext,
-    ) {
-        self.record_members(self.location(name.span), ty, associated, typer);
-        if let Some(method) = typer.method(ty, &name.val)
-            && matches!(method.body, crate::ir::typecheck::FunctionBody::Defined(_))
-            && let Some(receiver) = typer.receiver_definition(ty)
-        {
-            let mut data = self.data.borrow_mut();
-            if let Some(origin) = data
-                .method_origins
-                .get(&(receiver, name.val.to_string()))
-                .cloned()
-            {
-                data.references.insert(self.location(name.span), origin);
-            }
-        }
+        self.fields.insert(location, members);
     }
 }
-
 pub(crate) fn format_type(ty: &Ty, typer: &TyperContext) -> String {
     match ty {
         Ty::Union { variants } => {

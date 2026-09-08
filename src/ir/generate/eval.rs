@@ -57,17 +57,14 @@ impl Evaluator<'_> {
             holes: &mut Vec::new(),
             resolve: &mut |name| {
                 if name.val.as_ref() == "String" {
-                    return Ok(self.typer.string_type.clone().expect("builtin String"));
+                    return Ok(self
+                        .typer
+                        .string_type
+                        .clone()
+                        .expect("builtin String")
+                        .into());
                 }
-                self.scopes.record_reference(name, true);
-                self.scopes
-                    .lookup_type(&name.val)
-                    .ok_or_else(|| GenerateError {
-                        span: name.span,
-                        kind: GenerateErrorKind::UnboundType {
-                            name: name.val.clone(),
-                        },
-                    })
+                self.scopes.resolve_type(name)
             },
         }
         .decode(ty, false)?;

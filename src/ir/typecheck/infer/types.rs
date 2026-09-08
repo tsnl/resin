@@ -17,6 +17,7 @@ pub(in crate::ir) enum Head {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::ir) enum Type {
+    Invalid,
     Variable(usize),
     Node(Head, Vec<Type>),
 }

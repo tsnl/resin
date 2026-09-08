@@ -100,7 +100,7 @@ impl Generator {
         let result = self.module.functions[id.index()].result.clone();
         self.function = Some(FunctionBuilder::new(Some(name.val.clone())));
         self.function().result(result.clone());
-        self.scopes.push();
+        self.scopes.push_at(body.span);
         self.owned.push(vec![LocalId::from_index(0)]);
         self.bind_params(signature)?;
         self.gen_term(body, Some(&result))?;

@@ -646,8 +646,14 @@ fn conflicting_imports_are_ambiguous_and_report_related_locations() {
 
 #[test]
 fn missing_imports_and_cycles_have_source_ranges() {
-    let source = "import { \"missing.resin\" };";
-    let project = Project::new(&[("main.resin", source)]);
+    let source = "import { \"missing.resin\", \"available.resin\" }; def main() = { var point = make(); point.x; };";
+    let project = Project::new(&[
+        ("main.resin", source),
+        (
+            "available.resin",
+            "export { make }; struct Point { x: int }; def make() -> Point = { Point { x = 1 } };",
+        ),
+    ]);
     let analysis = project.analyze();
     assert_eq!(analysis.diagnostics.len(), 1);
     let error = &analysis.diagnostics[0];
@@ -655,6 +661,14 @@ fn missing_imports_and_cycles_have_source_ranges() {
     assert_eq!(
         &source[error.location.span.start..error.location.span.end],
         "\"missing.resin\""
+    );
+    let fields = analysis.completions(
+        &project.path("main.resin"),
+        source.find("point.x").unwrap() + 6,
+    );
+    assert_eq!(
+        fields[0].detail, "x: int",
+        "a failed import must preserve later dependencies"
     );
     let project = Project::new(&[
         ("main.resin", "import { \"a.resin\" };"),
@@ -686,6 +700,44 @@ fn imported_syntax_errors_stay_at_the_dependency() {
             .diagnostics
             .iter()
             .any(|d| d.location.path == project.path("a.resin"))
+    );
+}
+
+#[test]
+fn malformed_foreign_headers_are_diagnostics_not_panics() {
+    for source in [
+        r#"extern "bad\q" def release();"#,
+        "extern \"unfinished def release();",
+        "extern def release();",
+    ] {
+        let project = Project::new(&[("main.resin", source)]);
+        let path = project.path("main.resin");
+        let error = ast::load_with(&path, &project.root, &project.sources).unwrap_err();
+        assert_eq!(error.path, path);
+        assert!(error.span.is_some(), "{source}: {error}");
+        let analysis = project.analyze();
+        assert!(!analysis.diagnostics.is_empty(), "{source}");
+        assert!(analysis.module().is_err(), "{source}");
+    }
+}
+
+#[test]
+fn malformed_function_names_do_not_create_editor_definitions() {
+    let source = "extern \"native.h\" def releasex: int); def main() = {};";
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.analyze();
+    let path = project.path("main.resin");
+    assert!(analysis.module().is_err());
+    assert!(
+        analysis
+            .definition(&path, source.find("releasex").unwrap())
+            .is_none()
+    );
+    assert!(
+        analysis
+            .completions(&path, source.len())
+            .iter()
+            .all(|item| item.name != "releasex")
     );
 }
 
@@ -925,29 +977,112 @@ fn holes_preserve_later_locals_and_functions_without_producing_ir() {
 
 #[test]
 fn unknown_bindings_shadow_outer_values_without_fabricating_types() {
-    let source = "def main(point: { x: int }) = { var point = ; var alias = point; alias.; };";
+    for initializer in ["", "missing(1)", "1 + (1 == 1)"] {
+        let source = format!(
+            "def main(point: {{ x: int }}) = {{ var point = {initializer}; var alias = point; alias.; var healthy = {{ count = 42 }}; healthy.count; }};"
+        );
+        let project = Project::new(&[("main.resin", &source)]);
+        let analysis = project.analyze();
+        let path = project.path("main.resin");
+        assert_eq!(
+            analysis
+                .hover(&path, source.rfind("alias").unwrap())
+                .unwrap()
+                .text,
+            "alias: ?"
+        );
+        assert!(
+            analysis
+                .completions(&path, source.find("alias.").unwrap() + 6)
+                .is_empty()
+        );
+        assert_eq!(
+            analysis
+                .definition(&path, source.rfind("point").unwrap())
+                .unwrap()
+                .span
+                .start,
+            source.find("var point").unwrap() + 4
+        );
+        assert!(analysis.module().is_err());
+        let fields = analysis.completions(&path, source.rfind("count").unwrap());
+        assert_eq!(
+            fields
+                .iter()
+                .map(|item| item.detail.as_str())
+                .collect::<Vec<_>>(),
+            ["count: int"],
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn unrelated_errors_preserve_expression_types_and_field_completion() {
+    let mut failures = Vec::new();
+    for (setup, expected) in [
+        ("var value = -128b;", "sbyte"),
+        ("var value = float32(42);", "float32"),
+        ("var unused: int; var value = size_of(unused);", "ulong"),
+        (
+            "var value: Result<int, Never>; value := ok(42);",
+            "Result<int, Never>",
+        ),
+    ] {
+        for broken in ["", "def broken() = { missing; };"] {
+            let source = format!(
+                "{broken} def main() = {{ {setup} value; var record = {{ payload = value }}; record.payload; }};"
+            );
+            let project = Project::new(&[("main.resin", &source)]);
+            let analysis = project.analyze();
+            let path = project.path("main.resin");
+            assert_eq!(
+                analysis.diagnostics.is_empty(),
+                broken.is_empty(),
+                "{source}: {:?}",
+                analysis.diagnostics
+            );
+            assert_eq!(analysis.module().is_ok(), broken.is_empty(), "{source}");
+            let hover = analysis
+                .hover(&path, source.find("value;").unwrap())
+                .unwrap();
+            let fields = analysis.completions(&path, source.rfind("payload").unwrap());
+            let details: Vec<_> = fields.iter().map(|item| item.detail.as_str()).collect();
+            if hover.text != format!("value: {expected}")
+                || details != [format!("payload: {expected}")]
+            {
+                failures.push(format!(
+                    "{source}\nexpected {expected}, got {} and {details:?}",
+                    hover.text
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn failed_compound_constraints_do_not_poison_independent_inference() {
+    let source = "def main() = { var value: _; var broken: { first: int, second: bool }; broken := { first = value, second = 0 }; value := 1.5f; value; };";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.analyze();
+    assert!(!analysis.diagnostics.is_empty());
+    assert!(analysis.module().is_err());
     let path = project.path("main.resin");
     assert_eq!(
         analysis
-            .hover(&path, source.rfind("alias").unwrap())
+            .hover(&path, source.rfind("value").unwrap())
             .unwrap()
             .text,
-        "alias: ?"
-    );
-    assert!(
-        analysis
-            .completions(&path, source.find("alias.").unwrap() + 6)
-            .is_empty()
+        "value: float32"
     );
     assert_eq!(
         analysis
-            .definition(&path, source.rfind("point").unwrap())
+            .definition(&path, source.rfind("value").unwrap())
             .unwrap()
             .span
             .start,
-        source.find("var point").unwrap() + 4
+        source.find("value").unwrap()
     );
 }
 
@@ -1108,6 +1243,200 @@ fn suffixes_and_one_armed_if_have_editor_types() {
 }
 
 #[test]
+fn failed_children_invalidate_composites_without_hiding_later_bindings() {
+    for expression in [
+        "if (1 == 1) { missing } else { 42 }",
+        "[missing, 42]",
+        "ok(missing)",
+        "place := missing",
+    ] {
+        let source = format!(
+            "def f() = {{ var place = 1; var bad = {expression}; var alias = bad; var healthy = 1.5f; alias; healthy; }};"
+        );
+        let project = Project::new(&[("main.resin", &source)]);
+        let analysis = project.analyze();
+        let path = project.path("main.resin");
+        assert!(!analysis.diagnostics.is_empty(), "{source}");
+        assert!(analysis.module().is_err());
+        for (name, expected) in [
+            ("bad", "bad: ?"),
+            ("alias", "alias: ?"),
+            ("healthy", "healthy: float32"),
+        ] {
+            assert_eq!(
+                analysis
+                    .hover(&path, source.rfind(name).unwrap())
+                    .unwrap()
+                    .text,
+                expected,
+                "{source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn broken_annotations_and_duplicate_declarations_retain_recognizable_children() {
+    for (source, name, expected) in [
+        (
+            "def f() -> { a: _, b: _, c: _, d: Missing } = {}; def later() = { var healthy = 1.5f; healthy; };",
+            "healthy",
+            "healthy: float32",
+        ),
+        (
+            "def f() = { var duplicate = 1; var duplicate = { var healthy = 1.5f; healthy }; };",
+            "healthy",
+            "healthy: float32",
+        ),
+        (
+            "type T = int; def f() = { type T = Missing; var value: T; value; };",
+            "value",
+            "value: ?",
+        ),
+    ] {
+        let project = Project::new(&[("main.resin", source)]);
+        let analysis = project.analyze();
+        assert!(!analysis.diagnostics.is_empty());
+        assert!(analysis.module().is_err());
+        assert_eq!(
+            analysis
+                .hover(&project.path("main.resin"), source.rfind(name).unwrap())
+                .unwrap()
+                .text,
+            expected,
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn unknown_exports_retain_identity_and_poison_consumers_through_reexports() {
+    let library =
+        "export { Broken, broken }; type Broken = Missing; def broken() -> _ = { missing };";
+    let source = "import { \"left.resin\", \"right.resin\" }; def main() = { var value: Broken; var result = broken(); value; result; };";
+    let project = Project::new(&[
+        ("main.resin", source),
+        ("base.resin", library),
+        (
+            "left.resin",
+            "export { Broken, broken }; import { \"base.resin\" };",
+        ),
+        (
+            "right.resin",
+            "export { Broken, broken }; import { \"base.resin\" };",
+        ),
+    ]);
+    let analysis = project.analyze();
+    assert!(analysis.module().is_err());
+    let path = project.path("main.resin");
+    for name in ["Broken", "broken"] {
+        let offset = source.rfind(name).unwrap();
+        let definition = analysis
+            .definition(&path, offset)
+            .unwrap_or_else(|| panic!("missing {name}: {:?}", analysis.diagnostics));
+        assert_eq!(definition.path, project.path("base.resin"));
+        assert_eq!(&library[definition.span.start..definition.span.end], name);
+        assert!(
+            analysis
+                .completions(&path, offset)
+                .iter()
+                .any(|item| item.name == name)
+        );
+    }
+    assert_eq!(
+        analysis
+            .hover(&path, source.rfind("result").unwrap())
+            .unwrap()
+            .text,
+        "result: ?"
+    );
+    assert!(
+        analysis
+            .diagnostics
+            .iter()
+            .all(|d| d.location.path != path || !d.message.contains("Unbound")),
+        "{:?}",
+        analysis.diagnostics
+    );
+}
+
+#[test]
+fn callers_cannot_resurrect_failed_result_inference() {
+    for (result, body, caller_result, expected) in [
+        ("_", "missing", "int", "alias: ?"),
+        (
+            "_",
+            "if (1 == 1) { caller() } else { missing }",
+            "int",
+            "alias: ?",
+        ),
+        (
+            "_",
+            "if (1 == 1) { caller() } else { 1 + () }",
+            "int",
+            "alias: ?",
+        ),
+        (
+            "Result<int, _>",
+            "missing",
+            "Result<int, Never>",
+            "alias: ?",
+        ),
+        ("int", "missing", "int", "alias: (()) -> int"),
+    ] {
+        let source = format!(
+            "def broken() -> {result} = {{ var healthy = 1.5f; healthy; {body} }}; def caller() -> {caller_result} = {{ broken() }}; def observer() = {{ var alias = broken; alias; }};"
+        );
+        let project = Project::new(&[("main.resin", &source)]);
+        let analysis = project.analyze();
+        let path = project.path("main.resin");
+        assert!(analysis.program().is_ok(), "{source}");
+        assert!(!analysis.diagnostics.is_empty());
+        assert!(analysis.module().is_err());
+        assert_eq!(
+            analysis
+                .hover(&path, source.rfind("alias").unwrap())
+                .unwrap()
+                .text,
+            expected,
+            "{source}"
+        );
+        assert_eq!(
+            analysis
+                .hover(&path, source.rfind("healthy").unwrap())
+                .unwrap()
+                .text,
+            "healthy: float32"
+        );
+    }
+}
+
+#[test]
+fn recursive_failure_discards_copied_caller_result_facts() {
+    let source = "def broken() -> _ = { if (1 == 0) { caller() } else { 1 + () } }; def caller() -> _ = { broken() }; def observer() = { var forced = int(caller()); var alias = caller; var failed = broken; alias; failed; };";
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.analyze();
+    assert!(analysis.program().is_ok());
+    assert!(!analysis.diagnostics.is_empty());
+    assert!(analysis.module().is_err());
+    let path = project.path("main.resin");
+    assert_eq!(
+        analysis
+            .hover(&path, source.rfind("alias").unwrap())
+            .unwrap()
+            .text,
+        "alias: ?"
+    );
+    assert_eq!(
+        analysis
+            .hover(&path, source.rfind("failed").unwrap())
+            .unwrap()
+            .text,
+        "failed: ?"
+    );
+}
+
+#[test]
 fn incomplete_impls_and_method_arguments_keep_editor_recovery() {
     let source = "struct Counter { count: int }; impl Counter { def add(counter: Counter, amount: int) -> int = { counter.count + amount }; } def f(c: Counter) -> int = { c.add(1) };";
     for end in source
@@ -1176,5 +1505,38 @@ fn formatted_string_and_literal_span_types_survive_editor_recovery() {
             .completions(&project.path("main.resin"), offset);
         assert!(items.iter().any(|item| item.name == "data"), "{items:?}");
         assert!(items.iter().any(|item| item.name == "length"), "{items:?}");
+    }
+}
+
+#[test]
+fn invalid_method_arguments_preserve_receiver_facts_and_later_bindings() {
+    for duplicate in ["", "def read(self: Missing) -> int = { 0 };"] {
+        let source = format!(
+            "struct Item {{ count: int }}; impl Item {{ def read(self: Ptr<Item>) -> int = {{ self.count }}; {duplicate} }} def f(c: Item) = {{ var bad = c.read(missing); var alias = bad; var healthy = 1.5f; alias; healthy; c.; }};"
+        );
+        let project = Project::new(&[("main.resin", &source)]);
+        let analysis = project.analyze();
+        let path = project.path("main.resin");
+        assert!(analysis.module().is_err());
+        for (name, expected) in [("alias", "alias: ?"), ("healthy", "healthy: float32")] {
+            assert_eq!(
+                analysis
+                    .hover(&path, source.rfind(name).unwrap())
+                    .unwrap()
+                    .text,
+                expected
+            );
+        }
+        assert_eq!(
+            analysis
+                .definition(&path, source.find("c.read").unwrap() + 2)
+                .unwrap()
+                .span
+                .start,
+            source.find("read(self").unwrap()
+        );
+        let members = analysis.completions(&path, source.rfind("c.;").unwrap() + 2);
+        assert!(members.iter().any(|member| member.name == "read"));
+        assert!(members.iter().any(|member| member.detail == "count: int"));
     }
 }

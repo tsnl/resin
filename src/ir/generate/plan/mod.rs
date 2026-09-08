@@ -1,5 +1,5 @@
 //! Walk expressions once, selecting emission operations and adding typing constraints together.
-//! Emission operations run after their dependency group's types resolve.
+//! Operations are replayable for cleanup, and run after their dependency group's types resolve.
 mod context;
 mod expressions;
 mod groups;
@@ -42,6 +42,7 @@ pub(super) enum Form {
     Num { value: Arc<str> },
     Unit,
     Record,
+    Type { ty: Type },
     Other,
 }
 pub(super) struct MatchArm {
@@ -53,13 +54,9 @@ pub(super) struct MatchArm {
 pub(super) struct Annotation {
     pub ty: Type,
     pub span: Span,
-    pub references: Vec<Ident>,
 }
 impl Annotation {
     pub(super) fn resolve(&self, g: &Generator) -> Result<Ty> {
-        for name in &self.references {
-            g.scopes.record_reference(name, true);
-        }
         g.solver.require(&self.ty, self.span)
     }
 }
@@ -68,26 +65,43 @@ pub(super) struct Signature {
     pub result: Annotation,
 }
 impl Planner<'_> {
-    fn ann(&mut self, ann: &ast::Type, infer: bool) -> Result<Annotation> {
-        let ty = self.annotation(ann, infer)?;
-        Ok(Annotation {
-            ty,
-            span: ann.span,
-            references: std::mem::take(&mut self.references),
-        })
+    fn ann(&mut self, ann: &ast::Type, infer: bool) -> Annotation {
+        let scoped = !matches!(ann.val, ast::TypeKind::Unit);
+        if scoped {
+            self.scopes.push_at(ann.span);
+        }
+        let checkpoint = self.solver.clone();
+        let holes = self.holes.len();
+        let result = self.annotation(ann, infer);
+        if scoped {
+            self.scopes.pop();
+        }
+        let ty = result.unwrap_or_else(|error| {
+            self.errors.push(error);
+            self.typing.solver = checkpoint;
+            self.holes.truncate(holes);
+            Type::Invalid
+        });
+        if self.output != Type::Invalid {
+            self.constrain((
+                ann.span,
+                crate::ir::typecheck::infer::constraints::Constraint::Depends(ty.clone()),
+            ));
+        }
+        Annotation { ty, span: ann.span }
     }
     fn signature(
         &mut self,
         params: &[(Ident, ast::Type)],
         result: &ast::Type,
         infer: bool,
-    ) -> Result<Signature> {
+    ) -> Signature {
         let params = params
             .iter()
-            .map(|(name, ann)| Ok((name.clone(), self.ann(ann, false)?)))
-            .collect::<Result<Vec<_>>>()?;
-        let result = self.ann(result, infer)?;
-        Ok(Signature { params, result })
+            .map(|(name, ann)| (name.clone(), self.ann(ann, false)))
+            .collect();
+        let result = self.ann(result, infer);
+        Signature { params, result }
     }
 }
 
@@ -95,15 +109,14 @@ pub(super) struct PlannedFile {
     pub signatures: BTreeMap<Arc<str>, Signature>,
     pub bodies: BTreeMap<Arc<str>, Term>,
     pub solver: Solver,
+    pub errors: Vec<GenerateError>,
 }
 struct Planner<'a> {
     typing: Inference<'a>,
     scopes: Scopes,
-    locals: Vec<BTreeMap<Arc<str>, Type>>,
-    functions: BTreeMap<Arc<str>, Type>,
+    errors: Vec<GenerateError>,
     dependencies: BTreeSet<Arc<str>>,
     holes: Vec<(Span, Type)>,
-    references: Vec<Ident>,
     expressions: Vec<(Span, Type)>,
     result: Type,
     source_module: SourceModuleId,
@@ -113,11 +126,9 @@ impl<'a> Planner<'a> {
         Self {
             typing: Inference::new(typer),
             scopes,
-            locals: vec![],
-            functions: BTreeMap::new(),
+            errors: vec![],
             dependencies: BTreeSet::new(),
             holes: vec![],
-            references: vec![],
             expressions: vec![],
             result: Ty::Unit.into(),
             source_module,
@@ -140,32 +151,28 @@ pub(super) fn file(
     typer: &mut TyperContext,
     scopes: &Scopes,
     source_module: SourceModuleId,
-) -> Result<PlannedFile> {
-    let mut planner = Planner::new(typer, scopes.untraced(), source_module);
+) -> PlannedFile {
+    let mut planner = Planner::new(typer, scopes.planning(), source_module);
     let mut signatures = BTreeMap::new();
     let mut functions = vec![];
     for stmt in file.declarations() {
-        let (name, params, result, infer) = match &stmt.val {
+        let (name, params, result, body) = match &stmt.val {
             StmtKind::Function {
                 name,
                 params,
                 result,
                 body,
                 ..
-            } => {
-                functions.push((name, body));
-                (name, params, result, true)
-            }
+            } => (name, params, result, Some(body)),
             StmtKind::ForeignFunction {
                 name,
                 params,
                 result,
                 ..
-            } => (name, params, result, false),
+            } => (name, params, result, None),
             _ => continue,
         };
-        crate::ir::typecheck::check_binding_name(name)?;
-        let signature = planner.signature(params, result, infer)?;
+        let signature = planner.signature(params, result, body.is_some());
         let ty = Type::function(
             Type::parameter(
                 signature
@@ -176,13 +183,27 @@ pub(super) fn file(
             ),
             signature.result.ty.clone(),
         );
-        if planner.functions.insert(name.val.clone(), ty).is_some() {
-            return Err(GenerateError {
-                span: name.span,
-                kind: crate::ir::GenerateErrorKind::DuplicateValue {
-                    name: name.val.clone(),
-                },
-            });
+        let declared = crate::ir::typecheck::check_binding_name(name).and_then(|()| {
+            planner
+                .scopes
+                .define_inferred(name, ty, true)
+                .map_err(|duplicate| GenerateError {
+                    span: name.span,
+                    kind: crate::ir::GenerateErrorKind::DuplicateValue { name: duplicate },
+                })
+        });
+        if let Err(error) = declared {
+            planner.errors.push(error);
+            continue;
+        }
+        if matches!(&stmt.val, StmtKind::Function { decorators, .. }
+            if decorators.len() == 1 && matches!(decorators[0].val.as_ref(),
+                "compute_shader" | "vertex_shader" | "fragment_shader"))
+        {
+            planner.scopes.mark_shader(name);
+        }
+        if let Some(body) = body {
+            functions.push((name, body));
         }
         signatures.insert(name.val.clone(), signature);
     }
@@ -197,13 +218,30 @@ pub(super) fn file(
     let mut expressions = vec![];
     for (name, body) in &functions {
         let signature = &signatures[&name.val];
-        planner.push();
+        let errors_before = planner.errors.len();
+        planner.scopes.push_at(body.span);
         planner.result = signature.result.ty.clone();
         for (name, ann) in &signature.params {
-            planner.bind(name, ann.ty.clone())?;
+            if let Err(error) = planner.bind(name, ann.ty.clone()) {
+                planner.errors.push(error);
+            }
+            planner.scopes.set_definition_kind(
+                name,
+                crate::ir::generate::semantic::DefinitionKind::Parameter,
+            );
         }
-        let term = planner.term(body, Some(signature.result.ty.clone()))?;
-        planner.pop();
+        let term = planner.term(body, Some(signature.result.ty.clone()));
+        planner.scopes.pop();
+        if planner.errors.len() != errors_before {
+            planner.solver.invalidate(&term.ty);
+        }
+        // Signature holes belong to the body that proves them, even when a
+        // recursive caller has already constrained those holes on a prior attempt.
+        planner.constraints.push((
+            signature.result.span,
+            signature.result.ty.clone(),
+            crate::ir::typecheck::infer::constraints::Constraint::Depends(term.ty.clone()),
+        ));
         bodies.insert(name.val.clone(), term);
         edges.push(
             std::mem::take(&mut planner.dependencies)
@@ -221,32 +259,47 @@ pub(super) fn file(
             roots.extend(expressions[i].iter().map(|(_, ty)| ty.clone()));
             roots.push(signatures[&functions[i].0.val].result.ty.clone());
         }
-        planner.solve(&roots)?;
+        let errors = planner.solve(&roots);
+        planner.errors.extend(errors);
         for &i in &group {
             let result = &signatures[&functions[i].0.val].result;
-            planner.solver.require(&result.ty, result.span)?;
-            for (span, ty) in &expressions[i] {
-                if let Err(error) = planner.solver.require(ty, *span) {
-                    // Empty arrays need an element annotation even when discarded.
+            for (span, ty) in
+                std::iter::once(&(result.span, result.ty.clone())).chain(expressions[i].iter())
+            {
+                if planner.solver.invalid(ty) {
+                    continue;
+                }
+                if let Err(mut error) = planner.solver.require(ty, *span) {
                     if matches!(planner.solver.head(ty), Type::Node(Head::Array(0), _)) {
-                        return Err(GenerateError::typing(
+                        error = GenerateError::typing(
                             *span,
                             crate::ir::TypeError {
                                 kind: crate::ir::TypeErrorKind::EmptyArrayNeedsElementType,
                             },
-                        ));
+                        );
                     }
-                    return Err(error);
+                    planner.errors.push(error);
+                    if ty == &result.ty {
+                        planner.solver.invalidate(&result.ty);
+                    }
                 }
             }
         }
     }
     for (span, ty) in &planner.holes {
-        planner.solver.require(ty, *span)?;
+        if !planner.solver.invalid(ty)
+            && let Err(error) = planner.solver.require(ty, *span)
+        {
+            planner.errors.push(error);
+        }
     }
-    Ok(PlannedFile {
+    planner
+        .scopes
+        .resolve_inferred(&planner.solver, planner.typer);
+    PlannedFile {
         signatures,
         bodies,
         solver: planner.typing.solver,
-    })
+        errors: planner.errors,
+    }
 }

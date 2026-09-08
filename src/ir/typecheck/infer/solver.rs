@@ -16,13 +16,14 @@ enum Class {
     Errors,
 }
 
+#[derive(Clone)]
 struct Variable {
     value: Option<Type>,
     class: Class,
     variants: Vec<TypeId>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(in crate::ir) struct Solver {
     variables: Vec<Variable>,
     pub revision: usize,
@@ -178,6 +179,7 @@ impl Solver {
     fn variables_in(&self, roots: &[Type]) -> Vec<usize> {
         fn collect(solver: &Solver, ty: &Type, ids: &mut Vec<usize>) {
             match solver.head(ty) {
+                Type::Invalid => {}
                 Type::Variable(id) => {
                     if !ids.contains(&id) {
                         ids.push(id);
@@ -233,7 +235,7 @@ impl Solver {
 
     pub fn resolve(&self, ty: &Type) -> Option<Ty> {
         match self.head(ty) {
-            Type::Variable(_) => None,
+            Type::Invalid | Type::Variable(_) => None,
             Type::Node(head, args) => Some(
                 head.concrete(
                     args.iter()
@@ -241,6 +243,27 @@ impl Solver {
                         .collect::<Option<_>>()?,
                 ),
             ),
+        }
+    }
+
+    pub fn invalid(&self, ty: &Type) -> bool {
+        match self.head(ty) {
+            Type::Invalid => true,
+            Type::Node(_, children) => children.iter().any(|ty| self.invalid(ty)),
+            Type::Variable(_) => false,
+        }
+    }
+
+    /// Invalidate original inference holes without replacing explicit type structure.
+    pub fn invalidate(&mut self, ty: &Type) {
+        match ty {
+            Type::Variable(id) => self.variables[*id].value = Some(Type::Invalid),
+            Type::Node(_, children) => {
+                for child in children {
+                    self.invalidate(child);
+                }
+            }
+            Type::Invalid => {}
         }
     }
 
@@ -366,6 +389,7 @@ impl Solver {
 
     fn occurs(&self, id: usize, ty: &Type) -> bool {
         match self.head(ty) {
+            Type::Invalid => false,
             Type::Variable(other) => id == other,
             Type::Node(_, args) => args.iter().any(|arg| self.occurs(id, arg)),
         }

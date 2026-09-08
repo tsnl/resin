@@ -6,7 +6,10 @@ use super::{
 };
 use crate::{ast::Span, ir::Ty};
 
+#[derive(Clone)]
 pub(in crate::ir) enum Constraint {
+    Equal(Type, Type),
+    Depends(Type),
     Coerce(Type, Type),
     ExcludeNone(Type, Type),
     Layout(Type),
@@ -22,6 +25,7 @@ pub(in crate::ir) enum Constraint {
     Builtin(Arc<str>, Vec<Type>, Type),
 }
 
+#[derive(Clone)]
 pub(in crate::ir) enum Pattern {
     Ok,
     Err,
@@ -29,52 +33,81 @@ pub(in crate::ir) enum Pattern {
 }
 
 impl Inference<'_> {
-    pub fn solve(&mut self, roots: &[Type]) -> Result<()> {
-        loop {
-            let before = self.solver.revision;
-            let pending = std::mem::take(&mut self.constraints);
-            for (span, constraint) in pending {
-                if !self.constraint(&constraint, span)? {
-                    self.constraints.push((span, constraint));
+    /// Retry equations from a clean SCC snapshot after discarding a failed
+    /// producer. Pending constraints may have mutated the solver on earlier
+    /// attempts, so rolling back only the final attempt is insufficient.
+    pub fn solve(&mut self, roots: &[Type]) -> Vec<GenerateError> {
+        let baseline = self.solver.clone();
+        let equations = std::mem::take(&mut self.constraints);
+        let mut failed = Vec::new();
+        let mut errors = Vec::new();
+        'retry: loop {
+            self.solver = baseline.clone();
+            for output in &failed {
+                self.solver.invalidate(output);
+            }
+            self.constraints = equations
+                .iter()
+                .filter(|(_, out, _)| !failed.contains(out))
+                .cloned()
+                .collect();
+            loop {
+                let before = self.solver.revision;
+                let pending = std::mem::take(&mut self.constraints);
+                for (span, output, constraint) in pending {
+                    if constraint.inputs().iter().any(|ty| self.solver.invalid(ty)) {
+                        failed.push(output);
+                        continue 'retry;
+                    }
+                    match self.constraint(&constraint, span) {
+                        Ok(true) => {}
+                        Ok(false) => self.constraints.push((span, output, constraint)),
+                        Err(error) => {
+                            errors.push(error);
+                            failed.push(output);
+                            continue 'retry;
+                        }
+                    }
                 }
-            }
-            if self.solver.revision != before {
-                continue;
-            }
-            // Give contextual record layouts priority over source field order.
-            let mut seeded = false;
-            for (span, constraint) in &self.constraints {
-                if let Constraint::Record(fields, out) = constraint
-                    && matches!(self.solver.head(out), Type::Variable(_))
-                {
-                    self.solver
-                        .unify(out, &Type::record(fields.clone()), *span)?;
-                    seeded = true;
+                if self.solver.revision != before {
+                    continue;
                 }
-            }
-            if seeded {
-                continue;
-            }
-            // A receiver's default selects the method whose parameter types
-            // must constrain arguments before ordinary literal defaults run.
-            for (_, constraint) in &self.constraints {
-                if let Constraint::Method(receiver, ..) = constraint {
-                    seeded |= self.solver.default_numbers(std::slice::from_ref(receiver));
+                let mut seeded = false;
+                for (span, _, constraint) in &self.constraints {
+                    if let Constraint::Record(fields, out) = constraint
+                        && matches!(self.solver.head(out), Type::Variable(_))
+                    {
+                        self.solver
+                            .unify(out, &Type::record(fields.clone()), *span)
+                            .expect("fresh record result");
+                        seeded = true;
+                    }
                 }
+                if seeded {
+                    continue;
+                }
+                // Receiver defaults select the parameter types before argument defaults.
+                for (_, _, constraint) in &self.constraints {
+                    if let Constraint::Method(receiver, ..) = constraint {
+                        seeded |= self.solver.default_numbers(std::slice::from_ref(receiver));
+                    }
+                }
+                if seeded || self.solver.default_numbers(roots) {
+                    continue;
+                }
+                if self.solver.finish_errors(roots) {
+                    continue;
+                }
+                if let Some((span, output, _)) = self.constraints.first() {
+                    errors.push(error(
+                        *span,
+                        "cannot infer this operation; annotate its operand or result",
+                    ));
+                    failed.push(output.clone());
+                    continue 'retry;
+                }
+                return errors;
             }
-            if seeded || self.solver.default_numbers(roots) {
-                continue;
-            }
-            if self.solver.finish_errors(roots) {
-                continue;
-            }
-            if let Some((span, _)) = self.constraints.first() {
-                return Err(error(
-                    *span,
-                    "cannot infer this operation; annotate its operand or result",
-                ));
-            }
-            return Ok(());
         }
     }
 
@@ -118,6 +151,12 @@ impl Inference<'_> {
                     .coerce(&method.result.clone().into(), out, span)?;
                 return Ok(a && b);
             }
+            Constraint::Depends(_) => {}
+            Constraint::Equal(from, to) => {
+                if !self.solver.invalid(to) {
+                    self.solver.unify(from, to, span)?;
+                }
+            }
             Constraint::Layout(ty) => {
                 let Some(ty) = self.solver.resolve(ty) else {
                     return Ok(false);
@@ -134,8 +173,16 @@ impl Inference<'_> {
                     .ok_or_else(|| error(span, "postfix ! requires a type containing None"))?;
                 self.solver.unify(out, &remaining.into(), span)?;
             }
-            Constraint::Coerce(from, to) => return self.solver.coerce(from, to, span),
-            Constraint::Errors(from, to) => return self.solver.include(from, to, span),
+            Constraint::Coerce(from, to) => {
+                if !self.solver.invalid(to) {
+                    return self.solver.coerce(from, to, span);
+                }
+            }
+            Constraint::Errors(from, to) => {
+                if !self.solver.invalid(to) {
+                    return self.solver.include(from, to, span);
+                }
+            }
             Constraint::Variant(input, variant, out) => match (self.solver.head(input), variant) {
                 (Type::Variable(_), _) => return Ok(false),
                 (Type::Node(Head::Result, parts), Pattern::Ok) => {
@@ -355,5 +402,26 @@ impl Inference<'_> {
             }
         }
         Ok(true)
+    }
+}
+
+impl Constraint {
+    fn inputs(&self) -> Vec<&Type> {
+        match self {
+            Self::Depends(from)
+            | Self::ExcludeNone(from, _)
+            | Self::Equal(from, _)
+            | Self::Coerce(from, _)
+            | Self::Errors(from, _)
+            | Self::Layout(from)
+            | Self::Boolean(from)
+            | Self::Deref(from, _)
+            | Self::Field(from, _, _)
+            | Self::Ascribe(from, _, _)
+            | Self::Variant(from, _, _) => vec![from],
+            Self::Call(func, arg, _) | Self::Method(func, _, arg, _, _) => vec![func, arg],
+            Self::Record(fields, _) => fields.iter().map(|(_, ty)| ty).collect(),
+            Self::Builtin(_, args, _) => args.iter().collect(),
+        }
     }
 }

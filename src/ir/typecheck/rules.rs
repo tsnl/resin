@@ -1,6 +1,6 @@
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
-use crate::ir::{RecordField, Ty};
+use crate::ir::Ty;
 
 use super::{BuiltinRule, Conv, TypeError, TypeErrorKind, TyperContext};
 
@@ -18,84 +18,10 @@ pub struct BuiltinCall {
 }
 
 impl TyperContext {
-    pub const fn type_unit(&self) -> Ty {
-        Ty::Unit
-    }
-
     pub fn type_num(&self, value: &str) -> Ty {
         crate::ir::literal::split(value)
             .1
             .unwrap_or_else(|| crate::ir::literal::unsuffixed_type(value))
-    }
-
-    pub const fn type_type(&self, _value: &Ty) -> Ty {
-        Ty::Type
-    }
-
-    pub fn type_var(&self, binding: &Ty) -> Ty {
-        binding.clone()
-    }
-
-    pub fn type_block(&self, tail: &Ty) -> Ty {
-        tail.clone()
-    }
-
-    pub fn type_assign(&self, place: &Ty, value: &Ty) -> Result<Ty, TypeError> {
-        self.same(place, value)?;
-        Ok(value.clone())
-    }
-
-    pub fn type_array(&self, elements: &[Ty]) -> Result<Ty, TypeError> {
-        let Some(element) = elements.first() else {
-            return Err(TypeError::new(TypeErrorKind::EmptyArrayNeedsElementType));
-        };
-        self.type_array_of(element, elements)
-    }
-
-    pub fn type_array_of(&self, element: &Ty, elements: &[Ty]) -> Result<Ty, TypeError> {
-        for found in elements {
-            self.same(element, found)?;
-        }
-        Ok(Ty::Array {
-            element: Box::new(element.clone()),
-            length: elements.len(),
-        })
-    }
-
-    pub fn type_record(&self, fields: &[RecordField]) -> Result<Ty, TypeError> {
-        let mut names = HashSet::with_capacity(fields.len());
-        for field in fields {
-            if !names.insert(field.name.clone()) {
-                return Err(TypeError::new(TypeErrorKind::DuplicateField {
-                    name: field.name.clone(),
-                }));
-            }
-        }
-        Ok(Ty::Record {
-            fields: fields.to_vec(),
-        })
-    }
-
-    pub fn type_function(&self, param: &Ty, body: &Ty) -> Ty {
-        Ty::Function {
-            param: Box::new(param.clone()),
-            result: Box::new(body.clone()),
-        }
-    }
-
-    pub fn type_if(&self, condition: &Ty, then_ty: &Ty, else_ty: &Ty) -> Result<Ty, TypeError> {
-        self.as_bool(condition)?;
-        self.same(then_ty, else_ty)?;
-        Ok(then_ty.clone())
-    }
-
-    pub fn type_deref(&self, pointer: &Ty) -> Result<Ty, TypeError> {
-        let Some(pointee) = pointer.deref_target() else {
-            return Err(TypeError::new(TypeErrorKind::ExpectedPointer {
-                found: pointer.clone(),
-            }));
-        };
-        Ok(pointee.clone())
     }
 
     pub fn type_field(&self, base: &Ty, name: &str) -> Result<FieldAccess, TypeError> {
@@ -118,29 +44,6 @@ impl TyperContext {
         Err(TypeError::new(TypeErrorKind::UnknownField {
             name: Arc::from(name),
         }))
-    }
-
-    pub fn type_call(&self, callee: &Ty, arg: &Ty) -> Result<Ty, TypeError> {
-        if let Ty::Span { element } | Ty::Array { element, .. } = self.body(callee)? {
-            if !arg.is_integer() {
-                return Err(TypeError::new(TypeErrorKind::ExpectedInteger {
-                    found: arg.clone(),
-                }));
-            }
-            return Ok(Ty::Pointer { pointee: element });
-        }
-        let Ty::Function { param, result } = callee else {
-            return Err(TypeError::new(TypeErrorKind::ExpectedFunction {
-                found: callee.clone(),
-            }));
-        };
-        self.same(param, arg)?;
-        Ok(*result.clone())
-    }
-
-    pub fn type_ascription(&self, expected: &Ty, value: &Ty) -> Result<Ty, TypeError> {
-        self.ascribe(value, expected)?;
-        Ok(expected.clone())
     }
 
     pub fn type_builtin_call(&self, name: &str, args: &[Ty]) -> Result<BuiltinCall, TypeError> {

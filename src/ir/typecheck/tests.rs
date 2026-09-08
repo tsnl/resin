@@ -1,6 +1,26 @@
 use super::*;
 use crate::ir::RecordField;
 
+fn infer_relation(
+    typer: &mut TyperContext,
+    relation: impl FnOnce(infer::types::Type) -> infer::constraints::Constraint,
+) -> Result<Ty, crate::ir::GenerateError> {
+    let mut inference = infer::Inference::new(typer);
+    let out = inference.solver.fresh();
+    inference.output = out.clone();
+    inference.constrain((crate::ast::Span { start: 0, end: 0 }, relation(out.clone())));
+    if let Some(error) = inference
+        .solve(std::slice::from_ref(&out))
+        .into_iter()
+        .next()
+    {
+        return Err(error);
+    }
+    inference
+        .solver
+        .require(&out, crate::ast::Span { start: 0, end: 0 })
+}
+
 fn record(ty: Ty) -> Ty {
     Ty::Record {
         fields: vec![RecordField {
@@ -221,18 +241,34 @@ fn recursive_span_and_function_fields_have_finite_layouts() {
 
 #[test]
 fn empty_arrays_need_an_injected_element_type() {
-    let typer = TyperContext::new();
-
+    let compile = |source: &str| {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_resin::LANGUAGE.into())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        crate::ir::generate(
+            &crate::ast::generate::AstGen::new(source)
+                .gen_source_file(tree.root_node())
+                .unwrap(),
+        )
+    };
     assert_eq!(
-        typer.type_array(&[]).unwrap_err().kind,
-        TypeErrorKind::EmptyArrayNeedsElementType
+        compile("def main() = { []; };").unwrap_err().kind,
+        crate::ir::GenerateErrorKind::Type(TypeErrorKind::EmptyArrayNeedsElementType)
     );
+    let mut typer = TyperContext::new();
+    let empty = Ty::Array {
+        element: Box::new(Ty::UInt8),
+        length: 0,
+    };
     assert_eq!(
-        typer.type_array_of(&Ty::UInt8, &[]).unwrap(),
-        Ty::Array {
-            element: Box::new(Ty::UInt8),
-            length: 0,
-        }
+        infer_relation(&mut typer, |out| infer::constraints::Constraint::Equal(
+            empty.clone().into(),
+            out
+        ))
+        .unwrap(),
+        empty
     );
 }
 
@@ -259,7 +295,7 @@ fn field_access_preserves_nominal_identity_and_autoderefs_pointers() {
         );
     }
     assert!(matches!(
-        typer.type_assign(&node, &body),
+        typer.same(&node, &body),
         Err(TypeError {
             kind: TypeErrorKind::TypeMismatch { .. }
         })
@@ -267,7 +303,14 @@ fn field_access_preserves_nominal_identity_and_autoderefs_pointers() {
     let pointer = Ty::Pointer {
         pointee: Box::new(Ty::Int64),
     };
-    assert_eq!(typer.type_deref(&pointer).unwrap(), Ty::Int64);
+    assert_eq!(
+        infer_relation(&mut typer, |out| infer::constraints::Constraint::Deref(
+            pointer.clone().into(),
+            out
+        ))
+        .unwrap(),
+        Ty::Int64
+    );
     assert!(matches!(
         typer.type_field(&pointer, "value"),
         Err(TypeError {
@@ -287,9 +330,14 @@ fn convert_does_not_unwrap_function_arguments() {
         result: Box::new(Ty::Int32),
     };
     assert!(matches!(
-        typer.type_call(&callee, &meters),
-        Err(TypeError {
-            kind: TypeErrorKind::TypeMismatch { .. }
+        infer_relation(&mut typer, |out| infer::constraints::Constraint::Call(
+            callee.into(),
+            meters.into(),
+            out
+        )),
+        Err(crate::ir::GenerateError {
+            kind: crate::ir::GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. }),
+            ..
         })
     ));
 }
@@ -307,15 +355,25 @@ fn ascription_wraps_records_but_does_not_flatten_nested_fields() {
             .create_type("Distance", distance_body.clone())
             .unwrap(),
     };
-    assert_eq!(
-        typer.type_ascription(&distance, &distance_body).unwrap(),
-        distance
-    );
-    assert!(typer.type_ascription(&distance, &meters).is_err());
-    assert!(typer.type_ascription(&meters, &Ty::Int32).is_err());
+    assert!(typer.ascribe(&distance_body, &distance).is_ok());
+    assert!(typer.ascribe(&meters, &distance).is_err());
+    assert!(typer.ascribe(&Ty::Int32, &meters).is_err());
     assert!(typer.as_bool(&meters).is_err());
-    assert!(typer.type_deref(&meters).is_err());
-    assert!(typer.type_call(&meters, &Ty::Unit).is_err());
+    assert!(
+        infer_relation(&mut typer, |out| infer::constraints::Constraint::Deref(
+            meters.clone().into(),
+            out
+        ))
+        .is_err()
+    );
+    assert!(
+        infer_relation(&mut typer, |out| infer::constraints::Constraint::Call(
+            meters.into(),
+            Ty::Unit.into(),
+            out
+        ))
+        .is_err()
+    );
 }
 
 #[test]

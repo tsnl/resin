@@ -14,7 +14,7 @@ type Result<T> = std::result::Result<T, GenerateError>;
 pub(super) struct Decoder<'a> {
     pub solver: &'a mut Solver,
     pub holes: &'a mut Vec<(Span, Type)>,
-    pub resolve: &'a mut dyn FnMut(&Ident) -> Result<Ty>,
+    pub resolve: &'a mut dyn FnMut(&Ident) -> Result<Type>,
 }
 
 impl Decoder<'_> {
@@ -39,9 +39,8 @@ impl Decoder<'_> {
                 ty
             }
             TypeKind::Atom { name } => builtin_ty(&name.val)
-                .map(Ok)
-                .unwrap_or_else(|| (self.resolve)(name))?
-                .into(),
+                .map(|ty| Ok(ty.into()))
+                .unwrap_or_else(|| (self.resolve)(name))?,
             TypeKind::App { head, arg } => {
                 let arg = self.decode(arg, infer)?;
                 let head = match head.val.as_ref() {

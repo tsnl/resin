@@ -11,7 +11,7 @@ use crate::{
 };
 
 impl Generator {
-    pub(super) fn declare_methods(&mut self, file: &SourceFile) -> Result<(), GenerateError> {
+    pub(super) fn declare_methods(&mut self, file: &SourceFile) {
         for stmt in file.declarations() {
             let StmtKind::Function {
                 receiver: Some(receiver),
@@ -24,8 +24,21 @@ impl Generator {
             else {
                 continue;
             };
-            let Some(Ty::Defined { definition }) = self.scopes.lookup_type(&receiver.val) else {
-                return Err(error(receiver.span, "impl requires a nominal struct type"));
+            let receiver_type = self
+                .scopes
+                .resolve_type(receiver)
+                .and_then(|ty| self.solver.require(&ty, receiver.span));
+            let definition = match receiver_type {
+                Ok(Ty::Defined { definition }) => definition,
+                Ok(_) => {
+                    self.errors
+                        .push(error(receiver.span, "impl requires a nominal struct type"));
+                    continue;
+                }
+                Err(error) => {
+                    self.errors.push(error);
+                    continue;
+                }
             };
             if self
                 .typer
@@ -33,57 +46,61 @@ impl Generator {
                 .map(|origin| origin.module)
                 != Some(self.source_module)
             {
-                return Err(error(
+                self.errors.push(error(
                     receiver.span,
                     "impl requires a type defined in this module",
                 ));
+                continue;
             }
-            if !decorators.is_empty() {
-                return Err(error(name.span, "methods cannot be shader entries"));
-            }
-            let signature = Signature {
-                params: params
-                    .iter()
-                    .map(|(name, ann)| {
-                        Ok((
-                            name.clone(),
-                            Annotation {
-                                ty: self.evaluator().ty(ann)?.into(),
-                                span: ann.span,
-                                references: vec![],
-                            },
-                        ))
-                    })
-                    .collect::<Result<_, GenerateError>>()?,
-                result: Annotation {
-                    ty: self.evaluator().ty(result)?.into(),
-                    span: result.span,
-                    references: vec![],
-                },
-            };
-            let function = self.declare_function(name, &signature)?;
-            let short = name.val.rsplit('.').next().unwrap();
-            if !self.typer.define_method(definition, short.into(), function) {
-                return Err(error(name.span, "duplicate method"));
-            }
-            if short == "drop" {
-                let declaration = self.typer.declared_function(function);
-                if declaration.params
-                    != [Ty::Pointer {
-                        pointee: Box::new(Ty::Defined { definition }),
-                    }]
-                    || declaration.result != Ty::Unit
-                {
-                    return Err(error(
-                        name.span,
-                        "drop must have signature drop(receiver: Ptr<T>) -> ()",
-                    ));
+            let checked = (|| {
+                if !decorators.is_empty() {
+                    return Err(error(name.span, "methods cannot be shader entries"));
                 }
-                self.typer.define_drop(definition, function);
-            }
+                let signature = Signature {
+                    params: params
+                        .iter()
+                        .map(|(name, ann)| {
+                            Ok((
+                                name.clone(),
+                                Annotation {
+                                    ty: self.evaluator().ty(ann)?.into(),
+                                    span: ann.span,
+                                },
+                            ))
+                        })
+                        .collect::<Result<_, GenerateError>>()?,
+                    result: Annotation {
+                        ty: self.evaluator().ty(result)?.into(),
+                        span: result.span,
+                    },
+                };
+                let function = self.declare_function(name, &signature)?;
+                let short = name.val.rsplit('.').next().unwrap();
+                if !self.typer.define_method(definition, short.into(), function) {
+                    return Err(error(name.span, "duplicate method"));
+                }
+                if short == "drop" {
+                    let declaration = self.typer.declared_function(function);
+                    if declaration.params
+                        != [Ty::Pointer {
+                            pointee: Box::new(Ty::Defined { definition }),
+                        }]
+                        || declaration.result != Ty::Unit
+                    {
+                        return Err(error(
+                            name.span,
+                            "drop must have signature drop(receiver: Ptr<T>) -> ()",
+                        ));
+                    }
+                    self.typer.define_drop(definition, function);
+                }
+                Ok(())
+            })();
             self.scopes.record_method_definition(definition, name);
+            if let Err(error) = checked {
+                self.errors.push(error);
+            }
         }
-        Ok(())
     }
 
     pub(super) fn hold_arc_address(&mut self, term: &Term) -> Result<Ty, GenerateError> {
@@ -112,8 +129,6 @@ impl Generator {
             .typer
             .method(receiver_type, &name.val)
             .ok_or_else(|| error(name.span, "unknown method"))?;
-        self.scopes
-            .record_method(name, receiver_type, associated, &self.typer);
         if let FunctionBody::Defined(function) = &function.body {
             self.emit(Instr::Function {
                 function: *function,

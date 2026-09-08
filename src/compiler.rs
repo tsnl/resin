@@ -4,10 +4,14 @@
 //! and checked snapshots. Queries without intervening changes reuse the same
 //! snapshot. Existing snapshots remain valid when the session advances.
 
-use crate::{
-    analysis::{Analysis, Sources, normalize_path, syntax::Document},
-    ast, backend, toolchain,
-};
+use crate::{ast, backend, toolchain};
+mod snapshot;
+mod source;
+pub(crate) mod syntax;
+pub use snapshot::{Diagnostic, Snapshot};
+pub use source::{Sources, normalize_path};
+use syntax::Document;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     io,
@@ -138,7 +142,7 @@ pub struct Session {
     sources: Sources,
     stdlib: PathBuf,
     parsed: BTreeMap<PathBuf, Arc<Document>>,
-    checked: BTreeMap<PathBuf, Arc<Analysis>>,
+    checked: BTreeMap<PathBuf, Arc<Snapshot>>,
     dependents: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
     revision: u64,
 }
@@ -200,12 +204,12 @@ impl Session {
         Ok(())
     }
 
-    pub fn analyze(&mut self, entry: &Path) -> io::Result<Arc<Analysis>> {
+    pub fn analyze(&mut self, entry: &Path) -> io::Result<Arc<Snapshot>> {
         let entry = normalize_path(entry)?;
         if let Some(snapshot) = self.checked.get(&entry) {
             return Ok(snapshot.clone());
         }
-        let snapshot = Arc::new(Analysis::build(
+        let snapshot = Arc::new(Snapshot::build(
             &entry,
             &self.sources,
             &self.stdlib,
@@ -347,8 +351,8 @@ mod verification_tests {
         let source = "export { main, a, b }; def main() -> int = { 0 }; @compute_shader def a(i: uint, p: Ptr<uint>) = { p.* := i; }; @compute_shader def b(i: uint, p: Ptr<uint>) = { p.* := i + 1I; };";
         let mut session = Session::default();
         session.set_overlay(&path, source.into()).unwrap();
-        let snapshot = session.analyze(&path).unwrap();
         ANALYSES.set(0);
+        let snapshot = session.analyze(&path).unwrap();
         let checked = snapshot.verified().unwrap();
         assert_eq!(ANALYSES.get(), 1);
         let mut shaders = Vec::new();
@@ -376,8 +380,8 @@ mod verification_tests {
         session
             .set_overlay(&path, source.replace("{ 0 }", "{ 1 }"))
             .unwrap();
-        let changed = session.analyze(&path).unwrap();
         ANALYSES.set(0);
+        let changed = session.analyze(&path).unwrap();
         let new = changed.verified().unwrap();
         assert_eq!(ANALYSES.get(), 1);
         assert!(!std::ptr::eq(checked.module, new.module));
