@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -15,6 +16,7 @@ concurrency:
 
 jobs:
   grammar:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Grammar checks
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -38,6 +40,7 @@ jobs:
         run: npm run typecheck
 
   native:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     env:
       # Keep assertions and overflow checks, but avoid generating and repeatedly
       # linking debug symbols into the test programs' static runtime archive.
