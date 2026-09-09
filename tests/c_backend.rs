@@ -44,6 +44,100 @@ fn ownership_example_releases_memory_on_success_and_failure() {
     );
 }
 
+#[test]
+fn array_value_projections_copy_the_element_and_destroy_the_container() {
+    use resin_lir::{BasicBlock, BlockId, Instr::*, Local, Terminator};
+    for projection in [
+        vec![AccessStatic { index: 0 }],
+        vec![
+            Push {
+                value: Value::UInt64 { value: 0 },
+            },
+            AccessDynamic,
+        ],
+    ] {
+        let mut program = module(
+            r#"
+            export { main };
+            struct Resource { trace: Ptr<int>, digit: int };
+            impl Resource {
+                def drop(self: Ptr<Resource>) = {
+                    self.trace.* := self.trace.* * 10 + self.digit;
+                };
+            }
+            def make(trace: Ptr<int>, digit: int) -> Arc<Resource> = {
+                Arc<Resource> { trace = trace, digit = digit }
+            };
+            def main() -> int = { 0 };
+        "#,
+        );
+        let make = FunctionId::from_index(
+            program
+                .functions
+                .iter()
+                .position(|f| f.name.as_deref() == Some("make"))
+                .unwrap(),
+        );
+        let element = program.functions[make.index()].result.clone();
+        let trace = LocalId::from_index(1);
+        let selected = LocalId::from_index(2);
+        let int = |value| Push {
+            value: Value::Int32 { value },
+        };
+        let mut instrs = vec![int(0), SetLocal { local: trace }];
+        for digit in [1, 2] {
+            instrs.extend([
+                Function { function: make },
+                LocalAddress { local: trace },
+                int(digit),
+                MakeRecord {
+                    fields: vec!["_0".into(), "_1".into()],
+                },
+                Call,
+            ]);
+        }
+        instrs.push(MakeArray {
+            elements: 2,
+            element: element.clone(),
+        });
+        instrs.extend(projection);
+        instrs.extend([
+            SetLocal { local: selected },
+            LocalAddress { local: selected },
+            Load,
+            ArcData,
+            AccessStatic { index: 1 },
+            Load,
+            DropLocal { local: selected },
+            LocalAddress { local: trace },
+            Load,
+            CallBuiltin {
+                name: "+".into(),
+                params: vec![Ty::Int32, Ty::Int32],
+                result: Ty::Int32,
+            },
+        ]);
+        let main = &mut program.functions[program.entries["main"].index()];
+        main.locals = [Ty::Unit, Ty::Int32, element]
+            .into_iter()
+            .map(|ty| Local { name: None, ty })
+            .collect();
+        main.entry = BlockId::from_index(0);
+        main.blocks = vec![BasicBlock {
+            name: None,
+            instrs,
+            terminator: Terminator::Return,
+        }];
+        let output = run_module(&program);
+        assert_eq!(
+            output.status.code(),
+            Some(22),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
 fn runs(source: &str, code: i32) {
     let output = run_module(&module(source));
     assert_eq!(
