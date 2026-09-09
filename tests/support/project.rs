@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use super::shaders;
 use std::process::{Command, Output};
 use tempfile::TempDir;
 
@@ -41,12 +42,19 @@ impl Project {
         &self,
         tools: &resin_toolchain::Toolchain,
     ) -> Result<resin_toolchain::BuiltProject, resin_toolchain::Error> {
-        tools.build(
+        for shader in self.generated.shaders() {
+            shaders::validate(shader.unoptimized_spirv());
+        }
+        let built = tools.build(
             self.generated.directory(),
             self.generated.name(),
             self.generated.entry().unwrap_or("shaders"),
             resin_toolchain::CProfile::Release,
-        )
+        )?;
+        for shader in self.generated.shaders() {
+            shaders::validate(&built.path(shader.spirv().file_name().unwrap()));
+        }
+        Ok(built)
     }
 }
 

@@ -785,7 +785,7 @@ pub mod shader {
         pub embedded: bool,
     }
 
-    /// A checked stage interface, shared by declaration checking and GLSL emission.
+    /// A checked stage interface, shared by declaration checking and shader emission.
     #[derive(Debug, Clone)]
     pub enum Interface {
         Compute {

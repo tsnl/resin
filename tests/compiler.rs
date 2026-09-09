@@ -33,7 +33,7 @@ fn compilation_uses_supplied_source_versions_and_explicit_profiles() {
     // Unused shader compilers remain optional for decorated host-callable functions.
     environment
         .variables
-        .insert("GLSLC".into(), "/missing/glslc".into());
+        .insert("SPIRV_OPT".into(), "/missing/spirv-opt".into());
     let path = temp.path().join("main.resin");
     fs::write(&path, "export { main }; def main() -> int = { 1 };").unwrap();
     let mut loader =
@@ -117,7 +117,7 @@ fn compiler_processes_use_the_supplied_environment_and_working_directory() {
         .insert("RESIN_TOOL_SETTING".into(), "later".into());
     let project = temp.path().join("generated");
     fs::create_dir(&project).unwrap();
-    for tool in ["cc", "glslc"] {
+    for tool in ["cc", "spirv_opt"] {
         fs::write(project.join("build.ninja"), format!("include toolchain.ninja\nrule probe\n  command = ${tool}\nbuild output: probe\ndefault output\n")).unwrap();
         let error = settings
             .build(&project, "probe", tool, CProfile::Debug)

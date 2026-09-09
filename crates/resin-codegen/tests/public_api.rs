@@ -90,10 +90,9 @@ fn generated_project_outlives_its_verified_input_and_retains_opaque_names() {
         shader.header().file_name().unwrap().to_str().unwrap()
     )));
     assert!(source.contains(&format!("{}_length", shader.symbol())));
-    assert!(
-        fs::read_to_string(shader.source())
-            .unwrap()
-            .starts_with("#version 460\n")
+    assert_eq!(
+        &fs::read(shader.unoptimized_spirv()).unwrap()[..4],
+        &[3, 2, 35, 7]
     );
     assert!(project.build_file().is_file());
     for output in [shader.spirv(), shader.header(), project.program().unwrap()] {
@@ -120,13 +119,12 @@ fn shader_only_generation_batches_declared_functions_without_a_host_entry() {
     assert_eq!(project.shaders().len(), 2);
     let first = &project.shaders()[0];
     let second = &project.shaders()[1];
-    assert_ne!(first.source(), second.source());
+    assert_ne!(first.unoptimized_spirv(), second.unoptimized_spirv());
     assert_ne!(first.symbol(), second.symbol());
     for shader in project.shaders() {
-        assert!(
-            fs::read_to_string(shader.source())
-                .unwrap()
-                .contains("void main()")
+        assert_eq!(
+            &fs::read(shader.unoptimized_spirv()).unwrap()[..4],
+            &[3, 2, 35, 7]
         );
     }
 }
@@ -161,7 +159,7 @@ fn lowering_failure_leaves_existing_outputs_untouched() {
     let checked = VerifiedModule::new(embedded_module()).unwrap();
     let project = resin_codegen::generate(checked.view(), Some("main"), directory.path()).unwrap();
     let before_c = fs::read(project.c_source().unwrap()).unwrap();
-    let before_glsl = fs::read(project.shaders()[0].source()).unwrap();
+    let before_spirv = fs::read(project.shaders()[0].unoptimized_spirv()).unwrap();
     let error =
         resin_codegen::generate(checked.view(), Some("missing"), directory.path()).unwrap_err();
     assert!(error.to_string().contains("not exported"));
@@ -183,20 +181,25 @@ fn lowering_failure_leaves_existing_outputs_untouched() {
     assert!(error.to_string().contains("shader string literals"));
     assert_eq!(fs::read(project.c_source().unwrap()).unwrap(), before_c);
     assert_eq!(
-        fs::read(project.shaders()[0].source()).unwrap(),
-        before_glsl
+        fs::read(project.shaders()[0].unoptimized_spirv()).unwrap(),
+        before_spirv
     );
 }
 
 #[test]
-fn build_graph_orders_shader_compilation_embedding_and_c_compilation() {
+fn build_graph_orders_shader_optimization_embedding_and_c_compilation() {
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
     let checked = VerifiedModule::new(embedded_module()).unwrap();
     let project = resin_codegen::generate(checked.view(), Some("main"), directory.path()).unwrap();
     let graph = fs::read_to_string(project.build_file()).unwrap();
     assert!(graph.contains("include toolchain.ninja"));
-    assert!(graph.contains("shader_1.spv: compile_shader shader_1.glsl | toolchain.state"));
+    assert!(
+        graph.contains("shader_1.spv: optimize_shader shader_1.unoptimized.spv | toolchain.state")
+    );
     assert!(graph.contains("shader_1.h: embed_shader shader_1.spv | toolchain.state"));
     assert!(graph.contains("compile_program main.c | toolchain.state $runtime_library shader_1.h"));
-    assert!(graph.contains("$resin --embed $in --symbol $symbol --output $out"));
+    assert!(
+        !graph.contains("command ="),
+        "native commands belong to the toolchain"
+    );
 }

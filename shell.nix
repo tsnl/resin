@@ -23,7 +23,8 @@ pkgs.mkShell (
       with pkgs;
       [
         rustup
-        shaderc
+        shaderc # Handwritten GLSL fixtures in the runtime tests.
+        spirv-tools
         nodejs_26
       ]
       ++ lib.optionals linux (

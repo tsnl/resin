@@ -488,7 +488,12 @@ fn bad_destinations_and_missing_compilers_preserve_files() {
 
 #[test]
 fn invalid_options_and_source_report_errors() {
-    for args in [vec!["-o"], vec!["--cc"], vec!["--glslc"], vec!["--unknown"]] {
+    for args in [
+        vec!["-o"],
+        vec!["--cc"],
+        vec!["--spirv-opt"],
+        vec!["--unknown"],
+    ] {
         assert!(
             !cli("export { main }; def main() = {};", &args)
                 .status
@@ -499,16 +504,16 @@ fn invalid_options_and_source_report_errors() {
 }
 
 #[test]
-fn decorated_host_calls_need_no_glslc() {
+fn decorated_host_calls_need_no_spirv_opt() {
     success(&cli(
         "export { main }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() -> int = { var output = 0_ui; kernel(7_ul, &output); if (output == 7_ui) { 0 } else { 1 } };",
-        &["--glslc", "/does/not/exist/glslc"],
+        &["--spirv-opt", "/does/not/exist/spirv-opt"],
     ));
 }
 
 #[test]
 fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
-    let Some(glslc) = shaders::compiler() else {
+    let Some(spirv_opt) = shaders::optimizer() else {
         return;
     };
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
@@ -536,8 +541,9 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
         .arg(&input)
         .arg("-o")
         .arg(&destination)
-        .arg("--glslc")
-        .arg(glslc)
+        .arg("--spirv-opt")
+        .arg(spirv_opt)
+        .env("GLSLC", "/missing/glslc")
         .output()
         .unwrap();
     success(&output);
@@ -552,13 +558,16 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
     let shaders = fs::read_dir(directory)
         .unwrap()
         .map(|entry| entry.unwrap().path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == "spv"))
+        .filter(|path| {
+            path.extension().is_some_and(|extension| extension == "spv")
+                && !path.to_string_lossy().ends_with(".unoptimized.spv")
+        })
         .collect::<Vec<_>>();
     assert_eq!(shaders.len(), 3);
     assert!(directory.join("build.ninja").is_file());
-    let mut sources = Vec::new();
     for shader in shaders {
-        sources.push(fs::read_to_string(shader.with_extension("glsl")).unwrap());
+        let raw = fs::read(shader.with_extension("unoptimized.spv")).unwrap();
+        assert_eq!(&raw[..4], &[3, 2, 35, 7]);
         let bytes = fs::read(&shader).unwrap();
         assert_eq!(&bytes[..4], &[3, 2, 35, 7]);
         assert_eq!(bytes.len() % 4, 0);
@@ -582,12 +591,6 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
                     .to_str()
                     .unwrap()
             )
-        );
-    }
-    for marker in ["gl_WorkGroupID", "gl_VertexIndex", "r_output"] {
-        assert!(
-            sources.iter().any(|source| source.contains(marker)),
-            "{marker}"
         );
     }
     success(&Command::new(destination).output().unwrap());
@@ -851,7 +854,7 @@ fn embedding_preserves_arbitrary_bytes_and_empty_length_without_tools() {
         fs::write(&input, &bytes).unwrap();
         let result = Command::new(env!("CARGO_BIN_EXE_resin"))
             .env("CC", "/missing/cc")
-            .env("GLSLC", "/missing/glslc")
+            .env("SPIRV_OPT", "/missing/spirv-opt")
             .env("NINJA", "/missing/ninja")
             .arg("--embed")
             .arg(&input)

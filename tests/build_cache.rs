@@ -55,7 +55,7 @@ fn foreign_header_changes_rebuild_including_nested_dependencies() {
 
 #[test]
 fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
-    let Some(glslc) = shaders::compiler() else {
+    let Some(spirv_opt) = shaders::optimizer() else {
         return;
     };
     let project = Project::new();
@@ -86,10 +86,10 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
     let run = || {
         project
             .command()
-            .arg("--glslc")
+            .arg("--spirv-opt")
             .arg(&shader_compiler)
             .env("RESIN_TEST_SHADER_COUNT", &count)
-            .env("RESIN_TEST_SHADER_COMPILER", &glslc)
+            .env("RESIN_TEST_SHADER_COMPILER", &spirv_opt)
             .output()
             .unwrap()
     };
@@ -500,7 +500,7 @@ fn concurrent_runs_share_one_build() {
 }
 
 #[test]
-fn all_glsl_is_generated_before_shader_or_c_compilers_run() {
+fn all_spirv_is_generated_before_shader_or_c_compilers_run() {
     let project = Project::new();
     fs::write(
         &project.input,
@@ -514,7 +514,7 @@ fn all_glsl_is_generated_before_shader_or_c_compilers_run() {
     .unwrap();
     let output = project
         .command()
-        .args(["--glslc", "/missing/glslc"])
+        .args(["--spirv-opt", "/missing/spirv-opt"])
         .output()
         .unwrap();
     assert!(!output.status.success());

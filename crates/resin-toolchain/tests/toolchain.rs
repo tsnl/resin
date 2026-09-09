@@ -29,7 +29,7 @@ fn c_project(temp: &TempDir, source: &str) -> PathBuf {
     fs::create_dir_all(&project).unwrap();
     fs::write(project.join("main.c"), source).unwrap();
     fs::write(project.join("build.ninja"), format!(
-        "include toolchain.ninja\nrule c\n  command = $cc $cflags -MD -MF $out.d -MT $out $in -o $out $ldflags\n  depfile = $out.d\n  deps = gcc\nbuild program{}: c main.c | $runtime_library toolchain.state\n",
+        "include toolchain.ninja\nbuild program{}: compile_program main.c | $runtime_library toolchain.state\n",
         std::env::consts::EXE_SUFFIX)).unwrap();
     project
 }
@@ -49,7 +49,7 @@ fn missing_tools_fail_only_when_the_graph_uses_them() {
     let temp = TempDir::new().unwrap();
     let mut environment = native_environment(&temp);
     let project = c_project(&temp, "int main(void) { return 0; }");
-    let host = environment.toolchain(None, Some(OsStr::new("missing-resin-glslc")));
+    let host = environment.toolchain(None, Some(OsStr::new("missing-resin-spirv-opt")));
     assert_eq!(
         build(&host, &project)
             .executable(program())
@@ -63,6 +63,19 @@ fn missing_tools_fail_only_when_the_graph_uses_them() {
         .build(&project, "generated/module", "main", CProfile::Debug)
         .unwrap_err();
     assert!(error.to_string().contains("missing-resin-cc"), "{error}");
+    fs::write(project.join("shader.unoptimized.spv"), []).unwrap();
+    fs::write(
+        project.join("build.ninja"),
+        "include toolchain.ninja\nbuild shader.spv: optimize_shader shader.unoptimized.spv | toolchain.state\n",
+    )
+    .unwrap();
+    let error = host
+        .build(&project, "generated/module", "main", CProfile::Debug)
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("missing-resin-spirv-opt"),
+        "{error}"
+    );
     environment
         .variables
         .insert("NINJA".into(), "missing-resin-ninja".into());
@@ -182,9 +195,10 @@ fn outputs_removed_from_the_graph_disappear_from_the_published_project() {
     let replacement = format!("replacement{}", std::env::consts::EXE_SUFFIX);
     fs::write(
         &graph,
-        fs::read_to_string(&graph)
-            .unwrap()
-            .replace(&program(), &replacement),
+        fs::read_to_string(&graph).unwrap().replace(
+            &format!("build {}:", program()),
+            &format!("build {replacement}:"),
+        ),
     )
     .unwrap();
     let second = build(&tools, &project);
@@ -352,10 +366,14 @@ printf '%s: %s\n' "$1" "$RESIN_TEST_HEADER" > "$1.d""#,
     fn shader_only_graph_needs_no_c_compiler_or_runtime_and_uses_captured_environment() {
         let temp = TempDir::new().unwrap();
         let mut environment = native_environment(&temp);
-        let shader = temp.path().join("shader compiler");
+        let shader = temp.path().join("shader optimizer");
         executable(
             &shader,
-            "for output do :; done\nprintf '%s' \"$RESIN_TEST_MARKER\" > \"$output\"",
+            r#"test "$1" = --target-env=vulkan1.3 || exit 1
+test "$2" = -O || exit 1
+test "$3" = shader.unoptimized.spv || exit 1
+test "$4" = -o || exit 1
+printf '%s' "$RESIN_TEST_MARKER" > "$5""#,
         );
         environment
             .variables
@@ -369,8 +387,8 @@ printf '%s: %s\n' "$1" "$RESIN_TEST_HEADER" > "$1.d""#,
             .insert("RESIN_TEST_MARKER".into(), "later marker".into());
         let project = temp.path().join("shader sources");
         fs::create_dir(&project).unwrap();
-        fs::write(project.join("shader.glsl"), "shader").unwrap();
-        fs::write(project.join("build.ninja"), "include toolchain.ninja\nrule shader\n  command = $glslc $in -o $out\nbuild shader.spv: shader shader.glsl | toolchain.state\n").unwrap();
+        fs::write(project.join("shader.unoptimized.spv"), "shader").unwrap();
+        fs::write(project.join("build.ninja"), "include toolchain.ninja\nbuild shader.spv: optimize_shader shader.unoptimized.spv | toolchain.state\n").unwrap();
         let built = build(&tools, &project);
         assert_eq!(
             fs::read(built.path("shader.spv")).unwrap(),

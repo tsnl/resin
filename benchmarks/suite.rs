@@ -210,7 +210,7 @@ fn percentile(sorted: &[f64], fraction: f64) -> f64 {
 
 fn metadata(target: Target, config: &Config) -> Value {
     let cc = std::env::var("CC").unwrap_or_else(|_| resin_toolchain::DEFAULT_C_COMPILER.into());
-    let glslc = std::env::var("GLSLC").unwrap_or_else(|_| "glslc".into());
+    let spirv_opt = std::env::var("SPIRV_OPT").unwrap_or_else(|_| "spirv-opt".into());
     json!({
         "schema_version": 1,
         "target": target.name(),
@@ -223,13 +223,13 @@ fn metadata(target: Target, config: &Config) -> Value {
         "cpu": cpu_name(),
         "logical_cpus": std::thread::available_parallelism().map(usize::from).ok(),
         "rustc": command_text("rustc", &["--version"]),
-        "native_profile": "release (-O3 C, -O GLSL, Vulkan 1.3)",
+        "native_profile": "release (-O3 C, -O SPIR-V, Vulkan 1.3)",
         "input_seed": 2891336453_u32,
         "cc": cc,
-        "glslc": glslc,
+        "spirv_opt": spirv_opt,
         "native_compiler_version": match target {
             Target::Cpu => command_text(&cc, &["--version"]),
-            Target::Gpu => command_text(&glslc, &["--version"]),
+            Target::Gpu => command_text(&spirv_opt, &["--version"]),
         },
         "timing": if target == Target::Cpu { "monotonic clock around one single-threaded CPU workload" }
                   else { "Vulkan timestamps around one dispatch, including runtime GPU barriers" },

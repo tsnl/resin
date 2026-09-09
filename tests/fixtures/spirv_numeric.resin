@@ -1,0 +1,68 @@
+export { kernel };
+
+struct Input { kind: uint, value: float32, wide: ulong };
+struct Output { progress: uint, value: ulong };
+struct Root { count: ulong, inputs: Ptr<Input>, outputs: Ptr<Output> };
+
+def convert(input: Input) -> ulong = {
+	if (input.kind == 0_ui) {
+		ulong(ubyte(input.value))
+	} else {
+		if (input.kind == 1_ui) {
+			ulong(uint(input.value))
+		} else {
+			if (input.kind == 2_ui) {
+				var value = int(input.value);
+				if (value < 0_i) {
+					0_ul - ulong(-(value + 1_i)) - 1_ul
+				} else {
+					ulong(value)
+				}
+			} else {
+				if (input.kind == 3_ui) {
+					ulong(input.value)
+				} else {
+					if (input.kind == 4_ui) {
+						ulong(ubyte(input.wide))
+					} else {
+						if (input.kind == 5_ui) {
+							ulong(uint(input.wide))
+						} else {
+							ulong(int(input.wide))
+						}
+					}
+				}
+			}
+		}
+	}
+};
+
+def ready(input: Input, progress: Ptr<uint>) -> bool = {
+	progress.* := 2_ui;
+	convert(input);
+	progress.* := 3_ui;
+	1_ui == 1_ui
+};
+
+def in_loop(input: Input, progress: Ptr<uint>) -> ulong = {
+	var step = 0_ui;
+	var result = 0_ul;
+	while (step < 1_ui && ready(input, progress)) {
+		result := convert(input);
+		step := step + 1_ui;
+	};
+	result
+};
+
+@compute_shader
+def kernel(index: ulong, root: Ptr<Root>) = {
+	if (index < root.count) {
+		var inputs = Span<Input> { data = root.inputs, length = root.count };
+		var outputs = Span<Output> { data = root.outputs, length = root.count };
+		var output = outputs.at(index);
+		output.progress := 1_ui;
+		var value = in_loop(inputs.at(index).*, &output.progress);
+		output.value := value;
+		output.progress := 4_ui;
+	};
+};

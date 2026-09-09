@@ -53,7 +53,7 @@ struct Cli {
     program_args: Vec<OsString>,
 
     /// Format files in place; search directories recursively for .resin files.
-    #[arg(short = 'f', long, conflicts_with_all = ["destination", "cc", "glslc"])]
+    #[arg(short = 'f', long, conflicts_with_all = ["destination", "cc", "spirv_opt"])]
     format: bool,
 
     /// With --format, check without writing; exit 1 on differences or file/syntax errors.
@@ -61,11 +61,11 @@ struct Cli {
     check: bool,
 
     /// Serve Language Server Protocol requests over stdin/stdout for this directory.
-    #[arg(long, conflicts_with_all = ["format", "check", "destination", "cc", "glslc", "program_args"])]
+    #[arg(long, conflicts_with_all = ["format", "check", "destination", "cc", "spirv_opt", "program_args"])]
     lsp: bool,
 
     /// Convert a binary file into an aligned C byte array without adding a terminator.
-    #[arg(long, value_name = "INPUT", requires_all = ["symbol", "destination"], conflicts_with_all = ["paths", "format", "lsp", "check", "cc", "glslc", "program_args"])]
+    #[arg(long, value_name = "INPUT", requires_all = ["symbol", "destination"], conflicts_with_all = ["paths", "format", "lsp", "check", "cc", "spirv_opt", "program_args"])]
     embed: Option<PathBuf>,
 
     /// C array identifier for --embed; also defines <SYMBOL>_length.
@@ -86,9 +86,9 @@ struct CompileOptions {
     #[arg(long)]
     cc: Option<OsString>,
 
-    /// Shader compiler executable (defaults to GLSLC or glslc).
+    /// SPIR-V optimizer executable (defaults to SPIRV_OPT or spirv-opt).
     #[arg(long)]
-    glslc: Option<OsString>,
+    spirv_opt: Option<OsString>,
 }
 
 impl Cli {
@@ -177,7 +177,7 @@ impl CompileOptions {
         } else {
             CProfile::Release
         };
-        let tools = environment.toolchain(self.cc.as_deref(), self.glslc.as_deref());
+        let tools = environment.toolchain(self.cc.as_deref(), self.spirv_opt.as_deref());
         Request::new(
             input,
             destination,

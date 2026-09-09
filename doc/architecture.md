@@ -38,9 +38,9 @@ flowchart LR
     ast --> hir[HIR: resolved tree]
     hir --> lir[LIR: storage and structured regions]
     lir --> verified[Verified LIR]
-    verified --> project[Codegen: C + GLSL + build.ninja]
+    verified --> project[Codegen: C + SPIR-V + build.ninja]
     project --> ninja[Ninja]
-    ninja --> spirv[glslc: SPIR-V]
+    ninja --> spirv[spirv-opt: optimized SPIR-V]
     spirv --> headers[resin --embed: C headers]
     headers --> executable[C compiler: executable]
 ```
@@ -57,7 +57,7 @@ pass consumes. Source and type vocabulary are independent foundations.
 | `resin-ast` | `resin-cst` | Source AST, recovery, parsing diagnostics |
 | `resin-hir` | `resin-ast`, `resin-cst` | Resolved tree, checking and elaboration, editor analysis |
 | `resin-lir` | `resin-hir` | Storage and control-flow lowering, verification certificates |
-| `resin-codegen` | `resin-lir` | Generate a complete on-disk C/GLSL/Ninja project |
+| `resin-codegen` | `resin-lir` | Generate a complete on-disk C/SPIR-V/Ninja project |
 | `resin-toolchain` | none | Captured process settings, Ninja builds, locked output files |
 | `resin-compiler` | CST, AST, HIR, LIR | Import traversal, pass sequencing, immutable compilations |
 | `resin-lsp` | `resin-compiler`, `resin-hir`, `resin-cst` | Compiler queries and formatting over LSP |
@@ -78,7 +78,7 @@ directly by types, HIR, and LIR; it owns no domain types or diagnostics.
 For each phase, start with `lib.rs`: language data appears beside the operations
 that accept the preceding language and produce this one. Follow an operation into
 private `lower` or `print` only when its implementation matters. Codegen's entry
-point exposes one project-generation operation. Its C and GLSL trees are private to
+point exposes one project-generation operation. Its C tree and SPIR-V builder are private to
 the target modules. Source and type entry points contain their definitions directly;
 language-specific builders and solver state stay private. In `resin-types`, the
 public type model and operations remain in `lib.rs`; private `types.rs` implements
@@ -105,7 +105,7 @@ compiler returns `resin_hir::Hover` and `resin_hir::Completion` directly.
 | HIR | [resolved nodes](../crates/resin-hir/src/lib.rs) | [AST → HIR](../crates/resin-hir/src/lower/mod.rs) | [typed S-expressions](../crates/resin-hir/src/print.rs) |
 | LIR | [instructions and blocks](../crates/resin-lir/src/lib.rs) | [HIR → LIR](../crates/resin-lir/src/lower/mod.rs) | [S-expressions](../crates/resin-lir/src/print/mod.rs) |
 | C | [private C tree](../crates/resin-codegen/src/c/mod.rs) | [verified LIR → C](../crates/resin-codegen/src/c/lower/mod.rs) | [C text](../crates/resin-codegen/src/c/print.rs) |
-| GLSL | [private GLSL tree](../crates/resin-codegen/src/glsl/mod.rs) | [verified LIR → GLSL](../crates/resin-codegen/src/glsl/lower/mod.rs) | [GLSL text](../crates/resin-codegen/src/glsl/print.rs) |
+| SPIR-V | Private `rspirv` module | [verified LIR → SPIR-V](../crates/resin-codegen/src/spirv/mod.rs) | Binary assembly; inspect with `spirv-dis` |
 
 Prefer small functions named for the operation they perform. The
 [Bitwise taste guide](bitwise.md) explains the style reference through concrete
@@ -179,17 +179,18 @@ Target lowering accepts a certificate for the module being lowered. Instruction
 effects stay private to verification; backends obtain checked operand counts through
 `resin_lir::FunctionTypes::operand_count(block, index)`.
 
-C lowering chooses the ABI, runtime operations, and native entry wrapper. GLSL
-lowering resolves reachable functions, checks device restrictions, and represents
-local addresses and direct functions symbolically. Both produce owned target
-trees. These describe translation units, functions, nested conditionals, loops,
-and returns; leaf strings already contain target syntax for declarations,
-expressions, and operand transfers. They are deliberately limited generated-source
-languages, rather than full C or GLSL parser ASTs. Lowering snapshots carried values
-before assigning region inputs, including initialization provenance in C and symbolic
-local places in GLSL. Printers only format their own target language. They need no
-LIR, verifier analysis, or source metadata. Shader functions use native structured
-control flow; they have no program counter or block-dispatch loop.
+C lowering chooses the ABI, runtime operations, and native entry wrapper. It builds
+an owned tree of translation units, functions, conditionals, loops, and returns;
+leaf strings contain target syntax for declarations, expressions, and operand transfers.
+The C printer formats only that completed target tree, without consulting LIR or
+verification facts.
+
+SPIR-V lowering resolves reachable functions, checks device restrictions, and emits
+binary instructions with `rspirv`. It preserves structured selection and loop regions
+using explicit merge and continue targets. Function storage holds addressable locals;
+physical buffer accesses use Resin's shared layout and Vulkan device addresses.
+Direct function identities and local addresses remain private lowering information.
+The optimizer runs separately in the toolchain; codegen invokes no external processes.
 
 ## Calling the passes
 
@@ -252,9 +253,9 @@ or forwarding object is needed. HIR functions carry optional source locations di
 Source handles retain their text, so later phases need no separate path-to-text table.
 `resin_lir::analyze` collects errors across functions; `resin_lir::generate` returns the first.
 Codegen accepts only verified LIR. `generate(verified, Some(entry), directory)` writes
-host C, the GLSL requested by `.spirv`, and `build.ninja`; `None` generates a shader-only
+host C, the SPIR-V requested by `.spirv`, and `build.ninja`; `None` generates a shader-only
 project containing all declared shaders. It returns paths, never target ASTs or per-target
-emission operations. C and GLSL lowering finish before any source files are written.
+emission operations. C and SPIR-V lowering finish before any generated files are written.
 
 The compiler's [lib.rs](../crates/resin-compiler/src/lib.rs) contains source traversal,
 syntax caching, HIR/LIR generation, verification, and retained query access.
@@ -267,15 +268,17 @@ dependencies in the directory where it runs the compiler.
 
 The [toolchain](../crates/resin-toolchain/src/lib.rs) captures explicit `Environment`
 inputs and builds any compatible Ninja source directory. `Toolchain::build` stages the
-project, supplies tool and runtime settings, and lets Ninja execute its dependencies:
-GLSL → SPIR-V → C headers, followed by C compilation and linking. `BuiltProject` exposes
+project, supplies the native command rules and settings in `toolchain.ninja`, and lets
+Ninja execute the generated dependency edges: unoptimized SPIR-V → `spirv-opt -O` →
+C headers, followed by C compilation and linking. `BuiltProject` exposes
 retained output paths; an `Executable` keeps the cache lock through copying and execution.
 The embedding command uses the running Resin executable obtained through `current_exe`,
 so it uses the same version without looking up `resin` on PATH.
 
-Install Ninja, `glslc`, and a C compiler (`CC` or `--cc` overrides the default). No tool
+Install Ninja, SPIR-V Tools (`spirv-opt`), and a C compiler (`CC` or `--cc` overrides
+the default). `SPIRV_OPT` or `--spirv-opt` selects the optimizer. No tool
 preflight is performed: a required command reports failure when executed. A host project
-without embedded shaders never invokes `glslc`. No language crate invokes native tools;
+without embedded shaders never invokes `spirv-opt`. No language crate invokes native tools;
 `resin-toolchain` has no dependency on compiler internals or concrete Resin types.
 
 ## Source identity and incrementality

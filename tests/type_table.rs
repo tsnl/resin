@@ -88,19 +88,32 @@ fn both_emitters_use_payload_table_indices_as_union_tags() {
     let host_project = support::project::Project::new(&module, Some("main")).unwrap();
     let shader_project = support::project::Project::new(&module, None).unwrap();
     let host = std::fs::read_to_string(host_project.generated.c_source().unwrap()).unwrap();
-    let shader = std::fs::read_to_string(shader_project.generated.shaders()[0].source()).unwrap();
-    for source in [&host, &shader] {
-        assert!(
-            source.contains(&format!("struct r_t{optional_id} {{")),
-            "{source}"
-        );
-        assert!(source.contains(&format!(".tag == {none_id}u")), "{source}");
-        assert!(source.contains(&format!(" v{uint_id};")), "{source}");
-    }
-    assert!(host.contains(&format!(".tag = {uint_id}u")), "{host}");
+    let shader = std::fs::read(shader_project.generated.shaders()[0].unoptimized_spirv()).unwrap();
     assert!(
-        shader.contains(&format!("r_t{optional_id}({uint_id}u,")),
-        "{shader}"
+        host.contains(&format!("struct r_t{optional_id} {{")),
+        "{host}"
+    );
+    assert!(host.contains(&format!(".tag == {none_id}u")), "{host}");
+    assert!(host.contains(&format!(" v{uint_id};")), "{host}");
+    assert!(host.contains(&format!(".tag = {uint_id}u")), "{host}");
+    use support::shaders::instructions;
+    let uint_type = instructions(&shader, 21)
+        .find(|args| args[1..] == [32, 0])
+        .unwrap()[0];
+    let constants: std::collections::HashMap<_, _> = instructions(&shader, 43)
+        .filter(|args| args[0] == uint_type)
+        .map(|args| (args[1], args[2]))
+        .collect();
+    // OpIEqual tests the canonical None tag; OpCompositeConstruct puts the
+    // canonical uint tag in the aggregate's first field.
+    assert!(instructions(&shader, 170).any(|args| {
+        args[2..]
+            .iter()
+            .any(|id| constants.get(id) == Some(&(none_id as u32)))
+    }));
+    assert!(
+        instructions(&shader, 80)
+            .any(|args| { constants.get(&args[2]) == Some(&(uint_id as u32)) })
     );
     let type_body = host
         .rsplit_once(&format!("r_fn{type_function}("))

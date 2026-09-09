@@ -8,8 +8,8 @@ nix-shell --run 'cargo bench --bench cpu'
 nix-shell --run 'cargo bench --bench gpu'
 ```
 
-The CPU target does not compile GLSL or initialize a GPU. The GPU target requires
-`glslc` and a compatible Vulkan device with timestamp support; missing tools or
+The CPU target does not optimize SPIR-V or initialize a GPU. The GPU target requires
+`spirv-opt` and a compatible Vulkan device with timestamp support; missing tools or
 unsupported devices cause a failure rather than a skipped measurement. No window
 or display is needed. On Windows, run the Cargo commands in the development
 PowerShell described in the root [README](../README.md).

@@ -4,6 +4,8 @@ use tempfile::TempDir;
 mod pipeline;
 #[path = "support/project.rs"]
 mod project;
+#[path = "support/shaders.rs"]
+mod shaders;
 #[path = "support/toolchain.rs"]
 mod toolchain;
 use std::{fs, path::Path, process::Command};

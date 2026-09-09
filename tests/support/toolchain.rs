@@ -8,7 +8,7 @@ pub fn c(compiler: &OsStr) -> Toolchain {
     environment().toolchain(Some(compiler), None)
 }
 
-pub fn glsl(compiler: &OsStr) -> Toolchain {
+pub fn spirv(compiler: &OsStr) -> Toolchain {
     environment().toolchain(None, Some(compiler))
 }
 
@@ -41,14 +41,17 @@ pub fn compile_c(
 }
 
 /// Malformed native input belongs to the native-tool boundary, without any LIR.
-pub fn compile_glsl(source: &str, compiler: &OsStr) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+pub fn optimize_spirv(
+    source: &[u8],
+    compiler: &OsStr,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let directory = TempDir::new()?;
-    fs::write(directory.path().join("shader.glsl"), source)?;
+    fs::write(directory.path().join("shader.unoptimized.spv"), source)?;
     fs::write(
         directory.path().join("build.ninja"),
-        "include toolchain.ninja\nrule glsl\n  command = $glslc --target-env=vulkan1.3 -fshader-stage=compute $in -o $out\nbuild shader.spv: glsl shader.glsl | toolchain.state\ndefault shader.spv\n",
+        "include toolchain.ninja\nrule optimize\n  command = $spirv_opt --target-env=vulkan1.3 -O $in -o $out\nbuild shader.spv: optimize shader.unoptimized.spv | toolchain.state\ndefault shader.spv\n",
     )?;
-    let built = glsl(compiler).build(
+    let built = spirv(compiler).build(
         directory.path(),
         "shader-test",
         "shader",

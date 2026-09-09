@@ -84,7 +84,7 @@ C ABI. Vulkan buffer device addresses implement the current device address profi
 ## Compiler architecture
 
 The compiler is a workspace of unpublished phase crates. The data flow is source text →
-CST → AST → HIR → LIR → verified LIR → C/GLSL. Each phase declares its public
+CST → AST → HIR → LIR → verified LIR → C/SPIR-V. Each phase declares its public
 language and operations in `lib.rs`, with private incoming `lower` and `print` modules.
 LIR's private verifier certifies its language before target lowering; the certificate
 and verification operations belong to `resin_lir`'s public interface. See
@@ -111,8 +111,8 @@ values remain usable after reads; this is not source-level move checking.
 
 Shared concrete types and layout rules live in `resin-types`. The source checker and
 LIR verifier reuse these rules without sharing source scopes or inference state. Target
-lowering chooses the ABI and device representation; target printers consume only their
-own C/GLSL source trees.
+lowering chooses the ABI and device representation. The C printer consumes its private
+source tree; the SPIR-V backend assembles binary instructions directly.
 
 Compiler inputs are immutable `Source` handles from `resin-source`. A clone shares
 one text version; a replacement keeps the logical source ID and leaves the old
@@ -131,7 +131,7 @@ Their definitions, queries, and private implementation stay together in `lib.rs`
 A small public interface can have a substantial, cohesive implementation. The
 compiler has no native-build, file-notification, or protocol-version API.
 
-Codegen consumes a compilation's verified LIR and writes a complete C/GLSL/Ninja
+Codegen consumes a compilation's verified LIR and writes a complete C/SPIR-V/Ninja
 project. Its target ASTs stay private. `resin-toolchain` builds the directory through
 Ninja and retains output files; it depends on no compiler or type crate. The root `resin` package provides one CLI for compilation, execution, formatting,
 and the language server; its request and destination validation stay private to the CLI.
@@ -143,11 +143,12 @@ changes. The single queue conservatively orders buffer-device-address accesses b
 rendering, and copies with global memory barriers. This favors correctness until resource access
 information permits narrower barriers.
 
-Target lowering produces C, GLSL, and a Ninja dependency graph in one operation.
-Ninja runs `glslc`, invokes the current Resin executable to embed SPIR-V in C headers,
-and compiles and links the host against the runtime. The toolchain passes explicit
-settings to these commands; it performs no tool preflight. Install Ninja, `glslc`,
-and a C compiler, choosing the latter with `CC` or `--cc` when needed.
+Target lowering produces C, SPIR-V binaries, and Ninja dependency edges in one operation.
+The toolchain supplies native command rules and explicit settings: Ninja runs `spirv-opt -O`,
+invokes the current Resin executable to embed the optimized SPIR-V in C headers, and compiles
+and links the host against the runtime. It performs no tool preflight. Install Ninja,
+SPIR-V Tools, and a C compiler, choosing the optimizer with `SPIRV_OPT` or `--spirv-opt`
+and the C compiler with `CC` or `--cc` when needed.
 Pipeline construction passes the embedded SPIR-V pointer and byte length to the runtime. This keeps
 the compiler/runtime seam small while leaving room for multiple host compilers, graphics APIs, and
 device code generators.

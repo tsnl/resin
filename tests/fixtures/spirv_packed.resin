@@ -1,0 +1,31 @@
+export { kernel };
+
+struct Bytes3 { a: ubyte, b: ubyte, c: ubyte };
+struct Rows { first: Bytes3, second: Bytes3 };
+struct Sample { lead: ubyte, rows: Rows, marker: uint, wide: ulong, tail: ubyte };
+struct Root { count: ulong, inputs: Ptr<Sample>, outputs: Ptr<Sample> };
+
+def update(output: Ptr<Sample>, index: ulong) = {
+	var rows = Span<Bytes3> { data = Ptr<Bytes3>(&output.rows), length = 2_ul };
+	var row = rows.at(index & 1_ul);
+	row.b := row.b + 1_ub;
+	var previous = output.*;
+	output.* := Sample {
+		lead = previous.lead,
+		rows = previous.rows,
+		marker = previous.marker + 1_ui,
+		wide = previous.wide + 4294967297_ul,
+		tail = previous.tail,
+	};
+};
+
+@compute_shader
+def kernel(index: ulong, root: Ptr<Root>) = {
+	if (index < root.count) {
+		var inputs = Span<Sample> { data = root.inputs, length = root.count };
+		var outputs = Span<Sample> { data = root.outputs, length = root.count };
+		var output = outputs.at(index);
+		output.* := inputs.at(index).*;
+		update(output, index);
+	};
+};

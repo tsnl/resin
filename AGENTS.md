@@ -7,14 +7,14 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 
 - Make the compiler educational to read. Prefer explicit data and direct control flow;
   a reader should be able to tell what a pass consumes, produces, and computes locally.
-- Follow one direction: syntax → AST → HIR → LIR → verified LIR → C/GLSL → native tools.
+- Follow one direction: syntax → AST → HIR → LIR → verified LIR → C/SPIR-V → native tools.
   Put each phase's public language definitions and operations in `lib.rs`. Keep incoming
   translation in private `lower` modules and textual rendering in private `print` modules.
   A crate's complete public contract should be discoverable from its entry point.
 - HIR is a typed, desugared tree with resolved bindings, calls, and operations. Source
   scopes, method namespaces, inference variables, and recovery belong to HIR construction.
   LIR describes storage, cleanup, stack operations, and structured control-flow regions.
-  If/Loop children form a tree; retain this structure through C and GLSL emission.
+  If/Loop children form a tree; retain this structure through C and SPIR-V emission.
   Selection arms end in Merge, loop conditions in LoopTest, and loop bodies in Continue;
   keep these distinct and reject exits that do not match their region.
   Keep LIR verification in private `crates/resin-lir/src/verify/` modules, with the
@@ -52,7 +52,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   by consumers instead of re-exported through `resin-types`. Use `tempfile` for temporary
   files. Do not move domain types, source diagnostics, or phase state into `resin-common`
   to break a dependency cycle.
-  C and GLSL each have a private target language, lowering, and printing inside `codegen`.
+  C has a private target language, lowering, and printing inside `codegen`; SPIR-V lowering
+  emits binary instructions directly through `rspirv`.
 - Use canonical crate and module names; do not rename dependencies or language types
   for brevity. Prefer a qualified name when two phases use the same type name.
   Import needed vocabulary privately with `use resin_source::prelude::*;` and
@@ -146,16 +147,17 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `Environment`, then choose CLI defaults and the build profile explicitly.
   Validate file selections and output destinations in the CLI. `Compiler::compile`
   consumes immutable sources and a loader to produce a `Compilation`. The separate
-  `resin_codegen::generate` operation takes verified LIR and writes C, GLSL, and a Ninja
-  build graph to disk in one call. C/GLSL ASTs and individual target emitters stay private.
+  `resin_codegen::generate` operation takes verified LIR and writes C, unoptimized SPIR-V, and a Ninja
+  dependency graph to disk in one call. Target representations and individual emitters stay private.
   `resin-toolchain` stages that directory, configures native tools, and invokes Ninja.
-  The graph compiles GLSL to SPIR-V, runs the same Resin binary with `--embed` to write
+  The toolchain owns native command rules. The graph optimizes SPIR-V with `spirv-opt`,
+  runs the same Resin binary with `--embed` to write
   aligned byte-array headers, then compiles C. Ninja owns ordering and incremental builds.
   Inspect cached intermediates or immutable `Compilation` results; do not add CLI inspection modes.
   Toolchain APIs consume explicit settings; execution is separate and retains the build-cache lock.
   Capture the Resin executable with `std::env::current_exe()` rather than resolving it on
   PATH. Do not run a blanket native-tool preflight: report failures when a build needs the
-  tool. Document Ninja, a C compiler (`CC`/`--cc`), and `glslc` (`GLSLC`/`--glslc`) as installation
+  tool. Document Ninja, a C compiler (`CC`/`--cc`), and `spirv-opt` (`SPIRV_OPT`/`--spirv-opt`) as installation
   requirements; `NINJA` selects the build runner. Embedding preserves arbitrary bytes and
   their exact logical length, including empty inputs, without appending a NUL.
 - Without `-o`, host compilation uses the debug cache and runs the program. With `-o`,
@@ -247,11 +249,11 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   examples. Enter it with `nix-shell` from the repository root, or run a command non-interactively
   with `nix-shell --run 'cargo test --workspace --all-features'`. On Windows, use a Visual Studio
   developer PowerShell with Rustup, LLVM Clang, and CMake on PATH, as described in `README.md`.
-- The shell supplies Rustup, a C compiler, CMake, Ninja, GLFW's native build dependencies, `glslc`,
+- The shell supplies Rustup, a C compiler, CMake, Ninja, GLFW's native build dependencies, SPIR-V Tools, `glslc` for handwritten test fixtures,
   and, on Linux, Vulkan tools and libraries. On macOS, GPU execution uses the Vulkan SDK's loader
   and MoltenVK. Cargo builds and statically links GLFW via `glfw-sys`. Rustup uses
   `rust-toolchain.toml`. Keep the shell's library paths; do not hardcode Nix store paths.
-- Use `RESIN_REQUIRE_GLSLC=1 RESIN_REQUIRE_GPU=1` when validating the full GPU path so missing
+- Use `RESIN_REQUIRE_SPIRV_TOOLS=1 RESIN_REQUIRE_GLSLC=1 RESIN_REQUIRE_GPU=1` when validating the full GPU path so missing
   dependencies do not silently skip tests. A working Vulkan driver is still required.
 - Window tests also need a display (desktop or Xvfb) and `RESIN_REQUIRE_WINDOW=1` to prevent
   skips. For Xvfb, set `DISPLAY` and `XDG_SESSION_TYPE=x11`; unsetting `WAYLAND_DISPLAY`

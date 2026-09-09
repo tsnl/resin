@@ -1,4 +1,6 @@
 //! Build an on-disk Ninja project with captured tools and a locked native cache.
+//! The included `toolchain.ninja` supplies `optimize_shader`, `embed_shader`, and
+//! `compile_program` rules; generated `build.ninja` files describe their dependencies.
 //! Ninja owns the graph and incremental work. Successful outputs remain available
 //! through `BuiltProject`; executable handles retain its lock during copying or use.
 
@@ -47,9 +49,9 @@ impl Environment {
         })
     }
 
-    /// Resolve explicit compiler choices, then CC/GLSLC, then platform defaults.
-    pub fn toolchain(&self, cc: Option<&OsStr>, glslc: Option<&OsStr>) -> Toolchain {
-        self.resolve_tools(cc, glslc)
+    /// Resolve explicit tool choices, then CC/SPIRV_OPT, then platform defaults.
+    pub fn toolchain(&self, cc: Option<&OsStr>, spirv_opt: Option<&OsStr>) -> Toolchain {
+        self.resolve_tools(cc, spirv_opt)
     }
 
     pub fn variable(&self, name: &str) -> Option<&OsStr> {

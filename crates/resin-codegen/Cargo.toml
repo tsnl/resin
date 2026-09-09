@@ -8,6 +8,7 @@ publish = false
 resin-types = { workspace = true }
 resin-source = { workspace = true }
 resin-lir = { workspace = true }
+rspirv = "0.13"
 
 [dev-dependencies]
 tempfile = "3"
