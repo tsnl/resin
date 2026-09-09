@@ -569,8 +569,8 @@ dependencies = [
  "resin-lir",
  "resin-lir-verifier",
  "resin-lsp",
- "resin-platform-toolchain",
  "resin-runtime",
+ "resin-toolchain",
  "serde_json",
  "tree-sitter",
  "tree-sitter-resin",
@@ -610,7 +610,7 @@ dependencies = [
  "resin-hir",
  "resin-lir",
  "resin-lir-verifier",
- "resin-platform-toolchain",
+ "resin-toolchain",
 ]
 
 [[package]]
@@ -666,13 +666,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "resin-platform-toolchain"
-version = "0.1.0"
-dependencies = [
- "resin-common",
-]
-
-[[package]]
 name = "resin-runtime"
 version = "0.1.0"
 dependencies = [
@@ -680,6 +673,13 @@ dependencies = [
  "glfw-sys",
  "libc",
  "png",
+]
+
+[[package]]
+name = "resin-toolchain"
+version = "0.1.0"
+dependencies = [
+ "resin-common",
 ]
 
 [[package]]

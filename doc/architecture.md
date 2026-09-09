@@ -12,7 +12,7 @@ Language Server Protocol. There is one executable to distribute.
 
 Reusable libraries live under `crates/`, with directory names matching their Cargo
 package names. `resin-compiler` owns pass sequencing, source loading, sessions, and
-retained analysis. `resin-platform-toolchain` owns process discovery, native builds,
+retained analysis. `resin-toolchain` owns process discovery, native builds,
 and artifact caches. The `resin-lsp` library adapts compiler queries to the protocol;
 no library depends on the root CLI. The native C ABI lives in `resin-runtime`.
 
@@ -54,8 +54,8 @@ pass consumes. Every phase uses `resin-common`; it has no phase dependencies.
 | `resin-lir` | `hir` | Typed stack instructions, storage and control-flow lowering |
 | `resin-lir-verifier` | `lir` | Verification and immutable certificates |
 | `resin-codegen` | `lir`, `lir-verifier` | C/GLSL source trees, target lowering, printing |
-| `resin-platform-toolchain` | none | Explicit process inputs, resolved tools, locked native artifacts |
-| `resin-compiler` | all phases and `platform-toolchain` | Source loading, pass sequencing, sessions, retained compilations |
+| `resin-toolchain` | none | Explicit process inputs, resolved tools, locked native artifacts |
+| `resin-compiler` | all phases and `toolchain` | Source loading, pass sequencing, sessions, retained compilations |
 | `resin-lsp` | `compiler`, `hir`, `cst` | Compiler queries and formatting over LSP |
 
 The HIR dependency on CST supports editor queries at a syntax position. Its public
@@ -178,7 +178,7 @@ Codegen's `emit_c` and `emit_glsl` conveniences verify, lower, and print ordinar
 The driver in [passes.rs](../crates/resin-compiler/src/passes.rs) sequences HIR,
 LIR, and verification. [build.rs](../crates/resin-compiler/src/build.rs) and
 [shaders.rs](../crates/resin-compiler/src/shaders.rs) coordinate target generation.
-The [toolchain facade](../crates/resin-platform-toolchain/src/lib.rs) accepts explicit
+The [toolchain facade](../crates/resin-toolchain/src/lib.rs) accepts explicit
 `Environment` inputs, resolves an opaque `Toolchain`, and returns an `Executable`
 that retains its build-cache lock through copying and execution.
 No language crate imports the driver, invokes native compilers, or executes code.

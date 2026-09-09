@@ -12,4 +12,4 @@ resin-hir = { workspace = true }
 resin-lir = { workspace = true }
 resin-lir-verifier = { workspace = true }
 resin-codegen = { workspace = true }
-resin-platform-toolchain = { workspace = true }
+resin-toolchain = { workspace = true }

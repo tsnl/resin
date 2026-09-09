@@ -16,8 +16,8 @@ impl From<resin_codegen::Error> for Error {
         Self(e.to_string())
     }
 }
-impl From<resin_platform_toolchain::Error> for Error {
-    fn from(e: resin_platform_toolchain::Error) -> Self {
+impl From<resin_toolchain::Error> for Error {
+    fn from(e: resin_toolchain::Error) -> Self {
         Self(e.to_string())
     }
 }

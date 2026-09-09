@@ -107,7 +107,7 @@ Shared concrete types and layout rules live in `resin-common`. The source checke
 LIR verifier reuse these rules without sharing source scopes or inference state. Target
 lowering chooses the ABI and device representation; target printers consume only their
 own C/GLSL source trees. `resin-compiler` sequences these passes and retains immutable `Compilation` results.
-`resin-platform-toolchain` owns native tool resolution, process invocation, and artifact
+`resin-toolchain` owns native tool resolution, process invocation, and artifact
 caches. The root `resin` package provides one CLI for compilation, execution, formatting,
 and the language server.
 

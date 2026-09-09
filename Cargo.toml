@@ -11,7 +11,7 @@ gpu = []
 resin-common = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 resin-compiler = { workspace = true }
-resin-platform-toolchain = { workspace = true }
+resin-toolchain = { workspace = true }
 resin-lsp = { workspace = true }
 resin-runtime = { workspace = true }
 resin-cst = { workspace = true }
@@ -48,7 +48,7 @@ sexpfmt = "2"
 tree-sitter = "0.27"
 tree-sitter-resin = { path = "crates/tree-sitter-resin" }
 resin-compiler = { path = "crates/resin-compiler" }
-resin-platform-toolchain = { path = "crates/resin-platform-toolchain" }
+resin-toolchain = { path = "crates/resin-toolchain" }
 resin-lsp = { path = "crates/resin-lsp" }
 resin-runtime = { path = "crates/resin-runtime" }
 resin-common = { path = "crates/resin-common" }

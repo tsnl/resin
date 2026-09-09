@@ -22,7 +22,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `resin-ast`, `resin-hir`, `resin-lir`, `resin-lir-verifier`, and `resin-codegen`,
   with `resin-common` for shared vocabulary. Directory names match Cargo package names;
   keep compilation orchestration in `resin-compiler`, external processes and build caches in
-  `resin-platform-toolchain`, and the parser in `tree-sitter-resin`.
+  `resin-toolchain`, and the parser in `tree-sitter-resin`.
   Use `publish = false` and local path dependencies. Keep dependencies acyclic and explicit;
   do not work around a boundary with public implementation modules or reverse dev-dependencies.
   Language nodes are public data. Solvers, scopes, builders, and traversal state stay private;

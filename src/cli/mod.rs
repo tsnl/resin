@@ -2,7 +2,7 @@
 use resin_compiler::Session;
 
 mod args;
-use resin_platform_toolchain::Environment;
+use resin_toolchain::Environment;
 mod format;
 mod source;
 

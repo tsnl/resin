@@ -2,7 +2,7 @@
 use super::{Environment, Result, source};
 use clap::CommandFactory;
 use resin_compiler::{Options, Request};
-use resin_platform_toolchain::CProfile;
+use resin_toolchain::CProfile;
 use std::{ffi::OsString, path::PathBuf};
 
 pub struct Invocation {

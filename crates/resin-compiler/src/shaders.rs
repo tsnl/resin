@@ -2,7 +2,7 @@
 use crate::Error;
 use resin_codegen::Shader;
 use resin_common::prelude::*;
-use resin_platform_toolchain::Toolchain;
+use resin_toolchain::Toolchain;
 
 pub(crate) fn build_verified(
     checked: resin_lir_verifier::Verified<'_>,

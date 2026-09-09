@@ -18,8 +18,7 @@ fn run(source: &str, native: &str) -> std::process::Output {
     let executable = temp
         .path()
         .join(format!("program{}", std::env::consts::EXE_SUFFIX));
-    let cc = std::env::var_os("CC")
-        .unwrap_or_else(|| resin_platform_toolchain::DEFAULT_C_COMPILER.into());
+    let cc = std::env::var_os("CC").unwrap_or_else(|| resin_toolchain::DEFAULT_C_COMPILER.into());
     toolchain::c(&cc).compile_c(&c, &executable).unwrap();
     Command::new(executable)
         .current_dir(temp.path())

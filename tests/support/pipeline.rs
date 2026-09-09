@@ -41,7 +41,7 @@ pub fn load_with(
 
 pub fn build_shaders(
     module: &resin_lir::Module,
-    tools: &resin_platform_toolchain::Toolchain,
+    tools: &resin_toolchain::Toolchain,
 ) -> Result<Vec<resin_codegen::Shader>, Box<dyn std::error::Error>> {
     module
         .shaders

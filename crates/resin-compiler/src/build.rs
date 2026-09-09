@@ -6,7 +6,7 @@ use crate::Request;
 pub(crate) fn generate(
     request: &Request,
     checked: resin_lir_verifier::Verified<'_>,
-) -> Result<resin_platform_toolchain::Executable, Error> {
+) -> Result<resin_toolchain::Executable, Error> {
     let shaders = super::shaders::build_verified(checked, &request.options.tools)?;
     let source = emit_c(checked, &request.input.entry, &shaders)?;
     let build = request.options.tools.build_c(

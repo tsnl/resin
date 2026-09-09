@@ -29,7 +29,7 @@ fn run(source: &str) {
         .path()
         .join(format!("shared{}", std::env::consts::EXE_SUFFIX));
     let cc = std::env::var_os("CC")
-        .unwrap_or_else(|| OsString::from(resin_platform_toolchain::DEFAULT_C_COMPILER));
+        .unwrap_or_else(|| OsString::from(resin_toolchain::DEFAULT_C_COMPILER));
     toolchain::c(&cc)
         .compile_c(&c, &output)
         .unwrap_or_else(|e| panic!("{e}\n{c}"));

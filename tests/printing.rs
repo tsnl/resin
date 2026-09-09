@@ -19,7 +19,7 @@ fn run_c(source: &str) -> std::process::Output {
         .path()
         .join(format!("program{}", std::env::consts::EXE_SUFFIX));
     let cc = std::env::var_os("CC")
-        .unwrap_or_else(|| OsString::from(resin_platform_toolchain::DEFAULT_C_COMPILER));
+        .unwrap_or_else(|| OsString::from(resin_toolchain::DEFAULT_C_COMPILER));
     toolchain::c(&cc)
         .compile_c(source, &executable)
         .unwrap_or_else(|error| panic!("{error}\n{source}"));

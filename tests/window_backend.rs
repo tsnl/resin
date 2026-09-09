@@ -18,8 +18,7 @@ mod shaders;
 mod support;
 
 fn compile(source: &str, path: &Path) {
-    let cc = std::env::var_os("CC")
-        .unwrap_or_else(|| resin_platform_toolchain::DEFAULT_C_COMPILER.into());
+    let cc = std::env::var_os("CC").unwrap_or_else(|| resin_toolchain::DEFAULT_C_COMPILER.into());
     toolchain::c(&cc).compile_c(source, path).unwrap();
 }
 

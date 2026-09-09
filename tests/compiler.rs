@@ -1,7 +1,7 @@
 use resin_common::prelude::*;
 use resin_compiler::{Input, Options, Request, Session};
-use resin_platform_toolchain::CProfile;
-use resin_platform_toolchain::Environment;
+use resin_toolchain::CProfile;
+use resin_toolchain::Environment;
 use std::{fs, path::Path, sync::Arc};
 
 fn options(environment: &Environment, profile: CProfile) -> Options {

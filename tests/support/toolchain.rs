@@ -1,6 +1,6 @@
 #![allow(dead_code)]
-use resin_platform_toolchain::Environment;
-use resin_platform_toolchain::Toolchain;
+use resin_toolchain::Environment;
+use resin_toolchain::Toolchain;
 use std::ffi::OsStr;
 
 pub fn c(compiler: &OsStr) -> Toolchain {

@@ -38,8 +38,8 @@ pub struct Input {
 
 /// Explicit build settings; tool resolution happens before compilation.
 pub struct Options {
-    pub profile: resin_platform_toolchain::CProfile,
-    pub tools: resin_platform_toolchain::Toolchain,
+    pub profile: resin_toolchain::CProfile,
+    pub tools: resin_toolchain::Toolchain,
 }
 
 /// A validated request, including optional executable publication.
@@ -78,10 +78,7 @@ impl Session {
         }
     }
     /// Analyze and build; the returned executable retains its cache lock through use.
-    pub fn compile(
-        &mut self,
-        request: &Request,
-    ) -> Result<resin_platform_toolchain::Executable, Error> {
+    pub fn compile(&mut self, request: &Request) -> Result<resin_toolchain::Executable, Error> {
         let compilation = self.analyze(&request.input.path)?;
         build::generate(request, compilation.data.verified()?)
     }

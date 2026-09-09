@@ -6,7 +6,7 @@ path through its implementation, not a language reference; keep the
 
 The root is both a Cargo workspace and the `resin` CLI package. [src/](src/)
 contains one executable's command dispatch. [crates/](crates/) contains the
-[compiler driver](crates/resin-compiler/), [platform toolchain](crates/resin-platform-toolchain/),
+[compiler driver](crates/resin-compiler/), [platform toolchain](crates/resin-toolchain/),
 compiler phases, and the supporting [runtime](crates/resin-runtime/),
 [parser](crates/tree-sitter-resin/), and [language server library](crates/resin-lsp/).
 All are unpublished. The
@@ -102,9 +102,9 @@ Interpreter mode builds a debug native executable and runs it. Compiler mode bui
 an optimized executable and copies it to the destination selected with `--output`
 (or `-o`). `resin --lsp DIR` runs the language server in that project directory.
 
-The platform toolchain's [Environment](crates/resin-platform-toolchain/src/lib.rs)
+The platform toolchain's [Environment](crates/resin-toolchain/src/lib.rs)
 captures environment variables, the working directory, and executable/temp paths once.
-Its private [resolution](crates/resin-platform-toolchain/src/environment.rs) applies CLI
+Its private [resolution](crates/resin-toolchain/src/environment.rs) applies CLI
 compiler choices before `CC`/`GLSLC` and platform defaults. It finds runtime headers,
 the archive, and cache settings, returning an opaque `Toolchain`. The CLI resolves
 `RESIN_STDLIB` against the compiler library's bundled path and chooses `CProfile`.
@@ -221,15 +221,15 @@ formats that tree without accessing LIR or typechecking facts. [function.rs](cra
 lowers instructions and block edges; [foreign.rs](crates/resin-codegen/src/c/lower/foreign.rs)
 bridges Resin's unary calls to conventional C argument lists.
 
-[toolchain/c.rs](crates/resin-platform-toolchain/src/c.rs) invokes the C compiler and statically links
-the runtime. [platform.rs](crates/resin-platform-toolchain/src/platform.rs) selects the default
+[toolchain/c.rs](crates/resin-toolchain/src/c.rs) invokes the C compiler and statically links
+the runtime. [platform.rs](crates/resin-toolchain/src/platform.rs) selects the default
 compiler, archive name, flags, and system libraries: `cc` and
 `libresin_runtime.a` on Unix; GNU-style LLVM `clang` and `resin_runtime.lib`
 on Windows MSVC. Windows builds must keep Rust, GLFW, and emitted C on the
 same C runtime. Host-only programs need neither a Vulkan SDK nor a GPU.
 
 The C toolchain also owns the native build cache and locks that keep concurrent
-builds and runs from interfering. [dependencies.rs](crates/resin-platform-toolchain/src/dependencies.rs)
+builds and runs from interfering. [dependencies.rs](crates/resin-toolchain/src/dependencies.rs)
 reads C compiler dependency files to track included headers.
 
 There are two artifact directories with different owners: Cargo builds the
@@ -307,7 +307,7 @@ shader entry declarations. [shader interfaces](crates/resin-common/src/types/sha
 and signature contracts. Decorated functions and their unannotated helpers remain
 host-callable. Accessing `function.spirv` requests a static `Span<ubyte>` artifact;
 [shader build orchestration](crates/resin-compiler/src/shaders.rs) enumerates those declaration
-requests and emits GLSL. [toolchain/shaders.rs](crates/resin-platform-toolchain/src/shaders.rs) caches the
+requests and emits GLSL. [toolchain/shaders.rs](crates/resin-toolchain/src/shaders.rs) caches the
 external compiler output, supplying SPIR-V for embedding in C.
 No runtime function-value analysis is involved. The runtime receives bytes, not a
 host function pointer or source-file path.

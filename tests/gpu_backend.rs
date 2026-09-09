@@ -70,8 +70,7 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
     let executable = temp
         .path()
         .join(format!("host-layout{}", std::env::consts::EXE_SUFFIX));
-    let cc = std::env::var_os("CC")
-        .unwrap_or_else(|| resin_platform_toolchain::DEFAULT_C_COMPILER.into());
+    let cc = std::env::var_os("CC").unwrap_or_else(|| resin_toolchain::DEFAULT_C_COMPILER.into());
     toolchain::c(&cc).compile_c(&c, &executable).unwrap();
     assert!(Command::new(executable).status().unwrap().success());
     let glsl = resin_codegen::emit_glsl(&module, "kernel", Stage::Compute).unwrap();

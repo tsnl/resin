@@ -1,5 +1,5 @@
 use resin_common::prelude::*;
-use resin_platform_toolchain::{CProfile, Environment};
+use resin_toolchain::{CProfile, Environment};
 use std::{ffi::OsStr, fs, process::Command};
 
 fn native_environment(temp: &TempDir) -> Environment {
