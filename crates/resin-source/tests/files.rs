@@ -39,9 +39,9 @@ fn unsaved_buffers_share_their_identity_with_later_disk_contents() {
 }
 
 #[test]
-fn imports_use_the_registered_origin_and_configured_standard_library() {
+fn imports_use_the_registered_origin_and_configured_library_root() {
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
-    let mut loader = Loader::new(directory.path().join("stdlib"));
+    let mut loader = Loader::new(directory.path().join("libraries"));
     let entry = loader
         .source_from_text(&directory.path().join("project/main.resin"), "")
         .unwrap();
@@ -49,16 +49,19 @@ fn imports_use_the_registered_origin_and_configured_standard_library() {
         ("helper.resin", "project/helper.resin"),
         ("../shared.resin", "shared.resin"),
         ("std/math.resin", "project/std/math.resin"),
-        ("$/std/math.resin", "stdlib/math.resin"),
+        ("$/std/math.resin", "libraries/std/math.resin"),
+        ("$/math/vector.resin", "libraries/math/vector.resin"),
+        ("$/vendor/module.resin", "libraries/vendor/module.resin"),
+        ("$/stdlib/module.resin", "libraries/stdlib/module.resin"),
     ] {
         let expected = normalize_path(&directory.path().join(expected)).unwrap();
         assert_eq!(loader.resolve_import(&entry, reference).unwrap(), expected);
     }
     for reference in [
-        "$/std/",
-        "$/std/../escape.resin",
-        "$/std/nested/../../escape.resin",
-        "$/std//absolute",
+        "$/",
+        "$/../escape.resin",
+        "$/math/../../escape.resin",
+        "$//absolute",
     ] {
         assert!(
             loader.resolve_import(&entry, reference).is_err(),
@@ -139,13 +142,7 @@ fn unknown_import_namespaces_are_rejected_without_filesystem_fallback() {
     let source = loader
         .source_from_text(&directory.path().join("main.resin"), "")
         .unwrap();
-    for reference in [
-        "$",
-        "$/std",
-        "$std/module.resin",
-        "$/vendor/module.resin",
-        "$/stdlib/module.resin",
-    ] {
+    for reference in ["$", "$std/module.resin", "$vendor/module.resin"] {
         let error = loader.resolve_import(&source, reference).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
         assert!(
@@ -232,21 +229,30 @@ fn named_source_bindings_are_explicit_and_survive_unrelated_disk_reads() {
         .unwrap();
     assert_eq!(loader.load_import(&first, "module").unwrap(), changed);
     assert_eq!(left.text(), "left");
-    for reference in ["$/unknown/module", "$/std/../escape", "$/std/"] {
+    loader
+        .set_import(&first, "$/vendor/module", right.clone())
+        .unwrap();
+    assert_eq!(
+        loader.load_import(&first, "$/vendor/module").unwrap(),
+        right
+    );
+    for reference in ["$vendor/module", "$/std/../escape", "$/"] {
         assert!(loader.set_import(&first, reference, right.clone()).is_err());
         assert!(loader.load_import(&first, reference).is_err());
     }
 }
 
 #[test]
-fn named_sources_can_import_the_global_standard_library_without_a_file_origin() {
+fn named_sources_can_import_rooted_libraries_without_a_file_origin() {
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
-    fs::write(directory.path().join("library.resin"), "standard library").unwrap();
+    let library = directory.path().join("math/library.resin");
+    fs::create_dir(library.parent().unwrap()).unwrap();
+    fs::write(&library, "math library").unwrap();
     let mut loader = Loader::new(directory.path().into());
     let source = Source::new("generated source", "");
     assert!(loader.path(&source).is_none());
-    let imported = loader.load_import(&source, "$/std/library.resin").unwrap();
-    assert_eq!(imported.text(), "standard library");
+    let imported = loader.load_import(&source, "$/math/library.resin").unwrap();
+    assert_eq!(imported.text(), "math library");
     assert!(loader.load_import(&source, "std/library.resin").is_err());
 }
 

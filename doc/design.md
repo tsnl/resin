@@ -118,7 +118,7 @@ retain the source alongside a byte span, so their meaning survives later edits.
 `resin_compiler::Compiler::compile(entry, loader)` resolves imports and returns an
 `Arc<Compilation>` containing completed phase products and editor facts. The concrete
 `resin_source::Loader` supplies files, registered buffer text, and explicit import
-bindings. It resolves relative and `$/std/` imports and reuses unchanged source
+bindings. It resolves relative and `$/` imports and reuses unchanged source
 instances. Source loading has no dependency on compiler phases or concrete types.
 Editors register changes and remove closed buffers through the loader.
 

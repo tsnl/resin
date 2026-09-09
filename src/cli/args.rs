@@ -7,7 +7,7 @@ use std::{ffi::OsString, path::PathBuf};
 
 pub struct Invocation {
     pub mode: Mode,
-    pub stdlib: PathBuf,
+    pub library_root: PathBuf,
 }
 
 pub enum Mode {
@@ -37,7 +37,7 @@ pub fn parse(
     let mode = <Cli as clap::Parser>::parse_from(args).mode(environment)?;
     Ok(Invocation {
         mode,
-        stdlib: environment.path("RESIN_STDLIB", resin_source::stdlib_path()),
+        library_root: environment.path("RESIN_LIBRARY_ROOT", resin_source::library_root()),
     })
 }
 

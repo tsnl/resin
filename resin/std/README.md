@@ -1,7 +1,8 @@
 # Standard library
 
 Resin modules built on C and the native `resin-runtime` ABI. Import only the functionality a file
-uses; the `$/std/` prefix resolves here. `RESIN_STDLIB` overrides this directory for installations.
+uses; the `$/std/` prefix resolves here. `RESIN_LIBRARY_ROOT` overrides the parent
+`resin/` library root for installations.
 
 ```resin
 import { "$/std/gpu.resin", "$/std/status.resin" };

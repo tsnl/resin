@@ -8,6 +8,8 @@ Libraries written in Resin live in this directory, one library per subdirectory.
 Add libraries such as math or rendering as siblings of `std/`. Keep platform
 wrappers in `std/` and put higher-level functionality in the library that owns it.
 
-The compiler resolves `$/std/` imports to this checkout's `resin/std/` by default;
-`RESIN_STDLIB` can override that directory. Other libraries currently use relative
-file imports.
+Imports beginning with `$/` resolve from this directory. For example,
+`$/std/gpu.resin` loads `std/gpu.resin`, and a future `$/math/matrix.resin` would
+load `math/matrix.resin`. `RESIN_LIBRARY_ROOT` overrides the whole library root.
+Other imports resolve relative to the importing file. No manifests or special
+entry files are required; existing explicit imports and exports apply.

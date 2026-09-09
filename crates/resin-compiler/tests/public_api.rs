@@ -26,7 +26,7 @@ fn unchanged_graph_reuses_the_completed_result_after_resolving_imports() {
         "dependency",
         "export { value }; def value() -> int = { 1 };",
     );
-    let mut loader = Loader::new(resin_source::stdlib_path());
+    let mut loader = Loader::new(resin_source::library_root());
     loader
         .set_import(&entry, "dependency", dependency.clone())
         .unwrap();
@@ -50,7 +50,7 @@ fn changing_a_transitive_source_invalidates_an_unchanged_entry() {
         "export { value }; import { \"leaf\" }; def value() -> int = { leaf() };",
     );
     let leaf = Source::new("leaf", "export { leaf }; def leaf() -> int = { 1 };");
-    let mut loader = Loader::new(resin_source::stdlib_path());
+    let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "middle", middle.clone()).unwrap();
     loader.set_import(&middle, "leaf", leaf.clone()).unwrap();
     let mut compiler = Compiler::default();
@@ -73,7 +73,7 @@ fn a_missing_transitive_import_recovers_without_notifications() {
     let entry = Source::new("entry", "import { \"middle\" };");
     let middle = Source::new("middle", "import { \"leaf\" };");
     let leaf = Source::new("leaf", "def leaf() = {};");
-    let mut loader = Loader::new(resin_source::stdlib_path());
+    let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "middle", middle.clone()).unwrap();
     let mut compiler = Compiler::default();
     let before = compiler.compile(entry.clone(), &mut loader);
@@ -112,7 +112,7 @@ fn changed_import_edges_invalidate_cache_even_with_the_same_source_set() {
         "boolean",
         "export { value }; def value() -> bool = { 1 == 1 };",
     );
-    let mut loader = Loader::new(resin_source::stdlib_path());
+    let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "first", first.clone()).unwrap();
     loader.set_import(&entry, "second", second.clone()).unwrap();
     loader.set_import(&first, "value", integer.clone()).unwrap();
@@ -140,7 +140,7 @@ fn inconsistent_versions_of_one_logical_source_are_diagnosed() {
     let second = first.with_text("def value() -> int = { 2 };");
     assert_eq!(first.id(), second.id());
     assert_ne!(first, second);
-    let mut loader = Loader::new(resin_source::stdlib_path());
+    let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "first", first.clone()).unwrap();
     loader.set_import(&entry, "second", second.clone()).unwrap();
     let result = Compiler::default().compile(entry.clone(), &mut loader);
@@ -158,7 +158,7 @@ fn inconsistent_versions_of_one_logical_source_are_diagnosed() {
 fn import_cycles_are_diagnosed_with_source_ranges() {
     let entry = Source::new("entry", "import { \"next\" };");
     let next = Source::new("next", "import { \"entry\" };");
-    let mut loader = Loader::new(resin_source::stdlib_path());
+    let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "next", next.clone()).unwrap();
     loader.set_import(&next, "entry", entry.clone()).unwrap();
     let result = Compiler::default().compile(entry.clone(), &mut loader);
@@ -176,7 +176,7 @@ fn identical_diagnostic_names_do_not_merge_distinct_sources() {
     let entry = Source::new("entry", "import { \"first\", \"second\" };");
     let first = Source::new("generated", "def first() -> int = { 1 == 1 };");
     let second = Source::new("generated", "def second() -> bool = { 1 };");
-    let mut loader = Loader::new(resin_source::stdlib_path());
+    let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "first", first.clone()).unwrap();
     loader.set_import(&entry, "second", second.clone()).unwrap();
     let result = Compiler::default().compile(entry.clone(), &mut loader);
@@ -199,7 +199,7 @@ fn retained_compilations_keep_their_own_source_versions_and_editor_queries() {
         "editor",
         "def value() -> int = { 1 }; def main() -> int = { value() };",
     );
-    let mut loader = Loader::new(resin_source::stdlib_path());
+    let mut loader = Loader::new(resin_source::library_root());
     let mut compiler = Compiler::default();
     let old = compiler.compile(before.clone(), &mut loader);
     let after =
@@ -232,7 +232,7 @@ fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
         "entry",
         "def first() -> int = { var n: int; n }; def second() -> bool = { var b: bool; b };",
     );
-    let mut loader = Loader::new(resin_source::stdlib_path());
+    let mut loader = Loader::new(resin_source::library_root());
     let mut compiler = Compiler::default();
     let lowered = compiler.compile(source.clone(), &mut loader);
     assert!(lowered.program().is_ok());
@@ -261,7 +261,7 @@ fn conflicting_versions_do_not_displace_the_first_accepted_version() {
     let entry = Source::new("entry", "import { \"first\", \"conflict\", \"original\" };");
     let original = Source::new("module", "def value() -> int = { 1 };");
     let conflict = original.with_text("def value() -> int = { 2 };");
-    let mut loader = Loader::new(resin_source::stdlib_path());
+    let mut loader = Loader::new(resin_source::library_root());
     loader
         .set_import(&entry, "first", original.clone())
         .unwrap();

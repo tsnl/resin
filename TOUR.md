@@ -108,7 +108,7 @@ captures environment variables, the working directory, and executable/temp paths
 Its private [resolution](crates/resin-toolchain/src/environment.rs) applies CLI
 compiler choices before `CC`/`GLSLC` and platform defaults. It finds runtime headers,
 the archive, and cache settings, returning an opaque `Toolchain`. The CLI resolves
-`RESIN_STDLIB` against the loader library's bundled path and chooses `CProfile`.
+`RESIN_LIBRARY_ROOT` against the loader library's bundled path and chooses `CProfile`.
 Tools are invoked when required, without preflight checks, so host-only
 programs remain independent of `glslc`. Compiler subprocesses and cache fingerprints
 use the same captured environment.
@@ -174,7 +174,7 @@ expressions as holes for editor recovery. AST generation performs no filesystem 
 The compiler's [import traversal](crates/resin-compiler/src/lib.rs) calls
 `resin_source::Loader::load_import` and builds an AST `Program` in dependency order.
 The [loader](crates/resin-source/src/lib.rs) accepts explicit source bindings, supplied
-file text, and disk files. It interprets relative and `$/std/` paths. Each AST source
+file text, and disk files. It interprets relative and `$/` paths. Each AST source
 module retains its immutable `Source` alongside its syntax.
 
 [HIR language](crates/resin-hir/src/lib.rs) is a self-contained, typed tree. Start

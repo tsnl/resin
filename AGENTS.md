@@ -128,6 +128,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   runtime's Vulkan features; MoltenVK discovery does not imply full GPU compatibility.
 - Keep the native C ABI in `crates/resin-runtime/` and language-facing modules in `resin/std/`.
   Add other Resin libraries as sibling directories under `resin/`.
+  Resolve `$/` imports from that library root, configurable with `RESIN_LIBRARY_ROOT`.
   Examples import standard-library functionality through `$/std/` paths; imports without
   a leading `$` resolve relative to their importer. Each file has a private scope with
   explicit exports; do not reintroduce textual inclusion.

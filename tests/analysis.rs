@@ -47,7 +47,7 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
                 buffer.host_pointer();
                 {tail}"#
         );
-        let mut loader = resin_source::Loader::new(resin_source::stdlib_path());
+        let mut loader = resin_source::Loader::new(resin_source::library_root());
         let input = loader
             .source_from_text(Path::new("main.resin"), source.clone())
             .unwrap();

@@ -36,7 +36,8 @@ fn compilation_uses_supplied_source_versions_and_explicit_profiles() {
         .insert("GLSLC".into(), "/missing/glslc".into());
     let path = temp.path().join("main.resin");
     fs::write(&path, "export { main }; def main() -> int = { 1 };").unwrap();
-    let mut loader = Loader::new(environment.path("RESIN_STDLIB", resin_source::stdlib_path()));
+    let mut loader =
+        Loader::new(environment.path("RESIN_LIBRARY_ROOT", resin_source::library_root()));
     let mut compiler = Compiler::new();
     for (profile, destination, code, directory) in [
         (
@@ -77,7 +78,7 @@ fn retained_compilations_build_their_own_source_version_after_later_edits() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut environment = Environment::capture().unwrap();
     environment.directory = temp.path().into();
-    let mut loader = Loader::new(resin_source::stdlib_path());
+    let mut loader = Loader::new(resin_source::library_root());
     let mut compiler = Compiler::new();
     let path = temp.path().join("main.resin");
     fs::write(&path, "export { main }; def main() -> int = { 41 };").unwrap();

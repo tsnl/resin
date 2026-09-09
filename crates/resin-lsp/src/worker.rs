@@ -32,7 +32,7 @@ pub struct AnalysisUpdate {
 }
 
 pub fn spawn(
-    stdlib: PathBuf,
+    library_root: PathBuf,
     updates: Receiver<Update>,
     results: Sender<AnalysisUpdate>,
     current: Arc<AtomicU64>,
@@ -40,7 +40,7 @@ pub fn spawn(
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut compiler = Compiler::new();
-        let mut loader = resin_source::Loader::new(stdlib);
+        let mut loader = resin_source::Loader::new(library_root);
         let mut documents = BTreeMap::new();
         while let Ok(first) = updates.recv() {
             if stopping.load(Ordering::Relaxed) {

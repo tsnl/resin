@@ -24,10 +24,10 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Options {
-    stdlib_path: Option<PathBuf>,
+    library_root: Option<PathBuf>,
 }
 
-pub(crate) fn run(default_stdlib: PathBuf) -> Result<i32> {
+pub(crate) fn run(default_library_root: PathBuf) -> Result<i32> {
     let (connection, io) = Connection::stdio();
     let (id, params) = connection.initialize_start()?;
     let params: lsp_types::InitializeParams = serde_json::from_value(params)?;
@@ -38,7 +38,7 @@ pub(crate) fn run(default_stdlib: PathBuf) -> Result<i32> {
         .map(serde_json::from_value)
         .transpose()?
         .unwrap_or_default();
-    let stdlib = options.stdlib_path.unwrap_or(default_stdlib);
+    let library_root = options.library_root.unwrap_or(default_library_root);
     let capabilities = lsp_types::ServerCapabilities {
         position_encoding: Some(lsp_types::PositionEncodingKind::UTF16),
         text_document_sync: Some(
@@ -81,7 +81,7 @@ pub(crate) fn run(default_stdlib: PathBuf) -> Result<i32> {
     let revision = Arc::new(AtomicU64::new(0));
     let stopping = Arc::new(AtomicBool::new(false));
     let worker = worker::spawn(
-        stdlib,
+        library_root,
         receiver,
         results,
         revision.clone(),
