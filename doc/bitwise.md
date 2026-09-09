@@ -3,13 +3,17 @@
 Code communicates a model of the problem. A reader should be able to discover the
 important objects, follow what happens to them, and predict where a change belongs.
 That is the quality Resin takes from Per Vognsen's
-[Bitwise](https://github.com/pervognsen/bitwise) project. Its educational purpose is
+[Bitwise](https://github.com/tsnl/bitwise) project. Its educational purpose is
 useful to us: the implementation has to explain the machinery while making it work.
 A compiler that teaches its own structure is easier to debug and extend.
 
+We forked Bitwise as [tsnl/bitwise](https://github.com/tsnl/bitwise) and archived
+our fork for posterity and future reference. Links in this guide point to that
+preserved copy of Per Vognsen's work.
+
 The most relevant reference is Ion, Bitwise's C implementation of a programming
 language compiler. The examples here link to commit
-[`5a261e9`](https://github.com/pervognsen/bitwise/tree/5a261e99efea080e1111a312d897f8d794f061a7/ion),
+[`5a261e9`](https://github.com/tsnl/bitwise/tree/5a261e99efea080e1111a312d897f8d794f061a7/ion),
 so each observation has a concrete source. This essay describes Resin's reading of
 that code. The Rust sketches are illustrative adaptations; the linked C is the
 original implementation.
@@ -22,9 +26,9 @@ keeping their implementation close enough to inspect.
 
 ## The representation explains the operations
 
-Ion's [`Expr`](https://github.com/pervognsen/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/ast.h#L218-L298)
+Ion's [`Expr`](https://github.com/tsnl/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/ast.h#L218-L298)
 is a tagged union. Its binary case contains `op`, `left`, and `right`.
-[`new_expr_binary`](https://github.com/pervognsen/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/ast.c#L333-L339)
+[`new_expr_binary`](https://github.com/tsnl/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/ast.c#L333-L339)
 allocates that case, fills those fields, and returns the node. The shape of the
 constructor follows directly from the shape of the data.
 
@@ -42,7 +46,7 @@ A reader can understand the result by inspecting the expression variant. The
 construction does not require knowledge of how the node will later be visited or
 emitted. This gives syntax a useful independence from the operations performed on it.
 
-Ion's shared [`new_expr`](https://github.com/pervognsen/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/ast.c#L195-L200)
+Ion's shared [`new_expr`](https://github.com/tsnl/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/ast.c#L195-L200)
 handles allocation, the tag, and source position. There is a reason for that helper:
 those details must agree across every expression constructor. In Rust, an enum
 already keeps the tag and payload consistent. A direct enum literal can therefore
@@ -58,7 +62,7 @@ an inference callback, the representation has left part of its meaning behind.
 
 ## Control flow follows the subject
 
-Ion's [`parse_expr_add` and `parse_expr_mul`](https://github.com/pervognsen/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/parse.c#L319-L343)
+Ion's [`parse_expr_add` and `parse_expr_mul`](https://github.com/tsnl/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/parse.c#L319-L343)
 make precedence visible in their call graph. Addition first parses a complete
 multiplicative expression. It then loops over addition-level operators, obtaining
 another multiplicative expression for each right operand and replacing the
@@ -91,7 +95,7 @@ visible in the ordinary control flow of the pass.
 
 ## A helper owns a complete decision
 
-Consider Ion's [`type_ptr`](https://github.com/pervognsen/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/type.c#L267-L279).
+Consider Ion's [`type_ptr`](https://github.com/tsnl/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/type.c#L267-L279).
 It looks up a pointer type by its base type. On a miss, it allocates the type, sets
 its size, alignment, and base, and caches it. Callers receive the canonical object
 for that base without coordinating allocation and registration themselves.
@@ -128,7 +132,7 @@ steps directly, with a small coordinating function showing their order.
 
 ## Small pieces can have substantial reach
 
-Ion's [common utilities](https://github.com/pervognsen/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/common.c#L95-L212)
+Ion's [common utilities](https://github.com/tsnl/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/common.c#L95-L212)
 include growing buffers and an arena. Their data makes their behavior explainable:
 the buffer tracks length and capacity; the arena tracks a current position, an end,
 and the blocks it owns. Growing a buffer and advancing an arena allocation are
@@ -141,9 +145,9 @@ from these recurring needs, with the compiler's language rules remaining in the
 code that uses the utilities.
 
 The arena example also shows how a short constructor can establish ownership.
-[`new_expr_call`](https://github.com/pervognsen/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/ast.c#L304-L310)
+[`new_expr_call`](https://github.com/tsnl/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/ast.c#L304-L310)
 copies the argument-pointer array into AST storage through
-[`ast_dup`](https://github.com/pervognsen/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/ast.c#L13-L22).
+[`ast_dup`](https://github.com/tsnl/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/ast.c#L13-L22).
 That shallow copy gives the array the AST's lifetime. It does not recursively clone
 the expressions. Understanding that distinction is enough to explain why the
 parser's temporary argument collection can have a separate lifetime.
@@ -155,7 +159,7 @@ place through a concrete need that the existing vocabulary expresses poorly.
 
 ## Small functions preserve a coherent thought
 
-Ion's [`parse_expr_base`](https://github.com/pervognsen/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/parse.c#L255-L286)
+Ion's [`parse_expr_base`](https://github.com/tsnl/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/parse.c#L255-L286)
 is longer than its precedence helpers. It starts with an operand and repeatedly
 attaches calls, indexes, fields, or postfix modifications. For `f(x)[i].field`, a
 single local expression accumulates each layer. Keeping those alternatives together
@@ -168,7 +172,7 @@ layers of vaguely named helpers. The relevant cost is how much a reader must hol
 in mind or go elsewhere to recover.
 
 Exhaustive dispatch often benefits from staying together. Ion's
-[`gen_expr`](https://github.com/pervognsen/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/gen.c#L613)
+[`gen_expr`](https://github.com/tsnl/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/gen.c#L613)
 dispatches over expression kinds. Such a dispatch serves as an inventory of the
 language handled by an operation. In Rust, an exhaustive `match` additionally makes
 new variants identify the operations that need attention. Extract a case when it
@@ -183,7 +187,7 @@ already say so. Explaining why an argument array must outlive the parser, howeve
 communicates a relationship that a memory copy alone cannot establish for the reader.
 
 Assertions can make some of that reasoning executable. Ion's
-[`arena_alloc`](https://github.com/pervognsen/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/common.c#L192-L203)
+[`arena_alloc`](https://github.com/tsnl/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/common.c#L192-L203)
 checks available space and alignment around the allocation. These checks expose
 assumptions the implementation relies on. They help a reader connect the compact
 operation to the conditions that make it valid.
@@ -203,7 +207,7 @@ that requires too much coordination.
 ## Carry the taste into Resin's architecture
 
 Ion makes tradeoffs specific to its implementation. Its
-[`main.c`](https://github.com/pervognsen/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/main.c#L1-L25)
+[`main.c`](https://github.com/tsnl/bitwise/blob/5a261e99efea080e1111a312d897f8d794f061a7/ion/main.c#L1-L25)
 includes the implementation files into one translation unit. Its parser uses global
 token state, and the type cache above is global too. Those choices make some local
 code compact, but their state and lifetime assumptions still exist. They matter
