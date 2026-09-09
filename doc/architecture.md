@@ -36,7 +36,7 @@ flowchart LR
     text[Source text] --> cst[CST]
     cst --> ast[AST]
     ast --> hir[HIR: resolved tree]
-    hir --> lir[LIR: storage and blocks]
+    hir --> lir[LIR: storage and structured regions]
     lir --> verified[Verified LIR]
     verified --> project[Codegen: C + GLSL + build.ninja]
     project --> ninja[Ninja]
@@ -147,8 +147,30 @@ checks during LIR lowering. Every LIR function reserves local zero for its unary
 parameter, including unit, tuples, and foreign declarations. Each `Instr` documents
 its consumed operands and produced values.
 
+LIR retains a structured tree of blocks. Each block contains straight-line stack
+instructions and an `If`, `Loop`, `Merge`, `LoopTest`, `Continue`, or `Return`
+terminator. `If` owns its two arms, which finish with `Merge`; `Loop` owns a
+condition region ending in `LoopTest` and a body region ending in `Continue`.
+Both may own a `next` continuation that consumes their result operands. A nested
+tail selection may omit its continuation and forward to the enclosing selection's
+merge. Completing a region at function scope or inside a loop condition or body
+requires an explicit continuation ending in the appropriate terminator. Returns
+leave the function after explicit cleanup.
+Blocks live in a flat arena to preserve stable instruction and source identities,
+but references express unique tree ownership rather than jump destinations.
+
+A loop's `LoopTest` consumes a bool above the carried operands. False exits with
+those operands; true runs the body, whose `Continue` must restore the condition's
+input types. Conditions can contain nested branches, loops, and early returns;
+their branch arms still end in `Merge`, followed by the explicit `LoopTest`.
+The verifier checks these contracts with one tree traversal, rejecting reused,
+cyclic, orphaned, and invalid block references. Function paths must return;
+branch arms that return do not contribute operands to a subsequent join.
+Continuation traversal is iterative, so sequential conditionals and `?` expressions
+do not consume nesting depth in verification, printing, or target lowering.
+
 LIR's private [verify module](../crates/resin-lir/src/verify/mod.rs) checks arbitrary
-LIR, including instruction operands, block entry stacks, returns, nominal layouts,
+LIR, including instruction operands, region nesting and exit kinds, returns, nominal layouts,
 shader signatures, and drop hooks. Its public contract stays in LIR's `lib.rs`.
 `resin_lir::VerifiedModule` owns the module and analysis behind private fields. `view()`
 borrows an immutable certificate for that exact module. `into_module()` consumes
@@ -160,11 +182,14 @@ effects stay private to verification; backends obtain checked operand counts thr
 C lowering chooses the ABI, runtime operations, and native entry wrapper. GLSL
 lowering resolves reachable functions, checks device restrictions, and represents
 local addresses and direct functions symbolically. Both produce owned target
-trees. These describe translation units, functions, blocks, and control-flow edges;
-leaf strings already contain target syntax for declarations and expressions. They
-are deliberately limited generated-source languages, rather than full C or GLSL
-parser ASTs. Printers only format their own target language, including parallel
-edge copies. They need no LIR, verifier analysis, or source metadata.
+trees. These describe translation units, functions, nested conditionals, loops,
+and returns; leaf strings already contain target syntax for declarations,
+expressions, and operand transfers. They are deliberately limited generated-source
+languages, rather than full C or GLSL parser ASTs. Lowering snapshots carried values
+before assigning region inputs, including initialization provenance in C and symbolic
+local places in GLSL. Printers only format their own target language. They need no
+LIR, verifier analysis, or source metadata. Shader functions use native structured
+control flow; they have no program counter or block-dispatch loop.
 
 ## Calling the passes
 

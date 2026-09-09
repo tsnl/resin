@@ -115,19 +115,43 @@ fn certified_operands_follow_block_indices_and_keep_instructions_without_results
                 Instr::Push {
                     value: Value::Bool { value: true },
                 },
+                Instr::Push {
+                    value: Value::Bool { value: false },
+                },
             ],
-            terminator: Terminator::Break {
-                target: BlockId::from_index(0),
+            terminator: Terminator::If {
+                then: BlockId::from_index(2),
+                els: BlockId::from_index(3),
+                next: Some(BlockId::from_index(0)),
             },
+        },
+        BasicBlock {
+            name: None,
+            instrs: vec![],
+            terminator: Terminator::Merge,
+        },
+        BasicBlock {
+            name: None,
+            instrs: vec![],
+            terminator: Terminator::Merge,
         },
     ];
     module.functions.push(caller);
     let checked = VerifiedModule::new(module).unwrap();
     let analysis = &checked.view().analysis().functions[1];
-    assert_eq!(analysis.inputs, [vec![callee, Ty::Int32, Ty::Bool], vec![]]);
-    for (block, counts) in [vec![2, 2, 1, 0, 0, 0, 3, 1, 0], vec![0, 0, 0]]
-        .iter()
-        .enumerate()
+    let carried = vec![callee, Ty::Int32, Ty::Bool];
+    assert_eq!(
+        analysis.inputs,
+        [carried.clone(), vec![], carried.clone(), carried]
+    );
+    for (block, counts) in [
+        vec![2, 2, 1, 0, 0, 0, 3, 1, 0],
+        vec![0, 0, 0, 0],
+        vec![],
+        vec![],
+    ]
+    .iter()
+    .enumerate()
     {
         assert_eq!(analysis.results[block].len(), counts.len());
         for (instruction, expected) in counts.iter().enumerate() {

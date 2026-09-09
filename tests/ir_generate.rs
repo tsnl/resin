@@ -20,7 +20,7 @@ fn compile_err(src: &str) -> GenerateErrorKind {
 }
 
 #[test]
-fn while_lowers_to_a_back_edge_and_returns_unit() {
+fn while_lowers_to_a_structured_loop_and_returns_unit() {
     let module = compile(
         "export { main }; def main () -> () = { var i = 0; while (i < 3) { i := i + 1; } };",
     );
@@ -33,9 +33,15 @@ fn while_lowers_to_a_back_edge_and_returns_unit() {
     let body = function
         .blocks
         .iter()
-        .find(|b| b.name.as_deref() == Some("while.body"))
+        .position(|b| b.name.as_deref() == Some("while.body"))
         .unwrap();
-    assert!(matches!(body.terminator, Terminator::Break { target } if target.index() == condition));
+    assert!(function.blocks.iter().any(|block| matches!(
+        block.terminator,
+        Terminator::Loop { condition: cond, body: repeated, next: Some(_) }
+            if cond.index() == condition && repeated.index() == body
+    )));
+    assert_eq!(function.blocks[condition].terminator, Terminator::LoopTest);
+    assert_eq!(function.blocks[body].terminator, Terminator::Continue);
     assert_eq!(function.result, Ty::Unit);
     verify(&module).unwrap();
 }
@@ -123,7 +129,9 @@ fn ir_dump_is_an_s_expression_with_names() {
     assert!(dump.contains("(local-addr n)"));
     assert!(dump.contains("(function-ref fibonacci)"));
     assert!(dump.contains("(block then"));
-    assert!(dump.contains("(branch then else)"));
+    let compact = dump.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(compact.contains("(if (then (block then"), "{dump}");
+    assert!(compact.contains("(block join"), "{dump}");
     assert!(!dump.contains("global-addr g"));
 }
 
@@ -237,7 +245,7 @@ fn if_joins_then_and_else_values() {
         function
             .blocks
             .iter()
-            .any(|block| { matches!(block.terminator, Terminator::Branch { .. }) })
+            .any(|block| { matches!(block.terminator, Terminator::If { .. }) })
     );
     assert_eq!(function.result, Ty::Int32);
 }

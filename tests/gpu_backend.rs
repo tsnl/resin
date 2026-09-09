@@ -826,3 +826,16 @@ fn packed_byte_arrays_execute_in_shaders() {
         },
     );
 }
+
+#[test]
+fn structured_loops_propagate_errors_from_conditions_and_nested_bodies() {
+    compute_values(
+        include_str!("fixtures/structured_control.resin"),
+        |index| match index {
+            0 => 0,
+            1 => 11,
+            2 => 22,
+            index => index + 10,
+        },
+    );
+}

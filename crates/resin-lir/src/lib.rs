@@ -1,4 +1,4 @@
-//! Low-level language: typed stack instructions and explicit control flow.
+//! Low-level language: typed stack instructions and structured control flow.
 //! [`generate`] translates HIR into this representation.
 //! [`verify`] checks storage and control flow before target lowering.
 //! Construction, verification, and printing internals are private.
@@ -34,6 +34,8 @@ pub struct Function {
     /// a positional record (tuple). Body lowering binds or unpacks this slot.
     /// Foreign declarations also reserve it; the C wrapper unpacks it into C arguments.
     pub locals: Vec<Local>,
+    /// Root of a structured block tree. Every block is owned exactly once by this
+    /// root or by an If/Loop terminator; block IDs identify storage, not jump labels.
     pub entry: BlockId,
     pub blocks: Vec<BasicBlock>,
 }
@@ -160,15 +162,42 @@ pub enum Instr {
     },
 }
 
-/// End a block. Stack contracts use the same top-on-the-right convention as [`Instr`].
+/// Complete a structured region. Stack tops are on the right, as in [`Instr`].
+/// Child IDs describe nesting, never arbitrary jumps. `next` runs after a region
+/// completes. A result-producing region without `next` must be the tail of a
+/// selection arm; its operands then pass to that selection's merge. Function,
+/// loop-condition, and loop-body continuations need their own explicit terminator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Terminator {
-    /// `[stack...] -> [stack...]` at `target`: transfer all operands unchanged.
-    Break { target: BlockId },
-    /// `[stack..., bool] -> [stack...]` at the selected target: consume the condition.
-    Branch { then: BlockId, els: BlockId },
-    /// `[result] -> []`: transfer the sole operand to the caller. Lowering must emit
-    /// any local cleanup first; returning does not itself destroy locals.
+    /// Complete a selection arm, transferring all operands to its If's merge.
+    /// Nested tail selections may forward to the same merge. Invalid at function
+    /// scope or as the completion of a loop condition or body.
+    Merge,
+    /// `[carried..., bool] -> [carried...]`: test the loop condition. True enters
+    /// the body; false exits the Loop with the carried operands. Only valid as
+    /// the completion of a loop's condition region.
+    LoopTest,
+    /// Complete a loop body, transferring all operands to its condition region
+    /// for the next iteration. Only valid as the completion of a loop body.
+    Continue,
+    /// Consume a bool, then execute one child with the remaining operands.
+    /// Merging arms must agree on their output stack; returning arms do not join.
+    If {
+        then: BlockId,
+        els: BlockId,
+        next: Option<BlockId>,
+    },
+    /// Repeatedly evaluate `condition` with the carried operands. Its LoopTest
+    /// needs the same operand types followed by a bool. False exits; true runs `body`.
+    /// The body's Continue must restore the condition's input types.
+    /// Both children can return early, but the condition needs a LoopTest path.
+    /// The final condition's carried operands enter `next` on the false exit.
+    Loop {
+        condition: BlockId,
+        body: BlockId,
+        next: Option<BlockId>,
+    },
+    /// Transfer the sole operand to the caller. Cleanup must already be explicit.
     Return,
 }
 
@@ -282,6 +311,13 @@ pub enum VerifyErrorKind {
     InvalidFunction { function: usize },
     InvalidBasicBlock { basic_block: usize },
     UnreachableBasicBlock,
+    ReusedBasicBlock,
+    UnexpectedMerge,
+    UnexpectedLoopTest,
+    UnexpectedContinue,
+    MissingLoopTest,
+    MissingRegionResult,
+    MissingRegionContinuation,
     StackUnderflow { needed: usize, available: usize },
     InvalidImmediate,
     TypeMismatch { expected: Ty, found: Ty },
@@ -296,7 +332,7 @@ pub enum VerifyErrorKind {
     InvalidReturnStack { expected: Ty, found: Vec<Ty> },
 }
 
-/// Check block and edge types; incoming edges must agree on the entry stack.
+/// Check structured ownership, explicit region exits, loop invariants, and instruction types.
 pub fn verify(module: &Module) -> Result<(), VerifyError> {
     verify::analyze(module).map(|_| ())
 }

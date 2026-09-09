@@ -100,9 +100,13 @@ source errors prevent publishing a complete HIR module.
 
 LIR lowering consumes HIR alone and makes storage, definite initialization, evaluation
 order, cleanup, and control flow explicit. Its typed stack machine has one parameter
-local per function and a flat list of basic blocks. Lowering records owned locals per
-lexical scope and emits conditional destruction at normal and error exits. Copy operations
-retain shared fields; compiler temporary transfers disarm the source's cleanup. Named
+local per function and a tree of blocks with explicit `If`, `Loop`, `Merge`,
+`LoopTest`, `Continue`, and `Return` terminators. Block IDs locate storage in an
+arena; child references express unique ownership, never arbitrary jumps.
+Verification checks selection merges, distinct loop tests and continuations, and loop
+stack invariants, and both backends preserve the nesting in native control flow.
+Lowering records owned locals per lexical scope and emits conditional destruction
+at normal and error exits. Copy operations retain shared fields; compiler temporary transfers disarm the source's cleanup. Named
 values remain usable after reads; this is not source-level move checking.
 
 Shared concrete types and layout rules live in `resin-types`. The source checker and

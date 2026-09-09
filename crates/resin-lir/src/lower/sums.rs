@@ -79,11 +79,14 @@ impl Generator {
         let saved = self.save_top(&ty);
         self.emit(Instr::LocalAddress { local: saved });
         self.emit(Instr::IsVariant { tag: Case::Ok });
-        let success = self.new_block("try.ok");
-        let failure = self.new_block("try.err");
-        self.terminate(Terminator::Branch {
+        let height = self.function().stack_len() - 1;
+        let success = self.new_block("try.ok", height);
+        let failure = self.new_block("try.err", height);
+        let next = self.new_block("try.next", height + 1);
+        self.terminate(Terminator::If {
             then: success,
             els: failure,
+            next: Some(next),
         });
         self.switch(failure);
         for _ in 0..self.function().stack_len() {
@@ -103,6 +106,8 @@ impl Generator {
         self.switch(success);
         self.emit(Instr::TakeLocal { local: saved });
         self.emit(Instr::VariantPayload { tag: Case::Ok });
+        self.terminate(Terminator::Merge);
+        self.switch(next);
         Ok(*value.clone())
     }
 
@@ -117,17 +122,19 @@ impl Generator {
         let before = self.bindings.clone();
         let mut after = None;
         let mut result = Some(expected.clone());
-        let join = self.new_block("match.join");
+        let height = self.function().stack_len();
+        let join = (arms.len() > 1).then(|| self.new_block("match.join", height + 1));
         for (i, arm) in arms.iter().enumerate() {
             let tag = &arm.tag;
             let next = if i + 1 < arms.len() {
                 self.emit(Instr::LocalAddress { local: saved });
                 self.emit(Instr::IsVariant { tag: tag.clone() });
-                let body = self.new_block("match.arm");
-                let next = self.new_block("match.next");
-                self.terminate(Terminator::Branch {
+                let body = self.new_block("match.arm", height);
+                let next = self.new_block("match.next", height);
+                self.terminate(Terminator::If {
                     then: body,
                     els: next,
+                    next: if i == 0 { join } else { None },
                 });
                 self.switch(body);
                 Some(next)
@@ -157,13 +164,17 @@ impl Generator {
                 self.intersect_initialization(previous);
             }
             after = Some(self.bindings.clone());
-            self.terminate(Terminator::Break { target: join });
+            if join.is_some() {
+                self.terminate(Terminator::Merge);
+            }
             if let Some(next) = next {
                 self.switch(next);
             }
         }
         self.bindings = after.unwrap();
-        self.switch(join);
+        if let Some(join) = join {
+            self.switch(join);
+        }
         Ok(result.unwrap())
     }
 }

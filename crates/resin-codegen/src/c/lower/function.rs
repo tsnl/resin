@@ -1,4 +1,4 @@
-use crate::c::{CBlock, CBody, CEdge, CEdgeValue, CExit, CFunction};
+use crate::c::{CBody, CFunction, CStatement};
 use resin_lir::FunctionTypes;
 use resin_types::prelude::*;
 use std::fmt::Write;
@@ -22,19 +22,10 @@ pub(super) fn lower(
         });
     }
     let locals = locals(types, function, flow);
-    let blocks = function
-        .blocks
-        .iter()
-        .enumerate()
-        .map(|(b, _)| lower_block(types, index, b, flow))
-        .collect::<Result<_, _>>()?;
+    let statements = lower_region(types, index, function.entry.index(), flow, None)?;
     Ok(CFunction {
         signature,
-        body: CBody::Blocks {
-            locals,
-            entry: function.entry.index(),
-            blocks,
-        },
+        body: CBody::Structured { locals, statements },
     })
 }
 
@@ -83,85 +74,89 @@ fn locals(types: &Types<'_>, function: &resin_lir::Function, flow: &FunctionType
     out
 }
 
-fn lower_block(
+// Continuations are a sequence, so only child regions recurse.
+fn lower_region(
     types: &Types<'_>,
     index: usize,
-    block_id: usize,
+    mut block_id: usize,
     flow: &FunctionTypes,
-) -> Result<CBlock, Error> {
+    exit_target: Option<ExitTarget>,
+) -> Result<Vec<CStatement>, Error> {
     let function = &types.module.functions[index];
-    let block = &function.blocks[block_id];
-    let mut out = String::new();
-    let mut stack: Vec<_> = flow.inputs[block_id]
-        .iter()
-        .enumerate()
-        .map(|(i, ty)| Slot {
-            ty: ty.clone(),
-            expr: format!("r_b{block_id}_{i}"),
-            live: tracks_initialization(types, ty).then(|| format!("r_b{block_id}_{i}_live")),
-        })
-        .collect();
-    let mut diverged = false;
-    for (i, instr) in block.instrs.iter().enumerate() {
-        if matches!(instr, Instr::Eliminate { .. }) {
-            out.push_str("  abort();\n");
-            diverged = true;
-            break;
-        }
-        let args = stack.split_off(
-            stack.len() - flow.operand_count(resin_lir::BlockId::from_index(block_id), i),
-        );
-        let result = flow.results[block_id][i].as_ref();
-        let projected_value = projects_value(types, instr, &args);
-        let name = format!("r_v{block_id}_{i}");
-        let expr = instruction(types, function, &name, instr, &args, result, &mut out)
-            .map_err(|error| Error::at(types.module, index, Some((block_id, i)), error))?;
-        if let Some(ty) = result {
-            writeln!(out, "  {} {name} = {}; (void){name};", types.name(ty), {
-                let expr = expr.unwrap();
-                if matches!(instr, Instr::Load) || projected_value {
-                    types.copy(ty, &expr)
-                } else {
-                    expr
+    let mut statements = Vec::new();
+    loop {
+        let block = &function.blocks[block_id];
+        let mut out = String::new();
+        let mut stack = block_inputs(types, flow, block_id);
+        let mut diverged = false;
+        for (i, instr) in block.instrs.iter().enumerate() {
+            if matches!(instr, Instr::Eliminate { .. }) {
+                out.push_str("  abort();\n");
+                diverged = true;
+                break;
+            }
+            let args = stack.split_off(
+                stack.len() - flow.operand_count(resin_lir::BlockId::from_index(block_id), i),
+            );
+            let result = flow.results[block_id][i].as_ref();
+            let projected_value = projects_value(types, instr, &args);
+            let name = format!("r_v{block_id}_{i}");
+            let expr = instruction(types, function, &name, instr, &args, result, &mut out)
+                .map_err(|error| Error::at(types.module, index, Some((block_id, i)), error))?;
+            if let Some(ty) = result {
+                writeln!(out, "  {} {name} = {}; (void){name};", types.name(ty), {
+                    let expr = expr.unwrap();
+                    if matches!(instr, Instr::Load) || projected_value {
+                        types.copy(ty, &expr)
+                    } else {
+                        expr
+                    }
+                })
+                .unwrap();
+                stack.push(Slot {
+                    ty: ty.clone(),
+                    expr: name,
+                    live: if let Instr::LocalAddress { local } = instr
+                        && tracks_initialization(types, ty)
+                    {
+                        Some(format!("&r_live{}", local.index()))
+                    } else {
+                        None
+                    },
+                });
+            }
+            let consume = matches!(
+                instr,
+                Instr::IsVariant { .. }
+                    | Instr::CallBuiltin { .. }
+                    | Instr::ArcData
+                    | Instr::Downgrade
+                    | Instr::Upgrade
+            ) || projected_value;
+            if consume {
+                for arg in &args {
+                    types.drop_value(&arg.ty, &arg.expr, &mut out);
                 }
-            })
-            .unwrap();
-            stack.push(Slot {
-                ty: ty.clone(),
-                expr: name,
-                live: if let Instr::LocalAddress { local } = instr
-                    && tracks_initialization(types, ty)
-                {
-                    Some(format!("&r_live{}", local.index()))
-                } else {
-                    None
-                },
-            });
-        }
-        let consume = matches!(
-            instr,
-            Instr::IsVariant { .. }
-                | Instr::CallBuiltin { .. }
-                | Instr::ArcData
-                | Instr::Downgrade
-                | Instr::Upgrade
-        ) || projected_value;
-        if consume {
-            for arg in &args {
-                types.drop_value(&arg.ty, &arg.expr, &mut out);
             }
         }
+        statements.push(CStatement::Text { source: out });
+        if diverged {
+            return Ok(statements);
+        }
+        let next = lower_exit(
+            types,
+            index,
+            block_id,
+            flow,
+            stack,
+            exit_target,
+            &mut statements,
+        )?;
+        let Some(next) = next else {
+            return Ok(statements);
+        };
+        block_id = next;
     }
-    let exit = if diverged {
-        CExit::Unreachable
-    } else {
-        exit(types, &block.terminator, &mut stack)
-    };
-    Ok(CBlock {
-        label: block_id,
-        statements: out,
-        exit,
-    })
 }
 
 fn projects_value(types: &Types<'_>, instr: &Instr, args: &[Slot]) -> bool {
@@ -172,32 +167,193 @@ fn projects_value(types: &Types<'_>, instr: &Instr, args: &[Slot]) -> bool {
     }
 }
 
-fn exit(types: &Types<'_>, term: &Terminator, stack: &mut Vec<Slot>) -> CExit {
-    match term {
-        Terminator::Return => CExit::Return(stack[0].expr.clone()),
-        Terminator::Break { target } => CExit::Jump(edge(types, target.index(), stack)),
-        Terminator::Branch { then, els } => {
-            let condition = stack.pop().unwrap();
-            CExit::Branch {
-                condition: types.unwrap(&condition.ty, condition.expr),
-                then: edge(types, then.index(), stack),
-                els: edge(types, els.index(), stack),
-            }
-        }
-    }
+#[derive(Clone, Copy)]
+enum ExitTarget {
+    Merge { block: usize },
+    LoopTest { body: usize, test: usize },
+    Continue { condition: usize },
 }
 
-fn edge(types: &Types<'_>, target: usize, stack: &[Slot]) -> CEdge {
-    let values = stack
+fn block_inputs(types: &Types<'_>, flow: &FunctionTypes, block: usize) -> Vec<Slot> {
+    flow.inputs[block]
         .iter()
-        .map(|slot| CEdgeValue {
-            ty: types.name(&slot.ty),
-            value: slot.expr.clone(),
-            live: tracks_initialization(types, &slot.ty)
-                .then(|| slot.live.clone().unwrap_or("NULL".into())),
+        .enumerate()
+        .map(|(i, ty)| Slot {
+            ty: ty.clone(),
+            expr: format!("r_b{block}_{i}"),
+            live: tracks_initialization(types, ty).then(|| format!("r_b{block}_{i}_live")),
         })
-        .collect();
-    CEdge { target, values }
+        .collect()
+}
+
+fn lower_exit(
+    types: &Types<'_>,
+    index: usize,
+    block: usize,
+    flow: &FunctionTypes,
+    mut stack: Vec<Slot>,
+    exit_target: Option<ExitTarget>,
+    statements: &mut Vec<CStatement>,
+) -> Result<Option<usize>, Error> {
+    let next = match types.module.functions[index].blocks[block].terminator {
+        Terminator::Return => {
+            statements.push(CStatement::Return {
+                value: stack[0].expr.clone(),
+            });
+            None
+        }
+        Terminator::Merge => {
+            let Some(ExitTarget::Merge { block }) = exit_target else {
+                unreachable!("verified merge has a selection destination")
+            };
+            statements.push(CStatement::Text {
+                source: transfer(types, block, &stack),
+            });
+            None
+        }
+        Terminator::LoopTest => {
+            let Some(ExitTarget::LoopTest { body, test }) = exit_target else {
+                unreachable!("verified loop test has a condition destination")
+            };
+            statements.push(CStatement::Text {
+                source: loop_test(types, &stack, body, test),
+            });
+            None
+        }
+        Terminator::Continue => {
+            let Some(ExitTarget::Continue { condition }) = exit_target else {
+                unreachable!("verified continue has a loop destination")
+            };
+            statements.push(CStatement::Text {
+                source: transfer(types, condition, &stack),
+            });
+            None
+        }
+        Terminator::If { then, els, next } => {
+            let condition = stack.pop().unwrap();
+            let target = next
+                .map(|id| ExitTarget::Merge { block: id.index() })
+                .or(exit_target.filter(|target| matches!(target, ExitTarget::Merge { .. })));
+            statements.push(CStatement::If {
+                condition: types.unwrap(&condition.ty, condition.expr),
+                then: enter_region(types, index, then.index(), flow, &stack, target)?,
+                els: enter_region(types, index, els.index(), flow, &stack, target)?,
+            });
+            next
+        }
+        Terminator::Loop {
+            condition,
+            body,
+            next,
+        } => {
+            let condition = condition.index();
+            let body = body.index();
+            statements.push(CStatement::Text {
+                source: transfer(types, condition, &stack),
+            });
+            statements.push(CStatement::Text {
+                source: format!("  bool r_test{block} = false;\n"),
+            });
+            let mut repeated = lower_region(
+                types,
+                index,
+                condition,
+                flow,
+                Some(ExitTarget::LoopTest { body, test: block }),
+            )?;
+            repeated.push(CStatement::If {
+                condition: format!("!r_test{block}"),
+                then: vec![CStatement::Break],
+                els: vec![],
+            });
+            repeated.extend(lower_region(
+                types,
+                index,
+                body,
+                flow,
+                Some(ExitTarget::Continue { condition }),
+            )?);
+            statements.push(CStatement::Loop { body: repeated });
+            // The condition writes these operands before its bool is tested, so
+            // the false exit sees the final condition's values, even on a zero-trip loop.
+            let output = block_inputs(types, flow, body);
+            if let Some(next) = next {
+                statements.push(CStatement::Text {
+                    source: transfer(types, next.index(), &output),
+                });
+            } else {
+                let Some(ExitTarget::Merge { block }) = exit_target else {
+                    unreachable!("verified loop without a continuation merges a selection")
+                };
+                statements.push(CStatement::Text {
+                    source: transfer(types, block, &output),
+                });
+            }
+            next
+        }
+    };
+    Ok(next.map(|id| id.index()))
+}
+
+fn enter_region(
+    types: &Types<'_>,
+    index: usize,
+    block: usize,
+    flow: &FunctionTypes,
+    stack: &[Slot],
+    target: Option<ExitTarget>,
+) -> Result<Vec<CStatement>, Error> {
+    let mut statements = vec![CStatement::Text {
+        source: transfer(types, block, stack),
+    }];
+    statements.extend(lower_region(types, index, block, flow, target)?);
+    Ok(statements)
+}
+
+fn loop_test(types: &Types<'_>, stack: &[Slot], body: usize, test: usize) -> String {
+    let (condition, operands) = stack.split_last().unwrap();
+    let mut source = transfer(types, body, operands);
+    writeln!(
+        source,
+        "  r_test{test} = {};",
+        types.unwrap(&condition.ty, condition.expr.clone())
+    )
+    .unwrap();
+    source
+}
+
+/// Snapshot every operand before assigning destinations, including initialization
+/// provenance for borrowed managed storage. A loop may permute its incoming slots.
+fn transfer(types: &Types<'_>, target: usize, stack: &[Slot]) -> String {
+    if stack.is_empty() {
+        return String::new();
+    }
+    let mut source = String::from("  {\n");
+    for (i, value) in stack.iter().enumerate() {
+        writeln!(
+            source,
+            "    {} r_edge{i} = {};",
+            types.name(&value.ty),
+            value.expr
+        )
+        .unwrap();
+        if tracks_initialization(types, &value.ty) {
+            writeln!(
+                source,
+                "    bool *r_edge{i}_live = {};",
+                value.live.as_deref().unwrap_or("NULL")
+            )
+            .unwrap();
+        }
+    }
+    for (i, value) in stack.iter().enumerate() {
+        writeln!(source, "    r_b{target}_{i} = r_edge{i};").unwrap();
+        if tracks_initialization(types, &value.ty) {
+            writeln!(source, "    r_b{target}_{i}_live = r_edge{i}_live;").unwrap();
+        }
+    }
+    source.push_str("  }\n");
+    source
 }
 
 fn tracks_initialization(types: &Types<'_>, ty: &Ty) -> bool {

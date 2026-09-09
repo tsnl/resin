@@ -1,7 +1,6 @@
-//! Verify stack types across an existing IR function's control-flow graph.
+//! Verify a structured block tree and its stack contracts.
 
 use resin_types::prelude::*;
-use std::collections::VecDeque;
 
 use crate::{BlockId, Function, Module, Terminator};
 
@@ -26,8 +25,6 @@ pub(super) fn check_function(
         check_value(&module.types, &local.ty, function_location)?;
     }
 
-    let location = Location::basic_block(function_id, entry);
-
     if let Some(foreign) = &function.foreign {
         if function.name.is_none()
             || !function.blocks.is_empty()
@@ -43,116 +40,173 @@ pub(super) fn check_function(
         });
     }
 
-    if function.blocks.get(entry.index()).is_none() {
-        return Err(location.error(VerifyErrorKind::InvalidBasicBlock {
-            basic_block: entry.index(),
-        }));
-    }
-
-    let mut entries = vec![None; function.blocks.len()];
-    entries[entry.index()] = Some(Vec::new());
-    let mut pending = VecDeque::from([entry]);
-    let mut results = vec![Vec::new(); function.blocks.len()];
-    let mut operand_counts = vec![Vec::new(); function.blocks.len()];
-
-    while let Some(basic_block_id) = pending.pop_front() {
-        let basic_block = &function.blocks[basic_block_id.index()];
-        let mut stack = entries[basic_block_id.index()]
-            .clone()
-            .expect("queued basic blocks always have an inferred input stack");
-
-        for (instruction, instr) in basic_block.instrs.iter().enumerate() {
-            let location = Location::instruction(function_id, basic_block_id, instruction);
-            check_instr(module, function, instr, &mut stack, location)?;
-            let effect = super::stack_effect(instr);
-            operand_counts[basic_block_id.index()].push(effect.pops);
-            if effect.pushes == 1 {
-                check_value(&module.types, stack.last().unwrap(), location)?;
-            }
-            results[basic_block_id.index()]
-                .push((effect.pushes == 1).then(|| stack.last().unwrap().clone()));
-        }
-
-        let location = Location::basic_block(function_id, basic_block_id);
-        match basic_block.terminator {
-            Terminator::Break { target } => propagate(
-                function,
-                target,
-                stack,
-                &mut entries,
-                &mut pending,
-                location,
-            )?,
-            Terminator::Branch { then, els } => {
-                let condition = pop_one(&mut stack, location)?;
-                let condition_shape = shape(&module.types, condition.clone(), location)?;
-                if condition_shape != Ty::Bool {
-                    return Err(location.error(VerifyErrorKind::TypeMismatch {
-                        expected: Ty::Bool,
-                        found: condition,
-                    }));
-                }
-                propagate(
-                    function,
-                    then,
-                    stack.clone(),
-                    &mut entries,
-                    &mut pending,
-                    location,
-                )?;
-                propagate(function, els, stack, &mut entries, &mut pending, location)?;
-            }
-            Terminator::Return => {
-                if stack.as_slice() != [function.result.clone()] {
-                    return Err(location.error(VerifyErrorKind::InvalidReturnStack {
-                        expected: function.result.clone(),
-                        found: stack,
-                    }));
-                }
-            }
-        }
-    }
-
-    if let Some(basic_block) = entries.iter().position(Option::is_none) {
+    let mut checker = Regions {
+        module,
+        function,
+        function_id,
+        entries: vec![None; function.blocks.len()],
+        results: vec![Vec::new(); function.blocks.len()],
+        operand_counts: vec![Vec::new(); function.blocks.len()],
+    };
+    checker.visit(entry, Vec::new(), Region::Function)?;
+    if let Some(block) = checker.entries.iter().position(Option::is_none) {
         return Err(
-            Location::basic_block(function_id, BlockId::from_index(basic_block))
+            Location::basic_block(function_id, BlockId::from_index(block))
                 .error(VerifyErrorKind::UnreachableBasicBlock),
         );
     }
-
     Ok(FunctionTypes {
-        inputs: entries.into_iter().map(Option::unwrap).collect(),
-        results,
-        operand_counts,
+        inputs: checker.entries.into_iter().map(Option::unwrap).collect(),
+        results: checker.results,
+        operand_counts: checker.operand_counts,
     })
 }
 
-fn propagate(
-    function: &Function,
-    target: BlockId,
-    stack: Vec<Ty>,
-    entries: &mut [Option<Vec<Ty>>],
-    pending: &mut VecDeque<BlockId>,
-    location: Location,
-) -> Result<(), VerifyError> {
-    if function.blocks.get(target.index()).is_none() {
-        return Err(location.error(VerifyErrorKind::InvalidBasicBlock {
-            basic_block: target.index(),
-        }));
+/// Enter each owned block once. A return has no region result and does not
+/// participate in joins; loops check their back-edge contract without a fixpoint.
+/// Iterate continuations so only actual region nesting consumes call-stack depth.
+struct Regions<'a> {
+    module: &'a Module,
+    function: &'a Function,
+    function_id: FunctionId,
+    entries: Vec<Option<Vec<Ty>>>,
+    results: Vec<Vec<Option<Ty>>>,
+    operand_counts: Vec<Vec<usize>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Region {
+    Function,
+    Selection,
+    LoopCondition,
+    LoopBody,
+}
+
+impl Regions<'_> {
+    fn visit(
+        &mut self,
+        mut id: BlockId,
+        mut stack: Vec<Ty>,
+        region: Region,
+    ) -> Result<Option<Vec<Ty>>, VerifyError> {
+        loop {
+            let location = Location::basic_block(self.function_id, id);
+            let block = self.function.blocks.get(id.index()).ok_or_else(|| {
+                location.error(VerifyErrorKind::InvalidBasicBlock {
+                    basic_block: id.index(),
+                })
+            })?;
+            if self.entries[id.index()].is_some() {
+                return Err(location.error(VerifyErrorKind::ReusedBasicBlock));
+            }
+            self.entries[id.index()] = Some(stack.clone());
+            for (i, instr) in block.instrs.iter().enumerate() {
+                let location = Location::instruction(self.function_id, id, i);
+                check_instr(self.module, self.function, instr, &mut stack, location)?;
+                let effect = super::stack_effect(instr);
+                self.operand_counts[id.index()].push(effect.pops);
+                if effect.pushes == 1 {
+                    check_value(&self.module.types, stack.last().unwrap(), location)?;
+                }
+                self.results[id.index()]
+                    .push((effect.pushes == 1).then(|| stack.last().unwrap().clone()));
+            }
+            let (next, output) = match block.terminator {
+                Terminator::Merge => {
+                    if region != Region::Selection {
+                        return Err(location.error(VerifyErrorKind::UnexpectedMerge));
+                    }
+                    return Ok(Some(stack));
+                }
+                Terminator::LoopTest => {
+                    if region != Region::LoopCondition {
+                        return Err(location.error(VerifyErrorKind::UnexpectedLoopTest));
+                    }
+                    return Ok(Some(stack));
+                }
+                Terminator::Continue => {
+                    if region != Region::LoopBody {
+                        return Err(location.error(VerifyErrorKind::UnexpectedContinue));
+                    }
+                    return Ok(Some(stack));
+                }
+                Terminator::Return => {
+                    if stack.as_slice() != [self.function.result.clone()] {
+                        return Err(location.error(VerifyErrorKind::InvalidReturnStack {
+                            expected: self.function.result.clone(),
+                            found: stack,
+                        }));
+                    }
+                    return Ok(None);
+                }
+                Terminator::If { then, els, next } => {
+                    self.condition(&mut stack, location)?;
+                    let then_stack = self.visit(then, stack.clone(), Region::Selection)?;
+                    let else_stack = self.visit(els, stack, Region::Selection)?;
+                    let output = join(then_stack, else_stack, location)?;
+                    (next, output)
+                }
+                Terminator::Loop {
+                    condition,
+                    body,
+                    next,
+                } => {
+                    let mut output = self
+                        .visit(condition, stack.clone(), Region::LoopCondition)?
+                        .ok_or_else(|| location.error(VerifyErrorKind::MissingLoopTest))?;
+                    self.condition(&mut output, location)?;
+                    same_stack(&stack, &output, location)?;
+                    if let Some(repeated) = self.visit(body, output.clone(), Region::LoopBody)? {
+                        same_stack(&stack, &repeated, location)?;
+                    }
+                    (next, Some(output))
+                }
+            };
+            let Some(next) = next else {
+                // Tail selections may forward a merge to their enclosing arm.
+                // Testing or repeating a loop always needs its own explicit exit.
+                if output.is_some() && region != Region::Selection {
+                    return Err(location.error(VerifyErrorKind::MissingRegionContinuation));
+                }
+                return Ok(output);
+            };
+            stack = output.ok_or_else(|| location.error(VerifyErrorKind::MissingRegionResult))?;
+            id = next;
+        }
     }
 
-    match &entries[target.index()] {
-        None => {
-            entries[target.index()] = Some(stack);
-            pending.push_back(target);
-        }
-        Some(expected) if expected != &stack => {
-            return Err(location.error(VerifyErrorKind::ConflictingBasicBlockStack {
-                expected: expected.clone(),
-                found: stack,
+    fn condition(&self, stack: &mut Vec<Ty>, location: Location) -> Result<(), VerifyError> {
+        let condition = pop_one(stack, location)?;
+        if shape(&self.module.types, condition.clone(), location)? != Ty::Bool {
+            return Err(location.error(VerifyErrorKind::TypeMismatch {
+                expected: Ty::Bool,
+                found: condition,
             }));
         }
-        Some(_) => {}
+        Ok(())
+    }
+}
+
+fn same_stack(expected: &[Ty], found: &[Ty], location: Location) -> Result<(), VerifyError> {
+    if expected != found {
+        return Err(location.error(VerifyErrorKind::ConflictingBasicBlockStack {
+            expected: expected.to_vec(),
+            found: found.to_vec(),
+        }));
     }
     Ok(())
+}
+
+fn join(
+    then: Option<Vec<Ty>>,
+    els: Option<Vec<Ty>>,
+    location: Location,
+) -> Result<Option<Vec<Ty>>, VerifyError> {
+    match (then, els) {
+        (Some(then), Some(els)) => {
+            same_stack(&then, &els, location)?;
+            Ok(Some(then))
+        }
+        (then, els) => Ok(then.or(els)),
+    }
 }

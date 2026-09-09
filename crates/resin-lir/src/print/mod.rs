@@ -3,7 +3,7 @@
 use ::sexpfmt::{PrinterConfig, SExp, SExpBookendStyle, sexp_to_string};
 use resin_types::prelude::*;
 
-use crate::{Function, Instr, Module, Terminator};
+use crate::{BlockId, Function, Instr, Module, Terminator};
 
 mod names;
 
@@ -84,16 +84,19 @@ fn sexp_function(names: &Names, index: usize, function: &Function) -> SExp {
             ],
         ));
     }
-    for (i, block) in function.blocks.iter().enumerate() {
-        let mut block_items = vec![symbol(fn_names.blocks[i].as_ref())];
-        block_items.extend(
-            block
-                .instrs
-                .iter()
-                .map(|instr| sexp_instr(names, &fn_names, instr)),
-        );
-        block_items.push(sexp_terminator(&fn_names, &block.terminator));
-        items.push(list("block", block_items));
+    if function.foreign.is_none() {
+        let mut printer = Blocks {
+            names,
+            fn_names: &fn_names,
+            function,
+            printed: vec![false; function.blocks.len()],
+        };
+        items.extend(printer.region(function.entry));
+        for i in 0..function.blocks.len() {
+            if !printer.printed[i] {
+                items.push(list("unreachable", printer.region(BlockId::from_index(i))));
+            }
+        }
     }
     list("function", items)
 }
@@ -180,20 +183,73 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
     }
 }
 
-fn sexp_terminator(fn_names: &FunctionNames, terminator: &Terminator) -> SExp {
-    match terminator {
-        Terminator::Break { target } => list(
-            "break",
-            vec![symbol(fn_names.blocks[target.index()].as_ref())],
-        ),
-        Terminator::Branch { then, els } => list(
-            "branch",
-            vec![
-                symbol(fn_names.blocks[then.index()].as_ref()),
-                symbol(fn_names.blocks[els.index()].as_ref()),
-            ],
-        ),
-        Terminator::Return => symbol("return"),
+/// Print ownership nesting while keeping invalid trees inspectable.
+struct Blocks<'a> {
+    names: &'a Names,
+    fn_names: &'a FunctionNames,
+    function: &'a Function,
+    printed: Vec<bool>,
+}
+
+impl Blocks<'_> {
+    fn region(&mut self, mut id: BlockId) -> Vec<SExp> {
+        let mut blocks = Vec::new();
+        loop {
+            let Some(block) = self.function.blocks.get(id.index()) else {
+                blocks.push(list("invalid-block", vec![symbol(id.index().to_string())]));
+                return blocks;
+            };
+            let name = symbol(self.fn_names.blocks[id.index()].as_ref());
+            if std::mem::replace(&mut self.printed[id.index()], true) {
+                blocks.push(list("reused-block", vec![name]));
+                return blocks;
+            }
+            let mut items = vec![name];
+            items.extend(
+                block
+                    .instrs
+                    .iter()
+                    .map(|instr| sexp_instr(self.names, self.fn_names, instr)),
+            );
+            let (terminator, next) = self.terminator(&block.terminator);
+            items.push(terminator);
+            blocks.push(list("block", items));
+            let Some(next) = next else { return blocks };
+            id = next;
+        }
+    }
+
+    fn terminator(&mut self, terminator: &Terminator) -> (SExp, Option<BlockId>) {
+        match *terminator {
+            Terminator::Merge => (symbol("merge"), None),
+            Terminator::LoopTest => (symbol("loop-test"), None),
+            Terminator::Continue => (symbol("continue"), None),
+            Terminator::Return => (symbol("return"), None),
+            Terminator::If { then, els, next } => (
+                list(
+                    "if",
+                    vec![
+                        list("then", self.region(then)),
+                        list("else", self.region(els)),
+                    ],
+                ),
+                next,
+            ),
+            Terminator::Loop {
+                condition,
+                body,
+                next,
+            } => (
+                list(
+                    "loop",
+                    vec![
+                        list("condition", self.region(condition)),
+                        list("body", self.region(body)),
+                    ],
+                ),
+                next,
+            ),
+        }
     }
 }
 

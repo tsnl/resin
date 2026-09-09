@@ -192,9 +192,12 @@ contains neither AST nodes nor scope cursors. The temporary checking tree in
 [typed.rs](crates/resin-hir/src/lower/typed.rs) is an internal construction step.
 
 [LIR language](crates/resin-lir/src/lib.rs) defines a typed operand stack machine.
-Functions own locals and basic blocks; instructions consume and produce stack
-values, and terminators connect blocks. Local zero is always the parameter,
-including unit, tuples, and foreign declarations. [LIR lowering](crates/resin-lir/src/lower/mod.rs)
+Functions own locals and a tree of basic blocks. Instructions consume and produce
+stack values; `If` and `Loop` terminators own nested regions and their continuations.
+`Yield` transfers operands to the enclosing region, and `Return` leaves the function.
+Local zero is always the parameter, including unit, tuples, and foreign declarations.
+Block IDs locate nodes in an
+arena; the verifier rejects arbitrary jumps and cycles. [LIR lowering](crates/resin-lir/src/lower/mod.rs)
 consumes only HIR and shared concrete types. It chooses storage, checks definite
 initialization, makes evaluation order explicit, and inserts cleanup.
 
@@ -213,8 +216,8 @@ initialization, makes evaluation order explicit, and inserts cleanup.
 ### Verification certifies the LIR language
 
 LIR's private [verify](crates/resin-lir/src/verify/mod.rs) module checks definitions,
-instruction operands, block-edge stack types, and returns. Its public operations and
-certificate types live in [lib.rs](crates/resin-lir/src/lib.rs), beside the language
+instruction operands, unique region ownership, branch yields, loop stack invariants,
+and returns. Its public operations and certificate types live in [lib.rs](crates/resin-lir/src/lib.rs), beside the language
 being checked. `resin_lir::VerifiedModule` owns LIR and its verification analysis behind
 private fields. Native builds borrow an immutable `Verified` view. Consuming
 `into_module` returns ordinary LIR and discards the certificate; edits require
@@ -231,9 +234,9 @@ the verifier applies concrete rules to instructions independently of source chec
 
 [C lowering](crates/resin-codegen/src/c/lower/mod.rs) produces a
 [private C tree](crates/resin-codegen/src/c/mod.rs): declarations, shader-header references,
-functions, blocks, and a `main` wrapper. [The printer](crates/resin-codegen/src/c/print.rs)
+functions, structured statements, and a `main` wrapper. [The printer](crates/resin-codegen/src/c/print.rs)
 formats that tree without accessing LIR or typechecking facts. [function.rs](crates/resin-codegen/src/c/lower/function.rs)
-lowers instructions and block edges; [foreign.rs](crates/resin-codegen/src/c/lower/foreign.rs)
+lowers instructions, nested control flow, and operand transfers; [foreign.rs](crates/resin-codegen/src/c/lower/foreign.rs)
 bridges Resin's unary calls to conventional C argument lists.
 
 [Ninja execution](crates/resin-toolchain/src/ninja.rs) builds the generated dependency

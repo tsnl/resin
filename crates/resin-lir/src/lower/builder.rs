@@ -7,7 +7,7 @@ pub(super) struct FunctionBuilder {
     function: Function,
     current: BlockId,
     terminated: Vec<bool>,
-    heights: Vec<Option<usize>>,
+    heights: Vec<usize>,
     height: usize,
 }
 
@@ -31,7 +31,7 @@ impl FunctionBuilder {
             },
             current: BlockId::from_index(0),
             terminated: vec![false],
-            heights: vec![Some(0)],
+            heights: vec![0],
             height: 0,
         }
     }
@@ -85,17 +85,6 @@ impl FunctionBuilder {
     }
 
     pub(super) fn terminate(&mut self, terminator: Terminator) {
-        let (height, targets) = match &terminator {
-            Terminator::Return => (0, vec![]),
-            Terminator::Break { target } => (self.height, vec![*target]),
-            Terminator::Branch { then, els } => (self.height - 1, vec![*then, *els]),
-        };
-        for target in targets {
-            if let Some(old) = self.heights[target.index()] {
-                debug_assert_eq!(old, height);
-            }
-            self.heights[target.index()] = Some(height);
-        }
         let current = self.current.index();
         debug_assert!(!self.terminated[current]);
         self.function.blocks[current].terminator = terminator;
@@ -104,10 +93,10 @@ impl FunctionBuilder {
 
     pub(super) fn switch(&mut self, block: BlockId) {
         self.current = block;
-        self.height = self.heights[block.index()].expect("reachable generated block");
+        self.height = self.heights[block.index()];
     }
 
-    pub(super) fn new_block(&mut self, hint: &str) -> BlockId {
+    pub(super) fn new_block(&mut self, hint: &str, height: usize) -> BlockId {
         let id = BlockId::from_index(self.function.blocks.len());
         self.function.blocks.push(BasicBlock {
             name: Some(self.unique_block_name(hint)),
@@ -115,7 +104,7 @@ impl FunctionBuilder {
             terminator: Terminator::Return,
         });
         self.terminated.push(false);
-        self.heights.push(None);
+        self.heights.push(height);
         id
     }
 
@@ -154,16 +143,14 @@ mod tests {
         builder.parameter(Some("value".into()), Ty::Int32);
         builder.result(Ty::Int32);
         assert_eq!(builder.local(Ty::Bool, Some("temporary".into())).index(), 1);
-        let body = builder.new_block("body");
-        builder.terminate(Terminator::Break { target: body });
-        builder.switch(body);
+        let body = BlockId::from_index(0);
         builder.emit(Instr::LocalAddress {
             local: LocalId::from_index(0),
         });
         builder.emit(Instr::Load);
         builder.terminate(Terminator::Return);
         let function = builder.finish();
-        assert_eq!(function.blocks.len(), 2);
+        assert_eq!(function.blocks.len(), 1);
         assert_eq!(function.locals[0].name.as_deref(), Some("value"));
         assert_eq!(function.blocks[body.index()].terminator, Terminator::Return);
         assert_eq!(function.blocks[body.index()].instrs.len(), 2);
@@ -173,7 +160,7 @@ mod tests {
     fn block_names_stay_unique_when_hints_collide() {
         let mut builder = FunctionBuilder::new(None);
         for hint in ["body", "body", "body.1", "body"] {
-            builder.new_block(hint);
+            builder.new_block(hint, 0);
         }
         let function = builder.finish();
         let names: Vec<_> = function

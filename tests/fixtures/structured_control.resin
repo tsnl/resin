@@ -1,0 +1,87 @@
+export { kernel, main };
+struct Root { count: uint, pixels: Ptr<uint> };
+struct Stop { code: uint };
+struct First {};
+struct Second {};
+struct Third {};
+
+def checked(stop: bool, code: uint) -> Result<bool, Stop> = {
+	if (stop) {
+		err(Stop { code = code })
+	} else {
+		ok(1_ui == 1_ui)
+	}
+};
+def tag(index: uint) -> First | Second | Third = {
+	if (index == 0_ui) {
+		First {}
+	} else {
+		if (index == 1_ui) {
+			Second {}
+		} else {
+			Third {}
+		}
+	}
+};
+def evaluate(index: uint) -> Result<uint, Stop> = {
+	var limit = if (index == 0_ui) {
+		0_ui
+	} else {
+		3_ui
+	};
+	var outer = 0_ui;
+	var total = 0_ui;
+	while (outer < limit && checked(index == 1_ui && outer == 1_ui, 11_ui)?) {
+		total := total + {
+			var sum = 0_ui;
+			var inner = 0_ui;
+			while (inner <= outer) {
+				checked(index == 2_ui && outer == 1_ui && inner == 0_ui, 22_ui)?;
+				sum := sum + match (tag(inner)) {
+					First(first) => {
+						1_ui
+					},
+					Second(second) => {
+						2_ui
+					},
+					Third(third) => {
+						3_ui
+					}
+				};
+				inner := inner + 1_ui;
+			};
+			sum
+		};
+		outer := outer + 1_ui;
+	};
+	ok(total + index)
+};
+@compute_shader
+def kernel(invocation: ulong, root: Ptr<Root>) = {
+	var index = uint(invocation);
+	if (index < root.count) {
+		var output = Span<uint> { data = root.pixels, length = ulong(root.count) };
+		output.at(invocation).* := match (evaluate(index)) {
+			ok(value) => {
+				value
+			},
+			err(error) => {
+				error.code
+			}
+		};
+	};
+};
+def main() -> int = {
+	var values = [0_ui, 0_ui, 0_ui, 0_ui];
+	var root = Root { count = 4_ui, pixels = values.at(0_ul) };
+	var index = 0_ul;
+	while (index < 4_ul) {
+		kernel(index, &root);
+		index := index + 1_ul;
+	};
+	if (values.at(0_ul).* == 0_ui && values.at(1_ul).* == 11_ui && values.at(2_ul).* == 22_ui && values.at(3_ul).* == 13_ui) {
+		0
+	} else {
+		1
+	}
+};

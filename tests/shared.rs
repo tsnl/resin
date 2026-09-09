@@ -502,3 +502,37 @@ fn pointer_replace_transfers_managed_values_and_leaves_ordinary_names_available(
     };
     "#);
 }
+
+#[test]
+fn loop_condition_and_body_errors_preserve_scope_cleanup() {
+    run(r#"
+    struct Stopped { code: uint };
+    def check(stop: bool) -> Result<(), Stopped> = {
+        if (stop) { err(Stopped { code = 7_ui }) } else { ok(()) }
+    };
+    def exercise(trace: Ptr<int>, mode: int) -> Result<int, Stopped> = {
+        var owner = Resource.make(trace, 1);
+        var index = 0;
+        while ({
+            var condition = Resource.make(trace, 2);
+            check(mode == 0)?;
+            index < 1
+        }) {
+            var body = Resource.make(trace, 3);
+            check(mode == 1)?;
+            index := index + 1;
+        };
+        ok(trace.*)
+    };
+    def main() -> int = {
+        var condition_trace = 0;
+        var body_trace = 0;
+        var normal_trace = 0;
+        var a = match (exercise(&condition_trace, 0)) { ok(v) => { 0_ui }, err(e) => { e.code } };
+        var b = match (exercise(&body_trace, 1)) { ok(v) => { 0_ui }, err(e) => { e.code } };
+        var c = match (exercise(&normal_trace, 2)) { ok(v) => { v }, err(e) => { 0 } };
+        if (a == 7_ui && b == 7_ui && c == 232 &&
+            condition_trace == 21 && body_trace == 231 && normal_trace == 2321) { 0 } else { 1 }
+    };
+    "#);
+}
