@@ -6,8 +6,9 @@ implementation modules construct it. The `resin` crate is the driver and
 re-exports the phase crates for library users.
 
 The root manifest is a virtual workspace. All native Rust packages live under
-`crates/`: the driver in `resin`, the native C ABI in `runtime`, the language server
-in `lsp`, and the compiler phases alongside them. Each package owns its source and
+`crates/`: the driver in `resin`, the native C ABI in `resin-runtime`, the language server
+in `resin-lsp`, and the compiler phases alongside them. Directories match their Cargo
+package names, including the `resin-` prefix. Each package owns its source and
 tests. Shared Resin examples, the standard library, and documentation stay at the
 repository root. `resin` is the default member, so `cargo run -- examples/eg001.resin`
 still works there; use `--workspace` to build or test every native package.
@@ -64,12 +65,12 @@ are private even when their functions must be shared internally.
 
 | Phase | Language definition | Incoming pass | Printing |
 | --- | --- | --- | --- |
-| CST | [Document](../crates/cst/src/language.rs) | [incremental parsing](../crates/cst/src/lower.rs) | [source formatting](../crates/cst/src/print.rs) |
-| AST | [source nodes](../crates/ast/src/language.rs) | [CST → AST](../crates/ast/src/lower.rs) | [S-expressions](../crates/ast/src/print.rs) |
-| HIR | [resolved nodes](../crates/hir/src/language.rs) | [AST → HIR](../crates/hir/src/lower/mod.rs) | [typed S-expressions](../crates/hir/src/print.rs) |
-| LIR | [instructions and blocks](../crates/lir/src/language.rs) | [HIR → LIR](../crates/lir/src/lower/mod.rs) | [S-expressions](../crates/lir/src/print/mod.rs) |
-| C | [C source tree](../crates/codegen/src/c/language.rs) | [verified LIR → C](../crates/codegen/src/c/lower/mod.rs) | [C text](../crates/codegen/src/c/print.rs) |
-| GLSL | [shader source tree](../crates/codegen/src/glsl/language.rs) | [verified LIR → GLSL](../crates/codegen/src/glsl/lower/mod.rs) | [GLSL text](../crates/codegen/src/glsl/print.rs) |
+| CST | [Document](../crates/resin-cst/src/language.rs) | [incremental parsing](../crates/resin-cst/src/lower.rs) | [source formatting](../crates/resin-cst/src/print.rs) |
+| AST | [source nodes](../crates/resin-ast/src/language.rs) | [CST → AST](../crates/resin-ast/src/lower.rs) | [S-expressions](../crates/resin-ast/src/print.rs) |
+| HIR | [resolved nodes](../crates/resin-hir/src/language.rs) | [AST → HIR](../crates/resin-hir/src/lower/mod.rs) | [typed S-expressions](../crates/resin-hir/src/print.rs) |
+| LIR | [instructions and blocks](../crates/resin-lir/src/language.rs) | [HIR → LIR](../crates/resin-lir/src/lower/mod.rs) | [S-expressions](../crates/resin-lir/src/print/mod.rs) |
+| C | [C source tree](../crates/resin-codegen/src/c/language.rs) | [verified LIR → C](../crates/resin-codegen/src/c/lower/mod.rs) | [C text](../crates/resin-codegen/src/c/print.rs) |
+| GLSL | [shader source tree](../crates/resin-codegen/src/glsl/language.rs) | [verified LIR → GLSL](../crates/resin-codegen/src/glsl/lower/mod.rs) | [GLSL text](../crates/resin-codegen/src/glsl/print.rs) |
 
 Prefer small functions named for the operation they perform. The
 [Bitwise project](https://github.com/pervognsen/bitwise) is a style reference for

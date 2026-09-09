@@ -13,7 +13,7 @@ submodule checkout is required.
 From the Resin repository root:
 
 ```sh
-nix-shell --run 'cargo install --path crates/lsp --locked'
+nix-shell --run 'cargo install --path crates/resin-lsp --locked'
 nix-shell --run 'rustup target add wasm32-wasip2'
 ```
 
@@ -85,7 +85,7 @@ The formatter always indents with hard tabs; `hard_tabs` also makes ordinary edi
 indentation use tabs. `tab_size` controls their display width. A trailing comma
 forces a list onto multiple lines and is preserved, except for singleton tuples such as
 `(x,)` and `(int,)`. Comments and nested multiline content can still force breaks. Comments stay intact, and
-multiple blank lines collapse to one. See the [formatting rules](../../crates/lsp/README.md#formatting)
+multiple blank lines collapse to one. See the [formatting rules](../../crates/resin-lsp/README.md#formatting)
 for details. Incomplete syntax is left unchanged until repaired.
 
 ## Check the workflow
@@ -118,7 +118,7 @@ The extension is not published in Zed's registry yet. A future registry entry
 can point to this repository with `path = "editors/zed"`; see the
 [publishing guide](https://zed.dev/docs/extensions/publishing/publishing-guide).
 Current limitations and compiler architecture are documented in
-[crates/lsp/README.md](../../crates/lsp/README.md).
+[crates/resin-lsp/README.md](../../crates/resin-lsp/README.md).
 
 Validated with Zed 1.17.2 on Linux under Xvfb: Zed's own builder compiled and
 loaded the extension and pinned grammar; highlighting, imported/standard-library

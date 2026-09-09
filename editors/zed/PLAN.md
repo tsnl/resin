@@ -10,7 +10,7 @@ Tracking issue: [tsnl/resin#75](https://github.com/tsnl/resin/issues/75).
 
 The grammar migration is complete in commit `2a39afd`. Editor implementation is
 on the stack above; see the [extension setup](README.md) and
-[compiler/server architecture](../../crates/lsp/README.md).
+[compiler/server architecture](../../crates/resin-lsp/README.md).
 
 The compiler is now designed around a long-lived `compiler::Session`, shared by
 the CLI and the LSP. The session owns overlays, incremental syntax trees, cached
@@ -47,7 +47,7 @@ editors/zed/
     overrides.scm
     textobjects.scm
   README.md
-crates/lsp/
+crates/resin-lsp/
   Cargo.toml
   src/
   tests/

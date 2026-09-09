@@ -13,18 +13,20 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - HIR is a typed, desugared tree with resolved bindings, calls, and operations. Source
   scopes, method namespaces, inference variables, and recovery belong to HIR construction.
   LIR describes storage, cleanup, stack operations, and explicit control-flow blocks.
-  Keep `crates/lir-verifier` independent; LIR definitions do not invoke their verifier.
-- Keep common resolved types and layout rules in `crates/common/src/types`; they must not depend on a
+  Keep `crates/resin-lir-verifier` independent; LIR definitions do not invoke their verifier.
+- Keep common resolved types and layout rules in `crates/resin-common/src/types`; they must not depend on a
   frontend, backend, or verifier. The compiler driver sequences passes and the toolchain
   owns external processes. Printers consume their own language, without reaching upstream.
-- Each compiler phase is an unpublished workspace crate under `crates/`: `cst`, `ast`,
-  `hir`, `lir`, `lir-verifier`, and `codegen`, with `common` for shared vocabulary.
+- Each compiler phase is an unpublished workspace crate under `crates/`: `resin-cst`,
+  `resin-ast`, `resin-hir`, `resin-lir`, `resin-lir-verifier`, and `resin-codegen`,
+  with `resin-common` for shared vocabulary. Directory names match Cargo package names;
+  keep the driver in `resin` and the parser in `tree-sitter-resin`.
   Use `publish = false` and local path dependencies. Keep dependencies acyclic and explicit;
   do not work around a boundary with public implementation modules or reverse dev-dependencies.
   Language nodes are public data. Solvers, scopes, builders, and traversal state stay private;
   expose a small set of lowering, printing, and query operations instead.
 - Keep the root manifest a virtual workspace, with all native Rust packages under
-  `crates/`, including the `resin` driver, `runtime`, `lsp`, and `tree-sitter-resin`.
+  `crates/`, including the `resin` driver, `resin-runtime`, `resin-lsp`, and `tree-sitter-resin`.
   Keep the complete Tree-sitter package together. Editor integrations live under
   `editors/`; the Zed WASI extension has its own Cargo workspace in `editors/zed`.
   Each crate owns its tests; shared examples, `stdlib`, and documentation stay at
@@ -63,7 +65,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Target 64-bit Linux, macOS, and Windows (MSVC with LLVM Clang for emitted C).
   Keep host builds independent of a Vulkan SDK or GPU. GPU execution still requires the
   runtime's Vulkan features; MoltenVK discovery does not imply full GPU compatibility.
-- Keep the native C ABI in `crates/runtime/` and language-facing modules in `stdlib/`.
+- Keep the native C ABI in `crates/resin-runtime/` and language-facing modules in `stdlib/`.
   Examples import standard-library functionality through `std/` paths. Each file has a private
   scope with explicit exports; do not reintroduce textual inclusion.
 - Host entries take unit or `(int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>)` for argc/argv/envp.
@@ -92,7 +94,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   identifiers. Desugar method calls into ordinary functions before IR; method namespaces
   and module origins belong to frontend metadata. Compiler-provided methods use the
   same declaration lookup, argument checking, and editor analysis as source methods;
-  register their signatures and intrinsic operations in `crates/hir/src/lower/builtin_methods.rs`.
+  register their signatures and intrinsic operations in `crates/resin-hir/src/lower/builtin_methods.rs`.
   HIR construction recognizes `drop` as a hook; direct calls remain ordinary calls.
 - Reading existing values performs compiler-defined copying. Function and type
   applications consume their argument results; operators do the same, and aggregate

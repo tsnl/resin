@@ -21,7 +21,7 @@ From the Resin repository root:
 
 ```sh
 nix-shell --run 'cargo build -p resin-lsp'
-nix-shell --run 'cargo install --path crates/lsp --locked'
+nix-shell --run 'cargo install --path crates/resin-lsp --locked'
 ```
 
 Configure your editor to launch `resin-lsp` (or `resin-lsp --stdio`). The server

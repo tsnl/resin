@@ -636,7 +636,7 @@ fn ordinary_resin_programs_render_and_write_pngs() {
     let reference = image_read_png(
         concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../runtime/tests/hello_triangle.png"
+            "/../resin-runtime/tests/hello_triangle.png"
         ),
         4,
     )

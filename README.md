@@ -89,7 +89,7 @@ XDG_SESSION_TYPE=x11 RESIN_REQUIRE_GPU=1 RESIN_REQUIRE_GLSLC=1 RESIN_REQUIRE_WIN
 ## Editor support
 
 The [Zed extension](editors/zed/README.md) provides Resin syntax support and uses
-[`resin-lsp`](crates/lsp/README.md) for diagnostics, hover, go-to-definition, and
+[`resin-lsp`](crates/resin-lsp/README.md) for diagnostics, hover, go-to-definition, and
 basic completion. Build the server with `nix-shell --run 'cargo build -p resin-lsp'`.
 
 Both the CLI and LSP use a persistent `resin::compiler::Session`: source overlays,
@@ -409,13 +409,13 @@ Delete `build/` to clean it, including after linked system library changes or ch
 behind a compiler wrapper.
 
 Host executables statically link `resin-runtime`; host-only programs do not initialize Vulkan.
-Generated C includes `resin_runtime.h` and its hierarchy from `crates/runtime/include`.
+Generated C includes `resin_runtime.h` and its hierarchy from `crates/resin-runtime/include`.
 Cargo builds the runtime archive alongside the compiler. For relocated installations, set
 `RESIN_RUNTIME_INCLUDE` and `RESIN_RUNTIME_LIB` (`libresin_runtime.a` on Unix,
 `resin_runtime.lib` on Windows MSVC). To compile emitted C manually on Linux:
 
 ```sh
-cc -std=c11 -fno-strict-aliasing -I crates/runtime/include fibonacci.c \
+cc -std=c11 -fno-strict-aliasing -I crates/resin-runtime/include fibonacci.c \
   target/debug/deps/libresin_runtime.a -ldl -lpthread -lm -lrt -lutil -o fibonacci
 ```
 
@@ -457,7 +457,7 @@ such as `(x,)` and `(int,)`, force multiline
 lists; add one to keep long calls or records readable. Comments and literal
 contents are preserved, and repeated blank lines collapse to one. Keep one blank
 line between example functions and between logical sections inside a function.
-The [full formatting rules](crates/lsp/README.md#formatting) also apply to the CLI.
+The [full formatting rules](crates/resin-lsp/README.md#formatting) also apply to the CLI.
 CI checks the examples with `--format --check` on Linux, macOS, and Windows.
 
 ## Strings, formatting, and output
@@ -566,7 +566,7 @@ keywords: definitions and parameters cannot use those names, but record fields c
 
 `std/` resolves to the standard-library sources in `stdlib/`, independent of the source file or
 working directory. Set `RESIN_STDLIB` to relocate that directory when distributing the compiler.
-The native Rust crate lives separately at `crates/runtime/`; it has no dependency on the standard
+The native Rust crate lives separately at `crates/resin-runtime/`; it has no dependency on the standard
 library. Programs use standard-library wrappers; the integer-status C ABI stays private
 to those modules. Public operations are static constructors and instance methods:
 
