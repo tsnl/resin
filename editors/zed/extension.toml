@@ -1,0 +1,19 @@
+id = "resin"
+name = "Resin"
+version = "0.1.0"
+schema_version = 1
+authors = ["Nikhil Idiculla <nikhil.idiculla@gmail.com>"]
+description = "Resin language support and language server"
+repository = "https://github.com/tsnl/resin"
+
+[grammars.resin]
+repository = "https://github.com/tsnl/resin"
+rev = "78de8fe94d04ea4f032301ef7ae7f6692cdfc6cf"
+path = "crates/tree-sitter-resin"
+
+[language_servers.resin-lsp]
+name = "Resin Language Server"
+languages = ["Resin"]
+
+[language_servers.resin-lsp.language_ids]
+Resin = "resin"

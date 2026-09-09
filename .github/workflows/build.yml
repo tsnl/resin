@@ -22,14 +22,14 @@ jobs:
     timeout-minutes: 5
     defaults:
       run:
-        working-directory: tree-sitter-resin
+        working-directory: crates/tree-sitter-resin
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: tree-sitter-resin/package-lock.json
+          cache-dependency-path: crates/tree-sitter-resin/package-lock.json
       - name: Install grammar check dependencies
         run: npm ci --ignore-scripts
       - name: Check grammar formatting
@@ -63,7 +63,7 @@ jobs:
           rustc --version &
           toolchain_pid=$!
           sudo apt-get update
-          sudo apt-get install -y cmake pkg-config libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libwayland-dev libxkbcommon-dev wayland-protocols glslc mesa-vulkan-drivers
+          sudo apt-get install -y cmake ninja-build pkg-config libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libwayland-dev libxkbcommon-dev wayland-protocols glslc mesa-vulkan-drivers
           wait "$toolchain_pid"
       - name: Select the Linux software Vulkan driver
         if: runner.os == 'Linux'
@@ -74,6 +74,13 @@ jobs:
             echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
             break
           done
+      - name: macOS native build tools
+        if: runner.os == 'macOS'
+        run: brew install ninja shaderc
+      - name: Windows Ninja
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install ninja --yes --no-progress
       - name: Windows C toolchain
         if: runner.os == 'Windows'
         shell: pwsh

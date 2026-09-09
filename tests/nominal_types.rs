@@ -1,21 +1,12 @@
-use resin::{
-    ast::{StmtKind, TypeKind, generate::AstGen, print},
-    ir::{
-        BasicBlock, BlockId, Function, Instr, Local, LocalId, Module, RecordField, Terminator, Ty,
-        TypeDef, TypeId, TyperContext, Value, VerifyErrorKind, VerifyLocation, format_module,
-        verify,
-    },
-};
-use tree_sitter::Parser;
+use resin_ast::{StmtKind, TypeKind, format_source};
+use resin_lir::VerifyErrorKind;
+use resin_lir::VerifyLocation;
+use resin_lir::verify;
+use resin_lir::{BasicBlock, BlockId, Function, Instr, Local, Module, Terminator, format_module};
+use resin_types::prelude::*;
 
-fn parse(src: &str) -> resin::ast::SourceFile {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_resin::LANGUAGE.into())
-        .expect("failed to load Resin grammar");
-    let tree = parser.parse(src, None).expect("parser returned no tree");
-    AstGen::new(src)
-        .gen_source_file(tree.root_node())
+fn parse(src: &str) -> resin_ast::SourceFile {
+    resin_ast::generate(&resin_cst::Document::reparse(src.to_string(), None))
         .unwrap_or_else(|err| panic!("{err}"))
 }
 
@@ -50,7 +41,7 @@ fn uppercase_definitions_remain_distinct_in_the_ast() {
     };
     assert_eq!(name.val.as_ref(), "List");
     assert!(matches!(init.val, TypeKind::Record { .. }));
-    assert!(print::format_source(&file).contains("(struct"));
+    assert!(format_source(&file).contains("(struct"));
 }
 
 #[test]

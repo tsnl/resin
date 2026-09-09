@@ -1,0 +1,10 @@
+[package]
+name = "resin-ast"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dependencies]
+resin-source = { workspace = true }
+resin-cst = { workspace = true }
+sexpfmt = { workspace = true }

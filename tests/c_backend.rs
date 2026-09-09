@@ -1,36 +1,27 @@
+use resin_types::prelude::*;
+use tempfile::TempDir;
 #[path = "support/toolchain.rs"]
-mod config;
-use std::{ffi::OsString, fs, process::Command};
+mod toolchain;
+use std::fs;
+use support::pipeline;
 
-use resin::{
-    backend::c,
-    ir,
-    toolchain::{self, TempDir},
-};
 mod support;
 use support::module;
 
-fn run_module(module: &ir::Module) -> std::process::Output {
+fn run_module(module: &resin_lir::Module) -> std::process::Output {
     run_entry(module, "main")
 }
 
-fn run_entry(module: &ir::Module, entry: &str) -> std::process::Output {
-    let source = c::emit(module, entry).unwrap();
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let output = temp
-        .path()
-        .join(format!("program{}", std::env::consts::EXE_SUFFIX));
-    let cc = std::env::var_os("CC")
-        .unwrap_or_else(|| OsString::from(resin::toolchain::DEFAULT_C_COMPILER));
-    toolchain::compile_c(&source, &output, &config::c(&cc))
-        .unwrap_or_else(|error| panic!("{error}\n{source}"));
-    Command::new(output).output().unwrap()
+fn run_entry(module: &resin_lir::Module, entry: &str) -> std::process::Output {
+    support::project::Project::new(module, Some(entry))
+        .unwrap()
+        .run()
 }
 
 #[test]
 fn ownership_example_releases_memory_on_success_and_failure() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/ownership.resin");
-    let m = ir::generate_program(&resin::ast::load(&path).unwrap()).unwrap();
+    let m = pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap();
     let success = run_entry(&m, "main");
     assert!(
         success.status.success(),
@@ -97,7 +88,7 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
         "export { main }; struct Broken {}; def main() -> Result<(), Broken> = { err(Broken {}) };",
     );
     let mut definitions = m.types.to_vec();
-    let ir::TypeDef::Nominal { name, .. } = &mut definitions[1] else {
+    let TypeDef::Nominal { name, .. } = &mut definitions[1] else {
         unreachable!()
     };
     *name = "quoted\"name\\value".into();
@@ -152,8 +143,8 @@ fn numbered_examples_compile_as_strict_c11() {
                 .to_string_lossy()
                 .starts_with("eg")
         {
-            let program = resin::ast::load(&path).unwrap();
-            let module = ir::generate_program(&program).unwrap();
+            let program = pipeline::load(&path).unwrap();
+            let module = pipeline::generate_program(&program).unwrap();
             let output = run_module(&module);
             assert_eq!(
                 output.status.code(),
@@ -311,9 +302,9 @@ fn invalid_integer_operations_fail_at_runtime() {
 
 #[test]
 fn unsupported_operations_report_backend_errors() {
-    let error = c::emit(
+    let error = support::project::Project::new(
         &module("export { main }; def main () -> int = { var r = { x = 1 }; r + r; 0 };"),
-        "main",
+        Some("main"),
     )
     .unwrap_err();
     assert!(error.to_string().contains("unsupported builtin"));
@@ -321,9 +312,9 @@ fn unsupported_operations_report_backend_errors() {
 }
 
 #[test]
-fn invalid_ir_is_rejected_before_emitting() {
+fn entry_selection_and_invalid_ir_have_distinct_boundaries() {
     assert!(
-        c::emit(&ir::Module::default(), "main")
+        support::project::Project::new(&resin_lir::Module::default(), Some("main"))
             .unwrap_err()
             .to_string()
             .contains("export { main }")
@@ -331,10 +322,11 @@ fn invalid_ir_is_rejected_before_emitting() {
     let mut m = module("export { main }; def main () -> int = { 0 };");
     m.functions[0].blocks[0]
         .instrs
-        .insert(0, ir::Instr::Discard);
+        .insert(0, resin_lir::Instr::Discard);
     assert!(
-        c::emit(&m, "main")
-            .unwrap_err()
+        resin_lir::VerifiedModule::new(m)
+            .err()
+            .unwrap()
             .to_string()
             .contains("StackUnderflow")
     );
@@ -351,14 +343,14 @@ fn unused_functions_do_not_fail_strict_compilation() {
 
 #[test]
 fn failed_compilation_preserves_existing_output() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let output = temp.path().join("existing");
     fs::write(&output, b"keep me").unwrap();
     assert!(
         toolchain::compile_c(
             "not C",
             &output,
-            &config::c(std::ffi::OsStr::new(resin::toolchain::DEFAULT_C_COMPILER))
+            std::ffi::OsStr::new(resin_toolchain::DEFAULT_C_COMPILER)
         )
         .is_err()
     );
@@ -368,7 +360,7 @@ fn failed_compilation_preserves_existing_output() {
 
 #[test]
 fn loops_carry_typed_stack_values_across_edges() {
-    use ir::{BasicBlock, BlockId, Instr::*, Local, LocalId, Terminator::*, Ty, Value};
+    use resin_lir::{BasicBlock, BlockId, Instr::*, Local, Terminator::*};
     let mut m = module("export { main }; def main () -> int = { 0 };");
     let f = m
         .functions
@@ -444,7 +436,7 @@ fn loops_carry_typed_stack_values_across_edges() {
 
 #[test]
 fn array_addresses_and_dynamic_bounds_are_executable() {
-    use ir::{Instr::*, Local, LocalId, Ty, Value};
+    use resin_lir::{Instr::*, Local};
     let mut m = module("export { main }; def main () -> int = { 0 };");
     let f = m
         .functions
@@ -594,9 +586,9 @@ fn decorated_functions_and_their_helpers_remain_host_callable() {
 #[test]
 fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/particles.resin");
-    let mut program = resin::ast::load(&path).unwrap();
+    let mut program = pipeline::load(&path).unwrap();
     let file = &mut program.modules.last_mut().unwrap().file;
-    file.stmts.retain(|s| !matches!(&s.val, resin::ast::StmtKind::Function { name, .. } if name.val.as_ref() == "main"));
+    file.stmts.retain(|s| !matches!(&s.val, resin_ast::StmtKind::Function { name, .. } if name.val.as_ref() == "main"));
     file.stmts.extend(support::parse(r#"
         def main() -> int = {
             var particle = Particle { x = 0_f, y = 0_f, z = 0_f, vx = 0_f, vy = 0_f, vz = 0_f };
@@ -657,7 +649,7 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
             if (valid && particle.x != first.x && color.r >= 0_f && color.r <= 1_f && color.b >= 0_f && color.b <= 1_f) { 0 } else { 1 }
         };
     "#).stmts);
-    let m = ir::generate_program(&program).unwrap();
+    let m = pipeline::generate_program(&program).unwrap();
     assert!(m.shaders.values().all(|entry| !entry.embedded));
     assert!(run_module(&m).status.success());
 }

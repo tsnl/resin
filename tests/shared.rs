@@ -1,13 +1,5 @@
-#[path = "support/toolchain.rs"]
-mod config;
+use support::pipeline;
 mod support;
-
-use resin::{
-    backend::c,
-    ir,
-    toolchain::{self, TempDir},
-};
-use std::{ffi::OsString, process::Command};
 
 const RESOURCE: &str = r#"
 struct Resource { trace: Ptr<int>, digit: int };
@@ -26,15 +18,9 @@ impl Resource {
 fn run(source: &str) {
     let source = format!("export {{ main }}; {RESOURCE} {source}");
     let module = support::module(&source);
-    let c = c::emit(&module, "main").unwrap();
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let output = temp
-        .path()
-        .join(format!("shared{}", std::env::consts::EXE_SUFFIX));
-    let cc =
-        std::env::var_os("CC").unwrap_or_else(|| OsString::from(toolchain::DEFAULT_C_COMPILER));
-    toolchain::compile_c(&c, &output, &config::c(&cc)).unwrap_or_else(|e| panic!("{e}\n{c}"));
-    let result = Command::new(output).output().unwrap();
+    let result = support::project::Project::new(&module, Some("main"))
+        .unwrap()
+        .run();
     assert_eq!(
         result.status.code(),
         Some(0),
@@ -46,7 +32,7 @@ fn run(source: &str) {
 
 fn rejects(source: &str, message: &str) {
     let source = format!("{RESOURCE} {source}");
-    let error = ir::generate(&support::parse(&source))
+    let error = pipeline::generate(&support::parse(&source))
         .unwrap_err()
         .to_string();
     assert!(error.contains(message), "expected {message:?}: {error}");
@@ -485,7 +471,7 @@ fn weak_payloads_require_upgrade_before_dereference_or_field_access() {
         "def f(value: Weak<Resource>) = { value.read(); };",
     ] {
         assert!(
-            ir::generate(&support::parse(&format!("{RESOURCE} {source}"))).is_err(),
+            pipeline::generate(&support::parse(&format!("{RESOURCE} {source}"))).is_err(),
             "{source}"
         );
     }

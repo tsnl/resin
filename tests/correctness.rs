@@ -1,20 +1,16 @@
-use resin::{
-    ast::{AstGen, SourceFile},
-    ir::{self, GenerateErrorKind, Instr, Ty, TypeErrorKind, Value},
-};
-use tree_sitter::Parser;
+use resin_hir::GenerateErrorKind;
+use resin_types::prelude::*;
+#[path = "support/pipeline.rs"]
+mod pipeline;
+use resin_ast::SourceFile;
+use resin_lir::Instr;
 
-fn parse(src: &str) -> Result<SourceFile, resin::ast::AstError> {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_resin::LANGUAGE.into())
-        .unwrap();
-    let tree = parser.parse(src, None).unwrap();
-    AstGen::new(src).gen_source_file(tree.root_node())
+fn parse(src: &str) -> Result<SourceFile, resin_ast::AstError> {
+    resin_ast::generate(&resin_cst::Document::reparse(src.to_string(), None))
 }
 
-fn compile(src: &str) -> ir::Module {
-    ir::generate(&parse(src).unwrap()).unwrap_or_else(|err| panic!("{src}\n{err}"))
+fn compile(src: &str) -> resin_lir::Module {
+    pipeline::generate(&parse(src).unwrap()).unwrap_or_else(|err| panic!("{src}\n{err}"))
 }
 
 #[test]
@@ -105,8 +101,10 @@ fn unary_typechecking_rejects_wrong_argument_shapes() {
     ] {
         assert!(
             matches!(
-                ir::generate(&parse(src).unwrap()).unwrap_err().kind,
-                GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
+                pipeline::generate(&parse(src).unwrap()).unwrap_err().kind,
+                GenerateErrorKind::Type {
+                    kind: TypeErrorKind::TypeMismatch { .. }
+                }
             ),
             "{src}"
         );
@@ -126,8 +124,10 @@ fn nominal_conversion_requires_an_explicit_ascription() {
     ] {
         assert!(
             matches!(
-                ir::generate(&parse(src).unwrap()).unwrap_err().kind,
-                GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
+                pipeline::generate(&parse(src).unwrap()).unwrap_err().kind,
+                GenerateErrorKind::Type {
+                    kind: TypeErrorKind::TypeMismatch { .. }
+                }
             ),
             "{src}"
         );
@@ -190,7 +190,7 @@ fn recursion_uses_immutable_function_references() {
                 .any(|i| matches!(i, Instr::Function { .. }))
         );
     }
-    let error = ir::generate(
+    let error = pipeline::generate(
         &parse("export { main }; def f () -> int = { 1 }; def main() -> () = { f := f; };")
             .unwrap(),
     )
@@ -237,11 +237,13 @@ fn omitted_function_results_are_unit_not_inferred() {
         "def answer() = { if (1 == 1) { 42 } else { 0 } };",
         "struct Unit {}; def nominal() = { Unit {} };",
     ] {
-        let error = ir::generate(&parse(source).unwrap()).unwrap_err();
+        let error = pipeline::generate(&parse(source).unwrap()).unwrap_err();
         assert!(
             matches!(
                 error.kind,
-                GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
+                GenerateErrorKind::Type {
+                    kind: TypeErrorKind::TypeMismatch { .. }
+                }
             ),
             "{source}\n{error}"
         );
@@ -286,7 +288,7 @@ fn returned_pointers_support_field_assignment() {
     );
     let src = "def id (r: { x: int }) -> { x: int } = { r }; def f (r: { x: int }) -> int = { id(r).x := 1 };";
     assert!(matches!(
-        ir::generate(&parse(src).unwrap()).unwrap_err().kind,
+        pipeline::generate(&parse(src).unwrap()).unwrap_err().kind,
         GenerateErrorKind::NotAPlace
     ));
 }
@@ -327,7 +329,7 @@ fn uninitialized_reads_are_rejected_on_all_paths() {
     ] {
         assert!(
             matches!(
-                ir::generate(&parse(src).unwrap()).unwrap_err().kind,
+                pipeline::generate(&parse(src).unwrap()).unwrap_err().kind,
                 GenerateErrorKind::UninitializedValue { .. }
             ),
             "{src}"

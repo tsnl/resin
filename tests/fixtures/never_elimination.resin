@@ -8,7 +8,7 @@ def infallible(n: uint, p: Ptr<uint>) -> Result<uint, Never> = {
 def unwrap(r: Result<uint, Never>) -> uint = {
     match (r) { ok(n) => { n }, err(impossible) => { absurd(impossible) } }
 };
-def kernel(i: ulong, p: Ptr<uint>) = {
+@compute_shader def kernel(i: ulong, p: Ptr<uint>) = {
     if (i == 0_ul) {
         var n = unwrap(infallible(41_ui, p));
         p.* := p.* + n;

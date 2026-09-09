@@ -1,10 +1,8 @@
 //! CLI syntax and conversion into an explicit execution mode.
+use super::request::{Options, Request};
 use super::{Environment, Result, source};
-use crate::{
-    compiler::{Options, Request},
-    toolchain::CProfile,
-};
 use clap::CommandFactory;
+use resin_toolchain::CProfile;
 use std::{ffi::OsString, path::PathBuf};
 
 pub struct Invocation {
@@ -18,9 +16,17 @@ pub enum Mode {
         args: Vec<OsString>,
     },
     Compiler(Box<Request>),
+    Embed {
+        input: PathBuf,
+        output: PathBuf,
+        symbol: String,
+    },
     Formatter {
         paths: Vec<PathBuf>,
         check: bool,
+    },
+    LanguageServer {
+        directory: PathBuf,
     },
 }
 
@@ -31,15 +37,15 @@ pub fn parse(
     let mode = <Cli as clap::Parser>::parse_from(args).mode(environment)?;
     Ok(Invocation {
         mode,
-        stdlib: environment.stdlib(),
+        stdlib: environment.path("RESIN_STDLIB", resin_source::stdlib_path()),
     })
 }
 
 #[derive(clap::Parser)]
-#[command(name = "resin")]
+#[command(name = "resin", version)]
 struct Cli {
-    /// One FILE[:ENTRY] to run/compile, or files/directories to format with --format.
-    #[arg(required_unless_present = "format", value_name = "PATH")]
+    /// A FILE[:ENTRY] to run/compile, paths to --format, or a directory for --lsp.
+    #[arg(required_unless_present_any = ["format", "lsp", "embed"], value_name = "PATH")]
     paths: Vec<PathBuf>,
 
     /// Arguments passed literally after --, or additional formatter paths.
@@ -54,6 +60,18 @@ struct Cli {
     #[arg(long, requires = "format")]
     check: bool,
 
+    /// Serve Language Server Protocol requests over stdin/stdout for this directory.
+    #[arg(long, conflicts_with_all = ["format", "check", "destination", "cc", "glslc", "program_args"])]
+    lsp: bool,
+
+    /// Convert a binary file into an aligned C byte array without adding a terminator.
+    #[arg(long, value_name = "INPUT", requires_all = ["symbol", "destination"], conflicts_with_all = ["paths", "format", "lsp", "check", "cc", "glslc", "program_args"])]
+    embed: Option<PathBuf>,
+
+    /// C array identifier for --embed; also defines <SYMBOL>_length.
+    #[arg(long, requires = "embed")]
+    symbol: Option<String>,
+
     #[command(flatten)]
     compile: CompileOptions,
 }
@@ -61,7 +79,7 @@ struct Cli {
 #[derive(clap::Args)]
 struct CompileOptions {
     /// Destination file, or directory for host executables. Executables use -O3 and are not run.
-    #[arg(short = 'o', long = "out")]
+    #[arg(short = 'o', long = "output", visible_alias = "out")]
     destination: Option<PathBuf>,
 
     /// C compiler executable (defaults to CC, then cc on Unix or clang on Windows MSVC).
@@ -75,25 +93,69 @@ struct CompileOptions {
 
 impl Cli {
     fn mode(self, environment: &Environment) -> Result<Mode> {
-        if self.format {
-            if self.paths.is_empty() && self.program_args.is_empty() {
-                Self::command()
-                    .error(
-                        clap::error::ErrorKind::MissingRequiredArgument,
-                        "formatting requires at least one path",
-                    )
-                    .exit();
-            }
-            return Ok(Mode::Formatter {
-                paths: self
-                    .paths
-                    .into_iter()
-                    .chain(self.program_args.into_iter().map(PathBuf::from))
-                    .map(|path| environment.directory.join(path))
-                    .collect(),
-                check: self.check,
+        if let Some(input) = &self.embed {
+            return Ok(Mode::Embed {
+                input: environment.directory.join(input),
+                output: environment
+                    .directory
+                    .join(self.compile.destination.as_ref().expect("required output")),
+                symbol: self.symbol.expect("required symbol"),
             });
         }
+        if self.lsp {
+            return self.language_server(environment);
+        }
+        if self.format {
+            return self.formatter(environment);
+        }
+        self.build(environment)
+    }
+
+    fn language_server(&self, environment: &Environment) -> Result<Mode> {
+        let directory = match self.paths.as_slice() {
+            [] => environment.directory.clone(),
+            [path] => environment.directory.join(path),
+            _ => return Err("--lsp accepts one project directory".into()),
+        };
+        if !directory.is_dir() {
+            return Err(format!("LSP project is not a directory: {}", directory.display()).into());
+        }
+        Ok(Mode::LanguageServer { directory })
+    }
+
+    fn formatter(self, environment: &Environment) -> Result<Mode> {
+        if self.paths.is_empty() && self.program_args.is_empty() {
+            Self::command()
+                .error(
+                    clap::error::ErrorKind::MissingRequiredArgument,
+                    "formatting requires at least one path",
+                )
+                .exit();
+        }
+        let paths = self
+            .paths
+            .into_iter()
+            .chain(self.program_args.into_iter().map(PathBuf::from));
+        Ok(Mode::Formatter {
+            paths: paths.map(|path| environment.directory.join(path)).collect(),
+            check: self.check,
+        })
+    }
+
+    fn build(self, environment: &Environment) -> Result<Mode> {
+        let input = self.input(environment)?;
+        let request = Box::new(self.compile.request(input, environment)?);
+        Ok(if request.destination.as_deref().is_none() {
+            Mode::Interpreter {
+                request,
+                args: self.program_args,
+            }
+        } else {
+            Mode::Compiler(request)
+        })
+    }
+
+    fn input(&self, environment: &Environment) -> Result<source::Input> {
         let [path] = self.paths.as_slice() else {
             Self::command().error(clap::error::ErrorKind::WrongNumberOfValues,
                 "running or compiling requires exactly one FILE[:ENTRY]; use --format for multiple paths").exit();
@@ -104,31 +166,29 @@ impl Cli {
                 .exit()
         });
         input.path = environment.directory.join(input.path);
-        let mut options = self.compile;
-        options.destination = options
+        Ok(input)
+    }
+}
+
+impl CompileOptions {
+    fn request(self, input: source::Input, environment: &Environment) -> Result<Request> {
+        let destination = self
             .destination
             .map(|path| environment.directory.join(path));
-        let interpret = options.destination.is_none();
-        let profile = if interpret {
+        let profile = if destination.is_none() {
             CProfile::Debug
         } else {
             CProfile::Release
         };
-        let request = Box::new(Request::new(
+        let tools = environment.toolchain(self.cc.as_deref(), self.glslc.as_deref());
+        Request::new(
             input,
-            options.destination,
+            destination,
             Options {
                 profile,
-                tools: environment.toolchain(options.cc.as_deref(), options.glslc.as_deref()),
+                tools,
+                temporary: environment.temporary.clone(),
             },
-        )?);
-        Ok(if interpret {
-            Mode::Interpreter {
-                request,
-                args: self.program_args,
-            }
-        } else {
-            Mode::Compiler(request)
-        })
+        )
     }
 }

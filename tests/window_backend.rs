@@ -1,14 +1,15 @@
+use tempfile::TempDir;
 #[path = "support/toolchain.rs"]
-mod config;
+mod toolchain;
 use std::{
     ffi::OsStr,
     path::Path,
     process::{Command, Output, Stdio},
     time::{Duration, Instant},
 };
+use support::pipeline;
 
-use resin::ast::{StmtKind, TermKind};
-use resin::toolchain::{TempDir, compile_c};
+use resin_ast::{StmtKind, TermKind};
 use resin_runtime::testing::lock_gpu;
 
 #[path = "support/shaders.rs"]
@@ -17,8 +18,8 @@ mod shaders;
 mod support;
 
 fn compile(source: &str, path: &Path) {
-    let cc = std::env::var_os("CC").unwrap_or_else(|| resin::toolchain::DEFAULT_C_COMPILER.into());
-    compile_c(source, path, &config::c(&cc)).unwrap();
+    let cc = std::env::var_os("CC").unwrap_or_else(|| resin_toolchain::DEFAULT_C_COMPILER.into());
+    toolchain::compile_c(source, path, &cc).unwrap();
 }
 
 fn window_required() -> bool {
@@ -76,7 +77,7 @@ fn succeeded(output: &Output) -> bool {
 #[test]
 #[cfg(target_os = "linux")]
 fn missing_display_returns_status_and_clears_output() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let executable = temp
         .path()
         .join(format!("unavailable{}", std::env::consts::EXE_SUFFIX));
@@ -115,7 +116,7 @@ fn missing_display_returns_status_and_clears_output() {
 
 #[test]
 fn glfw_is_linked_into_c_executables() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let executable = temp
         .path()
         .join(format!("static-glfw{}", std::env::consts::EXE_SUFFIX));
@@ -149,7 +150,7 @@ fn windows_present_resize_and_release_resources() {
         return;
     }
     let _lock = lock_gpu();
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let executable = temp
         .path()
         .join(format!("window{}", std::env::consts::EXE_SUFFIX));
@@ -269,12 +270,12 @@ fn run_example(name: &str) {
     let Some(compiler) = shaders::compiler() else {
         return;
     };
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("examples/{name}.resin"));
     let executable = temp
         .path()
         .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
-    let mut ast = resin::ast::load(&source).unwrap();
+    let mut ast = pipeline::load(&source).unwrap();
     let body = ast
         .modules
         .last_mut()
@@ -306,10 +307,14 @@ fn run_example(name: &str) {
     };
     // Close through the runtime after three frames; leave the interactive demo unbounded.
     stmts.extend(support::statements("test_frames := test_frames + 1; if (test_frames == 3) { window.set_should_close(1 == 1)?; } else { () };"));
-    let module = resin::ir::generate_program(&ast).unwrap();
-    let shaders = resin::backend::build_shaders(&module, &config::glsl(&compiler)).unwrap();
-    let c = resin::backend::c::emit_with_shaders(&module, "main", &shaders).unwrap();
-    compile(&c, &executable);
+    let module = pipeline::generate_program(&ast).unwrap();
+    let project = support::project::Project::new(&module, Some("main")).unwrap();
+    let built = project.build(&toolchain::glsl(&compiler)).unwrap();
+    built
+        .executable(project.generated.program().unwrap().file_name().unwrap())
+        .unwrap()
+        .copy_to(&executable)
+        .unwrap();
     if !display_available() {
         return;
     }

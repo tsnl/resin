@@ -1,28 +1,14 @@
-#[path = "support/toolchain.rs"]
-mod config;
+use resin_types::prelude::*;
+use support::pipeline;
 mod support;
 
-use resin::{
-    backend::c,
-    ir,
-    toolchain::{self, TempDir},
-};
-use std::{
-    ffi::OsString,
-    process::{Command, Output},
-};
+use std::process::Output;
 
 fn run(source: &str) -> Output {
     let module = support::module(&format!("export {{ main }}; {source}"));
-    let source = c::emit(&module, "main").unwrap();
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let executable = temp
-        .path()
-        .join(format!("option{}", std::env::consts::EXE_SUFFIX));
-    let cc =
-        std::env::var_os("CC").unwrap_or_else(|| OsString::from(toolchain::DEFAULT_C_COMPILER));
-    toolchain::compile_c(&source, &executable, &config::c(&cc)).unwrap();
-    Command::new(executable).output().unwrap()
+    support::project::Project::new(&module, Some("main"))
+        .unwrap()
+        .run()
 }
 
 #[test]
@@ -90,7 +76,7 @@ fn none_elimination_preserves_all_other_union_members() {
     );
     assert_eq!(
         module.functions[0].result,
-        ir::Ty::union_of([ir::Ty::None, ir::Ty::Int32])
+        Ty::union_of([Ty::None, Ty::Int32])
     );
 }
 
@@ -194,6 +180,9 @@ fn optional_patterns_and_unwrap_are_checked() {
         "def f(x: int | None) = { match (x) { int(n) => {}, None => {}, None => {} } };",
         "type Both = int | bool; def f(x: Both) = { match (x) { Both(v) => {} } };",
     ] {
-        assert!(ir::generate(&support::parse(source)).is_err(), "{source}");
+        assert!(
+            pipeline::generate(&support::parse(source)).is_err(),
+            "{source}"
+        );
     }
 }

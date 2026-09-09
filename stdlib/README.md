@@ -4,7 +4,7 @@ Resin modules built on C and the native `resin-runtime` ABI. Import only the fun
 uses; the `std/` prefix resolves here. `RESIN_STDLIB` overrides this directory for installations.
 
 ```resin
-import { "std/gpu.resin", "std/status.resin" };
+import { "$/std/gpu.resin", "$/std/status.resin" };
 ```
 
 - `gpu.resin`: devices, allocations, pipelines, GPU images, commands, and window presentation.
@@ -31,7 +31,7 @@ Constructors return the new handle, not an integer and an out-parameter:
 
 ```resin
 export { main };
-import { "std/gpu.resin" };
+import { "$/std/gpu.resin" };
 
 def main() -> Result<(), _> = {
     var gpu = Gpu.new()?;
@@ -101,7 +101,7 @@ Small native helpers expose standard-stream operations and integer-width convers
 
 ```resin
 export { main };
-import { "std/console.resin" };
+import { "$/std/console.resin" };
 
 def main() -> Result<(), _> = {
     print("Name: ");

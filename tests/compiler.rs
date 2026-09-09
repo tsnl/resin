@@ -1,118 +1,43 @@
-use resin::{
-    cli::Environment,
-    compiler::{Input, Options, Request, Session},
-    toolchain::{CProfile, TempDir},
-};
-use std::{fs, path::Path, sync::Arc};
+use resin_compiler::{Compilation, Compiler};
+use resin_source::Loader;
+use resin_toolchain::{CProfile, Environment};
+use std::{fs, sync::Arc};
+use tempfile::TempDir;
 
-fn options(environment: &Environment, profile: CProfile) -> Options {
-    Options {
-        profile,
-        tools: environment.toolchain(None, None),
-    }
-}
-
-fn input(path: &Path) -> Input {
-    Input {
-        path: path.into(),
-        entry: "main".into(),
-    }
-}
-
-#[test]
-fn requests_reject_source_overwrites_before_compilation() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let environment = Environment::capture().unwrap();
-    let source = temp
-        .path()
-        .join(format!("program{}", std::env::consts::EXE_SUFFIX));
-    fs::write(&source, "this need not parse").unwrap();
-    let alias = temp.path().join(".").join(source.file_name().unwrap());
-    for destination in [&source, &alias] {
-        let result = Request::new(
-            input(&source),
-            Some(destination.into()),
-            options(&environment, CProfile::Debug),
-        );
-        let error = result
-            .err()
-            .expect("source overwrite must fail at construction");
-        assert!(
-            error.to_string().contains("overwrite the source"),
-            "{error}"
-        );
-    }
-    let result = Request::new(
-        input(&source),
-        Some(temp.path().into()),
-        options(&environment, CProfile::Debug),
-    );
-    assert!(
-        result.is_err(),
-        "the generated filename also needs validation"
-    );
-    let unsaved = temp.path().join("unsaved.resin");
-    assert!(
-        Request::new(
-            input(&unsaved),
-            Some(unsaved.clone()),
-            options(&environment, CProfile::Debug)
-        )
-        .is_err()
-    );
-    assert_eq!(fs::read_to_string(source).unwrap(), "this need not parse");
-}
-
-#[test]
-fn requests_resolve_executable_directories_and_preserve_file_destinations() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let environment = Environment::capture().unwrap();
-    let input = Input {
-        path: temp.path().join("example.resin"),
-        entry: "demo".into(),
-    };
-    for directory in [temp.path().to_path_buf(), temp.path().join("new/")] {
-        let request = Request::new(
-            input.clone(),
-            Some(directory.clone()),
-            options(&environment, CProfile::Release),
-        )
-        .unwrap();
-        assert_eq!(
-            request.destination(),
-            Some(
-                directory
-                    .join(format!("example-demo{}", std::env::consts::EXE_SUFFIX))
-                    .as_path()
-            )
-        );
-    }
-    let output = temp.path().join("custom-program");
-    let request = Request::new(
-        input,
-        Some(output.clone()),
-        options(&environment, CProfile::Release),
+fn build(
+    compilation: &Compilation,
+    environment: &Environment,
+    profile: CProfile,
+) -> resin_toolchain::Executable {
+    let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
+    let project = resin_codegen::generate(
+        compilation.verified().unwrap(),
+        Some("main"),
+        directory.path(),
     )
     .unwrap();
-    assert_eq!(request.destination(), Some(output.as_path()));
-    assert!(
-        !temp.path().join("new").exists(),
-        "construction must not build anything"
-    );
+    let built = environment
+        .toolchain(None, None)
+        .build(project.directory(), project.name(), "main", profile)
+        .unwrap();
+    built
+        .executable(project.program().unwrap().file_name().unwrap())
+        .unwrap()
 }
 
 #[test]
-fn session_compilation_uses_overlays_and_explicit_profiles() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+fn compilation_uses_supplied_source_versions_and_explicit_profiles() {
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut environment = Environment::capture().unwrap();
     environment.directory = temp.path().into();
-    // An unused shader compiler is optional, even for annotated host functions.
+    // Unused shader compilers remain optional for decorated host-callable functions.
     environment
         .variables
         .insert("GLSLC".into(), "/missing/glslc".into());
-    let source = temp.path().join("main.resin");
-    fs::write(&source, "export { main }; def main() -> int = { 1 };").unwrap();
-    let mut session = Session::new(environment.stdlib());
+    let path = temp.path().join("main.resin");
+    fs::write(&path, "export { main }; def main() -> int = { 1 };").unwrap();
+    let mut loader = Loader::new(environment.path("RESIN_STDLIB", resin_source::stdlib_path()));
+    let mut compiler = Compiler::new();
     for (profile, destination, code, directory) in [
         (
             CProfile::Debug,
@@ -122,37 +47,57 @@ fn session_compilation_uses_overlays_and_explicit_profiles() {
         ),
         (CProfile::Release, None, 43, "release"),
     ] {
-        session.set_overlay(&source, format!("export {{ main }}; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = {{ var i = uint(invocation); output.* := i; }}; def main() -> int = {{ var output = 0_ui; kernel({code}_ul, &output); if (output == {code}_ui) {{ {code} }} else {{ 0 }} }};")).unwrap();
-        let snapshot = session.analyze(&source).unwrap();
-        let request = Request::new(
-            input(&source),
-            destination.clone(),
-            options(&environment, profile),
-        )
-        .unwrap();
-        let artifact = session.compile(&request).unwrap();
+        let source = loader.source_from_text(&path, format!("export {{ main }}; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = {{ var i = uint(invocation); output.* := i; }}; def main() -> int = {{ var output = 0_ui; kernel({code}_ul, &output); if (output == {code}_ui) {{ {code} }} else {{ 0 }} }};")).unwrap();
+        let compilation = compiler.compile(source.clone(), &mut loader);
+        let artifact = build(&compilation, &environment, profile);
         assert_eq!(
             artifact.path().parent().unwrap().file_name().unwrap(),
             directory
         );
         assert_eq!(artifact.run().unwrap(), code);
         assert!(
-            Arc::ptr_eq(&snapshot, &session.analyze(&source).unwrap()),
-            "compilation should reuse the session snapshot"
+            Arc::ptr_eq(&compilation, &compiler.compile(source, &mut loader)),
+            "unchanged sources should reuse the completed compilation"
         );
         if let Some(path) = destination {
+            artifact.copy_to(&path).unwrap();
             assert!(path.is_file());
-            fs::remove_file(&source).unwrap();
+            fs::remove_file(&path).unwrap();
         }
     }
     assert!(!environment.directory.join("build/shaders").exists());
+    assert_eq!(
+        fs::read_to_string(path).unwrap(),
+        "export { main }; def main() -> int = { 1 };"
+    );
+}
+
+#[test]
+fn retained_compilations_build_their_own_source_version_after_later_edits() {
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
+    let mut environment = Environment::capture().unwrap();
+    environment.directory = temp.path().into();
+    let mut loader = Loader::new(resin_source::stdlib_path());
+    let mut compiler = Compiler::new();
+    let path = temp.path().join("main.resin");
+    fs::write(&path, "export { main }; def main() -> int = { 41 };").unwrap();
+    let first = compiler.compile(loader.load_file(&path).unwrap(), &mut loader);
+    fs::write(&path, "export { main }; def main() -> int = { 42 };").unwrap();
+    let second = compiler.compile(loader.load_file(&path).unwrap(), &mut loader);
+    assert_eq!(first.entry().id(), second.entry().id());
+    assert_ne!(first.entry(), second.entry());
+    fs::remove_file(path).unwrap();
+    for (compilation, code) in [(second, 42), (first, 41)] {
+        let artifact = build(&compilation, &environment, CProfile::Debug);
+        assert_eq!(artifact.run().unwrap(), code);
+    }
 }
 
 #[test]
 #[cfg(unix)]
 fn compiler_processes_use_the_supplied_environment_and_working_directory() {
     use std::os::unix::fs::PermissionsExt;
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let wrapper = temp.path().join("compiler");
     fs::write(
         &wrapper,
@@ -169,84 +114,15 @@ fn compiler_processes_use_the_supplied_environment_and_working_directory() {
     environment
         .variables
         .insert("RESIN_TOOL_SETTING".into(), "later".into());
-    let expected = format!(
-        "chosen:{}",
-        fs::canonicalize(temp.path()).unwrap().display()
-    );
-    let c = resin::toolchain::compile_c("", &temp.path().join("output"), &settings).unwrap_err();
-    let shader =
-        resin::toolchain::compile_glsl("", resin::backend::glsl::Stage::Compute, &settings)
+    let project = temp.path().join("generated");
+    fs::create_dir(&project).unwrap();
+    for tool in ["cc", "glslc"] {
+        fs::write(project.join("build.ninja"), format!("include toolchain.ninja\nrule probe\n  command = ${tool}\nbuild output: probe\ndefault output\n")).unwrap();
+        let error = settings
+            .build(&project, "probe", tool, CProfile::Debug)
             .unwrap_err();
-    for error in [c, shader] {
-        assert!(error.to_string().contains(&expected), "{error}");
+        assert!(error.to_string().contains("chosen:"), "{error}");
+        assert!(error.to_string().contains(".ninja-work"), "{error}");
+        assert!(!error.to_string().contains("later:"), "{error}");
     }
-}
-
-#[test]
-fn requests_validate_existing_output_ancestors() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let environment = Environment::capture().unwrap();
-    let file = temp.path().join("file");
-    fs::write(&file, "preserve").unwrap();
-    for suffix in ["program", "missing/program", "../program"] {
-        assert!(
-            Request::new(
-                input(&temp.path().join("source.resin")),
-                Some(file.join(suffix)),
-                options(&environment, CProfile::Debug)
-            )
-            .is_err()
-        );
-    }
-    assert_eq!(fs::read_to_string(file).unwrap(), "preserve");
-    assert!(
-        Request::new(
-            input(&temp.path().join("source.resin")),
-            Some(temp.path().join("missing/nested/program")),
-            options(&environment, CProfile::Debug)
-        )
-        .is_ok()
-    );
-    assert!(!temp.path().join("missing").exists());
-}
-
-#[cfg(unix)]
-#[test]
-fn output_ancestor_validation_follows_symlinks() {
-    use std::os::unix::fs::symlink;
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let environment = Environment::capture().unwrap();
-    fs::write(temp.path().join("file"), "preserve").unwrap();
-    symlink("file", temp.path().join("file-link")).unwrap();
-    symlink("missing", temp.path().join("dangling-link")).unwrap();
-    assert!(
-        Request::new(
-            input(&temp.path().join("source.resin")),
-            Some(temp.path().join("dangling-link/program")),
-            options(&environment, CProfile::Debug)
-        )
-        .is_err()
-    );
-    symlink(".", temp.path().join("directory-link")).unwrap();
-    assert!(
-        Request::new(
-            input(&temp.path().join("source.resin")),
-            Some(temp.path().join("file-link/program")),
-            options(&environment, CProfile::Debug)
-        )
-        .is_err()
-    );
-    assert!(
-        Request::new(
-            input(&temp.path().join("source.resin")),
-            Some(temp.path().join("directory-link/missing/program")),
-            options(&environment, CProfile::Debug)
-        )
-        .is_ok()
-    );
-    assert_eq!(
-        fs::read_to_string(temp.path().join("file")).unwrap(),
-        "preserve"
-    );
-    assert!(!temp.path().join("missing").exists());
 }

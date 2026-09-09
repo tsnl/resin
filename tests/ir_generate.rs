@@ -1,23 +1,17 @@
-use resin::{
-    ast::generate::AstGen,
-    ir::{
-        GenerateErrorKind, Instr, Terminator, Ty, TypeErrorKind, format_module, generate, verify,
-    },
-};
-use tree_sitter::Parser;
+use resin_hir::GenerateErrorKind;
+use resin_types::prelude::*;
+#[path = "support/pipeline.rs"]
+mod pipeline;
+use pipeline::generate;
+use resin_lir::verify;
+use resin_lir::{Instr, Terminator, format_module};
 
-fn parse(src: &str) -> resin::ast::SourceFile {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_resin::LANGUAGE.into())
-        .expect("failed to load Resin grammar");
-    let tree = parser.parse(src, None).expect("parser returned no tree");
-    AstGen::new(src)
-        .gen_source_file(tree.root_node())
+fn parse(src: &str) -> resin_ast::SourceFile {
+    resin_ast::generate(&resin_cst::Document::reparse(src.to_string(), None))
         .unwrap_or_else(|err| panic!("{err}"))
 }
 
-fn compile(src: &str) -> resin::ir::Module {
+fn compile(src: &str) -> resin_lir::Module {
     generate(&parse(src)).unwrap_or_else(|err| panic!("{err}"))
 }
 
@@ -70,7 +64,7 @@ fn while_does_not_assume_its_body_ran() {
 fn while_requires_a_boolean_condition_and_keeps_body_bindings_local() {
     assert!(matches!(
         compile_err("export { main }; def main () -> () = { while (1) {} };"),
-        GenerateErrorKind::Type(_)
+        GenerateErrorKind::Type { kind: _ }
     ));
     assert!(matches!(
         compile_err(
@@ -80,7 +74,9 @@ fn while_requires_a_boolean_condition_and_keeps_body_bindings_local() {
     ));
     assert!(matches!(
         compile_err("export { main }; def main () -> int = { while (1 == 0) { 42 } };"),
-        GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
+        GenerateErrorKind::Type {
+            kind: TypeErrorKind::TypeMismatch { .. }
+        }
     ));
 }
 
@@ -94,8 +90,8 @@ fn examples_generate_verified_ir() {
             continue;
         }
         found += 1;
-        let ast = resin::ast::load(&path).unwrap();
-        let module = resin::ir::generate_program(&ast)
+        let ast = pipeline::load(&path).unwrap();
+        let module = pipeline::generate_program(&ast)
             .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
         verify(&module).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
     }
@@ -157,7 +153,9 @@ fn eager_recursion_is_rejected() {
 fn recursive_function_result_is_checked() {
     assert!(matches!(
         compile_err("def f (n: int) -> int = { if (n == 0) { () } else { f(n - 1) } };"),
-        GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
+        GenerateErrorKind::Type {
+            kind: TypeErrorKind::TypeMismatch { .. }
+        }
     ));
 }
 
@@ -165,7 +163,9 @@ fn recursive_function_result_is_checked() {
 fn type_mismatch_is_a_type_error() {
     assert!(matches!(
         compile_err("export { main }; def main() -> () = { var x = if (1) { 1 } else { 2 }; };"),
-        GenerateErrorKind::Type(TypeErrorKind::ExpectedBoolean { .. })
+        GenerateErrorKind::Type {
+            kind: TypeErrorKind::ExpectedBoolean { .. }
+        }
     ));
 }
 
@@ -187,7 +187,9 @@ fn linked_list_type_is_finite_through_its_pointer() {
 fn inline_recursive_type_is_rejected_during_generation() {
     assert!(matches!(
         compile_err("struct Bad { next: Bad };"),
-        GenerateErrorKind::Type(TypeErrorKind::RecursiveTypeWithoutIndirection { .. })
+        GenerateErrorKind::Type {
+            kind: TypeErrorKind::RecursiveTypeWithoutIndirection { .. }
+        }
     ));
 }
 
@@ -251,7 +253,7 @@ def from_meters (m: Meters) -> int = { m.value };
     );
     verify(&module).unwrap();
     let meters = Ty::Defined {
-        definition: resin::ir::TypeId::from_index(1),
+        definition: TypeId::from_index(1),
     };
     assert_eq!(
         module.functions[0].ty().unwrap(),
@@ -316,7 +318,9 @@ def main() -> () = {
     var x = Distance (1);
 };"#
         ),
-        GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
+        GenerateErrorKind::Type {
+            kind: TypeErrorKind::TypeMismatch { .. }
+        }
     ));
 }
 
@@ -337,7 +341,7 @@ def main() -> () = {
     assert_eq!(
         module.functions[0].locals[1].ty,
         Ty::Defined {
-            definition: resin::ir::TypeId::from_index(2),
+            definition: TypeId::from_index(2),
         }
     );
     assert_eq!(
@@ -361,7 +365,7 @@ def nil (p: Ptr<List>) -> List = { List { value = 0, next = p } };
     );
     verify(&module).unwrap();
     let list = Ty::Defined {
-        definition: resin::ir::TypeId::from_index(1),
+        definition: TypeId::from_index(1),
     };
     assert_eq!(
         module.functions[0].ty().unwrap(),
@@ -386,7 +390,9 @@ def nil (p: Ptr<List>) -> List = { List { value = 0, next = p } };
 fn empty_array_needs_an_element_type() {
     assert!(matches!(
         compile_err("export { main }; def main() -> () = { var x = []; };"),
-        GenerateErrorKind::Type(TypeErrorKind::EmptyArrayNeedsElementType)
+        GenerateErrorKind::Type {
+            kind: TypeErrorKind::EmptyArrayNeedsElementType
+        }
     ));
 }
 

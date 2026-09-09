@@ -5,31 +5,38 @@ CUDA for graphics. A simple systems programming language targeting host CPUs and
 Builds target 64-bit Linux, macOS, and Windows. GPU execution requires a compatible Vulkan
 driver; host-only programs do not require Vulkan or a GPU.
 
-New to the implementation? Start with the [guided repository tour](TOUR.md).
+New to the implementation? Start with the [guided repository tour](TOUR.md) and the
+[compiler architecture](doc/architecture.md), including the phase crates and their public APIs.
+
+The root is both the `resin` CLI package and a Cargo workspace. Reusable libraries
+live under `crates/`; the Zed extension has its own workspace under `editors/zed/`.
+Root Cargo commands select `resin`, and `--workspace` builds or tests all native
+packages. One executable runs programs, builds executables, formats source, and
+serves LSP.
 
 ## Development
 
 On Linux or macOS, enter `nix-shell` for Rustup (using `rust-toolchain.toml`), a C compiler,
-CMake, GLFW's native build dependencies, and `glslc`. On Linux it also supplies Vulkan tools,
+CMake, Ninja, GLFW's native build dependencies, and `glslc`. On Linux it also supplies Vulkan tools,
 validation layers, and RenderDoc.
-The parser is included in `tree-sitter-resin/`; run `cargo test --workspace` directly.
+The parser is included in `crates/tree-sitter-resin/`; run `cargo test --workspace` directly.
 Non-interactive commands work too: `nix-shell --run 'cargo test --workspace'`.
 
 Cargo builds and statically links the GLFW source bundled in `glfw-sys`; no GLFW installation
 or library search path is needed. Cargo uses `rust-toolchain.toml` to install the project's
 Rust toolchain. Outside Nix:
 
-- Linux: install Rustup, a C compiler, CMake, pkg-config, and the X11, Wayland, and xkbcommon
-  development packages, including `wayland-scanner`. For GPU programs, add `glslc`, the Vulkan
-  loader, and a Vulkan driver.
-- macOS: install Xcode Command Line Tools (`xcode-select --install`), Rustup, and CMake
-  (`brew install cmake`). `cargo run -- examples/eg001.resin` then builds and runs a host program.
+- Linux: install Rustup, a C compiler, CMake, Ninja, `glslc`, pkg-config, and the X11, Wayland, and xkbcommon
+  development packages, including `wayland-scanner`. For GPU execution, add the Vulkan
+  loader and a Vulkan driver.
+- macOS: install Xcode Command Line Tools (`xcode-select --install`), Rustup, CMake, Ninja, and `glslc`
+  (`brew install cmake ninja shaderc`). `cargo run -- examples/eg001.resin` then builds and runs a host program.
   For GPU programs, install the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#mac), which supplies
   `glslc`, the Vulkan loader, and MoltenVK; use its `setup-env.sh` before running Resin. If Cargo
   strips the loader's search path, run `target/debug/resin` directly from that configured shell.
 - Windows: install Rustup's **x86_64-pc-windows-msvc** toolchain, Visual Studio's **Desktop
-  development with C++** workload (including a Windows SDK), LLVM Clang, and CMake. Open a
-  **Developer PowerShell for VS** targeting x64 and put `clang.exe` and `cmake.exe` on PATH.
+  development with C++** workload (including a Windows SDK), LLVM Clang, CMake, Ninja, and `glslc`. Open a
+  **Developer PowerShell for VS** targeting x64 and put `clang.exe`, `cmake.exe`, `ninja.exe`, and `glslc.exe` on PATH.
   Run `cargo run -- examples/eg001.resin`. For GPU programs, install the
   [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) for `glslc` and a Vulkan-capable GPU driver.
 
@@ -52,11 +59,16 @@ also keeps its one-million default. The smaller test spans the same cloud volume
 checks synchronization, bounds, visible output, and sphere lighting.
 
 For parser development, install `cargo install --locked tree-sitter-cli --version 0.27.0`.
-After changing `tree-sitter-resin/grammar.js`, regenerate from that directory with
+After changing `crates/tree-sitter-resin/grammar.js`, regenerate from that directory with
 `tree-sitter generate --js-runtime native`.
 Commit grammar changes and generated files together in this repository.
 
-Backend tests compile generated C with `CC`, defaulting to `cc` on Unix and `clang` on Windows MSVC.
+Native builds require Ninja and a C compiler, selected with `CC` or `--cc` (default `cc`
+on Unix, `clang` on Windows MSVC). Install `glslc` for shader compilation. Resin performs
+no tool preflight; required commands report errors when executed. Host-only builds never
+invoke `glslc`. SPIR-V embedding invokes the running Resin executable through the platform
+`current_exe` API, so it neither searches PATH for Resin nor mixes compiler versions.
+Backend tests build generated projects through the same Ninja toolchain.
 Shader tests use `GLSLC` or `glslc` and skip if absent.
 The `gpu` feature enables compiler-to-image integration tests, not a different execution mode:
 
@@ -82,14 +94,18 @@ XDG_SESSION_TYPE=x11 RESIN_REQUIRE_GPU=1 RESIN_REQUIRE_GLSLC=1 RESIN_REQUIRE_WIN
 
 ## Editor support
 
-The [Zed extension](zed-resin/README.md) provides Resin syntax support and uses
-[`resin-lsp`](resin-lsp/README.md) for diagnostics, hover, go-to-definition, and
-basic completion. Build the server with `nix-shell --run 'cargo build -p resin-lsp'`.
+The [Zed extension](editors/zed/README.md) provides Resin syntax support and launches
+`resin --lsp DIR` for diagnostics, hover, go-to-definition, completion, and formatting.
+Build the unified executable with `nix-shell --run 'cargo build -p resin'`.
+The [language server library](crates/resin-lsp/README.md) ships inside that executable,
+so editor services and program compilation use the same compiler version.
 
-Both the CLI and LSP use a persistent `resin::compiler::Session`: source overlays,
-incremental parsing, dependency invalidation, and immutable checked snapshots
-live in the compiler library. The LSP hosts that session for ongoing edits; the
-CLI uses it for one build/run invocation.
+Both the CLI and LSP use `resin_compiler::Compiler`. It compiles immutable named
+`Source` values supplied by a loader and returns retained `Compilation` results.
+`resin-source` handles filesystem and standard-library imports; the LSP supplies
+its current editor buffers through its own loader. Each compile resolves imports
+before reusing cached work. Executable building is a separate operation. The root Cargo manifest is both the `resin` CLI package and
+the workspace; reusable libraries live under `crates/`.
 
 ## Functions and values
 
@@ -352,7 +368,7 @@ The exported entry may use the conventional three-argument form:
 
 ```resin
 export { main };
-import { "std/process.resin" };
+import { "$/std/process.resin" };
 
 def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> () = {
     var args = arguments(argc, argv);
@@ -372,7 +388,7 @@ These process-lifetime views are borrowed and must be treated as read-only; Resi
 pointer types do not enforce immutability. Unix preserves native bytes, including non-UTF-8;
 Windows converts its native wide inputs to UTF-8, replacing unpaired UTF-16 surrogates.
 
-`std/process.resin` provides `arguments(argc, argv)` and `environment(envp)` as pointer spans,
+`$/std/process.resin` provides `arguments(argc, argv)` and `environment(envp)` as pointer spans,
 `argument(args, index)` as a checked byte-span view, and `c_string(pointer)` for a valid
 NUL-terminated string. `environment_get(envp, name)` takes a NUL-terminated name and returns
 `Result<Span<ubyte>, EnvironmentVariableNotFound>`. Lookup is exact and case-sensitive on
@@ -380,36 +396,37 @@ all platforms; an empty value succeeds with length zero. It never reads live OS 
 See `examples/process.resin` for looking up a selected variable without dumping the environment.
 Program arguments apply only to run mode; `-o` builds the executable to invoke separately.
 
-With `-o PATH` (or `--out PATH`), Resin builds and copies the executable without running it.
+With `-o PATH` (or `--output PATH`, also accepted as `--out PATH`), Resin builds and copies the executable without running it.
 A successful build and copy returns status 0, independently of the program's eventual exit status.
 An existing directory or trailing separator receives the source name (or `source-entry` for a
 non-main entry), with `.exe` on Windows; otherwise PATH names the file exactly. Use an `.exe`
 extension for Windows executable filenames.
 
-Compilation follows one pipeline: generate the requested shaders' GLSL, compile it to SPIR-V,
-embed those bytes in generated C, then compile and link the executable. Shader stages come from
-decorators. To inspect intermediates without running the program, build with `-o PATH` and read
-`build/<source-name>-<path-and-entry-hash>/release/program.c` and
-`build/shaders/<hash>/shader.glsl` / `shader.spv`. Frontend inspection is available through
-`compiler::Session::analyze` and its AST/IR snapshots in the library.
+Compilation follows one pipeline: generate C, requested GLSL, and `build.ninja`;
+Ninja compiles shaders to SPIR-V, embeds them in C headers, then compiles and links
+the executable. Shader stages come from decorators. To inspect intermediates without
+running the program, build with `-o PATH` and inspect
+`build/<source-name>-<name-and-entry-hash>/release/`: `main.c`, `build.ninja`, and
+`shader_<function-id>.glsl` / `.spv` / `.h`. Frontend inspection is available through
+`resin_compiler::Compiler::compile` and the retained `Compilation` result's AST, HIR,
+and LIR accessors.
 
-Each canonical source path and entry name has a stable directory with separate debug and release
-artifacts. Each profile contains generated C, the executable, and an input fingerprint. Unchanged
-programs skip C compilation and linking. Generated C, Resin/compiler metadata, included C headers,
-the runtime archive, flags, and environment changes invalidate the cache.
-Calls for the same source and entry are serialized through building, running, and copying.
-Failed rebuilds never run the old executable. This is a whole-program cache, not incremental IR.
-Delete `build/` to clean it, including after linked system library changes or changes hidden
-behind a compiler wrapper.
+Each source name and entry has a stable directory with separate debug and release
+outputs. Ninja reuses unchanged work and tracks C header dependencies. Generated inputs,
+tool settings, runtime files, and captured environment changes invalidate the appropriate
+steps. Successful output files are retained together; failed rebuilds never run the old
+executable. A cache lock protects building, running, and copying. This native build cache
+is separate from compiler analysis. Delete `build/` to clean it, including after linked
+system library changes or changes hidden behind a compiler wrapper.
 
 Host executables statically link `resin-runtime`; host-only programs do not initialize Vulkan.
-Generated C includes `resin_runtime.h` and its hierarchy from `resin-runtime/include`.
+Generated C includes `resin_runtime.h` and its hierarchy from `crates/resin-runtime/include`.
 Cargo builds the runtime archive alongside the compiler. For relocated installations, set
 `RESIN_RUNTIME_INCLUDE` and `RESIN_RUNTIME_LIB` (`libresin_runtime.a` on Unix,
 `resin_runtime.lib` on Windows MSVC). To compile emitted C manually on Linux:
 
 ```sh
-cc -std=c11 -fno-strict-aliasing -I resin-runtime/include fibonacci.c \
+cc -std=c11 -fno-strict-aliasing -I crates/resin-runtime/include fibonacci.c \
   target/debug/deps/libresin_runtime.a -ldl -lpthread -lm -lrt -lutil -o fibonacci
 ```
 
@@ -419,7 +436,7 @@ dynamic array indexes fail with a diagnostic. There is no optimizer or stable ge
 
 ## Formatting
 
-The CLI uses the same canonical formatter as `resin-lsp`:
+The CLI and the language server in `resin --lsp DIR` use the same canonical formatter:
 
 ```sh
 # Format every .resin file under examples/, including examples/lib/.
@@ -451,7 +468,7 @@ such as `(x,)` and `(int,)`, force multiline
 lists; add one to keep long calls or records readable. Comments and literal
 contents are preserved, and repeated blank lines collapse to one. Keep one blank
 line between example functions and between logical sections inside a function.
-The [full formatting rules](resin-lsp/README.md#formatting) also apply to the CLI.
+The [full formatting rules](crates/resin-lsp/README.md#formatting) also apply to the CLI.
 CI checks the examples with `--format --check` on Linux, macOS, and Windows.
 
 ## Strings, formatting, and output
@@ -471,7 +488,7 @@ bytes, and the source need not have a NUL terminator.
 
 ```resin
 export { main };
-import { "std/io.resin" };
+import { "$/std/io.resin" };
 
 def main() -> Result<(), _> = {
     var n = 42;
@@ -503,13 +520,13 @@ addresses used by Resin spans. Pass a span of uploaded bytes in the shader root 
 
 ## Console input
 
-Import `std/console.resin` for `Console.read_line()`, a line reader implemented in Resin on top of C's
+Import `$/std/console.resin` for `Console.read_line()`, a line reader implemented in Resin on top of C's
 `getchar()`. It grows its buffer as needed and strips LF or CRLF. Write a prompt with `print`
 before reading:
 
 ```resin
 export { main };
-import { "std/console.resin" };
+import { "$/std/console.resin" };
 
 def main() -> Result<(), _> = {
     print("Name: ");
@@ -534,7 +551,7 @@ Each file has its own scope. An optional `export` clause comes first, followed b
 
 ```resin
 export { answer };
-import { "helpers.resin", "std/status.resin" };
+import { "helpers.resin", "$/std/status.resin" };
 
 def answer() -> int = { helper() };
 ```
@@ -546,8 +563,8 @@ are not implicitly re-exported. Only functions and types can be exported.
 
 Two different bindings with the same name are an error, including imports conflicting with
 local definitions. Nested scopes can still shadow names. Re-importing the same binding through
-multiple paths is harmless. Ordinary paths resolve relative to the importing file; each canonical
-file is loaded once. Imports never execute code. Import cycles are errors; mutually recursive
+multiple paths is harmless. Import paths without a leading `$` resolve relative to the
+importing file; each canonical file is loaded once. Imports never execute code. Import cycles are errors; mutually recursive
 functions within one file remain supported.
 `include` has been replaced by `import`.
 
@@ -558,19 +575,19 @@ Names such as `if_value` are ordinary identifiers. `fmt`, `print`, `ok`, `err`,
 `size_of`, `align_of`, and `absurd` are unshadowable compiler builtins, not syntax
 keywords: definitions and parameters cannot use those names, but record fields can.
 
-`std/` resolves to the standard-library sources in `stdlib/`, independent of the source file or
+`$/std/` resolves to the standard-library sources in `stdlib/`, independent of the source file or
 working directory. Set `RESIN_STDLIB` to relocate that directory when distributing the compiler.
-The native Rust crate lives separately at `resin-runtime/`; it has no dependency on the standard
+The native Rust crate lives separately at `crates/resin-runtime/`; it has no dependency on the standard
 library. Programs use standard-library wrappers; the integer-status C ABI stays private
 to those modules. Public operations are static constructors and instance methods:
 
-- `std/gpu.resin`: devices, allocations, images, pipelines, and command recording.
-- `std/window.resin`: windows and input; `Gpu.new_for_window(window)` and `gpu.present(image)` live in `std/gpu.resin`.
-- `std/image.resin`: PNG reading and writing.
-- `std/status.resin`: `RuntimeStatus` conversion methods and the `RuntimeError` union and its variants.
-- `std/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
-- `std/io.resin`: `Io.stdout().write(text)` and `Io.stderr().write(text)`.
-- `std/console.resin`: `Console.read_byte()`, `Console.read_line()`, and shared `InputLine` owners with `Console.print(line)`.
+- `$/std/gpu.resin`: devices, allocations, images, pipelines, and command recording.
+- `$/std/window.resin`: windows and input; `Gpu.new_for_window(window)` and `gpu.present(image)` live in `$/std/gpu.resin`.
+- `$/std/image.resin`: PNG reading and writing.
+- `$/std/status.resin`: `RuntimeStatus` conversion methods and the `RuntimeError` union and its variants.
+- `$/std/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
+- `$/std/io.resin`: `Io.stdout().write(text)` and `Io.stderr().write(text)`.
+- `$/std/console.resin`: `Console.read_byte()`, `Console.read_line()`, and shared `InputLine` owners with `Console.print(line)`.
 
 The polymorphic `fmt` operation and string-only `print` are compiler builtins; decorated shaders expose `.spirv`.
 Runtime flags are static methods, such as `Memory.default()`.
@@ -579,7 +596,7 @@ Run `cargo run -- examples/eg009_imports.resin` for an explicitly owned counter,
 
 ```resin
 export { main };
-import { "std/gpu.resin" };
+import { "$/std/gpu.resin" };
 
 def main() -> Result<(), _> = {
     var gpu = Gpu.new()?;
@@ -595,7 +612,7 @@ check statuses before returning out-parameter values. For example:
 
 ```resin
 export { Gpu };
-import { "std/status.resin" };
+import { "$/std/status.resin" };
 
 extern type ResinGpu;
 struct GpuOwner { handle: Ptr<ResinGpu> };
@@ -722,7 +739,7 @@ The Resin pipeline wrappers accept these spans directly:
 pointer/length pairs.
 
 Resin lowers the entry and its reachable named helpers to GLSL, invokes `glslc`, and embeds the
-result in generated C. Shader objects are deduplicated and cached under `build/shaders/`;
+result in generated C headers. Shader objects are deduplicated and retained with their generated project;
 imported helper changes invalidate them. Copied executables need the Vulkan loader/device,
 but neither Resin, source files, nor `glslc` at runtime.
 
@@ -833,7 +850,7 @@ speed depends on rendering throughput. Its decorated shader functions, ordinary 
 shared data definitions live alongside the host code in the same file. Initialization accepts
 a host `Span<Particle>`; the shaders use the same allocation's device address.
 
-Input is available through `std/window.resin`. `Window.keys()` names GLFW key codes (`Window.keys().w`,
+Input is available through `$/std/window.resin`. `Window.keys()` names GLFW key codes (`Window.keys().w`,
 `Window.keys().space`, `Window.keys().left_shift`); `Window.mouse_buttons()` names the eight mouse buttons.
 After polling, `window.key_state(Window.keys().w)` and
 `window.mouse_button_state(Window.mouse_buttons().left)` return `ButtonState` records
@@ -855,7 +872,7 @@ GLFW synthesizes button releases on focus loss. These APIs report physical contr
 they do not decode typed text or implement text composition.
 
 Windowing is an ordinary runtime API, exposed by `resin_runtime/window.h` and
-`std/window.resin`:
+`$/std/window.resin`:
 
 - `Window.new(width, height, title: String)` returns a shared window owner; use `String.from_str("Resin")` for a literal title. `window.poll_events()` processes
   GLFW events. Close state, framebuffer size, resizing, and GLFW key codes

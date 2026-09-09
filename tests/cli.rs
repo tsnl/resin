@@ -3,8 +3,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Output},
 };
-
-use resin::toolchain::TempDir;
+use tempfile::TempDir;
 
 #[path = "support/shaders.rs"]
 mod shaders;
@@ -14,7 +13,7 @@ fn cli(source: &str, args: &[&str]) -> Output {
 }
 
 fn selected(source: &str, entry: Option<&str>, args: &[&str]) -> Output {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
     fs::write(&input, source).unwrap();
     let input = selector(&input, entry);
@@ -78,7 +77,7 @@ fn omitted_unit_returns_run_and_reject_non_unit_tails() {
 #[test]
 fn destruction_runs_when_native_status_propagates_to_the_entry() {
     let output = cli(
-        "export { main }; import { \"std/status.resin\" }; struct Cleanup {}; impl Cleanup { def drop(self: Ptr<Cleanup>) = { print(fmt(\"cleanup\\n\", ())); }; } def main() -> Result<(), _> = { RuntimeStatus.from_code(0)?; var cleanup = Cleanup {}; RuntimeStatus.from_code(8)?; ok(()) };",
+        "export { main }; import { \"$/std/status.resin\" }; struct Cleanup {}; impl Cleanup { def drop(self: Ptr<Cleanup>) = { print(fmt(\"cleanup\\n\", ())); }; } def main() -> Result<(), _> = { RuntimeStatus.from_code(0)?; var cleanup = Cleanup {}; RuntimeStatus.from_code(8)?; ok(()) };",
         &[],
     );
     assert_eq!(output.status.code(), Some(1));
@@ -91,7 +90,7 @@ fn destruction_runs_when_native_status_propagates_to_the_entry() {
 
 #[test]
 fn default_output_builds_in_cwd_and_runs() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let sources = temp.path().join("sources");
     fs::create_dir(&sources).unwrap();
     let input = sources.join("hello world.resin");
@@ -125,7 +124,7 @@ fn default_output_builds_in_cwd_and_runs() {
 
 #[test]
 fn cached_programs_track_foreign_headers() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
     let header = temp.path().join("value header.h");
     fs::write(&header, "static inline int value(void) { return 41; }\n").unwrap();
@@ -136,7 +135,13 @@ fn cached_programs_track_foreign_headers() {
     assert_eq!(invoke(temp.path(), &input, &[]).status.code(), Some(41));
     let executable = artifact(temp.path(), "debug");
     let modified = fs::metadata(&executable).unwrap().modified().unwrap();
-    assert!(executable.parent().unwrap().join("fingerprint").is_file());
+    assert!(
+        executable
+            .parent()
+            .unwrap()
+            .join(".ninja-work/.ninja_log")
+            .is_file()
+    );
     assert_eq!(invoke(temp.path(), &input, &[]).status.code(), Some(41));
     assert_eq!(
         fs::metadata(&executable).unwrap().modified().unwrap(),
@@ -162,7 +167,7 @@ fn strings_are_c_compatible_in_both_profiles() {
             } else { 1 }
         };
     "#;
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
     fs::write(&input, source).unwrap();
     let debug = invoke(temp.path(), &input, &[]);
@@ -180,7 +185,7 @@ fn strings_are_c_compatible_in_both_profiles() {
 
 #[test]
 fn executable_destination_builds_without_running() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
     fs::write(
         &input,
@@ -204,7 +209,7 @@ fn executable_destination_builds_without_running() {
 #[test]
 fn output_directories_receive_the_source_name() {
     for destination in ["existing", "new/nested/"] {
-        let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+        let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
         fs::create_dir(temp.path().join("existing")).unwrap();
         let input = temp.path().join("hello.resin");
         fs::write(
@@ -231,7 +236,7 @@ fn output_directories_receive_the_source_name() {
 
 #[test]
 fn sources_with_the_same_name_have_separate_caches() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     for folder in ["first", "second"] {
         let directory = temp.path().join(folder);
         fs::create_dir(&directory).unwrap();
@@ -250,7 +255,7 @@ fn sources_with_the_same_name_have_separate_caches() {
 
 #[test]
 fn invalid_destination_parents_fail_before_building_or_running() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
     fs::write(
         &input,
@@ -270,7 +275,7 @@ fn invalid_destination_parents_fail_before_building_or_running() {
 
 #[test]
 fn directory_outputs_cannot_overwrite_the_source() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp
         .path()
         .join(format!("source{}", std::env::consts::EXE_SUFFIX));
@@ -379,7 +384,7 @@ fn selected_entries_must_be_exported_resin_functions_with_the_right_signature() 
 
 #[test]
 fn selectors_work_with_output_paths_and_source_protection() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let folder = temp.path().join(if cfg!(windows) {
         "directory with spaces"
     } else {
@@ -414,7 +419,7 @@ fn malformed_selectors_are_rejected() {
 
 #[test]
 fn missing_runtime_preserves_existing_output() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("input.resin");
     let output = temp.path().join("program");
     fs::write(&input, "export { main }; def main () -> int = { 0 };").unwrap();
@@ -428,13 +433,13 @@ fn missing_runtime_preserves_existing_output() {
         .output()
         .unwrap();
     assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stderr).contains("runtime library not found"));
+    assert!(String::from_utf8_lossy(&result.stderr).contains("missing.a"));
     assert_eq!(fs::read_to_string(output).unwrap(), "keep me");
 }
 
 #[test]
 fn builds_and_executes_paths_with_spaces_and_shell_punctuation() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let executable = temp
         .path()
         .join(format!("program ; literal{}", std::env::consts::EXE_SUFFIX));
@@ -448,7 +453,7 @@ fn builds_and_executes_paths_with_spaces_and_shell_punctuation() {
 
 #[test]
 fn bad_destinations_and_missing_compilers_preserve_files() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("input.resin");
     let source = "export { main }; def main () -> int = { 0 };";
     fs::write(&input, source).unwrap();
@@ -476,7 +481,7 @@ fn bad_destinations_and_missing_compilers_preserve_files() {
         ],
     );
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot run"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("missing compiler"));
     assert_eq!(fs::read(destination).unwrap(), b"keep me");
     assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 2);
 }
@@ -506,11 +511,11 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
     let Some(glslc) = shaders::compiler() else {
         return;
     };
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("stages.resin");
     fs::write(&input, r#"
         export { main };
-        import { "std/graphics.resin" };
+        import { "$/std/graphics.resin" };
         @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i + 1_ui }; };
         @vertex_shader def vertex(i: int) -> Vertex = {
             Vertex {
@@ -542,30 +547,41 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
         fs::read(&executable).unwrap(),
         fs::read(&destination).unwrap()
     );
-    let c = fs::read_to_string(executable.parent().unwrap().join("program.c")).unwrap();
-    let shaders = fs::read_dir(temp.path().join("build/shaders"))
+    let directory = executable.parent().unwrap();
+    let c = fs::read_to_string(directory.join("main.c")).unwrap();
+    let shaders = fs::read_dir(directory)
         .unwrap()
         .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "spv"))
         .collect::<Vec<_>>();
     assert_eq!(shaders.len(), 3);
+    assert!(directory.join("build.ninja").is_file());
     let mut sources = Vec::new();
     for shader in shaders {
-        sources.push(fs::read_to_string(shader.join("shader.glsl")).unwrap());
-        let bytes = fs::read(shader.join("shader.spv")).unwrap();
+        sources.push(fs::read_to_string(shader.with_extension("glsl")).unwrap());
+        let bytes = fs::read(&shader).unwrap();
         assert_eq!(&bytes[..4], &[3, 2, 35, 7]);
         assert_eq!(bytes.len() % 4, 0);
-        let words = bytes
-            .chunks_exact(4)
-            .map(|word| {
-                format!(
-                    "  0x{:08x},\n",
-                    u32::from_le_bytes(word.try_into().unwrap())
-                )
-            })
-            .collect::<String>();
+        let header = fs::read_to_string(shader.with_extension("h")).unwrap();
+        let embedded = header
+            .split("0x")
+            .skip(1)
+            .map(|hex| u8::from_str_radix(&hex[..2], 16).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            embedded, bytes,
+            "generated header must embed the exact SPIR-V bytes"
+        );
+        assert!(header.contains("_Alignas(4)"));
         assert!(
-            c.contains(&words),
-            "generated C must embed the compiled SPIR-V exactly"
+            c.contains(
+                shader
+                    .with_extension("h")
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+            )
         );
     }
     for marker in ["gl_WorkGroupID", "gl_VertexIndex", "r_output"] {
@@ -578,34 +594,31 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
 }
 
 #[test]
-fn removed_output_modes_are_rejected_before_building() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+fn removed_artifact_switches_and_duplicate_destinations_are_rejected_before_building() {
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
     fs::write(&input, "export { main }; def main() = {};").unwrap();
-    for mode in [
-        "c", "glsl", "spirv", "ir", "ast", "cst", "check", "exe", "run",
+    for args in [
+        vec!["--target", "c"],
+        vec!["--stage", "compute"],
+        vec!["--output", "first", "-o", "second"],
     ] {
-        let output = invoke(temp.path(), &input, &["--output", mode, "-o", "output"]);
+        let output = invoke(temp.path(), &input, &args);
         assert_eq!(output.status.code(), Some(2));
-        assert!(String::from_utf8_lossy(&output.stderr).contains("unexpected argument"));
+        assert!(!output.stderr.is_empty());
     }
-    assert_eq!(
-        invoke(temp.path(), &input, &["--stage", "compute"])
-            .status
-            .code(),
-        Some(2)
-    );
-    assert!(!temp.path().join("output").exists());
+    assert!(!temp.path().join("first").exists());
+    assert!(!temp.path().join("second").exists());
     assert!(!temp.path().join("build").exists());
 }
 
 #[test]
 fn process_entries_receive_literal_arguments_in_run_and_compiled_modes() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("args.resin");
     fs::write(&input, r#"
         export { main };
-        import { "std/process.resin" };
+        import { "$/std/process.resin" };
         def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> int = {
             var args = arguments(argc, argv);
             var with_sentinel = arguments(argc + 1, argv);
@@ -656,7 +669,7 @@ fn process_entries_receive_literal_arguments_in_run_and_compiled_modes() {
 
 #[test]
 fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let header = temp.path().join("mutate_environment.h");
     fs::write(
         &header,
@@ -679,7 +692,7 @@ fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
     let header_path = header.to_string_lossy().replace('\\', "/");
     fs::write(&input, format!(r#"
         export {{ main }};
-        import {{ "std/process.resin" }};
+        import {{ "$/std/process.resin" }};
         extern "{header_path}" def mutate_environment() -> int;
         extern "stdlib.h" def getenv(name: Ptr<ubyte>) -> Ptr<ubyte>;
         def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> Result<int, _> = {{
@@ -754,7 +767,7 @@ fn process_entry_signatures_results_and_argument_bounds_are_checked() {
         assert_eq!(cli(&source, &[]).status.code(), Some(code));
     }
     let output = cli(
-        r#"export { main }; import { "std/process.resin" }; def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) = { argument(arguments(argc, argv), ulong(argc)); };"#,
+        r#"export { main }; import { "$/std/process.resin" }; def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) = { argument(arguments(argc, argv), ulong(argc)); };"#,
         &[],
     );
     assert!(!output.status.success());
@@ -765,9 +778,9 @@ fn process_entry_signatures_results_and_argument_bounds_are_checked() {
 #[cfg(unix)]
 fn process_arguments_preserve_non_utf8_bytes() {
     use std::os::unix::ffi::OsStringExt;
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("bytes.resin");
-    fs::write(&input, r#"export { main }; import { "std/process.resin" }; def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) = { print(fmt("{0}", (argument(arguments(argc, argv), 1_ul),))); };"#).unwrap();
+    fs::write(&input, r#"export { main }; import { "$/std/process.resin" }; def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) = { print(fmt("{0}", (argument(arguments(argc, argv), 1_ul),))); };"#).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_resin"))
         .current_dir(temp.path())
         .arg(input)
@@ -777,4 +790,112 @@ fn process_arguments_preserve_non_utf8_bytes() {
         .unwrap();
     success(&output);
     assert_eq!(output.stdout, [0xff, b'x']);
+}
+
+#[test]
+fn output_long_option_builds_without_running() {
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
+    let source = temp.path().join("main.resin");
+    fs::write(&source, "export { main }; def main() -> int = { 42 };").unwrap();
+    let destination = temp
+        .path()
+        .join(format!("published{}", std::env::consts::EXE_SUFFIX));
+    let output = invoke(
+        temp.path(),
+        &source,
+        &["--output", destination.to_str().unwrap()],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(Command::new(destination).status().unwrap().code(), Some(42));
+}
+
+#[test]
+fn unified_command_identifies_its_version_and_rejects_invalid_lsp_modes() {
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
+    let version = Command::new(env!("CARGO_BIN_EXE_resin"))
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert!(version.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&version.stdout).trim(),
+        concat!("resin ", env!("CARGO_PKG_VERSION"))
+    );
+    for args in [
+        vec!["--lsp", "missing"],
+        vec!["--lsp", ".", "."],
+        vec!["--lsp", "--format", "."],
+        vec!["--lsp", ".", "--output", "program"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_resin"))
+            .args(&args)
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{args:?}");
+        assert!(output.stdout.is_empty(), "{args:?}");
+    }
+    assert!(!temp.path().join("build").exists());
+}
+
+#[test]
+fn embedding_preserves_arbitrary_bytes_and_empty_length_without_tools() {
+    let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
+    let input = directory.path().join("asset with spaces.bin");
+    let output = directory.path().join("asset.h");
+    for bytes in [vec![], vec![0, 1, 127, 128, 255, 0]] {
+        fs::write(&input, &bytes).unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_resin"))
+            .env("CC", "/missing/cc")
+            .env("GLSLC", "/missing/glslc")
+            .env("NINJA", "/missing/ninja")
+            .arg("--embed")
+            .arg(&input)
+            .args(["--symbol", "asset", "--output"])
+            .arg(&output)
+            .output()
+            .unwrap();
+        success(&result);
+        let text = fs::read_to_string(&output).unwrap();
+        assert!(text.contains(&format!("asset_length UINT64_C({})", bytes.len())));
+        let encoded = text
+            .split("0x")
+            .skip(1)
+            .map(|hex| u8::from_str_radix(&hex[..2], 16).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(encoded, bytes);
+    }
+}
+
+#[test]
+fn embedding_rejects_invalid_symbols_and_input_overwrites() {
+    let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
+    let input = directory.path().join("asset.bin");
+    let output = directory.path().join("asset.h");
+    fs::write(&input, [1, 2, 3]).unwrap();
+    fs::write(&output, "previous header").unwrap();
+    for symbol in ["bad-name", "1start", "static", ""] {
+        let result = Command::new(env!("CARGO_BIN_EXE_resin"))
+            .arg("--embed")
+            .arg(&input)
+            .args(["--symbol", symbol, "--output"])
+            .arg(&output)
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+        assert_eq!(fs::read_to_string(&output).unwrap(), "previous header");
+    }
+    let result = Command::new(env!("CARGO_BIN_EXE_resin"))
+        .arg("--embed")
+        .arg(&input)
+        .args(["--symbol", "asset", "--output"])
+        .arg(&input)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert_eq!(fs::read(input).unwrap(), [1, 2, 3]);
 }

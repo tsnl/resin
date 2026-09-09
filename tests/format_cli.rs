@@ -1,9 +1,9 @@
-use resin::toolchain::TempDir;
 use std::{
     fs,
     path::Path,
     process::{Command, Output},
 };
+use tempfile::TempDir;
 
 fn fmt(root: &Path, args: &[&str]) -> Output {
     invoke(root, &[&["--format"], args].concat())
@@ -19,7 +19,7 @@ fn invoke(root: &Path, args: &[&str]) -> Output {
 
 #[test]
 fn recursive_check_is_read_only_and_formatting_is_idempotent() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let root = temp.path();
     fs::create_dir_all(root.join("examples/nested")).unwrap();
     let a = "def main()={var x=[1,2,];unknown(x);};";
@@ -53,7 +53,7 @@ fn recursive_check_is_read_only_and_formatting_is_idempotent() {
     for (name, input) in [("examples/a.resin", a), ("examples/nested/b.resin", b)] {
         assert_eq!(
             fs::read_to_string(root.join(name)).unwrap(),
-            resin::formatting::format_source(input).unwrap()
+            resin_cst::format_source(input).unwrap()
         );
     }
     for args in [&["--check", "examples"][..], &["examples"][..]] {
@@ -74,7 +74,7 @@ fn recursive_check_is_read_only_and_formatting_is_idempotent() {
 
 #[test]
 fn errors_preserve_invalid_files_and_do_not_hide_other_inputs() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let root = temp.path();
     let invalid = "def broken() = { var x = ; };";
     fs::write(root.join("invalid.resin"), invalid).unwrap();
@@ -108,7 +108,7 @@ fn errors_preserve_invalid_files_and_do_not_hide_other_inputs() {
 
 #[test]
 fn help_paths_and_fmt_filename() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let root = temp.path();
     let help = fmt(root, &["--help"]);
     assert!(help.status.success());
@@ -137,7 +137,7 @@ fn help_paths_and_fmt_filename() {
 
 #[test]
 fn formatter_flag_aliases_work_before_and_after_paths() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let root = temp.path();
     let raw = "def main()={};";
     for args in [
@@ -171,7 +171,7 @@ fn formatter_flag_aliases_work_before_and_after_paths() {
 
 #[test]
 fn incompatible_modes_are_rejected_before_changing_files() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let root = temp.path();
     let source = "def main()={};";
     fs::write(root.join("source.resin"), source).unwrap();
@@ -203,7 +203,7 @@ fn incompatible_modes_are_rejected_before_changing_files() {
 #[cfg(unix)]
 #[test]
 fn format_mode_treats_colons_as_literal_filename_characters() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let path = temp.path().join("source.resin:1");
     fs::write(&path, "def main()={};").unwrap();
     let result = invoke(temp.path(), &["source.resin:1", "-f"]);
@@ -219,7 +219,7 @@ fn format_mode_treats_colons_as_literal_filename_characters() {
 #[test]
 fn skips_symlinks_and_preserves_modes() {
     use std::os::unix::fs::{PermissionsExt, symlink};
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let root = temp.path();
     fs::create_dir(root.join("examples")).unwrap();
     let raw = "def main()={};";
@@ -255,7 +255,7 @@ fn skips_symlinks_and_preserves_modes() {
 #[test]
 fn accepts_non_utf8_paths() {
     use std::os::unix::ffi::OsStringExt;
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let path = temp.path().join(std::ffi::OsString::from_vec(
         b"non-utf8-\xff.resin".to_vec(),
     ));

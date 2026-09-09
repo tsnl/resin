@@ -1,0 +1,12 @@
+[package]
+name = "resin-compiler"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dependencies]
+resin-source = { workspace = true }
+resin-cst = { workspace = true }
+resin-ast = { workspace = true }
+resin-hir = { workspace = true }
+resin-lir = { workspace = true }

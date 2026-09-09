@@ -6,8 +6,7 @@ use std::{
     path::PathBuf,
     process::{Command, Output, Stdio},
 };
-
-use resin::toolchain::TempDir;
+use tempfile::TempDir;
 
 #[path = "support/shaders.rs"]
 mod shaders;
@@ -99,14 +98,22 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
     printed(&run(), b"true");
     assert_eq!(calls(), 1);
     assert_eq!(project.calls(), 1);
+    // A changed shader tool rebuilds identical SPIR-V. Its unchanged header must
+    // settle after this rebuild instead of keeping native compilation dirty.
+    let wrapper = fs::read_to_string(&shader_compiler).unwrap();
+    fs::write(&shader_compiler, format!("{wrapper}# updated wrapper\n")).unwrap();
+    printed(&run(), b"true");
+    printed(&run(), b"true");
+    assert_eq!(calls(), 2);
+    assert_eq!(project.calls(), 2);
     fs::write(
         &helper,
         "export { pixel }; def pixel (i: uint) -> uint = { i + uint (2) };",
     )
     .unwrap();
     printed(&run(), b"true");
-    assert_eq!(calls(), 2);
-    assert_eq!(project.calls(), 2);
+    assert_eq!(calls(), 3);
+    assert_eq!(project.calls(), 3);
     fs::write(
         &helper,
         "export { pixel }; def pixel (i: uint) -> uint = { i / uint (2) };",
@@ -115,8 +122,8 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
     let output = run();
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
-    assert_eq!(calls(), 2);
-    assert_eq!(project.calls(), 2);
+    assert_eq!(calls(), 3);
+    assert_eq!(project.calls(), 3);
 }
 
 struct Project {
@@ -127,7 +134,7 @@ struct Project {
 
 impl Project {
     fn new() -> Self {
-        let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+        let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
         let input = temp.path().join("main.resin");
         let compiler = temp.path().join("compiler");
         fs::write(
@@ -310,7 +317,7 @@ fn executable_output_optimizes_and_both_profiles_stay_cached() {
 fn generated_c_is_retained_alongside_the_executable() {
     let project = Project::new();
     printed(&project.run(), b"first");
-    let source = project.executable().parent().unwrap().join("program.c");
+    let source = project.executable().parent().unwrap().join("main.c");
     assert!(
         fs::read_to_string(source)
             .unwrap()
@@ -428,6 +435,8 @@ fn failed_rebuilds_preserve_the_old_executable_but_never_run_it() {
     printed(&project.run(), b"first");
     let executable = project.executable();
     let original = fs::read(&executable).unwrap();
+    let state = executable.parent().unwrap().join("toolchain.state");
+    let previous_state = fs::read(&state).unwrap();
     fs::write(&project.compiler, "#!/bin/sh\nexit 9\n").unwrap();
     for _ in 0..2 {
         let output = project.run();
@@ -435,19 +444,38 @@ fn failed_rebuilds_preserve_the_old_executable_but_never_run_it() {
         assert!(output.stdout.is_empty());
         assert_eq!(fs::read(&executable).unwrap(), original);
     }
-    assert!(!executable.parent().unwrap().join("fingerprint").exists());
+    assert_eq!(
+        fs::read(state).unwrap(),
+        previous_state,
+        "failed Ninja work must not replace retained successful settings"
+    );
     fs::write(&project.compiler, WRAPPER).unwrap();
     printed(&project.run(), b"first");
     assert_eq!(project.calls(), 2);
 }
 
 #[test]
-fn missing_artifacts_are_rebuilt() {
+fn missing_artifacts_are_restored_or_rebuilt() {
     let project = Project::new();
     printed(&project.run(), b"first");
-    fs::remove_file(project.executable()).unwrap();
+    let executable = project.executable();
+    fs::remove_file(&executable).unwrap();
     printed(&project.run(), b"first");
-    assert_eq!(project.calls(), 2);
+    assert!(executable.is_file());
+    assert_eq!(
+        project.calls(),
+        1,
+        "a valid Ninja output can be republished"
+    );
+
+    let work = executable.parent().unwrap().join(".ninja-work");
+    fs::remove_file(work.join(executable.file_name().unwrap())).unwrap();
+    printed(&project.run(), b"first");
+    assert_eq!(
+        project.calls(),
+        2,
+        "a missing Ninja output must be compiled again"
+    );
 }
 
 #[test]

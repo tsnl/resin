@@ -83,42 +83,54 @@ C ABI. Vulkan buffer device addresses implement the current device address profi
 
 ## Compiler architecture
 
-The tree-sitter AST remains an untyped source representation. The generator's lexical scopes
-resolve value and type names. `TyperContext` owns a `Vec<TypeDef>` and the bottom-up rules that
-accept already-resolved child types and return the enclosing type; it does not walk syntax or emit
-code. It reserves nominal identities before recursive RHS evaluation. Bodies start as `None`;
-completion validates the body before setting `Some(body)` through `&mut self`. Redefinition and
-exporting unfinished tables are errors; failed validation remains retryable. The generator reuses
-one context and moves its completed definition table into the IR module without cloning.
-Standalone clients can start with `TyperContext::new()` or take ownership of an existing table
-with `from_definitions`.
-The evaluator resolves type expressions and literals. Functions needing inference first collect
-constraints, unify ordinary type holes, and solve error-set inclusion to a fixed point. Concrete
-node-keyed results guide lowering; inference variables never enter the IR. A generator can then
-interleave scope resolution, typing, evaluation, and emission without coupling the reusable typing
-rules to a particular backend. Errors propagate
-immediately and compilation stops after the first useful diagnostic.
+The compiler is a workspace of unpublished phase crates. The data flow is source text →
+CST → AST → HIR → LIR → verified LIR → C/GLSL. Each phase declares its public
+language and operations in `lib.rs`, with private incoming `lower` and `print` modules.
+LIR's private verifier certifies its language before target lowering; the certificate
+and verification operations belong to `resin_lir`'s public interface. See
+[compiler architecture](architecture.md) for the crate graph, pass contracts, public
+entry points, and a reading path.
 
-Lowering records owned locals per lexical scope and emits conditional destruction at
-normal and error exits. Copy operations retain shared fields; compiler-owned temporary
-transfers disarm the source's cleanup. These instructions do not impose source-level
-move checking: named values remain usable after reads.
+HIR is a resolved, typed tree. Its construction declares names, checks expressions,
+solves dependency groups, and elaborates source forms: methods become ordinary calls,
+short-circuit operators become conditionals, field projections are resolved, and layout
+queries become constants. Inference variables and lexical scopes remain private to HIR
+construction and editor analysis. Failed constraints preserve healthy editor facts;
+source errors prevent publishing a complete HIR module.
 
-The IR data model lives in `types`, `value`, and `instr`. Nominal reference and layout checks
-belong to `types::definitions`, shared by the typer and verifier. The typer separates definition
-ownership, typing rules, and conversions. Generation keeps syntax lowering and scopes together,
-but its evaluator borrows only scopes and types, and its function builder
-depends only on IR data. Verification separates control-flow traversal, instruction checks, and
-type checks; printing separates name allocation from formatting. Each pass owns its diagnostics.
+LIR lowering consumes HIR alone and makes storage, definite initialization, evaluation
+order, cleanup, and control flow explicit. Its typed stack machine has one parameter
+local per function and a flat list of basic blocks. Lowering records owned locals per
+lexical scope and emits conditional destruction at normal and error exits. Copy operations
+retain shared fields; compiler temporary transfers disarm the source's cleanup. Named
+values remain usable after reads; this is not source-level move checking.
 
-The first IR is a typed stack machine: each function has one parameter local and owns a flat list
-of basic blocks. Instructions make
-evaluation order explicit, and terminators provide control flow. Locals provide stable storage;
-stack values include literals, aggregates, function references, and addresses,
-with field and array access resolved from type information. A separate verifier checks stack effects
-and block edges after generation. Privileged operators retain their checked monomorphic signatures
-in IR, while the backend delays selecting or synthesizing their concrete implementations until it
-must emit the target.
+Shared concrete types and layout rules live in `resin-types`. The source checker and
+LIR verifier reuse these rules without sharing source scopes or inference state. Target
+lowering chooses the ABI and device representation; target printers consume only their
+own C/GLSL source trees.
+
+Compiler inputs are immutable `Source` handles from `resin-source`. A clone shares
+one text version; a replacement keeps the logical source ID and leaves the old
+version usable. Names serve diagnostics and need not be paths or unique. Locations
+retain the source alongside a byte span, so their meaning survives later edits.
+
+`resin_compiler::Compiler::compile(entry, loader)` resolves imports and returns an
+`Arc<Compilation>` containing completed phase products and editor facts. The concrete
+`resin_source::Loader` supplies files, registered buffer text, and explicit import
+bindings. It resolves relative and `$/std/` imports and reuses unchanged source
+instances. Source loading has no dependency on compiler phases or concrete types.
+Editors register changes and remove closed buffers through the loader.
+
+`Compiler` owns its cache fields directly; `Compilation` owns its retained products.
+Their definitions, queries, and private implementation stay together in `lib.rs`.
+A small public interface can have a substantial, cohesive implementation. The
+compiler has no native-build, file-notification, or protocol-version API.
+
+Codegen consumes a compilation's verified LIR and writes a complete C/GLSL/Ninja
+project. Its target ASTs stay private. `resin-toolchain` builds the directory through
+Ninja and retains output files; it depends on no compiler or type crate. The root `resin` package provides one CLI for compilation, execution, formatting,
+and the language server; its request and destination validation stay private to the CLI.
 
 The Rust runtime methods are an unsafe convenience interface with the same lifetime and
 synchronization contracts as the C ABI. Command recordings keep pending image layouts separate
@@ -127,9 +139,11 @@ changes. The single queue conservatively orders buffer-device-address accesses b
 rendering, and copies with global memory barriers. This favors correctness until resource access
 information permits narrower barriers.
 
-Backends scan this IR to produce the artifacts for one program. The host path emits C which links
-against the runtime. Device paths emit SPIR-V and embed its words directly in that generated C; the
-first implementation may emit GLSL and invoke `glslc`, while later backends can lower IR directly.
+Target lowering produces C, GLSL, and a Ninja dependency graph in one operation.
+Ninja runs `glslc`, invokes the current Resin executable to embed SPIR-V in C headers,
+and compiles and links the host against the runtime. The toolchain passes explicit
+settings to these commands; it performs no tool preflight. Install Ninja, `glslc`,
+and a C compiler, choosing the latter with `CC` or `--cc` when needed.
 Pipeline construction passes the embedded SPIR-V pointer and byte length to the runtime. This keeps
 the compiler/runtime seam small while leaving room for multiple host compilers, graphics APIs, and
 device code generators.

@@ -1,9 +1,5 @@
+use resin_types::prelude::*;
 mod support;
-
-use resin::{
-    backend::{c, glsl},
-    ir::{self, Ty, TypeDef, TypeId, TypeTable},
-};
 
 #[test]
 fn nominal_and_structural_types_share_one_index_space() {
@@ -70,27 +66,29 @@ fn both_emitters_use_payload_table_indices_as_union_tags() {
     // A type literal is another consumer of the very same ID, including when
     // direct IR clients add it after source lowering has completed the table.
     let type_function = module.functions.len();
-    module.functions.push(ir::Function {
+    module.functions.push(resin_lir::Function {
         name: Some("type_value".into()),
         foreign: None,
         result: Ty::Type,
-        locals: vec![ir::Local {
+        locals: vec![resin_lir::Local {
             name: None,
             ty: Ty::Unit,
         }],
-        entry: ir::BlockId::from_index(0),
-        blocks: vec![ir::BasicBlock {
+        entry: resin_lir::BlockId::from_index(0),
+        blocks: vec![resin_lir::BasicBlock {
             name: None,
-            instrs: vec![ir::Instr::Push {
-                value: ir::Value::Type {
+            instrs: vec![resin_lir::Instr::Push {
+                value: Value::Type {
                     ty: optional.clone(),
                 },
             }],
-            terminator: ir::Terminator::Return,
+            terminator: resin_lir::Terminator::Return,
         }],
     });
-    let host = c::emit(&module, "main").unwrap();
-    let shader = glsl::emit(&module, "kernel", glsl::Stage::Compute).unwrap();
+    let host_project = support::project::Project::new(&module, Some("main")).unwrap();
+    let shader_project = support::project::Project::new(&module, None).unwrap();
+    let host = std::fs::read_to_string(host_project.generated.c_source().unwrap()).unwrap();
+    let shader = std::fs::read_to_string(shader_project.generated.shaders()[0].source()).unwrap();
     for source in [&host, &shader] {
         assert!(
             source.contains(&format!("struct r_t{optional_id} {{")),
@@ -131,10 +129,10 @@ fn verifier_rejects_duplicate_definitions_and_nested_union_payloads() {
             variants: vec![Ty::None, Ty::union_of([Ty::Int32, Ty::Bool])],
         })],
     ] {
-        let module = ir::Module {
+        let module = resin_lir::Module {
             types: TypeTable::from(definitions),
             ..Default::default()
         };
-        assert!(ir::verify(&module).is_err());
+        assert!(resin_lir::verify(&module).is_err());
     }
 }

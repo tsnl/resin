@@ -1,17 +1,12 @@
-#[path = "support/toolchain.rs"]
-mod config;
+use resin_hir::GenerateErrorKind;
+use resin_source::prelude::*;
+use resin_types::prelude::*;
 use std::{
-    ffi::OsString,
     fs,
     process::{Command, Output},
 };
-
-use resin::{
-    ast,
-    backend::{c, glsl},
-    ir,
-    toolchain::{self, TempDir},
-};
+use support::pipeline;
+use tempfile::TempDir;
 
 mod support;
 
@@ -19,7 +14,7 @@ struct Project(TempDir);
 
 impl Project {
     fn new(files: &[(&str, &str)]) -> Self {
-        let project = Self(TempDir::new(&std::env::temp_dir()).unwrap());
+        let project = Self(TempDir::new_in(std::env::temp_dir()).unwrap());
         for (name, source) in files {
             let path = project.0.path().join(name);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -28,21 +23,15 @@ impl Project {
         project
     }
 
-    fn compile(&self) -> Result<ir::Module, ast::SourceError> {
-        ir::generate_program(&ast::load(&self.0.path().join("main.resin"))?)
+    fn compile(&self) -> Result<resin_lir::Module, SourceError> {
+        pipeline::generate_program(&pipeline::load(&self.0.path().join("main.resin"))?)
     }
 
     fn run(&self) -> Output {
         let module = self.compile().unwrap();
-        let source = c::emit(&module, "main").unwrap();
-        let executable = self
-            .0
-            .path()
-            .join(format!("program{}", std::env::consts::EXE_SUFFIX));
-        let compiler = std::env::var_os("CC")
-            .unwrap_or_else(|| OsString::from(resin::toolchain::DEFAULT_C_COMPILER));
-        toolchain::compile_c(&source, &executable, &config::c(&compiler)).unwrap();
-        Command::new(executable).output().unwrap()
+        support::project::Project::new(&module, Some("main"))
+            .unwrap()
+            .run()
     }
 
     fn error(&self, expected: &str) -> String {
@@ -75,9 +64,9 @@ fn ast_preserves_exports_imports_and_their_spans() {
         "answer"
     );
     assert_eq!(file.stmts.len(), 1);
-    assert!(ast::print::format_source(&file).contains("(export answer Box)"));
+    assert!(resin_ast::format_source(&file).contains("(export answer Box)"));
     assert!(
-        ir::generate(&file)
+        pipeline::generate(&file)
             .unwrap_err()
             .to_string()
             .contains("UnresolvedImport")
@@ -86,8 +75,8 @@ fn ast_preserves_exports_imports_and_their_spans() {
         "main.resin",
         "export { value }; def value() -> int = { 1 };",
     )]);
-    let program = ast::load(&project.0.path().join("main.resin")).unwrap();
-    let output = ast::print::format_program(&program);
+    let program = pipeline::load(&project.0.path().join("main.resin")).unwrap();
+    let output = resin_ast::format_program(&program);
     assert!(output.starts_with("(program"), "{output}");
     assert!(output.contains("main.resin\""), "{output}");
 }
@@ -297,7 +286,7 @@ fn invalid_exports_are_rejected_even_in_the_entry_file() {
     ] {
         Project::new(&[("main.resin", source)]).error(error);
         assert!(
-            ir::generate(&support::parse(source))
+            pipeline::generate(&support::parse(source))
                 .unwrap_err()
                 .to_string()
                 .contains(error)
@@ -391,7 +380,7 @@ fn private_main_is_not_an_entry_point() {
         ]);
         if !root.starts_with("export") {
             assert!(
-                c::emit(&project.compile().unwrap(), "main")
+                support::project::Project::new(&project.compile().unwrap(), Some("main"))
                     .unwrap_err()
                     .to_string()
                     .contains("export { main }")
@@ -417,7 +406,7 @@ fn an_imported_main_must_be_reexported_to_be_an_entry_point() {
         ]);
         if exports.is_empty() {
             assert!(
-                c::emit(&project.compile().unwrap(), "main")
+                support::project::Project::new(&project.compile().unwrap(), Some("main"))
                     .unwrap_err()
                     .to_string()
                     .contains("export { main }")
@@ -429,7 +418,7 @@ fn an_imported_main_must_be_reexported_to_be_an_entry_point() {
 }
 
 #[test]
-fn shader_entry_lookup_uses_the_entry_files_scope() {
+fn shader_declarations_preserve_the_entry_files_export_scope() {
     let project = Project::new(&[
         (
             "left.resin",
@@ -445,7 +434,17 @@ fn shader_entry_lookup_uses_the_entry_files_scope() {
         ),
     ]);
     let module = project.compile().unwrap();
-    glsl::emit(&module, "kernel", glsl::Stage::Compute).unwrap();
+    let kernel = module.entries["kernel"];
+    assert!(module.shaders[&kernel].embedded);
+    assert_eq!(module.shaders.len(), 3);
+    assert_eq!(
+        module
+            .shaders
+            .values()
+            .filter(|shader| shader.embedded)
+            .count(),
+        1
+    );
     let project = Project::new(&[
         (
             "library.resin",
@@ -453,24 +452,27 @@ fn shader_entry_lookup_uses_the_entry_files_scope() {
         ),
         ("main.resin", "import { \"library.resin\" };"),
     ]);
-    assert!(glsl::emit(&project.compile().unwrap(), "kernel", glsl::Stage::Compute).is_err());
+    let module = project.compile().unwrap();
+    assert!(!module.entries.contains_key("kernel"));
+    assert_eq!(module.shaders.len(), 1);
+    assert!(!module.shaders.values().next().unwrap().embedded);
 }
 
 #[test]
 fn standard_library_imports_work_outside_the_repository() {
     let project = Project::new(&[(
         "main.resin",
-        "export { main }; import { \"std/status.resin\", \"std/graphics.resin\", \"std/image.resin\" }; def main() -> Result<int, _> = { RuntimeStatus.from_code(0)?; ok(RuntimeStatus.code(Incomplete {}) + 35) };",
+        "export { main }; import { \"$/std/status.resin\", \"$/std/graphics.resin\", \"$/std/image.resin\" }; def main() -> Result<int, _> = { RuntimeStatus.from_code(0)?; ok(RuntimeStatus.code(Incomplete {}) + 35) };",
     )]);
     assert_eq!(project.run().status.code(), Some(42));
     Project::new(&[(
         "main.resin",
-        "export { main }; import { \"std/status.resin\" }; def main() = { resin_status_string(0); };",
+        "export { main }; import { \"$/std/status.resin\" }; def main() = { resin_status_string(0); };",
     )])
     .error("UnboundValue");
     Project::new(&[(
         "main.resin",
-        "export { main }; import { \"std/window.resin\" }; def main() = { Gpu.new(); };",
+        "export { main }; import { \"$/std/window.resin\" }; def main() = { Gpu.new(); };",
     )])
     .error("UnboundType");
 }
@@ -488,7 +490,7 @@ fn standard_library_can_be_relocated_and_does_not_capture_relative_imports() {
         ),
         (
             "main.resin",
-            "export { main }; import { \"std/library.resin\", \"library.resin\" }; def main() -> () = { print(fmt(\"{0}\", (answer() + local(),))); };",
+            "export { main }; import { \"$/std/library.resin\", \"library.resin\" }; def main() -> () = { print(fmt(\"{0}\", (answer() + local(),))); };",
         ),
     ]);
     let output = Command::new(env!("CARGO_BIN_EXE_resin"))
@@ -509,9 +511,9 @@ fn standard_library_can_be_relocated_and_does_not_capture_relative_imports() {
 fn invalid_import_paths_report_the_importing_file() {
     for path in [
         "missing.resin",
-        "std/missing.resin",
-        "std/../Cargo.toml",
-        "std/",
+        "$/std/missing.resin",
+        "$/std/../Cargo.toml",
+        "$/std/",
         "",
     ] {
         let error = Project::new(&[("main.resin", &format!("import {{ \"{path}\" }};"))])
@@ -563,9 +565,9 @@ fn entry_bindings_are_verified() {
     let mut module = support::module("export { main }; def main () -> () = {};");
     module
         .entries
-        .insert("main".into(), ir::FunctionId::from_index(999));
-    assert!(ir::verify(&module).is_err());
-    assert!(c::emit(&module, "main").is_err());
+        .insert("main".into(), FunctionId::from_index(999));
+    assert!(resin_lir::verify(&module).is_err());
+    assert!(resin_lir::VerifiedModule::new(module).is_err());
 }
 
 #[test]
@@ -591,14 +593,14 @@ fn lowering_rejects_runtime_module_items_even_in_constructed_asts() {
         let mut file = support::parse("");
         file.stmts.push(statement);
         assert_eq!(
-            ir::generate(&file).unwrap_err().kind,
-            ir::GenerateErrorKind::InvalidModuleItem
+            pipeline::generate(&file).unwrap_err().kind,
+            GenerateErrorKind::InvalidModuleItem
         );
         let project = Project::new(&[("main.resin", "")]);
-        let mut program = ast::load(&project.0.path().join("main.resin")).unwrap();
+        let mut program = pipeline::load(&project.0.path().join("main.resin")).unwrap();
         program.modules[0].file = file;
         assert!(
-            ir::generate_program(&program)
+            pipeline::generate_program(&program)
                 .unwrap_err()
                 .to_string()
                 .contains("InvalidModuleItem")
@@ -618,7 +620,8 @@ fn declarations_do_not_create_a_module_initializer() {
     assert_eq!(module.functions.len(), 1);
     assert_eq!(module.functions[0].name.as_deref(), Some("answer"));
     assert_eq!(module.entries.len(), 1);
-    let source = c::emit(&module, "answer").unwrap();
+    let project = support::project::Project::new(&module, Some("answer")).unwrap();
+    let source = fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
     assert!(source.contains("int main(int r_argc, char **r_argv) {\n  (void)r_argc; (void)r_argv;\n  atexit(resin_cleanup);\n  return r_fn0(0);\n}"));
 }
 
@@ -643,7 +646,7 @@ fn shader_objects_can_reference_private_helpers() {
             .iter()
             .flat_map(|f| &f.blocks)
             .flat_map(|b| &b.instrs)
-            .any(|i| matches!(i, ir::Instr::Shader { .. }))
+            .any(|i| matches!(i, resin_lir::Instr::Shader { .. }))
     );
 }
 
@@ -660,12 +663,12 @@ fn inherent_methods_keep_impl_nodes_and_follow_exported_types() {
     "#;
     let file = support::parse(source);
     assert_eq!(file.stmts.len(), 2);
-    let ast::StmtKind::Impl { receiver, methods } = &file.stmts[1].val else {
+    let resin_ast::StmtKind::Impl { receiver, methods } = &file.stmts[1].val else {
         panic!("expected an impl declaration");
     };
     assert_eq!(receiver.val.as_ref(), "Counter");
     assert_eq!(methods.len(), 3);
-    assert!(ast::print::format_source(&file).contains("(impl"));
+    assert!(resin_ast::format_source(&file).contains("(impl"));
     let project = Project::new(&[
         ("counter.resin", source),
         (
@@ -710,7 +713,7 @@ fn methods_validate_declarations_and_call_receivers() {
             "method receiver does not match",
         ),
     ] {
-        let error = ir::generate(&support::parse(source))
+        let error = pipeline::generate(&support::parse(source))
             .unwrap_err()
             .to_string();
         assert!(error.contains(message), "{error}");
@@ -748,7 +751,7 @@ fn method_syntax_and_field_calls_have_distinct_meanings() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let error = ir::generate(&support::parse(
+    let error = pipeline::generate(&support::parse(
         "struct Record { call: (int) -> int }; def f(r: Record) -> int = { r.call(1) };",
     ))
     .unwrap_err();
@@ -759,7 +762,10 @@ fn method_syntax_and_field_calls_have_distinct_meanings() {
 fn indexing_methods_require_ulong_and_do_not_replace_nominal_methods() {
     for arg in ["1_f", "1 == 1", "", "0, 1", "-1", "0_ui", "0_i", "0_l"] {
         let source = format!("def f() = {{ var values = [1, 2]; values.at({arg}); }};");
-        assert!(ir::generate(&support::parse(&source)).is_err(), "{source}");
+        assert!(
+            pipeline::generate(&support::parse(&source)).is_err(),
+            "{source}"
+        );
     }
     let project = Project::new(&[(
         "main.resin",
@@ -791,14 +797,14 @@ fn aliases_share_the_nominal_namespace_and_origin() {
     project.error("defined in this module");
     let source = "struct Item {}; type Alias = Item; impl Item { def f() = {}; } impl Alias { def f() = {}; }";
     assert!(
-        ir::generate(&support::parse(source))
+        pipeline::generate(&support::parse(source))
             .unwrap_err()
             .to_string()
             .contains("duplicate method")
     );
     let source = "type Number = int; impl Number { def f() = {}; }";
     assert!(
-        ir::generate(&support::parse(source))
+        pipeline::generate(&support::parse(source))
             .unwrap_err()
             .to_string()
             .contains("nominal struct")

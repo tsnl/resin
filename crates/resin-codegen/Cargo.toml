@@ -1,0 +1,13 @@
+[package]
+name = "resin-codegen"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dependencies]
+resin-types = { workspace = true }
+resin-source = { workspace = true }
+resin-lir = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

@@ -5,6 +5,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
+use tempfile::TempDir;
 
 pub(super) fn run(paths: &[PathBuf], check: bool) -> super::Result<i32> {
     let mut files = BTreeMap::new();
@@ -63,7 +64,7 @@ fn collect(
 fn format_file(path: &Path, check: bool) -> super::Result<bool> {
     let source = fs::read_to_string(path)?;
     let formatted =
-        crate::formatting::format_source(&source).ok_or("syntax errors; file left unchanged")?;
+        resin_cst::format_source(&source).ok_or("syntax errors; file left unchanged")?;
     if source == formatted {
         return Ok(false);
     }
@@ -77,7 +78,7 @@ fn format_file(path: &Path, check: bool) -> super::Result<bool> {
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
-        let temp = crate::toolchain::TempDir::new(parent)?;
+        let temp = TempDir::new_in(parent)?;
         let output = temp.path().join("formatted");
         fs::write(&output, formatted)?;
         fs::set_permissions(&output, metadata.permissions())?;

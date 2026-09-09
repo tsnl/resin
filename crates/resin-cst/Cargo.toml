@@ -1,0 +1,11 @@
+[package]
+name = "resin-cst"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dependencies]
+resin-types = { workspace = true }
+resin-source = { workspace = true }
+tree-sitter = { workspace = true }
+tree-sitter-resin = { workspace = true }

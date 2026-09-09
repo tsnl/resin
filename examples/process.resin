@@ -1,5 +1,5 @@
 export { main };
-import { "std/process.resin" };
+import { "$/std/process.resin" };
 
 def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> Result<(), _> = {
 	var args = arguments(argc, argv);

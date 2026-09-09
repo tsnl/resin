@@ -1,26 +1,63 @@
 [package]
 name = "resin"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
-
-[workspace]
-members = [".", "resin-runtime", "tree-sitter-resin", "resin-lsp"]
-exclude = ["zed-resin"]
-resolver = "3"
-
-[lib]
-path = "src/lib.rs"
+publish = false
 
 [features]
 gpu = []
 
 [dependencies]
+tempfile = { workspace = true }
 clap = { version = "4", features = ["derive"] }
-sexpfmt = "2"
-tree-sitter = "0.27"
-tree-sitter-resin = { path = "tree-sitter-resin" }
-resin-runtime = { path = "resin-runtime" }
+resin-compiler = { workspace = true }
+resin-codegen = { workspace = true }
+resin-source = { workspace = true }
+resin-toolchain = { workspace = true }
+resin-lsp = { workspace = true }
+resin-runtime = { workspace = true }
+resin-cst = { workspace = true }
+
+[dev-dependencies]
+resin-types = { workspace = true }
+resin-runtime = { workspace = true, features = ["test-support"] }
+resin-ast = { workspace = true }
+resin-hir = { workspace = true }
+resin-lir = { workspace = true }
+tree-sitter = { workspace = true }
+tree-sitter-resin = { workspace = true }
+lsp-server = "0.7.9"
+crossbeam-channel = "0.5"
+serde_json = "1"
+url = "2"
+
+[workspace]
+members = ["crates/*"]
+default-members = ["."]
+exclude = ["editors/zed"]
+resolver = "3"
 
 # Keep GLFW on the release CRT, matching Rust even in debug builds.
 [profile.dev.package.glfw-sys]
 opt-level = 1
+
+[workspace.package]
+version = "0.1.0"
+
+[workspace.dependencies]
+resin-common = { path = "crates/resin-common" }
+resin-types = { path = "crates/resin-types" }
+tempfile = "3"
+sexpfmt = "2"
+tree-sitter = "0.27"
+tree-sitter-resin = { path = "crates/tree-sitter-resin" }
+resin-compiler = { path = "crates/resin-compiler" }
+resin-source = { path = "crates/resin-source" }
+resin-toolchain = { path = "crates/resin-toolchain" }
+resin-lsp = { path = "crates/resin-lsp" }
+resin-runtime = { path = "crates/resin-runtime" }
+resin-cst = { path = "crates/resin-cst" }
+resin-ast = { path = "crates/resin-ast" }
+resin-hir = { path = "crates/resin-hir" }
+resin-lir = { path = "crates/resin-lir" }
+resin-codegen = { path = "crates/resin-codegen" }

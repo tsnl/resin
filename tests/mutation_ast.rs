@@ -1,14 +1,8 @@
-use resin::ast::{SourceFile, StmtKind, Term, TermKind, generate::AstGen, print};
-use tree_sitter::Parser;
+use resin_ast::{SourceFile, StmtKind, Term, TermKind, format_source};
+use resin_source::prelude::*;
 
 fn parse(src: &str) -> SourceFile {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_resin::LANGUAGE.into())
-        .expect("failed to load Resin grammar");
-    let tree = parser.parse(src, None).expect("parser returned no tree");
-    AstGen::new(src)
-        .gen_source_file(tree.root_node())
+    resin_ast::generate(&resin_cst::Document::reparse(src.to_string(), None))
         .unwrap_or_else(|err| panic!("{err}"))
 }
 
@@ -26,7 +20,7 @@ fn expect_deref_var(term: &Term, expected: &str) {
     expect_var(pointer, expected);
 }
 
-fn first_statement(file: &SourceFile) -> &resin::ast::Stmt {
+fn first_statement(file: &SourceFile) -> &resin_ast::Stmt {
     let StmtKind::Function { body, .. } = &file.stmts[0].val else {
         panic!("expected function");
     };
@@ -47,7 +41,7 @@ fn omitted_function_results_lower_to_unit() {
             | StmtKind::ForeignFunction { name, result, .. } => (name, result),
             _ => panic!("expected function"),
         };
-        assert!(matches!(result.val, resin::ast::TypeKind::Unit));
+        assert!(matches!(result.val, resin_ast::TypeKind::Unit));
         assert_eq!(
             &source[result.span.start..result.span.end],
             if index == 1 { "()" } else { name.val.as_ref() }
@@ -67,7 +61,7 @@ fn definition_keywords_preserve_statement_and_field_spans() {
         };
     "#;
     let file = parse(source);
-    let text = |span: resin::ast::Span| &source[span.start..span.end];
+    let text = |span: Span| &source[span.start..span.end];
     let definition = &file.stmts[0];
     assert!(matches!(definition.val, StmtKind::Struct { .. }));
     assert_eq!(
@@ -122,7 +116,7 @@ fn while_has_a_condition_and_a_scoped_body() {
     };
     assert_eq!(stmts.len(), 1);
     assert!(matches!(tail.val, TermKind::Unit));
-    assert!(print::format_source(&file).contains("(while"));
+    assert!(format_source(&file).contains("(while"));
 
     parse("def main() -> () = { while (ready) {}; };");
     parse("def f () -> () = { while (ready) { while (ready) {}; } };");
@@ -146,7 +140,7 @@ fn assignment_is_right_associative_and_deref_is_explicit() {
     expect_deref_var(place, "q");
     assert!(matches!(value.val, TermKind::Num { .. }));
 
-    let rendered = print::format_source(&file);
+    let rendered = format_source(&file);
     assert!(rendered.contains("(expr"));
     assert_eq!(rendered.matches("(assign").count(), 2);
     assert_eq!(rendered.matches("(deref").count(), 2);
@@ -183,6 +177,6 @@ fn dereference_composes_with_other_postfix_operations() {
     expect_var(base, "p");
     assert_eq!(name.val.as_ref(), "next");
 
-    let rendered = print::format_source(&file);
+    let rendered = format_source(&file);
     assert!(rendered.contains("(field"));
 }
