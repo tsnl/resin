@@ -1,4 +1,5 @@
-use resin_common::prelude::*;
+use resin_hir::GenerateErrorKind;
+use resin_types::prelude::*;
 #[path = "support/pipeline.rs"]
 mod pipeline;
 use resin_ast::SourceFile;
@@ -101,7 +102,9 @@ fn unary_typechecking_rejects_wrong_argument_shapes() {
         assert!(
             matches!(
                 pipeline::generate(&parse(src).unwrap()).unwrap_err().kind,
-                GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
+                GenerateErrorKind::Type {
+                    kind: TypeErrorKind::TypeMismatch { .. }
+                }
             ),
             "{src}"
         );
@@ -122,7 +125,9 @@ fn nominal_conversion_requires_an_explicit_ascription() {
         assert!(
             matches!(
                 pipeline::generate(&parse(src).unwrap()).unwrap_err().kind,
-                GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
+                GenerateErrorKind::Type {
+                    kind: TypeErrorKind::TypeMismatch { .. }
+                }
             ),
             "{src}"
         );
@@ -236,7 +241,9 @@ fn omitted_function_results_are_unit_not_inferred() {
         assert!(
             matches!(
                 error.kind,
-                GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
+                GenerateErrorKind::Type {
+                    kind: TypeErrorKind::TypeMismatch { .. }
+                }
             ),
             "{source}\n{error}"
         );

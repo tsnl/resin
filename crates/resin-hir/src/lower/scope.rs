@@ -1,13 +1,13 @@
 //! Persistent lexical scopes used by checking, elaboration, and editor queries.
 use crate::lower::context::Context;
-use crate::lower::infer::{solver::Solver, types::Type};
-use crate::lower::semantic::{Definition, DefinitionKind, SemanticData};
-use resin_common::prelude::*;
+use crate::lower::infer::{Solver, Type};
+use crate::{Analysis, Definition, DefinitionKind};
+use resin_source::prelude::*;
+use resin_types::prelude::*;
 
 use std::{
     cell::RefCell,
     collections::{BTreeMap, HashMap, HashSet},
-    path::PathBuf,
     rc::Rc,
     sync::Arc,
 };
@@ -56,11 +56,11 @@ impl Contexts {
             cursor = scope.parent?;
         }
     }
-    fn cursor_at(&self, path: &std::path::Path, offset: usize) -> Option<Cursor> {
+    fn cursor_at(&self, source: &Source, offset: usize) -> Option<Cursor> {
         let mut id = self
             .scopes
             .iter()
-            .position(|s| s.parent.is_none() && s.location.path == path)?;
+            .position(|s| s.parent.is_none() && &s.location.source == source)?;
         while let Some(child) = self.scopes[id].children.iter().rev().find(|&&child| {
             let span = self.scopes[child].location.span;
             span.start <= offset && offset <= span.end
@@ -77,17 +77,17 @@ impl Contexts {
     }
     pub(crate) fn definition(
         &self,
-        path: &std::path::Path,
+        source: &Source,
         offset: usize,
         name: &str,
         is_type: bool,
     ) -> Option<&Definition> {
-        let cursor = self.cursor_at(path, offset)?;
+        let cursor = self.cursor_at(source, offset)?;
         self.lookup(cursor, name, is_type)
             .map(|id| &self.definitions[id])
     }
-    pub(crate) fn visible(&self, path: &std::path::Path, offset: usize) -> Vec<Definition> {
-        let Some(cursor) = self.cursor_at(path, offset) else {
+    pub(crate) fn visible(&self, source: &Source, offset: usize) -> Vec<Definition> {
+        let Some(cursor) = self.cursor_at(source, offset) else {
             return vec![];
         };
         let mut names = BTreeMap::new();
@@ -116,8 +116,8 @@ impl Contexts {
 #[derive(Clone)]
 pub(crate) struct ContextView {
     cursor: Cursor,
-    path: PathBuf,
-    data: Rc<RefCell<SemanticData>>,
+    source: Source,
+    data: Rc<RefCell<Analysis>>,
 }
 impl ContextView {
     pub(super) fn capture(&self) -> Cursor {
@@ -155,13 +155,13 @@ pub(crate) struct Scopes {
     expressions: Vec<(SourceLocation, Type, bool)>,
 }
 impl Scopes {
-    pub(super) fn for_source(path: PathBuf, data: Rc<RefCell<SemanticData>>) -> Self {
+    pub(super) fn for_source(source: Source, data: Rc<RefCell<Analysis>>) -> Self {
         let mut shared = data.borrow_mut();
         let scope = shared.contexts.scopes.len();
         shared.contexts.scopes.push(LexicalScope {
             parent: None,
             location: SourceLocation {
-                path: path.clone(),
+                source: source.clone(),
                 span: Span {
                     start: 0,
                     end: usize::MAX,
@@ -174,7 +174,7 @@ impl Scopes {
         Self {
             view: ContextView {
                 cursor: Cursor { scope, prefix: 0 },
-                path,
+                source,
                 data,
             },
             inferred: HashMap::new(),
@@ -183,8 +183,8 @@ impl Scopes {
     }
     pub(super) fn new() -> Self {
         Self::for_source(
-            "<source>".into(),
-            Rc::new(RefCell::new(SemanticData::default())),
+            Source::new("<source>", ""),
+            Rc::new(RefCell::new(Analysis::default())),
         )
     }
     pub(super) fn view(&self) -> &ContextView {
@@ -206,7 +206,7 @@ impl Scopes {
         contexts.scopes.push(LexicalScope {
             parent: Some(self.view.cursor),
             location: SourceLocation {
-                path: self.view.path.clone(),
+                source: self.view.source.clone(),
                 span,
             },
             entries: vec![],
@@ -240,7 +240,7 @@ impl Scopes {
         contexts.definitions.push(Definition {
             name: name.val.to_string(),
             location: SourceLocation {
-                path: self.view.path.clone(),
+                source: self.view.source.clone(),
                 span: name.span,
             },
             kind,
@@ -317,7 +317,7 @@ impl Scopes {
     pub(crate) fn record_members(&mut self, span: Span, ty: Type, associated: bool) {
         self.expressions.push((
             SourceLocation {
-                path: self.view.path.clone(),
+                source: self.view.source.clone(),
                 span,
             },
             ty,

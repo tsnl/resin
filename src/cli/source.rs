@@ -1,6 +1,11 @@
 use std::{ffi::OsStr, path::PathBuf};
 
-use resin_compiler::Input;
+/// A filesystem source and the exported function selected by FILE[:ENTRY].
+#[derive(Clone)]
+pub struct Input {
+    pub path: PathBuf,
+    pub entry: String,
+}
 
 pub fn parse(value: &OsStr) -> Result<Input, String> {
     let mut path = PathBuf::from(value);

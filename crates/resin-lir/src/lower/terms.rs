@@ -1,4 +1,6 @@
-use resin_common::prelude::*;
+use super::LowerError;
+use resin_source::prelude::*;
+use resin_types::prelude::*;
 use std::{collections::HashMap, sync::Arc};
 
 use crate::Instr;
@@ -7,7 +9,7 @@ use resin_hir::Term;
 use super::Generator;
 
 impl Generator {
-    pub(super) fn gen_array(&mut self, elems: &[Term], ty: &Ty) -> Result<Ty, GenerateError> {
+    pub(super) fn gen_array(&mut self, elems: &[Term], ty: &Ty) -> Result<Ty, LowerError> {
         let Ty::Array { element, length } = ty else {
             unreachable!("checked array")
         };
@@ -25,7 +27,7 @@ impl Generator {
         &mut self,
         fields: &[(Ident, Term)],
         ty: &Ty,
-    ) -> Result<Ty, GenerateError> {
+    ) -> Result<Ty, LowerError> {
         let Ty::Record {
             fields: expected_fields,
         } = ty
@@ -67,7 +69,7 @@ impl Generator {
         Ok(ty.clone())
     }
 
-    pub(super) fn gen_call(&mut self, func: &Term, arg: &Term) -> Result<Ty, GenerateError> {
+    pub(super) fn gen_call(&mut self, func: &Term, arg: &Term) -> Result<Ty, LowerError> {
         let callee_ty = self.gen_term(func, None)?;
         let Ty::Function { param, .. } = &callee_ty else {
             unreachable!("inferred callable type")
@@ -84,9 +86,9 @@ impl Generator {
         &mut self,
         term: &Term,
         arg: &Term,
-        conversion: &resin_common::types::check::ExplicitConversion,
-    ) -> Result<Ty, GenerateError> {
-        use resin_common::types::check::ExplicitConversion::*;
+        conversion: &resin_types::ExplicitConversion,
+    ) -> Result<Ty, LowerError> {
+        use resin_types::ExplicitConversion::*;
         let from = self.gen_term(arg, None)?;
         let ty = term.ty.clone();
         match conversion {
@@ -104,7 +106,7 @@ impl Generator {
         name: &str,
         args: &[Term],
         expected: &Ty,
-    ) -> Result<Ty, GenerateError> {
+    ) -> Result<Ty, LowerError> {
         let mut arg_tys = Vec::with_capacity(args.len());
         for arg in args {
             arg_tys.push(self.gen_term(arg, None)?);

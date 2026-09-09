@@ -1,4 +1,6 @@
-use resin_common::prelude::*;
+use resin_hir::GenerateErrorKind;
+use resin_types::prelude::*;
+use tempfile::TempDir;
 #[path = "support/toolchain.rs"]
 mod toolchain;
 use std::{ffi::OsString, process::Command};
@@ -10,18 +12,19 @@ mod support;
 use support::module;
 
 fn run(source: &str) -> std::process::Output {
-    run_c(&resin_codegen::emit_c(&module(source), "main").unwrap())
+    support::project::Project::new(&module(source), Some("main"))
+        .unwrap()
+        .run()
 }
 
 fn run_c(source: &str) -> std::process::Output {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let executable = temp
         .path()
         .join(format!("program{}", std::env::consts::EXE_SUFFIX));
     let cc = std::env::var_os("CC")
         .unwrap_or_else(|| OsString::from(resin_toolchain::DEFAULT_C_COMPILER));
-    toolchain::c(&cc)
-        .compile_c(source, &executable)
+    toolchain::compile_c(source, &executable, &cc)
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
     Command::new(executable).output().unwrap()
 }
@@ -97,7 +100,8 @@ fn string_storage_is_terminated_without_changing_its_logical_length() {
     for local in m.functions[0].locals.iter().skip(1) {
         assert_eq!(local.ty, Ty::byte_span());
     }
-    let c = resin_codegen::emit_c(&m, "main").unwrap();
+    let project = support::project::Project::new(&m, Some("main")).unwrap();
+    let c = std::fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
     assert!(c.contains("static uint8_t r_literal_"), "{c}");
     prints(
         r#"export { main };
@@ -274,9 +278,9 @@ fn invalid_print_types_are_rejected() {
 #[test]
 fn shader_print_has_a_host_only_diagnostic() {
     let m = module(
-        r#"export { kernel }; def kernel (invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); print(fmt("{0}", (i,))); output.* := i; };"#,
+        r#"export { kernel }; @compute_shader def kernel (invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); print(fmt("{0}", (i,))); output.* := i; };"#,
     );
-    let error = resin_codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap_err();
+    let error = support::project::Project::new(&m, None).unwrap_err();
     assert!(
         error
             .to_string()
@@ -286,11 +290,12 @@ fn shader_print_has_a_host_only_diagnostic() {
 
 #[test]
 fn generated_c_uses_the_shared_runtime_header() {
-    let source = resin_codegen::emit_c(
+    let project = support::project::Project::new(
         &module(r#"export { main }; def main() -> () = { print("hello"); };"#),
-        "main",
+        Some("main"),
     )
     .unwrap();
+    let source = std::fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
     assert!(source.starts_with("#include <resin_runtime.h>\n"));
     assert!(source.contains("resin_print("));
     assert!(!source.contains("static void r_cleanup"));

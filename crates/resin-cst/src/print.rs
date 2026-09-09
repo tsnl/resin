@@ -64,7 +64,7 @@ pub fn format_source(source: &str) -> Option<String> {
             writer.space();
         }
         if node.kind() == "number" {
-            writer.write(&resin_common::types::literal::format(text));
+            writer.write(&resin_types::literal::format(text));
         } else {
             writer.write(text);
         }

@@ -17,10 +17,7 @@ pub fn format_program(program: &Program) -> String {
             .map(|module| {
                 list(
                     "file",
-                    vec![
-                        string(module.path.to_string_lossy()),
-                        sexp_source(&module.file),
-                    ],
+                    vec![string(module.source.name()), sexp_source(&module.file)],
                 )
             })
             .collect(),

@@ -1,5 +1,5 @@
 use resin_ast::{SourceFile, StmtKind, Term, TermKind, format_source};
-use resin_common::prelude::*;
+use resin_source::prelude::*;
 
 fn parse(src: &str) -> SourceFile {
     resin_ast::generate(&resin_cst::Document::reparse(src.to_string(), None))

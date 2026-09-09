@@ -1,5 +1,6 @@
 use resin_ast::{StmtKind, TypeKind};
-use resin_common::prelude::*;
+use resin_hir::GenerateErrorKind;
+use resin_types::prelude::*;
 use support::pipeline;
 
 mod support;
@@ -361,7 +362,9 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
         assert!(
             matches!(
                 error.kind,
-                GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
+                GenerateErrorKind::Type {
+                    kind: TypeErrorKind::TypeMismatch { .. }
+                }
             ),
             "{source}: {error}"
         );

@@ -1,0 +1,8 @@
+[package]
+name = "resin-source"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dev-dependencies]
+tempfile = { workspace = true }

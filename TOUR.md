@@ -6,7 +6,8 @@ path through its implementation, not a language reference; keep the
 
 The root is both a Cargo workspace and the `resin` CLI package. [src/](src/)
 contains one executable's command dispatch. [crates/](crates/) contains the
-[compiler driver](crates/resin-compiler/), [platform toolchain](crates/resin-toolchain/),
+[compiler driver](crates/resin-compiler/), [sources and loading](crates/resin-source/), [concrete types](crates/resin-types/),
+[platform toolchain](crates/resin-toolchain/),
 compiler phases, and the supporting [runtime](crates/resin-runtime/),
 [parser](crates/tree-sitter-resin/), and [language server library](crates/resin-lsp/).
 All are unpublished. The
@@ -94,7 +95,7 @@ pipelines and run them. Host-only programs follow the same recipe with an empty 
 
 ### The CLI connects the stages
 
-[src/main.rs](src/main.rs) only calls `resin::main`, the root package's CLI entry.
+[src/main.rs](src/main.rs) only calls `resin::cli::main`, the root package's CLI entry.
 [cli/mod.rs](src/cli/mod.rs) dispatches modes, and [args.rs](src/cli/args.rs)
 parses flags and chooses `Interpreter`, `Compiler`, `Formatter`, or `LanguageServer`;
 [source.rs](src/cli/source.rs) parses the `FILE[:ENTRY]` selector.
@@ -107,30 +108,36 @@ captures environment variables, the working directory, and executable/temp paths
 Its private [resolution](crates/resin-toolchain/src/environment.rs) applies CLI
 compiler choices before `CC`/`GLSLC` and platform defaults. It finds runtime headers,
 the archive, and cache settings, returning an opaque `Toolchain`. The CLI resolves
-`RESIN_STDLIB` against the compiler library's bundled path and chooses `CProfile`.
-Tool discovery errors are reported only when an operation needs that tool, so host-only
+`RESIN_STDLIB` against the loader library's bundled path and chooses `CProfile`.
+Tools are invoked when required, without preflight checks, so host-only
 programs remain independent of `glslc`. Compiler subprocesses and cache fingerprints
 use the same captured environment.
 
-[compiler::Request::new](crates/resin-compiler/src/lib.rs) validates the input/output combination and
-resolves native directory destinations, rejecting outputs that would overwrite the
-source. `Session::compile(&request)` analyzes through the caller's session, then passes
-verified LIR to [compiler/build.rs](crates/resin-compiler/src/build.rs). Every compilation follows the
-same recipe: generate GLSL for all requested shaders, compile it to SPIR-V, embed the bytes
-in generated C, then compile and link the executable. `Session::compile` returns an
-`Executable` that keeps the build-cache lock while the caller runs it. Execution remains
-a separate step. Generated C, GLSL, and SPIR-V remain in the build cache for inspection.
+The CLI's private [Request](src/cli/request.rs) validates the input/output combination,
+resolves directory destinations, and rejects outputs that would overwrite the source.
+A [resin_source::Loader](crates/resin-source/src/lib.rs) reads the entry into an immutable `Source`.
+`Compiler::compile(entry, &mut loader)` resolves imports and returns an
+`Arc<Compilation>` containing analysis and phase products.
 
-The session owns source overlays, cached parses, import dependencies, and
-immutable [Compilation results](crates/resin-compiler/src/lib.rs). A result retains
-successful phase products and editor facts for one entry and its imports. Public
-accessors expose diagnostics, AST, HIR, LIR, and source queries without publishing
-the checker state. The CLI uses one session for its invocation; the language server
-retains one across edits.
+The CLI passes `compilation.verified()` to
+[codegen](crates/resin-codegen/src/lib.rs), which writes C, requested GLSL, and
+`build.ninja` in one operation. It then asks `Toolchain::build` to execute that
+project. Ninja compiles SPIR-V, invokes this Resin executable with `--embed` to make
+C headers, and compiles and links the host program. The executable path comes from
+the platform's `current_exe` API, keeping embedding on the same Resin version.
+The returned build and executable handles retain a cache lock. Generated sources,
+headers, SPIR-V, and the Ninja graph remain available for inspection.
+The [compiler facade](crates/resin-compiler/src/lib.rs) exposes a small contract:
+immutable sources go in, a loader discovers their imports, and immutable compilations
+come out. A result retains successful phase products and editor facts for one entry
+and its imports. Its public accessors expose diagnostics, AST, HIR, LIR, and source
+queries. `Compiler` owns private parsing and analysis caches directly; `Compilation`
+owns its retained products. Their definitions and implementations live together in
+`lib.rs`. The concrete `resin_source::Loader` owns import lookup.
 
-Each compiler phase is a directly usable crate. The root [src/lib.rs](src/lib.rs)
-only exposes the CLI entry point. Tests use phase APIs directly or call
-`resin_compiler::Session::analyze` to inspect a program without building an executable.
+Each phase is also a directly usable crate. The root [src/lib.rs](src/lib.rs) exposes
+only the CLI module. Tests call phase APIs directly or use `Compiler::compile`
+to inspect a program without building an executable.
 
 Formatting takes a separate path from `main` through
 [format.rs](src/cli/format.rs) to the shared
@@ -164,14 +171,17 @@ terms, and type syntax with byte spans. [AST lowering](crates/resin-ast/src/lowe
 translates CST nodes, decodes strings, inserts the unit branch of one-armed `if`,
 and represents operators as builtin applications. It also preserves incomplete
 expressions as holes for editor recovery. AST generation performs no filesystem I/O.
-The compiler's private [module loader](crates/resin-compiler/src/loading.rs) resolves
-relative and `std/` imports and builds an AST `Program` in dependency order.
+The compiler's [import traversal](crates/resin-compiler/src/lib.rs) calls
+`resin_source::Loader::load_import` and builds an AST `Program` in dependency order.
+The [loader](crates/resin-source/src/lib.rs) accepts explicit source bindings, supplied
+file text, and disk files. It interprets relative and `$/std/` paths. Each AST source
+module retains its immutable `Source` alongside its syntax.
 
 [HIR language](crates/resin-hir/src/lib.rs) is a self-contained, typed tree. Start
 at [HIR lowering](crates/resin-hir/src/lower/mod.rs), then follow
-[checking a file](crates/resin-hir/src/lower/check/file.rs): declare signatures, check
+[checking a file](crates/resin-hir/src/lower/check/mod.rs): declare signatures, check
 bodies, solve dependency groups, and replace inference variables with concrete types.
-The [solver](crates/resin-hir/src/lower/infer/solver.rs) handles numeric constraints
+The [solver](crates/resin-hir/src/lower/infer/mod.rs) handles numeric constraints
 and recursive error sets. It stays private to this crate.
 
 [Elaboration](crates/resin-hir/src/lower/elaborate.rs) resolves lexical bindings,
@@ -189,48 +199,52 @@ initialization, makes evaluation order explicit, and inserts cleanup.
 
 | Question | Start reading here |
 | --- | --- |
-| Which imported declaration does a name mean? | [HIR modules](crates/resin-hir/src/lower/modules.rs) |
+| Which imported declaration does a name mean? | [HIR modules](crates/resin-hir/src/lower/mod.rs) |
 | Which names are visible at this source position? | [HIR scopes](crates/resin-hir/src/lower/scope.rs) |
-| How are a function's constraints solved? | [HIR checking](crates/resin-hir/src/lower/check/file.rs) |
+| How are a function's constraints solved? | [HIR checking](crates/resin-hir/src/lower/check/mod.rs) |
 | How does a method become an ordinary call? | [HIR elaboration](crates/resin-hir/src/lower/elaborate.rs) |
 | Where is a binding stored, and is it initialized? | [LIR bindings](crates/resin-lir/src/lower/bindings.rs) |
 | Which storage location does an assignment address? | [LIR places](crates/resin-lir/src/lower/places.rs) |
 | How do branches and loops join? | [LIR control flow](crates/resin-lir/src/lower/flow.rs) |
-| How are Result propagation and cleanup lowered? | [LIR sums](crates/resin-lir/src/lower/sums.rs), [cleanup](crates/resin-lir/src/lower/cleanup.rs) |
+| How are Result propagation and cleanup lowered? | [LIR sums](crates/resin-lir/src/lower/sums.rs), [cleanup](crates/resin-lir/src/lower/mod.rs) |
 | How are concrete instructions assembled? | [LIR builder](crates/resin-lir/src/lower/builder.rs) |
 
-### Verification is a separate crate
+### Verification certifies the LIR language
 
-[resin-lir-verifier](crates/resin-lir-verifier/src/lib.rs) checks definitions, instruction
-operands, block-edge stack types, and returns. LIR has no dependency on this crate.
-Its `VerifiedModule` owns LIR and the analysis that certifies it behind private
-fields. Native builds borrow an immutable `Verified` view. Consuming `into_module`
-returns mutable LIR and discards the certificate; changes require verification again.
+LIR's private [verify](crates/resin-lir/src/verify/mod.rs) module checks definitions,
+instruction operands, block-edge stack types, and returns. Its public operations and
+certificate types live in [lib.rs](crates/resin-lir/src/lib.rs), beside the language
+being checked. `resin_lir::VerifiedModule` owns LIR and its verification analysis behind
+private fields. Native builds borrow an immutable `Verified` view. Consuming
+`into_module` returns ordinary LIR and discards the certificate; edits require
+verification again.
 
-The [concrete type rules](crates/resin-common/src/types/check/mod.rs) and
-[layout checks](crates/resin-common/src/types/definitions.rs) live in `resin-common`.
+The [concrete type rules](crates/resin-types/src/lib.rs) and
+[layout checks](crates/resin-types/src/definitions.rs) live in `resin-types`.
 They depend on no compiler phase. HIR adds inference and method namespaces privately;
 the verifier applies concrete rules to instructions independently of source checking.
 
 ### C emission and native builds are separate
 
 [C lowering](crates/resin-codegen/src/c/lower/mod.rs) produces a
-[C source tree](crates/resin-codegen/src/lib.rs): declarations, embedded shaders,
+[private C tree](crates/resin-codegen/src/c/mod.rs): declarations, shader-header references,
 functions, blocks, and a `main` wrapper. [The printer](crates/resin-codegen/src/c/print.rs)
 formats that tree without accessing LIR or typechecking facts. [function.rs](crates/resin-codegen/src/c/lower/function.rs)
 lowers instructions and block edges; [foreign.rs](crates/resin-codegen/src/c/lower/foreign.rs)
 bridges Resin's unary calls to conventional C argument lists.
 
-[toolchain/c.rs](crates/resin-toolchain/src/c.rs) invokes the C compiler and statically links
-the runtime. [platform.rs](crates/resin-toolchain/src/platform.rs) selects the default
-compiler, archive name, flags, and system libraries: `cc` and
-`libresin_runtime.a` on Unix; GNU-style LLVM `clang` and `resin_runtime.lib`
-on Windows MSVC. Windows builds must keep Rust, GLFW, and emitted C on the
-same C runtime. Host-only programs need neither a Vulkan SDK nor a GPU.
+[Ninja execution](crates/resin-toolchain/src/ninja.rs) builds the generated dependency
+graph. [platform.rs](crates/resin-toolchain/src/platform.rs) supplies the default
+compiler, archive name, flags, and system libraries: `cc` and `libresin_runtime.a`
+on Unix; GNU-style LLVM `clang` and `resin_runtime.lib` on Windows MSVC. Windows
+builds keep Rust, GLFW, and emitted C on the same C runtime. Install Ninja, `glslc`,
+and a C compiler; `CC` or `--cc` overrides the compiler selection. Host-only programs
+invoke no shader compiler and need neither a Vulkan SDK nor a GPU.
 
-The C toolchain also owns the native build cache and locks that keep concurrent
-builds and runs from interfering. [dependencies.rs](crates/resin-toolchain/src/dependencies.rs)
-reads C compiler dependency files to track included headers.
+The toolchain stages source projects and retains successful outputs under a cache
+lock. Ninja tracks dependencies between shaders, embedded headers, C includes, and
+the executable. Its configured commands use captured process settings; there is no
+compiler-specific interpretation inside the toolchain.
 
 There are two artifact directories with different owners: Cargo builds the
 compiler and runtime under `target/`; Resin builds user programs under `build/`
@@ -240,18 +254,26 @@ and copies the output without running it. This does not change Cargo's Rust prof
 
 ## 3. Follow an editor change through the compiler
 
-Start again at [compiler::Session](crates/resin-compiler/src/lib.rs). An editor supplies unsaved
-text through `set_overlay`, removes it with `remove_overlay`, and reports disk
-changes with `file_changed`. Overlays take precedence over disk. Changes
-invalidate dependent entries; retained `Compilation` results remain valid for their readers.
+Start with [Source](crates/resin-source/src/lib.rs): immutable text with a diagnostic
+name and a stable logical `SourceId`. Cloning shares the same version. `with_text`
+creates a new version with the same logical identity; both versions remain usable.
+Names are labels, so two sources with the same name are still distinct.
+`SourceLocation` retains a source handle and byte span, keeping diagnostics tied to
+exactly the text that produced them.
 
-[compiler/source.rs](crates/resin-compiler/src/source.rs) handles source lookup and path
-normalization; [compiler/syntax.rs](crates/resin-compiler/src/syntax.rs) caches CST and AST
-products together. The CST crate performs incremental reparsing.
-[compilation.rs](crates/resin-compiler/src/compilation.rs) builds the private data behind
-a `Compilation`, including completed phase products and editor facts. Parsing is
-incremental per file; semantic checking reruns an affected entry's import
-closure. This is separate from the native artifact cache.
+The editor's [worker](crates/resin-lsp/src/worker.rs) registers open document text
+with `resin_source::Loader::source_from_text`. Those sources take precedence over
+disk imports. Closing a buffer calls `remove_source` to restore disk loading;
+file notifications schedule another compile call. Generated sources can instead
+use `set_import` to bind an import directly to a source handle.
+
+The compiler's [lib.rs](crates/resin-compiler/src/lib.rs) keeps this traversal,
+its private cache fields, and retained compilation products together. Each compile
+call resolves the import graph before deciding whether analysis can be reused.
+An unchanged source version reuses its syntax; a changed version can reuse the
+previous Tree-sitter tree for incremental parsing. Semantic checking reruns when
+the entry's resolved import graph changes. Previously returned compilations own
+their original sources and remain usable after subsequent calls.
 
 Incomplete code goes through the same compiler traversal. Expression, type,
 and missing-field holes preserve useful children; bounded delimiter repair
@@ -260,13 +282,13 @@ Invalid declarations still shadow outer names, and healthy siblings retain
 their types. Unknown types display as `?`; errors prevent executable generation.
 
 The `Compilation` query methods in [lib.rs](crates/resin-compiler/src/lib.rs) delegate to
-HIR's opaque `Analysis`. [queries.rs](crates/resin-compiler/src/queries.rs) supplies the
-small document-access interface those queries need. HIR's private
-[analysis implementation](crates/resin-hir/src/analysis.rs) selects
-the source context view and looks up declarations on demand. Member observations
+HIR's opaque `Analysis`, supplying its shared CST map. HIR's
+[lib.rs](crates/resin-hir/src/lib.rs) keeps the private analysis fields and their query
+operations together. They select the source context view and look up declarations
+on demand. Member observations
 retain available fields, signatures, and canonical method origins even when later code fails.
 Hover and member completion use these facts and
-[shared type formatting](crates/resin-common/src/types/print.rs). There is no separate
+[shared type formatting](crates/resin-types/src/lib.rs). There is no separate
 recovery compiler or fallback declaration index.
 
 The [language server library](crates/resin-lsp/README.md) adapts that compiler state to
@@ -274,7 +296,7 @@ the Language Server Protocol over stdio. `resin --lsp DIR` invokes it inside the
 executable that builds programs. [server.rs](crates/resin-lsp/src/server.rs)
 handles requests, document versions, and file notifications;
 [text.rs](crates/resin-lsp/src/text.rs) converts byte offsets to UTF-16 positions.
-[worker.rs](crates/resin-lsp/src/worker.rs) runs the session in
+[worker.rs](crates/resin-lsp/src/worker.rs) retains a compiler and loader in
 the background, coalesces edits, and discards obsolete results. Editor analysis
 never compiles C/GLSL, initializes a GPU, or executes Resin programs.
 
@@ -300,15 +322,15 @@ the generated shaders without running a Vulkan program:
 cargo run -- examples/gradient.resin -o dist/
 ```
 
-Read `build/shaders/<hash>/shader.glsl` and `shader.spv` after the build.
+Read `shader_<function-id>.glsl` and `.spv` in the generated project’s release cache after the build.
 
 `@compute_shader`, `@vertex_shader`, and `@fragment_shader` register and validate
-shader entry declarations. [shader interfaces](crates/resin-common/src/types/shader.rs) defines their metadata
+shader entry declarations. [shader interfaces](crates/resin-types/src/lib.rs) defines their metadata
 and signature contracts. Decorated functions and their unannotated helpers remain
 host-callable. Accessing `function.spirv` requests a static `Span<ubyte>` artifact;
-[shader build orchestration](crates/resin-compiler/src/shaders.rs) enumerates those declaration
-requests and emits GLSL. [toolchain/shaders.rs](crates/resin-toolchain/src/shaders.rs) caches the
-external compiler output, supplying SPIR-V for embedding in C.
+[project generation](crates/resin-codegen/src/lib.rs) enumerates those declaration
+requests and writes GLSL plus their Ninja dependencies. `glslc` produces SPIR-V,
+and `resin --embed` writes the headers included by generated C.
 No runtime function-value analysis is involved. The runtime receives bytes, not a
 host function pointer or source-file path.
 
@@ -378,7 +400,7 @@ Tests are executable descriptions of the boundaries above:
 | Syntax or AST shape | [parser corpus](crates/tree-sitter-resin/test/corpus/), [mutation_ast.rs](tests/mutation_ast.rs) |
 | Grammar JavaScript types, lint, or formatting | Run `npm run check` in [crates/tree-sitter-resin/](crates/tree-sitter-resin/README.md) |
 | Imports, exports, or entry visibility | [modules.rs](tests/modules.rs), [cli.rs](tests/cli.rs) |
-| Typing, conversions, or IR invariants | [nominal_types.rs](tests/nominal_types.rs), [typing-rule tests](crates/resin-common/src/types/check/tests.rs), [verifier tests](crates/resin-lir-verifier/src/tests.rs) |
+| Typing, conversions, or IR invariants | [nominal_types.rs](tests/nominal_types.rs), [typing-rule tests](crates/resin-types/src/tests.rs), [verifier tests](crates/resin-lir/src/verify/tests.rs) |
 | Explicit type holes and return inference | [inference.rs](tests/inference.rs), [inference example](examples/inference.resin) |
 | Structs, aliases, unions, and typed errors | [results.rs](tests/results.rs), [errors example](examples/errors.resin) |
 | Automatic destruction, scope exits, and copying | [shared.rs](tests/shared.rs), [ownership example](examples/ownership.resin), [C execution tests](tests/c_backend.rs) |
@@ -387,7 +409,7 @@ Tests are executable descriptions of the boundaries above:
 | Console input, byte handling, and allocation failures | [console.rs](tests/console.rs), [input example](examples/input.resin) |
 | Compilation and artifact reuse | [build_cache.rs](tests/build_cache.rs), [cli.rs](tests/cli.rs) |
 | Source formatting, file traversal, or format checks | [formatting.rs](tests/formatting.rs), [format_cli.rs](tests/format_cli.rs), [LSP formatting tests](tests/lsp.rs) |
-| Session invalidation, editor queries, or recovery | [session tests](crates/resin-compiler/src/session.rs), [analysis.rs](tests/analysis.rs) |
+| Source versions, import caching, editor queries, or recovery | [compiler API tests](crates/resin-compiler/tests/public_api.rs), [loader tests](crates/resin-source/tests/files.rs), [analysis.rs](tests/analysis.rs) |
 | LSP protocol, buffer versions, or watched files | [lsp.rs](tests/lsp.rs) |
 | Zed syntax features | [zed_queries.rs](tests/zed_queries.rs) |
 | Shader generation or execution | [glsl_backend.rs](tests/glsl_backend.rs), [gpu_backend.rs](tests/gpu_backend.rs), [window_backend.rs](tests/window_backend.rs) |

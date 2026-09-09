@@ -1,14 +1,15 @@
 use super::Generator;
+use super::LowerError;
 use crate::Instr;
-use resin_common::prelude::*;
 use resin_hir::ReceiverConversion;
 use resin_hir::Term;
+use resin_types::prelude::*;
 
 impl Generator {
-    pub(super) fn hold_arc_address(&mut self, term: &Term) -> Result<Ty, GenerateError> {
+    pub(super) fn hold_arc_address(&mut self, term: &Term) -> Result<Ty, LowerError> {
         let ty = self.gen_term(term, None)?;
         let Ty::Arc { pointee } = &ty else {
-            return Err(GenerateError::inference(term.span, "expected Arc<T>"));
+            return Err(LowerError::invalid_hir(term.span, "expected Arc<T>"));
         };
         let pointee = *pointee.clone();
         let owner = self.save_top(&ty);
@@ -24,7 +25,7 @@ impl Generator {
         receiver: &Term,
         conversion: ReceiverConversion,
         to: &Ty,
-    ) -> Result<(), GenerateError> {
+    ) -> Result<(), LowerError> {
         match conversion {
             conversion @ (ReceiverConversion::ArcAddress | ReceiverConversion::ArcLoad) => {
                 self.hold_arc_address(receiver)?;
@@ -53,11 +54,7 @@ impl Generator {
         Ok(())
     }
 
-    pub(super) fn unpack_argument(
-        &mut self,
-        arg: &Term,
-        params: &[Ty],
-    ) -> Result<(), GenerateError> {
+    pub(super) fn unpack_argument(&mut self, arg: &Term, params: &[Ty]) -> Result<(), LowerError> {
         self.gen_term(arg, Some(&Ty::parameter(params)))?;
         match params.len() {
             0 => self.emit(Instr::Discard),

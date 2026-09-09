@@ -1,4 +1,4 @@
-use resin_common::prelude::*;
+use resin_types::prelude::*;
 use std::fmt::Write;
 
 use super::types::Types;

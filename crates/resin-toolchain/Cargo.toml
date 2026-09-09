@@ -5,4 +5,4 @@ edition = "2024"
 publish = false
 
 [dependencies]
-resin-common = { workspace = true }
+tempfile = { workspace = true }

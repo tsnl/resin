@@ -1,25 +1,14 @@
-use resin_common::prelude::*;
-#[path = "support/toolchain.rs"]
-mod toolchain;
+use resin_types::prelude::*;
 use support::pipeline;
 mod support;
 
-use std::{
-    ffi::OsString,
-    process::{Command, Output},
-};
+use std::process::Output;
 
 fn run(source: &str) -> Output {
     let module = support::module(&format!("export {{ main }}; {source}"));
-    let source = resin_codegen::emit_c(&module, "main").unwrap();
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let executable = temp
-        .path()
-        .join(format!("option{}", std::env::consts::EXE_SUFFIX));
-    let cc = std::env::var_os("CC")
-        .unwrap_or_else(|| OsString::from(resin_toolchain::DEFAULT_C_COMPILER));
-    toolchain::c(&cc).compile_c(&source, &executable).unwrap();
-    Command::new(executable).output().unwrap()
+    support::project::Project::new(&module, Some("main"))
+        .unwrap()
+        .run()
 }
 
 #[test]

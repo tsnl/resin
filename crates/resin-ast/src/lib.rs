@@ -5,7 +5,7 @@
 //! use resin_ast::lower;
 //! ```
 
-use resin_common::prelude::*;
+use resin_source::prelude::*;
 mod lower;
 mod print;
 
@@ -218,8 +218,7 @@ pub struct Program {
 
 #[derive(Debug, Clone)]
 pub struct SourceModule {
-    pub path: std::path::PathBuf,
-    pub source: String,
+    pub source: Source,
     pub file: SourceFile,
     pub imports: Vec<(Span, usize)>,
 }
@@ -276,18 +275,19 @@ pub fn format_program(program: &Program) -> String {
 
 impl SourceModule {
     pub fn location(&self, span: Span) -> String {
-        let mut start = span.start.min(self.source.len());
-        while !self.source.is_char_boundary(start) {
+        let text = self.source.text();
+        let mut start = span.start.min(text.len());
+        while !text.is_char_boundary(start) {
             start -= 1;
         }
-        let prefix = &self.source[..start];
+        let prefix = &text[..start];
         let line = prefix.bytes().filter(|&byte| byte == b'\n').count() + 1;
         let column = prefix.rsplit('\n').next().unwrap().chars().count() + 1;
-        format!("{}:{line}:{column}", self.path.display())
+        format!("{}:{line}:{column}", self.source.name())
     }
 
     pub fn error(&self, span: Span, message: impl fmt::Display) -> SourceError {
-        let mut error = SourceError::new(self.path.clone(), Some(span), message.to_string());
+        let mut error = SourceError::new(self.source.clone(), Some(span), message.to_string());
         error.message = format!("{}: {}", self.location(span), error.diagnostic).into();
         error
     }

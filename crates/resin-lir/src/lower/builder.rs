@@ -1,4 +1,4 @@
-use resin_common::prelude::*;
+use resin_types::prelude::*;
 use std::sync::Arc;
 
 use crate::{BasicBlock, BlockId, Function, Instr, Local, Terminator};
@@ -75,7 +75,7 @@ impl FunctionBuilder {
     pub(super) fn emit(&mut self, instr: Instr) {
         let current = self.current.index();
         debug_assert!(!self.terminated[current]);
-        let effect = instr.stack_effect();
+        let effect = crate::verify::stack_effect(&instr);
         self.height = self
             .height
             .checked_sub(effect.pops)

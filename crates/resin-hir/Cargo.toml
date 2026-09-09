@@ -5,7 +5,8 @@ edition = "2024"
 publish = false
 
 [dependencies]
-resin-common = { workspace = true }
+resin-types = { workspace = true }
+resin-source = { workspace = true }
 resin-cst = { workspace = true }
 resin-ast = { workspace = true }
 sexpfmt = { workspace = true }

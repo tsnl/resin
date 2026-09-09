@@ -1,13 +1,14 @@
 //! Emit blocks and branches for source-level control-flow expressions.
+use super::LowerError;
 
 use crate::{Instr, Terminator};
-use resin_common::prelude::*;
 use resin_hir::{Statement, Term};
+use resin_types::prelude::*;
 
 use super::Generator;
 
 impl Generator {
-    pub(super) fn gen_while(&mut self, cond: &Term, body: &Term) -> Result<Ty, GenerateError> {
+    pub(super) fn gen_while(&mut self, cond: &Term, body: &Term) -> Result<Ty, LowerError> {
         let condition = self.new_block("while.cond");
         let body_block = self.new_block("while.body");
         let exit = self.new_block("while.exit");
@@ -15,7 +16,7 @@ impl Generator {
 
         self.switch(condition);
         self.gen_term(cond, None)?;
-        let after_condition = self.environment.clone();
+        let after_condition = self.bindings.clone();
         self.terminate(Terminator::Branch {
             then: body_block,
             els: exit,
@@ -26,7 +27,7 @@ impl Generator {
         self.emit(Instr::Discard);
         self.terminate(Terminator::Break { target: condition });
 
-        self.environment = after_condition;
+        self.bindings = after_condition;
         self.switch(exit);
         self.emit(Instr::Push { value: Value::Unit });
         Ok(Ty::Unit)
@@ -38,7 +39,7 @@ impl Generator {
         then: &Term,
         els: &Term,
         expected: &Ty,
-    ) -> Result<Ty, GenerateError> {
+    ) -> Result<Ty, LowerError> {
         self.gen_term(cond, None)?;
         let then_block = self.new_block("then");
         let else_block = self.new_block("else");
@@ -48,17 +49,17 @@ impl Generator {
             els: else_block,
         });
 
-        let before = self.environment.clone();
+        let before = self.bindings.clone();
         self.switch(then_block);
         let _ = self.gen_term(then, Some(expected))?;
         self.terminate(Terminator::Break { target: join_block });
-        let after_then = self.environment.clone();
+        let after_then = self.bindings.clone();
 
-        self.environment = before;
+        self.bindings = before;
         self.switch(else_block);
         let _ = self.gen_term(els, Some(expected))?;
         self.terminate(Terminator::Break { target: join_block });
-        self.environment.intersect_initialization(&after_then);
+        self.intersect_initialization(&after_then);
 
         self.switch(join_block);
         Ok(expected.clone())
@@ -69,7 +70,7 @@ impl Generator {
         stmts: &[Statement],
         tail: &Term,
         expected: &Ty,
-    ) -> Result<Ty, GenerateError> {
+    ) -> Result<Ty, LowerError> {
         self.owned.push(vec![]);
         for stmt in stmts {
             self.lower_statement(stmt)?;

@@ -219,20 +219,40 @@ lowering can consume after construction state has been discarded. The driver own
 pass sequencing; language crates describe and transform their own languages.
 This lets each component be understood in terms of a bounded input and output.
 
-The [verification certificate](../crates/resin-lir-verifier/src/lib.rs) is a concrete
+The [verification certificate](../crates/resin-lir/src/lib.rs) is a concrete
 example of an abstraction earning its place:
 
 ```rust
-let checked = lir_verifier::VerifiedModule::new(module)?;
-let target = resin_codegen::generate_c(checked.view(), "main", &[])?;
-let text = resin_codegen::print_c(&target);
+let checked = resin_lir::VerifiedModule::new(module)?;
+let project = resin_codegen::generate(checked.view(), Some("main"), directory)?;
+let text = std::fs::read_to_string(project.c_source().unwrap())?;
 ```
 
 The wrapper keeps a module with the analysis that certifies it. The caller can
 borrow the certificate for generation; obtaining editable LIR consumes the wrapper
 and discards the certificate. This prevents a verified flag from surviving an edit
-to the data it describes. The target printer then receives a completed target tree,
-so it needs neither the verifier nor the frontend's construction state.
+to the data it describes. Codegen completes its private target trees and writes a
+source project. Callers receive file paths and a Ninja graph; the target trees never
+become another public language for them to learn.
+
+Immutable sources apply the same idea to editor changes. A `Source` is a shared
+handle to one text version, with a stable logical identity and a diagnostic name.
+Replacing its text creates a new version; existing diagnostics keep the old handle
+and their byte spans still describe the original text. The compiler does not need
+a mutable path-to-text table to recover what those locations mean.
+
+`Compiler::compile(entry, loader)` makes the next boundary explicit: the compiler
+uses the concrete `resin_source::Loader` to obtain imports, then sequences the language
+passes. The loader knows file references, supplied buffers, and explicit source
+bindings. Its operations establish source lookup directly. The compiler caches those
+immutable inputs. Codegen takes its verified output, and the independent toolchain
+builds the generated directory through Ninja. The CLI connects these completed results.
+
+Keeping this implementation together helps explain ownership. `Compiler` declares
+its private cache fields beside its operations; `Compilation` declares the products
+that its queries inspect. Their `lib.rs` can be long because related state and code
+belong together. The public interface remains small, and the reader can follow a
+private operation without tracing forwarding objects across several files.
 
 The same discipline should guide an edit after finding a bug. First trace the
 operation and the facts it needs. Then ask where each fact is established, how it

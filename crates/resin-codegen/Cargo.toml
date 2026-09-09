@@ -5,6 +5,9 @@ edition = "2024"
 publish = false
 
 [dependencies]
-resin-common = { workspace = true }
+resin-types = { workspace = true }
+resin-source = { workspace = true }
 resin-lir = { workspace = true }
-resin-lir-verifier = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

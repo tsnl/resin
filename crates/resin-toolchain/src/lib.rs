@@ -1,31 +1,33 @@
-//! Native tools resolved from explicit process inputs, with locked build caches.
-//!
-//! `Environment` is caller-owned input. `Toolchain` resolves it once and hides
-//! process invocation, dependency tracking, and cache maintenance. Missing tools
-//! are reported only when an operation needs them, so host builds need no glslc.
+//! Build an on-disk Ninja project with captured tools and a locked native cache.
+//! Ninja owns the graph and incremental work. Successful outputs remain available
+//! through `BuiltProject`; executable handles retain its lock during copying or use.
 
-use resin_common::prelude::*;
 use std::{
     collections::BTreeMap,
     ffi::{OsStr, OsString},
     fs, io,
     path::{Path, PathBuf},
     process::Command,
+    sync::Arc,
 };
 
-mod c;
-mod dependencies;
 mod environment;
 mod files;
+mod ninja;
 mod platform;
 mod process;
 mod settings;
-mod shaders;
 
-use files::{copy_output, io_error, parent, write_output};
-pub use platform::DEFAULT_C_COMPILER;
+use files::copy_output;
 use platform::RUNTIME_ARCHIVE;
 use settings::Settings;
+
+#[cfg(not(windows))]
+pub const DEFAULT_C_COMPILER: &str = "cc";
+#[cfg(all(windows, target_env = "msvc"))]
+pub const DEFAULT_C_COMPILER: &str = "clang";
+#[cfg(all(windows, not(target_env = "msvc")))]
+pub const DEFAULT_C_COMPILER: &str = "gcc";
 
 /// Captured process inputs; callers may supply these without changing OS state.
 pub struct Environment {
@@ -81,30 +83,16 @@ pub struct Toolchain {
 }
 
 impl Toolchain {
-    /// Compile and retain a cached executable, locked until the result is dropped.
-    pub fn build_c(
+    /// Stage a complete source directory, build its `build.ninja`, and retain outputs.
+    /// `name` and `entry` identify a stable cache independently of temporary inputs.
+    pub fn build(
         &self,
-        file: &Path,
+        project: &Path,
+        name: &str,
         entry: &str,
-        source: &str,
         profile: CProfile,
-    ) -> Result<Executable, Error> {
-        c::build_c(file, entry, source, &self.settings, profile)
-    }
-
-    /// Compile C directly to an output path using the release profile.
-    pub fn compile_c(&self, source: &str, output: &Path) -> Result<(), Error> {
-        c::compile_c(source, output, &self.settings)
-    }
-
-    /// Compile GLSL and reuse a valid cached SPIR-V result when available.
-    pub fn build_glsl(&self, source: &str, stage: Stage) -> Result<Vec<u8>, Error> {
-        shaders::build_glsl(source, stage, &self.settings)
-    }
-
-    /// Compile GLSL to validated SPIR-V bytes without using the build cache.
-    pub fn compile_glsl(&self, source: &str, stage: Stage) -> Result<Vec<u8>, Error> {
-        shaders::compile_glsl(source, stage, &self.settings)
+    ) -> Result<BuiltProject, Error> {
+        ninja::build(project, name, entry, profile, &self.settings)
     }
 }
 
@@ -114,10 +102,42 @@ pub enum CProfile {
     Release,
 }
 
+/// Successful project files, protected from another build until all handles drop.
+#[derive(Debug)]
+pub struct BuiltProject {
+    directory: PathBuf,
+    lock: Arc<fs::File>,
+}
+
+impl BuiltProject {
+    pub fn directory(&self) -> &Path {
+        &self.directory
+    }
+
+    pub fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
+        self.directory.join(relative)
+    }
+
+    pub fn executable(&self, relative: impl AsRef<Path>) -> Result<Executable, Error> {
+        let executable = self.path(relative);
+        if !executable.is_file() {
+            return Err(Error(format!(
+                "built executable not found: {}",
+                executable.display()
+            )));
+        }
+        Ok(Executable {
+            executable,
+            _lock: self.lock.clone(),
+        })
+    }
+}
+
 /// A native executable whose cache lock is retained during copying and execution.
+#[derive(Debug)]
 pub struct Executable {
     executable: PathBuf,
-    _lock: fs::File,
+    _lock: Arc<fs::File>,
 }
 
 impl Executable {

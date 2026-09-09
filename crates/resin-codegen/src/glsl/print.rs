@@ -1,5 +1,5 @@
 //! Shader source tree → GLSL text; no upstream compiler state is needed.
-use crate::{GlslBlock, GlslEdge, GlslExit, GlslFunction, GlslModule};
+use crate::glsl::{GlslBlock, GlslEdge, GlslExit, GlslFunction, GlslModule};
 use std::fmt::Write;
 
 pub fn module(module: &GlslModule) -> String {

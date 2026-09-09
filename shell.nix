@@ -39,6 +39,7 @@ pkgs.mkShell (
       with pkgs;
       [
         cmake
+        ninja
         pkg-config
       ]
       ++ lib.optional linux wayland-scanner;

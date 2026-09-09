@@ -1,4 +1,4 @@
-use resin_common::prelude::*;
+use resin_types::prelude::*;
 mod support;
 
 #[test]
@@ -85,8 +85,10 @@ fn both_emitters_use_payload_table_indices_as_union_tags() {
             terminator: resin_lir::Terminator::Return,
         }],
     });
-    let host = resin_codegen::emit_c(&module, "main").unwrap();
-    let shader = resin_codegen::emit_glsl(&module, "kernel", Stage::Compute).unwrap();
+    let host_project = support::project::Project::new(&module, Some("main")).unwrap();
+    let shader_project = support::project::Project::new(&module, None).unwrap();
+    let host = std::fs::read_to_string(host_project.generated.c_source().unwrap()).unwrap();
+    let shader = std::fs::read_to_string(shader_project.generated.shaders()[0].source()).unwrap();
     for source in [&host, &shader] {
         assert!(
             source.contains(&format!("struct r_t{optional_id} {{")),
@@ -131,6 +133,6 @@ fn verifier_rejects_duplicate_definitions_and_nested_union_payloads() {
             types: TypeTable::from(definitions),
             ..Default::default()
         };
-        assert!(resin_lir_verifier::verify(&module).is_err());
+        assert!(resin_lir::verify(&module).is_err());
     }
 }

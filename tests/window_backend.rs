@@ -1,4 +1,4 @@
-use resin_common::prelude::*;
+use tempfile::TempDir;
 #[path = "support/toolchain.rs"]
 mod toolchain;
 use std::{
@@ -19,7 +19,7 @@ mod support;
 
 fn compile(source: &str, path: &Path) {
     let cc = std::env::var_os("CC").unwrap_or_else(|| resin_toolchain::DEFAULT_C_COMPILER.into());
-    toolchain::c(&cc).compile_c(source, path).unwrap();
+    toolchain::compile_c(source, path, &cc).unwrap();
 }
 
 fn window_required() -> bool {
@@ -77,7 +77,7 @@ fn succeeded(output: &Output) -> bool {
 #[test]
 #[cfg(target_os = "linux")]
 fn missing_display_returns_status_and_clears_output() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let executable = temp
         .path()
         .join(format!("unavailable{}", std::env::consts::EXE_SUFFIX));
@@ -116,7 +116,7 @@ fn missing_display_returns_status_and_clears_output() {
 
 #[test]
 fn glfw_is_linked_into_c_executables() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let executable = temp
         .path()
         .join(format!("static-glfw{}", std::env::consts::EXE_SUFFIX));
@@ -150,7 +150,7 @@ fn windows_present_resize_and_release_resources() {
         return;
     }
     let _lock = lock_gpu();
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let executable = temp
         .path()
         .join(format!("window{}", std::env::consts::EXE_SUFFIX));
@@ -270,7 +270,7 @@ fn run_example(name: &str) {
     let Some(compiler) = shaders::compiler() else {
         return;
     };
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("examples/{name}.resin"));
     let executable = temp
         .path()
@@ -308,9 +308,13 @@ fn run_example(name: &str) {
     // Close through the runtime after three frames; leave the interactive demo unbounded.
     stmts.extend(support::statements("test_frames := test_frames + 1; if (test_frames == 3) { window.set_should_close(1 == 1)?; } else { () };"));
     let module = pipeline::generate_program(&ast).unwrap();
-    let shaders = pipeline::build_shaders(&module, &toolchain::glsl(&compiler)).unwrap();
-    let c = resin_codegen::emit_c_with_shaders(&module, "main", &shaders).unwrap();
-    compile(&c, &executable);
+    let project = support::project::Project::new(&module, Some("main")).unwrap();
+    let built = project.build(&toolchain::glsl(&compiler)).unwrap();
+    built
+        .executable(project.generated.program().unwrap().file_name().unwrap())
+        .unwrap()
+        .copy_to(&executable)
+        .unwrap();
     if !display_available() {
         return;
     }

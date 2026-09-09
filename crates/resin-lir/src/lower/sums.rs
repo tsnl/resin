@@ -1,19 +1,21 @@
+use super::LowerError;
 use crate::{Instr, Terminator};
-use resin_common::prelude::*;
 use resin_hir::{MatchArm, Term};
+use resin_source::prelude::*;
+use resin_types::prelude::*;
 
 use super::Generator;
-use super::scope::{Initialization, ValueBinding};
+use super::{Initialization, ValueBinding};
 
 impl Generator {
-    pub(super) fn coerce(&mut self, span: Span, from: Ty, to: &Ty) -> Result<Ty, GenerateError> {
+    pub(super) fn coerce(&mut self, span: Span, from: Ty, to: &Ty) -> Result<Ty, LowerError> {
         if &from != to {
             if !from.widens_to(to) {
                 return self
                     .typer
                     .same(to, &from)
                     .map(|()| to.clone())
-                    .map_err(|e| GenerateError::typing(span, e));
+                    .map_err(|e| LowerError::typing(span, e));
             }
             self.emit(if from == Ty::union([]) {
                 Instr::Eliminate { result: to.clone() }
@@ -30,13 +32,13 @@ impl Generator {
         failure: bool,
         arg: &Term,
         expected: &Ty,
-    ) -> Result<Ty, GenerateError> {
+    ) -> Result<Ty, LowerError> {
         let ty @ Ty::Result {
             value,
             error: errors,
         } = expected
         else {
-            return Err(GenerateError::inference(
+            return Err(LowerError::invalid_hir(
                 span,
                 "cannot infer Result; annotate its value and error types",
             ));
@@ -49,27 +51,27 @@ impl Generator {
         Ok(ty.clone())
     }
 
-    pub(super) fn gen_try(&mut self, span: Span, term: &Term) -> Result<Ty, GenerateError> {
+    pub(super) fn gen_try(&mut self, span: Span, term: &Term) -> Result<Ty, LowerError> {
         let ty = self.gen_term(term, None)?;
         let Ty::Result {
             value,
             error: errors,
         } = &ty
         else {
-            return Err(GenerateError::inference(
+            return Err(LowerError::invalid_hir(
                 span,
                 "postfix ? requires a Result value",
             ));
         };
         let result = self.function().result_type().clone();
         let Ty::Result { error: target, .. } = &result else {
-            return Err(GenerateError::inference(
+            return Err(LowerError::invalid_hir(
                 span,
                 "postfix ? requires a Result return type",
             ));
         };
         if !errors.widens_to(target) {
-            return Err(GenerateError::inference(
+            return Err(LowerError::invalid_hir(
                 span,
                 "the return type does not include every propagated error",
             ));
@@ -94,10 +96,10 @@ impl Generator {
             ty: result.clone(),
             tag: Case::Err,
         });
-        let before_cleanup = self.environment.clone();
+        let before_cleanup = self.bindings.clone();
         self.cleanup(0, &result);
         self.terminate(Terminator::Return);
-        self.environment = before_cleanup;
+        self.bindings = before_cleanup;
         self.switch(success);
         self.emit(Instr::TakeLocal { local: saved });
         self.emit(Instr::VariantPayload { tag: Case::Ok });
@@ -109,10 +111,10 @@ impl Generator {
         term: &Term,
         arms: &[MatchArm],
         expected: &Ty,
-    ) -> Result<Ty, GenerateError> {
+    ) -> Result<Ty, LowerError> {
         let ty = self.gen_term(term, None)?;
         let saved = self.save_top(&ty);
-        let before = self.environment.clone();
+        let before = self.bindings.clone();
         let mut after = None;
         let mut result = Some(expected.clone());
         let join = self.new_block("match.join");
@@ -132,14 +134,14 @@ impl Generator {
             } else {
                 None
             };
-            self.environment = before.clone();
+            self.bindings = before.clone();
             self.owned.push(vec![]);
             self.emit(Instr::TakeLocal { local: saved });
             self.emit(Instr::VariantPayload { tag: tag.clone() });
             let payload = ty.payload(tag).unwrap();
             let local = self.save_top(&payload);
             if let Some(binding) = arm.binding {
-                self.environment.bind(
+                self.bindings.insert(
                     binding,
                     ValueBinding {
                         local,
@@ -152,15 +154,15 @@ impl Generator {
             self.cleanup(self.owned.len() - 1, result.as_ref().unwrap());
             self.owned.pop();
             if let Some(previous) = &after {
-                self.environment.intersect_initialization(previous);
+                self.intersect_initialization(previous);
             }
-            after = Some(self.environment.clone());
+            after = Some(self.bindings.clone());
             self.terminate(Terminator::Break { target: join });
             if let Some(next) = next {
                 self.switch(next);
             }
         }
-        self.environment = after.unwrap();
+        self.bindings = after.unwrap();
         self.switch(join);
         Ok(result.unwrap())
     }

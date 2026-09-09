@@ -1,8 +1,10 @@
 use super::Generator;
-use super::scope::{Initialization, ValueBinding};
+use super::{ErrorKind, LowerError};
+use super::{Initialization, ValueBinding};
 use crate::Instr;
-use resin_common::prelude::*;
 use resin_hir::{BindingId, Term};
+use resin_source::prelude::*;
+use resin_types::prelude::*;
 
 impl Generator {
     pub(super) fn gen_define(
@@ -10,9 +12,9 @@ impl Generator {
         id: BindingId,
         name: &Ident,
         init: &Term,
-    ) -> Result<(), GenerateError> {
+    ) -> Result<(), LowerError> {
         let local = self.alloc_local(init.ty.clone(), Some(name.val.clone()));
-        self.environment.bind(
+        self.bindings.insert(
             id,
             ValueBinding {
                 local,
@@ -21,7 +23,7 @@ impl Generator {
             },
         );
         self.gen_term(init, None)?;
-        self.environment.binding_mut(id).unwrap().initialization = Initialization::Initialized;
+        self.bindings.get_mut(&id).unwrap().initialization = Initialization::Initialized;
         self.emit(Instr::SetLocal { local });
         Ok(())
     }
@@ -31,9 +33,9 @@ impl Generator {
         id: BindingId,
         name: &Ident,
         ty: Ty,
-    ) -> Result<(), GenerateError> {
+    ) -> Result<(), LowerError> {
         let local = self.alloc_local(ty.clone(), Some(name.val.clone()));
-        self.environment.bind(
+        self.bindings.insert(
             id,
             ValueBinding {
                 local,
@@ -44,7 +46,7 @@ impl Generator {
         Ok(())
     }
 
-    pub(super) fn gen_var(&mut self, id: BindingId, name: &Ident) -> Result<Ty, GenerateError> {
+    pub(super) fn gen_var(&mut self, id: BindingId, name: &Ident) -> Result<Ty, LowerError> {
         let binding = self.resolve_value(id, name)?;
         self.load_local(binding.local);
         Ok(binding.ty)
@@ -54,7 +56,7 @@ impl Generator {
         &self,
         id: BindingId,
         name: &Ident,
-    ) -> Result<ValueBinding, GenerateError> {
+    ) -> Result<ValueBinding, LowerError> {
         self.resolve_binding(id, name, true)
     }
 
@@ -63,27 +65,23 @@ impl Generator {
         id: BindingId,
         name: &Ident,
         read: bool,
-    ) -> Result<ValueBinding, GenerateError> {
-        let binding = self
-            .environment
-            .binding(id)
-            .cloned()
-            .ok_or_else(|| GenerateError {
-                span: name.span,
-                kind: GenerateErrorKind::UnboundValue {
-                    name: name.val.clone(),
-                },
-            })?;
-        let kind = match binding.initialization {
-            Initialization::Initializing => GenerateErrorKind::EagerRecursion {
+    ) -> Result<ValueBinding, LowerError> {
+        let binding = self.bindings.get(&id).cloned().ok_or_else(|| LowerError {
+            span: name.span,
+            kind: ErrorKind::UnboundValue {
                 name: name.val.clone(),
             },
-            Initialization::Uninitialized if read => GenerateErrorKind::UninitializedValue {
+        })?;
+        let kind = match binding.initialization {
+            Initialization::Initializing => ErrorKind::EagerRecursion {
+                name: name.val.clone(),
+            },
+            Initialization::Uninitialized if read => ErrorKind::UninitializedValue {
                 name: name.val.clone(),
             },
             _ => return Ok(binding),
         };
-        Err(GenerateError {
+        Err(LowerError {
             span: name.span,
             kind,
         })

@@ -8,5 +8,5 @@ def convert(i: uint) -> uint = {
         uint(f + 42.75_f)
     } else { 99_ui }
 };
-def kernel(i: ulong, p: Ptr<uint>) = { if (i == 0_ul) { p.* := convert(uint(i)); }; };
+@compute_shader def kernel(i: ulong, p: Ptr<uint>) = { if (i == 0_ul) { p.* := convert(uint(i)); }; };
 def main() -> int = { var result = 0_ui; kernel(0_ul, &result); if (result == 42_ui) { 0 } else { 1 } };

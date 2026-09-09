@@ -4,7 +4,7 @@ struct Pair { a: uint, b: uint };
 def touch(p: Ptr<State>) -> uint = { var old = p.counter; p.counter := old + 1_ui; old };
 def choose(p: Ptr<State>) -> Ptr<uint> = { touch(p); &p.result };
 def identity(n: uint) -> uint = { n };
-def kernel(i: ulong, root: Ptr<State>) = {
+@compute_shader def kernel(i: ulong, root: Ptr<State>) = {
     if (i == 0_ul) {
         var x = 0_ui;
         x := if (i == 0_ul) { 7_ui } else { 8_ui };

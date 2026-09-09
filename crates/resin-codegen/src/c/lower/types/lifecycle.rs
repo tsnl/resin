@@ -1,5 +1,5 @@
 use super::Types;
-use resin_common::prelude::*;
+use resin_types::prelude::*;
 use std::fmt::Write;
 
 impl Types<'_> {

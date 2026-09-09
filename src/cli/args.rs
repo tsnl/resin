@@ -1,7 +1,7 @@
 //! CLI syntax and conversion into an explicit execution mode.
+use super::request::{Options, Request};
 use super::{Environment, Result, source};
 use clap::CommandFactory;
-use resin_compiler::{Options, Request};
 use resin_toolchain::CProfile;
 use std::{ffi::OsString, path::PathBuf};
 
@@ -16,6 +16,11 @@ pub enum Mode {
         args: Vec<OsString>,
     },
     Compiler(Box<Request>),
+    Embed {
+        input: PathBuf,
+        output: PathBuf,
+        symbol: String,
+    },
     Formatter {
         paths: Vec<PathBuf>,
         check: bool,
@@ -32,7 +37,7 @@ pub fn parse(
     let mode = <Cli as clap::Parser>::parse_from(args).mode(environment)?;
     Ok(Invocation {
         mode,
-        stdlib: environment.path("RESIN_STDLIB", resin_compiler::stdlib_path()),
+        stdlib: environment.path("RESIN_STDLIB", resin_source::stdlib_path()),
     })
 }
 
@@ -40,7 +45,7 @@ pub fn parse(
 #[command(name = "resin", version)]
 struct Cli {
     /// A FILE[:ENTRY] to run/compile, paths to --format, or a directory for --lsp.
-    #[arg(required_unless_present_any = ["format", "lsp"], value_name = "PATH")]
+    #[arg(required_unless_present_any = ["format", "lsp", "embed"], value_name = "PATH")]
     paths: Vec<PathBuf>,
 
     /// Arguments passed literally after --, or additional formatter paths.
@@ -58,6 +63,14 @@ struct Cli {
     /// Serve Language Server Protocol requests over stdin/stdout for this directory.
     #[arg(long, conflicts_with_all = ["format", "check", "destination", "cc", "glslc", "program_args"])]
     lsp: bool,
+
+    /// Convert a binary file into an aligned C byte array without adding a terminator.
+    #[arg(long, value_name = "INPUT", requires_all = ["symbol", "destination"], conflicts_with_all = ["paths", "format", "lsp", "check", "cc", "glslc", "program_args"])]
+    embed: Option<PathBuf>,
+
+    /// C array identifier for --embed; also defines <SYMBOL>_length.
+    #[arg(long, requires = "embed")]
+    symbol: Option<String>,
 
     #[command(flatten)]
     compile: CompileOptions,
@@ -80,6 +93,15 @@ struct CompileOptions {
 
 impl Cli {
     fn mode(self, environment: &Environment) -> Result<Mode> {
+        if let Some(input) = &self.embed {
+            return Ok(Mode::Embed {
+                input: environment.directory.join(input),
+                output: environment
+                    .directory
+                    .join(self.compile.destination.as_ref().expect("required output")),
+                symbol: self.symbol.expect("required symbol"),
+            });
+        }
         if self.lsp {
             return self.language_server(environment);
         }
@@ -123,7 +145,7 @@ impl Cli {
     fn build(self, environment: &Environment) -> Result<Mode> {
         let input = self.input(environment)?;
         let request = Box::new(self.compile.request(input, environment)?);
-        Ok(if request.destination().is_none() {
+        Ok(if request.destination.as_deref().is_none() {
             Mode::Interpreter {
                 request,
                 args: self.program_args,
@@ -133,7 +155,7 @@ impl Cli {
         })
     }
 
-    fn input(&self, environment: &Environment) -> Result<resin_compiler::Input> {
+    fn input(&self, environment: &Environment) -> Result<source::Input> {
         let [path] = self.paths.as_slice() else {
             Self::command().error(clap::error::ErrorKind::WrongNumberOfValues,
                 "running or compiling requires exactly one FILE[:ENTRY]; use --format for multiple paths").exit();
@@ -149,7 +171,7 @@ impl Cli {
 }
 
 impl CompileOptions {
-    fn request(self, input: resin_compiler::Input, environment: &Environment) -> Result<Request> {
+    fn request(self, input: source::Input, environment: &Environment) -> Result<Request> {
         let destination = self
             .destination
             .map(|path| environment.directory.join(path));
@@ -159,10 +181,14 @@ impl CompileOptions {
             CProfile::Release
         };
         let tools = environment.toolchain(self.cc.as_deref(), self.glslc.as_deref());
-        Ok(Request::new(
+        Request::new(
             input,
             destination,
-            Options { profile, tools },
-        )?)
+            Options {
+                profile,
+                tools,
+                temporary: environment.temporary.clone(),
+            },
+        )
     }
 }

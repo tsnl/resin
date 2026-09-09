@@ -1,6 +1,6 @@
-use crate::{CBlock, CBody, CEdge, CEdgeValue, CExit, CFunction};
-use resin_common::prelude::*;
-use resin_lir_verifier::FunctionTypes;
+use crate::c::{CBlock, CBody, CEdge, CEdgeValue, CExit, CFunction};
+use resin_lir::FunctionTypes;
+use resin_types::prelude::*;
 use std::fmt::Write;
 
 use crate::Error;
@@ -108,7 +108,9 @@ fn lower_block(
             diverged = true;
             break;
         }
-        let args = stack.split_off(stack.len() - instr.stack_effect().pops);
+        let args = stack.split_off(
+            stack.len() - flow.operand_count(resin_lir::BlockId::from_index(block_id), i),
+        );
         let result = flow.results[block_id][i].as_ref();
         let name = format!("r_v{block_id}_{i}");
         let expr = instruction(types, function, &name, instr, &args, result, &mut out)
@@ -360,16 +362,11 @@ fn instruction(
             }
         }
         Instr::PointerCast { ty } => format!("({})(uintptr_t)({})", types.name(ty), args[0].expr),
-        Instr::Shader { function, stage } => {
-            let index = types
-                .shaders
-                .iter()
-                .position(|shader| {
-                    shader.function == *function && shader.stage.name() == stage.as_ref()
-                })
-                .ok_or_else(|| Error("shader needs SPIR-V compilation before C emission".into()))?;
+        Instr::Shader { function, .. } => {
+            // Verification tied this instruction to the declared shader and stage.
+            let symbol = crate::shader_symbol(*function);
             format!(
-                "({}){{ (uint8_t *)r_spv{index}, sizeof(r_spv{index}) }}",
+                "({}){{ (uint8_t *){symbol}, {symbol}_length }}",
                 types.name(result.unwrap())
             )
         }

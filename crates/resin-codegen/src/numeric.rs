@@ -1,4 +1,4 @@
-use resin_common::prelude::*;
+use resin_types::prelude::*;
 fn integer(ty: &Ty) -> Option<(u32, bool)> {
     Some(match ty {
         Ty::Int8 => (8, true),

@@ -1,10 +1,3 @@
-#[cfg(not(windows))]
-pub const DEFAULT_C_COMPILER: &str = "cc";
-#[cfg(all(windows, target_env = "msvc"))]
-pub const DEFAULT_C_COMPILER: &str = "clang";
-#[cfg(all(windows, not(target_env = "msvc")))]
-pub const DEFAULT_C_COMPILER: &str = "gcc";
-
 #[cfg(not(target_env = "msvc"))]
 pub(crate) const RUNTIME_ARCHIVE: &str = "libresin_runtime.a";
 #[cfg(target_env = "msvc")]

@@ -2,7 +2,8 @@
 
 This is the historical implementation plan. The current layout uses the root
 `resin` executable with `--lsp <directory>`, the `resin-lsp` protocol library,
-and the `resin-compiler` library. See [current setup](README.md).
+the `resin-compiler` library, and the filesystem adapter in `resin-source`.
+See [current setup](README.md).
 
 Scope: a Zed extension plus a reusable language server providing diagnostics,
 hover, go-to-definition, and basic completion. Development targets 64-bit Linux.
@@ -16,24 +17,27 @@ The grammar migration is complete in commit `2a39afd`. Editor implementation is
 on the stack above; see the [extension setup](README.md) and
 [compiler/server architecture](../../crates/resin-lsp/README.md).
 
-The compiler is now designed around a long-lived `compiler::Session`, shared by
-the CLI and the LSP. The session owns overlays, incremental syntax trees, cached
-ASTs, dependency invalidation, and immutable checked snapshots. Hosts provide
-change events. The LSP is a protocol adapter and background-worker host. The CLI
-retains its existing build/run/exit behavior. Semantic caches are per entry and
-its import closure; per-function incremental checking is follow-up work.
+The current compiler API accepts immutable `Source` values from
+`resin_source::prelude::*` and a concrete `resin_source::Loader` that resolves imports.
+A reusable `resin_compiler::Compiler` owns syntax and compilation caches;
+`compile` returns an immutable `Compilation`. Every call resolves imports before
+reusing a result. Native generation passes verified LIR to codegen; the toolchain builds its Ninja project.
+`resin_source::Loader` owns filesystem identities and standard-library lookup.
+The language server owns open buffers, URI/version bookkeeping, frontend revisions,
+and its background worker. Buffer changes supply new immutable source versions
+and schedule compilation. Semantic caches cover each entry's import closure;
+per-function incremental checking remains follow-up work. The CLI retains its
+build/run/exit behavior.
 Module analysis follows the declarations-only grammar and needs no exported
 entry; the CLI selects an exported function with `FILE:ENTRY`. Function/type/local
 declarations use `def`/`type`/`var`, and omitted function returns default to unit.
 
-Automated validation completed on Linux: native protocol tests, compiler/session
+Earlier automated validation completed on Linux: native protocol tests, compiler
 tests, query capture tests, workspace tests with GPU and shader checks required,
 Clippy in both workspaces, and the WASI build. Coverage includes the current
 `def`/`var`/`type` syntax and omitted unit result annotations. Earlier Zed 1.17.2
 smoke tests under Xvfb covered imported/standard-library navigation and unsaved
 editor features; the most recent editor smoke test used grammar pin `79e4a26`.
-Changed Rust files pass rustfmt; the pre-existing formatting difference in
-`src/ir/types/mod.rs` remains outside this change.
 
 ## Repository layout
 
@@ -54,8 +58,9 @@ editors/zed/
 crates/resin-lsp/
   Cargo.toml
   src/
-  tests/
 crates/resin-compiler/src/lib.rs
+crates/resin-source/src/lib.rs
+tests/lsp.rs                     # complete executable protocol tests
 crates/tree-sitter-resin/          # grammar tracked directly in this repository
 ```
 
@@ -65,8 +70,9 @@ workspace: its WebAssembly build should only depend on Zed's extension API.
 No separate extension repository is needed: Zed's registry supports a repository
 subdirectory through `path = "editors/zed"` in its registry entry. See the
 [publishing guide](https://zed.dev/docs/extensions/publishing/publishing-guide).
-Add `resin-lsp` as a native workspace member depending on the Resin library.
-Keep compiler state and shared analysis in that library, with no Zed or LSP protocol types.
+Keep `resin-lsp` as a native workspace library depending on `resin-compiler` and
+`resin-source`. Compiler caches and phase products contain no Zed or LSP protocol
+types; open buffers and protocol revisions belong to the language server.
 
 Use the grammar in `https://github.com/tsnl/resin` with
 `path = "crates/tree-sitter-resin"` and pin a Resin commit containing the required parser.
@@ -88,15 +94,17 @@ or a document contains incomplete code.
 
 ## 2. Expose compiler analysis suitable for editing
 
-The AST already retains byte spans. `ast::load`, however, reads and canonicalizes
-files directly, and `SourceError` retains only a path and formatted message.
-Semantic scopes and definition origins currently live inside IR generation.
+The AST retains byte spans, and source locations retain immutable `Source`
+handles. Source scopes and definition origins belong to HIR construction; the
+compiler's `Compilation` exposes diagnostics and queries over those phase products.
 
-Introduce a source-provider interface with a filesystem implementation for the
-CLI and an in-memory overlay for editor buffers. Preserve relative imports,
-`std/`, `RESIN_STDLIB`, canonical identity for existing files, explicit exports,
-re-exports, duplicate-import handling, and cycle detection. Support file-backed
-buffers that have not yet been saved without requiring them to exist on disk.
+Use `resin_source::Loader` to resolve references from their importing source.
+The CLI loads files; the server registers authoritative buffer text through
+`source_from_text` and removes it with `remove_source` when a document closes. Preserve relative imports, `$/std/`, `RESIN_STDLIB`,
+canonical filesystem identities, explicit exports, re-exports, duplicate-import
+handling, and cycle detection. File-backed buffers need not exist on disk.
+`resin_source::Loader` maps logical source identities back to exact OS paths, including
+paths that have identical lossy display names.
 
 Preserve structured diagnostics: source identity, byte range, severity, message,
 and related locations for import chains or conflicting definitions. Keep CLI
@@ -124,26 +132,28 @@ Use `lsp-server`, `lsp-types`, and serde-based message conversion. Run over stdi
 reserve stdout for protocol messages and send logs to stderr. Implement lifecycle,
 capability negotiation, unsupported-request responses, cancellation, and clean exit.
 
-Maintain document URI, version, and a line index. Let the compiler session own
-source text and cached analysis. Start with full-document synchronization and
-incremental Tree-sitter reparsing; handle open/change/save/close notifications and
-clear obsolete diagnostics. Convert byte spans to UTF-16 LSP positions, including
+Maintain document URI, version, open-buffer sources, and a line index in the
+server. Submit immutable sources to the compiler and retain its completed results.
+Use full-document synchronization with incremental Tree-sitter reparsing; handle
+open/change/save/close notifications and clear obsolete diagnostics. Convert byte spans to UTF-16 LSP positions, including
 non-BMP characters, CRLF, and end-of-file ranges.
 
-Treat each open file as an analysis entry with its transitive imports. Unsaved
-overlays apply to imported files as well as the entry. Track reverse dependencies
-so changes invalidate affected open entries. Handle watched-file changes for disk
-dependencies and advertise/register only supported capabilities. Aggregate results
-by source URI so one entry cannot clear another entry's active diagnostics.
+Treat each open file as an analysis entry with its transitive imports. The shared
+loader supplies registered buffers for both entries and imports. Edits and watched-file
+changes schedule analysis; each compiler call resolves imports again, so missing
+files and retargeted symlinks are discovered without compiler notifications.
+Advertise/register only supported capabilities. Aggregate results by source URI so
+one entry cannot clear another entry's active diagnostics.
 
-Run analysis on immutable snapshots with a worker, coalesce pending edits, and
-discard results whose document or dependency versions changed. Keep protocol
+Run compilation on immutable sources in a worker, coalesce pending edits, and
+discard results whose frontend revision is obsolete. Keep protocol
 handling responsive while analysis is running.
 
-Analysis uses parsing, resolution, and typing without invoking C compilation,
-shader compilation, GPU operations, or user programs. The initial native package
-still builds the existing Resin library and its runtime dependency in `shell.nix`;
-removing that build dependency can be a separate change.
+Analysis uses parsing, resolution, typing, and LIR verification without invoking
+C compilation, shader compilation, GPU operations, or user programs. Native builds
+pass verified LIR to codegen and build the resulting Ninja project through the toolchain. The root executable also links
+the runtime for its build/run modes; the compiler and LSP libraries have no runtime
+dependency.
 
 ## 4. Implement the agreed editor features
 
@@ -162,8 +172,8 @@ imports and inferred record-field completion are outside this first version.
 ## 5. Connect Zed and validate the complete workflow
 
 Register the language server in `editors/zed/extension.toml`. The Rust adapter
-launches a configured executable or finds `resin-lsp` through Zed's worktree PATH
-API. Preserve the worktree environment, including `RESIN_STDLIB` and Nix library
+launches a configured executable or finds `resin` through Zed's worktree PATH
+API, passing `--lsp <directory>`. Preserve the worktree environment, including `RESIN_STDLIB` and Nix library
 paths. Provide an actionable installation message when the executable is missing.
 
 Document building/installing the native server inside `nix-shell`, installing
@@ -187,9 +197,10 @@ Validation:
   Zed 1.17.2 is available as `zeditor`; use an isolated Xvfb display for validation
   in this environment.
 
-References, rename, signature help, formatting, automatic server downloads, and
-extension-registry publication are follow-up work. Resin's current AST printer
-emits S-expressions and cannot serve as a source formatter.
+References, rename, signature help, automatic server downloads, and
+extension-registry publication remain follow-up work. Whole-document formatting
+is implemented through `resin_cst::format_source`; the AST printer remains an
+S-expression renderer for inspecting that phase.
 
 ## References
 

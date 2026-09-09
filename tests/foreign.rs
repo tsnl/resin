@@ -1,28 +1,19 @@
-use resin_common::prelude::*;
-#[path = "support/toolchain.rs"]
-mod toolchain;
-use std::{ffi::OsString, fs, process::Command};
+use resin_types::prelude::*;
+use std::fs;
 use support::pipeline;
+use tempfile::TempDir;
 
 mod support;
 use support::module;
 
 fn run(source: &str) -> std::process::Output {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let executable = temp
-        .path()
-        .join(format!("program{}", std::env::consts::EXE_SUFFIX));
-    let source = resin_codegen::emit_c(&module(source), "main").unwrap();
-    let cc = std::env::var_os("CC")
-        .unwrap_or_else(|| OsString::from(resin_toolchain::DEFAULT_C_COMPILER));
-    toolchain::c(&cc)
-        .compile_c(&source, &executable)
-        .unwrap_or_else(|error| panic!("{error}\n{source}"));
-    Command::new(executable).output().unwrap()
+    support::project::Project::new(&module(source), Some("main"))
+        .unwrap()
+        .run()
 }
 
 fn error(source: &str) -> String {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let path = temp.path().join("source.resin");
     fs::write(&path, source).unwrap();
     pipeline::generate_program(&pipeline::load(&path).unwrap())
@@ -32,7 +23,7 @@ fn error(source: &str) -> String {
 
 #[test]
 fn foreign_functions_are_unary_values_with_c_argument_wrappers() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let header = temp.path().join("foreign.h");
     fs::write(&header, "static inline int answer(void) { return 42; }\nstatic inline void assign(int *out, int value) { *out = value; }\n").unwrap();
     let source = format!(
@@ -116,7 +107,7 @@ fn foreign_aggregate_values_and_implicit_pointer_casts_are_rejected() {
 
 #[test]
 fn imports_are_relative_deduplicated_and_checked_for_cycles() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let main = temp.path().join("main.resin");
     let nested = temp.path().join("nested");
     fs::create_dir(&nested).unwrap();
@@ -176,12 +167,16 @@ fn spirv_requires_a_decorated_function_declaration() {
     let main = &module.functions[module.entries["main"].index()];
     assert_eq!(main.locals[1].ty, Ty::shader());
     assert_eq!(module.shaders.len(), 1);
+    let project = support::project::Project::new(&module, Some("main")).unwrap();
+    assert_eq!(project.generated.shaders().len(), 1);
+    let shader = &project.generated.shaders()[0];
+    assert!(shader.source().is_file());
     assert!(
-        resin_codegen::emit_c(&module, "main")
-            .unwrap_err()
-            .to_string()
-            .contains("SPIR-V compilation")
+        !shader.header().exists(),
+        "the toolchain supplies compiled bytes"
     );
+    let source = fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
+    assert!(source.contains(shader.symbol()));
 }
 
 #[test]

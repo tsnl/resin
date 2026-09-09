@@ -1,17 +1,19 @@
 //! Allocate storage for parameters and turn one structured body into blocks.
 use super::Generator;
+use super::LowerError;
 use super::builder::FunctionBuilder;
-use super::scope::{Environment, Initialization, ValueBinding};
+use super::{Initialization, ValueBinding};
 use crate::{Instr, Terminator};
-use resin_common::prelude::*;
 use resin_hir::{Function, Parameter, Signature};
+use resin_source::prelude::*;
+use resin_types::prelude::*;
 
 impl Generator {
     pub(super) fn gen_function(
         &mut self,
         id: FunctionId,
         source: &Function,
-    ) -> Result<(), GenerateError> {
+    ) -> Result<(), LowerError> {
         self.begin_function(id, source);
         if let Some(body) = &source.body {
             self.bind_params(&source.signature);
@@ -28,7 +30,7 @@ impl Generator {
 
     fn begin_function(&mut self, id: FunctionId, source: &Function) {
         self.function_id = Some(id);
-        self.environment = Environment::new();
+        self.bindings.clear();
         self.owned.clear();
         self.owned.push(vec![LocalId::from_index(0)]);
         self.set_function_origin(id);
@@ -38,10 +40,9 @@ impl Generator {
     }
 
     fn set_function_origin(&mut self, id: FunctionId) {
-        if let Some(origin) = self.module.origins.functions.get(&id) {
-            self.source_path = origin.path.clone();
-            self.source_span = origin.span;
-        }
+        let origin = self.module.origins.functions.get(&id);
+        self.source = origin.map(|origin| origin.source.clone());
+        self.source_span = origin.map_or(Span { start: 0, end: 0 }, |origin| origin.span);
     }
 
     fn finish_function(&mut self, id: FunctionId, source: &Function) {
@@ -76,7 +77,7 @@ impl Generator {
             self.unpack_parameter(local, index, ty);
             local
         };
-        self.environment.bind(
+        self.bindings.insert(
             parameter.binding.expect("checked body parameter"),
             ValueBinding {
                 local,

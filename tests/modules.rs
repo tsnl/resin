@@ -1,12 +1,12 @@
-use resin_common::prelude::*;
-#[path = "support/toolchain.rs"]
-mod toolchain;
+use resin_hir::GenerateErrorKind;
+use resin_source::prelude::*;
+use resin_types::prelude::*;
 use std::{
-    ffi::OsString,
     fs,
     process::{Command, Output},
 };
 use support::pipeline;
+use tempfile::TempDir;
 
 mod support;
 
@@ -14,7 +14,7 @@ struct Project(TempDir);
 
 impl Project {
     fn new(files: &[(&str, &str)]) -> Self {
-        let project = Self(TempDir::new(&std::env::temp_dir()).unwrap());
+        let project = Self(TempDir::new_in(std::env::temp_dir()).unwrap());
         for (name, source) in files {
             let path = project.0.path().join(name);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -29,17 +29,9 @@ impl Project {
 
     fn run(&self) -> Output {
         let module = self.compile().unwrap();
-        let source = resin_codegen::emit_c(&module, "main").unwrap();
-        let executable = self
-            .0
-            .path()
-            .join(format!("program{}", std::env::consts::EXE_SUFFIX));
-        let compiler = std::env::var_os("CC")
-            .unwrap_or_else(|| OsString::from(resin_toolchain::DEFAULT_C_COMPILER));
-        toolchain::c(&compiler)
-            .compile_c(&source, &executable)
-            .unwrap();
-        Command::new(executable).output().unwrap()
+        support::project::Project::new(&module, Some("main"))
+            .unwrap()
+            .run()
     }
 
     fn error(&self, expected: &str) -> String {
@@ -388,7 +380,7 @@ fn private_main_is_not_an_entry_point() {
         ]);
         if !root.starts_with("export") {
             assert!(
-                resin_codegen::emit_c(&project.compile().unwrap(), "main")
+                support::project::Project::new(&project.compile().unwrap(), Some("main"))
                     .unwrap_err()
                     .to_string()
                     .contains("export { main }")
@@ -414,7 +406,7 @@ fn an_imported_main_must_be_reexported_to_be_an_entry_point() {
         ]);
         if exports.is_empty() {
             assert!(
-                resin_codegen::emit_c(&project.compile().unwrap(), "main")
+                support::project::Project::new(&project.compile().unwrap(), Some("main"))
                     .unwrap_err()
                     .to_string()
                     .contains("export { main }")
@@ -426,7 +418,7 @@ fn an_imported_main_must_be_reexported_to_be_an_entry_point() {
 }
 
 #[test]
-fn shader_entry_lookup_uses_the_entry_files_scope() {
+fn shader_declarations_preserve_the_entry_files_export_scope() {
     let project = Project::new(&[
         (
             "left.resin",
@@ -442,7 +434,17 @@ fn shader_entry_lookup_uses_the_entry_files_scope() {
         ),
     ]);
     let module = project.compile().unwrap();
-    resin_codegen::emit_glsl(&module, "kernel", Stage::Compute).unwrap();
+    let kernel = module.entries["kernel"];
+    assert!(module.shaders[&kernel].embedded);
+    assert_eq!(module.shaders.len(), 3);
+    assert_eq!(
+        module
+            .shaders
+            .values()
+            .filter(|shader| shader.embedded)
+            .count(),
+        1
+    );
     let project = Project::new(&[
         (
             "library.resin",
@@ -450,26 +452,27 @@ fn shader_entry_lookup_uses_the_entry_files_scope() {
         ),
         ("main.resin", "import { \"library.resin\" };"),
     ]);
-    assert!(
-        resin_codegen::emit_glsl(&project.compile().unwrap(), "kernel", Stage::Compute).is_err()
-    );
+    let module = project.compile().unwrap();
+    assert!(!module.entries.contains_key("kernel"));
+    assert_eq!(module.shaders.len(), 1);
+    assert!(!module.shaders.values().next().unwrap().embedded);
 }
 
 #[test]
 fn standard_library_imports_work_outside_the_repository() {
     let project = Project::new(&[(
         "main.resin",
-        "export { main }; import { \"std/status.resin\", \"std/graphics.resin\", \"std/image.resin\" }; def main() -> Result<int, _> = { RuntimeStatus.from_code(0)?; ok(RuntimeStatus.code(Incomplete {}) + 35) };",
+        "export { main }; import { \"$/std/status.resin\", \"$/std/graphics.resin\", \"$/std/image.resin\" }; def main() -> Result<int, _> = { RuntimeStatus.from_code(0)?; ok(RuntimeStatus.code(Incomplete {}) + 35) };",
     )]);
     assert_eq!(project.run().status.code(), Some(42));
     Project::new(&[(
         "main.resin",
-        "export { main }; import { \"std/status.resin\" }; def main() = { resin_status_string(0); };",
+        "export { main }; import { \"$/std/status.resin\" }; def main() = { resin_status_string(0); };",
     )])
     .error("UnboundValue");
     Project::new(&[(
         "main.resin",
-        "export { main }; import { \"std/window.resin\" }; def main() = { Gpu.new(); };",
+        "export { main }; import { \"$/std/window.resin\" }; def main() = { Gpu.new(); };",
     )])
     .error("UnboundType");
 }
@@ -487,7 +490,7 @@ fn standard_library_can_be_relocated_and_does_not_capture_relative_imports() {
         ),
         (
             "main.resin",
-            "export { main }; import { \"std/library.resin\", \"library.resin\" }; def main() -> () = { print(fmt(\"{0}\", (answer() + local(),))); };",
+            "export { main }; import { \"$/std/library.resin\", \"library.resin\" }; def main() -> () = { print(fmt(\"{0}\", (answer() + local(),))); };",
         ),
     ]);
     let output = Command::new(env!("CARGO_BIN_EXE_resin"))
@@ -508,9 +511,9 @@ fn standard_library_can_be_relocated_and_does_not_capture_relative_imports() {
 fn invalid_import_paths_report_the_importing_file() {
     for path in [
         "missing.resin",
-        "std/missing.resin",
-        "std/../Cargo.toml",
-        "std/",
+        "$/std/missing.resin",
+        "$/std/../Cargo.toml",
+        "$/std/",
         "",
     ] {
         let error = Project::new(&[("main.resin", &format!("import {{ \"{path}\" }};"))])
@@ -563,8 +566,8 @@ fn entry_bindings_are_verified() {
     module
         .entries
         .insert("main".into(), FunctionId::from_index(999));
-    assert!(resin_lir_verifier::verify(&module).is_err());
-    assert!(resin_codegen::emit_c(&module, "main").is_err());
+    assert!(resin_lir::verify(&module).is_err());
+    assert!(resin_lir::VerifiedModule::new(module).is_err());
 }
 
 #[test]
@@ -617,7 +620,8 @@ fn declarations_do_not_create_a_module_initializer() {
     assert_eq!(module.functions.len(), 1);
     assert_eq!(module.functions[0].name.as_deref(), Some("answer"));
     assert_eq!(module.entries.len(), 1);
-    let source = resin_codegen::emit_c(&module, "answer").unwrap();
+    let project = support::project::Project::new(&module, Some("answer")).unwrap();
+    let source = fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
     assert!(source.contains("int main(int r_argc, char **r_argv) {\n  (void)r_argc; (void)r_argv;\n  atexit(resin_cleanup);\n  return r_fn0(0);\n}"));
 }
 

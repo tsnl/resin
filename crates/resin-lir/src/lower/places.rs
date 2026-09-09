@@ -1,9 +1,10 @@
+use super::{ErrorKind, LowerError};
 use crate::Instr;
-use resin_common::prelude::*;
 use resin_hir::{Term, TermKind};
+use resin_types::prelude::*;
 
 use super::Generator;
-use super::scope::Initialization;
+use super::Initialization;
 
 pub(super) enum Operand {
     Value(Ty),
@@ -11,10 +12,10 @@ pub(super) enum Operand {
 }
 
 impl Generator {
-    pub(super) fn gen_assign(&mut self, place: &Term, value: &Term) -> Result<Ty, GenerateError> {
+    pub(super) fn gen_assign(&mut self, place: &Term, value: &Term) -> Result<Ty, LowerError> {
         let place_ty = self.gen_place(place)?;
         let Ty::Pointer { pointee } = place_ty else {
-            return Err(GenerateError::typing(
+            return Err(LowerError::typing(
                 place.span,
                 TypeError {
                     kind: TypeErrorKind::ExpectedPointer { found: place_ty },
@@ -24,8 +25,8 @@ impl Generator {
         let ty = self.gen_term(value, Some(&pointee))?;
         self.emit(Instr::Store);
         if let TermKind::Local { binding: id, .. } = &place.kind {
-            self.environment
-                .binding_mut(*id)
+            self.bindings
+                .get_mut(id)
                 .expect("assigned binding")
                 .initialization = Initialization::Initialized;
         }
@@ -36,7 +37,7 @@ impl Generator {
         &mut self,
         base: &Term,
         access: &FieldAccess,
-    ) -> Result<Ty, GenerateError> {
+    ) -> Result<Ty, LowerError> {
         self.check_place_initialized(base)?;
         let base = self.gen_operand(base)?;
         match self.gen_field_operand(base, access)? {
@@ -48,21 +49,21 @@ impl Generator {
         }
     }
 
-    pub(super) fn gen_place(&mut self, term: &Term) -> Result<Ty, GenerateError> {
+    pub(super) fn gen_place(&mut self, term: &Term) -> Result<Ty, LowerError> {
         match self.gen_operand(term)? {
             Operand::Place(ty) => Ok(Ty::Pointer {
                 pointee: Box::new(ty),
             }),
-            Operand::Value(_) => Err(GenerateError {
+            Operand::Value(_) => Err(LowerError {
                 span: term.span,
-                kind: GenerateErrorKind::NotAPlace,
+                kind: ErrorKind::NotAPlace,
             }),
         }
     }
 
     // Lower once, preserving an address when available. Speculatively generating
     // a place and then retrying as a value can evaluate side effects twice.
-    pub(super) fn gen_operand(&mut self, term: &Term) -> Result<Operand, GenerateError> {
+    pub(super) fn gen_operand(&mut self, term: &Term) -> Result<Operand, LowerError> {
         match &term.kind {
             TermKind::Local { binding: id, name } => {
                 let binding = self.resolve_binding(*id, name, false)?;
@@ -95,7 +96,7 @@ impl Generator {
         &mut self,
         base: Operand,
         access: &FieldAccess,
-    ) -> Result<Operand, GenerateError> {
+    ) -> Result<Operand, LowerError> {
         let (mut base_ty, mut is_place) = match base {
             Operand::Value(ty) => (ty, false),
             Operand::Place(ty) => (ty, true),
@@ -154,7 +155,7 @@ impl Generator {
         }
     }
 
-    pub(super) fn check_place_initialized(&self, term: &Term) -> Result<(), GenerateError> {
+    pub(super) fn check_place_initialized(&self, term: &Term) -> Result<(), LowerError> {
         match &term.kind {
             TermKind::Local { binding: id, name } => {
                 self.resolve_value(*id, name)?;

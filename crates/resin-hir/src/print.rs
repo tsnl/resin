@@ -1,7 +1,7 @@
 //! Inspect the resolved tree without the AST, scopes, or inference state.
 use crate::{Arguments, Function, MatchArm, Module, Parameter, Statement, Term, TermKind};
-use resin_common::prelude::*;
-use resin_common::types::print::format_type;
+use resin_types::format_type;
+use resin_types::prelude::*;
 
 use sexpfmt::{PrinterConfig, SExp, SExpBookendStyle, sexp_to_string};
 
@@ -110,7 +110,7 @@ impl Printer<'_> {
 
     fn kind(&self, kind: &TermKind) -> SExp {
         match kind {
-            TermKind::Constant(value) => list("constant", vec![quoted(format!("{value:?}"))]),
+            TermKind::Constant { value } => list("constant", vec![quoted(format!("{value:?}"))]),
             TermKind::Local { binding: id, name } => {
                 list("local", vec![binding(*id), atom(&name.val)])
             }
@@ -152,7 +152,7 @@ impl Printer<'_> {
                 list(name, args.iter().map(|t| self.term(t)).collect())
             }
             TermKind::Call { func, arg } => list("call", vec![self.term(func), self.term(arg)]),
-            TermKind::Pack(args) => self.arguments(args),
+            TermKind::Pack { args } => self.arguments(args),
             TermKind::Intrinsic { op, args } => list(
                 "intrinsic",
                 vec![atom(format!("{op:?}")), self.arguments(args)],

@@ -1,6 +1,6 @@
 use resin_ast::{SourceModule, StmtKind, TermKind};
-use resin_common::prelude::*;
 use resin_cst::Document;
+use resin_source::prelude::*;
 
 #[test]
 fn recovery_keeps_original_byte_spans_and_incomplete_function_bodies() {
@@ -42,8 +42,7 @@ fn recovering_valid_syntax_matches_strict_generation() {
 fn source_locations_tolerate_editor_offsets_inside_utf8() {
     let source = "// é🌲\ndef main() = {};";
     let module = SourceModule {
-        path: "memory.resin".into(),
-        source: source.into(),
+        source: Source::new("memory.resin", source),
         file: resin_ast::generate(&Document::reparse(source.into(), None)).unwrap(),
         imports: vec![],
     };

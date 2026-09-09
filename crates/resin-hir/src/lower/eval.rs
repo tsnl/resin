@@ -1,10 +1,134 @@
-use crate::lower::context::Context;
-use resin_common::prelude::*;
-use std::fmt;
+//! Evaluate source types and literals, retaining inference holes during annotation decoding.
+use super::{
+    context::Context,
+    infer::{Head, Solver, Type, VariableId},
+    scope::ContextView,
+};
+use crate::{GenerateError, GenerateErrorKind};
+use resin_ast::TypeKind;
+use resin_source::prelude::*;
+use resin_types::prelude::*;
+use std::{collections::HashSet, fmt};
 
-use resin_ast::Type;
+pub(super) struct Decoded {
+    pub ty: Type,
+    pub holes: Vec<(Span, VariableId)>,
+}
 
-use super::scope::ContextView;
+pub(super) struct Decoder<'a> {
+    pub solver: &'a mut Solver,
+    pub holes: Vec<(Span, VariableId)>,
+    pub resolve: &'a mut dyn FnMut(&Ident) -> Result<Type, GenerateError>,
+}
+
+impl Decoder<'_> {
+    pub fn decode(mut self, ann: &resin_ast::Type, infer: bool) -> Result<Decoded, GenerateError> {
+        let ty = self.ty(ann, infer)?;
+        Ok(Decoded {
+            ty,
+            holes: self.holes,
+        })
+    }
+
+    fn ty(&mut self, ann: &resin_ast::Type, infer: bool) -> Result<Type, GenerateError> {
+        Ok(match &ann.val {
+            TypeKind::Unit => Ty::Unit.into(),
+            TypeKind::Hole => {
+                return Err(GenerateError {
+                    span: ann.span,
+                    kind: GenerateErrorKind::IncompleteSyntax,
+                });
+            }
+            TypeKind::Infer => {
+                if !infer {
+                    return Err(GenerateError::inference(
+                        ann.span,
+                        "type holes are only allowed in local annotations and function results",
+                    ));
+                }
+                let variable = self.solver.fresh_variable();
+                self.holes.push((ann.span, variable));
+                variable.ty()
+            }
+            TypeKind::Atom { name } => builtin_ty(&name.val)
+                .map(|ty| Ok(ty.into()))
+                .unwrap_or_else(|| (self.resolve)(name))?,
+            TypeKind::App { head, arg } => {
+                let arg = self.ty(arg, infer)?;
+                let head = match head.val.as_ref() {
+                    "Ptr" => Head::Pointer,
+                    "Arc" => Head::Arc,
+                    "Weak" => Head::Weak,
+                    "Span" => Head::Span,
+                    _ => {
+                        return Err(GenerateError {
+                            span: head.span,
+                            kind: GenerateErrorKind::UnknownTypeFormer {
+                                name: head.val.clone(),
+                            },
+                        });
+                    }
+                };
+                Type::Node(head, vec![arg])
+            }
+            TypeKind::Func { from, to } => {
+                Type::function(self.ty(from, infer)?, self.ty(to, infer)?)
+            }
+            TypeKind::Record { fields } => {
+                let fields = fields
+                    .iter()
+                    .map(|(name, ty)| Ok((name.val.clone(), self.ty(ty, infer)?)))
+                    .collect::<Result<Vec<_>, GenerateError>>()?;
+                let mut names = HashSet::new();
+                for (name, _) in &fields {
+                    if !names.insert(name) {
+                        return Err(GenerateError::typing(
+                            ann.span,
+                            TypeError {
+                                kind: TypeErrorKind::DuplicateField { name: name.clone() },
+                            },
+                        ));
+                    }
+                }
+                Type::record(fields)
+            }
+            TypeKind::Result { value, error } => {
+                let value = self.ty(value, infer)?;
+                let error = self.ty(error, infer)?;
+                self.solver.errors(&error, ann.span)?;
+                Type::result(value, error)
+            }
+            TypeKind::Union { left, right } => {
+                let left = self.ty(left, false)?;
+                let right = self.ty(right, false)?;
+                Ty::union_of([
+                    self.solver.require(&left, ann.span)?,
+                    self.solver.require(&right, ann.span)?,
+                ])
+                .into()
+            }
+        })
+    }
+}
+
+fn builtin_ty(name: &str) -> Option<Ty> {
+    Some(match name {
+        "Never" => Ty::union([]),
+        "None" => Ty::None,
+        "bool" => Ty::Bool,
+        "sbyte" => Ty::Int8,
+        "short" => Ty::Int16,
+        "int" => Ty::Int32,
+        "long" => Ty::Int64,
+        "ubyte" => Ty::UInt8,
+        "ushort" => Ty::UInt16,
+        "uint" => Ty::UInt32,
+        "ulong" => Ty::UInt64,
+        "float32" => Ty::Float32,
+        "float64" => Ty::Float64,
+        _ => return None,
+    })
+}
 
 pub(crate) struct Evaluator<'a> {
     pub(crate) scopes: &'a ContextView,
@@ -14,7 +138,7 @@ pub(crate) struct Evaluator<'a> {
 impl Evaluator<'_> {
     pub(super) fn type_name(&self, name: &Ident) -> Result<Ty, GenerateError> {
         let ty = self.scopes.resolve_type(name)?;
-        crate::lower::infer::solver::Solver::default().require(&ty, name.span)
+        crate::lower::infer::Solver::default().require(&ty, name.span)
     }
 
     pub(super) fn number(
@@ -24,7 +148,7 @@ impl Evaluator<'_> {
         expected: Option<&Ty>,
     ) -> Result<(Value, Ty), GenerateError> {
         let ty = self.numeric_type(span, text, expected)?;
-        let (text, _) = resin_common::types::literal::split(text);
+        let (text, _) = resin_types::literal::split(text);
         let value = parse_number(text, &ty).map_err(|message| GenerateError {
             span,
             kind: GenerateErrorKind::InvalidLiteral {
@@ -40,7 +164,7 @@ impl Evaluator<'_> {
         text: &str,
         expected: Option<&Ty>,
     ) -> Result<Ty, GenerateError> {
-        if let (_, Some(ty)) = resin_common::types::literal::split(text) {
+        if let (_, Some(ty)) = resin_types::literal::split(text) {
             return Ok(ty);
         }
         if let Some(expected) = expected {
@@ -55,9 +179,9 @@ impl Evaluator<'_> {
         Ok(self.typer.type_num(text))
     }
 
-    pub(crate) fn ty(&self, ty: &Type) -> Result<Ty, GenerateError> {
-        let mut solver = crate::lower::infer::solver::Solver::default();
-        let inferred = super::annotation::Decoder {
+    pub(crate) fn ty(&self, ty: &resin_ast::Type) -> Result<Ty, GenerateError> {
+        let mut solver = crate::lower::infer::Solver::default();
+        let inferred = Decoder {
             solver: &mut solver,
             holes: Vec::new(),
             resolve: &mut |name| {
@@ -196,7 +320,7 @@ mod tests {
             typer: &typer,
         };
         let span = Span { start: 4, end: 8 };
-        let named = Type::new(
+        let named = resin_ast::Type::new(
             TypeKind::Atom {
                 name: Ident::new("Byte".into(), span),
             },

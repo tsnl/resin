@@ -1,4 +1,5 @@
 pub mod pipeline;
+pub mod project;
 
 pub fn parse(source: &str) -> resin_ast::SourceFile {
     resin_ast::generate(&resin_cst::Document::reparse(source.to_string(), None)).unwrap()

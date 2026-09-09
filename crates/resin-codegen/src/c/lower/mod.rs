@@ -1,8 +1,8 @@
 //! Verified LIR → C source tree. Runtime and ABI choices are made here.
 use crate::Error;
-use resin_common::prelude::*;
 use resin_lir::Module;
-use resin_lir_verifier::Verified;
+use resin_lir::Verified;
+use resin_types::prelude::*;
 use types::Types;
 
 mod entry;
@@ -20,29 +20,27 @@ struct Slot {
     live: Option<String>,
 }
 
-use crate::Shader;
-
-pub fn generate(
-    checked: Verified<'_>,
-    entry: &str,
-    shaders: &[Shader],
-) -> Result<crate::CModule, Error> {
+pub fn generate(checked: Verified<'_>, entry: &str) -> Result<crate::c::CModule, Error> {
     let module = checked.module();
     let analysis = checked.analysis();
-    let types = Types::new(module, &analysis.types, shaders);
+    let types = Types::new(module, &analysis.types);
     let entry = entry_function(&types, entry)?;
-    let data = shader_data(shaders)?;
     let functions = analysis
         .functions
         .iter()
         .enumerate()
         .map(|(i, flow)| function::lower(&types, i, flow))
         .collect::<Result<_, _>>()?;
-    Ok(crate::CModule {
+    Ok(crate::c::CModule {
         includes: includes(module),
         assertions: host_assertions(),
         declarations: types.declarations(),
-        data,
+        local_includes: module
+            .shaders
+            .iter()
+            .filter(|(_, shader)| shader.embedded)
+            .map(|(&function, _)| crate::shader_header(function))
+            .collect(),
         prototypes: (0..module.functions.len())
             .map(|i| function::signature(&types, i))
             .collect(),
@@ -80,23 +78,11 @@ fn host_assertions() -> Vec<(String, String)> {
     )]
 }
 
-fn shader_data(shaders: &[Shader]) -> Result<Vec<Vec<u32>>, Error> {
-    shaders
-        .iter()
-        .map(|shader| {
-            if shader.words.len() < 5 || shader.words[0] != 0x07230203 {
-                return Err(Error("invalid embedded SPIR-V".into()));
-            }
-            Ok(shader.words.clone())
-        })
-        .collect()
-}
-
-fn entry_function(types: &Types<'_>, name: &str) -> Result<crate::CFunction, Error> {
+fn entry_function(types: &Types<'_>, name: &str) -> Result<crate::c::CFunction, Error> {
     let mut body = "  (void)r_argc; (void)r_argv;\n  atexit(resin_cleanup);\n".to_string();
     body.push_str(&entry::emit(types, name)?);
-    Ok(crate::CFunction {
+    Ok(crate::c::CFunction {
         signature: "int main(int r_argc, char **r_argv)".into(),
-        body: crate::CBody::Inline(body),
+        body: crate::c::CBody::Inline(body),
     })
 }

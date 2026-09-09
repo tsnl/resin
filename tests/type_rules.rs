@@ -1,4 +1,4 @@
-use resin_common::prelude::*;
+use resin_types::prelude::*;
 fn record(ty: Ty) -> Ty {
     Ty::Record {
         fields: vec![RecordField {
@@ -44,8 +44,8 @@ fn nominal_nonrecords_are_rejected_at_creation_and_verification() {
             ..Default::default()
         };
         assert_eq!(
-            resin_lir_verifier::verify(&module).unwrap_err().kind,
-            resin_lir_verifier::VerifyErrorKind::NominalTypeMustBeRecord { definition }
+            resin_lir::verify(&module).unwrap_err().kind,
+            resin_lir::VerifyErrorKind::NominalTypeMustBeRecord { definition }
         );
     }
 }
@@ -73,7 +73,7 @@ fn inline_dependencies_require_completion_but_indirect_fields_can_be_pending() {
         )
         .unwrap();
     context.define_type(first, record(second_ty)).unwrap();
-    resin_lir_verifier::verify(&resin_lir::Module {
+    resin_lir::verify(&resin_lir::Module {
         types: context.into_definitions().unwrap(),
         ..Default::default()
     })
@@ -97,7 +97,7 @@ fn recursive_span_and_function_fields_have_finite_layouts() {
             }
         };
         context.define_type(definition, record(field)).unwrap();
-        resin_lir_verifier::verify(&resin_lir::Module {
+        resin_lir::verify(&resin_lir::Module {
             types: context.into_definitions().unwrap(),
             ..Default::default()
         })

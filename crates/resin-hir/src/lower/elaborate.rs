@@ -1,20 +1,22 @@
 //! Discard source contexts and express sugar using the HIR language.
-use resin_common::prelude::*;
-mod conversions;
+use super::elaborate_annotation;
 use super::eval::Evaluator;
-use super::functions::annotation;
 use super::{Generator, typed};
 use crate::ReceiverConversion;
-use crate::lower::namespaces::FunctionBody;
+use crate::lower::context::FunctionBody;
 use crate::{Arguments, MatchArm, Statement, Term, TermKind};
+use crate::{GenerateError, GenerateErrorKind};
+use resin_source::prelude::*;
+use resin_types::ExplicitConversion;
+use resin_types::prelude::*;
 
 type Result<T> = std::result::Result<T, GenerateError>;
 
 impl Generator {
     pub(super) fn elaborate(&mut self, source: &typed::Term) -> Result<Term> {
-        let before = self.environment.context.select(source.context);
+        let before = self.scopes.select(source.context);
         let kind = self.elaborate_kind(source);
-        self.environment.context.select(before);
+        self.scopes.select(before);
         Ok(Term {
             span: source.span,
             ty: source.ty.clone(),
@@ -29,13 +31,17 @@ impl Generator {
     fn elaborate_kind(&mut self, source: &typed::Term) -> Result<TermKind> {
         Ok(match &source.kind {
             typed::TermKind::Error(error) => return Err(error.clone()),
-            typed::TermKind::Unit => TermKind::Constant(Value::Unit),
-            typed::TermKind::None => TermKind::Constant(Value::None),
+            typed::TermKind::Unit => TermKind::Constant { value: Value::Unit },
+            typed::TermKind::None => TermKind::Constant { value: Value::None },
             typed::TermKind::Num { value } => self.number(source, value)?,
-            typed::TermKind::String { value } => TermKind::Constant(Value::Bytes {
-                value: value.as_bytes().into(),
-            }),
-            typed::TermKind::Type { ty } => TermKind::Constant(Value::Type { ty: ty.ty.clone() }),
+            typed::TermKind::String { value } => TermKind::Constant {
+                value: Value::Bytes {
+                    value: value.as_bytes().into(),
+                },
+            },
+            typed::TermKind::Type { ty } => TermKind::Constant {
+                value: Value::Type { ty: ty.ty.clone() },
+            },
             typed::TermKind::Var { name } => self.reference(name)?,
             typed::TermKind::Layout { ty, size } => self.layout(ty, *size)?,
             typed::TermKind::Unwrap { value } => TermKind::Unwrap {
@@ -107,8 +113,7 @@ impl Generator {
 
     fn reference(&self, name: &Ident) -> Result<TermKind> {
         let binding = self
-            .environment
-            .context
+            .scopes
             .lookup(&name.val, false)
             .ok_or_else(|| GenerateError {
                 span: name.span,
@@ -116,7 +121,7 @@ impl Generator {
                     name: name.val.clone(),
                 },
             })?;
-        Ok(match self.environment.binding(binding) {
+        Ok(match self.function_bindings.get(&binding).copied() {
             Some(function) => TermKind::Function { function },
             None => TermKind::Local {
                 binding,
@@ -127,19 +132,21 @@ impl Generator {
 
     fn number(&self, source: &typed::Term, text: &str) -> Result<TermKind> {
         let evaluator = Evaluator {
-            scopes: &self.environment.context,
+            scopes: &self.scopes,
             typer: &self.typer,
         };
         let (value, _) = evaluator.number(source.span, text, Some(&source.ty))?;
-        Ok(TermKind::Constant(value))
+        Ok(TermKind::Constant { value })
     }
 
     fn layout(&self, ty: &typed::Annotation, size: bool) -> Result<TermKind> {
-        let layout = resin_common::types::layout::layout(self.typer.definitions(), &ty.ty)
+        let layout = resin_types::layout::layout(self.typer.definitions(), &ty.ty)
             .map_err(|e| GenerateError::inference(ty.span, e.to_string()))?;
-        Ok(TermKind::Constant(Value::UInt64 {
-            value: if size { layout.size } else { layout.align } as u64,
-        }))
+        Ok(TermKind::Constant {
+            value: Value::UInt64 {
+                value: if size { layout.size } else { layout.align } as u64,
+            },
+        })
     }
 
     fn builtin(
@@ -177,9 +184,11 @@ impl Generator {
         let fixed = Box::new(Term {
             span,
             ty: Ty::Bool,
-            kind: TermKind::Constant(Value::Bool {
-                value: name == "||",
-            }),
+            kind: TermKind::Constant {
+                value: Value::Bool {
+                    value: name == "||",
+                },
+            },
         });
         let right = self.boxed(&args[1])?;
         let (then, els) = if name == "&&" {
@@ -267,7 +276,7 @@ impl Generator {
                     Box::new(Term {
                         span: argument.span,
                         ty: param,
-                        kind: TermKind::Pack(args),
+                        kind: TermKind::Pack { args },
                     })
                 } else {
                     args.argument
@@ -334,7 +343,7 @@ impl Generator {
             typed::StatementKind::Declare { binding, name, ty } => Statement::Declare {
                 binding: *binding,
                 name: name.clone(),
-                ty: annotation(ty),
+                ty: elaborate_annotation(ty),
             },
             typed::StatementKind::Expr { term } => Statement::Expr {
                 term: self.elaborate(term)?,
@@ -398,5 +407,93 @@ fn pattern(arm: &typed::MatchArm, ty: &Ty) -> Result<Case> {
             arm.body.span,
             "pattern does not belong to this match type",
         )),
+    }
+}
+
+impl Generator {
+    pub(super) fn ascription(
+        &mut self,
+        span: Span,
+        to: &Ty,
+        source: &typed::Term,
+    ) -> Result<TermKind> {
+        if let Ty::Arc { pointee } = to {
+            return Ok(TermKind::ArcNew {
+                value: Box::new(self.shared_payload(pointee, source)?),
+            });
+        }
+        if let Ty::Weak { pointee } = to
+            && matches!(source.kind, typed::TermKind::Unit)
+        {
+            return Ok(TermKind::WeakEmpty {
+                pointee: *pointee.clone(),
+            });
+        }
+        let value = self.constructor_argument(to, source)?;
+        self.conversion(span, value, to)
+    }
+
+    fn constructor_argument(&mut self, to: &Ty, source: &typed::Term) -> Result<Term> {
+        let body = self
+            .typer
+            .body(to)
+            .map_err(|e| GenerateError::typing(source.span, e))?;
+        let body = body.span_record().unwrap_or(body);
+        if matches!(&body, Ty::Record { fields } if fields.is_empty())
+            && matches!(source.kind, typed::TermKind::Unit)
+        {
+            return Ok(Term {
+                span: source.span,
+                ty: body,
+                kind: TermKind::Record { fields: vec![] },
+            });
+        }
+        self.elaborate(source)
+    }
+
+    fn shared_payload(&mut self, to: &Ty, source: &typed::Term) -> Result<Term> {
+        if !matches!(
+            source.kind,
+            typed::TermKind::Record { .. } | typed::TermKind::Unit
+        ) {
+            return self.elaborate(source);
+        }
+        let value = self.constructor_argument(to, source)?;
+        if &value.ty == to {
+            return Ok(value);
+        }
+        let kind = self.conversion(source.span, value, to)?;
+        Ok(Term {
+            span: source.span,
+            ty: to.clone(),
+            kind,
+        })
+    }
+
+    fn conversion(&self, span: Span, value: Term, to: &Ty) -> Result<TermKind> {
+        let conversion = self
+            .typer
+            .explicit_conversion(&value.ty, to)
+            .map_err(|e| GenerateError::typing(span, e))?;
+        if let ExplicitConversion::Ascribe(steps) = &conversion {
+            self.check_unwrap(span, steps)?;
+        }
+        Ok(TermKind::Convert {
+            conversion,
+            arg: Box::new(value),
+        })
+    }
+
+    fn check_unwrap(&self, span: Span, steps: &[Conv]) -> Result<()> {
+        if steps.iter().any(|step| {
+            matches!(step, Conv::Unwrap { definition }
+            if self.typer.definition(*definition).unwrap().drop_hook().is_some())
+        }) {
+            return Err(GenerateError::inference(
+                span,
+                "cannot unwrap a type with drop; access its fields through a pointer or use Ptr.replace",
+            ));
+        }
+        Ok(())
     }
 }

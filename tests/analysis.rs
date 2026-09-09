@@ -1,16 +1,16 @@
-use resin_common::prelude::*;
-#[path = "support/pipeline.rs"]
-mod pipeline;
-use resin_compiler::SourceProvider;
-use resin_compiler::{Compilation, Sources, normalize_path};
-use std::path::PathBuf;
+use resin_compiler::{Compilation, Compiler};
+use resin_hir::GenerateErrorKind;
+use resin_source::normalize_path;
+use resin_source::prelude::*;
+use std::{collections::BTreeMap, path::Path, sync::Arc};
+use tempfile::TempDir;
 
 #[test]
 fn option_payload_fields_remain_available_in_incomplete_code() {
     let source = "struct Item { count: int }; def f(value: Item | None) = { value!.; };";
     let project = Project::new(&[("main.resin", source)]);
     let items = project.analyze().completions(
-        &project.path("main.resin"),
+        &project.source("main.resin"),
         source.find("value!.").unwrap() + 7,
     );
     assert_eq!(items.len(), 1);
@@ -21,9 +21,10 @@ fn option_payload_fields_remain_available_in_incomplete_code() {
 fn weak_upgrade_recovery_exposes_the_shared_payload_and_handle_operations() {
     let source = "struct Item { count: int }; def f(weak: Weak<Item>) = { weak.upgrade()!.; };";
     let project = Project::new(&[("main.resin", source)]);
-    let items = project
-        .analyze()
-        .completions(&project.path("main.resin"), source.find("!.").unwrap() + 2);
+    let items = project.analyze().completions(
+        &project.source("main.resin"),
+        source.find("!.").unwrap() + 2,
+    );
     assert!(
         items.iter().any(|item| item.detail == "count: int"),
         "{items:?}"
@@ -39,28 +40,31 @@ fn weak_upgrade_recovery_exposes_the_shared_payload_and_handle_operations() {
 fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
     for tail in ["ok(()) };", "buffer."] {
         let source = format!(
-            r#"import {{ "std/gpu.resin" }};
+            r#"import {{ "$/std/gpu.resin" }};
             def f() -> Result<(), _> = {{
                 var gpu = Gpu.new()?;
                 var buffer = gpu.malloc(4_ul, 4_ul, Memory.default())?;
                 buffer.host_pointer();
                 {tail}"#
         );
-        let project = Project::new(&[("main.resin", &source)]);
-        let analysis = Compilation::new(
-            &project.path("main.resin"),
-            &project.sources,
-            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib"),
-        );
-        let path = project.path("main.resin");
+        let mut loader = resin_source::Loader::new(resin_source::stdlib_path());
+        let input = loader
+            .source_from_text(Path::new("main.resin"), source.clone())
+            .unwrap();
+        let analysis = Compiler::new().compile(input.clone(), &mut loader);
         let call = source.find("host_pointer").unwrap();
         let definition = analysis
-            .definition(&path, call)
+            .definition(&input, call)
             .unwrap_or_else(|| panic!("tail: {tail}\n{:?}", analysis.diagnostics()));
-        assert!(definition.path.ends_with("stdlib/gpu.resin"));
+        assert!(
+            loader
+                .path(&definition.source)
+                .unwrap()
+                .ends_with("stdlib/gpu.resin")
+        );
         assert!(
             analysis
-                .hover(&path, call)
+                .hover(&input, call)
                 .unwrap()
                 .text
                 .starts_with("def host_pointer(")
@@ -70,7 +74,7 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
         } else {
             call
         };
-        let items = analysis.completions(&path, offset);
+        let items = analysis.completions(&input, offset);
         for name in ["host_pointer", "device_pointer", "size"] {
             assert!(
                 items.iter().any(|item| item.name == name),
@@ -93,7 +97,10 @@ fn pointer_hover_and_completion_use_angle_bracket_types() {
     );
     assert_eq!(
         analysis
-            .hover(&project.path("main.resin"), source.rfind("value").unwrap())
+            .hover(
+                &project.source("main.resin"),
+                source.rfind("value").unwrap()
+            )
             .unwrap()
             .text,
         "value: Ptr<Span<int>>"
@@ -102,7 +109,7 @@ fn pointer_hover_and_completion_use_angle_bracket_types() {
     let source = "type Number = int; def main () -> () = { var value: Ptr<Num>; };";
     let project = Project::new(&[("main.resin", source)]);
     let items = project.analyze().completions(
-        &project.path("main.resin"),
+        &project.source("main.resin"),
         source.rfind("Num").unwrap() + 3,
     );
     assert_eq!(
@@ -115,8 +122,7 @@ fn pointer_hover_and_completion_use_angle_bracket_types() {
 }
 
 struct Project {
-    root: PathBuf,
-    sources: Sources,
+    sources: BTreeMap<String, Source>,
 }
 
 #[test]
@@ -131,7 +137,7 @@ fn inherent_methods_have_navigation_hover_and_member_completion() {
         );
         let project = Project::new(&[("main.resin", &source), ("lib.resin", library)]);
         let analysis = project.analyze();
-        let path = project.path("main.resin");
+        let input = project.source("main.resin");
         assert_eq!(
             analysis.diagnostics().is_empty(),
             incomplete.is_none(),
@@ -140,25 +146,25 @@ fn inherent_methods_have_navigation_hover_and_member_completion() {
         );
         for method in ["new", "read"] {
             let call = source.find(&format!(".{method}()")).unwrap() + 1;
-            let definition = analysis.definition(&path, call).unwrap();
-            assert_eq!(definition.path, project.path("lib.resin"));
+            let definition = analysis.definition(&input, call).unwrap();
+            assert_eq!(definition.source, project.source("lib.resin"));
             assert_eq!(
                 definition.span.start,
                 library.find(&format!("{method}(")).unwrap()
             );
             assert!(
                 analysis
-                    .hover(&path, call)
+                    .hover(&input, call)
                     .unwrap()
                     .text
                     .starts_with(&format!("def {method}("))
             );
-            let items = analysis.completions(&path, call);
+            let items = analysis.completions(&input, call);
             assert!(items.iter().any(
                 |item| item.name == method && item.kind == resin_hir::DefinitionKind::Function
             ));
         }
-        let global = analysis.completions(&path, source.find("var c").unwrap());
+        let global = analysis.completions(&input, source.find("var c").unwrap());
         assert!(
             global
                 .iter()
@@ -166,7 +172,7 @@ fn inherent_methods_have_navigation_hover_and_member_completion() {
         );
         if let Some(base) = incomplete {
             let items = analysis.completions(
-                &path,
+                &input,
                 source.rfind(&format!("{base}.;")).unwrap() + base.len() + 1,
             );
             assert_eq!(
@@ -184,7 +190,7 @@ fn inherent_methods_have_navigation_hover_and_member_completion() {
     }
     let project = Project::new(&[("main.resin", library)]);
     let items = project.analyze().completions(
-        &project.path("main.resin"),
+        &project.source("main.resin"),
         library.find("self.count").unwrap(),
     );
     assert!(
@@ -203,7 +209,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
             );
             let project = Project::new(&[("main.resin", &source)]);
             let analysis = project.analyze();
-            let path = project.path("main.resin");
+            let input = project.source("main.resin");
             assert_eq!(
                 analysis.diagnostics().is_empty(),
                 tail.is_empty(),
@@ -212,10 +218,10 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
             );
             let offset = source.find(".at(0)").unwrap() + 1;
             assert_eq!(
-                analysis.hover(&path, offset).unwrap().text,
+                analysis.hover(&input, offset).unwrap().text,
                 "at: (ulong) -> Ptr<int>"
             );
-            let items = analysis.completions(&path, offset);
+            let items = analysis.completions(&input, offset);
             assert!(
                 items
                     .iter()
@@ -224,7 +230,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
             );
             if !tail.is_empty() {
                 let offset = source.rfind(".;").or_else(|| source.rfind(".at(")).unwrap() + 1;
-                let items = analysis.completions(&path, offset);
+                let items = analysis.completions(&input, offset);
                 assert!(
                     items.iter().any(|item| item.name == "at"),
                     "{source}\n{items:?}"
@@ -242,22 +248,22 @@ fn shared_receiver_completion_and_navigation_include_ordinary_drop_methods() {
             format!("import {{ \"lib.resin\" }}; def f(c: Arc<Counter>) = {{ c.read(); {tail} }};");
         let project = Project::new(&[("main.resin", &source), ("lib.resin", library)]);
         let analysis = project.analyze();
-        let path = project.path("main.resin");
+        let input = project.source("main.resin");
         let call = source.find("c.read").unwrap() + 2;
         assert_eq!(
             analysis
-                .definition(&path, call)
+                .definition(&input, call)
                 .unwrap_or_else(|| panic!(
                     "{:?}\n{:?}",
                     analysis.diagnostics(),
-                    analysis.recovered_file(&path)
+                    analysis.recovered_file(&input)
                 ))
-                .path,
-            project.path("lib.resin")
+                .source,
+            project.source("lib.resin")
         );
         assert!(
             analysis
-                .hover(&path, call)
+                .hover(&input, call)
                 .unwrap()
                 .text
                 .starts_with("def read(")
@@ -267,7 +273,7 @@ fn shared_receiver_completion_and_navigation_include_ordinary_drop_methods() {
         } else {
             source.rfind("c.;").unwrap() + 2
         };
-        let items = analysis.completions(&path, offset);
+        let items = analysis.completions(&input, offset);
         assert!(items.iter().any(|item| item.name == "read"));
         assert!(items.iter().any(|item| item.name == "drop"));
     }
@@ -283,34 +289,34 @@ fn inferred_errors_and_match_payloads_have_editor_types() {
         "{:?}",
         analysis.diagnostics()
     );
-    let path = project.path("main.resin");
+    let input = project.source("main.resin");
     assert_eq!(
         analysis
-            .hover(&path, source.find("match (result").unwrap() + 7)
+            .hover(&input, source.find("match (result").unwrap() + 7)
             .unwrap()
             .text,
         "result: Result<int, Broken>"
     );
     assert_eq!(
         analysis
-            .hover(&path, source.find("error.code").unwrap())
+            .hover(&input, source.find("error.code").unwrap())
             .unwrap()
             .text,
         "error: Broken"
     );
-    let fields = analysis.completions(&path, source.find("error.code").unwrap() + 6);
+    let fields = analysis.completions(&input, source.find("error.code").unwrap() + 6);
     assert!(
         fields
             .iter()
             .any(|field| field.name == "code" && field.detail == "code: int")
     );
     let origin = analysis
-        .definition(&path, source.find("error.code").unwrap())
+        .definition(&input, source.find("error.code").unwrap())
         .unwrap();
     assert_eq!(origin.span.start, source.find("err(error)").unwrap() + 4);
     assert!(
         analysis
-            .completions(&path, source.find("var result").unwrap())
+            .completions(&input, source.find("var result").unwrap())
             .iter()
             .all(|item| item.name != "error")
     );
@@ -328,24 +334,24 @@ fn inferred_imported_results_and_local_annotations_support_editor_queries() {
         "{:?}",
         analysis.diagnostics()
     );
-    let path = project.path("main.resin");
+    let input = project.source("main.resin");
     assert_eq!(
         analysis
-            .hover(&path, source.rfind("value").unwrap())
+            .hover(&input, source.rfind("value").unwrap())
             .unwrap()
             .text,
         "value: Counter"
     );
-    let fields = analysis.completions(&path, source.rfind("count").unwrap());
+    let fields = analysis.completions(&input, source.rfind("count").unwrap());
     assert!(
         fields
             .iter()
             .any(|field| field.name == "count" && field.detail == "count: int")
     );
     let definition = analysis
-        .definition(&path, source.find("make()").unwrap())
+        .definition(&input, source.find("make()").unwrap())
         .unwrap();
-    assert_eq!(definition.path, project.path("lib.resin"));
+    assert_eq!(definition.source, project.source("lib.resin"));
 }
 
 #[test]
@@ -360,7 +366,7 @@ fn inference_does_not_publish_speculative_type_references() {
     );
     let reference = source.find("Wrapper = Value").unwrap() + "Wrapper = ".len();
     let definition = analysis
-        .definition(&project.path("main.resin"), reference)
+        .definition(&project.source("main.resin"), reference)
         .unwrap();
     assert_eq!(
         definition.span.start,
@@ -389,7 +395,7 @@ fn field_completion_uses_receiver_types_and_replaces_only_the_field() {
             let offset = start + field.len().min(2);
             let items = project
                 .analyze()
-                .completions(&project.path("main.resin"), offset);
+                .completions(&project.source("main.resin"), offset);
             let names = items
                 .iter()
                 .filter(|item| item.kind == resin_hir::DefinitionKind::Field)
@@ -422,9 +428,10 @@ fn field_completion_resolves_imported_nominal_function_results() {
             "export { make }; struct Counter { count: int }; def make () -> Counter = { Counter { count = 0 } };",
         ),
     ]);
-    let items = project
-        .analyze()
-        .completions(&project.path("main.resin"), source.rfind('.').unwrap() + 1);
+    let items = project.analyze().completions(
+        &project.source("main.resin"),
+        source.rfind('.').unwrap() + 1,
+    );
     assert_eq!(
         items
             .iter()
@@ -442,7 +449,10 @@ fn field_completion_does_not_offer_unrelated_names() {
         assert!(
             project
                 .analyze()
-                .completions(&project.path("main.resin"), source.rfind('.').unwrap() + 1)
+                .completions(
+                    &project.source("main.resin"),
+                    source.rfind('.').unwrap() + 1
+                )
                 .is_empty(),
             "{source}"
         );
@@ -457,9 +467,10 @@ fn field_completion_recovers_unfinished_functions_and_uninitialized_locals() {
         "def main () = { var point = { x = 1, y = 2 }; point.",
     ] {
         let project = Project::new(&[("main.resin", source)]);
-        let items = project
-            .analyze()
-            .completions(&project.path("main.resin"), source.rfind('.').unwrap() + 1);
+        let items = project.analyze().completions(
+            &project.source("main.resin"),
+            source.rfind('.').unwrap() + 1,
+        );
         assert_eq!(
             items
                 .iter()
@@ -472,28 +483,25 @@ fn field_completion_recovers_unfinished_functions_and_uninitialized_locals() {
 }
 impl Project {
     fn new(files: &[(&str, &str)]) -> Self {
-        let root = normalize_path(
-            &std::env::temp_dir().join(format!("resin-analysis-unsaved-{}", std::process::id())),
-        )
-        .unwrap();
-        let overlays = files
+        let sources = files
             .iter()
-            .map(|(path, text)| (root.join(path), text.to_string()))
+            .map(|(name, text)| (name.to_string(), Source::new(*name, *text)))
             .collect();
-        Self {
-            root,
-            sources: Sources { overlays },
+        Self { sources }
+    }
+    fn analyze(&self) -> Arc<Compilation> {
+        let mut loader = resin_source::Loader::new(Default::default());
+        for importer in self.sources.values() {
+            for (reference, target) in &self.sources {
+                loader
+                    .set_import(importer, reference, target.clone())
+                    .unwrap();
+            }
         }
+        Compiler::new().compile(self.source("main.resin"), &mut loader)
     }
-    fn analyze(&self) -> Compilation {
-        Compilation::new(
-            &self.root.join("main.resin"),
-            &self.sources,
-            &self.root.join("std"),
-        )
-    }
-    fn path(&self, name: &str) -> PathBuf {
-        self.root.join(name)
+    fn source(&self, name: &str) -> Source {
+        self.sources[name].clone()
     }
 }
 
@@ -507,18 +515,18 @@ fn inferred_types_and_parameter_definitions_come_from_compilation() {
         "{:?}",
         analysis.diagnostics()
     );
-    let path = project.path("main.resin");
+    let input = project.source("main.resin");
     assert_eq!(
         analysis
-            .hover(&path, source.rfind("value").unwrap())
+            .hover(&input, source.rfind("value").unwrap())
             .unwrap()
             .text,
         "value: int"
     );
     let location = analysis
-        .definition(&path, source.rfind("argument").unwrap())
+        .definition(&input, source.rfind("argument").unwrap())
         .unwrap();
-    assert_eq!(location.path, path);
+    assert_eq!(location.source, input);
     assert_eq!(&source[location.span.start..location.span.end], "argument");
     assert_eq!(location.span.start, source.find("argument").unwrap());
 }
@@ -547,25 +555,25 @@ fn reexports_keep_original_definitions_through_diamond_imports() {
         "{:?}",
         analysis.diagnostics()
     );
-    let path = project.path("main.resin");
+    let input = project.source("main.resin");
     for word in ["Number", "make"] {
         assert_eq!(
             analysis
-                .definition(&path, source.rfind(word).unwrap())
+                .definition(&input, source.rfind(word).unwrap())
                 .unwrap()
-                .path,
-            project.path("base.resin")
+                .source,
+            project.source("base.resin")
         );
     }
-    let completions = analysis.completions(&path, source.rfind("make").unwrap());
+    let completions = analysis.completions(&input, source.rfind("make").unwrap());
     assert!(completions.iter().any(|c| c.name == "make"));
     assert!(!completions.iter().any(|c| c.name == "secret"));
     assert_eq!(
         analysis
-            .definition(&path, source.find("left.resin").unwrap())
+            .definition(&input, source.find("left.resin").unwrap())
             .unwrap()
-            .path,
-        project.path("left.resin")
+            .source,
+        project.source("left.resin")
     );
 }
 
@@ -580,15 +588,15 @@ fn nested_bindings_shadow_without_leaking_out_of_their_scope() {
         "{:?}",
         analysis.diagnostics()
     );
-    let path = project.path("main.resin");
+    let input = project.source("main.resin");
     let inside = source.find("value };").unwrap();
     assert_eq!(
-        analysis.definition(&path, inside).unwrap().span.start,
+        analysis.definition(&input, inside).unwrap().span.start,
         source.find("value = 2").unwrap()
     );
     assert_eq!(
         analysis
-            .definition(&path, source.rfind("value").unwrap())
+            .definition(&input, source.rfind("value").unwrap())
             .unwrap()
             .span
             .start,
@@ -606,12 +614,12 @@ fn incomplete_code_keeps_parameters_and_prior_locals_available() {
         let project = Project::new(&[("main.resin", source)]);
         let analysis = project.analyze();
         let at = source.rfind("arg").unwrap() + 3;
-        let completions = analysis.completions(&project.path("main.resin"), at);
+        let completions = analysis.completions(&project.source("main.resin"), at);
         assert!(
             completions.iter().any(|c| c.name == "argument"),
             "{source}: {completions:?}"
         );
-        let local = analysis.completions(&project.path("main.resin"), at - 3);
+        let local = analysis.completions(&project.source("main.resin"), at - 3);
         assert!(
             local.iter().any(|c| c.name == "local"),
             "{source}: {local:?}"
@@ -637,12 +645,18 @@ fn conflicting_imports_are_ambiguous_and_report_related_locations() {
     assert!(analysis.diagnostics().iter().any(|d| d.related.len() == 2));
     assert!(
         analysis
-            .definition(&project.path("main.resin"), source.rfind("answer").unwrap())
+            .definition(
+                &project.source("main.resin"),
+                source.rfind("answer").unwrap()
+            )
             .is_none()
     );
     assert!(
         !analysis
-            .completions(&project.path("main.resin"), source.rfind("answer").unwrap())
+            .completions(
+                &project.source("main.resin"),
+                source.rfind("answer").unwrap()
+            )
             .iter()
             .any(|c| c.name == "answer")
     );
@@ -661,13 +675,13 @@ fn missing_imports_and_cycles_have_source_ranges() {
     let analysis = project.analyze();
     assert_eq!(analysis.diagnostics().len(), 1);
     let error = &analysis.diagnostics()[0];
-    assert_eq!(error.location.path, project.path("main.resin"));
+    assert_eq!(error.location.source, project.source("main.resin"));
     assert_eq!(
         &source[error.location.span.start..error.location.span.end],
         "\"missing.resin\""
     );
     let fields = analysis.completions(
-        &project.path("main.resin"),
+        &project.source("main.resin"),
         source.find("point.x").unwrap() + 6,
     );
     assert_eq!(
@@ -693,17 +707,20 @@ fn imported_syntax_errors_stay_at_the_dependency() {
         ("main.resin", "import { \"a.resin\" };"),
         ("a.resin", "export { value }; def value () -> int = { + };"),
     ]);
-    let error = pipeline::load_with(&project.path("main.resin"), &project.root, &project.sources)
-        .unwrap_err();
-    assert_eq!(error.path, project.path("a.resin"));
+    let analysis = project.analyze();
+    let error = analysis.program().unwrap_err();
+    assert_eq!(error.source, project.source("a.resin"));
     assert!(error.span.is_some());
-    assert_eq!(error.related[0].location.path, project.path("main.resin"));
+    assert_eq!(
+        error.related[0].location.source,
+        project.source("main.resin")
+    );
     assert!(
         project
             .analyze()
             .diagnostics()
             .iter()
-            .any(|d| d.location.path == project.path("a.resin"))
+            .any(|d| d.location.source == project.source("a.resin"))
     );
 }
 
@@ -715,11 +732,11 @@ fn malformed_foreign_headers_are_diagnostics_not_panics() {
         "extern def release();",
     ] {
         let project = Project::new(&[("main.resin", source)]);
-        let path = project.path("main.resin");
-        let error = pipeline::load_with(&path, &project.root, &project.sources).unwrap_err();
-        assert_eq!(error.path, path);
-        assert!(error.span.is_some(), "{source}: {error}");
+        let input = project.source("main.resin");
         let analysis = project.analyze();
+        let error = analysis.program().unwrap_err();
+        assert_eq!(error.source, input);
+        assert!(error.span.is_some(), "{source}: {error}");
         assert!(!analysis.diagnostics().is_empty(), "{source}");
         assert!(analysis.module().is_err(), "{source}");
     }
@@ -730,16 +747,16 @@ fn malformed_function_names_do_not_create_editor_definitions() {
     let source = "extern \"native.h\" def releasex: int); def main() = {};";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.analyze();
-    let path = project.path("main.resin");
+    let input = project.source("main.resin");
     assert!(analysis.module().is_err());
     assert!(
         analysis
-            .definition(&path, source.find("releasex").unwrap())
+            .definition(&input, source.find("releasex").unwrap())
             .is_none()
     );
     assert!(
         analysis
-            .completions(&path, source.len())
+            .completions(&input, source.len())
             .iter()
             .all(|item| item.name != "releasex")
     );
@@ -748,7 +765,7 @@ fn malformed_function_names_do_not_create_editor_definitions() {
 #[test]
 #[cfg(unix)]
 fn new_paths_resolve_through_symlinks() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let root = std::fs::canonicalize(temp.path()).unwrap();
     std::fs::create_dir(root.join("real")).unwrap();
     std::os::unix::fs::symlink(root.join("real"), root.join("alias")).unwrap();
@@ -759,20 +776,19 @@ fn new_paths_resolve_through_symlinks() {
 }
 
 #[test]
-fn buffers_override_disk() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+fn source_buffers_need_no_disk_write() {
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let path = temp.path().join("lib.resin");
     std::fs::write(&path, "disk").unwrap();
-    let path = normalize_path(&path).unwrap();
-    let sources = Sources {
-        overlays: [(path.clone(), "buffer".into())].into(),
-    };
-    assert_eq!(sources.read(&path).unwrap(), "buffer");
+    let mut loader = resin_source::Loader::new(temp.path().to_path_buf());
+    let source = loader.source_from_text(&path, "buffer").unwrap();
+    assert_eq!(source.text(), "buffer");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "disk");
 }
 
 #[test]
 fn normalized_paths_are_stable_for_existing_and_unsaved_files() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     std::fs::write(temp.path().join("saved.resin"), "").unwrap();
     let root = std::fs::canonicalize(temp.path()).unwrap();
     for name in ["saved.resin", "unsaved.resin"] {
@@ -788,7 +804,7 @@ fn completion_respects_type_context_and_ignores_strings_and_comments() {
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.analyze();
     let suggestions = analysis.completions(
-        &project.path("main.resin"),
+        &project.source("main.resin"),
         source.rfind("Num").unwrap() + 3,
     );
     assert_eq!(
@@ -808,7 +824,7 @@ fn completion_respects_type_context_and_ignores_strings_and_comments() {
         assert!(
             project
                 .analyze()
-                .completions(&project.path("main.resin"), at)
+                .completions(&project.source("main.resin"), at)
                 .is_empty(),
             "{source}"
         );
@@ -821,7 +837,7 @@ fn completion_obeys_parameter_shadowing_and_module_type_order() {
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.analyze();
     let items = analysis.completions(
-        &project.path("main.resin"),
+        &project.source("main.resin"),
         source.rfind("val").unwrap() + 3,
     );
     let value = items.iter().find(|item| item.name == "value").unwrap();
@@ -835,8 +851,10 @@ fn completion_obeys_parameter_shadowing_and_module_type_order() {
     ] {
         let project = Project::new(&[("main.resin", source)]);
         let analysis = project.analyze();
-        let items =
-            analysis.completions(&project.path("main.resin"), source.find("Num").unwrap() + 2);
+        let items = analysis.completions(
+            &project.source("main.resin"),
+            source.find("Num").unwrap() + 2,
+        );
         assert_eq!(
             items.iter().any(|item| item.name == "Number"),
             expected,
@@ -847,7 +865,7 @@ fn completion_obeys_parameter_shadowing_and_module_type_order() {
     assert!(
         project
             .analyze()
-            .completions(&project.path("main.resin"), 10)
+            .completions(&project.source("main.resin"), 10)
             .is_empty()
     );
 }
@@ -874,7 +892,7 @@ fn module_analysis_needs_no_entry_and_rejects_runtime_globals() {
     );
     assert_eq!(
         analysis
-            .definition(&project.path("main.resin"), source.find("run").unwrap())
+            .definition(&project.source("main.resin"), source.find("run").unwrap())
             .unwrap()
             .span
             .start,
@@ -893,12 +911,12 @@ fn module_analysis_needs_no_entry_and_rejects_runtime_globals() {
         let at = source.rfind("glo").unwrap();
         assert!(
             analysis
-                .definition(&project.path("main.resin"), at)
+                .definition(&project.source("main.resin"), at)
                 .is_none()
         );
         assert!(
             !analysis
-                .completions(&project.path("main.resin"), at + 3)
+                .completions(&project.source("main.resin"), at + 3)
                 .iter()
                 .any(|item| item.name == "global")
         );
@@ -915,7 +933,7 @@ fn implicit_unit_signatures_and_declaration_keywords_support_editor_features() {
         "{:?}",
         analysis.diagnostics()
     );
-    let path = project.path("main.resin");
+    let input = project.source("main.resin");
     for (name, signature) in [
         (
             "release",
@@ -924,21 +942,21 @@ fn implicit_unit_signatures_and_declaration_keywords_support_editor_features() {
         ("run", "def run() -> ()"),
     ] {
         let offset = source.rfind(name).unwrap();
-        assert_eq!(analysis.hover(&path, offset).unwrap().text, signature);
-        let items = analysis.completions(&path, offset + name.len());
+        assert_eq!(analysis.hover(&input, offset).unwrap().text, signature);
+        let items = analysis.completions(&input, offset + name.len());
         assert_eq!(
             items.iter().find(|item| item.name == name).unwrap().detail,
             signature
         );
         assert_eq!(
-            analysis.definition(&path, offset).unwrap().span.start,
+            analysis.definition(&input, offset).unwrap().span.start,
             source.find(name).unwrap()
         );
     }
     let project = Project::new(&[("main.resin", "def run() = { var value = 1; ")]);
     let items = project
         .analyze()
-        .completions(&project.path("main.resin"), 28);
+        .completions(&project.source("main.resin"), 28);
     for keyword in ["def", "var", "type"] {
         assert!(items.iter().any(|item| item.name == keyword), "{items:?}");
     }
@@ -963,17 +981,17 @@ fn holes_preserve_later_locals_and_functions_without_producing_ir() {
         );
         let project = Project::new(&[("main.resin", &source)]);
         let analysis = project.analyze();
-        let path = project.path("main.resin");
+        let input = project.source("main.resin");
         assert!(analysis.module().is_err(), "{source}");
         assert!(!analysis.diagnostics().is_empty(), "{source}");
-        let items = analysis.completions(&path, source.find("point.").unwrap() + 6);
+        let items = analysis.completions(&input, source.find("point.").unwrap() + 6);
         assert_eq!(
             items.iter().map(|i| i.name.as_str()).collect::<Vec<_>>(),
             ["x", "y"],
             "{source}"
         );
         let hover = analysis
-            .hover(&path, source.rfind("result").unwrap())
+            .hover(&input, source.rfind("result").unwrap())
             .unwrap();
         assert_eq!(hover.text, "result: int", "{source}");
     }
@@ -987,29 +1005,29 @@ fn unknown_bindings_shadow_outer_values_without_fabricating_types() {
         );
         let project = Project::new(&[("main.resin", &source)]);
         let analysis = project.analyze();
-        let path = project.path("main.resin");
+        let input = project.source("main.resin");
         assert_eq!(
             analysis
-                .hover(&path, source.rfind("alias").unwrap())
+                .hover(&input, source.rfind("alias").unwrap())
                 .unwrap()
                 .text,
             "alias: ?"
         );
         assert!(
             analysis
-                .completions(&path, source.find("alias.").unwrap() + 6)
+                .completions(&input, source.find("alias.").unwrap() + 6)
                 .is_empty()
         );
         assert_eq!(
             analysis
-                .definition(&path, source.rfind("point").unwrap())
+                .definition(&input, source.rfind("point").unwrap())
                 .unwrap()
                 .span
                 .start,
             source.find("var point").unwrap() + 4
         );
         assert!(analysis.module().is_err());
-        let fields = analysis.completions(&path, source.rfind("count").unwrap());
+        let fields = analysis.completions(&input, source.rfind("count").unwrap());
         assert_eq!(
             fields
                 .iter()
@@ -1039,7 +1057,7 @@ fn unrelated_errors_preserve_expression_types_and_field_completion() {
             );
             let project = Project::new(&[("main.resin", &source)]);
             let analysis = project.analyze();
-            let path = project.path("main.resin");
+            let input = project.source("main.resin");
             assert_eq!(
                 analysis.diagnostics().is_empty(),
                 broken.is_empty(),
@@ -1048,9 +1066,9 @@ fn unrelated_errors_preserve_expression_types_and_field_completion() {
             );
             assert_eq!(analysis.module().is_ok(), broken.is_empty(), "{source}");
             let hover = analysis
-                .hover(&path, source.find("value;").unwrap())
+                .hover(&input, source.find("value;").unwrap())
                 .unwrap();
-            let fields = analysis.completions(&path, source.rfind("payload").unwrap());
+            let fields = analysis.completions(&input, source.rfind("payload").unwrap());
             let details: Vec<_> = fields.iter().map(|item| item.detail.as_str()).collect();
             if hover.text != format!("value: {expected}")
                 || details != [format!("payload: {expected}")]
@@ -1072,17 +1090,17 @@ fn failed_compound_constraints_do_not_poison_independent_inference() {
     let analysis = project.analyze();
     assert!(!analysis.diagnostics().is_empty());
     assert!(analysis.module().is_err());
-    let path = project.path("main.resin");
+    let input = project.source("main.resin");
     assert_eq!(
         analysis
-            .hover(&path, source.rfind("value").unwrap())
+            .hover(&input, source.rfind("value").unwrap())
             .unwrap()
             .text,
         "value: float32"
     );
     assert_eq!(
         analysis
-            .definition(&path, source.rfind("value").unwrap())
+            .definition(&input, source.rfind("value").unwrap())
             .unwrap()
             .span
             .start,
@@ -1103,7 +1121,7 @@ fn recovery_uses_unsaved_imports_and_keeps_nominal_field_types() {
     ]);
     let analysis = project.analyze();
     let items = analysis.completions(
-        &project.path("main.resin"),
+        &project.source("main.resin"),
         source.find("point.").unwrap() + 6,
     );
     assert_eq!(items.len(), 1);
@@ -1118,7 +1136,7 @@ fn recovered_ast_contains_expression_type_and_field_holes() {
     let analysis = project.analyze();
     let ast = resin_ast::format_source(
         analysis
-            .recovered_file(&project.path("main.resin"))
+            .recovered_file(&project.source("main.resin"))
             .unwrap(),
     );
     assert!(ast.contains("(hole "), "{ast}");
@@ -1139,7 +1157,7 @@ fn editor_analysis_tolerates_truncation_and_deleted_tokens() {
         for end in 0..=source.len() {
             let project = Project::new(&[("main.resin", &source[..end])]);
             let analysis = project.analyze();
-            analysis.completions(&project.path("main.resin"), end);
+            analysis.completions(&project.source("main.resin"), end);
         }
         for index in 0..source.len() {
             let mut edited = source.to_owned();
@@ -1151,7 +1169,7 @@ fn editor_analysis_tolerates_truncation_and_deleted_tokens() {
 }
 
 #[test]
-fn strict_lowering_rejects_holes_even_when_given_a_recovered_ast() {
+fn checking_rejects_holes_even_when_given_a_recovered_ast() {
     for source in [
         "def main() = { var value = ; };",
         "def main() = { var value: ; };",
@@ -1160,9 +1178,9 @@ fn strict_lowering_rejects_holes_even_when_given_a_recovered_ast() {
         let project = Project::new(&[("main.resin", source)]);
         let analysis = project.analyze();
         let file = analysis
-            .recovered_file(&project.path("main.resin"))
+            .recovered_file(&project.source("main.resin"))
             .unwrap();
-        let error = pipeline::generate(file).unwrap_err();
+        let error = resin_hir::generate(file).unwrap_err();
         assert_eq!(
             error.kind,
             GenerateErrorKind::IncompleteSyntax,
@@ -1182,17 +1200,17 @@ fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
         "{:?}",
         analysis.diagnostics()
     );
-    let path = project.path("main.resin");
+    let input = project.source("main.resin");
     assert_eq!(
         analysis
-            .hover(&path, source.find("p =").unwrap())
+            .hover(&input, source.find("p =").unwrap())
             .unwrap()
             .text,
         "p: Ptr<long>"
     );
     assert_eq!(
         analysis
-            .hover(&path, source.rfind("code.length").unwrap())
+            .hover(&input, source.rfind("code.length").unwrap())
             .unwrap()
             .text,
         "code: Span<ubyte>"
@@ -1200,7 +1218,7 @@ fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
     let source = "@compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() = { kernel. };";
     let project = Project::new(&[("main.resin", source)]);
     let items = project.analyze().completions(
-        &project.path("main.resin"),
+        &project.source("main.resin"),
         source.find("kernel. }").unwrap() + 7,
     );
     assert!(
@@ -1212,7 +1230,7 @@ fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
     let source = "@compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() = { var alias = kernel; alias. };";
     let project = Project::new(&[("main.resin", source)]);
     let items = project.analyze().completions(
-        &project.path("main.resin"),
+        &project.source("main.resin"),
         source.find("alias. }").unwrap() + 6,
     );
     assert!(items.iter().all(|i| i.name != "spirv"));
@@ -1228,17 +1246,17 @@ fn suffixes_and_one_armed_if_have_editor_types() {
         "{:?}",
         analysis.diagnostics()
     );
-    let path = project.path("main.resin");
+    let input = project.source("main.resin");
     assert_eq!(
         analysis
-            .hover(&path, source.rfind("count").unwrap())
+            .hover(&input, source.rfind("count").unwrap())
             .unwrap()
             .text,
         "count: ulong"
     );
     assert_eq!(
         analysis
-            .hover(&path, source.rfind("speed").unwrap())
+            .hover(&input, source.rfind("speed").unwrap())
             .unwrap()
             .text,
         "speed: float32"
@@ -1258,7 +1276,7 @@ fn failed_children_invalidate_composites_without_hiding_later_bindings() {
         );
         let project = Project::new(&[("main.resin", &source)]);
         let analysis = project.analyze();
-        let path = project.path("main.resin");
+        let input = project.source("main.resin");
         assert!(!analysis.diagnostics().is_empty(), "{source}");
         assert!(analysis.module().is_err());
         for (name, expected) in [
@@ -1268,7 +1286,7 @@ fn failed_children_invalidate_composites_without_hiding_later_bindings() {
         ] {
             assert_eq!(
                 analysis
-                    .hover(&path, source.rfind(name).unwrap())
+                    .hover(&input, source.rfind(name).unwrap())
                     .unwrap()
                     .text,
                 expected,
@@ -1303,7 +1321,7 @@ fn broken_annotations_and_duplicate_declarations_retain_recognizable_children() 
         assert!(analysis.module().is_err());
         assert_eq!(
             analysis
-                .hover(&project.path("main.resin"), source.rfind(name).unwrap())
+                .hover(&project.source("main.resin"), source.rfind(name).unwrap())
                 .unwrap()
                 .text,
             expected,
@@ -1331,24 +1349,24 @@ fn unknown_exports_retain_identity_and_poison_consumers_through_reexports() {
     ]);
     let analysis = project.analyze();
     assert!(analysis.module().is_err());
-    let path = project.path("main.resin");
+    let input = project.source("main.resin");
     for name in ["Broken", "broken"] {
         let offset = source.rfind(name).unwrap();
         let definition = analysis
-            .definition(&path, offset)
+            .definition(&input, offset)
             .unwrap_or_else(|| panic!("missing {name}: {:?}", analysis.diagnostics()));
-        assert_eq!(definition.path, project.path("base.resin"));
+        assert_eq!(definition.source, project.source("base.resin"));
         assert_eq!(&library[definition.span.start..definition.span.end], name);
         assert!(
             analysis
-                .completions(&path, offset)
+                .completions(&input, offset)
                 .iter()
                 .any(|item| item.name == name)
         );
     }
     assert_eq!(
         analysis
-            .hover(&path, source.rfind("result").unwrap())
+            .hover(&input, source.rfind("result").unwrap())
             .unwrap()
             .text,
         "result: ?"
@@ -1357,7 +1375,7 @@ fn unknown_exports_retain_identity_and_poison_consumers_through_reexports() {
         analysis
             .diagnostics()
             .iter()
-            .all(|d| d.location.path != path || !d.message.contains("Unbound")),
+            .all(|d| d.location.source != input || !d.message.contains("Unbound")),
         "{:?}",
         analysis.diagnostics()
     );
@@ -1392,13 +1410,13 @@ fn callers_cannot_resurrect_failed_result_inference() {
         );
         let project = Project::new(&[("main.resin", &source)]);
         let analysis = project.analyze();
-        let path = project.path("main.resin");
+        let input = project.source("main.resin");
         assert!(analysis.program().is_ok(), "{source}");
         assert!(!analysis.diagnostics().is_empty());
         assert!(analysis.module().is_err());
         assert_eq!(
             analysis
-                .hover(&path, source.rfind("alias").unwrap())
+                .hover(&input, source.rfind("alias").unwrap())
                 .unwrap()
                 .text,
             expected,
@@ -1406,7 +1424,7 @@ fn callers_cannot_resurrect_failed_result_inference() {
         );
         assert_eq!(
             analysis
-                .hover(&path, source.rfind("healthy").unwrap())
+                .hover(&input, source.rfind("healthy").unwrap())
                 .unwrap()
                 .text,
             "healthy: float32"
@@ -1422,17 +1440,17 @@ fn recursive_failure_discards_copied_caller_result_facts() {
     assert!(analysis.program().is_ok());
     assert!(!analysis.diagnostics().is_empty());
     assert!(analysis.module().is_err());
-    let path = project.path("main.resin");
+    let input = project.source("main.resin");
     assert_eq!(
         analysis
-            .hover(&path, source.rfind("alias").unwrap())
+            .hover(&input, source.rfind("alias").unwrap())
             .unwrap()
             .text,
         "alias: ?"
     );
     assert_eq!(
         analysis
-            .hover(&path, source.rfind("failed").unwrap())
+            .hover(&input, source.rfind("failed").unwrap())
             .unwrap()
             .text,
         "failed: ?"
@@ -1456,7 +1474,7 @@ fn incomplete_impls_and_method_arguments_keep_editor_recovery() {
     let offset = source.rfind("read").unwrap();
     assert!(
         analysis
-            .definition(&project.path("main.resin"), offset)
+            .definition(&project.source("main.resin"), offset)
             .is_some()
     );
 }
@@ -1467,7 +1485,7 @@ fn pointer_replace_has_ordinary_method_hover_and_recovery() {
         let source = format!("def f(p: Ptr<int>) = {{ p.replace(3); {tail} }};");
         let project = Project::new(&[("main.resin", &source)]);
         let analysis = project.analyze();
-        let path = project.path("main.resin");
+        let input = project.source("main.resin");
         assert_eq!(
             analysis.diagnostics().is_empty(),
             tail.is_empty(),
@@ -1476,11 +1494,11 @@ fn pointer_replace_has_ordinary_method_hover_and_recovery() {
         );
         let offset = source.find("replace").unwrap();
         assert_eq!(
-            analysis.hover(&path, offset).unwrap().text,
+            analysis.hover(&input, offset).unwrap().text,
             "replace: (int) -> int"
         );
         let items = analysis.completions(
-            &path,
+            &input,
             if tail.is_empty() {
                 offset
             } else {
@@ -1507,7 +1525,7 @@ fn formatted_string_and_literal_span_types_survive_editor_recovery() {
         let offset = source.rfind(".;").unwrap() + 1;
         let items = project
             .analyze()
-            .completions(&project.path("main.resin"), offset);
+            .completions(&project.source("main.resin"), offset);
         assert!(items.iter().any(|item| item.name == "data"), "{items:?}");
         assert!(items.iter().any(|item| item.name == "length"), "{items:?}");
     }
@@ -1521,12 +1539,12 @@ fn invalid_method_arguments_preserve_receiver_facts_and_later_bindings() {
         );
         let project = Project::new(&[("main.resin", &source)]);
         let analysis = project.analyze();
-        let path = project.path("main.resin");
+        let input = project.source("main.resin");
         assert!(analysis.module().is_err());
         for (name, expected) in [("alias", "alias: ?"), ("healthy", "healthy: float32")] {
             assert_eq!(
                 analysis
-                    .hover(&path, source.rfind(name).unwrap())
+                    .hover(&input, source.rfind(name).unwrap())
                     .unwrap()
                     .text,
                 expected
@@ -1534,13 +1552,13 @@ fn invalid_method_arguments_preserve_receiver_facts_and_later_bindings() {
         }
         assert_eq!(
             analysis
-                .definition(&path, source.find("c.read").unwrap() + 2)
+                .definition(&input, source.find("c.read").unwrap() + 2)
                 .unwrap()
                 .span
                 .start,
             source.find("read(self").unwrap()
         );
-        let members = analysis.completions(&path, source.rfind("c.;").unwrap() + 2);
+        let members = analysis.completions(&input, source.rfind("c.;").unwrap() + 2);
         assert!(members.iter().any(|member| member.name == "read"));
         assert!(members.iter().any(|member| member.detail == "count: int"));
     }
@@ -1555,7 +1573,7 @@ fn string_constructor_is_an_ordinary_discoverable_static_method() {
         let project = Project::new(&[("main.resin", source)]);
         let analysis = project.analyze();
         let offset = source.rfind(".;").unwrap() + 1;
-        let items = analysis.completions(&project.path("main.resin"), offset);
+        let items = analysis.completions(&project.source("main.resin"), offset);
         let member = if source.contains("from_str") {
             "length"
         } else {

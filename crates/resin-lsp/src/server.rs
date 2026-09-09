@@ -5,9 +5,9 @@ use crate::{
 use crossbeam_channel::{Receiver, Sender, select};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::{Position, Uri};
-use resin_common::prelude::*;
-use resin_compiler::normalize_path;
 use resin_hir::DefinitionKind;
+use resin_source::normalize_path;
+use resin_source::prelude::*;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
@@ -125,7 +125,7 @@ struct State {
     revision: Arc<AtomicU64>,
     documents: BTreeMap<String, OpenDocument>,
     snapshot: Option<AnalysisUpdate>,
-    texts: BTreeMap<PathBuf, Text>,
+    texts: BTreeMap<Source, Text>,
     published: BTreeSet<String>,
     pending: HashMap<RequestId, Query>,
     shutdown: bool,
@@ -153,7 +153,7 @@ impl State {
                     if !self.shutdown && snapshot.revision == self.revision.load(Ordering::Acquire) {
                         self.texts.clear();
                         for entry in snapshot.entries.values() {
-                            for (path, text) in entry.sources() { self.texts.entry(path.to_path_buf()).or_insert_with(|| Text::new(text)); }
+                            for source in entry.sources() { self.texts.entry(source.clone()).or_insert_with(|| Text::new(source.text())); }
                         }
                         self.snapshot = Some(snapshot);
                         self.publish()?;
@@ -272,7 +272,7 @@ impl State {
         else {
             return self.send(Response::new_ok(id, Value::Null));
         };
-        let Some(text) = self.texts.get(&document.path) else {
+        let Some(text) = self.texts.get(analysis.entry()) else {
             return self.send(Response::new_ok(id, Value::Null));
         };
         let Some(offset) = text.offset(query.position) else {
@@ -284,7 +284,7 @@ impl State {
         };
         let result = match query.method.as_str() {
             "textDocument/hover" => {
-                serde_json::to_value(analysis.hover(&document.path, offset).map(|hover| {
+                serde_json::to_value(analysis.hover(analysis.entry(), offset).map(|hover| {
                     lsp_types::Hover {
                         contents: lsp_types::HoverContents::Markup(lsp_types::MarkupContent {
                             kind: lsp_types::MarkupKind::Markdown,
@@ -296,12 +296,12 @@ impl State {
             }
             "textDocument/definition" => serde_json::to_value(
                 analysis
-                    .definition(&document.path, offset)
+                    .definition(analysis.entry(), offset)
                     .and_then(|location| self.location(&location)),
             )?,
             "textDocument/completion" => {
                 let items = analysis
-                    .completions(&document.path, offset)
+                    .completions(analysis.entry(), offset)
                     .into_iter()
                     .enumerate()
                     .map(|(index, item)| lsp_types::CompletionItem {
@@ -407,7 +407,8 @@ impl State {
             }
             "textDocument/didSave" => {
                 let params: lsp_types::DidSaveTextDocumentParams = serde_json::from_value(params)?;
-                self.update(Change::Disk(vec![uri_path(&params.text_document.uri)?]))?;
+                uri_path(&params.text_document.uri)?;
+                self.update(Change::Refresh)?;
             }
             "textDocument/didClose" => {
                 let params: lsp_types::DidCloseTextDocumentParams = serde_json::from_value(params)?;
@@ -418,12 +419,12 @@ impl State {
             "workspace/didChangeWatchedFiles" => {
                 let params: lsp_types::DidChangeWatchedFilesParams =
                     serde_json::from_value(params)?;
-                let paths = params
+                let _paths = params
                     .changes
                     .iter()
                     .map(|event| uri_path(&event.uri))
                     .collect::<Result<Vec<_>>>()?;
-                self.update(Change::Disk(paths))?;
+                self.update(Change::Refresh)?;
             }
             "$/cancelRequest" => {
                 if let Some(id) = params
@@ -448,10 +449,10 @@ impl State {
     }
     fn location(&self, location: &SourceLocation) -> Option<lsp_types::Location> {
         Some(lsp_types::Location {
-            uri: self.uri(&location.path)?,
+            uri: self.uri(self.snapshot.as_ref()?.paths.get(&location.source.id())?)?,
             range: self
                 .texts
-                .get(&location.path)
+                .get(&location.source)
                 .map(|text| text.range(location.span))
                 .unwrap_or_default(),
         })

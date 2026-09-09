@@ -1,4 +1,4 @@
-use resin_common::prelude::*;
+use resin_types::prelude::*;
 use support::pipeline;
 
 mod support;
@@ -167,8 +167,8 @@ fn verifier_rejects_invalid_sum_instructions_and_types() {
     };
     *tag = Case::Type(Ty::Bool);
     assert!(matches!(
-        resin_lir_verifier::verify(&m).unwrap_err().kind,
-        resin_lir_verifier::VerifyErrorKind::InvalidVariant
+        resin_lir::verify(&m).unwrap_err().kind,
+        resin_lir::VerifyErrorKind::InvalidVariant
     ));
 
     let mut m = module(source);
@@ -177,8 +177,8 @@ fn verifier_rejects_invalid_sum_instructions_and_types() {
         error: Box::new(Ty::Bool),
     };
     assert!(matches!(
-        resin_lir_verifier::verify(&m).unwrap_err().kind,
-        resin_lir_verifier::VerifyErrorKind::InvalidVariant
+        resin_lir::verify(&m).unwrap_err().kind,
+        resin_lir::VerifyErrorKind::InvalidVariant
     ));
 
     let mut m = module(source);
@@ -193,8 +193,8 @@ fn verifier_rejects_invalid_sum_instructions_and_types() {
         ],
     };
     assert!(matches!(
-        resin_lir_verifier::verify(&m).unwrap_err().kind,
-        resin_lir_verifier::VerifyErrorKind::InvalidVariant
+        resin_lir::verify(&m).unwrap_err().kind,
+        resin_lir::VerifyErrorKind::InvalidVariant
     ));
 }
 
@@ -272,5 +272,5 @@ fn ir_never_elimination_cannot_consume_an_inhabited_value() {
             .any(|i| matches!(i, resin_lir::Instr::Eliminate { .. }))
     );
     m.functions[0].locals[0].ty = Ty::Int32;
-    assert!(resin_lir_verifier::verify(&m).is_err());
+    assert!(resin_lir::verify(&m).is_err());
 }

@@ -1,4 +1,4 @@
-use resin_common::prelude::*;
+use resin_types::prelude::*;
 use std::fmt::Write;
 
 use resin_lir::{Instr, Module};
@@ -8,12 +8,11 @@ mod lifecycle;
 pub(super) struct Types<'a> {
     pub table: &'a TypeTable,
     pub module: &'a Module,
-    pub shaders: &'a [super::Shader],
     literals: Vec<&'a [u8]>,
 }
 
 impl<'a> Types<'a> {
-    pub fn new(module: &'a Module, table: &'a TypeTable, shaders: &'a [super::Shader]) -> Self {
+    pub fn new(module: &'a Module, table: &'a TypeTable) -> Self {
         let mut literals = Vec::new();
         for instruction in module
             .functions
@@ -33,7 +32,6 @@ impl<'a> Types<'a> {
             literals,
             module,
             table,
-            shaders,
         }
     }
 

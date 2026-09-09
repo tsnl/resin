@@ -2,8 +2,8 @@
 //! Runtime operands, including dynamic indices, have already been assigned temporaries.
 use super::{Slot, ops::instruction, types::Types};
 use crate::Error;
+use resin_lir::FunctionTypes;
 use resin_lir::{Function, Instr, Terminator};
-use resin_lir_verifier::FunctionTypes;
 
 pub(super) fn inputs(
     types: &mut Types<'_>,
@@ -16,7 +16,8 @@ pub(super) fn inputs(
     while let Some(b) = pending.pop() {
         let mut stack = inputs[b].clone().unwrap();
         for (i, instr) in function.blocks[b].instrs.iter().enumerate() {
-            let args = stack.split_off(stack.len() - instr.stack_effect().pops);
+            let args = stack
+                .split_off(stack.len() - flow.operand_count(resin_lir::BlockId::from_index(b), i));
             if let Some(ty) = &flow.results[b][i] {
                 let local = Slot::local_result(instr, &args);
                 let expr = if local || matches!(instr, Instr::Function { .. }) {

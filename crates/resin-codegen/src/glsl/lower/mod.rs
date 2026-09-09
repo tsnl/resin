@@ -1,5 +1,5 @@
 use crate::Error;
-use resin_common::prelude::*;
+use resin_types::prelude::*;
 
 mod entry;
 mod function;
@@ -11,10 +11,10 @@ mod types;
 use types::Types;
 
 pub fn generate(
-    checked: resin_lir_verifier::Verified<'_>,
+    checked: resin_lir::Verified<'_>,
     entry: FunctionId,
     stage: Stage,
-) -> Result<crate::GlslModule, Error> {
+) -> Result<crate::glsl::GlslModule, Error> {
     let module = checked.module();
     let analysis = checked.analysis();
     let reachable = reachable::functions(module, entry.index())?;
@@ -34,7 +34,7 @@ pub fn generate(
             index,
         )?);
     }
-    Ok(crate::GlslModule {
+    Ok(crate::glsl::GlslModule {
         extensions: types.extensions().into(),
         declarations: types.declarations(),
         globals: "bool r_failed = false;\n".into(),
@@ -66,7 +66,7 @@ impl Slot {
 fn register_function_types(
     types: &mut Types<'_>,
     index: usize,
-    flow: &resin_lir_verifier::FunctionTypes,
+    flow: &resin_lir::FunctionTypes,
 ) -> Result<(), Error> {
     let function = &types.module.functions[index];
     for ty in function
@@ -105,7 +105,7 @@ fn shader_wrapper(
     stage: Stage,
 ) -> Result<String, Error> {
     let typer = TyperContext::from_definitions(types.module.types.clone());
-    let interface = resin_common::types::shader::validate(
+    let interface = resin_types::shader::validate(
         &typer,
         &function.locals[0].ty,
         &function.result,

@@ -1,5 +1,5 @@
 //! C source tree → text. This module does not inspect LIR or Resin types.
-use crate::{CBlock, CBody, CEdge, CEdgeValue, CExit, CFunction, CModule};
+use crate::c::{CBlock, CBody, CEdge, CEdgeValue, CExit, CFunction, CModule};
 use std::fmt::Write;
 
 pub fn module(module: &CModule) -> String {
@@ -7,11 +7,13 @@ pub fn module(module: &CModule) -> String {
     for header in &module.includes {
         writeln!(out, "#include <{header}>").unwrap();
     }
+    for header in &module.local_includes {
+        writeln!(out, "#include \"{header}\"").unwrap();
+    }
     for (condition, message) in &module.assertions {
         writeln!(out, "_Static_assert({condition}, {message:?});").unwrap();
     }
     out.push_str(&module.declarations);
-    print_data(&mut out, &module.data);
     for signature in &module.prototypes {
         writeln!(out, "{signature};").unwrap();
     }
@@ -21,16 +23,6 @@ pub fn module(module: &CModule) -> String {
     }
     print_function(&mut out, &module.entry);
     out
-}
-
-fn print_data(out: &mut String, data: &[Vec<u32>]) {
-    for (index, words) in data.iter().enumerate() {
-        writeln!(out, "static uint32_t r_spv{index}[] = {{").unwrap();
-        for word in words {
-            writeln!(out, "  0x{word:08x},").unwrap();
-        }
-        out.push_str("};\n");
-    }
 }
 
 fn print_function(out: &mut String, function: &CFunction) {

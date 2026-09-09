@@ -1,6 +1,6 @@
-use crate::{GlslBlock, GlslEdge, GlslEdgeValue, GlslExit, GlslFunction};
-use resin_common::prelude::*;
-use resin_lir_verifier::FunctionTypes;
+use crate::glsl::{GlslBlock, GlslEdge, GlslEdgeValue, GlslExit, GlslFunction};
+use resin_lir::FunctionTypes;
+use resin_types::prelude::*;
 use std::fmt::Write;
 
 use crate::Error;
@@ -95,7 +95,8 @@ fn lower_block(
             diverged = true;
             break;
         }
-        let args = stack.split_off(stack.len() - instr.stack_effect().pops);
+        let args =
+            stack.split_off(stack.len() - flow.operand_count(resin_lir::BlockId::from_index(b), i));
         let result = flow.results[b][i].as_ref();
         check_instruction(types, instr, &args, result)
             .map_err(|error| Error::at(types.module, index, Some((b, i)), error))?;

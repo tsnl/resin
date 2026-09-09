@@ -8,8 +8,9 @@ use std::{
 impl Environment {
     pub(super) fn resolve_tools(&self, cc: Option<&OsStr>, glslc: Option<&OsStr>) -> Toolchain {
         let settings = Settings {
-            cc: self.resolve(self.compiler(cc, "CC", crate::DEFAULT_C_COMPILER)),
-            glslc: self.resolve(self.compiler(glslc, "GLSLC", "glslc")),
+            cc: self.optional_tool(self.compiler(cc, "CC", crate::DEFAULT_C_COMPILER)),
+            glslc: self.optional_tool(self.compiler(glslc, "GLSLC", "glslc")),
+            ninja: self.optional_tool(self.compiler(None, "NINJA", "ninja")),
             runtime_include: self.path(
                 "RESIN_RUNTIME_INCLUDE",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/../resin-runtime/include"),
@@ -18,7 +19,6 @@ impl Environment {
             environment: self.variables.clone(),
             cache: self.directory.join("build"),
             directory: self.directory.clone(),
-            temporary: self.temporary.clone(),
             executable: self.executable.clone(),
         };
         Toolchain { settings }
@@ -35,14 +35,19 @@ impl Environment {
             .unwrap_or_else(|| OsStr::new(fallback))
     }
 
-    fn runtime_library(&self) -> Result<PathBuf, String> {
-        if let Some(path) = self.variable("RESIN_RUNTIME_LIB") {
-            let path = self.directory.join(path);
-            return if path.is_file() {
-                Ok(path)
+    fn optional_tool(&self, name: &OsStr) -> PathBuf {
+        self.resolve(name).unwrap_or_else(|_| {
+            if Path::new(name).components().count() > 1 {
+                self.directory.join(name)
             } else {
-                Err(format!("runtime library not found: {}", path.display()))
-            };
+                name.into()
+            }
+        })
+    }
+
+    fn runtime_library(&self) -> PathBuf {
+        if let Some(path) = self.variable("RESIN_RUNTIME_LIB") {
+            return self.directory.join(path);
         }
         let directory = self.executable.parent().unwrap_or(Path::new("."));
         for path in [
@@ -50,13 +55,10 @@ impl Environment {
             directory.join(crate::RUNTIME_ARCHIVE),
         ] {
             if path.is_file() {
-                return Ok(path);
+                return path;
             }
         }
-        Err(format!(
-            "cannot find {} beside the compiler or in deps; set RESIN_RUNTIME_LIB",
-            crate::RUNTIME_ARCHIVE
-        ))
+        directory.join(crate::RUNTIME_ARCHIVE)
     }
 
     fn resolve(&self, compiler: &OsStr) -> Result<PathBuf, String> {
@@ -103,8 +105,8 @@ impl Environment {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use resin_common::prelude::*;
     use std::{collections::BTreeMap, fs};
+    use tempfile::TempDir;
 
     fn executable(directory: &Path, name: &str) -> PathBuf {
         let path = directory.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
@@ -119,7 +121,7 @@ mod tests {
 
     #[test]
     fn resolves_flags_environment_and_defaults_from_supplied_process_inputs() {
-        let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+        let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
         let bin = temp.path().join("tools with spaces");
         fs::create_dir(&bin).unwrap();
         let default_cc = executable(&bin, crate::DEFAULT_C_COMPILER);
@@ -135,11 +137,10 @@ mod tests {
             temporary: temp.path().into(),
         };
         let settings = env.toolchain(None, None).settings;
-        assert_eq!(settings.cc.unwrap(), default_cc);
-        assert_eq!(settings.glslc.unwrap(), default_glslc);
-        assert_eq!(settings.runtime_library.unwrap(), runtime);
+        assert_eq!(settings.cc, default_cc);
+        assert_eq!(settings.glslc, default_glslc);
+        assert_eq!(settings.runtime_library, runtime);
         assert_eq!(settings.cache, temp.path().join("build"));
-        assert_eq!(settings.temporary, temp.path());
         assert_eq!(
             settings.runtime_include,
             PathBuf::from(concat!(
@@ -158,37 +159,32 @@ mod tests {
         }
         fs::write(temp.path().join("archive"), []).unwrap();
         let settings = env.toolchain(None, None).settings;
-        assert_eq!(settings.cc.unwrap(), custom);
-        assert_eq!(settings.glslc.unwrap(), custom);
+        assert_eq!(settings.cc, custom);
+        assert_eq!(settings.glslc, custom);
         assert_eq!(settings.runtime_include, temp.path().join("include"));
-        assert_eq!(
-            settings.runtime_library.unwrap(),
-            temp.path().join("archive")
-        );
+        assert_eq!(settings.runtime_library, temp.path().join("archive"));
         let settings = env
             .toolchain(Some(OsStr::new("explicit")), Some(explicit.as_os_str()))
             .settings;
-        assert_eq!(settings.cc.as_ref().unwrap(), &explicit);
-        assert_eq!(settings.glslc.as_ref().unwrap(), &explicit);
+        assert_eq!(&settings.cc, &explicit);
+        assert_eq!(&settings.glslc, &explicit);
         env.variables.insert("CC".into(), "missing".into());
         assert_eq!(
             settings.environment.get(OsStr::new("CC")).unwrap(),
             "custom"
         );
-        assert!(env.toolchain(None, None).settings.cc.is_err());
+        assert_eq!(env.toolchain(None, None).settings.cc, Path::new("missing"));
         // In particular, failure to resolve an explicit choice never falls back.
-        assert!(
-            env.toolchain(Some(OsStr::new("missing")), None)
-                .settings
-                .cc
-                .is_err()
+        assert_eq!(
+            env.toolchain(Some(OsStr::new("missing")), None).settings.cc,
+            Path::new("missing")
         );
     }
 
     #[test]
     #[cfg(windows)]
     fn windows_environment_names_and_executable_extensions_are_resolved() {
-        let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+        let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
         let path = executable(temp.path(), "compiler with spaces");
         let env = Environment {
             variables: BTreeMap::from([
@@ -199,7 +195,7 @@ mod tests {
             executable: temp.path().join("resin.exe"),
             temporary: temp.path().into(),
         };
-        assert_eq!(env.toolchain(None, None).settings.cc.unwrap(), path);
+        assert_eq!(env.toolchain(None, None).settings.cc, path);
         assert_eq!(env.resolve(path.as_os_str()).unwrap(), path);
         assert_eq!(
             env.resolve(path.with_extension("").as_os_str()).unwrap(),

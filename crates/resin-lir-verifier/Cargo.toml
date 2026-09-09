@@ -1,9 +1,0 @@
-[package]
-name = "resin-lir-verifier"
-version.workspace = true
-edition = "2024"
-publish = false
-
-[dependencies]
-resin-common = { workspace = true }
-resin-lir = { workspace = true }

@@ -1,6 +1,5 @@
 use crossbeam_channel::{Receiver, unbounded};
 use lsp_server::{Message, Notification, Request, Response};
-use resin_common::prelude::*;
 use serde_json::{Value, json};
 use std::{
     collections::VecDeque,
@@ -10,6 +9,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use tempfile::TempDir;
 
 struct Client {
     child: Child,
@@ -162,7 +162,7 @@ fn at(uri: &str, line: u32, character: u32) -> Value {
 
 #[test]
 fn explicit_inference_updates_hover_after_edits() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("inference.resin"));
     for (version, initializer, expected) in [(1, "42", "long"), (2, "1 == 1", "bool")] {
@@ -215,7 +215,7 @@ fn formatting_uses_current_buffers_and_returns_utf16_edits() {
         }
         result
     }
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let path = temp.path().join("format.resin");
     let file = uri(&path);
     let disk = "def main() = {};\n";
@@ -283,7 +283,7 @@ fn formatting_uses_current_buffers_and_returns_utf16_edits() {
 
 #[test]
 fn dot_completion_updates_unsaved_receiver_types_and_uses_utf16_edits() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("fields.resin"));
     for (version, field, typed) in [(1, "count", ""), (2, "length", "le")] {
@@ -318,7 +318,7 @@ fn dot_completion_updates_unsaved_receiver_types_and_uses_utf16_edits() {
 
 #[test]
 fn dot_completion_sorts_fields_before_methods() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("members.resin"));
     let source = "struct Record { zebra: int, middle: int };\n\
@@ -358,7 +358,7 @@ fn dot_completion_sorts_fields_before_methods() {
 
 #[test]
 fn unsaved_unicode_buffers_support_features_edits_and_clean_shutdown() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("new.resin"));
     let source = "def main (argument: int) -> int = {\r\n  // 😀\r\n  var value = argument + 1;\r\n  /* 😀 */ value\r\n};\r\n";
@@ -438,7 +438,7 @@ fn unsaved_unicode_buffers_support_features_edits_and_clean_shutdown() {
 
 #[test]
 fn dependency_overlays_close_and_disk_changes_refresh_consumers() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let root = temp.path();
     let library = root.join("lib.resin");
     std::fs::write(
@@ -448,7 +448,7 @@ fn dependency_overlays_close_and_disk_changes_refresh_consumers() {
     .unwrap();
     let mut client = Client::start(root, Value::Null);
     let main_uri = uri(&root.join("main.resin"));
-    let lib_uri = uri(&resin_compiler::normalize_path(&library).unwrap());
+    let lib_uri = uri(&resin_source::normalize_path(&library).unwrap());
     let source = "import { \"lib.resin\" }; def main () -> int = { answer() };";
     let column = source.rfind("answer").unwrap() as u32;
     client.open(&main_uri, source);
@@ -509,7 +509,7 @@ fn dependency_overlays_close_and_disk_changes_refresh_consumers() {
 
 #[test]
 fn stdlib_override_and_rapid_versions_use_the_latest_snapshot() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let stdlib = temp.path().join("standard");
     std::fs::create_dir(&stdlib).unwrap();
     std::fs::write(
@@ -521,7 +521,7 @@ fn stdlib_override_and_rapid_versions_use_the_latest_snapshot() {
     let uri = uri(&temp.path().join("main.resin"));
     client.open(
         &uri,
-        "import { \"std/custom.resin\" }; def main () -> int = { standard() };",
+        "import { \"$/std/custom.resin\" }; def main () -> int = { standard() };",
     );
     client.diagnostics(&uri, Some(1), false);
     for version in 2..50 {
@@ -549,7 +549,7 @@ fn stdlib_override_and_rapid_versions_use_the_latest_snapshot() {
 
 #[test]
 fn holes_do_not_block_later_features_and_repair_clears_diagnostics() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("holes.resin"));
     let broken = "def main() = { var missing = ; var value = { count = 1 }; value.count; };";

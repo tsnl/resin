@@ -1,6 +1,8 @@
-use resin_common::prelude::*;
+use tempfile::TempDir;
 #[path = "support/pipeline.rs"]
 mod pipeline;
+#[path = "support/project.rs"]
+mod project;
 #[path = "support/toolchain.rs"]
 mod toolchain;
 use std::{
@@ -18,22 +20,26 @@ struct Program {
 
 impl Program {
     fn new(source: &str) -> Self {
-        let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+        let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
         let path = temp.path().join("main.resin");
         fs::write(&path, source).unwrap();
         let module = pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap();
-        Self::compile(temp, &resin_codegen::emit_c(&module, "main").unwrap())
+        let project = project::Project::new(&module, Some("main")).unwrap();
+        Self::compile(temp, &project)
     }
 
-    fn compile(temp: TempDir, source: &str) -> Self {
+    fn compile(temp: TempDir, project: &project::Project) -> Self {
         let executable = temp
             .path()
             .join(format!("program{}", std::env::consts::EXE_SUFFIX));
         let cc = std::env::var_os("CC")
             .unwrap_or_else(|| OsString::from(resin_toolchain::DEFAULT_C_COMPILER));
-        toolchain::c(&cc)
-            .compile_c(source, &executable)
-            .unwrap_or_else(|error| panic!("{error}\n{source}"));
+        let built = project.build(&toolchain::c(&cc)).unwrap();
+        built
+            .executable(project.generated.program().unwrap().file_name().unwrap())
+            .unwrap()
+            .copy_to(&executable)
+            .unwrap();
         Self {
             _temp: temp,
             executable,
@@ -61,7 +67,7 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
     let program = Program::new(
         r#"
         export { main };
-        import { "std/console.resin" };
+        import { "$/std/console.resin" };
         def failed(error: InputError) -> Result<(), InputError> = { err(error) };
         def main() -> Result<(), _> = {
             var reading = 1 == 1;
@@ -129,7 +135,7 @@ fn byte_input_distinguishes_bytes_from_eof() {
     let program = Program::new(
         r#"
         export { main };
-        import { "std/console.resin" };
+        import { "$/std/console.resin" };
         def main() -> Result<int, _> = {
             var zero = Console.read_byte()?;
             var first = Console.read_byte()?;
@@ -166,7 +172,7 @@ fn greeting_example_and_eof_error() {
 #[test]
 fn failures_release_the_current_buffer_and_report_the_right_error() {
     for mode in 0..=6 {
-        let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+        let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
         let header = temp.path().join("faults.h");
         fs::write(
             &header,
@@ -180,7 +186,7 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
         let source = format!(
             r#"
             export {{ main }};
-            import {{ "std/console.resin" }};
+            import {{ "$/std/console.resin" }};
             extern "{header}" def console_test_mode() -> int;
             extern "{header}" def console_test_frees() -> int;
             def exercise() -> int = {{
@@ -213,11 +219,14 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
         fs::write(&path, source).unwrap();
         let module = pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap();
         // Include before the generated header list so all foreign calls use the test shims.
+        let project = project::Project::new(&module, Some("main")).unwrap();
+        let path = project.generated.c_source().unwrap();
         let source = format!(
             "#include \"{header}\"\n{}",
-            resin_codegen::emit_c(&module, "main").unwrap()
+            fs::read_to_string(path).unwrap()
         );
-        let output = Program::compile(temp, &source).run(b"");
+        fs::write(path, source).unwrap();
+        let output = Program::compile(temp, &project).run(b"");
         assert!(
             output.status.success(),
             "mode {mode}: {:?}: {}",
@@ -232,7 +241,7 @@ fn streams_write_literals_and_owned_strings_verbatim() {
     let program = Program::new(
         r#"
         export { main };
-        import { "std/io.resin" };
+        import { "$/std/io.resin" };
         def literal() -> Span<ubyte> = { "static\0bytes" };
         def main() -> Result<(), _> = {
             var out = Io.stdout();
@@ -258,7 +267,7 @@ fn stream_write_failure_propagates_as_a_library_error() {
     let program = Program::new(
         r#"
         export { main };
-        import { "std/io.resin" };
+        import { "$/std/io.resin" };
         def main() -> Result<(), _> = {
             Output { stream = 99_ui }.write("unwritten")?;
             print("not reached");

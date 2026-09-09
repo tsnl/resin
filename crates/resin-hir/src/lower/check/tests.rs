@@ -3,11 +3,10 @@ use crate::lower::{
     Generator,
     typed::{StatementKind, TermKind},
 };
-use resin_common::prelude::*;
+use resin_types::prelude::*;
 
 fn check(source: &str, generator: &mut Generator) -> CheckedFile {
-    let file =
-        resin_ast::generate(&resin_cst::Document::reparse(source.to_string(), None)).unwrap();
+    let file = resin_ast::generate(&resin_cst::Document::reparse(source.into(), None)).unwrap();
     let mut scopes = Scopes::new();
     assert!(
         scopes
@@ -67,4 +66,12 @@ fn recovery_keeps_signatures_and_healthy_trees_without_lowering_failed_bodies() 
     assert_eq!(checked.signatures["bad"].result.ty, Ty::Int32);
     assert!(!checked.bodies.contains_key("bad"));
     assert_eq!(checked.bodies["healthy"].ty, Ty::Int32);
+}
+
+#[test]
+fn recursive_groups_follow_dependencies() {
+    assert_eq!(
+        super::groups(&[vec![1], vec![0, 2], vec![]]),
+        vec![vec![2], vec![1, 0]]
+    );
 }

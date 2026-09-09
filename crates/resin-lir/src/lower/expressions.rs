@@ -1,15 +1,16 @@
 //! Every HIR constructor has an explicit storage/control-flow translation here.
 use super::Generator;
+use super::LowerError;
 use crate::Instr;
-use resin_common::prelude::*;
 use resin_hir::{Arguments, Statement, Term, TermKind};
+use resin_types::prelude::*;
 
 impl Generator {
-    pub(super) fn lower_term(&mut self, term: &Term) -> Result<Ty, GenerateError> {
+    pub(super) fn lower_term(&mut self, term: &Term) -> Result<Ty, LowerError> {
         let span = term.span;
         let expected = &term.ty;
         match &term.kind {
-            TermKind::Constant(value) => self.emit(Instr::Push {
+            TermKind::Constant { value } => self.emit(Instr::Push {
                 value: value.clone(),
             }),
             TermKind::Function { function } => self.emit(Instr::Function {
@@ -35,7 +36,7 @@ impl Generator {
                 return self.gen_builtin(name, args, expected);
             }
             TermKind::Call { func, arg } => return self.gen_call(func, arg),
-            TermKind::Pack(args) => self.gen_pack(args)?,
+            TermKind::Pack { args } => self.gen_pack(args)?,
             TermKind::Intrinsic { op, args } => self.gen_intrinsic(*op, args, expected)?,
             TermKind::Adapt { conversion, arg } => self.gen_receiver(arg, *conversion, expected)?,
             TermKind::Convert { conversion, arg } => {
@@ -75,7 +76,7 @@ impl Generator {
         Ok(expected.clone())
     }
 
-    pub(super) fn lower_statement(&mut self, statement: &Statement) -> Result<(), GenerateError> {
+    pub(super) fn lower_statement(&mut self, statement: &Statement) -> Result<(), LowerError> {
         match statement {
             Statement::Define {
                 binding,
@@ -93,14 +94,14 @@ impl Generator {
         }
     }
 
-    fn gen_arguments(&mut self, args: &Arguments) -> Result<(), GenerateError> {
+    fn gen_arguments(&mut self, args: &Arguments) -> Result<(), LowerError> {
         if let Some(receiver) = &args.receiver {
             self.gen_term(receiver, None)?;
         }
         self.unpack_argument(&args.argument, &args.params)
     }
 
-    fn gen_pack(&mut self, args: &Arguments) -> Result<(), GenerateError> {
+    fn gen_pack(&mut self, args: &Arguments) -> Result<(), LowerError> {
         self.gen_arguments(args)?;
         let count = args.params.len() + usize::from(args.receiver.is_some());
         if count > 1 {
@@ -116,7 +117,7 @@ impl Generator {
         op: Intrinsic,
         args: &Arguments,
         result: &Ty,
-    ) -> Result<(), GenerateError> {
+    ) -> Result<(), LowerError> {
         self.gen_arguments(args)?;
         match op {
             Intrinsic::StringFromStr => self.emit(Instr::CallBuiltin {

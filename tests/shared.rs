@@ -1,10 +1,5 @@
-use resin_common::prelude::*;
-#[path = "support/toolchain.rs"]
-mod toolchain;
 use support::pipeline;
 mod support;
-
-use std::{ffi::OsString, process::Command};
 
 const RESOURCE: &str = r#"
 struct Resource { trace: Ptr<int>, digit: int };
@@ -23,17 +18,9 @@ impl Resource {
 fn run(source: &str) {
     let source = format!("export {{ main }}; {RESOURCE} {source}");
     let module = support::module(&source);
-    let c = resin_codegen::emit_c(&module, "main").unwrap();
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let output = temp
-        .path()
-        .join(format!("shared{}", std::env::consts::EXE_SUFFIX));
-    let cc = std::env::var_os("CC")
-        .unwrap_or_else(|| OsString::from(resin_toolchain::DEFAULT_C_COMPILER));
-    toolchain::c(&cc)
-        .compile_c(&c, &output)
-        .unwrap_or_else(|e| panic!("{e}\n{c}"));
-    let result = Command::new(output).output().unwrap();
+    let result = support::project::Project::new(&module, Some("main"))
+        .unwrap()
+        .run();
     assert_eq!(
         result.status.code(),
         Some(0),

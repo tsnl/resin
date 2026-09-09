@@ -1,7 +1,8 @@
-use resin_common::prelude::*;
+use resin_types::prelude::*;
+use tempfile::TempDir;
 #[path = "support/toolchain.rs"]
 mod toolchain;
-use std::{ffi::OsString, fs, process::Command};
+use std::fs;
 use support::pipeline;
 
 mod support;
@@ -12,17 +13,9 @@ fn run_module(module: &resin_lir::Module) -> std::process::Output {
 }
 
 fn run_entry(module: &resin_lir::Module, entry: &str) -> std::process::Output {
-    let source = resin_codegen::emit_c(module, entry).unwrap();
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let output = temp
-        .path()
-        .join(format!("program{}", std::env::consts::EXE_SUFFIX));
-    let cc = std::env::var_os("CC")
-        .unwrap_or_else(|| OsString::from(resin_toolchain::DEFAULT_C_COMPILER));
-    toolchain::c(&cc)
-        .compile_c(&source, &output)
-        .unwrap_or_else(|error| panic!("{error}\n{source}"));
-    Command::new(output).output().unwrap()
+    support::project::Project::new(module, Some(entry))
+        .unwrap()
+        .run()
 }
 
 #[test]
@@ -309,9 +302,9 @@ fn invalid_integer_operations_fail_at_runtime() {
 
 #[test]
 fn unsupported_operations_report_backend_errors() {
-    let error = resin_codegen::emit_c(
+    let error = support::project::Project::new(
         &module("export { main }; def main () -> int = { var r = { x = 1 }; r + r; 0 };"),
-        "main",
+        Some("main"),
     )
     .unwrap_err();
     assert!(error.to_string().contains("unsupported builtin"));
@@ -319,9 +312,9 @@ fn unsupported_operations_report_backend_errors() {
 }
 
 #[test]
-fn invalid_ir_is_rejected_before_emitting() {
+fn entry_selection_and_invalid_ir_have_distinct_boundaries() {
     assert!(
-        resin_codegen::emit_c(&resin_lir::Module::default(), "main")
+        support::project::Project::new(&resin_lir::Module::default(), Some("main"))
             .unwrap_err()
             .to_string()
             .contains("export { main }")
@@ -331,8 +324,9 @@ fn invalid_ir_is_rejected_before_emitting() {
         .instrs
         .insert(0, resin_lir::Instr::Discard);
     assert!(
-        resin_codegen::emit_c(&m, "main")
-            .unwrap_err()
+        resin_lir::VerifiedModule::new(m)
+            .err()
+            .unwrap()
             .to_string()
             .contains("StackUnderflow")
     );
@@ -349,13 +343,16 @@ fn unused_functions_do_not_fail_strict_compilation() {
 
 #[test]
 fn failed_compilation_preserves_existing_output() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let output = temp.path().join("existing");
     fs::write(&output, b"keep me").unwrap();
     assert!(
-        toolchain::c(std::ffi::OsStr::new(resin_toolchain::DEFAULT_C_COMPILER))
-            .compile_c("not C", &output)
-            .is_err()
+        toolchain::compile_c(
+            "not C",
+            &output,
+            std::ffi::OsStr::new(resin_toolchain::DEFAULT_C_COMPILER)
+        )
+        .is_err()
     );
     assert_eq!(fs::read(&output).unwrap(), b"keep me");
     assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 1);

@@ -1,7 +1,7 @@
 //! IR → S-expression formatting via `sexpfmt`.
 
 use ::sexpfmt::{PrinterConfig, SExp, SExpBookendStyle, sexp_to_string};
-use resin_common::prelude::*;
+use resin_types::prelude::*;
 
 use crate::{Function, Instr, Module, Terminator};
 

@@ -1,7 +1,7 @@
 # Resin language server
 
 The `resin --lsp <directory>` mode provides diagnostics, hover, go-to-definition, basic completion, and formatting
-over stdio. It uses the persistent `resin_compiler::Session`.
+over stdio. It reuses `resin_compiler::Compiler` with immutable source versions.
 Semantic editor requests run parsing, resolution, typing, and IR verification; they do not
 compile C/GLSL, initialize a GPU, or run the program. Analysis accepts library
 modules without an exported entry function; runtime bindings belong inside
@@ -33,7 +33,7 @@ Standard-library lookup, in descending precedence:
 
 1. Initialization options: `{ "stdlibPath": "/absolute/path/to/stdlib" }`
 2. `RESIN_STDLIB`
-3. The repository's `stdlib/` path recorded when the Resin library was built.
+3. The repository's `stdlib/` path recorded when `resin-source` was built.
 
 Relative initialization overrides resolve against the selected project directory.
 `RESIN_STDLIB` resolves against the invoking process's working directory. An
@@ -89,44 +89,69 @@ and `resin --format --check examples` checks them without writing. See the
 Only whole-document LSP formatting is supported; range/on-type formatting is not
 implemented.
 
-## Stateful compiler core
+## Immutable sources and compiler caches
 
-The compiler owns source state, incremental Tree-sitter parses, cached ASTs,
-import dependencies, and immutable `Compilation` results. The CLI and the language
-server both use this API. The server adds URI/version bookkeeping, UTF-16 position
-conversion, client file-watch notifications, and a background worker.
+`resin_source::Source` is immutable named text with a stable logical
+identity. Cloning shares a version; `with_text` creates a new version of the same
+source. Names are diagnostic labels and need not be filesystem paths or unique.
+`resin_compiler::Compiler` retains syntax and compilation caches. Its `compile`
+method receives an entry source and a concrete `resin_source::Loader`, resolves the import
+graph, and returns an immutable `Compilation` with diagnostics and editor queries.
+
+Explicit import bindings also support sources held entirely in memory. This complete
+example changes an imported module while keeping its entry unchanged:
 
 ```rust
-use resin_compiler::Session;
-use std::path::Path;
-
-fn main() -> std::io::Result<()> {
-    let entry = Path::new("/tmp/example.resin");
-    let mut compiler = Session::default();
-    compiler.set_overlay(entry, "def main () -> int = { var value = 1; value };".into())?;
-    let before = compiler.analyze(entry)?;
+use resin_source::prelude::*;
+fn main() {
+    let library = Source::new(
+        "library",
+        "export { answer }; def answer() -> int = { 42 };",
+    );
+    let entry = Source::new(
+        "example",
+        r#"import { "library" }; def main() -> int = { answer() };"#,
+    );
+    let mut loader = resin_source::Loader::new(resin_source::stdlib_path());
+    loader.set_import(&entry, "library", library.clone()).unwrap();
+    let mut compiler = resin_compiler::Compiler::new();
+    let before = compiler.compile(entry.clone(), &mut loader);
     assert!(before.module().is_ok());
 
-    compiler.set_overlay(entry, "def main () -> int = { var value = missing; value };".into())?;
-    let after = compiler.analyze(entry)?;
+    loader.set_import(
+        &entry,
+        "library",
+        library.with_text("export { answer }; def answer() -> int = { missing };"),
+    ).unwrap();
+    let after = compiler.compile(entry, &mut loader);
     assert!(!after.diagnostics().is_empty());
-    assert!(before.module().is_ok()); // Retained readers keep their old compilation.
-    Ok(())
+    assert!(before.module().is_ok()); // Retained results keep their original sources.
 }
 ```
 
-Hosts call `set_overlay`/`remove_overlay` for buffers and `file_changed` after disk
-changes, creations, or deletions. An open overlay takes precedence over disk.
-`analyze` reuses an unchanged entry's compilation; edits invalidate entries that
-transitively depend on the changed file. Missing imports also register dependencies
-so creating a file can recover an error. `set_stdlib` invalidates checked entries.
-`retain_entries` accepts canonical entry paths to release results no longer needed.
+`resin_source::Loader` supplies filesystem loading, canonical path identities,
+relative imports, and `$/std/` resolution. `load_file` reads disk contents;
+`source_from_text` registers authoritative supplied text for a file's imports, and
+`remove_source` restores disk loading when a buffer closes. Unchanged text reuses its
+source version. The CLI loads its entry through this loader. Codegen and the native
+toolchain use `compilation.verified()` to build an executable from the retained
+result, without reading the source again. Only `$/std/` selects
+the configured standard library; `std/` is an ordinary relative directory. Other
+references beginning with `$` report an unknown namespace.
 
-Parsing is incremental per file. Semantic checking currently reruns the affected
-entry's complete import closure, while unrelated checked entries remain cached.
-There is no per-function query engine or shared compiler daemon yet. The core
-consumes change events rather than owning an OS watcher. The CLI still builds,
-runs, and exits once; a watch command can host the same session later.
+The language server owns open buffers, document versions, URI/path mappings, and
+frontend revisions. Open/change notifications register supplied text with the loader;
+close notifications remove it. Saves and file-watch notifications schedule another
+analysis. The compiler receives immutable sources and the concrete loader, while
+protocol changes and scheduling remain server operations.
+
+Each compile call resolves imports before checking its caches. An unchanged graph
+reuses its compilation. Missing files that appear, changed file contents, and
+retargeted import symlinks are observed on the next call without invalidation calls.
+Tree-sitter reparsing is incremental per source; semantic checking reruns the
+changed entry's complete import closure. There is no per-function query engine or
+shared compiler daemon. The CLI builds, runs, and exits once; the server retains a
+compiler in its background worker and discards results from obsolete frontend revisions.
 
 ## Protocol behavior and limits
 
@@ -135,12 +160,10 @@ runs, and exits once; a watch command can host the same session later.
   characters. Older document versions are ignored.
 - Each open file is an analysis entry. Diagnostics from its dependencies are
   published at the actual source URI and aggregated across entries.
-- Multiple syntax errors; the first semantic error for each entry/import closure.
-  Strict compiler diagnostics remain authoritative. A separate editor pass walks
-  AST expression/type holes and missing-field nodes, continuing through later
-  statements, functions, and imported buffers. It shares compiler type rules and
-  records unknown bindings as `?`; it never emits IR or treats unknown as unit.
-  Strict source loading and compilation still reject incomplete programs.
+- Syntax and semantic diagnostics from the compiler's normal frontend. HIR checking
+  traverses expression/type holes and missing-field nodes, preserving facts from
+  healthy statements, functions, and imported buffers. Unknown bindings appear as
+  `?`; incomplete programs retain editor facts without publishing executable IR.
 - Navigation includes locals, parameters, nominal types, explicit exports,
   re-exports, standard-library names, and import strings.
 - Completion includes visible names, keywords, builtin types, and intrinsics,
@@ -151,8 +174,8 @@ runs, and exits once; a watch command can host the same session later.
   unknown receiver types can still prevent suggestions. Automatic imports are
   not implemented.
 - The client is asked to watch `**/*.resin` if it supports dynamic registration.
-  A client without file notifications needs a server restart after external
-  changes to closed dependencies.
+  Without file notifications, external changes to closed dependencies are
+  discovered when a later edit or save schedules analysis.
 - Queued changes are coalesced; obsolete results are discarded. Requests can be
   cancelled while queued. An edit invalidating a queued request returns
   `ContentModified`; a running compiler pass finishes before the next pass.
@@ -161,7 +184,7 @@ runs, and exits once; a watch command can host the same session later.
 
 ```sh
 nix-shell --run 'cargo test -p resin-lsp'
-nix-shell --run 'cargo test -p resin-compiler'
+nix-shell --run 'cargo test -p resin-compiler -p resin-source'
 nix-shell --run 'cargo test -p resin --test lsp --test analysis --test zed_queries'
 nix-shell --run 'cargo test -p resin --test formatting'
 ```

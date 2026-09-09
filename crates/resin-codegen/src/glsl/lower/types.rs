@@ -1,4 +1,4 @@
-use resin_common::prelude::*;
+use resin_types::prelude::*;
 use std::{collections::HashSet, fmt::Write};
 
 use crate::Error;

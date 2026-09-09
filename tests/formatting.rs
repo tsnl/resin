@@ -43,8 +43,8 @@ fn check(source: &str, expected: &str) {
 #[test]
 fn trailing_commas_and_nested_lists() {
     check(
-        "export {main,}; import {\"std/test.resin\",}; def main(a:int,b:float32,)={var xs=[1,2,3,]; call(a,b,); var r={x=1,y=2,}; ();};",
-        "export {\n\tmain,\n};\nimport {\n\t\"std/test.resin\",\n};\ndef main(\n\ta: int,\n\tb: float32,\n) = {\n\tvar xs = [\n\t\t1,\n\t\t2,\n\t\t3,\n\t];\n\tcall(\n\t\ta,\n\t\tb,\n\t);\n\tvar r = {\n\t\tx = 1,\n\t\ty = 2,\n\t};\n\t();\n};\n",
+        "export {main,}; import {\"$/std/test.resin\",}; def main(a:int,b:float32,)={var xs=[1,2,3,]; call(a,b,); var r={x=1,y=2,}; ();};",
+        "export {\n\tmain,\n};\nimport {\n\t\"$/std/test.resin\",\n};\ndef main(\n\ta: int,\n\tb: float32,\n) = {\n\tvar xs = [\n\t\t1,\n\t\t2,\n\t\t3,\n\t];\n\tcall(\n\t\ta,\n\t\tb,\n\t);\n\tvar r = {\n\t\tx = 1,\n\t\ty = 2,\n\t};\n\t();\n};\n",
     );
     check(
         "type Pair={x:int,y:float32,}; extern \"x.h\" def call(x:(int,),); def main()={f([1,2,],3);};",

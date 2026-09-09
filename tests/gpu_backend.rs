@@ -1,5 +1,6 @@
 #![cfg(feature = "gpu")]
-use resin_common::prelude::*;
+use resin_types::prelude::*;
+use tempfile::TempDir;
 #[path = "support/toolchain.rs"]
 mod toolchain;
 use support::pipeline;
@@ -50,7 +51,7 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
                 end = old.end + uint (2)
             };
         };
-        def kernel (invocation: ulong, root: Ptr<Params>) -> () = { var index = uint(invocation);
+        @compute_shader def kernel (invocation: ulong, root: Ptr<Params>) -> () = { var index = uint(invocation);
             if (index < root.count) {
                 var p = at(root.values, index);
                 bump(p, index)
@@ -65,18 +66,18 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
         };
     "#,
     );
-    let c = resin_codegen::emit_c(&module, "main").unwrap();
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
-    let executable = temp
-        .path()
-        .join(format!("host-layout{}", std::env::consts::EXE_SUFFIX));
-    let cc = std::env::var_os("CC").unwrap_or_else(|| resin_toolchain::DEFAULT_C_COMPILER.into());
-    toolchain::c(&cc).compile_c(&c, &executable).unwrap();
-    assert!(Command::new(executable).status().unwrap().success());
-    let glsl = resin_codegen::emit_glsl(&module, "kernel", Stage::Compute).unwrap();
-    let spv = toolchain::glsl(&compiler)
-        .compile_glsl(&glsl, Stage::Compute)
-        .unwrap();
+    assert!(
+        support::project::Project::new(&module, Some("main"))
+            .unwrap()
+            .run()
+            .status
+            .success()
+    );
+    let project = support::project::Project::new(&module, None).unwrap();
+    let built = project.build(&toolchain::glsl(&compiler)).unwrap();
+    let spv =
+        std::fs::read(built.path(project.generated.shaders()[0].spirv().file_name().unwrap()))
+            .unwrap();
     #[repr(C)]
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Data {
@@ -167,15 +168,20 @@ fn particles_compute_then_render_from_the_same_buffer() {
     let Some(mut gpu) = gpu() else { return };
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/particles.resin");
     let module = pipeline::generate_program(&pipeline::load(&source).unwrap()).unwrap();
-    let compile = |stage: Stage| {
-        let glsl = resin_codegen::emit_glsl(&module, stage.entry(), stage).unwrap();
-        toolchain::glsl(&compiler)
-            .compile_glsl(&glsl, stage)
-            .unwrap()
+    let project = support::project::Project::new(&module, None).unwrap();
+    let built = project.build(&toolchain::glsl(&compiler)).unwrap();
+    let shader_bytes = |stage: Stage| {
+        let shader = project
+            .generated
+            .shaders()
+            .iter()
+            .find(|shader| shader.stage() == stage)
+            .unwrap();
+        std::fs::read(built.path(shader.spirv().file_name().unwrap())).unwrap()
     };
-    let compute = compile(Stage::Compute);
-    let vertex = compile(Stage::Vertex);
-    let fragment = compile(Stage::Fragment);
+    let compute = shader_bytes(Stage::Compute);
+    let vertex = shader_bytes(Stage::Vertex);
+    let fragment = shader_bytes(Stage::Fragment);
     #[repr(C)]
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Particle {
@@ -359,14 +365,19 @@ fn fragment_shaders_read_typed_root_parameters() {
         .stmts,
     );
     let module = pipeline::generate_program(&ast).unwrap();
-    let compile = |stage: Stage| {
-        let glsl = resin_codegen::emit_glsl(&module, stage.entry(), stage).unwrap();
-        toolchain::glsl(&compiler)
-            .compile_glsl(&glsl, stage)
-            .unwrap()
+    let project = support::project::Project::new(&module, None).unwrap();
+    let built = project.build(&toolchain::glsl(&compiler)).unwrap();
+    let shader_bytes = |stage: Stage| {
+        let shader = project
+            .generated
+            .shaders()
+            .iter()
+            .find(|shader| shader.stage() == stage)
+            .unwrap();
+        std::fs::read(built.path(shader.spirv().file_name().unwrap())).unwrap()
     };
-    let vertex = compile(Stage::Vertex);
-    let fragment = compile(Stage::Fragment);
+    let vertex = shader_bytes(Stage::Vertex);
+    let fragment = shader_bytes(Stage::Fragment);
     // The mapped root is updated only between completed submissions.
     unsafe {
         let pipeline = gpu.create_graphics_pipeline(&vertex, &fragment).unwrap();
@@ -397,7 +408,7 @@ fn fragment_shaders_read_typed_root_parameters() {
 #[test]
 fn shader_while_loops_execute_with_nested_and_zero_trip_iterations() {
     compute_values(
-        "export { kernel }; struct PixelRoot { count: uint, pixels: Ptr<uint> }; def kernel(invocation: ulong, root: Ptr<PixelRoot>) = { var index = uint(invocation); if (index < root.count) { var output = Span<uint> { data = root.pixels, length = 67_ul }; output(index).* := { var total = uint (0); var n = index; while (n > uint (0) && n <= index) { var j = uint (0); while (j < n) { total := total + uint (1); j := j + uint (1); }; n := n - uint (1); }; total }; }; };",
+        "export { kernel }; struct PixelRoot { count: uint, pixels: Ptr<uint> }; @compute_shader def kernel(invocation: ulong, root: Ptr<PixelRoot>) = { var index = uint(invocation); if (index < root.count) { var output = Span<uint> { data = root.pixels, length = 67_ul }; output(index).* := { var total = uint (0); var n = index; while (n > uint (0) && n <= index) { var j = uint (0); while (j < n) { total := total + uint (1); j := j + uint (1); }; n := n - uint (1); }; total }; }; };",
         |index| index * (index + 1) / 2,
     );
 }
@@ -405,7 +416,7 @@ fn shader_while_loops_execute_with_nested_and_zero_trip_iterations() {
 #[test]
 fn shader_results_propagate_and_match_union_payloads_on_device() {
     compute_values(
-        "export { kernel }; struct Zero {}; struct Odd { index: uint }; def checked(i: uint) -> Result<uint, Zero | Odd> = { if (i == uint(0)) { err(Zero {}) } else { if ((i & uint(1)) == uint(1)) { err(Odd { index = i }) } else { ok(i) } } }; def add(i: uint) -> Result<uint, _> = { var value = checked(i)?; ok(value + uint(10)) }; struct PixelRoot { count: uint, pixels: Ptr<uint> }; def kernel(invocation: ulong, root: Ptr<PixelRoot>) = { var i = uint(invocation); if (i < root.count) { var output = Span<uint> { data = root.pixels, length = 67_ul }; output(i).* := { match (add(i)) { ok(value) => { value }, err(error) => { match (error) { Zero(zero) => { uint(0) }, Odd(odd) => { odd.index * uint(2) } } } } }; }; };",
+        "export { kernel }; struct Zero {}; struct Odd { index: uint }; def checked(i: uint) -> Result<uint, Zero | Odd> = { if (i == uint(0)) { err(Zero {}) } else { if ((i & uint(1)) == uint(1)) { err(Odd { index = i }) } else { ok(i) } } }; def add(i: uint) -> Result<uint, _> = { var value = checked(i)?; ok(value + uint(10)) }; struct PixelRoot { count: uint, pixels: Ptr<uint> }; @compute_shader def kernel(invocation: ulong, root: Ptr<PixelRoot>) = { var i = uint(invocation); if (i < root.count) { var output = Span<uint> { data = root.pixels, length = 67_ul }; output(i).* := { match (add(i)) { ok(value) => { value }, err(error) => { match (error) { Zero(zero) => { uint(0) }, Odd(odd) => { odd.index * uint(2) } } } } }; }; };",
         |index| {
             if index == 0 {
                 0
@@ -424,7 +435,7 @@ fn optional_unwrap_stops_shader_callers_on_none() {
         r#"export { kernel };
         struct Root { count: uint, pixels: Ptr<uint> };
         def choose(i: uint) -> uint = { var value: uint | None; value := if ((i & 1_ui) == 0_ui) { i } else { None }; value! };
-        def kernel(invocation: ulong, root: Ptr<Root>) = { var i = uint(invocation);
+        @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = { var i = uint(invocation);
             if (i < root.count) {
                 var output = Span<uint> { data = root.pixels, length = 67_ul };
                 output(i).* := 7_ui;
@@ -447,7 +458,7 @@ fn none_elimination_preserves_shader_union_members() {
         def read(i: uint) -> uint = {
             match (choose(i)!) { uint(n) => { n + 1_ui }, bool(b) => { if (b) { 42_ui } else { 0_ui } } }
         };
-        def kernel(invocation: ulong, root: Ptr<Root>) = { var i = uint(invocation);
+        @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = { var i = uint(invocation);
             if (i < root.count) {
                 var output = Span<uint> { data = root.pixels, length = 67_ul };
                 output(i).* := 7_ui;
@@ -473,7 +484,7 @@ fn inherent_methods_execute_in_shader_helpers() {
             def add(self: Counter, n: uint, m: uint) -> Counter = { Counter { value = self.value + n + m } };
             def read(self: Counter) -> uint = { self.value };
         }
-        def kernel(invocation: ulong, root: Ptr<Root>) = { var id = uint(invocation);
+        @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = { var id = uint(invocation);
             if (id < root.count) {
                 var counter = Counter.new(id);
                 var incremented = counter.add(1_ui, 2_ui);
@@ -496,7 +507,7 @@ fn at_indexing_mutates_shader_arrays_and_span_fields() {
             var previous = values.at(0_ul).replace(i);
             values.at(ulong(i & 1_ui)).* + values.at(ulong(i & 1_ui)).* + previous - 10_ui
         };
-        def kernel(invocation: ulong, root: Ptr<Root>) = { var i = uint(invocation);
+        @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = { var i = uint(invocation);
             if (i < root.count) {
                 var holder = { values = Span<uint> { data = root.pixels, length = 67_ul } };
                 holder.values.at(ulong(i)).* := 7_ui;
@@ -515,10 +526,11 @@ fn compute_values(source: &str, expected: fn(u32) -> u32) {
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
     let module = support::module(source);
-    let glsl = resin_codegen::emit_glsl(&module, "kernel", Stage::Compute).unwrap();
-    let spv = toolchain::glsl(&compiler)
-        .compile_glsl(&glsl, Stage::Compute)
-        .unwrap();
+    let project = support::project::Project::new(&module, None).unwrap();
+    let built = project.build(&toolchain::glsl(&compiler)).unwrap();
+    let spv =
+        std::fs::read(built.path(project.generated.shaders()[0].spirv().file_name().unwrap()))
+            .unwrap();
     #[repr(C)]
     struct Root {
         count: u32,
@@ -563,7 +575,7 @@ fn ordinary_resin_programs_render_and_write_pngs() {
     let _lock = lock_gpu();
     let Some(gpu) = gpu() else { return };
     drop(gpu);
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     for (name, dimensions) in [
         ("gradient", Some((256, 256))),
         ("gradient", Some((17, 9))),
@@ -659,7 +671,7 @@ fn ordinary_resin_programs_render_and_write_pngs() {
 
 #[test]
 fn invalid_images_do_not_replace_existing_files() {
-    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let output = temp.path().join("existing.png");
     std::fs::write(&output, b"keep me").unwrap();
     assert!(image_write_png(&output, 2, 2, 4, &[]).is_err());
@@ -718,10 +730,11 @@ fn execute_interaction(source: &str, expected: [u32; 2]) {
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
     let m = support::module(source);
-    let glsl = resin_codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
-    let spv = toolchain::glsl(&compiler)
-        .compile_glsl(&glsl, Stage::Compute)
-        .unwrap();
+    let project = support::project::Project::new(&m, None).unwrap();
+    let built = project.build(&toolchain::glsl(&compiler)).unwrap();
+    let spv =
+        std::fs::read(built.path(project.generated.shaders()[0].spirv().file_name().unwrap()))
+            .unwrap();
     // Each fixture's root fits two uints. Read only after synchronous submission.
     unsafe {
         let pipeline = gpu.create_compute_pipeline(&spv).unwrap();
@@ -762,7 +775,7 @@ fn numeric_conversion_failures_stop_shader_helpers_before_stores() {
         "int(1.0_f / 0.0_f)",
     ] {
         let source = format!(
-            "export {{ kernel }}; def invalid() = {{ {expression}; }}; def kernel(invocation: ulong, p: Ptr<uint>) = {{ var i = uint(invocation); if (i == 0_ui) {{ invalid(); p.* := 99_ui; }}; }};"
+            "export {{ kernel }}; def invalid() = {{ {expression}; }}; @compute_shader def kernel(invocation: ulong, p: Ptr<uint>) = {{ var i = uint(invocation); if (i == 0_ui) {{ invalid(); p.* := 99_ui; }}; }};"
         );
         execute_interaction(&source, [0, 0]);
     }

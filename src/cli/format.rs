@@ -1,11 +1,11 @@
 //! File-oriented front end for the same formatter used by the language server.
 
-use resin_common::prelude::*;
 use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
 };
+use tempfile::TempDir;
 
 pub(super) fn run(paths: &[PathBuf], check: bool) -> super::Result<i32> {
     let mut files = BTreeMap::new();
@@ -78,7 +78,7 @@ fn format_file(path: &Path, check: bool) -> super::Result<bool> {
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
-        let temp = TempDir::new(parent)?;
+        let temp = TempDir::new_in(parent)?;
         let output = temp.path().join("formatted");
         fs::write(&output, formatted)?;
         fs::set_permissions(&output, metadata.permissions())?;

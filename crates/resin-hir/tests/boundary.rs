@@ -1,15 +1,20 @@
 use resin_ast::{Program, SourceModule};
-use resin_common::prelude::*;
+use resin_source::prelude::*;
+use resin_types::prelude::*;
 
 use resin_cst::Document;
-use std::path::Path;
+use std::{collections::BTreeMap, sync::Arc};
 
-fn module(path: &str, source: &str) -> SourceModule {
+fn module(name: &str, text: &str) -> SourceModule {
+    source_module(Source::new(name, text))
+}
+
+fn source_module(source: Source) -> SourceModule {
+    let file = resin_ast::generate(&Document::reparse(source.text().into(), None)).unwrap();
     SourceModule {
-        path: path.into(),
-        source: source.into(),
+        source,
+        file,
         imports: vec![],
-        file: resin_ast::generate(&Document::reparse(source.into(), None)).unwrap(),
     }
 }
 
@@ -58,35 +63,39 @@ fn resolved_program_infers_through_an_import_and_exposes_only_root_exports() {
     assert!(main.body.is_some());
 }
 
-struct Syntax(Document);
-impl resin_hir::Documents for Syntax {
-    fn get(&self, path: &Path) -> Option<&Document> {
-        (path == Path::new("entry.resin")).then_some(&self.0)
-    }
+fn syntax(sources: &[Source]) -> BTreeMap<Source, Arc<Document>> {
+    sources
+        .iter()
+        .map(|source| {
+            let document = Document::reparse(source.text().into(), None);
+            (source.clone(), Arc::new(document))
+        })
+        .collect()
 }
 
 #[test]
 fn analysis_keeps_editor_queries_after_an_unrelated_type_error() {
     let source =
         "// é🌲\ndef broken() -> int = { missing() }; def healthy(value: int) -> int = { value };";
-    let syntax = Syntax(Document::reparse(source.into(), None));
+    let entry = module("entry.resin", source);
+    let input = entry.source.clone();
+    let syntax = syntax(std::slice::from_ref(&input));
     let program = Program {
-        modules: vec![module("entry.resin", source)],
+        modules: vec![entry],
     };
     let analysis = resin_hir::analyze_program(&program);
     assert!(analysis.module.is_none());
     assert!(!analysis.diagnostics.is_empty());
-    let path = Path::new("entry.resin");
     let offset = source.rfind("value").unwrap();
     let definition = analysis
         .semantics
-        .definition(&syntax, path, offset)
+        .definition(&syntax, &input, offset)
         .unwrap();
     assert_eq!(definition.span.start, source.find("value").unwrap());
     assert!(
         analysis
             .semantics
-            .hover(&syntax, path, offset)
+            .hover(&syntax, &input, offset)
             .unwrap()
             .text
             .contains("int")
@@ -95,15 +104,80 @@ fn analysis_keeps_editor_queries_after_an_unrelated_type_error() {
         assert!(
             analysis
                 .semantics
-                .definition(&syntax, path, invalid)
+                .definition(&syntax, &input, invalid)
                 .is_none()
         );
-        assert!(analysis.semantics.hover(&syntax, path, invalid).is_none());
+        assert!(analysis.semantics.hover(&syntax, &input, invalid).is_none());
         assert!(
             analysis
                 .semantics
-                .completions(&syntax, path, invalid)
+                .completions(&syntax, &input, invalid)
                 .is_empty()
         );
     }
+}
+
+#[test]
+fn sources_with_equal_names_have_distinct_editor_facts() {
+    let integer = Source::new("memory", "def local(value: int) -> int = { value };");
+    let boolean = Source::new("memory", "def local(value: bool) -> bool = { value };");
+    let syntax = syntax(&[integer.clone(), boolean.clone()]);
+    let program = Program {
+        modules: vec![
+            source_module(integer.clone()),
+            source_module(boolean.clone()),
+        ],
+    };
+    let analysis = resin_hir::analyze_program(&program);
+    assert!(analysis.module.is_some(), "{:?}", analysis.diagnostics);
+    for (source, expected) in [(integer, "value: int"), (boolean, "value: bool")] {
+        let offset = source.text().rfind("value").unwrap();
+        let definition = analysis
+            .semantics
+            .definition(&syntax, &source, offset)
+            .unwrap();
+        assert_eq!(definition.source, source);
+        assert_eq!(definition.span.start, source.text().find("value").unwrap());
+        assert_eq!(
+            analysis
+                .semantics
+                .hover(&syntax, &source, offset)
+                .unwrap()
+                .text,
+            expected
+        );
+    }
+}
+
+#[test]
+fn revised_source_cannot_borrow_editor_facts_from_its_previous_version() {
+    let original = Source::new("memory", "def local(value: int) -> int = { value };");
+    let revised = original.with_text("def local(value: bool) -> bool = { value };");
+    let syntax = syntax(&[original.clone(), revised.clone()]);
+    let analysis = resin_hir::analyze_program(&Program {
+        modules: vec![source_module(original.clone())],
+    });
+    let offset = revised.text().rfind("value").unwrap();
+    assert_eq!(original.id(), revised.id());
+    assert!(
+        analysis
+            .semantics
+            .definition(&syntax, &revised, offset)
+            .is_none()
+    );
+    assert!(
+        analysis
+            .semantics
+            .hover(&syntax, &revised, offset)
+            .is_none()
+    );
+    let offset = original.text().rfind("value").unwrap();
+    assert_eq!(
+        analysis
+            .semantics
+            .hover(&syntax, &original, offset)
+            .unwrap()
+            .text,
+        "value: int"
+    );
 }

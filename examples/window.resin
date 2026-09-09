@@ -1,9 +1,9 @@
 export { main };
 
 import {
-	"std/gpu.resin",
-	"std/graphics.resin",
-	"std/window.resin",
+	"$/std/gpu.resin",
+	"$/std/graphics.resin",
+	"$/std/window.resin",
 };
 
 @vertex_shader
