@@ -242,7 +242,7 @@ fn streams_write_literals_and_owned_strings_verbatim() {
         r#"
         export { main };
         import { "$/std/io.resin" };
-        def literal() -> Span<ubyte> = { "static\0bytes" };
+        def literal() -> str = { "static\0bytes" };
         def main() -> Result<(), _> = {
             var out = Io.stdout();
             var error = Io.stderr();
@@ -250,6 +250,7 @@ fn streams_write_literals_and_owned_strings_verbatim() {
             var copy = text;
             out.write("raw {0}\0")?;
             out.write(copy)?;
+            out.write(Span<ubyte>(" bytes"))?;
             error.write(fmt("error: {0}\n", (text,)))?;
             error.write(literal())?;
             ok(())
@@ -258,7 +259,7 @@ fn streams_write_literals_and_owned_strings_verbatim() {
     );
     let output = program.run(b"");
     assert!(output.status.success(), "{:?}", output);
-    assert_eq!(output.stdout, b"raw {0}\0n = 42");
+    assert_eq!(output.stdout, b"raw {0}\0n = 42 bytes");
     assert_eq!(output.stderr, b"error: n = 42\nstatic\0bytes");
 }
 

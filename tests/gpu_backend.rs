@@ -800,3 +800,29 @@ fn byte_spans_read_and_write_device_storage() {
         |_| u32::from_le_bytes([65, 66, 0, 255]),
     );
 }
+
+#[test]
+fn packed_byte_arrays_execute_in_shaders() {
+    compute_values(
+        r#"export { kernel };
+        struct Root { count: uint, pixels: Ptr<uint> };
+        @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {
+            if (index < ulong(root.count)) {
+                var rows = [[65_ub, 66_ub], [0_ub, 255_ub]];
+                var row = rows.at(index & 1_ul).*;
+                var copy = row;
+                row.at(0_ul).* := 99_ub;
+                var packed = uint(copy.at(0_ul).*) + uint(copy.at(1_ul).*) * 256_ui;
+                var output = Span<uint> { data = root.pixels, length = ulong(root.count) };
+                output.at(index).* := packed + uint(size_of(rows)) * 65536_ui;
+            };
+        };"#,
+        |i| {
+            if i % 2 == 0 {
+                65 + 66 * 256 + 4 * 65536
+            } else {
+                255 * 256 + 4 * 65536
+            }
+        },
+    );
+}

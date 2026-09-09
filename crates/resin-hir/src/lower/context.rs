@@ -224,12 +224,7 @@ fn pointer(ty: Ty) -> Ty {
 
 fn builtin_methods(receiver: &Ty, typer: &Context) -> Vec<(Arc<str>, FunctionDecl)> {
     if typer.string_type() == Some(receiver) {
-        return vec![method(
-            "from_str",
-            vec![Ty::byte_span()],
-            receiver.clone(),
-            Intrinsic::StringFromStr,
-        )];
+        return string_constructors(receiver);
     }
     match receiver {
         Ty::Pointer { pointee } => vec![method(
@@ -248,6 +243,12 @@ fn builtin_methods(receiver: &Ty, typer: &Context) -> Vec<(Arc<str>, FunctionDec
             "at",
             vec![receiver.clone(), Ty::UInt64],
             pointer(*element.clone()),
+            Intrinsic::Index,
+        )],
+        Ty::Str => vec![method(
+            "at",
+            vec![Ty::Str, Ty::UInt64],
+            pointer(Ty::UInt8),
             Intrinsic::Index,
         )],
         Ty::Arc { pointee } => vec![
@@ -279,6 +280,20 @@ fn builtin_methods(receiver: &Ty, typer: &Context) -> Vec<(Arc<str>, FunctionDec
         )],
         _ => vec![],
     }
+}
+
+fn string_constructors(receiver: &Ty) -> Vec<(Arc<str>, FunctionDecl)> {
+    [("from_str", Ty::Str), ("from_bytes", Ty::byte_span())]
+        .into_iter()
+        .map(|(name, arg)| {
+            method(
+                name,
+                vec![arg],
+                receiver.clone(),
+                Intrinsic::StringFromBytes,
+            )
+        })
+        .collect()
 }
 
 fn method(

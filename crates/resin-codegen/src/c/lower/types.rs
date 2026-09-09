@@ -174,12 +174,7 @@ impl<'a> Types<'a> {
             }
             Ty::Array { element, length } => {
                 self.definition(element, emitted, out);
-                // Byte arrays keep a NUL beyond their logical length for C string interop.
-                let capacity = if element.as_ref() == &Ty::UInt8 {
-                    format!("{length} + 1")
-                } else {
-                    (*length).max(1).to_string()
-                };
+                let capacity = (*length).max(1);
                 format!("{} items[{capacity}];", self.name(element))
             }
             Ty::Record { fields } => {
@@ -197,6 +192,7 @@ impl<'a> Types<'a> {
                         .join(" ")
                 }
             }
+            Ty::Str => "uint8_t *f0; uint64_t f1;".into(),
             Ty::Span { element } => format!("{} *f0; uint64_t f1;", self.name(element)),
             Ty::Function { param, result } => {
                 format!("{} (*call)({});", self.name(result), self.name(param))
@@ -229,7 +225,7 @@ fn scalar(ty: &Ty) -> Option<&'static str> {
 
 fn collect_literals<'a>(value: &'a Value, literals: &mut Vec<&'a [u8]>) {
     match value {
-        Value::Bytes { value } => {
+        Value::Str { value } => {
             if !literals.contains(&value.as_ref()) {
                 literals.push(value);
             }

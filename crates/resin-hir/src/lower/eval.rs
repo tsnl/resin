@@ -116,6 +116,7 @@ fn builtin_ty(name: &str) -> Option<Ty> {
         "Never" => Ty::union([]),
         "None" => Ty::None,
         "bool" => Ty::Bool,
+        "str" => Ty::Str,
         "sbyte" => Ty::Int8,
         "short" => Ty::Int16,
         "int" => Ty::Int32,

@@ -39,6 +39,21 @@ impl Type {
         }
     }
 
+    pub fn view_element(&self) -> Option<Type> {
+        match self {
+            Self::Node(Head::Atom(Ty::Str), _) => Some(Ty::UInt8.into()),
+            Self::Node(Head::Span, children) => children.first().cloned(),
+            _ => None,
+        }
+    }
+
+    pub fn index_element(&self) -> Option<Type> {
+        match self {
+            Self::Node(Head::Array(_), children) => children.first().cloned(),
+            _ => self.view_element(),
+        }
+    }
+
     pub fn result(value: Type, error: Type) -> Self {
         Self::Node(Head::Result, vec![value, error])
     }
@@ -891,11 +906,11 @@ impl Inference<'_> {
                     self.solver.unify(out, &Ty::shader().into(), span)?;
                     return Ok(true);
                 }
-                if let Type::Node(Head::Span, children) = &shape {
+                if let Some(element) = shape.view_element() {
                     let ty = match name.as_ref() {
-                        "data" => Type::pointer(children[0].clone()),
+                        "data" => Type::pointer(element),
                         "length" => Ty::UInt64.into(),
-                        _ => return Err(error(span, "unknown Span field")),
+                        _ => return Err(error(span, "unknown string or span field")),
                     };
                     self.solver.unify(out, &ty, span)?;
                     return Ok(true);
@@ -915,9 +930,8 @@ impl Inference<'_> {
             }
             Constraint::Call(func, arg, out) => {
                 let shape = self.shape(func, false, span)?;
-                if let Type::Node(Head::Span | Head::Array(_), children) = &shape {
-                    self.solver
-                        .unify(out, &Type::pointer(children[0].clone()), span)?;
+                if let Some(element) = shape.index_element() {
+                    self.solver.unify(out, &Type::pointer(element), span)?;
                     let Some(index) = self.solver.resolve(arg) else {
                         return Ok(false);
                     };
@@ -970,6 +984,14 @@ impl Inference<'_> {
                     return Ok(true);
                 }
                 if let Type::Node(Head::Span, children) = self.solver.head(to) {
+                    // The source may still become str, Span, or a field record.
+                    if matches!(self.solver.head(from), Type::Variable(_)) {
+                        return Ok(false);
+                    }
+                    if self.solver.resolve(from) == Some(Ty::Str) {
+                        self.solver.unify(&children[0], &Ty::UInt8.into(), span)?;
+                        return Ok(true);
+                    }
                     if matches!(self.solver.head(from), Type::Node(Head::Span, _)) {
                         return self.solver.unify(from, to, span).map(|_| true);
                     }
@@ -1028,7 +1050,7 @@ impl Inference<'_> {
                     .map_err(|e| GenerateError::typing(span, e))?;
                 match rule {
                     BuiltinRule::Print => self.solver.unify(out, &Ty::Unit.into(), span)?,
-                    BuiltinRule::Format | BuiltinRule::StringFromStr => self.solver.unify(
+                    BuiltinRule::Format | BuiltinRule::StringFromBytes => self.solver.unify(
                         out,
                         &self
                             .typer

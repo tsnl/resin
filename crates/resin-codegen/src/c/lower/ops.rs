@@ -9,8 +9,8 @@ pub(super) fn builtin(
     args: &[Slot],
     result: &Ty,
 ) -> Result<String, Error> {
-    if name == "string_from_str" {
-        return super::formatting::from_str(types, args, result);
+    if name == "string_from_bytes" {
+        return super::formatting::from_bytes(types, args, result);
     }
     if name == "fmt" {
         return super::formatting::format(types, args, result);

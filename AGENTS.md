@@ -174,12 +174,20 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Native wrappers must make their copying safe or expose Arc-based ownership;
   `pointer.replace(replacement)` can disarm a native owner during deliberate transfer.
   See `doc/lifetimes.md` for lifecycle rules.
-- String literals are `Span<ubyte>` over static NUL-terminated bytes, with the terminator
-  excluded from length. `fmt(format, arguments)` returns the builtin nominal `String`,
-  wrapping `Arc<Span<ubyte>>`; formatting and reference counting are host-only.
+- String literals have primitive type `str`, distinct from `Span<ubyte>` and the owned
+  nominal `String`. They expose `data` and `length` over static NUL-terminated bytes;
+  length excludes the appended terminator. Literal storage may be shared; treat it as read-only.
+  `Span<ubyte>(text)` explicitly borrows literal bytes; never implicitly convert a `str`
+  to a span or construct a `str` from arbitrary bytes. `String.from_str(text)` copies a
+  `str`, and `String.from_bytes(bytes)` copies a raw byte span. Both append a NUL outside
+  their logical length. `fmt(format, arguments)` returns `String`, wrapping
+  `Arc<Span<ubyte>>`; formatting and reference counting are host-only.
   `print(text)` and the ordinary `Io.stdout().write(text)` / `Io.stderr().write(text)` methods
-  write strings verbatim. Use `.data` when passing literal storage to C.
-  Device-backed byte spans use 8-bit storage; shader literal spans need an addressable
+  accept `str`, `Span<ubyte>`, and `String` and write bytes verbatim. Use `.data` when
+  passing literal storage to C. Ordinary byte arrays contain exactly their declared
+  elements, without a sentinel; nested array stride follows the packed shared layout.
+  Empty C byte arrays reserve a placeholder byte that is outside the logical array.
+  Device-backed byte arrays and spans use 8-bit storage; shader literals need an addressable
   constant-storage implementation and are currently rejected explicitly.
 - Numeric suffixes are case insensitive: `b/h/i/l` select signed 8/16/32/64-bit integers,
   `ub/uh/ui/ul` select unsigned widths, and `f/d` select float32/float64. The formatter
@@ -199,7 +207,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   index. Their signatures are checked at declaration; helpers need no decoration and remain host-callable.
   `function.spirv` requests embedded `Span<ubyte>` bytes from a decorated declaration, never
   from a runtime function alias. Keep shader definitions inline in examples.
-- Arrays and `Span<T>` provide indexing with `items.at(index)`, returning `Ptr<T>`;
+- Arrays, `Span<T>`, and `str` provide indexing with `items.at(index)`, returning `Ptr<T>`
+  (`Ptr<ubyte>` for `str`);
   its index parameter is `ulong`, with explicit conversions for other integer types.
   Use `items.at(index).*` to read or write. The earlier `items(index)` spelling remains supported.
   Bounds checking is not part of the indexing contract. Host indexing diagnoses invalid indices;

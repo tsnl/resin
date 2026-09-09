@@ -415,7 +415,7 @@ fn instruction(
         Instr::Ascribe { ty } => {
             if ty == &args[0].ty {
                 args[0].expr.clone()
-            } else if matches!(ty, Ty::Span { .. }) || matches!(args[0].ty, Ty::Span { .. }) {
+            } else if is_view_conversion(&args[0].ty, ty) {
                 format!(
                     "({}){{ ({}).f0, ({}).f1 }}",
                     types.name(ty),
@@ -541,12 +541,12 @@ fn project(types: &Types<'_>, source: &Slot, index: &str, dynamic: bool) -> Resu
         false
     };
     let expr = match ty {
-        Ty::Span { .. } if dynamic => {
+        Ty::Str | Ty::Span { .. } if dynamic => {
             return Ok(format!(
                 "&(({expr}).f0[resin_index((uint64_t)({index}), ({expr}).f1)])"
             ));
         }
-        Ty::Span { .. } | Ty::Record { .. } if !dynamic => format!("({expr}).f{index}"),
+        Ty::Str | Ty::Span { .. } | Ty::Record { .. } if !dynamic => format!("({expr}).f{index}"),
         Ty::Array { length, .. } => {
             let index = if dynamic {
                 format!("resin_index((uint64_t)({index}), {length})")
@@ -558,4 +558,10 @@ fn project(types: &Types<'_>, source: &Slot, index: &str, dynamic: bool) -> Resu
         _ => return Err(Error(format!("unsupported projection through {ty:?}"))),
     };
     Ok(if pointer { format!("&({expr})") } else { expr })
+}
+
+fn is_view_conversion(from: &Ty, to: &Ty) -> bool {
+    from.view_record().as_ref() == Some(to)
+        || to.view_record().as_ref() == Some(from)
+        || from == &Ty::Str && to == &Ty::byte_span()
 }

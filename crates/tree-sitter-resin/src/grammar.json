@@ -2592,6 +2592,10 @@
       "members": [
         {
           "type": "STRING",
+          "value": "str"
+        },
+        {
+          "type": "STRING",
           "value": "bool"
         },
         {
@@ -3056,6 +3060,10 @@
       {
         "type": "STRING",
         "value": "match"
+      },
+      {
+        "type": "STRING",
+        "value": "str"
       },
       {
         "type": "STRING",

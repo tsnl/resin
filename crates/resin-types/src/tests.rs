@@ -210,7 +210,7 @@ fn explicit_conversions_preserve_ascription_and_pointer_boundaries() {
     let span = Ty::Span {
         element: Box::new(Ty::Int32),
     };
-    let span_record = span.span_record().unwrap();
+    let span_record = span.view_record().unwrap();
     for (from, to, expected) in [
         (Ty::Int32, Ty::Int32, ExplicitConversion::Ascribe(vec![])),
         (
@@ -231,7 +231,7 @@ fn explicit_conversions_preserve_ascription_and_pointer_boundaries() {
         (
             span.clone(),
             span_record.clone(),
-            ExplicitConversion::Ascribe(vec![Conv::SpanRecord]),
+            ExplicitConversion::Ascribe(vec![Conv::ViewRecord]),
         ),
         (
             span_record,
@@ -271,4 +271,29 @@ fn explicit_conversions_preserve_ascription_and_pointer_boundaries() {
     ] {
         assert!(context.explicit_conversion(&from, &to).is_err());
     }
+}
+
+#[test]
+fn string_views_expose_bytes_without_accepting_arbitrary_storage() {
+    let context = TyperContext::new();
+    let pointer = Ty::Pointer {
+        pointee: Box::new(Ty::UInt8),
+    };
+    assert_eq!(context.type_field(&Ty::Str, "data").unwrap().ty, pointer);
+    assert_eq!(
+        context.type_field(&Ty::Str, "length").unwrap().ty,
+        Ty::UInt64
+    );
+    assert_eq!(
+        context.ascribe(&Ty::Str, &Ty::byte_span()).unwrap(),
+        vec![Conv::StrSpan]
+    );
+    assert!(!Ty::Str.widens_to(&Ty::byte_span()));
+    assert!(!Ty::byte_span().widens_to(&Ty::Str));
+    assert!(context.ascribe(&Ty::byte_span(), &Ty::Str).is_err());
+    assert!(
+        context
+            .ascribe(&Ty::Str.view_record().unwrap(), &Ty::Str)
+            .is_err()
+    );
 }

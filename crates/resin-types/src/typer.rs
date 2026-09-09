@@ -17,7 +17,7 @@ pub(super) fn lookup(name: &str, arity: usize) -> Result<BuiltinRule, TypeError>
         "&&" | "||" => (BuiltinRule::Boolean, arity == 2),
         "print" => (BuiltinRule::Print, arity == 1),
         "fmt" => (BuiltinRule::Format, arity == 1),
-        "string_from_str" => (BuiltinRule::StringFromStr, arity == 1),
+        "string_from_bytes" => (BuiltinRule::StringFromBytes, arity == 1),
         _ => {
             return Err(TypeError::new(TypeErrorKind::UnknownBuiltin {
                 name: name.into(),
@@ -97,7 +97,7 @@ pub(super) fn as_record(context: &TyperContext, ty: &Ty) -> Result<Converted, Ty
         steps.push(Conv::Unwrap { definition });
         current = context.definition_body(definition)?.clone();
     }
-    if matches!(current, Ty::Record { .. } | Ty::Span { .. }) {
+    if matches!(current, Ty::Record { .. } | Ty::Span { .. } | Ty::Str) {
         Ok(Converted { ty: current, steps })
     } else {
         Err(TypeError::new(TypeErrorKind::ExpectedRecord {
@@ -169,7 +169,7 @@ pub(super) fn type_field(
     name: &str,
 ) -> Result<FieldAccess, TypeError> {
     let converted = context.as_record(base)?;
-    let shape = converted.ty.span_record().unwrap_or(converted.ty);
+    let shape = converted.ty.view_record().unwrap_or(converted.ty);
     let Ty::Record { fields } = shape else {
         return Err(TypeError::new(TypeErrorKind::ExpectedRecord {
             found: base.clone(),
@@ -203,8 +203,10 @@ pub(super) fn type_builtin_call(
             }));
         }
         BuiltinRule::Format => context.type_format(&args[0])?,
-        BuiltinRule::StringFromStr => {
-            context.same(&Ty::byte_span(), &args[0])?;
+        BuiltinRule::StringFromBytes => {
+            if args[0] != Ty::Str {
+                context.same(&Ty::byte_span(), &args[0])?;
+            }
             context.string_type.clone().ok_or_else(|| {
                 TypeError::new(TypeErrorKind::UnknownBuiltin { name: name.into() })
             })?
@@ -245,7 +247,7 @@ impl TyperContext {
 
 impl TyperContext {
     fn is_string(&self, ty: &Ty) -> bool {
-        ty == &Ty::byte_span() || self.string_type.as_ref() == Some(ty)
+        ty == &Ty::Str || ty == &Ty::byte_span() || self.string_type.as_ref() == Some(ty)
     }
 
     fn type_format(&self, arg: &Ty) -> Result<Ty, TypeError> {
@@ -297,10 +299,12 @@ pub(super) fn ascription(
 ) -> Result<Option<Vec<Conv>>, TypeError> {
     let step = if from == to {
         return Ok(Some(Vec::new()));
-    } else if to.span_record().as_ref() == Some(from) {
+    } else if from == &Ty::Str && to == &Ty::byte_span() {
+        Conv::StrSpan
+    } else if matches!(to, Ty::Span { .. }) && to.view_record().as_ref() == Some(from) {
         Conv::MakeSpan
-    } else if from.span_record().as_ref() == Some(to) {
-        Conv::SpanRecord
+    } else if from.view_record().as_ref() == Some(to) {
+        Conv::ViewRecord
     } else if let Ty::Defined { definition } = to
         && from == types::body(table, *definition)?
     {

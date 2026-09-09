@@ -165,7 +165,11 @@ fn explicit_inference_updates_hover_after_edits() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("inference.resin"));
-    for (version, initializer, expected) in [(1, "42", "long"), (2, "1 == 1", "bool")] {
+    for (version, initializer, expected) in [
+        (1, "42", "long"),
+        (2, "1 == 1", "bool"),
+        (3, "\"text\"", "str"),
+    ] {
         let source =
             format!("def answer() -> _ = {{ var value: _; value := {initializer}; value }};");
         if version == 1 {
@@ -312,6 +316,34 @@ fn dot_completion_updates_unsaved_receiver_types_and_uses_utf16_edits() {
                 "newText": field
             })
         );
+    }
+    client.stop();
+}
+
+#[test]
+fn string_completions_distinguish_literal_views_and_owned_constructors() {
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
+    let mut client = Client::start(temp.path(), Value::Null);
+    let uri = uri(&temp.path().join("strings.resin"));
+    for (version, expression, labels) in [
+        (1, "\"text\".", vec!["data", "length", "at"]),
+        (2, "String.", vec!["from_bytes", "from_str"]),
+    ] {
+        let source = format!("def main() = {{ {expression}; }};");
+        if version == 1 {
+            client.open(&uri, &source);
+        } else {
+            client.change(&uri, version, &source);
+        }
+        client.diagnostics(&uri, Some(version), true);
+        let column = source.rfind('.').unwrap() as u32 + 1;
+        let completion = client.request("textDocument/completion", at(&uri, 0, column));
+        let items = completion["items"].as_array().unwrap();
+        let actual: Vec<_> = items
+            .iter()
+            .map(|item| item["label"].as_str().unwrap())
+            .collect();
+        assert_eq!(actual, labels, "{completion}");
     }
     client.stop();
 }

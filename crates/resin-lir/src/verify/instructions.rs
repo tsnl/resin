@@ -283,7 +283,7 @@ fn immediate_ty(table: &[TypeDef], value: &Value, location: Location) -> Result<
             check_type(table, ty, location)?;
             Ty::Type
         }
-        Value::Bytes { .. } => Ty::byte_span(),
+        Value::Str { .. } => Ty::Str,
         Value::Unit => Ty::Unit,
         Value::None => Ty::None,
         Value::Bool { .. } => Ty::Bool,
@@ -340,8 +340,8 @@ fn project_static(
         Ty::Defined { .. } => {
             project_static(table, shape(table, source, location)?, index, location)
         }
-        span @ Ty::Span { .. } => {
-            project_static(table, span.span_record().unwrap(), index, location)
+        view @ (Ty::Str | Ty::Span { .. }) => {
+            project_static(table, view.view_record().unwrap(), index, location)
         }
         Ty::Record { fields } => fields
             .get(index)
@@ -370,6 +370,9 @@ fn project_dynamic(table: &[TypeDef], source: Ty, location: Location) -> Result<
             found => Err(location.error(VerifyErrorKind::ExpectedArray { found })),
         },
         Ty::Defined { .. } => project_dynamic(table, shape(table, source, location)?, location),
+        Ty::Str => Ok(Ty::Pointer {
+            pointee: Box::new(Ty::UInt8),
+        }),
         Ty::Span { element } => Ok(Ty::Pointer { pointee: element }),
         Ty::Array { element, .. } => Ok(*element),
         found => Err(location.error(VerifyErrorKind::ExpectedArray { found })),

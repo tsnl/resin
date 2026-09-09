@@ -517,3 +517,98 @@ fn destruction_hooks_reference_a_function_with_the_nominal_pointer_signature() {
     };
     verify(&module).unwrap();
 }
+
+#[test]
+fn string_immediates_have_a_distinct_type() {
+    let literal = Instr::Push {
+        value: Value::Str {
+            value: b"a\0b".as_slice().into(),
+        },
+    };
+    verify(&expression_module(Ty::Unit, Ty::Str, vec![literal.clone()])).unwrap();
+    assert!(verify(&expression_module(Ty::Unit, Ty::byte_span(), vec![literal])).is_err());
+}
+
+#[test]
+fn string_views_preserve_fields_and_byte_indexing() {
+    let pointer = Ty::Pointer {
+        pointee: Box::new(Ty::UInt8),
+    };
+    for (instruction, result) in [
+        (Instr::AccessStatic { index: 0 }, pointer.clone()),
+        (Instr::AccessStatic { index: 1 }, Ty::UInt64),
+        (
+            Instr::Ascribe {
+                ty: Ty::byte_span(),
+            },
+            Ty::byte_span(),
+        ),
+        (
+            Instr::Ascribe {
+                ty: Ty::Str.view_record().unwrap(),
+            },
+            Ty::Str.view_record().unwrap(),
+        ),
+    ] {
+        verify(&parameter_expression(Ty::Str, result, vec![instruction])).unwrap();
+    }
+    let index = Instr::Push {
+        value: Value::UInt64 { value: 0 },
+    };
+    verify(&parameter_expression(
+        Ty::Str,
+        pointer,
+        vec![index, Instr::AccessDynamic],
+    ))
+    .unwrap();
+}
+
+#[test]
+fn byte_views_cannot_be_ascribed_as_strings() {
+    for source in [Ty::byte_span(), Ty::Str.view_record().unwrap()] {
+        let module = parameter_expression(
+            source.clone(),
+            Ty::Str,
+            vec![Instr::Ascribe { ty: Ty::Str }],
+        );
+        assert_eq!(
+            verify(&module).unwrap_err().kind,
+            VerifyErrorKind::TypeMismatch {
+                expected: Ty::Str,
+                found: source,
+            }
+        );
+    }
+}
+
+fn parameter_expression(param: Ty, result: Ty, instructions: Vec<Instr>) -> Module {
+    let mut body = vec![
+        Instr::LocalAddress {
+            local: LocalId::from_index(0),
+        },
+        Instr::Load,
+    ];
+    body.extend(instructions);
+    expression_module(param, result, body)
+}
+
+fn expression_module(param: Ty, result: Ty, instrs: Vec<Instr>) -> Module {
+    Module {
+        functions: vec![Function {
+            foreign: None,
+            name: None,
+            result,
+            locals: vec![Local {
+                name: None,
+                ty: param,
+            }],
+            entry: BlockId::from_index(0),
+            blocks: vec![BasicBlock {
+                name: None,
+                instrs,
+                terminator: Terminator::Return,
+            }],
+        }],
+        ..Default::default()
+    }
+}

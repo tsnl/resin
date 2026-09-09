@@ -756,22 +756,23 @@ fn dedicated_cleanup_bindings_retain_acquisitions_on_both_exits() {
 }
 
 #[test]
-fn host_byte_arrays_have_explicit_sentinel_storage() {
+fn byte_arrays_have_packed_storage_and_nested_stride() {
     runs(
         r#"
         export { main };
-        extern "string.h" def strlen(p: Ptr<ubyte>) -> ulong;
         def main() -> int = {
             var binary = [65_ub, 66_ub];
             var copied = binary;
             var nested = [[1_ub, 2_ub], [3_ub, 4_ub]];
-            var empty = "";
             var embedded = [65_ub, 0_ub, 66_ub];
-            if (strlen(Ptr<ubyte>(&copied)) == 2_ul &&
-                strlen(empty.data) == 0_ul &&
-                strlen(Ptr<ubyte>(&embedded)) == 1_ul &&
-                ulong(nested(1)) - ulong(nested(0)) == 3_ul &&
-                copied(1).* == 66_ub) { 0 } else { 1 }
+            var record = { bytes = copied, tail = 255_ub };
+            binary.at(0).* := 90_ub;
+            if (size_of(binary) == 2_ul && align_of(binary) == 1_ul &&
+                size_of(nested) == 4_ul && size_of(embedded) == 3_ul &&
+                ulong(nested.at(1)) - ulong(nested.at(0)) == 2_ul &&
+                size_of(record) == 3_ul && ulong(&record.tail) - ulong(&record.bytes) == 2_ul &&
+                copied.at(0).* == 65_ub && copied.at(1).* == 66_ub &&
+                record.tail == 255_ub && embedded.at(1).* == 0_ub) { 0 } else { 1 }
         };
     "#,
         0,
