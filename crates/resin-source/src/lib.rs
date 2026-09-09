@@ -300,7 +300,7 @@ pub fn normalize_path(path: &Path) -> io::Result<PathBuf> {
 
 /// Bundled library path; applications may supply their own configured directory.
 pub fn stdlib_path() -> PathBuf {
-    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../stdlib"))
+    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resin/std"))
 }
 
 struct File {

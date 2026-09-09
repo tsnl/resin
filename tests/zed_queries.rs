@@ -190,7 +190,7 @@ fn queries_capture_resin_constructs() {
 }
 
 #[test]
-fn queries_run_on_examples_stdlib_and_incomplete_code() {
+fn queries_run_on_examples_libraries_and_incomplete_code() {
     fn visit(path: &Path, sources: &mut Vec<String>) {
         for entry in std::fs::read_dir(path).unwrap() {
             let path = entry.unwrap().path();
@@ -204,7 +204,7 @@ fn queries_run_on_examples_stdlib_and_incomplete_code() {
     let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), ""));
     let mut sources = vec!["def main (argument: int) -> int = { pri".into()];
     visit(&root.join("examples"), &mut sources);
-    visit(&root.join("stdlib"), &mut sources);
+    visit(&root.join("resin"), &mut sources);
     for source in sources {
         for (_, query) in QUERIES {
             captures(query, &source);

@@ -31,9 +31,9 @@ uses stdout exclusively for the protocol and stderr for logs. See
 
 Standard-library lookup, in descending precedence:
 
-1. Initialization options: `{ "stdlibPath": "/absolute/path/to/stdlib" }`
+1. Initialization options: `{ "stdlibPath": "/absolute/path/to/checkout/resin/std" }`
 2. `RESIN_STDLIB`
-3. The repository's `stdlib/` path recorded when `resin-source` was built.
+3. The repository's `resin/std/` path recorded when `resin-source` was built.
 
 Relative initialization overrides resolve against the selected project directory.
 `RESIN_STDLIB` resolves against the invoking process's working directory. An

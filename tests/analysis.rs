@@ -60,7 +60,7 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
             loader
                 .path(&definition.source)
                 .unwrap()
-                .ends_with("stdlib/gpu.resin")
+                .ends_with("resin/std/gpu.resin")
         );
         assert!(
             analysis
