@@ -1,4 +1,4 @@
-use crate::glsl::{GlslBlock, GlslEdge, GlslEdgeValue, GlslExit, GlslFunction};
+use crate::glsl::{GlslFunction, GlslStatement};
 use resin_lir::FunctionTypes;
 use resin_types::prelude::*;
 use std::fmt::Write;
@@ -27,19 +27,33 @@ pub(super) fn lower(
         types.name(&function.locals[0].ty)
     );
     let locals = locals(types, function, flow);
-    let blocks = function
-        .blocks
-        .iter()
-        .enumerate()
-        .map(|(b, _)| lower_block(types, function, flow, index, b, &inputs[b]))
-        .collect::<Result<_, _>>()?;
+    let mut lowering = FunctionLowering {
+        types,
+        function,
+        flow,
+        inputs,
+        index,
+    };
+    let statements = lowering.region(function.entry.index(), None)?;
     Ok(GlslFunction {
         signature,
         locals,
-        entry: function.entry.index(),
-        blocks,
-        default_result: types.zero(&function.result),
+        statements,
     })
+}
+
+#[derive(Clone, Copy)]
+enum YieldTarget {
+    Block { target: usize },
+    Condition { body: usize, test: usize },
+}
+
+struct FunctionLowering<'a, 'm> {
+    types: &'a mut Types<'m>,
+    function: &'a Function,
+    flow: &'a FunctionTypes,
+    inputs: Vec<Vec<Slot>>,
+    index: usize,
 }
 
 fn locals(types: &Types<'_>, function: &Function, flow: &FunctionTypes) -> String {
@@ -72,110 +86,216 @@ fn locals(types: &Types<'_>, function: &Function, flow: &FunctionTypes) -> Strin
     out
 }
 
-fn lower_block(
-    types: &mut Types<'_>,
-    function: &Function,
-    flow: &FunctionTypes,
-    index: usize,
-    b: usize,
-    inputs: &[Slot],
-) -> Result<GlslBlock, Error> {
-    let block = &function.blocks[b];
-    let mut out = String::new();
-    let mut stack = inputs.to_vec();
-    let mut diverged = false;
-    for (i, instr) in block.instrs.iter().enumerate() {
-        if matches!(instr, Instr::Eliminate { .. }) {
-            writeln!(
-                out,
-                "      r_failed = true; return {};",
-                types.zero(&function.result)
-            )
-            .unwrap();
-            diverged = true;
-            break;
-        }
-        let args =
-            stack.split_off(stack.len() - flow.operand_count(resin_lir::BlockId::from_index(b), i));
-        let result = flow.results[b][i].as_ref();
-        check_instruction(types, instr, &args, result)
-            .map_err(|error| Error::at(types.module, index, Some((b, i)), error))?;
-        let local = Slot::local_result(instr, &args);
-        runtime_checks(types, instr, &args, &function.result, &mut out);
-        let expr = instruction(types, instr, &args, result, &mut out)
-            .map_err(|error| Error::at(types.module, index, Some((b, i)), error))?;
-        if let Some(ty) = result {
-            let mut expr = expr.unwrap();
-            if !local && !matches!(ty, Ty::Function { .. }) {
-                let name = format!("r_v{b}_{i}");
-                writeln!(out, "      {name} = {expr};").unwrap();
-                expr = name;
+impl FunctionLowering<'_, '_> {
+    // Continuations are a sequence, so only child regions recurse.
+    fn region(
+        &mut self,
+        mut b: usize,
+        yield_target: Option<YieldTarget>,
+    ) -> Result<Vec<GlslStatement>, Error> {
+        let mut statements = Vec::new();
+        loop {
+            let types = &mut *self.types;
+            let function = self.function;
+            let flow = self.flow;
+            let index = self.index;
+            let block = &function.blocks[b];
+            let mut out = String::new();
+            let mut stack = self.inputs[b].clone();
+            let mut diverged = false;
+            for (i, instr) in block.instrs.iter().enumerate() {
+                if matches!(instr, Instr::Eliminate { .. }) {
+                    writeln!(
+                        out,
+                        "      r_failed = true; return {};",
+                        types.zero(&function.result)
+                    )
+                    .unwrap();
+                    diverged = true;
+                    break;
+                }
+                let args = stack.split_off(
+                    stack.len() - flow.operand_count(resin_lir::BlockId::from_index(b), i),
+                );
+                let result = flow.results[b][i].as_ref();
+                check_instruction(types, instr, &args, result)
+                    .map_err(|error| Error::at(types.module, index, Some((b, i)), error))?;
+                let local = Slot::local_result(instr, &args);
+                runtime_checks(types, instr, &args, &function.result, &mut out);
+                let expr = instruction(types, instr, &args, result, &mut out)
+                    .map_err(|error| Error::at(types.module, index, Some((b, i)), error))?;
+                if let Some(ty) = result {
+                    let mut expr = expr.unwrap();
+                    if !local && !matches!(ty, Ty::Function { .. }) {
+                        let name = format!("r_v{b}_{i}");
+                        writeln!(out, "      {name} = {expr};").unwrap();
+                        expr = name;
+                    }
+                    if matches!(instr, Instr::Call) {
+                        writeln!(
+                            out,
+                            "      if (r_failed) return {};",
+                            types.zero(&function.result)
+                        )
+                        .unwrap();
+                    }
+                    stack.push(Slot {
+                        ty: ty.clone(),
+                        expr,
+                        local,
+                    });
+                }
             }
-            if matches!(instr, Instr::Call) {
-                writeln!(
-                    out,
-                    "      if (r_failed) return {};",
-                    types.zero(&function.result)
-                )
-                .unwrap();
+
+            statements.push(GlslStatement::Text { source: out });
+            if diverged {
+                return Ok(statements);
             }
-            stack.push(Slot {
-                ty: ty.clone(),
-                expr,
-                local,
-            });
+            let next = self.exit(b, stack, yield_target, &mut statements)?;
+            let Some(next) = next else {
+                return Ok(statements);
+            };
+            b = next;
         }
     }
 
-    let exit = if diverged {
-        GlslExit::Unreachable
-    } else {
-        lower_exit(types, &block.terminator, &mut stack)
-            .map_err(|e| Error::at(types.module, index, Some((b, block.instrs.len())), e))?
-    };
-    Ok(GlslBlock {
-        label: b,
-        statements: out,
-        exit,
-    })
-}
-
-fn lower_exit(
-    types: &Types<'_>,
-    term: &Terminator,
-    stack: &mut Vec<Slot>,
-) -> Result<GlslExit, Error> {
-    Ok(match term {
-        Terminator::Return => {
-            if stack[0].local {
-                return Err(Error("shader cannot return a local address".into()));
+    fn exit(
+        &mut self,
+        b: usize,
+        mut stack: Vec<Slot>,
+        yield_target: Option<YieldTarget>,
+        statements: &mut Vec<GlslStatement>,
+    ) -> Result<Option<usize>, Error> {
+        let next = match self.function.blocks[b].terminator {
+            Terminator::Return => {
+                if stack[0].local {
+                    return Err(Error::at(
+                        self.types.module,
+                        self.index,
+                        Some((b, self.function.blocks[b].instrs.len())),
+                        Error("shader cannot return a local address".into()),
+                    ));
+                }
+                statements.push(GlslStatement::Return {
+                    value: stack[0].expr.clone(),
+                });
+                None
             }
-            GlslExit::Return(stack[0].expr.clone())
-        }
-        Terminator::Break { target } => GlslExit::Jump(edge(types, target.index(), stack)),
-        Terminator::Branch { then, els } => {
-            let condition = stack.pop().unwrap();
-            GlslExit::Branch {
-                condition: types.unwrap(&condition.ty, condition.expr),
-                then: edge(types, then.index(), stack),
-                els: edge(types, els.index(), stack),
+            Terminator::Yield => {
+                statements.push(GlslStatement::Text {
+                    source: self.yield_values(&stack, yield_target.unwrap()),
+                });
+                None
+            }
+            Terminator::If { then, els, next } => {
+                let condition = stack.pop().unwrap();
+                let target = next
+                    .map(|id| YieldTarget::Block { target: id.index() })
+                    .or(yield_target);
+                statements.push(GlslStatement::If {
+                    condition: self.types.unwrap(&condition.ty, condition.expr),
+                    then: self.enter(then.index(), &stack, target)?,
+                    els: self.enter(els.index(), &stack, target)?,
+                });
+                next
+            }
+            Terminator::Loop {
+                condition,
+                body,
+                next,
+            } => {
+                let condition = condition.index();
+                let body = body.index();
+                statements.push(GlslStatement::Text {
+                    source: self.transfer(condition, &stack),
+                });
+                statements.push(GlslStatement::Text {
+                    source: format!("      bool r_test{b} = false;\n"),
+                });
+                let mut repeated =
+                    self.region(condition, Some(YieldTarget::Condition { body, test: b }))?;
+                repeated.push(GlslStatement::If {
+                    condition: format!("!r_test{b}"),
+                    then: vec![GlslStatement::Break],
+                    els: vec![],
+                });
+                repeated.extend(self.region(body, Some(YieldTarget::Block { target: condition }))?);
+                statements.push(GlslStatement::Loop { body: repeated });
+                // These slots hold the final condition's operands on the false exit.
+                let output = self.inputs[body].clone();
+                if let Some(next) = next {
+                    statements.push(GlslStatement::Text {
+                        source: self.transfer(next.index(), &output),
+                    });
+                } else {
+                    statements.push(GlslStatement::Text {
+                        source: self.yield_values(&output, yield_target.unwrap()),
+                    });
+                }
+                next
+            }
+        };
+        Ok(next.map(|id| id.index()))
+    }
+
+    fn enter(
+        &mut self,
+        block: usize,
+        stack: &[Slot],
+        target: Option<YieldTarget>,
+    ) -> Result<Vec<GlslStatement>, Error> {
+        let mut statements = vec![GlslStatement::Text {
+            source: self.transfer(block, stack),
+        }];
+        statements.extend(self.region(block, target)?);
+        Ok(statements)
+    }
+
+    fn yield_values(&self, stack: &[Slot], target: YieldTarget) -> String {
+        match target {
+            YieldTarget::Block { target } => self.transfer(target, stack),
+            YieldTarget::Condition { body, test } => {
+                let (condition, operands) = stack.split_last().unwrap();
+                let mut source = self.transfer(body, operands);
+                writeln!(
+                    source,
+                    "      r_test{test} = {};",
+                    self.types.unwrap(&condition.ty, condition.expr.clone())
+                )
+                .unwrap();
+                source
             }
         }
-    })
-}
+    }
 
-fn edge(types: &Types<'_>, target: usize, stack: &[Slot]) -> GlslEdge {
-    let values = stack
-        .iter()
-        .enumerate()
-        .filter(|(_, slot)| !slot.symbolic())
-        .map(|(slot, value)| GlslEdgeValue {
-            slot,
-            ty: types.name(&value.ty),
-            value: value.expr.clone(),
-        })
-        .collect();
-    GlslEdge { target, values }
+    fn transfer(&self, target: usize, stack: &[Slot]) -> String {
+        if stack.iter().all(Slot::symbolic) {
+            return String::new();
+        }
+        let mut source = String::from("      {\n");
+        for (i, value) in stack
+            .iter()
+            .enumerate()
+            .filter(|(_, slot)| !slot.symbolic())
+        {
+            writeln!(
+                source,
+                "        {} edge{i} = {};",
+                self.types.name(&value.ty),
+                value.expr
+            )
+            .unwrap();
+        }
+        for (i, _) in stack
+            .iter()
+            .enumerate()
+            .filter(|(_, slot)| !slot.symbolic())
+        {
+            writeln!(source, "        r_b{target}_{i} = edge{i};").unwrap();
+        }
+        source.push_str("      }\n");
+        source
+    }
 }
 
 fn check_instruction(

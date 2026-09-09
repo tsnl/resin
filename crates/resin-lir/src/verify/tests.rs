@@ -113,9 +113,10 @@ fn conflicting_join_stacks_are_rejected() {
                 instrs: vec![Instr::Push {
                     value: Value::Bool { value: true },
                 }],
-                terminator: Terminator::Branch {
+                terminator: Terminator::If {
                     then: BlockId::from_index(1),
                     els: BlockId::from_index(2),
+                    next: Some(BlockId::from_index(3)),
                 },
             },
             BasicBlock {
@@ -123,18 +124,14 @@ fn conflicting_join_stacks_are_rejected() {
                 instrs: vec![Instr::Push {
                     value: Value::Int32 { value: 1 },
                 }],
-                terminator: Terminator::Break {
-                    target: BlockId::from_index(3),
-                },
+                terminator: Terminator::Yield,
             },
             BasicBlock {
                 name: None,
                 instrs: vec![Instr::Push {
                     value: Value::Float32 { value: 1.0 },
                 }],
-                terminator: Terminator::Break {
-                    target: BlockId::from_index(3),
-                },
+                terminator: Terminator::Yield,
             },
             BasicBlock {
                 name: None,
@@ -210,7 +207,7 @@ fn indirect_calls_use_the_callee_on_the_stack() {
 }
 
 #[test]
-fn loop_backedges_must_match_the_header_stack() {
+fn loop_body_preserves_the_condition_stack() {
     let function = Function {
         foreign: None,
         name: None,
@@ -224,8 +221,10 @@ fn loop_backedges_must_match_the_header_stack() {
             BasicBlock {
                 name: None,
                 instrs: vec![],
-                terminator: Terminator::Break {
-                    target: BlockId::from_index(1),
+                terminator: Terminator::Loop {
+                    condition: BlockId::from_index(1),
+                    body: BlockId::from_index(2),
+                    next: Some(BlockId::from_index(3)),
                 },
             },
             BasicBlock {
@@ -233,17 +232,12 @@ fn loop_backedges_must_match_the_header_stack() {
                 instrs: vec![Instr::Push {
                     value: Value::Bool { value: true },
                 }],
-                terminator: Terminator::Branch {
-                    then: BlockId::from_index(2),
-                    els: BlockId::from_index(3),
-                },
+                terminator: Terminator::Yield,
             },
             BasicBlock {
                 name: None,
                 instrs: vec![],
-                terminator: Terminator::Break {
-                    target: BlockId::from_index(1),
-                },
+                terminator: Terminator::Yield,
             },
             BasicBlock {
                 name: None,

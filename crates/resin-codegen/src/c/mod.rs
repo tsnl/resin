@@ -28,41 +28,27 @@ pub(super) struct CFunction {
 #[derive(Debug, Clone)]
 pub(super) enum CBody {
     Inline(String),
-    Blocks {
+    Structured {
         locals: String,
-        entry: usize,
-        blocks: Vec<CBlock>,
+        statements: Vec<CStatement>,
     },
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct CBlock {
-    label: usize,
-    statements: String,
-    exit: CExit,
-}
-
-#[derive(Debug, Clone)]
-pub(super) enum CExit {
-    Return(String),
-    Jump(CEdge),
-    Branch {
+pub(super) enum CStatement {
+    Text {
+        source: String,
+    },
+    If {
         condition: String,
-        then: CEdge,
-        els: CEdge,
+        then: Vec<CStatement>,
+        els: Vec<CStatement>,
     },
-    Unreachable,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct CEdge {
-    target: usize,
-    values: Vec<CEdgeValue>,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct CEdgeValue {
-    ty: String,
-    value: String,
-    live: Option<String>,
+    Loop {
+        body: Vec<CStatement>,
+    },
+    Break,
+    Return {
+        value: String,
+    },
 }

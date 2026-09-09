@@ -403,3 +403,69 @@ fn compute_index_uses_wide_arithmetic_and_indexes_spans_directly() {
         project.build(&toolchain::glsl(&compiler)).unwrap();
     }
 }
+
+#[test]
+fn branch_only_shaders_do_not_acquire_dispatch_loops() {
+    let m = example("triangle.resin");
+    let project = support::project::Project::new(&m, None).unwrap();
+    for shader in project.generated.shaders() {
+        let source = std::fs::read_to_string(shader.source()).unwrap();
+        assert!(!source.contains("while ("), "{source}");
+        assert!(!source.contains("switch ("), "{source}");
+    }
+    let Some(compiler) = shaders::compiler() else {
+        return;
+    };
+    let built = project.build(&toolchain::glsl(&compiler)).unwrap();
+    for shader in project.generated.shaders() {
+        let bytes = std::fs::read(built.path(shader.spirv().file_name().unwrap())).unwrap();
+        let words: Vec<_> = bytes
+            .chunks_exact(4)
+            .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+            .collect();
+        let mut instructions = &words[5..];
+        while let Some(&first) = instructions.first() {
+            let length = (first >> 16) as usize;
+            assert!(length > 0);
+            // OpLoopMerge declares a structured SPIR-V loop.
+            assert_ne!(first & 0xffff, 246, "a branch-only shader gained a loop");
+            instructions = &instructions[length..];
+        }
+    }
+}
+
+#[test]
+fn structured_loop_conditions_and_early_returns_compile_to_spirv() {
+    let m = module(include_str!("fixtures/structured_control.resin"));
+    let project = support::project::Project::new(&m, None).unwrap();
+    let source = std::fs::read_to_string(project.generated.shaders()[0].source()).unwrap();
+    assert_eq!(source.matches("while (true)").count(), 2, "{source}");
+    assert!(!source.contains("switch ("), "{source}");
+    if let Some(compiler) = shaders::compiler() {
+        project
+            .build(&toolchain::glsl(&compiler))
+            .unwrap_or_else(|error| panic!("{error}\n{source}"));
+    }
+}
+
+#[test]
+fn sequential_conditionals_and_error_propagation_keep_constant_nesting() {
+    let mut source = String::from(
+        "export { kernel }; struct Failed {}; def step() -> Result<(), Failed> = { ok(()) }; def helper(value: uint) -> Result<uint, Failed> = { var result = value; ",
+    );
+    for _ in 0..512 {
+        source.push_str(
+            "if (result == 0_ui) { result := 1_ui; } else { result := 0_ui; }; step()?; ",
+        );
+    }
+    source.push_str("ok(result) }; @compute_shader def kernel(i: ulong, output: Ptr<uint>) = { output.* := match (helper(uint(i))) { ok(value) => { value }, err(error) => { 99_ui } }; };");
+    let project = support::project::Project::new(&module(&source), None).unwrap();
+    let glsl = std::fs::read_to_string(project.generated.shaders()[0].source()).unwrap();
+    assert!(
+        glsl.lines()
+            .all(|line| line.len() - line.trim_start().len() < 32)
+    );
+    if let Some(compiler) = shaders::compiler() {
+        project.build(&toolchain::glsl(&compiler)).unwrap();
+    }
+}

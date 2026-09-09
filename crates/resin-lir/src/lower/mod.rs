@@ -158,8 +158,8 @@ impl Generator {
         self.function().terminate(terminator);
     }
 
-    fn new_block(&mut self, hint: &str) -> BlockId {
-        self.function().new_block(hint)
+    fn new_block(&mut self, hint: &str, height: usize) -> BlockId {
+        self.function().new_block(hint, height)
     }
 
     fn switch(&mut self, block: BlockId) {

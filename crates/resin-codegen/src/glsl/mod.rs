@@ -20,39 +20,24 @@ pub(super) struct GlslModule {
 pub(super) struct GlslFunction {
     signature: String,
     locals: String,
-    entry: usize,
-    blocks: Vec<GlslBlock>,
-    default_result: String,
+    statements: Vec<GlslStatement>,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct GlslBlock {
-    label: usize,
-    statements: String,
-    exit: GlslExit,
-}
-
-#[derive(Debug, Clone)]
-pub(super) enum GlslExit {
-    Return(String),
-    Jump(GlslEdge),
-    Branch {
-        condition: String,
-        then: GlslEdge,
-        els: GlslEdge,
+pub(super) enum GlslStatement {
+    Text {
+        source: String,
     },
-    Unreachable,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct GlslEdge {
-    target: usize,
-    values: Vec<GlslEdgeValue>,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct GlslEdgeValue {
-    slot: usize,
-    ty: String,
-    value: String,
+    If {
+        condition: String,
+        then: Vec<GlslStatement>,
+        els: Vec<GlslStatement>,
+    },
+    Loop {
+        body: Vec<GlslStatement>,
+    },
+    Break,
+    Return {
+        value: String,
+    },
 }

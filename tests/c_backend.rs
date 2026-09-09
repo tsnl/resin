@@ -453,7 +453,7 @@ fn failed_compilation_preserves_existing_output() {
 }
 
 #[test]
-fn loops_carry_typed_stack_values_across_edges() {
+fn loops_carry_typed_stack_values_between_iterations() {
     use resin_lir::{BasicBlock, BlockId, Instr::*, Local, Terminator::*};
     let mut m = module("export { main }; def main () -> int = { 0 };");
     let f = m
@@ -484,22 +484,23 @@ fn loops_carry_typed_stack_values_across_edges() {
                 Discard,
                 int(0),
             ],
-            terminator: Break {
-                target: BlockId::from_index(1),
+            terminator: Loop {
+                condition: BlockId::from_index(1),
+                body: BlockId::from_index(2),
+                next: Some(BlockId::from_index(3)),
             },
         },
         BasicBlock {
             name: None,
             instrs: vec![
+                int(10),
+                op("+", Ty::Int32),
                 LocalAddress { local: counter },
                 Load,
                 int(0),
                 op(">", Ty::Bool),
             ],
-            terminator: Branch {
-                then: BlockId::from_index(2),
-                els: BlockId::from_index(3),
-            },
+            terminator: Yield,
         },
         BasicBlock {
             name: None,
@@ -515,9 +516,7 @@ fn loops_carry_typed_stack_values_across_edges() {
                 Store,
                 Discard,
             ],
-            terminator: Break {
-                target: BlockId::from_index(1),
-            },
+            terminator: Yield,
         },
         BasicBlock {
             name: None,
@@ -525,7 +524,17 @@ fn loops_carry_typed_stack_values_across_edges() {
             terminator: Return,
         },
     ];
-    assert_eq!(run_module(&m).status.code(), Some(6));
+    // The false condition also contributes its carried value, including when
+    // the loop never enters its body.
+    for (iterations, expected) in [(3, 46), (0, 10)] {
+        m.functions
+            .iter_mut()
+            .find(|f| f.name.as_deref() == Some("main"))
+            .unwrap()
+            .blocks[0]
+            .instrs[1] = int(iterations);
+        assert_eq!(run_module(&m).status.code(), Some(expected));
+    }
 }
 
 #[test]
@@ -958,4 +967,37 @@ fn compute_entry_preserves_ulong_indices_on_the_host() {
         "export { main }; @compute_shader def kernel(index: ulong, output: Ptr<ulong>) = { output.* := index; }; def main() -> int = { var output = 0_ul; kernel(4294967297_ul, &output); if (output == 4294967297_ul) { 0 } else { 1 } };",
         0,
     );
+}
+
+#[test]
+fn structured_loops_propagate_errors_from_conditions_and_nested_bodies() {
+    let m = module(include_str!("fixtures/structured_control.resin"));
+    let project = support::project::Project::new(&m, Some("main")).unwrap();
+    let source = fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
+    assert!(source.contains("while (true)"));
+    assert!(!source.contains("goto "), "{source}");
+    let output = project.run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn sequential_conditionals_and_error_propagation_keep_constant_nesting() {
+    let mut source = String::from(
+        "export { main }; struct Failed {}; def step() -> Result<(), Failed> = { ok(()) }; def main() -> Result<int, Failed> = { var value = 0; ",
+    );
+    for _ in 0..512 {
+        source.push_str("if (value == 0) { value := 1; } else { value := 0; }; step()?; ");
+    }
+    source.push_str("ok(value) };");
+    let project = support::project::Project::new(&module(&source), Some("main")).unwrap();
+    let c = fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
+    assert!(
+        c.lines()
+            .all(|line| line.len() - line.trim_start().len() < 32)
+    );
+    assert!(project.run().status.success());
 }
