@@ -13,6 +13,7 @@ use std::ptr;
 use std::rc::Rc;
 use std::slice;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use ash::{Device, Entry, Instance, vk};
 
@@ -64,6 +65,8 @@ pub struct ResinGpu {
     command_pool: vk::CommandPool,
     timeline: vk::Semaphore,
     timeline_value: AtomicU64,
+    timestamp_valid_bits: u32,
+    timestamp_period: f32,
     memory_properties: vk::PhysicalDeviceMemoryProperties,
     max_buffer_size: vk::DeviceSize,
     memory_priority: bool,
@@ -111,6 +114,7 @@ pub struct ResinCommandBuffer {
     graphics: bool,
     rendering: bool,
     submitted: bool,
+    timestamp_pool: vk::QueryPool,
     layouts: ImageLayouts,
 }
 
@@ -195,6 +199,17 @@ impl ResinGpu {
     }
 
     fn from_context(mut created: device::DeviceContext) -> Result<Self, ResinStatus> {
+        let properties = unsafe {
+            created
+                .instance
+                .get_physical_device_properties(created.physical)
+        };
+        let queues = unsafe {
+            created
+                .instance
+                .get_physical_device_queue_family_properties(created.physical)
+        };
+        let timestamp_valid_bits = queues[created.queue_family as usize].timestamp_valid_bits;
         let pool_info = vk::CommandPoolCreateInfo::default()
             .queue_family_index(created.queue_family)
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER);
@@ -253,6 +268,8 @@ impl ResinGpu {
             command_pool,
             timeline,
             timeline_value: AtomicU64::new(0),
+            timestamp_valid_bits,
+            timestamp_period: properties.limits.timestamp_period,
             memory_properties: created.memory_properties,
             max_buffer_size: created.max_buffer_size,
             memory_priority: created.memory_priority,
@@ -625,6 +642,7 @@ impl ResinGpu {
             graphics: false,
             rendering: false,
             submitted: false,
+            timestamp_pool: vk::QueryPool::null(),
             layouts: ImageLayouts::default(),
         })
     }
@@ -635,9 +653,65 @@ impl ResinGpu {
         unsafe { self.submit_signaling(command_buffer, vk::Semaphore::null()) }
     }
 
+    pub(crate) unsafe fn record_with_timestamps(&self) -> Result<ResinCommandBuffer, ResinStatus> {
+        if self.timestamp_valid_bits == 0 {
+            return Err(ResinStatus::Unsupported);
+        }
+        let mut commands = unsafe { self.start_command_recording() }?;
+        let info = vk::QueryPoolCreateInfo::default()
+            .query_type(vk::QueryType::TIMESTAMP)
+            .query_count(2);
+        commands.timestamp_pool =
+            unsafe { self.device.create_query_pool(&info, None) }.map_err(vk_status)?;
+        unsafe {
+            self.device
+                .cmd_reset_query_pool(commands.handle, commands.timestamp_pool, 0, 2);
+            self.device.cmd_write_timestamp2(
+                commands.handle,
+                vk::PipelineStageFlags2::TOP_OF_PIPE,
+                commands.timestamp_pool,
+                0,
+            );
+        }
+        Ok(commands)
+    }
+
+    pub(crate) unsafe fn submit_with_timestamps(
+        &self,
+        mut commands: ResinCommandBuffer,
+    ) -> Result<Duration, ResinStatus> {
+        if commands.timestamp_pool == vk::QueryPool::null() {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        unsafe { self.submit_and_wait(&mut commands, vk::Semaphore::null()) }?;
+        let mut timestamps = [0u64; 2];
+        unsafe {
+            self.device.get_query_pool_results(
+                commands.timestamp_pool,
+                0,
+                &mut timestamps,
+                vk::QueryResultFlags::TYPE_64 | vk::QueryResultFlags::WAIT,
+            )
+        }
+        .map_err(vk_status)?;
+        Ok(timestamp_elapsed(
+            timestamps,
+            self.timestamp_valid_bits,
+            self.timestamp_period,
+        ))
+    }
+
     unsafe fn submit_signaling(
         &self,
         mut command_buffer: ResinCommandBuffer,
+        ready: vk::Semaphore,
+    ) -> Result<(), ResinStatus> {
+        unsafe { self.submit_and_wait(&mut command_buffer, ready) }
+    }
+
+    unsafe fn submit_and_wait(
+        &self,
+        command_buffer: &mut ResinCommandBuffer,
         ready: vk::Semaphore,
     ) -> Result<(), ResinStatus> {
         if command_buffer.rendering || !command_buffer.layouts.is_current() {
@@ -653,6 +727,14 @@ impl ResinGpu {
         unsafe {
             self.device
                 .cmd_pipeline_barrier2(command_buffer.handle, &dependency);
+            if command_buffer.timestamp_pool != vk::QueryPool::null() {
+                self.device.cmd_write_timestamp2(
+                    command_buffer.handle,
+                    vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
+                    command_buffer.timestamp_pool,
+                    1,
+                );
+            }
         }
         unsafe { self.device.end_command_buffer(command_buffer.handle) }.map_err(vk_status)?;
 
@@ -677,7 +759,6 @@ impl ResinGpu {
             self.device
                 .queue_submit2(self.queue, slice::from_ref(&submit), vk::Fence::null())
         } {
-            drop(command_buffer);
             return Err(vk_status(err));
         }
         command_buffer.submitted = true;
@@ -689,13 +770,9 @@ impl ResinGpu {
         match unsafe { self.device.wait_semaphores(&wait, u64::MAX) } {
             Ok(()) => {
                 command_buffer.submitted = false;
-                drop(command_buffer);
                 Ok(())
             }
-            Err(err) => {
-                drop(command_buffer);
-                Err(vk_status(err))
-            }
+            Err(err) => Err(vk_status(err)),
         }
     }
 }
@@ -1007,9 +1084,19 @@ impl Drop for ResinCommandBuffer {
         unsafe {
             self.device
                 .free_command_buffers(self.pool, slice::from_ref(&self.handle));
+            if self.timestamp_pool != vk::QueryPool::null() {
+                self.device.destroy_query_pool(self.timestamp_pool, None);
+            }
         }
         self.handle = vk::CommandBuffer::null();
     }
+}
+
+fn timestamp_elapsed(timestamps: [u64; 2], valid_bits: u32, period_ns: f32) -> Duration {
+    // Undefined high bits must not affect elapsed time on narrower hardware counters.
+    let mask = u64::MAX >> (64 - valid_bits);
+    let ticks = timestamps[1].wrapping_sub(timestamps[0]) & mask;
+    Duration::from_secs_f64(ticks as f64 * f64::from(period_ns) * 1e-9)
 }
 
 #[derive(Clone, Copy)]
@@ -1260,6 +1347,26 @@ mod tests {
     use super::*;
     use vk::Handle;
 
+    #[test]
+    fn timestamp_elapsed_uses_device_period() {
+        assert_eq!(
+            timestamp_elapsed([10, 30], 64, 2.5),
+            Duration::from_nanos(50)
+        );
+        assert_eq!(timestamp_elapsed([10, 10], 64, 1.0), Duration::ZERO);
+    }
+
+    #[test]
+    fn timestamp_elapsed_masks_high_bits_and_handles_counter_wrap() {
+        assert_eq!(
+            timestamp_elapsed([0xab00_00f0, 0xcd00_0010], 8, 1.0),
+            Duration::from_nanos(32),
+        );
+        assert_eq!(
+            timestamp_elapsed([u64::MAX - 3, 5], 64, 1.0),
+            Duration::from_nanos(9),
+        );
+    }
     #[test]
     fn allocation_retries_have_acyclic_complete_extension_chains() {
         for device_address in [false, true] {

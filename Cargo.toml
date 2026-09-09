@@ -7,6 +7,16 @@ publish = false
 [features]
 gpu = []
 
+[[bench]]
+name = "cpu"
+path = "benchmarks/cpu_main.rs"
+harness = false
+
+[[bench]]
+name = "gpu"
+path = "benchmarks/gpu_main.rs"
+harness = false
+
 [dependencies]
 tempfile = { workspace = true }
 clap = { version = "4", features = ["derive"] }

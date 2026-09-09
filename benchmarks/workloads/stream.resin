@@ -1,0 +1,21 @@
+export { Root, kernel, cpu };
+
+struct Root { count: uint, iterations: uint, input: Ptr<uint>, output: Ptr<uint> };
+
+// One read and one write per lane, with little arithmetic between them.
+@compute_shader
+def kernel(index: ulong, root: Ptr<Root>) = {
+	if (index < ulong(root.count)) {
+		var input = Span<uint> { data = root.input, length = ulong(root.count) };
+		var output = Span<uint> { data = root.output, length = ulong(root.count) };
+		output.at(index).* := input.at(index).* * 1664525_ui + uint(index);
+	};
+};
+
+def cpu(root: Ptr<Root>) = {
+	var index = 0_ul;
+	while (index < ulong(root.count)) {
+		kernel(index, root);
+		index := index + 1_ul;
+	};
+};

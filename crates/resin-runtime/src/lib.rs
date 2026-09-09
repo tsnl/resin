@@ -27,11 +27,44 @@ pub const INCLUDE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/include");
 use std::ffi::c_void;
 use std::os::raw::c_char;
 use std::ptr;
+use std::time::Duration;
 
 pub use gpu::{
     GPU_DEVICE_NAME_MAX, ResinAllocation, ResinCommandBuffer, ResinGpu, ResinGpuDeviceInfo,
     ResinGpuDeviceType, ResinImage, ResinPipeline,
 };
+
+impl ResinGpu {
+    /// Start a recording whose complete GPU execution will be measured with timestamps.
+    /// Returns [`ResinStatus::Unsupported`] if the selected queue has no timestamp support.
+    /// Ordinary recordings allocate no timestamp queries.
+    ///
+    /// # Safety
+    /// The GPU must outlive the recording. Operations on its command pool and queue
+    /// must be externally synchronized.
+    pub unsafe fn start_timed_command_recording(&self) -> Result<ResinCommandBuffer, ResinStatus> {
+        unsafe { self.record_with_timestamps() }
+    }
+
+    /// Submit a timed recording, wait for completion, and return its elapsed GPU time.
+    /// Includes recorded work and runtime barriers; excludes host recording, submission,
+    /// and waiting overhead. Returns [`ResinStatus::InvalidArgument`] for an untimed
+    /// recording. Like ordinary submission, this consumes the recording even on error.
+    ///
+    /// The timestamp counter wraps at the device's supported bit width. A recording
+    /// must complete within one counter period for its elapsed time to be unambiguous.
+    ///
+    /// # Safety
+    /// The recording must have been created by this GPU.
+    /// All recorded resources and GPU addresses must remain valid through completion
+    /// and belong to this GPU. Host accesses and queue operations must be synchronized.
+    pub unsafe fn submit_timed(
+        &self,
+        command_buffer: ResinCommandBuffer,
+    ) -> Result<Duration, ResinStatus> {
+        unsafe { self.submit_with_timestamps(command_buffer) }
+    }
+}
 
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]

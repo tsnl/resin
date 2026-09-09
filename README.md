@@ -81,6 +81,12 @@ Runtime GPU tests expect `glslc` on `PATH` and a working system Vulkan driver.
 The development shell supplies the Vulkan loader and window-system libraries through
 `LD_LIBRARY_PATH`.
 `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation` enables installed validation layers.
+
+Dedicated [CPU and GPU benchmarks](benchmarks/README.md) live under `benchmarks/`.
+Run them separately with `cargo bench --bench cpu` and `cargo bench --bench gpu`
+inside the development environment. Both measure compiled Resin workloads, validate
+their outputs, and can save raw timings and hardware metadata with `-- --json PATH`.
+
 Window integration tests use the `gpu` feature and run on a desktop display or Xvfb. Set `RESIN_REQUIRE_WINDOW=1`
 to fail instead of skipping when windowing or presentation is unavailable.
 When using Xvfb, set `DISPLAY` to its display and `XDG_SESSION_TYPE=x11` to select GLFW's X11
