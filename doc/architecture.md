@@ -234,7 +234,11 @@ emission operations. C and GLSL lowering finish before any source files are writ
 The compiler's [lib.rs](../crates/resin-compiler/src/lib.rs) contains source traversal,
 syntax caching, HIR/LIR generation, verification, and retained query access.
 `Compilation::verified()` supplies the certificate for codegen without reloading sources.
-The CLI's private [Request](../src/cli/request.rs) validates source and destination choices.
+The CLI's private [Request](../src/cli/request.rs) resolves source and destination choices
+against the captured working directory, including output naming and ancestor validation.
+Argument parsing passes the original paths to this boundary. Native compiler search paths
+retain their meaning relative to that captured directory; Ninja resolves discovered header
+dependencies in the directory where it runs the compiler.
 
 The [toolchain](../crates/resin-toolchain/src/lib.rs) captures explicit `Environment`
 inputs and builds any compatible Ninja source directory. `Toolchain::build` stages the

@@ -112,16 +112,14 @@ fn lower_block(
             stack.len() - flow.operand_count(resin_lir::BlockId::from_index(block_id), i),
         );
         let result = flow.results[block_id][i].as_ref();
+        let projected_value = projects_value(types, instr, &args);
         let name = format!("r_v{block_id}_{i}");
         let expr = instruction(types, function, &name, instr, &args, result, &mut out)
             .map_err(|error| Error::at(types.module, index, Some((block_id, i)), error))?;
         if let Some(ty) = result {
             writeln!(out, "  {} {name} = {}; (void){name};", types.name(ty), {
                 let expr = expr.unwrap();
-                if matches!(instr, Instr::Load)
-                    || matches!(instr, Instr::AccessStatic { .. })
-                        && !matches!(args[0].ty, Ty::Pointer { .. })
-                {
+                if matches!(instr, Instr::Load) || projected_value {
                     types.copy(ty, &expr)
                 } else {
                     expr
@@ -147,8 +145,7 @@ fn lower_block(
                 | Instr::ArcData
                 | Instr::Downgrade
                 | Instr::Upgrade
-        ) || matches!(instr, Instr::AccessStatic { .. })
-            && !matches!(args[0].ty, Ty::Pointer { .. });
+        ) || projected_value;
         if consume {
             for arg in &args {
                 types.drop_value(&arg.ty, &arg.expr, &mut out);
@@ -165,6 +162,14 @@ fn lower_block(
         statements: out,
         exit,
     })
+}
+
+fn projects_value(types: &Types<'_>, instr: &Instr, args: &[Slot]) -> bool {
+    match instr {
+        Instr::AccessStatic { .. } => !matches!(types.shape(&args[0].ty), Ty::Pointer { .. }),
+        Instr::AccessDynamic => matches!(types.shape(&args[0].ty), Ty::Array { .. }),
+        _ => false,
+    }
 }
 
 fn exit(types: &Types<'_>, term: &Terminator, stack: &mut Vec<Slot>) -> CExit {

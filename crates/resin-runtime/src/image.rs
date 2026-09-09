@@ -1,13 +1,61 @@
 //! Host-side PNG encode/decode for the C ABI.
 
+use std::borrow::Cow;
 use std::ffi::{CStr, c_char, c_void};
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
 use std::ptr;
 use std::slice;
 
 use crate::ResinStatus;
+
+struct PixelLayout {
+    width: u32,
+    height: u32,
+    color: png::ColorType,
+    row_bytes: usize,
+    stride: usize,
+    byte_len: usize,
+}
+
+impl PixelLayout {
+    fn new(width: u32, height: u32, channels: u32, stride: usize) -> Result<Self, ResinStatus> {
+        let color = color_type(channels).ok_or(ResinStatus::InvalidArgument)?;
+        let row_bytes = (width as usize)
+            .checked_mul(channels as usize)
+            .ok_or(ResinStatus::InvalidArgument)?;
+        let stride = if stride == 0 { row_bytes } else { stride };
+        let byte_len = stride
+            .checked_mul(height as usize)
+            .ok_or(ResinStatus::InvalidArgument)?;
+        if width == 0 || height == 0 || stride < row_bytes || byte_len > isize::MAX as usize {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        Ok(Self {
+            width,
+            height,
+            color,
+            row_bytes,
+            stride,
+            byte_len,
+        })
+    }
+
+    fn packed_pixels<'a>(&self, pixels: &'a [u8]) -> Result<Cow<'a, [u8]>, ResinStatus> {
+        let pixels = pixels
+            .get(..self.byte_len)
+            .ok_or(ResinStatus::InvalidArgument)?;
+        if self.stride == self.row_bytes {
+            return Ok(Cow::Borrowed(pixels));
+        }
+        let mut packed = Vec::with_capacity(self.row_bytes * self.height as usize);
+        for row in pixels.chunks_exact(self.stride) {
+            packed.extend_from_slice(&row[..self.row_bytes]);
+        }
+        Ok(Cow::Owned(packed))
+    }
+}
 
 /// # Safety
 /// `path` must be a valid C string; `pixels` must hold `height` rows of
@@ -24,32 +72,15 @@ pub unsafe extern "C" fn resin_image_write_png(
     let Some(path) = c_path(path) else {
         return ResinStatus::InvalidArgument;
     };
-    let Some(color) = color_type(channels) else {
+    if pixels.is_null() {
         return ResinStatus::InvalidArgument;
+    }
+    let layout = match PixelLayout::new(width, height, channels, row_stride) {
+        Ok(layout) => layout,
+        Err(status) => return status,
     };
-    if width == 0 || height == 0 || pixels.is_null() {
-        return ResinStatus::InvalidArgument;
-    }
-    let packed = (width as usize).saturating_mul(channels as usize);
-    if packed == 0 {
-        return ResinStatus::InvalidArgument;
-    }
-    let stride = if row_stride == 0 { packed } else { row_stride };
-    if stride < packed {
-        return ResinStatus::InvalidArgument;
-    }
-    let total = stride.saturating_mul(height as usize);
-    let src = unsafe { slice::from_raw_parts(pixels.cast::<u8>(), total) };
-
-    let packed_buf;
-    let image: &[u8] = if stride == packed {
-        src
-    } else {
-        packed_buf = pack_rows(src, height as usize, packed, stride);
-        &packed_buf
-    };
-
-    match encode_png(path, width, height, color, image) {
+    let pixels = unsafe { slice::from_raw_parts(pixels.cast::<u8>(), layout.byte_len) };
+    match write_png(path, &layout, pixels) {
         Ok(()) => ResinStatus::Success,
         Err(status) => status,
     }
@@ -120,17 +151,8 @@ pub fn image_write_png(
     channels: u32,
     pixels: &[u8],
 ) -> Result<(), ResinStatus> {
-    let Some(color) = color_type(channels) else {
-        return Err(ResinStatus::InvalidArgument);
-    };
-    if width == 0 || height == 0 {
-        return Err(ResinStatus::InvalidArgument);
-    }
-    let packed = (width as usize).saturating_mul(channels as usize);
-    if packed == 0 || pixels.len() < packed.saturating_mul(height as usize) {
-        return Err(ResinStatus::InvalidArgument);
-    }
-    encode_png(path.as_ref(), width, height, color, pixels)
+    let layout = PixelLayout::new(width, height, channels, 0)?;
+    write_png(path.as_ref(), &layout, pixels)
 }
 
 pub struct PngImage {
@@ -166,21 +188,21 @@ pub fn image_read_png(
     })
 }
 
-fn encode_png(
-    path: &Path,
-    width: u32,
-    height: u32,
-    color: png::ColorType,
-    pixels: &[u8],
-) -> Result<(), ResinStatus> {
+fn write_png(path: &Path, layout: &PixelLayout, pixels: &[u8]) -> Result<(), ResinStatus> {
+    let pixels = layout.packed_pixels(pixels)?;
     let file = File::create(path).map_err(|_| ResinStatus::IoError)?;
-    let mut encoder = png::Encoder::new(BufWriter::new(file), width, height);
-    encoder.set_color(color);
+    encode_png(BufWriter::new(file), layout, &pixels)
+}
+
+fn encode_png(output: impl Write, layout: &PixelLayout, pixels: &[u8]) -> Result<(), ResinStatus> {
+    let mut encoder = png::Encoder::new(output, layout.width, layout.height);
+    encoder.set_color(layout.color);
     encoder.set_depth(png::BitDepth::Eight);
     let mut writer = encoder.write_header().map_err(|_| ResinStatus::IoError)?;
     writer
         .write_image_data(pixels)
-        .map_err(|_| ResinStatus::IoError)
+        .map_err(|_| ResinStatus::IoError)?;
+    writer.finish().map_err(|_| ResinStatus::IoError)
 }
 
 fn decode_png(path: &Path) -> Result<PngImage, ResinStatus> {
@@ -228,16 +250,6 @@ fn c_path<'a>(path: *const c_char) -> Option<&'a Path> {
         return None;
     }
     Some(Path::new(s))
-}
-
-fn pack_rows(src: &[u8], height: usize, packed: usize, stride: usize) -> Vec<u8> {
-    let mut out = vec![0u8; packed * height];
-    for y in 0..height {
-        let dst = y * packed;
-        let src_row = y * stride;
-        out[dst..dst + packed].copy_from_slice(&src[src_row..src_row + packed]);
-    }
-    out
 }
 
 fn convert_channels(src: &[u8], src_ch: u32, dst_ch: u32, pixels: usize) -> Vec<u8> {
@@ -293,4 +305,117 @@ fn malloc_copy(bytes: &[u8]) -> Option<*mut c_void> {
         ptr::copy_nonoverlapping(bytes.as_ptr(), ptr.cast::<u8>(), bytes.len());
     }
     Some(ptr)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+    use std::io;
+    use std::path::PathBuf;
+
+    struct FlushError;
+
+    impl Write for FlushError {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::other("output is full"))
+        }
+    }
+
+    fn test_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("resin-png-{name}-{}.png", std::process::id()))
+    }
+
+    #[test]
+    fn encoder_reports_flush_errors() {
+        let layout = PixelLayout::new(1, 1, 4, 0).unwrap();
+        assert_eq!(
+            encode_png(FlushError, &layout, &[255, 0, 0, 255]),
+            Err(ResinStatus::IoError)
+        );
+    }
+
+    #[test]
+    fn rust_writer_uses_only_the_image_bytes() {
+        let path = test_path("extra-bytes");
+        let pixels = [255, 0, 0, 255, 42, 42, 42, 42];
+        image_write_png(&path, 1, 1, 4, &pixels).unwrap();
+        let decoded = image_read_png(&path, 0).unwrap();
+        assert_eq!((decoded.width, decoded.height, decoded.channels), (1, 1, 4));
+        assert_eq!(decoded.pixels, pixels[..4]);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn c_writer_removes_row_padding() {
+        let path = test_path("row-padding");
+        let path_c = CString::new(path.to_str().unwrap()).unwrap();
+        let pixels: [u8; 12] = [1, 2, 3, 4, 90, 90, 5, 6, 7, 8, 90, 90];
+        assert_eq!(
+            unsafe { resin_image_write_png(path_c.as_ptr(), 1, 2, 4, pixels.as_ptr().cast(), 6) },
+            ResinStatus::Success
+        );
+        let decoded = image_read_png(&path, 0).unwrap();
+        assert_eq!((decoded.width, decoded.height, decoded.channels), (1, 2, 4));
+        assert_eq!(decoded.pixels, [1, 2, 3, 4, 5, 6, 7, 8]);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn invalid_images_preserve_the_output_file() {
+        let path = test_path("invalid-image");
+        std::fs::write(&path, b"existing contents").unwrap();
+        for (width, height, channels) in [
+            (0, 1, 4),
+            (1, 0, 4),
+            (1, 1, 0),
+            (1, 1, 5),
+            (u32::MAX, u32::MAX, 4),
+            (2, 1, 4),
+        ] {
+            assert_eq!(
+                image_write_png(&path, width, height, channels, &[0; 4]),
+                Err(ResinStatus::InvalidArgument)
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), b"existing contents");
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn invalid_c_layouts_are_rejected_before_reading_pixels() {
+        let path = test_path("invalid-c-layout");
+        let path_c = CString::new(path.to_str().unwrap()).unwrap();
+        std::fs::write(&path, b"existing contents").unwrap();
+        for (width, height, channels, stride) in [
+            (0, 1, 4, 0),
+            (1, 0, 4, 0),
+            (1, 1, 0, 0),
+            (1, 1, 5, 0),
+            (1, 1, 4, 3),
+            (1, 1, 4, usize::MAX),
+            (1, 2, 4, usize::MAX),
+            (u32::MAX, u32::MAX, 4, 0),
+        ] {
+            assert_eq!(
+                unsafe {
+                    resin_image_write_png(
+                        path_c.as_ptr(),
+                        width,
+                        height,
+                        channels,
+                        ptr::dangling(),
+                        stride,
+                    )
+                },
+                ResinStatus::InvalidArgument
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), b"existing contents");
+        }
+        std::fs::remove_file(path).unwrap();
+    }
 }

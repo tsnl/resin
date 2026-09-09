@@ -143,7 +143,7 @@ impl Cli {
     }
 
     fn build(self, environment: &Environment) -> Result<Mode> {
-        let input = self.input(environment)?;
+        let input = self.input()?;
         let request = Box::new(self.compile.request(input, environment)?);
         Ok(if request.destination.as_deref().is_none() {
             Mode::Interpreter {
@@ -155,26 +155,23 @@ impl Cli {
         })
     }
 
-    fn input(&self, environment: &Environment) -> Result<source::Input> {
+    fn input(&self) -> Result<source::Input> {
         let [path] = self.paths.as_slice() else {
             Self::command().error(clap::error::ErrorKind::WrongNumberOfValues,
                 "running or compiling requires exactly one FILE[:ENTRY]; use --format for multiple paths").exit();
         };
-        let mut input = source::parse(path.as_os_str()).unwrap_or_else(|error| {
+        let input = source::parse(path.as_os_str()).unwrap_or_else(|error| {
             Self::command()
                 .error(clap::error::ErrorKind::InvalidValue, error)
                 .exit()
         });
-        input.path = environment.directory.join(input.path);
         Ok(input)
     }
 }
 
 impl CompileOptions {
     fn request(self, input: source::Input, environment: &Environment) -> Result<Request> {
-        let destination = self
-            .destination
-            .map(|path| environment.directory.join(path));
+        let destination = self.destination;
         let profile = if destination.is_none() {
             CProfile::Debug
         } else {
@@ -185,6 +182,7 @@ impl CompileOptions {
             input,
             destination,
             Options {
+                directory: environment.directory.clone(),
                 profile,
                 tools,
                 temporary: environment.temporary.clone(),

@@ -526,3 +526,55 @@ fn all_glsl_is_generated_before_shader_or_c_compilers_run() {
     assert!(!project.temp.path().join("build").exists());
     assert!(!project.temp.path().join("calls").exists());
 }
+
+#[test]
+fn embedded_builds_resolve_header_dependencies_from_the_compiler_directory() {
+    use resin_toolchain::{CProfile, Environment};
+    let project = Project::new();
+    let header = project.temp.path().join("foreign.h");
+    fs::write(&header, "#define VALUE 41\n").unwrap();
+    let mut environment = Environment::capture().unwrap();
+    environment.directory = project.temp.path().into();
+    environment.variables.extend([
+        ("CPATH".into(), ".".into()),
+        (
+            "RESIN_TEST_COUNT".into(),
+            project.temp.path().join("calls").into(),
+        ),
+        (
+            "RESIN_TEST_FLAGS".into(),
+            project.temp.path().join("flags").into(),
+        ),
+        (
+            "RESIN_TEST_COMPILER".into(),
+            std::env::var_os("CC").unwrap_or_else(|| "cc".into()),
+        ),
+    ]);
+    let settings = environment.toolchain(Some(project.compiler.as_os_str()), None);
+    let generated = project.temp.path().join("generated");
+    fs::create_dir(&generated).unwrap();
+    fs::write(
+        generated.join("main.c"),
+        "#include \"foreign.h\"\nint main(void) { return VALUE; }\n",
+    )
+    .unwrap();
+    fs::write(generated.join("build.ninja"), "include toolchain.ninja\nrule c\n  command = $cc $cflags -MMD -MF $out.d -MT $out $in -o $out $ldflags\n  depfile = $out.d\n  deps = gcc\nbuild program: c main.c | toolchain.state $runtime_library\n").unwrap();
+    let run = || {
+        let build = settings
+            .build(
+                &generated,
+                &project.input.to_string_lossy(),
+                "main",
+                CProfile::Debug,
+            )
+            .unwrap();
+        Some(build.executable("program").unwrap().run().unwrap())
+    };
+    assert_eq!(run(), Some(41));
+    assert_eq!(run(), Some(41));
+    assert_eq!(project.calls(), 1);
+    fs::write(header, "#define VALUE 42\n").unwrap();
+    assert_eq!(run(), Some(42));
+    assert_eq!(run(), Some(42));
+    assert_eq!(project.calls(), 2);
+}
