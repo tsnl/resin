@@ -2,7 +2,7 @@
 use resin_common::types;
 use resin_lir as lir;
 
-use crate::lir::{FunctionId, Module, Ty};
+use crate::lir::{BlockId, FunctionId, Module, Ty, TypeId};
 
 mod error;
 mod flow;
@@ -11,7 +11,62 @@ mod module;
 mod rules;
 mod table;
 
-pub use error::{VerifyError, VerifyErrorKind, VerifyLocation};
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifyError {
+    pub location: VerifyLocation,
+    pub kind: VerifyErrorKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerifyLocation {
+    TypeDefinition {
+        definition: TypeId,
+    },
+    Function {
+        function: FunctionId,
+    },
+    BasicBlock {
+        function: FunctionId,
+        basic_block: BlockId,
+    },
+    Instruction {
+        function: FunctionId,
+        basic_block: BlockId,
+        instruction: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerifyErrorKind {
+    InvalidVariant,
+    InvalidDropHook,
+    InvalidForeignSignature,
+    OpaqueValue { ty: Ty },
+    InvalidShader,
+    PointerArithmetic,
+    InvalidBuiltin(crate::types::check::TypeError),
+    InvalidPointerCast { from: Ty, to: Ty },
+    InvalidTypeDefinition { definition: usize },
+    IncompleteTypeDefinition { definition: TypeId },
+    NominalTypeMustBeRecord { definition: TypeId },
+    RecursiveTypeWithoutIndirection { definition: TypeId },
+    InvalidLocal { local: usize },
+    InvalidFunction { function: usize },
+    InvalidBasicBlock { basic_block: usize },
+    UnreachableBasicBlock,
+    StackUnderflow { needed: usize, available: usize },
+    InvalidImmediate,
+    TypeMismatch { expected: Ty, found: Ty },
+    ExpectedPointer { found: Ty },
+    ExpectedAggregate { found: Ty },
+    ExpectedArray { found: Ty },
+    ExpectedFunction { found: Ty },
+    ExpectedInteger { found: Ty },
+    StaticIndexOutOfBounds { index: usize, length: usize },
+    ArgumentCount { expected: usize, found: usize },
+    ConflictingBasicBlockStack { expected: Vec<Ty>, found: Vec<Ty> },
+    InvalidReturnStack { expected: Ty, found: Vec<Ty> },
+}
 
 use flow::check_function;
 
@@ -21,6 +76,14 @@ pub fn verify(module: &Module) -> Result<(), VerifyError> {
 }
 
 /// A borrow of LIR and the analysis certifying that exact immutable module.
+/// Only the verifier can construct a certificate.
+///
+/// ```compile_fail,E0451
+/// use resin_lir_verifier::{ModuleTypes, Verified};
+/// let module = resin_lir::Module::default();
+/// let analysis = ModuleTypes { functions: vec![], types: Default::default() };
+/// let forged = Verified { module: &module, analysis: &analysis };
+/// ```
 #[derive(Clone, Copy)]
 pub struct Verified<'a> {
     module: &'a Module,
@@ -38,6 +101,19 @@ impl<'a> Verified<'a> {
 }
 
 /// The checked module and the analysis that certifies this exact immutable IR.
+/// Editing requires [`Self::into_module`], which consumes and discards the certificate.
+///
+/// ```compile_fail,E0596
+/// let checked = resin_lir_verifier::VerifiedModule::new(Default::default()).unwrap();
+/// checked.view().module().functions.clear();
+/// ```
+///
+/// ```compile_fail,E0505
+/// let checked = resin_lir_verifier::VerifiedModule::new(Default::default()).unwrap();
+/// let borrowed = checked.view();
+/// let editable = checked.into_module();
+/// let _ = borrowed.module();
+/// ```
 pub struct VerifiedModule {
     module: Module,
     analysis: ModuleTypes,

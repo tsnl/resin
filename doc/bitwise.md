@@ -54,7 +54,7 @@ be the clearest construction; an extra constructor earns its place when it
 establishes an additional invariant or names a meaningful conversion.
 
 The same quality matters in Resin's
-[HIR language](../crates/resin-hir/src/language.rs). `Term` exposes its source span,
+[HIR language](../crates/resin-hir/src/lib.rs). `Term` exposes its source span,
 concrete type, and expression kind. A call or conditional is recognizable as data.
 Reading that definition should be enough to understand what the next pass receives.
 If understanding a node requires consulting the checker's current scope or invoking
@@ -192,7 +192,7 @@ checks available space and alignment around the allocation. These checks expose
 assumptions the implementation relies on. They help a reader connect the compact
 operation to the conditions that make it valid.
 
-Resin's [LIR definition](../crates/resin-lir/src/language.rs) has a useful comment explaining
+Resin's [LIR definition](../crates/resin-lir/src/lib.rs) has a useful comment explaining
 that local zero is always the parameter, including for unit and foreign functions.
 A vector of locals cannot express that convention by itself. Keeping the explanation
 beside the representation and checking it in the verifier is more useful than
@@ -224,8 +224,8 @@ example of an abstraction earning its place:
 
 ```rust
 let checked = lir_verifier::VerifiedModule::new(module)?;
-let target = c::lower::generate(checked.view(), "main", &[])?;
-let text = c::print::module(&target);
+let target = resin_codegen::generate_c(checked.view(), "main", &[])?;
+let text = resin_codegen::print_c(&target);
 ```
 
 The wrapper keeps a module with the analysis that certifies it. The caller can

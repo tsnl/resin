@@ -1,17 +1,26 @@
 # Compiler architecture
 
 Resin's compiler is a sequence of explicit languages and passes. Each phase is an
-unpublished Cargo workspace crate; public data describes its output, and private
-implementation modules construct it. The `resin` crate is the driver and
-re-exports the phase crates for library users.
+unpublished Cargo workspace crate. Public data describes its output; a small set
+of public operations constructs, prints, or queries that data. Each crate lists
+its full public interface in `lib.rs`; implementation modules stay private.
 
-The root manifest is a virtual workspace. All native Rust packages live under
-`crates/`: the driver in `resin`, the native C ABI in `resin-runtime`, the language server
-in `resin-lsp`, and the compiler phases alongside them. Directories match their Cargo
-package names, including the `resin-` prefix. Each package owns its source and
-tests. Shared Resin examples, the standard library, and documentation stay at the
-repository root. `resin` is the default member, so `cargo run -- examples/eg001.resin`
-still works there; use `--workspace` to build or test every native package.
+The root manifest is both a package and a workspace. Root `src/` contains the
+`resin` CLI: `resin FILE` builds and runs, `resin FILE --output PATH` builds an
+executable, `resin --format DIR` formats source, and `resin --lsp DIR` serves the
+Language Server Protocol. There is one executable to distribute.
+
+Reusable libraries live under `crates/`, with directory names matching their Cargo
+package names. `resin-compiler` owns pass sequencing, source loading, sessions, and
+retained analysis. `resin-platform-toolchain` owns process discovery, native builds,
+and artifact caches. The `resin-lsp` library adapts compiler queries to the protocol;
+no library depends on the root CLI. The native C ABI lives in `resin-runtime`.
+
+Crates own their isolated tests; root `tests/` exercises the complete executable and
+cross-crate behavior. Examples, the standard library, and documentation stay at the
+repository root. The root package is the default member, so
+`cargo run -- examples/eg001.resin` works there. Use `--workspace` to build or test
+all native packages.
 
 `crates/tree-sitter-resin` keeps the grammar, generated parser, queries, JavaScript
 tooling, and Rust bindings together as one package. `editors/zed` is an independent
@@ -40,11 +49,14 @@ pass consumes. Every phase uses `resin-common`; it has no phase dependencies.
 | Crate | Direct compiler dependencies besides `common` | Public purpose |
 | --- | --- | --- |
 | `resin-cst` | generated `tree-sitter-resin` grammar | Concrete syntax documents, reparsing, syntax queries, formatting |
-| `resin-ast` | `cst` | Source AST, parsing diagnostics, import loading |
+| `resin-ast` | `cst` | Source AST, syntax recovery, and parsing diagnostics |
 | `resin-hir` | `ast`, `cst` | Resolved tree, source checking and elaboration, opaque editor analysis |
 | `resin-lir` | `hir` | Typed stack instructions, storage and control-flow lowering |
 | `resin-lir-verifier` | `lir` | Verification and immutable certificates |
 | `resin-codegen` | `lir`, `lir-verifier` | C/GLSL source trees, target lowering, printing |
+| `resin-platform-toolchain` | none | Explicit process inputs, resolved tools, locked native artifacts |
+| `resin-compiler` | all phases and `platform-toolchain` | Source loading, pass sequencing, sessions, retained compilations |
+| `resin-lsp` | `compiler`, `cst` | Compiler queries and formatting over LSP |
 
 The HIR dependency on CST supports editor queries at a syntax position. Its public
 language uses only shared source identities and concrete types. LIR lowering never
@@ -58,19 +70,21 @@ It is not a home for phase-specific state moved to avoid a dependency cycle.
 
 ## A consistent reading path
 
-For each phase, read `language.rs`, then `lower`, then `print`. The target languages
-follow the same arrangement inside `codegen/c` and `codegen/glsl`. A module's
-`lib.rs` (or a target's `mod.rs`) lists its public API. Most implementation modules
-are private even when their functions must be shared internally.
+For each phase, start with `lib.rs`: language data appears beside the operations
+that accept the preceding language and produce this one. Follow an operation into
+private `lower` or `print` only when its implementation matters. Codegen's entry
+point contains both C and GLSL definitions, with separate private target modules.
+Common's entry point lists curated source, diagnostic, and concrete-type namespaces.
+Language-specific builders and solver state stay behind these facades.
 
 | Phase | Language definition | Incoming pass | Printing |
 | --- | --- | --- | --- |
-| CST | [Document](../crates/resin-cst/src/language.rs) | [incremental parsing](../crates/resin-cst/src/lower.rs) | [source formatting](../crates/resin-cst/src/print.rs) |
-| AST | [source nodes](../crates/resin-ast/src/language.rs) | [CST → AST](../crates/resin-ast/src/lower.rs) | [S-expressions](../crates/resin-ast/src/print.rs) |
-| HIR | [resolved nodes](../crates/resin-hir/src/language.rs) | [AST → HIR](../crates/resin-hir/src/lower/mod.rs) | [typed S-expressions](../crates/resin-hir/src/print.rs) |
-| LIR | [instructions and blocks](../crates/resin-lir/src/language.rs) | [HIR → LIR](../crates/resin-lir/src/lower/mod.rs) | [S-expressions](../crates/resin-lir/src/print/mod.rs) |
-| C | [C source tree](../crates/resin-codegen/src/c/language.rs) | [verified LIR → C](../crates/resin-codegen/src/c/lower/mod.rs) | [C text](../crates/resin-codegen/src/c/print.rs) |
-| GLSL | [shader source tree](../crates/resin-codegen/src/glsl/language.rs) | [verified LIR → GLSL](../crates/resin-codegen/src/glsl/lower/mod.rs) | [GLSL text](../crates/resin-codegen/src/glsl/print.rs) |
+| CST | [Document](../crates/resin-cst/src/lib.rs) | [incremental parsing](../crates/resin-cst/src/lower.rs) | [source formatting](../crates/resin-cst/src/print.rs) |
+| AST | [source nodes](../crates/resin-ast/src/lib.rs) | [CST → AST](../crates/resin-ast/src/lower.rs) | [S-expressions](../crates/resin-ast/src/print.rs) |
+| HIR | [resolved nodes](../crates/resin-hir/src/lib.rs) | [AST → HIR](../crates/resin-hir/src/lower/mod.rs) | [typed S-expressions](../crates/resin-hir/src/print.rs) |
+| LIR | [instructions and blocks](../crates/resin-lir/src/lib.rs) | [HIR → LIR](../crates/resin-lir/src/lower/mod.rs) | [S-expressions](../crates/resin-lir/src/print/mod.rs) |
+| C | [C source tree](../crates/resin-codegen/src/lib.rs) | [verified LIR → C](../crates/resin-codegen/src/c/lower/mod.rs) | [C text](../crates/resin-codegen/src/c/print.rs) |
+| GLSL | [shader source tree](../crates/resin-codegen/src/lib.rs) | [verified LIR → GLSL](../crates/resin-codegen/src/glsl/lower/mod.rs) | [GLSL text](../crates/resin-codegen/src/glsl/print.rs) |
 
 Prefer small functions named for the operation they perform. The
 [Bitwise taste guide](bitwise.md) explains the style reference through concrete
@@ -84,7 +98,8 @@ CST pairs source text with a Tree-sitter tree. `Document::reparse` may reuse a
 previous document, and syntax-only queries and formatting need no semantic state.
 AST lowering converts that syntax into source constructs. The recovering API keeps
 holes and diagnostics; the strict API returns a file only when syntax is valid.
-AST module loading orders dependencies and resolves paths, without executing imports.
+The compiler's private loader resolves paths and orders AST modules into a `Program`,
+without executing imports. AST generation itself performs no source I/O.
 
 HIR construction has three internal steps:
 
@@ -130,48 +145,61 @@ edge copies. They need no LIR, verifier analysis, or source metadata.
 The smallest host pipeline uses just the public phase APIs:
 
 ```rust
-use resin::{ast, c, cst, hir, lir, lir_verifier};
+use resin_ast as ast;
+use resin_codegen as codegen;
+use resin_cst as cst;
+use resin_hir as hir;
+use resin_lir as lir;
+use resin_lir_verifier as lir_verifier;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let syntax = cst::Document::reparse(
         "export { main }; def main() -> int = { 42 };".into(), None,
     );
-    let ast = ast::lower::generate(&syntax)?;
-    let hir = hir::lower::generate(&ast)?;
-    let lir = lir::lower::generate(&hir)?;
+    let ast = ast::generate(&syntax)?;
+    let hir = hir::generate(&ast)?;
+    let lir = lir::generate(&hir)?;
     let checked = lir_verifier::VerifiedModule::new(lir)?;
-    let target = c::lower::generate(checked.view(), "main", &[])?;
-    let source = c::print::module(&target);
+    let target = codegen::generate_c(checked.view(), "main", &[])?;
+    let source = codegen::print_c(&target);
+    assert!(source.contains("main"));
     Ok(())
 }
 ```
 
-For imports, use `ast::load_with` and `hir::lower::generate_program`.
-`hir::lower::analyze_program` returns a `Compilation` with diagnostics and opaque
-editor analysis even on failure. The `Analysis` query methods accept a small
-`Documents` interface rather than exposing scopes to the editor adapter.
-`lir::lower::analyze` collects errors across functions; `generate` returns the
-first error. Convenience C/GLSL `emit` functions verify, lower, and print for
-callers holding ordinary LIR.
+For file imports and unsaved buffers, use `resin_compiler::Session::analyze`.
+An in-memory caller may construct an `ast::Program` in dependency order and call
+`hir::generate_program`. `hir::analyze_program` returns a `CheckedProgram` with
+diagnostics and opaque editor analysis even on failure. The `Analysis` query
+methods accept a small `Documents` interface; source scopes remain private.
+`lir::analyze` collects errors across functions; `lir::generate` returns the first.
+Codegen's `emit_c` and `emit_glsl` conveniences verify, lower, and print ordinary LIR.
 
-The driver in [compiler/passes.rs](../crates/resin/src/compiler/passes.rs) sequences HIR,
-LIR, and verification. [compiler/build.rs](../crates/resin/src/compiler/build.rs) and
-[compiler/shaders.rs](../crates/resin/src/compiler/shaders.rs) coordinate target generation
-and the [toolchain](../crates/resin/src/toolchain.rs), which owns external processes and caches.
+The driver in [passes.rs](../crates/resin-compiler/src/passes.rs) sequences HIR,
+LIR, and verification. [build.rs](../crates/resin-compiler/src/build.rs) and
+[shaders.rs](../crates/resin-compiler/src/shaders.rs) coordinate target generation.
+The [toolchain facade](../crates/resin-platform-toolchain/src/lib.rs) accepts explicit
+`Environment` inputs, resolves an opaque `Toolchain`, and returns an `Executable`
+that retains its build-cache lock through copying and execution.
 No language crate imports the driver, invokes native compilers, or executes code.
 
 ## Sessions and incrementality
 
 The architecture supports both a long-lived editor and a single CLI invocation.
 `Session` retains source overlays, parsed documents, import dependencies, and
-immutable snapshots. Repeated analysis without changes reuses a snapshot; edits
-incrementally reparse affected CST documents and invalidate dependent entries.
+immutable `Compilation` results. Repeated analysis without changes reuses a result;
+edits incrementally reparse affected CST documents and invalidate dependent entries.
 Semantic checking currently reruns the affected entry's import closure. It is
 not an incremental constraint solver or a per-function incremental backend.
 
-A snapshot exposes recovered ASTs, strict AST/HIR products, diagnostics, and
-verified LIR. A later pass failing does not invalidate an earlier successful
-product. Old snapshots remain usable when the session advances. The native
-artifact cache is separate from this analysis cache. The CLI uses the same
-session implementation for one build/run request; the language server retains
-it across edits.
+A `Compilation` represents the retained work for one entry and its imports. It
+exposes diagnostics, source queries, recovered AST files, and successful AST, HIR,
+and LIR products. A failed later pass preserves the earlier completed products.
+Private analysis data owns the syntax documents and HIR's opaque editor facts;
+callers use `definition`, `hover`, and `completions` without accessing source scopes.
+Old compilations remain usable when the session advances.
+
+The name distinguishes the whole retained analysis from a language `Module`, such
+as a HIR or LIR module. Native artifact caching is separate from this analysis
+cache. The CLI uses one session for its invocation; the LSP library retains one
+across edits, inside the same `resin` executable.

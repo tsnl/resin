@@ -33,6 +33,7 @@ pub use gpu::{
     ResinGpuDeviceType, ResinImage, ResinPipeline,
 };
 
+#[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 pub mod testing {
     use std::fs::File;
@@ -56,7 +57,14 @@ pub mod testing {
     }
 }
 pub use image::{PngImage, image_read_png, image_write_png};
-pub use window::{ResinWindow, ffi::*};
+pub use window::ResinWindow;
+pub use window::ffi::{
+    resin_gpu_create_for_window, resin_gpu_present, resin_window_capture_cursor,
+    resin_window_create, resin_window_cursor_position, resin_window_destroy, resin_window_focused,
+    resin_window_framebuffer_size, resin_window_key_pressed, resin_window_key_state,
+    resin_window_mouse_button_state, resin_window_poll_events, resin_window_scroll_delta,
+    resin_window_set_should_close, resin_window_set_size, resin_window_should_close,
+};
 
 pub type ResinDeviceAddress = u64;
 

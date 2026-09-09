@@ -8,10 +8,11 @@ driver; host-only programs do not require Vulkan or a GPU.
 New to the implementation? Start with the [guided repository tour](TOUR.md) and the
 [compiler architecture](doc/architecture.md), including the phase crates and their public APIs.
 
-The root is a virtual Cargo workspace: native packages and their tests live under
-`crates/`, and the Zed extension lives under `editors/zed/`. The default package is
-`resin`, so Cargo commands below still run from the repository root. Use `--workspace`
-to build or test all native packages.
+The root is both the `resin` CLI package and a Cargo workspace. Reusable libraries
+live under `crates/`; the Zed extension has its own workspace under `editors/zed/`.
+Root Cargo commands select `resin`, and `--workspace` builds or tests all native
+packages. One executable runs programs, builds executables, formats source, and
+serves LSP.
 
 ## Development
 
@@ -88,14 +89,17 @@ XDG_SESSION_TYPE=x11 RESIN_REQUIRE_GPU=1 RESIN_REQUIRE_GLSLC=1 RESIN_REQUIRE_WIN
 
 ## Editor support
 
-The [Zed extension](editors/zed/README.md) provides Resin syntax support and uses
-[`resin-lsp`](crates/resin-lsp/README.md) for diagnostics, hover, go-to-definition, and
-basic completion. Build the server with `nix-shell --run 'cargo build -p resin-lsp'`.
+The [Zed extension](editors/zed/README.md) provides Resin syntax support and launches
+`resin --lsp DIR` for diagnostics, hover, go-to-definition, completion, and formatting.
+Build the unified executable with `nix-shell --run 'cargo build -p resin'`.
+The [language server library](crates/resin-lsp/README.md) ships inside that executable,
+so editor services and program compilation use the same compiler version.
 
-Both the CLI and LSP use a persistent `resin::compiler::Session`: source overlays,
-incremental parsing, dependency invalidation, and immutable checked snapshots
-live in the compiler library. The LSP hosts that session for ongoing edits; the
-CLI uses it for one build/run invocation.
+Both the CLI and LSP use `resin_compiler::Session`: source overlays, incremental
+parsing, dependency invalidation, and immutable `Compilation` results live in
+`resin-compiler`. The LSP retains a session across edits; the CLI uses one for a
+build/run invocation. The root Cargo manifest is both the `resin` CLI package and
+the workspace; reusable libraries live under `crates/`.
 
 ## Functions and values
 
@@ -386,7 +390,7 @@ all platforms; an empty value succeeds with length zero. It never reads live OS 
 See `examples/process.resin` for looking up a selected variable without dumping the environment.
 Program arguments apply only to run mode; `-o` builds the executable to invoke separately.
 
-With `-o PATH` (or `--out PATH`), Resin builds and copies the executable without running it.
+With `-o PATH` (or `--output PATH`, also accepted as `--out PATH`), Resin builds and copies the executable without running it.
 A successful build and copy returns status 0, independently of the program's eventual exit status.
 An existing directory or trailing separator receives the source name (or `source-entry` for a
 non-main entry), with `.exe` on Windows; otherwise PATH names the file exactly. Use an `.exe`
@@ -397,7 +401,8 @@ embed those bytes in generated C, then compile and link the executable. Shader s
 decorators. To inspect intermediates without running the program, build with `-o PATH` and read
 `build/<source-name>-<path-and-entry-hash>/release/program.c` and
 `build/shaders/<hash>/shader.glsl` / `shader.spv`. Frontend inspection is available through
-`compiler::Session::analyze` and its AST/IR snapshots in the library.
+`resin_compiler::Session::analyze` and the retained `Compilation` result's AST, HIR,
+and LIR accessors.
 
 Each canonical source path and entry name has a stable directory with separate debug and release
 artifacts. Each profile contains generated C, the executable, and an input fingerprint. Unchanged
@@ -425,7 +430,7 @@ dynamic array indexes fail with a diagnostic. There is no optimizer or stable ge
 
 ## Formatting
 
-The CLI uses the same canonical formatter as `resin-lsp`:
+The CLI and the language server in `resin --lsp DIR` use the same canonical formatter:
 
 ```sh
 # Format every .resin file under examples/, including examples/lib/.

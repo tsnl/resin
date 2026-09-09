@@ -1,9 +1,5 @@
 //! Source identities, spans, diagnostics, and access shared by all phases.
-use std::{
-    fmt, fs, io,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{fmt, path::PathBuf, sync::Arc};
 
 pub type Ident = Spanned<Arc<str>>;
 
@@ -71,20 +67,3 @@ impl fmt::Display for SourceError {
     }
 }
 impl std::error::Error for SourceError {}
-
-/// Source access shared by the CLI and editor. An editor may resolve/read a file
-/// from memory before it exists on disk.
-pub trait SourceProvider {
-    fn resolve(&self, path: &Path) -> io::Result<PathBuf>;
-    fn read(&self, path: &Path) -> io::Result<String>;
-}
-
-pub struct FileSystem;
-impl SourceProvider for FileSystem {
-    fn resolve(&self, path: &Path) -> io::Result<PathBuf> {
-        fs::canonicalize(path)
-    }
-    fn read(&self, path: &Path) -> io::Result<String> {
-        fs::read_to_string(path)
-    }
-}

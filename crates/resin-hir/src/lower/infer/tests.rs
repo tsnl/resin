@@ -39,7 +39,7 @@ fn record(ty: Ty) -> Ty {
 fn empty_arrays_need_an_injected_element_type() {
     let compile = |source: &str| {
         crate::generate(
-            &crate::ast::lower::generate(&crate::cst::Document::reparse(source.to_string(), None))
+            &crate::ast::generate(&crate::cst::Document::reparse(source.to_string(), None))
                 .unwrap(),
         )
     };

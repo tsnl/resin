@@ -1,71 +1,16 @@
 //! Editor queries over opaque HIR analysis; source scopes stay private.
 use crate::lower::semantic;
+use crate::{Completion, DefinitionKind, Documents, Hover};
 use crate::{
-    cst::{Document, contains, span},
+    cst::{contains, span},
     source::{SourceLocation, Span},
 };
-pub use semantic::{Definition, DefinitionKind};
+use semantic::Definition;
 use std::path::Path;
 
-#[derive(Debug, Clone, Default)]
-pub struct Analysis(pub(crate) semantic::SemanticData);
-
-/// Read-only syntax access for editor queries, supplied by the compiler snapshot.
-pub trait Documents {
-    fn get(&self, path: &Path) -> Option<&Document>;
-}
-
-struct Query<'a> {
-    semantics: &'a semantic::SemanticData,
-    documents: &'a dyn Documents,
-}
-
-impl Analysis {
-    pub fn definition(
-        &self,
-        documents: &dyn Documents,
-        path: &Path,
-        offset: usize,
-    ) -> Option<SourceLocation> {
-        Query {
-            semantics: &self.0,
-            documents,
-        }
-        .definition(path, offset)
-    }
-    pub fn hover(&self, documents: &dyn Documents, path: &Path, offset: usize) -> Option<Hover> {
-        Query {
-            semantics: &self.0,
-            documents,
-        }
-        .hover(path, offset)
-    }
-    pub fn completions(
-        &self,
-        documents: &dyn Documents,
-        path: &Path,
-        offset: usize,
-    ) -> Vec<Completion> {
-        Query {
-            semantics: &self.0,
-            documents,
-        }
-        .completions(path, offset)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Hover {
-    pub span: Span,
-    pub text: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct Completion {
-    pub name: String,
-    pub detail: String,
-    pub kind: DefinitionKind,
-    pub replace: Span,
+pub(crate) struct Query<'a> {
+    pub(crate) semantics: &'a semantic::SemanticData,
+    pub(crate) documents: &'a dyn Documents,
 }
 
 impl Query<'_> {

@@ -2,8 +2,9 @@
 use crate::lower::context::Context;
 use crate::lower::infer::{solver::Solver, types::Type};
 use crate::{
-    ast::{Ident, SourceLocation, Span},
+    ast::{Ident, Span},
     lower::semantic::{Definition, DefinitionKind, SemanticData},
+    source::SourceLocation,
     types::{Ty, TypeId},
 };
 use std::{

@@ -1,5 +1,5 @@
 //! C source tree → text. This module does not inspect LIR or Resin types.
-use super::language::*;
+use super::*;
 use std::fmt::Write;
 
 pub fn module(module: &Module) -> String {

@@ -1,8 +1,11 @@
 [package]
 name = "resin-runtime"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 publish = false
+
+[features]
+test-support = []
 
 [lib]
 crate-type = ["rlib", "staticlib", "cdylib"]
@@ -15,3 +18,15 @@ png = "0.17"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 glfw-sys = { version = "8", default-features = false, features = ["x11", "wayland"] }
+
+[[test]]
+name = "compute"
+required-features = ["test-support"]
+
+[[test]]
+name = "hello_triangle"
+required-features = ["test-support"]
+
+[[test]]
+name = "synchronization"
+required-features = ["test-support"]

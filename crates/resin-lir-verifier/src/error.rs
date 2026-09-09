@@ -1,64 +1,9 @@
 use std::fmt;
 
-use crate::lir::{BlockId, FunctionId, Ty, TypeId};
+use crate::lir::{BlockId, FunctionId, TypeId};
 use crate::types::{TypeError, TypeErrorKind};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VerifyError {
-    pub location: VerifyLocation,
-    pub kind: VerifyErrorKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VerifyLocation {
-    TypeDefinition {
-        definition: TypeId,
-    },
-    Function {
-        function: FunctionId,
-    },
-    BasicBlock {
-        function: FunctionId,
-        basic_block: BlockId,
-    },
-    Instruction {
-        function: FunctionId,
-        basic_block: BlockId,
-        instruction: usize,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum VerifyErrorKind {
-    InvalidVariant,
-    InvalidDropHook,
-    InvalidForeignSignature,
-    OpaqueValue { ty: Ty },
-    InvalidShader,
-    PointerArithmetic,
-    InvalidBuiltin(crate::types::check::TypeError),
-    InvalidPointerCast { from: Ty, to: Ty },
-    InvalidTypeDefinition { definition: usize },
-    IncompleteTypeDefinition { definition: TypeId },
-    NominalTypeMustBeRecord { definition: TypeId },
-    RecursiveTypeWithoutIndirection { definition: TypeId },
-    InvalidLocal { local: usize },
-    InvalidFunction { function: usize },
-    InvalidBasicBlock { basic_block: usize },
-    UnreachableBasicBlock,
-    StackUnderflow { needed: usize, available: usize },
-    InvalidImmediate,
-    TypeMismatch { expected: Ty, found: Ty },
-    ExpectedPointer { found: Ty },
-    ExpectedAggregate { found: Ty },
-    ExpectedArray { found: Ty },
-    ExpectedFunction { found: Ty },
-    ExpectedInteger { found: Ty },
-    StaticIndexOutOfBounds { index: usize, length: usize },
-    ArgumentCount { expected: usize, found: usize },
-    ConflictingBasicBlockStack { expected: Vec<Ty>, found: Vec<Ty> },
-    InvalidReturnStack { expected: Ty, found: Vec<Ty> },
-}
+use crate::{VerifyError, VerifyErrorKind, VerifyLocation};
 
 impl fmt::Display for VerifyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

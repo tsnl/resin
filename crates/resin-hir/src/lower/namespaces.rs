@@ -132,6 +132,25 @@ impl Context {
     }
 }
 
+impl ReceiverConversion {
+    pub(crate) fn between(from: &Ty, to: &Ty) -> Option<Self> {
+        if from == to {
+            Some(Self::Value)
+        } else if matches!(to, Ty::Pointer { pointee } if pointee.as_ref() == from) {
+            Some(Self::Address)
+        } else if matches!(from, Ty::Pointer { pointee } if pointee.as_ref() == to) {
+            Some(Self::Load)
+        } else if matches!(from, Ty::Arc { pointee } if to == &Ty::Pointer { pointee: pointee.clone() })
+        {
+            Some(Self::ArcAddress)
+        } else if matches!(from, Ty::Arc { pointee } if pointee.as_ref() == to) {
+            Some(Self::ArcLoad)
+        } else {
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -8,8 +8,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Make the compiler educational to read. Prefer explicit data and direct control flow;
   a reader should be able to tell what a pass consumes, produces, and computes locally.
 - Follow one direction: syntax → AST → HIR → LIR → verified LIR → C/GLSL → native tools.
-  Put each language's definitions in `language.rs`, its incoming translation in `lower`,
-  and its textual rendering in `print`. Keep module entry points short and navigable.
+  Put each phase's public language definitions and operations in `lib.rs`. Keep incoming
+  translation in private `lower` modules and textual rendering in private `print` modules.
+  A crate's complete public contract should be discoverable from its entry point.
 - HIR is a typed, desugared tree with resolved bindings, calls, and operations. Source
   scopes, method namespaces, inference variables, and recovery belong to HIR construction.
   LIR describes storage, cleanup, stack operations, and explicit control-flow blocks.
@@ -20,17 +21,22 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Each compiler phase is an unpublished workspace crate under `crates/`: `resin-cst`,
   `resin-ast`, `resin-hir`, `resin-lir`, `resin-lir-verifier`, and `resin-codegen`,
   with `resin-common` for shared vocabulary. Directory names match Cargo package names;
-  keep the driver in `resin` and the parser in `tree-sitter-resin`.
+  keep compilation orchestration in `resin-compiler`, external processes and build caches in
+  `resin-platform-toolchain`, and the parser in `tree-sitter-resin`.
   Use `publish = false` and local path dependencies. Keep dependencies acyclic and explicit;
   do not work around a boundary with public implementation modules or reverse dev-dependencies.
   Language nodes are public data. Solvers, scopes, builders, and traversal state stay private;
   expose a small set of lowering, printing, and query operations instead.
-- Keep the root manifest a virtual workspace, with all native Rust packages under
-  `crates/`, including the `resin` driver, `resin-runtime`, `resin-lsp`, and `tree-sitter-resin`.
-  Keep the complete Tree-sitter package together. Editor integrations live under
+- The root manifest is both the `resin` package and the workspace. Root `src/` contains
+  only the CLI; library crates live under `crates/`. One `resin` executable builds/runs
+  programs, formats source, and serves LSP with `--lsp DIR`. `resin-lsp` is a library,
+  so editor and compilation services ship in the same binary. Do not re-export compiler
+  implementation modules through the CLI crate.
+- Keep the complete Tree-sitter package together. Editor integrations live under
   `editors/`; the Zed WASI extension has its own Cargo workspace in `editors/zed`.
-  Each crate owns its tests; shared examples, `stdlib`, and documentation stay at
-  the repository root. Keep `resin` as the default member for root Cargo commands.
+  Crates own their isolated tests; root `tests/` exercises the complete executable and
+  cross-crate behavior. Shared examples, `stdlib`, and documentation stay at the root.
+  Keep the root package as the default member for root Cargo commands.
 - Keep `common` narrow: source locations, diagnostics, concrete types, layout, and small
   utilities used by multiple phases. Do not move a phase's state there just to break a cycle.
   C and GLSL each have a target language, lowering, and printing inside `codegen`.
@@ -75,12 +81,13 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `--` separates run arguments from compiler options; execution arguments stay out of build requests.
 - Source files contain declarations only; keep runtime state inside functions and pass it
   explicitly. `FILE:ENTRY` selects an exported entry (default `main`); imports never run code.
-- Keep `crates/resin/src/bin/resin.rs` as a wrapper around `cli::main`; argument-to-`Mode` dispatch
-  lives in `crates/resin/src/cli/`, including environment/default and build-profile resolution.
-  Construct validated requests with `compiler::Request::new`; `Session::compile` owns
-  analysis and dispatches checked IR to the backend. Every compilation generates GLSL for
+- Keep `src/main.rs` as a wrapper around `resin::main`; argument-to-`Mode` dispatch
+  lives in `src/cli/`. Capture process settings through the platform toolchain's
+  `Environment`, then choose CLI defaults and the build profile explicitly.
+  Construct validated requests with `resin_compiler::Request::new`; `Session::compile`
+  owns analysis and dispatches verified LIR to the backend. Every compilation generates GLSL for
   requested shaders, compiles SPIR-V, embeds it in C, then builds an executable. Inspect
-  cached intermediates or library snapshots; do not reintroduce artifact targets or CLI inspection modes.
+  cached intermediates or immutable `Compilation` results; do not reintroduce artifact targets or CLI inspection modes.
   Toolchain APIs consume explicit settings; execution is separate and retains the build-cache lock.
 - Without `-o`, host compilation uses the debug cache and runs the program. With `-o`,
   build and copy the optimized executable without running it.

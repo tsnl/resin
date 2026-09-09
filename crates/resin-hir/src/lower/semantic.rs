@@ -3,22 +3,14 @@
 use super::scope::DeclarationId;
 use crate::lower::context::Context;
 use crate::{
-    ast::SourceLocation,
+    source::SourceLocation,
     types::{Ty, TypeId},
 };
 use std::{collections::BTreeMap, path::PathBuf};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DefinitionKind {
-    Function,
-    Variable,
-    Parameter,
-    Type,
-    Keyword,
-    Field,
-}
+pub(crate) use crate::DefinitionKind;
 #[derive(Debug, Clone)]
-pub struct Definition {
+pub(crate) struct Definition {
     pub name: String,
     pub location: SourceLocation,
     pub kind: DefinitionKind,

@@ -84,9 +84,9 @@ C ABI. Vulkan buffer device addresses implement the current device address profi
 ## Compiler architecture
 
 The compiler is a workspace of unpublished phase crates. The data flow is source text →
-CST → AST → HIR → LIR → verified LIR → C/GLSL. Each language has a `language.rs`,
-incoming `lower` pass, and `print` module. The separate `lir-verifier` crate certifies
-LIR before target lowering. See [compiler architecture](architecture.md) for the
+CST → AST → HIR → LIR → verified LIR → C/GLSL. Each phase declares its public
+language and operations in `lib.rs`, with private incoming `lower` and `print` modules.
+The separate `resin-lir-verifier` crate certifies LIR before target lowering. See [compiler architecture](architecture.md) for the
 crate graph, pass contracts, public entry points, and a reading path.
 
 HIR is a resolved, typed tree. Its construction declares names, checks expressions,
@@ -106,7 +106,10 @@ values remain usable after reads; this is not source-level move checking.
 Shared concrete types and layout rules live in `resin-common`. The source checker and
 LIR verifier reuse these rules without sharing source scopes or inference state. Target
 lowering chooses the ABI and device representation; target printers consume only their
-own C/GLSL source trees. The driver invokes native tools after these pure passes finish.
+own C/GLSL source trees. `resin-compiler` sequences these passes and retains immutable `Compilation` results.
+`resin-platform-toolchain` owns native tool resolution, process invocation, and artifact
+caches. The root `resin` package provides one CLI for compilation, execution, formatting,
+and the language server.
 
 The Rust runtime methods are an unsafe convenience interface with the same lifetime and
 synchronization contracts as the C ABI. Command recordings keep pending image layouts separate

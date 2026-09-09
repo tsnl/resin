@@ -13,19 +13,21 @@ impl zed::Extension for Resin {
         worktree: &zed::Worktree,
     ) -> zed::Result<zed::Command> {
         let settings = zed::settings::LspSettings::for_worktree(id.as_ref(), worktree)?;
-        let mut args = Vec::new();
+        let mut args = vec!["--lsp".into(), worktree.root_path()];
         let mut env = worktree
             .shell_env()
             .into_iter()
             .collect::<std::collections::BTreeMap<_, _>>();
         let configured = settings.binary.and_then(|binary| {
-            args = binary.arguments.unwrap_or_default();
+            if let Some(arguments) = binary.arguments {
+                args = arguments;
+            }
             if let Some(overrides) = binary.env {
                 env.extend(overrides);
             }
             binary.path
         });
-        let command = configured.or_else(|| worktree.which("resin-lsp")).ok_or("Install resin-lsp with nix-shell --run 'cargo install --path crates/resin-lsp --locked', or configure lsp.resin-lsp.binary.path in Zed.")?;
+        let command = configured.or_else(|| worktree.which("resin")).ok_or("Install resin with nix-shell --run 'cargo install --path . --locked', or configure lsp.resin-lsp.binary.path in Zed.")?;
         Ok(zed::Command {
             command,
             args,

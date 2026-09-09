@@ -1,14 +1,12 @@
 use crate::{
     text::Text,
-    worker::{self, Change, Snapshot, Update},
+    worker::{self, AnalysisUpdate, Change, Update},
 };
 use crossbeam_channel::{Receiver, Sender, select};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::{self as lsp, Position, Uri};
-use resin::{
-    analysis::{DefinitionKind, normalize_path},
-    ast::SourceLocation,
-};
+use resin_common::source::SourceLocation;
+use resin_compiler::{DefinitionKind, normalize_path};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
@@ -28,7 +26,7 @@ struct Options {
     stdlib_path: Option<PathBuf>,
 }
 
-pub fn run(stdlib: Option<PathBuf>, default_stdlib: PathBuf) -> Result<i32> {
+pub(crate) fn run(default_stdlib: PathBuf) -> Result<i32> {
     let (connection, io) = Connection::stdio();
     let (id, params) = connection.initialize_start()?;
     let params: lsp::InitializeParams = serde_json::from_value(params)?;
@@ -39,7 +37,7 @@ pub fn run(stdlib: Option<PathBuf>, default_stdlib: PathBuf) -> Result<i32> {
         .map(serde_json::from_value)
         .transpose()?
         .unwrap_or_default();
-    let stdlib = stdlib.or(options.stdlib_path).unwrap_or(default_stdlib);
+    let stdlib = options.stdlib_path.unwrap_or(default_stdlib);
     let capabilities = lsp::ServerCapabilities {
         position_encoding: Some(lsp::PositionEncodingKind::UTF16),
         text_document_sync: Some(
@@ -125,7 +123,7 @@ struct State {
     updates: Sender<Update>,
     revision: Arc<AtomicU64>,
     documents: BTreeMap<String, OpenDocument>,
-    snapshot: Option<Snapshot>,
+    snapshot: Option<AnalysisUpdate>,
     texts: BTreeMap<PathBuf, Text>,
     published: BTreeSet<String>,
     pending: HashMap<RequestId, Query>,
@@ -133,7 +131,7 @@ struct State {
 }
 
 impl State {
-    fn events(&mut self, snapshots: &Receiver<Snapshot>) -> Result<i32> {
+    fn events(&mut self, snapshots: &Receiver<AnalysisUpdate>) -> Result<i32> {
         loop {
             select! {
                 recv(self.connection.receiver) -> message => {
@@ -209,7 +207,7 @@ impl State {
             };
             // Use the latest accepted buffer even while semantic analysis is busy.
             // Resin has one canonical style, independent of editor indent settings.
-            let result = resin::formatting::format_source(&document.source)
+            let result = resin_cst::format_source(&document.source)
                 .map(|formatted| formatting_edits(&document.source, &formatted));
             return self.send(Response::new_ok(request.id, result));
         }
@@ -459,7 +457,7 @@ impl State {
         let mut diagnostics = BTreeMap::<String, Vec<lsp::Diagnostic>>::new();
         if let Some(snapshot) = &self.snapshot {
             for analysis in snapshot.entries.values() {
-                for diagnostic in &analysis.diagnostics {
+                for diagnostic in analysis.diagnostics() {
                     let Some(location) = self.location(&diagnostic.location) else {
                         continue;
                     };
@@ -547,7 +545,7 @@ fn formatting_edits(source: &str, formatted: &str) -> Vec<lsp::TextEdit> {
         new_end += 1;
     }
     vec![lsp::TextEdit {
-        range: Text::new(source).range(resin::ast::Span { start, end }),
+        range: Text::new(source).range(resin_common::source::Span { start, end }),
         new_text: formatted[start..new_end].into(),
     }]
 }

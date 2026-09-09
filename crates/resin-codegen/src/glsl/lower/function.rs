@@ -1,4 +1,4 @@
-use crate::glsl::language::{Block, Edge, EdgeValue, Exit, Function as TargetFunction};
+use crate::glsl::{Block, Edge, EdgeValue, Exit, Function as TargetFunction};
 use crate::lir_verifier::FunctionTypes;
 use std::fmt::Write;
 

@@ -7,8 +7,7 @@ use crate::types::Ty;
 
 fn check(source: &str, generator: &mut Generator) -> CheckedFile {
     let file =
-        crate::ast::lower::generate(&crate::cst::Document::reparse(source.to_string(), None))
-            .unwrap();
+        crate::ast::generate(&crate::cst::Document::reparse(source.to_string(), None)).unwrap();
     let mut scopes = Scopes::new();
     assert!(
         scopes

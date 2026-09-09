@@ -20,18 +20,7 @@ mod scope;
 mod sums;
 mod terms;
 
-/// Lower a self-contained HIR module. Verification is a separate pass.
-#[derive(Debug)]
-pub struct Error {
-    pub function: FunctionId,
-    pub error: GenerateError,
-}
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.error.fmt(f)
-    }
-}
-impl std::error::Error for Error {}
+use crate::Error;
 
 pub fn generate(source: &hir::Module) -> Result<Module, Error> {
     analyze(source).map_err(|mut errors| errors.remove(0))

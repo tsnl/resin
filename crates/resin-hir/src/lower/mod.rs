@@ -25,7 +25,7 @@ pub(crate) mod scope;
 pub(crate) mod semantic;
 mod typed;
 pub use crate::diagnostic::{GenerateError, GenerateErrorKind};
-pub use modules::{Compilation, analyze_program, generate_program};
+pub use modules::{analyze_program, generate_program};
 
 /// Check a standalone source file. Imports require `generate_program`.
 pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {

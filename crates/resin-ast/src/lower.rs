@@ -1,16 +1,10 @@
 //! Tree-sitter parse tree → AST generation.
 
-use std::{fmt, sync::Arc};
+use std::sync::Arc;
 
 use crate::cst::Node;
 
 use super::*;
-
-/// An AST and diagnostics recovered from one concrete syntax document.
-pub struct Parsed {
-    pub file: SourceFile,
-    pub errors: Vec<(Span, String)>,
-}
 
 pub fn document(source: &crate::cst::Document) -> Parsed {
     let errors = AstGen::new(source.source())
@@ -36,30 +30,6 @@ pub(crate) struct AstGen<'a> {
     src: &'a str,
     source_len: usize,
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AstError {
-    pub span: Span,
-    pub kind: AstErrorKind,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AstErrorKind {
-    Unexpected { found: Arc<str> },
-    Missing { expected: Arc<str> },
-}
-
-impl fmt::Display for AstError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "parse error at {}..{}: {:?}",
-            self.span.start, self.span.end, self.kind
-        )
-    }
-}
-
-impl std::error::Error for AstError {}
 
 impl<'a> AstGen<'a> {
     pub fn new(src: &'a str) -> Self {

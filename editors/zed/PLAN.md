@@ -1,5 +1,9 @@
 # Resin editor support plan
 
+This is the historical implementation plan. The current layout uses the root
+`resin` executable with `--lsp <directory>`, the `resin-lsp` protocol library,
+and the `resin-compiler` library. See [current setup](README.md).
+
 Scope: a Zed extension plus a reusable language server providing diagnostics,
 hover, go-to-definition, and basic completion. Development targets 64-bit Linux.
 
@@ -51,7 +55,7 @@ crates/resin-lsp/
   Cargo.toml
   src/
   tests/
-crates/resin/src/analysis.rs
+crates/resin-compiler/src/lib.rs
 crates/tree-sitter-resin/          # grammar tracked directly in this repository
 ```
 

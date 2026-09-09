@@ -1,7 +1,7 @@
 use crate::lower::namespaces::{SourceModuleId, SourceOrigin};
 use crate::{
-    ast::{SourceLocation, SourceNote},
     lower::semantic::SemanticData,
+    source::{SourceLocation, SourceNote},
 };
 use std::{cell::RefCell, rc::Rc};
 use std::{collections::BTreeMap, sync::Arc};
@@ -18,11 +18,7 @@ struct Export {
 
 type Exports = BTreeMap<Arc<str>, Export>;
 
-pub struct Compilation {
-    pub module: Option<crate::Module>,
-    pub diagnostics: Vec<SourceError>,
-    pub semantics: crate::analysis::Analysis,
-}
+use crate::CheckedProgram;
 
 pub fn generate_program(program: &Program) -> Result<crate::Module, SourceError> {
     let mut compilation = analyze_program(program);
@@ -34,13 +30,33 @@ pub fn generate_program(program: &Program) -> Result<crate::Module, SourceError>
 }
 
 /// Check modules in import order while retaining independent editor facts after errors.
-pub fn analyze_program(program: &Program) -> Compilation {
+pub fn analyze_program(program: &Program) -> CheckedProgram {
+    let diagnostics = invalid_dependencies(program);
+    if !diagnostics.is_empty() {
+        return CheckedProgram {
+            module: None,
+            diagnostics,
+            semantics: Default::default(),
+        };
+    }
     let mut builder = ProgramBuilder::new(program);
     for index in 0..program.modules.len() {
         builder.module(index);
     }
     builder.entries();
     builder.finish()
+}
+
+fn invalid_dependencies(program: &Program) -> Vec<SourceError> {
+    let mut errors = Vec::new();
+    for (index, source) in program.modules.iter().enumerate() {
+        for &(span, dependency) in &source.imports {
+            if dependency >= index {
+                errors.push(source.error(span, "import dependency must precede its consumer"));
+            }
+        }
+    }
+    errors
 }
 
 struct ProgramBuilder<'a> {
@@ -169,7 +185,7 @@ impl<'a> ProgramBuilder<'a> {
         }
     }
 
-    fn finish(mut self) -> Compilation {
+    fn finish(mut self) -> CheckedProgram {
         let module = if self.diagnostics.is_empty() {
             self.generator
                 .finish()
@@ -180,10 +196,10 @@ impl<'a> ProgramBuilder<'a> {
         } else {
             None
         };
-        Compilation {
+        CheckedProgram {
             module,
             diagnostics: self.diagnostics,
-            semantics: crate::analysis::Analysis(self.data.borrow().clone()),
+            semantics: crate::Analysis(self.data.borrow().clone()),
         }
     }
 }

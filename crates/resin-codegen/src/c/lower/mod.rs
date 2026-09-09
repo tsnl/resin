@@ -1,7 +1,7 @@
 //! Verified LIR → C source tree. Runtime and ABI choices are made here.
-use super::language;
+use super as language;
 use crate::Error;
-use crate::lir::{self, Module, Ty};
+use crate::lir::{Module, Ty};
 use crate::lir_verifier::Verified;
 use types::Types;
 
@@ -20,11 +20,7 @@ struct Slot {
     live: Option<String>,
 }
 
-pub struct Shader {
-    pub function: lir::FunctionId,
-    pub stage: crate::types::shader::Stage,
-    pub words: Vec<u32>,
-}
+use crate::Shader;
 
 pub fn generate(
     checked: Verified<'_>,

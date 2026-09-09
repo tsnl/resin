@@ -1,4 +1,4 @@
-use crate::c::language::{Block, Body, Edge, EdgeValue, Exit, Function};
+use crate::c::{Block, Body, Edge, EdgeValue, Exit, Function};
 use crate::lir_verifier::FunctionTypes;
 use std::fmt::Write;
 

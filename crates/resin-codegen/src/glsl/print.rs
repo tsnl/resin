@@ -1,5 +1,5 @@
 //! Shader source tree → GLSL text; no upstream compiler state is needed.
-use super::language::*;
+use super::*;
 use std::fmt::Write;
 
 pub fn module(module: &Module) -> String {

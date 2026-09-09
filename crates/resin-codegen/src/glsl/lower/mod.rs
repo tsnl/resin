@@ -19,7 +19,7 @@ pub fn generate(
     checked: lir_verifier::Verified<'_>,
     entry: lir::FunctionId,
     stage: Stage,
-) -> Result<super::language::Module, Error> {
+) -> Result<super::Module, Error> {
     let module = checked.module();
     let analysis = checked.analysis();
     let reachable = reachable::functions(module, entry.index())?;
@@ -39,7 +39,7 @@ pub fn generate(
             index,
         )?);
     }
-    Ok(super::language::Module {
+    Ok(super::Module {
         extensions: types.extensions().into(),
         declarations: types.declarations(),
         globals: "bool r_failed = false;\n".into(),

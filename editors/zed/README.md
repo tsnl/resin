@@ -1,7 +1,7 @@
 # Resin for Zed
 
 Language support for `.resin` files: highlighting, comments, brackets,
-indentation, outlines, and function/comment text objects. The native `resin-lsp`
+indentation, outlines, and function/comment text objects. The native `resin --lsp` mode
 adds diagnostics, hover, go-to-definition, basic completion, and formatting.
 
 Both this extension and the grammar are ordinary folders in the
@@ -13,7 +13,7 @@ submodule checkout is required.
 From the Resin repository root:
 
 ```sh
-nix-shell --run 'cargo install --path crates/resin-lsp --locked'
+nix-shell --run 'cargo install --path . --locked'
 nix-shell --run 'rustup target add wasm32-wasip2'
 ```
 
@@ -29,13 +29,15 @@ Launch Zed from `nix-shell` so it inherits the native library paths, then run
 On systems whose executable is named `zeditor`, use `nix-shell --run 'zeditor .'`.
 Zed compiles the extension and downloads the WASI SDK to build the grammar.
 Rebuild it from Zed's Extensions view after changing the adapter or queries.
-Restarting `resin-lsp` alone does not reload highlighting queries or the pinned
+Restarting `resin --lsp` alone does not reload highlighting queries or the pinned
 Tree-sitter grammar. If `struct`, `match`, or `impl` still look like ordinary
 identifiers, rebuild/reinstall the dev extension from this checkout's `editors/zed/`.
 See [Zed's extension development guide](https://zed.dev/docs/extensions/developing-extensions).
 
-The adapter uses a configured binary or finds `resin-lsp` on the worktree's PATH.
-For a local debug build, run `nix-shell --run 'cargo build -p resin-lsp'` and set
+The adapter uses a configured binary or finds `resin` on the worktree's PATH,
+then passes `--lsp` and the worktree root. A configured `binary.arguments` replaces
+that argument list; include `--lsp` and the project directory when overriding it.
+For a local debug build, run `nix-shell --run 'cargo build -p resin'` and set
 an absolute path in Zed settings:
 
 ```json
@@ -43,8 +45,7 @@ an absolute path in Zed settings:
   "lsp": {
     "resin-lsp": {
       "binary": {
-        "path": "/absolute/path/to/resin/target/debug/resin-lsp",
-        "arguments": ["--stdio"]
+        "path": "/absolute/path/to/resin/target/debug/resin"
       },
       "initialization_options": {
         "stdlibPath": "/absolute/path/to/resin/stdlib"
@@ -65,7 +66,7 @@ For syntax support alone, Zed's language setting
 
 ## Formatting
 
-After rebuilding/reinstalling `resin-lsp` and restarting the language server, use
+After rebuilding/reinstalling `resin` and restarting the language server, use
 **Format Document**. To use the language server for formatting and enable it on
 save, add these [language settings](https://zed.dev/docs/configuring-languages):
 
@@ -136,7 +137,7 @@ including hover/completion for omitted unit results. This revision was validated
 through automated tests and WASI builds; the editor smoke test above used `79e4a26`.
 
 The grammar also supports explicit `_` type-inference holes, including nested
-local and return annotations. Rebuild `resin-lsp` and reinstall the dev extension
+local and return annotations. Rebuild `resin` and reinstall the dev extension
 after updating. Parser, query, and stdio regressions cover the new syntax and
 inferred hover types without launching an editor.
 

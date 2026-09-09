@@ -1,38 +1,27 @@
 //! Source text → concrete syntax, with optional incremental reparsing.
 use super::Document;
-use crate::source::Span;
 use tree_sitter::{InputEdit, Node, Point, Tree};
-pub fn span(node: Node<'_>) -> Span {
-    Span {
-        start: node.start_byte(),
-        end: node.end_byte(),
-    }
+pub(super) fn reparse(text: String, previous: Option<&Document>) -> Document {
+    let previous_tree = previous.map(|old| edited_tree(old, &text));
+    let tree = crate::parser()
+        .parse(&text, previous_tree.as_ref())
+        .expect("parser language is set");
+    Document { text, tree }
 }
-pub fn contains(span: Span, offset: usize) -> bool {
-    span.start <= offset && offset <= span.end
-}
-impl Document {
-    pub fn reparse(text: String, previous: Option<&Self>) -> Self {
-        let previous_tree = previous.map(|old| edited_tree(old, &text));
-        let tree = crate::parser()
-            .parse(&text, previous_tree.as_ref())
-            .expect("parser language is set");
-        Self { text, tree }
+
+pub(super) fn recovery(document: &Document) -> Option<Document> {
+    if !document.tree.root_node().has_error() {
+        return None;
     }
-    pub fn recovery(&self) -> Option<Self> {
-        if !self.tree.root_node().has_error() {
-            return None;
-        }
-        let mut closers = vec![];
-        unmatched(self.tree.root_node(), &mut closers);
-        if closers.is_empty() || closers.len() > 64 {
-            return None;
-        }
-        let mut text = self.text.clone();
-        text.extend(closers.into_iter().rev());
-        text.push(';');
-        Some(Self::reparse(text, None))
+    let mut closers = vec![];
+    unmatched(document.tree.root_node(), &mut closers);
+    if closers.is_empty() || closers.len() > 64 {
+        return None;
     }
+    let mut text = document.text.clone();
+    text.extend(closers.into_iter().rev());
+    text.push(';');
+    Some(reparse(text, None))
 }
 
 fn edited_tree(old: &Document, text: &str) -> Tree {

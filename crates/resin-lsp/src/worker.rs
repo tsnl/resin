@@ -1,5 +1,6 @@
 use crossbeam_channel::{Receiver, Sender};
-use resin::{analysis::Analysis, compiler::Session};
+use resin_compiler::Compilation;
+use resin_compiler::Session;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
@@ -22,15 +23,15 @@ pub struct Update {
     pub change: Change,
 }
 
-pub struct Snapshot {
+pub struct AnalysisUpdate {
     pub revision: u64,
-    pub entries: BTreeMap<PathBuf, Arc<Analysis>>,
+    pub entries: BTreeMap<PathBuf, Arc<Compilation>>,
 }
 
 pub fn spawn(
     stdlib: PathBuf,
     updates: Receiver<Update>,
-    results: Sender<Snapshot>,
+    results: Sender<AnalysisUpdate>,
     current: Arc<AtomicU64>,
     stopping: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
@@ -74,7 +75,7 @@ pub fn spawn(
                 break;
             }
             if current.load(Ordering::Acquire) == revision
-                && results.send(Snapshot { revision, entries }).is_err()
+                && results.send(AnalysisUpdate { revision, entries }).is_err()
             {
                 break;
             }

@@ -1,7 +1,7 @@
 # Resin language server
 
-`resin-lsp` provides diagnostics, hover, go-to-definition, basic completion, and formatting
-over stdio. It uses the Resin compiler's persistent `compiler::Session`.
+The `resin --lsp <directory>` mode provides diagnostics, hover, go-to-definition, basic completion, and formatting
+over stdio. It uses the persistent `resin_compiler::Session`.
 Semantic editor requests run parsing, resolution, typing, and IR verification; they do not
 compile C/GLSL, initialize a GPU, or run the program. Analysis accepts library
 modules without an exported entry function; runtime bindings belong inside
@@ -20,23 +20,24 @@ Match-arm bindings are scoped to their arm and expose the selected payload's fie
 From the Resin repository root:
 
 ```sh
-nix-shell --run 'cargo build -p resin-lsp'
-nix-shell --run 'cargo install --path crates/resin-lsp --locked'
+nix-shell --run 'cargo build -p resin'
+nix-shell --run 'cargo install --path . --locked'
 ```
 
-Configure your editor to launch `resin-lsp` (or `resin-lsp --stdio`). The server
+Configure your editor to launch `resin --lsp /path/to/project`. The root `resin`
+package supplies the sole executable; `resin-lsp` is its protocol library. The server
 uses stdout exclusively for the protocol and stderr for logs. See
 [the Zed extension](../../editors/zed/README.md) for a complete editor setup.
 
 Standard-library lookup, in descending precedence:
 
-1. `resin-lsp --stdlib /absolute/path/to/stdlib`
-2. Initialization options: `{ "stdlibPath": "/absolute/path/to/stdlib" }`
-3. `RESIN_STDLIB`
-4. The repository's `stdlib/` path recorded when the Resin library was built.
+1. Initialization options: `{ "stdlibPath": "/absolute/path/to/stdlib" }`
+2. `RESIN_STDLIB`
+3. The repository's `stdlib/` path recorded when the Resin library was built.
 
-Relative overrides resolve against the server's working directory. Prefer an
-absolute path, especially when using the server in another checkout. Keep the
+Relative initialization overrides resolve against the selected project directory.
+`RESIN_STDLIB` resolves against the invoking process's working directory. An
+absolute override is useful when using the server in another checkout. Keep the
 Nix shell environment when launching Zed/the server; it supplies native libraries.
 
 ## Formatting
@@ -48,7 +49,7 @@ applies the returned text edit through its normal undo/save workflow. The server
 does not write the file. Rebuild/reinstall the server and restart it in your editor
 to pick up formatting support; see the [Zed setup](../../editors/zed/README.md#formatting).
 
-Formatting uses `resin::formatting::format_source` on the latest accepted open
+Formatting uses `resin_cst::format_source` on the latest accepted open
 buffer, independently of background semantic analysis. Unresolved names, imports,
 and type errors do not prevent formatting. Syntax errors return no edits, as does
 formatting a document that is not open. An already formatted buffer returns an
@@ -91,12 +92,12 @@ implemented.
 ## Stateful compiler core
 
 The compiler owns source state, incremental Tree-sitter parses, cached ASTs,
-import dependencies, and immutable checked snapshots. The CLI and the language
+import dependencies, and immutable `Compilation` results. The CLI and the language
 server both use this API. The server adds URI/version bookkeeping, UTF-16 position
 conversion, client file-watch notifications, and a background worker.
 
 ```rust
-use resin::compiler::Session;
+use resin_compiler::Session;
 use std::path::Path;
 
 fn main() -> std::io::Result<()> {
@@ -108,15 +109,15 @@ fn main() -> std::io::Result<()> {
 
     compiler.set_overlay(entry, "def main () -> int = { var value = missing; value };".into())?;
     let after = compiler.analyze(entry)?;
-    assert!(!after.diagnostics.is_empty());
-    assert!(before.module().is_ok()); // Retained readers keep their old snapshot.
+    assert!(!after.diagnostics().is_empty());
+    assert!(before.module().is_ok()); // Retained readers keep their old compilation.
     Ok(())
 }
 ```
 
 Hosts call `set_overlay`/`remove_overlay` for buffers and `file_changed` after disk
 changes, creations, or deletions. An open overlay takes precedence over disk.
-`analyze` reuses an unchanged entry's snapshot; edits invalidate entries that
+`analyze` reuses an unchanged entry's compilation; edits invalidate entries that
 transitively depend on the changed file. Missing imports also register dependencies
 so creating a file can recover an error. `set_stdlib` invalidates checked entries.
 `retain_entries` accepts canonical entry paths to release results no longer needed.
@@ -145,7 +146,7 @@ runs, and exits once; a watch command can host the same session later.
 - Completion includes visible names, keywords, builtin types, and intrinsics,
   with identifier replacement ranges. Typing `.` offers fields from the receiver's
   record type, including nominal records, pointers, and nested access. Field
-  suggestions use the cached recovered AST and semantic snapshot without inserting
+  suggestions use the cached recovered AST and semantic analysis without inserting
   synthetic identifiers. Unrecoverable declarations, unresolved imports, and
   unknown receiver types can still prevent suggestions. Automatic imports are
   not implemented.
@@ -160,7 +161,8 @@ runs, and exits once; a watch command can host the same session later.
 
 ```sh
 nix-shell --run 'cargo test -p resin-lsp'
-nix-shell --run 'cargo test -p resin --lib --test analysis --test zed_queries'
+nix-shell --run 'cargo test -p resin-compiler'
+nix-shell --run 'cargo test -p resin --test lsp --test analysis --test zed_queries'
 nix-shell --run 'cargo test -p resin --test formatting'
 ```
 
