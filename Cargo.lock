@@ -649,6 +649,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "resin-common"
+version = "0.1.0"
+
+[[package]]
 name = "resin-compiler"
 version = "0.1.0"
 dependencies = [
@@ -674,6 +678,7 @@ name = "resin-hir"
 version = "0.1.0"
 dependencies = [
  "resin-ast",
+ "resin-common",
  "resin-cst",
  "resin-source",
  "resin-types",
@@ -684,6 +689,7 @@ dependencies = [
 name = "resin-lir"
 version = "0.1.0"
 dependencies = [
+ "resin-common",
  "resin-hir",
  "resin-source",
  "resin-types",
@@ -734,6 +740,9 @@ dependencies = [
 [[package]]
 name = "resin-types"
 version = "0.1.0"
+dependencies = [
+ "resin-common",
+]
 
 [[package]]
 name = "rustix"

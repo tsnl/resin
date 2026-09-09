@@ -50,6 +50,7 @@ pass consumes. Source and type vocabulary are independent foundations.
 
 | Crate | Direct phase dependencies | Public purpose |
 | --- | --- | --- |
+| `resin-common` | none | Shared `define_id!` index-type macro |
 | `resin-source` | none | Immutable sources, locations, import loading and standard-library resolution |
 | `resin-types` | none | Concrete types, values, conversions, layout and shader interfaces |
 | `resin-cst` | generated `tree-sitter-resin` grammar | Syntax documents, reparsing, queries, formatting |
@@ -69,7 +70,9 @@ LIR certificate; it cannot reach the checker's private state.
 All workspace packages have `publish = false`. Path dependencies are declared
 centrally in the workspace manifest. Source diagnostics belong to `resin-source`;
 phase-specific errors belong to the phase that rejects the input. Temporary directories
-use `tempfile`. There is no catch-all common crate.
+use `tempfile`. `resin-common` contains only the shared `define_id!` macro, imported
+directly by types, HIR, and LIR; it owns no domain types or diagnostics.
+
 ## A consistent reading path
 
 For each phase, start with `lib.rs`: language data appears beside the operations
@@ -77,7 +80,10 @@ that accept the preceding language and produce this one. Follow an operation int
 private `lower` or `print` only when its implementation matters. Codegen's entry
 point exposes one project-generation operation. Its C and GLSL trees are private to
 the target modules. Source and type entry points contain their definitions directly;
-language-specific builders and solver state stay private.
+language-specific builders and solver state stay private. In `resin-types`, the
+public type model and operations remain in `lib.rs`; private `types.rs` implements
+representation, table, and layout algorithms, while private `typer.rs` implements
+concrete checks and conversions.
 
 Keep related state and operations together. The compiler's `lib.rs` contains
 `Compiler` with its private caches, `Compilation` with its retained products, and

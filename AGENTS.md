@@ -17,7 +17,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Keep LIR verification in private `crates/resin-lir/src/verify/` modules, with the
   verification API beside the language in `lib.rs`; constructing LIR does not verify it.
 - Keep resolved types and layout rules in `crates/resin-types`; they must not depend on a
-  frontend, backend, or verifier. The compiler driver sequences passes and the toolchain
+  frontend, backend, or verifier. Keep the public contract in `lib.rs`, with substantial
+  representation algorithms in private `types.rs` and concrete checking/conversion rules
+  in private `typer.rs`. The compiler driver sequences passes and the toolchain
   owns external processes. Printers consume their own language, without reaching upstream.
 - Each compiler phase is an unpublished workspace crate under `crates/`: `resin-cst`,
   `resin-ast`, `resin-hir`, `resin-lir`, and `resin-codegen`,
@@ -42,8 +44,10 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Keep `resin-source` and `resin-types` independent of compiler phases and of each other.
   Define phase-specific errors in their producing crate; source locations and rendered
   source diagnostics are shared transport, not a common compiler-error enum.
-  Use `tempfile` for temporary files instead of a shared utility crate. Do not recreate
-  a `common` grab-bag to break a dependency cycle.
+  Keep `resin-common` minimal: it owns the shared `define_id!` macro, imported directly
+  by consumers instead of re-exported through `resin-types`. Use `tempfile` for temporary
+  files. Do not move domain types, source diagnostics, or phase state into `resin-common`
+  to break a dependency cycle.
   C and GLSL each have a private target language, lowering, and printing inside `codegen`.
 - Use canonical crate and module names; do not rename dependencies or language types
   for brevity. Prefer a qualified name when two phases use the same type name.

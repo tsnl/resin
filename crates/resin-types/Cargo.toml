@@ -3,3 +3,6 @@ name = "resin-types"
 version.workspace = true
 edition = "2024"
 publish = false
+
+[dependencies]
+resin-common = { workspace = true }

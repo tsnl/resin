@@ -11,6 +11,7 @@
 //! use resin_lir::verify::instructions;
 //! ```
 
+use resin_common::define_id;
 use resin_source::prelude::*;
 use resin_types::prelude::*;
 mod lower;

@@ -219,8 +219,10 @@ private fields. Native builds borrow an immutable `Verified` view. Consuming
 `into_module` returns ordinary LIR and discards the certificate; edits require
 verification again.
 
-The [concrete type rules](crates/resin-types/src/lib.rs) and
-[layout checks](crates/resin-types/src/definitions.rs) live in `resin-types`.
+The [public type model and operations](crates/resin-types/src/lib.rs) live in
+`resin-types`. Private [types.rs](crates/resin-types/src/types.rs) implements
+representation and layout; [typer.rs](crates/resin-types/src/typer.rs) implements
+concrete checking and conversions.
 They depend on no compiler phase. HIR adds inference and method namespaces privately;
 the verifier applies concrete rules to instructions independently of source checking.
 

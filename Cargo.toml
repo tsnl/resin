@@ -45,6 +45,7 @@ opt-level = 1
 version = "0.1.0"
 
 [workspace.dependencies]
+resin-common = { path = "crates/resin-common" }
 resin-types = { path = "crates/resin-types" }
 tempfile = "3"
 sexpfmt = "2"

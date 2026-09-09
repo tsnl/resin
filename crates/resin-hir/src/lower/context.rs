@@ -1,5 +1,6 @@
 //! Source type namespaces, nominal origins, and builtin method signatures.
 use crate::ReceiverConversion;
+use resin_common::define_id;
 use resin_source::prelude::*;
 use resin_types::prelude::*;
 use std::{
