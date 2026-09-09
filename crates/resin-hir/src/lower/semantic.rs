@@ -2,10 +2,8 @@
 
 use super::scope::DeclarationId;
 use crate::lower::context::Context;
-use crate::{
-    source::SourceLocation,
-    types::{Ty, TypeId},
-};
+use resin_common::source::SourceLocation;
+use resin_common::types::{Ty, TypeId};
 use std::{collections::BTreeMap, path::PathBuf};
 
 pub(crate) use crate::DefinitionKind;
@@ -85,5 +83,5 @@ impl SemanticData {
     }
 }
 pub(crate) fn format_type(ty: &Ty, typer: &Context) -> String {
-    crate::types::print::format_type(ty, typer.definitions())
+    resin_common::types::print::format_type(ty, typer.definitions())
 }

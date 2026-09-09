@@ -1,11 +1,9 @@
-use crate::glsl::{Block, Edge, EdgeValue, Exit, Function as TargetFunction};
-use crate::lir_verifier::FunctionTypes;
+use crate::{GlslBlock, GlslEdge, GlslEdgeValue, GlslExit, GlslFunction};
+use resin_lir_verifier::FunctionTypes;
 use std::fmt::Write;
 
-use crate::{
-    Error,
-    lir::{Case, Function, Instr, Terminator, Ty},
-};
+use crate::Error;
+use resin_lir::{Case, Function, Instr, Terminator, Ty};
 
 use super::{
     Slot,
@@ -20,7 +18,7 @@ pub(super) fn lower(
     flow: &FunctionTypes,
     name: &str,
     index: usize,
-) -> Result<TargetFunction, Error> {
+) -> Result<GlslFunction, Error> {
     let inputs = symbols::inputs(types, function, flow)?;
     let signature = format!(
         "{} {name}({} arg)",
@@ -34,7 +32,7 @@ pub(super) fn lower(
         .enumerate()
         .map(|(b, _)| lower_block(types, function, flow, index, b, &inputs[b]))
         .collect::<Result<_, _>>()?;
-    Ok(TargetFunction {
+    Ok(GlslFunction {
         signature,
         locals,
         entry: function.entry.index(),
@@ -80,7 +78,7 @@ fn lower_block(
     index: usize,
     b: usize,
     inputs: &[Slot],
-) -> Result<Block, Error> {
+) -> Result<GlslBlock, Error> {
     let block = &function.blocks[b];
     let mut out = String::new();
     let mut stack = inputs.to_vec();
@@ -128,30 +126,34 @@ fn lower_block(
     }
 
     let exit = if diverged {
-        Exit::Unreachable
+        GlslExit::Unreachable
     } else {
         lower_exit(types, &block.terminator, &mut stack)
             .map_err(|e| Error::at(types.module, index, Some((b, block.instrs.len())), e))?
     };
-    Ok(Block {
+    Ok(GlslBlock {
         label: b,
         statements: out,
         exit,
     })
 }
 
-fn lower_exit(types: &Types<'_>, term: &Terminator, stack: &mut Vec<Slot>) -> Result<Exit, Error> {
+fn lower_exit(
+    types: &Types<'_>,
+    term: &Terminator,
+    stack: &mut Vec<Slot>,
+) -> Result<GlslExit, Error> {
     Ok(match term {
         Terminator::Return => {
             if stack[0].local {
                 return Err(Error("shader cannot return a local address".into()));
             }
-            Exit::Return(stack[0].expr.clone())
+            GlslExit::Return(stack[0].expr.clone())
         }
-        Terminator::Break { target } => Exit::Jump(edge(types, target.index(), stack)),
+        Terminator::Break { target } => GlslExit::Jump(edge(types, target.index(), stack)),
         Terminator::Branch { then, els } => {
             let condition = stack.pop().unwrap();
-            Exit::Branch {
+            GlslExit::Branch {
                 condition: types.unwrap(&condition.ty, condition.expr),
                 then: edge(types, then.index(), stack),
                 els: edge(types, els.index(), stack),
@@ -160,18 +162,18 @@ fn lower_exit(types: &Types<'_>, term: &Terminator, stack: &mut Vec<Slot>) -> Re
     })
 }
 
-fn edge(types: &Types<'_>, target: usize, stack: &[Slot]) -> Edge {
+fn edge(types: &Types<'_>, target: usize, stack: &[Slot]) -> GlslEdge {
     let values = stack
         .iter()
         .enumerate()
         .filter(|(_, slot)| !slot.symbolic())
-        .map(|(slot, value)| EdgeValue {
+        .map(|(slot, value)| GlslEdgeValue {
             slot,
             ty: types.name(&value.ty),
             value: value.expr.clone(),
         })
         .collect();
-    Edge { target, values }
+    GlslEdge { target, values }
 }
 
 fn check_instruction(

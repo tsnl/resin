@@ -1,7 +1,6 @@
 mod support;
 
-use resin_codegen as codegen;
-use resin_lir::{self as lir, Ty, TypeDef, TypeId, TypeTable};
+use resin_lir::{Ty, TypeDef, TypeId, TypeTable};
 
 #[test]
 fn nominal_and_structural_types_share_one_index_space() {
@@ -68,27 +67,28 @@ fn both_emitters_use_payload_table_indices_as_union_tags() {
     // A type literal is another consumer of the very same ID, including when
     // direct IR clients add it after source lowering has completed the table.
     let type_function = module.functions.len();
-    module.functions.push(lir::Function {
+    module.functions.push(resin_lir::Function {
         name: Some("type_value".into()),
         foreign: None,
         result: Ty::Type,
-        locals: vec![lir::Local {
+        locals: vec![resin_lir::Local {
             name: None,
             ty: Ty::Unit,
         }],
-        entry: lir::BlockId::from_index(0),
-        blocks: vec![lir::BasicBlock {
+        entry: resin_lir::BlockId::from_index(0),
+        blocks: vec![resin_lir::BasicBlock {
             name: None,
-            instrs: vec![lir::Instr::Push {
-                value: lir::Value::Type {
+            instrs: vec![resin_lir::Instr::Push {
+                value: resin_lir::Value::Type {
                     ty: optional.clone(),
                 },
             }],
-            terminator: lir::Terminator::Return,
+            terminator: resin_lir::Terminator::Return,
         }],
     });
-    let host = codegen::emit_c(&module, "main").unwrap();
-    let shader = codegen::emit_glsl(&module, "kernel", codegen::Stage::Compute).unwrap();
+    let host = resin_codegen::emit_c(&module, "main").unwrap();
+    let shader =
+        resin_codegen::emit_glsl(&module, "kernel", resin_codegen::Stage::Compute).unwrap();
     for source in [&host, &shader] {
         assert!(
             source.contains(&format!("struct r_t{optional_id} {{")),
@@ -129,7 +129,7 @@ fn verifier_rejects_duplicate_definitions_and_nested_union_payloads() {
             variants: vec![Ty::None, Ty::union_of([Ty::Int32, Ty::Bool])],
         })],
     ] {
-        let module = lir::Module {
+        let module = resin_lir::Module {
             types: TypeTable::from(definitions),
             ..Default::default()
         };

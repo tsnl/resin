@@ -1,4 +1,4 @@
-use resin_lir::{self as lir, Ty, TypeId};
+use resin_lir::{Ty, TypeId};
 use support::pipeline;
 
 mod support;
@@ -160,12 +160,12 @@ fn verifier_rejects_invalid_sum_instructions_and_types() {
     let instruction = m.functions[0].blocks[0]
         .instrs
         .iter_mut()
-        .find(|i| matches!(i, lir::Instr::MakeVariant { .. }))
+        .find(|i| matches!(i, resin_lir::Instr::MakeVariant { .. }))
         .unwrap();
-    let lir::Instr::MakeVariant { tag, .. } = instruction else {
+    let resin_lir::Instr::MakeVariant { tag, .. } = instruction else {
         unreachable!()
     };
-    *tag = lir::Case::Type(Ty::Bool);
+    *tag = resin_lir::Case::Type(Ty::Bool);
     assert!(matches!(
         resin_lir_verifier::verify(&m).unwrap_err().kind,
         resin_lir_verifier::VerifyErrorKind::InvalidVariant

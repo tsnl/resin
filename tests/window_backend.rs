@@ -1,5 +1,5 @@
 #[path = "support/toolchain.rs"]
-mod config;
+mod toolchain;
 use resin_common::TempDir;
 use std::{
     ffi::OsStr,
@@ -20,7 +20,7 @@ mod support;
 fn compile(source: &str, path: &Path) {
     let cc = std::env::var_os("CC")
         .unwrap_or_else(|| resin_platform_toolchain::DEFAULT_C_COMPILER.into());
-    config::c(&cc).compile_c(source, path).unwrap();
+    toolchain::c(&cc).compile_c(source, path).unwrap();
 }
 
 fn window_required() -> bool {
@@ -309,7 +309,7 @@ fn run_example(name: &str) {
     // Close through the runtime after three frames; leave the interactive demo unbounded.
     stmts.extend(support::statements("test_frames := test_frames + 1; if (test_frames == 3) { window.set_should_close(1 == 1)?; } else { () };"));
     let module = pipeline::generate_program(&ast).unwrap();
-    let shaders = pipeline::build_shaders(&module, &config::glsl(&compiler)).unwrap();
+    let shaders = pipeline::build_shaders(&module, &toolchain::glsl(&compiler)).unwrap();
     let c = resin_codegen::emit_c_with_shaders(&module, "main", &shaders).unwrap();
     compile(&c, &executable);
     if !display_available() {

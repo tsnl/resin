@@ -9,8 +9,8 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-impl From<crate::lir_verifier::VerifyError> for Error {
-    fn from(error: crate::lir_verifier::VerifyError) -> Self {
+impl From<resin_lir_verifier::VerifyError> for Error {
+    fn from(error: resin_lir_verifier::VerifyError) -> Self {
         Self(error.to_string())
     }
 }
@@ -21,20 +21,20 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<crate::source::SourceError> for Error {
-    fn from(error: crate::source::SourceError) -> Self {
+impl From<resin_common::source::SourceError> for Error {
+    fn from(error: resin_common::source::SourceError) -> Self {
         Self(error.to_string())
     }
 }
 
 impl Error {
     pub(crate) fn at(
-        module: &crate::lir::Module,
+        module: &resin_lir::Module,
         function: usize,
         instruction: Option<(usize, usize)>,
         error: Self,
     ) -> Self {
-        use crate::lir::{BlockId, FunctionId};
+        use resin_lir::{BlockId, FunctionId};
         let id = FunctionId::from_index(function);
         let origin = instruction
             .and_then(|(b, i)| {

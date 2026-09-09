@@ -1,9 +1,7 @@
 //! Lower one stack operation to GLSL expressions and local statements.
 use super::{Slot, types::Types};
-use crate::{
-    Error,
-    lir::{Case, Instr, Ty, Value},
-};
+use crate::Error;
+use resin_lir::{Case, Instr, Ty, Value};
 use std::fmt::Write;
 
 pub(super) fn instruction(

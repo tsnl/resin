@@ -1,11 +1,9 @@
-use crate::c::{Block, Body, Edge, EdgeValue, Exit, Function};
-use crate::lir_verifier::FunctionTypes;
+use crate::{CBlock, CBody, CEdge, CEdgeValue, CExit, CFunction};
+use resin_lir_verifier::FunctionTypes;
 use std::fmt::Write;
 
-use crate::{
-    Error,
-    lir::{Case, Instr, Terminator, Ty},
-};
+use crate::Error;
+use resin_lir::{Case, Instr, Terminator, Ty};
 
 use super::{Slot, ops, types::Types, value::literal};
 
@@ -13,13 +11,13 @@ pub(super) fn lower(
     types: &Types<'_>,
     index: usize,
     flow: &FunctionTypes,
-) -> Result<Function, Error> {
+) -> Result<CFunction, Error> {
     let function = &types.module.functions[index];
     let signature = signature(types, index);
     if let Some(foreign) = &function.foreign {
-        return Ok(Function {
+        return Ok(CFunction {
             signature,
-            body: Body::Inline(super::foreign::lower(types, index, foreign)),
+            body: CBody::Inline(super::foreign::lower(types, index, foreign)),
         });
     }
     let locals = locals(types, function, flow);
@@ -29,9 +27,9 @@ pub(super) fn lower(
         .enumerate()
         .map(|(b, _)| lower_block(types, index, b, flow))
         .collect::<Result<_, _>>()?;
-    Ok(Function {
+    Ok(CFunction {
         signature,
-        body: Body::Blocks {
+        body: CBody::Blocks {
             locals,
             entry: function.entry.index(),
             blocks,
@@ -48,7 +46,7 @@ pub(super) fn signature(types: &Types<'_>, index: usize) -> String {
     )
 }
 
-fn locals(types: &Types<'_>, function: &crate::lir::Function, flow: &FunctionTypes) -> String {
+fn locals(types: &Types<'_>, function: &resin_lir::Function, flow: &FunctionTypes) -> String {
     let mut out = String::new();
     for (i, local) in function.locals.iter().enumerate() {
         writeln!(
@@ -89,7 +87,7 @@ fn lower_block(
     index: usize,
     block_id: usize,
     flow: &FunctionTypes,
-) -> Result<Block, Error> {
+) -> Result<CBlock, Error> {
     let function = &types.module.functions[index];
     let block = &function.blocks[block_id];
     let mut out = String::new();
@@ -155,24 +153,24 @@ fn lower_block(
         }
     }
     let exit = if diverged {
-        Exit::Unreachable
+        CExit::Unreachable
     } else {
         exit(types, &block.terminator, &mut stack)
     };
-    Ok(Block {
+    Ok(CBlock {
         label: block_id,
         statements: out,
         exit,
     })
 }
 
-fn exit(types: &Types<'_>, term: &Terminator, stack: &mut Vec<Slot>) -> Exit {
+fn exit(types: &Types<'_>, term: &Terminator, stack: &mut Vec<Slot>) -> CExit {
     match term {
-        Terminator::Return => Exit::Return(stack[0].expr.clone()),
-        Terminator::Break { target } => Exit::Jump(edge(types, target.index(), stack)),
+        Terminator::Return => CExit::Return(stack[0].expr.clone()),
+        Terminator::Break { target } => CExit::Jump(edge(types, target.index(), stack)),
         Terminator::Branch { then, els } => {
             let condition = stack.pop().unwrap();
-            Exit::Branch {
+            CExit::Branch {
                 condition: types.unwrap(&condition.ty, condition.expr),
                 then: edge(types, then.index(), stack),
                 els: edge(types, els.index(), stack),
@@ -181,17 +179,17 @@ fn exit(types: &Types<'_>, term: &Terminator, stack: &mut Vec<Slot>) -> Exit {
     }
 }
 
-fn edge(types: &Types<'_>, target: usize, stack: &[Slot]) -> Edge {
+fn edge(types: &Types<'_>, target: usize, stack: &[Slot]) -> CEdge {
     let values = stack
         .iter()
-        .map(|slot| EdgeValue {
+        .map(|slot| CEdgeValue {
             ty: types.name(&slot.ty),
             value: slot.expr.clone(),
             live: tracks_initialization(types, &slot.ty)
                 .then(|| slot.live.clone().unwrap_or("NULL".into())),
         })
         .collect();
-    Edge { target, values }
+    CEdge { target, values }
 }
 
 fn tracks_initialization(types: &Types<'_>, ty: &Ty) -> bool {
@@ -200,7 +198,7 @@ fn tracks_initialization(types: &Types<'_>, ty: &Ty) -> bool {
 
 fn instruction(
     types: &Types<'_>,
-    function: &crate::lir::Function,
+    function: &resin_lir::Function,
     temp: &str,
     instr: &Instr,
     args: &[Slot],

@@ -1,6 +1,6 @@
 use super::*;
-use crate::lir::{BasicBlock, Local, LocalId, TypeDef};
-use crate::lir::{BlockId, Function, Instr, Module, Terminator, Ty, TypeId, Value};
+use resin_lir::{BasicBlock, Local, LocalId, TypeDef};
+use resin_lir::{BlockId, Function, Instr, Module, Terminator, Ty, TypeId, Value};
 
 #[test]
 fn ascribe_wraps_and_unwraps_a_nominal_representation() {
@@ -45,7 +45,7 @@ fn ascribe_wraps_and_unwraps_a_nominal_representation() {
 
 fn record() -> Ty {
     Ty::Record {
-        fields: vec![crate::lir::RecordField {
+        fields: vec![resin_lir::RecordField {
             name: "value".into(),
             ty: Ty::Int32,
         }],
@@ -263,7 +263,7 @@ fn loop_backedges_must_match_the_header_stack() {
 fn all_functions_require_parameter_local_zero() {
     for foreign in [
         None,
-        Some(crate::lir::Foreign {
+        Some(resin_lir::Foreign {
             header: "test.h".into(),
             params: vec![],
         }),
@@ -479,7 +479,7 @@ fn ascription_cannot_stand_in_for_cast_or_widen_instructions() {
 #[test]
 fn destruction_hooks_reference_a_function_with_the_nominal_pointer_signature() {
     let mut definition = TypeDef::new("Resource", record());
-    if let crate::lir::TypeDef::Nominal { drop, .. } = &mut definition {
+    if let resin_lir::TypeDef::Nominal { drop, .. } = &mut definition {
         *drop = Some(FunctionId::from_index(0));
     }
     let mut module = Module {

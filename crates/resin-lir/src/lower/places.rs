@@ -1,6 +1,6 @@
-use crate::hir::{Term, TermKind};
-use crate::types::{Conv, TypeError, TypeErrorKind};
 use crate::{Instr, Ty};
+use resin_common::types::{Conv, TypeError, TypeErrorKind};
+use resin_hir::{Term, TermKind};
 
 use super::scope::Initialization;
 use super::{GenerateError, GenerateErrorKind, Generator};
@@ -35,7 +35,7 @@ impl Generator {
     pub(super) fn gen_field_value(
         &mut self,
         base: &Term,
-        access: &crate::types::FieldAccess,
+        access: &resin_common::types::FieldAccess,
     ) -> Result<Ty, GenerateError> {
         self.check_place_initialized(base)?;
         let base = self.gen_operand(base)?;
@@ -94,7 +94,7 @@ impl Generator {
     fn gen_field_operand(
         &mut self,
         base: Operand,
-        access: &crate::types::FieldAccess,
+        access: &resin_common::types::FieldAccess,
     ) -> Result<Operand, GenerateError> {
         let (mut base_ty, mut is_place) = match base {
             Operand::Value(ty) => (ty, false),

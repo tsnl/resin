@@ -21,10 +21,8 @@ use crate::lower::infer::{
     types::{Head, Type},
 };
 use crate::lower::namespaces::SourceModuleId;
-use crate::{
-    ast::{self, Ident, Span},
-    types::Ty,
-};
+use resin_ast::{Ident, Span};
+use resin_common::types::Ty;
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -53,8 +51,8 @@ pub(super) struct Signature {
     pub result: Annotation,
 }
 impl Checker<'_> {
-    fn ann(&mut self, ann: &ast::Type, infer: bool) -> Annotation {
-        let scoped = !matches!(ann.val, ast::TypeKind::Unit);
+    fn ann(&mut self, ann: &resin_ast::Type, infer: bool) -> Annotation {
+        let scoped = !matches!(ann.val, resin_ast::TypeKind::Unit);
         if scoped {
             self.scopes.push_at(ann.span);
         }
@@ -97,8 +95,8 @@ impl Checker<'_> {
 
     fn signature(
         &mut self,
-        params: &[(Ident, ast::Type)],
-        result: &ast::Type,
+        params: &[(Ident, resin_ast::Type)],
+        result: &resin_ast::Type,
         infer: bool,
     ) -> Signature {
         let params = params

@@ -1,6 +1,6 @@
-use crate::hir::{MatchArm, Term};
-use crate::source::Span;
 use crate::{Case, Instr, Terminator, Ty};
+use resin_common::source::Span;
+use resin_hir::{MatchArm, Term};
 
 use super::scope::{Initialization, ValueBinding};
 use super::{GenerateError, Generator};

@@ -1,19 +1,17 @@
 use super::super::GenerateError;
-use super::super::typed::{StatementKind, TermKind as Kind};
+use super::super::typed::{StatementKind, TermKind};
 use super::super::{scope::Cursor, semantic::DefinitionKind};
 use super::{Annotation, Checker, Head, MatchArm, Result, Statement, Term, Type};
 use crate::lower::infer::{
     Rule,
     constraints::{Constraint, Pattern},
 };
-use crate::{
-    ast::{self, StmtKind, TermKind as SourceTerm},
-    diagnostic::GenerateErrorKind,
-    types::Ty,
-};
+use resin_ast::StmtKind;
+use resin_common::diagnostic::GenerateErrorKind;
+use resin_common::types::Ty;
 
 impl Checker<'_> {
-    pub fn term(&mut self, term: &ast::Term, expected: Option<Type>) -> (Rule, Term) {
+    pub fn term(&mut self, term: &resin_ast::Term, expected: Option<Type>) -> (Rule, Term) {
         let (rule, out) = self.typing.expression();
         let term = Expression {
             checker: self,
@@ -31,7 +29,7 @@ struct Expression<'p, 'a> {
 }
 
 impl Expression<'_, '_> {
-    fn child(&mut self, term: &ast::Term, expected: Option<Type>) -> Term {
+    fn child(&mut self, term: &resin_ast::Term, expected: Option<Type>) -> Term {
         let (_, child) = self.checker.term(term, expected);
         self.checker
             .typing
@@ -39,7 +37,7 @@ impl Expression<'_, '_> {
         child
     }
 
-    fn annotation(&mut self, ann: &ast::Type, infer: bool) -> Annotation {
+    fn annotation(&mut self, ann: &resin_ast::Type, infer: bool) -> Annotation {
         let annotation = self.checker.ann(ann, infer);
         self.checker
             .typing
@@ -47,15 +45,15 @@ impl Expression<'_, '_> {
         annotation
     }
 
-    fn constrain(&mut self, constraint: (ast::Span, Constraint)) {
+    fn constrain(&mut self, constraint: (resin_ast::Span, Constraint)) {
         self.checker.typing.constrain(self.rule, constraint);
     }
 
-    fn result_parts(&mut self, ty: &Type, span: ast::Span) -> Result<(Type, Type)> {
+    fn result_parts(&mut self, ty: &Type, span: resin_ast::Span) -> Result<(Type, Type)> {
         self.checker.typing.result_parts(self.rule, ty, span)
     }
 
-    fn check(&mut self, term: &ast::Term, expected: Option<Type>, out: Type) -> Term {
+    fn check(&mut self, term: &resin_ast::Term, expected: Option<Type>, out: Type) -> Term {
         let context = self.checker.scopes.capture();
         let checked = self.term_inner(term, expected, out.clone(), context);
         let checked = match checked {
@@ -68,7 +66,7 @@ impl Expression<'_, '_> {
                     context,
                     span: term.span,
                     ty: out.clone(),
-                    kind: Kind::Error(error),
+                    kind: TermKind::Error(error),
                 }
             }
         };
@@ -79,15 +77,17 @@ impl Expression<'_, '_> {
 
     fn term_inner(
         &mut self,
-        term: &ast::Term,
+        term: &resin_ast::Term,
         expected: Option<Type>,
         out: Type,
         context: Cursor,
     ) -> Result<Term> {
         let propagate = matches!(
             term.val,
-            SourceTerm::If { .. } | SourceTerm::Match { .. } | SourceTerm::Block { .. }
-        ) || matches!(&term.val, SourceTerm::Call { func, .. } if matches!(&func.val, SourceTerm::Var { name } if matches!(name.val.as_ref(), "ok" | "err" | "absurd")));
+            resin_ast::TermKind::If { .. }
+                | resin_ast::TermKind::Match { .. }
+                | resin_ast::TermKind::Block { .. }
+        ) || matches!(&term.val, resin_ast::TermKind::Call { func, .. } if matches!(&func.val, resin_ast::TermKind::Var { name } if matches!(name.val.as_ref(), "ok" | "err" | "absurd")));
         let contextual = propagate && expected.is_some();
         if propagate && let Some(expected) = &expected {
             self.constrain((term.span, Constraint::Equal(expected.clone(), out.clone())));
@@ -95,7 +95,7 @@ impl Expression<'_, '_> {
         let span = term.span;
         let mut equate = None;
         let kind = match &term.val {
-            SourceTerm::Hole { children } => {
+            resin_ast::TermKind::Hole { children } => {
                 for child in children {
                     self.child(child, None);
                 }
@@ -104,17 +104,17 @@ impl Expression<'_, '_> {
                     kind: GenerateErrorKind::IncompleteSyntax,
                 });
             }
-            SourceTerm::FieldHole { base } => {
+            resin_ast::TermKind::FieldHole { base } => {
                 let base = self.child(base, None);
                 let (ty, associated) = match &base.kind {
-                    Kind::Type { ty } => (ty.ty.clone(), true),
-                    Kind::Var { name } if self.checker.scopes.is_shader(&name.val) => {
+                    TermKind::Type { ty } => (ty.ty.clone(), true),
+                    TermKind::Var { name } if self.checker.scopes.is_shader(&name.val) => {
                         (crate::lower::builtins::shader_properties().into(), false)
                     }
                     _ => (base.ty.clone(), false),
                 };
                 self.checker.scopes.record_members(
-                    ast::Span {
+                    resin_ast::Span {
                         start: span.end,
                         end: span.end,
                     },
@@ -126,65 +126,65 @@ impl Expression<'_, '_> {
                     kind: GenerateErrorKind::IncompleteSyntax,
                 });
             }
-            SourceTerm::Unit => {
+            resin_ast::TermKind::Unit => {
                 equate = Some(Ty::Unit.into());
-                Kind::Unit
+                TermKind::Unit
             }
-            SourceTerm::None => {
+            resin_ast::TermKind::None => {
                 equate = Some(Ty::None.into());
-                Kind::None
+                TermKind::None
             }
-            SourceTerm::Unwrap { value } => {
+            resin_ast::TermKind::Unwrap { value } => {
                 let input = self.child(value, None);
                 self.constrain((span, Constraint::ExcludeNone(input.ty.clone(), out.clone())));
-                Kind::Unwrap {
+                TermKind::Unwrap {
                     value: Box::new(input),
                 }
             }
-            SourceTerm::Num { value } => {
+            resin_ast::TermKind::Num { value } => {
                 equate = Some(self.checker.typing.solver.number(value));
-                Kind::Num {
+                TermKind::Num {
                     value: value.clone(),
                 }
             }
-            SourceTerm::String { value } => {
+            resin_ast::TermKind::String { value } => {
                 equate = Some(Ty::byte_span().into());
-                Kind::String {
+                TermKind::String {
                     value: value.clone(),
                 }
             }
-            SourceTerm::Var { name } => {
+            resin_ast::TermKind::Var { name } => {
                 equate = Some(self.checker.value(name)?);
-                Kind::Var { name: name.clone() }
+                TermKind::Var { name: name.clone() }
             }
-            SourceTerm::Type { ty } => {
+            resin_ast::TermKind::Type { ty } => {
                 let ann = self.annotation(ty, true);
                 equate = Some(Ty::Type.into());
-                Kind::Type {
+                TermKind::Type {
                     ty: ann.into_tree(),
                 }
             }
-            SourceTerm::Try { value } => {
+            resin_ast::TermKind::Try { value } => {
                 let input = self.child(value, None);
                 let (value, errors) = self.result_parts(&input.ty, span)?;
                 let result = self.checker.result.clone();
                 let (_, target_errors) = self.result_parts(&result, span)?;
                 self.constrain((span, Constraint::Errors(errors, target_errors)));
                 equate = Some(value);
-                Kind::Try {
+                TermKind::Try {
                     value: Box::new(input),
                 }
             }
-            SourceTerm::Match { value, arms } => {
+            resin_ast::TermKind::Match { value, arms } => {
                 let input = self.child(value, None);
                 let mut checked = vec![];
                 for arm in arms {
                     self.checker.scopes.push_at(arm.body.span);
                     let payload = self.checker.typing.solver.fresh();
                     let (variant, pattern) = match &arm.variant {
-                        ast::MatchVariant::Ok => (None, Pattern::Ok),
-                        ast::MatchVariant::Err => (None, Pattern::Err),
-                        ast::MatchVariant::Type(ty) => {
+                        resin_ast::MatchVariant::Ok => (None, Pattern::Ok),
+                        resin_ast::MatchVariant::Err => (None, Pattern::Err),
+                        resin_ast::MatchVariant::Type(ty) => {
                             let ann = self.annotation(ty, false);
                             let ty = ann.ty.clone();
                             (Some(ann.into_tree()), Pattern::Type(ty))
@@ -204,38 +204,38 @@ impl Expression<'_, '_> {
                     checked.push(MatchArm {
                         binding,
                         variant,
-                        failure: matches!(arm.variant, ast::MatchVariant::Err),
+                        failure: matches!(arm.variant, resin_ast::MatchVariant::Err),
                         body,
                     });
                     self.checker.scopes.pop();
                 }
-                Kind::Match {
+                TermKind::Match {
                     value: Box::new(input),
                     arms: checked,
                 }
             }
-            SourceTerm::If { cond, then, els } => {
+            resin_ast::TermKind::If { cond, then, els } => {
                 let cond = self.child(cond, None);
                 self.constrain((cond.span, Constraint::Boolean(cond.ty.clone())));
                 let then = self.child(then, Some(out.clone()));
                 let els = self.child(els, Some(out.clone()));
-                Kind::If {
+                TermKind::If {
                     cond: Box::new(cond),
                     then: Box::new(then),
                     els: Box::new(els),
                 }
             }
-            SourceTerm::While { cond, body } => {
+            resin_ast::TermKind::While { cond, body } => {
                 let cond = self.child(cond, None);
                 self.constrain((cond.span, Constraint::Boolean(cond.ty.clone())));
                 let body = self.child(body, None);
                 equate = Some(Ty::Unit.into());
-                Kind::While {
+                TermKind::While {
                     cond: Box::new(cond),
                     body: Box::new(body),
                 }
             }
-            SourceTerm::Block { stmts, tail } => {
+            resin_ast::TermKind::Block { stmts, tail } => {
                 self.checker.scopes.push_at(term.span);
                 let stmts = stmts
                     .iter()
@@ -243,12 +243,12 @@ impl Expression<'_, '_> {
                     .collect::<Vec<_>>();
                 let tail = self.child(tail, Some(out.clone()));
                 self.checker.scopes.pop();
-                Kind::Block {
+                TermKind::Block {
                     stmts,
                     tail: Box::new(tail),
                 }
             }
-            SourceTerm::Record { fields } => {
+            resin_ast::TermKind::Record { fields } => {
                 let fields = fields
                     .iter()
                     .map(|(name, term)| (name.clone(), self.child(term, None)))
@@ -263,18 +263,18 @@ impl Expression<'_, '_> {
                         out.clone(),
                     ),
                 ));
-                Kind::Record { fields }
+                TermKind::Record { fields }
             }
-            SourceTerm::Array { elems } => {
+            resin_ast::TermKind::Array { elems } => {
                 let element = self.checker.typing.solver.fresh();
                 let elems = elems
                     .iter()
                     .map(|elem| self.child(elem, Some(element.clone())))
                     .collect::<Vec<_>>();
                 equate = Some(Type::Node(Head::Array(elems.len()), vec![element]));
-                Kind::Array { elems }
+                TermKind::Array { elems }
             }
-            SourceTerm::Builtin { name, args } => {
+            resin_ast::TermKind::Builtin { name, args } => {
                 let args = args
                     .iter()
                     .map(|arg| self.child(arg, None))
@@ -287,18 +287,18 @@ impl Expression<'_, '_> {
                         out.clone(),
                     ),
                 ));
-                Kind::Builtin {
+                TermKind::Builtin {
                     name: name.clone(),
                     args,
                 }
             }
-            SourceTerm::MethodCall {
+            resin_ast::TermKind::MethodCall {
                 receiver,
                 name,
                 arg,
             } => {
                 let (receiver, annotation, receiver_type, associated) =
-                    if let SourceTerm::Type { ty } = &receiver.val {
+                    if let resin_ast::TermKind::Type { ty } = &receiver.val {
                         let annotation = self.annotation(ty, false);
                         let ty = annotation.ty.clone();
                         (None, Some(annotation), ty, true)
@@ -321,7 +321,7 @@ impl Expression<'_, '_> {
                         associated,
                     ),
                 ));
-                Kind::MethodCall {
+                TermKind::MethodCall {
                     receiver: receiver.map(Box::new),
                     receiver_type: annotation.map(Annotation::into_tree).unwrap_or(
                         super::super::typed::Annotation {
@@ -333,17 +333,17 @@ impl Expression<'_, '_> {
                     arg: Box::new(arg),
                 }
             }
-            SourceTerm::Call { func, arg } => {
-                if let SourceTerm::Var { name } = &func.val
+            resin_ast::TermKind::Call { func, arg } => {
+                if let resin_ast::TermKind::Var { name } = &func.val
                     && name.val.as_ref() == "absurd"
                 {
                     let arg = self.child(arg, Some(Ty::union([]).into()));
-                    Kind::Absurd { arg: Box::new(arg) }
-                } else if let SourceTerm::Var { name } = &func.val
+                    TermKind::Absurd { arg: Box::new(arg) }
+                } else if let resin_ast::TermKind::Var { name } = &func.val
                     && matches!(name.val.as_ref(), "size_of" | "align_of")
                 {
                     // Check the operand for typing only. Never execute its effects or read its locals.
-                    let ann = if let SourceTerm::Type { ty } = &arg.val {
+                    let ann = if let resin_ast::TermKind::Type { ty } = &arg.val {
                         self.annotation(ty, false)
                     } else {
                         let term = self.child(arg, None);
@@ -356,11 +356,11 @@ impl Expression<'_, '_> {
                     self.constrain((span, Constraint::Layout(ann.ty.clone())));
                     equate = Some(Ty::UInt64.into());
                     let size = name.val.as_ref() == "size_of";
-                    Kind::Layout {
+                    TermKind::Layout {
                         ty: ann.into_tree(),
                         size,
                     }
-                } else if let SourceTerm::Var { name } = &func.val
+                } else if let resin_ast::TermKind::Var { name } = &func.val
                     && matches!(name.val.as_ref(), "ok" | "err")
                 {
                     let (value, errors) = self.result_parts(&out, span)?;
@@ -369,37 +369,38 @@ impl Expression<'_, '_> {
                     if failure {
                         self.constrain((span, Constraint::Errors(arg.ty.clone(), errors)));
                     }
-                    Kind::Result {
+                    TermKind::Result {
                         failure,
                         arg: Box::new(arg),
                     }
-                } else if let SourceTerm::Type { ty } = &func.val {
+                } else if let resin_ast::TermKind::Type { ty } = &func.val {
                     let ann = self.annotation(ty, true);
                     let arg = if let Type::Node(Head::Arc, parts) = &ann.ty {
-                        let context =
-                            if matches!(arg.val, SourceTerm::Record { .. } | SourceTerm::Unit) {
-                                let payload =
-                                    self.checker.typing.solver.require(&parts[0], span)?;
-                                let body = self
-                                    .checker
-                                    .typing
-                                    .typer
-                                    .body(&payload)
-                                    .map_err(|e| GenerateError::typing(span, e))?;
-                                if matches!(arg.val, SourceTerm::Unit)
-                                    && matches!(&body, Ty::Record { fields } if fields.is_empty())
-                                {
-                                    Ty::Unit.into()
-                                } else {
-                                    body.into()
-                                }
+                        let context = if matches!(
+                            arg.val,
+                            resin_ast::TermKind::Record { .. } | resin_ast::TermKind::Unit
+                        ) {
+                            let payload = self.checker.typing.solver.require(&parts[0], span)?;
+                            let body = self
+                                .checker
+                                .typing
+                                .typer
+                                .body(&payload)
+                                .map_err(|e| GenerateError::typing(span, e))?;
+                            if matches!(arg.val, resin_ast::TermKind::Unit)
+                                && matches!(&body, Ty::Record { fields } if fields.is_empty())
+                            {
+                                Ty::Unit.into()
                             } else {
-                                parts[0].clone()
-                            };
+                                body.into()
+                            }
+                        } else {
+                            parts[0].clone()
+                        };
                         self.child(arg, Some(context))
                     } else {
-                        let literal = matches!(arg.val, SourceTerm::Num { .. })
-                            || matches!(&arg.val, SourceTerm::Builtin { name, args } if matches!(name.as_ref(), "+" | "-") && matches!(args.as_slice(), [ast::Term { val: SourceTerm::Num { .. }, .. }]));
+                        let literal = matches!(arg.val, resin_ast::TermKind::Num { .. })
+                            || matches!(&arg.val, resin_ast::TermKind::Builtin { name, args } if matches!(name.as_ref(), "+" | "-") && matches!(args.as_slice(), [resin_ast::Term { val: resin_ast::TermKind::Num { .. }, .. }]));
                         let arg = self.child(arg, None);
                         self.constrain((
                             span,
@@ -408,11 +409,11 @@ impl Expression<'_, '_> {
                         arg
                     };
                     equate = Some(ann.ty.clone());
-                    Kind::Ascribe {
+                    TermKind::Ascribe {
                         ty: ann.into_tree(),
                         arg: Box::new(arg),
                     }
-                } else if let SourceTerm::Var { name } = &func.val
+                } else if let resin_ast::TermKind::Var { name } = &func.val
                     && matches!(name.val.as_ref(), "print" | "fmt")
                 {
                     let arg = self.child(arg, None);
@@ -420,7 +421,7 @@ impl Expression<'_, '_> {
                         span,
                         Constraint::Builtin(name.val.clone(), vec![arg.ty.clone()], out.clone()),
                     ));
-                    Kind::Builtin {
+                    TermKind::Builtin {
                         name: name.val.clone(),
                         args: vec![arg],
                     }
@@ -431,40 +432,40 @@ impl Expression<'_, '_> {
                         span,
                         Constraint::Call(func.ty.clone(), arg.ty.clone(), out.clone()),
                     ));
-                    Kind::Call {
+                    TermKind::Call {
                         func: Box::new(func),
                         arg: Box::new(arg),
                     }
                 }
             }
-            SourceTerm::Assign { place, value } => {
+            resin_ast::TermKind::Assign { place, value } => {
                 let place = self.child(place, None);
                 let value = self.child(value, Some(place.ty.clone()));
                 equate = Some(place.ty.clone());
-                Kind::Assign {
+                TermKind::Assign {
                     place: Box::new(place),
                     value: Box::new(value),
                 }
             }
-            SourceTerm::Address { place } => {
+            resin_ast::TermKind::Address { place } => {
                 let place = self.child(place, None);
                 equate = Some(Type::pointer(place.ty.clone()));
-                Kind::Address {
+                TermKind::Address {
                     place: Box::new(place),
                 }
             }
-            SourceTerm::Deref { pointer } => {
+            resin_ast::TermKind::Deref { pointer } => {
                 let pointer = self.child(pointer, None);
                 self.constrain((span, Constraint::Deref(pointer.ty.clone(), out.clone())));
-                Kind::Deref {
+                TermKind::Deref {
                     pointer: Box::new(pointer),
                 }
             }
-            SourceTerm::Field { base, name } => {
+            resin_ast::TermKind::Field { base, name } => {
                 let base = self.child(base, None);
                 let (receiver, associated) = match &base.kind {
-                    Kind::Type { ty } => (ty.ty.clone(), true),
-                    Kind::Var { name } if self.checker.scopes.is_shader(&name.val) => {
+                    TermKind::Type { ty } => (ty.ty.clone(), true),
+                    TermKind::Var { name } if self.checker.scopes.is_shader(&name.val) => {
                         (crate::lower::builtins::shader_properties().into(), false)
                     }
                     _ => (base.ty.clone(), false),
@@ -476,7 +477,7 @@ impl Expression<'_, '_> {
                     span,
                     Constraint::Field(base.ty.clone(), name.val.clone(), out.clone()),
                 ));
-                Kind::Field {
+                TermKind::Field {
                     base: Box::new(base),
                     name: name.clone(),
                 }
@@ -500,7 +501,7 @@ impl Expression<'_, '_> {
         })
     }
 
-    fn statement(&mut self, stmt: &ast::Stmt) -> Statement {
+    fn statement(&mut self, stmt: &resin_ast::Stmt) -> Statement {
         let context = self.checker.scopes.capture();
         let result = self.statement_inner(stmt);
         let kind = match result {
@@ -524,7 +525,7 @@ impl Expression<'_, '_> {
         Statement { context, kind }
     }
 
-    fn statement_inner(&mut self, stmt: &ast::Stmt) -> Result<StatementKind<Type>> {
+    fn statement_inner(&mut self, stmt: &resin_ast::Stmt) -> Result<StatementKind<Type>> {
         let span = stmt.span;
         Ok(match &stmt.val {
             StmtKind::Define { name, init } => {

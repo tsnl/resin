@@ -1,27 +1,25 @@
 #[path = "support/toolchain.rs"]
-mod config;
+mod toolchain;
 use resin_common::TempDir;
 use std::{ffi::OsString, fs, process::Command};
 use support::pipeline;
 
-use resin_codegen as codegen;
-use resin_lir as lir;
 mod support;
 use support::module;
 
-fn run_module(module: &lir::Module) -> std::process::Output {
+fn run_module(module: &resin_lir::Module) -> std::process::Output {
     run_entry(module, "main")
 }
 
-fn run_entry(module: &lir::Module, entry: &str) -> std::process::Output {
-    let source = codegen::emit_c(module, entry).unwrap();
+fn run_entry(module: &resin_lir::Module, entry: &str) -> std::process::Output {
+    let source = resin_codegen::emit_c(module, entry).unwrap();
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let output = temp
         .path()
         .join(format!("program{}", std::env::consts::EXE_SUFFIX));
     let cc = std::env::var_os("CC")
         .unwrap_or_else(|| OsString::from(resin_platform_toolchain::DEFAULT_C_COMPILER));
-    config::c(&cc)
+    toolchain::c(&cc)
         .compile_c(&source, &output)
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
     Command::new(output).output().unwrap()
@@ -97,7 +95,7 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
         "export { main }; struct Broken {}; def main() -> Result<(), Broken> = { err(Broken {}) };",
     );
     let mut definitions = m.types.to_vec();
-    let lir::TypeDef::Nominal { name, .. } = &mut definitions[1] else {
+    let resin_lir::TypeDef::Nominal { name, .. } = &mut definitions[1] else {
         unreachable!()
     };
     *name = "quoted\"name\\value".into();
@@ -311,7 +309,7 @@ fn invalid_integer_operations_fail_at_runtime() {
 
 #[test]
 fn unsupported_operations_report_backend_errors() {
-    let error = codegen::emit_c(
+    let error = resin_codegen::emit_c(
         &module("export { main }; def main () -> int = { var r = { x = 1 }; r + r; 0 };"),
         "main",
     )
@@ -323,7 +321,7 @@ fn unsupported_operations_report_backend_errors() {
 #[test]
 fn invalid_ir_is_rejected_before_emitting() {
     assert!(
-        codegen::emit_c(&lir::Module::default(), "main")
+        resin_codegen::emit_c(&resin_lir::Module::default(), "main")
             .unwrap_err()
             .to_string()
             .contains("export { main }")
@@ -331,9 +329,9 @@ fn invalid_ir_is_rejected_before_emitting() {
     let mut m = module("export { main }; def main () -> int = { 0 };");
     m.functions[0].blocks[0]
         .instrs
-        .insert(0, lir::Instr::Discard);
+        .insert(0, resin_lir::Instr::Discard);
     assert!(
-        codegen::emit_c(&m, "main")
+        resin_codegen::emit_c(&m, "main")
             .unwrap_err()
             .to_string()
             .contains("StackUnderflow")
@@ -355,7 +353,7 @@ fn failed_compilation_preserves_existing_output() {
     let output = temp.path().join("existing");
     fs::write(&output, b"keep me").unwrap();
     assert!(
-        config::c(std::ffi::OsStr::new(
+        toolchain::c(std::ffi::OsStr::new(
             resin_platform_toolchain::DEFAULT_C_COMPILER
         ))
         .compile_c("not C", &output)
@@ -367,7 +365,7 @@ fn failed_compilation_preserves_existing_output() {
 
 #[test]
 fn loops_carry_typed_stack_values_across_edges() {
-    use lir::{BasicBlock, BlockId, Instr::*, Local, LocalId, Terminator::*, Ty, Value};
+    use resin_lir::{BasicBlock, BlockId, Instr::*, Local, LocalId, Terminator::*, Ty, Value};
     let mut m = module("export { main }; def main () -> int = { 0 };");
     let f = m
         .functions
@@ -443,7 +441,7 @@ fn loops_carry_typed_stack_values_across_edges() {
 
 #[test]
 fn array_addresses_and_dynamic_bounds_are_executable() {
-    use lir::{Instr::*, Local, LocalId, Ty, Value};
+    use resin_lir::{Instr::*, Local, LocalId, Ty, Value};
     let mut m = module("export { main }; def main () -> int = { 0 };");
     let f = m
         .functions

@@ -1,13 +1,12 @@
 //! Artifact generation from checked IR and explicit build settings.
-use crate::lir_verifier;
 
 use crate::Error;
-use crate::{Request, toolchain};
+use crate::Request;
 
 pub(crate) fn generate(
     request: &Request,
-    checked: lir_verifier::Verified<'_>,
-) -> Result<toolchain::Executable, Error> {
+    checked: resin_lir_verifier::Verified<'_>,
+) -> Result<resin_platform_toolchain::Executable, Error> {
     let shaders = super::shaders::build_verified(checked, &request.options.tools)?;
     let source = emit_c(checked, &request.input.entry, &shaders)?;
     let build = request.options.tools.build_c(
@@ -23,11 +22,11 @@ pub(crate) fn generate(
 }
 
 pub(super) fn emit_c(
-    checked: crate::lir_verifier::Verified<'_>,
+    checked: resin_lir_verifier::Verified<'_>,
     entry: &str,
-    shaders: &[crate::codegen::Shader],
+    shaders: &[resin_codegen::Shader],
 ) -> Result<String, crate::Error> {
-    crate::codegen::generate_c(checked, entry, shaders)
-        .map(|module| crate::codegen::print_c(&module))
+    resin_codegen::generate_c(checked, entry, shaders)
+        .map(|module| resin_codegen::print_c(&module))
         .map_err(Into::into)
 }

@@ -1,7 +1,7 @@
-#[path = "support/toolchain.rs"]
-mod config;
 #[path = "support/pipeline.rs"]
 mod pipeline;
+#[path = "support/toolchain.rs"]
+mod toolchain;
 use resin_common::TempDir;
 use std::{
     ffi::OsString,
@@ -10,9 +10,6 @@ use std::{
     path::PathBuf,
     process::{Command, Output, Stdio},
 };
-
-use resin_codegen as codegen;
-use resin_platform_toolchain::{self as toolchain};
 
 struct Program {
     _temp: TempDir,
@@ -25,16 +22,16 @@ impl Program {
         let path = temp.path().join("main.resin");
         fs::write(&path, source).unwrap();
         let module = pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap();
-        Self::compile(temp, &codegen::emit_c(&module, "main").unwrap())
+        Self::compile(temp, &resin_codegen::emit_c(&module, "main").unwrap())
     }
 
     fn compile(temp: TempDir, source: &str) -> Self {
         let executable = temp
             .path()
             .join(format!("program{}", std::env::consts::EXE_SUFFIX));
-        let cc =
-            std::env::var_os("CC").unwrap_or_else(|| OsString::from(toolchain::DEFAULT_C_COMPILER));
-        config::c(&cc)
+        let cc = std::env::var_os("CC")
+            .unwrap_or_else(|| OsString::from(resin_platform_toolchain::DEFAULT_C_COMPILER));
+        toolchain::c(&cc)
             .compile_c(source, &executable)
             .unwrap_or_else(|error| panic!("{error}\n{source}"));
         Self {
@@ -218,7 +215,7 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
         // Include before the generated header list so all foreign calls use the test shims.
         let source = format!(
             "#include \"{header}\"\n{}",
-            codegen::emit_c(&module, "main").unwrap()
+            resin_codegen::emit_c(&module, "main").unwrap()
         );
         let output = Program::compile(temp, &source).run(b"");
         assert!(

@@ -240,7 +240,6 @@ mod tests {
 #[cfg(test)]
 mod verification_tests {
     use crate::Session;
-    use crate::codegen;
     use crate::{build::emit_c, shaders::emit_glsl};
 
     #[test]
@@ -254,18 +253,22 @@ mod verification_tests {
         let mut shaders = Vec::new();
         for name in ["a", "b"] {
             let id = checked.module().entries[name];
-            shaders.push(emit_glsl(checked, id, codegen::Stage::Compute).unwrap());
+            shaders.push(emit_glsl(checked, id, resin_codegen::Stage::Compute).unwrap());
         }
         let host = emit_c(checked, "main", &[]).unwrap();
         assert!(std::ptr::eq(
             checked.analysis(),
             compilation.data.verified().unwrap().analysis()
         ));
-        assert_eq!(host, codegen::emit_c(checked.module(), "main").unwrap());
+        assert_eq!(
+            host,
+            resin_codegen::emit_c(checked.module(), "main").unwrap()
+        );
         for (name, expected) in ["a", "b"].into_iter().zip(shaders) {
             assert_eq!(
                 expected,
-                codegen::emit_glsl(checked.module(), name, codegen::Stage::Compute).unwrap()
+                resin_codegen::emit_glsl(checked.module(), name, resin_codegen::Stage::Compute)
+                    .unwrap()
             );
         }
         session

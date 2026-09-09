@@ -2,12 +2,12 @@
 use std::collections::HashSet;
 
 use super::{GenerateError, GenerateErrorKind};
-use crate::ast::{self, Ident, Span, TypeKind};
 use crate::lower::infer::{
     solver::{Solver, VariableId},
     types::{Head, Type},
 };
-use crate::types::{Ty, TypeError, TypeErrorKind};
+use resin_ast::{Ident, Span, TypeKind};
+use resin_common::types::{Ty, TypeError, TypeErrorKind};
 
 type Result<T> = std::result::Result<T, GenerateError>;
 
@@ -23,7 +23,7 @@ pub(super) struct Decoder<'a> {
 }
 
 impl Decoder<'_> {
-    pub fn decode(mut self, ann: &ast::Type, infer: bool) -> Result<Decoded> {
+    pub fn decode(mut self, ann: &resin_ast::Type, infer: bool) -> Result<Decoded> {
         let ty = self.ty(ann, infer)?;
         Ok(Decoded {
             ty,
@@ -31,7 +31,7 @@ impl Decoder<'_> {
         })
     }
 
-    fn ty(&mut self, ann: &ast::Type, infer: bool) -> Result<Type> {
+    fn ty(&mut self, ann: &resin_ast::Type, infer: bool) -> Result<Type> {
         Ok(match &ann.val {
             TypeKind::Unit => Ty::Unit.into(),
             TypeKind::Hole => {

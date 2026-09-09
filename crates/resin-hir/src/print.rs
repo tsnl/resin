@@ -1,6 +1,7 @@
 //! Inspect the resolved tree without the AST, scopes, or inference state.
-use crate::types::{Case, Ty, TypeDef, TypeId, print::format_type};
 use crate::{Arguments, Function, MatchArm, Module, Parameter, Statement, Term, TermKind};
+use resin_common::types::print::format_type;
+use resin_common::types::{Case, Ty, TypeDef, TypeId};
 use sexpfmt::{PrinterConfig, SExp, SExpBookendStyle, sexp_to_string};
 
 pub fn format_module(module: &Module) -> String {

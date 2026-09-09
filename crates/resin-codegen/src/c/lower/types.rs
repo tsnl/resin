@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::lir::{Case, Instr, Module, Ty, TypeTable, Value};
+use resin_lir::{Case, Instr, Module, Ty, TypeTable, Value};
 
 mod lifecycle;
 

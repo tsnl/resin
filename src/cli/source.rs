@@ -1,6 +1,6 @@
 use std::{ffi::OsStr, path::PathBuf};
 
-use crate::compiler::Input;
+use resin_compiler::Input;
 
 pub fn parse(value: &OsStr) -> Result<Input, String> {
     let mut path = PathBuf::from(value);

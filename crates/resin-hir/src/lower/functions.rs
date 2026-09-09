@@ -1,7 +1,8 @@
 use super::{GenerateError, GenerateErrorKind, Generator, typed};
-use crate::types::{Foreign, FunctionId};
 use crate::{Annotation, Function, Parameter, Signature};
-use crate::{ast::Ident, source::SourceLocation};
+use resin_ast::Ident;
+use resin_common::source::SourceLocation;
+use resin_common::types::{Foreign, FunctionId};
 
 pub(super) fn signature(source: &typed::Signature) -> Signature {
     Signature {

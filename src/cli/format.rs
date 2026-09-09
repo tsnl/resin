@@ -63,7 +63,7 @@ fn collect(
 fn format_file(path: &Path, check: bool) -> super::Result<bool> {
     let source = fs::read_to_string(path)?;
     let formatted =
-        crate::cst::format_source(&source).ok_or("syntax errors; file left unchanged")?;
+        resin_cst::format_source(&source).ok_or("syntax errors; file left unchanged")?;
     if source == formatted {
         return Ok(false);
     }

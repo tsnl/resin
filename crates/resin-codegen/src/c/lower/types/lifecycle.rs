@@ -1,5 +1,5 @@
 use super::Types;
-use crate::lir::Ty;
+use resin_lir::Ty;
 use std::fmt::Write;
 
 impl Types<'_> {

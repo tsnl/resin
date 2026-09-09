@@ -2,8 +2,8 @@
 use super::builder::FunctionBuilder;
 use super::scope::{Environment, Initialization, ValueBinding};
 use super::{GenerateError, Generator};
-use crate::hir::{Function, Parameter, Signature};
 use crate::{FunctionId, Instr, LocalId, Terminator, Ty};
+use resin_hir::{Function, Parameter, Signature};
 
 impl Generator {
     pub(super) fn gen_function(

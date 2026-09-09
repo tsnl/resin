@@ -1,11 +1,9 @@
 //! Carry local places and direct functions across edges when predecessors agree.
 //! Runtime operands, including dynamic indices, have already been assigned temporaries.
 use super::{Slot, ops::instruction, types::Types};
-use crate::{
-    Error,
-    lir::{Function, Instr, Terminator},
-    lir_verifier::FunctionTypes,
-};
+use crate::Error;
+use resin_lir::{Function, Instr, Terminator};
+use resin_lir_verifier::FunctionTypes;
 
 pub(super) fn inputs(
     types: &mut Types<'_>,

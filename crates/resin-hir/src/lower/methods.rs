@@ -5,9 +5,9 @@ use super::{
     semantic::DefinitionKind,
     typed::{Annotation, Signature},
 };
-use crate::ast::{self, Ident, SourceFile, StmtKind};
 use crate::lower::infer::types::Type;
-use crate::types::{FunctionId, Ty, TypeId};
+use resin_ast::{Ident, SourceFile, StmtKind};
+use resin_common::types::{FunctionId, Ty, TypeId};
 use std::{collections::BTreeMap, sync::Arc};
 
 type Declarations = BTreeMap<Arc<str>, DeclarationId>;
@@ -151,8 +151,8 @@ fn duplicate(name: &Ident) -> GenerateError {
 fn method_signature(
     evaluator: &Evaluator<'_>,
     declaration: DeclarationId,
-    params: &[(Ident, ast::Type)],
-    result: &ast::Type,
+    params: &[(Ident, resin_ast::Type)],
+    result: &resin_ast::Type,
 ) -> Result<Signature, GenerateError> {
     Ok(Signature {
         declaration: Some(declaration),
@@ -165,7 +165,10 @@ fn method_signature(
     })
 }
 
-fn annotation(evaluator: &Evaluator<'_>, source: &ast::Type) -> Result<Annotation, GenerateError> {
+fn annotation(
+    evaluator: &Evaluator<'_>,
+    source: &resin_ast::Type,
+) -> Result<Annotation, GenerateError> {
     Ok(Annotation {
         ty: evaluator.ty(source)?,
         span: source.span,

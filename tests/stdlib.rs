@@ -1,10 +1,7 @@
-#[path = "support/toolchain.rs"]
-mod config;
 #[path = "support/pipeline.rs"]
 mod pipeline;
-use resin_codegen as codegen;
-use resin_lir as lir;
-use resin_platform_toolchain as toolchain;
+#[path = "support/toolchain.rs"]
+mod toolchain;
 use std::{fs, path::Path, process::Command};
 
 fn run(source: &str, native: &str) -> std::process::Output {
@@ -13,12 +10,16 @@ fn run(source: &str, native: &str) -> std::process::Output {
     fs::write(&path, source).unwrap();
     let program = pipeline::load(&path).unwrap();
     let module = pipeline::generate_program(&program).unwrap();
-    let c = format!("{native}\n{}", codegen::emit_c(&module, "main").unwrap());
+    let c = format!(
+        "{native}\n{}",
+        resin_codegen::emit_c(&module, "main").unwrap()
+    );
     let executable = temp
         .path()
         .join(format!("program{}", std::env::consts::EXE_SUFFIX));
-    let cc = std::env::var_os("CC").unwrap_or_else(|| toolchain::DEFAULT_C_COMPILER.into());
-    config::c(&cc).compile_c(&c, &executable).unwrap();
+    let cc = std::env::var_os("CC")
+        .unwrap_or_else(|| resin_platform_toolchain::DEFAULT_C_COMPILER.into());
+    toolchain::c(&cc).compile_c(&c, &executable).unwrap();
     Command::new(executable)
         .current_dir(temp.path())
         .output()
@@ -105,7 +106,10 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
                 .find(|function| function.name.as_deref() == Some(qualified.as_str()))
                 .unwrap_or_else(|| panic!("missing lowered function {qualified}"));
             assert!(function.foreign.is_none(), "{name}");
-            assert!(matches!(function.result, lir::Ty::Result { .. }), "{name}");
+            assert!(
+                matches!(function.result, resin_lir::Ty::Result { .. }),
+                "{name}"
+            );
             checked += 1;
         }
         assert!(checked > 0 || name == "console");

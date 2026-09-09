@@ -1,5 +1,5 @@
 //! Command-line argument parsing and mode dispatch.
-use crate::compiler::Session;
+use resin_compiler::Session;
 
 mod args;
 use resin_platform_toolchain::Environment;

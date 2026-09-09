@@ -1,5 +1,5 @@
 #[path = "support/toolchain.rs"]
-mod config;
+mod toolchain;
 use resin_common::TempDir;
 use std::{
     ffi::OsString,
@@ -7,10 +7,6 @@ use std::{
     process::{Command, Output},
 };
 use support::pipeline;
-
-use resin_ast as ast;
-use resin_codegen as codegen;
-use resin_lir as lir;
 
 mod support;
 
@@ -27,20 +23,20 @@ impl Project {
         project
     }
 
-    fn compile(&self) -> Result<lir::Module, ast::SourceError> {
+    fn compile(&self) -> Result<resin_lir::Module, resin_ast::SourceError> {
         pipeline::generate_program(&pipeline::load(&self.0.path().join("main.resin"))?)
     }
 
     fn run(&self) -> Output {
         let module = self.compile().unwrap();
-        let source = codegen::emit_c(&module, "main").unwrap();
+        let source = resin_codegen::emit_c(&module, "main").unwrap();
         let executable = self
             .0
             .path()
             .join(format!("program{}", std::env::consts::EXE_SUFFIX));
         let compiler = std::env::var_os("CC")
             .unwrap_or_else(|| OsString::from(resin_platform_toolchain::DEFAULT_C_COMPILER));
-        config::c(&compiler)
+        toolchain::c(&compiler)
             .compile_c(&source, &executable)
             .unwrap();
         Command::new(executable).output().unwrap()
@@ -76,7 +72,7 @@ fn ast_preserves_exports_imports_and_their_spans() {
         "answer"
     );
     assert_eq!(file.stmts.len(), 1);
-    assert!(ast::format_source(&file).contains("(export answer Box)"));
+    assert!(resin_ast::format_source(&file).contains("(export answer Box)"));
     assert!(
         pipeline::generate(&file)
             .unwrap_err()
@@ -88,7 +84,7 @@ fn ast_preserves_exports_imports_and_their_spans() {
         "export { value }; def value() -> int = { 1 };",
     )]);
     let program = pipeline::load(&project.0.path().join("main.resin")).unwrap();
-    let output = ast::format_program(&program);
+    let output = resin_ast::format_program(&program);
     assert!(output.starts_with("(program"), "{output}");
     assert!(output.contains("main.resin\""), "{output}");
 }
@@ -392,7 +388,7 @@ fn private_main_is_not_an_entry_point() {
         ]);
         if !root.starts_with("export") {
             assert!(
-                codegen::emit_c(&project.compile().unwrap(), "main")
+                resin_codegen::emit_c(&project.compile().unwrap(), "main")
                     .unwrap_err()
                     .to_string()
                     .contains("export { main }")
@@ -418,7 +414,7 @@ fn an_imported_main_must_be_reexported_to_be_an_entry_point() {
         ]);
         if exports.is_empty() {
             assert!(
-                codegen::emit_c(&project.compile().unwrap(), "main")
+                resin_codegen::emit_c(&project.compile().unwrap(), "main")
                     .unwrap_err()
                     .to_string()
                     .contains("export { main }")
@@ -446,7 +442,7 @@ fn shader_entry_lookup_uses_the_entry_files_scope() {
         ),
     ]);
     let module = project.compile().unwrap();
-    codegen::emit_glsl(&module, "kernel", codegen::Stage::Compute).unwrap();
+    resin_codegen::emit_glsl(&module, "kernel", resin_codegen::Stage::Compute).unwrap();
     let project = Project::new(&[
         (
             "library.resin",
@@ -455,10 +451,10 @@ fn shader_entry_lookup_uses_the_entry_files_scope() {
         ("main.resin", "import { \"library.resin\" };"),
     ]);
     assert!(
-        codegen::emit_glsl(
+        resin_codegen::emit_glsl(
             &project.compile().unwrap(),
             "kernel",
-            codegen::Stage::Compute
+            resin_codegen::Stage::Compute
         )
         .is_err()
     );
@@ -571,9 +567,9 @@ fn entry_bindings_are_verified() {
     let mut module = support::module("export { main }; def main () -> () = {};");
     module
         .entries
-        .insert("main".into(), lir::FunctionId::from_index(999));
+        .insert("main".into(), resin_lir::FunctionId::from_index(999));
     assert!(resin_lir_verifier::verify(&module).is_err());
-    assert!(codegen::emit_c(&module, "main").is_err());
+    assert!(resin_codegen::emit_c(&module, "main").is_err());
 }
 
 #[test]
@@ -626,7 +622,7 @@ fn declarations_do_not_create_a_module_initializer() {
     assert_eq!(module.functions.len(), 1);
     assert_eq!(module.functions[0].name.as_deref(), Some("answer"));
     assert_eq!(module.entries.len(), 1);
-    let source = codegen::emit_c(&module, "answer").unwrap();
+    let source = resin_codegen::emit_c(&module, "answer").unwrap();
     assert!(source.contains("int main(int r_argc, char **r_argv) {\n  (void)r_argc; (void)r_argv;\n  atexit(resin_cleanup);\n  return r_fn0(0);\n}"));
 }
 
@@ -651,7 +647,7 @@ fn shader_objects_can_reference_private_helpers() {
             .iter()
             .flat_map(|f| &f.blocks)
             .flat_map(|b| &b.instrs)
-            .any(|i| matches!(i, lir::Instr::Shader { .. }))
+            .any(|i| matches!(i, resin_lir::Instr::Shader { .. }))
     );
 }
 
@@ -668,12 +664,12 @@ fn inherent_methods_keep_impl_nodes_and_follow_exported_types() {
     "#;
     let file = support::parse(source);
     assert_eq!(file.stmts.len(), 2);
-    let ast::StmtKind::Impl { receiver, methods } = &file.stmts[1].val else {
+    let resin_ast::StmtKind::Impl { receiver, methods } = &file.stmts[1].val else {
         panic!("expected an impl declaration");
     };
     assert_eq!(receiver.val.as_ref(), "Counter");
     assert_eq!(methods.len(), 3);
-    assert!(ast::format_source(&file).contains("(impl"));
+    assert!(resin_ast::format_source(&file).contains("(impl"));
     let project = Project::new(&[
         ("counter.resin", source),
         (

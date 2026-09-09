@@ -1,5 +1,5 @@
 //! A backend client constructs LIR directly and never depends on frontend state.
-use resin_codegen::{self as codegen, Stage};
+use resin_codegen::Stage;
 use resin_lir::{
     BasicBlock, BlockId, Function, FunctionId, Instr, Local, Module, Terminator, Ty, Value,
 };
@@ -42,24 +42,26 @@ fn target_trees_outlive_the_verified_input() {
     let (host, shader) = {
         let checked = VerifiedModule::new(module()).unwrap();
         (
-            codegen::generate_c(checked.view(), "main", &[]).unwrap(),
-            codegen::generate_glsl(checked.view(), FunctionId::from_index(1), Stage::Compute)
+            resin_codegen::generate_c(checked.view(), "main", &[]).unwrap(),
+            resin_codegen::generate_glsl(checked.view(), FunctionId::from_index(1), Stage::Compute)
                 .unwrap(),
         )
     };
-    assert!(codegen::print_c(&host).contains("int main("));
-    assert!(codegen::print_glsl(&shader).contains("void main()"));
+    assert!(resin_codegen::print_c(&host).contains("int main("));
+    assert!(resin_codegen::print_glsl(&shader).contains("void main()"));
 }
 
 #[test]
 fn entry_selection_reports_errors_after_module_verification() {
     let checked = VerifiedModule::new(module()).unwrap();
-    assert!(codegen::generate_c(checked.view(), "missing", &[]).is_err());
-    let error = codegen::generate_glsl(checked.view(), FunctionId::from_index(99), Stage::Compute)
-        .unwrap_err();
+    assert!(resin_codegen::generate_c(checked.view(), "missing", &[]).is_err());
+    let error =
+        resin_codegen::generate_glsl(checked.view(), FunctionId::from_index(99), Stage::Compute)
+            .unwrap_err();
     assert!(error.to_string().contains("invalid shader function"));
     assert!(
-        codegen::generate_glsl(checked.view(), FunctionId::from_index(0), Stage::Compute).is_err()
+        resin_codegen::generate_glsl(checked.view(), FunctionId::from_index(0), Stage::Compute)
+            .is_err()
     );
 }
 
@@ -67,8 +69,9 @@ fn entry_selection_reports_errors_after_module_verification() {
 fn emission_convenience_operations_still_require_valid_lir() {
     let mut module = module();
     module.functions[0].locals.clear();
-    assert!(codegen::emit_c(&module, "main").is_err());
+    assert!(resin_codegen::emit_c(&module, "main").is_err());
     assert!(
-        codegen::emit_glsl_function(&module, FunctionId::from_index(1), Stage::Compute).is_err()
+        resin_codegen::emit_glsl_function(&module, FunctionId::from_index(1), Stage::Compute)
+            .is_err()
     );
 }

@@ -1,11 +1,9 @@
 //! Source-level function namespaces. None of this metadata is part of IR.
 use super::context::Context;
 use crate::ReceiverConversion;
-use crate::{
-    ast::Span,
-    types::{FunctionId, Ty, TypeId},
-    util::define_id,
-};
+use resin_ast::Span;
+use resin_common::types::{FunctionId, Ty, TypeId};
+use resin_common::util::define_id;
 use std::{
     collections::{BTreeMap, btree_map::Entry},
     sync::Arc,
@@ -32,7 +30,7 @@ pub(crate) enum FunctionBody {
     Defined(FunctionId),
     /// Primitive operation elaborated at its call site, preserving addresses
     /// that cannot cross shader calls.
-    Intrinsic(crate::types::Intrinsic),
+    Intrinsic(resin_common::types::Intrinsic),
 }
 
 pub(crate) type MethodDefinitions = fn(&Ty, &Context) -> Vec<(Arc<str>, FunctionDecl)>;

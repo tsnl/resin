@@ -1,6 +1,6 @@
-use crate::types::{LocalId, Ty};
+use resin_common::types::{LocalId, Ty};
+use resin_hir::BindingId;
 use std::collections::HashMap;
-pub(super) type DeclarationId = crate::hir::BindingId;
 
 #[derive(Clone)]
 pub(crate) struct ValueBinding {
@@ -17,7 +17,7 @@ pub(super) enum Initialization {
 /// Map resolved HIR bindings to storage and track their initialization across branches.
 #[derive(Clone)]
 pub(super) struct Environment {
-    values: HashMap<DeclarationId, ValueBinding>,
+    values: HashMap<BindingId, ValueBinding>,
 }
 impl Environment {
     pub(super) fn new() -> Self {
@@ -25,13 +25,13 @@ impl Environment {
             values: HashMap::new(),
         }
     }
-    pub(super) fn bind(&mut self, id: DeclarationId, binding: ValueBinding) {
+    pub(super) fn bind(&mut self, id: BindingId, binding: ValueBinding) {
         self.values.insert(id, binding);
     }
-    pub(super) fn binding_mut(&mut self, id: DeclarationId) -> Option<&mut ValueBinding> {
+    pub(super) fn binding_mut(&mut self, id: BindingId) -> Option<&mut ValueBinding> {
         self.values.get_mut(&id)
     }
-    pub(super) fn binding(&self, id: DeclarationId) -> Option<&ValueBinding> {
+    pub(super) fn binding(&self, id: BindingId) -> Option<&ValueBinding> {
         self.values.get(&id)
     }
     pub(super) fn intersect_initialization(&mut self, other: &Self) {

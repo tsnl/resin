@@ -1,8 +1,5 @@
-use crate::lir_verifier;
-use crate::{
-    Error,
-    lir::{self, Ty},
-};
+use crate::Error;
+use resin_lir::Ty;
 
 mod entry;
 mod function;
@@ -13,13 +10,13 @@ mod types;
 
 use types::Types;
 
-pub use crate::types::shader::Stage;
+pub use resin_common::types::shader::Stage;
 
 pub fn generate(
-    checked: lir_verifier::Verified<'_>,
-    entry: lir::FunctionId,
+    checked: resin_lir_verifier::Verified<'_>,
+    entry: resin_lir::FunctionId,
     stage: Stage,
-) -> Result<super::Module, Error> {
+) -> Result<crate::GlslModule, Error> {
     let module = checked.module();
     let analysis = checked.analysis();
     let reachable = reachable::functions(module, entry.index())?;
@@ -39,7 +36,7 @@ pub fn generate(
             index,
         )?);
     }
-    Ok(super::Module {
+    Ok(crate::GlslModule {
         extensions: types.extensions().into(),
         declarations: types.declarations(),
         globals: "bool r_failed = false;\n".into(),
@@ -59,11 +56,11 @@ impl Slot {
     fn symbolic(&self) -> bool {
         self.local || matches!(self.ty, Ty::Function { .. })
     }
-    fn local_result(instr: &lir::Instr, args: &[Self]) -> bool {
-        matches!(instr, lir::Instr::LocalAddress { .. })
+    fn local_result(instr: &resin_lir::Instr, args: &[Self]) -> bool {
+        matches!(instr, resin_lir::Instr::LocalAddress { .. })
             || matches!(
                 instr,
-                lir::Instr::AccessStatic { .. } | lir::Instr::AccessDynamic
+                resin_lir::Instr::AccessStatic { .. } | resin_lir::Instr::AccessDynamic
             ) && args[0].local
     }
 }
@@ -71,7 +68,7 @@ impl Slot {
 fn register_function_types(
     types: &mut Types<'_>,
     index: usize,
-    flow: &lir_verifier::FunctionTypes,
+    flow: &resin_lir_verifier::FunctionTypes,
 ) -> Result<(), Error> {
     let function = &types.module.functions[index];
     for ty in function
@@ -105,12 +102,12 @@ fn register_operand(types: &mut Types<'_>, ty: &Ty) -> Result<(), Error> {
 
 fn shader_wrapper(
     types: &Types<'_>,
-    function: &lir::Function,
+    function: &resin_lir::Function,
     index: usize,
     stage: Stage,
 ) -> Result<String, Error> {
-    let typer = crate::types::TyperContext::from_definitions(types.module.types.clone());
-    let interface = crate::types::shader::validate(
+    let typer = resin_common::types::TyperContext::from_definitions(types.module.types.clone());
+    let interface = resin_common::types::shader::validate(
         &typer,
         &function.locals[0].ty,
         &function.result,

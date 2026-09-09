@@ -5,8 +5,6 @@
 //! use resin_ast::lower;
 //! ```
 
-use resin_cst as cst;
-
 mod lower;
 mod print;
 pub use resin_common::source::{Ident, SourceError, Span, Spanned};
@@ -256,12 +254,12 @@ impl fmt::Display for AstError {
 impl std::error::Error for AstError {}
 
 /// Generate a complete AST from a concrete syntax document.
-pub fn generate(source: &cst::Document) -> Result<SourceFile, AstError> {
+pub fn generate(source: &resin_cst::Document) -> Result<SourceFile, AstError> {
     lower::generate(source)
 }
 
 /// Recover a tree with explicit holes and retain every syntax diagnostic.
-pub fn recover(source: &cst::Document) -> Parsed {
+pub fn recover(source: &resin_cst::Document) -> Parsed {
     lower::document(source)
 }
 

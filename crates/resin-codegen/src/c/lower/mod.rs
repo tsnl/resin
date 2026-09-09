@@ -1,8 +1,7 @@
 //! Verified LIR → C source tree. Runtime and ABI choices are made here.
-use super as language;
 use crate::Error;
-use crate::lir::{Module, Ty};
-use crate::lir_verifier::Verified;
+use resin_lir::{Module, Ty};
+use resin_lir_verifier::Verified;
 use types::Types;
 
 mod entry;
@@ -26,7 +25,7 @@ pub fn generate(
     checked: Verified<'_>,
     entry: &str,
     shaders: &[Shader],
-) -> Result<language::Module, Error> {
+) -> Result<crate::CModule, Error> {
     let module = checked.module();
     let analysis = checked.analysis();
     let types = Types::new(module, &analysis.types, shaders);
@@ -38,7 +37,7 @@ pub fn generate(
         .enumerate()
         .map(|(i, flow)| function::lower(&types, i, flow))
         .collect::<Result<_, _>>()?;
-    Ok(language::Module {
+    Ok(crate::CModule {
         includes: includes(module),
         assertions: host_assertions(),
         declarations: types.declarations(),
@@ -92,11 +91,11 @@ fn shader_data(shaders: &[Shader]) -> Result<Vec<Vec<u32>>, Error> {
         .collect()
 }
 
-fn entry_function(types: &Types<'_>, name: &str) -> Result<language::Function, Error> {
+fn entry_function(types: &Types<'_>, name: &str) -> Result<crate::CFunction, Error> {
     let mut body = "  (void)r_argc; (void)r_argv;\n  atexit(resin_cleanup);\n".to_string();
     body.push_str(&entry::emit(types, name)?);
-    Ok(language::Function {
+    Ok(crate::CFunction {
         signature: "int main(int r_argc, char **r_argv)".into(),
-        body: language::Body::Inline(body),
+        body: crate::CBody::Inline(body),
     })
 }

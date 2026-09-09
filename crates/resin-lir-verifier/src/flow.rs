@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 
-use crate::lir::{BlockId, Function, FunctionId, Module, Terminator, Ty};
+use resin_lir::{BlockId, Function, FunctionId, Module, Terminator, Ty};
 
 use super::error::Location;
 use super::instructions::{check_instr, pop_one};

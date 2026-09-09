@@ -1,12 +1,10 @@
 //! Persistent lexical scopes used by checking, elaboration, and editor queries.
 use crate::lower::context::Context;
 use crate::lower::infer::{solver::Solver, types::Type};
-use crate::{
-    ast::{Ident, Span},
-    lower::semantic::{Definition, DefinitionKind, SemanticData},
-    source::SourceLocation,
-    types::{Ty, TypeId},
-};
+use crate::lower::semantic::{Definition, DefinitionKind, SemanticData};
+use resin_ast::{Ident, Span};
+use resin_common::source::SourceLocation;
+use resin_common::types::{Ty, TypeId};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, HashMap, HashSet},

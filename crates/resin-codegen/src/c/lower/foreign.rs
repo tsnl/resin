@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::lir::{Foreign, Ty};
+use resin_lir::{Foreign, Ty};
 
 use super::types::Types;
 

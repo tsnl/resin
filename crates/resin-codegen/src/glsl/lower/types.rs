@@ -1,9 +1,7 @@
 use std::{collections::HashSet, fmt::Write};
 
-use crate::{
-    Error,
-    lir::{Case, Module, Ty, TypeTable},
-};
+use crate::Error;
+use resin_lir::{Case, Module, Ty, TypeTable};
 
 pub(super) struct Types<'a> {
     pub table: &'a TypeTable,

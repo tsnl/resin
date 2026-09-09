@@ -1,7 +1,7 @@
-use crate::{compilation::Data, cst, hir};
+use crate::compilation::Data;
 use std::path::Path;
-impl hir::Documents for Data {
-    fn get(&self, path: &Path) -> Option<&cst::Document> {
+impl resin_hir::Documents for Data {
+    fn get(&self, path: &Path) -> Option<&resin_cst::Document> {
         self.documents.get(path).map(|document| &document.syntax)
     }
 }

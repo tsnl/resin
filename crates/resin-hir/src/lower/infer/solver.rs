@@ -1,7 +1,5 @@
-use crate::{
-    ast::Span,
-    types::{Ty, TypeError, TypeErrorKind, TypeId},
-};
+use resin_ast::Span;
+use resin_common::types::{Ty, TypeError, TypeErrorKind, TypeId};
 
 use super::{
     GenerateError, Result, error,
@@ -49,11 +47,11 @@ impl Solver {
     }
 
     pub fn number(&mut self, text: &str) -> Type {
-        if let (_, Some(ty)) = crate::types::literal::split(text) {
+        if let (_, Some(ty)) = resin_common::types::literal::split(text) {
             return ty.into();
         }
         self.variable(
-            if crate::types::literal::unsuffixed_type(text).is_integer() {
+            if resin_common::types::literal::unsuffixed_type(text).is_integer() {
                 Class::Number
             } else {
                 Class::Float

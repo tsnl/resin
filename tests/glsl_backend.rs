@@ -1,7 +1,6 @@
 #[path = "support/toolchain.rs"]
-mod config;
-use resin_codegen::{self as codegen, Stage};
-use resin_lir as lir;
+mod toolchain;
+use resin_codegen::Stage;
 use support::pipeline;
 
 #[path = "support/shaders.rs"]
@@ -9,7 +8,7 @@ mod shaders;
 mod support;
 use support::module;
 
-fn example(name: &str) -> lir::Module {
+fn example(name: &str) -> resin_lir::Module {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
         .join(name);
@@ -22,10 +21,10 @@ fn shader_indexing_emits_no_bounds_checks() {
         let m = module(&format!(
             "export {{ kernel }}; def kernel(i: ulong, output: Ptr<uint>) = {{ var values = [1_ui, 2_ui]; var view = Span<uint> {{ data = output, length = 2_ul }}; output.* := {indexing}.*; }};"
         ));
-        let source = codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
+        let source = resin_codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
         assert!(!source.contains("r_failed = true"), "{source}");
         if let Some(compiler) = shaders::compiler() {
-            config::glsl(&compiler)
+            toolchain::glsl(&compiler)
                 .compile_glsl(&source, Stage::Compute)
                 .unwrap();
         }
@@ -37,9 +36,9 @@ fn shader_helpers_can_propagate_and_handle_results() {
     let m = module(
         "export { kernel }; struct Bad { index: uint }; def checked(i: uint) -> Result<uint, Bad> = { if (i == uint(0)) { err(Bad { index = i }) } else { ok(i) } }; def helper(i: uint) -> Result<uint, _> = { var value = checked(i)?; ok(value + uint(1)) }; def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { match (helper(i)) { ok(value) => { value }, err(error) => { error.index } } }; };",
     );
-    let source = codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
+    let source = resin_codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
     if let Some(compiler) = shaders::compiler() {
-        config::glsl(&compiler)
+        toolchain::glsl(&compiler)
             .compile_glsl(&source, Stage::Compute)
             .unwrap_or_else(|error| panic!("{error}\n{source}"));
     }
@@ -50,10 +49,10 @@ fn inferred_shader_results_lower_without_backend_inference() {
     let m = module(
         "export { kernel }; def kernel(invocation: ulong, output: Ptr<uint>) -> _ = { var i = uint(invocation); output.* := { var value: _; value := i + 1; value }; };",
     );
-    assert_eq!(m.functions[0].result, lir::Ty::Unit);
-    let source = codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
+    assert_eq!(m.functions[0].result, resin_lir::Ty::Unit);
+    let source = resin_codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
     if let Some(compiler) = shaders::compiler() {
-        config::glsl(&compiler)
+        toolchain::glsl(&compiler)
             .compile_glsl(&source, Stage::Compute)
             .unwrap();
     }
@@ -70,10 +69,13 @@ fn all_example_stages_emit_deterministically() {
         ("particles.resin", Stage::Fragment),
     ] {
         let m = example(name);
-        let first = codegen::emit_glsl(&m, stage.entry(), stage).unwrap();
+        let first = resin_codegen::emit_glsl(&m, stage.entry(), stage).unwrap();
         assert!(first.starts_with("#version 460\n"));
         assert!(first.contains("void main()"));
-        assert_eq!(first, codegen::emit_glsl(&m, stage.entry(), stage).unwrap());
+        assert_eq!(
+            first,
+            resin_codegen::emit_glsl(&m, stage.entry(), stage).unwrap()
+        );
     }
 }
 
@@ -115,8 +117,8 @@ fn examples_helpers_and_control_flow_compile_to_spirv() {
         ),
     ];
     for (m, stage) in modules {
-        let glsl = codegen::emit_glsl(&m, stage.entry(), stage).unwrap();
-        let bytes = config::glsl(&compiler)
+        let glsl = resin_codegen::emit_glsl(&m, stage.entry(), stage).unwrap();
+        let bytes = toolchain::glsl(&compiler)
             .compile_glsl(&glsl, stage)
             .unwrap_or_else(|error| panic!("{error}\n{glsl}"));
         assert_eq!(&bytes[..4], &[3, 2, 35, 7]);
@@ -143,8 +145,8 @@ fn device_pointers_and_shared_roots_compile() {
             Stage::Fragment,
         ),
     ] {
-        let glsl = codegen::emit_glsl(&module(source), stage.entry(), stage).unwrap();
-        config::glsl(&compiler)
+        let glsl = resin_codegen::emit_glsl(&module(source), stage.entry(), stage).unwrap();
+        toolchain::glsl(&compiler)
             .compile_glsl(&glsl, stage)
             .unwrap_or_else(|error| panic!("{error}\n{glsl}"));
     }
@@ -178,7 +180,8 @@ fn shader_addresses_cannot_hide_unsupported_layouts_or_escape_locals() {
             "cannot return a local address",
         ),
     ] {
-        let error = codegen::emit_glsl(&module(source), "kernel", Stage::Compute).unwrap_err();
+        let error =
+            resin_codegen::emit_glsl(&module(source), "kernel", Stage::Compute).unwrap_err();
         assert!(error.to_string().contains(expected), "{source}\n{error}");
     }
 }
@@ -211,7 +214,8 @@ fn unsupported_shader_features_are_diagnosed() {
             "does not support type",
         ),
     ] {
-        let error = codegen::emit_glsl(&module(source), "kernel", Stage::Compute).unwrap_err();
+        let error =
+            resin_codegen::emit_glsl(&module(source), "kernel", Stage::Compute).unwrap_err();
         assert!(error.to_string().contains(expected), "{source}\n{error}");
     }
 }
@@ -244,7 +248,7 @@ fn entry_interfaces_are_checked() {
             "float32 r/g/b/a fields",
         ),
     ] {
-        let error = codegen::emit_glsl(&m, entry, stage).unwrap_err();
+        let error = resin_codegen::emit_glsl(&m, entry, stage).unwrap_err();
         assert!(error.to_string().contains(expected), "{error}");
     }
 }
@@ -254,7 +258,7 @@ fn compiler_errors_are_reported() {
     let Some(compiler) = shaders::compiler() else {
         return;
     };
-    let error = config::glsl(&compiler)
+    let error = toolchain::glsl(&compiler)
         .compile_glsl("not GLSL", Stage::Compute)
         .unwrap_err();
     assert!(error.to_string().contains("shader compiler failed"));
@@ -266,8 +270,8 @@ fn compound_control_flow_compiles_to_spirv() {
         return;
     };
     let m = module(include_str!("fixtures/compound_control.resin"));
-    let source = codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
-    config::glsl(&compiler)
+    let source = resin_codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
+    toolchain::glsl(&compiler)
         .compile_glsl(&source, Stage::Compute)
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
 }
@@ -297,7 +301,7 @@ fn imported_backend_errors_retain_expression_origins() {
         !origins.is_empty(),
         "the operation retains its original expression"
     );
-    let error = codegen::emit_glsl(m, "kernel", Stage::Compute)
+    let error = resin_codegen::emit_glsl(m, "kernel", Stage::Compute)
         .unwrap_err()
         .to_string();
     assert!(
@@ -311,7 +315,7 @@ fn imported_backend_errors_retain_expression_origins() {
     assert!(error.contains("unsupported shader builtin"), "{error}");
     let mut without = m.clone();
     without.origins = Default::default();
-    let error = codegen::emit_glsl(&without, "kernel", Stage::Compute)
+    let error = resin_codegen::emit_glsl(&without, "kernel", Stage::Compute)
         .unwrap_err()
         .to_string();
     assert!(
@@ -326,9 +330,9 @@ fn managed_fields_are_opaque_until_consumed_by_a_shader() {
     let m = module(&format!(
         "{prefix} def kernel(invocation: ulong, root: Ptr<Root>) = {{ var i = uint(invocation); root.result := i; var address = &root.owner; }};"
     ));
-    let source = codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
+    let source = resin_codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
     if let Some(compiler) = shaders::compiler() {
-        config::glsl(&compiler)
+        toolchain::glsl(&compiler)
             .compile_glsl(&source, Stage::Compute)
             .unwrap();
     }
@@ -340,7 +344,7 @@ fn managed_fields_are_opaque_until_consumed_by_a_shader() {
         let m = module(&format!(
             "{prefix} def kernel(invocation: ulong, root: Ptr<Root>) = {{ var i = uint(invocation); {body} }};"
         ));
-        let error = codegen::emit_glsl(&m, "kernel", Stage::Compute)
+        let error = resin_codegen::emit_glsl(&m, "kernel", Stage::Compute)
             .unwrap_err()
             .to_string();
         assert!(
@@ -355,9 +359,9 @@ fn options_of_plain_values_work_in_shaders() {
     let m = module(
         "export { kernel }; def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); var value: uint | None; value := if (i == 0_ui) { 42_ui } else { None }; output.* := match (value) { uint(n) => { n }, None => { 0_ui } }; };",
     );
-    let source = codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
+    let source = resin_codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
     if let Some(compiler) = shaders::compiler() {
-        config::glsl(&compiler)
+        toolchain::glsl(&compiler)
             .compile_glsl(&source, Stage::Compute)
             .unwrap();
     }
@@ -368,7 +372,7 @@ fn literal_spans_report_the_missing_shader_storage_support() {
     let m = module(
         r#"export { kernel }; def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); var text = "abc"; output.* := uint(text.length); };"#,
     );
-    let error = codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap_err();
+    let error = resin_codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap_err();
     assert!(
         error
             .to_string()
@@ -382,11 +386,11 @@ fn compute_index_uses_wide_arithmetic_and_indexes_spans_directly() {
     let m = module(
         "export { kernel }; @compute_shader def kernel(index: ulong, output: Ptr<Span<ulong>>) = { if (index < output.length) { output.at(index).* := index; }; };",
     );
-    let source = codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
+    let source = resin_codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
     assert!(source.contains("uint64_t(gl_WorkGroupID.x) * uint64_t(gl_WorkGroupSize.x) + uint64_t(gl_LocalInvocationID.x)"), "{source}");
     assert!(!source.contains("gl_GlobalInvocationID"), "{source}");
     if let Some(compiler) = shaders::compiler() {
-        config::glsl(&compiler)
+        toolchain::glsl(&compiler)
             .compile_glsl(&source, Stage::Compute)
             .unwrap();
     }

@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
-use crate::cst::Node;
+use resin_cst::Node;
 
 use super::*;
 
-pub fn document(source: &crate::cst::Document) -> Parsed {
+pub fn document(source: &resin_cst::Document) -> Parsed {
     let errors = AstGen::new(source.source())
         .errors(source.tree().root_node())
         .into_iter()
@@ -22,7 +22,7 @@ pub fn document(source: &crate::cst::Document) -> Parsed {
 }
 
 /// Lower a complete concrete syntax document, rejecting missing or malformed syntax.
-pub fn generate(source: &crate::cst::Document) -> Result<SourceFile, AstError> {
+pub fn generate(source: &resin_cst::Document) -> Result<SourceFile, AstError> {
     AstGen::new(source.source()).gen_source_file(source.tree().root_node())
 }
 
@@ -939,7 +939,7 @@ mod tests {
     use super::*;
 
     fn parse_err(src: &str) -> AstError {
-        let mut parser = crate::cst::parser();
+        let mut parser = resin_cst::parser();
         let tree = parser.parse(src, None).expect("parser returned no tree");
         AstGen::new(src)
             .gen_source_file(tree.root_node())

@@ -1,5 +1,5 @@
-use resin_ast::{self as ast, StmtKind, TypeKind};
-use resin_lir::{self as lir, Ty};
+use resin_ast::{StmtKind, TypeKind};
+use resin_lir::Ty;
 use support::pipeline;
 
 mod support;
@@ -26,7 +26,7 @@ fn explicit_holes_are_not_editor_recovery_holes() {
         panic!()
     };
     assert!(matches!(result.val, TypeKind::Infer));
-    assert!(ast::format_source(&file).contains("infer-type"));
+    assert!(resin_ast::format_source(&file).contains("infer-type"));
     assert_eq!(
         self::result("def answer() -> _ = { 42 };", "answer"),
         Ty::Int64
@@ -114,7 +114,7 @@ fn casts_do_not_choose_an_unrelated_nominal_type_for_a_hole() {
             "value"
         ),
         Ty::Defined {
-            definition: lir::TypeId::from_index(1)
+            definition: resin_lir::TypeId::from_index(1)
         }
     );
 }
@@ -448,7 +448,7 @@ fn numeric_conversions_do_not_choose_source_storage_types() {
             .blocks
             .iter()
             .flat_map(|b| &b.instrs)
-            .any(|i| matches!(i, lir::Instr::NumericCast { ty: Ty::UInt8 }))
+            .any(|i| matches!(i, resin_lir::Instr::NumericCast { ty: Ty::UInt8 }))
     );
 }
 
@@ -490,7 +490,10 @@ fn layout_operands_check_nested_declarations_without_emitting_them() {
             .blocks
             .iter()
             .flat_map(|b| &b.instrs)
-            .all(|instr| !matches!(instr, lir::Instr::Call | lir::Instr::MakeRecord { .. }))
+            .all(|instr| !matches!(
+                instr,
+                resin_lir::Instr::Call | resin_lir::Instr::MakeRecord { .. }
+            ))
     );
 
     rejects(

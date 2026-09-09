@@ -9,9 +9,6 @@
 //! ```compile_fail,E0603
 //! use resin_codegen::glsl;
 //! ```
-use resin_common::{source, types};
-use resin_lir as lir;
-use resin_lir_verifier as lir_verifier;
 mod c;
 mod error;
 mod glsl;
@@ -137,14 +134,14 @@ pub struct GlslEdgeValue {
 
 /// Compiled shader words embedded in a C translation unit.
 pub struct Shader {
-    pub function: lir::FunctionId,
+    pub function: resin_lir::FunctionId,
     pub stage: Stage,
     pub words: Vec<u32>,
 }
 
 /// Lower verified LIR and its compiled shaders to a C translation unit.
 pub fn generate_c(
-    checked: lir_verifier::Verified<'_>,
+    checked: resin_lir_verifier::Verified<'_>,
     entry: &str,
     shaders: &[Shader],
 ) -> Result<CModule, Error> {
@@ -153,8 +150,8 @@ pub fn generate_c(
 
 /// Lower one shader function from verified LIR to a GLSL translation unit.
 pub fn generate_glsl(
-    checked: lir_verifier::Verified<'_>,
-    entry: lir::FunctionId,
+    checked: resin_lir_verifier::Verified<'_>,
+    entry: resin_lir::FunctionId,
     stage: Stage,
 ) -> Result<GlslModule, Error> {
     glsl::lower::generate(checked, entry, stage)
@@ -171,23 +168,23 @@ pub fn print_glsl(module: &GlslModule) -> String {
 }
 
 /// Verify and emit C for a module that does not embed shaders.
-pub fn emit_c(module: &lir::Module, entry: &str) -> Result<String, Error> {
+pub fn emit_c(module: &resin_lir::Module, entry: &str) -> Result<String, Error> {
     emit_c_with_shaders(module, entry, &[])
 }
 
 /// Verify and emit C with the supplied compiled shaders.
 pub fn emit_c_with_shaders(
-    module: &lir::Module,
+    module: &resin_lir::Module,
     entry: &str,
     shaders: &[Shader],
 ) -> Result<String, Error> {
-    lir_verifier::with_verified(module, |checked| {
+    resin_lir_verifier::with_verified(module, |checked| {
         generate_c(checked, entry, shaders).map(|module| print_c(&module))
     })
 }
 
 /// Verify and emit GLSL for an exported shader function.
-pub fn emit_glsl(module: &lir::Module, entry: &str, stage: Stage) -> Result<String, Error> {
+pub fn emit_glsl(module: &resin_lir::Module, entry: &str, stage: Stage) -> Result<String, Error> {
     let function = module.entries.get(entry).ok_or_else(|| {
         Error(format!(
             "expected an exported shader function named {entry:?}"
@@ -198,11 +195,11 @@ pub fn emit_glsl(module: &lir::Module, entry: &str, stage: Stage) -> Result<Stri
 
 /// Verify and emit GLSL for a resolved shader function.
 pub fn emit_glsl_function(
-    module: &lir::Module,
-    entry: lir::FunctionId,
+    module: &resin_lir::Module,
+    entry: resin_lir::FunctionId,
     stage: Stage,
 ) -> Result<String, Error> {
-    lir_verifier::with_verified(module, |checked| {
+    resin_lir_verifier::with_verified(module, |checked| {
         generate_glsl(checked, entry, stage).map(|module| print_glsl(&module))
     })
 }

@@ -1,8 +1,8 @@
 //! Every HIR constructor has an explicit storage/control-flow translation here.
 use super::{GenerateError, Generator};
-use crate::hir::{Arguments, Statement, Term, TermKind};
-use crate::types::Intrinsic;
 use crate::{Instr, Ty};
+use resin_common::types::Intrinsic;
+use resin_hir::{Arguments, Statement, Term, TermKind};
 
 impl Generator {
     pub(super) fn lower_term(&mut self, term: &Term) -> Result<Ty, GenerateError> {

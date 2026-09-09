@@ -1,5 +1,5 @@
 //! Resolve argv defaults from one snapshot of the invoking process.
-use crate::{self as toolchain, Environment, Settings, Toolchain};
+use crate::{Environment, Settings, Toolchain};
 use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
@@ -8,7 +8,7 @@ use std::{
 impl Environment {
     pub(super) fn resolve_tools(&self, cc: Option<&OsStr>, glslc: Option<&OsStr>) -> Toolchain {
         let settings = Settings {
-            cc: self.resolve(self.compiler(cc, "CC", toolchain::DEFAULT_C_COMPILER)),
+            cc: self.resolve(self.compiler(cc, "CC", crate::DEFAULT_C_COMPILER)),
             glslc: self.resolve(self.compiler(glslc, "GLSLC", "glslc")),
             runtime_include: self.path(
                 "RESIN_RUNTIME_INCLUDE",
@@ -46,8 +46,8 @@ impl Environment {
         }
         let directory = self.executable.parent().unwrap_or(Path::new("."));
         for path in [
-            directory.join("deps").join(toolchain::RUNTIME_ARCHIVE),
-            directory.join(toolchain::RUNTIME_ARCHIVE),
+            directory.join("deps").join(crate::RUNTIME_ARCHIVE),
+            directory.join(crate::RUNTIME_ARCHIVE),
         ] {
             if path.is_file() {
                 return Ok(path);
@@ -55,7 +55,7 @@ impl Environment {
         }
         Err(format!(
             "cannot find {} beside the compiler or in deps; set RESIN_RUNTIME_LIB",
-            toolchain::RUNTIME_ARCHIVE
+            crate::RUNTIME_ARCHIVE
         ))
     }
 
@@ -122,11 +122,11 @@ mod tests {
         let temp = TempDir::new(&std::env::temp_dir()).unwrap();
         let bin = temp.path().join("tools with spaces");
         fs::create_dir(&bin).unwrap();
-        let default_cc = executable(&bin, toolchain::DEFAULT_C_COMPILER);
+        let default_cc = executable(&bin, crate::DEFAULT_C_COMPILER);
         let default_glslc = executable(&bin, "glslc");
         let custom = executable(&bin, "custom");
         let explicit = executable(&bin, "explicit");
-        let runtime = bin.join(toolchain::RUNTIME_ARCHIVE);
+        let runtime = bin.join(crate::RUNTIME_ARCHIVE);
         fs::write(&runtime, []).unwrap();
         let mut env = Environment {
             variables: BTreeMap::from([("PATH".into(), "tools with spaces".into())]),

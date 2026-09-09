@@ -3,10 +3,10 @@ mod conversions;
 use super::functions::annotation;
 use super::{GenerateError, GenerateErrorKind, Generator, eval::Evaluator, typed};
 use crate::ReceiverConversion;
-use crate::ast::{Ident, Span};
 use crate::lower::namespaces::FunctionBody;
-use crate::types::{Case, FunctionId, Intrinsic, Ty, Value};
 use crate::{Arguments, MatchArm, Statement, Term, TermKind};
+use resin_ast::{Ident, Span};
+use resin_common::types::{Case, FunctionId, Intrinsic, Ty, Value};
 type Result<T> = std::result::Result<T, GenerateError>;
 
 impl Generator {
@@ -26,80 +26,81 @@ impl Generator {
     }
 
     fn elaborate_kind(&mut self, source: &typed::Term) -> Result<TermKind> {
-        use typed::TermKind as S;
         Ok(match &source.kind {
-            S::Error(error) => return Err(error.clone()),
-            S::Unit => TermKind::Constant(Value::Unit),
-            S::None => TermKind::Constant(Value::None),
-            S::Num { value } => self.number(source, value)?,
-            S::String { value } => TermKind::Constant(Value::Bytes {
+            typed::TermKind::Error(error) => return Err(error.clone()),
+            typed::TermKind::Unit => TermKind::Constant(Value::Unit),
+            typed::TermKind::None => TermKind::Constant(Value::None),
+            typed::TermKind::Num { value } => self.number(source, value)?,
+            typed::TermKind::String { value } => TermKind::Constant(Value::Bytes {
                 value: value.as_bytes().into(),
             }),
-            S::Type { ty } => TermKind::Constant(Value::Type { ty: ty.ty.clone() }),
-            S::Var { name } => self.reference(name)?,
-            S::Layout { ty, size } => self.layout(ty, *size)?,
-            S::Unwrap { value } => TermKind::Unwrap {
+            typed::TermKind::Type { ty } => TermKind::Constant(Value::Type { ty: ty.ty.clone() }),
+            typed::TermKind::Var { name } => self.reference(name)?,
+            typed::TermKind::Layout { ty, size } => self.layout(ty, *size)?,
+            typed::TermKind::Unwrap { value } => TermKind::Unwrap {
                 value: self.boxed(value)?,
             },
-            S::Try { value } => TermKind::Try {
+            typed::TermKind::Try { value } => TermKind::Try {
                 value: self.boxed(value)?,
             },
-            S::Match { value, arms } => self.match_expression(source.span, value, arms)?,
-            S::If { cond, then, els } => TermKind::If {
+            typed::TermKind::Match { value, arms } => {
+                self.match_expression(source.span, value, arms)?
+            }
+            typed::TermKind::If { cond, then, els } => TermKind::If {
                 cond: self.boxed(cond)?,
                 then: self.boxed(then)?,
                 els: self.boxed(els)?,
             },
-            S::While { cond, body } => TermKind::While {
+            typed::TermKind::While { cond, body } => TermKind::While {
                 cond: self.boxed(cond)?,
                 body: self.boxed(body)?,
             },
-            S::Block { stmts, tail } => TermKind::Block {
+            typed::TermKind::Block { stmts, tail } => TermKind::Block {
                 stmts: stmts
                     .iter()
                     .filter_map(|stmt| self.statement(stmt).transpose())
                     .collect::<Result<_>>()?,
                 tail: self.boxed(tail)?,
             },
-            S::Record { fields } => TermKind::Record {
+            typed::TermKind::Record { fields } => TermKind::Record {
                 fields: fields
                     .iter()
                     .map(|(name, value)| Ok((name.clone(), self.elaborate(value)?)))
                     .collect::<Result<_>>()?,
             },
-            S::Array { elems } => TermKind::Array {
+            typed::TermKind::Array { elems } => TermKind::Array {
                 elems: elems
                     .iter()
                     .map(|e| self.elaborate(e))
                     .collect::<Result<_>>()?,
             },
-            S::Builtin { name, args } => self.builtin(source, name, args)?,
-            S::MethodCall {
+            typed::TermKind::Builtin { name, args } => self.builtin(source, name, args)?,
+            typed::TermKind::MethodCall {
                 receiver,
                 receiver_type,
                 name,
                 arg,
             } => self.method(receiver.as_deref(), &receiver_type.ty, name, arg)?,
-            S::Call { func, arg } => self.call(func, arg)?,
-            S::Ascribe { ty, arg } => self.ascription(source.span, &ty.ty, arg)?,
-            S::Result { failure, arg } => TermKind::Result {
+            typed::TermKind::Call { func, arg } => self.call(func, arg)?,
+            typed::TermKind::Ascribe { ty, arg } => self.ascription(source.span, &ty.ty, arg)?,
+            typed::TermKind::Result { failure, arg } => TermKind::Result {
                 failure: *failure,
                 arg: self.boxed(arg)?,
             },
-            S::Absurd { arg } => TermKind::Absurd {
+            typed::TermKind::Absurd { arg } => TermKind::Absurd {
                 arg: self.boxed(arg)?,
             },
-            S::Assign { place, value } => TermKind::Assign {
+            typed::TermKind::Assign { place, value } => TermKind::Assign {
                 place: self.boxed(place)?,
                 value: self.boxed(value)?,
             },
-            S::Address { place } => TermKind::Address {
+            typed::TermKind::Address { place } => TermKind::Address {
                 place: self.boxed(place)?,
             },
-            S::Deref { pointer } => TermKind::Deref {
+            typed::TermKind::Deref { pointer } => TermKind::Deref {
                 pointer: self.boxed(pointer)?,
             },
-            S::Field { base, name } => self.field(source.span, base, name)?,
+            typed::TermKind::Field { base, name } => self.field(source.span, base, name)?,
         })
     }
 
@@ -133,7 +134,7 @@ impl Generator {
     }
 
     fn layout(&self, ty: &typed::Annotation, size: bool) -> Result<TermKind> {
-        let layout = crate::types::layout::layout(self.typer.definitions(), &ty.ty)
+        let layout = resin_common::types::layout::layout(self.typer.definitions(), &ty.ty)
             .map_err(|e| GenerateError::inference(ty.span, e.to_string()))?;
         Ok(TermKind::Constant(Value::UInt64 {
             value: if size { layout.size } else { layout.align } as u64,
@@ -317,11 +318,10 @@ impl Generator {
     }
 
     fn statement(&mut self, stmt: &typed::Statement) -> Result<Option<Statement>> {
-        use typed::StatementKind as S;
         Ok(Some(match &stmt.kind {
-            S::Error(error) => return Err(error.clone()),
-            S::TypeDefinition => return Ok(None),
-            S::Define {
+            typed::StatementKind::Error(error) => return Err(error.clone()),
+            typed::StatementKind::TypeDefinition => return Ok(None),
+            typed::StatementKind::Define {
                 binding,
                 name,
                 init,
@@ -330,12 +330,12 @@ impl Generator {
                 name: name.clone(),
                 init: self.elaborate(init)?,
             },
-            S::Declare { binding, name, ty } => Statement::Declare {
+            typed::StatementKind::Declare { binding, name, ty } => Statement::Declare {
                 binding: *binding,
                 name: name.clone(),
                 ty: annotation(ty),
             },
-            S::Expr { term } => Statement::Expr {
+            typed::StatementKind::Expr { term } => Statement::Expr {
                 term: self.elaborate(term)?,
             },
         }))

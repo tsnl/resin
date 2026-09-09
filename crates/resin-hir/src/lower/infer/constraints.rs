@@ -4,7 +4,8 @@ use super::{
     Equation, GenerateError, Inference, Result, error,
     types::{Head, Type},
 };
-use crate::{ast::Span, types::Ty};
+use resin_ast::Span;
+use resin_common::types::Ty;
 
 #[derive(Clone)]
 pub(crate) enum Constraint {
@@ -179,7 +180,7 @@ impl Inference<'_> {
                 let Some(ty) = self.solver.resolve(ty) else {
                     return Ok(false);
                 };
-                crate::types::layout::layout(self.typer.definitions(), &ty)
+                resin_common::types::layout::layout(self.typer.definitions(), &ty)
                     .map_err(|e| error(span, e.to_string()))?;
             }
             Constraint::ExcludeNone(input, out) => {
@@ -371,7 +372,7 @@ impl Inference<'_> {
                 }
             }
             Constraint::Builtin(name, args, out) => {
-                use crate::types::check::BuiltinRule;
+                use resin_common::types::check::BuiltinRule;
                 let rule = BuiltinRule::lookup(name, args.len())
                     .map_err(|e| GenerateError::typing(span, e))?;
                 match rule {

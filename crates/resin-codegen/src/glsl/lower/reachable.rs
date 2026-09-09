@@ -1,8 +1,6 @@
 //! Find shader callees in dependency order, rejecting recursive and host-only calls.
-use crate::{
-    Error,
-    lir::{self, Module},
-};
+use crate::Error;
+use resin_lir::{self, Module};
 
 pub(super) fn functions(module: &Module, entry: usize) -> Result<Vec<usize>, Error> {
     let mut result = vec![];
@@ -49,11 +47,11 @@ fn visit(
     for (b, block) in function.blocks.iter().enumerate() {
         for (i, instr) in block.instrs.iter().enumerate() {
             match instr {
-                lir::Instr::Function { function } => {
+                resin_lir::Instr::Function { function } => {
                     visit(module, function.index(), active, result)
                         .map_err(|error| Error::at(module, index, Some((b, i)), error))?
                 }
-                lir::Instr::CallBuiltin { name, .. }
+                resin_lir::Instr::CallBuiltin { name, .. }
                     if matches!(name.as_ref(), "print" | "fmt") =>
                 {
                     return Err(Error::at(

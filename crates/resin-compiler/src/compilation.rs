@@ -1,11 +1,7 @@
 //! A compiler result retained for executable generation and source queries.
 use super::syntax::Document;
-use crate::lir_verifier;
-use crate::{
-    ast::{self, Span},
-    hir::Analysis as HirAnalysis,
-    lir, {Diagnostic, SourceLocation, SourceProvider},
-};
+use crate::{Diagnostic, SourceLocation, SourceProvider};
+use resin_common::source::Span;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
@@ -18,10 +14,10 @@ pub(super) struct Data {
     pub diagnostics: Vec<Diagnostic>,
     pub dependencies: BTreeSet<PathBuf>,
     pub(super) resolutions: BTreeMap<PathBuf, PathBuf>,
-    pub(super) semantics: HirAnalysis,
-    program: Result<ast::Program, ast::SourceError>,
-    hir: Result<crate::hir::Module, ast::SourceError>,
-    module: Result<lir_verifier::VerifiedModule, ast::SourceError>,
+    pub(super) semantics: resin_hir::Analysis,
+    program: Result<resin_ast::Program, resin_ast::SourceError>,
+    hir: Result<resin_hir::Module, resin_ast::SourceError>,
+    module: Result<resin_lir_verifier::VerifiedModule, resin_ast::SourceError>,
 }
 
 impl Data {
@@ -52,7 +48,7 @@ impl Data {
             (file, errors)
         });
         let load_error = loaded.errors.first().cloned();
-        let mut checked = crate::hir::analyze_program(&loaded.program);
+        let mut checked = resin_hir::analyze_program(&loaded.program);
         let hir_error = load_error
             .clone()
             .or_else(|| checked.diagnostics.first().cloned());
@@ -95,27 +91,27 @@ impl Data {
     }
 
     /// The compiler AST, possibly containing holes. `program` and `module` stay strict.
-    pub(super) fn recovered_file(&self, path: &Path) -> Option<&ast::SourceFile> {
+    pub(super) fn recovered_file(&self, path: &Path) -> Option<&resin_ast::SourceFile> {
         self.documents.get(path).map(|d| &d.file)
     }
 
-    pub(super) fn program(&self) -> Result<&ast::Program, ast::SourceError> {
+    pub(super) fn program(&self) -> Result<&resin_ast::Program, resin_ast::SourceError> {
         self.program.as_ref().map_err(Clone::clone)
     }
 
     /// Resolved tree before storage and control-flow lowering.
-    pub(super) fn hir(&self) -> Result<&crate::hir::Module, ast::SourceError> {
+    pub(super) fn hir(&self) -> Result<&resin_hir::Module, resin_ast::SourceError> {
         self.hir.as_ref().map_err(Clone::clone)
     }
 
-    pub(super) fn module(&self) -> Result<&lir::Module, ast::SourceError> {
+    pub(super) fn module(&self) -> Result<&resin_lir::Module, resin_ast::SourceError> {
         self.module
             .as_ref()
             .map(|checked| checked.view().module())
             .map_err(Clone::clone)
     }
 
-    pub(super) fn verified(&self) -> Result<lir_verifier::Verified<'_>, crate::Error> {
+    pub(super) fn verified(&self) -> Result<resin_lir_verifier::Verified<'_>, crate::Error> {
         Ok(self.module.as_ref().map_err(Clone::clone)?.view())
     }
 

@@ -1,11 +1,8 @@
 #[path = "support/toolchain.rs"]
-mod config;
+mod toolchain;
 use resin_common::TempDir;
 use std::{ffi::OsString, fs, process::Command};
 use support::pipeline;
-
-use resin_codegen as codegen;
-use resin_lir as lir;
 
 mod support;
 use support::module;
@@ -15,10 +12,10 @@ fn run(source: &str) -> std::process::Output {
     let executable = temp
         .path()
         .join(format!("program{}", std::env::consts::EXE_SUFFIX));
-    let source = codegen::emit_c(&module(source), "main").unwrap();
+    let source = resin_codegen::emit_c(&module(source), "main").unwrap();
     let cc = std::env::var_os("CC")
         .unwrap_or_else(|| OsString::from(resin_platform_toolchain::DEFAULT_C_COMPILER));
-    config::c(&cc)
+    toolchain::c(&cc)
         .compile_c(&source, &executable)
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
     Command::new(executable).output().unwrap()
@@ -177,10 +174,10 @@ fn spirv_requires_a_decorated_function_declaration() {
         "export { main }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() = { var code = kernel.spirv; };",
     );
     let main = &module.functions[module.entries["main"].index()];
-    assert_eq!(main.locals[1].ty, lir::Ty::shader());
+    assert_eq!(main.locals[1].ty, resin_lir::Ty::shader());
     assert_eq!(module.shaders.len(), 1);
     assert!(
-        codegen::emit_c(&module, "main")
+        resin_codegen::emit_c(&module, "main")
             .unwrap_err()
             .to_string()
             .contains("SPIR-V compilation")

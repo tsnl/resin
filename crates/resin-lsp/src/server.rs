@@ -4,7 +4,7 @@ use crate::{
 };
 use crossbeam_channel::{Receiver, Sender, select};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
-use lsp_types::{self as lsp, Position, Uri};
+use lsp_types::{Position, Uri};
 use resin_common::source::SourceLocation;
 use resin_compiler::{DefinitionKind, normalize_path};
 use serde::Deserialize;
@@ -29,7 +29,7 @@ struct Options {
 pub(crate) fn run(default_stdlib: PathBuf) -> Result<i32> {
     let (connection, io) = Connection::stdio();
     let (id, params) = connection.initialize_start()?;
-    let params: lsp::InitializeParams = serde_json::from_value(params)?;
+    let params: lsp_types::InitializeParams = serde_json::from_value(params)?;
     let options: Options = params
         .initialization_options
         .clone()
@@ -38,14 +38,14 @@ pub(crate) fn run(default_stdlib: PathBuf) -> Result<i32> {
         .transpose()?
         .unwrap_or_default();
     let stdlib = options.stdlib_path.unwrap_or(default_stdlib);
-    let capabilities = lsp::ServerCapabilities {
-        position_encoding: Some(lsp::PositionEncodingKind::UTF16),
+    let capabilities = lsp_types::ServerCapabilities {
+        position_encoding: Some(lsp_types::PositionEncodingKind::UTF16),
         text_document_sync: Some(
-            lsp::TextDocumentSyncOptions {
+            lsp_types::TextDocumentSyncOptions {
                 open_close: Some(true),
-                change: Some(lsp::TextDocumentSyncKind::FULL),
+                change: Some(lsp_types::TextDocumentSyncKind::FULL),
                 save: Some(
-                    lsp::SaveOptions {
+                    lsp_types::SaveOptions {
                         include_text: Some(false),
                     }
                     .into(),
@@ -54,10 +54,10 @@ pub(crate) fn run(default_stdlib: PathBuf) -> Result<i32> {
             }
             .into(),
         ),
-        hover_provider: Some(lsp::HoverProviderCapability::Simple(true)),
-        definition_provider: Some(lsp::OneOf::Left(true)),
-        document_formatting_provider: Some(lsp::OneOf::Left(true)),
-        completion_provider: Some(lsp::CompletionOptions {
+        hover_provider: Some(lsp_types::HoverProviderCapability::Simple(true)),
+        definition_provider: Some(lsp_types::OneOf::Left(true)),
+        document_formatting_provider: Some(lsp_types::OneOf::Left(true)),
+        completion_provider: Some(lsp_types::CompletionOptions {
             resolve_provider: Some(false),
             trigger_characters: Some(vec![".".into()]),
             ..Default::default()
@@ -191,17 +191,17 @@ impl State {
             return self.send(Response::new_ok(request.id, Value::Null));
         }
         if request.method == "textDocument/formatting" {
-            let params: lsp::DocumentFormattingParams = match serde_json::from_value(request.params)
-            {
-                Ok(params) => params,
-                Err(error) => {
-                    return self.error(
-                        request.id,
-                        ErrorCode::InvalidParams as i32,
-                        error.to_string(),
-                    );
-                }
-            };
+            let params: lsp_types::DocumentFormattingParams =
+                match serde_json::from_value(request.params) {
+                    Ok(params) => params,
+                    Err(error) => {
+                        return self.error(
+                            request.id,
+                            ErrorCode::InvalidParams as i32,
+                            error.to_string(),
+                        );
+                    }
+                };
             let Some(document) = self.documents.get(params.text_document.uri.as_str()) else {
                 return self.send(Response::new_ok(request.id, Value::Null));
             };
@@ -221,16 +221,17 @@ impl State {
                 format!("unsupported method: {}", request.method),
             );
         }
-        let params: lsp::TextDocumentPositionParams = match serde_json::from_value(request.params) {
-            Ok(params) => params,
-            Err(error) => {
-                return self.error(
-                    request.id,
-                    ErrorCode::InvalidParams as i32,
-                    error.to_string(),
-                );
-            }
-        };
+        let params: lsp_types::TextDocumentPositionParams =
+            match serde_json::from_value(request.params) {
+                Ok(params) => params,
+                Err(error) => {
+                    return self.error(
+                        request.id,
+                        ErrorCode::InvalidParams as i32,
+                        error.to_string(),
+                    );
+                }
+            };
         let query = Query {
             revision: self.revision.load(Ordering::Acquire),
             method: request.method,
@@ -283,9 +284,9 @@ impl State {
         let result = match query.method.as_str() {
             "textDocument/hover" => {
                 serde_json::to_value(analysis.hover(&document.path, offset).map(|hover| {
-                    lsp::Hover {
-                        contents: lsp::HoverContents::Markup(lsp::MarkupContent {
-                            kind: lsp::MarkupKind::Markdown,
+                    lsp_types::Hover {
+                        contents: lsp_types::HoverContents::Markup(lsp_types::MarkupContent {
+                            kind: lsp_types::MarkupKind::Markdown,
                             value: format!("```resin\n{}\n```", hover.text),
                         }),
                         range: Some(text.range(hover.span)),
@@ -302,28 +303,28 @@ impl State {
                     .completions(&document.path, offset)
                     .into_iter()
                     .enumerate()
-                    .map(|(index, item)| lsp::CompletionItem {
+                    .map(|(index, item)| lsp_types::CompletionItem {
                         label: item.name.clone(),
                         // Preserve analysis ordering when clients sort completion items.
                         sort_text: Some(format!("{index:010}")),
                         detail: Some(item.detail),
                         kind: Some(match item.kind {
-                            DefinitionKind::Function => lsp::CompletionItemKind::FUNCTION,
-                            DefinitionKind::Type => lsp::CompletionItemKind::CLASS,
-                            DefinitionKind::Keyword => lsp::CompletionItemKind::KEYWORD,
-                            DefinitionKind::Field => lsp::CompletionItemKind::FIELD,
+                            DefinitionKind::Function => lsp_types::CompletionItemKind::FUNCTION,
+                            DefinitionKind::Type => lsp_types::CompletionItemKind::CLASS,
+                            DefinitionKind::Keyword => lsp_types::CompletionItemKind::KEYWORD,
+                            DefinitionKind::Field => lsp_types::CompletionItemKind::FIELD,
                             DefinitionKind::Variable | DefinitionKind::Parameter => {
-                                lsp::CompletionItemKind::VARIABLE
+                                lsp_types::CompletionItemKind::VARIABLE
                             }
                         }),
-                        text_edit: Some(lsp::CompletionTextEdit::Edit(lsp::TextEdit {
+                        text_edit: Some(lsp_types::CompletionTextEdit::Edit(lsp_types::TextEdit {
                             range: text.range(item.replace),
                             new_text: item.name,
                         })),
                         ..Default::default()
                     })
                     .collect::<Vec<_>>();
-                serde_json::to_value(lsp::CompletionList {
+                serde_json::to_value(lsp_types::CompletionList {
                     is_incomplete: false,
                     items,
                 })?
@@ -362,7 +363,7 @@ impl State {
     fn apply_notification(&mut self, method: &str, params: Value) -> Result<()> {
         match method {
             "textDocument/didOpen" => {
-                let params: lsp::DidOpenTextDocumentParams = serde_json::from_value(params)?;
+                let params: lsp_types::DidOpenTextDocumentParams = serde_json::from_value(params)?;
                 let doc = params.text_document;
                 let path = uri_path(&doc.uri)?;
                 if self.documents.contains_key(doc.uri.as_str()) {
@@ -383,7 +384,8 @@ impl State {
                 self.update(Change::Set(path, doc.text))?;
             }
             "textDocument/didChange" => {
-                let params: lsp::DidChangeTextDocumentParams = serde_json::from_value(params)?;
+                let params: lsp_types::DidChangeTextDocumentParams =
+                    serde_json::from_value(params)?;
                 let Some(document) = self.documents.get_mut(params.text_document.uri.as_str())
                 else {
                     return Err("document is not open".into());
@@ -403,17 +405,18 @@ impl State {
                 self.update(Change::Set(path, change.text))?;
             }
             "textDocument/didSave" => {
-                let params: lsp::DidSaveTextDocumentParams = serde_json::from_value(params)?;
+                let params: lsp_types::DidSaveTextDocumentParams = serde_json::from_value(params)?;
                 self.update(Change::Disk(vec![uri_path(&params.text_document.uri)?]))?;
             }
             "textDocument/didClose" => {
-                let params: lsp::DidCloseTextDocumentParams = serde_json::from_value(params)?;
+                let params: lsp_types::DidCloseTextDocumentParams = serde_json::from_value(params)?;
                 if let Some(document) = self.documents.remove(params.text_document.uri.as_str()) {
                     self.update(Change::Close(document.path))?;
                 }
             }
             "workspace/didChangeWatchedFiles" => {
-                let params: lsp::DidChangeWatchedFilesParams = serde_json::from_value(params)?;
+                let params: lsp_types::DidChangeWatchedFilesParams =
+                    serde_json::from_value(params)?;
                 let paths = params
                     .changes
                     .iter()
@@ -442,8 +445,8 @@ impl State {
             .map(|d| d.uri.clone())
             .or_else(|| url::Url::from_file_path(path).ok()?.as_str().parse().ok())
     }
-    fn location(&self, location: &SourceLocation) -> Option<lsp::Location> {
-        Some(lsp::Location {
+    fn location(&self, location: &SourceLocation) -> Option<lsp_types::Location> {
+        Some(lsp_types::Location {
             uri: self.uri(&location.path)?,
             range: self
                 .texts
@@ -454,7 +457,7 @@ impl State {
     }
 
     fn publish(&mut self) -> Result<()> {
-        let mut diagnostics = BTreeMap::<String, Vec<lsp::Diagnostic>>::new();
+        let mut diagnostics = BTreeMap::<String, Vec<lsp_types::Diagnostic>>::new();
         if let Some(snapshot) = &self.snapshot {
             for analysis in snapshot.entries.values() {
                 for diagnostic in analysis.diagnostics() {
@@ -465,15 +468,15 @@ impl State {
                         .related
                         .iter()
                         .filter_map(|note| {
-                            Some(lsp::DiagnosticRelatedInformation {
+                            Some(lsp_types::DiagnosticRelatedInformation {
                                 location: self.location(&note.location)?,
                                 message: note.message.clone(),
                             })
                         })
                         .collect::<Vec<_>>();
-                    let diagnostic = lsp::Diagnostic {
+                    let diagnostic = lsp_types::Diagnostic {
                         range: location.range,
-                        severity: Some(lsp::DiagnosticSeverity::ERROR),
+                        severity: Some(lsp_types::DiagnosticSeverity::ERROR),
                         source: Some("resin".into()),
                         message: diagnostic.message.clone(),
                         related_information: (!related.is_empty()).then_some(related),
@@ -492,7 +495,7 @@ impl State {
             .cloned()
             .collect::<BTreeSet<_>>();
         for uri in current.union(&self.published) {
-            let params = lsp::PublishDiagnosticsParams {
+            let params = lsp_types::PublishDiagnosticsParams {
                 uri: uri.parse()?,
                 diagnostics: diagnostics.remove(uri).unwrap_or_default(),
                 version: self.documents.get(uri).map(|d| d.version),
@@ -510,7 +513,7 @@ impl State {
 }
 
 /// Trim unchanged text around a replacement, preserving UTF-8 and CRLF boundaries.
-fn formatting_edits(source: &str, formatted: &str) -> Vec<lsp::TextEdit> {
+fn formatting_edits(source: &str, formatted: &str) -> Vec<lsp_types::TextEdit> {
     if source == formatted {
         return Vec::new();
     }
@@ -544,7 +547,7 @@ fn formatting_edits(source: &str, formatted: &str) -> Vec<lsp::TextEdit> {
         end += 1;
         new_end += 1;
     }
-    vec![lsp::TextEdit {
+    vec![lsp_types::TextEdit {
         range: Text::new(source).range(resin_common::source::Span { start, end }),
         new_text: formatted[start..new_end].into(),
     }]

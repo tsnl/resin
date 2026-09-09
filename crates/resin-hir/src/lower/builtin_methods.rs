@@ -7,7 +7,7 @@ use crate::lower::namespaces::{FunctionBody, FunctionDecl};
 
 use std::sync::Arc;
 
-use crate::types::{Intrinsic, Ty};
+use resin_common::types::{Intrinsic, Ty};
 
 pub(super) fn register(typer: &mut Context) {
     typer.register_method_definitions(definitions);

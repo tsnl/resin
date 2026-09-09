@@ -11,7 +11,6 @@ use std::{
 
 use ash::vk::Handle;
 use ash::{Entry, Instance, khr, vk};
-use glfw_sys as sys;
 
 use crate::{ResinStatus, gpu::vk_status};
 use glfw::Glfw;
@@ -22,7 +21,7 @@ pub struct ResinWindow {
 
 pub(crate) struct NativeWindow {
     glfw: Rc<Glfw>,
-    handle: *mut sys::GLFWwindow,
+    handle: *mut glfw_sys::GLFWwindow,
     attached: Cell<bool>,
     input: RefCell<input::Input>,
 }
@@ -43,9 +42,9 @@ impl ResinWindow {
         }
         let glfw = unsafe { Glfw::acquire()? };
         let handle = unsafe {
-            sys::glfwDefaultWindowHints();
-            sys::glfwWindowHint(sys::GLFW_CLIENT_API, sys::GLFW_NO_API);
-            sys::glfwCreateWindow(
+            glfw_sys::glfwDefaultWindowHints();
+            glfw_sys::glfwWindowHint(glfw_sys::GLFW_CLIENT_API, glfw_sys::GLFW_NO_API);
+            glfw_sys::glfwCreateWindow(
                 width as i32,
                 height as i32,
                 title.as_ptr(),
@@ -66,25 +65,25 @@ impl ResinWindow {
         // The Rc allocation stays at a stable address until after GLFW destroys
         // the native window, including when a GPU retains it.
         unsafe {
-            sys::glfwSetWindowUserPointer(handle, Rc::as_ptr(&native).cast_mut().cast());
-            sys::glfwSetKeyCallback(handle, Some(key_callback));
-            sys::glfwSetMouseButtonCallback(handle, Some(mouse_button_callback));
-            sys::glfwSetScrollCallback(handle, Some(scroll_callback));
+            glfw_sys::glfwSetWindowUserPointer(handle, Rc::as_ptr(&native).cast_mut().cast());
+            glfw_sys::glfwSetKeyCallback(handle, Some(key_callback));
+            glfw_sys::glfwSetMouseButtonCallback(handle, Some(mouse_button_callback));
+            glfw_sys::glfwSetScrollCallback(handle, Some(scroll_callback));
         }
         Ok(Self { native })
     }
 
     pub fn poll_events(&self) {
-        unsafe { sys::glfwPollEvents() };
+        unsafe { glfw_sys::glfwPollEvents() };
         self.native.input.borrow_mut().commit();
     }
 
     pub fn should_close(&self) -> bool {
-        unsafe { sys::glfwWindowShouldClose(self.native.handle) != sys::GLFW_FALSE }
+        unsafe { glfw_sys::glfwWindowShouldClose(self.native.handle) != glfw_sys::GLFW_FALSE }
     }
 
     pub fn set_should_close(&self, close: bool) {
-        unsafe { sys::glfwSetWindowShouldClose(self.native.handle, i32::from(close)) };
+        unsafe { glfw_sys::glfwSetWindowShouldClose(self.native.handle, i32::from(close)) };
     }
 
     pub fn framebuffer_size(&self) -> (u32, u32) {
@@ -95,7 +94,7 @@ impl ResinWindow {
         if !valid_size(width, height) {
             return Err(ResinStatus::InvalidArgument);
         }
-        unsafe { sys::glfwSetWindowSize(self.native.handle, width as i32, height as i32) };
+        unsafe { glfw_sys::glfwSetWindowSize(self.native.handle, width as i32, height as i32) };
         Ok(())
     }
 
@@ -113,7 +112,7 @@ impl ResinWindow {
 
     pub fn cursor_position(&self) -> (f64, f64) {
         let (mut x, mut y) = (0.0, 0.0);
-        unsafe { sys::glfwGetCursorPos(self.native.handle, &mut x, &mut y) };
+        unsafe { glfw_sys::glfwGetCursorPos(self.native.handle, &mut x, &mut y) };
         (x, y)
     }
 
@@ -122,18 +121,21 @@ impl ResinWindow {
     }
 
     pub fn focused(&self) -> bool {
-        unsafe { sys::glfwGetWindowAttrib(self.native.handle, sys::GLFW_FOCUSED) == sys::GLFW_TRUE }
+        unsafe {
+            glfw_sys::glfwGetWindowAttrib(self.native.handle, glfw_sys::GLFW_FOCUSED)
+                == glfw_sys::GLFW_TRUE
+        }
     }
 
     pub fn capture_cursor(&self, capture: bool) {
         unsafe {
-            sys::glfwSetInputMode(
+            glfw_sys::glfwSetInputMode(
                 self.native.handle,
-                sys::GLFW_CURSOR,
+                glfw_sys::GLFW_CURSOR,
                 if capture {
-                    sys::GLFW_CURSOR_DISABLED
+                    glfw_sys::GLFW_CURSOR_DISABLED
                 } else {
-                    sys::GLFW_CURSOR_NORMAL
+                    glfw_sys::GLFW_CURSOR_NORMAL
                 },
             );
         }
@@ -141,7 +143,7 @@ impl ResinWindow {
 
     pub(crate) fn extensions(&self) -> Result<Vec<*const c_char>, ResinStatus> {
         let mut count = 0;
-        let names = unsafe { sys::glfwGetRequiredInstanceExtensions(&mut count) };
+        let names = unsafe { glfw_sys::glfwGetRequiredInstanceExtensions(&mut count) };
         if names.is_null() || count == 0 {
             self.native
                 .glfw
@@ -173,8 +175,8 @@ impl ResinWindow {
         }
         let mut handle = ptr::null_mut();
         let result = unsafe {
-            sys::glfwCreateWindowSurface(
-                instance.handle().as_raw() as sys::VkInstance,
+            glfw_sys::glfwCreateWindowSurface(
+                instance.handle().as_raw() as glfw_sys::VkInstance,
                 self.native.handle,
                 ptr::null(),
                 &mut handle,
@@ -196,14 +198,14 @@ impl ResinWindow {
 impl NativeWindow {
     pub fn framebuffer_size(&self) -> (u32, u32) {
         let (mut width, mut height) = (0, 0);
-        unsafe { sys::glfwGetFramebufferSize(self.handle, &mut width, &mut height) };
+        unsafe { glfw_sys::glfwGetFramebufferSize(self.handle, &mut width, &mut height) };
         (width.max(0) as u32, height.max(0) as u32)
     }
 }
 
 impl Drop for NativeWindow {
     fn drop(&mut self) {
-        unsafe { sys::glfwDestroyWindow(self.handle) };
+        unsafe { glfw_sys::glfwDestroyWindow(self.handle) };
     }
 }
 
@@ -219,27 +221,27 @@ fn valid_size(width: u32, height: u32) -> bool {
 }
 
 unsafe extern "C" fn key_callback(
-    window: *mut sys::GLFWwindow,
+    window: *mut glfw_sys::GLFWwindow,
     key: i32,
     _scancode: i32,
     action: i32,
     _mods: i32,
 ) {
-    let native = unsafe { &*sys::glfwGetWindowUserPointer(window).cast::<NativeWindow>() };
+    let native = unsafe { &*glfw_sys::glfwGetWindowUserPointer(window).cast::<NativeWindow>() };
     native.input.borrow_mut().key(key, action);
 }
 
 unsafe extern "C" fn mouse_button_callback(
-    window: *mut sys::GLFWwindow,
+    window: *mut glfw_sys::GLFWwindow,
     button: i32,
     action: i32,
     _mods: i32,
 ) {
-    let native = unsafe { &*sys::glfwGetWindowUserPointer(window).cast::<NativeWindow>() };
+    let native = unsafe { &*glfw_sys::glfwGetWindowUserPointer(window).cast::<NativeWindow>() };
     native.input.borrow_mut().mouse_button(button, action);
 }
 
-unsafe extern "C" fn scroll_callback(window: *mut sys::GLFWwindow, x: f64, y: f64) {
-    let native = unsafe { &*sys::glfwGetWindowUserPointer(window).cast::<NativeWindow>() };
+unsafe extern "C" fn scroll_callback(window: *mut glfw_sys::GLFWwindow, x: f64, y: f64) {
+    let native = unsafe { &*glfw_sys::glfwGetWindowUserPointer(window).cast::<NativeWindow>() };
     native.input.borrow_mut().scroll(x, y);
 }

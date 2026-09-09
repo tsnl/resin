@@ -1,5 +1,5 @@
 use super::scope::{ContextView, DeclarationId, Scopes, Symbol};
-use crate::types::FunctionId;
+use resin_common::types::FunctionId;
 use std::collections::HashMap;
 
 pub(super) struct Environment {

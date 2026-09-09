@@ -1,17 +1,16 @@
 #[path = "support/toolchain.rs"]
-mod config;
+mod toolchain;
 use resin_common::TempDir;
 use std::{ffi::OsString, process::Command};
 use support::pipeline;
 
-use resin_codegen as codegen;
 use resin_lir::{Instr, Ty};
 
 mod support;
 use support::module;
 
 fn run(source: &str) -> std::process::Output {
-    run_c(&codegen::emit_c(&module(source), "main").unwrap())
+    run_c(&resin_codegen::emit_c(&module(source), "main").unwrap())
 }
 
 fn run_c(source: &str) -> std::process::Output {
@@ -21,7 +20,7 @@ fn run_c(source: &str) -> std::process::Output {
         .join(format!("program{}", std::env::consts::EXE_SUFFIX));
     let cc = std::env::var_os("CC")
         .unwrap_or_else(|| OsString::from(resin_platform_toolchain::DEFAULT_C_COMPILER));
-    config::c(&cc)
+    toolchain::c(&cc)
         .compile_c(source, &executable)
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
     Command::new(executable).output().unwrap()
@@ -98,7 +97,7 @@ fn string_storage_is_terminated_without_changing_its_logical_length() {
     for local in m.functions[0].locals.iter().skip(1) {
         assert_eq!(local.ty, Ty::byte_span());
     }
-    let c = codegen::emit_c(&m, "main").unwrap();
+    let c = resin_codegen::emit_c(&m, "main").unwrap();
     assert!(c.contains("static uint8_t r_literal_"), "{c}");
     prints(
         r#"export { main };
@@ -280,7 +279,7 @@ fn shader_print_has_a_host_only_diagnostic() {
     let m = module(
         r#"export { kernel }; def kernel (invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); print(fmt("{0}", (i,))); output.* := i; };"#,
     );
-    let error = codegen::emit_glsl(&m, "kernel", codegen::Stage::Compute).unwrap_err();
+    let error = resin_codegen::emit_glsl(&m, "kernel", resin_codegen::Stage::Compute).unwrap_err();
     assert!(
         error
             .to_string()
@@ -290,7 +289,7 @@ fn shader_print_has_a_host_only_diagnostic() {
 
 #[test]
 fn generated_c_uses_the_shared_runtime_header() {
-    let source = codegen::emit_c(
+    let source = resin_codegen::emit_c(
         &module(r#"export { main }; def main() -> () = { print("hello"); };"#),
         "main",
     )

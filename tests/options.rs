@@ -1,12 +1,9 @@
 #[path = "support/toolchain.rs"]
-mod config;
+mod toolchain;
 use support::pipeline;
 mod support;
 
-use resin_codegen as codegen;
 use resin_common::TempDir;
-use resin_lir as lir;
-use resin_platform_toolchain::{self as toolchain};
 use std::{
     ffi::OsString,
     process::{Command, Output},
@@ -14,14 +11,14 @@ use std::{
 
 fn run(source: &str) -> Output {
     let module = support::module(&format!("export {{ main }}; {source}"));
-    let source = codegen::emit_c(&module, "main").unwrap();
+    let source = resin_codegen::emit_c(&module, "main").unwrap();
     let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let executable = temp
         .path()
         .join(format!("option{}", std::env::consts::EXE_SUFFIX));
-    let cc =
-        std::env::var_os("CC").unwrap_or_else(|| OsString::from(toolchain::DEFAULT_C_COMPILER));
-    config::c(&cc).compile_c(&source, &executable).unwrap();
+    let cc = std::env::var_os("CC")
+        .unwrap_or_else(|| OsString::from(resin_platform_toolchain::DEFAULT_C_COMPILER));
+    toolchain::c(&cc).compile_c(&source, &executable).unwrap();
     Command::new(executable).output().unwrap()
 }
 
@@ -90,7 +87,7 @@ fn none_elimination_preserves_all_other_union_members() {
     );
     assert_eq!(
         module.functions[0].result,
-        lir::Ty::union_of([lir::Ty::None, lir::Ty::Int32])
+        resin_lir::Ty::union_of([resin_lir::Ty::None, resin_lir::Ty::Int32])
     );
 }
 

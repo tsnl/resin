@@ -1,7 +1,7 @@
 //! Emit blocks and branches for source-level control-flow expressions.
 
-use crate::hir::{Statement, Term};
 use crate::{Instr, Terminator, Ty, Value};
+use resin_hir::{Statement, Term};
 
 use super::{GenerateError, Generator};
 

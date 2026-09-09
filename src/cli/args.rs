@@ -1,10 +1,8 @@
 //! CLI syntax and conversion into an explicit execution mode.
 use super::{Environment, Result, source};
-use crate::{
-    compiler::{Options, Request},
-    toolchain::CProfile,
-};
 use clap::CommandFactory;
+use resin_compiler::{Options, Request};
+use resin_platform_toolchain::CProfile;
 use std::{ffi::OsString, path::PathBuf};
 
 pub struct Invocation {
@@ -135,7 +133,7 @@ impl Cli {
         })
     }
 
-    fn input(&self, environment: &Environment) -> Result<crate::compiler::Input> {
+    fn input(&self, environment: &Environment) -> Result<resin_compiler::Input> {
         let [path] = self.paths.as_slice() else {
             Self::command().error(clap::error::ErrorKind::WrongNumberOfValues,
                 "running or compiling requires exactly one FILE[:ENTRY]; use --format for multiple paths").exit();
@@ -151,7 +149,7 @@ impl Cli {
 }
 
 impl CompileOptions {
-    fn request(self, input: crate::compiler::Input, environment: &Environment) -> Result<Request> {
+    fn request(self, input: resin_compiler::Input, environment: &Environment) -> Result<Request> {
         let destination = self
             .destination
             .map(|path| environment.directory.join(path));

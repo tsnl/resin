@@ -9,14 +9,6 @@
 //! use resin_compiler::{loading, session, compilation};
 //! ```
 
-use resin_ast as ast;
-use resin_codegen as codegen;
-use resin_common::{diagnostic, source as common_source, types};
-use resin_cst as cst;
-use resin_hir as hir;
-use resin_lir as lir;
-use resin_lir_verifier as lir_verifier;
-use resin_platform_toolchain as toolchain;
 use std::{
     collections::{BTreeMap, BTreeSet},
     io,
@@ -48,8 +40,8 @@ pub struct Input {
 
 /// Explicit build settings; tool resolution happens before compilation.
 pub struct Options {
-    pub profile: toolchain::CProfile,
-    pub tools: toolchain::Toolchain,
+    pub profile: resin_platform_toolchain::CProfile,
+    pub tools: resin_platform_toolchain::Toolchain,
 }
 
 /// A validated request, including optional executable publication.
@@ -88,7 +80,10 @@ impl Session {
         }
     }
     /// Analyze and build; the returned executable retains its cache lock through use.
-    pub fn compile(&mut self, request: &Request) -> Result<toolchain::Executable, Error> {
+    pub fn compile(
+        &mut self,
+        request: &Request,
+    ) -> Result<resin_platform_toolchain::Executable, Error> {
         let compilation = self.analyze(&request.input.path)?;
         build::generate(request, compilation.data.verified()?)
     }
@@ -159,16 +154,16 @@ impl Compilation {
     pub fn sources(&self) -> impl Iterator<Item = (&Path, &str)> {
         self.data.sources()
     }
-    pub fn program(&self) -> Result<&ast::Program, SourceError> {
+    pub fn program(&self) -> Result<&resin_ast::Program, SourceError> {
         self.data.program()
     }
-    pub fn hir(&self) -> Result<&hir::Module, SourceError> {
+    pub fn hir(&self) -> Result<&resin_hir::Module, SourceError> {
         self.data.hir()
     }
-    pub fn module(&self) -> Result<&lir::Module, SourceError> {
+    pub fn module(&self) -> Result<&resin_lir::Module, SourceError> {
         self.data.module()
     }
-    pub fn recovered_file(&self, path: &Path) -> Option<&ast::SourceFile> {
+    pub fn recovered_file(&self, path: &Path) -> Option<&resin_ast::SourceFile> {
         self.data.recovered_file(path)
     }
     pub fn definition(&self, path: &Path, offset: usize) -> Option<SourceLocation> {

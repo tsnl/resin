@@ -1,7 +1,7 @@
 use std::fmt;
 
-use crate::lir::{BlockId, FunctionId, TypeId};
-use crate::types::{TypeError, TypeErrorKind};
+use resin_common::types::{TypeError, TypeErrorKind};
+use resin_lir::{BlockId, FunctionId, TypeId};
 
 use crate::{VerifyError, VerifyErrorKind, VerifyLocation};
 

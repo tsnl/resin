@@ -1,7 +1,7 @@
 use super::{GenerateError, GenerateErrorKind, scope::Scopes};
-use crate::ast::{SourceFile, StmtKind, Type};
 use crate::lower::context::Context;
-use crate::types::Ty;
+use resin_ast::{SourceFile, StmtKind, Type};
+use resin_common::types::Ty;
 
 impl Scopes {
     pub(super) fn prepare(

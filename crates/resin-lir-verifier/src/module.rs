@@ -1,11 +1,11 @@
 //! Validate module-wide identities before walking instruction graphs.
-use crate::lir::{FunctionId, Module, Ty, TypeId};
-use crate::types::{TyperContext, shader};
 use crate::{
     VerifyError, VerifyErrorKind,
     error::Location,
     rules::{check_definitions, check_value},
 };
+use resin_common::types::{TyperContext, shader};
+use resin_lir::{FunctionId, Module, Ty, TypeId};
 
 pub(super) fn check(module: &Module) -> Result<(), VerifyError> {
     check_entries(module)?;

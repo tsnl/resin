@@ -1,7 +1,7 @@
 //! Publish checked declarations, then elaborate bodies against their stable identities.
 use super::{GenerateError, GenerateErrorKind, Generator, check::CheckedFile, functions, typed};
-use crate::ast::{Ident, SourceFile, StmtKind};
-use crate::types::{FunctionId, shader};
+use resin_ast::{Ident, SourceFile, StmtKind};
+use resin_common::types::{FunctionId, shader};
 use std::collections::BTreeSet;
 
 impl Generator {

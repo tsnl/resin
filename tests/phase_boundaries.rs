@@ -1,19 +1,13 @@
 //! Exercise public phase APIs without retaining construction state between them.
-use resin_ast as ast;
-use resin_codegen as codegen;
 use resin_common::types::Ty;
-use resin_cst as cst;
-use resin_hir as hir;
-use resin_lir as lir;
-use resin_lir_verifier as lir_verifier;
 
-fn hir(source: &str) -> hir::Module {
-    let syntax = cst::Document::reparse(source.to_owned(), None);
-    let file = ast::generate(&syntax).unwrap();
-    hir::generate(&file).unwrap()
+fn hir(source: &str) -> resin_hir::Module {
+    let syntax = resin_cst::Document::reparse(source.to_owned(), None);
+    let file = resin_ast::generate(&syntax).unwrap();
+    resin_hir::generate(&file).unwrap()
 }
 
-fn function<'a>(module: &'a hir::Module, name: &str) -> &'a hir::Function {
+fn function<'a>(module: &'a resin_hir::Module, name: &str) -> &'a resin_hir::Function {
     module
         .functions
         .iter()
@@ -21,8 +15,8 @@ fn function<'a>(module: &'a hir::Module, name: &str) -> &'a hir::Function {
         .unwrap()
 }
 
-fn tail(function: &hir::Function) -> &hir::Term {
-    let hir::TermKind::Block { tail, .. } = &function.body.as_ref().unwrap().kind else {
+fn tail(function: &resin_hir::Function) -> &resin_hir::Term {
+    let resin_hir::TermKind::Block { tail, .. } = &function.body.as_ref().unwrap().kind else {
         panic!("block")
     };
     tail
@@ -38,28 +32,28 @@ fn hir_resolves_calls_short_circuiting_and_layout_before_lir() {
         def measure() -> ulong = { size_of(int) };
     "#);
     let read = function(&module, "read");
-    let hir::TermKind::Call { func, arg } = &tail(read).kind else {
+    let resin_hir::TermKind::Call { func, arg } = &tail(read).kind else {
         panic!("ordinary call")
     };
-    let hir::TermKind::Function { function: id } = func.kind else {
+    let resin_hir::TermKind::Function { function: id } = func.kind else {
         panic!("resolved function")
     };
     assert_eq!(module.functions[id.index()].name.as_ref(), "Item.read");
-    let hir::TermKind::Pack(args) = &arg.kind else {
+    let resin_hir::TermKind::Pack(args) = &arg.kind else {
         panic!("explicit arguments")
     };
     assert!(args.receiver.is_some());
     assert!(matches!(
         tail(function(&module, "both")).kind,
-        hir::TermKind::If { .. }
+        resin_hir::TermKind::If { .. }
     ));
     assert!(matches!(
         tail(function(&module, "measure")).kind,
-        hir::TermKind::Constant(_)
+        resin_hir::TermKind::Constant(_)
     ));
-    let printed = hir::format_module(&module);
+    let printed = resin_hir::format_module(&module);
     assert!(printed.contains("Item.read") && printed.contains("(if") && printed.contains("(pack"));
-    lir_verifier::verify(&lir::generate(&module).unwrap()).unwrap();
+    resin_lir_verifier::verify(&resin_lir::generate(&module).unwrap()).unwrap();
 }
 
 #[test]
@@ -76,13 +70,13 @@ fn lir_lowering_needs_only_the_resolved_tree() {
     "#);
     assert_eq!(function(&module, "main").signature.result.ty, Ty::Int32);
     // Source text and AST have already been dropped. Origins are optional metadata.
-    module.origins = hir::SourceMap::default();
-    let first = lir::generate(&module).unwrap();
-    let second = lir::generate(&module).unwrap();
+    module.origins = resin_hir::SourceMap::default();
+    let first = resin_lir::generate(&module).unwrap();
+    let second = resin_lir::generate(&module).unwrap();
     assert_eq!(first, second);
     drop(module);
-    let checked = lir_verifier::VerifiedModule::new(first).unwrap();
-    assert!(codegen::generate_c(checked.view(), "main", &[]).is_ok());
+    let checked = resin_lir_verifier::VerifiedModule::new(first).unwrap();
+    assert!(resin_codegen::generate_c(checked.view(), "main", &[]).is_ok());
 }
 
 #[test]
@@ -92,23 +86,27 @@ fn target_trees_outlive_lir_and_its_verification_certificate() {
         @compute_shader def kernel(i: ulong, output: Ptr<ulong>) = { output.* := i; };
         def main() -> int = { 42 };
     "#);
-    let checked = lir_verifier::VerifiedModule::new(lir::generate(&module).unwrap()).unwrap();
+    let checked =
+        resin_lir_verifier::VerifiedModule::new(resin_lir::generate(&module).unwrap()).unwrap();
     let kernel = checked.view().module().entries["kernel"];
-    let c = codegen::generate_c(checked.view(), "main", &[]).unwrap();
-    let glsl = codegen::generate_glsl(checked.view(), kernel, codegen::Stage::Compute).unwrap();
+    let c = resin_codegen::generate_c(checked.view(), "main", &[]).unwrap();
+    let glsl = resin_codegen::generate_glsl(checked.view(), kernel, resin_codegen::Stage::Compute)
+        .unwrap();
     drop(checked);
     drop(module);
-    assert!(codegen::print_c(&c).contains("int main("));
-    assert!(codegen::print_glsl(&glsl).contains("void main()"));
+    assert!(resin_codegen::print_c(&c).contains("int main("));
+    assert!(resin_codegen::print_glsl(&glsl).contains("void main()"));
 }
 
 #[test]
 fn mutating_lir_discards_the_certificate_and_requires_reverification() {
-    let checked =
-        lir_verifier::VerifiedModule::new(lir::generate(&hir("def f() = {}; ")).unwrap()).unwrap();
+    let checked = resin_lir_verifier::VerifiedModule::new(
+        resin_lir::generate(&hir("def f() = {}; ")).unwrap(),
+    )
+    .unwrap();
     let mut module = checked.into_module();
     module.functions[0].locals.clear();
-    assert!(lir_verifier::VerifiedModule::new(module).is_err());
+    assert!(resin_lir_verifier::VerifiedModule::new(module).is_err());
 }
 
 #[test]

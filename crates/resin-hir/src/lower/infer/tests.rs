@@ -1,18 +1,18 @@
 use crate::lower::context::Context;
 use crate::lower::infer;
-use crate::types::RecordField;
-use crate::types::Ty;
-use crate::types::check::*;
+use resin_common::types::RecordField;
+use resin_common::types::Ty;
+use resin_common::types::check::*;
 
 fn infer_relation(
     typer: &mut Context,
     relation: impl FnOnce(infer::types::Type) -> infer::constraints::Constraint,
-) -> Result<Ty, crate::diagnostic::GenerateError> {
+) -> Result<Ty, resin_common::diagnostic::GenerateError> {
     let mut inference = infer::Inference::new(typer);
     let (rule, out) = inference.expression();
     inference.constrain(
         rule,
-        (crate::ast::Span { start: 0, end: 0 }, relation(out.clone())),
+        (resin_ast::Span { start: 0, end: 0 }, relation(out.clone())),
     );
     if let Some(error) = inference
         .solve(std::slice::from_ref(&out))
@@ -23,7 +23,7 @@ fn infer_relation(
     }
     inference
         .solver
-        .require(&out, crate::ast::Span { start: 0, end: 0 })
+        .require(&out, resin_ast::Span { start: 0, end: 0 })
 }
 
 fn record(ty: Ty) -> Ty {
@@ -39,13 +39,14 @@ fn record(ty: Ty) -> Ty {
 fn empty_arrays_need_an_injected_element_type() {
     let compile = |source: &str| {
         crate::generate(
-            &crate::ast::generate(&crate::cst::Document::reparse(source.to_string(), None))
-                .unwrap(),
+            &resin_ast::generate(&resin_cst::Document::reparse(source.to_string(), None)).unwrap(),
         )
     };
     assert_eq!(
         compile("def main() = { []; };").unwrap_err().kind,
-        crate::diagnostic::GenerateErrorKind::Type(TypeErrorKind::EmptyArrayNeedsElementType)
+        resin_common::diagnostic::GenerateErrorKind::Type(
+            TypeErrorKind::EmptyArrayNeedsElementType
+        )
     );
     let mut typer = Context::new();
     let empty = Ty::Array {
@@ -125,8 +126,10 @@ fn convert_does_not_unwrap_function_arguments() {
             meters.into(),
             out
         )),
-        Err(crate::diagnostic::GenerateError {
-            kind: crate::diagnostic::GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. }),
+        Err(resin_common::diagnostic::GenerateError {
+            kind: resin_common::diagnostic::GenerateErrorKind::Type(
+                TypeErrorKind::TypeMismatch { .. }
+            ),
             ..
         })
     ));

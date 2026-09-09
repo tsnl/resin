@@ -1,11 +1,11 @@
 //! Declare all signatures, check bodies, solve dependency groups, then resolve the tree.
 use super::*;
-use crate::ast::{SourceFile, StmtKind};
-use crate::diagnostic::GenerateErrorKind;
 use crate::lower::infer::{Equation, solver::Solver, types::Head};
+use resin_ast::{SourceFile, StmtKind};
+use resin_common::diagnostic::GenerateErrorKind;
 
 type Signatures = BTreeMap<Arc<str>, Signature>;
-type SourceBodies<'a> = Vec<(&'a Ident, &'a ast::Term)>;
+type SourceBodies<'a> = Vec<(&'a Ident, &'a resin_ast::Term)>;
 
 struct Body {
     name: Arc<str>,
@@ -53,7 +53,7 @@ impl Checker<'_> {
         &mut self,
         stmt: &'s StmtKind,
         methods: &mut BTreeMap<Arc<str>, DeclarationId>,
-    ) -> Option<(&'s Ident, Option<&'s ast::Term>, Signature)> {
+    ) -> Option<(&'s Ident, Option<&'s resin_ast::Term>, Signature)> {
         let (name, params, result, body) = match stmt {
             StmtKind::Function {
                 name,
@@ -119,7 +119,7 @@ impl Checker<'_> {
             .collect()
     }
 
-    fn function_body(&mut self, source: &ast::Term, signature: &mut Signature) -> Term {
+    fn function_body(&mut self, source: &resin_ast::Term, signature: &mut Signature) -> Term {
         let errors_before = self.errors.len();
         self.scopes.push_at(source.span);
         self.result = signature.result.ty.clone();
@@ -201,8 +201,8 @@ impl Checker<'_> {
                 if matches!(self.typing.solver.head(ty), Type::Node(Head::Array(0), _)) {
                     GenerateError::typing(
                         span,
-                        crate::types::TypeError {
-                            kind: crate::types::TypeErrorKind::EmptyArrayNeedsElementType,
+                        resin_common::types::TypeError {
+                            kind: resin_common::types::TypeErrorKind::EmptyArrayNeedsElementType,
                         },
                     )
                 } else {

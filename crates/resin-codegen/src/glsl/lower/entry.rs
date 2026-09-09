@@ -1,4 +1,4 @@
-use crate::types::{Ty, shader::Interface};
+use resin_common::types::{Ty, shader::Interface};
 
 use super::types::Types;
 

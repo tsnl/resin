@@ -1,9 +1,9 @@
 #![cfg(feature = "gpu")]
 #[path = "support/toolchain.rs"]
-mod config;
+mod toolchain;
 use support::pipeline;
 
-use resin_codegen::{self as codegen, Stage};
+use resin_codegen::Stage;
 use resin_common::TempDir;
 use resin_runtime::{
     ResinGpu, ResinMemory, ResinStatus, image_read_png, image_write_png, testing::lock_gpu,
@@ -73,10 +73,10 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
         .join(format!("host-layout{}", std::env::consts::EXE_SUFFIX));
     let cc = std::env::var_os("CC")
         .unwrap_or_else(|| resin_platform_toolchain::DEFAULT_C_COMPILER.into());
-    config::c(&cc).compile_c(&c, &executable).unwrap();
+    toolchain::c(&cc).compile_c(&c, &executable).unwrap();
     assert!(Command::new(executable).status().unwrap().success());
-    let glsl = codegen::emit_glsl(&module, "kernel", Stage::Compute).unwrap();
-    let spv = config::glsl(&compiler)
+    let glsl = resin_codegen::emit_glsl(&module, "kernel", Stage::Compute).unwrap();
+    let spv = toolchain::glsl(&compiler)
         .compile_glsl(&glsl, Stage::Compute)
         .unwrap();
     #[repr(C)]
@@ -170,8 +170,10 @@ fn particles_compute_then_render_from_the_same_buffer() {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/particles.resin");
     let module = pipeline::generate_program(&pipeline::load(&source).unwrap()).unwrap();
     let compile = |stage: Stage| {
-        let glsl = codegen::emit_glsl(&module, stage.entry(), stage).unwrap();
-        config::glsl(&compiler).compile_glsl(&glsl, stage).unwrap()
+        let glsl = resin_codegen::emit_glsl(&module, stage.entry(), stage).unwrap();
+        toolchain::glsl(&compiler)
+            .compile_glsl(&glsl, stage)
+            .unwrap()
     };
     let compute = compile(Stage::Compute);
     let vertex = compile(Stage::Vertex);
@@ -360,8 +362,10 @@ fn fragment_shaders_read_typed_root_parameters() {
     );
     let module = pipeline::generate_program(&ast).unwrap();
     let compile = |stage: Stage| {
-        let glsl = codegen::emit_glsl(&module, stage.entry(), stage).unwrap();
-        config::glsl(&compiler).compile_glsl(&glsl, stage).unwrap()
+        let glsl = resin_codegen::emit_glsl(&module, stage.entry(), stage).unwrap();
+        toolchain::glsl(&compiler)
+            .compile_glsl(&glsl, stage)
+            .unwrap()
     };
     let vertex = compile(Stage::Vertex);
     let fragment = compile(Stage::Fragment);
@@ -514,7 +518,7 @@ fn compute_values(source: &str, expected: fn(u32) -> u32) {
     let Some(mut gpu) = gpu() else { return };
     let module = support::module(source);
     let glsl = resin_codegen::emit_glsl(&module, "kernel", resin_codegen::Stage::Compute).unwrap();
-    let spv = config::glsl(&compiler)
+    let spv = toolchain::glsl(&compiler)
         .compile_glsl(&glsl, resin_codegen::Stage::Compute)
         .unwrap();
     #[repr(C)]
@@ -716,8 +720,8 @@ fn execute_interaction(source: &str, expected: [u32; 2]) {
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
     let m = support::module(source);
-    let glsl = codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
-    let spv = config::glsl(&compiler)
+    let glsl = resin_codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
+    let spv = toolchain::glsl(&compiler)
         .compile_glsl(&glsl, Stage::Compute)
         .unwrap();
     // Each fixture's root fits two uints. Read only after synchronous submission.

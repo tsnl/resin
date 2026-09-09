@@ -1,5 +1,8 @@
 use super::Error;
-use crate::lir::{Module, Ty};
-pub(crate) fn layout(module: &Module, ty: &Ty) -> Result<crate::types::layout::Layout, Error> {
-    crate::types::layout::layout(&module.types, ty).map_err(|error| Error(error.to_string()))
+use resin_lir::{Module, Ty};
+pub(crate) fn layout(
+    module: &Module,
+    ty: &Ty,
+) -> Result<resin_common::types::layout::Layout, Error> {
+    resin_common::types::layout::layout(&module.types, ty).map_err(|error| Error(error.to_string()))
 }

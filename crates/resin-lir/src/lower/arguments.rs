@@ -1,7 +1,7 @@
 use super::{GenerateError, Generator};
-use crate::hir::ReceiverConversion;
-use crate::hir::Term;
 use crate::{Instr, Ty};
+use resin_hir::ReceiverConversion;
+use resin_hir::Term;
 
 impl Generator {
     pub(super) fn hold_arc_address(&mut self, term: &Term) -> Result<Ty, GenerateError> {

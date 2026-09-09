@@ -1,6 +1,6 @@
 //! Source-only type namespaces layered over the shared concrete type rules.
 use super::namespaces::{FunctionDecl, MethodDefinitions, Namespace};
-use crate::types::{FunctionId, Ty, TypeError, TypeId, TypeTable, TyperContext};
+use resin_common::types::{FunctionId, Ty, TypeError, TypeId, TypeTable, TyperContext};
 use std::{
     collections::BTreeMap,
     ops::{Deref, DerefMut},

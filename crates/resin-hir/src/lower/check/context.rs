@@ -1,7 +1,8 @@
 use super::super::semantic::DefinitionKind;
 use super::{Checker, GenerateError, Result, Type};
 use crate::lower::infer::check_binding_name;
-use crate::{ast::Ident, diagnostic::GenerateErrorKind};
+use resin_ast::Ident;
+use resin_common::diagnostic::GenerateErrorKind;
 impl Checker<'_> {
     pub fn bind(
         &mut self,

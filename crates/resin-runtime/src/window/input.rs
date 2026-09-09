@@ -1,6 +1,5 @@
 //! Per-window button snapshots. Callbacks accumulate transitions until that
 //! window polls, including taps that begin and end within one poll.
-use glfw_sys as sys;
 
 pub(super) const DOWN: u32 = 1;
 const PRESSED: u32 = 2;
@@ -8,16 +7,16 @@ const RELEASED: u32 = 4;
 
 #[derive(Clone)]
 struct Snapshot {
-    keys: [u32; sys::GLFW_KEY_LAST as usize + 1],
-    buttons: [u32; sys::GLFW_MOUSE_BUTTON_LAST as usize + 1],
+    keys: [u32; glfw_sys::GLFW_KEY_LAST as usize + 1],
+    buttons: [u32; glfw_sys::GLFW_MOUSE_BUTTON_LAST as usize + 1],
     scroll: (f64, f64),
 }
 
 impl Default for Snapshot {
     fn default() -> Self {
         Self {
-            keys: [0; sys::GLFW_KEY_LAST as usize + 1],
-            buttons: [0; sys::GLFW_MOUSE_BUTTON_LAST as usize + 1],
+            keys: [0; glfw_sys::GLFW_KEY_LAST as usize + 1],
+            buttons: [0; glfw_sys::GLFW_MOUSE_BUTTON_LAST as usize + 1],
             scroll: (0.0, 0.0),
         }
     }
@@ -87,10 +86,10 @@ impl Input {
 
 fn transition(state: &mut u32, action: i32) {
     match action {
-        sys::GLFW_PRESS => {
+        glfw_sys::GLFW_PRESS => {
             *state |= DOWN | PRESSED;
         }
-        sys::GLFW_RELEASE => {
+        glfw_sys::GLFW_RELEASE => {
             *state = (*state & !DOWN) | RELEASED;
         }
         _ => {} // Repeats do not create another physical press edge.
@@ -104,24 +103,27 @@ mod tests {
     #[test]
     fn short_taps_repeats_and_holds_survive_poll_boundaries() {
         let mut input = Input::default();
-        input.key(sys::GLFW_KEY_A, sys::GLFW_PRESS);
-        input.key(sys::GLFW_KEY_A, sys::GLFW_RELEASE);
-        input.mouse_button(sys::GLFW_MOUSE_BUTTON_LEFT, sys::GLFW_PRESS);
-        assert_eq!(input.key_state(sys::GLFW_KEY_A), 0);
+        input.key(glfw_sys::GLFW_KEY_A, glfw_sys::GLFW_PRESS);
+        input.key(glfw_sys::GLFW_KEY_A, glfw_sys::GLFW_RELEASE);
+        input.mouse_button(glfw_sys::GLFW_MOUSE_BUTTON_LEFT, glfw_sys::GLFW_PRESS);
+        assert_eq!(input.key_state(glfw_sys::GLFW_KEY_A), 0);
         input.commit();
-        assert_eq!(input.key_state(sys::GLFW_KEY_A), PRESSED | RELEASED);
+        assert_eq!(input.key_state(glfw_sys::GLFW_KEY_A), PRESSED | RELEASED);
         assert_eq!(
-            input.mouse_button_state(sys::GLFW_MOUSE_BUTTON_LEFT),
+            input.mouse_button_state(glfw_sys::GLFW_MOUSE_BUTTON_LEFT),
             DOWN | PRESSED
         );
-        input.mouse_button(sys::GLFW_MOUSE_BUTTON_LEFT, sys::GLFW_REPEAT);
+        input.mouse_button(glfw_sys::GLFW_MOUSE_BUTTON_LEFT, glfw_sys::GLFW_REPEAT);
         input.commit();
-        assert_eq!(input.key_state(sys::GLFW_KEY_A), 0);
-        assert_eq!(input.mouse_button_state(sys::GLFW_MOUSE_BUTTON_LEFT), DOWN);
-        input.mouse_button(sys::GLFW_MOUSE_BUTTON_LEFT, sys::GLFW_RELEASE);
+        assert_eq!(input.key_state(glfw_sys::GLFW_KEY_A), 0);
+        assert_eq!(
+            input.mouse_button_state(glfw_sys::GLFW_MOUSE_BUTTON_LEFT),
+            DOWN
+        );
+        input.mouse_button(glfw_sys::GLFW_MOUSE_BUTTON_LEFT, glfw_sys::GLFW_RELEASE);
         input.commit();
         assert_eq!(
-            input.mouse_button_state(sys::GLFW_MOUSE_BUTTON_LEFT),
+            input.mouse_button_state(glfw_sys::GLFW_MOUSE_BUTTON_LEFT),
             RELEASED
         );
     }
@@ -136,8 +138,8 @@ mod tests {
         assert_eq!(input.scroll_delta(), (-0.5, 1.5));
         input.commit();
         assert_eq!(input.scroll_delta(), (0.0, 0.0));
-        input.key(-1, sys::GLFW_PRESS);
-        input.mouse_button(8, sys::GLFW_PRESS);
+        input.key(-1, glfw_sys::GLFW_PRESS);
+        input.mouse_button(8, glfw_sys::GLFW_PRESS);
         input.commit();
         assert_eq!(input.key_state(-1), 0);
         assert_eq!(input.key_state(i32::MAX), 0);

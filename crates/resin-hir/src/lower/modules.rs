@@ -1,13 +1,11 @@
 use crate::lower::namespaces::{SourceModuleId, SourceOrigin};
-use crate::{
-    lower::semantic::SemanticData,
-    source::{SourceLocation, SourceNote},
-};
+use crate::lower::semantic::SemanticData;
+use resin_common::source::{SourceLocation, SourceNote};
 use std::{cell::RefCell, rc::Rc};
 use std::{collections::BTreeMap, sync::Arc};
 
-use crate::ast::{Program, SourceError, SourceFile, Span, StmtKind};
-use crate::types::FunctionId;
+use resin_ast::{Program, SourceError, SourceFile, Span, StmtKind};
+use resin_common::types::FunctionId;
 
 use super::{GenerateError, GenerateErrorKind, Generator, Scopes, scope::Symbol};
 
@@ -204,7 +202,7 @@ impl<'a> ProgramBuilder<'a> {
     }
 }
 
-fn declaration_name(stmt: &StmtKind) -> Option<&crate::ast::Ident> {
+fn declaration_name(stmt: &StmtKind) -> Option<&resin_ast::Ident> {
     match stmt {
         StmtKind::ForeignType { name }
         | StmtKind::ForeignFunction { name, .. }

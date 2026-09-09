@@ -1,8 +1,8 @@
 use super::scope::{Initialization, ValueBinding};
 use super::{GenerateError, GenerateErrorKind, Generator};
-use crate::hir::{BindingId, Term};
-use crate::source::Ident;
 use crate::{Instr, Ty};
+use resin_common::source::Ident;
+use resin_hir::{BindingId, Term};
 
 impl Generator {
     pub(super) fn gen_define(

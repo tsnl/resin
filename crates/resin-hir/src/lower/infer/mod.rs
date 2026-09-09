@@ -5,10 +5,8 @@ pub(crate) mod constraints;
 pub(crate) mod solver;
 pub(crate) mod types;
 
-use crate::{
-    ast::{Ident, Span},
-    diagnostic::{GenerateError, GenerateErrorKind},
-};
+use resin_ast::{Ident, Span};
+use resin_common::diagnostic::{GenerateError, GenerateErrorKind};
 use std::sync::Arc;
 type Result<T> = std::result::Result<T, GenerateError>;
 fn error(span: Span, message: impl Into<Arc<str>>) -> GenerateError {

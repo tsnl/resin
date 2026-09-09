@@ -3,13 +3,13 @@ mod pipeline;
 use resin_ast::SourceFile;
 use resin_common::diagnostic::GenerateErrorKind;
 use resin_common::types::TypeErrorKind;
-use resin_lir::{self as lir, Instr, Ty, Value};
+use resin_lir::{Instr, Ty, Value};
 
 fn parse(src: &str) -> Result<SourceFile, resin_ast::AstError> {
     resin_ast::generate(&resin_cst::Document::reparse(src.to_string(), None))
 }
 
-fn compile(src: &str) -> lir::Module {
+fn compile(src: &str) -> resin_lir::Module {
     pipeline::generate(&parse(src).unwrap()).unwrap_or_else(|err| panic!("{src}\n{err}"))
 }
 

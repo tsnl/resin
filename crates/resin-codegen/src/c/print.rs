@@ -1,8 +1,8 @@
 //! C source tree → text. This module does not inspect LIR or Resin types.
-use super::*;
+use crate::{CBlock, CBody, CEdge, CEdgeValue, CExit, CFunction, CModule};
 use std::fmt::Write;
 
-pub fn module(module: &Module) -> String {
+pub fn module(module: &CModule) -> String {
     let mut out = String::new();
     for header in &module.includes {
         writeln!(out, "#include <{header}>").unwrap();
@@ -33,11 +33,11 @@ fn print_data(out: &mut String, data: &[Vec<u32>]) {
     }
 }
 
-fn print_function(out: &mut String, function: &Function) {
+fn print_function(out: &mut String, function: &CFunction) {
     writeln!(out, "{} {{", function.signature).unwrap();
     match &function.body {
-        Body::Inline(body) => out.push_str(body),
-        Body::Blocks {
+        CBody::Inline(body) => out.push_str(body),
+        CBody::Blocks {
             locals,
             entry,
             blocks,
@@ -52,18 +52,18 @@ fn print_function(out: &mut String, function: &Function) {
     out.push_str("}\n");
 }
 
-fn print_block(out: &mut String, block: &Block) {
+fn print_block(out: &mut String, block: &CBlock) {
     writeln!(out, "r_b{}: {{", block.label).unwrap();
     out.push_str(&block.statements);
     print_exit(out, &block.exit);
     out.push_str("}\n");
 }
 
-fn print_exit(out: &mut String, exit: &Exit) {
+fn print_exit(out: &mut String, exit: &CExit) {
     match exit {
-        Exit::Return(value) => writeln!(out, "  return {value};").unwrap(),
-        Exit::Jump(edge) => print_edge(out, edge),
-        Exit::Branch {
+        CExit::Return(value) => writeln!(out, "  return {value};").unwrap(),
+        CExit::Jump(edge) => print_edge(out, edge),
+        CExit::Branch {
             condition,
             then,
             els,
@@ -74,11 +74,11 @@ fn print_exit(out: &mut String, exit: &Exit) {
             print_edge(out, els);
             out.push_str("  }\n");
         }
-        Exit::Unreachable => {}
+        CExit::Unreachable => {}
     }
 }
 
-fn print_edge(out: &mut String, edge: &Edge) {
+fn print_edge(out: &mut String, edge: &CEdge) {
     out.push_str("  {\n");
     for (i, value) in edge.values.iter().enumerate() {
         edge_temporary(out, i, value);
@@ -89,14 +89,14 @@ fn print_edge(out: &mut String, edge: &Edge) {
     writeln!(out, "    goto r_b{};\n  }}", edge.target).unwrap();
 }
 
-fn edge_temporary(out: &mut String, i: usize, value: &EdgeValue) {
+fn edge_temporary(out: &mut String, i: usize, value: &CEdgeValue) {
     writeln!(out, "    {} r_edge{i} = {};", value.ty, value.value).unwrap();
     if let Some(live) = &value.live {
         writeln!(out, "    bool *r_edge{i}_live = {live};").unwrap();
     }
 }
 
-fn edge_assignment(out: &mut String, target: usize, i: usize, value: &EdgeValue) {
+fn edge_assignment(out: &mut String, target: usize, i: usize, value: &CEdgeValue) {
     writeln!(out, "    r_b{target}_{i} = r_edge{i};").unwrap();
     if value.live.is_some() {
         writeln!(out, "    r_b{target}_{i}_live = r_edge{i}_live;").unwrap();

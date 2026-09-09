@@ -1,11 +1,10 @@
 pub mod pipeline;
-use resin_lir as lir;
 
 pub fn parse(source: &str) -> resin_ast::SourceFile {
     resin_ast::generate(&resin_cst::Document::reparse(source.to_string(), None)).unwrap()
 }
 
-pub fn module(source: &str) -> lir::Module {
+pub fn module(source: &str) -> resin_lir::Module {
     pipeline::generate(&parse(source)).unwrap_or_else(|error| panic!("{source}\n{error}"))
 }
 

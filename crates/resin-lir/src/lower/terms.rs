@@ -1,9 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::hir::Term;
-use crate::source::Ident;
-use crate::types::Conv;
 use crate::{Instr, Ty};
+use resin_common::source::Ident;
+use resin_common::types::Conv;
+use resin_hir::Term;
 
 use super::{GenerateError, Generator};
 
@@ -85,9 +85,9 @@ impl Generator {
         &mut self,
         term: &Term,
         arg: &Term,
-        conversion: &crate::types::check::ExplicitConversion,
+        conversion: &resin_common::types::check::ExplicitConversion,
     ) -> Result<Ty, GenerateError> {
-        use crate::types::check::ExplicitConversion::*;
+        use resin_common::types::check::ExplicitConversion::*;
         let from = self.gen_term(arg, None)?;
         let ty = term.ty.clone();
         match conversion {

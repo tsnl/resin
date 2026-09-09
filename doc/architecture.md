@@ -145,34 +145,28 @@ edge copies. They need no LIR, verifier analysis, or source metadata.
 The smallest host pipeline uses just the public phase APIs:
 
 ```rust
-use resin_ast as ast;
-use resin_codegen as codegen;
-use resin_cst as cst;
-use resin_hir as hir;
-use resin_lir as lir;
-use resin_lir_verifier as lir_verifier;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let syntax = cst::Document::reparse(
+    let syntax = resin_cst::Document::reparse(
         "export { main }; def main() -> int = { 42 };".into(), None,
     );
-    let ast = ast::generate(&syntax)?;
-    let hir = hir::generate(&ast)?;
-    let lir = lir::generate(&hir)?;
-    let checked = lir_verifier::VerifiedModule::new(lir)?;
-    let target = codegen::generate_c(checked.view(), "main", &[])?;
-    let source = codegen::print_c(&target);
+    let ast = resin_ast::generate(&syntax)?;
+    let hir = resin_hir::generate(&ast)?;
+    let lir = resin_lir::generate(&hir)?;
+    let checked = resin_lir_verifier::VerifiedModule::new(lir)?;
+    let target = resin_codegen::generate_c(checked.view(), "main", &[])?;
+    let source = resin_codegen::print_c(&target);
     assert!(source.contains("main"));
     Ok(())
 }
 ```
 
 For file imports and unsaved buffers, use `resin_compiler::Session::analyze`.
-An in-memory caller may construct an `ast::Program` in dependency order and call
-`hir::generate_program`. `hir::analyze_program` returns a `CheckedProgram` with
+An in-memory caller may construct an `resin_ast::Program` in dependency order and call
+`resin_hir::generate_program`. `resin_hir::analyze_program` returns a `CheckedProgram` with
 diagnostics and opaque editor analysis even on failure. The `Analysis` query
 methods accept a small `Documents` interface; source scopes remain private.
-`lir::analyze` collects errors across functions; `lir::generate` returns the first.
+`resin_lir::analyze` collects errors across functions; `resin_lir::generate` returns the first.
 Codegen's `emit_c` and `emit_glsl` conveniences verify, lower, and print ordinary LIR.
 
 The driver in [passes.rs](../crates/resin-compiler/src/passes.rs) sequences HIR,

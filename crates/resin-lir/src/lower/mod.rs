@@ -1,10 +1,10 @@
 //! HIR → LIR: choose storage and make evaluation, cleanup, and control flow explicit.
-pub use crate::diagnostic::{GenerateError, GenerateErrorKind};
-use crate::hir::{self, Term};
-use crate::source::Span;
-use crate::types::TyperContext;
 use crate::{BlockId, FunctionId, Instr, LocalId, Module, Terminator, Ty};
 use builder::FunctionBuilder;
+pub use resin_common::diagnostic::{GenerateError, GenerateErrorKind};
+use resin_common::source::Span;
+use resin_common::types::TyperContext;
+use resin_hir::Term;
 use scope::Environment;
 use std::sync::Arc;
 
@@ -22,11 +22,11 @@ mod terms;
 
 use crate::Error;
 
-pub fn generate(source: &hir::Module) -> Result<Module, Error> {
+pub fn generate(source: &resin_hir::Module) -> Result<Module, Error> {
     analyze(source).map_err(|mut errors| errors.remove(0))
 }
 
-pub fn analyze(source: &hir::Module) -> Result<Module, Vec<Error>> {
+pub fn analyze(source: &resin_hir::Module) -> Result<Module, Vec<Error>> {
     let mut generator = Generator::new(source);
     let mut errors = vec![];
     for (index, function) in source.functions.iter().enumerate() {
@@ -56,7 +56,7 @@ struct Generator {
     owned: Vec<Vec<LocalId>>,
 }
 impl Generator {
-    fn new(source: &hir::Module) -> Self {
+    fn new(source: &resin_hir::Module) -> Self {
         let module = Module {
             types: source.types.clone(),
             entries: source.entries.clone(),
@@ -115,7 +115,7 @@ impl Generator {
             let (block, instruction) = self.function().position();
             self.module.origins.instructions.insert(
                 (function, block, instruction),
-                crate::source::SourceLocation {
+                resin_common::source::SourceLocation {
                     path: self.source_path.clone(),
                     span: self.source_span,
                 },

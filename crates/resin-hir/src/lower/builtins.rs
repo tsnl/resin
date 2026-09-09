@@ -1,6 +1,6 @@
 //! Builtin source types lower to ordinary nominal records and shared owners.
 use crate::lower::context::Context;
-use crate::types::{RecordField, Ty};
+use resin_common::types::{RecordField, Ty};
 
 pub(super) fn typer() -> Context {
     let mut typer = Context::new();

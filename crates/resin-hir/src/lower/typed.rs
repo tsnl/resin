@@ -5,10 +5,8 @@ use super::{
     GenerateError,
     scope::{Cursor, DeclarationId},
 };
-use crate::{
-    ast::{Ident, Span},
-    types::Ty,
-};
+use resin_ast::{Ident, Span};
+use resin_common::types::Ty;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]

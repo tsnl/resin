@@ -1,5 +1,6 @@
 use super::types::Types;
-use crate::{Error, lir::Ty};
+use crate::Error;
+use resin_lir::Ty;
 
 pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
     let module = types.module;

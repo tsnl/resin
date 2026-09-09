@@ -40,6 +40,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Keep `common` narrow: source locations, diagnostics, concrete types, layout, and small
   utilities used by multiple phases. Do not move a phase's state there just to break a cycle.
   C and GLSL each have a target language, lowering, and printing inside `codegen`.
+- Use canonical crate and module names; do not rename dependencies or language types
+  for brevity. Prefer a qualified name when two phases use the same type name.
 - Prefer small functions with descriptive names, ideally fewer than ten lines of logic.
   Split by a meaningful operation, not an arbitrary line count. Exhaustive language
   dispatch and simple data definitions may be longer when that keeps the cases together.
@@ -81,7 +83,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `--` separates run arguments from compiler options; execution arguments stay out of build requests.
 - Source files contain declarations only; keep runtime state inside functions and pass it
   explicitly. `FILE:ENTRY` selects an exported entry (default `main`); imports never run code.
-- Keep `src/main.rs` as a wrapper around `resin::main`; argument-to-`Mode` dispatch
+- Keep `src/main.rs` as a wrapper around `resin::cli::main`; argument-to-`Mode` dispatch
   lives in `src/cli/`. Capture process settings through the platform toolchain's
   `Environment`, then choose CLI defaults and the build profile explicitly.
   Construct validated requests with `resin_compiler::Request::new`; `Session::compile`

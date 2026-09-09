@@ -1,8 +1,8 @@
 use crate::lower::context::Context;
 use std::fmt;
 
-use crate::ast::{Ident, Span, Type};
-use crate::types::{Ty, Value};
+use resin_ast::{Ident, Span, Type};
+use resin_common::types::{Ty, Value};
 
 use super::scope::ContextView;
 use super::{GenerateError, GenerateErrorKind};
@@ -25,7 +25,7 @@ impl Evaluator<'_> {
         expected: Option<&Ty>,
     ) -> Result<(Value, Ty), GenerateError> {
         let ty = self.numeric_type(span, text, expected)?;
-        let (text, _) = crate::types::literal::split(text);
+        let (text, _) = resin_common::types::literal::split(text);
         let value = parse_number(text, &ty).map_err(|message| GenerateError {
             span,
             kind: GenerateErrorKind::InvalidLiteral {
@@ -41,7 +41,7 @@ impl Evaluator<'_> {
         text: &str,
         expected: Option<&Ty>,
     ) -> Result<Ty, GenerateError> {
-        if let (_, Some(ty)) = crate::types::literal::split(text) {
+        if let (_, Some(ty)) = resin_common::types::literal::split(text) {
             return Ok(ty);
         }
         if let Some(expected) = expected {
@@ -179,8 +179,8 @@ fn is_hex_literal(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Ident, TypeKind};
     use crate::lower::scope::Scopes;
+    use resin_ast::{Ident, TypeKind};
 
     #[test]
     fn evaluation_only_needs_scopes_and_types() {

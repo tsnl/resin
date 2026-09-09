@@ -8,8 +8,7 @@
 //! use resin_cst::lower;
 //! ```
 
-use resin_common::{source, types};
-use source::Span;
+use resin_common::source::Span;
 
 mod lower;
 mod print;

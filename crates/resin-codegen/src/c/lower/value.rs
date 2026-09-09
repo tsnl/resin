@@ -1,4 +1,4 @@
-use crate::lir::{Ty, Value};
+use resin_lir::{Ty, Value};
 
 use super::types::Types;
 

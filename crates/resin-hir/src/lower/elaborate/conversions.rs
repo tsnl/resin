@@ -1,5 +1,6 @@
 use super::*;
-use crate::types::{Conv, check::ExplicitConversion};
+use resin_common::types::Conv;
+use resin_common::types::check::ExplicitConversion;
 
 impl Generator {
     pub(super) fn ascription(

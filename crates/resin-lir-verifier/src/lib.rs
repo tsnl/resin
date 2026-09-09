@@ -1,8 +1,6 @@
 //! Stack and control-flow verification for typed IR.
-use resin_common::types;
-use resin_lir as lir;
 
-use crate::lir::{BlockId, FunctionId, Module, Ty, TypeId};
+use resin_lir::{BlockId, FunctionId, Module, Ty, TypeId};
 
 mod error;
 mod flow;
@@ -44,7 +42,7 @@ pub enum VerifyErrorKind {
     OpaqueValue { ty: Ty },
     InvalidShader,
     PointerArithmetic,
-    InvalidBuiltin(crate::types::check::TypeError),
+    InvalidBuiltin(resin_common::types::check::TypeError),
     InvalidPointerCast { from: Ty, to: Ty },
     InvalidTypeDefinition { definition: usize },
     IncompleteTypeDefinition { definition: TypeId },
@@ -153,7 +151,7 @@ pub fn with_verified<T, E: From<VerifyError>>(
 
 pub struct ModuleTypes {
     pub functions: Vec<FunctionTypes>,
-    pub types: crate::lir::TypeTable,
+    pub types: resin_lir::TypeTable,
 }
 
 pub struct FunctionTypes {

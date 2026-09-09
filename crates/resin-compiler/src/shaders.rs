@@ -1,10 +1,10 @@
 //! Lower declaration-selected shader artifacts for embedding in host code.
 use crate::Error;
-use crate::codegen::Shader;
-use crate::toolchain::Toolchain;
+use resin_codegen::Shader;
+use resin_platform_toolchain::Toolchain;
 
 pub(crate) fn build_verified(
-    checked: crate::lir_verifier::Verified<'_>,
+    checked: resin_lir_verifier::Verified<'_>,
     settings: &Toolchain,
 ) -> Result<Vec<Shader>, Error> {
     let module = checked.module();
@@ -35,11 +35,11 @@ pub(crate) fn build_verified(
 }
 
 pub(super) fn emit_glsl(
-    checked: crate::lir_verifier::Verified<'_>,
-    entry: crate::types::FunctionId,
-    stage: crate::codegen::Stage,
+    checked: resin_lir_verifier::Verified<'_>,
+    entry: resin_common::types::FunctionId,
+    stage: resin_codegen::Stage,
 ) -> Result<String, crate::Error> {
-    crate::codegen::generate_glsl(checked, entry, stage)
-        .map(|module| crate::codegen::print_glsl(&module))
+    resin_codegen::generate_glsl(checked, entry, stage)
+        .map(|module| resin_codegen::print_glsl(&module))
         .map_err(Into::into)
 }

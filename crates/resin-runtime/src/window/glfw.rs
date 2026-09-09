@@ -6,8 +6,6 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use glfw_sys as sys;
-
 use crate::ResinStatus;
 
 pub(super) struct Glfw;
@@ -24,7 +22,7 @@ impl Glfw {
                 return Ok(glfw);
             }
             let glfw = Rc::new(Self);
-            if unsafe { sys::glfwInit() } == sys::GLFW_FALSE {
+            if unsafe { glfw_sys::glfwInit() } == glfw_sys::GLFW_FALSE {
                 glfw.print_error("glfwInit");
                 return Err(ResinStatus::WindowUnavailable);
             }
@@ -35,7 +33,7 @@ impl Glfw {
 
     pub fn print_error(&self, operation: &str) {
         let mut description = ptr::null();
-        let code = unsafe { sys::glfwGetError(&mut description) };
+        let code = unsafe { glfw_sys::glfwGetError(&mut description) };
         let description = if description.is_null() {
             c"no error description"
         } else {
@@ -51,6 +49,6 @@ impl Glfw {
 
 impl Drop for Glfw {
     fn drop(&mut self) {
-        unsafe { sys::glfwTerminate() };
+        unsafe { glfw_sys::glfwTerminate() };
     }
 }

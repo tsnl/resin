@@ -5,8 +5,6 @@
 //! ```compile_fail,E0603
 //! use resin_lir::lower;
 //! ```
-use resin_common::{diagnostic, source, types, util};
-use resin_hir as hir;
 
 mod lower;
 mod print;
@@ -19,9 +17,9 @@ pub use resin_common::types::{
 
 use std::{collections::BTreeMap, sync::Arc};
 
-use crate::util::define_id;
+use resin_common::util::define_id;
 
-use crate::types::shader;
+use resin_common::types::shader;
 
 define_id! {
     pub struct BlockId(usize);
@@ -266,15 +264,15 @@ pub struct Module {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SourceMap {
     pub sources: BTreeMap<std::path::PathBuf, Arc<str>>,
-    pub functions: BTreeMap<FunctionId, crate::source::SourceLocation>,
-    pub instructions: BTreeMap<(FunctionId, BlockId, usize), crate::source::SourceLocation>,
+    pub functions: BTreeMap<FunctionId, resin_common::source::SourceLocation>,
+    pub instructions: BTreeMap<(FunctionId, BlockId, usize), resin_common::source::SourceLocation>,
 }
 
 /// Lower a self-contained HIR module. Verification is a separate pass.
 #[derive(Debug)]
 pub struct Error {
     pub function: FunctionId,
-    pub error: diagnostic::GenerateError,
+    pub error: resin_common::diagnostic::GenerateError,
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -284,12 +282,12 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 /// Lower a typed tree into storage and control flow; verification is a separate pass.
-pub fn generate(source: &hir::Module) -> Result<Module, Error> {
+pub fn generate(source: &resin_hir::Module) -> Result<Module, Error> {
     lower::generate(source)
 }
 
 /// Collect independent lowering errors across functions.
-pub fn analyze(source: &hir::Module) -> Result<Module, Vec<Error>> {
+pub fn analyze(source: &resin_hir::Module) -> Result<Module, Vec<Error>> {
     lower::analyze(source)
 }
 

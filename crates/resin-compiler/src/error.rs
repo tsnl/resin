@@ -1,4 +1,4 @@
-use crate::{Error, ast, codegen, lir_verifier, toolchain};
+use crate::Error;
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
@@ -10,23 +10,23 @@ impl From<std::io::Error> for Error {
         Self(e.to_string())
     }
 }
-impl From<codegen::Error> for Error {
-    fn from(e: codegen::Error) -> Self {
+impl From<resin_codegen::Error> for Error {
+    fn from(e: resin_codegen::Error) -> Self {
         Self(e.to_string())
     }
 }
-impl From<toolchain::Error> for Error {
-    fn from(e: toolchain::Error) -> Self {
+impl From<resin_platform_toolchain::Error> for Error {
+    fn from(e: resin_platform_toolchain::Error) -> Self {
         Self(e.to_string())
     }
 }
-impl From<ast::SourceError> for Error {
-    fn from(e: ast::SourceError) -> Self {
+impl From<resin_ast::SourceError> for Error {
+    fn from(e: resin_ast::SourceError) -> Self {
         Self(e.to_string())
     }
 }
-impl From<lir_verifier::VerifyError> for Error {
-    fn from(e: lir_verifier::VerifyError) -> Self {
+impl From<resin_lir_verifier::VerifyError> for Error {
+    fn from(e: resin_lir_verifier::VerifyError) -> Self {
         Self(e.to_string())
     }
 }

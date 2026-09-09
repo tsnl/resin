@@ -1,5 +1,5 @@
-use crate::lir::{Function, Ty, TypeDef, TypeId, TypeTable};
-use crate::types;
+use resin_common::types;
+use resin_lir::{Function, Ty, TypeDef, TypeId, TypeTable};
 
 use super::error::Location;
 use super::{VerifyError, VerifyErrorKind};
@@ -147,7 +147,7 @@ pub(super) fn ascribe(
     found: Ty,
     location: Location,
 ) -> Result<(), VerifyError> {
-    if crate::types::check::ascription(table, &found, expected)
+    if resin_common::types::check::ascription(table, &found, expected)
         .map_err(|error| location.error(error.into()))?
         .is_some()
     {

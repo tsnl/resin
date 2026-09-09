@@ -3,11 +3,11 @@ use crate::lower::{
     Generator,
     typed::{StatementKind, TermKind},
 };
-use crate::types::Ty;
+use resin_common::types::Ty;
 
 fn check(source: &str, generator: &mut Generator) -> CheckedFile {
     let file =
-        crate::ast::generate(&crate::cst::Document::reparse(source.to_string(), None)).unwrap();
+        resin_ast::generate(&resin_cst::Document::reparse(source.to_string(), None)).unwrap();
     let mut scopes = Scopes::new();
     assert!(
         scopes
