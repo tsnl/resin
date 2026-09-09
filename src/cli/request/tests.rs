@@ -7,6 +7,7 @@ use tempfile::TempDir;
 
 fn options(environment: &Environment, profile: CProfile) -> Options {
     Options {
+        directory: environment.directory.clone(),
         profile,
         temporary: environment.temporary.clone(),
         tools: environment.toolchain(None, None),
@@ -130,6 +131,29 @@ fn requests_validate_existing_output_ancestors() {
     assert!(!temp.path().join("missing").exists());
 }
 
+#[test]
+fn requests_check_relative_ancestors_before_resolving_paths() {
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
+    let mut environment = Environment::capture().unwrap();
+    environment.directory = fs::canonicalize(temp.path()).unwrap();
+    fs::write(environment.directory.join("file"), "preserve").unwrap();
+    for destination in ["file/../program", "file/missing/program", "file/"] {
+        let error = Request::new(
+            input(Path::new("source.resin")),
+            Some(destination.into()),
+            options(&environment, CProfile::Debug),
+        )
+        .err()
+        .expect("output ancestors must be directories");
+        assert!(error.to_string().contains("not a directory"), "{error}");
+    }
+    assert_eq!(
+        fs::read_to_string(temp.path().join("file")).unwrap(),
+        "preserve"
+    );
+    assert!(!temp.path().join("program").exists());
+}
+
 #[cfg(unix)]
 #[test]
 fn output_ancestor_validation_follows_symlinks() {
@@ -169,4 +193,44 @@ fn output_ancestor_validation_follows_symlinks() {
         "preserve"
     );
     assert!(!temp.path().join("missing").exists());
+}
+
+#[test]
+fn requests_resolve_relative_paths_from_the_supplied_directory() {
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
+    let mut environment = Environment::capture().unwrap();
+    environment.directory = fs::canonicalize(temp.path()).unwrap();
+    let source = environment.directory.join("program.resin");
+    fs::write(&source, "export { main }; def main() = {};").unwrap();
+    fs::create_dir(environment.directory.join("dist")).unwrap();
+    for destination in ["dist", "new/", "output"] {
+        let request = Request::new(
+            input(Path::new("program.resin")),
+            Some(destination.into()),
+            options(&environment, CProfile::Release),
+        )
+        .unwrap();
+        assert_eq!(request.input.path, source);
+        let expected = if destination == "output" {
+            environment.directory.join(destination)
+        } else {
+            environment
+                .directory
+                .join(destination)
+                .join(format!("program{}", std::env::consts::EXE_SUFFIX))
+        };
+        assert_eq!(request.destination.as_deref(), Some(expected.as_path()));
+    }
+    let request = Request::new(
+        input(Path::new("program.resin")),
+        Some(source),
+        options(&environment, CProfile::Debug),
+    );
+    assert!(
+        request
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("overwrite the source")
+    );
 }
