@@ -108,7 +108,8 @@ captures environment variables, the working directory, and executable/temp paths
 Its private [resolution](crates/resin-toolchain/src/environment.rs) applies CLI
 compiler choices before `CC`/`GLSLC` and platform defaults. It finds runtime headers,
 the archive, and cache settings, returning an opaque `Toolchain`. The CLI resolves
-`RESIN_LIBRARY_ROOT` against the loader library's bundled path and chooses `CProfile`.
+relative `RESIN_LIBRARY_ROOT` overrides against the captured working directory,
+defaults to the bundled library root, and chooses `CProfile`.
 Tools are invoked when required, without preflight checks, so host-only
 programs remain independent of `glslc`. Compiler subprocesses and cache fingerprints
 use the same captured environment.
