@@ -28,7 +28,7 @@ cargo run -- examples/eg001.resin -o dist/
 ```
 
 The first command builds and runs the Fibonacci program; the second builds an optimized
-executable without running it. Inspect the generated `program.c` beside each cached executable
+executable without running it. Inspect the generated `main.c` beside each cached executable
 under `build/`. There is no bytecode interpreter behind the CLI.
 
 A few language choices explain much of the implementation:
@@ -236,8 +236,9 @@ lowers instructions and block edges; [foreign.rs](crates/resin-codegen/src/c/low
 bridges Resin's unary calls to conventional C argument lists.
 
 [Ninja execution](crates/resin-toolchain/src/ninja.rs) builds the generated dependency
-graph. [platform.rs](crates/resin-toolchain/src/platform.rs) supplies the default
-compiler, archive name, flags, and system libraries: `cc` and `libresin_runtime.a`
+graph. The toolchain's [public interface](crates/resin-toolchain/src/lib.rs) names
+the default compiler; private [platform.rs](crates/resin-toolchain/src/platform.rs)
+supplies the archive name, flags, and system libraries: `cc` and `libresin_runtime.a`
 on Unix; GNU-style LLVM `clang` and `resin_runtime.lib` on Windows MSVC. Windows
 builds keep Rust, GLFW, and emitted C on the same C runtime. Install Ninja, `glslc`,
 and a C compiler; `CC` or `--cc` overrides the compiler selection. Host-only programs
