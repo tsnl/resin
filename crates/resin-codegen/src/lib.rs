@@ -299,6 +299,7 @@ rule compile_shader
 rule embed_shader
   command = $resin --embed $in --symbol $symbol --output $out
   description = EMBED $in
+  restat = 1
 
 rule compile_program
   command = $cc $cflags -MMD -MF $out.d -MT $out $in -o $out $ldflags

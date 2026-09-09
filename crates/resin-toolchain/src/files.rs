@@ -115,7 +115,11 @@ fn publish_file(source: &Path, output: &Path) -> Result<(), Error> {
         // another thread's fork can briefly inherit a writer before exec closes it.
         fs::rename(source, output)?;
         fs::copy(output, source)?;
-        fs::File::open(source)?.set_modified(metadata.modified()?)?;
+        fs::File::options()
+            .read(true)
+            .write(cfg!(windows))
+            .open(source)?
+            .set_modified(metadata.modified()?)?;
         Ok(())
     } else {
         copy_changed(source, output)

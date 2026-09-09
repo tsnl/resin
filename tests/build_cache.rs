@@ -98,14 +98,22 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
     printed(&run(), b"true");
     assert_eq!(calls(), 1);
     assert_eq!(project.calls(), 1);
+    // A changed shader tool rebuilds identical SPIR-V. Its unchanged header must
+    // settle after this rebuild instead of keeping native compilation dirty.
+    let wrapper = fs::read_to_string(&shader_compiler).unwrap();
+    fs::write(&shader_compiler, format!("{wrapper}# updated wrapper\n")).unwrap();
+    printed(&run(), b"true");
+    printed(&run(), b"true");
+    assert_eq!(calls(), 2);
+    assert_eq!(project.calls(), 2);
     fs::write(
         &helper,
         "export { pixel }; def pixel (i: uint) -> uint = { i + uint (2) };",
     )
     .unwrap();
     printed(&run(), b"true");
-    assert_eq!(calls(), 2);
-    assert_eq!(project.calls(), 2);
+    assert_eq!(calls(), 3);
+    assert_eq!(project.calls(), 3);
     fs::write(
         &helper,
         "export { pixel }; def pixel (i: uint) -> uint = { i / uint (2) };",
@@ -114,8 +122,8 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
     let output = run();
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
-    assert_eq!(calls(), 2);
-    assert_eq!(project.calls(), 2);
+    assert_eq!(calls(), 3);
+    assert_eq!(project.calls(), 3);
 }
 
 struct Project {

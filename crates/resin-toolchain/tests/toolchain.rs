@@ -123,13 +123,14 @@ fn failed_builds_leave_published_executables_unchanged() {
         assert_eq!(fs::read(&output).unwrap(), before);
     }
     fs::write(project.join("main.c"), "int main(void) { return 8; }").unwrap();
+    let rebuilt = build(&tools, &project);
+    assert_eq!(rebuilt.executable(program()).unwrap().run().unwrap(), 8);
+    let published = fs::metadata(rebuilt.path(program())).unwrap();
+    let staged = fs::metadata(rebuilt.path(".ninja-work").join(program())).unwrap();
     assert_eq!(
-        build(&tools, &project)
-            .executable(program())
-            .unwrap()
-            .run()
-            .unwrap(),
-        8
+        published.modified().unwrap(),
+        staged.modified().unwrap(),
+        "publication must preserve the timestamp used for incremental Ninja builds"
     );
 }
 
