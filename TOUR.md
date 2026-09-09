@@ -76,11 +76,11 @@ The main path is short enough to keep in mind:
 source files -> CST -> AST -> HIR -> LIR -> verified LIR
                                             |
                                             v
-                                 requested shaders' GLSL
+                                 requested shaders' SPIR-V
                                             |
-                                          glslc
+                                        spirv-opt
                                             |
-                                          SPIR-V
+                                    optimized SPIR-V
                                             |
                               host C with embedded SPIR-V
                                             |
@@ -106,12 +106,12 @@ an optimized executable and copies it to the destination selected with `--output
 The platform toolchain's [Environment](crates/resin-toolchain/src/lib.rs)
 captures environment variables, the working directory, and executable/temp paths once.
 Its private [resolution](crates/resin-toolchain/src/environment.rs) applies CLI
-compiler choices before `CC`/`GLSLC` and platform defaults. It finds runtime headers,
+compiler choices before `CC`/`SPIRV_OPT` and platform defaults. It finds runtime headers,
 the archive, and cache settings, returning an opaque `Toolchain`. The CLI resolves
 relative `RESIN_LIBRARY_ROOT` overrides against the captured working directory,
 defaults to the bundled library root, and chooses `CProfile`.
 Tools are invoked when required, without preflight checks, so host-only
-programs remain independent of `glslc`. Compiler subprocesses and cache fingerprints
+programs remain independent of `spirv-opt`. Compiler subprocesses and cache fingerprints
 use the same captured environment.
 
 The CLI's private [Request](src/cli/request.rs) validates the input/output combination,
@@ -121,9 +121,10 @@ A [resin_source::Loader](crates/resin-source/src/lib.rs) reads the entry into an
 `Arc<Compilation>` containing analysis and phase products.
 
 The CLI passes `compilation.verified()` to
-[codegen](crates/resin-codegen/src/lib.rs), which writes C, requested GLSL, and
+[codegen](crates/resin-codegen/src/lib.rs), which writes C, requested SPIR-V, and
 `build.ninja` in one operation. It then asks `Toolchain::build` to execute that
-project. Ninja compiles SPIR-V, invokes this Resin executable with `--embed` to make
+project. The toolchain supplies native command rules in `toolchain.ninja`. Ninja optimizes
+SPIR-V, invokes this Resin executable with `--embed` to make
 C headers, and compiles and links the host program. The executable path comes from
 the platform's `current_exe` API, keeping embedding on the same Resin version.
 The returned build and executable handles retain a cache lock. Generated sources,
@@ -244,9 +245,9 @@ graph. The toolchain's [public interface](crates/resin-toolchain/src/lib.rs) nam
 the default compiler; private [platform.rs](crates/resin-toolchain/src/platform.rs)
 supplies the archive name, flags, and system libraries: `cc` and `libresin_runtime.a`
 on Unix; GNU-style LLVM `clang` and `resin_runtime.lib` on Windows MSVC. Windows
-builds keep Rust, GLFW, and emitted C on the same C runtime. Install Ninja, `glslc`,
+builds keep Rust, GLFW, and emitted C on the same C runtime. Install Ninja, SPIR-V Tools (`spirv-opt`),
 and a C compiler; `CC` or `--cc` overrides the compiler selection. Host-only programs
-invoke no shader compiler and need neither a Vulkan SDK nor a GPU.
+invoke no shader optimizer and need neither a Vulkan SDK nor a GPU.
 
 The toolchain stages source projects and retains successful outputs under a cache
 lock. Ninja tracks dependencies between shaders, embedded headers, C includes, and
@@ -305,7 +306,7 @@ handles requests, document versions, and file notifications;
 [text.rs](crates/resin-lsp/src/text.rs) converts byte offsets to UTF-16 positions.
 [worker.rs](crates/resin-lsp/src/worker.rs) retains a compiler and loader in
 the background, coalesces edits, and discards obsolete results. Editor analysis
-never compiles C/GLSL, initializes a GPU, or executes Resin programs.
+never builds C/SPIR-V, initializes a GPU, or executes Resin programs.
 
 `textDocument/formatting` uses the same [formatter](crates/resin-cst/src/print.rs) as the
 CLI. The server formats the open document's current text and returns a text edit
@@ -329,24 +330,26 @@ the generated shaders without running a Vulkan program:
 cargo run -- examples/gradient.resin -o dist/
 ```
 
-Read `shader_<function-id>.glsl` and `.spv` in the generated project’s release cache after the build.
+Inspect `shader_<function-id>.unoptimized.spv` and `.spv` in the generated project’s
+release cache after the build, using `spirv-dis` to view their assembly.
 
 `@compute_shader`, `@vertex_shader`, and `@fragment_shader` register and validate
 shader entry declarations. [shader interfaces](crates/resin-types/src/lib.rs) defines their metadata
 and signature contracts. Decorated functions and their unannotated helpers remain
 host-callable. Accessing `function.spirv` requests a static `Span<ubyte>` artifact;
 [project generation](crates/resin-codegen/src/lib.rs) enumerates those declaration
-requests and writes GLSL plus their Ninja dependencies. `glslc` produces SPIR-V,
+requests and writes SPIR-V plus their Ninja dependencies. `spirv-opt -O` optimizes it,
 and `resin --embed` writes the headers included by generated C.
 No runtime function-value analysis is involved. The runtime receives bytes, not a
 host function pointer or source-file path.
 
-[GLSL lowering](crates/resin-codegen/src/glsl/lower/mod.rs) collects reachable shader
-functions. [entry.rs](crates/resin-codegen/src/glsl/lower/entry.rs) adapts regular Resin function
-signatures to compute, vertex, or fragment interfaces, and
-[function.rs](crates/resin-codegen/src/glsl/lower/function.rs) lowers their bodies. The GLSL
-backend supports a subset of the host language; it rejects operations such as
-foreign calls and recursion rather than making them work on the device.
+[SPIR-V lowering](crates/resin-codegen/src/spirv/mod.rs) collects reachable shader
+functions. [entry.rs](crates/resin-codegen/src/spirv/entry.rs) adapts regular Resin function
+signatures to compute, vertex, or fragment interfaces; the private function and operation
+lowering emits their bodies as SPIR-V instructions. The backend uses `rspirv` to allocate IDs
+and assemble the binary. Structured control flow remains explicit, and physical pointers
+use the shared host/device layout. The shader profile rejects operations such as foreign
+calls and recursion. Optimization is a separate `spirv-opt` process owned by the toolchain.
 
 The remaining GPU operations are ordinary standard-library calls. Follow one
 from [resin/gpu.resin](resin/gpu.resin), through
@@ -378,7 +381,7 @@ conversion to `ulong` and operates on byte addresses. The host allocates memory,
 writes root data, and passes its device address when dispatching or drawing.
 Shader entry wrappers interpret that root according to their supported
 interface. [target layout helpers](crates/resin-codegen/src/layout.rs) keeps supported buffer
-layouts consistent between C and GLSL; start there when investigating a field
+layouts consistent between C and SPIR-V; start there when investigating a field
 offset or alignment mismatch.
 
 These APIs expose resource lifetimes explicitly. The C API and its unsafe Rust
@@ -453,7 +456,7 @@ desktop display or Xvfb available (for Xvfb, set `DISPLAY` to its display and
 `XDG_SESSION_TYPE=x11` so GLFW does not select a Wayland compositor):
 
 ```sh
-RESIN_REQUIRE_GLSLC=1 RESIN_REQUIRE_GPU=1 RESIN_REQUIRE_WINDOW=1 \
+RESIN_REQUIRE_SPIRV_TOOLS=1 RESIN_REQUIRE_GLSLC=1 RESIN_REQUIRE_GPU=1 RESIN_REQUIRE_WINDOW=1 \
   cargo test --workspace --all-features
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```

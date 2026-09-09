@@ -3,7 +3,7 @@
 The `resin --lsp <directory>` mode provides diagnostics, hover, go-to-definition, basic completion, and formatting
 over stdio. It reuses `resin_compiler::Compiler` with immutable source versions.
 Semantic editor requests run parsing, resolution, typing, and IR verification; they do not
-compile C/GLSL, initialize a GPU, or run the program. Analysis accepts library
+build C/SPIR-V, initialize a GPU, or run the program. Analysis accepts library
 modules without an exported entry function; runtime bindings belong inside
 functions, following the compiler's declarations-only module rules. Functions use
 `def`, local bindings use `var`, nominal records use `struct`, and aliases use `type`. Omitted function

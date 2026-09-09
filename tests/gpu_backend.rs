@@ -10,8 +10,7 @@ use resin_runtime::{
 };
 use std::{path::Path, process::Command};
 
-#[path = "support/shaders.rs"]
-mod shaders;
+use support::shaders;
 mod support;
 
 fn gpu() -> Option<ResinGpu> {
@@ -31,7 +30,7 @@ fn gpu() -> Option<ResinGpu> {
 
 #[test]
 fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
-    let Some(compiler) = shaders::compiler() else {
+    let Some(compiler) = shaders::optimizer() else {
         return;
     };
     let _lock = lock_gpu();
@@ -74,7 +73,7 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
             .success()
     );
     let project = support::project::Project::new(&module, None).unwrap();
-    let built = project.build(&toolchain::glsl(&compiler)).unwrap();
+    let built = project.build(&toolchain::spirv(&compiler)).unwrap();
     let spv =
         std::fs::read(built.path(project.generated.shaders()[0].spirv().file_name().unwrap()))
             .unwrap();
@@ -161,7 +160,7 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
 
 #[test]
 fn particles_compute_then_render_from_the_same_buffer() {
-    let Some(compiler) = shaders::compiler() else {
+    let Some(compiler) = shaders::optimizer() else {
         return;
     };
     let _lock = lock_gpu();
@@ -169,7 +168,7 @@ fn particles_compute_then_render_from_the_same_buffer() {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/particles.resin");
     let module = pipeline::generate_program(&pipeline::load(&source).unwrap()).unwrap();
     let project = support::project::Project::new(&module, None).unwrap();
-    let built = project.build(&toolchain::glsl(&compiler)).unwrap();
+    let built = project.build(&toolchain::spirv(&compiler)).unwrap();
     let shader_bytes = |stage: Stage| {
         let shader = project
             .generated
@@ -349,7 +348,7 @@ fn particles_compute_then_render_from_the_same_buffer() {
 
 #[test]
 fn fragment_shaders_read_typed_root_parameters() {
-    let Some(compiler) = shaders::compiler() else {
+    let Some(compiler) = shaders::optimizer() else {
         return;
     };
     let _lock = lock_gpu();
@@ -366,7 +365,7 @@ fn fragment_shaders_read_typed_root_parameters() {
     );
     let module = pipeline::generate_program(&ast).unwrap();
     let project = support::project::Project::new(&module, None).unwrap();
-    let built = project.build(&toolchain::glsl(&compiler)).unwrap();
+    let built = project.build(&toolchain::spirv(&compiler)).unwrap();
     let shader_bytes = |stage: Stage| {
         let shader = project
             .generated
@@ -520,14 +519,14 @@ fn at_indexing_mutates_shader_arrays_and_span_fields() {
 }
 
 fn compute_values(source: &str, expected: fn(u32) -> u32) {
-    let Some(compiler) = shaders::compiler() else {
+    let Some(compiler) = shaders::optimizer() else {
         return;
     };
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
     let module = support::module(source);
     let project = support::project::Project::new(&module, None).unwrap();
-    let built = project.build(&toolchain::glsl(&compiler)).unwrap();
+    let built = project.build(&toolchain::spirv(&compiler)).unwrap();
     let spv =
         std::fs::read(built.path(project.generated.shaders()[0].spirv().file_name().unwrap()))
             .unwrap();
@@ -569,7 +568,7 @@ fn compute_values(source: &str, expected: fn(u32) -> u32) {
 
 #[test]
 fn ordinary_resin_programs_render_and_write_pngs() {
-    let Some(compiler) = shaders::compiler() else {
+    let Some(compiler) = shaders::optimizer() else {
         return;
     };
     let _lock = lock_gpu();
@@ -601,7 +600,7 @@ fn ordinary_resin_programs_render_and_write_pngs() {
         let output = Command::new(env!("CARGO_BIN_EXE_resin"))
             .current_dir(temp.path())
             .arg(source)
-            .arg("--glslc")
+            .arg("--spirv-opt")
             .arg(&compiler)
             .arg("-o")
             .arg(&executable)
@@ -618,7 +617,7 @@ fn ordinary_resin_programs_render_and_write_pngs() {
         // The copy is standalone: no compiler or source files are needed to run it.
         let output = Command::new(executable)
             .current_dir(temp.path())
-            .env("GLSLC", "/missing/glslc")
+            .env("SPIRV_OPT", "/missing/spirv-opt")
             .env("CC", "/missing/cc")
             .output()
             .unwrap();
@@ -724,14 +723,14 @@ fn numeric_suffixes_and_one_armed_if_execute_on_device() {
 mod interactions;
 
 fn execute_interaction(source: &str, expected: [u32; 2]) {
-    let Some(compiler) = shaders::compiler() else {
+    let Some(compiler) = shaders::optimizer() else {
         return;
     };
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
     let m = support::module(source);
     let project = support::project::Project::new(&m, None).unwrap();
-    let built = project.build(&toolchain::glsl(&compiler)).unwrap();
+    let built = project.build(&toolchain::spirv(&compiler)).unwrap();
     let spv =
         std::fs::read(built.path(project.generated.shaders()[0].spirv().file_name().unwrap()))
             .unwrap();

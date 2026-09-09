@@ -10,10 +10,10 @@ use std::{
 };
 
 /// Environment and paths resolved before compilation. Discovery failures are retained
-/// so unused tools (in particular glslc for host-only code) remain optional.
+/// so unused tools (in particular spirv-opt for host-only code) remain optional.
 pub(super) struct Settings {
     pub(super) cc: PathBuf,
-    pub(super) glslc: PathBuf,
+    pub(super) spirv_opt: PathBuf,
     pub(super) ninja: PathBuf,
     pub(super) runtime_include: PathBuf,
     pub(super) runtime_library: PathBuf,
@@ -46,7 +46,7 @@ impl Settings {
     pub(super) fn configure(&self, profile: CProfile, directory: &Path) -> Result<(), Error> {
         for path in [
             &self.cc,
-            &self.glslc,
+            &self.spirv_opt,
             &self.executable,
             &self.runtime_include,
             &self.runtime_library,
@@ -62,7 +62,7 @@ impl Settings {
         }
         let mut text = Vec::new();
         command_variable(&mut text, "cc", [self.cc.as_os_str()]);
-        command_variable(&mut text, "glslc", [self.glslc.as_os_str()]);
+        command_variable(&mut text, "spirv_opt", [self.spirv_opt.as_os_str()]);
         command_variable(&mut text, "resin", [self.executable.as_os_str()]);
         command_variable(
             &mut text,
@@ -81,6 +81,7 @@ impl Settings {
             true,
         );
         text.push(b'\n');
+        text.extend_from_slice(NATIVE_RULES.as_bytes());
         files::write_changed(&text, &directory.join("toolchain.ninja"))?;
         files::write_changed(
             self.fingerprint().as_bytes(),
@@ -115,7 +116,7 @@ impl Settings {
         let mut hash = DefaultHasher::new();
         self.environment.hash(&mut hash);
         self.directory.hash(&mut hash);
-        for path in [&self.executable, &self.cc, &self.glslc, &self.ninja] {
+        for path in [&self.executable, &self.cc, &self.spirv_opt, &self.ninja] {
             hash_metadata(path, &mut hash);
         }
         hash_contents(&self.runtime_library, &mut hash, &mut HashSet::new());
@@ -240,3 +241,22 @@ fn hash_contents(path: &Path, hash: &mut DefaultHasher, seen: &mut HashSet<PathB
         }
     }
 }
+
+// Native commands belong to the toolchain; generated projects describe only edges.
+const NATIVE_RULES: &str = "\
+rule optimize_shader
+  command = $spirv_opt --target-env=vulkan1.3 -O $in -o $out
+  description = SPIR-V $in
+
+rule embed_shader
+  command = $resin --embed $in --symbol $symbol --output $out
+  description = EMBED $in
+  restat = 1
+
+rule compile_program
+  command = $cc $cflags -MMD -MF $out.d -MT $out $in -o $out $ldflags
+  description = C $in
+  depfile = $out.d
+  deps = gcc
+
+";

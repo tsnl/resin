@@ -103,10 +103,9 @@ fn generated_files_outlive_lir_and_its_verification_certificate() {
             .unwrap()
             .contains("int main(")
     );
-    assert!(
-        std::fs::read_to_string(shaders.shaders()[0].source())
-            .unwrap()
-            .contains("void main()")
+    assert_eq!(
+        &std::fs::read(shaders.shaders()[0].unoptimized_spirv()).unwrap()[..4],
+        &[3, 2, 35, 7]
     );
     assert!(host.build_file().is_file() && shaders.build_file().is_file());
 }

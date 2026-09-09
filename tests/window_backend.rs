@@ -12,8 +12,7 @@ use support::pipeline;
 use resin_ast::{StmtKind, TermKind};
 use resin_runtime::testing::lock_gpu;
 
-#[path = "support/shaders.rs"]
-mod shaders;
+use support::shaders;
 #[allow(dead_code)]
 mod support;
 
@@ -267,7 +266,7 @@ fn resin_particles_example_computes_and_presents() {
 }
 
 fn run_example(name: &str) {
-    let Some(compiler) = shaders::compiler() else {
+    let Some(compiler) = shaders::optimizer() else {
         return;
     };
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
@@ -309,7 +308,7 @@ fn run_example(name: &str) {
     stmts.extend(support::statements("test_frames := test_frames + 1; if (test_frames == 3) { window.set_should_close(1 == 1)?; } else { () };"));
     let module = pipeline::generate_program(&ast).unwrap();
     let project = support::project::Project::new(&module, Some("main")).unwrap();
-    let built = project.build(&toolchain::glsl(&compiler)).unwrap();
+    let built = project.build(&toolchain::spirv(&compiler)).unwrap();
     built
         .executable(project.generated.program().unwrap().file_name().unwrap())
         .unwrap()
@@ -320,7 +319,7 @@ fn run_example(name: &str) {
     }
     let _lock = lock_gpu();
     let mut child = Command::new(executable)
-        .env("GLSLC", OsStr::new("/missing/glslc"))
+        .env("SPIRV_OPT", OsStr::new("/missing/spirv-opt"))
         .env("CC", OsStr::new("/missing/cc"))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

@@ -170,7 +170,7 @@ fn spirv_requires_a_decorated_function_declaration() {
     let project = support::project::Project::new(&module, Some("main")).unwrap();
     assert_eq!(project.generated.shaders().len(), 1);
     let shader = &project.generated.shaders()[0];
-    assert!(shader.source().is_file());
+    assert!(shader.unoptimized_spirv().is_file());
     assert!(
         !shader.header().exists(),
         "the toolchain supplies compiled bytes"

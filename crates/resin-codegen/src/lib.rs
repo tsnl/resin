@@ -1,17 +1,17 @@
-//! Generate C, GLSL, and a Ninja build graph from verified LIR in one pass.
+//! Generate C, SPIR-V, and a Ninja dependency graph from verified LIR in one pass.
 //! The returned project describes inputs for native tools; it owns no compiler state.
-//! C/GLSL trees, lowering, and printing are private. Generation runs no external tools.
+//! Target languages and lowering are private. Generation runs no external tools.
 //!
 //! ```compile_fail,E0603
 //! use resin_codegen::c;
 //! ```
 //!
 //! ```compile_fail,E0603
-//! use resin_codegen::glsl;
+//! use resin_codegen::spirv;
 //! ```
 //!
 //! ```compile_fail,E0432
-//! use resin_codegen::{CModule, GlslModule};
+//! use resin_codegen::{CModule, SpirvModule};
 //! ```
 
 use resin_types::prelude::*;
@@ -22,9 +22,9 @@ use std::{
 
 mod c;
 mod error;
-mod glsl;
 mod layout;
 mod numeric;
+mod spirv;
 
 //
 // Generated source files and the binary headers they will need
@@ -38,7 +38,7 @@ pub struct GeneratedProject {
     build_file: PathBuf,
     program: Option<PathBuf>,
     c_source: Option<PathBuf>,
-    shaders: Vec<ShaderSource>,
+    shaders: Vec<GeneratedShader>,
     name: String,
     entry: Option<String>,
 }
@@ -48,7 +48,7 @@ impl GeneratedProject {
         &self.directory
     }
 
-    /// Ninja graph; the toolchain supplies its included `toolchain.ninja` settings.
+    /// Ninja dependency graph; `toolchain.ninja` supplies native rules and settings.
     pub fn build_file(&self) -> &Path {
         &self.build_file
     }
@@ -63,7 +63,7 @@ impl GeneratedProject {
         self.c_source.as_deref()
     }
 
-    pub fn shaders(&self) -> &[ShaderSource] {
+    pub fn shaders(&self) -> &[GeneratedShader] {
         &self.shaders
     }
 
@@ -77,18 +77,18 @@ impl GeneratedProject {
     }
 }
 
-/// A generated GLSL file and its planned C header containing compiled SPIR-V.
+/// A generated SPIR-V module and its planned optimized binary and C header.
 #[derive(Debug)]
-pub struct ShaderSource {
+pub struct GeneratedShader {
     function: FunctionId,
     stage: Stage,
-    source: PathBuf,
+    unoptimized_spirv: PathBuf,
     spirv: PathBuf,
     header: PathBuf,
     symbol: String,
 }
 
-impl ShaderSource {
+impl GeneratedShader {
     pub fn function(&self) -> FunctionId {
         self.function
     }
@@ -97,11 +97,12 @@ impl ShaderSource {
         self.stage
     }
 
-    pub fn source(&self) -> &Path {
-        &self.source
+    /// Unoptimized SPIR-V binary emitted directly from verified LIR.
+    pub fn unoptimized_spirv(&self) -> &Path {
+        &self.unoptimized_spirv
     }
 
-    /// Planned SPIR-V binary path, produced by the Ninja shader rule.
+    /// Planned optimized SPIR-V binary path, produced by the toolchain.
     pub fn spirv(&self) -> &Path {
         &self.spirv
     }
@@ -120,7 +121,7 @@ impl ShaderSource {
 /// Generate a source project and its complete build graph before running native tools.
 /// All target lowering succeeds before any files are written.
 /// A host entry emits C and its embedded shaders; `None` emits all declared shaders.
-/// The toolchain configures and runs the returned Ninja graph. SPIR-V, headers, and
+/// The toolchain configures and runs the returned Ninja graph. Optimized SPIR-V, headers, and
 /// executables are planned outputs until then. Paths in the result are absolute.
 /// I/O failure may leave partially written files.
 ///
@@ -210,11 +211,11 @@ fn describe_shader(
     function: FunctionId,
     stage: &str,
     directory: &Path,
-) -> Result<ShaderSource, Error> {
-    Ok(ShaderSource {
+) -> Result<GeneratedShader, Error> {
+    Ok(GeneratedShader {
         function,
         stage: stage.parse().map_err(Error)?,
-        source: directory.join(format!("shader_{}.glsl", function.index())),
+        unoptimized_spirv: directory.join(format!("shader_{}.unoptimized.spv", function.index())),
         spirv: directory.join(format!("shader_{}.spv", function.index())),
         header: directory.join(shader_header(function)),
         symbol: shader_symbol(function),
@@ -239,37 +240,36 @@ fn generate_host(checked: resin_lir::Verified<'_>, entry: &str) -> Result<String
 
 fn generate_shader(
     checked: resin_lir::Verified<'_>,
-    shader: &ShaderSource,
-) -> Result<String, Error> {
-    glsl::lower::generate(checked, shader.function, shader.stage)
-        .map(|module| glsl::print::module(&module))
+    shader: &GeneratedShader,
+) -> Result<Vec<u8>, Error> {
+    spirv::generate(checked, shader.function, shader.stage)
 }
 
 fn write_sources(
     project: &GeneratedProject,
     c: Option<&str>,
-    shaders: &[String],
+    shaders: &[Vec<u8>],
     build: &str,
 ) -> Result<(), Error> {
     fs::create_dir_all(&project.directory)?;
     if let (Some(path), Some(source)) = (&project.c_source, c) {
-        write_source(path, source)?;
+        write_source(path, source.as_bytes())?;
     }
     for (shader, source) in project.shaders.iter().zip(shaders) {
-        write_source(&shader.source, source)?;
+        write_source(&shader.unoptimized_spirv, source)?;
     }
-    write_source(&project.build_file, build)
+    write_source(&project.build_file, build.as_bytes())
 }
 
-fn write_source(path: &Path, source: &str) -> Result<(), Error> {
-    if fs::read(path).is_ok_and(|current| current == source.as_bytes()) {
+fn write_source(path: &Path, source: &[u8]) -> Result<(), Error> {
+    if fs::read(path).is_ok_and(|current| current == source) {
         return Ok(());
     }
     fs::write(path, source).map_err(|error| Error(format!("{}: {error}", path.display())))
 }
 
 //
-// Build dependencies: GLSL → SPIR-V → embedded headers → host executable
+// Build dependencies: SPIR-V → optimized SPIR-V → embedded headers → host executable
 //
 
 fn program_filename() -> String {
@@ -280,7 +280,6 @@ fn build_graph(project: &GeneratedProject) -> String {
     let mut out = String::from(
         "# Native tool paths and platform flags are supplied by the toolchain.\ninclude toolchain.ninja\n\n",
     );
-    out.push_str(NINJA_RULES);
     for shader in &project.shaders {
         shader_rules(&mut out, shader);
     }
@@ -291,33 +290,14 @@ fn build_graph(project: &GeneratedProject) -> String {
     out
 }
 
-const NINJA_RULES: &str = "\
-rule compile_shader
-  command = $glslc -fshader-stage=$stage --target-env=vulkan1.3 -O -Werror $in -o $out
-  description = GLSL $in
-
-rule embed_shader
-  command = $resin --embed $in --symbol $symbol --output $out
-  description = EMBED $in
-  restat = 1
-
-rule compile_program
-  command = $cc $cflags -MMD -MF $out.d -MT $out $in -o $out $ldflags
-  description = C $in
-  depfile = $out.d
-  deps = gcc
-
-";
-
-fn shader_rules(out: &mut String, shader: &ShaderSource) {
+fn shader_rules(out: &mut String, shader: &GeneratedShader) {
     use std::fmt::Write;
     let id = shader.function.index();
     writeln!(
         out,
-        "build shader_{id}.spv: compile_shader shader_{id}.glsl | toolchain.state"
+        "build shader_{id}.spv: optimize_shader shader_{id}.unoptimized.spv | toolchain.state"
     )
     .unwrap();
-    writeln!(out, "  stage = {}\n", shader.stage.name()).unwrap();
     writeln!(
         out,
         "build shader_{id}.h: embed_shader shader_{id}.spv | toolchain.state"
@@ -326,7 +306,7 @@ fn shader_rules(out: &mut String, shader: &ShaderSource) {
     writeln!(out, "  symbol = {}\n", shader.symbol).unwrap();
 }
 
-fn host_rule(out: &mut String, shaders: &[ShaderSource]) {
+fn host_rule(out: &mut String, shaders: &[GeneratedShader]) {
     use std::fmt::Write;
     write!(
         out,

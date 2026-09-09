@@ -182,7 +182,7 @@ fn incompatible_modes_are_rejected_before_changing_files() {
         vec!["-f", "source.resin", "-o", "destination"],
         vec!["-f", "source.resin", "--out", "destination"],
         vec!["-f", "source.resin", "--cc", "compiler"],
-        vec!["-f", "source.resin", "--glslc", "compiler"],
+        vec!["-f", "source.resin", "--spirv-opt", "compiler"],
     ] {
         let result = invoke(root, &args);
         assert_eq!(

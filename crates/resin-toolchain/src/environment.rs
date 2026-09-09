@@ -6,10 +6,10 @@ use std::{
 };
 
 impl Environment {
-    pub(super) fn resolve_tools(&self, cc: Option<&OsStr>, glslc: Option<&OsStr>) -> Toolchain {
+    pub(super) fn resolve_tools(&self, cc: Option<&OsStr>, spirv_opt: Option<&OsStr>) -> Toolchain {
         let settings = Settings {
             cc: self.optional_tool(self.compiler(cc, "CC", crate::DEFAULT_C_COMPILER)),
-            glslc: self.optional_tool(self.compiler(glslc, "GLSLC", "glslc")),
+            spirv_opt: self.optional_tool(self.compiler(spirv_opt, "SPIRV_OPT", "spirv-opt")),
             ninja: self.optional_tool(self.compiler(None, "NINJA", "ninja")),
             runtime_include: self.path(
                 "RESIN_RUNTIME_INCLUDE",
@@ -125,7 +125,7 @@ mod tests {
         let bin = temp.path().join("tools with spaces");
         fs::create_dir(&bin).unwrap();
         let default_cc = executable(&bin, crate::DEFAULT_C_COMPILER);
-        let default_glslc = executable(&bin, "glslc");
+        let default_spirv_opt = executable(&bin, "spirv-opt");
         let custom = executable(&bin, "custom");
         let explicit = executable(&bin, "explicit");
         let runtime = bin.join(crate::RUNTIME_ARCHIVE);
@@ -138,7 +138,7 @@ mod tests {
         };
         let settings = env.toolchain(None, None).settings;
         assert_eq!(settings.cc, default_cc);
-        assert_eq!(settings.glslc, default_glslc);
+        assert_eq!(settings.spirv_opt, default_spirv_opt);
         assert_eq!(settings.runtime_library, runtime);
         assert_eq!(settings.cache, temp.path().join("build"));
         assert_eq!(
@@ -150,7 +150,7 @@ mod tests {
         );
         for (name, value) in [
             ("CC", "custom"),
-            ("GLSLC", "custom"),
+            ("SPIRV_OPT", "custom"),
             ("RESIN_RUNTIME_INCLUDE", "include"),
             ("RESIN_RUNTIME_LIB", "archive"),
         ] {
@@ -159,14 +159,14 @@ mod tests {
         fs::write(temp.path().join("archive"), []).unwrap();
         let settings = env.toolchain(None, None).settings;
         assert_eq!(settings.cc, custom);
-        assert_eq!(settings.glslc, custom);
+        assert_eq!(settings.spirv_opt, custom);
         assert_eq!(settings.runtime_include, temp.path().join("include"));
         assert_eq!(settings.runtime_library, temp.path().join("archive"));
         let settings = env
             .toolchain(Some(OsStr::new("explicit")), Some(explicit.as_os_str()))
             .settings;
         assert_eq!(&settings.cc, &explicit);
-        assert_eq!(&settings.glslc, &explicit);
+        assert_eq!(&settings.spirv_opt, &explicit);
         env.variables.insert("CC".into(), "missing".into());
         assert_eq!(
             settings.environment.get(OsStr::new("CC")).unwrap(),

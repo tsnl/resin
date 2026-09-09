@@ -17,8 +17,8 @@ serves LSP.
 ## Development
 
 On Linux or macOS, enter `nix-shell` for Rustup (using `rust-toolchain.toml`), a C compiler,
-CMake, Ninja, GLFW's native build dependencies, and `glslc`. On Linux it also supplies Vulkan tools,
-validation layers, and RenderDoc.
+CMake, Ninja, GLFW's native build dependencies, SPIR-V Tools, and `glslc` for handwritten
+test fixtures. On Linux it also supplies Vulkan tools, validation layers, and RenderDoc.
 The parser is included in `crates/tree-sitter-resin/`; run `cargo test --workspace` directly.
 Non-interactive commands work too: `nix-shell --run 'cargo test --workspace'`.
 
@@ -26,19 +26,21 @@ Cargo builds and statically links the GLFW source bundled in `glfw-sys`; no GLFW
 or library search path is needed. Cargo uses `rust-toolchain.toml` to install the project's
 Rust toolchain. Outside Nix:
 
-- Linux: install Rustup, a C compiler, CMake, Ninja, `glslc`, pkg-config, and the X11, Wayland, and xkbcommon
-  development packages, including `wayland-scanner`. For GPU execution, add the Vulkan
+- Linux: install Rustup, a C compiler, CMake, Ninja, SPIR-V Tools (`spirv-opt`, `spirv-val`),
+  `glslc` for tests, pkg-config, and the X11, Wayland, and xkbcommon development packages,
+  including `wayland-scanner`. For GPU execution, add the Vulkan
   loader and a Vulkan driver.
-- macOS: install Xcode Command Line Tools (`xcode-select --install`), Rustup, CMake, Ninja, and `glslc`
-  (`brew install cmake ninja shaderc`). `cargo run -- examples/eg001.resin` then builds and runs a host program.
+- macOS: install Xcode Command Line Tools (`xcode-select --install`), Rustup, CMake, Ninja, and SPIR-V Tools
+  (`brew install cmake ninja spirv-tools shaderc`; Shaderc supplies `glslc` for tests).
+  `cargo run -- examples/eg001.resin` then builds and runs a host program.
   For GPU programs, install the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#mac), which supplies
-  `glslc`, the Vulkan loader, and MoltenVK; use its `setup-env.sh` before running Resin. If Cargo
+  `spirv-opt`, the Vulkan loader, and MoltenVK; use its `setup-env.sh` before running Resin. If Cargo
   strips the loader's search path, run `target/debug/resin` directly from that configured shell.
 - Windows: install Rustup's **x86_64-pc-windows-msvc** toolchain, Visual Studio's **Desktop
-  development with C++** workload (including a Windows SDK), LLVM Clang, CMake, Ninja, and `glslc`. Open a
-  **Developer PowerShell for VS** targeting x64 and put `clang.exe`, `cmake.exe`, `ninja.exe`, and `glslc.exe` on PATH.
+  development with C++** workload (including a Windows SDK), LLVM Clang, CMake, Ninja, and SPIR-V Tools. Open a
+  **Developer PowerShell for VS** targeting x64 and put `clang.exe`, `cmake.exe`, `ninja.exe`, and `spirv-opt.exe` on PATH.
   Run `cargo run -- examples/eg001.resin`. For GPU programs, install the
-  [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) for `glslc` and a Vulkan-capable GPU driver.
+  [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) for SPIR-V Tools and a Vulkan-capable GPU driver.
 
 Windows emitted C uses the GNU-style `clang` driver with the MSVC ABI, not `cl` or `clang-cl`.
 MinGW and cross-compiling Resin programs are not tested. macOS enables Vulkan portability
@@ -64,16 +66,20 @@ After changing `crates/tree-sitter-resin/grammar.js`, regenerate from that direc
 Commit grammar changes and generated files together in this repository.
 
 Native builds require Ninja and a C compiler, selected with `CC` or `--cc` (default `cc`
-on Unix, `clang` on Windows MSVC). Install `glslc` for shader compilation. Resin performs
+on Unix, `clang` on Windows MSVC). Shader builds use the `spirv-opt` binary from
+[SPIR-V Tools](https://github.com/KhronosGroup/SPIRV-Tools),
+selected with `SPIRV_OPT` or `--spirv-opt`; `NINJA` selects the build runner. Resin performs
 no tool preflight; required commands report errors when executed. Host-only builds never
-invoke `glslc`. SPIR-V embedding invokes the running Resin executable through the platform
+invoke `spirv-opt`. SPIR-V embedding invokes the running Resin executable through the platform
 `current_exe` API, so it neither searches PATH for Resin nor mixes compiler versions.
 Backend tests build generated projects through the same Ninja toolchain.
-Shader tests use `GLSLC` or `glslc` and skip if absent.
+Generated shaders are validated with `spirv-val` and optimized with `spirv-opt`. Set
+`RESIN_REQUIRE_SPIRV_TOOLS=1` to require these tools in tests. Handwritten GLSL fixtures
+in runtime tests still use `glslc` from `PATH` and skip if absent, unless GPU tests are required.
 The `gpu` feature enables compiler-to-image integration tests, not a different execution mode:
 
 ```sh
-RESIN_REQUIRE_GPU=1 RESIN_REQUIRE_GLSLC=1 cargo test --workspace --all-features
+RESIN_REQUIRE_GPU=1 RESIN_REQUIRE_SPIRV_TOOLS=1 RESIN_REQUIRE_GLSLC=1 cargo test --workspace --all-features
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
@@ -94,7 +100,7 @@ backend. Unsetting `WAYLAND_DISPLAY` alone is insufficient: GLFW can still conne
 Wayland socket. With Xvfb already running, run the full suite without excluding window tests:
 
 ```sh
-XDG_SESSION_TYPE=x11 RESIN_REQUIRE_GPU=1 RESIN_REQUIRE_GLSLC=1 RESIN_REQUIRE_WINDOW=1 \
+XDG_SESSION_TYPE=x11 RESIN_REQUIRE_GPU=1 RESIN_REQUIRE_SPIRV_TOOLS=1 RESIN_REQUIRE_GLSLC=1 RESIN_REQUIRE_WINDOW=1 \
   cargo test --workspace --all-features
 ```
 
@@ -228,7 +234,7 @@ foreign signatures remain fully explicit. Unresolved or infinitely recursive
 inferred types are errors; `_` is not a wildcard, unit, or a dynamic type.
 
 Omitting a function result annotation still means unit; inference is opt-in.
-Types are fully resolved before IR generation, so C and GLSL share the same
+Types are fully resolved before IR generation, so C and SPIR-V share the same
 inference behavior. Run `cargo run -- examples/inference.resin` for an example.
 
 ## Unions and errors
@@ -285,8 +291,8 @@ def describe(result: Result<int, CalculationError>) = {
 Host entry points can return `Result<(), E>` or `Result<int, E>`; an unhandled
 error prints its struct name and exits with status 1. Run `cargo run -- examples/errors.resin`
 or `cargo run -- examples/errors.resin:failure` to try both paths.
-Helpers using Result and match also compile to GLSL. C uses a tag and a union of
-payloads; GLSL uses separate payload fields because it has no native union type.
+Helpers using Result and match also compile to SPIR-V. C uses a tag and a union of
+payloads; shader values use a tag and separate payload fields.
 Shared host/device buffer layouts for tagged values are not yet supported.
 
 The standard library's `RuntimeStatus.from_code(code)` converts native status integers to
@@ -408,12 +414,14 @@ An existing directory or trailing separator receives the source name (or `source
 non-main entry), with `.exe` on Windows; otherwise PATH names the file exactly. Use an `.exe`
 extension for Windows executable filenames.
 
-Compilation follows one pipeline: generate C, requested GLSL, and `build.ninja`;
-Ninja compiles shaders to SPIR-V, embeds them in C headers, then compiles and links
-the executable. Shader stages come from decorators. To inspect intermediates without
+Compilation follows one pipeline: generate C, requested SPIR-V binaries, and `build.ninja`;
+Ninja optimizes shaders with `spirv-opt`, embeds them in C headers, then compiles and links
+the executable. The toolchain owns the native command rules and flags; codegen supplies
+the project dependency edges. Shader stages come from decorators. To inspect intermediates without
 running the program, build with `-o PATH` and inspect
 `build/<source-name>-<name-and-entry-hash>/release/`: `main.c`, `build.ninja`, and
-`shader_<function-id>.glsl` / `.spv` / `.h`. Frontend inspection is available through
+`shader_<function-id>.unoptimized.spv` / `.spv` / `.h`. Use `spirv-dis` to inspect a shader
+as SPIR-V assembly. Frontend inspection is available through
 `resin_compiler::Compiler::compile` and the retained `Compilation` result's AST, HIR,
 and LIR accessors.
 
@@ -527,8 +535,8 @@ are reserved builtins and host-only.
 
 Byte arrays and device-backed `Span<ubyte>` values support shader reads and writes using
 8-bit storage and arithmetic extensions. The runtime enables the corresponding Vulkan features when available.
-Shader `str` literals remain unsupported: GLSL constant arrays cannot supply the device-buffer
-addresses used by Resin spans. Pass a span of uploaded bytes in the shader root instead.
+Shader `str` literals remain unsupported: the backend does not yet provide addressable
+constant storage for the device addresses used by Resin spans. Pass a span of uploaded bytes in the shader root instead.
 
 ## Console input
 
@@ -746,7 +754,7 @@ not implemented yet.
 decorated function declaration directly, including an imported declaration; runtime function
 aliases do not expose `.spirv`. The compiler records artifact requests by declaration identity,
 without following function values or analyzing runtime branches. Merely declaring or calling a
-decorated function on the host requires no shader compiler. Artifact requests anywhere in the
+decorated function on the host requires no shader optimizer. Artifact requests anywhere in the
 loaded modules require compilation even when their containing function is not executed.
 
 The Resin pipeline wrappers accept these spans directly:
@@ -754,10 +762,11 @@ The Resin pipeline wrappers accept these spans directly:
 `gpu.create_graphics_pipeline(vertex.spirv, fragment.spirv)`. The private C ABI still uses
 pointer/length pairs.
 
-Resin lowers the entry and its reachable named helpers to GLSL, invokes `glslc`, and embeds the
-result in generated C headers. Shader objects are deduplicated and retained with their generated project;
+Resin lowers the entry and its reachable named helpers directly to SPIR-V. The toolchain runs
+`spirv-opt -O --target-env=vulkan1.3` and embeds the optimized binary in generated C headers.
+Shader objects are deduplicated and retained with their generated project;
 imported helper changes invalidate them. Copied executables need the Vulkan loader/device,
-but neither Resin, source files, nor `glslc` at runtime.
+but neither Resin, source files, nor `spirv-opt` at runtime.
 
 Shaders receive application data through the root address passed to `gpu_dispatch` or
 `gpu_draw`. Add a typed pointer as the second tuple element:
@@ -789,7 +798,7 @@ The entry interfaces are:
 Device pointers support loads, stores, record fields, explicit casts, and passing to
 ordinary helpers. Shared storage supports `ubyte`, `int`, `uint`, `float32`, `ulong`, pointers, nonempty
 records, arrays, spans, and nominal wrappers. Scalars align to their size; records align to their largest
-member, with member and trailing padding. This matches C and GLSL `std430` without requiring
+member, with member and trailing padding. This matches C and Vulkan's base alignment rules without requiring
 scalar-block-layout support. Generated C asserts sizes, alignments, and member offsets.
 Spans occupy 16 bytes (address and length) with alignment 8; arrays retain their element alignment.
 Storage containing booleans, unit, or other numeric widths is rejected for now.
@@ -811,10 +820,10 @@ atomics are not exposed yet. For multi-pass algorithms, record separate dispatch
 inserts memory barriers before dispatches and rendering, including compute-to-vertex reads.
 Submission currently waits for completion, making mapped results readable by the host.
 
-Build a GPU program with `-o` to inspect its cached GLSL and SPIR-V without executing GPU work,
+Build a GPU program with `-o` to inspect its unoptimized and optimized SPIR-V without executing GPU work,
 for example `cargo run -- examples/gradient.resin -o dist/`. Only the host entry selected by
 `FILE:ENTRY` needs to be exported; accessing `private_helper.spirv` inside its module does not
-require exporting that helper. `--glslc PATH` selects the shader compiler.
+require exporting that helper. `--spirv-opt PATH` selects the shader optimizer.
 
 ## GPU requirements
 
@@ -837,7 +846,7 @@ nix-shell --run 'cargo run -- examples/particles.resin'
 
 The demo renders a triangle until Escape or the close button is pressed. It uses a `while`
 event loop and defines its decorated shader functions inline, as does the headless triangle demo.
-Resizing scales the fixed-size offscreen image. Building this demo requires `glslc`; running the
+Resizing scales the fixed-size offscreen image. Building this demo requires `spirv-opt`; running the
 resulting executable does not. The PNG demos remain headless.
 
 `particles.resin` seeds **1,000,000 particles** with pseudorandom 3D positions and velocities,
@@ -938,7 +947,7 @@ copies raw bytes and appends that terminator outside the logical length.
 ### Shared size and alignment
 
 `size_of(T)` and `align_of(T)` return `ulong` constants for the shared host/device
-layout of a concrete type. They use the same layout rules as C assertions and GLSL
+layout of a concrete type. They use the same layout rules as C assertions and SPIR-V
 storage emission. Scalars in the shared profile, padded/nested records, pointers,
 spans, and nonempty arrays are supported; unsupported layouts produce a source error.
 For an inferred array type, `size_of(array_expression)` queries its type. Expression

@@ -76,7 +76,7 @@ fn cpu_workloads_match_reference_in_optimized_generated_code() {
 #[test]
 #[cfg(feature = "gpu")]
 fn gpu_workloads_match_reference_with_a_partial_workgroup() {
-    if shaders::compiler().is_none() {
+    if shaders::optimizer().is_none() {
         return;
     }
     let _lock = resin_runtime::testing::lock_gpu();
