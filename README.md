@@ -368,7 +368,7 @@ The exported entry may use the conventional three-argument form:
 
 ```resin
 export { main };
-import { "$/std/process.resin" };
+import { "$/process.resin" };
 
 def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> () = {
     var args = arguments(argc, argv);
@@ -388,7 +388,7 @@ These process-lifetime views are borrowed and must be treated as read-only; Resi
 pointer types do not enforce immutability. Unix preserves native bytes, including non-UTF-8;
 Windows converts its native wide inputs to UTF-8, replacing unpaired UTF-16 surrogates.
 
-`$/std/process.resin` provides `arguments(argc, argv)` and `environment(envp)` as pointer spans,
+`$/process.resin` provides `arguments(argc, argv)` and `environment(envp)` as pointer spans,
 `argument(args, index)` as a checked byte-span view, and `c_string(pointer)` for a valid
 NUL-terminated string. `environment_get(envp, name)` takes a NUL-terminated name and returns
 `Result<Span<ubyte>, EnvironmentVariableNotFound>`. Lookup is exact and case-sensitive on
@@ -494,7 +494,7 @@ preserve embedded NULs and treat braces as ordinary bytes.
 
 ```resin
 export { main };
-import { "$/std/io.resin" };
+import { "$/io.resin" };
 
 def main() -> Result<(), _> = {
     var n = 42;
@@ -526,13 +526,13 @@ addresses used by Resin spans. Pass a span of uploaded bytes in the shader root 
 
 ## Console input
 
-Import `$/std/console.resin` for `Console.read_line()`, a line reader implemented in Resin on top of C's
+Import `$/console.resin` for `Console.read_line()`, a line reader implemented in Resin on top of C's
 `getchar()`. It grows its buffer as needed and strips LF or CRLF. Write a prompt with `print`
 before reading:
 
 ```resin
 export { main };
-import { "$/std/console.resin" };
+import { "$/console.resin" };
 
 def main() -> Result<(), _> = {
     print("Name: ");
@@ -547,7 +547,7 @@ def main() -> Result<(), _> = {
 The result is a shared `InputLine` owner exposing `data: Ptr<ubyte>` and `length: ulong`.
 Copies retain its allocation; the final owner frees it. `Console.print(line)` prints the bytes without adding a newline. Empty lines succeed, EOF before any
 bytes returns `EndOfInput`, and a final line without a newline succeeds. Read and allocation
-failures are also explicit errors. See [the console API](resin/std/README.md#console-input) for
+failures are also explicit errors. See [the console API](resin/README.md#console-input) for
 ownership and byte semantics, or run `cargo run -- examples/input.resin`.
 
 ## Files and the standard library
@@ -557,7 +557,7 @@ Each file has its own scope. An optional `export` clause comes first, followed b
 
 ```resin
 export { answer };
-import { "helpers.resin", "$/std/status.resin" };
+import { "helpers.resin", "$/status.resin" };
 
 def answer() -> int = { helper() };
 ```
@@ -582,8 +582,8 @@ Names such as `if_value` are ordinary identifiers. `fmt`, `print`, `ok`, `err`,
 keywords: definitions and parameters cannot use those names, but record fields can.
 
 Imports beginning with `$/` resolve from the repository's [`resin/`](resin/) library root,
-independent of the source file or working directory. For example, `$/std/gpu.resin`
-loads `resin/std/gpu.resin`; a future `$/math/matrix.resin` would load `resin/math/matrix.resin`.
+independent of the source file or working directory. For example, `$/gpu.resin`
+loads `resin/gpu.resin`; a future `$/math/matrix.resin` would load `resin/math/matrix.resin`.
 Set `RESIN_LIBRARY_ROOT` to override the library root when distributing the compiler.
 Other imports resolve relative to the importing file. Files have explicit imports and exports;
 directories need no manifest or special entry file.
@@ -591,13 +591,13 @@ The native Rust crate lives separately at `crates/resin-runtime/`; it has no dep
 library. Programs use standard-library wrappers; the integer-status C ABI stays private
 to those modules. Public operations are static constructors and instance methods:
 
-- `$/std/gpu.resin`: devices, allocations, images, pipelines, and command recording.
-- `$/std/window.resin`: windows and input; `Gpu.new_for_window(window)` and `gpu.present(image)` live in `$/std/gpu.resin`.
-- `$/std/image.resin`: PNG reading and writing.
-- `$/std/status.resin`: `RuntimeStatus` conversion methods and the `RuntimeError` union and its variants.
-- `$/std/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
-- `$/std/io.resin`: `Io.stdout().write(text)` and `Io.stderr().write(text)`.
-- `$/std/console.resin`: `Console.read_byte()`, `Console.read_line()`, and shared `InputLine` owners with `Console.print(line)`.
+- `$/gpu.resin`: devices, allocations, images, pipelines, and command recording.
+- `$/window.resin`: windows and input; `Gpu.new_for_window(window)` and `gpu.present(image)` live in `$/gpu.resin`.
+- `$/image.resin`: PNG reading and writing.
+- `$/status.resin`: `RuntimeStatus` conversion methods and the `RuntimeError` union and its variants.
+- `$/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
+- `$/io.resin`: `Io.stdout().write(text)` and `Io.stderr().write(text)`.
+- `$/console.resin`: `Console.read_byte()`, `Console.read_line()`, and shared `InputLine` owners with `Console.print(line)`.
 
 The polymorphic `fmt` operation and string-only `print` are compiler builtins; decorated shaders expose `.spirv`.
 Runtime flags are static methods, such as `Memory.default()`.
@@ -606,7 +606,7 @@ Run `cargo run -- examples/eg009_imports.resin` for an explicitly owned counter,
 
 ```resin
 export { main };
-import { "$/std/gpu.resin" };
+import { "$/gpu.resin" };
 
 def main() -> Result<(), _> = {
     var gpu = Gpu.new()?;
@@ -622,7 +622,7 @@ check statuses before returning out-parameter values. For example:
 
 ```resin
 export { Gpu };
-import { "$/std/status.resin" };
+import { "$/status.resin" };
 
 extern type ResinGpu;
 struct GpuOwner { handle: Ptr<ResinGpu> };
@@ -860,7 +860,7 @@ speed depends on rendering throughput. Its decorated shader functions, ordinary 
 shared data definitions live alongside the host code in the same file. Initialization accepts
 a host `Span<Particle>`; the shaders use the same allocation's device address.
 
-Input is available through `$/std/window.resin`. `Window.keys()` names GLFW key codes (`Window.keys().w`,
+Input is available through `$/window.resin`. `Window.keys()` names GLFW key codes (`Window.keys().w`,
 `Window.keys().space`, `Window.keys().left_shift`); `Window.mouse_buttons()` names the eight mouse buttons.
 After polling, `window.key_state(Window.keys().w)` and
 `window.mouse_button_state(Window.mouse_buttons().left)` return `ButtonState` records
@@ -882,7 +882,7 @@ GLFW synthesizes button releases on focus loss. These APIs report physical contr
 they do not decode typed text or implement text composition.
 
 Windowing is an ordinary runtime API, exposed by `resin_runtime/window.h` and
-`$/std/window.resin`:
+`$/window.resin`:
 
 - `Window.new(width, height, title: String)` returns a shared window owner; use `String.from_str("Resin")` for a literal title. `window.poll_events()` processes
   GLFW events. Close state, framebuffer size, resizing, and GLFW key codes

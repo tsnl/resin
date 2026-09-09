@@ -77,7 +77,7 @@ fn omitted_unit_returns_run_and_reject_non_unit_tails() {
 #[test]
 fn destruction_runs_when_native_status_propagates_to_the_entry() {
     let output = cli(
-        "export { main }; import { \"$/std/status.resin\" }; struct Cleanup {}; impl Cleanup { def drop(self: Ptr<Cleanup>) = { print(fmt(\"cleanup\\n\", ())); }; } def main() -> Result<(), _> = { RuntimeStatus.from_code(0)?; var cleanup = Cleanup {}; RuntimeStatus.from_code(8)?; ok(()) };",
+        "export { main }; import { \"$/status.resin\" }; struct Cleanup {}; impl Cleanup { def drop(self: Ptr<Cleanup>) = { print(fmt(\"cleanup\\n\", ())); }; } def main() -> Result<(), _> = { RuntimeStatus.from_code(0)?; var cleanup = Cleanup {}; RuntimeStatus.from_code(8)?; ok(()) };",
         &[],
     );
     assert_eq!(output.status.code(), Some(1));
@@ -515,7 +515,7 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
     let input = temp.path().join("stages.resin");
     fs::write(&input, r#"
         export { main };
-        import { "$/std/graphics.resin" };
+        import { "$/graphics.resin" };
         @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i + 1_ui }; };
         @vertex_shader def vertex(i: int) -> Vertex = {
             Vertex {
@@ -618,7 +618,7 @@ fn process_entries_receive_literal_arguments_in_run_and_compiled_modes() {
     let input = temp.path().join("args.resin");
     fs::write(&input, r#"
         export { main };
-        import { "$/std/process.resin" };
+        import { "$/process.resin" };
         def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> int = {
             var args = arguments(argc, argv);
             var with_sentinel = arguments(argc + 1, argv);
@@ -692,7 +692,7 @@ fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
     let header_path = header.to_string_lossy().replace('\\', "/");
     fs::write(&input, format!(r#"
         export {{ main }};
-        import {{ "$/std/process.resin" }};
+        import {{ "$/process.resin" }};
         extern "{header_path}" def mutate_environment() -> int;
         extern "stdlib.h" def getenv(name: Ptr<ubyte>) -> Ptr<ubyte>;
         def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> Result<int, _> = {{
@@ -767,7 +767,7 @@ fn process_entry_signatures_results_and_argument_bounds_are_checked() {
         assert_eq!(cli(&source, &[]).status.code(), Some(code));
     }
     let output = cli(
-        r#"export { main }; import { "$/std/process.resin" }; def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) = { argument(arguments(argc, argv), ulong(argc)); };"#,
+        r#"export { main }; import { "$/process.resin" }; def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) = { argument(arguments(argc, argv), ulong(argc)); };"#,
         &[],
     );
     assert!(!output.status.success());
@@ -780,7 +780,7 @@ fn process_arguments_preserve_non_utf8_bytes() {
     use std::os::unix::ffi::OsStringExt;
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("bytes.resin");
-    fs::write(&input, r#"export { main }; import { "$/std/process.resin" }; def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) = { print(fmt("{0}", (argument(arguments(argc, argv), 1_ul),))); };"#).unwrap();
+    fs::write(&input, r#"export { main }; import { "$/process.resin" }; def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) = { print(fmt("{0}", (argument(arguments(argc, argv), 1_ul),))); };"#).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_resin"))
         .current_dir(temp.path())
         .arg(input)

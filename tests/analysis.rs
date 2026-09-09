@@ -40,7 +40,7 @@ fn weak_upgrade_recovery_exposes_the_shared_payload_and_handle_operations() {
 fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
     for tail in ["ok(()) };", "buffer."] {
         let source = format!(
-            r#"import {{ "$/std/gpu.resin" }};
+            r#"import {{ "$/gpu.resin" }};
             def f() -> Result<(), _> = {{
                 var gpu = Gpu.new()?;
                 var buffer = gpu.malloc(4_ul, 4_ul, Memory.default())?;
@@ -60,7 +60,7 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
             loader
                 .path(&definition.source)
                 .unwrap()
-                .ends_with("resin/std/gpu.resin")
+                .ends_with("resin/gpu.resin")
         );
         assert!(
             analysis

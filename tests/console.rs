@@ -67,7 +67,7 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
     let program = Program::new(
         r#"
         export { main };
-        import { "$/std/console.resin" };
+        import { "$/console.resin" };
         def failed(error: InputError) -> Result<(), InputError> = { err(error) };
         def main() -> Result<(), _> = {
             var reading = 1 == 1;
@@ -135,7 +135,7 @@ fn byte_input_distinguishes_bytes_from_eof() {
     let program = Program::new(
         r#"
         export { main };
-        import { "$/std/console.resin" };
+        import { "$/console.resin" };
         def main() -> Result<int, _> = {
             var zero = Console.read_byte()?;
             var first = Console.read_byte()?;
@@ -186,7 +186,7 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
         let source = format!(
             r#"
             export {{ main }};
-            import {{ "$/std/console.resin" }};
+            import {{ "$/console.resin" }};
             extern "{header}" def console_test_mode() -> int;
             extern "{header}" def console_test_frees() -> int;
             def exercise() -> int = {{
@@ -241,7 +241,7 @@ fn streams_write_literals_and_owned_strings_verbatim() {
     let program = Program::new(
         r#"
         export { main };
-        import { "$/std/io.resin" };
+        import { "$/io.resin" };
         def literal() -> str = { "static\0bytes" };
         def main() -> Result<(), _> = {
             var out = Io.stdout();
@@ -268,7 +268,7 @@ fn stream_write_failure_propagates_as_a_library_error() {
     let program = Program::new(
         r#"
         export { main };
-        import { "$/std/io.resin" };
+        import { "$/io.resin" };
         def main() -> Result<(), _> = {
             Output { stream = 99_ui }.write("unwritten")?;
             print("not reached");

@@ -40,7 +40,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `editors/`; the Zed WASI extension has its own Cargo workspace in `editors/zed`.
   Crates own their isolated tests; root `tests/` exercises the complete executable and
   cross-crate behavior. Shared examples and documentation stay at the root. Resin
-  libraries live under `resin/`, with the standard library in `resin/std/`.
+  libraries live directly under `resin/`, organized into modules or subdirectories.
   Keep the root package as the default member for root Cargo commands.
 - Keep `resin-source` and `resin-types` independent of compiler phases and of each other.
   Define phase-specific errors in their producing crate; source locations and rendered
@@ -126,10 +126,10 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Target 64-bit Linux, macOS, and Windows (MSVC with LLVM Clang for emitted C).
   Keep host builds independent of a Vulkan SDK or GPU. GPU execution still requires the
   runtime's Vulkan features; MoltenVK discovery does not imply full GPU compatibility.
-- Keep the native C ABI in `crates/resin-runtime/` and language-facing modules in `resin/std/`.
-  Add other Resin libraries as sibling directories under `resin/`.
+- Keep the native C ABI in `crates/resin-runtime/` and language-facing modules in `resin/`.
+  Add other Resin libraries as modules or subdirectories under `resin/`.
   Resolve `$/` imports from that library root, configurable with `RESIN_LIBRARY_ROOT`.
-  Examples import standard-library functionality through `$/std/` paths; imports without
+  Examples import standard-library functionality through `$/` paths; imports without
   a leading `$` resolve relative to their importer. Each file has a private scope with
   explicit exports; do not reintroduce textual inclusion.
 - Host entries take unit or `(int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>)` for argc/argv/envp.

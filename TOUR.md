@@ -12,7 +12,7 @@ compiler phases, and the supporting [runtime](crates/resin-runtime/),
 [parser](crates/tree-sitter-resin/), and [language server library](crates/resin-lsp/).
 All are unpublished. The
 [Zed extension](editors/zed/) has a separate Cargo workspace under `editors/`.
-The [standard library](resin/std/) is written in Resin and wraps the runtime's C API.
+The [standard library](resin/) is written in Resin and wraps the runtime's C API.
 
 ## 1. Start with a program
 
@@ -64,7 +64,7 @@ cargo run -- examples/eg009_imports.resin:independent
 
 For a host-only standard-library example, read
 [examples/input.resin](examples/input.resin) alongside
-[resin/std/console.resin](resin/std/console.resin). The module builds a growing line
+[resin/console.resin](resin/console.resin). The module builds a growing line
 buffer on top of C's `getchar`, returns typed errors, and wraps successful lines
 in shared owners. Scope cleanup releases them automatically.
 
@@ -346,12 +346,12 @@ backend supports a subset of the host language; it rejects operations such as
 foreign calls and recursion rather than making them work on the device.
 
 The remaining GPU operations are ordinary standard-library calls. Follow one
-from [resin/std/gpu.resin](resin/std/gpu.resin), through
+from [resin/gpu.resin](resin/gpu.resin), through
 [resin_runtime.h](crates/resin-runtime/include/resin_runtime.h) and its included
 headers, to [the runtime](crates/resin-runtime/src/lib.rs). The same pattern applies
 to images and windows. Wrappers omit the native `resin_` prefix and return
 `Result<T, RuntimeError>`, with created handles in the success value.
-[resin/std/status.resin](resin/std/status.resin) translates integer status codes into
+[resin/status.resin](resin/status.resin) translates integer status codes into
 named error structs; the C ABI remains unchanged.
 
 Inside the runtime, the useful landmarks are:

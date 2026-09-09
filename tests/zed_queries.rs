@@ -130,7 +130,7 @@ fn inference_holes_are_highlighted_as_types() {
 
 #[test]
 fn queries_capture_resin_constructs() {
-    let source = "export { main, Number }; import { \"$/std/core.resin\" };\n\
+    let source = "export { main, Number }; import { \"$/core.resin\" };\n\
         extern type Handle; extern \"lib.h\" def native (arg: int) -> int;\n\
         struct Number {field: int};\n\
         // a function\n\
@@ -172,7 +172,7 @@ fn queries_capture_resin_constructs() {
         ("outline", "name", "Number"),
         ("outline", "name", "reset"),
         ("outline", "name", "finish"),
-        ("overrides", "string", "\"$/std/core.resin\""),
+        ("overrides", "string", "\"$/core.resin\""),
         ("overrides", "comment.inclusive", "// a function"),
         ("textobjects", "comment.around", "// a function"),
     ] {

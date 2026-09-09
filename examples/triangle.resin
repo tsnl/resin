@@ -1,6 +1,6 @@
 export { main, vertex, fragment };
 
-import { "$/std/gpu.resin", "$/std/graphics.resin", "$/std/image.resin" };
+import { "$/gpu.resin", "$/graphics.resin", "$/image.resin" };
 
 @vertex_shader
 def vertex(index: int) -> Vertex = {

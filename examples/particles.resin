@@ -1,9 +1,9 @@
 export { main, kernel, vertex, fragment };
 
 import {
-	"$/std/gpu.resin",
-	"$/std/window.resin",
-	"$/std/graphics.resin",
+	"$/gpu.resin",
+	"$/window.resin",
+	"$/graphics.resin",
 };
 
 struct Particle { x: float32, y: float32, z: float32, vx: float32, vy: float32, vz: float32 };

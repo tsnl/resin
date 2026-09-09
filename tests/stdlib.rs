@@ -43,11 +43,15 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
     let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), ""));
     let source = TempDir::new_in(std::env::temp_dir()).unwrap();
     let path = source.path().join("main.resin");
-    fs::write(&path, "import { \"$/std/gpu.resin\", \"$/std/window.resin\", \"$/std/image.resin\", \"$/std/console.resin\" };").unwrap();
+    fs::write(
+        &path,
+        "import { \"$/gpu.resin\", \"$/window.resin\", \"$/image.resin\", \"$/console.resin\" };",
+    )
+    .unwrap();
     let module = pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap();
     for name in ["gpu", "window", "image", "console"] {
         let public = pipeline::generate_program(
-            &pipeline::load(&root.join(format!("resin/std/{name}.resin"))).unwrap(),
+            &pipeline::load(&root.join(format!("resin/{name}.resin"))).unwrap(),
         )
         .unwrap();
         assert!(
@@ -121,7 +125,7 @@ fn native_statuses_become_named_errors_and_keep_unknown_codes() {
     let output = run(
         r#"
         export { main };
-        import { "$/std/status.resin" };
+        import { "$/status.resin" };
         extern "string.h" def strcmp(a: Ptr<ubyte>, b: Ptr<ubyte>) -> int;
         def main() -> Result<int, _> = {
             RuntimeStatus.from_code(0)?;
@@ -157,7 +161,7 @@ fn native_statuses_become_named_errors_and_keep_unknown_codes() {
     ] {
         let output = run(
             &format!(
-                "export {{ main }}; import {{ \"$/std/status.resin\" }}; def main() -> Result<(), _> = {{ RuntimeStatus.from_code({code}) }};"
+                "export {{ main }}; import {{ \"$/status.resin\" }}; def main() -> Result<(), _> = {{ RuntimeStatus.from_code({code}) }};"
             ),
             "",
         );
@@ -173,7 +177,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     let output = run(
         r#"
         export { main };
-        import { "$/std/image.resin", "$/std/status.resin" };
+        import { "$/image.resin", "$/status.resin" };
         def main() -> Result<int, _> = {
             var path = "pixel.png";
             var pixels = [ubyte(1), ubyte(2), ubyte(3), ubyte(255)];
@@ -197,7 +201,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     ] {
         let output = run(
             &format!(
-                "export {{ main }}; import {{ \"$/std/image.resin\" }}; struct Cleanup {{}}; impl Cleanup {{ def drop(self: Ptr<Cleanup>) = {{ print(fmt(\"cleanup\\n\", ())); }}; }} def main() -> Result<(), _> = {{ var path = \"missing/pixel.png\"; var pixels = [uint(0)]; var cleanup = Cleanup {{}}; {call}; ok(()) }};"
+                "export {{ main }}; import {{ \"$/image.resin\" }}; struct Cleanup {{}}; impl Cleanup {{ def drop(self: Ptr<Cleanup>) = {{ print(fmt(\"cleanup\\n\", ())); }}; }} def main() -> Result<(), _> = {{ var path = \"missing/pixel.png\"; var pixels = [uint(0)]; var cleanup = Cleanup {{}}; {call}; ok(()) }};"
             ),
             "",
         );
@@ -212,7 +216,7 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
     let output = run(
         r#"
         export { main };
-        import { "$/std/gpu.resin", "$/std/status.resin" };
+        import { "$/gpu.resin", "$/status.resin" };
         extern "resin_runtime.h" def test_mode(mode: int);
         extern "resin_runtime.h" def test_verify(code: int);
         def work() -> Result<(), _> = {
@@ -309,7 +313,7 @@ fn presentation_distinguishes_skipped_frames_from_errors_without_opening_windows
     let output = run(
         r#"
         export { main };
-        import { "$/std/gpu.resin", "$/std/window.resin", "$/std/status.resin" };
+        import { "$/gpu.resin", "$/window.resin", "$/status.resin" };
         def main() -> int = {
             var gpu = Gpu { handle = Ptr<ResinGpu>(0_ul), window = None };
             var image = GpuImage { handle = Ptr<ResinImage>(0_ul), gpu = gpu };
@@ -340,7 +344,7 @@ fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
     let output = run(
         r#"
         export { main };
-        import { "$/std/gpu.resin", "$/std/window.resin", "$/std/status.resin" };
+        import { "$/gpu.resin", "$/window.resin", "$/status.resin" };
         def valid_size(width: uint, height: uint) -> bool = {
             width == uint(640) && height == uint(480)
         };
@@ -410,7 +414,7 @@ fn byte_input_reports_stream_errors_instead_of_eof() {
     let output = run(
         r#"
         export { main };
-        import { "$/std/console.resin" };
+        import { "$/console.resin" };
         struct Cleanup {};
         impl Cleanup { def drop(self: Ptr<Cleanup>) = { print("cleanup\n"); }; }
         def main() -> Result<(), _> = {
@@ -437,7 +441,7 @@ fn pipeline_wrappers_unpack_shader_spans_at_the_c_boundary() {
     let output = run(
         r#"
         export { main };
-        import { "$/std/gpu.resin" };
+        import { "$/gpu.resin" };
         def main() -> Result<int, _> = {
             var a = [ubyte(1), ubyte(2)];
             var b = [ubyte(3), ubyte(4), ubyte(5)];
@@ -478,7 +482,7 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
     let output = run(
         r#"
         export { main };
-        import { "$/std/window.resin" };
+        import { "$/window.resin" };
         def coordinates(x: float64, y: float64) -> bool = { x == 12.5_d && y == -3.25_d };
         def main() -> Result<int, _> = {
             var window = Window { handle = Ptr<ResinWindow>(0_ul) };
@@ -534,7 +538,7 @@ fn buffer_address_methods_retain_named_and_fresh_receivers_until_scope_exit() {
     ] {
         let source = r#"
         export { main };
-        import { "$/std/gpu.resin" };
+        import { "$/gpu.resin" };
         extern "resin_runtime.h" def test_frees() -> int;
         def main() -> int = {
             var gpu = Gpu { handle = Ptr<ResinGpu>(0_ul), window = None };
@@ -580,7 +584,7 @@ fn window_constructor_accepts_owned_titles_until_the_native_call_returns() {
     let output = run(
         r#"
         export { main };
-        import { "$/std/window.resin" };
+        import { "$/window.resin" };
         extern "resin_runtime.h" def window_counts() -> int;
         def main() -> Result<int, _> = {
             var weak = Weak<Span<ubyte>>();
