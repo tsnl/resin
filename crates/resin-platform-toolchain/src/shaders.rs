@@ -1,3 +1,4 @@
+use resin_common::prelude::*;
 use std::{
     collections::hash_map::DefaultHasher,
     fs,
@@ -7,9 +8,8 @@ use std::{
 };
 
 use crate::Error;
-use resin_common::types::shader::Stage;
 
-use super::{Settings, TempDir, c, write_output};
+use super::{Settings, c, write_output};
 
 /// Compile GLSL with an environment-sensitive, locked SPIR-V cache.
 pub(super) fn build_glsl(

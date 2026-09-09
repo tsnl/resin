@@ -1,5 +1,4 @@
-use resin_common::TempDir;
-use resin_common::types::shader::Stage;
+use resin_common::prelude::*;
 use resin_platform_toolchain::{CProfile, Environment};
 use std::{ffi::OsStr, fs, process::Command};
 

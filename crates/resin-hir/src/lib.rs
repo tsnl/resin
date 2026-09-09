@@ -9,12 +9,11 @@
 //! use resin_hir::lower;
 //! ```
 
+use resin_common::prelude::*;
 mod analysis;
 mod lower;
 mod print;
 
-use resin_common::source::{Ident, SourceLocation, Span};
-use resin_common::types::{Case, Foreign, FunctionId, Intrinsic, Ty, TypeTable, Value};
 use resin_cst::Document;
 use std::{
     collections::BTreeMap,
@@ -30,7 +29,7 @@ pub struct Module {
     pub entries: BTreeMap<Arc<str>, FunctionId>,
     pub types: TypeTable,
     pub functions: Vec<Function>,
-    pub shaders: BTreeMap<FunctionId, resin_common::types::shader::ShaderEntry>,
+    pub shaders: BTreeMap<FunctionId, ShaderEntry>,
     pub origins: SourceMap,
 }
 
@@ -178,7 +177,7 @@ pub enum TermKind {
     /// The projection is resolved during HIR construction; names are not looked up again.
     Field {
         base: Box<Term>,
-        access: resin_common::types::FieldAccess,
+        access: FieldAccess,
     },
 }
 
@@ -242,7 +241,7 @@ pub trait Documents {
 /// Diagnostics and editor facts, with a complete module only when checking succeeds.
 pub struct CheckedProgram {
     pub module: Option<crate::Module>,
-    pub diagnostics: Vec<resin_common::source::SourceError>,
+    pub diagnostics: Vec<SourceError>,
     pub semantics: Analysis,
 }
 
@@ -295,16 +294,12 @@ pub struct Completion {
 }
 
 /// Check a standalone source file; imports require a resolved Program.
-pub fn generate(
-    file: &resin_ast::SourceFile,
-) -> Result<Module, resin_common::diagnostic::GenerateError> {
+pub fn generate(file: &resin_ast::SourceFile) -> Result<Module, GenerateError> {
     lower::generate(file)
 }
 
 /// Check declarations in import order, requiring a completely typed tree.
-pub fn generate_program(
-    program: &resin_ast::Program,
-) -> Result<Module, resin_common::source::SourceError> {
+pub fn generate_program(program: &resin_ast::Program) -> Result<Module, SourceError> {
     lower::generate_program(program)
 }
 

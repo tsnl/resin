@@ -1,4 +1,5 @@
-use resin_lir::{BasicBlock, BlockId, Function, Instr, Local, Module, Terminator, Ty, Value};
+use resin_common::prelude::*;
+use resin_lir::{BasicBlock, BlockId, Function, Instr, Local, Module, Terminator};
 use resin_lir_verifier::{VerifiedModule, VerifyErrorKind};
 
 fn module() -> Module {

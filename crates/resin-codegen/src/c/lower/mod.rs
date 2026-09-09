@@ -1,6 +1,7 @@
 //! Verified LIR → C source tree. Runtime and ABI choices are made here.
 use crate::Error;
-use resin_lir::{Module, Ty};
+use resin_common::prelude::*;
+use resin_lir::Module;
 use resin_lir_verifier::Verified;
 use types::Types;
 

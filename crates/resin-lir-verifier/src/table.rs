@@ -1,6 +1,6 @@
 use super::FunctionTypes;
-use resin_common::types::TypeTable;
-use resin_lir::{Instr, Module, Value};
+use resin_common::prelude::*;
+use resin_lir::{Instr, Module};
 
 /// Complete the table after stack verification has resolved every operand.
 /// The verified module shares this table across all shader and host emitters.

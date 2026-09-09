@@ -1,4 +1,4 @@
-use resin_common::TempDir;
+use resin_common::prelude::*;
 use std::{
     fs,
     path::Path,

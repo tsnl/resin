@@ -4,6 +4,7 @@
 //! process invocation, dependency tracking, and cache maintenance. Missing tools
 //! are reported only when an operation needs them, so host builds need no glslc.
 
+use resin_common::prelude::*;
 use std::{
     collections::BTreeMap,
     ffi::{OsStr, OsString},
@@ -11,8 +12,6 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
-
-use resin_common::types::shader::Stage;
 
 mod c;
 mod dependencies;
@@ -26,7 +25,6 @@ mod shaders;
 use files::{copy_output, io_error, parent, write_output};
 pub use platform::DEFAULT_C_COMPILER;
 use platform::RUNTIME_ARCHIVE;
-use resin_common::TempDir;
 use settings::Settings;
 
 /// Captured process inputs; callers may supply these without changing OS state.

@@ -1,6 +1,5 @@
-use resin_lir::{Ty, Value};
-
 use super::types::Types;
+use resin_common::prelude::*;
 
 pub(super) fn literal(types: &Types<'_>, ty: &Ty, value: &Value) -> String {
     match value {

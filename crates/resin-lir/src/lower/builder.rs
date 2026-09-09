@@ -1,6 +1,7 @@
+use resin_common::prelude::*;
 use std::sync::Arc;
 
-use crate::{BasicBlock, BlockId, Function, Instr, Local, LocalId, Terminator, Ty};
+use crate::{BasicBlock, BlockId, Function, Instr, Local, Terminator};
 
 pub(super) struct FunctionBuilder {
     function: Function,

@@ -1,6 +1,6 @@
+use resin_common::prelude::*;
 #[path = "support/toolchain.rs"]
 mod toolchain;
-use resin_common::TempDir;
 use std::{
     ffi::OsString,
     fs,
@@ -23,7 +23,7 @@ impl Project {
         project
     }
 
-    fn compile(&self) -> Result<resin_lir::Module, resin_ast::SourceError> {
+    fn compile(&self) -> Result<resin_lir::Module, SourceError> {
         pipeline::generate_program(&pipeline::load(&self.0.path().join("main.resin"))?)
     }
 
@@ -442,7 +442,7 @@ fn shader_entry_lookup_uses_the_entry_files_scope() {
         ),
     ]);
     let module = project.compile().unwrap();
-    resin_codegen::emit_glsl(&module, "kernel", resin_codegen::Stage::Compute).unwrap();
+    resin_codegen::emit_glsl(&module, "kernel", Stage::Compute).unwrap();
     let project = Project::new(&[
         (
             "library.resin",
@@ -451,12 +451,7 @@ fn shader_entry_lookup_uses_the_entry_files_scope() {
         ("main.resin", "import { \"library.resin\" };"),
     ]);
     assert!(
-        resin_codegen::emit_glsl(
-            &project.compile().unwrap(),
-            "kernel",
-            resin_codegen::Stage::Compute
-        )
-        .is_err()
+        resin_codegen::emit_glsl(&project.compile().unwrap(), "kernel", Stage::Compute).is_err()
     );
 }
 
@@ -567,7 +562,7 @@ fn entry_bindings_are_verified() {
     let mut module = support::module("export { main }; def main () -> () = {};");
     module
         .entries
-        .insert("main".into(), resin_lir::FunctionId::from_index(999));
+        .insert("main".into(), FunctionId::from_index(999));
     assert!(resin_lir_verifier::verify(&module).is_err());
     assert!(resin_codegen::emit_c(&module, "main").is_err());
 }
@@ -596,7 +591,7 @@ fn lowering_rejects_runtime_module_items_even_in_constructed_asts() {
         file.stmts.push(statement);
         assert_eq!(
             pipeline::generate(&file).unwrap_err().kind,
-            resin_common::diagnostic::GenerateErrorKind::InvalidModuleItem
+            GenerateErrorKind::InvalidModuleItem
         );
         let project = Project::new(&[("main.resin", "")]);
         let mut program = pipeline::load(&project.0.path().join("main.resin")).unwrap();

@@ -1,8 +1,9 @@
 //! Verify stack types across an existing IR function's control-flow graph.
 
+use resin_common::prelude::*;
 use std::collections::VecDeque;
 
-use resin_lir::{BlockId, Function, FunctionId, Module, Terminator, Ty};
+use resin_lir::{BlockId, Function, Module, Terminator};
 
 use super::error::Location;
 use super::instructions::{check_instr, pop_one};

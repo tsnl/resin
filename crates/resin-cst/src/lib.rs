@@ -8,8 +8,7 @@
 //! use resin_cst::lower;
 //! ```
 
-use resin_common::source::Span;
-
+use resin_common::prelude::*;
 mod lower;
 mod print;
 mod query;

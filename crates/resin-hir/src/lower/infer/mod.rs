@@ -1,12 +1,11 @@
 //! Typing services used by the source-checking pass.
 //! Inference handles are resolved before the typed tree reaches IR lowering.
 
+use resin_common::prelude::*;
 pub(crate) mod constraints;
 pub(crate) mod solver;
 pub(crate) mod types;
 
-use resin_ast::{Ident, Span};
-use resin_common::diagnostic::{GenerateError, GenerateErrorKind};
 use std::sync::Arc;
 type Result<T> = std::result::Result<T, GenerateError>;
 fn error(span: Span, message: impl Into<Arc<str>>) -> GenerateError {

@@ -9,13 +9,12 @@
 //! ```compile_fail,E0603
 //! use resin_codegen::glsl;
 //! ```
+use resin_common::prelude::*;
 mod c;
 mod error;
 mod glsl;
 mod layout;
 mod numeric;
-
-pub use resin_common::types::shader::Stage;
 
 #[derive(Debug)]
 pub struct Error(pub String);
@@ -134,7 +133,7 @@ pub struct GlslEdgeValue {
 
 /// Compiled shader words embedded in a C translation unit.
 pub struct Shader {
-    pub function: resin_lir::FunctionId,
+    pub function: FunctionId,
     pub stage: Stage,
     pub words: Vec<u32>,
 }
@@ -151,7 +150,7 @@ pub fn generate_c(
 /// Lower one shader function from verified LIR to a GLSL translation unit.
 pub fn generate_glsl(
     checked: resin_lir_verifier::Verified<'_>,
-    entry: resin_lir::FunctionId,
+    entry: FunctionId,
     stage: Stage,
 ) -> Result<GlslModule, Error> {
     glsl::lower::generate(checked, entry, stage)
@@ -196,7 +195,7 @@ pub fn emit_glsl(module: &resin_lir::Module, entry: &str, stage: Stage) -> Resul
 /// Verify and emit GLSL for a resolved shader function.
 pub fn emit_glsl_function(
     module: &resin_lir::Module,
-    entry: resin_lir::FunctionId,
+    entry: FunctionId,
     stage: Stage,
 ) -> Result<String, Error> {
     resin_lir_verifier::with_verified(module, |checked| {

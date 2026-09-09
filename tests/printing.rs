@@ -1,10 +1,10 @@
+use resin_common::prelude::*;
 #[path = "support/toolchain.rs"]
 mod toolchain;
-use resin_common::TempDir;
 use std::{ffi::OsString, process::Command};
 use support::pipeline;
 
-use resin_lir::{Instr, Ty};
+use resin_lir::Instr;
 
 mod support;
 use support::module;
@@ -62,7 +62,7 @@ fn print_is_unary_and_returns_unit() {
         matches!(params.as_slice(), [Ty::Defined { definition }] if m.types[definition.index()].name().unwrap().as_ref() == "String")
     );
     assert_eq!(result, &Ty::Unit);
-    let typer = resin_common::types::TyperContext::from_definitions(m.types.clone());
+    let typer = TyperContext::from_definitions(m.types.clone());
     assert_eq!(
         typer.type_builtin_call("print", params).unwrap().result,
         Ty::Unit
@@ -199,10 +199,7 @@ fn print_cannot_be_shadowed_by_a_local_or_parameter() {
     ] {
         let error = pipeline::generate(&support::parse(source)).unwrap_err();
         assert!(
-            matches!(
-                error.kind,
-                resin_common::diagnostic::GenerateErrorKind::ReservedBuiltin { .. }
-            ),
+            matches!(error.kind, GenerateErrorKind::ReservedBuiltin { .. }),
             "{error}"
         );
     }
@@ -279,7 +276,7 @@ fn shader_print_has_a_host_only_diagnostic() {
     let m = module(
         r#"export { kernel }; def kernel (invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); print(fmt("{0}", (i,))); output.* := i; };"#,
     );
-    let error = resin_codegen::emit_glsl(&m, "kernel", resin_codegen::Stage::Compute).unwrap_err();
+    let error = resin_codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap_err();
     assert!(
         error
             .to_string()

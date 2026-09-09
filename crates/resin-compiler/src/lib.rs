@@ -9,6 +9,7 @@
 //! use resin_compiler::{loading, session, compilation};
 //! ```
 
+use resin_common::prelude::*;
 use std::{
     collections::{BTreeMap, BTreeSet},
     io,
@@ -27,9 +28,6 @@ mod session;
 mod shaders;
 mod source;
 mod syntax;
-
-pub use resin_common::source::{SourceError, SourceLocation, SourceNote};
-pub use resin_hir::{Completion, DefinitionKind, Hover};
 
 /// A source file and the exported entry to execute, usually `main`.
 #[derive(Clone, Debug)]
@@ -169,10 +167,10 @@ impl Compilation {
     pub fn definition(&self, path: &Path, offset: usize) -> Option<SourceLocation> {
         self.data.semantics.definition(&self.data, path, offset)
     }
-    pub fn hover(&self, path: &Path, offset: usize) -> Option<Hover> {
+    pub fn hover(&self, path: &Path, offset: usize) -> Option<resin_hir::Hover> {
         self.data.semantics.hover(&self.data, path, offset)
     }
-    pub fn completions(&self, path: &Path, offset: usize) -> Vec<Completion> {
+    pub fn completions(&self, path: &Path, offset: usize) -> Vec<resin_hir::Completion> {
         self.data.semantics.completions(&self.data, path, offset)
     }
 }

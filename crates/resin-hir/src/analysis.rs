@@ -1,7 +1,8 @@
 //! Editor queries over opaque HIR analysis; source scopes stay private.
 use crate::lower::semantic;
 use crate::{Completion, DefinitionKind, Documents, Hover};
-use resin_common::source::{SourceLocation, Span};
+use resin_common::prelude::*;
+
 use resin_cst::{contains, span};
 use semantic::Definition;
 use std::path::Path;

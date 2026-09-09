@@ -1,4 +1,5 @@
-use resin_lir::{Function, Instr, Module, RecordField, Ty, TypeDef, Value};
+use resin_common::prelude::*;
+use resin_lir::{Function, Instr, Module};
 
 use super::error::Location;
 use super::rules::{
@@ -258,18 +259,15 @@ pub(super) fn check_instr(
                 check_type(&module.types, param, location)?;
             }
             check_type(&module.types, result, location)?;
-            let signature =
-                resin_common::types::TyperContext::from_definitions(module.types.clone())
-                    .type_builtin_call(name, params)
-                    .map_err(|error| {
-                        location.error(
-                            if error.kind == resin_common::types::TypeErrorKind::PointerArithmetic {
-                                VerifyErrorKind::PointerArithmetic
-                            } else {
-                                VerifyErrorKind::InvalidBuiltin(error)
-                            },
-                        )
-                    })?;
+            let signature = TyperContext::from_definitions(module.types.clone())
+                .type_builtin_call(name, params)
+                .map_err(|error| {
+                    location.error(if error.kind == TypeErrorKind::PointerArithmetic {
+                        VerifyErrorKind::PointerArithmetic
+                    } else {
+                        VerifyErrorKind::InvalidBuiltin(error)
+                    })
+                })?;
             expect_type(signature.result, result.clone(), location)?;
             let values = pop(stack, params.len(), location)?;
             expect_types(params, &values, location)?;

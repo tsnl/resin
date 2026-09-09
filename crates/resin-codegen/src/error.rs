@@ -1,4 +1,5 @@
 use crate::Error;
+use resin_common::prelude::*;
 use std::fmt;
 
 impl fmt::Display for Error {
@@ -21,8 +22,8 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<resin_common::source::SourceError> for Error {
-    fn from(error: resin_common::source::SourceError) -> Self {
+impl From<SourceError> for Error {
+    fn from(error: SourceError) -> Self {
         Self(error.to_string())
     }
 }
@@ -34,7 +35,7 @@ impl Error {
         instruction: Option<(usize, usize)>,
         error: Self,
     ) -> Self {
-        use resin_lir::{BlockId, FunctionId};
+        use resin_lir::BlockId;
         let id = FunctionId::from_index(function);
         let origin = instruction
             .and_then(|(b, i)| {

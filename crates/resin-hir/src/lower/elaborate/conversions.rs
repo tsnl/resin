@@ -1,5 +1,5 @@
 use super::*;
-use resin_common::types::Conv;
+
 use resin_common::types::check::ExplicitConversion;
 
 impl Generator {

@@ -1,3 +1,4 @@
+use resin_common::prelude::*;
 #[path = "support/pipeline.rs"]
 mod pipeline;
 #[path = "support/toolchain.rs"]
@@ -5,7 +6,7 @@ mod toolchain;
 use std::{fs, path::Path, process::Command};
 
 fn run(source: &str, native: &str) -> std::process::Output {
-    let temp = resin_common::TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let path = temp.path().join("main.resin");
     fs::write(&path, source).unwrap();
     let program = pipeline::load(&path).unwrap();
@@ -38,7 +39,7 @@ fn success(output: &std::process::Output) {
 #[test]
 fn every_native_status_operation_has_a_public_result_wrapper() {
     let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), ""));
-    let source = resin_common::TempDir::new(&std::env::temp_dir()).unwrap();
+    let source = TempDir::new(&std::env::temp_dir()).unwrap();
     let path = source.path().join("main.resin");
     fs::write(&path, "import { \"std/gpu.resin\", \"std/window.resin\", \"std/image.resin\", \"std/console.resin\" };").unwrap();
     let module = pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap();
@@ -106,10 +107,7 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
                 .find(|function| function.name.as_deref() == Some(qualified.as_str()))
                 .unwrap_or_else(|| panic!("missing lowered function {qualified}"));
             assert!(function.foreign.is_none(), "{name}");
-            assert!(
-                matches!(function.result, resin_lir::Ty::Result { .. }),
-                "{name}"
-            );
+            assert!(matches!(function.result, Ty::Result { .. }), "{name}");
             checked += 1;
         }
         assert!(checked > 0 || name == "console");

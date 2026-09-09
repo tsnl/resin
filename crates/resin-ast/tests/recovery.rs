@@ -1,4 +1,5 @@
-use resin_ast::{SourceModule, Span, StmtKind, TermKind};
+use resin_ast::{SourceModule, StmtKind, TermKind};
+use resin_common::prelude::*;
 use resin_cst::Document;
 
 #[test]

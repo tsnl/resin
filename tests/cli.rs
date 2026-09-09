@@ -1,10 +1,9 @@
+use resin_common::prelude::*;
 use std::{
     fs,
     path::{Path, PathBuf},
     process::{Command, Output},
 };
-
-use resin_common::TempDir;
 
 #[path = "support/shaders.rs"]
 mod shaders;

@@ -1,6 +1,6 @@
+use resin_common::prelude::*;
 #[path = "support/toolchain.rs"]
 mod toolchain;
-use resin_common::TempDir;
 use std::{ffi::OsString, fs, process::Command};
 use support::pipeline;
 
@@ -95,7 +95,7 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
         "export { main }; struct Broken {}; def main() -> Result<(), Broken> = { err(Broken {}) };",
     );
     let mut definitions = m.types.to_vec();
-    let resin_lir::TypeDef::Nominal { name, .. } = &mut definitions[1] else {
+    let TypeDef::Nominal { name, .. } = &mut definitions[1] else {
         unreachable!()
     };
     *name = "quoted\"name\\value".into();
@@ -365,7 +365,7 @@ fn failed_compilation_preserves_existing_output() {
 
 #[test]
 fn loops_carry_typed_stack_values_across_edges() {
-    use resin_lir::{BasicBlock, BlockId, Instr::*, Local, LocalId, Terminator::*, Ty, Value};
+    use resin_lir::{BasicBlock, BlockId, Instr::*, Local, Terminator::*};
     let mut m = module("export { main }; def main () -> int = { 0 };");
     let f = m
         .functions
@@ -441,7 +441,7 @@ fn loops_carry_typed_stack_values_across_edges() {
 
 #[test]
 fn array_addresses_and_dynamic_bounds_are_executable() {
-    use resin_lir::{Instr::*, Local, LocalId, Ty, Value};
+    use resin_lir::{Instr::*, Local};
     let mut m = module("export { main }; def main () -> int = { 0 };");
     let f = m
         .functions

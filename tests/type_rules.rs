@@ -1,4 +1,4 @@
-use resin_common::types::{RecordField, Ty, TypeDef, TypeErrorKind, TypeId, TyperContext};
+use resin_common::prelude::*;
 fn record(ty: Ty) -> Ty {
     Ty::Record {
         fields: vec![RecordField {

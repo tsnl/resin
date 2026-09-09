@@ -42,6 +42,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   C and GLSL each have a target language, lowering, and printing inside `codegen`.
 - Use canonical crate and module names; do not rename dependencies or language types
   for brevity. Prefer a qualified name when two phases use the same type name.
+  Import shared vocabulary privately with `use resin_common::prelude::*;`; do not
+  re-export another crate's types merely because they appear in public signatures.
 - Prefer small functions with descriptive names, ideally fewer than ten lines of logic.
   Split by a meaningful operation, not an arbitrary line count. Exhaustive language
   dispatch and simple data definitions may be longer when that keeps the cases together.

@@ -1,9 +1,10 @@
 use crate::{GlslBlock, GlslEdge, GlslEdgeValue, GlslExit, GlslFunction};
+use resin_common::prelude::*;
 use resin_lir_verifier::FunctionTypes;
 use std::fmt::Write;
 
 use crate::Error;
-use resin_lir::{Case, Function, Instr, Terminator, Ty};
+use resin_lir::{Function, Instr, Terminator};
 
 use super::{
     Slot,

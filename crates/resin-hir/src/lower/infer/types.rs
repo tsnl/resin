@@ -1,6 +1,5 @@
+use resin_common::prelude::*;
 use std::sync::Arc;
-
-use resin_common::types::{RecordField, Ty};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Head {

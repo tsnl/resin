@@ -1,7 +1,8 @@
 //! Publish checked declarations, then elaborate bodies against their stable identities.
-use super::{GenerateError, GenerateErrorKind, Generator, check::CheckedFile, functions, typed};
-use resin_ast::{Ident, SourceFile, StmtKind};
-use resin_common::types::{FunctionId, shader};
+use super::check::CheckedFile;
+use super::{Generator, functions, typed};
+use resin_ast::{SourceFile, StmtKind};
+use resin_common::prelude::*;
 use std::collections::BTreeSet;
 
 impl Generator {
@@ -66,7 +67,7 @@ impl Generator {
             ));
         }
         let signature = &self.module.functions[id.index()].signature;
-        shader::validate(
+        resin_common::types::shader::validate(
             &self.typer,
             &signature.parameter_type(),
             &signature.result.ty,
@@ -76,7 +77,7 @@ impl Generator {
         .map_err(|message| shader_error(decorator, &message))?;
         self.module.shaders.insert(
             id,
-            shader::ShaderEntry {
+            resin_common::types::shader::ShaderEntry {
                 stage: stage.into(),
                 embedded: false,
             },

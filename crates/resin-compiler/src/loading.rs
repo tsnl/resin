@@ -1,6 +1,6 @@
 use crate::SourceProvider;
-use resin_ast::{Program, SourceFile, SourceModule, Span};
-use resin_common::source::{SourceError, SourceLocation, SourceNote};
+use resin_ast::{Program, SourceFile, SourceModule};
+use resin_common::prelude::*;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     path::{Component, Path, PathBuf},

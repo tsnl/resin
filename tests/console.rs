@@ -1,8 +1,8 @@
+use resin_common::prelude::*;
 #[path = "support/pipeline.rs"]
 mod pipeline;
 #[path = "support/toolchain.rs"]
 mod toolchain;
-use resin_common::TempDir;
 use std::{
     ffi::OsString,
     fs,

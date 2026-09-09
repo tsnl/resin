@@ -1,7 +1,7 @@
+use super::Generator;
 use super::scope::{Initialization, ValueBinding};
-use super::{GenerateError, GenerateErrorKind, Generator};
-use crate::{Instr, Ty};
-use resin_common::source::Ident;
+use crate::Instr;
+use resin_common::prelude::*;
 use resin_hir::{BindingId, Term};
 
 impl Generator {

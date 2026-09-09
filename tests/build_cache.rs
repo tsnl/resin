@@ -1,13 +1,12 @@
 #![cfg(unix)]
 
+use resin_common::prelude::*;
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
     process::{Command, Output, Stdio},
 };
-
-use resin_common::TempDir;
 
 #[path = "support/shaders.rs"]
 mod shaders;

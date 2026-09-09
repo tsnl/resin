@@ -5,8 +5,9 @@ use crate::{
 use crossbeam_channel::{Receiver, Sender, select};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::{Position, Uri};
-use resin_common::source::SourceLocation;
-use resin_compiler::{DefinitionKind, normalize_path};
+use resin_common::prelude::*;
+use resin_compiler::normalize_path;
+use resin_hir::DefinitionKind;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
@@ -548,7 +549,7 @@ fn formatting_edits(source: &str, formatted: &str) -> Vec<lsp_types::TextEdit> {
         new_end += 1;
     }
     vec![lsp_types::TextEdit {
-        range: Text::new(source).range(resin_common::source::Span { start, end }),
+        range: Text::new(source).range(Span { start, end }),
         new_text: formatted[start..new_end].into(),
     }]
 }

@@ -2,7 +2,6 @@
 use super::*;
 use crate::lower::infer::{Equation, solver::Solver, types::Head};
 use resin_ast::{SourceFile, StmtKind};
-use resin_common::diagnostic::GenerateErrorKind;
 
 type Signatures = BTreeMap<Arc<str>, Signature>;
 type SourceBodies<'a> = Vec<(&'a Ident, &'a resin_ast::Term)>;
@@ -201,8 +200,8 @@ impl Checker<'_> {
                 if matches!(self.typing.solver.head(ty), Type::Node(Head::Array(0), _)) {
                     GenerateError::typing(
                         span,
-                        resin_common::types::TypeError {
-                            kind: resin_common::types::TypeErrorKind::EmptyArrayNeedsElementType,
+                        TypeError {
+                            kind: TypeErrorKind::EmptyArrayNeedsElementType,
                         },
                     )
                 } else {

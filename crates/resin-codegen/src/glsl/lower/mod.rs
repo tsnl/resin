@@ -1,5 +1,5 @@
 use crate::Error;
-use resin_lir::Ty;
+use resin_common::prelude::*;
 
 mod entry;
 mod function;
@@ -10,11 +10,9 @@ mod types;
 
 use types::Types;
 
-pub use resin_common::types::shader::Stage;
-
 pub fn generate(
     checked: resin_lir_verifier::Verified<'_>,
-    entry: resin_lir::FunctionId,
+    entry: FunctionId,
     stage: Stage,
 ) -> Result<crate::GlslModule, Error> {
     let module = checked.module();
@@ -106,7 +104,7 @@ fn shader_wrapper(
     index: usize,
     stage: Stage,
 ) -> Result<String, Error> {
-    let typer = resin_common::types::TyperContext::from_definitions(types.module.types.clone());
+    let typer = TyperContext::from_definitions(types.module.types.clone());
     let interface = resin_common::types::shader::validate(
         &typer,
         &function.locals[0].ty,

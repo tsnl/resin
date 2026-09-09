@@ -1,13 +1,12 @@
 //! Decode annotations with injected name lookup and inference state.
+use resin_common::prelude::*;
 use std::collections::HashSet;
 
-use super::{GenerateError, GenerateErrorKind};
 use crate::lower::infer::{
     solver::{Solver, VariableId},
     types::{Head, Type},
 };
-use resin_ast::{Ident, Span, TypeKind};
-use resin_common::types::{Ty, TypeError, TypeErrorKind};
+use resin_ast::TypeKind;
 
 type Result<T> = std::result::Result<T, GenerateError>;
 

@@ -1,4 +1,4 @@
-use resin_lir::{Ty, TypeId};
+use resin_common::prelude::*;
 use support::pipeline;
 
 mod support;
@@ -165,7 +165,7 @@ fn verifier_rejects_invalid_sum_instructions_and_types() {
     let resin_lir::Instr::MakeVariant { tag, .. } = instruction else {
         unreachable!()
     };
-    *tag = resin_lir::Case::Type(Ty::Bool);
+    *tag = Case::Type(Ty::Bool);
     assert!(matches!(
         resin_lir_verifier::verify(&m).unwrap_err().kind,
         resin_lir_verifier::VerifyErrorKind::InvalidVariant
@@ -271,6 +271,6 @@ fn ir_never_elimination_cannot_consume_an_inhabited_value() {
             .flat_map(|b| &b.instrs)
             .any(|i| matches!(i, resin_lir::Instr::Eliminate { .. }))
     );
-    m.functions[0].locals[0].ty = resin_lir::Ty::Int32;
+    m.functions[0].locals[0].ty = Ty::Int32;
     assert!(resin_lir_verifier::verify(&m).is_err());
 }

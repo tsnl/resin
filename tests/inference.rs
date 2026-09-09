@@ -1,5 +1,5 @@
 use resin_ast::{StmtKind, TypeKind};
-use resin_lir::Ty;
+use resin_common::prelude::*;
 use support::pipeline;
 
 mod support;
@@ -114,7 +114,7 @@ fn casts_do_not_choose_an_unrelated_nominal_type_for_a_hole() {
             "value"
         ),
         Ty::Defined {
-            definition: resin_lir::TypeId::from_index(1)
+            definition: TypeId::from_index(1)
         }
     );
 }
@@ -361,9 +361,7 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
         assert!(
             matches!(
                 error.kind,
-                resin_common::diagnostic::GenerateErrorKind::Type(
-                    resin_common::types::TypeErrorKind::TypeMismatch { .. }
-                )
+                GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. })
             ),
             "{source}: {error}"
         );

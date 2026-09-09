@@ -1,5 +1,6 @@
-use super::{GenerateError, Generator};
-use crate::{Instr, Ty};
+use super::Generator;
+use crate::Instr;
+use resin_common::prelude::*;
 use resin_hir::ReceiverConversion;
 use resin_hir::Term;
 

@@ -1,4 +1,4 @@
-use resin_common::types::{LocalId, Ty};
+use resin_common::prelude::*;
 use resin_hir::BindingId;
 use std::collections::HashMap;
 

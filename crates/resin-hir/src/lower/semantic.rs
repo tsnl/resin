@@ -2,8 +2,8 @@
 
 use super::scope::DeclarationId;
 use crate::lower::context::Context;
-use resin_common::source::SourceLocation;
-use resin_common::types::{Ty, TypeId};
+use resin_common::prelude::*;
+
 use std::{collections::BTreeMap, path::PathBuf};
 
 pub(crate) use crate::DefinitionKind;

@@ -1,9 +1,9 @@
+use resin_common::prelude::*;
 #[path = "support/toolchain.rs"]
 mod toolchain;
 use support::pipeline;
 mod support;
 
-use resin_common::TempDir;
 use std::{ffi::OsString, process::Command};
 
 const RESOURCE: &str = r#"

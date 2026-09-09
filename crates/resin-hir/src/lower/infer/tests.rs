@@ -1,19 +1,14 @@
 use crate::lower::context::Context;
 use crate::lower::infer;
-use resin_common::types::RecordField;
-use resin_common::types::Ty;
-use resin_common::types::check::*;
+use resin_common::prelude::*;
 
 fn infer_relation(
     typer: &mut Context,
     relation: impl FnOnce(infer::types::Type) -> infer::constraints::Constraint,
-) -> Result<Ty, resin_common::diagnostic::GenerateError> {
+) -> Result<Ty, GenerateError> {
     let mut inference = infer::Inference::new(typer);
     let (rule, out) = inference.expression();
-    inference.constrain(
-        rule,
-        (resin_ast::Span { start: 0, end: 0 }, relation(out.clone())),
-    );
+    inference.constrain(rule, (Span { start: 0, end: 0 }, relation(out.clone())));
     if let Some(error) = inference
         .solve(std::slice::from_ref(&out))
         .into_iter()
@@ -21,9 +16,7 @@ fn infer_relation(
     {
         return Err(error);
     }
-    inference
-        .solver
-        .require(&out, resin_ast::Span { start: 0, end: 0 })
+    inference.solver.require(&out, Span { start: 0, end: 0 })
 }
 
 fn record(ty: Ty) -> Ty {
@@ -44,9 +37,7 @@ fn empty_arrays_need_an_injected_element_type() {
     };
     assert_eq!(
         compile("def main() = { []; };").unwrap_err().kind,
-        resin_common::diagnostic::GenerateErrorKind::Type(
-            TypeErrorKind::EmptyArrayNeedsElementType
-        )
+        GenerateErrorKind::Type(TypeErrorKind::EmptyArrayNeedsElementType)
     );
     let mut typer = Context::new();
     let empty = Ty::Array {
@@ -126,10 +117,8 @@ fn convert_does_not_unwrap_function_arguments() {
             meters.into(),
             out
         )),
-        Err(resin_common::diagnostic::GenerateError {
-            kind: resin_common::diagnostic::GenerateErrorKind::Type(
-                TypeErrorKind::TypeMismatch { .. }
-            ),
+        Err(GenerateError {
+            kind: GenerateErrorKind::Type(TypeErrorKind::TypeMismatch { .. }),
             ..
         })
     ));

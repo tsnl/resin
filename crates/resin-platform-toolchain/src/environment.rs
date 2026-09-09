@@ -103,7 +103,7 @@ impl Environment {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::TempDir;
+    use resin_common::prelude::*;
     use std::{collections::BTreeMap, fs};
 
     fn executable(directory: &Path, name: &str) -> PathBuf {

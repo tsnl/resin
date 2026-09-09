@@ -1,9 +1,8 @@
+use resin_common::prelude::*;
 #[path = "support/pipeline.rs"]
 mod pipeline;
 use resin_ast::SourceFile;
-use resin_common::diagnostic::GenerateErrorKind;
-use resin_common::types::TypeErrorKind;
-use resin_lir::{Instr, Ty, Value};
+use resin_lir::Instr;
 
 fn parse(src: &str) -> Result<SourceFile, resin_ast::AstError> {
     resin_ast::generate(&resin_cst::Document::reparse(src.to_string(), None))

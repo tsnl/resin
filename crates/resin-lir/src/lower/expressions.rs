@@ -1,7 +1,7 @@
 //! Every HIR constructor has an explicit storage/control-flow translation here.
-use super::{GenerateError, Generator};
-use crate::{Instr, Ty};
-use resin_common::types::Intrinsic;
+use super::Generator;
+use crate::Instr;
+use resin_common::prelude::*;
 use resin_hir::{Arguments, Statement, Term, TermKind};
 
 impl Generator {

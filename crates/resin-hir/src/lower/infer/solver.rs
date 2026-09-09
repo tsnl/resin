@@ -1,10 +1,6 @@
-use resin_ast::Span;
-use resin_common::types::{Ty, TypeError, TypeErrorKind, TypeId};
-
-use super::{
-    GenerateError, Result, error,
-    types::{Head, Type},
-};
+use super::types::{Head, Type};
+use super::{Result, error};
+use resin_common::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Class {

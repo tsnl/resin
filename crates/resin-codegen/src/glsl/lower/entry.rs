@@ -1,4 +1,5 @@
-use resin_common::types::{Ty, shader::Interface};
+use resin_common::prelude::*;
+use resin_common::types::shader::Interface;
 
 use super::types::Types;
 

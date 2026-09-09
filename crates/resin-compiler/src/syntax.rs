@@ -1,8 +1,9 @@
 //! Cached products of the CST and AST passes, retained together by the driver.
+use resin_common::prelude::*;
 pub(crate) struct Document {
     pub syntax: resin_cst::Document,
     pub file: resin_ast::SourceFile,
-    pub errors: Vec<(resin_ast::Span, String)>,
+    pub errors: Vec<(Span, String)>,
 }
 impl Document {
     pub fn reparse(text: String, previous: Option<&Self>) -> Self {

@@ -1,6 +1,6 @@
+use resin_common::prelude::*;
 #[path = "support/toolchain.rs"]
 mod toolchain;
-use resin_codegen::Stage;
 use support::pipeline;
 
 #[path = "support/shaders.rs"]
@@ -49,7 +49,7 @@ fn inferred_shader_results_lower_without_backend_inference() {
     let m = module(
         "export { kernel }; def kernel(invocation: ulong, output: Ptr<uint>) -> _ = { var i = uint(invocation); output.* := { var value: _; value := i + 1; value }; };",
     );
-    assert_eq!(m.functions[0].result, resin_lir::Ty::Unit);
+    assert_eq!(m.functions[0].result, Ty::Unit);
     let source = resin_codegen::emit_glsl(&m, "kernel", Stage::Compute).unwrap();
     if let Some(compiler) = shaders::compiler() {
         toolchain::glsl(&compiler)
@@ -278,7 +278,7 @@ fn compound_control_flow_compiles_to_spirv() {
 
 #[test]
 fn imported_backend_errors_retain_expression_origins() {
-    let temp = resin_common::TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let helper = temp.path().join("helper.resin");
     let entry = temp.path().join("main.resin");
     let mut session = resin_compiler::Session::default();

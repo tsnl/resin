@@ -1,12 +1,9 @@
 //! Private checking tree, retaining source forms and lexical contexts for elaboration.
 //! Inference first fills this tree with `Type`, then resolves every node to `Ty`.
 //! Elaboration consumes the concrete tree and erases its source-only metadata.
-use super::{
-    GenerateError,
-    scope::{Cursor, DeclarationId},
-};
-use resin_ast::{Ident, Span};
-use resin_common::types::Ty;
+use super::scope::{Cursor, DeclarationId};
+use resin_common::prelude::*;
+
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]

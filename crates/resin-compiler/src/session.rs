@@ -241,6 +241,7 @@ mod tests {
 mod verification_tests {
     use crate::Session;
     use crate::{build::emit_c, shaders::emit_glsl};
+    use resin_common::prelude::*;
 
     #[test]
     fn compilations_reuse_verification_for_multiple_backends_and_invalidate_on_edit() {
@@ -253,7 +254,7 @@ mod verification_tests {
         let mut shaders = Vec::new();
         for name in ["a", "b"] {
             let id = checked.module().entries[name];
-            shaders.push(emit_glsl(checked, id, resin_codegen::Stage::Compute).unwrap());
+            shaders.push(emit_glsl(checked, id, Stage::Compute).unwrap());
         }
         let host = emit_c(checked, "main", &[]).unwrap();
         assert!(std::ptr::eq(
@@ -267,8 +268,7 @@ mod verification_tests {
         for (name, expected) in ["a", "b"].into_iter().zip(shaders) {
             assert_eq!(
                 expected,
-                resin_codegen::emit_glsl(checked.module(), name, resin_codegen::Stage::Compute)
-                    .unwrap()
+                resin_codegen::emit_glsl(checked.module(), name, Stage::Compute).unwrap()
             );
         }
         session

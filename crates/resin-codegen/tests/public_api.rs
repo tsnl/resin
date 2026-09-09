@@ -1,8 +1,6 @@
 //! A backend client constructs LIR directly and never depends on frontend state.
-use resin_codegen::Stage;
-use resin_lir::{
-    BasicBlock, BlockId, Function, FunctionId, Instr, Local, Module, Terminator, Ty, Value,
-};
+use resin_common::prelude::*;
+use resin_lir::{BasicBlock, BlockId, Function, Instr, Local, Module, Terminator};
 use resin_lir_verifier::VerifiedModule;
 
 fn constant_function(parameter: Ty, result: Ty, value: Value) -> Function {

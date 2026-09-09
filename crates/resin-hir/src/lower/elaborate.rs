@@ -1,12 +1,13 @@
 //! Discard source contexts and express sugar using the HIR language.
+use resin_common::prelude::*;
 mod conversions;
+use super::eval::Evaluator;
 use super::functions::annotation;
-use super::{GenerateError, GenerateErrorKind, Generator, eval::Evaluator, typed};
+use super::{Generator, typed};
 use crate::ReceiverConversion;
 use crate::lower::namespaces::FunctionBody;
 use crate::{Arguments, MatchArm, Statement, Term, TermKind};
-use resin_ast::{Ident, Span};
-use resin_common::types::{Case, FunctionId, Intrinsic, Ty, Value};
+
 type Result<T> = std::result::Result<T, GenerateError>;
 
 impl Generator {

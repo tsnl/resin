@@ -1,4 +1,3 @@
-use super::super::GenerateError;
 use super::super::typed::{StatementKind, TermKind};
 use super::super::{scope::Cursor, semantic::DefinitionKind};
 use super::{Annotation, Checker, Head, MatchArm, Result, Statement, Term, Type};
@@ -7,8 +6,7 @@ use crate::lower::infer::{
     constraints::{Constraint, Pattern},
 };
 use resin_ast::StmtKind;
-use resin_common::diagnostic::GenerateErrorKind;
-use resin_common::types::Ty;
+use resin_common::prelude::*;
 
 impl Checker<'_> {
     pub fn term(&mut self, term: &resin_ast::Term, expected: Option<Type>) -> (Rule, Term) {
@@ -45,11 +43,11 @@ impl Expression<'_, '_> {
         annotation
     }
 
-    fn constrain(&mut self, constraint: (resin_ast::Span, Constraint)) {
+    fn constrain(&mut self, constraint: (Span, Constraint)) {
         self.checker.typing.constrain(self.rule, constraint);
     }
 
-    fn result_parts(&mut self, ty: &Type, span: resin_ast::Span) -> Result<(Type, Type)> {
+    fn result_parts(&mut self, ty: &Type, span: Span) -> Result<(Type, Type)> {
         self.checker.typing.result_parts(self.rule, ty, span)
     }
 
@@ -114,7 +112,7 @@ impl Expression<'_, '_> {
                     _ => (base.ty.clone(), false),
                 };
                 self.checker.scopes.record_members(
-                    resin_ast::Span {
+                    Span {
                         start: span.end,
                         end: span.end,
                     },

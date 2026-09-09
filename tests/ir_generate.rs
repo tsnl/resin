@@ -1,9 +1,8 @@
+use resin_common::prelude::*;
 #[path = "support/pipeline.rs"]
 mod pipeline;
 use pipeline::generate;
-use resin_common::diagnostic::GenerateErrorKind;
-use resin_common::types::TypeErrorKind;
-use resin_lir::{Instr, Terminator, Ty, format_module};
+use resin_lir::{Instr, Terminator, format_module};
 use resin_lir_verifier::verify;
 
 fn parse(src: &str) -> resin_ast::SourceFile {
@@ -245,7 +244,7 @@ def from_meters (m: Meters) -> int = { m.value };
     );
     verify(&module).unwrap();
     let meters = Ty::Defined {
-        definition: resin_lir::TypeId::from_index(1),
+        definition: TypeId::from_index(1),
     };
     assert_eq!(
         module.functions[0].ty().unwrap(),
@@ -331,7 +330,7 @@ def main() -> () = {
     assert_eq!(
         module.functions[0].locals[1].ty,
         Ty::Defined {
-            definition: resin_lir::TypeId::from_index(2),
+            definition: TypeId::from_index(2),
         }
     );
     assert_eq!(
@@ -355,7 +354,7 @@ def nil (p: Ptr<List>) -> List = { List { value = 0, next = p } };
     );
     verify(&module).unwrap();
     let list = Ty::Defined {
-        definition: resin_lir::TypeId::from_index(1),
+        definition: TypeId::from_index(1),
     };
     assert_eq!(
         module.functions[0].ty().unwrap(),

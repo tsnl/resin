@@ -1,3 +1,4 @@
+use resin_common::prelude::*;
 #[path = "support/pipeline.rs"]
 mod pipeline;
 use resin_compiler::SourceProvider;
@@ -153,10 +154,9 @@ fn inherent_methods_have_navigation_hover_and_member_completion() {
                     .starts_with(&format!("def {method}("))
             );
             let items = analysis.completions(&path, call);
-            assert!(
-                items.iter().any(|item| item.name == method
-                    && item.kind == resin_compiler::DefinitionKind::Function)
-            );
+            assert!(items.iter().any(
+                |item| item.name == method && item.kind == resin_hir::DefinitionKind::Function
+            ));
         }
         let global = analysis.completions(&path, source.find("var c").unwrap());
         assert!(
@@ -217,8 +217,10 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
             );
             let items = analysis.completions(&path, offset);
             assert!(
-                items.iter().any(|item| item.name == "at"
-                    && item.kind == resin_compiler::DefinitionKind::Function)
+                items
+                    .iter()
+                    .any(|item| item.name == "at"
+                        && item.kind == resin_hir::DefinitionKind::Function)
             );
             if !tail.is_empty() {
                 let offset = source.rfind(".;").or_else(|| source.rfind(".at(")).unwrap() + 1;
@@ -390,7 +392,7 @@ fn field_completion_uses_receiver_types_and_replaces_only_the_field() {
                 .completions(&project.path("main.resin"), offset);
             let names = items
                 .iter()
-                .filter(|item| item.kind == resin_compiler::DefinitionKind::Field)
+                .filter(|item| item.kind == resin_hir::DefinitionKind::Field)
                 .map(|item| item.name.as_str())
                 .collect::<Vec<_>>();
             assert_eq!(
@@ -403,7 +405,7 @@ fn field_completion_uses_receiver_types_and_replaces_only_the_field() {
                 "{source}"
             );
             assert_eq!(items[0].detail, "count: long");
-            assert_eq!(items[0].kind, resin_compiler::DefinitionKind::Field);
+            assert_eq!(items[0].kind, resin_hir::DefinitionKind::Field);
             assert_eq!(items[0].replace.start, start);
             assert_eq!(items[0].replace.end, start + field.len());
         }
@@ -746,7 +748,7 @@ fn malformed_function_names_do_not_create_editor_definitions() {
 #[test]
 #[cfg(unix)]
 fn new_paths_resolve_through_symlinks() {
-    let temp = resin_common::TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let root = std::fs::canonicalize(temp.path()).unwrap();
     std::fs::create_dir(root.join("real")).unwrap();
     std::os::unix::fs::symlink(root.join("real"), root.join("alias")).unwrap();
@@ -758,7 +760,7 @@ fn new_paths_resolve_through_symlinks() {
 
 #[test]
 fn buffers_override_disk() {
-    let temp = resin_common::TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     let path = temp.path().join("lib.resin");
     std::fs::write(&path, "disk").unwrap();
     let path = normalize_path(&path).unwrap();
@@ -770,7 +772,7 @@ fn buffers_override_disk() {
 
 #[test]
 fn normalized_paths_are_stable_for_existing_and_unsaved_files() {
-    let temp = resin_common::TempDir::new(&std::env::temp_dir()).unwrap();
+    let temp = TempDir::new(&std::env::temp_dir()).unwrap();
     std::fs::write(temp.path().join("saved.resin"), "").unwrap();
     let root = std::fs::canonicalize(temp.path()).unwrap();
     for name in ["saved.resin", "unsaved.resin"] {
@@ -823,7 +825,7 @@ fn completion_obeys_parameter_shadowing_and_module_type_order() {
         source.rfind("val").unwrap() + 3,
     );
     let value = items.iter().find(|item| item.name == "value").unwrap();
-    assert_eq!(value.kind, resin_compiler::DefinitionKind::Variable);
+    assert_eq!(value.kind, resin_hir::DefinitionKind::Variable);
 
     // Module type definitions run before function signatures, but run in source
     // order relative to each other. Completion must match those compiler phases.
@@ -1163,7 +1165,7 @@ fn strict_lowering_rejects_holes_even_when_given_a_recovered_ast() {
         let error = pipeline::generate(file).unwrap_err();
         assert_eq!(
             error.kind,
-            resin_common::diagnostic::GenerateErrorKind::IncompleteSyntax,
+            GenerateErrorKind::IncompleteSyntax,
             "{source}: {error}"
         );
         assert!(error.span.start <= error.span.end && error.span.end <= source.len());
@@ -1486,8 +1488,10 @@ fn pointer_replace_has_ordinary_method_hover_and_recovery() {
             },
         );
         assert!(
-            items.iter().any(|item| item.name == "replace"
-                && item.kind == resin_compiler::DefinitionKind::Function),
+            items
+                .iter()
+                .any(|item| item.name == "replace"
+                    && item.kind == resin_hir::DefinitionKind::Function),
             "{items:?}"
         );
     }

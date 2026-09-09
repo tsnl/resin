@@ -1,7 +1,8 @@
+use resin_common::prelude::*;
 use std::{collections::HashSet, fmt::Write};
 
 use crate::Error;
-use resin_lir::{Case, Module, Ty, TypeTable};
+use resin_lir::Module;
 
 pub(super) struct Types<'a> {
     pub table: &'a TypeTable,

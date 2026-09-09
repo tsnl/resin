@@ -1,8 +1,9 @@
 //! IR → S-expression formatting via `sexpfmt`.
 
 use ::sexpfmt::{PrinterConfig, SExp, SExpBookendStyle, sexp_to_string};
+use resin_common::prelude::*;
 
-use crate::{Function, Instr, Module, Terminator, Ty, Value};
+use crate::{Function, Instr, Module, Terminator};
 
 mod names;
 
@@ -321,10 +322,10 @@ fn symbol(s: impl Into<String>) -> SExp {
     SExp::Atom(s.into())
 }
 
-fn sexp_case(names: &Names, case: &crate::Case) -> SExp {
+fn sexp_case(names: &Names, case: &Case) -> SExp {
     match case {
-        crate::Case::Ok => symbol("ok"),
-        crate::Case::Err => symbol("err"),
-        crate::Case::Type(ty) => sexp_ty(names, ty),
+        Case::Ok => symbol("ok"),
+        Case::Err => symbol("err"),
+        Case::Type(ty) => sexp_ty(names, ty),
     }
 }

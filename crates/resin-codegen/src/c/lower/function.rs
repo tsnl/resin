@@ -1,9 +1,10 @@
 use crate::{CBlock, CBody, CEdge, CEdgeValue, CExit, CFunction};
+use resin_common::prelude::*;
 use resin_lir_verifier::FunctionTypes;
 use std::fmt::Write;
 
 use crate::Error;
-use resin_lir::{Case, Instr, Terminator, Ty};
+use resin_lir::{Instr, Terminator};
 
 use super::{Slot, ops, types::Types, value::literal};
 

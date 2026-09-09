@@ -1,9 +1,10 @@
 //! Emit blocks and branches for source-level control-flow expressions.
 
-use crate::{Instr, Terminator, Ty, Value};
+use crate::{Instr, Terminator};
+use resin_common::prelude::*;
 use resin_hir::{Statement, Term};
 
-use super::{GenerateError, Generator};
+use super::Generator;
 
 impl Generator {
     pub(super) fn gen_while(&mut self, cond: &Term, body: &Term) -> Result<Ty, GenerateError> {

@@ -3,7 +3,7 @@ use crate::lower::{
     Generator,
     typed::{StatementKind, TermKind},
 };
-use resin_common::types::Ty;
+use resin_common::prelude::*;
 
 fn check(source: &str, generator: &mut Generator) -> CheckedFile {
     let file =

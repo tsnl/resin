@@ -1,11 +1,8 @@
+use resin_common::prelude::*;
 use std::{collections::HashSet, sync::Arc};
 
-use super::{
-    Equation, GenerateError, Inference, Result, error,
-    types::{Head, Type},
-};
-use resin_ast::Span;
-use resin_common::types::Ty;
+use super::types::{Head, Type};
+use super::{Equation, Inference, Result, error};
 
 #[derive(Clone)]
 pub(crate) enum Constraint {

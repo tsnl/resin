@@ -1,13 +1,15 @@
 //! Register inherent methods in the defining type's source namespace.
-use super::{GenerateError, GenerateErrorKind, Generator, eval::Evaluator};
+use super::Generator;
+use super::eval::Evaluator;
 use super::{
     scope::{DeclarationId, Scopes},
     semantic::DefinitionKind,
     typed::{Annotation, Signature},
 };
 use crate::lower::infer::types::Type;
-use resin_ast::{Ident, SourceFile, StmtKind};
-use resin_common::types::{FunctionId, Ty, TypeId};
+use resin_ast::{SourceFile, StmtKind};
+use resin_common::prelude::*;
+
 use std::{collections::BTreeMap, sync::Arc};
 
 type Declarations = BTreeMap<Arc<str>, DeclarationId>;

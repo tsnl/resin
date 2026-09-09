@@ -4,8 +4,8 @@ use crate::{
     error::Location,
     rules::{check_definitions, check_value},
 };
-use resin_common::types::{TyperContext, shader};
-use resin_lir::{FunctionId, Module, Ty, TypeId};
+use resin_common::prelude::*;
+use resin_lir::Module;
 
 pub(super) fn check(module: &Module) -> Result<(), VerifyError> {
     check_entries(module)?;
@@ -51,7 +51,7 @@ fn check_shader(
         .locals
         .first()
         .ok_or_else(|| location.error(VerifyErrorKind::InvalidLocal { local: 0 }))?;
-    shader::validate(
+    resin_common::types::shader::validate(
         typer,
         &parameter.ty,
         &function.result,

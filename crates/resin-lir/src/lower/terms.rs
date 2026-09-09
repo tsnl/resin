@@ -1,11 +1,10 @@
+use resin_common::prelude::*;
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{Instr, Ty};
-use resin_common::source::Ident;
-use resin_common::types::Conv;
+use crate::Instr;
 use resin_hir::Term;
 
-use super::{GenerateError, Generator};
+use super::Generator;
 
 impl Generator {
     pub(super) fn gen_array(&mut self, elems: &[Term], ty: &Ty) -> Result<Ty, GenerateError> {

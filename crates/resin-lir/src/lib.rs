@@ -6,20 +6,11 @@
 //! use resin_lir::lower;
 //! ```
 
+use resin_common::prelude::*;
 mod lower;
 mod print;
-// Re-export only the shared vocabulary used by the LIR language.
-
-pub use resin_common::types::{
-    ArrayValue, Case, Foreign, FunctionId, LocalId, RecordField, RecordFieldValue, RecordValue,
-    StaticAddressValue, Ty, TypeDef, TypeId, TypeTable, Value,
-};
 
 use std::{collections::BTreeMap, sync::Arc};
-
-use resin_common::util::define_id;
-
-use resin_common::types::shader;
 
 define_id! {
     pub struct BlockId(usize);
@@ -256,7 +247,7 @@ pub struct Module {
     pub types: TypeTable,
     pub functions: Vec<Function>,
     /// Decorated shader candidates and whether their static artifact is requested.
-    pub shaders: BTreeMap<FunctionId, shader::ShaderEntry>,
+    pub shaders: BTreeMap<FunctionId, ShaderEntry>,
     /// Optional source origins; direct IR clients may leave this empty.
     pub origins: SourceMap,
 }
@@ -264,15 +255,15 @@ pub struct Module {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SourceMap {
     pub sources: BTreeMap<std::path::PathBuf, Arc<str>>,
-    pub functions: BTreeMap<FunctionId, resin_common::source::SourceLocation>,
-    pub instructions: BTreeMap<(FunctionId, BlockId, usize), resin_common::source::SourceLocation>,
+    pub functions: BTreeMap<FunctionId, SourceLocation>,
+    pub instructions: BTreeMap<(FunctionId, BlockId, usize), SourceLocation>,
 }
 
 /// Lower a self-contained HIR module. Verification is a separate pass.
 #[derive(Debug)]
 pub struct Error {
     pub function: FunctionId,
-    pub error: resin_common::diagnostic::GenerateError,
+    pub error: GenerateError,
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

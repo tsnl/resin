@@ -1,6 +1,7 @@
 //! First expression pass: resolve declarations and types, producing a typed tree.
 //! No IR instructions or deferred code-generation operations are created here.
 use crate::lower::context::Context;
+use resin_common::prelude::*;
 mod context;
 mod file;
 pub(super) use file::file;
@@ -9,20 +10,16 @@ mod groups;
 mod resolve;
 #[cfg(test)]
 mod tests;
+use super::scope::{ContextView, DeclarationId, Scopes};
 use super::semantic::DefinitionKind;
 use super::typed;
-use super::{
-    GenerateError,
-    scope::{ContextView, DeclarationId, Scopes},
-};
 use crate::lower::infer::{
     Inference,
     solver::VariableId,
     types::{Head, Type},
 };
 use crate::lower::namespaces::SourceModuleId;
-use resin_ast::{Ident, Span};
-use resin_common::types::Ty;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,

@@ -1,5 +1,6 @@
 use super::Error;
-use resin_lir::{Module, Ty};
+use resin_common::prelude::*;
+use resin_lir::Module;
 pub(crate) fn layout(
     module: &Module,
     ty: &Ty,

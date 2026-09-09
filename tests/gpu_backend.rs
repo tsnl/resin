@@ -1,10 +1,9 @@
 #![cfg(feature = "gpu")]
+use resin_common::prelude::*;
 #[path = "support/toolchain.rs"]
 mod toolchain;
 use support::pipeline;
 
-use resin_codegen::Stage;
-use resin_common::TempDir;
 use resin_runtime::{
     ResinGpu, ResinMemory, ResinStatus, image_read_png, image_write_png, testing::lock_gpu,
 };
@@ -517,9 +516,9 @@ fn compute_values(source: &str, expected: fn(u32) -> u32) {
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
     let module = support::module(source);
-    let glsl = resin_codegen::emit_glsl(&module, "kernel", resin_codegen::Stage::Compute).unwrap();
+    let glsl = resin_codegen::emit_glsl(&module, "kernel", Stage::Compute).unwrap();
     let spv = toolchain::glsl(&compiler)
-        .compile_glsl(&glsl, resin_codegen::Stage::Compute)
+        .compile_glsl(&glsl, Stage::Compute)
         .unwrap();
     #[repr(C)]
     struct Root {

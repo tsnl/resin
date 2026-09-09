@@ -4,10 +4,9 @@
 //! without passing them through a runtime call or tuple value.
 use crate::lower::context::Context;
 use crate::lower::namespaces::{FunctionBody, FunctionDecl};
+use resin_common::prelude::*;
 
 use std::sync::Arc;
-
-use resin_common::types::{Intrinsic, Ty};
 
 pub(super) fn register(typer: &mut Context) {
     typer.register_method_definitions(definitions);

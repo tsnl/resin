@@ -1,5 +1,5 @@
 use crate::Error;
-use resin_common::TempDir;
+use resin_common::prelude::*;
 use std::{fs, io, path::Path};
 
 pub(super) fn write_output(bytes: &[u8], output: &Path) -> Result<(), Error> {

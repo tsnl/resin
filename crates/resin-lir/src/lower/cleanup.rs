@@ -1,5 +1,6 @@
 use super::Generator;
-use crate::{Instr, Ty};
+use crate::Instr;
+use resin_common::prelude::*;
 
 impl Generator {
     pub(super) fn cleanup(&mut self, first_scope: usize, result: &Ty) {

@@ -1,11 +1,10 @@
 use crate::lower::context::Context;
+use resin_common::prelude::*;
 use std::fmt;
 
-use resin_ast::{Ident, Span, Type};
-use resin_common::types::{Ty, Value};
+use resin_ast::Type;
 
 use super::scope::ContextView;
-use super::{GenerateError, GenerateErrorKind};
 
 pub(crate) struct Evaluator<'a> {
     pub(crate) scopes: &'a ContextView,
@@ -180,7 +179,7 @@ fn is_hex_literal(value: &str) -> bool {
 mod tests {
     use super::*;
     use crate::lower::scope::Scopes;
-    use resin_ast::{Ident, TypeKind};
+    use resin_ast::TypeKind;
 
     #[test]
     fn evaluation_only_needs_scopes_and_types() {

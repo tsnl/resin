@@ -1,4 +1,5 @@
 use resin_ast::{SourceFile, StmtKind, Term, TermKind, format_source};
+use resin_common::prelude::*;
 
 fn parse(src: &str) -> SourceFile {
     resin_ast::generate(&resin_cst::Document::reparse(src.to_string(), None))
@@ -60,7 +61,7 @@ fn definition_keywords_preserve_statement_and_field_spans() {
         };
     "#;
     let file = parse(source);
-    let text = |span: resin_ast::Span| &source[span.start..span.end];
+    let text = |span: Span| &source[span.start..span.end];
     let definition = &file.stmts[0];
     assert!(matches!(definition.val, StmtKind::Struct { .. }));
     assert_eq!(

@@ -1,3 +1,4 @@
+use resin_common::prelude::*;
 use std::{
     collections::{HashSet, hash_map::DefaultHasher},
     ffi::OsStr,
@@ -10,7 +11,7 @@ use std::{
 use crate::{CProfile, Error, Executable};
 
 use super::platform::{C_FLAGS, LIBRARIES};
-use super::{Settings, TempDir, dependencies, io_error, parent, write_output};
+use super::{Settings, dependencies, io_error, parent, write_output};
 
 const FLAGS: &[&str] = &[
     "-std=c11",

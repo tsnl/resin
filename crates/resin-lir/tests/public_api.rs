@@ -1,7 +1,7 @@
 //! Lower a resolved tree without a parser, source provider, or compiler session.
-use resin_common::source::Span;
+use resin_common::prelude::*;
 use resin_hir::{Annotation, Function, Module, Signature, Term, TermKind};
-use resin_lir::{Instr, Ty, Value};
+use resin_lir::Instr;
 
 fn constant(value: Value, ty: Ty) -> Term {
     Term {

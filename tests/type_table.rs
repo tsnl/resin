@@ -1,6 +1,5 @@
+use resin_common::prelude::*;
 mod support;
-
-use resin_lir::{Ty, TypeDef, TypeId, TypeTable};
 
 #[test]
 fn nominal_and_structural_types_share_one_index_space() {
@@ -79,7 +78,7 @@ fn both_emitters_use_payload_table_indices_as_union_tags() {
         blocks: vec![resin_lir::BasicBlock {
             name: None,
             instrs: vec![resin_lir::Instr::Push {
-                value: resin_lir::Value::Type {
+                value: Value::Type {
                     ty: optional.clone(),
                 },
             }],
@@ -87,8 +86,7 @@ fn both_emitters_use_payload_table_indices_as_union_tags() {
         }],
     });
     let host = resin_codegen::emit_c(&module, "main").unwrap();
-    let shader =
-        resin_codegen::emit_glsl(&module, "kernel", resin_codegen::Stage::Compute).unwrap();
+    let shader = resin_codegen::emit_glsl(&module, "kernel", Stage::Compute).unwrap();
     for source in [&host, &shader] {
         assert!(
             source.contains(&format!("struct r_t{optional_id} {{")),

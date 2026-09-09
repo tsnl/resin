@@ -1,5 +1,5 @@
 use crate::Error;
-use resin_lir::Ty;
+use resin_common::prelude::*;
 
 use super::{Slot, types::Types};
 

@@ -1,6 +1,5 @@
+use resin_common::prelude::*;
 use std::fmt::Write;
-
-use resin_lir::{Foreign, Ty};
 
 use super::types::Types;
 

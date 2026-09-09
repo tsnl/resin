@@ -1,6 +1,6 @@
 //! Exercise public phase APIs without retaining construction state between them.
-use resin_common::types::Ty;
 
+use resin_common::prelude::*;
 fn hir(source: &str) -> resin_hir::Module {
     let syntax = resin_cst::Document::reparse(source.to_owned(), None);
     let file = resin_ast::generate(&syntax).unwrap();
@@ -90,8 +90,7 @@ fn target_trees_outlive_lir_and_its_verification_certificate() {
         resin_lir_verifier::VerifiedModule::new(resin_lir::generate(&module).unwrap()).unwrap();
     let kernel = checked.view().module().entries["kernel"];
     let c = resin_codegen::generate_c(checked.view(), "main", &[]).unwrap();
-    let glsl = resin_codegen::generate_glsl(checked.view(), kernel, resin_codegen::Stage::Compute)
-        .unwrap();
+    let glsl = resin_codegen::generate_glsl(checked.view(), kernel, Stage::Compute).unwrap();
     drop(checked);
     drop(module);
     assert!(resin_codegen::print_c(&c).contains("int main("));

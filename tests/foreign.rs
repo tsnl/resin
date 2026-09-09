@@ -1,6 +1,6 @@
+use resin_common::prelude::*;
 #[path = "support/toolchain.rs"]
 mod toolchain;
-use resin_common::TempDir;
 use std::{ffi::OsString, fs, process::Command};
 use support::pipeline;
 
@@ -174,7 +174,7 @@ fn spirv_requires_a_decorated_function_declaration() {
         "export { main }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() = { var code = kernel.spirv; };",
     );
     let main = &module.functions[module.entries["main"].index()];
-    assert_eq!(main.locals[1].ty, resin_lir::Ty::shader());
+    assert_eq!(main.locals[1].ty, Ty::shader());
     assert_eq!(module.shaders.len(), 1);
     assert!(
         resin_codegen::emit_c(&module, "main")

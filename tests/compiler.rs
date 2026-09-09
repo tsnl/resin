@@ -1,4 +1,4 @@
-use resin_common::TempDir;
+use resin_common::prelude::*;
 use resin_compiler::{Input, Options, Request, Session};
 use resin_platform_toolchain::CProfile;
 use resin_platform_toolchain::Environment;
@@ -175,9 +175,7 @@ fn compiler_processes_use_the_supplied_environment_and_working_directory() {
     let c = settings
         .compile_c("", &temp.path().join("output"))
         .unwrap_err();
-    let shader = settings
-        .compile_glsl("", resin_codegen::Stage::Compute)
-        .unwrap_err();
+    let shader = settings.compile_glsl("", Stage::Compute).unwrap_err();
     for error in [c, shader] {
         assert!(error.to_string().contains(&expected), "{error}");
     }

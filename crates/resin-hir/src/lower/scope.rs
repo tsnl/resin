@@ -2,9 +2,8 @@
 use crate::lower::context::Context;
 use crate::lower::infer::{solver::Solver, types::Type};
 use crate::lower::semantic::{Definition, DefinitionKind, SemanticData};
-use resin_ast::{Ident, Span};
-use resin_common::source::SourceLocation;
-use resin_common::types::{Ty, TypeId};
+use resin_common::prelude::*;
+
 use std::{
     cell::RefCell,
     collections::{BTreeMap, HashMap, HashSet},

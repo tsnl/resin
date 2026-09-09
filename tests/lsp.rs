@@ -1,6 +1,6 @@
 use crossbeam_channel::{Receiver, unbounded};
 use lsp_server::{Message, Notification, Request, Response};
-use resin_common::TempDir;
+use resin_common::prelude::*;
 use serde_json::{Value, json};
 use std::{
     collections::VecDeque,

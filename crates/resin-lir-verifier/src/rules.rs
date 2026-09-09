@@ -1,5 +1,5 @@
-use resin_common::types;
-use resin_lir::{Function, Ty, TypeDef, TypeId, TypeTable};
+use resin_common::prelude::*;
+use resin_lir::Function;
 
 use super::error::Location;
 use super::{VerifyError, VerifyErrorKind};
@@ -20,7 +20,8 @@ pub(super) fn check_definitions(table: &TypeTable) -> Result<(), VerifyError> {
         } else {
             let body = definition_body(table, id, location)?;
             check_type(table, body, location)?;
-            types::check_layout(table, id, body).map_err(|error| location.error(error.into()))?;
+            resin_common::types::check_layout(table, id, body)
+                .map_err(|error| location.error(error.into()))?;
         }
     }
     Ok(())
@@ -31,7 +32,7 @@ pub(super) fn check_type(
     ty: &Ty,
     location: Location,
 ) -> Result<(), VerifyError> {
-    types::check_references(table, ty).map_err(|error| location.error(error.into()))
+    resin_common::types::check_references(table, ty).map_err(|error| location.error(error.into()))
 }
 
 pub(super) fn check_value(
@@ -138,7 +139,8 @@ fn definition_body(
     definition: TypeId,
     location: Location,
 ) -> Result<&Ty, VerifyError> {
-    types::definition_body(table, definition).map_err(|error| location.error(error.into()))
+    resin_common::types::definition_body(table, definition)
+        .map_err(|error| location.error(error.into()))
 }
 
 pub(super) fn ascribe(

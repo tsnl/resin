@@ -1,5 +1,6 @@
-use resin_ast::{Program, SourceModule, Span};
-use resin_common::types::Ty;
+use resin_ast::{Program, SourceModule};
+use resin_common::prelude::*;
+
 use resin_cst::Document;
 use std::path::Path;
 

@@ -1,9 +1,9 @@
-use crate::{Instr, Ty};
-use resin_common::types::{Conv, TypeError, TypeErrorKind};
+use crate::Instr;
+use resin_common::prelude::*;
 use resin_hir::{Term, TermKind};
 
+use super::Generator;
 use super::scope::Initialization;
-use super::{GenerateError, GenerateErrorKind, Generator};
 
 pub(super) enum Operand {
     Value(Ty),
@@ -35,7 +35,7 @@ impl Generator {
     pub(super) fn gen_field_value(
         &mut self,
         base: &Term,
-        access: &resin_common::types::FieldAccess,
+        access: &FieldAccess,
     ) -> Result<Ty, GenerateError> {
         self.check_place_initialized(base)?;
         let base = self.gen_operand(base)?;
@@ -94,7 +94,7 @@ impl Generator {
     fn gen_field_operand(
         &mut self,
         base: Operand,
-        access: &resin_common::types::FieldAccess,
+        access: &FieldAccess,
     ) -> Result<Operand, GenerateError> {
         let (mut base_ty, mut is_place) = match base {
             Operand::Value(ty) => (ty, false),

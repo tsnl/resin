@@ -3,7 +3,8 @@ use crate::Module;
 use crate::lower::context::Context;
 use crate::lower::namespaces::SourceModuleId;
 use environment::Environment;
-use resin_ast::{SourceFile, Span};
+use resin_ast::SourceFile;
+use resin_common::prelude::*;
 use scope::Scopes;
 
 mod annotation;
@@ -25,7 +26,6 @@ pub(crate) mod scope;
 pub(crate) mod semantic;
 mod typed;
 pub use modules::{analyze_program, generate_program};
-pub use resin_common::diagnostic::{GenerateError, GenerateErrorKind};
 
 /// Check a standalone source file. Imports require `generate_program`.
 pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {

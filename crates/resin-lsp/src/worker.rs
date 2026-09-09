@@ -1,6 +1,5 @@
 use crossbeam_channel::{Receiver, Sender};
-use resin_compiler::Compilation;
-use resin_compiler::Session;
+use resin_compiler::{Compilation, Session};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,

@@ -1,9 +1,9 @@
-use crate::{Case, Instr, Terminator, Ty};
-use resin_common::source::Span;
+use crate::{Instr, Terminator};
+use resin_common::prelude::*;
 use resin_hir::{MatchArm, Term};
 
+use super::Generator;
 use super::scope::{Initialization, ValueBinding};
-use super::{GenerateError, Generator};
 
 impl Generator {
     pub(super) fn coerce(&mut self, span: Span, from: Ty, to: &Ty) -> Result<Ty, GenerateError> {

@@ -16,6 +16,23 @@ mod locations;
 mod resolved;
 mod temporary;
 
+/// Shared vocabulary for compiler phases and their callers.
+///
+/// Import this privately with `use resin_common::prelude::*;`. Phase crates use
+/// these types in their interfaces without re-exporting them. Operations such as
+/// layout and literal parsing keep their qualified module paths.
+pub mod prelude {
+    pub use crate::diagnostic::{GenerateError, GenerateErrorKind};
+    pub use crate::source::{Ident, SourceError, SourceLocation, SourceNote, Span, Spanned};
+    pub use crate::types::shader::{ShaderEntry, Stage};
+    pub use crate::types::{
+        ArrayValue, BuiltinCall, Case, Conv, Converted, FieldAccess, Foreign, FunctionId,
+        Intrinsic, LocalId, RecordField, RecordFieldValue, RecordValue, StaticAddressValue, Ty,
+        TypeDef, TypeError, TypeErrorKind, TypeId, TypeTable, TyperContext, Value,
+    };
+    pub use crate::{TempDir, define_id};
+}
+
 /// Byte spans, source identities, and diagnostics with source locations.
 pub mod source {
     pub use crate::locations::{Ident, SourceError, SourceLocation, SourceNote, Span, Spanned};

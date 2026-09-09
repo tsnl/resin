@@ -1,5 +1,5 @@
 //! Compiler behavior exercised through the public facade by an external client.
-use resin_common::TempDir;
+use resin_common::prelude::*;
 use resin_compiler::Session;
 use std::{fs, sync::Arc};
 

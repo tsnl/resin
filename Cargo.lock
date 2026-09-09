@@ -659,6 +659,7 @@ dependencies = [
  "resin-common",
  "resin-compiler",
  "resin-cst",
+ "resin-hir",
  "serde",
  "serde_json",
  "url",

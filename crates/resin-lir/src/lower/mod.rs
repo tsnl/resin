@@ -1,9 +1,7 @@
 //! HIR → LIR: choose storage and make evaluation, cleanup, and control flow explicit.
-use crate::{BlockId, FunctionId, Instr, LocalId, Module, Terminator, Ty};
+use crate::{BlockId, Instr, Module, Terminator};
 use builder::FunctionBuilder;
-pub use resin_common::diagnostic::{GenerateError, GenerateErrorKind};
-use resin_common::source::Span;
-use resin_common::types::TyperContext;
+use resin_common::prelude::*;
 use resin_hir::Term;
 use scope::Environment;
 use std::sync::Arc;
@@ -115,7 +113,7 @@ impl Generator {
             let (block, instruction) = self.function().position();
             self.module.origins.instructions.insert(
                 (function, block, instruction),
-                resin_common::source::SourceLocation {
+                SourceLocation {
                     path: self.source_path.clone(),
                     span: self.source_span,
                 },

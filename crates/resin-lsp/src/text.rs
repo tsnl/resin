@@ -1,5 +1,5 @@
 use lsp_types::{Position, Range};
-use resin_common::source::Span;
+use resin_common::prelude::*;
 
 pub struct Text {
     source: String,

@@ -1,9 +1,6 @@
 use resin_ast::{StmtKind, TypeKind, format_source};
-use resin_common::types::TyperContext;
-use resin_lir::{
-    BasicBlock, BlockId, Function, Instr, Local, LocalId, Module, RecordField, Terminator, Ty,
-    TypeDef, TypeId, Value, format_module,
-};
+use resin_common::prelude::*;
+use resin_lir::{BasicBlock, BlockId, Function, Instr, Local, Module, Terminator, format_module};
 use resin_lir_verifier::VerifyErrorKind;
 use resin_lir_verifier::VerifyLocation;
 use resin_lir_verifier::verify;

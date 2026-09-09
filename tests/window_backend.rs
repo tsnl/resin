@@ -1,6 +1,6 @@
+use resin_common::prelude::*;
 #[path = "support/toolchain.rs"]
 mod toolchain;
-use resin_common::TempDir;
 use std::{
     ffi::OsStr,
     path::Path,

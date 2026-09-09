@@ -1,7 +1,7 @@
 //! A compiler result retained for executable generation and source queries.
 use super::syntax::Document;
-use crate::{Diagnostic, SourceLocation, SourceProvider};
-use resin_common::source::Span;
+use crate::{Diagnostic, SourceProvider};
+use resin_common::prelude::*;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
@@ -15,9 +15,9 @@ pub(super) struct Data {
     pub dependencies: BTreeSet<PathBuf>,
     pub(super) resolutions: BTreeMap<PathBuf, PathBuf>,
     pub(super) semantics: resin_hir::Analysis,
-    program: Result<resin_ast::Program, resin_ast::SourceError>,
-    hir: Result<resin_hir::Module, resin_ast::SourceError>,
-    module: Result<resin_lir_verifier::VerifiedModule, resin_ast::SourceError>,
+    program: Result<resin_ast::Program, SourceError>,
+    hir: Result<resin_hir::Module, SourceError>,
+    module: Result<resin_lir_verifier::VerifiedModule, SourceError>,
 }
 
 impl Data {
@@ -95,16 +95,16 @@ impl Data {
         self.documents.get(path).map(|d| &d.file)
     }
 
-    pub(super) fn program(&self) -> Result<&resin_ast::Program, resin_ast::SourceError> {
+    pub(super) fn program(&self) -> Result<&resin_ast::Program, SourceError> {
         self.program.as_ref().map_err(Clone::clone)
     }
 
     /// Resolved tree before storage and control-flow lowering.
-    pub(super) fn hir(&self) -> Result<&resin_hir::Module, resin_ast::SourceError> {
+    pub(super) fn hir(&self) -> Result<&resin_hir::Module, SourceError> {
         self.hir.as_ref().map_err(Clone::clone)
     }
 
-    pub(super) fn module(&self) -> Result<&resin_lir::Module, resin_ast::SourceError> {
+    pub(super) fn module(&self) -> Result<&resin_lir::Module, SourceError> {
         self.module
             .as_ref()
             .map(|checked| checked.view().module())

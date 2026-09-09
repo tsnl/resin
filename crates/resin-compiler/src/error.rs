@@ -1,4 +1,5 @@
 use crate::Error;
+use resin_common::prelude::*;
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
@@ -20,8 +21,8 @@ impl From<resin_platform_toolchain::Error> for Error {
         Self(e.to_string())
     }
 }
-impl From<resin_ast::SourceError> for Error {
-    fn from(e: resin_ast::SourceError) -> Self {
+impl From<SourceError> for Error {
+    fn from(e: SourceError) -> Self {
         Self(e.to_string())
     }
 }

@@ -56,7 +56,7 @@ pass consumes. Every phase uses `resin-common`; it has no phase dependencies.
 | `resin-codegen` | `lir`, `lir-verifier` | C/GLSL source trees, target lowering, printing |
 | `resin-platform-toolchain` | none | Explicit process inputs, resolved tools, locked native artifacts |
 | `resin-compiler` | all phases and `platform-toolchain` | Source loading, pass sequencing, sessions, retained compilations |
-| `resin-lsp` | `compiler`, `cst` | Compiler queries and formatting over LSP |
+| `resin-lsp` | `compiler`, `hir`, `cst` | Compiler queries and formatting over LSP |
 
 The HIR dependency on CST supports editor queries at a syntax position. Its public
 language uses only shared source identities and concrete types. LIR lowering never
@@ -76,6 +76,12 @@ private `lower` or `print` only when its implementation matters. Codegen's entry
 point contains both C and GLSL definitions, with separate private target modules.
 Common's entry point lists curated source, diagnostic, and concrete-type namespaces.
 Language-specific builders and solver state stay behind these facades.
+
+Use canonical crate and language names instead of renaming imports. Shared vocabulary
+comes from a private `use resin_common::prelude::*;`; operations keep qualified module
+paths. Public signatures can name another crate's public types without re-exporting
+them. Phase crates therefore expose their own language and operations, and the
+compiler returns `resin_hir::Hover` and `resin_hir::Completion` directly.
 
 | Phase | Language definition | Incoming pass | Printing |
 | --- | --- | --- | --- |

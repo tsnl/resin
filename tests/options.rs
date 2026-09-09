@@ -1,9 +1,9 @@
+use resin_common::prelude::*;
 #[path = "support/toolchain.rs"]
 mod toolchain;
 use support::pipeline;
 mod support;
 
-use resin_common::TempDir;
 use std::{
     ffi::OsString,
     process::{Command, Output},
@@ -87,7 +87,7 @@ fn none_elimination_preserves_all_other_union_members() {
     );
     assert_eq!(
         module.functions[0].result,
-        resin_lir::Ty::union_of([resin_lir::Ty::None, resin_lir::Ty::Int32])
+        Ty::union_of([Ty::None, Ty::Int32])
     );
 }
 
