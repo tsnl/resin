@@ -1,0 +1,27 @@
+export { Root, kernel, cpu };
+
+struct Root { count: uint, iterations: uint, input: Ptr<uint>, output: Ptr<uint> };
+
+// Loop-carried integer arithmetic without a data-dependent branch.
+@compute_shader
+def kernel(index: ulong, root: Ptr<Root>) = {
+	if (index < ulong(root.count)) {
+		var x = uint(index) * 747796405_ui + 2891336453_ui;
+		var n = 0_ui;
+		while (n < root.iterations) {
+			x := (x ^ (x * 8191_ui)) * 1664525_ui + n;
+			x := (x ^ (x * 65521_ui)) + 1013904223_ui;
+			n := n + 1_ui;
+		};
+		var output = Span<uint> { data = root.output, length = ulong(root.count) };
+		output.at(index).* := x;
+	};
+};
+
+def cpu(root: Ptr<Root>) = {
+	var index = 0_ul;
+	while (index < ulong(root.count)) {
+		kernel(index, root);
+		index := index + 1_ul;
+	};
+};

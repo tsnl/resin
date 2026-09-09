@@ -88,3 +88,51 @@ fn cancelled_transitions_do_not_affect_later_submissions() {
         }
     }
 }
+
+#[test]
+fn timed_recordings_preserve_submission_and_cancellation() {
+    let Some(mut gpu) = common::require_gpu() else {
+        return;
+    };
+    // SAFETY: resources belong to this GPU, survive recordings, and are accessed
+    // sequentially. Every host read follows synchronous submission.
+    unsafe {
+        let untimed = gpu.start_command_recording().unwrap();
+        assert_eq!(gpu.submit_timed(untimed), Err(ResinStatus::InvalidArgument));
+        let mut cancelled = match gpu.start_timed_command_recording() {
+            Ok(commands) => commands,
+            Err(ResinStatus::Unsupported) => {
+                // Timestamps are optional even on an otherwise supported GPU.
+                let commands = gpu.start_command_recording().unwrap();
+                gpu.submit(commands).unwrap();
+                return;
+            }
+            Err(status) => panic!("start_timed_command_recording failed: {status:?}"),
+        };
+        let mut image = gpu.create_image(4, 4).unwrap();
+        let pixels = gpu.malloc(4 * 4 * 4, 4, ResinMemory::Readback).unwrap();
+        cancelled.begin_rendering(&mut image, [1.0; 4]).unwrap();
+        cancelled.end_rendering().unwrap();
+        drop(cancelled);
+
+        let mut invalid = gpu.start_timed_command_recording().unwrap();
+        invalid.begin_rendering(&mut image, [1.0; 4]).unwrap();
+        assert_eq!(gpu.submit_timed(invalid), Err(ResinStatus::InvalidArgument));
+
+        for red in [0.0, 1.0] {
+            let mut commands = gpu.start_timed_command_recording().unwrap();
+            commands
+                .begin_rendering(&mut image, [red, 0.0, 1.0, 1.0])
+                .unwrap();
+            commands.end_rendering().unwrap();
+            commands.copy_image_to_buffer(&mut image, &pixels).unwrap();
+            let _elapsed = gpu.submit_timed(commands).unwrap();
+            for pixel in pixels.host_bytes().unwrap().chunks_exact(4) {
+                assert_eq!(pixel, [(red * 255.0) as u8, 0, 255, 255]);
+            }
+        }
+        // Callers may discard the result without leaving a pending query read.
+        let commands = gpu.start_timed_command_recording().unwrap();
+        gpu.submit(commands).unwrap();
+    }
+}

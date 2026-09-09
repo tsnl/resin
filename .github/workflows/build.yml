@@ -103,9 +103,9 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Build compiler, runtime, and language server
         run: cargo build --workspace --all-features --locked
-      - name: Check example formatting
+      - name: Check example and benchmark formatting
         shell: bash
-        run: ./target/debug/resin --format --check examples
+        run: ./target/debug/resin --format --check examples benchmarks
       # Nextest does not run rustdoc tests. Check these before integration tests.
       - name: Test documentation
         run: cargo test --workspace --all-features --locked --doc
