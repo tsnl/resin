@@ -500,7 +500,7 @@ fn loops_carry_typed_stack_values_between_iterations() {
                 int(0),
                 op(">", Ty::Bool),
             ],
-            terminator: Yield,
+            terminator: LoopTest,
         },
         BasicBlock {
             name: None,
@@ -516,7 +516,7 @@ fn loops_carry_typed_stack_values_between_iterations() {
                 Store,
                 Discard,
             ],
-            terminator: Yield,
+            terminator: Continue,
         },
         BasicBlock {
             name: None,

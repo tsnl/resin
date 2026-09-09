@@ -43,9 +43,10 @@ pub(super) fn lower(
 }
 
 #[derive(Clone, Copy)]
-enum YieldTarget {
-    Block { target: usize },
-    Condition { body: usize, test: usize },
+enum ExitTarget {
+    Merge { block: usize },
+    LoopTest { body: usize, test: usize },
+    Continue { condition: usize },
 }
 
 struct FunctionLowering<'a, 'm> {
@@ -91,7 +92,7 @@ impl FunctionLowering<'_, '_> {
     fn region(
         &mut self,
         mut b: usize,
-        yield_target: Option<YieldTarget>,
+        exit_target: Option<ExitTarget>,
     ) -> Result<Vec<GlslStatement>, Error> {
         let mut statements = Vec::new();
         loop {
@@ -151,7 +152,7 @@ impl FunctionLowering<'_, '_> {
             if diverged {
                 return Ok(statements);
             }
-            let next = self.exit(b, stack, yield_target, &mut statements)?;
+            let next = self.exit(b, stack, exit_target, &mut statements)?;
             let Some(next) = next else {
                 return Ok(statements);
             };
@@ -163,7 +164,7 @@ impl FunctionLowering<'_, '_> {
         &mut self,
         b: usize,
         mut stack: Vec<Slot>,
-        yield_target: Option<YieldTarget>,
+        exit_target: Option<ExitTarget>,
         statements: &mut Vec<GlslStatement>,
     ) -> Result<Option<usize>, Error> {
         let next = match self.function.blocks[b].terminator {
@@ -181,17 +182,38 @@ impl FunctionLowering<'_, '_> {
                 });
                 None
             }
-            Terminator::Yield => {
+            Terminator::Merge => {
+                let Some(ExitTarget::Merge { block }) = exit_target else {
+                    unreachable!("verified merge has a selection destination")
+                };
                 statements.push(GlslStatement::Text {
-                    source: self.yield_values(&stack, yield_target.unwrap()),
+                    source: self.transfer(block, &stack),
+                });
+                None
+            }
+            Terminator::LoopTest => {
+                let Some(ExitTarget::LoopTest { body, test }) = exit_target else {
+                    unreachable!("verified loop test has a condition destination")
+                };
+                statements.push(GlslStatement::Text {
+                    source: self.loop_test(&stack, body, test),
+                });
+                None
+            }
+            Terminator::Continue => {
+                let Some(ExitTarget::Continue { condition }) = exit_target else {
+                    unreachable!("verified continue has a loop destination")
+                };
+                statements.push(GlslStatement::Text {
+                    source: self.transfer(condition, &stack),
                 });
                 None
             }
             Terminator::If { then, els, next } => {
                 let condition = stack.pop().unwrap();
                 let target = next
-                    .map(|id| YieldTarget::Block { target: id.index() })
-                    .or(yield_target);
+                    .map(|id| ExitTarget::Merge { block: id.index() })
+                    .or(exit_target.filter(|target| matches!(target, ExitTarget::Merge { .. })));
                 statements.push(GlslStatement::If {
                     condition: self.types.unwrap(&condition.ty, condition.expr),
                     then: self.enter(then.index(), &stack, target)?,
@@ -213,13 +235,13 @@ impl FunctionLowering<'_, '_> {
                     source: format!("      bool r_test{b} = false;\n"),
                 });
                 let mut repeated =
-                    self.region(condition, Some(YieldTarget::Condition { body, test: b }))?;
+                    self.region(condition, Some(ExitTarget::LoopTest { body, test: b }))?;
                 repeated.push(GlslStatement::If {
                     condition: format!("!r_test{b}"),
                     then: vec![GlslStatement::Break],
                     els: vec![],
                 });
-                repeated.extend(self.region(body, Some(YieldTarget::Block { target: condition }))?);
+                repeated.extend(self.region(body, Some(ExitTarget::Continue { condition }))?);
                 statements.push(GlslStatement::Loop { body: repeated });
                 // These slots hold the final condition's operands on the false exit.
                 let output = self.inputs[body].clone();
@@ -228,8 +250,11 @@ impl FunctionLowering<'_, '_> {
                         source: self.transfer(next.index(), &output),
                     });
                 } else {
+                    let Some(ExitTarget::Merge { block }) = exit_target else {
+                        unreachable!("verified loop without a continuation merges a selection")
+                    };
                     statements.push(GlslStatement::Text {
-                        source: self.yield_values(&output, yield_target.unwrap()),
+                        source: self.transfer(block, &output),
                     });
                 }
                 next
@@ -242,7 +267,7 @@ impl FunctionLowering<'_, '_> {
         &mut self,
         block: usize,
         stack: &[Slot],
-        target: Option<YieldTarget>,
+        target: Option<ExitTarget>,
     ) -> Result<Vec<GlslStatement>, Error> {
         let mut statements = vec![GlslStatement::Text {
             source: self.transfer(block, stack),
@@ -251,21 +276,16 @@ impl FunctionLowering<'_, '_> {
         Ok(statements)
     }
 
-    fn yield_values(&self, stack: &[Slot], target: YieldTarget) -> String {
-        match target {
-            YieldTarget::Block { target } => self.transfer(target, stack),
-            YieldTarget::Condition { body, test } => {
-                let (condition, operands) = stack.split_last().unwrap();
-                let mut source = self.transfer(body, operands);
-                writeln!(
-                    source,
-                    "      r_test{test} = {};",
-                    self.types.unwrap(&condition.ty, condition.expr.clone())
-                )
-                .unwrap();
-                source
-            }
-        }
+    fn loop_test(&self, stack: &[Slot], body: usize, test: usize) -> String {
+        let (condition, operands) = stack.split_last().unwrap();
+        let mut source = self.transfer(body, operands);
+        writeln!(
+            source,
+            "      r_test{test} = {};",
+            self.types.unwrap(&condition.ty, condition.expr.clone())
+        )
+        .unwrap();
+        source
     }
 
     fn transfer(&self, target: usize, stack: &[Slot]) -> String {

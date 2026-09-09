@@ -148,16 +148,21 @@ parameter, including unit, tuples, and foreign declarations. Each `Instr` docume
 its consumed operands and produced values.
 
 LIR retains a structured tree of blocks. Each block contains straight-line stack
-instructions and a `Yield`, `Return`, `If`, or `Loop` terminator. `If` owns its two
-arms; `Loop` owns a condition region and a body region. Both may own a `next`
-continuation that consumes their yielded operands. Without a continuation, yields
-pass to the enclosing region. Returns leave the function after explicit cleanup.
+instructions and an `If`, `Loop`, `Merge`, `LoopTest`, `Continue`, or `Return`
+terminator. `If` owns its two arms, which finish with `Merge`; `Loop` owns a
+condition region ending in `LoopTest` and a body region ending in `Continue`.
+Both may own a `next` continuation that consumes their result operands. A nested
+tail selection may omit its continuation and forward to the enclosing selection's
+merge. Completing a region at function scope or inside a loop condition or body
+requires an explicit continuation ending in the appropriate terminator. Returns
+leave the function after explicit cleanup.
 Blocks live in a flat arena to preserve stable instruction and source identities,
 but references express unique tree ownership rather than jump destinations.
 
-A loop condition yields the loop's carried stack plus a bool. False exits with
-those operands; true runs the body, whose yielded stack must restore the condition's
-input types. Conditions can contain nested branches, loops, and early returns.
+A loop's `LoopTest` consumes a bool above the carried operands. False exits with
+those operands; true runs the body, whose `Continue` must restore the condition's
+input types. Conditions can contain nested branches, loops, and early returns;
+their branch arms still end in `Merge`, followed by the explicit `LoopTest`.
 The verifier checks these contracts with one tree traversal, rejecting reused,
 cyclic, orphaned, and invalid block references. Function paths must return;
 branch arms that return do not contribute operands to a subsequent join.
@@ -165,7 +170,7 @@ Continuation traversal is iterative, so sequential conditionals and `?` expressi
 do not consume nesting depth in verification, printing, or target lowering.
 
 LIR's private [verify module](../crates/resin-lir/src/verify/mod.rs) checks arbitrary
-LIR, including instruction operands, region nesting and yields, returns, nominal layouts,
+LIR, including instruction operands, region nesting and exit kinds, returns, nominal layouts,
 shader signatures, and drop hooks. Its public contract stays in LIR's `lib.rs`.
 `resin_lir::VerifiedModule` owns the module and analysis behind private fields. `view()`
 borrows an immutable certificate for that exact module. `into_module()` consumes

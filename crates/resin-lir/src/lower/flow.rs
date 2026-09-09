@@ -22,12 +22,12 @@ impl Generator {
         self.switch(condition);
         self.gen_term(cond, None)?;
         let after_condition = self.bindings.clone();
-        self.terminate(Terminator::Yield);
+        self.terminate(Terminator::LoopTest);
 
         self.switch(body_block);
         self.gen_term(body, None)?;
         self.emit(Instr::Discard);
-        self.terminate(Terminator::Yield);
+        self.terminate(Terminator::Continue);
 
         self.bindings = after_condition;
         self.switch(exit);
@@ -56,13 +56,13 @@ impl Generator {
         let before = self.bindings.clone();
         self.switch(then_block);
         let _ = self.gen_term(then, Some(expected))?;
-        self.terminate(Terminator::Yield);
+        self.terminate(Terminator::Merge);
         let after_then = self.bindings.clone();
 
         self.bindings = before;
         self.switch(else_block);
         let _ = self.gen_term(els, Some(expected))?;
-        self.terminate(Terminator::Yield);
+        self.terminate(Terminator::Merge);
         self.intersect_initialization(&after_then);
 
         self.switch(join_block);

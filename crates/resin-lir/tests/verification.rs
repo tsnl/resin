@@ -128,12 +128,12 @@ fn certified_operands_follow_block_indices_and_keep_instructions_without_results
         BasicBlock {
             name: None,
             instrs: vec![],
-            terminator: Terminator::Yield,
+            terminator: Terminator::Merge,
         },
         BasicBlock {
             name: None,
             instrs: vec![],
-            terminator: Terminator::Yield,
+            terminator: Terminator::Merge,
         },
     ];
     module.functions.push(caller);

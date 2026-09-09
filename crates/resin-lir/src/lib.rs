@@ -164,23 +164,34 @@ pub enum Instr {
 
 /// Complete a structured region. Stack tops are on the right, as in [`Instr`].
 /// Child IDs describe nesting, never arbitrary jumps. `next` runs after a region
-/// yields; without `next`, its yielded operands pass to the enclosing region.
+/// completes. A result-producing region without `next` must be the tail of a
+/// selection arm; its operands then pass to that selection's merge. Function,
+/// loop-condition, and loop-body continuations need their own explicit terminator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Terminator {
-    /// Yield all operands to the enclosing If or Loop. Invalid at function scope.
-    Yield,
+    /// Complete a selection arm, transferring all operands to its If's merge.
+    /// Nested tail selections may forward to the same merge. Invalid at function
+    /// scope or as the completion of a loop condition or body.
+    Merge,
+    /// `[carried..., bool] -> [carried...]`: test the loop condition. True enters
+    /// the body; false exits the Loop with the carried operands. Only valid as
+    /// the completion of a loop's condition region.
+    LoopTest,
+    /// Complete a loop body, transferring all operands to its condition region
+    /// for the next iteration. Only valid as the completion of a loop body.
+    Continue,
     /// Consume a bool, then execute one child with the remaining operands.
-    /// Yielding arms must agree on their output stack; returning arms do not join.
+    /// Merging arms must agree on their output stack; returning arms do not join.
     If {
         then: BlockId,
         els: BlockId,
         next: Option<BlockId>,
     },
-    /// Repeatedly evaluate `condition` with the carried operands. It must yield
-    /// the same operand types followed by a bool. False exits; true runs `body`.
-    /// A yielding body must restore the condition's input types for the next iteration.
-    /// Both children can return early, but the condition needs a yielding path.
-    /// The loop yields its last condition operands when false, then runs `next`.
+    /// Repeatedly evaluate `condition` with the carried operands. Its LoopTest
+    /// needs the same operand types followed by a bool. False exits; true runs `body`.
+    /// The body's Continue must restore the condition's input types.
+    /// Both children can return early, but the condition needs a LoopTest path.
+    /// The final condition's carried operands enter `next` on the false exit.
     Loop {
         condition: BlockId,
         body: BlockId,
@@ -301,8 +312,12 @@ pub enum VerifyErrorKind {
     InvalidBasicBlock { basic_block: usize },
     UnreachableBasicBlock,
     ReusedBasicBlock,
-    UnexpectedYield,
-    MissingYield,
+    UnexpectedMerge,
+    UnexpectedLoopTest,
+    UnexpectedContinue,
+    MissingLoopTest,
+    MissingRegionResult,
+    MissingRegionContinuation,
     StackUnderflow { needed: usize, available: usize },
     InvalidImmediate,
     TypeMismatch { expected: Ty, found: Ty },
@@ -317,7 +332,7 @@ pub enum VerifyErrorKind {
     InvalidReturnStack { expected: Ty, found: Vec<Ty> },
 }
 
-/// Check structured ownership, region yields, loop invariants, and instruction types.
+/// Check structured ownership, explicit region exits, loop invariants, and instruction types.
 pub fn verify(module: &Module) -> Result<(), VerifyError> {
     verify::analyze(module).map(|_| ())
 }

@@ -40,8 +40,8 @@ fn while_lowers_to_a_structured_loop_and_returns_unit() {
         Terminator::Loop { condition: cond, body: repeated, next: Some(_) }
             if cond.index() == condition && repeated.index() == body
     )));
-    assert_eq!(function.blocks[condition].terminator, Terminator::Yield);
-    assert_eq!(function.blocks[body].terminator, Terminator::Yield);
+    assert_eq!(function.blocks[condition].terminator, Terminator::LoopTest);
+    assert_eq!(function.blocks[body].terminator, Terminator::Continue);
     assert_eq!(function.result, Ty::Unit);
     verify(&module).unwrap();
 }

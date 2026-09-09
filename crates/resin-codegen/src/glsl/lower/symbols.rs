@@ -69,7 +69,9 @@ impl Regions<'_, '_> {
             }
             let (next, output) = match self.function.blocks[b].terminator {
                 Terminator::Return => return Ok(None),
-                Terminator::Yield => return Ok(Some(stack)),
+                Terminator::Merge | Terminator::LoopTest | Terminator::Continue => {
+                    return Ok(Some(stack));
+                }
                 Terminator::If { then, els, next } => {
                     stack.pop();
                     let then = self.visit(then, stack.clone())?;

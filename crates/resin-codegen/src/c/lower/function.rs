@@ -80,7 +80,7 @@ fn lower_region(
     index: usize,
     mut block_id: usize,
     flow: &FunctionTypes,
-    yield_target: Option<YieldTarget>,
+    exit_target: Option<ExitTarget>,
 ) -> Result<Vec<CStatement>, Error> {
     let function = &types.module.functions[index];
     let mut statements = Vec::new();
@@ -149,7 +149,7 @@ fn lower_region(
             block_id,
             flow,
             stack,
-            yield_target,
+            exit_target,
             &mut statements,
         )?;
         let Some(next) = next else {
@@ -168,9 +168,10 @@ fn projects_value(types: &Types<'_>, instr: &Instr, args: &[Slot]) -> bool {
 }
 
 #[derive(Clone, Copy)]
-enum YieldTarget {
-    Block { target: usize },
-    Condition { body: usize, test: usize },
+enum ExitTarget {
+    Merge { block: usize },
+    LoopTest { body: usize, test: usize },
+    Continue { condition: usize },
 }
 
 fn block_inputs(types: &Types<'_>, flow: &FunctionTypes, block: usize) -> Vec<Slot> {
@@ -191,7 +192,7 @@ fn lower_exit(
     block: usize,
     flow: &FunctionTypes,
     mut stack: Vec<Slot>,
-    yield_target: Option<YieldTarget>,
+    exit_target: Option<ExitTarget>,
     statements: &mut Vec<CStatement>,
 ) -> Result<Option<usize>, Error> {
     let next = match types.module.functions[index].blocks[block].terminator {
@@ -201,17 +202,38 @@ fn lower_exit(
             });
             None
         }
-        Terminator::Yield => {
+        Terminator::Merge => {
+            let Some(ExitTarget::Merge { block }) = exit_target else {
+                unreachable!("verified merge has a selection destination")
+            };
             statements.push(CStatement::Text {
-                source: yield_values(types, &stack, yield_target.unwrap()),
+                source: transfer(types, block, &stack),
+            });
+            None
+        }
+        Terminator::LoopTest => {
+            let Some(ExitTarget::LoopTest { body, test }) = exit_target else {
+                unreachable!("verified loop test has a condition destination")
+            };
+            statements.push(CStatement::Text {
+                source: loop_test(types, &stack, body, test),
+            });
+            None
+        }
+        Terminator::Continue => {
+            let Some(ExitTarget::Continue { condition }) = exit_target else {
+                unreachable!("verified continue has a loop destination")
+            };
+            statements.push(CStatement::Text {
+                source: transfer(types, condition, &stack),
             });
             None
         }
         Terminator::If { then, els, next } => {
             let condition = stack.pop().unwrap();
             let target = next
-                .map(|id| YieldTarget::Block { target: id.index() })
-                .or(yield_target);
+                .map(|id| ExitTarget::Merge { block: id.index() })
+                .or(exit_target.filter(|target| matches!(target, ExitTarget::Merge { .. })));
             statements.push(CStatement::If {
                 condition: types.unwrap(&condition.ty, condition.expr),
                 then: enter_region(types, index, then.index(), flow, &stack, target)?,
@@ -237,7 +259,7 @@ fn lower_exit(
                 index,
                 condition,
                 flow,
-                Some(YieldTarget::Condition { body, test: block }),
+                Some(ExitTarget::LoopTest { body, test: block }),
             )?;
             repeated.push(CStatement::If {
                 condition: format!("!r_test{block}"),
@@ -249,7 +271,7 @@ fn lower_exit(
                 index,
                 body,
                 flow,
-                Some(YieldTarget::Block { target: condition }),
+                Some(ExitTarget::Continue { condition }),
             )?);
             statements.push(CStatement::Loop { body: repeated });
             // The condition writes these operands before its bool is tested, so
@@ -260,8 +282,11 @@ fn lower_exit(
                     source: transfer(types, next.index(), &output),
                 });
             } else {
+                let Some(ExitTarget::Merge { block }) = exit_target else {
+                    unreachable!("verified loop without a continuation merges a selection")
+                };
                 statements.push(CStatement::Text {
-                    source: yield_values(types, &output, yield_target.unwrap()),
+                    source: transfer(types, block, &output),
                 });
             }
             next
@@ -276,7 +301,7 @@ fn enter_region(
     block: usize,
     flow: &FunctionTypes,
     stack: &[Slot],
-    target: Option<YieldTarget>,
+    target: Option<ExitTarget>,
 ) -> Result<Vec<CStatement>, Error> {
     let mut statements = vec![CStatement::Text {
         source: transfer(types, block, stack),
@@ -285,21 +310,16 @@ fn enter_region(
     Ok(statements)
 }
 
-fn yield_values(types: &Types<'_>, stack: &[Slot], target: YieldTarget) -> String {
-    match target {
-        YieldTarget::Block { target } => transfer(types, target, stack),
-        YieldTarget::Condition { body, test } => {
-            let (condition, operands) = stack.split_last().unwrap();
-            let mut source = transfer(types, body, operands);
-            writeln!(
-                source,
-                "  r_test{test} = {};",
-                types.unwrap(&condition.ty, condition.expr.clone())
-            )
-            .unwrap();
-            source
-        }
-    }
+fn loop_test(types: &Types<'_>, stack: &[Slot], body: usize, test: usize) -> String {
+    let (condition, operands) = stack.split_last().unwrap();
+    let mut source = transfer(types, body, operands);
+    writeln!(
+        source,
+        "  r_test{test} = {};",
+        types.unwrap(&condition.ty, condition.expr.clone())
+    )
+    .unwrap();
+    source
 }
 
 /// Snapshot every operand before assigning destinations, including initialization

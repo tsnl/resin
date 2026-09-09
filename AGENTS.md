@@ -15,6 +15,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   scopes, method namespaces, inference variables, and recovery belong to HIR construction.
   LIR describes storage, cleanup, stack operations, and structured control-flow regions.
   If/Loop children form a tree; retain this structure through C and GLSL emission.
+  Selection arms end in Merge, loop conditions in LoopTest, and loop bodies in Continue;
+  keep these distinct and reject exits that do not match their region.
   Keep LIR verification in private `crates/resin-lir/src/verify/` modules, with the
   verification API beside the language in `lib.rs`; constructing LIR does not verify it.
 - Keep resolved types and layout rules in `crates/resin-types`; they must not depend on a

@@ -106,7 +106,7 @@ impl Generator {
         self.switch(success);
         self.emit(Instr::TakeLocal { local: saved });
         self.emit(Instr::VariantPayload { tag: Case::Ok });
-        self.terminate(Terminator::Yield);
+        self.terminate(Terminator::Merge);
         self.switch(next);
         Ok(*value.clone())
     }
@@ -165,7 +165,7 @@ impl Generator {
             }
             after = Some(self.bindings.clone());
             if join.is_some() {
-                self.terminate(Terminator::Yield);
+                self.terminate(Terminator::Merge);
             }
             if let Some(next) = next {
                 self.switch(next);

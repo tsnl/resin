@@ -25,8 +25,6 @@ pub(super) fn check_function(
         check_value(&module.types, &local.ty, function_location)?;
     }
 
-    let location = Location::basic_block(function_id, entry);
-
     if let Some(foreign) = &function.foreign {
         if function.name.is_none()
             || !function.blocks.is_empty()
@@ -50,9 +48,7 @@ pub(super) fn check_function(
         results: vec![Vec::new(); function.blocks.len()],
         operand_counts: vec![Vec::new(); function.blocks.len()],
     };
-    if checker.visit(entry, Vec::new())?.is_some() {
-        return Err(location.error(VerifyErrorKind::UnexpectedYield));
-    }
+    checker.visit(entry, Vec::new(), Region::Function)?;
     if let Some(block) = checker.entries.iter().position(Option::is_none) {
         return Err(
             Location::basic_block(function_id, BlockId::from_index(block))
@@ -66,7 +62,7 @@ pub(super) fn check_function(
     })
 }
 
-/// Enter each owned block once. A return has no yielded stack and does not
+/// Enter each owned block once. A return has no region result and does not
 /// participate in joins; loops check their back-edge contract without a fixpoint.
 /// Iterate continuations so only actual region nesting consumes call-stack depth.
 struct Regions<'a> {
@@ -78,11 +74,20 @@ struct Regions<'a> {
     operand_counts: Vec<Vec<usize>>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Region {
+    Function,
+    Selection,
+    LoopCondition,
+    LoopBody,
+}
+
 impl Regions<'_> {
     fn visit(
         &mut self,
         mut id: BlockId,
         mut stack: Vec<Ty>,
+        region: Region,
     ) -> Result<Option<Vec<Ty>>, VerifyError> {
         loop {
             let location = Location::basic_block(self.function_id, id);
@@ -107,7 +112,24 @@ impl Regions<'_> {
                     .push((effect.pushes == 1).then(|| stack.last().unwrap().clone()));
             }
             let (next, output) = match block.terminator {
-                Terminator::Yield => return Ok(Some(stack)),
+                Terminator::Merge => {
+                    if region != Region::Selection {
+                        return Err(location.error(VerifyErrorKind::UnexpectedMerge));
+                    }
+                    return Ok(Some(stack));
+                }
+                Terminator::LoopTest => {
+                    if region != Region::LoopCondition {
+                        return Err(location.error(VerifyErrorKind::UnexpectedLoopTest));
+                    }
+                    return Ok(Some(stack));
+                }
+                Terminator::Continue => {
+                    if region != Region::LoopBody {
+                        return Err(location.error(VerifyErrorKind::UnexpectedContinue));
+                    }
+                    return Ok(Some(stack));
+                }
                 Terminator::Return => {
                     if stack.as_slice() != [self.function.result.clone()] {
                         return Err(location.error(VerifyErrorKind::InvalidReturnStack {
@@ -119,8 +141,8 @@ impl Regions<'_> {
                 }
                 Terminator::If { then, els, next } => {
                     self.condition(&mut stack, location)?;
-                    let then_stack = self.visit(then, stack.clone())?;
-                    let else_stack = self.visit(els, stack)?;
+                    let then_stack = self.visit(then, stack.clone(), Region::Selection)?;
+                    let else_stack = self.visit(els, stack, Region::Selection)?;
                     let output = join(then_stack, else_stack, location)?;
                     (next, output)
                 }
@@ -130,18 +152,25 @@ impl Regions<'_> {
                     next,
                 } => {
                     let mut output = self
-                        .visit(condition, stack.clone())?
-                        .ok_or_else(|| location.error(VerifyErrorKind::MissingYield))?;
+                        .visit(condition, stack.clone(), Region::LoopCondition)?
+                        .ok_or_else(|| location.error(VerifyErrorKind::MissingLoopTest))?;
                     self.condition(&mut output, location)?;
                     same_stack(&stack, &output, location)?;
-                    if let Some(repeated) = self.visit(body, output.clone())? {
+                    if let Some(repeated) = self.visit(body, output.clone(), Region::LoopBody)? {
                         same_stack(&stack, &repeated, location)?;
                     }
                     (next, Some(output))
                 }
             };
-            let Some(next) = next else { return Ok(output) };
-            stack = output.ok_or_else(|| location.error(VerifyErrorKind::MissingYield))?;
+            let Some(next) = next else {
+                // Tail selections may forward a merge to their enclosing arm.
+                // Testing or repeating a loop always needs its own explicit exit.
+                if output.is_some() && region != Region::Selection {
+                    return Err(location.error(VerifyErrorKind::MissingRegionContinuation));
+                }
+                return Ok(output);
+            };
+            stack = output.ok_or_else(|| location.error(VerifyErrorKind::MissingRegionResult))?;
             id = next;
         }
     }

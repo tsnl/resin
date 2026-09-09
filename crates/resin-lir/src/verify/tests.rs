@@ -124,14 +124,14 @@ fn conflicting_join_stacks_are_rejected() {
                 instrs: vec![Instr::Push {
                     value: Value::Int32 { value: 1 },
                 }],
-                terminator: Terminator::Yield,
+                terminator: Terminator::Merge,
             },
             BasicBlock {
                 name: None,
                 instrs: vec![Instr::Push {
                     value: Value::Float32 { value: 1.0 },
                 }],
-                terminator: Terminator::Yield,
+                terminator: Terminator::Merge,
             },
             BasicBlock {
                 name: None,
@@ -232,12 +232,12 @@ fn loop_body_preserves_the_condition_stack() {
                 instrs: vec![Instr::Push {
                     value: Value::Bool { value: true },
                 }],
-                terminator: Terminator::Yield,
+                terminator: Terminator::LoopTest,
             },
             BasicBlock {
                 name: None,
                 instrs: vec![],
-                terminator: Terminator::Yield,
+                terminator: Terminator::Continue,
             },
             BasicBlock {
                 name: None,

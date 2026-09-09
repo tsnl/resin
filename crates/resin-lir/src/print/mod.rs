@@ -221,7 +221,9 @@ impl Blocks<'_> {
 
     fn terminator(&mut self, terminator: &Terminator) -> (SExp, Option<BlockId>) {
         match *terminator {
-            Terminator::Yield => (symbol("yield"), None),
+            Terminator::Merge => (symbol("merge"), None),
+            Terminator::LoopTest => (symbol("loop-test"), None),
+            Terminator::Continue => (symbol("continue"), None),
             Terminator::Return => (symbol("return"), None),
             Terminator::If { then, els, next } => (
                 list(
