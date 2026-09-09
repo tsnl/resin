@@ -462,17 +462,17 @@ fn shader_declarations_preserve_the_entry_files_export_scope() {
 fn standard_library_imports_work_outside_the_repository() {
     let project = Project::new(&[(
         "main.resin",
-        "export { main }; import { \"$/std/status.resin\", \"$/std/graphics.resin\", \"$/std/image.resin\" }; def main() -> Result<int, _> = { RuntimeStatus.from_code(0)?; ok(RuntimeStatus.code(Incomplete {}) + 35) };",
+        "export { main }; import { \"$/status.resin\", \"$/graphics.resin\", \"$/image.resin\" }; def main() -> Result<int, _> = { RuntimeStatus.from_code(0)?; ok(RuntimeStatus.code(Incomplete {}) + 35) };",
     )]);
     assert_eq!(project.run().status.code(), Some(42));
     Project::new(&[(
         "main.resin",
-        "export { main }; import { \"$/std/status.resin\" }; def main() = { resin_status_string(0); };",
+        "export { main }; import { \"$/status.resin\" }; def main() = { resin_status_string(0); };",
     )])
     .error("UnboundValue");
     Project::new(&[(
         "main.resin",
-        "export { main }; import { \"$/std/window.resin\" }; def main() = { Gpu.new(); };",
+        "export { main }; import { \"$/window.resin\" }; def main() = { Gpu.new(); };",
     )])
     .error("UnboundType");
 }
@@ -515,12 +515,11 @@ fn library_root_can_be_relocated_and_does_not_capture_relative_imports() {
 fn invalid_import_paths_report_the_importing_file() {
     for path in [
         "missing.resin",
-        "$/std/missing.resin",
+        "$/missing.resin",
         "$/../Cargo.toml",
         "$/math/../../Cargo.toml",
         "$//absolute.resin",
         "$/",
-        "$/std/",
         "",
     ] {
         let error = Project::new(&[("main.resin", &format!("import {{ \"{path}\" }};"))])

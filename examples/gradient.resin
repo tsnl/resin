@@ -1,6 +1,6 @@
 export { kernel, main };
 
-import { "$/std/gpu.resin", "$/std/image.resin" };
+import { "$/gpu.resin", "$/image.resin" };
 
 struct Root { width: uint, height: uint, pixels: Span<uint> };
 

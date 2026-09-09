@@ -49,7 +49,7 @@ fn imports_use_the_registered_origin_and_configured_library_root() {
         ("helper.resin", "project/helper.resin"),
         ("../shared.resin", "shared.resin"),
         ("std/math.resin", "project/std/math.resin"),
-        ("$/std/math.resin", "libraries/std/math.resin"),
+        ("$/math.resin", "libraries/math.resin"),
         ("$/math/vector.resin", "libraries/math/vector.resin"),
         ("$/vendor/module.resin", "libraries/vendor/module.resin"),
         ("$/stdlib/module.resin", "libraries/stdlib/module.resin"),
@@ -236,7 +236,7 @@ fn named_source_bindings_are_explicit_and_survive_unrelated_disk_reads() {
         loader.load_import(&first, "$/vendor/module").unwrap(),
         right
     );
-    for reference in ["$vendor/module", "$/std/../escape", "$/"] {
+    for reference in ["$vendor/module", "$/../escape", "$/"] {
         assert!(loader.set_import(&first, reference, right.clone()).is_err());
         assert!(loader.load_import(&first, reference).is_err());
     }

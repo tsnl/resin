@@ -136,8 +136,8 @@ relative imports, and `$/` resolution. `load_file` reads disk contents;
 source version. The CLI loads its entry through this loader. Codegen and the native
 toolchain use `compilation.verified()` to build an executable from the retained
 result, without reading the source again. Imports starting with `$/` select
-the configured library root: `$/std/` selects its standard library, and sibling
-libraries use paths such as `$/math/`. A plain `std/` is an ordinary relative
+the configured library root: `$/gpu.resin` loads `resin/gpu.resin` by default, and
+libraries in subdirectories use paths such as `$/math/`. A plain `std/` is an ordinary relative
 directory. Other references beginning with `$` report an unknown namespace.
 
 The language server owns open buffers, document versions, URI/path mappings, and

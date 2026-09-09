@@ -21,8 +21,8 @@ The CLI connects compilation, code generation, and native building. `resin-lsp`
 adapts compiler queries to the protocol; the native C ABI lives in `resin-runtime`.
 
 Crates own their isolated tests; root `tests/` exercises the complete executable and
-cross-crate behavior. Examples, the standard library, and documentation stay at the
-repository root. The root package is the default member, so
+cross-crate behavior. Examples and documentation stay at the repository root;
+Resin libraries live under `resin/`. The root package is the default member, so
 `cargo run -- examples/eg001.resin` works there. Use `--workspace` to build or test
 all native packages.
 

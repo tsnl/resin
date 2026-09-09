@@ -92,7 +92,7 @@ for details. Incomplete syntax is left unchanged until repaired.
 ## Check the workflow
 
 Open `examples/eg009_imports.resin`. Hover `next`, navigate to its definition in
-`examples/lib/counter.resin`, and navigate `RuntimeStatus.from_code` into `resin/std/status.resin`.
+`examples/lib/counter.resin`, and navigate `RuntimeStatus.from_code` into `resin/status.resin`.
 Rename a use without saving to see a diagnostic, then repair it to clear the
 diagnostic. Type a prefix inside a function to see visible-name completions.
 Edits to an open imported buffer apply to its consumers before saving.
