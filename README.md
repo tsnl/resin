@@ -547,7 +547,7 @@ def main() -> Result<(), _> = {
 The result is a shared `InputLine` owner exposing `data: Ptr<ubyte>` and `length: ulong`.
 Copies retain its allocation; the final owner frees it. `Console.print(line)` prints the bytes without adding a newline. Empty lines succeed, EOF before any
 bytes returns `EndOfInput`, and a final line without a newline succeeds. Read and allocation
-failures are also explicit errors. See [the console API](stdlib/README.md#console-input) for
+failures are also explicit errors. See [the console API](resin/std/README.md#console-input) for
 ownership and byte semantics, or run `cargo run -- examples/input.resin`.
 
 ## Files and the standard library
@@ -581,8 +581,12 @@ Names such as `if_value` are ordinary identifiers. `fmt`, `print`, `ok`, `err`,
 `size_of`, `align_of`, and `absurd` are unshadowable compiler builtins, not syntax
 keywords: definitions and parameters cannot use those names, but record fields can.
 
-`$/std/` resolves to the standard-library sources in `stdlib/`, independent of the source file or
-working directory. Set `RESIN_STDLIB` to relocate that directory when distributing the compiler.
+Imports beginning with `$/` resolve from the repository's [`resin/`](resin/) library root,
+independent of the source file or working directory. For example, `$/std/gpu.resin`
+loads `resin/std/gpu.resin`; a future `$/math/matrix.resin` would load `resin/math/matrix.resin`.
+Set `RESIN_LIBRARY_ROOT` to override the library root when distributing the compiler.
+Other imports resolve relative to the importing file. Files have explicit imports and exports;
+directories need no manifest or special entry file.
 The native Rust crate lives separately at `crates/resin-runtime/`; it has no dependency on the standard
 library. Programs use standard-library wrappers; the integer-status C ABI stays private
 to those modules. Public operations are static constructors and instance methods:

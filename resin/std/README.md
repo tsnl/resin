@@ -1,7 +1,8 @@
 # Standard library
 
 Resin modules built on C and the native `resin-runtime` ABI. Import only the functionality a file
-uses; the `std/` prefix resolves here. `RESIN_STDLIB` overrides this directory for installations.
+uses; the `$/std/` prefix resolves here. `RESIN_LIBRARY_ROOT` overrides the parent
+`resin/` library root for installations.
 
 ```resin
 import { "$/std/gpu.resin", "$/std/status.resin" };
@@ -21,7 +22,7 @@ Public operations use static and instance methods on the corresponding types. Fa
 return values. Resource owners release their native handles automatically.
 Native declarations stay private. The C ABI remains unchecked: callers
 must uphold pointer validity, lifetimes, and buffer sizes. Importing a module does not
-re-export its dependencies. Import `std/status.resin` to name or match errors; inferred
+re-export its dependencies. Import `$/std/status.resin` to name or match errors; inferred
 `Result<(), _>` callers do not need that import.
 `fmt`, `print`, `ok`, and `err` are unshadowable compiler builtins. Shader candidates use
 `@compute_shader`, `@vertex_shader`, or `@fragment_shader`; `function.spirv` produces a
@@ -136,7 +137,7 @@ callers never need to interpret its negative sentinel. These console APIs are fo
 
 
 `Io.stdout().write(text)` and `Io.stderr().write(text)` accept `str | Span<ubyte> | String`, write
-bytes verbatim, flush, and return `Result<(), WriteError>`. Import `std/io.resin` to use them.
+bytes verbatim, flush, and return `Result<(), WriteError>`. Import `$/std/io.resin` to use them.
 Use `fmt("n = {0}", (n,))` to construct an owned String before writing or storing it.
 Literals have type `str` over static bytes; formatting results own an Arc allocation. Use
 `Span<ubyte>(literal)` when a raw byte view is needed. InputLine

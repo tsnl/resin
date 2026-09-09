@@ -180,16 +180,16 @@ pub mod prelude {
 
 /// Filesystem sources and named-source import bindings for one compilation environment.
 pub struct Loader {
-    stdlib: PathBuf,
+    library_root: PathBuf,
     files: BTreeMap<PathBuf, File>,
     origins: BTreeMap<SourceId, PathBuf>,
     imports: BTreeMap<(SourceId, String), Source>,
 }
 
 impl Loader {
-    pub fn new(stdlib: PathBuf) -> Self {
+    pub fn new(library_root: PathBuf) -> Self {
         Self {
-            stdlib,
+            library_root,
             files: BTreeMap::new(),
             origins: BTreeMap::new(),
             imports: BTreeMap::new(),
@@ -273,11 +273,11 @@ impl Loader {
         self.origins.get(&source.id()).map(PathBuf::as_path)
     }
 
-    /// Resolve a filesystem reference; `$/std/` also works for named in-memory sources.
+    /// Resolve a filesystem reference; `$/` also works for named in-memory sources.
     pub fn resolve_import(&self, source: &Source, reference: &str) -> io::Result<PathBuf> {
         validate_reference(reference)?;
-        if let Some(relative) = reference.strip_prefix("$/std/") {
-            return normalize_path(&self.stdlib.join(relative));
+        if let Some(relative) = reference.strip_prefix("$/") {
+            return normalize_path(&self.library_root.join(relative));
         }
         let origin = self.path(source).ok_or_else(unknown_source)?;
         normalize_path(&origin.parent().unwrap_or(Path::new(".")).join(reference))
@@ -299,8 +299,8 @@ pub fn normalize_path(path: &Path) -> io::Result<PathBuf> {
 }
 
 /// Bundled library path; applications may supply their own configured directory.
-pub fn stdlib_path() -> PathBuf {
-    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../stdlib"))
+pub fn library_root() -> PathBuf {
+    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resin"))
 }
 
 struct File {
@@ -328,7 +328,7 @@ fn read_file(path: &Path) -> io::Result<String> {
 }
 
 fn validate_reference(reference: &str) -> io::Result<()> {
-    if let Some(relative) = reference.strip_prefix("$/std/") {
+    if let Some(relative) = reference.strip_prefix("$/") {
         if relative.is_empty()
             || Path::new(relative)
                 .components()
@@ -336,7 +336,7 @@ fn validate_reference(reference: &str) -> io::Result<()> {
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "standard-library imports must stay under $/std/",
+                "library imports must stay under $/",
             ));
         }
     } else if reference.starts_with('$') {

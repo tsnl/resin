@@ -151,7 +151,6 @@ mod tests {
         for (name, value) in [
             ("CC", "custom"),
             ("GLSLC", "custom"),
-            ("RESIN_STDLIB", "std"),
             ("RESIN_RUNTIME_INCLUDE", "include"),
             ("RESIN_RUNTIME_LIB", "archive"),
         ] {

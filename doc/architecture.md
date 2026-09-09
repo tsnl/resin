@@ -202,7 +202,7 @@ fn main() {
         export { main }; import { "math" };
         def main() -> int = { answer() };
     "#);
-    let mut loader = resin_source::Loader::new(resin_source::stdlib_path());
+    let mut loader = resin_source::Loader::new(resin_source::library_root());
     loader.set_import(&entry, "math", math).unwrap();
     let mut compiler = resin_compiler::Compiler::new();
     let compilation = compiler.compile(entry.clone(), &mut loader);
@@ -215,7 +215,7 @@ fn main() {
 as authoritative for that path's imports. `remove_source(path)` restores disk loading
 for a closed buffer. `set_import(importer, reference, source)` binds a reference
 explicitly, allowing names that have no filesystem origin. Otherwise imports resolve
-relative to their importing file, with `$/std/` selecting the configured library.
+relative to their importing file, with `$/` selecting the configured library root.
 Unchanged text reuses its source version. The compiler needs no buffer or path policy.
 
 A caller may also construct a `resin_ast::Program` in dependency order and call

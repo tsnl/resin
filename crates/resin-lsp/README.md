@@ -29,14 +29,14 @@ package supplies the sole executable; `resin-lsp` is its protocol library. The s
 uses stdout exclusively for the protocol and stderr for logs. See
 [the Zed extension](../../editors/zed/README.md) for a complete editor setup.
 
-Standard-library lookup, in descending precedence:
+Library-root lookup for `$/` imports, in descending precedence:
 
-1. Initialization options: `{ "stdlibPath": "/absolute/path/to/stdlib" }`
-2. `RESIN_STDLIB`
-3. The repository's `stdlib/` path recorded when `resin-source` was built.
+1. Initialization options: `{ "libraryRoot": "/absolute/path/to/checkout/resin" }`
+2. `RESIN_LIBRARY_ROOT`
+3. The repository's `resin/` path recorded when `resin-source` was built.
 
 Relative initialization overrides resolve against the selected project directory.
-`RESIN_STDLIB` resolves against the invoking process's working directory. An
+`RESIN_LIBRARY_ROOT` resolves against the invoking process's working directory. An
 absolute override is useful when using the server in another checkout. Keep the
 Nix shell environment when launching Zed/the server; it supplies native libraries.
 
@@ -112,7 +112,7 @@ fn main() {
         "example",
         r#"import { "library" }; def main() -> int = { answer() };"#,
     );
-    let mut loader = resin_source::Loader::new(resin_source::stdlib_path());
+    let mut loader = resin_source::Loader::new(resin_source::library_root());
     loader.set_import(&entry, "library", library.clone()).unwrap();
     let mut compiler = resin_compiler::Compiler::new();
     let before = compiler.compile(entry.clone(), &mut loader);
@@ -130,14 +130,15 @@ fn main() {
 ```
 
 `resin_source::Loader` supplies filesystem loading, canonical path identities,
-relative imports, and `$/std/` resolution. `load_file` reads disk contents;
+relative imports, and `$/` resolution. `load_file` reads disk contents;
 `source_from_text` registers authoritative supplied text for a file's imports, and
 `remove_source` restores disk loading when a buffer closes. Unchanged text reuses its
 source version. The CLI loads its entry through this loader. Codegen and the native
 toolchain use `compilation.verified()` to build an executable from the retained
-result, without reading the source again. Only `$/std/` selects
-the configured standard library; `std/` is an ordinary relative directory. Other
-references beginning with `$` report an unknown namespace.
+result, without reading the source again. Imports starting with `$/` select
+the configured library root: `$/std/` selects its standard library, and sibling
+libraries use paths such as `$/math/`. A plain `std/` is an ordinary relative
+directory. Other references beginning with `$` report an unknown namespace.
 
 The language server owns open buffers, document versions, URI/path mappings, and
 frontend revisions. Open/change notifications register supplied text with the loader;

@@ -12,7 +12,7 @@ compiler phases, and the supporting [runtime](crates/resin-runtime/),
 [parser](crates/tree-sitter-resin/), and [language server library](crates/resin-lsp/).
 All are unpublished. The
 [Zed extension](editors/zed/) has a separate Cargo workspace under `editors/`.
-The [standard library](stdlib/) is written in Resin and wraps the runtime's C API.
+The [standard library](resin/std/) is written in Resin and wraps the runtime's C API.
 
 ## 1. Start with a program
 
@@ -64,7 +64,7 @@ cargo run -- examples/eg009_imports.resin:independent
 
 For a host-only standard-library example, read
 [examples/input.resin](examples/input.resin) alongside
-[stdlib/console.resin](stdlib/console.resin). The module builds a growing line
+[resin/std/console.resin](resin/std/console.resin). The module builds a growing line
 buffer on top of C's `getchar`, returns typed errors, and wraps successful lines
 in shared owners. Scope cleanup releases them automatically.
 
@@ -108,7 +108,8 @@ captures environment variables, the working directory, and executable/temp paths
 Its private [resolution](crates/resin-toolchain/src/environment.rs) applies CLI
 compiler choices before `CC`/`GLSLC` and platform defaults. It finds runtime headers,
 the archive, and cache settings, returning an opaque `Toolchain`. The CLI resolves
-`RESIN_STDLIB` against the loader library's bundled path and chooses `CProfile`.
+relative `RESIN_LIBRARY_ROOT` overrides against the captured working directory,
+defaults to the bundled library root, and chooses `CProfile`.
 Tools are invoked when required, without preflight checks, so host-only
 programs remain independent of `glslc`. Compiler subprocesses and cache fingerprints
 use the same captured environment.
@@ -174,7 +175,7 @@ expressions as holes for editor recovery. AST generation performs no filesystem 
 The compiler's [import traversal](crates/resin-compiler/src/lib.rs) calls
 `resin_source::Loader::load_import` and builds an AST `Program` in dependency order.
 The [loader](crates/resin-source/src/lib.rs) accepts explicit source bindings, supplied
-file text, and disk files. It interprets relative and `$/std/` paths. Each AST source
+file text, and disk files. It interprets relative and `$/` paths. Each AST source
 module retains its immutable `Source` alongside its syntax.
 
 [HIR language](crates/resin-hir/src/lib.rs) is a self-contained, typed tree. Start
@@ -345,12 +346,12 @@ backend supports a subset of the host language; it rejects operations such as
 foreign calls and recursion rather than making them work on the device.
 
 The remaining GPU operations are ordinary standard-library calls. Follow one
-from [stdlib/gpu.resin](stdlib/gpu.resin), through
+from [resin/std/gpu.resin](resin/std/gpu.resin), through
 [resin_runtime.h](crates/resin-runtime/include/resin_runtime.h) and its included
 headers, to [the runtime](crates/resin-runtime/src/lib.rs). The same pattern applies
 to images and windows. Wrappers omit the native `resin_` prefix and return
 `Result<T, RuntimeError>`, with created handles in the success value.
-[stdlib/status.resin](stdlib/status.resin) translates integer status codes into
+[resin/std/status.resin](resin/std/status.resin) translates integer status codes into
 named error structs; the C ABI remains unchanged.
 
 Inside the runtime, the useful landmarks are:

@@ -47,7 +47,7 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
     let module = pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap();
     for name in ["gpu", "window", "image", "console"] {
         let public = pipeline::generate_program(
-            &pipeline::load(&root.join(format!("stdlib/{name}.resin"))).unwrap(),
+            &pipeline::load(&root.join(format!("resin/std/{name}.resin"))).unwrap(),
         )
         .unwrap();
         assert!(

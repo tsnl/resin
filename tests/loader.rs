@@ -94,18 +94,18 @@ fn unchanged_roots_retry_missing_transitive_imports_without_notifications() {
 }
 
 #[test]
-fn custom_standard_library_edits_recompile_an_unchanged_entry() {
+fn custom_library_root_edits_recompile_an_unchanged_entry() {
     use std::sync::Arc;
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
-    let stdlib = directory.path().join("custom-library");
-    fs::create_dir(&stdlib).unwrap();
-    let library = stdlib.join("math.resin");
+    let library_root = directory.path().join("custom-library");
+    fs::create_dir(&library_root).unwrap();
+    let library = library_root.join("math.resin");
     fs::write(&library, "export { answer }; def answer() -> int = { 41 };").unwrap();
-    let mut loader = Loader::new(stdlib);
+    let mut loader = Loader::new(library_root);
     let source = loader
         .source_from_text(
             &directory.path().join("main.resin"),
-            "import { \"$/std/math.resin\" }; def value() -> _ = { answer() };",
+            "import { \"$/math.resin\" }; def value() -> _ = { answer() };",
         )
         .unwrap();
     let mut compiler = resin_compiler::Compiler::new();

@@ -28,10 +28,10 @@ pub fn main() -> ! {
     );
 }
 
-fn run(Invocation { mode, stdlib }: Invocation) -> Result<i32> {
+fn run(Invocation { mode, library_root }: Invocation) -> Result<i32> {
     match &mode {
         Mode::Compiler(request) | Mode::Interpreter { request, .. } => {
-            let executable = compile(request, stdlib)?;
+            let executable = compile(request, library_root)?;
             if let Mode::Interpreter { args, .. } = &mode {
                 return Ok(executable.run_with_args(args)?);
             }
@@ -45,16 +45,16 @@ fn run(Invocation { mode, stdlib }: Invocation) -> Result<i32> {
         Mode::Formatter { paths, check } => format::run(paths, *check),
         Mode::LanguageServer { directory } => {
             std::env::set_current_dir(directory)?;
-            resin_lsp::serve(stdlib)
+            resin_lsp::serve(library_root)
         }
     }
 }
 
 fn compile(
     request: &request::Request,
-    stdlib: std::path::PathBuf,
+    library_root: std::path::PathBuf,
 ) -> Result<resin_toolchain::Executable> {
-    let mut loader = resin_source::Loader::new(stdlib);
+    let mut loader = resin_source::Loader::new(library_root);
     let source = loader.load_file(&request.input.path)?;
     let compilation = Compiler::new().compile(source, &mut loader);
     let directory = tempfile::TempDir::new_in(&request.options.temporary)?;

@@ -48,15 +48,15 @@ an absolute path in Zed settings:
         "path": "/absolute/path/to/resin/target/debug/resin"
       },
       "initialization_options": {
-        "stdlibPath": "/absolute/path/to/resin/stdlib"
+        "libraryRoot": "/absolute/path/to/checkout/resin"
       }
     }
   }
 }
 ```
 
-The standard-library override is useful when switching worktrees or using an
-installed server built in another checkout. Alternatively, set `RESIN_STDLIB` in
+The library-root override is useful when switching worktrees or using an
+installed server built in another checkout. Alternatively, set `RESIN_LIBRARY_ROOT` in
 the environment. Configured `binary.env` entries override the inherited worktree
 environment. Restart the language server after changing its configuration or
 rebuilding the native executable.
@@ -92,14 +92,14 @@ for details. Incomplete syntax is left unchanged until repaired.
 ## Check the workflow
 
 Open `examples/eg009_imports.resin`. Hover `next`, navigate to its definition in
-`examples/lib/counter.resin`, and navigate `RuntimeStatus.from_code` into `stdlib/status.resin`.
+`examples/lib/counter.resin`, and navigate `RuntimeStatus.from_code` into `resin/std/status.resin`.
 Rename a use without saving to see a diagnostic, then repair it to clear the
 diagnostic. Type a prefix inside a function to see visible-name completions.
 Edits to an open imported buffer apply to its consumers before saving.
 
 Use **dev: open language server logs** for protocol logs and **zed: open log**
 for extension errors. A missing executable produces an installation message.
-If `std/` imports fail, check the standard-library path. If the executable cannot
+If `$/` imports fail, check the library root. If the executable cannot
 load a native library, restart Zed from the repository's `nix-shell`.
 
 ## Build and maintain

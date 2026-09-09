@@ -21,15 +21,22 @@ struct Client {
 
 impl Client {
     fn start(root: &Path, options: Value) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_resin"))
+        Self::start_with_library_root(root, options, None)
+    }
+
+    fn start_with_library_root(root: &Path, options: Value, library_root: Option<&Path>) -> Self {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_resin"));
+        command
             .arg("--lsp")
             .arg(root)
             .current_dir(root.parent().unwrap())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .unwrap();
+            .stderr(Stdio::inherit());
+        if let Some(library_root) = library_root {
+            command.env("RESIN_LIBRARY_ROOT", library_root);
+        }
+        let mut child = command.spawn().unwrap();
         let input = child.stdin.take().unwrap();
         let mut stdout = BufReader::new(child.stdout.take().unwrap());
         let (sender, output) = unbounded();
@@ -540,20 +547,53 @@ fn dependency_overlays_close_and_disk_changes_refresh_consumers() {
 }
 
 #[test]
-fn stdlib_override_and_rapid_versions_use_the_latest_snapshot() {
+fn library_root_options_override_the_environment_with_separate_relative_bases() {
+    let temp = TempDir::new().unwrap();
+    let project = temp.path().join("project");
+    for (root, function) in [
+        (temp.path(), "environment_value"),
+        (project.as_path(), "option_value"),
+    ] {
+        let library = root.join("libraries/math/value.resin");
+        std::fs::create_dir_all(library.parent().unwrap()).unwrap();
+        std::fs::write(
+            &library,
+            format!("export {{ {function} }}; def {function}() -> int = {{ 42 }};"),
+        )
+        .unwrap();
+    }
+    for (options, function) in [
+        (Value::Null, "environment_value"),
+        (json!({"libraryRoot": "libraries"}), "option_value"),
+    ] {
+        let mut client =
+            Client::start_with_library_root(&project, options, Some(Path::new("libraries")));
+        let uri = uri(&project.join("main.resin"));
+        client.open(
+            &uri,
+            &format!(
+                "import {{ \"$/math/value.resin\" }}; def main() -> int = {{ {function}() }};"
+            ),
+        );
+        client.diagnostics(&uri, Some(1), false);
+    }
+}
+
+#[test]
+fn library_root_override_and_rapid_versions_use_the_latest_snapshot() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
-    let stdlib = temp.path().join("standard");
-    std::fs::create_dir(&stdlib).unwrap();
+    let library_root = temp.path().join("standard");
+    std::fs::create_dir(&library_root).unwrap();
     std::fs::write(
-        stdlib.join("custom.resin"),
+        library_root.join("custom.resin"),
         "export { standard }; def standard () -> int = { 1 };",
     )
     .unwrap();
-    let mut client = Client::start(temp.path(), json!({"stdlibPath": "standard"}));
+    let mut client = Client::start(temp.path(), json!({"libraryRoot": "standard"}));
     let uri = uri(&temp.path().join("main.resin"));
     client.open(
         &uri,
-        "import { \"$/std/custom.resin\" }; def main () -> int = { standard() };",
+        "import { \"$/custom.resin\" }; def main () -> int = { standard() };",
     );
     client.diagnostics(&uri, Some(1), false);
     for version in 2..50 {

@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 use resin_compiler::Compiler;
 use resin_hir::{GenerateError, GenerateErrorKind};
+use resin_source::library_root;
 use resin_source::prelude::*;
-use resin_source::stdlib_path;
 use std::path::Path;
 
 pub fn generate(file: &resin_ast::SourceFile) -> Result<resin_lir::Module, GenerateError> {
@@ -57,7 +57,7 @@ pub fn generate_program(program: &resin_ast::Program) -> Result<resin_lir::Modul
         })
 }
 pub fn load(path: &Path) -> Result<resin_ast::Program, SourceError> {
-    let mut loader = resin_source::Loader::new(stdlib_path());
+    let mut loader = resin_source::Loader::new(library_root());
     let source = loader.load_file(path).map_err(|error| {
         SourceError::new(
             Source::new(path.display().to_string(), ""),

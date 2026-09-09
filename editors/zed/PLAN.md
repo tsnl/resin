@@ -100,7 +100,7 @@ compiler's `Compilation` exposes diagnostics and queries over those phase produc
 
 Use `resin_source::Loader` to resolve references from their importing source.
 The CLI loads files; the server registers authoritative buffer text through
-`source_from_text` and removes it with `remove_source` when a document closes. Preserve relative imports, `$/std/`, `RESIN_STDLIB`,
+`source_from_text` and removes it with `remove_source` when a document closes. Preserve relative imports, `$/`, `RESIN_LIBRARY_ROOT`,
 canonical filesystem identities, explicit exports, re-exports, duplicate-import
 handling, and cycle detection. File-backed buffers need not exist on disk.
 `resin_source::Loader` maps logical source identities back to exact OS paths, including
@@ -173,7 +173,7 @@ imports and inferred record-field completion are outside this first version.
 
 Register the language server in `editors/zed/extension.toml`. The Rust adapter
 launches a configured executable or finds `resin` through Zed's worktree PATH
-API, passing `--lsp <directory>`. Preserve the worktree environment, including `RESIN_STDLIB` and Nix library
+API, passing `--lsp <directory>`. Preserve the worktree environment, including `RESIN_LIBRARY_ROOT` and Nix library
 paths. Provide an actionable installation message when the executable is missing.
 
 Document building/installing the native server inside `nix-shell`, installing

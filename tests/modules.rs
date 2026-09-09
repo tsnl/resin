@@ -478,24 +478,28 @@ fn standard_library_imports_work_outside_the_repository() {
 }
 
 #[test]
-fn standard_library_can_be_relocated_and_does_not_capture_relative_imports() {
+fn library_root_can_be_relocated_and_does_not_capture_relative_imports() {
     let project = Project::new(&[
         (
-            "custom/library.resin",
+            "custom/math/library.resin",
             "export { answer }; def answer() -> int = { 42 };",
         ),
         (
-            "library.resin",
+            "custom/renderer/value.resin",
+            "export { rendered }; import { \"$/math/library.resin\" }; def rendered() -> int = { answer() };",
+        ),
+        (
+            "std/library.resin",
             "export { local }; def local() -> int = { 1 };",
         ),
         (
             "main.resin",
-            "export { main }; import { \"$/std/library.resin\", \"library.resin\" }; def main() -> () = { print(fmt(\"{0}\", (answer() + local(),))); };",
+            "export { main }; import { \"$/renderer/value.resin\", \"std/library.resin\" }; def main() -> () = { print(fmt(\"{0}\", (rendered() + local(),))); };",
         ),
     ]);
     let output = Command::new(env!("CARGO_BIN_EXE_resin"))
         .current_dir(project.0.path())
-        .env("RESIN_STDLIB", project.0.path().join("custom"))
+        .env("RESIN_LIBRARY_ROOT", "custom")
         .arg("main.resin")
         .output()
         .unwrap();
@@ -512,7 +516,10 @@ fn invalid_import_paths_report_the_importing_file() {
     for path in [
         "missing.resin",
         "$/std/missing.resin",
-        "$/std/../Cargo.toml",
+        "$/../Cargo.toml",
+        "$/math/../../Cargo.toml",
+        "$//absolute.resin",
+        "$/",
         "$/std/",
         "",
     ] {
