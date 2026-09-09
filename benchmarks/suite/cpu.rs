@@ -15,13 +15,13 @@ pub fn run(workload: &Workload, config: &Config) -> Result<Vec<f64>> {
         .replace('\t', "\\t");
     fs::write(
         &wrapper,
-        include_str!("support/host.resin").replace("@WORKLOAD@", &import),
+        include_str!("../support/host.resin").replace("@WORKLOAD@", &import),
     )?;
     let built = super::build(
         workload,
         &wrapper,
         Some("main"),
-        &[("benchmark.h", include_str!("support/benchmark.h"))],
+        &[("benchmark.h", include_str!("../support/benchmark.h"))],
     )?;
     let program = built.generated.program().ok_or("missing CPU executable")?;
     let executable = built
