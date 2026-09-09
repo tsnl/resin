@@ -40,9 +40,10 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Use concrete representations and a few explicit passes rather than callback frameworks,
   hidden cross-pass state, or speculative abstractions. Explain invariants and non-obvious
   ownership choices close to the code that needs them.
-- Take inspiration from [Bitwise](https://github.com/pervognsen/bitwise): visible data,
-  direct constructors, and code that teaches how the system works. Preserve Resin's
-  behavior and idiomatic Rust; the reference is an ethos, not a mandate to copy C idioms.
+- Use [the Bitwise taste guide](doc/bitwise.md) when designing and refactoring code.
+  It explains the motivation through concrete Ion examples: visible data, operations
+  that establish complete guarantees, and control flow that teaches the problem.
+  Adapt that taste to Resin's behavior, explicit phase boundaries, and idiomatic Rust.
 
 ## Cost control
 

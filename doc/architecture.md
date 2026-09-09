@@ -73,8 +73,8 @@ are private even when their functions must be shared internally.
 | GLSL | [shader source tree](../crates/resin-codegen/src/glsl/language.rs) | [verified LIR → GLSL](../crates/resin-codegen/src/glsl/lower/mod.rs) | [GLSL text](../crates/resin-codegen/src/glsl/print.rs) |
 
 Prefer small functions named for the operation they perform. The
-[Bitwise project](https://github.com/pervognsen/bitwise) is a style reference for
-visible data, direct construction, and code that teaches its implementation.
+[Bitwise taste guide](bitwise.md) explains the style reference through concrete
+examples of visible data, direct construction, and code that teaches its implementation.
 Resin uses idiomatic Rust and meaningful pass boundaries; an exhaustive language
 dispatch may remain long when splitting it would obscure the cases.
 
