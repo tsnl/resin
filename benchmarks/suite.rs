@@ -8,9 +8,7 @@ use std::{
     process::Command,
 };
 
-#[path = "cpu.rs"]
 mod cpu;
-#[path = "gpu.rs"]
 mod gpu;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;

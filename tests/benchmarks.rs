@@ -2,8 +2,11 @@
 use clap::Parser;
 
 #[allow(dead_code)]
-#[path = "../benchmarks/suite.rs"]
-mod suite;
+#[path = "../benchmarks"]
+mod benchmarks {
+    pub mod suite;
+}
+use benchmarks::suite;
 
 #[cfg(feature = "gpu")]
 #[path = "support/shaders.rs"]
