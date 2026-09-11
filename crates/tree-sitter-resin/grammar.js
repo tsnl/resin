@@ -65,7 +65,15 @@ const BUILTIN_TYPES = [
   "GpuArguments",
 ];
 
-const TYPE_FORMERS = ["Ptr", "Span", "GpuPtr", "GpuSpan", "Arc", "Weak", "Result"];
+const TYPE_FORMERS = [
+  "Ptr",
+  "Span",
+  "GpuPtr",
+  "GpuSpan",
+  "Arc",
+  "Weak",
+  "Result",
+];
 
 /**
  * Tree-sitter reserves words for only one token; uppercase names need an exclusion too.
@@ -450,7 +458,10 @@ export default grammar({
     unary_type: ($) =>
       choice(
         seq(
-          field("former", choice("Ptr", "Span", "GpuPtr", "GpuSpan", "Arc", "Weak")),
+          field(
+            "former",
+            choice("Ptr", "Span", "GpuPtr", "GpuSpan", "Arc", "Weak"),
+          ),
           "<",
           field("arg", $.type),
           ">",
@@ -499,7 +510,7 @@ export default grammar({
     uid: () =>
       token(
         new RustRegex(
-          `[_]+[A-Z][a-zA-Z0-9_]*|${identifierExcept("A-Z", [...TYPE_FORMERS, "Never", "None"])}`,
+          `[_]+[A-Z][a-zA-Z0-9_]*|${identifierExcept("A-Z", [...TYPE_FORMERS, "Never", "None", "GpuArguments"])}`,
         ),
       ),
 

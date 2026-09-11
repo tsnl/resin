@@ -228,7 +228,7 @@ mod tests {
                 format!("def main() -> () = {{ var {keyword}_value = 1; var _{keyword} = 2; }};");
             assert!(!parse(&source).root_node().has_error(), "{source}");
         }
-        for name in ["Ptr", "Span", "GpuPtr", "GpuSpan"] {
+        for name in ["Ptr", "Span", "GpuPtr", "GpuSpan", "GpuArguments"] {
             for source in [
                 format!("type {name} = int;"),
                 format!("extern type {name};"),
