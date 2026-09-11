@@ -121,6 +121,18 @@ pub enum Ty {
     Span {
         element: Box<Ty>,
     },
+    /// An owning GPU allocation view with a byte offset and CPU access permissions.
+    /// Host storage occupies 24 bytes aligned to 8; shader projection produces Ptr<T>.
+    GpuPointer {
+        pointee: Box<Ty>,
+    },
+    /// An owning GPU pointer and element count: 32 host bytes aligned to 8.
+    /// Shader projection produces Span<T>; owners never reside in device storage.
+    GpuSpan {
+        element: Box<Ty>,
+    },
+    /// Opaque projected shader arguments, retained by a host Arc handle.
+    GpuArguments,
     Arc {
         pointee: Box<Ty>,
     },
@@ -171,13 +183,27 @@ impl Ty {
     /// successfully; their payload may already have been destroyed.
     pub fn deref_target(&self) -> Option<&Ty> {
         match self {
-            Self::Pointer { pointee } | Self::Arc { pointee } => Some(pointee),
+            Self::Pointer { pointee } | Self::GpuPointer { pointee } | Self::Arc { pointee } => {
+                Some(pointee)
+            }
             _ => None,
         }
     }
 
     pub fn needs_drop(&self, definitions: &[TypeDef]) -> bool {
         types::needs_drop(self, definitions)
+    }
+
+    /// Values that can live directly in GPU storage: shared scalar/aggregate layout,
+    /// with no pointers, spans, managed owners, or custom destruction hooks.
+    pub fn gpu_element(&self, definitions: &[TypeDef]) -> bool {
+        types::gpu_element(self, definitions)
+    }
+
+    /// Host argument shape whose GPU views project into this shader root type.
+    /// Nominal records expose structural host fields; raw pointer graphs are rejected.
+    pub fn gpu_projection(&self, definitions: &[TypeDef]) -> Option<Ty> {
+        types::gpu_projection(self, definitions)
     }
 
     pub fn payloads(&self) -> Option<Vec<(Case, Ty)>> {
@@ -305,6 +331,15 @@ pub enum Intrinsic {
     ArcGet,
     Downgrade,
     Upgrade,
+    GpuIndex,
+    GpuSlice,
+    GpuReadOnly,
+    GpuWriteOnly,
+    GpuAllocateNative,
+    GpuArgumentsDispatch,
+    GpuArgumentsDraw,
+    GpuCopyTo,
+    GpuCopyImage,
 }
 
 /// Validate references in a concrete type against a program's canonical table.

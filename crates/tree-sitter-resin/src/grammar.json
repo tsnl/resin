@@ -2488,6 +2488,14 @@
                   },
                   {
                     "type": "STRING",
+                    "value": "GpuPtr"
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "GpuSpan"
+                  },
+                  {
+                    "type": "STRING",
                     "value": "Arc"
                   },
                   {
@@ -2645,6 +2653,10 @@
         {
           "type": "STRING",
           "value": "None"
+        },
+        {
+          "type": "STRING",
+          "value": "GpuArguments"
         }
       ]
     },
@@ -2863,7 +2875,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PATTERN",
-        "value": "[_]+[A-Z][a-zA-Z0-9_]*|(?:P(?:t(?:r(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^r]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^t]][a-zA-Z0-9_]*|)|S(?:p(?:a(?:n(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^n]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^a]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^p]][a-zA-Z0-9_]*|)|A(?:r(?:c(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^c]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^r]][a-zA-Z0-9_]*|)|W(?:e(?:a(?:k(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^k]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^a]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^e]][a-zA-Z0-9_]*|)|R(?:e(?:s(?:u(?:l(?:t(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^t]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^l]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^u]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^s]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^e]][a-zA-Z0-9_]*|)|N(?:e(?:v(?:e(?:r(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^r]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^e]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^v]][a-zA-Z0-9_]*|)|o(?:n(?:e(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^e]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^n]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^eo]][a-zA-Z0-9_]*|)|[A-Z&&[^PSAWRN]][a-zA-Z0-9_]*)"
+        "value": "[_]+[A-Z][a-zA-Z0-9_]*|(?:P(?:t(?:r(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^r]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^t]][a-zA-Z0-9_]*|)|S(?:p(?:a(?:n(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^n]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^a]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^p]][a-zA-Z0-9_]*|)|G(?:p(?:u(?:P(?:t(?:r(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^r]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^t]][a-zA-Z0-9_]*|)|S(?:p(?:a(?:n(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^n]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^a]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^p]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^PS]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^u]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^p]][a-zA-Z0-9_]*|)|A(?:r(?:c(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^c]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^r]][a-zA-Z0-9_]*|)|W(?:e(?:a(?:k(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^k]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^a]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^e]][a-zA-Z0-9_]*|)|R(?:e(?:s(?:u(?:l(?:t(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^t]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^l]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^u]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^s]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^e]][a-zA-Z0-9_]*|)|N(?:e(?:v(?:e(?:r(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^r]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^e]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^v]][a-zA-Z0-9_]*|)|o(?:n(?:e(?:[a-zA-Z0-9_][a-zA-Z0-9_]*)|[a-zA-Z0-9_&&[^e]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^n]][a-zA-Z0-9_]*|)|[a-zA-Z0-9_&&[^eo]][a-zA-Z0-9_]*|)|[A-Z&&[^PSGAWRN]][a-zA-Z0-9_]*)"
       }
     },
     "number": {
@@ -3119,11 +3131,23 @@
       },
       {
         "type": "STRING",
+        "value": "GpuArguments"
+      },
+      {
+        "type": "STRING",
         "value": "Ptr"
       },
       {
         "type": "STRING",
         "value": "Span"
+      },
+      {
+        "type": "STRING",
+        "value": "GpuPtr"
+      },
+      {
+        "type": "STRING",
+        "value": "GpuSpan"
       },
       {
         "type": "STRING",

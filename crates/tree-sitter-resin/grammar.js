@@ -62,9 +62,10 @@ const BUILTIN_TYPES = [
   "float64",
   "Never",
   "None",
+  "GpuArguments",
 ];
 
-const TYPE_FORMERS = ["Ptr", "Span", "Arc", "Weak", "Result"];
+const TYPE_FORMERS = ["Ptr", "Span", "GpuPtr", "GpuSpan", "Arc", "Weak", "Result"];
 
 /**
  * Tree-sitter reserves words for only one token; uppercase names need an exclusion too.
@@ -449,7 +450,7 @@ export default grammar({
     unary_type: ($) =>
       choice(
         seq(
-          field("former", choice("Ptr", "Span", "Arc", "Weak")),
+          field("former", choice("Ptr", "Span", "GpuPtr", "GpuSpan", "Arc", "Weak")),
           "<",
           field("arg", $.type),
           ">",

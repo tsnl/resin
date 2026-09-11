@@ -501,7 +501,10 @@ impl Generator {
         let declaration = reserve_method(name, scopes, declarations)?;
         let definition = self.method_owner(receiver, scopes)?;
         scopes.record_method_definition(definition, declaration);
-        if !decorators.is_empty() {
+        if decorators
+            .iter()
+            .any(|decorator| decorator.val.as_ref() != "gpu_allocator")
+        {
             return Err(GenerateError::inference(
                 name.span,
                 "methods cannot be shader entries",
@@ -513,7 +516,41 @@ impl Generator {
         };
         let signature = method_signature(&evaluator, declaration, params, result)?;
         let function = self.declare_function(name, &signature)?;
-        self.register_method(definition, name, function)
+        self.register_method(definition, name, function)?;
+        if !decorators.is_empty() {
+            self.register_gpu_allocator(definition, function, name)?;
+        }
+        Ok(())
+    }
+
+    fn register_gpu_allocator(
+        &mut self,
+        owner: TypeId,
+        function: FunctionId,
+        name: &Ident,
+    ) -> Result<(), GenerateError> {
+        let declaration = self.typer.declared_function(function);
+        let params = &declaration.params;
+        let receiver_matches = params
+            .first()
+            .is_some_and(|receiver| self.typer.receiver_definition(receiver) == Some(owner));
+        let result_matches = matches!(&declaration.result, Ty::Result { value, .. } if **value == Ty::GpuPointer { pointee: Box::new(Ty::UInt8) });
+        if !receiver_matches
+            || params.get(1..) != Some(&[Ty::UInt64, Ty::UInt64, Ty::Int32][..])
+            || !result_matches
+        {
+            return Err(GenerateError::inference(
+                name.span,
+                "@gpu_allocator requires (self, bytes: ulong, alignment: ulong, memory: int) -> Result<GpuPtr<ubyte>, E>",
+            ));
+        }
+        if self.typer.gpu_allocators.insert(owner, function).is_some() {
+            return Err(GenerateError::inference(
+                name.span,
+                "a type can declare only one GPU allocator",
+            ));
+        }
+        Ok(())
     }
 
     fn method_owner(&self, receiver: &Ident, scopes: &Scopes) -> Result<TypeId, GenerateError> {
@@ -743,7 +780,9 @@ impl Generator {
             StmtKind::Function { decorators, .. } => {
                 if let Some(id) = self.function_identity(name, signature)? {
                     for decorator in decorators {
-                        self.declare_shader(id, decorator)?;
+                        if decorator.val.as_ref() != "gpu_allocator" || !name.val.contains('.') {
+                            self.declare_shader(id, decorator)?;
+                        }
                     }
                 }
             }

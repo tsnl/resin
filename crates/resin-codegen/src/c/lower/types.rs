@@ -205,7 +205,9 @@ impl<'a> Types<'a> {
 
 fn scalar(ty: &Ty) -> Option<&'static str> {
     Some(match ty {
-        Ty::Arc { .. } | Ty::Weak { .. } => "ResinArc *",
+        Ty::Arc { .. } | Ty::Weak { .. } | Ty::GpuArguments => "ResinArc *",
+        Ty::GpuPointer { .. } => "ResinGpuPtr",
+        Ty::GpuSpan { .. } => "ResinGpuSpan",
         Ty::Unit | Ty::None => "uint8_t",
         Ty::Type => "size_t",
         Ty::Bool => "bool",

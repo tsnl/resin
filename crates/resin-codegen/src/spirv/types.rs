@@ -32,10 +32,16 @@ impl Context<'_> {
             | Ty::UInt8
             | Ty::UInt32
             | Ty::UInt64
+            | Ty::Int64
             | Ty::Float32
             | Ty::Arc { .. }
             | Ty::Weak { .. } => {}
             Ty::Str => return Err(super::str_storage_error()),
+            Ty::GpuPointer { .. } | Ty::GpuSpan { .. } | Ty::GpuArguments => {
+                return Err(Error(
+                    "shader cannot consume a managed GPU view or projected arguments".into(),
+                ));
+            }
             Ty::Pointer { pointee } => self.validate_buffer(pointee)?,
             Ty::Span { element } => self.validate_buffer(element)?,
             Ty::Array { element, length } => {
@@ -96,6 +102,7 @@ impl Context<'_> {
             Ty::Unit | Ty::None | Ty::UInt32 => self.builder.type_int(32, 0),
             Ty::Bool => self.builder.type_bool(),
             Ty::Int32 => self.builder.type_int(32, 1),
+            Ty::Int64 => self.builder.type_int(64, 1),
             Ty::UInt8 => {
                 self.builder.capability(Capability::Int8);
                 self.builder.capability(Capability::StorageBuffer8BitAccess);

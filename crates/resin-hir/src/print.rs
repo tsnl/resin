@@ -166,6 +166,26 @@ impl Printer<'_> {
                 vec![quoted(format!("{conversion:?}")), self.term(arg)],
             ),
             TermKind::ArcNew { value } => list("arc", vec![self.term(value)]),
+            TermKind::GpuNew { allocator, args } => list(
+                "gpu-new",
+                vec![function_id(allocator.index()), self.arguments(args)],
+            ),
+            TermKind::GpuAllocate { allocator, args } => list(
+                "gpu-allocate",
+                vec![function_id(allocator.index()), self.arguments(args)],
+            ),
+            TermKind::GpuProject {
+                allocator,
+                shader,
+                args,
+            } => list(
+                "gpu-project",
+                vec![
+                    function_id(allocator.index()),
+                    function_id(shader.index()),
+                    self.arguments(args),
+                ],
+            ),
             TermKind::WeakEmpty { pointee } => list("weak-empty", vec![self.ty(pointee)]),
             TermKind::Result { failure, arg } => {
                 list(if *failure { "err" } else { "ok" }, vec![self.term(arg)])

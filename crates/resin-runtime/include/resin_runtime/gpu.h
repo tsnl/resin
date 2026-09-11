@@ -1,6 +1,7 @@
 #pragma once
 
 #include "resin_runtime/status.h"
+#include "resin_runtime/shared.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -16,6 +17,21 @@ typedef struct ResinPipeline ResinPipeline;
 typedef struct ResinCommandBuffer ResinCommandBuffer;
 
 typedef uint64_t ResinDeviceAddress;
+
+#define RESIN_GPU_ACCESS_READ 1u
+#define RESIN_GPU_ACCESS_WRITE 2u
+
+/* Compiler-managed values: copying ABI bytes borrows rather than retains owner. */
+typedef struct ResinGpuPtr {
+    ResinArc *owner;
+    size_t offset;
+    uint32_t access;
+} ResinGpuPtr;
+
+typedef struct ResinGpuSpan {
+    ResinGpuPtr data;
+    size_t length;
+} ResinGpuSpan;
 
 #define RESIN_GPU_DEVICE_NAME_MAX 256
 
@@ -76,11 +92,52 @@ void *resin_allocation_host_pointer(const ResinAllocation *allocation);
 ResinDeviceAddress resin_allocation_device_pointer(const ResinAllocation *allocation);
 size_t resin_allocation_size(const ResinAllocation *allocation);
 
-/* Translate any pointer inside a mapped heap block, preserving its byte offset. */
-ResinStatus resin_gpu_host_to_device_pointer(
-    const ResinGpu *gpu,
-    const void *host_pointer,
-    ResinDeviceAddress *out_device_pointer);
+/* Compiler operations. gpu_owner retains gpu; success retains gpu_owner.
+   Empty allocations are supported. Host pointers are for immediate accesses
+   and must never be exposed as an unrestricted language Ptr. */
+ResinStatus resin_gpu_ptr_allocate(
+    ResinGpu *gpu,
+    ResinArc *gpu_owner,
+    size_t bytes,
+    size_t alignment,
+    int32_t memory,
+    ResinGpuPtr *out);
+void *resin_gpu_ptr_host(
+    ResinGpuPtr value,
+    size_t bytes,
+    size_t alignment,
+    uint32_t required_access);
+ResinGpuPtr resin_gpu_ptr_offset(
+    ResinGpuPtr value,
+    size_t byte_offset,
+    size_t bytes,
+    size_t alignment);
+
+/* Compiler-only projection construction. The root and dependency addresses
+   remain private to generated launch code. No CPU locks are taken until a
+   projected dispatch or draw is successfully recorded. */
+ResinArc *resin_gpu_projection_new(ResinGpuPtr root);
+void *resin_gpu_projection_root(ResinArc *projection);
+ResinDeviceAddress resin_gpu_projection_pointer(
+    ResinArc *projection,
+    ResinGpuPtr value,
+    size_t bytes,
+    size_t alignment);
+/* These borrow projection; success retains it through completion/cancellation. */
+ResinStatus resin_gpu_projected_dispatch(
+    ResinCommandBuffer *commands,
+    ResinArc *projection,
+    uint32_t group_count_x,
+    uint32_t group_count_y,
+    uint32_t group_count_z);
+ResinStatus resin_gpu_projected_draw(
+    ResinCommandBuffer *commands,
+    ResinArc *projection,
+    uint32_t vertex_count);
+ResinStatus resin_gpu_copy_image_to_span(
+    ResinCommandBuffer *commands,
+    ResinImage *image,
+    ResinGpuSpan destination);
 
 /* SPIR-V byte lengths must be multiples of four. */
 ResinStatus resin_gpu_create_compute_pipeline(
@@ -141,7 +198,9 @@ ResinStatus resin_gpu_copy_image_to_buffer(
 /* Submits, waits until this command buffer's work completes, then frees it.
    Returns INVALID_ARGUMENT if another submitted recording has changed an
    image layout assumed by this recording; record its commands again.
-   A non-null command buffer is consumed even when the status is not success. */
+   A non-null command buffer is consumed even when the status is not success.
+   If submission began and both completion waits fail, terminates the process
+   before application cleanup can destroy resources that may still be in use. */
 ResinStatus resin_gpu_submit(ResinGpu *gpu, ResinCommandBuffer *command_buffer);
 /* A non-null command buffer is consumed. Pending image layout changes are discarded. */
 void resin_gpu_cancel_command_buffer(ResinGpu *gpu, ResinCommandBuffer *command_buffer);

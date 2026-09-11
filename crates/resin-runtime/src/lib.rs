@@ -15,6 +15,7 @@ compile_error!("resin-runtime requires 64-bit Linux, macOS, or Windows");
 
 mod allocator;
 mod gpu;
+mod gpu_view;
 mod host;
 mod image;
 mod print;
@@ -33,6 +34,7 @@ pub use gpu::{
     GPU_DEVICE_NAME_MAX, ResinAllocation, ResinCommandBuffer, ResinGpu, ResinGpuDeviceInfo,
     ResinGpuDeviceType, ResinImage, ResinPipeline,
 };
+pub use shared::ResinArc;
 
 impl ResinGpu {
     /// Start a recording whose complete GPU execution will be measured with timestamps.
@@ -100,6 +102,176 @@ pub use window::ffi::{
 };
 
 pub type ResinDeviceAddress = u64;
+
+//
+// Owning GPU views
+//
+
+pub const RESIN_GPU_ACCESS_READ: u32 = 1;
+pub const RESIN_GPU_ACCESS_WRITE: u32 = 2;
+
+/// Compiler-managed GPU allocation reference. Copying these ABI bytes does not
+/// retain `owner`; generated language copies retain it explicitly.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct ResinGpuPtr {
+    pub owner: *mut ResinArc,
+    pub offset: usize,
+    pub access: u32,
+}
+
+/// An owning, bounded sequence of GPU elements. Element size belongs to its
+/// compiler-known type and is supplied to the checked runtime operations.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct ResinGpuSpan {
+    pub data: ResinGpuPtr,
+    pub length: usize,
+}
+
+/// Allocate a GPU view, retaining the supplied device owner on success.
+/// Zero bytes creates an empty logical allocation with inaccessible storage.
+///
+/// # Safety
+/// `gpu_owner` must be a live strong reference retaining `gpu`; `out` must be
+/// writable. GPU operations require external synchronization.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_ptr_allocate(
+    gpu: *mut ResinGpu,
+    gpu_owner: *mut ResinArc,
+    bytes: usize,
+    alignment: usize,
+    memory: i32,
+    out: *mut ResinGpuPtr,
+) -> ResinStatus {
+    unsafe { gpu_view::allocate(gpu, gpu_owner, bytes, alignment, memory, out) }
+}
+
+/// Return checked host storage for one immediate compiler-generated access.
+/// Fails if the allocation is unmapped, recorded for GPU use, out of bounds,
+/// misaligned, or missing the requested read/write permission.
+///
+/// # Safety
+/// A non-null `value.owner` must be a live GPU allocation owner. The pointer must
+/// not escape the immediate access or overlap unsynchronized allocation use.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_ptr_host(
+    value: ResinGpuPtr,
+    bytes: usize,
+    alignment: usize,
+    required_access: u32,
+) -> *mut c_void {
+    unsafe { gpu_view::host(value, bytes, alignment, required_access) }
+}
+
+/// Derive a checked interior view without retaining its borrowed owner.
+///
+/// # Safety
+/// A non-null `value.owner` must be a live GPU allocation owner. The compiler
+/// must retain it before the derived value outlives that borrow.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_ptr_offset(
+    value: ResinGpuPtr,
+    byte_offset: usize,
+    bytes: usize,
+    alignment: usize,
+) -> ResinGpuPtr {
+    unsafe { gpu_view::offset(value, byte_offset, bytes, alignment) }
+}
+
+//
+// Compiler-generated launch projection
+//
+
+/// Begin a reusable launch projection by retaining its freshly allocated root.
+///
+/// # Safety
+/// `root` must be a live GPU allocation reference with writable mapped storage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_projection_new(root: ResinGpuPtr) -> *mut ResinArc {
+    unsafe { gpu_view::projection_new(root) }
+}
+
+/// Obtain root storage solely for compiler-generated projection construction.
+///
+/// # Safety
+/// `projection` must identify a live projection. The returned pointer must not
+/// escape construction, which must finish before copying or recording it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_projection_root(projection: *mut ResinArc) -> *mut c_void {
+    unsafe { gpu_view::projection_root(projection) }
+}
+
+/// Project a GPU view to a device address and retain its allocation.
+/// Checks device identity, bounds, alignment, and read/write permissions.
+///
+/// # Safety
+/// `projection` must be an exclusively held projection under construction and
+/// `value` a live GPU view. Only compiler-generated root construction may use
+/// the resulting device address.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_projection_pointer(
+    projection: *mut ResinArc,
+    value: ResinGpuPtr,
+    bytes: usize,
+    alignment: usize,
+) -> ResinDeviceAddress {
+    unsafe { gpu_view::projection_pointer(projection, value, bytes, alignment) }
+}
+
+/// Record a projected dispatch. Success retains the projection and prevents
+/// CPU accesses to its allocations until completion or cancellation.
+///
+/// # Safety
+/// Non-null arguments must identify live objects. The projection must be fully
+/// constructed and match the bound shader; operations require synchronization.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_projected_dispatch(
+    commands: *mut ResinCommandBuffer,
+    projection: *mut ResinArc,
+    group_count_x: u32,
+    group_count_y: u32,
+    group_count_z: u32,
+) -> ResinStatus {
+    unsafe {
+        gpu_view::projected_dispatch(
+            commands,
+            projection,
+            group_count_x,
+            group_count_y,
+            group_count_z,
+        )
+    }
+}
+
+/// Record a projected draw, retaining and locking its allocations on success.
+///
+/// # Safety
+/// Non-null arguments must identify live objects. The projection must be fully
+/// constructed and match the bound shaders; operations require synchronization.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_projected_draw(
+    commands: *mut ResinCommandBuffer,
+    projection: *mut ResinArc,
+    vertex_count: u32,
+) -> ResinStatus {
+    unsafe { gpu_view::projected_draw(commands, projection, vertex_count) }
+}
+
+/// Copy image pixels to an owning byte span. Success retains and locks the
+/// allocation until command completion or cancellation.
+///
+/// # Safety
+/// Non-null pointers must identify live objects. The image must belong to the
+/// recording's GPU and survive completion; operations require synchronization.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_copy_image_to_span(
+    commands: *mut ResinCommandBuffer,
+    image: *mut ResinImage,
+    destination: ResinGpuSpan,
+) -> ResinStatus {
+    unsafe { gpu_view::copy_image_to_span(commands, image, destination) }
+}
 
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -311,27 +483,6 @@ pub unsafe extern "C" fn resin_allocation_size(allocation: *const ResinAllocatio
     unsafe { allocation.as_ref() }
         .map(ResinAllocation::size)
         .unwrap_or(0)
-}
-
-/// # Safety
-/// `gpu` and `out_device_pointer` must be valid.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn resin_gpu_host_to_device_pointer(
-    gpu: *const ResinGpu,
-    host_pointer: *const c_void,
-    out_device_pointer: *mut ResinDeviceAddress,
-) -> ResinStatus {
-    if gpu.is_null() || out_device_pointer.is_null() {
-        return ResinStatus::InvalidArgument;
-    }
-    unsafe { *out_device_pointer = 0 };
-    match unsafe { (&*gpu).host_to_device(host_pointer.cast()) } {
-        Ok(address) => {
-            unsafe { *out_device_pointer = address };
-            ResinStatus::Success
-        }
-        Err(status) => status,
-    }
 }
 
 /// # Safety
@@ -596,6 +747,8 @@ pub unsafe extern "C" fn resin_gpu_copy_image_to_buffer(
 }
 
 /// Submits, waits until this command buffer's work completes, then frees it.
+/// If submission began and both completion waits fail, terminates the process
+/// before source cleanup can destroy resources that may still be in use.
 ///
 /// # Safety
 /// A non-null `command_buffer` is consumed even when the status is not success.
@@ -861,7 +1014,7 @@ mod tests {
     }
 
     #[test]
-    fn malloc_and_pointer_translation() {
+    fn mapped_allocations_preserve_size_and_device_alignment() {
         let Some(gpu) = require_gpu() else {
             return;
         };
@@ -886,26 +1039,6 @@ mod tests {
         let base_device = unsafe { resin_allocation_device_pointer(allocation) };
         assert_ne!(base_device, 0);
 
-        let mut translated = 0;
-        let status = unsafe { resin_gpu_host_to_device_pointer(gpu.ptr, host, &mut translated) };
-        assert_eq!(status, ResinStatus::Success);
-        assert_eq!(translated, base_device);
-
-        let interior = unsafe { host.byte_add(128) };
-        let status =
-            unsafe { resin_gpu_host_to_device_pointer(gpu.ptr, interior, &mut translated) };
-        assert_eq!(status, ResinStatus::Success);
-        assert_eq!(translated, base_device + 128);
-
-        let status = unsafe {
-            resin_gpu_host_to_device_pointer(
-                gpu.ptr,
-                ptr::dangling::<c_void>().cast(),
-                &mut translated,
-            )
-        };
-        assert_eq!(status, ResinStatus::InvalidArgument);
-
         unsafe { resin_gpu_free(gpu.ptr, allocation) };
 
         let mut aligned = ptr::null_mut();
@@ -914,13 +1047,8 @@ mod tests {
         assert_eq!(status, ResinStatus::Success);
         let aligned_host = unsafe { resin_allocation_host_pointer(aligned) };
         let aligned_device = unsafe { resin_allocation_device_pointer(aligned) };
+        assert!(!aligned_host.is_null());
         assert_eq!(aligned_device % 256, 0);
-        let mut translated = 0;
-        assert_eq!(
-            unsafe { resin_gpu_host_to_device_pointer(gpu.ptr, aligned_host, &mut translated) },
-            ResinStatus::Success
-        );
-        assert_eq!(translated, aligned_device);
         unsafe { resin_gpu_free(gpu.ptr, aligned) };
 
         let mut reused = ptr::null_mut();
@@ -1023,11 +1151,7 @@ void main() {
         let values_host = unsafe { resin_allocation_host_pointer(values) }.cast::<u32>();
         unsafe { std::ptr::write_bytes(values_host, 0, COUNT as usize) };
 
-        let mut dst_device = 0;
-        let status = unsafe {
-            resin_gpu_host_to_device_pointer(gpu.ptr, values_host.cast(), &mut dst_device)
-        };
-        assert_eq!(status, ResinStatus::Success);
+        let dst_device = unsafe { resin_allocation_device_pointer(values) };
 
         #[repr(C)]
         struct Root {
@@ -1044,11 +1168,7 @@ void main() {
             });
         }
 
-        let mut root_device = 0;
-        let status = unsafe {
-            resin_gpu_host_to_device_pointer(gpu.ptr, root_host.cast(), &mut root_device)
-        };
-        assert_eq!(status, ResinStatus::Success);
+        let root_device = unsafe { resin_allocation_device_pointer(root) };
 
         let mut command_buffer = ptr::null_mut();
         assert_eq!(
@@ -1179,7 +1299,7 @@ void main() {
         assert!(pipeline.is_null());
     }
 
-    fn compile_compute(src: &str) -> Option<Vec<u8>> {
+    pub(super) fn compile_compute(src: &str) -> Option<Vec<u8>> {
         let mut child = match Command::new("glslc")
             .args([
                 "-fshader-stage=comp",

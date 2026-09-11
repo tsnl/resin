@@ -73,3 +73,19 @@ fn formatting_needs_no_semantic_context() {
     assert_eq!(resin_cst::format_source(&formatted).unwrap(), formatted);
     assert!(resin_cst::format_source("def broken( = {").is_none());
 }
+
+#[test]
+fn gpu_type_formers_preserve_token_queries_and_formatting() {
+    let source = "def first(values: GpuSpan<uint>) -> GpuPtr<uint> = { values.at(0_ul) };";
+    let document = Document::reparse(source.into(), None);
+    assert!(!document.tree().root_node().has_error());
+    for former in ["GpuSpan", "GpuPtr"] {
+        let offset = source.find(former).unwrap() + 2;
+        assert_eq!(document.token(offset).unwrap().kind(), former);
+        assert!(document.type_context(offset));
+    }
+    let formatted = resin_cst::format_source(source).unwrap();
+    assert_eq!(resin_cst::format_source(&formatted).unwrap(), formatted);
+    assert!(formatted.contains("GpuSpan<uint>"));
+    assert!(formatted.contains("GpuPtr<uint>"));
+}

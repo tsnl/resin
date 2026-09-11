@@ -228,7 +228,7 @@ mod tests {
                 format!("def main() -> () = {{ var {keyword}_value = 1; var _{keyword} = 2; }};");
             assert!(!parse(&source).root_node().has_error(), "{source}");
         }
-        for name in ["Ptr", "Span"] {
+        for name in ["Ptr", "Span", "GpuPtr", "GpuSpan"] {
             for source in [
                 format!("type {name} = int;"),
                 format!("extern type {name};"),
@@ -252,6 +252,9 @@ mod tests {
     fn type_formers_use_angle_brackets_without_conflicting_with_operators() {
         for source in [
             "type P = Ptr<int>; type Pp = Ptr<Ptr<int>>; type S = Span<Ptr<int>>;",
+            "type G = GpuPtr<int>; type S = GpuSpan<{ x: uint }>; type Nested = Ptr<GpuSpan<GpuPtr<int>>>;",
+            "def launch(args: GpuArguments) -> GpuArguments = { args };",
+            "def first(p: GpuSpan<int>) -> GpuPtr<int> = { p.at(0_ul) }; def make() -> GpuPtr<_> = { GpuPtr<int>.new(gpu, 3_i) };",
             "type P = Ptr<()>; type S = Span<(int, int)>; type R = Ptr<{ x: int }>; type F = Ptr<(int) -> int>;",
             "def main() -> () = { var p = Ptr<int>(ulong(0)); var x = ulong(p) > ulong(0); var y = 8 >> 1; var z = 1 < 2; };",
             "def main() -> () = { var p = Ptr < Ptr < int > > (ulong (0)); };",
@@ -268,6 +271,9 @@ mod tests {
             "type P = Ptr<>;",
             "type P = Ptr<int, int>;",
             "type P = Ptr<Ptr<int>;",
+            "type P = GpuPtr<>;",
+            "type P = GpuSpan<int, int>;",
+            "type P = GpuPtr(int);",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
         }

@@ -14,6 +14,8 @@ use std::{collections::HashSet, sync::Arc};
 pub(crate) enum Head {
     Atom(Ty),
     Pointer,
+    GpuPointer,
+    GpuSpan,
     Arc,
     Weak,
     Span,
@@ -34,7 +36,7 @@ impl Type {
     /// The inference representation of Ty::deref_target; Weak is not dereferenceable.
     pub fn deref_target(&self) -> Option<&Type> {
         match self {
-            Self::Node(Head::Pointer | Head::Arc, children) => children.first(),
+            Self::Node(Head::Pointer | Head::GpuPointer | Head::Arc, children) => children.first(),
             _ => None,
         }
     }
@@ -42,14 +44,14 @@ impl Type {
     pub fn view_element(&self) -> Option<Type> {
         match self {
             Self::Node(Head::Atom(Ty::Str), _) => Some(Ty::UInt8.into()),
-            Self::Node(Head::Span, children) => children.first().cloned(),
+            Self::Node(Head::Span | Head::GpuSpan, children) => children.first().cloned(),
             _ => None,
         }
     }
 
     pub fn index_element(&self) -> Option<Type> {
         match self {
-            Self::Node(Head::Array(_), children) => children.first().cloned(),
+            Self::Node(Head::Array(_) | Head::GpuPointer, children) => children.first().cloned(),
             _ => self.view_element(),
         }
     }
@@ -59,6 +61,10 @@ impl Type {
     }
     pub fn pointer(pointee: Type) -> Self {
         Self::Node(Head::Pointer, vec![pointee])
+    }
+
+    pub fn gpu_pointer(pointee: Type) -> Self {
+        Self::Node(Head::GpuPointer, vec![pointee])
     }
 
     pub fn function(param: Type, result: Type) -> Self {
@@ -92,6 +98,8 @@ impl From<Ty> for Type {
             Ty::Weak { pointee } => Self::Node(Head::Weak, vec![(*pointee).into()]),
             Ty::Pointer { pointee } => Self::pointer((*pointee).into()),
             Ty::Span { element } => Self::Node(Head::Span, vec![(*element).into()]),
+            Ty::GpuPointer { pointee } => Self::gpu_pointer((*pointee).into()),
+            Ty::GpuSpan { element } => Self::Node(Head::GpuSpan, vec![(*element).into()]),
             Ty::Array { element, length } => {
                 Self::Node(Head::Array(length), vec![(*element).into()])
             }
@@ -118,6 +126,12 @@ impl Head {
             },
             Self::Pointer => Ty::Pointer {
                 pointee: Box::new(children.next().unwrap()),
+            },
+            Self::GpuPointer => Ty::GpuPointer {
+                pointee: Box::new(children.next().unwrap()),
+            },
+            Self::GpuSpan => Ty::GpuSpan {
+                element: Box::new(children.next().unwrap()),
             },
             Self::Span => Ty::Span {
                 element: Box::new(children.next().unwrap()),
@@ -674,6 +688,23 @@ impl<'a> Inference<'a> {
 //
 
 #[derive(Clone)]
+pub(crate) enum AddressOrigin {
+    /// Explicit `.*` dereferences exactly one pointer.
+    Deref { pointer: Type },
+    /// Field lookup implicitly follows every pointer and Arc receiver.
+    Field { base: Type },
+}
+
+impl AddressOrigin {
+    fn input(&self) -> &Type {
+        match self {
+            Self::Deref { pointer } => pointer,
+            Self::Field { base } => base,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub(crate) enum Constraint {
     Equal(Type, Type),
     Depends(Type),
@@ -684,9 +715,11 @@ pub(crate) enum Constraint {
     Variant(Type, Pattern, Type),
     Boolean(Type),
     Deref(Type, Type),
+    Address(Vec<AddressOrigin>, Type, Type),
     Field(Type, Arc<str>, Type),
     Call(Type, Type, Type),
-    Method(Type, Arc<str>, Type, Type, bool),
+    Method(Type, Arc<str>, Type, Type, bool, Vec<AddressOrigin>),
+    GpuProject(Type, Type, Type),
     Ascribe(Type, Type, bool),
     Record(Vec<(Arc<str>, Type)>, Type),
     Builtin(Arc<str>, Vec<Type>, Type),
@@ -813,16 +846,135 @@ impl Inference<'_> {
         Ok(ty)
     }
 
+    fn require_gpu_element(&self, element: &Ty, span: Span) -> Result<()> {
+        if element.gpu_element(self.typer.definitions()) {
+            return Ok(());
+        }
+        Err(error(
+            span,
+            "GPU elements require a shared host/device layout without pointers, owners, or drop hooks",
+        ))
+    }
+
+    fn gpu_address(&self, origins: &[AddressOrigin]) -> Option<bool> {
+        let mut gpu = false;
+        for origin in origins {
+            let mut current = self.solver.head(origin.input());
+            loop {
+                match current {
+                    Type::Variable(_) => return None,
+                    Type::Node(Head::GpuPointer, _) => gpu = true,
+                    _ => {}
+                }
+                if matches!(origin, AddressOrigin::Deref { .. }) {
+                    break;
+                }
+                let Some(pointee) = current.deref_target() else {
+                    break;
+                };
+                current = self.solver.head(pointee);
+            }
+        }
+        Some(gpu)
+    }
+
     fn constraint(&mut self, constraint: &Constraint, span: Span) -> Result<bool> {
         match constraint {
-            Constraint::Method(receiver_type, name, arg, out, associated) => {
+            Constraint::Method(receiver_type, name, arg, out, associated, origins) => {
                 let Some(receiver_type) = self.solver.resolve(receiver_type) else {
                     return Ok(false);
                 };
-                let method = self
-                    .typer
-                    .method(&receiver_type, name)
-                    .ok_or_else(|| error(span, format!("unknown method `{name}`")))?;
+                if !associated
+                    && name.as_ref() == "new"
+                    && let Some(allocator) = self.typer.gpu_allocator(&receiver_type)
+                {
+                    let result = Type::result(
+                        Type::gpu_pointer(arg.clone()),
+                        self.typer.gpu_error(allocator).into(),
+                    );
+                    self.solver.coerce(&result, out, span)?;
+                    let Some(element) = self.solver.resolve(arg) else {
+                        return Ok(false);
+                    };
+                    self.require_gpu_element(&element, span)?;
+                    return Ok(true);
+                }
+                let method = if *associated
+                    && matches!(
+                        (&receiver_type, name.as_ref()),
+                        (Ty::GpuPointer { .. }, "new") | (Ty::GpuSpan { .. }, "allocate")
+                    ) {
+                    let Type::Node(Head::Record(_), parts) = self.solver.head(arg) else {
+                        return Ok(false);
+                    };
+                    let Some(gpu) = parts.first().and_then(|ty| self.solver.resolve(ty)) else {
+                        return Ok(false);
+                    };
+                    let element = match &receiver_type {
+                        Ty::GpuPointer { pointee } => &**pointee,
+                        Ty::GpuSpan { element } => &**element,
+                        _ => unreachable!(),
+                    };
+                    self.require_gpu_element(element, span)?;
+                    let argument = Ty::parameter(&[gpu, element.clone()]);
+                    self.typer
+                        .method_call(&receiver_type, name, &argument, true)
+                } else if *associated
+                    && name.as_ref() == "allocate_native"
+                    && receiver_type
+                        == (Ty::GpuPointer {
+                            pointee: Box::new(Ty::UInt8),
+                        })
+                {
+                    let Type::Node(Head::Record(_), parts) = self.solver.head(arg) else {
+                        return Ok(false);
+                    };
+                    let Some(prefix) = parts
+                        .iter()
+                        .take(2)
+                        .map(|ty| self.solver.resolve(ty))
+                        .collect::<Option<Vec<_>>>()
+                    else {
+                        return Ok(false);
+                    };
+                    if prefix.len() != 2 {
+                        return Err(error(
+                            span,
+                            "native GPU allocation requires a handle and owner",
+                        ));
+                    }
+                    let argument = Ty::parameter(&[
+                        prefix[0].clone(),
+                        prefix[1].clone(),
+                        Ty::UInt64,
+                        Ty::UInt64,
+                        Ty::Int32,
+                    ]);
+                    self.typer
+                        .method_call(&receiver_type, name, &argument, true)
+                } else {
+                    self.typer.method(&receiver_type, name)
+                }
+                .ok_or_else(|| error(span, format!("unknown method `{name}`")))?;
+                if !associated
+                    && let Some(first) = method.params.first()
+                    && crate::ReceiverConversion::between(&receiver_type, first)
+                        == Some(crate::ReceiverConversion::Address)
+                {
+                    let Some(gpu) = self.gpu_address(origins) else {
+                        return Ok(false);
+                    };
+                    if gpu != matches!(first, Ty::GpuPointer { .. }) {
+                        return Err(error(
+                            span,
+                            if gpu {
+                                "GPU storage requires a GpuPtr receiver; it cannot be borrowed as a raw Ptr"
+                            } else {
+                                "a GpuPtr receiver requires an address in GPU storage"
+                            },
+                        ));
+                    }
+                }
                 let params = method
                     .arguments(&receiver_type, *associated)
                     .ok_or_else(|| {
@@ -888,6 +1040,17 @@ impl Inference<'_> {
                     .map_err(|e| GenerateError::typing(span, e))?;
             }
 
+            Constraint::Address(origins, pointee, out) => {
+                let Some(gpu) = self.gpu_address(origins) else {
+                    return Ok(false);
+                };
+                let pointer = if gpu {
+                    Type::gpu_pointer(pointee.clone())
+                } else {
+                    Type::pointer(pointee.clone())
+                };
+                self.solver.unify(out, &pointer, span)?;
+            }
             Constraint::Deref(input, out) => {
                 let shape = self.shape(input, false, span)?;
                 if matches!(shape, Type::Variable(_)) {
@@ -908,6 +1071,9 @@ impl Inference<'_> {
                 }
                 if let Some(element) = shape.view_element() {
                     let ty = match name.as_ref() {
+                        "data" if matches!(shape, Type::Node(Head::GpuSpan, _)) => {
+                            Type::gpu_pointer(element)
+                        }
                         "data" => Type::pointer(element),
                         "length" => Ty::UInt64.into(),
                         _ => return Err(error(span, "unknown string or span field")),
@@ -928,10 +1094,72 @@ impl Inference<'_> {
                     _ => return Err(error(span, "field access requires a record")),
                 }
             }
+            Constraint::GpuProject(func, arg, out) => {
+                let Some(Ty::Function { param, .. }) = self.solver.resolve(func) else {
+                    return Ok(false);
+                };
+                let Ty::Record { fields } = *param else {
+                    return Err(error(
+                        span,
+                        "projection requires a shader with a root pointer",
+                    ));
+                };
+                let Some(RecordField {
+                    ty: Ty::Pointer { pointee },
+                    ..
+                }) = fields.get(1)
+                else {
+                    return Err(error(
+                        span,
+                        "projection requires a shader with a root pointer",
+                    ));
+                };
+                let input = pointee.gpu_projection(self.typer.definitions()).ok_or_else(||
+                    error(span, "shader root projection requires shared values and pointers or spans to plain GPU elements"))?;
+                let Type::Node(Head::Record(names), arguments) = self.solver.head(arg) else {
+                    if matches!(self.solver.head(arg), Type::Variable(_)) {
+                        return Ok(false);
+                    }
+                    return Err(error(
+                        span,
+                        "projection takes a GPU and a host argument record",
+                    ));
+                };
+                if names.as_slice() != [Arc::from("_0"), Arc::from("_1")] {
+                    return Err(error(
+                        span,
+                        "projection takes a GPU and a host argument record",
+                    ));
+                }
+                let Some(gpu) = self.solver.resolve(&arguments[0]) else {
+                    return Ok(false);
+                };
+                let allocator = self.typer.gpu_allocator(&gpu).ok_or_else(|| {
+                    error(
+                        span,
+                        "projection requires a GPU with a registered allocator",
+                    )
+                })?;
+                self.solver.unify(
+                    out,
+                    &Type::result(
+                        Ty::GpuArguments.into(),
+                        self.typer.gpu_error(allocator).into(),
+                    ),
+                    span,
+                )?;
+                return self.solver.coerce(&arguments[1], &input.into(), span);
+            }
             Constraint::Call(func, arg, out) => {
                 let shape = self.shape(func, false, span)?;
                 if let Some(element) = shape.index_element() {
-                    self.solver.unify(out, &Type::pointer(element), span)?;
+                    let pointer =
+                        if matches!(shape, Type::Node(Head::GpuPointer | Head::GpuSpan, _)) {
+                            Type::gpu_pointer(element)
+                        } else {
+                            Type::pointer(element)
+                        };
+                    self.solver.unify(out, &pointer, span)?;
                     let Some(index) = self.solver.resolve(arg) else {
                         return Ok(false);
                     };
@@ -1111,7 +1339,17 @@ impl Constraint {
             | Self::Field(from, _, _)
             | Self::Ascribe(from, _, _)
             | Self::Variant(from, _, _) => vec![from],
-            Self::Call(func, arg, _) | Self::Method(func, _, arg, _, _) => vec![func, arg],
+            Self::Call(func, arg, _) | Self::GpuProject(func, arg, _) => vec![func, arg],
+            Self::Method(func, _, arg, _, _, origins) => origins
+                .iter()
+                .map(AddressOrigin::input)
+                .chain([func, arg])
+                .collect(),
+            Self::Address(origins, pointee, _) => origins
+                .iter()
+                .map(AddressOrigin::input)
+                .chain(std::iter::once(pointee))
+                .collect(),
             Self::Record(fields, _) => fields.iter().map(|(_, ty)| ty).collect(),
             Self::Builtin(_, args, _) => args.iter().collect(),
         }

@@ -43,12 +43,11 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
             r#"import {{ "$/gpu.resin" }};
             def f() -> Result<(), _> = {{
                 var gpu = Gpu.new()?;
-                var buffer = gpu.malloc(4_ul, 4_ul, Memory.default())?;
-                buffer.host_pointer();
-                var device: Ptr<ubyte>;
-                device := buffer.device_pointer();
-                var translated: Ptr<ubyte>;
-                translated := gpu.host_to_device_pointer(buffer.host_pointer())?;
+                var bytes = gpu.malloc(4_ul, 4_ul, Memory.default())?;
+                var commands = gpu.start_command_recording()?;
+                var buffer = GpuSpan<int>.allocate(gpu, 4)?;
+                buffer.at(0).* := 42;
+                var readable = buffer.read_only();
                 {tail}"#
         );
         let mut loader = resin_source::Loader::new(resin_source::library_root());
@@ -64,53 +63,68 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
             );
         }
         for (method, result) in [
-            ("host_pointer", "-> Ptr<ubyte>"),
-            ("device_pointer", "-> Ptr<ubyte>"),
-            ("host_to_device_pointer", "-> Result<Ptr<ubyte>,"),
+            ("malloc", "-> Result<GpuPtr<ubyte>,"),
+            ("start_command_recording", "-> Result<GpuCommands,"),
         ] {
             let call = source.find(&format!(".{method}(")).unwrap() + 1;
             let definition = analysis
                 .definition(&input, call)
                 .unwrap_or_else(|| panic!("tail: {tail}\n{:?}", analysis.diagnostics()));
-            assert!(loader
-                .path(&definition.source)
-                .unwrap()
-                .ends_with("resin/gpu.resin"));
+            assert!(
+                loader
+                    .path(&definition.source)
+                    .unwrap()
+                    .ends_with("resin/gpu.resin")
+            );
             let hover = analysis.hover(&input, call).unwrap().text;
-            assert!(hover.starts_with(&format!("def {method}(")), "{hover}");
+            assert!(hover.contains(&format!("def {method}(")), "{hover}");
             assert!(hover.contains(result), "{hover}");
         }
         let offset = if tail == "buffer." {
             source.len()
         } else {
-            source.find("host_pointer").unwrap()
+            source.find("at(0)").unwrap()
         };
         let items = analysis.completions(&input, offset);
-        for name in ["host_pointer", "device_pointer", "size"] {
+        for name in [
+            "at",
+            "slice",
+            "read_only",
+            "write_only",
+            "copy_to",
+            "data",
+            "length",
+        ] {
             assert!(
                 items.iter().any(|item| item.name == name),
                 "missing {name}: {items:?}"
             );
         }
-        assert!(items.iter().any(|item| item.name == "drop"));
+        assert!(
+            items
+                .iter()
+                .all(|item| !matches!(item.name.as_str(), "host_pointer" | "device_pointer"))
+        );
     }
 }
 
 #[test]
-fn gpu_commands_require_buffer_roots_and_allow_rootless_draws() {
+fn gpu_commands_require_projected_roots_and_allow_rootless_draws() {
     for (call, valid) in [
-        ("dispatch(buffer, 1_ui, 1_ui, 1_ui)", true),
-        ("draw(buffer, 3_ui)", true),
+        ("dispatch(root, 1_ui, 1_ui, 1_ui)", true),
+        ("draw(root, 3_ui)", true),
         ("draw(None, 3_ui)", true),
         ("dispatch(None, 1_ui, 1_ui, 1_ui)", false),
         ("dispatch(0_ul, 1_ui, 1_ui, 1_ui)", false),
         ("dispatch(pointer, 1_ui, 1_ui, 1_ui)", false),
+        ("dispatch(buffer, 1_ui, 1_ui, 1_ui)", false),
         ("draw(0_ul, 3_ui)", false),
         ("draw(pointer, 3_ui)", false),
+        ("draw(buffer, 3_ui)", false),
     ] {
         let source = format!(
             r#"import {{ "$/gpu.resin" }};
-            def f(commands: GpuCommands, buffer: GpuBuffer, pointer: Ptr<ubyte>) -> Result<(), _> = {{
+            def f(commands: GpuCommands, root: GpuArguments, buffer: GpuPtr<ubyte>, pointer: Ptr<ubyte>) -> Result<(), _> = {{
                 commands.{call}?;
                 ok(())
             }};"#

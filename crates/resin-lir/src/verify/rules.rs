@@ -71,6 +71,13 @@ pub(super) fn check_value(
             Ty::Arc { pointee: value } | Ty::Weak { pointee: value } => {
                 visit(table, value, location, seen)?
             }
+            Ty::GpuPointer { pointee: element } | Ty::GpuSpan { element } => {
+                if !element.gpu_element(table) {
+                    return Err(location.error(VerifyErrorKind::UnsupportedGpuElement {
+                        ty: *element.clone(),
+                    }));
+                }
+            }
             Ty::Array { element, .. } => visit(table, element, location, seen)?,
             Ty::Record { fields } => {
                 for field in fields {

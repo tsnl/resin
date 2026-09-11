@@ -39,7 +39,7 @@ impl Generator {
             ReceiverConversion::Address => {
                 self.check_place_initialized(receiver)?;
                 match self.gen_operand(receiver)? {
-                    super::places::Operand::Place(_) => {}
+                    super::places::Operand::Place { .. } => {}
                     super::places::Operand::Value(ty) => {
                         let local = self.save_top(&ty);
                         self.emit(Instr::LocalAddress { local });

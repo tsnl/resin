@@ -246,9 +246,34 @@ impl Generator {
         name: &Ident,
         argument: &typed::Term,
     ) -> Result<TermKind> {
+        if name.val.as_ref() == "project"
+            && let Some(receiver) = receiver
+        {
+            let shader = self.elaborate(receiver)?;
+            if let TermKind::Function { function } = shader.kind
+                && self.module.shaders.contains_key(&function)
+            {
+                let Ty::Record { fields } = &argument.ty else {
+                    unreachable!("checked projection arguments")
+                };
+                let allocator = self
+                    .typer
+                    .gpu_allocator(&fields[0].ty)
+                    .expect("checked projection allocator");
+                return Ok(TermKind::GpuProject {
+                    allocator,
+                    shader: function,
+                    args: Arguments {
+                        receiver: None,
+                        params: fields.iter().map(|field| field.ty.clone()).collect(),
+                        argument: self.boxed(argument)?,
+                    },
+                });
+            }
+        }
         let declaration = self
             .typer
-            .method(receiver_ty, &name.val)
+            .method_call(receiver_ty, &name.val, &argument.ty, receiver.is_none())
             .ok_or_else(|| GenerateError::inference(name.span, "unknown method"))?;
         let receiver = receiver
             .map(|r| self.adapt(r, receiver_ty, &declaration.params[0]))
@@ -261,6 +286,8 @@ impl Generator {
         };
         Ok(match declaration.body {
             FunctionBody::Intrinsic(op) => TermKind::Intrinsic { op, args },
+            FunctionBody::GpuNew { allocator } => TermKind::GpuNew { allocator, args },
+            FunctionBody::GpuAllocate { allocator } => TermKind::GpuAllocate { allocator, args },
             FunctionBody::Defined(function) => {
                 let param = Ty::parameter(&declaration.params);
                 let ty = Ty::Function {
@@ -307,7 +334,9 @@ impl Generator {
             Ty::Array { .. } => Some(Ty::Pointer {
                 pointee: Box::new(func.ty.clone()),
             }),
-            Ty::Str | Ty::Span { .. } => Some(func.ty.clone()),
+            Ty::Str | Ty::Span { .. } | Ty::GpuPointer { .. } | Ty::GpuSpan { .. } => {
+                Some(func.ty.clone())
+            }
             _ => None,
         };
         if let Some(to) = to {
@@ -317,7 +346,11 @@ impl Generator {
                 params: vec![arg.ty.clone()],
             };
             return Ok(TermKind::Intrinsic {
-                op: Intrinsic::Index,
+                op: if matches!(func.ty, Ty::GpuPointer { .. } | Ty::GpuSpan { .. }) {
+                    Intrinsic::GpuIndex
+                } else {
+                    Intrinsic::Index
+                },
                 args,
             });
         }

@@ -781,6 +781,9 @@ impl Expression<'_, '_> {
                 name,
                 arg,
             } => {
+                let projection = name.val.as_ref() == "project"
+                    && matches!(&receiver.val, resin_ast::TermKind::Var { name }
+                        if self.checker.scopes.is_shader(&name.val));
                 let (receiver, annotation, receiver_type, associated) =
                     if let resin_ast::TermKind::Type { ty } = &receiver.val {
                         let annotation = self.annotation(ty, false);
@@ -795,16 +798,19 @@ impl Expression<'_, '_> {
                     .scopes
                     .record_members(name.span, receiver_type.clone(), associated);
                 let arg = self.child(arg, None);
-                self.constrain((
-                    span,
+                let constraint = if projection {
+                    Constraint::GpuProject(receiver_type.clone(), arg.ty.clone(), out.clone())
+                } else {
                     Constraint::Method(
                         receiver_type.clone(),
                         name.val.clone(),
                         arg.ty.clone(),
                         out.clone(),
                         associated,
-                    ),
-                ));
+                        receiver.as_ref().map(address_origins).unwrap_or_default(),
+                    )
+                };
+                self.constrain((span, constraint));
                 TermKind::MethodCall {
                     receiver: receiver.map(Box::new),
                     receiver_type: annotation.map(Annotation::into_tree).unwrap_or(
@@ -933,7 +939,10 @@ impl Expression<'_, '_> {
             }
             resin_ast::TermKind::Address { place } => {
                 let place = self.child(place, None);
-                equate = Some(Type::pointer(place.ty.clone()));
+                self.constrain((
+                    span,
+                    Constraint::Address(address_origins(&place), place.ty.clone(), out.clone()),
+                ));
                 TermKind::Address {
                     place: Box::new(place),
                 }
@@ -1322,3 +1331,21 @@ fn groups(edges: &[Vec<usize>]) -> Vec<Vec<usize>> {
 
 #[cfg(test)]
 mod tests;
+
+/// Implicit field dereferences and explicit dereferences preserve a GPU allocation owner.
+fn address_origins(term: &Term) -> Vec<super::infer::AddressOrigin> {
+    use super::infer::AddressOrigin;
+    match &term.kind {
+        TermKind::Deref { pointer } => vec![AddressOrigin::Deref {
+            pointer: pointer.ty.clone(),
+        }],
+        TermKind::Field { base, .. } => {
+            let mut origins = address_origins(base);
+            origins.push(AddressOrigin::Field {
+                base: base.ty.clone(),
+            });
+            origins
+        }
+        _ => vec![],
+    }
+}

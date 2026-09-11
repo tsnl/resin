@@ -55,7 +55,9 @@ impl Types<'_> {
             )
             .unwrap();
             match ty {
-                Ty::Arc { .. } => out.push_str("  resin_arc_release(*p);\n"),
+                Ty::Arc { .. } | Ty::GpuArguments => out.push_str("  resin_arc_release(*p);\n"),
+                Ty::GpuPointer { .. } => out.push_str("  resin_arc_release(p->owner);\n"),
+                Ty::GpuSpan { .. } => out.push_str("  resin_arc_release(p->data.owner);\n"),
                 Ty::Weak { .. } => out.push_str("  resin_weak_release(*p);\n"),
                 Ty::Defined { definition } => {
                     let def = &self.module.types[definition.index()];
@@ -96,8 +98,14 @@ impl Types<'_> {
 
     fn retain_fields(&self, ty: &Ty, value: &str, out: &mut String) {
         match ty {
-            Ty::Arc { .. } => {
+            Ty::Arc { .. } | Ty::GpuArguments => {
                 writeln!(out, "  resin_arc_retain({value});").unwrap();
+            }
+            Ty::GpuPointer { .. } => {
+                writeln!(out, "  resin_arc_retain(({value}).owner);").unwrap();
+            }
+            Ty::GpuSpan { .. } => {
+                writeln!(out, "  resin_arc_retain(({value}).data.owner);").unwrap();
             }
             Ty::Weak { .. } => {
                 writeln!(out, "  resin_weak_retain({value});").unwrap();

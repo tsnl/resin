@@ -42,50 +42,36 @@ Process termination and traps do not unwind scopes.
 
 ## Host and GPU
 
-The initial model uses explicit addresses and shared layouts. There is no automatic
-value or allocation projection: compiling a shader preserves shared scalar/record
-representations and the numeric bits of pointers. It neither walks nor copies a
-pointer graph. A host allocation address is not translated by a cast or by calling
-a helper. Applications obtain mapped host addresses and device virtual addresses
-from the runtime and put the appropriate addresses in each representation.
+Host code uses builtin `GpuPtr<T>` and `GpuSpan<T>` views, carrying an allocation
+owner, byte offset, and access permissions. Copies and interior views retain the
+owner. Checked host operations enforce bounds, alignment, mapping state, permissions,
+and exclusion while a command recording can use the allocation. Views cannot be
+cast to ordinary pointers or constructed from raw addresses.
 
-For example, a record uploaded for device use may contain a device pointer obtained
-from `buffer.device_pointer()` or `gpu.host_to_device_pointer(host)`. Writing a
-mapped host address into that field is invalid, even though both have source type
-`Ptr<T>`. Scalar/record fields must satisfy the shared
-layout profile. Host-only types such as function values and unsupported storage
-layouts are rejected from shader code. Aliases, nulls, cycles, and interior addresses
-are preserved as bits; they do not trigger traversal, relocation, or allocation.
-Null must not be dereferenced. An interior address must remain inside live storage
-with the pointee's alignment and enough bytes for the accessed value.
+Shader entries retain ordinary `Ptr<T>` parameters. The compiler builtin
+`shader.project(gpu, arguments)` derives a host launch-record shape from the shader
+root: shader pointers and spans become owning GPU views on the host. Projection
+builds separate root storage, converts the views internally, and retains their
+allocations. GPU buffer elements use one shared host/device layout and cannot
+contain pointers or managed owners. This boundary does not traverse pointer graphs
+or modify host records into device representations.
 
-Address spaces initially live in backend metadata: shader-local places are distinct
-from device addresses. They may be read, written, and indexed in the shader, but may
-not escape through calls, return values, stored pointer values, or reinterpretation.
-Host and device addresses both use `Ptr<T>` in source; the compiler does not prove
-which kind an arbitrary numeric address contains. Shared helpers may accept device
-pointers when compiled for a shader and host pointers when compiled for the CPU.
-A pointer/`ulong` cast preserves bits, never changes their address space, and confers
-no ownership or lifetime guarantee. Shader-local address rejection remains explicit.
+Shader-local places remain distinct from device addresses in backend metadata.
+They may be read, written, and indexed but cannot escape through calls, return
+values, stored pointers, or reinterpretation. Shared helpers may take device pointers
+when compiled for a shader and host pointers when compiled for the CPU. Numeric
+pointer casts preserve bits and do not translate addresses or confer ownership.
 
-Command recordings retain their root buffer handles through synchronous submission
-or cancellation. Callers keep allocations referenced by pointers inside those roots
-alive, and manage upload/readback, synchronization, and visibility.
-Host writes become device inputs only through the runtime's documented synchronization;
-device writes require completion and visibility before host access. Copying a raw pointer
-copies its address without retaining its allocation. Host copies of Arc fields retain
-shared ownership; shader consumption of those managed fields is rejected.
-The portable contract is deliberately limited to backends supporting this explicit
-address/shared-layout profile. A future backend must implement it or reject the
-program; recursive projection or address-space source types would be a separate
-language change, not an implicit reinterpretation of existing programs.
+Command recordings accept projected `GpuArguments`, retain the root and every
+referenced allocation, and exclude CPU access until synchronous submission or
+cancellation. Device writes require completion and visibility before host access.
+Raw host pointers still borrow memory without retaining it, and shader consumption
+of managed host values remains rejected.
 
 The runtime draws on Sebastian Aaltonen's
 [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api), behind a small
-C ABI. Vulkan buffer device addresses implement the current device address profile.
-Commands accept `GpuBuffer` root handles and pass their device addresses to
-pointer-based shader entries. See [GPU buffers](gpu-buffers.md) for command roots,
-borrowed pointers, and the lifetime of allocations referenced inside shared data.
+C ABI. Vulkan buffer device addresses implement shader access internally.
+See [GPU buffers](gpu-buffers.md) for typed allocation, projection, and command lifetime.
 
 ## Compiler architecture
 

@@ -103,6 +103,35 @@ fn sexp_function(names: &Names, index: usize, function: &Function) -> SExp {
 
 fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
     match instr {
+        Instr::GpuNew { allocator, element } => list(
+            "gpu-new",
+            vec![
+                symbol(names.functions[allocator.index()].as_ref()),
+                sexp_ty(names, element),
+            ],
+        ),
+        Instr::GpuAllocate { allocator, element } => list(
+            "gpu-allocate",
+            vec![
+                symbol(names.functions[allocator.index()].as_ref()),
+                sexp_ty(names, element),
+            ],
+        ),
+        Instr::GpuAllocateNative => symbol("gpu-allocate-native"),
+        Instr::GpuSlice => symbol("gpu-slice"),
+        Instr::GpuReadOnly => symbol("gpu-read-only"),
+        Instr::GpuWriteOnly => symbol("gpu-write-only"),
+        Instr::GpuCopyTo => symbol("gpu-copy-to"),
+        Instr::GpuProject { allocator, shader } => list(
+            "gpu-project",
+            vec![
+                symbol(names.functions[allocator.index()].as_ref()),
+                symbol(names.functions[shader.index()].as_ref()),
+            ],
+        ),
+        Instr::GpuArgumentsDispatch => symbol("gpu-dispatch"),
+        Instr::GpuArgumentsDraw => symbol("gpu-draw"),
+        Instr::GpuCopyImage => symbol("gpu-copy-image"),
         Instr::TransferLoad => symbol("transfer-load"),
         Instr::ForgetLocal { local } => list(
             "forget-local",
@@ -332,6 +361,9 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
             .map(|name| symbol(name.as_ref()))
             .unwrap_or_else(|| symbol(format!("type.{}", definition.index()))),
         Ty::Pointer { pointee } => list("ptr", vec![sexp_ty(names, pointee)]),
+        Ty::GpuPointer { pointee } => list("gpu-ptr", vec![sexp_ty(names, pointee)]),
+        Ty::GpuSpan { element } => list("gpu-span", vec![sexp_ty(names, element)]),
+        Ty::GpuArguments => symbol("GpuArguments"),
         Ty::Arc { pointee } => list("arc", vec![sexp_ty(names, pointee)]),
         Ty::Weak { pointee } => list("weak", vec![sexp_ty(names, pointee)]),
         Ty::Span { element } => list("span", vec![sexp_ty(names, element)]),
