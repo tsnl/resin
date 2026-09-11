@@ -55,7 +55,10 @@ impl Types<'_> {
             )
             .unwrap();
             match ty {
-                Ty::Arc { .. } | Ty::GpuArguments => out.push_str("  resin_arc_release(*p);\n"),
+                Ty::Arc { .. }
+                | Ty::GpuArguments
+                | Ty::GpuComputePipeline { .. }
+                | Ty::GpuGraphicsPipeline { .. } => out.push_str("  resin_arc_release(*p);\n"),
                 Ty::GpuPointer { .. } => out.push_str("  resin_arc_release(p->owner);\n"),
                 Ty::GpuSpan { .. } => out.push_str("  resin_arc_release(p->data.owner);\n"),
                 Ty::Weak { .. } => out.push_str("  resin_weak_release(*p);\n"),
@@ -98,7 +101,10 @@ impl Types<'_> {
 
     fn retain_fields(&self, ty: &Ty, value: &str, out: &mut String) {
         match ty {
-            Ty::Arc { .. } | Ty::GpuArguments => {
+            Ty::Arc { .. }
+            | Ty::GpuArguments
+            | Ty::GpuComputePipeline { .. }
+            | Ty::GpuGraphicsPipeline { .. } => {
                 writeln!(out, "  resin_arc_retain({value});").unwrap();
             }
             Ty::GpuPointer { .. } => {

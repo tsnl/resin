@@ -11,6 +11,7 @@ mod formatting;
 mod function;
 mod gpu;
 mod ops;
+mod pipeline;
 mod projection;
 mod types;
 mod value;

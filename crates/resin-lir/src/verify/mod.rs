@@ -8,6 +8,7 @@ mod flow;
 mod gpu;
 mod instructions;
 mod module;
+mod pipeline;
 mod rules;
 mod table;
 
@@ -58,11 +59,15 @@ pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
         | Instr::Eliminate { .. }
         | Instr::NumericCast { .. }
         | Instr::PointerCast { .. } => StackEffect { pops: 1, pushes: 1 },
-        Instr::GpuReadOnly | Instr::GpuWriteOnly => StackEffect { pops: 1, pushes: 1 },
-        Instr::GpuNew { .. }
-        | Instr::GpuAllocate { .. }
-        | Instr::GpuCopyTo
-        | Instr::GpuProject { .. } => StackEffect { pops: 2, pushes: 1 },
+        Instr::GpuReadOnly
+        | Instr::GpuWriteOnly
+        | Instr::GpuComputePipeline { .. }
+        | Instr::GpuGraphicsPipeline { .. } => StackEffect { pops: 1, pushes: 1 },
+        Instr::GpuDispatch { .. } => StackEffect { pops: 6, pushes: 1 },
+        Instr::GpuDraw { .. } => StackEffect { pops: 4, pushes: 1 },
+        Instr::GpuNew { .. } | Instr::GpuAllocate { .. } | Instr::GpuCopyTo => {
+            StackEffect { pops: 2, pushes: 1 }
+        }
         Instr::GpuSlice | Instr::GpuArgumentsDraw | Instr::GpuCopyImage => {
             StackEffect { pops: 3, pushes: 1 }
         }

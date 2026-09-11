@@ -275,9 +275,9 @@ def main() -> Result<(), _> = {
 
 	var gpu = Gpu.new_for_window(window)?;
 
-	var compute = gpu.create_compute_pipeline(kernel.spirv)?;
+	var compute = gpu.create_compute_pipeline(kernel)?;
 
-	var graphics = gpu.create_graphics_pipeline(vertex.spirv, fragment.spirv)?;
+	var graphics = gpu.create_graphics_pipeline(vertex, fragment)?;
 
 	// Initialization and shader projection share one owned particle allocation.
 	var particles = GpuSpan<Particle>.allocate(gpu, ulong(count))?;
@@ -338,29 +338,24 @@ def main() -> Result<(), _> = {
 		previous_cursor := cursor;
 		was_dragging := dragging;
 		apply_camera(camera, &params);
-		var root = kernel.project(
-			gpu,
-			{
-				dt = params.dt,
-				yaw_cos = params.yaw_cos,
-				yaw_sin = params.yaw_sin,
-				pitch_cos = params.pitch_cos,
-				pitch_sin = params.pitch_sin,
-				zoom = params.zoom,
-				aspect = params.aspect,
-				radius = params.radius,
-				particles = params.particles,
-			}
-		)?;
+		var root = {
+			dt = params.dt,
+			yaw_cos = params.yaw_cos,
+			yaw_sin = params.yaw_sin,
+			pitch_cos = params.pitch_cos,
+			pitch_sin = params.pitch_sin,
+			zoom = params.zoom,
+			aspect = params.aspect,
+			radius = params.radius,
+			particles = params.particles,
+		};
 		var commands = gpu.start_command_recording()?;
 
 		if (!paused) {
-			commands.set_pipeline(compute)?;
-			commands.dispatch(root, (count + 63_ui) / 64_ui, 1, 1)?;
+			commands.dispatch(compute, root, (count + 63_ui) / 64_ui, 1, 1)?;
 		};
 		commands.begin_rendering(image, 0.004_f, 0.008_f, 0.02_f, 1.0_f)?;
-		commands.set_pipeline(graphics)?;
-		commands.draw(root, count * 24_ui)?;
+		commands.draw(graphics, root, count * 24_ui)?;
 		commands.end_rendering()?;
 		commands.submit()?;
 		gpu.present(image)?;

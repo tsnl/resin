@@ -48,13 +48,15 @@ owner. Checked host operations enforce bounds, alignment, mapping state, permiss
 and exclusion while a command recording can use the allocation. Views cannot be
 cast to ordinary pointers or constructed from raw addresses.
 
-Shader entries retain ordinary `Ptr<T>` parameters. The compiler builtin
-`shader.project(gpu, arguments)` derives a host launch-record shape from the shader
-root: shader pointers and spans become owning GPU views on the host. Projection
-builds separate root storage, converts the views internally, and retains their
-allocations. GPU buffer elements use one shared host/device layout and cannot
-contain pointers or managed owners. This boundary does not traverse pointer graphs
-or modify host records into device representations.
+Shader entries retain ordinary `Ptr<T>` parameters. Pipeline creation accepts shader
+declarations and preserves their stage and root type in builtin
+`GpuComputePipeline<Root, Owner>` and `GpuGraphicsPipeline<Root, Owner>` values.
+Dispatch and draw check a host launch-record shape derived from that root: shader
+pointers and spans become owning GPU views on the host. Compiler projection builds
+separate root storage, converts the views internally, and retains their allocations.
+GPU buffer elements use one shared host/device layout and cannot contain pointers or
+managed owners. This boundary does not traverse pointer graphs or modify host
+records into device representations.
 
 Shader-local places remain distinct from device addresses in backend metadata.
 They may be read, written, and indexed but cannot escape through calls, return
@@ -62,9 +64,9 @@ values, stored pointers, or reinterpretation. Shared helpers may take device poi
 when compiled for a shader and host pointers when compiled for the CPU. Numeric
 pointer casts preserve bits and do not translate addresses or confer ownership.
 
-Command recordings accept projected `GpuArguments`, retain the root and every
-referenced allocation, and exclude CPU access until synchronous submission or
-cancellation. Device writes require completion and visibility before host access.
+Command recordings accept typed pipelines and matching host arguments, retain the
+projected root and every referenced allocation, and exclude CPU access until
+synchronous submission or cancellation. Device writes require completion and visibility before host access.
 Raw host pointers still borrow memory without retaining it, and shader consumption
 of managed host values remains rejected.
 
@@ -145,10 +147,10 @@ Pipeline construction passes the embedded SPIR-V pointer and byte length to the 
 the compiler/runtime seam small while leaving room for multiple host compilers, graphics APIs, and
 device code generators.
 
-## Immediate path
+## Runtime path
 
-Start with headless Vulkan compute: runtime creation, host-visible and device-local allocation,
-host-to-device pointer translation, compute-pipeline creation from SPIR-V, command recording,
-dispatch with one root buffer handle, synchronous submission, and automatic owner cleanup. Add
-proper asynchronous queues and synchronization before transfers, textures and their descriptor
-heap, raster pipelines, acceleration structures, and ray queries.
+The runtime supports Vulkan compute and raster pipelines, command recording, synchronous
+submission, and automatic owner cleanup. Source pipeline creation preserves shader signatures;
+dispatch and draw project checked host arguments into their shader root storage. Native pipeline
+creation receives the embedded SPIR-V. Asynchronous queues and explicit synchronization remain
+future work, alongside richer transfers, textures, acceleration structures, and ray queries.

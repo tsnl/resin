@@ -12,6 +12,10 @@ use std::{fs, process::Output};
 use tempfile::TempDir;
 
 fn run(source: &str) -> Option<Output> {
+    run_with_gpu_library(source, None)
+}
+
+fn run_with_gpu_library(source: &str, library: Option<&str>) -> Option<Output> {
     let _lock = lock_gpu();
     match ResinGpu::create() {
         Ok(gpu) => drop(gpu),
@@ -27,6 +31,9 @@ fn run(source: &str) -> Option<Output> {
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("main.resin");
     fs::write(&path, source).unwrap();
+    if let Some(library) = library {
+        fs::write(directory.path().join("gpu.resin"), library).unwrap();
+    }
     let module = pipeline::generate_program(&pipeline::load(&path).unwrap())
         .unwrap_or_else(|error| panic!("{source}\n{error}"));
     Some(project::Project::new(&module, Some("main")).unwrap().run())
@@ -117,43 +124,56 @@ fn nested_host_owners_and_gpu_method_receivers_preserve_allocation_lifetimes() {
 
 #[test]
 fn custom_allocators_must_return_the_requested_size_and_alignment() {
-    for allocate in [
-        "self.gpu.malloc(1_ul, alignment, memory)",
-        "ok(self.gpu.malloc(bytes + 1_ul, alignment, memory)?.at(1_ul))",
+    for (bytes, value) in [
+        ("1_ul", "allocation.value!"),
+        ("bytes + 1_ul", "allocation.value!.at(1_ul)"),
     ] {
+        let library = allocator_library(bytes, value);
         for action in [
             "var values = GpuSpan<long>.allocate(gpu, 2_ul)?;",
-            "var arguments = kernel.project(gpu, { left = 1_l, right = 2_l })?;",
+            "var pipeline = gpu.create_compute_pipeline(kernel)?; var commands = gpu.start_command_recording()?; commands.dispatch(pipeline, { left = 1_l, right = 2_l }, 1_ui, 1_ui, 1_ui)?;",
         ] {
             let source = format!(
                 r#"
                 export {{ main }};
-                import {{ "$/gpu.resin", "$/status.resin" }};
-                struct Custom {{ gpu: Gpu }};
-                impl Custom {{
-                    @gpu_allocator
-                    def malloc(self: Custom, bytes: ulong, alignment: ulong, memory: int) -> Result<GpuPtr<ubyte>, RuntimeError> = {{ {allocate} }};
-                }}
+                import {{ "gpu.resin", "$/status.resin" }};
                 struct Root {{ left: long, right: long }};
                 @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {{}};
                 def main() -> Result<int, _> = {{
-                    var gpu = Custom {{ gpu = Gpu.new()? }};
+                    var gpu = Gpu.new()?;
                     {action}
                     ok(0_i)
                 }};
             "#
             );
-            let Some(output) = run(&source) else {
+            let Some(output) = run_with_gpu_library(&source, Some(&library)) else {
                 return;
             };
             assert!(
                 !output.status.success(),
-                "invalid allocation was accepted: {allocate}; {action}"
+                "invalid allocation was accepted: {bytes}; {value}; {action}"
             );
             let error = String::from_utf8_lossy(&output.stderr);
             assert!(error.contains("GPU"), "{error}");
         }
     }
+}
+
+fn allocator_library(bytes: &str, value: &str) -> String {
+    let mut library = include_str!("../resin/gpu.resin")
+        .replace("\"status.resin\"", "\"$/status.resin\"")
+        .replace("\"window.resin\"", "\"$/window.resin\"");
+    let start = library.find("\t@gpu_allocator").unwrap();
+    let end = start + library[start..].find("\t@gpu_compute_pipeline").unwrap();
+    library.replace_range(start..end, &format!(r#"
+        @gpu_allocator
+        def malloc(self: Gpu, bytes: ulong, alignment: ulong, memory: int) -> Result<GpuPtr<ubyte>, RuntimeError> = {{
+            var allocation = GpuPtr<ubyte>.allocate_native(self.handle, self, {bytes}, alignment, memory);
+            RuntimeStatus.from_code(allocation.status)?;
+            ok({value})
+        }};
+    "#));
+    library
 }
 
 const COMPUTE: &str = r#"
@@ -171,8 +191,8 @@ const COMPUTE: &str = r#"
         var values = GpuSpan<uint>.allocate(gpu, 4_ul)?;
         var i = 0_ul;
         while (i < values.length) { values.at(i).* := uint(i); i := i + 1_ul; };
-        var arguments = kernel.project(gpu, { increment = 5_ui, values = values.slice(1_ul, 2_ul) })?;
-        var pipeline = gpu.create_compute_pipeline(kernel.spirv)?;
+        var arguments = { increment = 5_ui, values = values.slice(1_ul, 2_ul) };
+        var pipeline = gpu.create_compute_pipeline(kernel)?;
         ACTION
     };
 "#;
@@ -183,12 +203,10 @@ fn projected_scalar_and_span_arguments_dispatch_and_allow_readback_after_submit(
         "ACTION",
         r#"
         var commands = gpu.start_command_recording()?;
-        commands.set_pipeline(pipeline)?;
-        commands.dispatch(arguments, 1_ui, 1_ui, 1_ui)?;
+        commands.dispatch(pipeline, arguments, 1_ui, 1_ui, 1_ui)?;
         commands.submit()?;
         var again = gpu.start_command_recording()?;
-        again.set_pipeline(pipeline)?;
-        again.dispatch(arguments, 1_ui, 1_ui, 1_ui)?;
+        again.dispatch(pipeline, arguments, 1_ui, 1_ui, 1_ui)?;
         again.submit()?;
         var result = [0_ui, 0_ui, 0_ui, 0_ui];
         values.copy_to(Span<uint> { data = result.at(0_ul), length = 4_ul });
@@ -205,21 +223,21 @@ fn failed_dispatch_and_cancel_restore_cpu_access_and_last_command_alias_cancels(
     let source = COMPUTE.replace(
         "ACTION",
         r#"
-        var commands = gpu.start_command_recording()?;
-        var failed = match (commands.dispatch(arguments, 1_ui, 1_ui, 1_ui)) {
+        var cancelled = gpu.start_command_recording()?;
+        cancelled.cancel();
+        var failed = match (cancelled.dispatch(pipeline, arguments, 1_ui, 1_ui, 1_ui)) {
             ok(value) => { 0_i }, err(error) => { RuntimeStatus.code(error) },
         };
         values.at(1_ul).* := 20_ui;
-        commands.set_pipeline(pipeline)?;
-        commands.dispatch(arguments, 1_ui, 1_ui, 1_ui)?;
+        var commands = gpu.start_command_recording()?;
+        commands.dispatch(pipeline, arguments, 1_ui, 1_ui, 1_ui)?;
         var alias = commands;
         alias.cancel();
         values.at(1_ul).* := 21_ui;
         {
             var abandoned = gpu.start_command_recording()?;
             var last = abandoned;
-            last.set_pipeline(pipeline)?;
-            last.dispatch(arguments, 1_ui, 1_ui, 1_ui)?;
+            last.dispatch(pipeline, arguments, 1_ui, 1_ui, 1_ui)?;
         };
         ok(if (failed == 1_i && values.at(1_ul).* == 21_ui) { 0 } else { 1 })
     "#,
@@ -239,8 +257,7 @@ fn recorded_gpu_work_denies_cpu_access_through_all_aliases() {
             &format!(
                 r#"
             var commands = gpu.start_command_recording()?;
-            commands.set_pipeline(pipeline)?;
-            commands.dispatch(arguments, 1_ui, 1_ui, 1_ui)?;
+            commands.dispatch(pipeline, arguments, 1_ui, 1_ui, 1_ui)?;
             {access}
             ok(0_i)
         "#
@@ -306,9 +323,9 @@ fn inferred_signed_long_pointers_project_and_tuple_arguments_evaluate_once() {
             calls.* := calls.* + 1_i;
             (gpu, 1_ul)
         };
-        def launch(gpu: Gpu, value: GpuPtr<long>, values: GpuSpan<long>, calls: Ptr<int>) -> _ = {
+        def launch(pipeline: GpuComputePipeline<Parameters, GpuPipelineOwner>, value: GpuPtr<long>, values: GpuSpan<long>, calls: Ptr<int>) -> _ = {
             calls.* := calls.* + 1_i;
-            (gpu, { value = value, values = values, increment = 7_l })
+            (pipeline, { value = value, values = values, increment = 7_l }, 1_ui, 1_ui, 1_ui)
         };
         def main() -> Result<int, _> = {
             var gpu = Gpu.new()?;
@@ -316,13 +333,120 @@ fn inferred_signed_long_pointers_project_and_tuple_arguments_evaluate_once() {
             var value = gpu.new(-42)?;
             var values = GpuSpan<long>.allocate(allocation(gpu, &calls))?;
             values.at(0_ul).* := 0_l;
-            var arguments = kernel.project(launch(gpu, value, values, &calls))?;
-            var pipeline = gpu.create_compute_pipeline(kernel.spirv)?;
+            var pipeline = gpu.create_compute_pipeline(kernel)?;
             var commands = gpu.start_command_recording()?;
-            commands.set_pipeline(pipeline)?;
-            commands.dispatch(arguments, 1_ui, 1_ui, 1_ui)?;
+            commands.dispatch(launch(pipeline, value, values, &calls))?;
             commands.submit()?;
             ok(if (calls == 2_i && value.* == 49_l && values.at(0_ul).* == 98_l) { 0 } else { 1 })
+        };
+    "#) else {
+        return;
+    };
+    success(&output);
+}
+
+#[test]
+fn returned_typed_pipelines_and_recordings_keep_scoped_resources_alive() {
+    let Some(output) = run(r#"
+        export { main };
+        import { "$/gpu.resin" };
+        struct Parameters { values: Span<uint> };
+        @compute_shader def kernel(index: ulong, root: Ptr<Parameters>) = {
+            if (index < root.values.length) { root.values.at(index).* := 42_ui; };
+        };
+        def make_pipeline(gpu: Gpu) -> Result<GpuComputePipeline<Parameters, GpuPipelineOwner>, _> = {
+            gpu.create_compute_pipeline(kernel)
+        };
+        def record() -> Result<{ commands: GpuCommands, values: GpuSpan<uint> }, _> = {
+            var gpu = Gpu.new()?;
+            var values = GpuSpan<uint>.allocate(gpu, 1_ul)?;
+            values.at(0_ul).* := 0_ui;
+            var pipeline = make_pipeline(gpu)?;
+            var alias = pipeline;
+            var commands = gpu.start_command_recording()?;
+            commands.dispatch(alias, { values = values }, 1_ui, 1_ui, 1_ui)?;
+            ok({ commands = commands, values = values })
+        };
+        def main() -> Result<int, _> = {
+            var recorded = record()?;
+            recorded.commands.submit()?;
+            ok(if (recorded.values.at(0_ul).* == 42_ui) { 0_i } else { 1_i })
+        };
+    "#) else {
+        return;
+    };
+    success(&output);
+}
+
+#[test]
+fn pipelines_from_another_device_fail_recording_without_locking_arguments() {
+    let source = COMPUTE.replace(
+        "ACTION",
+        r#"
+        var other = Gpu.new()?;
+        var commands = other.start_command_recording()?;
+        var failed = match (commands.dispatch(pipeline, arguments, 1_ui, 1_ui, 1_ui)) {
+            ok(value) => { 0_i }, err(error) => { RuntimeStatus.code(error) },
+        };
+        values.at(1_ul).* := 42_ui;
+        commands.cancel();
+        ok(if (failed == 1_i && values.at(1_ul).* == 42_ui) { 0_i } else { 1_i })
+    "#,
+    );
+    let Some(output) = run(&source) else { return };
+    success(&output);
+}
+
+#[test]
+fn dispatch_rejects_argument_views_from_another_device() {
+    let source = COMPUTE.replace("ACTION", r#"
+        var other = Gpu.new()?;
+        var foreign_values = GpuSpan<uint>.allocate(other, 1_ul)?;
+        var commands = gpu.start_command_recording()?;
+        commands.dispatch(pipeline, { increment = 5_ui, values = foreign_values }, 1_ui, 1_ui, 1_ui)?;
+        ok(0_i)
+    "#);
+    let Some(output) = run(&source) else { return };
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("different device"));
+}
+
+#[test]
+fn rooted_graphics_stages_receive_automatically_projected_arguments() {
+    let Some(output) = run(r#"
+        export { main };
+        import { "$/gpu.resin", "$/graphics.resin" };
+        struct Parameters { color: Ptr<Color>, offset: float32 };
+        @vertex_shader def vertex(index: int, root: Ptr<Parameters>) -> Vertex = {
+            Vertex {
+                position = Position {
+                    x = (if (index == 1_i) { 3.0_f } else { -1.0_f }) + root.offset,
+                    y = if (index == 2_i) { 3.0_f } else { -1.0_f },
+                    z = 0.0_f, w = 1.0_f,
+                },
+                color = Color { r = 1.0_f, g = 1.0_f, b = 1.0_f, a = 1.0_f },
+            }
+        };
+        @fragment_shader def fragment(color: Color, root: Ptr<Parameters>) -> Color = {
+            root.color.*
+        };
+        def make_pipeline(gpu: Gpu) -> Result<GpuGraphicsPipeline<Parameters, GpuPipelineOwner>, _> = {
+            gpu.create_graphics_pipeline(vertex, fragment)
+        };
+        def main() -> Result<int, _> = {
+            var gpu = Gpu.new()?;
+            var pipeline = make_pipeline(gpu)?;
+            var color = gpu.new(Color { r = 1.0_f, g = 0.0_f, b = 0.0_f, a = 1.0_f })?;
+            var image = gpu.create_image(8_ui, 8_ui)?;
+            var pixels = GpuSpan<ubyte>.allocate(gpu, 256_ul)?;
+            var commands = gpu.start_command_recording()?;
+            commands.begin_rendering(image, 0.0_f, 0.0_f, 0.0_f, 1.0_f)?;
+            commands.draw(pipeline, { color = color, offset = 0.0_f }, 3_ui)?;
+            commands.end_rendering()?;
+            commands.copy_image_to_buffer(image, pixels)?;
+            commands.submit()?;
+            ok(if (pixels.at(0_ul).* == 255_ub && pixels.at(1_ul).* == 0_ub
+                && pixels.at(2_ul).* == 0_ub && pixels.at(3_ul).* == 255_ub) { 0_i } else { 1_i })
         };
     "#) else {
         return;

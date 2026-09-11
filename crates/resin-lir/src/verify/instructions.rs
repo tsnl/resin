@@ -15,6 +15,13 @@ pub(super) fn check_instr(
     location: Location,
 ) -> Result<(), VerifyError> {
     match instr {
+        Instr::GpuComputePipeline { .. }
+        | Instr::GpuGraphicsPipeline { .. }
+        | Instr::GpuDispatch { .. }
+        | Instr::GpuDraw { .. } => {
+            super::pipeline::check(module, instr, stack, location)?;
+        }
+
         Instr::GpuNew { .. }
         | Instr::GpuAllocate { .. }
         | Instr::GpuAllocateNative
@@ -22,7 +29,6 @@ pub(super) fn check_instr(
         | Instr::GpuReadOnly
         | Instr::GpuWriteOnly
         | Instr::GpuCopyTo
-        | Instr::GpuProject { .. }
         | Instr::GpuArgumentsDispatch
         | Instr::GpuArgumentsDraw
         | Instr::GpuCopyImage => super::gpu::check(module, instr, stack, location)?,

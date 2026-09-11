@@ -1,7 +1,7 @@
 export {
 	Gpu,
 	GpuImage,
-	GpuPipeline,
+	GpuPipelineOwner,
 	GpuCommands,
 	Memory,
 	ResinGpu,
@@ -51,15 +51,17 @@ impl GpuOwner {
 		RuntimeStatus.from_code(allocation.status)?;
 		ok(allocation.value!)
 	};
-	def create_compute_pipeline(self: Gpu, code: Span<ubyte>) -> Result<GpuPipeline, RuntimeError> = {
+	@gpu_compute_pipeline
+	def create_compute_pipeline(self: Gpu, code: Span<ubyte>) -> Result<GpuPipelineOwner, RuntimeError> = {
 		var pipeline = Ptr<ResinPipeline>(ulong(0));
 		RuntimeStatus.from_code(resin_gpu_create_compute_pipeline(self.handle, code.data, code.length, &pipeline))?;
-		ok(GpuPipeline { handle = pipeline, gpu = self })
+		ok(GpuPipelineOwner { handle = pipeline, gpu = self })
 	};
-	def create_graphics_pipeline(self: Gpu, vertex: Span<ubyte>, fragment: Span<ubyte>) -> Result<GpuPipeline, RuntimeError> = {
+	@gpu_graphics_pipeline
+	def create_graphics_pipeline(self: Gpu, vertex: Span<ubyte>, fragment: Span<ubyte>) -> Result<GpuPipelineOwner, RuntimeError> = {
 		var pipeline = Ptr<ResinPipeline>(ulong(0));
 		RuntimeStatus.from_code(resin_gpu_create_graphics_pipeline(self.handle, vertex.data, vertex.length, fragment.data, fragment.length, &pipeline))?;
-		ok(GpuPipeline { handle = pipeline, gpu = self })
+		ok(GpuPipelineOwner { handle = pipeline, gpu = self })
 	};
 	def create_image(self: Gpu, width: uint, height: uint) -> Result<GpuImage, RuntimeError> = {
 		var image = Ptr<ResinImage>(ulong(0));
@@ -103,8 +105,13 @@ impl ImageOwner {
 }
 
 struct PipelineOwner { handle: Ptr<ResinPipeline>, gpu: Gpu };
-type GpuPipeline = Arc<PipelineOwner>;
+type GpuPipelineOwner = Arc<PipelineOwner>;
 impl PipelineOwner {
+	@gpu_pipeline_context
+	def context(self: GpuPipelineOwner) -> Gpu = {
+		self.gpu
+	};
+
 	def drop(self: Ptr<PipelineOwner>) = {
 		resin_gpu_free_pipeline(self.gpu.handle, self.handle);
 	};
@@ -112,7 +119,7 @@ impl PipelineOwner {
 
 // Retain resources mentioned by recorded commands until synchronous submit or cancellation.
 struct RecordedResources {
-	pipeline: GpuPipeline | None,
+	pipeline: GpuPipelineOwner | None,
 	image: GpuImage | None,
 	previous: Arc<RecordedResources> | None,
 };
@@ -122,16 +129,14 @@ impl CommandsOwner {
 	def drop(self: Ptr<CommandsOwner>) = {
 		resin_gpu_cancel_command_buffer(self.gpu.handle, self.handle);
 	};
-	def retain(self: Ptr<CommandsOwner>, pipeline: GpuPipeline | None, image: GpuImage | None) = {
+	def retain(self: Ptr<CommandsOwner>, pipeline: GpuPipelineOwner | None, image: GpuImage | None) = {
 		self.retained := Arc<RecordedResources> { pipeline = pipeline, image = image, previous = self.retained };
 	};
 
-	def set_pipeline(self: GpuCommands, pipeline: GpuPipeline) -> Result<(), RuntimeError> = {
+	@gpu_dispatch
+	def dispatch(self: GpuCommands, pipeline: GpuPipelineOwner, root: GpuArguments, x: uint, y: uint, z: uint) -> Result<(), RuntimeError> = {
 		RuntimeStatus.from_code(resin_gpu_set_pipeline(self.handle, pipeline.handle))?;
 		self.retain(pipeline, None);
-		ok(())
-	};
-	def dispatch(self: GpuCommands, root: GpuArguments, x: uint, y: uint, z: uint) -> Result<(), RuntimeError> = {
 		RuntimeStatus.from_code(root.dispatch_native(Ptr<ubyte>(self.handle), x, y, z))
 	};
 	def begin_rendering(self: GpuCommands, image: GpuImage, r: float32, g: float32, b: float32, a: float32) -> Result<(), RuntimeError> = {
@@ -142,7 +147,10 @@ impl CommandsOwner {
 	def end_rendering(self: GpuCommands) -> Result<(), RuntimeError> = {
 		RuntimeStatus.from_code(resin_gpu_end_rendering(self.handle))
 	};
-	def draw(self: GpuCommands, root: GpuArguments | None, count: uint) -> Result<(), RuntimeError> = {
+	@gpu_draw
+	def draw(self: GpuCommands, pipeline: GpuPipelineOwner, root: GpuArguments | None, count: uint) -> Result<(), RuntimeError> = {
+		RuntimeStatus.from_code(resin_gpu_set_pipeline(self.handle, pipeline.handle))?;
+		self.retain(pipeline, None);
 		match (root) {
 			GpuArguments(arguments) => {
 				RuntimeStatus.from_code(arguments.draw_native(Ptr<ubyte>(self.handle), count))

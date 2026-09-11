@@ -1269,6 +1269,14 @@
             "named": false
           },
           {
+            "type": "GpuComputePipeline",
+            "named": false
+          },
+          {
+            "type": "GpuGraphicsPipeline",
+            "named": false
+          },
+          {
             "type": "GpuPtr",
             "named": false
           },
@@ -1287,6 +1295,26 @@
           {
             "type": "Weak",
             "named": false
+          }
+        ]
+      },
+      "owner": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type",
+            "named": true
+          }
+        ]
+      },
+      "root": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type",
+            "named": true
           }
         ]
       },
@@ -1503,6 +1531,14 @@
   },
   {
     "type": "GpuArguments",
+    "named": false
+  },
+  {
+    "type": "GpuComputePipeline",
+    "named": false
+  },
+  {
+    "type": "GpuGraphicsPipeline",
     "named": false
   },
   {

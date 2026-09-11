@@ -75,16 +75,47 @@ impl Generator {
                     element: *element.clone(),
                 });
             }
-            TermKind::GpuProject {
-                allocator,
-                shader,
+            TermKind::GpuPipelineCreate {
+                factory,
+                shaders,
                 args,
             } => {
                 self.gen_arguments(args)?;
-                self.emit(Instr::GpuProject {
-                    allocator: *allocator,
-                    shader: *shader,
+                self.emit(match shaders.as_slice() {
+                    [shader] => Instr::GpuComputePipeline {
+                        factory: *factory,
+                        shader: *shader,
+                    },
+                    [vertex, fragment] => Instr::GpuGraphicsPipeline {
+                        factory: *factory,
+                        vertex: *vertex,
+                        fragment: *fragment,
+                    },
+                    _ => unreachable!("checked pipeline stages"),
                 });
+            }
+            TermKind::GpuPipelineDispatch {
+                context,
+                allocator,
+                record,
+                args,
+            } => {
+                self.gen_arguments(args)?;
+                self.emit(
+                    if args.params.len() + usize::from(args.receiver.is_some()) == 6 {
+                        Instr::GpuDispatch {
+                            context: *context,
+                            allocator: allocator.expect("compute root"),
+                            record: *record,
+                        }
+                    } else {
+                        Instr::GpuDraw {
+                            context: *context,
+                            allocator: *allocator,
+                            record: *record,
+                        }
+                    },
+                );
             }
             TermKind::WeakEmpty { pointee } => self.emit(Instr::WeakEmpty {
                 pointee: pointee.clone(),

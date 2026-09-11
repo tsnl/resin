@@ -1,6 +1,6 @@
 //! Inference variables, unification, and expression constraints.
 //! All handles are resolved before the typed tree reaches LIR lowering.
-use crate::lower::context::Context;
+use crate::lower::context::{Context, FunctionBody, FunctionDecl};
 use crate::{GenerateError, GenerateErrorKind};
 use resin_source::prelude::*;
 use resin_types::prelude::*;
@@ -16,6 +16,8 @@ pub(crate) enum Head {
     Pointer,
     GpuPointer,
     GpuSpan,
+    GpuComputePipeline,
+    GpuGraphicsPipeline,
     Arc,
     Weak,
     Span,
@@ -100,6 +102,14 @@ impl From<Ty> for Type {
             Ty::Span { element } => Self::Node(Head::Span, vec![(*element).into()]),
             Ty::GpuPointer { pointee } => Self::gpu_pointer((*pointee).into()),
             Ty::GpuSpan { element } => Self::Node(Head::GpuSpan, vec![(*element).into()]),
+            Ty::GpuComputePipeline { root, owner } => Self::Node(
+                Head::GpuComputePipeline,
+                vec![(*root).into(), (*owner).into()],
+            ),
+            Ty::GpuGraphicsPipeline { root, owner } => Self::Node(
+                Head::GpuGraphicsPipeline,
+                vec![(*root).into(), (*owner).into()],
+            ),
             Ty::Array { element, length } => {
                 Self::Node(Head::Array(length), vec![(*element).into()])
             }
@@ -132,6 +142,14 @@ impl Head {
             },
             Self::GpuSpan => Ty::GpuSpan {
                 element: Box::new(children.next().unwrap()),
+            },
+            Self::GpuComputePipeline => Ty::GpuComputePipeline {
+                root: Box::new(children.next().unwrap()),
+                owner: Box::new(children.next().unwrap()),
+            },
+            Self::GpuGraphicsPipeline => Ty::GpuGraphicsPipeline {
+                root: Box::new(children.next().unwrap()),
+                owner: Box::new(children.next().unwrap()),
             },
             Self::Span => Ty::Span {
                 element: Box::new(children.next().unwrap()),
@@ -719,7 +737,6 @@ pub(crate) enum Constraint {
     Field(Type, Arc<str>, Type),
     Call(Type, Type, Type),
     Method(Type, Arc<str>, Type, Type, bool, Vec<AddressOrigin>),
-    GpuProject(Type, Type, Type),
     Ascribe(Type, Type, bool),
     Record(Vec<(Arc<str>, Type)>, Type),
     Builtin(Arc<str>, Vec<Type>, Type),
@@ -878,6 +895,52 @@ impl Inference<'_> {
         Some(gpu)
     }
 
+    fn pipeline_method(
+        &self,
+        method: FunctionDecl,
+        arg: &Type,
+        associated: bool,
+        span: Span,
+    ) -> Result<Option<FunctionDecl>> {
+        let factory = match method.body {
+            FunctionBody::GpuPipelineFactory { .. } => true,
+            FunctionBody::GpuPipelineRecord { .. } => false,
+            _ => return Ok(Some(method)),
+        };
+        let count = method.params.len() - usize::from(!associated);
+        let inputs = if count == 1 {
+            vec![arg.clone()]
+        } else {
+            match self.solver.head(arg) {
+                Type::Variable(_) => return Ok(None),
+                Type::Node(Head::Record(names), parts)
+                    if parts.len() == count
+                        && names
+                            .iter()
+                            .enumerate()
+                            .all(|(i, name)| name.as_ref() == format!("_{i}")) =>
+                {
+                    parts
+                }
+                _ => return Err(error(span, "incorrect pipeline argument count")),
+            }
+        };
+        let inputs = &inputs[usize::from(associated)..];
+        let needed = if factory { inputs.len() } else { 1 };
+        let Some(arguments) = inputs
+            .iter()
+            .take(needed)
+            .map(|ty| self.solver.resolve(ty))
+            .collect::<Option<Vec<_>>>()
+        else {
+            return Ok(None);
+        };
+        self.typer
+            .specialize_gpu_method(method, &arguments)
+            .map(Some)
+            .map_err(|message| error(span, message))
+    }
+
     fn constraint(&mut self, constraint: &Constraint, span: Span) -> Result<bool> {
         match constraint {
             Constraint::Method(receiver_type, name, arg, out, associated, origins) => {
@@ -956,6 +1019,9 @@ impl Inference<'_> {
                     self.typer.method(&receiver_type, name)
                 }
                 .ok_or_else(|| error(span, format!("unknown method `{name}`")))?;
+                let Some(method) = self.pipeline_method(method, arg, *associated, span)? else {
+                    return Ok(false);
+                };
                 if !associated
                     && let Some(first) = method.params.first()
                     && crate::ReceiverConversion::between(&receiver_type, first)
@@ -1093,62 +1159,6 @@ impl Inference<'_> {
                     }
                     _ => return Err(error(span, "field access requires a record")),
                 }
-            }
-            Constraint::GpuProject(func, arg, out) => {
-                let Some(Ty::Function { param, .. }) = self.solver.resolve(func) else {
-                    return Ok(false);
-                };
-                let Ty::Record { fields } = *param else {
-                    return Err(error(
-                        span,
-                        "projection requires a shader with a root pointer",
-                    ));
-                };
-                let Some(RecordField {
-                    ty: Ty::Pointer { pointee },
-                    ..
-                }) = fields.get(1)
-                else {
-                    return Err(error(
-                        span,
-                        "projection requires a shader with a root pointer",
-                    ));
-                };
-                let input = pointee.gpu_projection(self.typer.definitions()).ok_or_else(||
-                    error(span, "shader root projection requires shared values and pointers or spans to plain GPU elements"))?;
-                let Type::Node(Head::Record(names), arguments) = self.solver.head(arg) else {
-                    if matches!(self.solver.head(arg), Type::Variable(_)) {
-                        return Ok(false);
-                    }
-                    return Err(error(
-                        span,
-                        "projection takes a GPU and a host argument record",
-                    ));
-                };
-                if names.as_slice() != [Arc::from("_0"), Arc::from("_1")] {
-                    return Err(error(
-                        span,
-                        "projection takes a GPU and a host argument record",
-                    ));
-                }
-                let Some(gpu) = self.solver.resolve(&arguments[0]) else {
-                    return Ok(false);
-                };
-                let allocator = self.typer.gpu_allocator(&gpu).ok_or_else(|| {
-                    error(
-                        span,
-                        "projection requires a GPU with a registered allocator",
-                    )
-                })?;
-                self.solver.unify(
-                    out,
-                    &Type::result(
-                        Ty::GpuArguments.into(),
-                        self.typer.gpu_error(allocator).into(),
-                    ),
-                    span,
-                )?;
-                return self.solver.coerce(&arguments[1], &input.into(), span);
             }
             Constraint::Call(func, arg, out) => {
                 let shape = self.shape(func, false, span)?;
@@ -1339,7 +1349,7 @@ impl Constraint {
             | Self::Field(from, _, _)
             | Self::Ascribe(from, _, _)
             | Self::Variant(from, _, _) => vec![from],
-            Self::Call(func, arg, _) | Self::GpuProject(func, arg, _) => vec![func, arg],
+            Self::Call(func, arg, _) => vec![func, arg],
             Self::Method(func, _, arg, _, _, origins) => origins
                 .iter()
                 .map(AddressOrigin::input)

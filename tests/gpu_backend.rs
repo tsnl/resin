@@ -356,10 +356,12 @@ fn fragment_shaders_read_typed_root_parameters() {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/triangle.resin");
     let mut ast = pipeline::load(&source).unwrap();
     let file = &mut ast.modules.last_mut().unwrap().file;
-    file.stmts.retain(|stmt| !matches!(&stmt.val, resin_ast::StmtKind::Function { name, .. } if name.val.as_ref() == "fragment"));
+    // This fixture drives rendering through the native API. Replacing the shader
+    // signature also removes the example's now-incompatible rootless host call.
+    file.stmts.retain(|stmt| !matches!(&stmt.val, resin_ast::StmtKind::Function { name, .. } if matches!(name.val.as_ref(), "fragment" | "main")));
     file.stmts.extend(
         support::parse(
-            "export { fragment }; @fragment_shader def fragment (color: Color, root: Ptr<Color>) -> Color = { root.* };",
+            "export { fragment }; def main() = {}; @fragment_shader def fragment (color: Color, root: Ptr<Color>) -> Color = { root.* };",
         )
         .stmts,
     );

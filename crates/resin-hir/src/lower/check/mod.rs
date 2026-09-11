@@ -781,9 +781,6 @@ impl Expression<'_, '_> {
                 name,
                 arg,
             } => {
-                let projection = name.val.as_ref() == "project"
-                    && matches!(&receiver.val, resin_ast::TermKind::Var { name }
-                        if self.checker.scopes.is_shader(&name.val));
                 let (receiver, annotation, receiver_type, associated) =
                     if let resin_ast::TermKind::Type { ty } = &receiver.val {
                         let annotation = self.annotation(ty, false);
@@ -798,18 +795,20 @@ impl Expression<'_, '_> {
                     .scopes
                     .record_members(name.span, receiver_type.clone(), associated);
                 let arg = self.child(arg, None);
-                let constraint = if projection {
-                    Constraint::GpuProject(receiver_type.clone(), arg.ty.clone(), out.clone())
-                } else {
-                    Constraint::Method(
-                        receiver_type.clone(),
-                        name.val.clone(),
-                        arg.ty.clone(),
-                        out.clone(),
-                        associated,
-                        receiver.as_ref().map(address_origins).unwrap_or_default(),
-                    )
-                };
+                self.checker.scopes.record_call(
+                    name,
+                    receiver_type.clone(),
+                    arg.ty.clone(),
+                    associated,
+                );
+                let constraint = Constraint::Method(
+                    receiver_type.clone(),
+                    name.val.clone(),
+                    arg.ty.clone(),
+                    out.clone(),
+                    associated,
+                    receiver.as_ref().map(address_origins).unwrap_or_default(),
+                );
                 self.constrain((span, constraint));
                 TermKind::MethodCall {
                     receiver: receiver.map(Box::new),

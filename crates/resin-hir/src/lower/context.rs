@@ -15,6 +15,7 @@ pub(crate) struct Context {
     pub(super) namespaces: BTreeMap<TypeId, Namespace>,
     pub(super) functions: BTreeMap<FunctionId, FunctionDecl>,
     pub(super) gpu_allocators: BTreeMap<TypeId, FunctionId>,
+    pub(super) gpu_pipeline_contexts: BTreeMap<TypeId, FunctionId>,
     pub(super) method_definitions: Vec<MethodDefinitions>,
 }
 impl Context {
@@ -75,6 +76,19 @@ pub(crate) enum FunctionBody {
     },
     GpuAllocate {
         allocator: FunctionId,
+    },
+    GpuPipelineFactory {
+        factory: FunctionId,
+        graphics: bool,
+    },
+    GpuPipelineRecord {
+        record: FunctionId,
+        graphics: bool,
+    },
+    GpuPipelineDispatch {
+        context: FunctionId,
+        allocator: Option<FunctionId>,
+        record: FunctionId,
     },
 }
 
@@ -282,23 +296,6 @@ impl Context {
             }
             _ => None,
         }
-    }
-
-    pub(crate) fn projection_method_label(&self, shader: &Ty) -> Option<String> {
-        let Ty::Function { param, .. } = shader else {
-            return None;
-        };
-        let Ty::Record { fields } = &**param else {
-            return None;
-        };
-        let Ty::Pointer { pointee } = &fields.get(1)?.ty else {
-            return None;
-        };
-        let argument = pointee.gpu_projection(self.definitions())?;
-        Some(format!(
-            "(gpu: _, arguments: {}) -> Result<GpuArguments, _>",
-            resin_types::format_type(&argument, self.definitions())
-        ))
     }
 
     pub(crate) fn method(&self, ty: &Ty, name: &str) -> Option<FunctionDecl> {

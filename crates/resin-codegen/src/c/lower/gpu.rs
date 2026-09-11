@@ -51,8 +51,11 @@ pub(super) fn instruction(
             writeln!(out, "  if ({bytes}) memmove(({target}).f0, resin_gpu_ptr_host(({source}).data, {bytes}, _Alignof({}), 1u), {bytes});", types.name(element)).unwrap();
             Ok("0".into())
         }
-        Instr::GpuProject { allocator, shader } => {
-            super::projection::project(types, name, *allocator, *shader, args, result, out)
+        Instr::GpuComputePipeline { .. }
+        | Instr::GpuGraphicsPipeline { .. }
+        | Instr::GpuDispatch { .. }
+        | Instr::GpuDraw { .. } => {
+            super::pipeline::instruction(types, name, instr, args, result, out)
         }
         Instr::GpuArgumentsDispatch => Ok(format!(
             "resin_gpu_projected_dispatch((ResinCommandBuffer *){}, {}, {}, {}, {})",

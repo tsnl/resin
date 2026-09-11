@@ -122,11 +122,49 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
         Instr::GpuReadOnly => symbol("gpu-read-only"),
         Instr::GpuWriteOnly => symbol("gpu-write-only"),
         Instr::GpuCopyTo => symbol("gpu-copy-to"),
-        Instr::GpuProject { allocator, shader } => list(
-            "gpu-project",
+        Instr::GpuComputePipeline { factory, shader } => list(
+            "gpu-compute-pipeline",
             vec![
-                symbol(names.functions[allocator.index()].as_ref()),
+                symbol(names.functions[factory.index()].as_ref()),
                 symbol(names.functions[shader.index()].as_ref()),
+            ],
+        ),
+        Instr::GpuGraphicsPipeline {
+            factory,
+            vertex,
+            fragment,
+        } => list(
+            "gpu-graphics-pipeline",
+            vec![
+                symbol(names.functions[factory.index()].as_ref()),
+                symbol(names.functions[vertex.index()].as_ref()),
+                symbol(names.functions[fragment.index()].as_ref()),
+            ],
+        ),
+        Instr::GpuDispatch {
+            context,
+            allocator,
+            record,
+        } => list(
+            "gpu-dispatch",
+            vec![
+                symbol(names.functions[context.index()].as_ref()),
+                symbol(names.functions[allocator.index()].as_ref()),
+                symbol(names.functions[record.index()].as_ref()),
+            ],
+        ),
+        Instr::GpuDraw {
+            context,
+            allocator,
+            record,
+        } => list(
+            "gpu-draw",
+            vec![
+                symbol(names.functions[context.index()].as_ref()),
+                allocator
+                    .map(|id| symbol(names.functions[id.index()].as_ref()))
+                    .unwrap_or_else(|| symbol("none")),
+                symbol(names.functions[record.index()].as_ref()),
             ],
         ),
         Instr::GpuArgumentsDispatch => symbol("gpu-dispatch"),
@@ -364,6 +402,14 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
         Ty::GpuPointer { pointee } => list("gpu-ptr", vec![sexp_ty(names, pointee)]),
         Ty::GpuSpan { element } => list("gpu-span", vec![sexp_ty(names, element)]),
         Ty::GpuArguments => symbol("GpuArguments"),
+        Ty::GpuComputePipeline { root, owner } => list(
+            "gpu-compute-pipeline",
+            vec![sexp_ty(names, root), sexp_ty(names, owner)],
+        ),
+        Ty::GpuGraphicsPipeline { root, owner } => list(
+            "gpu-graphics-pipeline",
+            vec![sexp_ty(names, root), sexp_ty(names, owner)],
+        ),
         Ty::Arc { pointee } => list("arc", vec![sexp_ty(names, pointee)]),
         Ty::Weak { pointee } => list("weak", vec![sexp_ty(names, pointee)]),
         Ty::Span { element } => list("span", vec![sexp_ty(names, element)]),

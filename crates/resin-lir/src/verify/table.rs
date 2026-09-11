@@ -25,6 +25,21 @@ pub(super) fn collect(module: &Module, analysis: &[FunctionTypes]) -> TypeTable 
         }
         for block in &function.blocks {
             for instr in &block.instrs {
+                if let Instr::GpuDispatch { allocator, .. }
+                | Instr::GpuDraw {
+                    allocator: Some(allocator),
+                    ..
+                } = instr
+                {
+                    let Ty::Result { error, .. } = &module.functions[allocator.index()].result
+                    else {
+                        unreachable!("verified pipeline allocator");
+                    };
+                    table.intern(&Ty::Result {
+                        value: Box::new(Ty::GpuArguments),
+                        error: error.clone(),
+                    });
+                }
                 if let Instr::Push { value } = instr {
                     collect_value(&mut table, value);
                 }

@@ -246,35 +246,38 @@ impl Generator {
         name: &Ident,
         argument: &typed::Term,
     ) -> Result<TermKind> {
-        if name.val.as_ref() == "project"
-            && let Some(receiver) = receiver
-        {
-            let shader = self.elaborate(receiver)?;
-            if let TermKind::Function { function } = shader.kind
-                && self.module.shaders.contains_key(&function)
-            {
-                let Ty::Record { fields } = &argument.ty else {
-                    unreachable!("checked projection arguments")
-                };
-                let allocator = self
-                    .typer
-                    .gpu_allocator(&fields[0].ty)
-                    .expect("checked projection allocator");
-                return Ok(TermKind::GpuProject {
-                    allocator,
-                    shader: function,
-                    args: Arguments {
-                        receiver: None,
-                        params: fields.iter().map(|field| field.ty.clone()).collect(),
-                        argument: self.boxed(argument)?,
-                    },
-                });
-            }
-        }
         let declaration = self
             .typer
             .method_call(receiver_ty, &name.val, &argument.ty, receiver.is_none())
             .ok_or_else(|| GenerateError::inference(name.span, "unknown method"))?;
+        let declaration = if matches!(
+            declaration.body,
+            FunctionBody::GpuPipelineFactory { .. } | FunctionBody::GpuPipelineRecord { .. }
+        ) {
+            let count = declaration.params.len() - usize::from(receiver.is_some());
+            let arguments = if count == 1 {
+                vec![argument.ty.clone()]
+            } else {
+                let Ty::Record { fields } = &argument.ty else {
+                    unreachable!("checked pipeline arguments")
+                };
+                fields.iter().map(|field| field.ty.clone()).collect()
+            };
+            self.typer
+                .specialize_gpu_method(declaration, &arguments[usize::from(receiver.is_none())..])
+                .map_err(|message| GenerateError::inference(name.span, message))?
+        } else {
+            declaration
+        };
+        if let FunctionBody::GpuPipelineFactory { factory, graphics } = declaration.body {
+            return self.pipeline_create(
+                receiver,
+                argument,
+                &declaration.params,
+                factory,
+                graphics,
+            );
+        }
         let receiver = receiver
             .map(|r| self.adapt(r, receiver_ty, &declaration.params[0]))
             .transpose()?;
@@ -288,6 +291,19 @@ impl Generator {
             FunctionBody::Intrinsic(op) => TermKind::Intrinsic { op, args },
             FunctionBody::GpuNew { allocator } => TermKind::GpuNew { allocator, args },
             FunctionBody::GpuAllocate { allocator } => TermKind::GpuAllocate { allocator, args },
+            FunctionBody::GpuPipelineDispatch {
+                context,
+                allocator,
+                record,
+            } => TermKind::GpuPipelineDispatch {
+                context,
+                allocator,
+                record,
+                args,
+            },
+            FunctionBody::GpuPipelineFactory { .. } | FunctionBody::GpuPipelineRecord { .. } => {
+                unreachable!("specialized pipeline bridge")
+            }
             FunctionBody::Defined(function) => {
                 let param = Ty::parameter(&declaration.params);
                 let ty = Ty::Function {
@@ -310,6 +326,79 @@ impl Generator {
                 };
                 TermKind::Call { func, arg }
             }
+        })
+    }
+
+    fn pipeline_create(
+        &mut self,
+        receiver: Option<&typed::Term>,
+        argument: &typed::Term,
+        params: &[Ty],
+        factory: FunctionId,
+        graphics: bool,
+    ) -> Result<TermKind> {
+        let count = params.len() - usize::from(receiver.is_some());
+        let terms = if count == 1 {
+            vec![argument]
+        } else {
+            let typed::TermKind::Record { fields } = &argument.kind else {
+                return Err(GenerateError::inference(
+                    argument.span,
+                    "pipeline creation requires shader declarations as direct arguments",
+                ));
+            };
+            fields.iter().map(|(_, term)| term).collect()
+        };
+        let stages = if graphics {
+            &["vertex", "fragment"][..]
+        } else {
+            &["compute"][..]
+        };
+        let mut shaders = Vec::new();
+        for (shader, stage) in terms[usize::from(receiver.is_none())..].iter().zip(stages) {
+            let term = self.elaborate(shader)?;
+            let TermKind::Function { function } = term.kind else {
+                return Err(GenerateError::inference(
+                    shader.span,
+                    "pipeline creation requires direct shader declarations; runtime aliases are unsupported",
+                ));
+            };
+            let entry = self.module.shaders.get_mut(&function).ok_or_else(|| {
+                GenerateError::inference(
+                    shader.span,
+                    "pipeline creation requires a decorated shader declaration",
+                )
+            })?;
+            if entry.stage.as_ref() != *stage {
+                return Err(GenerateError::inference(
+                    shader.span,
+                    format!("pipeline requires a @{stage}_shader declaration"),
+                ));
+            }
+            entry.embedded = true;
+            shaders.push(function);
+        }
+        let args = if let Some(receiver) = receiver {
+            Arguments {
+                receiver: Some(self.adapt(receiver, &receiver.ty, &params[0])?),
+                argument: Box::new(Term {
+                    span: argument.span,
+                    ty: Ty::Unit,
+                    kind: TermKind::Constant { value: Value::Unit },
+                }),
+                params: vec![],
+            }
+        } else {
+            Arguments {
+                receiver: None,
+                argument: self.boxed(terms[0])?,
+                params: vec![params[0].clone()],
+            }
+        };
+        Ok(TermKind::GpuPipelineCreate {
+            factory,
+            shaders,
+            args,
         })
     }
 

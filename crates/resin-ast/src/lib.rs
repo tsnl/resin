@@ -44,6 +44,11 @@ pub enum TypeKind {
         head: Ident,
         arg: Box<Type>,
     },
+    GpuPipeline {
+        head: Ident,
+        root: Box<Type>,
+        owner: Box<Type>,
+    },
     Result {
         value: Box<Type>,
         error: Box<Type>,

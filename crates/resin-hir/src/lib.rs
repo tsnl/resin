@@ -162,10 +162,17 @@ pub enum TermKind {
         allocator: FunctionId,
         args: Arguments,
     },
-    /// Project a host launch record into the decorated shader's root layout.
-    GpuProject {
-        allocator: FunctionId,
-        shader: FunctionId,
+    /// Create an owning pipeline whose root type comes from its shader declarations.
+    GpuPipelineCreate {
+        factory: FunctionId,
+        shaders: Vec<FunctionId>,
+        args: Arguments,
+    },
+    /// Project the checked host arguments and record a dispatch or draw.
+    GpuPipelineDispatch {
+        context: FunctionId,
+        allocator: Option<FunctionId>,
+        record: FunctionId,
         args: Arguments,
     },
     WeakEmpty {
@@ -323,6 +330,7 @@ impl Analysis {
         let document = documents.get(source)?;
         let token = document.token(offset)?;
         let text = builtin_hover(document, token)
+            .or_else(|| self.compiler_member_hover(source, document, token))
             .or_else(|| self.definition_hover(documents, source, offset))
             .or_else(|| self.member_hover(source, document, token))?;
         Some(Hover {
@@ -431,24 +439,24 @@ impl Analysis {
             source: source.clone(),
             span: resin_cst::span(token),
         };
-        if document.node_text(token) == "project"
-            && let Some(signature) = self.projection_member(source, document, token.start_byte())
-        {
-            return Some(format!("project: {signature}"));
-        }
         let member = self.member(&location, document.node_text(token))?;
         Some(format!("{}: {}", member.name, member.ty))
     }
 
-    fn projection_member(
+    fn compiler_member_hover(
         &self,
         source: &Source,
         document: &resin_cst::Document,
-        offset: usize,
+        token: resin_cst::Node<'_>,
     ) -> Option<String> {
-        let (name, start) = direct_method_receiver(document, offset)?;
-        let shader = self.contexts.shader_type(source, start, name)?;
-        self.typer.projection_method_label(shader)
+        let location = SourceLocation {
+            source: source.clone(),
+            span: resin_cst::span(token),
+        };
+        let member = self.member(&location, document.node_text(token))?;
+        member
+            .compiler_signature
+            .then(|| format!("{}: {}", member.name, member.ty))
     }
 
     fn definition_label(
@@ -523,40 +531,12 @@ impl Analysis {
                 replace,
             })
             .collect::<Vec<_>>();
-        if "project".starts_with(prefix)
-            && let Some(signature) = self.projection_member(source, document, replace.start)
-        {
-            items.push(Completion {
-                name: "project".into(),
-                detail: format!("project: {signature}"),
-                kind: DefinitionKind::Function,
-                replace,
-            });
-        }
         items.sort_by(|a, b| {
             (a.kind != DefinitionKind::Field, &a.name)
                 .cmp(&(b.kind != DefinitionKind::Field, &b.name))
         });
         items
     }
-}
-
-/// A complete or recovered dot must follow a bare declaration name. Field and
-/// call receivers do not inherit a shader declaration's projection operation.
-fn direct_method_receiver(document: &resin_cst::Document, offset: usize) -> Option<(&str, usize)> {
-    let before_member = document.source().get(..offset)?.trim_end();
-    let before_dot = before_member.strip_suffix('.')?.trim_end();
-    let name = document.token(before_dot.len().checked_sub(1)?)?;
-    if name.kind() != "lid" || name.end_byte() != before_dot.len() {
-        return None;
-    }
-    if document.source()[..name.start_byte()]
-        .trim_end()
-        .ends_with('.')
-    {
-        return None;
-    }
-    Some((document.node_text(name), name.start_byte()))
 }
 
 fn builtin_hover(document: &resin_cst::Document, token: resin_cst::Node<'_>) -> Option<String> {
@@ -569,6 +549,8 @@ fn builtin_hover(document: &resin_cst::Document, token: resin_cst::Node<'_>) -> 
                 | "GpuPtr"
                 | "GpuSpan"
                 | "GpuArguments"
+                | "GpuComputePipeline"
+                | "GpuGraphicsPipeline"
                 | "Result"
                 | "Arc"
                 | "Weak"
@@ -697,7 +679,17 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ),
     (
         "GpuArguments",
-        "GpuArguments\n\nA compiler-projected shader root retaining all referenced GPU allocations.",
+        "GpuArguments\n\nAn internal dispatch projection retaining referenced GPU allocations.",
+        DefinitionKind::Type,
+    ),
+    (
+        "GpuComputePipeline",
+        "GpuComputePipeline<T, Owner>\n\nAn owning compute pipeline retaining its shader root type T. Dispatch checks and projects its host arguments.",
+        DefinitionKind::Type,
+    ),
+    (
+        "GpuGraphicsPipeline",
+        "GpuGraphicsPipeline<T, Owner>\n\nAn owning graphics pipeline retaining the shared shader root T. Rootless shaders use None.",
         DefinitionKind::Type,
     ),
     (
@@ -839,8 +831,60 @@ struct Member {
     ty: String,
     kind: DefinitionKind,
     origin: Option<lower::scope::DeclarationId>,
+    compiler_signature: bool,
 }
 impl Analysis {
+    fn record_method_call(
+        &mut self,
+        location: &SourceLocation,
+        receiver: &Ty,
+        name: &str,
+        argument: &Ty,
+        associated: bool,
+        typer: &lower::context::Context,
+    ) {
+        let Some(method) = typer.method(receiver, name) else {
+            return;
+        };
+        if !matches!(
+            method.body,
+            lower::context::FunctionBody::GpuPipelineFactory { .. }
+                | lower::context::FunctionBody::GpuPipelineRecord { .. }
+        ) {
+            return;
+        }
+        let count = method.params.len() - usize::from(!associated);
+        let arguments = if count == 1 {
+            vec![argument.clone()]
+        } else {
+            let Ty::Record { fields } = argument else {
+                return;
+            };
+            if fields.len() != count {
+                return;
+            }
+            fields.iter().map(|field| field.ty.clone()).collect()
+        };
+        let Ok(method) = typer.specialize_gpu_method(method, &arguments[usize::from(associated)..])
+        else {
+            return;
+        };
+        let Some(params) = method.arguments(receiver, associated) else {
+            return;
+        };
+        let signature = Ty::Function {
+            param: Box::new(Ty::parameter(params)),
+            result: Box::new(method.result),
+        };
+        if let Some(member) = self
+            .fields
+            .get_mut(location)
+            .and_then(|members| members.iter_mut().find(|member| member.name == name))
+        {
+            member.ty = format_type(&signature, typer);
+        }
+    }
+
     fn record_members(
         &mut self,
         location: SourceLocation,
@@ -858,6 +902,7 @@ impl Analysis {
                 ty: format_type(&field.ty, typer),
                 kind: DefinitionKind::Field,
                 origin: None,
+                compiler_signature: false,
             }));
         }
         for (name, method) in typer.methods(ty) {
@@ -868,7 +913,12 @@ impl Analysis {
                 param: Box::new(Ty::parameter(params)),
                 result: Box::new(method.result.clone()),
             };
-            let origin = if matches!(method.body, crate::lower::context::FunctionBody::Defined(_)) {
+            let origin = if matches!(
+                method.body,
+                crate::lower::context::FunctionBody::Defined(_)
+                    | crate::lower::context::FunctionBody::GpuPipelineFactory { .. }
+                    | crate::lower::context::FunctionBody::GpuPipelineRecord { .. }
+            ) {
                 typer.receiver_definition(ty).and_then(|receiver| {
                     self.method_origins
                         .get(&(receiver, name.to_string()))
@@ -880,9 +930,12 @@ impl Analysis {
             members.retain(|member| member.name != name.as_ref());
             members.push(Member {
                 name: name.to_string(),
-                ty: format_type(&signature, typer),
+                ty: typer
+                    .gpu_method_label(&method, associated)
+                    .unwrap_or_else(|| format_type(&signature, typer)),
                 kind: DefinitionKind::Function,
                 origin,
+                compiler_signature: typer.gpu_method_label(&method, associated).is_some(),
             });
         }
         if let Some((name, signature)) = typer.generic_method_label(ty, associated) {
@@ -892,6 +945,7 @@ impl Analysis {
                 ty: signature,
                 kind: DefinitionKind::Function,
                 origin: None,
+                compiler_signature: true,
             });
         }
         self.fields.insert(location, members);

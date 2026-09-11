@@ -60,7 +60,7 @@ def fragment(color: Color) -> Color = {
 def main() -> Result<(), _> = {
 	var gpu = Gpu.new()?;
 
-	var pipeline = gpu.create_graphics_pipeline(vertex.spirv, fragment.spirv)?;
+	var pipeline = gpu.create_graphics_pipeline(vertex, fragment)?;
 
 	var image = gpu.create_image(256, 256)?;
 
@@ -69,8 +69,7 @@ def main() -> Result<(), _> = {
 	var commands = gpu.start_command_recording()?;
 
 	commands.begin_rendering(image, 0.0, 0.0, 0.0, 1.0)?;
-	commands.set_pipeline(pipeline)?;
-	commands.draw(None, 3)?;
+	commands.draw(pipeline, None, 3)?;
 	commands.end_rendering()?;
 	commands.copy_image_to_buffer(image, pixels)?;
 	commands.submit()?;

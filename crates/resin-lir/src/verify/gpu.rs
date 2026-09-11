@@ -101,28 +101,6 @@ pub(super) fn check(
             )?;
             Ty::Unit
         }
-        Instr::GpuProject { allocator, shader } => {
-            if !module.shaders.contains_key(shader) {
-                return Err(invalid());
-            }
-            let function = module.functions.get(shader.index()).ok_or_else(invalid)?;
-            let Ty::Record { fields } = &function.locals[0].ty else {
-                return Err(invalid());
-            };
-            let Some(RecordField {
-                ty: Ty::Pointer { pointee },
-                ..
-            }) = fields.get(1)
-            else {
-                return Err(invalid());
-            };
-            let expected = pointee.gpu_projection(&module.types).ok_or_else(invalid)?;
-            expect_type(expected, args[1].clone(), location)?;
-            Ty::Result {
-                value: Box::new(Ty::GpuArguments),
-                error: Box::new(allocation_error(module, *allocator, &args[0], location)?),
-            }
-        }
         Instr::GpuArgumentsDispatch | Instr::GpuArgumentsDraw => {
             expect_type(Ty::GpuArguments, args[0].clone(), location)?;
             expect_type(byte_pointer(), args[1].clone(), location)?;
@@ -155,7 +133,7 @@ fn byte_pointer() -> Ty {
     }
 }
 
-fn allocation_error(
+pub(super) fn allocation_error(
     module: &Module,
     allocator: FunctionId,
     gpu: &Ty,

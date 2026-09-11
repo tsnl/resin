@@ -37,7 +37,11 @@ impl Context<'_> {
             | Ty::Arc { .. }
             | Ty::Weak { .. } => {}
             Ty::Str => return Err(super::str_storage_error()),
-            Ty::GpuPointer { .. } | Ty::GpuSpan { .. } | Ty::GpuArguments => {
+            Ty::GpuPointer { .. }
+            | Ty::GpuSpan { .. }
+            | Ty::GpuArguments
+            | Ty::GpuComputePipeline { .. }
+            | Ty::GpuGraphicsPipeline { .. } => {
                 return Err(Error(
                     "shader cannot consume a managed GPU view or projected arguments".into(),
                 ));

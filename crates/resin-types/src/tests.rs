@@ -432,3 +432,221 @@ fn gpu_arguments_are_opaque_managed_values_and_projection_is_type_directed() {
     assert_eq!(graph.gpu_projection(&table), None);
     assert_eq!(Ty::GpuArguments.gpu_projection(&[]), None);
 }
+
+#[test]
+fn pipeline_types_preserve_root_identity_and_opaque_shared_ownership() {
+    let context = TyperContext::new();
+    let root = record(Ty::Span {
+        element: Box::new(Ty::UInt32),
+    });
+    let owner = Ty::Arc {
+        pointee: Box::new(Ty::Int32),
+    };
+    let compute = Ty::GpuComputePipeline {
+        root: Box::new(root.clone()),
+        owner: Box::new(owner.clone()),
+    };
+    let graphics = Ty::GpuGraphicsPipeline {
+        root: Box::new(root.clone()),
+        owner: Box::new(owner.clone()),
+    };
+    assert_ne!(compute, graphics);
+    for pipeline in [&compute, &graphics] {
+        assert_eq!(pipeline.gpu_pipeline(), Some((&root, &owner)));
+        assert_eq!(
+            pipeline.gpu_pipeline_argument(&[]),
+            root.gpu_projection(&[])
+        );
+        assert!(pipeline.needs_drop(&[]));
+        assert!(pipeline.deref_target().is_none());
+        assert!(pipeline.view_record().is_none());
+        assert!(!pipeline.foreign_value());
+        assert!(layout::layout(&[], pipeline).is_err());
+        assert!(!pipeline.gpu_element(&[]));
+        assert!(pipeline.gpu_projection(&[]).is_none());
+        for other in [&owner, &Ty::UInt64] {
+            assert!(context.explicit_conversion(pipeline, other).is_err());
+            assert!(context.explicit_conversion(other, pipeline).is_err());
+        }
+    }
+    assert!(context.explicit_conversion(&compute, &graphics).is_err());
+    let mut table = TypeTable::default();
+    table.intern(&compute);
+    table.intern(&graphics);
+    for ty in [&root, &owner, &Ty::Int32, &Ty::UInt32] {
+        assert!(table.id(ty).is_some());
+    }
+    assert_eq!(
+        format_type(&compute, &table),
+        "GpuComputePipeline<{ value: Span<uint> }, Arc<int>>"
+    );
+    assert_eq!(
+        format_type(&graphics, &table),
+        "GpuGraphicsPipeline<{ value: Span<uint> }, Arc<int>>"
+    );
+}
+
+#[test]
+fn pipeline_argument_contract_rejects_invalid_owners_roots_and_rootless_compute() {
+    let owner = Box::new(Ty::Arc {
+        pointee: Box::new(Ty::Int32),
+    });
+    let graphics = Ty::GpuGraphicsPipeline {
+        root: Box::new(Ty::None),
+        owner: owner.clone(),
+    };
+    assert_eq!(graphics.gpu_pipeline_argument(&[]), Some(Ty::None));
+    for pipeline in [
+        Ty::GpuComputePipeline {
+            root: Box::new(Ty::None),
+            owner: owner.clone(),
+        },
+        Ty::GpuComputePipeline {
+            root: Box::new(Ty::UInt32),
+            owner: Box::new(Ty::Int32),
+        },
+        Ty::GpuGraphicsPipeline {
+            root: Box::new(Ty::GpuArguments),
+            owner,
+        },
+    ] {
+        assert_eq!(pipeline.gpu_pipeline_argument(&[]), None);
+    }
+}
+
+fn shader_parameter(input: Ty, root: Ty) -> Ty {
+    Ty::Record {
+        fields: vec![
+            RecordField {
+                name: "_0".into(),
+                ty: input,
+            },
+            RecordField {
+                name: "_1".into(),
+                ty: Ty::Pointer {
+                    pointee: Box::new(root),
+                },
+            },
+        ],
+    }
+}
+
+fn shader_graphics_types(context: &mut TyperContext) -> (Ty, Ty, Ty) {
+    let vector = |names: &[&str]| Ty::Record {
+        fields: names
+            .iter()
+            .map(|name| RecordField {
+                name: (*name).into(),
+                ty: Ty::Float32,
+            })
+            .collect(),
+    };
+    let color = Ty::Defined {
+        definition: context
+            .create_type("Color", vector(&["r", "g", "b", "a"]))
+            .unwrap(),
+    };
+    let other = Ty::Defined {
+        definition: context
+            .create_type("OtherColor", vector(&["r", "g", "b", "a"]))
+            .unwrap(),
+    };
+    let vertex = Ty::Record {
+        fields: vec![
+            RecordField {
+                name: "position".into(),
+                ty: vector(&["x", "y", "z", "w"]),
+            },
+            RecordField {
+                name: "color".into(),
+                ty: color.clone(),
+            },
+        ],
+    };
+    (color, other, vertex)
+}
+
+#[test]
+fn compute_pipeline_root_checks_stage_signature_and_projection_support() {
+    let context = TyperContext::new();
+    let parameter = shader_parameter(Ty::UInt64, Ty::UInt32);
+    assert_eq!(
+        shader::pipeline_root(&context, &[(&parameter, &Ty::Unit, "compute")]).unwrap(),
+        Ty::UInt32
+    );
+    for stages in [
+        vec![],
+        vec![(&parameter, &Ty::Unit, "vertex")],
+        vec![
+            (&parameter, &Ty::Unit, "compute"),
+            (&parameter, &Ty::Unit, "compute"),
+        ],
+        vec![(&Ty::UInt64, &Ty::Unit, "compute")],
+        vec![(&parameter, &Ty::UInt32, "compute")],
+    ] {
+        assert!(shader::pipeline_root(&context, &stages).is_err());
+    }
+    let parameter = shader_parameter(Ty::UInt64, Ty::Bool);
+    assert!(
+        shader::pipeline_root(&context, &[(&parameter, &Ty::Unit, "compute")])
+            .unwrap_err()
+            .contains("projection")
+    );
+}
+
+#[test]
+fn graphics_pipeline_roots_and_varyings_keep_nominal_type_identity() {
+    let mut context = TyperContext::new();
+    let (color, other_color, vertex) = shader_graphics_types(&mut context);
+    let root = Ty::Defined {
+        definition: context.create_type("Root", record(Ty::UInt32)).unwrap(),
+    };
+    let other_root = Ty::Defined {
+        definition: context
+            .create_type("OtherRoot", record(Ty::UInt32))
+            .unwrap(),
+    };
+    let rooted_vertex = shader_parameter(Ty::Int32, root.clone());
+    let rooted_fragment = shader_parameter(color.clone(), root.clone());
+    let pipeline = |vertex_parameter: &Ty, fragment_parameter: &Ty| {
+        shader::pipeline_root(
+            &context,
+            &[
+                (vertex_parameter, &vertex, "vertex"),
+                (fragment_parameter, &color, "fragment"),
+            ],
+        )
+    };
+    assert_eq!(pipeline(&Ty::Int32, &color).unwrap(), Ty::None);
+    for (vertex_parameter, fragment_parameter) in [
+        (&rooted_vertex, &color),
+        (&Ty::Int32, &rooted_fragment),
+        (&rooted_vertex, &rooted_fragment),
+    ] {
+        assert_eq!(
+            pipeline(vertex_parameter, fragment_parameter).unwrap(),
+            root
+        );
+    }
+    let mismatched_root = shader_parameter(color.clone(), other_root);
+    assert!(
+        pipeline(&rooted_vertex, &mismatched_root)
+            .unwrap_err()
+            .contains("same root type")
+    );
+    assert!(
+        pipeline(&Ty::Int32, &other_color)
+            .unwrap_err()
+            .contains("same type")
+    );
+    assert!(
+        shader::pipeline_root(
+            &context,
+            &[
+                (&color, &color, "fragment"),
+                (&Ty::Int32, &vertex, "vertex")
+            ]
+        )
+        .is_err()
+    );
+}
