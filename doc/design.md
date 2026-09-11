@@ -77,9 +77,12 @@ address/shared-layout profile. A future backend must implement it or reject the
 program; recursive projection or address-space source types would be a separate
 language change, not an implicit reinterpretation of existing programs.
 
-The runtime follows the pointer-oriented direction of Sebastian Aaltonen's
+The runtime draws on Sebastian Aaltonen's
 [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api), behind a small
 C ABI. Vulkan buffer device addresses implement the current device address profile.
+Host resource handles can coexist with pointer-based shader entries. The
+[GpuBuffer API cleanup proposal](gpu-buffers.md) scopes handle-based command roots
+and the separate question of constructing device pointers inside shared data.
 
 ## Compiler architecture
 
