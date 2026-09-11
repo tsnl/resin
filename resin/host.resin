@@ -1,0 +1,30 @@
+export { Host };
+
+import { "status.resin" };
+
+struct Host {};
+
+impl Host {
+	// A successful empty allocation still has a non-null, freeable pointer.
+	def malloc(bytes: ulong) -> Result<Ptr<ubyte>, OutOfMemory> = {
+		var memory = malloc(
+			if (bytes == 0_ul) {
+				1_ul
+			} else {
+				bytes
+			}
+		);
+		if (ulong(memory) == 0_ul) {
+			err(OutOfMemory {})
+		} else {
+			ok(memory)
+		}
+	};
+	// Free the original allocation pointer once; null is also accepted.
+	def free(memory: Ptr<ubyte>) = {
+		free(memory);
+	};
+}
+
+extern "stdlib.h" def malloc(bytes: ulong) -> Ptr<ubyte>;
+extern "stdlib.h" def free(memory: Ptr<ubyte>);

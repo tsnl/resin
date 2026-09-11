@@ -1,9 +1,6 @@
 export { kernel, main };
 
-import { "$/gpu.resin", "$/image.resin", "$/status.resin" };
-
-extern "stdlib.h" def malloc(bytes: ulong) -> Ptr<ubyte>;
-extern "stdlib.h" def free(memory: Ptr<ubyte>);
+import { "$/gpu.resin", "$/host.resin", "$/image.resin" };
 
 struct Root { width: uint, height: uint, pixels: Span<uint> };
 
@@ -37,15 +34,10 @@ def main() -> Result<(), _> = {
 	commands.submit()?;
 
 	var path = "gradient.png";
-	var host = malloc(count * size_of(uint));
-	if (ulong(host) == 0_ul) {
-		err(OutOfMemory {})
-	} else {
-		ok(())
-	}?;
+	var host = Host.malloc(count * size_of(uint))?;
 	pixels.copy_to(Span<uint> { data = Ptr<uint>(host), length = count });
 	var written = ImageData.write_pixels(path.data, width, height, 4, host, 0);
-	free(host);
+	Host.free(host);
 	written?;
 	print("wrote gradient.png\n");
 	ok(())

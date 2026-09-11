@@ -1,26 +1,20 @@
 export { main, failure };
 
-extern "stdlib.h" def malloc(bytes: ulong) -> Ptr<ubyte>;
-extern "stdlib.h" def free(memory: Ptr<ubyte>);
+import { "$/host.resin", "$/status.resin" };
 
-struct OutOfMemory {};
 struct Failed {};
 
 struct Allocation { data: Ptr<int> };
 impl Allocation {
 	def drop(self: Ptr<Allocation>) = {
-		free(Ptr<ubyte>(self.data));
+		Host.free(Ptr<ubyte>(self.data));
 		print("freed memory\n");
 	};
 }
 
 def allocate() -> Result<Arc<Allocation>, OutOfMemory> = {
-	var memory = malloc(ulong(4));
-	if (ulong(memory) == ulong(0)) {
-		err(OutOfMemory {})
-	} else {
-		ok(Arc<Allocation> { data = Ptr<int>(memory) })
-	}
+	var memory = Host.malloc(size_of(int))?;
+	ok(Arc<Allocation> { data = Ptr<int>(memory) })
 };
 
 def fail_if(fail: bool) -> Result<(), Failed> = {

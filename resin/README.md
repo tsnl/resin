@@ -15,6 +15,7 @@ import { "$/gpu.resin", "$/status.resin" };
 ```
 
 - `gpu.resin`: devices, allocations, pipelines, GPU images, commands, and window presentation.
+- `host.resin`: checked host memory allocation and explicit deallocation.
 - `window.resin`: windows, named controls, button snapshots, cursor capture, and scrolling.
 - `image.resin`: PNG I/O.
 - `status.resin`: native status conversion and named errors.
@@ -70,6 +71,7 @@ dropping one already consumed does not cancel it again. Submission waits for GPU
 
 | Type | Constructors and operations |
 | --- | --- |
+| `Host` | `Host.malloc(bytes)`, `Host.free(memory)` |
 | `Gpu` | `Gpu.new()`, `Gpu.new_at(index)`, `Gpu.new_for_window(window)`, `gpu.malloc(...)`, `gpu.create_compute_pipeline(code)`, `gpu.create_image(...)` |
 | `GpuPtr<T>` / `GpuSpan<T>` | `gpu.new(value)`, `GpuSpan<T>.allocate(gpu, count)`, `.at(index)`, `.slice(start, length)`, `.read_only()`, `.write_only()` |
 | `GpuArguments` | `kernel.project(gpu, arguments)` |
@@ -84,6 +86,13 @@ dropping one already consumed does not cancel it again. Submission waits for GPU
 borrowed host memory; copy GPU output there with `GpuSpan<T>.copy_to` first. The
 caller keeps that memory valid.
 The instance method `image.write_png(path)` uses the loaded image's dimensions and pixels.
+
+Import `$/host.resin` for `Host.malloc(bytes) -> Result<Ptr<ubyte>, OutOfMemory>`
+and `Host.free(memory)`. Allocations contain uninitialized bytes; a zero-byte request
+reserves one backing byte so success always returns a non-null pointer. The caller
+owns the allocation and frees its original pointer exactly once; pointer copies do
+not retain ownership. `Host.free(Ptr<ubyte>(0_ul))` is a no-op. The libc declarations
+stay private, and callers can propagate allocation errors with `?`.
 
 Some operations return additional information:
 

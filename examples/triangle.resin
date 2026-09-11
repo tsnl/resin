@@ -1,9 +1,6 @@
 export { main, vertex, fragment };
 
-import { "$/gpu.resin", "$/graphics.resin", "$/image.resin", "$/status.resin" };
-
-extern "stdlib.h" def malloc(bytes: ulong) -> Ptr<ubyte>;
-extern "stdlib.h" def free(memory: Ptr<ubyte>);
+import { "$/gpu.resin", "$/graphics.resin", "$/host.resin", "$/image.resin" };
 
 @vertex_shader
 def vertex(index: int) -> Vertex = {
@@ -79,15 +76,10 @@ def main() -> Result<(), _> = {
 	commands.submit()?;
 
 	var path = "triangle.png";
-	var host = malloc(pixels.length);
-	if (ulong(host) == 0_ul) {
-		err(OutOfMemory {})
-	} else {
-		ok(())
-	}?;
+	var host = Host.malloc(pixels.length)?;
 	pixels.copy_to(Span<ubyte> { data = host, length = pixels.length });
 	var written = ImageData.write_pixels(path.data, 256, 256, 4, host, 0);
-	free(host);
+	Host.free(host);
 	written?;
 	print("wrote triangle.png\n");
 	ok(())
