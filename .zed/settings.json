@@ -10,10 +10,8 @@
                     "--quiet",
                     "--manifest-path",
                     "Cargo.toml",
-                    "-p",
-                    "resin-lsp",
                     "--",
-                    "--stdio"
+                    "--lsp"
                 ]
             }
         }
