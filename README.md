@@ -611,6 +611,7 @@ to those modules. Public operations are static constructors and instance methods
 - `$/status.resin`: `RuntimeStatus` conversion methods and the `RuntimeError` union and its variants.
 - `$/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
 - `$/io.resin`: `Io.stdout().write(text)` and `Io.stderr().write(text)`.
+- `$/host.resin`: `Host.malloc(bytes)?` allocates host memory; `Host.free(memory)` releases it.
 - `$/console.resin`: `Console.read_byte()`, `Console.read_line()`, and shared `InputLine` owners with `Console.print(line)`.
 
 The polymorphic `fmt` operation and string-only `print` are compiler builtins; decorated shaders expose `.spirv`.

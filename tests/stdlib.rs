@@ -41,6 +41,75 @@ fn success(output: &std::process::Output) {
 }
 
 #[test]
+fn host_memory_allocates_writable_bytes_and_reports_allocation_failure() {
+    let native = r#"
+        #include <stdlib.h>
+        static int allocations, releases;
+        static void *host_test_malloc(size_t bytes) {
+            ++allocations;
+            if (bytes == 0) abort();
+            if (bytes == 999) return NULL;
+            return malloc(bytes);
+        }
+        static void host_test_free(void *memory) {
+            ++releases;
+            free(memory);
+        }
+        int host_test_stats(void) {
+            return allocations == 3 && releases == 3;
+        }
+        #define malloc host_test_malloc
+        #define free host_test_free
+    "#;
+    let output = run(
+        r#"
+        export { main };
+        import { "$/host.resin", "$/status.resin" };
+        extern "stdlib.h" def host_test_stats() -> int;
+        def main() -> Result<int, _> = {
+            var memory = Host.malloc(4)?;
+            var bytes = Span<ubyte> { data = memory, length = 4_ul };
+            bytes.at(3).* := 42_ub;
+            var written = bytes.at(3).* == 42_ub;
+            Host.free(memory);
+            var empty = Host.malloc(0)?;
+            var nonnull = ulong(empty) != 0_ul;
+            Host.free(empty);
+            Host.free(Ptr<ubyte>(0_ul));
+            var failure: Result<Ptr<ubyte>, OutOfMemory>;
+            failure := Host.malloc(999);
+            var failed = match (failure) {
+                ok(memory) => { Host.free(memory); 1 == 0 },
+                err(error) => { 1 == 1 },
+            };
+            ok(if (written && nonnull && failed && host_test_stats() == 1) { 0 } else { 1 })
+        };
+        "#,
+        native,
+    );
+    success(&output);
+
+    // Error propagation does not require importing the module's private dependencies.
+    let output = run(
+        r#"
+        export { main };
+        import { "$/host.resin" };
+        def main() -> Result<(), _> = {
+            var memory = Host.malloc(999)?;
+            Host.free(memory);
+            ok(())
+        };
+        "#,
+        native,
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n"),
+        "unhandled error: OutOfMemory\n"
+    );
+}
+
+#[test]
 fn every_native_status_operation_has_a_public_result_wrapper() {
     let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), ""));
     let source = TempDir::new_in(std::env::temp_dir()).unwrap();
