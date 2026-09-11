@@ -287,7 +287,6 @@ def main() -> Result<(), _> = {
 		radius = 0.004_f,
 		particles = Span<Particle> { data = Ptr<Particle>(particles.device_pointer()), length = ulong(count) },
 	};
-	var address = root.device_pointer();
 	var image = gpu.create_image(1280, 800)?;
 
 	var paused = 1 == 0;
@@ -335,11 +334,11 @@ def main() -> Result<(), _> = {
 
 		if (!paused) {
 			commands.set_pipeline(compute)?;
-			commands.dispatch(address, (count + 63_ui) / 64_ui, 1, 1)?;
+			commands.dispatch(root, (count + 63_ui) / 64_ui, 1, 1)?;
 		};
 		commands.begin_rendering(image, 0.004_f, 0.008_f, 0.02_f, 1.0_f)?;
 		commands.set_pipeline(graphics)?;
-		commands.draw(address, count * 24_ui)?;
+		commands.draw(root, count * 24_ui)?;
 		commands.end_rendering()?;
 		commands.submit()?;
 		gpu.present(image)?;

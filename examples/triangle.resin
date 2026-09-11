@@ -70,7 +70,7 @@ def main() -> Result<(), _> = {
 
 	commands.begin_rendering(image, 0.0, 0.0, 0.0, 1.0)?;
 	commands.set_pipeline(pipeline)?;
-	commands.draw(0, 3)?;
+	commands.draw(None, 3)?;
 	commands.end_rendering()?;
 	commands.copy_image_to_buffer(image, pixels)?;
 	commands.submit()?;

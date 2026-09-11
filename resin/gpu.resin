@@ -53,10 +53,10 @@ impl GpuOwner {
 		RuntimeStatus.from_code(resin_gpu_malloc(self.handle, bytes, alignment, memory, &allocation))?;
 		ok(GpuBuffer { handle = allocation, gpu = self })
 	};
-	def host_to_device_pointer(self: Gpu, host: Ptr<ubyte>) -> Result<ulong, RuntimeError> = {
+	def host_to_device_pointer(self: Gpu, host: Ptr<ubyte>) -> Result<Ptr<ubyte>, RuntimeError> = {
 		var device = ulong(0);
 		RuntimeStatus.from_code(resin_gpu_host_to_device_pointer(self.handle, host, &device))?;
-		ok(device)
+		ok(Ptr<ubyte>(device))
 	};
 	def create_compute_pipeline(self: Gpu, code: Span<ubyte>) -> Result<GpuPipeline, RuntimeError> = {
 		var pipeline = Ptr<ResinPipeline>(ulong(0));
@@ -104,8 +104,8 @@ impl BufferOwner {
 	def host_pointer(self: Ptr<BufferOwner>) -> Ptr<ubyte> = {
 		resin_allocation_host_pointer(self.handle)
 	};
-	def device_pointer(self: Ptr<BufferOwner>) -> ulong = {
-		resin_allocation_device_pointer(self.handle)
+	def device_pointer(self: Ptr<BufferOwner>) -> Ptr<ubyte> = {
+		Ptr<ubyte>(resin_allocation_device_pointer(self.handle))
 	};
 	def size(self: GpuBuffer) -> ulong = {
 		resin_allocation_size(self.handle)
@@ -157,8 +157,11 @@ impl CommandsOwner {
 		self.retain(pipeline, None, None);
 		ok(())
 	};
-	def dispatch(self: GpuCommands, root: ulong, x: uint, y: uint, z: uint) -> Result<(), RuntimeError> = {
-		RuntimeStatus.from_code(resin_gpu_dispatch(self.handle, root, x, y, z))
+	def dispatch(self: GpuCommands, root: GpuBuffer, x: uint, y: uint, z: uint) -> Result<(), RuntimeError> = {
+		var address = command_root_address(self.gpu.handle, root)?;
+		RuntimeStatus.from_code(resin_gpu_dispatch(self.handle, address, x, y, z))?;
+		self.retain(None, None, root);
+		ok(())
 	};
 	def begin_rendering(self: GpuCommands, image: GpuImage, r: float32, g: float32, b: float32, a: float32) -> Result<(), RuntimeError> = {
 		RuntimeStatus.from_code(resin_gpu_begin_rendering(self.handle, image.handle, r, g, b, a))?;
@@ -168,8 +171,18 @@ impl CommandsOwner {
 	def end_rendering(self: GpuCommands) -> Result<(), RuntimeError> = {
 		RuntimeStatus.from_code(resin_gpu_end_rendering(self.handle))
 	};
-	def draw(self: GpuCommands, root: ulong, count: uint) -> Result<(), RuntimeError> = {
-		RuntimeStatus.from_code(resin_gpu_draw(self.handle, root, count))
+	def draw(self: GpuCommands, root: GpuBuffer | None, count: uint) -> Result<(), RuntimeError> = {
+		match (root) {
+			GpuBuffer(buffer) => {
+				var address = command_root_address(self.gpu.handle, buffer)?;
+				RuntimeStatus.from_code(resin_gpu_draw(self.handle, address, count))?;
+				self.retain(None, None, buffer);
+				ok(())
+			},
+			None => {
+				RuntimeStatus.from_code(resin_gpu_draw(self.handle, 0_ul, count))
+			},
+		}
 	};
 	def copy_image_to_buffer(self: GpuCommands, image: GpuImage, buffer: GpuBuffer) -> Result<(), RuntimeError> = {
 		RuntimeStatus.from_code(resin_gpu_copy_image_to_buffer(self.handle, image.handle, buffer.handle))?;
@@ -188,6 +201,14 @@ impl CommandsOwner {
 		self.retained := None;
 	};
 }
+
+def command_root_address(gpu: Ptr<ResinGpu>, root: GpuBuffer) -> Result<ulong, RuntimeError> = {
+	if (gpu == root.gpu.handle) {
+		ok(resin_allocation_device_pointer(root.handle))
+	} else {
+		err(InvalidArgument {})
+	}
+};
 
 impl Memory {
 	def default() -> int = {

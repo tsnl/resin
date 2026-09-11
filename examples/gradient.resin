@@ -36,7 +36,7 @@ def main() -> Result<(), _> = {
 	commands.set_pipeline(pipeline)?;
 	// Compute shaders use 64 invocations per workgroup.
 	var groups = uint((data.pixels.length + 63_ul) / 64_ul);
-	commands.dispatch(root.device_pointer(), groups, 1, 1)?;
+	commands.dispatch(root, groups, 1, 1)?;
 	commands.submit()?;
 
 	var path = "gradient.png";

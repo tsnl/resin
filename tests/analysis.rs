@@ -45,6 +45,10 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
                 var gpu = Gpu.new()?;
                 var buffer = gpu.malloc(4_ul, 4_ul, Memory.default())?;
                 buffer.host_pointer();
+                var device: Ptr<ubyte>;
+                device := buffer.device_pointer();
+                var translated: Ptr<ubyte>;
+                translated := gpu.host_to_device_pointer(buffer.host_pointer())?;
                 {tail}"#
         );
         let mut loader = resin_source::Loader::new(resin_source::library_root());
@@ -52,27 +56,34 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
             .source_from_text(Path::new("main.resin"), source.clone())
             .unwrap();
         let analysis = Compiler::new().compile(input.clone(), &mut loader);
-        let call = source.find("host_pointer").unwrap();
-        let definition = analysis
-            .definition(&input, call)
-            .unwrap_or_else(|| panic!("tail: {tail}\n{:?}", analysis.diagnostics()));
-        assert!(
-            loader
+        if tail != "buffer." {
+            assert!(
+                analysis.diagnostics().is_empty(),
+                "{:?}",
+                analysis.diagnostics()
+            );
+        }
+        for (method, result) in [
+            ("host_pointer", "-> Ptr<ubyte>"),
+            ("device_pointer", "-> Ptr<ubyte>"),
+            ("host_to_device_pointer", "-> Result<Ptr<ubyte>,"),
+        ] {
+            let call = source.find(&format!(".{method}(")).unwrap() + 1;
+            let definition = analysis
+                .definition(&input, call)
+                .unwrap_or_else(|| panic!("tail: {tail}\n{:?}", analysis.diagnostics()));
+            assert!(loader
                 .path(&definition.source)
                 .unwrap()
-                .ends_with("resin/gpu.resin")
-        );
-        assert!(
-            analysis
-                .hover(&input, call)
-                .unwrap()
-                .text
-                .starts_with("def host_pointer(")
-        );
+                .ends_with("resin/gpu.resin"));
+            let hover = analysis.hover(&input, call).unwrap().text;
+            assert!(hover.starts_with(&format!("def {method}(")), "{hover}");
+            assert!(hover.contains(result), "{hover}");
+        }
         let offset = if tail == "buffer." {
             source.len()
         } else {
-            call
+            source.find("host_pointer").unwrap()
         };
         let items = analysis.completions(&input, offset);
         for name in ["host_pointer", "device_pointer", "size"] {
@@ -82,6 +93,47 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
             );
         }
         assert!(items.iter().any(|item| item.name == "drop"));
+    }
+}
+
+#[test]
+fn gpu_commands_require_buffer_roots_and_allow_rootless_draws() {
+    for (call, valid) in [
+        ("dispatch(buffer, 1_ui, 1_ui, 1_ui)", true),
+        ("draw(buffer, 3_ui)", true),
+        ("draw(None, 3_ui)", true),
+        ("dispatch(None, 1_ui, 1_ui, 1_ui)", false),
+        ("dispatch(0_ul, 1_ui, 1_ui, 1_ui)", false),
+        ("dispatch(pointer, 1_ui, 1_ui, 1_ui)", false),
+        ("draw(0_ul, 3_ui)", false),
+        ("draw(pointer, 3_ui)", false),
+    ] {
+        let source = format!(
+            r#"import {{ "$/gpu.resin" }};
+            def f(commands: GpuCommands, buffer: GpuBuffer, pointer: Ptr<ubyte>) -> Result<(), _> = {{
+                commands.{call}?;
+                ok(())
+            }};"#
+        );
+        let mut loader = resin_source::Loader::new(resin_source::library_root());
+        let input = loader
+            .source_from_text(Path::new("main.resin"), source)
+            .unwrap();
+        let analysis = Compiler::new().compile(input.clone(), &mut loader);
+        assert_eq!(
+            analysis.diagnostics().is_empty(),
+            valid,
+            "{call}: {:?}",
+            analysis.diagnostics()
+        );
+        assert!(
+            analysis
+                .diagnostics()
+                .iter()
+                .all(|diagnostic| diagnostic.location.source == input),
+            "{call}: {:?}",
+            analysis.diagnostics()
+        );
     }
 }
 

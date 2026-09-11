@@ -52,11 +52,20 @@ def main() -> Result<(), _> = {
 Resources use shared owners. Copying a handle retains its allocation, and initialized
 locals release their ownership in reverse scope order, including through `?`.
 GPU resources retain their device; presentation devices retain their window. Recorded
-pipelines, images, and explicit copy buffers stay alive through submission or cancellation.
-Raw shader root addresses carry no owner information, so callers must keep their backing
-allocations alive until work completes.
-Buffer address methods use pointer receivers: even a fresh receiver is retained for
-the containing scope. Returning that raw address beyond the scope still carries no ownership.
+pipelines, images, copy buffers, and shader root buffers stay alive through synchronous
+submission or cancellation. Command roots are `GpuBuffer` handles: use
+`commands.dispatch(root, x, y, z)` or `commands.draw(root, count)`, and
+`commands.draw(None, count)` when graphics shaders do not dereference a root.
+Roots must belong to the recording's GPU. Shader entry parameters remain `Ptr<T>`;
+recording obtains the root's device address internally.
+
+Raw pointers and spans stored inside a root carry no ownership. Callers keep their
+backing allocations alive until work completes. `buffer.host_pointer()` and
+`buffer.device_pointer()` return borrowed `Ptr<ubyte>` values for their respective
+address spaces. A device pointer is for shader access, and a pointer cast does not
+translate between address spaces. These methods use pointer receivers: even a fresh
+receiver is retained for the containing scope. Returning its pointer beyond the scope
+still carries no ownership. See [GPU buffers](../doc/gpu-buffers.md).
 
 Submission consumes a recording even on failure. `commands.submit()` and
 `commands.cancel()` clear the shared native handle before entering C.
@@ -67,7 +76,7 @@ dropping one already consumed does not cancel it again. Submission waits for GPU
 | --- | --- |
 | `Gpu` | `Gpu.new()`, `Gpu.new_at(index)`, `Gpu.new_for_window(window)`, `gpu.malloc(...)`, `gpu.create_compute_pipeline(code)`, `gpu.create_image(...)` |
 | `GpuBuffer` | `buffer.host_pointer()`, `buffer.device_pointer()`, `buffer.size()` |
-| `GpuCommands` | `gpu.start_command_recording()`, `commands.set_pipeline(...)`, `commands.dispatch(...)`, `commands.submit()`, `commands.cancel()` |
+| `GpuCommands` | `gpu.start_command_recording()`, `commands.set_pipeline(...)`, `commands.dispatch(root, x, y, z)`, `commands.draw(root, count)`, `commands.submit()`, `commands.cancel()` |
 | `Window` | `Window.new(width, height, String.from_str("Resin"))`, `window.poll_events()`, `window.framebuffer_size()`, input and cursor methods |
 | `ImageData` | `ImageData.read_png(path, channels)`, `image.write_png(path)` |
 | `Console` / `InputLine` | `Console.read_byte()`, `Console.read_line()`, `Console.print(line)` |
@@ -80,7 +89,8 @@ The instance method `image.write_png(path)` uses the loaded image's dimensions a
 
 Some operations return additional information:
 
-- `Gpu.device_count()` returns the count; `gpu.host_to_device_pointer(host)` returns the address.
+- `Gpu.device_count()` returns the count; `gpu.host_to_device_pointer(host)` returns
+  `Result<Ptr<ubyte>, RuntimeError>`, preserving an interior byte offset in mapped memory.
 - `ImageData.read_png(path, channels)` returns a shared `ImageData` owner exposing
   `width`, `height`, `channels`, and `pixels`. The final owner releases the pixels;
   `channels = 0` requests the file's channel count.

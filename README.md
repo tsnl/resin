@@ -768,8 +768,10 @@ Shader objects are deduplicated and retained with their generated project;
 imported helper changes invalidate them. Copied executables need the Vulkan loader/device,
 but neither Resin, source files, nor `spirv-opt` at runtime.
 
-Shaders receive application data through the root address passed to `gpu_dispatch` or
-`gpu_draw`. Add a typed pointer as the second tuple element:
+Pass a `GpuBuffer` root handle to `commands.dispatch(root, x, y, z)` or
+`commands.draw(root, count)`. Recording obtains the buffer's device address
+internally, and shaders receive it as a typed pointer. Add that pointer as the
+second tuple element:
 
 ```resin
 struct Params { values: Span<float32>, scale: float32 };
@@ -794,6 +796,12 @@ The entry interfaces are:
   Position has `float32` fields `x, y, z, w`; Color has `r, g, b, a`, in those orders.
 - Fragment takes Color, optionally paired with `Ptr<T>`, and returns Color.
 
+Use `commands.draw(None, count)` when the graphics shaders do not dereference a
+root. A supplied root must belong to the recording's GPU. Successful recording
+retains it through synchronous submission or cancellation, while callers keep
+allocations referenced by pointers or spans inside the root alive until completion.
+The root's storage must match the shader parameter's type, size, alignment, and
+initialization requirements. See [GPU buffers](doc/gpu-buffers.md).
 
 Device pointers support loads, stores, record fields, explicit casts, and passing to
 ordinary helpers. Shared storage supports `ubyte`, `int`, `uint`, `float32`, `ulong`, pointers, nonempty
@@ -803,10 +811,14 @@ scalar-block-layout support. Generated C asserts sizes, alignments, and member o
 Spans occupy 16 bytes (address and length) with alignment 8; arrays retain their element alignment.
 Storage containing booleans, unit, or other numeric widths is rejected for now.
 
-Use `buffer.host_pointer()` to initialize mapped data on the CPU. Store
-`buffer.device_pointer()` addresses in records consumed by shaders; these are not
-interchangeable with host addresses. Pointer types do not enforce the address space or bounds.
-Calling the same function on the CPU requires a root containing host pointers instead.
+Use `buffer.host_pointer()` to initialize mapped data on the CPU. Both that query
+and `buffer.device_pointer()` return borrowed `Ptr<ubyte>` values. Store device
+pointers in records consumed by shaders; a pointer cast preserves bits and never
+translates a host address. `gpu.host_to_device_pointer(host)` explicitly translates
+a mapped host pointer and returns `Result<Ptr<ubyte>, RuntimeError>`. Pointer types
+do not enforce the address space or bounds. Calling the same function on the CPU
+requires a root containing host pointers instead. The unsafe native C ABI continues
+to use integer device addresses.
 
 Shader bodies support `ubyte`, 32-bit numbers, `ulong`, booleans, records, nominal types, local mutation,
 branches, loops, and direct calls to named Resin helpers. Foreign calls, recursion,

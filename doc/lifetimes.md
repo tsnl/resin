@@ -209,10 +209,18 @@ host/device boundary. Raw GPU addresses and spans retain their existing contract
 `Gpu`, `GpuBuffer`, `GpuImage`, `GpuPipeline`, `GpuCommands`, `Window`, `InputLine`,
 and `ImageData` use shared owners. Copying them retains ownership. GPU resources
 retain their device; a presentation device retains its window. Recorded pipelines,
-images, and explicit copy buffers remain owned until synchronous submission or
-cancellation. Submit/cancel clear the shared native command handle, so aliases see
-the same consumed state. Raw addresses passed as shader roots cannot carry owner
-information: callers must keep their backing allocations alive through submission.
+images, copy buffers, and shader root buffers remain owned until synchronous
+submission, cancellation, or destruction of the unfinished recording. Submit/cancel
+clear the shared native command handle, so aliases see the same consumed state.
+Submission failure also releases the recording's retained resources.
+
+`commands.dispatch(root, x, y, z)` and `commands.draw(root, count)` take a
+`GpuBuffer` handle from the recording's GPU and retain it after successful recording.
+`commands.draw(None, count)` supplies no root. Shader entry parameters remain raw
+`Ptr<T>` values. Pointers and spans stored inside a root do not retain the allocations
+they reference: callers keep those allocations alive through completion. Buffer
+pointer queries also return borrowed pointers without ownership. See
+[GPU buffers](gpu-buffers.md) for address-space and layout requirements.
 
 The standard library and its examples no longer require `gpu_destroy`, `gpu_free`,
 `gpu_free_pipeline`, `gpu_free_image`, `window_destroy`, `free_input`, or `image_free`.

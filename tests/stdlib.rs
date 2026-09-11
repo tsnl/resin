@@ -365,7 +365,7 @@ fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
             valid := valid && window.should_close();
             window.set_should_close(1 == 0)?;
             valid := valid && !window.should_close();
-            ok(if (valid && count == uint(2) && address == ulong(4294967303)
+            ok(if (valid && count == uint(2) && address == Ptr<ubyte>(4294967303_ul)
                 && valid_size(size) && incomplete == 7) { 0 } else { 1 })
         };
         "#,
@@ -546,7 +546,7 @@ fn buffer_address_methods_retain_named_and_fresh_receivers_until_scope_exit() {
             var gpu = Gpu { handle = Ptr<ResinGpu>(0_ul), window = None };
             var valid = {
                 BUFFER_ADDRESSES
-                test_frees() == 0 && host.* == 42_ub && device == 101_ul
+                test_frees() == 0 && host.* == 42_ub && device == Ptr<ubyte>(101_ul)
             };
             if (valid && test_frees() == 2) { 0 } else { 1 }
         };
@@ -579,6 +579,274 @@ fn buffer_address_methods_retain_named_and_fresh_receivers_until_scope_exit() {
         );
         success(&output);
     }
+}
+
+#[test]
+fn commands_retain_buffer_roots_until_submit_cancel_or_last_alias_drop() {
+    let output = run(
+        r#"
+        export { main };
+        import { "$/gpu.resin", "$/status.resin" };
+        extern "resin_runtime.h" def test_mode(mode: int);
+        extern "resin_runtime.h" def test_recorded();
+        extern "resin_runtime.h" def test_code(code: int);
+        extern "resin_runtime.h" def test_completed();
+        extern "resin_runtime.h" def test_finished();
+        def main() -> Result<(), _> = {
+            var gpu = Gpu { handle = Ptr<ResinGpu>(0_ul), window = None };
+            var mode = 0;
+            while (mode < 4) {
+                test_mode(mode);
+                {
+                    var commands = {
+                        var original = gpu.start_command_recording()?;
+                        {
+                            var root = GpuBuffer { handle = Ptr<ResinAllocation>(1_ul), gpu = gpu };
+                            original.dispatch(root, 3, 4, 5)?;
+                            original.draw(GpuBuffer { handle = Ptr<ResinAllocation>(2_ul), gpu = gpu }, 6)?;
+                        };
+                        original
+                    };
+                    var alias = commands;
+                    alias.draw(None, 7)?;
+                    test_recorded();
+                    if (mode < 2) {
+                        var code = match (alias.submit()) {
+                            ok(value) => { 0 },
+                            err(error) => { RuntimeStatus.code(error) },
+                        };
+                        test_code(code);
+                    } else if (mode == 2) {
+                        alias.cancel();
+                    };
+                    test_completed();
+                };
+                test_finished();
+                mode := mode + 1;
+            };
+            ok(())
+        };
+        "#,
+        r#"
+        #include <resin_runtime.h>
+        #include <assert.h>
+        static int mode, freed, completed, addresses, dispatched, drawn;
+        static void test_mode(int value) {
+            mode = value;
+            freed = completed = addresses = dispatched = drawn = 0;
+        }
+        static void test_recorded(void) {
+            assert(freed == 0 && completed == 0 && addresses == 2 && dispatched == 1 && drawn == 2);
+        }
+        static void test_code(int code) {
+            assert(code == (mode == 0 ? RESIN_STATUS_SUCCESS : RESIN_STATUS_VULKAN_ERROR));
+        }
+        static void test_completed(void) {
+            assert(freed == (mode == 3 ? 0 : 3));
+            assert(completed == (mode == 3 ? 0 : 1));
+        }
+        static void test_finished(void) { assert(freed == 3 && completed == 1); }
+        static ResinStatus mock_record(ResinGpu *gpu, ResinCommandBuffer **out) {
+            assert(gpu == NULL);
+            *out = (ResinCommandBuffer *)(uintptr_t)3;
+            return RESIN_STATUS_SUCCESS;
+        }
+        static ResinDeviceAddress mock_address(const ResinAllocation *allocation) {
+            assert(freed == 0 && ((uintptr_t)allocation == 1 || (uintptr_t)allocation == 2));
+            ++addresses;
+            return UINT64_C(4294967296) + (uintptr_t)allocation;
+        }
+        static ResinStatus mock_dispatch(ResinCommandBuffer *commands, ResinDeviceAddress root, uint32_t x, uint32_t y, uint32_t z) {
+            assert((uintptr_t)commands == 3 && root == UINT64_C(4294967297));
+            assert(x == 3 && y == 4 && z == 5 && freed == 0 && dispatched++ == 0);
+            return RESIN_STATUS_SUCCESS;
+        }
+        static ResinStatus mock_draw(ResinCommandBuffer *commands, ResinDeviceAddress root, uint32_t count) {
+            assert((uintptr_t)commands == 3 && freed == 0);
+            assert(root == (drawn == 0 ? UINT64_C(4294967298) : 0));
+            assert(count == (drawn++ == 0 ? 6 : 7));
+            return RESIN_STATUS_SUCCESS;
+        }
+        static ResinStatus mock_submit(ResinGpu *gpu, ResinCommandBuffer *commands) {
+            assert(gpu == NULL && (uintptr_t)commands == 3 && mode < 2);
+            assert(freed == 0 && completed++ == 0);
+            return mode == 0 ? RESIN_STATUS_SUCCESS : RESIN_STATUS_VULKAN_ERROR;
+        }
+        static void mock_cancel(ResinGpu *gpu, ResinCommandBuffer *commands) {
+            assert(gpu == NULL);
+            if (!commands) return;
+            assert((uintptr_t)commands == 3 && mode >= 2);
+            assert(freed == 0 && completed++ == 0);
+        }
+        static void mock_free(ResinGpu *gpu, ResinAllocation *allocation) {
+            assert(gpu == NULL && completed == 1);
+            assert((uintptr_t)allocation == 1 || (uintptr_t)allocation == 2);
+            int bit = (int)(uintptr_t)allocation;
+            assert((freed & bit) == 0);
+            freed |= bit;
+        }
+        #define resin_gpu_start_command_recording mock_record
+        #define resin_allocation_device_pointer mock_address
+        #define resin_gpu_dispatch mock_dispatch
+        #define resin_gpu_draw mock_draw
+        #define resin_gpu_submit mock_submit
+        #define resin_gpu_cancel_command_buffer mock_cancel
+        #define resin_gpu_free mock_free
+        "#,
+    );
+    success(&output);
+}
+
+#[test]
+fn failed_recording_does_not_retain_roots_and_foreign_gpu_roots_never_reach_native_calls() {
+    let output = run(
+        r#"
+        export { main };
+        import { "$/gpu.resin", "$/status.resin" };
+        extern "resin_runtime.h" def test_mode(mode: int);
+        extern "resin_runtime.h" def test_failed(code: int);
+        extern "resin_runtime.h" def test_released();
+        extern "resin_runtime.h" def test_finished();
+        def main() -> Result<(), _> = {
+            var gpu = Gpu { handle = Ptr<ResinGpu>(1_ul), window = None };
+            var other = Gpu { handle = Ptr<ResinGpu>(2_ul), window = None };
+            var mode = 0;
+            while (mode < 4) {
+                test_mode(mode);
+                {
+                    var commands = gpu.start_command_recording()?;
+                    {
+                        var root_gpu = if (mode < 2) { gpu } else { other };
+                        var root = GpuBuffer { handle = Ptr<ResinAllocation>(4_ul), gpu = root_gpu };
+                        var result = if (mode == 0 || mode == 2) {
+                            commands.dispatch(root, 1, 1, 1)
+                        } else {
+                            commands.draw(root, 3)
+                        };
+                        var code = match (result) {
+                            ok(value) => { 0 },
+                            err(error) => { RuntimeStatus.code(error) },
+                        };
+                        test_failed(code);
+                    };
+                    test_released();
+                };
+                test_finished();
+                mode := mode + 1;
+            };
+            ok(())
+        };
+        "#,
+        r#"
+        #include <resin_runtime.h>
+        #include <assert.h>
+        static int mode, freed, cancelled, addresses, recorded;
+        static void test_mode(int value) {
+            mode = value;
+            freed = cancelled = addresses = recorded = 0;
+        }
+        static void test_failed(int code) {
+            assert(code == (mode < 2 ? RESIN_STATUS_VULKAN_ERROR : RESIN_STATUS_INVALID_ARGUMENT));
+            assert(freed == 0 && addresses == (mode < 2) && recorded == (mode < 2));
+        }
+        static void test_released(void) { assert(freed == 1 && cancelled == 0); }
+        static void test_finished(void) { assert(freed == 1 && cancelled == 1); }
+        static ResinStatus mock_record(ResinGpu *gpu, ResinCommandBuffer **out) {
+            assert((uintptr_t)gpu == 1);
+            *out = (ResinCommandBuffer *)(uintptr_t)3;
+            return RESIN_STATUS_SUCCESS;
+        }
+        static ResinDeviceAddress mock_address(const ResinAllocation *allocation) {
+            assert((uintptr_t)allocation == 4 && mode < 2 && addresses++ == 0);
+            return 8;
+        }
+        static ResinStatus mock_dispatch(ResinCommandBuffer *commands, ResinDeviceAddress root, uint32_t x, uint32_t y, uint32_t z) {
+            assert((uintptr_t)commands == 3 && root == 8 && x == 1 && y == 1 && z == 1);
+            assert(mode == 0 && recorded++ == 0);
+            return RESIN_STATUS_VULKAN_ERROR;
+        }
+        static ResinStatus mock_draw(ResinCommandBuffer *commands, ResinDeviceAddress root, uint32_t count) {
+            assert((uintptr_t)commands == 3 && root == 8 && count == 3);
+            assert(mode == 1 && recorded++ == 0);
+            return RESIN_STATUS_VULKAN_ERROR;
+        }
+        static void mock_cancel(ResinGpu *gpu, ResinCommandBuffer *commands) {
+            assert((uintptr_t)gpu == 1 && (uintptr_t)commands == 3);
+            assert(freed == 1 && cancelled++ == 0);
+        }
+        static void mock_free(ResinGpu *gpu, ResinAllocation *allocation) {
+            assert((uintptr_t)gpu == (mode < 2 ? 1 : 2) && (uintptr_t)allocation == 4);
+            assert(cancelled == 0 && freed++ == 0);
+        }
+        static void mock_destroy(ResinGpu *gpu) { assert((uintptr_t)gpu == 1 || (uintptr_t)gpu == 2); }
+        #define resin_gpu_start_command_recording mock_record
+        #define resin_allocation_device_pointer mock_address
+        #define resin_gpu_dispatch mock_dispatch
+        #define resin_gpu_draw mock_draw
+        #define resin_gpu_cancel_command_buffer mock_cancel
+        #define resin_gpu_free mock_free
+        #define resin_gpu_destroy mock_destroy
+        "#,
+    );
+    success(&output);
+}
+
+#[test]
+fn gpu_pointer_queries_return_pointers_preserve_interior_offsets_and_propagate_errors() {
+    let output = run(
+        r#"
+        export { main };
+        import { "$/gpu.resin", "$/status.resin" };
+        def main() -> Result<int, _> = {
+            var gpu = Gpu { handle = Ptr<ResinGpu>(0_ul), window = None };
+            var buffer = GpuBuffer { handle = Ptr<ResinAllocation>(1_ul), gpu = gpu };
+            var host = buffer.host_pointer();
+            var base: Ptr<ubyte>;
+            base := buffer.device_pointer();
+            var translated: Ptr<ubyte>;
+            translated := gpu.host_to_device_pointer(host)?;
+            var interior: Ptr<ubyte>;
+            interior := gpu.host_to_device_pointer(Ptr<ubyte>(ulong(host) + 7_ul))?;
+            var code = match (gpu.host_to_device_pointer(Ptr<ubyte>(0_ul))) {
+                ok(value) => { 0 },
+                err(error) => { RuntimeStatus.code(error) },
+            };
+            ok(if (base == Ptr<ubyte>(4294967296_ul) && translated == base
+                && interior == Ptr<ubyte>(4294967303_ul) && code == 1) { 0 } else { 1 })
+        };
+        "#,
+        r#"
+        #include <resin_runtime.h>
+        #include <assert.h>
+        static uint8_t bytes[16];
+        static void *mock_host(const ResinAllocation *allocation) {
+            assert((uintptr_t)allocation == 1);
+            return bytes;
+        }
+        static ResinDeviceAddress mock_device(const ResinAllocation *allocation) {
+            assert((uintptr_t)allocation == 1);
+            return UINT64_C(4294967296);
+        }
+        static ResinStatus mock_address(const ResinGpu *gpu, const void *host, ResinDeviceAddress *out) {
+            assert(gpu == NULL);
+            if (!host) {
+                *out = UINT64_C(4294967296);
+                return RESIN_STATUS_INVALID_ARGUMENT;
+            }
+            assert(host == bytes || host == bytes + 7);
+            *out = UINT64_C(4294967296) + ((const uint8_t *)host - bytes);
+            return RESIN_STATUS_SUCCESS;
+        }
+        static void mock_free(ResinGpu *gpu, ResinAllocation *allocation) {
+            assert(gpu == NULL && (uintptr_t)allocation == 1);
+        }
+        #define resin_allocation_host_pointer mock_host
+        #define resin_allocation_device_pointer mock_device
+        #define resin_gpu_host_to_device_pointer mock_address
+        #define resin_gpu_free mock_free
+        "#,
+    );
+    success(&output);
 }
 
 #[test]

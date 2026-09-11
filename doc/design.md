@@ -49,9 +49,10 @@ pointer graph. A host allocation address is not translated by a cast or by calli
 a helper. Applications obtain mapped host addresses and device virtual addresses
 from the runtime and put the appropriate addresses in each representation.
 
-For example, a record uploaded for device use may contain a device address obtained
-from `gpu_host_to_device_pointer`; writing a mapped host address into that field is invalid, even
-though both have source type `Ptr<T>`. Scalar/record fields must satisfy the shared
+For example, a record uploaded for device use may contain a device pointer obtained
+from `buffer.device_pointer()` or `gpu.host_to_device_pointer(host)`. Writing a
+mapped host address into that field is invalid, even though both have source type
+`Ptr<T>`. Scalar/record fields must satisfy the shared
 layout profile. Host-only types such as function values and unsupported storage
 layouts are rejected from shader code. Aliases, nulls, cycles, and interior addresses
 are preserved as bits; they do not trigger traversal, relocation, or allocation.
@@ -67,7 +68,9 @@ pointers when compiled for a shader and host pointers when compiled for the CPU.
 A pointer/`ulong` cast preserves bits, never changes their address space, and confers
 no ownership or lifetime guarantee. Shader-local address rejection remains explicit.
 
-The caller owns allocation lifetime, upload/readback, synchronization, and visibility.
+Command recordings retain their root buffer handles through synchronous submission
+or cancellation. Callers keep allocations referenced by pointers inside those roots
+alive, and manage upload/readback, synchronization, and visibility.
 Host writes become device inputs only through the runtime's documented synchronization;
 device writes require completion and visibility before host access. Copying a raw pointer
 copies its address without retaining its allocation. Host copies of Arc fields retain
@@ -80,9 +83,9 @@ language change, not an implicit reinterpretation of existing programs.
 The runtime draws on Sebastian Aaltonen's
 [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api), behind a small
 C ABI. Vulkan buffer device addresses implement the current device address profile.
-Host resource handles can coexist with pointer-based shader entries. The
-[GpuBuffer API cleanup proposal](gpu-buffers.md) scopes handle-based command roots
-and the separate question of constructing device pointers inside shared data.
+Commands accept `GpuBuffer` root handles and pass their device addresses to
+pointer-based shader entries. See [GPU buffers](gpu-buffers.md) for command roots,
+borrowed pointers, and the lifetime of allocations referenced inside shared data.
 
 ## Compiler architecture
 
@@ -160,6 +163,6 @@ device code generators.
 
 Start with headless Vulkan compute: runtime creation, host-visible and device-local allocation,
 host-to-device pointer translation, compute-pipeline creation from SPIR-V, command recording,
-dispatch with one root-data GPU address, synchronous submission, and explicit destruction. Add
+dispatch with one root buffer handle, synchronous submission, and automatic owner cleanup. Add
 proper asynchronous queues and synchronization before transfers, textures and their descriptor
 heap, raster pipelines, acceleration structures, and ray queries.
