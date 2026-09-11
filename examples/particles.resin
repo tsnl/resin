@@ -6,7 +6,15 @@ import {
 	"$/graphics.resin",
 };
 
-struct Particle { x: float32, y: float32, z: float32, vx: float32, vy: float32, vz: float32 };
+struct Particle {
+	x: float32,
+	y: float32,
+	z: float32,
+	vx: float32,
+	vy: float32,
+	vz: float32,
+};
+
 struct Params {
 	dt: float32,
 	yaw_cos: float32,
