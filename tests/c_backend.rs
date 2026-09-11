@@ -692,6 +692,29 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
     let mut program = pipeline::load(&path).unwrap();
     let file = &mut program.modules.last_mut().unwrap().file;
     file.stmts.retain(|s| !matches!(&s.val, resin_ast::StmtKind::Function { name, .. } if name.val.as_ref() == "main"));
+    // Exercise the unchanged host helper bodies on stack-backed storage. Their
+    // example signatures use owning GPU views, whose runtime is tested separately.
+    for statement in &mut file.stmts {
+        let resin_ast::StmtKind::Function { name, params, .. } = &mut statement.val else {
+            continue;
+        };
+        if name.val.as_ref() == "initialize" {
+            let resin_ast::TypeKind::App { head, .. } = &mut params[0].1.val else {
+                panic!()
+            };
+            assert_eq!(head.val.as_ref(), "GpuSpan");
+            head.val = "Span".into();
+        } else if name.val.as_ref() == "apply_camera" {
+            let resin_ast::TypeKind::App { arg, .. } = &mut params[1].1.val else {
+                panic!()
+            };
+            let resin_ast::TypeKind::Atom { name } = &mut arg.val else {
+                panic!()
+            };
+            assert_eq!(name.val.as_ref(), "HostParams");
+            name.val = "Params".into();
+        }
+    }
     file.stmts.extend(support::parse(r#"
         def main() -> int = {
             var particle = Particle { x = 0_f, y = 0_f, z = 0_f, vx = 0_f, vy = 0_f, vz = 0_f };

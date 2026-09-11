@@ -385,7 +385,7 @@ fn builtin(
         return Err(unsupported());
     }
     let float = *ty == Ty::Float32;
-    let signed = *ty == Ty::Int32;
+    let signed = matches!(ty, Ty::Int32 | Ty::Int64);
     let boolean = *ty == Ty::Bool;
     let args: Vec<_> = args.iter().map(|arg| arg.id).collect();
     let op = match (name, args.len()) {
@@ -492,6 +492,7 @@ fn literal(context: &mut Context<'_>, ty: &Ty, value: &Value) -> Result<Word, Er
         Value::UInt8 { value } => context.builder.constant_bit32(type_id, *value as u32),
         Value::UInt32 { value } => context.constant_u32(*value),
         Value::UInt64 { value } => context.constant_u64(*value),
+        Value::Int64 { value } => context.builder.constant_bit64(type_id, *value as u64),
         Value::Float32 { value } if value.is_finite() => {
             context.builder.constant_bit32(type_id, value.to_bits())
         }
@@ -516,6 +517,7 @@ fn integer(ty: &Ty) -> Option<(u32, bool)> {
         Ty::UInt32 => (32, false),
         Ty::Int32 => (32, true),
         Ty::UInt64 => (64, false),
+        Ty::Int64 => (64, true),
         _ => return None,
     })
 }
@@ -648,7 +650,7 @@ fn range(bits: u32, signed: bool) -> (i128, i128) {
 
 fn integer_constant(context: &mut Context<'_>, ty: &Ty, value: i128) -> Result<Word, Error> {
     let id = context.ty(ty)?;
-    Ok(if *ty == Ty::UInt64 {
+    Ok(if matches!(ty, Ty::UInt64 | Ty::Int64) {
         context.builder.constant_bit64(id, value as u64)
     } else {
         context.builder.constant_bit32(id, value as u32)

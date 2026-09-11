@@ -73,6 +73,32 @@ impl Function {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instr {
+    /// `[gpu, value] -> [Result<GpuPtr<T>, E>]`: allocate and initialize plain GPU storage.
+    GpuNew { allocator: FunctionId, element: Ty },
+    /// `[gpu, count] -> [Result<GpuSpan<T>, E>]`: allocate checked count * sizeof(T) bytes.
+    GpuAllocate { allocator: FunctionId, element: Ty },
+    /// `[native_gpu, gpu_owner, bytes, alignment, memory] -> [{ value: GpuPtr<ubyte> | None, status: int }]`.
+    /// The runtime retains the GPU owner on success; operands are consumed.
+    GpuAllocateNative,
+    /// `[GPU view, start, length] -> [GpuSpan<T>]`: transfer ownership to a checked slice.
+    GpuSlice,
+    /// `[GPU view] -> [GPU view]`: transfer ownership while removing write permission.
+    GpuReadOnly,
+    /// `[GPU view] -> [GPU view]`: transfer ownership while removing read permission.
+    GpuWriteOnly,
+    /// `[GpuSpan<T>, Span<T>] -> [unit]`: copy readable GPU elements into host storage.
+    GpuCopyTo,
+    /// `[gpu, host root] -> [Result<GpuArguments, E>]`: project and retain shader arguments.
+    GpuProject {
+        allocator: FunctionId,
+        shader: FunctionId,
+    },
+    /// `[arguments, commands, x, y, z] -> [int]`: record a dispatch with retained arguments.
+    GpuArgumentsDispatch,
+    /// `[arguments, commands, count] -> [int]`: record a draw with retained arguments.
+    GpuArgumentsDraw,
+    /// `[GpuSpan<ubyte>, commands, image] -> [int]`: record an image copy retaining its buffer.
+    GpuCopyImage,
     /// `[payload] -> [Arc<payload>]`: transfer the payload into a new shared allocation.
     ArcNew,
     /// `[address] -> [value]`: transfer a pointee without copying or clearing storage.
@@ -120,10 +146,12 @@ pub enum Instr {
     /// `[] -> [address]`: borrow a local's storage without reading or initializing it.
     LocalAddress { local: LocalId },
     /// `[aggregate or address] -> [child or address]`: project by declaration index.
-    /// A value operand copies the child and destroys the aggregate; an address borrows.
+    /// A value operand copies the child and destroys the aggregate; raw addresses borrow.
+    /// GPU addresses transfer their owner into the projected GPU address.
     AccessStatic { index: usize },
     /// `[base, index] -> [element or address]`: index an array, array address, or span.
-    /// Array addresses and spans produce borrowed element addresses.
+    /// Array addresses and ordinary spans produce borrowed element addresses.
+    /// GPU views transfer their owner into the resulting GPU element address.
     AccessDynamic,
     /// `[address] -> [value]`: copy an initialized pointee, retaining managed owners.
     Load,
@@ -295,6 +323,8 @@ pub enum VerifyLocation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerifyErrorKind {
+    InvalidGpuOperation,
+    UnsupportedGpuElement { ty: Ty },
     InvalidVariant,
     InvalidDropHook,
     InvalidForeignSignature,

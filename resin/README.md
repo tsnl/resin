@@ -42,7 +42,7 @@ import { "$/gpu.resin" };
 
 def main() -> Result<(), _> = {
     var gpu = Gpu.new()?;
-    var data = gpu.malloc(256, 16, Memory.default())?;
+    var data = GpuSpan<uint>.allocate(gpu, 64)?;
     var commands = gpu.start_command_recording()?;
     commands.submit()?;
     ok(())
@@ -50,13 +50,18 @@ def main() -> Result<(), _> = {
 ```
 
 Resources use shared owners. Copying a handle retains its allocation, and initialized
-locals release their ownership in reverse scope order, including through `?`.
-GPU resources retain their device; presentation devices retain their window. Recorded
-pipelines, images, and explicit copy buffers stay alive through submission or cancellation.
-Raw shader root addresses carry no owner information, so callers must keep their backing
-allocations alive until work completes.
-Buffer address methods use pointer receivers: even a fresh receiver is retained for
-the containing scope. Returning that raw address beyond the scope still carries no ownership.
+locals release ownership in reverse scope order, including through `?`. GPU views
+retain their allocation and device through indexing, slicing, and field addresses.
+`gpu.new(value)?` infers `GpuPtr<T>`; `GpuSpan<T>.allocate(gpu, count)?` allocates
+uninitialized elements. `.read_only()` and `.write_only()` narrow host access.
+
+Compiler projection `kernel.project(gpu, arguments)?` converts host launch-record
+GPU views to the shader's raw pointers and spans. The resulting `GpuArguments`
+retains all referenced allocations. Commands accept those roots with
+`commands.dispatch(root, x, y, z)` or `commands.draw(root, count)`; rootless graphics
+use `commands.draw(None, count)`. Recorded allocations reject CPU access until
+submission or cancellation. Use `.copy_to(Span<T>)` for host readback without
+escaping a raw pointer into GPU memory. See [GPU buffers](../doc/gpu-buffers.md).
 
 Submission consumes a recording even on failure. `commands.submit()` and
 `commands.cancel()` clear the shared native handle before entering C.
@@ -66,8 +71,9 @@ dropping one already consumed does not cancel it again. Submission waits for GPU
 | Type | Constructors and operations |
 | --- | --- |
 | `Gpu` | `Gpu.new()`, `Gpu.new_at(index)`, `Gpu.new_for_window(window)`, `gpu.malloc(...)`, `gpu.create_compute_pipeline(code)`, `gpu.create_image(...)` |
-| `GpuBuffer` | `buffer.host_pointer()`, `buffer.device_pointer()`, `buffer.size()` |
-| `GpuCommands` | `gpu.start_command_recording()`, `commands.set_pipeline(...)`, `commands.dispatch(...)`, `commands.submit()`, `commands.cancel()` |
+| `GpuPtr<T>` / `GpuSpan<T>` | `gpu.new(value)`, `GpuSpan<T>.allocate(gpu, count)`, `.at(index)`, `.slice(start, length)`, `.read_only()`, `.write_only()` |
+| `GpuArguments` | `kernel.project(gpu, arguments)` |
+| `GpuCommands` | `gpu.start_command_recording()`, `commands.set_pipeline(...)`, `commands.dispatch(root, x, y, z)`, `commands.draw(root, count)`, `commands.submit()`, `commands.cancel()` |
 | `Window` | `Window.new(width, height, String.from_str("Resin"))`, `window.poll_events()`, `window.framebuffer_size()`, input and cursor methods |
 | `ImageData` | `ImageData.read_png(path, channels)`, `image.write_png(path)` |
 | `Console` / `InputLine` | `Console.read_byte()`, `Console.read_line()`, `Console.print(line)` |
@@ -75,12 +81,14 @@ dropping one already consumed does not cancel it again. Submission waits for GPU
 | `RuntimeStatus` | `RuntimeStatus.from_code(code)`, `RuntimeStatus.code(error)`, `RuntimeStatus.message(error)` |
 
 `ImageData.write_pixels(path, width, height, channels, pixels, stride)` writes from
-borrowed memory, such as a GPU readback buffer; the caller keeps that memory valid.
+borrowed host memory; copy GPU output there with `GpuSpan<T>.copy_to` first. The
+caller keeps that memory valid.
 The instance method `image.write_png(path)` uses the loaded image's dimensions and pixels.
 
 Some operations return additional information:
 
-- `Gpu.device_count()` returns the count; `gpu.host_to_device_pointer(host)` returns the address.
+- `Gpu.device_count()` returns the count. `kernel.project(gpu, arguments)` returns
+  an owning shader root whose projected views preserve their interior byte offsets.
 - `ImageData.read_png(path, channels)` returns a shared `ImageData` owner exposing
   `width`, `height`, `channels`, and `pixels`. The final owner releases the pixels;
   `channels = 0` requests the file's channel count.

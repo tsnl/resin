@@ -86,6 +86,15 @@ impl Contexts {
         self.lookup(cursor, name, is_type)
             .map(|id| &self.definitions[id])
     }
+    pub(crate) fn shader_type(&self, source: &Source, offset: usize, name: &str) -> Option<&Ty> {
+        let cursor = self.cursor_at(source, offset)?;
+        let id = self.lookup(cursor, name, false)?;
+        if !self.shaders.contains(&id) {
+            return None;
+        }
+        self.definitions[id].ty.as_ref()
+    }
+
     pub(crate) fn visible(&self, source: &Source, offset: usize) -> Vec<Definition> {
         let Some(cursor) = self.cursor_at(source, offset) else {
             return vec![];

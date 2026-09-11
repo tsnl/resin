@@ -63,3 +63,22 @@ fn source_locations_tolerate_editor_offsets_inside_utf8() {
             .starts_with("memory.resin:2:")
     );
 }
+
+#[test]
+fn gpu_type_formers_lower_with_their_element_annotations() {
+    let source = "def first(values: GpuSpan<uint>) -> GpuPtr<_> = { values.at(0_ul) };";
+    let file = resin_ast::generate(&Document::reparse(source.into(), None)).unwrap();
+    let StmtKind::Function { params, result, .. } = &file.stmts[0].val else {
+        panic!("expected function");
+    };
+    let resin_ast::TypeKind::App { head, arg } = &params[0].1.val else {
+        panic!("expected GPU span type former");
+    };
+    assert_eq!(head.val.as_ref(), "GpuSpan");
+    assert!(matches!(&arg.val, resin_ast::TypeKind::Atom { name } if name.val.as_ref() == "uint"));
+    let resin_ast::TypeKind::App { head, arg } = &result.val else {
+        panic!("expected GPU pointer type former");
+    };
+    assert_eq!(head.val.as_ref(), "GpuPtr");
+    assert!(matches!(arg.val, resin_ast::TypeKind::Infer));
+}

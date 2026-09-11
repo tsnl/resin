@@ -152,6 +152,22 @@ pub enum TermKind {
     ArcNew {
         value: Box<Term>,
     },
+    /// Allocate and initialize a GPU element through the registered allocator.
+    GpuNew {
+        allocator: FunctionId,
+        args: Arguments,
+    },
+    /// Allocate uninitialized GPU elements through the registered allocator.
+    GpuAllocate {
+        allocator: FunctionId,
+        args: Arguments,
+    },
+    /// Project a host launch record into the decorated shader's root layout.
+    GpuProject {
+        allocator: FunctionId,
+        shader: FunctionId,
+        args: Arguments,
+    },
     WeakEmpty {
         pointee: Ty,
     },
@@ -415,8 +431,24 @@ impl Analysis {
             source: source.clone(),
             span: resin_cst::span(token),
         };
+        if document.node_text(token) == "project"
+            && let Some(signature) = self.projection_member(source, document, token.start_byte())
+        {
+            return Some(format!("project: {signature}"));
+        }
         let member = self.member(&location, document.node_text(token))?;
         Some(format!("{}: {}", member.name, member.ty))
+    }
+
+    fn projection_member(
+        &self,
+        source: &Source,
+        document: &resin_cst::Document,
+        offset: usize,
+    ) -> Option<String> {
+        let (name, start) = direct_method_receiver(document, offset)?;
+        let shader = self.contexts.shader_type(source, start, name)?;
+        self.typer.projection_method_label(shader)
     }
 
     fn definition_label(
@@ -491,6 +523,16 @@ impl Analysis {
                 replace,
             })
             .collect::<Vec<_>>();
+        if "project".starts_with(prefix)
+            && let Some(signature) = self.projection_member(source, document, replace.start)
+        {
+            items.push(Completion {
+                name: "project".into(),
+                detail: format!("project: {signature}"),
+                kind: DefinitionKind::Function,
+                replace,
+            });
+        }
         items.sort_by(|a, b| {
             (a.kind != DefinitionKind::Field, &a.name)
                 .cmp(&(b.kind != DefinitionKind::Field, &b.name))
@@ -499,11 +541,38 @@ impl Analysis {
     }
 }
 
+/// A complete or recovered dot must follow a bare declaration name. Field and
+/// call receivers do not inherit a shader declaration's projection operation.
+fn direct_method_receiver(document: &resin_cst::Document, offset: usize) -> Option<(&str, usize)> {
+    let before_member = document.source().get(..offset)?.trim_end();
+    let before_dot = before_member.strip_suffix('.')?.trim_end();
+    let name = document.token(before_dot.len().checked_sub(1)?)?;
+    if name.kind() != "lid" || name.end_byte() != before_dot.len() {
+        return None;
+    }
+    if document.source()[..name.start_byte()]
+        .trim_end()
+        .ends_with('.')
+    {
+        return None;
+    }
+    Some((document.node_text(name), name.start_byte()))
+}
+
 fn builtin_hover(document: &resin_cst::Document, token: resin_cst::Node<'_>) -> Option<String> {
     if !document.reference(token)
         && !matches!(
             token.kind(),
-            "builtin_type" | "Ptr" | "Span" | "Result" | "Arc" | "Weak" | "None"
+            "builtin_type"
+                | "Ptr"
+                | "Span"
+                | "GpuPtr"
+                | "GpuSpan"
+                | "GpuArguments"
+                | "Result"
+                | "Arc"
+                | "Weak"
+                | "None"
         )
     {
         return None;
@@ -614,6 +683,21 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     (
         "Span",
         "Span<T>\n\nA pointer and length describing elements of T. Calling span.at(index: ulong) returns Ptr<T>; shader indexing is unchecked.",
+        DefinitionKind::Type,
+    ),
+    (
+        "GpuPtr",
+        "GpuPtr<T>\n\nAn owning GPU allocation view with checked host access. Indexing and field addresses retain its allocation.",
+        DefinitionKind::Type,
+    ),
+    (
+        "GpuSpan",
+        "GpuSpan<T>\n\nAn owning GPU range. Indexing and slicing preserve its owner and access permissions.",
+        DefinitionKind::Type,
+    ),
+    (
+        "GpuArguments",
+        "GpuArguments\n\nA compiler-projected shader root retaining all referenced GPU allocations.",
         DefinitionKind::Type,
     ),
     (
@@ -799,6 +883,15 @@ impl Analysis {
                 ty: format_type(&signature, typer),
                 kind: DefinitionKind::Function,
                 origin,
+            });
+        }
+        if let Some((name, signature)) = typer.generic_method_label(ty, associated) {
+            members.retain(|member| member.name != name);
+            members.push(Member {
+                name: name.into(),
+                ty: signature,
+                kind: DefinitionKind::Function,
+                origin: None,
             });
         }
         self.fields.insert(location, members);

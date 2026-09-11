@@ -116,6 +116,7 @@ pub struct ResinCommandBuffer {
     submitted: bool,
     timestamp_pool: vk::QueryPool,
     layouts: ImageLayouts,
+    gpu_uses: Vec<crate::gpu_view::GpuUse>,
 }
 
 /// Layouts predicted by this recording, separate from submitted image state.
@@ -346,26 +347,6 @@ impl ResinGpu {
         if release {
             self.heaps[heap][allocation.block] = None;
         }
-    }
-
-    pub fn host_to_device(&self, host_pointer: *const u8) -> Result<u64, ResinStatus> {
-        if host_pointer.is_null() {
-            return Err(ResinStatus::InvalidArgument);
-        }
-        let addr = host_pointer as usize;
-        for heap in &self.heaps {
-            for block in heap.iter().flatten() {
-                if block.host.is_null() {
-                    continue;
-                }
-                let start = block.host as usize;
-                let end = start + block.size as usize;
-                if addr >= start && addr < end {
-                    return Ok(block.device_address + (addr - start) as u64);
-                }
-            }
-        }
-        Err(ResinStatus::InvalidArgument)
     }
 
     fn reserve_heap_slot(&mut self, heap: usize) -> usize {
@@ -644,6 +625,7 @@ impl ResinGpu {
             submitted: false,
             timestamp_pool: vk::QueryPool::null(),
             layouts: ImageLayouts::default(),
+            gpu_uses: Vec::new(),
         })
     }
 
@@ -802,6 +784,10 @@ impl ResinAllocation {
 }
 
 impl ResinImage {
+    pub(crate) fn belongs_to_gpu(&self, gpu: &ResinGpu) -> bool {
+        self.device.handle() == gpu.device.handle()
+    }
+
     pub fn width(&self) -> u32 {
         self.width
     }
@@ -812,6 +798,14 @@ impl ResinImage {
 }
 
 impl ResinCommandBuffer {
+    pub(crate) fn belongs_to_gpu(&self, gpu: &ResinGpu) -> bool {
+        self.device.handle() == gpu.device.handle()
+    }
+
+    pub(crate) fn retain_gpu_use(&mut self, usage: crate::gpu_view::GpuUse) {
+        self.gpu_uses.push(usage);
+    }
+
     /// # Safety
     /// The pipeline must belong to this recording's GPU and remain live through command completion.
     pub unsafe fn set_pipeline(&mut self, pipeline: &ResinPipeline) -> Result<(), ResinStatus> {
@@ -936,6 +930,15 @@ impl ResinCommandBuffer {
         image: &mut ResinImage,
         dst: &ResinAllocation,
     ) -> Result<(), ResinStatus> {
+        unsafe { self.copy_image_to_buffer_offset(image, dst, 0) }
+    }
+
+    pub(crate) unsafe fn copy_image_to_buffer_offset(
+        &mut self,
+        image: &mut ResinImage,
+        dst: &ResinAllocation,
+        offset: usize,
+    ) -> Result<(), ResinStatus> {
         if self.rendering {
             return Err(ResinStatus::InvalidArgument);
         }
@@ -943,10 +946,14 @@ impl ResinCommandBuffer {
             .checked_mul(image.height as usize)
             .and_then(|pixels| pixels.checked_mul(4))
             .ok_or(ResinStatus::InvalidArgument)?;
-        if dst.size < bytes {
+        if offset > dst.size || bytes > dst.size - offset {
             return Err(ResinStatus::InvalidArgument);
         }
-        if !dst.buffer_offset.is_multiple_of(4) {
+        let buffer_offset = dst
+            .buffer_offset
+            .checked_add(offset as u64)
+            .ok_or(ResinStatus::InvalidArgument)?;
+        if !buffer_offset.is_multiple_of(4) {
             return Err(ResinStatus::InvalidArgument);
         }
         cmd_memory_barrier(&self.device, self.handle);
@@ -965,7 +972,7 @@ impl ResinCommandBuffer {
             vk::AccessFlags2::TRANSFER_READ,
         );
         let region = vk::BufferImageCopy::default()
-            .buffer_offset(dst.buffer_offset)
+            .buffer_offset(buffer_offset)
             .image_subresource(
                 vk::ImageSubresourceLayers::default()
                     .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -1078,8 +1085,9 @@ impl Drop for ResinCommandBuffer {
             return;
         }
         if self.submitted && unsafe { self.device.device_wait_idle() }.is_err() {
-            self.handle = vk::CommandBuffer::null();
-            return;
+            // Source cleanup also releases pipelines and images. Returning here
+            // could destroy live GPU resources even if owning views were leaked.
+            crate::host::fail("GPU submission failed and completion could not be confirmed");
         }
         unsafe {
             self.device

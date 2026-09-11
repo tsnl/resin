@@ -1,6 +1,9 @@
 export { kernel, main };
 
-import { "$/gpu.resin", "$/image.resin" };
+import { "$/gpu.resin", "$/image.resin", "$/status.resin" };
+
+extern "stdlib.h" def malloc(bytes: ulong) -> Ptr<ubyte>;
+extern "stdlib.h" def free(memory: Ptr<ubyte>);
 
 struct Root { width: uint, height: uint, pixels: Span<uint> };
 
@@ -20,27 +23,30 @@ def main() -> Result<(), _> = {
 
 	var pipeline = gpu.create_compute_pipeline(kernel.spirv)?;
 
-	var root = gpu.malloc(size_of(Root), align_of(Root), Memory.default())?;
-	var data = Ptr<Root>(root.host_pointer());
-	data.* := Root {
-		width = 256_ui,
-		height = 256_ui,
-		pixels = Span<uint> { data = Ptr<uint>(0_ul), length = 0_ul },
-	};
-
-	var count = ulong(data.width) * ulong(data.height);
-	var pixels = gpu.malloc(count * size_of(uint), align_of(uint), Memory.default())?;
-	data.pixels := Span<uint> { data = Ptr<uint>(pixels.device_pointer()), length = count };
+	var width = 256_ui;
+	var height = 256_ui;
+	var count = ulong(width) * ulong(height);
+	var pixels = GpuSpan<uint>.allocate(gpu, count)?;
+	var root = kernel.project(gpu, { width = width, height = height, pixels = pixels })?;
 	var commands = gpu.start_command_recording()?;
 
 	commands.set_pipeline(pipeline)?;
 	// Compute shaders use 64 invocations per workgroup.
-	var groups = uint((data.pixels.length + 63_ul) / 64_ul);
-	commands.dispatch(root.device_pointer(), groups, 1, 1)?;
+	var groups = uint((pixels.length + 63_ul) / 64_ul);
+	commands.dispatch(root, groups, 1, 1)?;
 	commands.submit()?;
 
 	var path = "gradient.png";
-	ImageData.write_pixels(path.data, data.width, data.height, 4, pixels.host_pointer(), 0)?;
+	var host = malloc(count * size_of(uint));
+	if (ulong(host) == 0_ul) {
+		err(OutOfMemory {})
+	} else {
+		ok(())
+	}?;
+	pixels.copy_to(Span<uint> { data = Ptr<uint>(host), length = count });
+	var written = ImageData.write_pixels(path.data, width, height, 4, host, 0);
+	free(host);
+	written?;
 	print("wrote gradient.png\n");
 	ok(())
 };

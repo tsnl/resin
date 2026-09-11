@@ -27,6 +27,18 @@ struct Params {
 	particles: Span<Particle>,
 };
 
+struct HostParams {
+	dt: float32,
+	yaw_cos: float32,
+	yaw_sin: float32,
+	pitch_cos: float32,
+	pitch_sin: float32,
+	zoom: float32,
+	aspect: float32,
+	radius: float32,
+	particles: GpuSpan<Particle>,
+};
+
 // Relax the initial random velocities toward the Lorenz attractor's flow.
 // Two small, fixed substeps keep the simulation stable, independently of camera motion.
 def advance(p: Particle, dt: float32) -> Particle = {
@@ -201,7 +213,7 @@ def random(state: Ptr<uint>) -> float32 = {
 	float32(x & 0xffffff_ui) / 16777216.0_f
 };
 
-def initialize(particles: Span<Particle>, seed: uint) -> () = {
+def initialize(particles: GpuSpan<Particle>, seed: uint) -> () = {
 	var state = seed | 1_ui;
 	var index = 0_ul;
 	while (index < particles.length) {
@@ -248,7 +260,7 @@ def move_camera(camera: Ptr<Camera>, dx: float64, dy: float64, scroll: float64) 
 	camera.zoom := clamp(camera.zoom * expf(clamp(float32(scroll), -20.0_f, 20.0_f) * 0.12_f), 0.35_f, 3.0_f);
 };
 
-def apply_camera(camera: Camera, params: Ptr<Params>) = {
+def apply_camera(camera: Camera, params: Ptr<HostParams>) = {
 	params.yaw_cos := cosf(camera.yaw);
 	params.yaw_sin := sinf(camera.yaw);
 	params.pitch_cos := cosf(camera.pitch);
@@ -267,16 +279,12 @@ def main() -> Result<(), _> = {
 
 	var graphics = gpu.create_graphics_pipeline(vertex.spirv, fragment.spirv)?;
 
-	// One shared 24 MB buffer: initialization writes host memory; compute and graphics use its device address.
-	var particles = gpu.malloc(ulong(count) * size_of(Particle), align_of(Particle), Memory.default())?;
+	// Initialization and shader projection share one owned particle allocation.
+	var particles = GpuSpan<Particle>.allocate(gpu, ulong(count))?;
 
-	var root = gpu.malloc(size_of(Params), align_of(Params), Memory.default())?;
-
-	var host_particles = Span<Particle> { data = Ptr<Particle>(particles.host_pointer()), length = ulong(count) };
 	var seed = 0x9e3779b9_ui;
-	initialize(host_particles, seed);
-	var params = Ptr<Params>(root.host_pointer());
-	params.* := Params {
+	initialize(particles, seed);
+	var params = HostParams {
 		dt = 0.005_f,
 		yaw_cos = 1.0_f,
 		yaw_sin = 0.0_f,
@@ -285,9 +293,8 @@ def main() -> Result<(), _> = {
 		zoom = 1.0_f,
 		aspect = 0.625_f,
 		radius = 0.004_f,
-		particles = Span<Particle> { data = Ptr<Particle>(particles.device_pointer()), length = ulong(count) },
+		particles = particles,
 	};
-	var address = root.device_pointer();
 	var image = gpu.create_image(1280, 800)?;
 
 	var paused = 1 == 0;
@@ -305,7 +312,7 @@ def main() -> Result<(), _> = {
 		};
 		if (reset.pressed) {
 			seed := seed * 1664525_ui + 1013904223_ui;
-			initialize(host_particles, seed);
+			initialize(particles, seed);
 		};
 		var cursor = mouse_position(window.cursor_position()?);
 		var left = window.mouse_button_state(Window.mouse_buttons().left);
@@ -330,16 +337,30 @@ def main() -> Result<(), _> = {
 		};
 		previous_cursor := cursor;
 		was_dragging := dragging;
-		apply_camera(camera, params);
+		apply_camera(camera, &params);
+		var root = kernel.project(
+			gpu,
+			{
+				dt = params.dt,
+				yaw_cos = params.yaw_cos,
+				yaw_sin = params.yaw_sin,
+				pitch_cos = params.pitch_cos,
+				pitch_sin = params.pitch_sin,
+				zoom = params.zoom,
+				aspect = params.aspect,
+				radius = params.radius,
+				particles = params.particles,
+			}
+		)?;
 		var commands = gpu.start_command_recording()?;
 
 		if (!paused) {
 			commands.set_pipeline(compute)?;
-			commands.dispatch(address, (count + 63_ui) / 64_ui, 1, 1)?;
+			commands.dispatch(root, (count + 63_ui) / 64_ui, 1, 1)?;
 		};
 		commands.begin_rendering(image, 0.004_f, 0.008_f, 0.02_f, 1.0_f)?;
 		commands.set_pipeline(graphics)?;
-		commands.draw(address, count * 24_ui)?;
+		commands.draw(root, count * 24_ui)?;
 		commands.end_rendering()?;
 		commands.submit()?;
 		gpu.present(image)?;

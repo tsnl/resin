@@ -9,7 +9,9 @@ mod entry;
 mod foreign;
 mod formatting;
 mod function;
+mod gpu;
 mod ops;
+mod projection;
 mod types;
 mod value;
 
@@ -58,6 +60,7 @@ fn includes(module: &Module) -> Vec<String> {
         "stdlib.h",
         "math.h",
         "float.h",
+        "string.h",
     ]
     .into_iter()
     .map(String::from)

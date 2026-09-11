@@ -378,8 +378,9 @@ Buffers make the host/device boundary concrete. `Span<T>` pairs an address with
 a length; both spans and arrays return a checked element pointer through `buffer(index)`.
 Use `buffer(index).*` to read or write it. Raw pointer arithmetic requires an explicit
 conversion to `ulong` and operates on byte addresses. The host allocates memory,
-writes root data, and passes its device address when dispatching or drawing.
-Shader entry wrappers interpret that root according to their supported
+writes root data, and passes its `GpuBuffer` handle to `commands.dispatch` or
+`commands.draw`. Recording obtains the device address internally; shader entry
+wrappers receive it as their declared `Ptr<T>` root according to their supported
 interface. [target layout helpers](crates/resin-codegen/src/layout.rs) keeps supported buffer
 layouts consistent between C and SPIR-V; start there when investigating a field
 offset or alignment mismatch.
@@ -389,7 +390,10 @@ convenience API are not ownership-safe GPU abstractions: resources must remain
 alive while commands use them. Standard-library wrappers retain shared owners and
 propagate failures with `?`. `commands.submit()` and cancellation clear the
 shared native handle; automatic destruction cancels unfinished recordings.
-Raw shader root addresses do not retain their backing allocations.
+Recordings retain root buffers through synchronous submission or cancellation.
+Pointers and spans stored inside a root do not retain their backing allocations;
+callers keep those allocations alive until work completes. See
+[GPU buffers](doc/gpu-buffers.md) for command roots and borrowed pointer queries.
 Shader bodies describe individual invocations;
 the compiler does not synthesize workgroup-local storage or barriers.
 

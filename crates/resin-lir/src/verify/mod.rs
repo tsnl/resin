@@ -5,6 +5,7 @@ use resin_types::prelude::*;
 
 mod error;
 mod flow;
+mod gpu;
 mod instructions;
 mod module;
 mod rules;
@@ -57,6 +58,17 @@ pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
         | Instr::Eliminate { .. }
         | Instr::NumericCast { .. }
         | Instr::PointerCast { .. } => StackEffect { pops: 1, pushes: 1 },
+        Instr::GpuReadOnly | Instr::GpuWriteOnly => StackEffect { pops: 1, pushes: 1 },
+        Instr::GpuNew { .. }
+        | Instr::GpuAllocate { .. }
+        | Instr::GpuCopyTo
+        | Instr::GpuProject { .. } => StackEffect { pops: 2, pushes: 1 },
+        Instr::GpuSlice | Instr::GpuArgumentsDraw | Instr::GpuCopyImage => {
+            StackEffect { pops: 3, pushes: 1 }
+        }
+        Instr::GpuAllocateNative | Instr::GpuArgumentsDispatch => {
+            StackEffect { pops: 5, pushes: 1 }
+        }
         Instr::AccessDynamic | Instr::Store | Instr::Replace => StackEffect { pops: 2, pushes: 1 },
         Instr::ForgetLocal { .. } | Instr::DropLocal { .. } => StackEffect { pops: 0, pushes: 0 },
         Instr::Discard | Instr::SetLocal { .. } => StackEffect { pops: 1, pushes: 0 },

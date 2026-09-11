@@ -1269,6 +1269,14 @@
             "named": false
           },
           {
+            "type": "GpuPtr",
+            "named": false
+          },
+          {
+            "type": "GpuSpan",
+            "named": false
+          },
+          {
             "type": "Ptr",
             "named": false
           },
@@ -1491,6 +1499,18 @@
   },
   {
     "type": "Arc",
+    "named": false
+  },
+  {
+    "type": "GpuArguments",
+    "named": false
+  },
+  {
+    "type": "GpuPtr",
+    "named": false
+  },
+  {
+    "type": "GpuSpan",
     "named": false
   },
   {

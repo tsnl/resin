@@ -8,13 +8,13 @@ use super::Initialization;
 
 pub(super) enum Operand {
     Value(Ty),
-    Place(Ty),
+    Place { ty: Ty, gpu: bool },
 }
 
 impl Generator {
     pub(super) fn gen_assign(&mut self, place: &Term, value: &Term) -> Result<Ty, LowerError> {
         let place_ty = self.gen_place(place)?;
-        let Ty::Pointer { pointee } = place_ty else {
+        let (Ty::Pointer { pointee } | Ty::GpuPointer { pointee }) = place_ty else {
             return Err(LowerError::typing(
                 place.span,
                 TypeError {
@@ -41,7 +41,7 @@ impl Generator {
         self.check_place_initialized(base)?;
         let base = self.gen_operand(base)?;
         match self.gen_field_operand(base, access)? {
-            Operand::Place(ty) => {
+            Operand::Place { ty, .. } => {
                 self.emit(Instr::Load);
                 Ok(ty)
             }
@@ -51,8 +51,14 @@ impl Generator {
 
     pub(super) fn gen_place(&mut self, term: &Term) -> Result<Ty, LowerError> {
         match self.gen_operand(term)? {
-            Operand::Place(ty) => Ok(Ty::Pointer {
-                pointee: Box::new(ty),
+            Operand::Place { ty, gpu } => Ok(if gpu {
+                Ty::GpuPointer {
+                    pointee: Box::new(ty),
+                }
+            } else {
+                Ty::Pointer {
+                    pointee: Box::new(ty),
+                }
             }),
             Operand::Value(_) => Err(LowerError {
                 span: term.span,
@@ -71,7 +77,7 @@ impl Generator {
                 self.emit(Instr::LocalAddress {
                     local: binding.local,
                 });
-                Ok(Operand::Place(ty))
+                Ok(Operand::Place { ty, gpu: false })
             }
             TermKind::Field { base, access } => {
                 self.check_place_initialized(base)?;
@@ -86,7 +92,10 @@ impl Generator {
                     self.gen_term(pointer, None)?
                 };
                 let pointee = term.ty.clone();
-                Ok(Operand::Place(pointee))
+                Ok(Operand::Place {
+                    ty: pointee,
+                    gpu: matches!(checked, Ty::GpuPointer { .. }),
+                })
             }
             _ => self.gen_term(term, None).map(Operand::Value),
         }
@@ -97,12 +106,13 @@ impl Generator {
         base: Operand,
         access: &FieldAccess,
     ) -> Result<Operand, LowerError> {
-        let (mut base_ty, mut is_place) = match base {
-            Operand::Value(ty) => (ty, false),
-            Operand::Place(ty) => (ty, true),
+        let (mut base_ty, mut is_place, mut gpu) = match base {
+            Operand::Value(ty) => (ty, false, false),
+            Operand::Place { ty, gpu } => (ty, true, gpu),
         };
         loop {
-            if let Ty::Pointer { pointee } = &base_ty {
+            if let Ty::Pointer { pointee } | Ty::GpuPointer { pointee } = &base_ty {
+                gpu = matches!(base_ty, Ty::GpuPointer { .. });
                 let pointee = *pointee.clone();
                 if is_place {
                     self.emit(Instr::Load);
@@ -141,7 +151,10 @@ impl Generator {
             index: access.index,
         });
         Ok(if is_place {
-            Operand::Place(access.ty.clone())
+            Operand::Place {
+                ty: access.ty.clone(),
+                gpu,
+            }
         } else {
             Operand::Value(access.ty.clone())
         })

@@ -202,17 +202,30 @@ implementation. `T | None` is available in shader-local values when `T` is compa
 
 Managed handles use an opaque 64-bit slot in shared layouts. Their pointee layouts
 need not be GPU-compatible. No pointer graph is translated or mirrored across the
-host/device boundary. Raw GPU addresses and spans retain their existing contracts.
+host/device boundary. Compiler projection translates owning GPU views in a host launch record into the
+shader's raw pointer/span representation, retaining all referenced allocations.
 
 ## Standard library
 
-`Gpu`, `GpuBuffer`, `GpuImage`, `GpuPipeline`, `GpuCommands`, `Window`, `InputLine`,
+`Gpu`, `GpuPtr<T>`, `GpuSpan<T>`, `GpuArguments`, `GpuImage`, `GpuPipeline`,
+`GpuCommands`, `Window`, `InputLine`,
 and `ImageData` use shared owners. Copying them retains ownership. GPU resources
 retain their device; a presentation device retains its window. Recorded pipelines,
-images, and explicit copy buffers remain owned until synchronous submission or
-cancellation. Submit/cancel clear the shared native command handle, so aliases see
-the same consumed state. Raw addresses passed as shader roots cannot carry owner
-information: callers must keep their backing allocations alive through submission.
+images, copy buffers, and shader root buffers remain owned until synchronous
+submission, cancellation, or destruction of the unfinished recording. Submit/cancel
+clear the shared native command handle, so aliases see the same consumed state.
+Submission errors return normally when device completion can be confirmed. If both
+submission waiting and the fallback device-idle wait fail, the runtime terminates
+before releasing resources that may still be in use.
+
+`commands.dispatch(root, x, y, z)` and `commands.draw(root, count)` take compiler
+projected `GpuArguments` and retain the root and its referenced allocations after
+successful recording. `commands.draw(None, count)` supplies no root. Shader entry
+parameters remain raw `Ptr<T>` values. Host `GpuPtr` and `GpuSpan` values are owning
+GPU views, and indexing, slicing, copying, and taking a field address preserve their
+owner. Allocation-wide recording state rejects CPU access until work completes or
+is canceled; per-view permissions additionally control host reads and writes.
+See [GPU buffers](gpu-buffers.md) for projection and layout requirements.
 
 The standard library and its examples no longer require `gpu_destroy`, `gpu_free`,
 `gpu_free_pipeline`, `gpu_free_image`, `window_destroy`, `free_input`, or `image_free`.

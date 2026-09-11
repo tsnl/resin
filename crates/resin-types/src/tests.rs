@@ -297,3 +297,138 @@ fn string_views_expose_bytes_without_accepting_arbitrary_storage() {
             .is_err()
     );
 }
+
+#[test]
+fn gpu_views_preserve_ownership_and_reject_raw_pointer_conversions() {
+    let context = TyperContext::new();
+    let gpu = Ty::GpuPointer {
+        pointee: Box::new(Ty::UInt32),
+    };
+    let span = Ty::GpuSpan {
+        element: Box::new(Ty::UInt32),
+    };
+    assert_eq!(gpu.deref_target(), Some(&Ty::UInt32));
+    assert_eq!(context.type_field(&span, "data").unwrap().ty, gpu);
+    assert_eq!(context.type_field(&span, "length").unwrap().ty, Ty::UInt64);
+    assert!(context.type_field(&gpu, "host").is_err());
+    for ty in [&gpu, &span] {
+        assert!(ty.needs_drop(&[]));
+        assert!(record(ty.clone()).needs_drop(&[]));
+        assert!(!ty.foreign_value());
+        assert!(layout::layout(&[], ty).is_err());
+    }
+    for other in [
+        Ty::UInt64,
+        Ty::Pointer {
+            pointee: Box::new(Ty::UInt32),
+        },
+        Ty::GpuPointer {
+            pointee: Box::new(Ty::UInt64),
+        },
+    ] {
+        assert!(!gpu.pointer_cast(&other));
+        assert!(!other.pointer_cast(&gpu));
+        assert!(context.explicit_conversion(&gpu, &other).is_err());
+        assert!(context.explicit_conversion(&other, &gpu).is_err());
+    }
+    let wider = Ty::GpuPointer {
+        pointee: Box::new(Ty::union_of([Ty::UInt32, Ty::UInt64])),
+    };
+    assert!(!gpu.widens_to(&wider));
+    assert!(
+        context
+            .ascribe(&span.view_record().unwrap(), &span)
+            .is_err()
+    );
+}
+
+#[test]
+fn gpu_element_storage_excludes_references_and_custom_destruction() {
+    let mut context = TyperContext::new();
+    let id = context.create_type("Element", record(Ty::UInt32)).unwrap();
+    let element = Ty::Defined { definition: id };
+    let array = Ty::Array {
+        element: Box::new(element.clone()),
+        length: 8,
+    };
+    assert!(array.gpu_element(context.definitions()));
+    context.define_drop(id, FunctionId::from_index(0));
+    assert!(!array.gpu_element(context.definitions()));
+    for ty in [
+        Ty::Pointer {
+            pointee: Box::new(Ty::UInt32),
+        },
+        Ty::Span {
+            element: Box::new(Ty::UInt32),
+        },
+        Ty::GpuPointer {
+            pointee: Box::new(Ty::UInt32),
+        },
+        Ty::GpuSpan {
+            element: Box::new(Ty::UInt32),
+        },
+        Ty::Arc {
+            pointee: Box::new(Ty::UInt32),
+        },
+        Ty::Array {
+            element: Box::new(Ty::UInt32),
+            length: 0,
+        },
+        Ty::Bool,
+        Ty::Str,
+    ] {
+        assert!(!ty.gpu_element(&[]));
+        assert!(!record(ty).gpu_element(&[]));
+    }
+}
+
+#[test]
+fn gpu_types_intern_components_and_render_source_spellings() {
+    let span = Ty::GpuSpan {
+        element: Box::new(Ty::UInt32),
+    };
+    let pointer = Ty::GpuPointer {
+        pointee: Box::new(Ty::UInt32),
+    };
+    let mut table = TypeTable::default();
+    table.intern(&span);
+    for ty in [&span, &pointer, &Ty::UInt32, &Ty::UInt64] {
+        assert!(table.id(ty).is_some());
+    }
+    assert_eq!(format_type(&span, &table), "GpuSpan<uint>");
+    assert_eq!(format_type(&pointer, &table), "GpuPtr<uint>");
+}
+
+#[test]
+fn gpu_arguments_are_opaque_managed_values_and_projection_is_type_directed() {
+    let arguments = Ty::GpuArguments;
+    let context = TyperContext::new();
+    assert!(arguments.needs_drop(&[]));
+    assert!(!arguments.foreign_value());
+    assert!(arguments.view_record().is_none());
+    assert!(arguments.deref_target().is_none());
+    assert!(layout::layout(&[], &arguments).is_err());
+    assert!(
+        context
+            .explicit_conversion(&Ty::UInt64, &arguments)
+            .is_err()
+    );
+    let root = record(Ty::Span {
+        element: Box::new(Ty::Int32),
+    });
+    let table = [TypeDef::new("Root", root)];
+    let root = Ty::Defined {
+        definition: TypeId::from_index(0),
+    };
+    assert_eq!(
+        root.gpu_projection(&table),
+        Some(record(Ty::GpuSpan {
+            element: Box::new(Ty::Int32)
+        }))
+    );
+    let graph = Ty::Pointer {
+        pointee: Box::new(root),
+    };
+    assert_eq!(graph.gpu_projection(&table), None);
+    assert_eq!(Ty::GpuArguments.gpu_projection(&[]), None);
+}

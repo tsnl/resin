@@ -36,17 +36,13 @@ fn compute_gradient() {
             .malloc(size_of::<Root>(), 8, ResinMemory::Default)
             .expect("malloc root");
 
-        let pixels_device = gpu
-            .host_to_device(pixels.host_pointer())
-            .expect("pixels device address");
+        let pixels_device = pixels.device_pointer();
         root.host_pointer().cast::<Root>().write(Root {
             width: WIDTH,
             height: HEIGHT,
             pixels: pixels_device,
         });
-        let root_device = gpu
-            .host_to_device(root.host_pointer())
-            .expect("root device address");
+        let root_device = root.device_pointer();
 
         let mut commands = gpu.start_command_recording().expect("record");
         commands.set_pipeline(&pipeline).expect("set pipeline");

@@ -49,6 +49,43 @@ impl Generator {
                 self.gen_term(value, Some(pointee))?;
                 self.emit(Instr::ArcNew);
             }
+            TermKind::GpuNew { allocator, args } => {
+                let Ty::Result { value, .. } = expected else {
+                    unreachable!("GPU allocation result")
+                };
+                let Ty::GpuPointer { pointee } = &**value else {
+                    unreachable!("GPU allocation pointer")
+                };
+                self.gen_arguments(args)?;
+                self.emit(Instr::GpuNew {
+                    allocator: *allocator,
+                    element: *pointee.clone(),
+                });
+            }
+            TermKind::GpuAllocate { allocator, args } => {
+                let Ty::Result { value, .. } = expected else {
+                    unreachable!("GPU allocation result")
+                };
+                let Ty::GpuSpan { element } = &**value else {
+                    unreachable!("GPU allocation span")
+                };
+                self.gen_arguments(args)?;
+                self.emit(Instr::GpuAllocate {
+                    allocator: *allocator,
+                    element: *element.clone(),
+                });
+            }
+            TermKind::GpuProject {
+                allocator,
+                shader,
+                args,
+            } => {
+                self.gen_arguments(args)?;
+                self.emit(Instr::GpuProject {
+                    allocator: *allocator,
+                    shader: *shader,
+                });
+            }
             TermKind::WeakEmpty { pointee } => self.emit(Instr::WeakEmpty {
                 pointee: pointee.clone(),
             }),
@@ -127,6 +164,15 @@ impl Generator {
             }),
             Intrinsic::Replace => self.emit(Instr::Replace),
             Intrinsic::Index => self.emit(Instr::AccessDynamic),
+            Intrinsic::GpuIndex => self.emit(Instr::AccessDynamic),
+            Intrinsic::GpuSlice => self.emit(Instr::GpuSlice),
+            Intrinsic::GpuReadOnly => self.emit(Instr::GpuReadOnly),
+            Intrinsic::GpuWriteOnly => self.emit(Instr::GpuWriteOnly),
+            Intrinsic::GpuAllocateNative => self.emit(Instr::GpuAllocateNative),
+            Intrinsic::GpuCopyTo => self.emit(Instr::GpuCopyTo),
+            Intrinsic::GpuArgumentsDispatch => self.emit(Instr::GpuArgumentsDispatch),
+            Intrinsic::GpuArgumentsDraw => self.emit(Instr::GpuArgumentsDraw),
+            Intrinsic::GpuCopyImage => self.emit(Instr::GpuCopyImage),
             Intrinsic::ArcGet => {
                 self.emit(Instr::Load);
                 self.emit(Instr::ArcData);

@@ -768,8 +768,10 @@ Shader objects are deduplicated and retained with their generated project;
 imported helper changes invalidate them. Copied executables need the Vulkan loader/device,
 but neither Resin, source files, nor `spirv-opt` at runtime.
 
-Shaders receive application data through the root address passed to `gpu_dispatch` or
-`gpu_draw`. Add a typed pointer as the second tuple element:
+Build shader arguments with the compiler builtin `kernel.project(gpu, arguments)?`,
+then pass the resulting `GpuArguments` to `commands.dispatch(root, x, y, z)` or
+`commands.draw(root, count)`. Shader entries keep a typed pointer as their second
+parameter:
 
 ```resin
 struct Params { values: Span<float32>, scale: float32 };
@@ -794,21 +796,44 @@ The entry interfaces are:
   Position has `float32` fields `x, y, z, w`; Color has `r, g, b, a`, in those orders.
 - Fragment takes Color, optionally paired with `Ptr<T>`, and returns Color.
 
+Allocate typed GPU storage with `gpu.new(value)?` (an inferred `GpuPtr<T>`) or
+`GpuSpan<T>.allocate(gpu, count)?`. A host launch record replaces shader `Ptr<T>`
+and `Span<T>` fields with `GpuPtr<T>` and `GpuSpan<T>` values:
+
+```resin
+var values = GpuSpan<float32>.allocate(gpu, 1024)?;
+var index = 0_ul;
+while (index < values.length) {
+    values.at(index).* := 1.0_f;
+    index := index + 1_ul;
+};
+var root = kernel.project(gpu, { values = values, scale = 2.0_f })?;
+commands.dispatch(root, 16, 1, 1)?;
+```
+
+Projection checks the shader root layout, translates owning views internally, and
+retains every referenced allocation. Use `commands.draw(None, count)` for graphics
+shaders without a root. Successful recording retains arguments and allocations
+through synchronous submission or cancellation. They must belong to the recording's
+GPU. See [GPU buffers](doc/gpu-buffers.md).
 
 Device pointers support loads, stores, record fields, explicit casts, and passing to
-ordinary helpers. Shared storage supports `ubyte`, `int`, `uint`, `float32`, `ulong`, pointers, nonempty
+ordinary helpers. Shared storage supports `ubyte`, `int`, `uint`, `long`, `float32`, `ulong`, pointers, nonempty
 records, arrays, spans, and nominal wrappers. Scalars align to their size; records align to their largest
 member, with member and trailing padding. This matches C and Vulkan's base alignment rules without requiring
 scalar-block-layout support. Generated C asserts sizes, alignments, and member offsets.
 Spans occupy 16 bytes (address and length) with alignment 8; arrays retain their element alignment.
 Storage containing booleans, unit, or other numeric widths is rejected for now.
 
-Use `buffer.host_pointer()` to initialize mapped data on the CPU. Store
-`buffer.device_pointer()` addresses in records consumed by shaders; these are not
-interchangeable with host addresses. Pointer types do not enforce the address space or bounds.
-Calling the same function on the CPU requires a root containing host pointers instead.
+Host `GpuPtr` and `GpuSpan` operations retain their allocation, including indexing,
+slicing, and field addresses. `.read_only()` and `.write_only()` narrow per-view
+access permissions. Host accesses check bounds, alignment, mapping, permissions,
+and pending recorded GPU use. `.copy_to(Span<T>)` copies into caller-owned host
+memory. GPU views cannot be converted to raw `Ptr` values; the compiler's shader
+projection is the host-to-device address conversion boundary. GPU buffer elements
+must have a shared layout without pointers, spans, owners, or drop hooks.
 
-Shader bodies support `ubyte`, 32-bit numbers, `ulong`, booleans, records, nominal types, local mutation,
+Shader bodies support `ubyte`, 32-bit numbers, `long`, `ulong`, booleans, records, nominal types, local mutation,
 branches, loops, and direct calls to named Resin helpers. Foreign calls, recursion,
 indirect calls, and integer division/remainder/shifts are rejected. Arrays and spans support
 unchecked `.at()` indexing. Local addresses
@@ -955,10 +980,10 @@ operands are checked but not executed, as with C `sizeof`; side effects do not r
 Holes in an explicit type argument are rejected. Empty arrays/records,
 booleans, function values, and other types outside the shared profile are rejected.
 
-For example, allocate one record with
-`gpu.malloc(size_of(Params), align_of(Params), Memory.default())?`.
-For N elements, multiplication remains ordinary `ulong` arithmetic: validate a dynamic
-count before multiplying. No unchecked element-count allocation helper is introduced.
+Use `gpu.new(value)?` to allocate and initialize one GPU element, with its type
+inferred from the value or result context. `GpuSpan<T>.allocate(gpu, count)?` allocates
+uninitialized elements and checks the multiplication of count by element size.
+The byte allocator `gpu.malloc(bytes, alignment, memory)?` returns `GpuPtr<ubyte>`.
 
 ### Explicit numeric conversions
 

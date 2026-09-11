@@ -892,7 +892,15 @@ impl<'a> AstGen<'a> {
         let text = if node.is_missing()
             || !matches!(
                 node.kind(),
-                "lid" | "uid" | "builtin_type" | "Ptr" | "Span" | "Arc" | "Weak"
+                "lid"
+                    | "uid"
+                    | "builtin_type"
+                    | "Ptr"
+                    | "Span"
+                    | "GpuPtr"
+                    | "GpuSpan"
+                    | "Arc"
+                    | "Weak"
             ) {
             ""
         } else {

@@ -57,6 +57,8 @@ impl Decoder<'_> {
                 let arg = self.ty(arg, infer)?;
                 let head = match head.val.as_ref() {
                     "Ptr" => Head::Pointer,
+                    "GpuPtr" => Head::GpuPointer,
+                    "GpuSpan" => Head::GpuSpan,
                     "Arc" => Head::Arc,
                     "Weak" => Head::Weak,
                     "Span" => Head::Span,
@@ -115,6 +117,7 @@ fn builtin_ty(name: &str) -> Option<Ty> {
     Some(match name {
         "Never" => Ty::union([]),
         "None" => Ty::None,
+        "GpuArguments" => Ty::GpuArguments,
         "bool" => Ty::Bool,
         "str" => Ty::Str,
         "sbyte" => Ty::Int8,

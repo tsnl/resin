@@ -65,10 +65,13 @@ pub(super) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), D
                 return Err(DefinitionError::NonRecord(*definition));
             }
         }
-        Ty::Pointer { pointee } | Ty::Arc { pointee } | Ty::Weak { pointee } => {
-            check_references(definitions, pointee)?
+        Ty::Pointer { pointee }
+        | Ty::GpuPointer { pointee }
+        | Ty::Arc { pointee }
+        | Ty::Weak { pointee } => check_references(definitions, pointee)?,
+        Ty::Span { element } | Ty::GpuSpan { element } | Ty::Array { element, .. } => {
+            check_references(definitions, element)?
         }
-        Ty::Span { element } | Ty::Array { element, .. } => check_references(definitions, element)?,
         Ty::Record { fields } => {
             for field in fields {
                 check_references(definitions, &field.ty)?;
@@ -188,7 +191,11 @@ mod definition_tests {
 
 pub(super) fn needs_drop(ty: &Ty, definitions: &[TypeDef]) -> bool {
     match ty {
-        Ty::Arc { .. } | Ty::Weak { .. } => true,
+        Ty::Arc { .. }
+        | Ty::Weak { .. }
+        | Ty::GpuPointer { .. }
+        | Ty::GpuSpan { .. }
+        | Ty::GpuArguments => true,
         Ty::Defined { definition } => {
             let d = &definitions[definition.index()];
             d.drop_hook().is_some() || d.body().is_some_and(|t| t.needs_drop(definitions))
@@ -201,6 +208,59 @@ pub(super) fn needs_drop(ty: &Ty, definitions: &[TypeDef]) -> bool {
         Ty::Union { variants } => variants.iter().any(|member| member.needs_drop(definitions)),
         _ => false,
     }
+}
+
+pub(super) fn gpu_element(ty: &Ty, definitions: &[TypeDef]) -> bool {
+    let plain = match ty {
+        Ty::UInt8 | Ty::Int32 | Ty::UInt32 | Ty::Int64 | Ty::UInt64 | Ty::Float32 => true,
+        Ty::Array { element, .. } => gpu_element(element, definitions),
+        Ty::Record { fields } => fields
+            .iter()
+            .all(|field| gpu_element(&field.ty, definitions)),
+        Ty::Defined { definition } => definitions.get(definition.index()).is_some_and(|def| {
+            def.drop_hook().is_none()
+                && def
+                    .body()
+                    .is_some_and(|body| gpu_element(body, definitions))
+        }),
+        _ => false,
+    };
+    plain && storage_layout(definitions, ty).is_ok()
+}
+
+pub(super) fn gpu_projection(ty: &Ty, definitions: &[TypeDef]) -> Option<Ty> {
+    Some(match ty {
+        Ty::Pointer { pointee } if pointee.gpu_element(definitions) => Ty::GpuPointer {
+            pointee: pointee.clone(),
+        },
+        Ty::Span { element } if element.gpu_element(definitions) => Ty::GpuSpan {
+            element: element.clone(),
+        },
+        Ty::Array { element, length } if *length > 0 => Ty::Array {
+            element: Box::new(gpu_projection(element, definitions)?),
+            length: *length,
+        },
+        Ty::Record { fields } if !fields.is_empty() => Ty::Record {
+            fields: fields
+                .iter()
+                .map(|field| {
+                    Some(RecordField {
+                        name: field.name.clone(),
+                        ty: gpu_projection(&field.ty, definitions)?,
+                    })
+                })
+                .collect::<Option<_>>()?,
+        },
+        Ty::Defined { definition } => {
+            let definition = definitions.get(definition.index())?;
+            if definition.drop_hook().is_some() {
+                return None;
+            }
+            gpu_projection(definition.body()?, definitions)?
+        }
+        ty if ty.gpu_element(definitions) => ty.clone(),
+        _ => return None,
+    })
 }
 
 pub(super) fn payloads(ty: &Ty) -> Option<Vec<(Case, Ty)>> {
@@ -259,16 +319,23 @@ pub(super) fn widens_to(ty: &Ty, to: &Ty) -> bool {
 }
 
 pub(super) fn view_record(ty: &Ty) -> Option<Ty> {
-    let element = match ty {
-        Ty::Span { element } => element.clone(),
-        Ty::Str => Box::new(Ty::UInt8),
+    let pointer = match ty {
+        Ty::Span { element } => Ty::Pointer {
+            pointee: element.clone(),
+        },
+        Ty::GpuSpan { element } => Ty::GpuPointer {
+            pointee: element.clone(),
+        },
+        Ty::Str => Ty::Pointer {
+            pointee: Box::new(Ty::UInt8),
+        },
         _ => return None,
     };
     Some(Ty::Record {
         fields: vec![
             RecordField {
                 name: "data".into(),
-                ty: Ty::Pointer { pointee: element },
+                ty: pointer,
             },
             RecordField {
                 name: "length".into(),
@@ -370,8 +437,17 @@ impl TypeTable {
                 self.intern(error);
                 self.intern(&Ty::UInt32);
             }
-            Ty::Pointer { pointee } | Ty::Arc { pointee } | Ty::Weak { pointee } => {
+            Ty::Pointer { pointee }
+            | Ty::GpuPointer { pointee }
+            | Ty::Arc { pointee }
+            | Ty::Weak { pointee } => {
                 self.intern(pointee);
+            }
+            Ty::GpuSpan { element } => {
+                self.intern(&Ty::GpuPointer {
+                    pointee: element.clone(),
+                });
+                self.intern(&Ty::UInt64);
             }
             Ty::Span { element } | Ty::Array { element, .. } => {
                 self.intern(element);
@@ -433,6 +509,9 @@ pub(super) fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
             .map(ToString::to_string)
             .unwrap_or_else(|| "?".into()),
         Ty::Pointer { pointee } => format!("Ptr<{}>", format_type(pointee, definitions)),
+        Ty::GpuPointer { pointee } => format!("GpuPtr<{}>", format_type(pointee, definitions)),
+        Ty::GpuSpan { element } => format!("GpuSpan<{}>", format_type(element, definitions)),
+        Ty::GpuArguments => "GpuArguments".into(),
         Ty::Arc { pointee } => format!("Arc<{}>", format_type(pointee, definitions)),
         Ty::Weak { pointee } => format!("Weak<{}>", format_type(pointee, definitions)),
         Ty::Span { element } => format!("Span<{}>", format_type(element, definitions)),
@@ -466,7 +545,7 @@ pub(super) fn storage_layout(
     let scalar = match ty {
         Ty::UInt8 => Some(1),
         Ty::Int32 | Ty::UInt32 | Ty::Float32 => Some(4),
-        Ty::UInt64 | Ty::Pointer { .. } | Ty::Arc { .. } | Ty::Weak { .. } => Some(8),
+        Ty::Int64 | Ty::UInt64 | Ty::Pointer { .. } | Ty::Arc { .. } | Ty::Weak { .. } => Some(8),
         _ => None,
     };
     if let Some(size) = scalar {
@@ -585,7 +664,7 @@ mod layout_tests {
             Ty::Str,
             Ty::Bool,
             Ty::Unit,
-            Ty::Int64,
+            Ty::Float64,
             record(vec![]),
             record(vec![Ty::Bool]),
         ] {

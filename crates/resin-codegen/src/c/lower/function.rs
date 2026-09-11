@@ -132,11 +132,24 @@ fn lower_region(
                     | Instr::ArcData
                     | Instr::Downgrade
                     | Instr::Upgrade
+                    | Instr::GpuAllocateNative
+                    | Instr::GpuCopyTo
+                    | Instr::GpuProject { .. }
+                    | Instr::GpuArgumentsDispatch
+                    | Instr::GpuArgumentsDraw
+                    | Instr::GpuCopyImage
             ) || projected_value;
             if consume {
                 for arg in &args {
                     types.drop_value(&arg.ty, &arg.expr, &mut out);
                 }
+            }
+            if matches!(
+                instr,
+                Instr::Load | Instr::TransferLoad | Instr::Store | Instr::Replace
+            ) && matches!(&args[0].ty, Ty::GpuPointer { .. })
+            {
+                types.drop_value(&args[0].ty, &args[0].expr, &mut out);
             }
         }
         statements.push(CStatement::Text { source: out });
@@ -161,7 +174,10 @@ fn lower_region(
 
 fn projects_value(types: &Types<'_>, instr: &Instr, args: &[Slot]) -> bool {
     match instr {
-        Instr::AccessStatic { .. } => !matches!(types.shape(&args[0].ty), Ty::Pointer { .. }),
+        Instr::AccessStatic { .. } => !matches!(
+            types.shape(&args[0].ty),
+            Ty::Pointer { .. } | Ty::GpuPointer { .. }
+        ),
         Instr::AccessDynamic => matches!(types.shape(&args[0].ty), Ty::Array { .. }),
         _ => false,
     }
@@ -370,6 +386,19 @@ fn instruction(
     out: &mut String,
 ) -> Result<Option<String>, Error> {
     let expr = match instr {
+        Instr::GpuNew { .. }
+        | Instr::GpuAllocate { .. }
+        | Instr::GpuAllocateNative
+        | Instr::GpuSlice
+        | Instr::GpuReadOnly
+        | Instr::GpuWriteOnly
+        | Instr::GpuCopyTo
+        | Instr::GpuProject { .. }
+        | Instr::GpuArgumentsDispatch
+        | Instr::GpuArgumentsDraw
+        | Instr::GpuCopyImage => {
+            super::gpu::instruction(types, temp, instr, args, result.unwrap(), out)?
+        }
         Instr::ForgetLocal { local } => {
             if function.locals[local.index()]
                 .ty
@@ -534,17 +563,17 @@ fn instruction(
         Instr::Push { value } => literal(types, result.unwrap(), value),
         Instr::LocalAddress { local } => format!("&r_l{}", local.index()),
         Instr::Load | Instr::TransferLoad => {
-            format!("*({})", types.unwrap(&args[0].ty, args[0].expr.clone()))
+            format!("*({})", super::gpu::host_address(types, &args[0], 1))
         }
         Instr::Replace => {
-            let target = format!("*({})", types.unwrap(&args[0].ty, args[0].expr.clone()));
+            let target = format!("*({})", super::gpu::host_address(types, &args[0], 3));
             let old = format!("{temp}_old");
             writeln!(out, "  {} {old} = {target};", types.name(&args[1].ty)).unwrap();
             writeln!(out, "  {target} = {};", args[1].expr).unwrap();
             old
         }
         Instr::Store => {
-            let target = format!("*({})", types.unwrap(&args[0].ty, args[0].expr.clone()));
+            let target = format!("*({})", super::gpu::host_address(types, &args[0], 2));
             if args[1].ty.needs_drop(&types.module.types) {
                 if let Some(live) = &args[0].live {
                     writeln!(out, "  bool *{temp}_live = {live};").unwrap();
@@ -562,7 +591,7 @@ fn instruction(
             writeln!(
                 out,
                 "  *({}) = {};",
-                types.unwrap(&args[0].ty, args[0].expr.clone()),
+                super::gpu::host_address(types, &args[0], 2),
                 types.copy(&args[1].ty, &args[1].expr)
             )
             .unwrap();
@@ -577,8 +606,13 @@ fn instruction(
             if ty == &args[0].ty {
                 args[0].expr.clone()
             } else if is_view_conversion(&args[0].ty, ty) {
+                let (first, second) = if matches!(args[0].ty, Ty::GpuSpan { .. }) {
+                    ("data", "length")
+                } else {
+                    ("f0", "f1")
+                };
                 format!(
-                    "({}){{ ({}).f0, ({}).f1 }}",
+                    "({}){{ ({}).{first}, ({}).{second} }}",
                     types.name(ty),
                     args[0].expr,
                     args[0].expr
@@ -615,12 +649,23 @@ fn instruction(
                 if values.is_empty() { "0" } else { &values }
             )
         }
-        Instr::AccessStatic { index } => project(types, &args[0], &index.to_string(), false)?,
+        Instr::AccessStatic { index } => project(
+            types,
+            &args[0],
+            &index.to_string(),
+            false,
+            result.unwrap(),
+            temp,
+            out,
+        )?,
         Instr::AccessDynamic => project(
             types,
             &args[0],
             &types.unwrap(&args[1].ty, args[1].expr.clone()),
             true,
+            result.unwrap(),
+            temp,
+            out,
         )?,
         Instr::Function { function } => format!(
             "({}){{ r_fn{} }}",
@@ -691,7 +736,19 @@ fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
     expression
 }
 
-fn project(types: &Types<'_>, source: &Slot, index: &str, dynamic: bool) -> Result<String, Error> {
+fn project(
+    types: &Types<'_>,
+    source: &Slot,
+    index: &str,
+    dynamic: bool,
+    result: &Ty,
+    name: &str,
+    out: &mut String,
+) -> Result<String, Error> {
+    if let Some(projected) = super::gpu::project(types, source, index, dynamic, result, name, out)?
+    {
+        return Ok(projected);
+    }
     let mut ty = types.shape(&source.ty);
     let mut expr = types.unwrap(&source.ty, source.expr.clone());
     let pointer = if let Ty::Pointer { pointee } = ty {
@@ -702,6 +759,9 @@ fn project(types: &Types<'_>, source: &Slot, index: &str, dynamic: bool) -> Resu
         false
     };
     let expr = match ty {
+        Ty::GpuSpan { .. } if !dynamic => {
+            format!("({expr}).{}", if index == "0" { "data" } else { "length" })
+        }
         Ty::Str | Ty::Span { .. } if dynamic => {
             return Ok(format!(
                 "&(({expr}).f0[resin_index((uint64_t)({index}), ({expr}).f1)])"

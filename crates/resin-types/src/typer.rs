@@ -97,7 +97,10 @@ pub(super) fn as_record(context: &TyperContext, ty: &Ty) -> Result<Converted, Ty
         steps.push(Conv::Unwrap { definition });
         current = context.definition_body(definition)?.clone();
     }
-    if matches!(current, Ty::Record { .. } | Ty::Span { .. } | Ty::Str) {
+    if matches!(
+        current,
+        Ty::Record { .. } | Ty::Span { .. } | Ty::GpuSpan { .. } | Ty::Str
+    ) {
         Ok(Converted { ty: current, steps })
     } else {
         Err(TypeError::new(TypeErrorKind::ExpectedRecord {
@@ -219,7 +222,9 @@ pub(super) fn type_builtin_call(
         }
         BuiltinRule::Arithmetic | BuiltinRule::Comparison => {
             if rule == BuiltinRule::Arithmetic
-                && args.iter().any(|ty| matches!(ty, Ty::Pointer { .. }))
+                && args
+                    .iter()
+                    .any(|ty| matches!(ty, Ty::Pointer { .. } | Ty::GpuPointer { .. }))
             {
                 return Err(TypeError::new(TypeErrorKind::PointerArithmetic));
             }

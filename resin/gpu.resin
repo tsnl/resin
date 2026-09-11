@@ -1,13 +1,11 @@
 export {
 	Gpu,
-	GpuBuffer,
 	GpuImage,
 	GpuPipeline,
 	GpuCommands,
 	Memory,
 	ResinGpu,
 	ResinGpuDeviceInfo,
-	ResinAllocation,
 	ResinImage,
 	ResinPipeline,
 	ResinCommandBuffer,
@@ -17,7 +15,6 @@ import { "status.resin", "window.resin" };
 
 extern type ResinGpu;
 extern type ResinGpuDeviceInfo;
-extern type ResinAllocation;
 extern type ResinImage;
 extern type ResinPipeline;
 extern type ResinCommandBuffer;
@@ -48,15 +45,11 @@ impl GpuOwner {
 		RuntimeStatus.from_code(resin_gpu_create_at(index, &gpu))?;
 		ok(Gpu { handle = gpu, window = None })
 	};
-	def malloc(self: Gpu, bytes: ulong, alignment: ulong, memory: int) -> Result<GpuBuffer, RuntimeError> = {
-		var allocation = Ptr<ResinAllocation>(ulong(0));
-		RuntimeStatus.from_code(resin_gpu_malloc(self.handle, bytes, alignment, memory, &allocation))?;
-		ok(GpuBuffer { handle = allocation, gpu = self })
-	};
-	def host_to_device_pointer(self: Gpu, host: Ptr<ubyte>) -> Result<ulong, RuntimeError> = {
-		var device = ulong(0);
-		RuntimeStatus.from_code(resin_gpu_host_to_device_pointer(self.handle, host, &device))?;
-		ok(device)
+	@gpu_allocator
+	def malloc(self: Gpu, bytes: ulong, alignment: ulong, memory: int) -> Result<GpuPtr<ubyte>, RuntimeError> = {
+		var allocation = GpuPtr<ubyte>.allocate_native(self.handle, self, bytes, alignment, memory);
+		RuntimeStatus.from_code(allocation.status)?;
+		ok(allocation.value!)
 	};
 	def create_compute_pipeline(self: Gpu, code: Span<ubyte>) -> Result<GpuPipeline, RuntimeError> = {
 		var pipeline = Ptr<ResinPipeline>(ulong(0));
@@ -94,24 +87,6 @@ impl GpuOwner {
 	};
 }
 
-struct BufferOwner { handle: Ptr<ResinAllocation>, gpu: Gpu };
-type GpuBuffer = Arc<BufferOwner>;
-impl BufferOwner {
-	def drop(self: Ptr<BufferOwner>) = {
-		resin_gpu_free(self.gpu.handle, self.handle);
-	};
-
-	def host_pointer(self: Ptr<BufferOwner>) -> Ptr<ubyte> = {
-		resin_allocation_host_pointer(self.handle)
-	};
-	def device_pointer(self: Ptr<BufferOwner>) -> ulong = {
-		resin_allocation_device_pointer(self.handle)
-	};
-	def size(self: GpuBuffer) -> ulong = {
-		resin_allocation_size(self.handle)
-	};
-}
-
 struct ImageOwner { handle: Ptr<ResinImage>, gpu: Gpu };
 type GpuImage = Arc<ImageOwner>;
 impl ImageOwner {
@@ -139,7 +114,6 @@ impl PipelineOwner {
 struct RecordedResources {
 	pipeline: GpuPipeline | None,
 	image: GpuImage | None,
-	buffer: GpuBuffer | None,
 	previous: Arc<RecordedResources> | None,
 };
 struct CommandsOwner { handle: Ptr<ResinCommandBuffer>, gpu: Gpu, retained: Arc<RecordedResources> | None };
@@ -148,32 +122,39 @@ impl CommandsOwner {
 	def drop(self: Ptr<CommandsOwner>) = {
 		resin_gpu_cancel_command_buffer(self.gpu.handle, self.handle);
 	};
-	def retain(self: Ptr<CommandsOwner>, pipeline: GpuPipeline | None, image: GpuImage | None, buffer: GpuBuffer | None) = {
-		self.retained := Arc<RecordedResources> { pipeline = pipeline, image = image, buffer = buffer, previous = self.retained };
+	def retain(self: Ptr<CommandsOwner>, pipeline: GpuPipeline | None, image: GpuImage | None) = {
+		self.retained := Arc<RecordedResources> { pipeline = pipeline, image = image, previous = self.retained };
 	};
 
 	def set_pipeline(self: GpuCommands, pipeline: GpuPipeline) -> Result<(), RuntimeError> = {
 		RuntimeStatus.from_code(resin_gpu_set_pipeline(self.handle, pipeline.handle))?;
-		self.retain(pipeline, None, None);
+		self.retain(pipeline, None);
 		ok(())
 	};
-	def dispatch(self: GpuCommands, root: ulong, x: uint, y: uint, z: uint) -> Result<(), RuntimeError> = {
-		RuntimeStatus.from_code(resin_gpu_dispatch(self.handle, root, x, y, z))
+	def dispatch(self: GpuCommands, root: GpuArguments, x: uint, y: uint, z: uint) -> Result<(), RuntimeError> = {
+		RuntimeStatus.from_code(root.dispatch_native(Ptr<ubyte>(self.handle), x, y, z))
 	};
 	def begin_rendering(self: GpuCommands, image: GpuImage, r: float32, g: float32, b: float32, a: float32) -> Result<(), RuntimeError> = {
 		RuntimeStatus.from_code(resin_gpu_begin_rendering(self.handle, image.handle, r, g, b, a))?;
-		self.retain(None, image, None);
+		self.retain(None, image);
 		ok(())
 	};
 	def end_rendering(self: GpuCommands) -> Result<(), RuntimeError> = {
 		RuntimeStatus.from_code(resin_gpu_end_rendering(self.handle))
 	};
-	def draw(self: GpuCommands, root: ulong, count: uint) -> Result<(), RuntimeError> = {
-		RuntimeStatus.from_code(resin_gpu_draw(self.handle, root, count))
+	def draw(self: GpuCommands, root: GpuArguments | None, count: uint) -> Result<(), RuntimeError> = {
+		match (root) {
+			GpuArguments(arguments) => {
+				RuntimeStatus.from_code(arguments.draw_native(Ptr<ubyte>(self.handle), count))
+			},
+			None => {
+				RuntimeStatus.from_code(resin_gpu_draw(self.handle, 0_ul, count))
+			},
+		}
 	};
-	def copy_image_to_buffer(self: GpuCommands, image: GpuImage, buffer: GpuBuffer) -> Result<(), RuntimeError> = {
-		RuntimeStatus.from_code(resin_gpu_copy_image_to_buffer(self.handle, image.handle, buffer.handle))?;
-		self.retain(None, image, buffer);
+	def copy_image_to_buffer(self: GpuCommands, image: GpuImage, buffer: GpuSpan<ubyte>) -> Result<(), RuntimeError> = {
+		RuntimeStatus.from_code(buffer.copy_image_native(Ptr<ubyte>(self.handle), Ptr<ubyte>(image.handle)))?;
+		self.retain(None, image);
 		ok(())
 	};
 	def submit(self: Ptr<CommandsOwner>) -> Result<(), RuntimeError> = {
@@ -206,12 +187,6 @@ extern "resin_runtime.h" def resin_gpu_enumerate_devices(infos: Ptr<ResinGpuDevi
 extern "resin_runtime.h" def resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
 extern "resin_runtime.h" def resin_gpu_create_at(index: uint, gpu: Ptr<Ptr<ResinGpu>>) -> int;
 extern "resin_runtime.h" def resin_gpu_destroy(gpu: Ptr<ResinGpu>) -> ();
-extern "resin_runtime.h" def resin_gpu_malloc(gpu: Ptr<ResinGpu>, bytes: ulong, alignment: ulong, memory: int, allocation: Ptr<Ptr<ResinAllocation>>) -> int;
-extern "resin_runtime.h" def resin_gpu_free(gpu: Ptr<ResinGpu>, allocation: Ptr<ResinAllocation>) -> ();
-extern "resin_runtime.h" def resin_allocation_host_pointer(allocation: Ptr<ResinAllocation>) -> Ptr<ubyte>;
-extern "resin_runtime.h" def resin_allocation_device_pointer(allocation: Ptr<ResinAllocation>) -> ulong;
-extern "resin_runtime.h" def resin_allocation_size(allocation: Ptr<ResinAllocation>) -> ulong;
-extern "resin_runtime.h" def resin_gpu_host_to_device_pointer(gpu: Ptr<ResinGpu>, host: Ptr<ubyte>, device: Ptr<ulong>) -> int;
 extern "resin_runtime.h" def resin_gpu_create_compute_pipeline(gpu: Ptr<ResinGpu>, code: Ptr<ubyte>, length: ulong, pipeline: Ptr<Ptr<ResinPipeline>>) -> int;
 extern "resin_runtime.h" def resin_gpu_create_graphics_pipeline(gpu: Ptr<ResinGpu>, vertex: Ptr<ubyte>, vertex_length: ulong, fragment: Ptr<ubyte>, fragment_length: ulong, pipeline: Ptr<Ptr<ResinPipeline>>) -> int;
 extern "resin_runtime.h" def resin_gpu_free_pipeline(gpu: Ptr<ResinGpu>, pipeline: Ptr<ResinPipeline>) -> ();
@@ -221,11 +196,9 @@ extern "resin_runtime.h" def resin_image_width(image: Ptr<ResinImage>) -> uint;
 extern "resin_runtime.h" def resin_image_height(image: Ptr<ResinImage>) -> uint;
 extern "resin_runtime.h" def resin_gpu_start_command_recording(gpu: Ptr<ResinGpu>, commands: Ptr<Ptr<ResinCommandBuffer>>) -> int;
 extern "resin_runtime.h" def resin_gpu_set_pipeline(commands: Ptr<ResinCommandBuffer>, pipeline: Ptr<ResinPipeline>) -> int;
-extern "resin_runtime.h" def resin_gpu_dispatch(commands: Ptr<ResinCommandBuffer>, root: ulong, x: uint, y: uint, z: uint) -> int;
 extern "resin_runtime.h" def resin_gpu_begin_rendering(commands: Ptr<ResinCommandBuffer>, image: Ptr<ResinImage>, r: float32, g: float32, b: float32, a: float32) -> int;
 extern "resin_runtime.h" def resin_gpu_end_rendering(commands: Ptr<ResinCommandBuffer>) -> int;
 extern "resin_runtime.h" def resin_gpu_draw(commands: Ptr<ResinCommandBuffer>, root: ulong, count: uint) -> int;
-extern "resin_runtime.h" def resin_gpu_copy_image_to_buffer(commands: Ptr<ResinCommandBuffer>, image: Ptr<ResinImage>, buffer: Ptr<ResinAllocation>) -> int;
 extern "resin_runtime.h" def resin_gpu_submit(gpu: Ptr<ResinGpu>, commands: Ptr<ResinCommandBuffer>) -> int;
 extern "resin_runtime.h" def resin_gpu_cancel_command_buffer(gpu: Ptr<ResinGpu>, commands: Ptr<ResinCommandBuffer>) -> ();
 extern "resin_runtime.h" def resin_gpu_create_for_window(window: Ptr<ResinWindow>, gpu: Ptr<Ptr<ResinGpu>>) -> int;
