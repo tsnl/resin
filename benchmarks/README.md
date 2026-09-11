@@ -102,7 +102,7 @@ quiet during measurement.
    `input: Ptr<uint>`, and `output: Ptr<uint>`. The decorated compute `kernel`
    takes `(index: ulong, root: Ptr<Root>)`; `cpu` takes `Ptr<Root>` and invokes the
    same kernel for each element. Check the index against `count` before access.
-2. Add the name to the CLI allowlist and `WORKLOADS` in [suite.rs](suite.rs), setting
+2. Add the name to the CLI allowlist and `WORKLOADS` in [suite/mod.rs](suite/mod.rs), setting
    its default count and iteration count; implement its independent scalar reference
    in `expected()` there. Keep
    runtime inputs observable and define exact output semantics; do not use an
