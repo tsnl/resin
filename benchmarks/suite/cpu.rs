@@ -4,7 +4,7 @@ use super::{Config, Result, Workload};
 
 pub fn run(workload: &Workload, config: &Config) -> Result<Vec<f64>> {
     let source = tempfile::tempdir()?;
-    let wrapper = source.path().join("host.resin");
+    let wrapper = source.path().join("benchmark_host.resin");
     let workload_path = super::workload_path(workload);
     let import = workload_path.to_str().ok_or("workload path is not UTF-8")?;
     let import = import
@@ -15,7 +15,7 @@ pub fn run(workload: &Workload, config: &Config) -> Result<Vec<f64>> {
         .replace('\t', "\\t");
     fs::write(
         &wrapper,
-        include_str!("../support/host.resin").replace("@WORKLOAD@", &import),
+        include_str!("../support/benchmark_host.resin").replace("@WORKLOAD@", &import),
     )?;
     let built = super::build(
         workload,
