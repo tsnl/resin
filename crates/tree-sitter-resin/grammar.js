@@ -70,6 +70,8 @@ const TYPE_FORMERS = [
   "Span",
   "GpuPtr",
   "GpuSpan",
+  "GpuComputePipeline",
+  "GpuGraphicsPipeline",
   "Arc",
   "Weak",
   "Result",
@@ -457,6 +459,14 @@ export default grammar({
 
     unary_type: ($) =>
       choice(
+        seq(
+          field("former", choice("GpuComputePipeline", "GpuGraphicsPipeline")),
+          "<",
+          field("root", $.type),
+          ",",
+          field("owner", $.type),
+          ">",
+        ),
         seq(
           field(
             "former",

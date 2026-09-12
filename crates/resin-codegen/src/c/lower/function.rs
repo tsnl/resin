@@ -134,7 +134,10 @@ fn lower_region(
                     | Instr::Upgrade
                     | Instr::GpuAllocateNative
                     | Instr::GpuCopyTo
-                    | Instr::GpuProject { .. }
+                    | Instr::GpuComputePipeline { .. }
+                    | Instr::GpuGraphicsPipeline { .. }
+                    | Instr::GpuDispatch { .. }
+                    | Instr::GpuDraw { .. }
                     | Instr::GpuArgumentsDispatch
                     | Instr::GpuArgumentsDraw
                     | Instr::GpuCopyImage
@@ -393,7 +396,10 @@ fn instruction(
         | Instr::GpuReadOnly
         | Instr::GpuWriteOnly
         | Instr::GpuCopyTo
-        | Instr::GpuProject { .. }
+        | Instr::GpuComputePipeline { .. }
+        | Instr::GpuGraphicsPipeline { .. }
+        | Instr::GpuDispatch { .. }
+        | Instr::GpuDraw { .. }
         | Instr::GpuArgumentsDispatch
         | Instr::GpuArgumentsDraw
         | Instr::GpuCopyImage => {

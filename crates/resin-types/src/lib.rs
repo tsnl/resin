@@ -133,6 +133,18 @@ pub enum Ty {
     },
     /// Opaque projected shader arguments, retained by a host Arc handle.
     GpuArguments,
+    /// A compute pipeline whose shader root and shared host owner stay in its type.
+    /// Storage is the owner's Arc handle; neither type parameter is device storage.
+    GpuComputePipeline {
+        root: Box<Ty>,
+        owner: Box<Ty>,
+    },
+    /// A graphics pipeline with one root shared by its vertex and fragment stages.
+    /// A None root denotes shaders without a root argument. Storage is the owner's Arc.
+    GpuGraphicsPipeline {
+        root: Box<Ty>,
+        owner: Box<Ty>,
+    },
     Arc {
         pointee: Box<Ty>,
     },
@@ -204,6 +216,28 @@ impl Ty {
     /// Nominal records expose structural host fields; raw pointer graphs are rejected.
     pub fn gpu_projection(&self, definitions: &[TypeDef]) -> Option<Ty> {
         types::gpu_projection(self, definitions)
+    }
+
+    /// Shader root and shared owner carried by an opaque pipeline value.
+    pub fn gpu_pipeline(&self) -> Option<(&Ty, &Ty)> {
+        match self {
+            Self::GpuComputePipeline { root, owner }
+            | Self::GpuGraphicsPipeline { root, owner } => Some((root, owner)),
+            _ => None,
+        }
+    }
+
+    /// Host arguments accepted by dispatch or draw, including None for rootless draw.
+    /// Invalid pipeline owners and roots have no argument contract.
+    pub fn gpu_pipeline_argument(&self, definitions: &[TypeDef]) -> Option<Ty> {
+        let (root, owner) = self.gpu_pipeline()?;
+        if !matches!(owner, Self::Arc { .. }) {
+            return None;
+        }
+        if *root == Self::None {
+            return matches!(self, Self::GpuGraphicsPipeline { .. }).then_some(Self::None);
+        }
+        root.gpu_projection(definitions)
     }
 
     pub fn payloads(&self) -> Option<Vec<(Case, Ty)>> {
@@ -846,6 +880,13 @@ pub mod shader {
         stage: &str,
     ) -> Result<Interface, String> {
         super::typer::validate_shader(typer, parameter, result, foreign, stage)
+    }
+
+    /// Validate a compute stage or an ordered vertex/fragment pair for pipeline creation.
+    /// Graphics stages must agree on their color type and any declared root; every root
+    /// must support host GPU-view projection. Rootless graphics returns None.
+    pub fn pipeline_root(typer: &TyperContext, stages: &[(&Ty, &Ty, &str)]) -> Result<Ty, String> {
+        super::typer::pipeline_root(typer, stages)
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

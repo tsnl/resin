@@ -783,6 +783,18 @@ impl<'a> AstGen<'a> {
         }
         if let Some(former) = node.child_by_field_name("former") {
             let head = self.ident(former);
+            if let Some(root) = node.child_by_field_name("root") {
+                return Spanned::new(
+                    TypeKind::GpuPipeline {
+                        head,
+                        root: Box::new(self.gen_type(root)),
+                        owner: Box::new(
+                            self.gen_type(node.child_by_field_name("owner").unwrap_or(node)),
+                        ),
+                    },
+                    self.span(node),
+                );
+            }
             let arg = self.gen_type(node.child_by_field_name("arg").unwrap_or(node));
             return Spanned::new(
                 TypeKind::App {
@@ -899,6 +911,8 @@ impl<'a> AstGen<'a> {
                     | "Span"
                     | "GpuPtr"
                     | "GpuSpan"
+                    | "GpuComputePipeline"
+                    | "GpuGraphicsPipeline"
                     | "Arc"
                     | "Weak"
             ) {

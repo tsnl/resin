@@ -24,6 +24,7 @@ mod check;
 pub(crate) mod context;
 mod elaborate;
 pub(crate) mod eval;
+mod gpu;
 pub(crate) mod infer;
 pub(crate) mod scope;
 mod typed;
@@ -503,7 +504,7 @@ impl Generator {
         scopes.record_method_definition(definition, declaration);
         if decorators
             .iter()
-            .any(|decorator| decorator.val.as_ref() != "gpu_allocator")
+            .any(|decorator| !gpu::is_bridge(&decorator.val))
         {
             return Err(GenerateError::inference(
                 name.span,
@@ -517,8 +518,18 @@ impl Generator {
         let signature = method_signature(&evaluator, declaration, params, result)?;
         let function = self.declare_function(name, &signature)?;
         self.register_method(definition, name, function)?;
-        if !decorators.is_empty() {
-            self.register_gpu_allocator(definition, function, name)?;
+        if decorators.len() > 1 {
+            return Err(GenerateError::inference(
+                name.span,
+                "a method can have only one GPU decorator",
+            ));
+        }
+        if let Some(decorator) = decorators.first() {
+            if decorator.val.as_ref() == "gpu_allocator" {
+                self.register_gpu_allocator(definition, function, name)?;
+            } else {
+                self.register_gpu_bridge(definition, function, decorator)?;
+            }
         }
         Ok(())
     }
@@ -780,7 +791,7 @@ impl Generator {
             StmtKind::Function { decorators, .. } => {
                 if let Some(id) = self.function_identity(name, signature)? {
                     for decorator in decorators {
-                        if decorator.val.as_ref() != "gpu_allocator" || !name.val.contains('.') {
+                        if !gpu::is_bridge(&decorator.val) || !name.val.contains('.') {
                             self.declare_shader(id, decorator)?;
                         }
                     }

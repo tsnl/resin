@@ -86,15 +86,6 @@ impl Contexts {
         self.lookup(cursor, name, is_type)
             .map(|id| &self.definitions[id])
     }
-    pub(crate) fn shader_type(&self, source: &Source, offset: usize, name: &str) -> Option<&Ty> {
-        let cursor = self.cursor_at(source, offset)?;
-        let id = self.lookup(cursor, name, false)?;
-        if !self.shaders.contains(&id) {
-            return None;
-        }
-        self.definitions[id].ty.as_ref()
-    }
-
     pub(crate) fn visible(&self, source: &Source, offset: usize) -> Vec<Definition> {
         let Some(cursor) = self.cursor_at(source, offset) else {
             return vec![];
@@ -162,6 +153,7 @@ pub(crate) struct Scopes {
     view: ContextView,
     inferred: HashMap<DeclarationId, (Type, bool)>,
     expressions: Vec<(SourceLocation, Type, bool)>,
+    calls: Vec<(SourceLocation, Type, Arc<str>, Type, bool)>,
 }
 impl Scopes {
     pub(super) fn for_source(source: Source, data: Rc<RefCell<Analysis>>) -> Self {
@@ -188,6 +180,7 @@ impl Scopes {
             },
             inferred: HashMap::new(),
             expressions: vec![],
+            calls: vec![],
         }
     }
     pub(super) fn new() -> Self {
@@ -333,6 +326,24 @@ impl Scopes {
             associated,
         ));
     }
+    pub(crate) fn record_call(
+        &mut self,
+        name: &Ident,
+        receiver: Type,
+        argument: Type,
+        associated: bool,
+    ) {
+        self.calls.push((
+            SourceLocation {
+                source: self.view.source.clone(),
+                span: name.span,
+            },
+            receiver,
+            name.val.clone(),
+            argument,
+            associated,
+        ));
+    }
     pub(super) fn record_method_definition(&mut self, receiver: TypeId, id: DeclarationId) {
         let mut data = self.view.data.borrow_mut();
         let definition = &mut data.contexts.definitions[id];
@@ -348,6 +359,13 @@ impl Scopes {
         for (location, ty, associated) in self.expressions.drain(..) {
             if let Some(ty) = solver.resolve(&ty) {
                 data.record_members(location, &ty, associated, typer);
+            }
+        }
+        for (location, receiver, name, argument, associated) in self.calls.drain(..) {
+            if let (Some(receiver), Some(argument)) =
+                (solver.resolve(&receiver), solver.resolve(&argument))
+            {
+                data.record_method_call(&location, &receiver, &name, &argument, associated, typer);
             }
         }
         data.typer = typer.clone();

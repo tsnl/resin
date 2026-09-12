@@ -72,6 +72,10 @@ pub(super) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), D
         Ty::Span { element } | Ty::GpuSpan { element } | Ty::Array { element, .. } => {
             check_references(definitions, element)?
         }
+        Ty::GpuComputePipeline { root, owner } | Ty::GpuGraphicsPipeline { root, owner } => {
+            check_references(definitions, root)?;
+            check_references(definitions, owner)?;
+        }
         Ty::Record { fields } => {
             for field in fields {
                 check_references(definitions, &field.ty)?;
@@ -195,7 +199,9 @@ pub(super) fn needs_drop(ty: &Ty, definitions: &[TypeDef]) -> bool {
         | Ty::Weak { .. }
         | Ty::GpuPointer { .. }
         | Ty::GpuSpan { .. }
-        | Ty::GpuArguments => true,
+        | Ty::GpuArguments
+        | Ty::GpuComputePipeline { .. }
+        | Ty::GpuGraphicsPipeline { .. } => true,
         Ty::Defined { definition } => {
             let d = &definitions[definition.index()];
             d.drop_hook().is_some() || d.body().is_some_and(|t| t.needs_drop(definitions))
@@ -449,6 +455,10 @@ impl TypeTable {
                 });
                 self.intern(&Ty::UInt64);
             }
+            Ty::GpuComputePipeline { root, owner } | Ty::GpuGraphicsPipeline { root, owner } => {
+                self.intern(root);
+                self.intern(owner);
+            }
             Ty::Span { element } | Ty::Array { element, .. } => {
                 self.intern(element);
             }
@@ -512,6 +522,16 @@ pub(super) fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
         Ty::GpuPointer { pointee } => format!("GpuPtr<{}>", format_type(pointee, definitions)),
         Ty::GpuSpan { element } => format!("GpuSpan<{}>", format_type(element, definitions)),
         Ty::GpuArguments => "GpuArguments".into(),
+        Ty::GpuComputePipeline { root, owner } => format!(
+            "GpuComputePipeline<{}, {}>",
+            format_type(root, definitions),
+            format_type(owner, definitions)
+        ),
+        Ty::GpuGraphicsPipeline { root, owner } => format!(
+            "GpuGraphicsPipeline<{}, {}>",
+            format_type(root, definitions),
+            format_type(owner, definitions)
+        ),
         Ty::Arc { pointee } => format!("Arc<{}>", format_type(pointee, definitions)),
         Ty::Weak { pointee } => format!("Weak<{}>", format_type(pointee, definitions)),
         Ty::Span { element } => format!("Span<{}>", format_type(element, definitions)),

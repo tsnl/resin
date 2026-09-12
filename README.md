@@ -758,10 +758,11 @@ without following function values or analyzing runtime branches. Merely declarin
 decorated function on the host requires no shader optimizer. Artifact requests anywhere in the
 loaded modules require compilation even when their containing function is not executed.
 
-The Resin pipeline wrappers accept these spans directly:
-`gpu.create_compute_pipeline(kernel.spirv)` and
-`gpu.create_graphics_pipeline(vertex.spirv, fragment.spirv)`. The private C ABI still uses
-pointer/length pairs.
+Create typed pipelines from shader declarations with
+`gpu.create_compute_pipeline(kernel)` and
+`gpu.create_graphics_pipeline(vertex, fragment)`. Creation requests their embedded
+SPIR-V automatically and preserves the shader stage and root type. The private C ABI
+still uses pointer/length pairs.
 
 Resin lowers the entry and its reachable named helpers directly to SPIR-V. The toolchain runs
 `spirv-opt -O --target-env=vulkan1.3` and embeds the optimized binary in generated C headers.
@@ -769,10 +770,11 @@ Shader objects are deduplicated and retained with their generated project;
 imported helper changes invalidate them. Copied executables need the Vulkan loader/device,
 but neither Resin, source files, nor `spirv-opt` at runtime.
 
-Build shader arguments with the compiler builtin `kernel.project(gpu, arguments)?`,
-then pass the resulting `GpuArguments` to `commands.dispatch(root, x, y, z)` or
-`commands.draw(root, count)`. Shader entries keep a typed pointer as their second
-parameter:
+Pass a typed pipeline and its host arguments to
+`commands.dispatch(pipeline, arguments, x, y, z)` or
+`commands.draw(pipeline, arguments, count)`. The compiler checks the arguments against
+the pipeline and projects GPU views internally. Shader entries keep a typed pointer
+as their second parameter:
 
 ```resin
 struct Params { values: Span<float32>, scale: float32 };
@@ -808,12 +810,14 @@ while (index < values.length) {
     values.at(index).* := 1.0_f;
     index := index + 1_ul;
 };
-var root = kernel.project(gpu, { values = values, scale = 2.0_f })?;
-commands.dispatch(root, 16, 1, 1)?;
+var pipeline = gpu.create_compute_pipeline(kernel)?;
+var commands = gpu.start_command_recording()?;
+commands.dispatch(pipeline, { values = values, scale = 2.0_f }, 16, 1, 1)?;
+commands.submit()?;
 ```
 
 Projection checks the shader root layout, translates owning views internally, and
-retains every referenced allocation. Use `commands.draw(None, count)` for graphics
+retains every referenced allocation. Use `commands.draw(pipeline, None, count)` for graphics
 shaders without a root. Successful recording retains arguments and allocations
 through synchronous submission or cancellation. They must belong to the recording's
 GPU. See [GPU buffers](doc/gpu-buffers.md).

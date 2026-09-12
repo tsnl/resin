@@ -150,13 +150,14 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
                 "image_write_png" => ("ImageDataOwner", "write_pixels"),
                 // These raw native operations have been replaced by owning
                 // views and compiler-generated projection in Resin source.
-                "gpu_malloc" | "gpu_dispatch" | "gpu_copy_image_to_buffer" => continue,
+                "gpu_malloc" | "gpu_dispatch" | "gpu_copy_image_to_buffer" | "gpu_set_pipeline" => {
+                    continue;
+                }
                 "gpu_ptr_allocate" => ("GpuOwner", "malloc"),
                 "gpu_create_compute_pipeline" => ("GpuOwner", "create_compute_pipeline"),
                 "gpu_create_graphics_pipeline" => ("GpuOwner", "create_graphics_pipeline"),
                 "gpu_create_image" => ("GpuOwner", "create_image"),
                 "gpu_start_command_recording" => ("GpuOwner", "start_command_recording"),
-                "gpu_set_pipeline" => ("CommandsOwner", "set_pipeline"),
                 "gpu_projected_dispatch" => ("CommandsOwner", "dispatch"),
                 "gpu_begin_rendering" => ("CommandsOwner", "begin_rendering"),
                 "gpu_end_rendering" => ("CommandsOwner", "end_rendering"),
@@ -286,12 +287,22 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
 
 #[test]
 fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
+    if shaders::optimizer().is_none() {
+        return;
+    }
     let output = run(
         r#"
         export { main };
-        import { "$/gpu.resin", "$/status.resin" };
+        import { "$/gpu.resin", "$/graphics.resin", "$/status.resin" };
         extern "resin_runtime.h" def test_mode(mode: int);
         extern "resin_runtime.h" def test_verify(code: int);
+        @vertex_shader
+        def vertex(index: int) -> Vertex = {
+            Vertex { position = Position { x = 0_f, y = 0_f, z = 0_f, w = 1_f },
+                color = Color { r = 1_f, g = 0_f, b = 0_f, a = 1_f } }
+        };
+        @fragment_shader
+        def fragment(color: Color) -> Color = { color };
         def work() -> Result<(), _> = {
             var gpu = Gpu.new()?;
 
@@ -299,7 +310,8 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
 
             var commands = gpu.start_command_recording()?;
 
-            commands.set_pipeline(GpuPipeline { handle = Ptr<ResinPipeline>(0_ul), gpu = gpu })?;
+            var pipeline = gpu.create_graphics_pipeline(vertex, fragment)?;
+            commands.draw(pipeline, None, 3)?;
             commands.submit()?;
             ok(())
         };
@@ -355,6 +367,15 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
             *out = (ResinCommandBuffer *)(uintptr_t)3;
             return mode == 2 ? RESIN_STATUS_VULKAN_ERROR : RESIN_STATUS_SUCCESS;
         }
+        static ResinStatus mock_graphics(ResinGpu *gpu, const uint8_t *vertex, size_t vertex_length, const uint8_t *fragment, size_t fragment_length, ResinPipeline **out) {
+            assert(gpu == (ResinGpu *)(uintptr_t)1 && vertex && fragment && vertex_length > 20 && fragment_length > 20);
+            *out = NULL;
+            return RESIN_STATUS_SUCCESS;
+        }
+        static ResinStatus mock_draw(ResinCommandBuffer *commands, ResinDeviceAddress root, uint32_t count) {
+            assert(commands == (ResinCommandBuffer *)(uintptr_t)3 && root == 0 && count == 3);
+            return RESIN_STATUS_SUCCESS;
+        }
         static ResinStatus mock_pipeline(ResinCommandBuffer *commands, const ResinPipeline *pipeline) {
             assert(commands == (ResinCommandBuffer *)(uintptr_t)3 && pipeline == NULL);
             return mode == 3 ? RESIN_STATUS_INVALID_ARGUMENT : RESIN_STATUS_SUCCESS;
@@ -376,6 +397,8 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
         #define resin_gpu_destroy mock_destroy
         #define resin_gpu_ptr_allocate mock_malloc
         #define resin_gpu_start_command_recording mock_record
+        #define resin_gpu_create_graphics_pipeline mock_graphics
+        #define resin_gpu_draw mock_draw
         #define resin_gpu_set_pipeline mock_pipeline
         #define resin_gpu_cancel_command_buffer mock_cancel
         #define resin_gpu_submit mock_submit
@@ -506,37 +529,82 @@ fn byte_input_reports_stream_errors_instead_of_eof() {
 }
 
 #[test]
-fn pipeline_wrappers_unpack_shader_spans_at_the_c_boundary() {
+fn typed_pipeline_factories_embed_shaders_and_keep_shared_ownership() {
+    if shaders::optimizer().is_none() {
+        return;
+    }
     let output = run(
         r#"
         export { main };
-        import { "$/gpu.resin" };
+        import { "$/gpu.resin", "$/graphics.resin", "$/status.resin" };
+        extern "resin_runtime.h" def test_finished();
+        extern "resin_runtime.h" def test_fail();
+        @compute_shader
+        def kernel(index: ulong, root: Ptr<int>) = { root.* := int(index); };
+        @vertex_shader
+        def vertex(index: int) -> Vertex = {
+            Vertex { position = Position { x = 0_f, y = 0_f, z = 0_f, w = 1_f },
+                color = Color { r = 1_f, g = 0_f, b = 0_f, a = 1_f } }
+        };
+        @fragment_shader
+        def fragment(color: Color) -> Color = { color };
+        def copy_pipeline(value: GpuComputePipeline<int, GpuPipelineOwner>) -> GpuComputePipeline<int, GpuPipelineOwner> = { value };
         def main() -> Result<int, _> = {
-            var a = [ubyte(1), ubyte(2)];
-            var b = [ubyte(3), ubyte(4), ubyte(5)];
-            var vertex = Span<ubyte> { data = Ptr<ubyte>(&a), length = ulong(2) };
-            var fragment = Span<ubyte> { data = Ptr<ubyte>(&b), length = ulong(3) };
             var gpu = Gpu { handle = Ptr<ResinGpu>(0_ul), window = None };
-            var compute = gpu.create_compute_pipeline(vertex)?;
-            var graphics = gpu.create_graphics_pipeline(vertex, fragment)?;
-            ok(if (ulong(compute.handle) == ulong(1) && ulong(graphics.handle) == ulong(2)) { 0 } else { 1 })
+            {
+                var compute = gpu.create_compute_pipeline(kernel)?;
+                var alias = copy_pipeline(compute);
+                var graphics = gpu.create_graphics_pipeline(vertex, fragment)?;
+                var graphics_alias = graphics;
+            };
+            test_fail();
+            var compute_code = match (gpu.create_compute_pipeline(kernel)) {
+                ok(pipeline) => { 0 }, err(error) => { RuntimeStatus.code(error) },
+            };
+            var graphics_code = match (gpu.create_graphics_pipeline(vertex, fragment)) {
+                ok(pipeline) => { 0 }, err(error) => { RuntimeStatus.code(error) },
+            };
+            test_finished();
+            ok(if (compute_code == 5 && graphics_code == 5) { 0 } else { 1 })
         };
     "#,
         r#"
         #include <resin_runtime.h>
         #include <assert.h>
+        #include <string.h>
+        static unsigned created, freed;
+        static int failing;
+        static void test_fail(void) { failing = 1; }
+        static void check_shader(const uint8_t *data, size_t length) {
+            uint32_t magic;
+            assert(data && length > 20 && length % 4 == 0);
+            memcpy(&magic, data, sizeof(magic));
+            assert(magic == 0x07230203);
+        }
+        static void test_finished(void) { assert(created == 3 && freed == 3); }
         static ResinStatus mock_compute(ResinGpu *gpu, const uint8_t *data, size_t length, ResinPipeline **out) {
-            assert(!gpu && length == 2 && data[0] == 1 && data[1] == 2);
+            assert(!gpu);
+            check_shader(data, length);
+            if (failing) return RESIN_STATUS_VULKAN_ERROR;
+            assert(created == 0);
+            created |= 1;
             *out = (ResinPipeline *)(uintptr_t)1;
             return RESIN_STATUS_SUCCESS;
         }
         static ResinStatus mock_graphics(ResinGpu *gpu, const uint8_t *vertex, size_t vertex_length, const uint8_t *fragment, size_t fragment_length, ResinPipeline **out) {
-            assert(!gpu && vertex_length == 2 && fragment_length == 3 && vertex[1] == 2 && fragment[2] == 5);
+            assert(!gpu);
+            check_shader(vertex, vertex_length);
+            check_shader(fragment, fragment_length);
+            if (failing) return RESIN_STATUS_VULKAN_ERROR;
+            assert(created == 1);
+            created |= 2;
             *out = (ResinPipeline *)(uintptr_t)2;
             return RESIN_STATUS_SUCCESS;
         }
         static void mock_free_pipeline(ResinGpu *gpu, ResinPipeline *pipeline) {
             assert(!gpu && ((uintptr_t)pipeline == 1 || (uintptr_t)pipeline == 2));
+            assert(!(freed & (uintptr_t)pipeline));
+            freed |= (uintptr_t)pipeline;
         }
         #define resin_gpu_free_pipeline mock_free_pipeline
         #define resin_gpu_create_compute_pipeline mock_compute
@@ -632,15 +700,25 @@ fn gpu_views_do_not_expose_unowned_address_conversions() {
 
 #[test]
 fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
+    if shaders::optimizer().is_none() {
+        return;
+    }
     let output = run(
         r#"
         export { main };
-        import { "$/gpu.resin", "$/status.resin" };
+        import { "$/gpu.resin", "$/graphics.resin", "$/status.resin" };
         extern "resin_runtime.h" def test_mode(mode: int);
         extern "resin_runtime.h" def test_recorded();
         extern "resin_runtime.h" def test_code(code: int);
         extern "resin_runtime.h" def test_completed();
         extern "resin_runtime.h" def test_finished();
+        @vertex_shader
+        def vertex(index: int) -> Vertex = {
+            Vertex { position = Position { x = 0_f, y = 0_f, z = 0_f, w = 1_f },
+                color = Color { r = 1_f, g = 0_f, b = 0_f, a = 1_f } }
+        };
+        @fragment_shader
+        def fragment(color: Color) -> Color = { color };
         def main() -> Result<(), _> = {
             var gpu = Gpu { handle = Ptr<ResinGpu>(0_ul), window = None };
             var mode = 0;
@@ -649,13 +727,14 @@ fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
                 {
                     var commands = {
                         var original = gpu.start_command_recording()?;
-                        original.set_pipeline(GpuPipeline { handle = Ptr<ResinPipeline>(1_ul), gpu = gpu })?;
+                        var pipeline = gpu.create_graphics_pipeline(vertex, fragment)?;
                         original.begin_rendering(GpuImage { handle = Ptr<ResinImage>(2_ul), gpu = gpu }, 0_f, 0_f, 0_f, 1_f)?;
+                        var drawing = original;
+                        drawing.draw(pipeline, None, 7)?;
                         original.end_rendering()?;
                         original
                     };
                     var alias = commands;
-                    alias.draw(None, 7)?;
                     test_recorded();
                     if (mode < 2) {
                         var code = match (alias.submit()) {
@@ -689,6 +768,11 @@ fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
         static ResinStatus mock_record(ResinGpu *gpu, ResinCommandBuffer **out) {
             assert(gpu == NULL); *out = (ResinCommandBuffer *)(uintptr_t)3; return RESIN_STATUS_SUCCESS;
         }
+        static ResinStatus mock_graphics(ResinGpu *gpu, const uint8_t *vertex, size_t vertex_length, const uint8_t *fragment, size_t fragment_length, ResinPipeline **out) {
+            assert(!gpu && vertex && fragment && vertex_length > 20 && fragment_length > 20);
+            *out = (ResinPipeline *)(uintptr_t)1;
+            return RESIN_STATUS_SUCCESS;
+        }
         static ResinStatus mock_pipeline(ResinCommandBuffer *commands, const ResinPipeline *pipeline) {
             assert((uintptr_t)commands == 3 && (uintptr_t)pipeline == 1); return RESIN_STATUS_SUCCESS;
         }
@@ -716,6 +800,7 @@ fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
             assert(gpu == NULL && completed == 1 && (uintptr_t)image == 2 && !(freed & 2)); freed |= 2;
         }
         #define resin_gpu_start_command_recording mock_record
+        #define resin_gpu_create_graphics_pipeline mock_graphics
         #define resin_gpu_set_pipeline mock_pipeline
         #define resin_gpu_begin_rendering mock_begin
         #define resin_gpu_end_rendering mock_end

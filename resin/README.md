@@ -56,13 +56,16 @@ retain their allocation and device through indexing, slicing, and field addresse
 `gpu.new(value)?` infers `GpuPtr<T>`; `GpuSpan<T>.allocate(gpu, count)?` allocates
 uninitialized elements. `.read_only()` and `.write_only()` narrow host access.
 
-Compiler projection `kernel.project(gpu, arguments)?` converts host launch-record
-GPU views to the shader's raw pointers and spans. The resulting `GpuArguments`
-retains all referenced allocations. Commands accept those roots with
-`commands.dispatch(root, x, y, z)` or `commands.draw(root, count)`; rootless graphics
-use `commands.draw(None, count)`. Recorded allocations reject CPU access until
-submission or cancellation. Use `.copy_to(Span<T>)` for host readback without
-escaping a raw pointer into GPU memory. See [GPU buffers](../doc/gpu-buffers.md).
+Pipeline creation accepts decorated shader declarations and preserves their root
+type: `gpu.create_compute_pipeline(kernel)` and
+`gpu.create_graphics_pipeline(vertex, fragment)`. Record work with
+`commands.dispatch(pipeline, arguments, x, y, z)` or
+`commands.draw(pipeline, arguments, count)`; rootless graphics use
+`commands.draw(pipeline, None, count)`. The compiler checks host arguments and
+projects GPU views to the shader's raw pointers and spans inside recording.
+Recorded allocations reject CPU access until submission or cancellation. Use
+`.copy_to(Span<T>)` for host readback without escaping a raw pointer into GPU memory.
+See [GPU buffers](../doc/gpu-buffers.md).
 
 Submission consumes a recording even on failure. `commands.submit()` and
 `commands.cancel()` clear the shared native handle before entering C.
@@ -72,10 +75,10 @@ dropping one already consumed does not cancel it again. Submission waits for GPU
 | Type | Constructors and operations |
 | --- | --- |
 | `Host` | `Host.malloc(bytes)`, `Host.free(memory)` |
-| `Gpu` | `Gpu.new()`, `Gpu.new_at(index)`, `Gpu.new_for_window(window)`, `gpu.malloc(...)`, `gpu.create_compute_pipeline(code)`, `gpu.create_image(...)` |
+| `Gpu` | `Gpu.new()`, `Gpu.new_at(index)`, `Gpu.new_for_window(window)`, `gpu.malloc(...)`, `gpu.create_compute_pipeline(kernel)`, `gpu.create_image(...)` |
 | `GpuPtr<T>` / `GpuSpan<T>` | `gpu.new(value)`, `GpuSpan<T>.allocate(gpu, count)`, `.at(index)`, `.slice(start, length)`, `.read_only()`, `.write_only()` |
-| `GpuArguments` | `kernel.project(gpu, arguments)` |
-| `GpuCommands` | `gpu.start_command_recording()`, `commands.set_pipeline(...)`, `commands.dispatch(root, x, y, z)`, `commands.draw(root, count)`, `commands.submit()`, `commands.cancel()` |
+| `GpuComputePipeline<Root, Owner>` / `GpuGraphicsPipeline<Root, Owner>` | `gpu.create_compute_pipeline(kernel)`, `gpu.create_graphics_pipeline(vertex, fragment)` |
+| `GpuCommands` | `gpu.start_command_recording()`, `commands.dispatch(pipeline, arguments, x, y, z)`, `commands.draw(pipeline, arguments, count)`, `commands.submit()`, `commands.cancel()` |
 | `Window` | `Window.new(width, height, String.from_str("Resin"))`, `window.poll_events()`, `window.framebuffer_size()`, input and cursor methods |
 | `ImageData` | `ImageData.read_png(path, channels)`, `image.write_png(path)` |
 | `Console` / `InputLine` | `Console.read_byte()`, `Console.read_line()`, `Console.print(line)` |
@@ -96,8 +99,9 @@ stay private, and callers can propagate allocation errors with `?`.
 
 Some operations return additional information:
 
-- `Gpu.device_count()` returns the count. `kernel.project(gpu, arguments)` returns
-  an owning shader root whose projected views preserve their interior byte offsets.
+- `Gpu.device_count()` returns the count.
+- Pipeline factories return typed shared owners. Dispatch and draw project arguments
+  internally, preserving interior byte offsets in GPU views.
 - `ImageData.read_png(path, channels)` returns a shared `ImageData` owner exposing
   `width`, `height`, `channels`, and `pixels`. The final owner releases the pixels;
   `channels = 0` requests the file's channel count.

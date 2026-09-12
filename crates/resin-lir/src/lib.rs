@@ -88,10 +88,32 @@ pub enum Instr {
     GpuWriteOnly,
     /// `[GpuSpan<T>, Span<T>] -> [unit]`: copy readable GPU elements into host storage.
     GpuCopyTo,
-    /// `[gpu, host root] -> [Result<GpuArguments, E>]`: project and retain shader arguments.
-    GpuProject {
-        allocator: FunctionId,
+    /// `[gpu] -> [Result<GpuComputePipeline<Root, Owner>, E>]`: create a pipeline
+    /// from the declared compute shader, retaining its root type and factory owner.
+    GpuComputePipeline {
+        factory: FunctionId,
         shader: FunctionId,
+    },
+    /// `[gpu] -> [Result<GpuGraphicsPipeline<Root, Owner>, E>]`: create a pipeline
+    /// from compatible vertex and fragment declarations. Rootless stages use None.
+    GpuGraphicsPipeline {
+        factory: FunctionId,
+        vertex: FunctionId,
+        fragment: FunctionId,
+    },
+    /// `[commands, pipeline, host root, x, y, z] -> [Result<(), E>]`: project
+    /// checked arguments and pass them with the pipeline owner to the recording function.
+    GpuDispatch {
+        context: FunctionId,
+        allocator: FunctionId,
+        record: FunctionId,
+    },
+    /// `[commands, pipeline, host root or None, count] -> [Result<(), E>]`.
+    /// Rootless graphics performs no allocation or projection.
+    GpuDraw {
+        context: FunctionId,
+        allocator: Option<FunctionId>,
+        record: FunctionId,
     },
     /// `[arguments, commands, x, y, z] -> [int]`: record a dispatch with retained arguments.
     GpuArgumentsDispatch,

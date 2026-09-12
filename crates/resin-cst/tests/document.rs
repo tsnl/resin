@@ -89,3 +89,31 @@ fn gpu_type_formers_preserve_token_queries_and_formatting() {
     assert!(formatted.contains("GpuSpan<uint>"));
     assert!(formatted.contains("GpuPtr<uint>"));
 }
+
+#[test]
+fn gpu_pipeline_annotations_preserve_type_queries_and_formatting() {
+    let source = "def pipeline(value:GpuComputePipeline<Root,Arc<Owner>>)->GpuGraphicsPipeline<None,_> = {value};";
+    let document = Document::reparse(source.into(), None);
+    assert!(!document.tree().root_node().has_error());
+    for former in ["GpuComputePipeline", "GpuGraphicsPipeline"] {
+        let offset = source.find(former).unwrap() + 2;
+        assert_eq!(document.token(offset).unwrap().kind(), former);
+        assert!(document.type_context(offset));
+    }
+    let formatted = resin_cst::format_source(source).unwrap();
+    assert_eq!(resin_cst::format_source(&formatted).unwrap(), formatted);
+    assert!(formatted.contains("GpuComputePipeline<Root, Arc<Owner>>"));
+    assert!(formatted.contains("GpuGraphicsPipeline<None, _>"));
+    for invalid in [
+        "GpuComputePipeline<Root>",
+        "GpuGraphicsPipeline<Root, Owner, Extra>",
+    ] {
+        let source = format!("type Invalid = {invalid};");
+        assert!(
+            Document::reparse(source, None)
+                .tree()
+                .root_node()
+                .has_error()
+        );
+    }
+}

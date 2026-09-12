@@ -339,21 +339,14 @@ pub(super) fn validate_shader(
     foreign: bool,
     stage: &str,
 ) -> Result<shader::Interface, String> {
-    fn shape(typer: &TyperContext, ty: &Ty) -> Result<Ty, String> {
-        let mut ty = ty.clone();
-        while matches!(ty, Ty::Defined { .. }) {
-            ty = typer.body(&ty).map_err(|e| e.to_string())?;
-        }
-        Ok(ty)
-    }
     fn vector(typer: &TyperContext, ty: &Ty, names: &[&str]) -> bool {
-        matches!(shape(typer, ty), Ok(Ty::Record { fields }) if fields.len() == names.len()
+        matches!(shader_shape(typer, ty), Ok(Ty::Record { fields }) if fields.len() == names.len()
                 && fields.iter().zip(names).all(|(field, name)| field.name.as_ref() == *name && field.ty == Ty::Float32))
     }
     if foreign {
         return Err("foreign functions cannot be shader entries".into());
     }
-    let param = shape(typer, parameter)?;
+    let param = shader_shape(typer, parameter)?;
     let (input, root) = match &param {
         Ty::Record { fields }
             if fields.len() == 2
@@ -365,8 +358,8 @@ pub(super) fn validate_shader(
         }
         _ => (parameter, false),
     };
-    let input_shape = shape(typer, input)?;
-    let result = shape(typer, result)?;
+    let input_shape = shader_shape(typer, input)?;
+    let result = shader_shape(typer, result)?;
     let interface = match stage {
         "compute" if root && input_shape == Ty::UInt64 && result == Ty::Unit => {
             Some(shader::Interface::Compute {
@@ -414,5 +407,103 @@ pub(super) fn validate_shader(
                 _ => "unknown shader stage",
             }
         ))
+    }
+}
+
+fn shader_shape(typer: &TyperContext, ty: &Ty) -> Result<Ty, String> {
+    let mut ty = ty.clone();
+    while matches!(ty, Ty::Defined { .. }) {
+        ty = typer.body(&ty).map_err(|error| error.to_string())?;
+    }
+    Ok(ty)
+}
+
+pub(super) fn pipeline_root(
+    typer: &TyperContext,
+    stages: &[(&Ty, &Ty, &str)],
+) -> Result<Ty, String> {
+    let root =
+        match stages {
+            [(parameter, result, "compute")] => {
+                validate_shader(typer, parameter, result, false, "compute")?;
+                Some(shader_root(typer, parameter)?)
+            }
+            [
+                (vertex_parameter, vertex_result, "vertex"),
+                (fragment_parameter, fragment_result, "fragment"),
+            ] => graphics_root(
+                typer,
+                vertex_parameter,
+                vertex_result,
+                fragment_parameter,
+                fragment_result,
+            )?,
+            _ => return Err(
+                "pipeline creation requires one compute shader or a vertex/fragment shader pair"
+                    .into(),
+            ),
+        };
+    match root {
+        Some(root) if root.gpu_projection(typer.definitions()).is_none() => {
+            Err("pipeline shader root does not support GPU argument projection".into())
+        }
+        Some(root) => Ok(root),
+        None => Ok(Ty::None),
+    }
+}
+
+fn shader_root(typer: &TyperContext, parameter: &Ty) -> Result<Ty, String> {
+    let Ty::Record { fields } = shader_shape(typer, parameter)? else {
+        return Err("shader root parameter must be a pointer".into());
+    };
+    let Some(Ty::Pointer { pointee }) = fields.get(1).map(|field| &field.ty) else {
+        return Err("shader root parameter must be a pointer".into());
+    };
+    Ok(*pointee.clone())
+}
+
+fn graphics_root(
+    typer: &TyperContext,
+    vertex_parameter: &Ty,
+    vertex_result: &Ty,
+    fragment_parameter: &Ty,
+    fragment_result: &Ty,
+) -> Result<Option<Ty>, String> {
+    let shader::Interface::Vertex {
+        root: vertex_root,
+        color: vertex_color,
+        ..
+    } = validate_shader(typer, vertex_parameter, vertex_result, false, "vertex")?
+    else {
+        unreachable!("validated vertex shader")
+    };
+    let shader::Interface::Fragment {
+        root: fragment_root,
+        color: fragment_color,
+    } = validate_shader(
+        typer,
+        fragment_parameter,
+        fragment_result,
+        false,
+        "fragment",
+    )?
+    else {
+        unreachable!("validated fragment shader")
+    };
+    if vertex_color != fragment_color {
+        return Err("vertex shader color and fragment shader input must have the same type".into());
+    }
+    let vertex_root = vertex_root
+        .then(|| shader_root(typer, vertex_parameter))
+        .transpose()?;
+    let fragment_root = fragment_root
+        .then(|| shader_root(typer, fragment_parameter))
+        .transpose()?;
+    match (vertex_root, fragment_root) {
+        (Some(vertex), Some(fragment)) if vertex != fragment => {
+            Err("vertex and fragment shaders must use the same root type".into())
+        }
+        (Some(root), _) | (_, Some(root)) => Ok(Some(root)),
+        (None, None) => Ok(None),
     }
 }

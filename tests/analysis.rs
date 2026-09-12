@@ -109,22 +109,57 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
 }
 
 #[test]
-fn gpu_commands_require_projected_roots_and_allow_rootless_draws() {
+fn gpu_commands_check_pipeline_stages_and_host_arguments() {
     for (call, valid) in [
-        ("dispatch(root, 1_ui, 1_ui, 1_ui)", true),
-        ("draw(root, 3_ui)", true),
-        ("draw(None, 3_ui)", true),
-        ("dispatch(None, 1_ui, 1_ui, 1_ui)", false),
-        ("dispatch(0_ul, 1_ui, 1_ui, 1_ui)", false),
-        ("dispatch(pointer, 1_ui, 1_ui, 1_ui)", false),
-        ("dispatch(buffer, 1_ui, 1_ui, 1_ui)", false),
-        ("draw(0_ul, 3_ui)", false),
-        ("draw(pointer, 3_ui)", false),
-        ("draw(buffer, 3_ui)", false),
+        (
+            "dispatch(compute, { value = buffer }, 1_ui, 1_ui, 1_ui)",
+            true,
+        ),
+        ("draw(graphics, { value = buffer }, 3_ui)", true),
+        ("draw(empty, None, 3_ui)", true),
+        (
+            "dispatch(graphics, { value = buffer }, 1_ui, 1_ui, 1_ui)",
+            false,
+        ),
+        ("draw(compute, { value = buffer }, 3_ui)", false),
+        ("dispatch(compute, None, 1_ui, 1_ui, 1_ui)", false),
+        ("dispatch(compute, 0_ul, 1_ui, 1_ui, 1_ui)", false),
+        (
+            "dispatch(compute, { value = pointer }, 1_ui, 1_ui, 1_ui)",
+            false,
+        ),
+        (
+            "dispatch(compute, { value = bytes }, 1_ui, 1_ui, 1_ui)",
+            false,
+        ),
+        (
+            "dispatch(compute, { other = buffer }, 1_ui, 1_ui, 1_ui)",
+            false,
+        ),
+        ("dispatch(compute, buffer, 1_ui, 1_ui, 1_ui)", false),
+        ("draw(graphics, None, 3_ui)", false),
+        ("draw(graphics, { value = pointer }, 3_ui)", false),
+        ("draw(empty, { value = buffer }, 3_ui)", false),
+        ("set_pipeline(compute)", false),
     ] {
         let source = format!(
-            r#"import {{ "$/gpu.resin" }};
-            def f(commands: GpuCommands, root: GpuArguments, buffer: GpuPtr<ubyte>, pointer: Ptr<ubyte>) -> Result<(), _> = {{
+            r#"import {{ "$/gpu.resin", "$/graphics.resin" }};
+            struct Root {{ value: Ptr<int> }};
+            @compute_shader
+            def kernel(index: ulong, root: Ptr<Root>) = {{}};
+            @vertex_shader
+            def vertex(index: int, root: Ptr<Root>) -> Vertex = {{ rootless(index) }};
+            @vertex_shader
+            def rootless(index: int) -> Vertex = {{
+                Vertex {{ position = Position {{ x = 0_f, y = 0_f, z = 0_f, w = 1_f }},
+                    color = Color {{ r = 1_f, g = 0_f, b = 0_f, a = 1_f }} }}
+            }};
+            @fragment_shader
+            def fragment(color: Color) -> Color = {{ color }};
+            def f(commands: GpuCommands, gpu: Gpu, buffer: GpuPtr<int>, bytes: GpuPtr<ubyte>, pointer: Ptr<int>) -> Result<(), _> = {{
+                var compute = gpu.create_compute_pipeline(kernel)?;
+                var graphics = gpu.create_graphics_pipeline(vertex, fragment)?;
+                var empty = gpu.create_graphics_pipeline(rootless, fragment)?;
                 commands.{call}?;
                 ok(())
             }};"#
@@ -148,6 +183,48 @@ fn gpu_commands_require_projected_roots_and_allow_rootless_draws() {
             "{call}: {:?}",
             analysis.diagnostics()
         );
+    }
+}
+
+#[test]
+fn typed_pipeline_calls_show_shader_contracts_in_editor_signatures() {
+    let source = r#"import { "$/gpu.resin" };
+        struct Root { values: Span<int>, scale: int };
+        @compute_shader
+        def kernel(index: ulong, root: Ptr<Root>) = {};
+        def f(gpu: Gpu, commands: GpuCommands, values: GpuSpan<int>) -> Result<(), _> = {
+            var pipeline = gpu.create_compute_pipeline(kernel)?;
+            commands.dispatch(pipeline, { values = values, scale = 2 }, 1, 1, 1)?;
+            ok(())
+        };"#;
+    let mut loader = resin_source::Loader::new(resin_source::library_root());
+    let input = loader
+        .source_from_text(Path::new("main.resin"), source)
+        .unwrap();
+    let analysis = Compiler::new().compile(input.clone(), &mut loader);
+    assert!(
+        analysis.diagnostics().is_empty(),
+        "{:?}",
+        analysis.diagnostics()
+    );
+    for (method, contract) in [
+        ("create_compute_pipeline", "GpuComputePipeline<Root,"),
+        ("dispatch", "GpuSpan<int>"),
+    ] {
+        let call = source.find(&format!(".{method}(")).unwrap() + 1;
+        let definition = analysis.definition(&input, call).unwrap();
+        assert!(
+            loader
+                .path(&definition.source)
+                .unwrap()
+                .ends_with("resin/gpu.resin")
+        );
+        let hover = analysis.hover(&input, call).unwrap().text;
+        assert!(hover.contains(contract), "{method}: {hover}");
+        assert!(!hover.contains("GpuArguments"), "{method}: {hover}");
+        let completions = analysis.completions(&input, call);
+        let item = completions.iter().find(|item| item.name == method).unwrap();
+        assert!(item.detail.contains(contract), "{method}: {}", item.detail);
     }
 }
 

@@ -51,11 +51,10 @@ not expose a raw pointer into the GPU allocation. [Gradient](../examples/gradien
 and [triangle](../examples/triangle.resin) copy completed GPU output into host
 memory before writing a PNG.
 
-## Compiler projection
+## Typed pipelines and compiler projection
 
-Shader entries keep ordinary pointer parameters. A decorated shader declaration
-provides `.project(gpu, arguments)`, which produces `Result<GpuArguments, RuntimeError>`
-for the standard GPU allocator:
+Create pipelines from decorated shader declarations. The compiler preserves their
+root type and stage, then checks host arguments when recording a dispatch or draw:
 
 ```resin
 struct Params { values: Span<float32>, scale: float32 };
@@ -68,34 +67,44 @@ def kernel(index: ulong, root: Ptr<Params>) = {
     };
 };
 
-// Host launch records contain owning GPU views.
-var root = kernel.project(gpu, { values = values, scale = 2.0_f })?;
+var pipeline = gpu.create_compute_pipeline(kernel)?;
 var commands = gpu.start_command_recording()?;
-commands.set_pipeline(pipeline)?;
-commands.dispatch(root, 16, 1, 1)?;
+commands.dispatch(pipeline, { values = values, scale = 2.0_f }, 16, 1, 1)?;
 commands.submit()?;
 ```
 
-Projection uses the shader's declared root type to check the host record: a shader
-`Ptr<T>` field receives a host `GpuPtr<T>`, and a shader `Span<T>` field receives a
-host `GpuSpan<T>`. Scalars and nested records keep their values. It creates a
-separate shader root, translates GPU views internally, and retains every referenced
-allocation. An indexed or sliced view preserves its byte offset.
+The inferred pipeline type is `GpuComputePipeline<Params, GpuPipelineOwner>`.
+`GpuGraphicsPipeline<Params, GpuPipelineOwner>` is the corresponding graphics type;
+its factory takes a vertex and fragment declaration. Both graphics stages must use
+the same root type when both have a root parameter. Rootless graphics pipelines use
+`None` as their root type and accept `commands.draw(pipeline, None, count)`.
 
-Projection requires a decorated declaration directly; runtime function aliases do
-not provide `.project`. A shader without a root pointer has nothing to project.
-Pointers inside GPU buffer elements are rejected: projection handles the launch
-record, not recursively mapped pointer graphs. Raw host pointers cannot substitute
-for GPU views. Current shader pointers allow both reads and writes, so projection
-requires views with both permissions.
+Pipeline types retain their shared native owner across copies and ordinary function
+calls. Explicit parameter types can name `GpuPipelineOwner`, exported by the GPU
+module. Their representation is opaque: pipelines expose neither raw handles nor
+construction from an owner. Compute and graphics pipelines cannot be interchanged.
+
+Dispatch and draw derive the host record from the pipeline's declared root type: a
+shader `Ptr<T>` field receives a host `GpuPtr<T>`, and a shader `Span<T>` field
+receives a host `GpuSpan<T>`. Scalars and nested records keep their values. The
+compiler creates a separate shader root, translates GPU views internally, and
+retains every referenced allocation. An indexed or sliced view preserves its byte
+offset. Projection occurs inside recording; the public GPU API exposes no untyped
+projected root to construct or reuse.
+
+Pipeline creation requires decorated declarations directly, rather than runtime
+function aliases or arbitrary SPIR-V bytes. `.spirv` remains available for obtaining
+a shader's embedded bytecode. Pointers inside GPU buffer elements are rejected:
+projection handles the launch record, not recursively mapped pointer graphs. Raw
+host pointers cannot substitute for GPU views. Current shader pointers allow both
+reads and writes, so projection requires views with both permissions.
 
 ## Recording and lifetime
 
-`commands.dispatch(root, x, y, z)` and `commands.draw(root, count)` accept
-`GpuArguments`. Bind the pipeline whose shader root matches those arguments.
-`commands.draw(None, count)` is available for shaders without a root. A projected
-root may be shared by shaders with the same root layout, as in
-[particles](../examples/particles.resin).
+`commands.dispatch(pipeline, arguments, x, y, z)` and
+`commands.draw(pipeline, arguments, count)` bind the supplied pipeline and project
+its checked host arguments. Host records can be reused across compatible pipelines,
+as in [particles](../examples/particles.resin); each recording creates its own root.
 
 Successful recording retains the root and its referenced allocations through
 synchronous submission or cancellation. Those allocations reject CPU access while
@@ -109,3 +118,8 @@ See [lifetime rules](lifetimes.md).
 The unsafe [native C ABI](../crates/resin-runtime/include/resin_runtime/gpu.h)
 retains its explicit native handles and device addresses. The Resin API obtains
 shader addresses through compiler projection.
+
+The GPU module implements pipeline creation and recording through explicitly
+decorated compiler bridges. Their native signatures are checked separately from
+the typed public calls. Bridge implementations handle native owners and internal
+`GpuArguments`, and must preserve resource retention through recording completion.

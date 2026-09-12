@@ -174,15 +174,39 @@ impl Printer<'_> {
                 "gpu-allocate",
                 vec![function_id(allocator.index()), self.arguments(args)],
             ),
-            TermKind::GpuProject {
-                allocator,
-                shader,
+            TermKind::GpuPipelineCreate {
+                factory,
+                shaders,
                 args,
             } => list(
-                "gpu-project",
+                "gpu-pipeline-create",
                 vec![
-                    function_id(allocator.index()),
-                    function_id(shader.index()),
+                    function_id(factory.index()),
+                    list(
+                        "shaders",
+                        shaders
+                            .iter()
+                            .map(|shader| function_id(shader.index()))
+                            .collect(),
+                    ),
+                    self.arguments(args),
+                ],
+            ),
+            TermKind::GpuPipelineDispatch {
+                context,
+                allocator,
+                record,
+                args,
+            } => list(
+                "gpu-pipeline-dispatch",
+                vec![
+                    function_id(context.index()),
+                    atom(
+                        allocator
+                            .map(|id| id.index().to_string())
+                            .unwrap_or_else(|| "none".into()),
+                    ),
+                    function_id(record.index()),
                     self.arguments(args),
                 ],
             ),

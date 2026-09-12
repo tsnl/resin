@@ -207,8 +207,8 @@ shader's raw pointer/span representation, retaining all referenced allocations.
 
 ## Standard library
 
-`Gpu`, `GpuPtr<T>`, `GpuSpan<T>`, `GpuArguments`, `GpuImage`, `GpuPipeline`,
-`GpuCommands`, `Window`, `InputLine`,
+`Gpu`, `GpuPtr<T>`, `GpuSpan<T>`, `GpuImage`, `GpuComputePipeline<Root, Owner>`,
+`GpuGraphicsPipeline<Root, Owner>`, `GpuCommands`, `Window`, `InputLine`,
 and `ImageData` use shared owners. Copying them retains ownership. GPU resources
 retain their device; a presentation device retains its window. Recorded pipelines,
 images, copy buffers, and shader root buffers remain owned until synchronous
@@ -218,9 +218,11 @@ Submission errors return normally when device completion can be confirmed. If bo
 submission waiting and the fallback device-idle wait fail, the runtime terminates
 before releasing resources that may still be in use.
 
-`commands.dispatch(root, x, y, z)` and `commands.draw(root, count)` take compiler
-projected `GpuArguments` and retain the root and its referenced allocations after
-successful recording. `commands.draw(None, count)` supplies no root. Shader entry
+`commands.dispatch(pipeline, arguments, x, y, z)` and
+`commands.draw(pipeline, arguments, count)` check host arguments against the typed
+pipeline, project them internally, and retain the root and its referenced
+allocations after successful recording. `commands.draw(pipeline, None, count)`
+supplies no root for a rootless graphics pipeline. Shader entry
 parameters remain raw `Ptr<T>` values. Host `GpuPtr` and `GpuSpan` values are owning
 GPU views, and indexing, slicing, copying, and taking a field address preserve their
 owner. Allocation-wide recording state rejects CPU access until work completes or

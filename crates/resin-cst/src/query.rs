@@ -22,6 +22,8 @@ pub(super) fn token(document: &Document, offset: usize) -> Option<Node<'_>> {
                     | "Span"
                     | "GpuPtr"
                     | "GpuSpan"
+                    | "GpuComputePipeline"
+                    | "GpuGraphicsPipeline"
             )
         {
             return Some(node);

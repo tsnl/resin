@@ -8,18 +8,11 @@ pub(super) fn project(
     types: &Types<'_>,
     name: &str,
     allocator: FunctionId,
-    shader: FunctionId,
+    root: &Ty,
     args: &[Slot],
     result: &Ty,
     out: &mut String,
 ) -> Result<String, Error> {
-    let function = &types.module.functions[shader.index()];
-    let Ty::Record { fields } = &function.locals[0].ty else {
-        unreachable!("verified shader root parameter")
-    };
-    let Ty::Pointer { pointee: root } = &fields[1].ty else {
-        unreachable!("verified shader root pointer")
-    };
     let allocate = &types.module.functions[allocator.index()];
     let ok = types.tag(&Case::Ok);
     let err = types.tag(&Case::Err);

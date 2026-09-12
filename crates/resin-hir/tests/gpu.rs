@@ -151,9 +151,38 @@ fn gpu_new_defaults_unconstrained_integer_elements_to_long() {
 
 const SHADER: &str = "struct Params { scale: float32, values: Span<int> }; @compute_shader def kernel(index: ulong, root: Ptr<Params>) = {};";
 
+const PIPELINES: &str = r#"
+struct PipelineOwner { gpu: Device };
+impl PipelineOwner {
+    @gpu_pipeline_context
+    def context(self: Arc<PipelineOwner>) -> Device = { self.gpu };
+}
+impl Device {
+    @gpu_compute_pipeline
+    def compute(self: Device, code: Span<ubyte>) -> Result<Arc<PipelineOwner>, Failure> = {
+        ok(Arc<PipelineOwner>(PipelineOwner { gpu = self }))
+    };
+    @gpu_graphics_pipeline
+    def graphics(self: Device, vertex: Span<ubyte>, fragment: Span<ubyte>) -> Result<Arc<PipelineOwner>, Failure> = {
+        ok(Arc<PipelineOwner>(PipelineOwner { gpu = self }))
+    };
+}
+struct Commands {};
+impl Commands {
+    @gpu_dispatch
+    def dispatch(self: Commands, pipeline: Arc<PipelineOwner>, root: GpuArguments, x: uint, y: uint, z: uint) -> Result<(), Failure> = { ok(()) };
+    @gpu_draw
+    def draw(self: Commands, pipeline: Arc<PipelineOwner>, root: GpuArguments | None, count: uint) -> Result<(), Failure> = { ok(()) };
+}
+"#;
+
+fn pipelines(source: &str) -> Result<Module, resin_hir::GenerateError> {
+    generate(&format!("{ALLOCATOR} {PIPELINES} {source}"))
+}
+
 #[test]
-fn projection_infers_host_fields_from_shader_root() {
-    let module = generate(&format!("{ALLOCATOR} {SHADER} def main(values: GpuSpan<int>) -> Result<GpuArguments, Failure> = {{ kernel.project(Device.new(), {{ scale = 2.0, values = values }}) }};")).unwrap();
+fn dispatch_infers_host_fields_from_the_pipeline_root() {
+    let module = pipelines(&format!("{SHADER} def main(values: GpuSpan<int>) -> Result<(), Failure> = {{ var pipeline = Device.new().compute(kernel)?; Commands {{}}.dispatch(pipeline, {{ scale = 2.0, values = values }}, 1, 1, 1) }};")).unwrap();
     let main = module
         .functions
         .iter()
@@ -162,9 +191,13 @@ fn projection_infers_host_fields_from_shader_root() {
     let TermKind::Block { tail, .. } = &main.body.as_ref().unwrap().kind else {
         panic!()
     };
-    let TermKind::GpuProject { args, .. } = &tail.kind else {
+    let TermKind::GpuPipelineDispatch {
+        args, allocator, ..
+    } = &tail.kind
+    else {
         panic!()
     };
+    assert!(allocator.is_some());
     let Ty::Record { fields } = &args.params[1] else {
         panic!()
     };
@@ -175,46 +208,94 @@ fn projection_infers_host_fields_from_shader_root() {
             element: Box::new(Ty::Int32)
         }
     );
+    assert!(module.shaders.values().all(|entry| entry.embedded));
 }
 
 #[test]
-fn projection_rejects_raw_pointers_and_runtime_shader_aliases() {
-    let raw = format!(
-        "{ALLOCATOR} {SHADER} def main(values: Span<int>) -> _ = {{ kernel.project(Device.new(), {{ scale = 2.0_f, values = values }}) }};"
-    );
-    assert!(generate(&raw).is_err());
-    let alias = format!(
-        "{ALLOCATOR} {SHADER} def main(values: GpuSpan<int>) -> _ = {{ var alias = kernel; alias.project(Device.new(), {{ scale = 2.0_f, values = values }}) }};"
-    );
-    assert!(generate(&alias).is_err());
-    let ordinary = format!(
-        "{ALLOCATOR} def ordinary(index: ulong, root: Ptr<int>) = {{}}; def main() -> _ = {{ ordinary.project(Device.new(), 1_i) }};"
-    );
-    assert!(generate(&ordinary).is_err());
+fn pipeline_types_cross_functions_and_dispatch_accepts_precomputed_arguments() {
+    pipelines(&format!("{SHADER}
+        def create(gpu: Device) -> Result<GpuComputePipeline<Params, Arc<PipelineOwner>>, Failure> = {{ gpu.compute(kernel) }};
+        def dispatch(pipeline: GpuComputePipeline<Params, Arc<PipelineOwner>>, values: GpuSpan<int>) -> Result<(), Failure> = {{
+            var args = (pipeline, {{ scale = 1.0_f, values = values }}, 1_ui, 1_ui, 1_ui);
+            Commands {{}}.dispatch(args)
+        }};
+        def associated(gpu: Device) -> _ = {{ Device.compute(gpu, kernel) }};
+    ")).unwrap();
 }
 
 #[test]
-fn projection_rejects_shaders_without_root_and_pointer_graphs() {
-    let no_root = format!(
-        "{ALLOCATOR} struct Color {{ r: float32, g: float32, b: float32, a: float32 }}; @fragment_shader def fragment(color: Color) -> Color = {{ color }}; def main() -> _ = {{ fragment.project(Device.new(), 1_i) }};"
-    );
-    assert!(generate(&no_root).is_err());
-    let graph = format!(
-        "{ALLOCATOR} struct Node {{ next: Ptr<int> }}; @compute_shader def kernel(index: ulong, root: Ptr<Node>) = {{}}; def main(pointer: GpuPtr<int>) -> _ = {{ kernel.project(Device.new(), {{ next = pointer }}) }};"
-    );
-    generate(&graph).unwrap();
-    let graph = format!(
-        "{ALLOCATOR} struct Node {{ next: Ptr<int> }}; struct Root {{ node: Ptr<Node> }}; @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {{}}; def main(pointer: GpuPtr<Node>) -> _ = {{ kernel.project(Device.new(), {{ node = pointer }}) }};"
-    );
-    assert!(generate(&graph).is_err());
+fn creation_rejects_bytecode_runtime_aliases_and_undecorated_functions() {
+    for expression in [
+        "gpu.compute(kernel.spirv)",
+        "gpu.compute(alias)",
+        "gpu.compute(ordinary)",
+        "gpu.compute(choose())",
+    ] {
+        let source = format!(
+            "{SHADER} def ordinary(index: ulong, root: Ptr<Params>) = {{}};
+            def choose() -> (ulong, Ptr<Params>) -> () = {{ kernel }};
+            def main(gpu: Device) -> _ = {{ var alias = kernel; {expression} }};"
+        );
+        assert!(pipelines(&source).is_err(), "{expression}");
+    }
 }
 
 #[test]
-fn gpu_builtins_accept_precomputed_argument_tuples() {
-    let source = format!(
-        "{ALLOCATOR} {SHADER} def main() -> Result<GpuArguments, Failure> = {{ var gpu = Device.new(); var allocation = (gpu, 4_ul); var values = GpuSpan<int>.allocate(allocation)?; var initialization = (gpu, 42_i); var pointer = GpuPtr<int>.new(initialization)?; var arguments = (gpu, {{scale = 1.0_f, values = values}}); kernel.project(arguments) }};"
-    );
-    generate(&source).unwrap();
+fn dispatch_rejects_raw_pointers_and_incompatible_pipeline_roots() {
+    for tail in [
+        "Commands {}.dispatch(pipeline, { scale = 1.0_f, values = raw }, 1, 1, 1)",
+        "Commands {}.dispatch(pipeline, { scale = 1.0_f, wrong = values }, 1, 1, 1)",
+        "Commands {}.draw(pipeline, { scale = 1.0_f, values = values }, 3)",
+        "Commands {}.dispatch(pipeline, None, 1, 1, 1)",
+    ] {
+        assert!(pipelines(&format!("{SHADER} def main(gpu: Device, values: GpuSpan<int>, raw: Span<int>) -> _ = {{ var pipeline = gpu.compute(kernel)?; {tail} }};")).is_err(), "{tail}");
+    }
+    assert!(pipelines(&format!("{SHADER} def create(gpu: Device) -> Result<GpuComputePipeline<int, Arc<PipelineOwner>>, Failure> = {{ gpu.compute(kernel) }};")).is_err());
+}
+
+#[test]
+fn standalone_projection_and_untyped_pipeline_owners_cannot_dispatch() {
+    assert!(pipelines(&format!("{SHADER} def main(gpu: Device, values: GpuSpan<int>) -> _ = {{ kernel.project(gpu, {{ scale = 2.0_f, values = values }}) }};")).is_err());
+    assert!(pipelines("def main(owner: Arc<PipelineOwner>, arguments: GpuArguments) -> _ = { Commands {}.dispatch(owner, arguments, 1, 1, 1) };").is_err());
+    assert!(pipelines("def forge(owner: Arc<PipelineOwner>) -> GpuComputePipeline<int, Arc<PipelineOwner>> = { GpuComputePipeline<int, Arc<PipelineOwner>>(owner) };").is_err());
+}
+
+#[test]
+fn native_bridge_signatures_cannot_escape_through_method_references() {
+    for tail in [
+        "var make = Device.compute; make(gpu, kernel.spirv)",
+        "(Device.compute)(gpu, kernel.spirv)",
+        "var make = gpu.compute; make(kernel.spirv)",
+        "var record = Commands.dispatch; record(Commands {}, owner, arguments, 1, 1, 1)",
+        "(Commands.dispatch)(Commands {}, owner, arguments, 1, 1, 1)",
+    ] {
+        assert!(pipelines(&format!("{SHADER} def main(gpu: Device, owner: Arc<PipelineOwner>, arguments: GpuArguments) -> _ = {{ {tail} }};")).is_err(), "{tail}");
+    }
+}
+
+#[test]
+fn gpu_bridge_decorators_require_one_valid_native_signature() {
+    for source in [
+        "struct Device {}; impl Device { @gpu_compute_pipeline def create(self: Device, shader: int) -> int = { 0_i }; }",
+        "struct Device {}; impl Device { @gpu_dispatch def dispatch(self: Device) = {}; }",
+        "struct Device {}; impl Device { @gpu_pipeline_context def context(self: Device) -> Device = { self }; }",
+        "struct Device {}; impl Device { @gpu_compute_pipeline @gpu_graphics_pipeline def create(self: Device) = {}; }",
+        "@gpu_compute_pipeline def create() = {};",
+    ] {
+        assert!(generate(source).is_err(), "{source}");
+    }
+    assert!(pipelines("impl PipelineOwner { @gpu_pipeline_context def again(self: Arc<PipelineOwner>) -> Device = { self.gpu }; }").is_err());
+}
+
+#[test]
+fn pipeline_creation_rejects_pointer_graph_roots() {
+    let graph = "struct Node { next: Ptr<int> }; struct Root { node: Ptr<Node> }; @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {}; def main(gpu: Device) -> _ = { gpu.compute(kernel) };";
+    assert!(pipelines(graph).is_err());
+}
+
+#[test]
+fn gpu_allocation_builtins_accept_precomputed_argument_tuples() {
+    generate(&format!("{ALLOCATOR} def main() -> Result<GpuPtr<int>, Failure> = {{ var gpu = Device.new(); var allocation = (gpu, 4_ul); var values = GpuSpan<int>.allocate(allocation)?; var initialization = (gpu, 42_i); GpuPtr<int>.new(initialization) }};")).unwrap();
 }
 
 #[test]
@@ -313,16 +394,13 @@ fn generic_gpu_constructor_completion_recovers_after_a_dot() {
 }
 
 #[test]
-fn shader_projection_completion_and_hover_follow_declaration_identity() {
+fn shader_completion_does_not_expose_standalone_projection() {
     use resin_source::Source;
     use std::{collections::BTreeMap, sync::Arc};
-
-    let text = format!(
-        "{ALLOCATOR} {SHADER} def main(gpu: Device, values: GpuSpan<int>) -> Result<GpuArguments, Failure> = {{ kernel.project(gpu, {{ scale = 2.0_f, values = values }}) }};"
-    );
+    let text = format!("{SHADER} def main() = {{ kernel.");
     let source = Source::new("gpu.resin", text.clone());
     let document = Arc::new(resin_cst::Document::reparse(text.clone(), None));
-    let file = resin_ast::generate(&document).unwrap();
+    let file = resin_ast::recover(&document).file;
     let analysis = resin_hir::analyze_program(&resin_ast::Program {
         modules: vec![resin_ast::SourceModule {
             source: source.clone(),
@@ -330,70 +408,12 @@ fn shader_projection_completion_and_hover_follow_declaration_identity() {
             imports: vec![],
         }],
     });
-    assert!(
-        analysis.diagnostics.is_empty(),
-        "{:?}",
-        analysis.diagnostics
-    );
     let documents = BTreeMap::from([(source.clone(), document)]);
-    let offset = text.find("kernel.project").unwrap() + "kernel.".len();
-    let items = analysis.semantics.completions(&documents, &source, offset);
-    let completion = items.iter().find(|item| item.name == "project").unwrap();
+    let items = analysis
+        .semantics
+        .completions(&documents, &source, text.len());
     assert!(
-        completion.detail.contains("scale: float32"),
-        "{completion:?}"
+        !items.iter().any(|item| item.name == "project"),
+        "{items:?}"
     );
-    assert!(
-        completion.detail.contains("values: GpuSpan<int>"),
-        "{completion:?}"
-    );
-    assert!(
-        completion.detail.ends_with("-> Result<GpuArguments, _>"),
-        "{completion:?}"
-    );
-    assert_eq!(
-        analysis
-            .semantics
-            .hover(&documents, &source, offset)
-            .unwrap()
-            .text,
-        completion.detail
-    );
-}
-
-#[test]
-fn projection_completion_excludes_aliases_unrooted_shaders_and_field_receivers() {
-    use resin_source::Source;
-    use std::{collections::BTreeMap, sync::Arc};
-
-    let unrooted = "struct Color { r: float32, g: float32, b: float32, a: float32 }; @fragment_shader def fragment(color: Color) -> Color = { color };";
-    for (receiver, expected) in [
-        ("kernel", true),
-        ("alias", false),
-        ("fragment", false),
-        ("record.kernel", false),
-    ] {
-        let text = format!(
-            "{ALLOCATOR} {SHADER} {unrooted} def main() = {{ var alias = kernel; var record = {{ kernel = kernel }}; {receiver}."
-        );
-        let source = Source::new("gpu.resin", text.clone());
-        let document = Arc::new(resin_cst::Document::reparse(text.clone(), None));
-        let file = resin_ast::recover(&document).file;
-        let analysis = resin_hir::analyze_program(&resin_ast::Program {
-            modules: vec![resin_ast::SourceModule {
-                source: source.clone(),
-                file,
-                imports: vec![],
-            }],
-        });
-        let documents = BTreeMap::from([(source.clone(), document)]);
-        let items = analysis
-            .semantics
-            .completions(&documents, &source, text.len());
-        assert_eq!(
-            items.iter().any(|item| item.name == "project"),
-            expected,
-            "{receiver}: {items:?}"
-        );
-    }
 }
