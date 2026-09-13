@@ -1,11 +1,11 @@
 //! Every HIR constructor has an explicit storage/control-flow translation here.
-use super::Generator;
+use super::FunctionLowering;
 use super::LowerError;
 use crate::Instr;
 use resin_hir::{Arguments, Statement, Term, TermKind};
 use resin_types::prelude::*;
 
-impl Generator {
+impl FunctionLowering<'_> {
     pub(super) fn lower_term(&mut self, term: &Term) -> Result<Ty, LowerError> {
         let span = term.span;
         let expected = &term.ty;

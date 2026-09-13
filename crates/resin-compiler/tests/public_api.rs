@@ -257,6 +257,53 @@ fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
 }
 
 #[test]
+fn imported_lowering_errors_keep_the_dependency_source_version() {
+    let entry = Source::new(
+        "entry",
+        "import { \"dependency\" }; def main() -> int = { value() };",
+    );
+    let dependency = Source::new(
+        "dependency",
+        "export { value }; def value() -> int = { var n: int; n };",
+    );
+    let read = dependency.text().rfind("n }").unwrap();
+    let mut loader = Loader::new(resin_source::library_root());
+    loader
+        .set_import(&entry, "dependency", dependency.clone())
+        .unwrap();
+    let mut compiler = Compiler::default();
+    let failed = compiler.compile(entry.clone(), &mut loader);
+    assert!(failed.hir().is_ok());
+    assert!(failed.module().is_err());
+    assert_eq!(failed.diagnostics().len(), 1);
+    let diagnostic = &failed.diagnostics()[0];
+    assert_eq!(diagnostic.location.source, dependency);
+    assert_eq!(
+        diagnostic.location.span,
+        Span {
+            start: read,
+            end: read + 1
+        }
+    );
+    assert!(diagnostic.message.contains("UninitializedValue"));
+    let call = entry.text().rfind("value").unwrap();
+    assert_eq!(failed.definition(&entry, call).unwrap().source, dependency);
+
+    let repaired = dependency.with_text("export { value }; def value() -> int = { 7 };");
+    loader.set_import(&entry, "dependency", repaired).unwrap();
+    valid(&compiler.compile(entry, &mut loader));
+    drop(compiler);
+    drop(loader);
+    let diagnostic = &failed.diagnostics()[0];
+    assert_eq!(diagnostic.location.source, dependency);
+    assert_eq!(
+        &diagnostic.location.source.text()
+            [diagnostic.location.span.start..diagnostic.location.span.end],
+        "n"
+    );
+}
+
+#[test]
 fn conflicting_versions_do_not_displace_the_first_accepted_version() {
     let entry = Source::new("entry", "import { \"first\", \"conflict\", \"original\" };");
     let original = Source::new("module", "def value() -> int = { 1 };");

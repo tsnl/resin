@@ -4,10 +4,10 @@ use resin_hir::{MatchArm, Term};
 use resin_source::prelude::*;
 use resin_types::prelude::*;
 
-use super::Generator;
+use super::FunctionLowering;
 use super::{Initialization, ValueBinding};
 
-impl Generator {
+impl FunctionLowering<'_> {
     pub(super) fn coerce(&mut self, span: Span, from: Ty, to: &Ty) -> Result<Ty, LowerError> {
         if &from != to {
             if !from.widens_to(to) {
@@ -63,7 +63,7 @@ impl Generator {
                 "postfix ? requires a Result value",
             ));
         };
-        let result = self.function().result_type().clone();
+        let result = self.function.result_type().clone();
         let Ty::Result { error: target, .. } = &result else {
             return Err(LowerError::invalid_hir(
                 span,
@@ -79,7 +79,7 @@ impl Generator {
         let saved = self.save_top(&ty);
         self.emit(Instr::LocalAddress { local: saved });
         self.emit(Instr::IsVariant { tag: Case::Ok });
-        let height = self.function().stack_len() - 1;
+        let height = self.function.stack_len() - 1;
         let success = self.new_block("try.ok", height);
         let failure = self.new_block("try.err", height);
         let next = self.new_block("try.next", height + 1);
@@ -89,7 +89,7 @@ impl Generator {
             next: Some(next),
         });
         self.switch(failure);
-        for _ in 0..self.function().stack_len() {
+        for _ in 0..self.function.stack_len() {
             self.emit(Instr::Discard);
         }
         self.emit(Instr::TakeLocal { local: saved });
@@ -122,7 +122,7 @@ impl Generator {
         let before = self.bindings.clone();
         let mut after = None;
         let mut result = Some(expected.clone());
-        let height = self.function().stack_len();
+        let height = self.function.stack_len();
         let join = (arms.len() > 1).then(|| self.new_block("match.join", height + 1));
         for (i, arm) in arms.iter().enumerate() {
             let tag = &arm.tag;

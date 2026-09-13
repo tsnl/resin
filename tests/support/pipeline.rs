@@ -35,16 +35,21 @@ fn lowering_error(error: resin_lir::Error) -> GenerateError {
 pub fn generate_program(program: &resin_ast::Program) -> Result<resin_lir::Module, SourceError> {
     let tree = resin_hir::generate_program(program)?;
     let module = resin_lir::generate(&tree).map_err(|error| {
-        let origin = tree.functions[error.function.index()]
-            .location
-            .as_ref()
-            .expect("generated HIR carries source locations");
-        program
+        let Some(source) = &error.source else {
+            return SourceError::new(
+                program.modules.last().expect("entry module").source.clone(),
+                None,
+                error.to_string(),
+            );
+        };
+        if let Some(module) = program
             .modules
             .iter()
-            .find(|source| source.source == origin.source)
-            .unwrap()
-            .error(error.span, error)
+            .find(|module| module.source == *source)
+        {
+            return module.error(error.span, &error);
+        }
+        SourceError::new(source.clone(), Some(error.span), error.to_string())
     })?;
     resin_lir::VerifiedModule::new(module)
         .map(|v| v.into_module())

@@ -377,7 +377,7 @@ fn lower_to_verified_lir(
     let lir = resin_lir::analyze(hir).map_err(|errors| {
         errors
             .into_iter()
-            .map(|error| lowering_error(program, hir, error))
+            .map(|error| lowering_error(program, error))
             .collect::<Vec<_>>()
     })?;
     resin_lir::VerifiedModule::new(lir).map_err(|error| {
@@ -389,21 +389,20 @@ fn lower_to_verified_lir(
     })
 }
 
-fn lowering_error(
-    program: &resin_ast::Program,
-    hir: &resin_hir::Module,
-    error: resin_lir::Error,
-) -> SourceError {
-    let origin = hir.functions[error.function.index()]
-        .location
-        .as_ref()
-        .expect("generated HIR carries source locations");
-    if let Some(source) = program
+fn lowering_error(program: &resin_ast::Program, error: resin_lir::Error) -> SourceError {
+    let Some(source) = &error.source else {
+        return SourceError::new(
+            program.modules.last().expect("entry module").source.clone(),
+            None,
+            error.to_string(),
+        );
+    };
+    if let Some(module) = program
         .modules
         .iter()
-        .find(|source| source.source == origin.source)
+        .find(|module| module.source == *source)
     {
-        return source.error(error.span, &error);
+        return module.error(error.span, &error);
     }
-    SourceError::new(origin.source.clone(), Some(error.span), error.to_string())
+    SourceError::new(source.clone(), Some(error.span), error.to_string())
 }

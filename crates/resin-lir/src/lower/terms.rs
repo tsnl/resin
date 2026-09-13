@@ -6,9 +6,9 @@ use std::{collections::HashMap, sync::Arc};
 use crate::Instr;
 use resin_hir::Term;
 
-use super::Generator;
+use super::FunctionLowering;
 
-impl Generator {
+impl FunctionLowering<'_> {
     pub(super) fn gen_array(&mut self, elems: &[Term], ty: &Ty) -> Result<Ty, LowerError> {
         let Ty::Array { element, length } = ty else {
             unreachable!("checked array")

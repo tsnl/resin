@@ -1,11 +1,11 @@
-use super::Generator;
+use super::FunctionLowering;
 use super::LowerError;
 use crate::Instr;
 use resin_hir::ReceiverConversion;
 use resin_hir::Term;
 use resin_types::prelude::*;
 
-impl Generator {
+impl FunctionLowering<'_> {
     pub(super) fn hold_arc_address(&mut self, term: &Term) -> Result<Ty, LowerError> {
         let ty = self.gen_term(term, None)?;
         let Ty::Arc { pointee } = &ty else {

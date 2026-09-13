@@ -5,11 +5,11 @@ use crate::{Instr, Terminator};
 use resin_hir::{Statement, Term};
 use resin_types::prelude::*;
 
-use super::Generator;
+use super::FunctionLowering;
 
-impl Generator {
+impl FunctionLowering<'_> {
     pub(super) fn gen_while(&mut self, cond: &Term, body: &Term) -> Result<Ty, LowerError> {
-        let height = self.function().stack_len();
+        let height = self.function.stack_len();
         let condition = self.new_block("while.cond", height);
         let body_block = self.new_block("while.body", height);
         let exit = self.new_block("while.exit", height);
@@ -43,7 +43,7 @@ impl Generator {
         expected: &Ty,
     ) -> Result<Ty, LowerError> {
         self.gen_term(cond, None)?;
-        let height = self.function().stack_len() - 1;
+        let height = self.function.stack_len() - 1;
         let then_block = self.new_block("then", height);
         let else_block = self.new_block("else", height);
         let join_block = self.new_block("join", height + 1);

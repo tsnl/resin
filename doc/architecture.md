@@ -147,6 +147,15 @@ checks during LIR lowering. Every LIR function reserves local zero for its unary
 parameter, including unit, tuples, and foreign declarations. Each `Instr` documents
 its consumed operands and produced values.
 
+LIR construction lowers each HIR function against shared, read-only concrete
+definitions using fresh per-function state. Each translation returns a completed
+function and source origins; module assembly assigns function IDs and combines
+those results after all functions succeed. Lowering collects independent failures
+across functions. Each failure carries its span and optional immutable source, so
+diagnostics do not recover sources by matching HIR and LIR function indices.
+Foreign declarations are constructed directly with parameter local zero and no
+blocks; they do not create function-body lowering state.
+
 LIR retains a structured tree of blocks. Each block contains straight-line stack
 instructions and an `If`, `Loop`, `Merge`, `LoopTest`, `Continue`, or `Return`
 terminator. `If` owns its two arms, which finish with `Merge`; `Loop` owns a
