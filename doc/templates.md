@@ -24,8 +24,11 @@ storage, or change to the meaning of an ordinary `var` binding. Parameters conti
 to have explicit annotations, which may refer to declared template parameters.
 
 The model draws on C++ [call argument deduction](https://eel.is/c++draft/temp.deduct.call)
-and [template instantiation](https://eel.is/c++draft/temp.inst), without adopting
-C++'s complete overload, conversion, or specialization system.
+and [template instantiation](https://eel.is/c++draft/temp.inst). Resin also uses a
+call's expected result type to deduce still-undetermined parameters through the
+declared result shape, so contextual numeric literals remain convenient. This is
+an extension to ordinary C++ call deduction; it does not adopt C++'s complete
+overload, conversion, or specialization system.
 
 ## Function templates
 
@@ -36,10 +39,10 @@ def identity<T>(value: T) -> T = { value };
 def add<T>(left: T, right: T) -> T = { left + right };
 
 def main() = {
-    var number = identity(42_i);       // identity<int>
-    var flag = identity(1 == 1);       // identity<bool>
-    var sum = add(1_i, 2_i);           // add<int>
-    var fraction = add(1.0_f, 2.0_f); // add<float32>
+    var number = identity(42);       // identity<long>
+    var flag = identity(1 == 1);     // identity<bool>
+    var sum = add(1, 2);             // add<long>
+    var fraction = add(1.0, 2.0);    // add<float64>
     var explicit = identity<int>(7);
     var function = identity<int>;
     var again = function(8);
@@ -56,26 +59,19 @@ requested the instance. Checking this dependent operation waits for instantiatio
 the compiler does not have to prove `+` exists for every possible `T`. This does
 not introduce user-defined operator overloading.
 
-The first deduction rule matches annotated parameter shapes against call argument
-types. Repeated occurrences of one template parameter must agree, including inside
-`Ptr<T>`, `Span<T>`, records, function types, and instantiated nominal types.
+Deduction matches annotated parameter shapes against call argument types, retaining
+unresolved literal constraints. Repeated occurrences of one template parameter
+must agree, including inside `Ptr<T>`, `Span<T>`, records, function types, and
+instantiated nominal types.
 Preserve nominal identity and mutable-pointer invariance; do not widen conflicting
 deductions to manufacture a common `T`. Once type arguments are fixed, check the
 ordinary call using Resin's existing conversion rules.
 
-For example, `add(1_i, 2_f)` has conflicting deductions. Explicit type arguments
-give unsuffixed literals context, so `add<int>(1, 2)` selects `int`; an otherwise
-unconstrained `add(1, 2)` uses the existing integer default, `long`. Defaulting must
-wait for constraints from the call's other arguments, rather than depend on their
-source order.
-
 Initially, a call either provides all type arguments or deduces them from its
-arguments. A parameter that cannot be deduced requires an explicit type argument.
-The expected result type does not select template arguments in this first rule;
-adding that inference is a separate decision. Partial explicit argument lists,
+arguments and expected result, using the rules below. A parameter that cannot be
+deduced requires an explicit type argument. Partial explicit argument lists,
 default template arguments, and `_` inside explicit argument lists are deferred.
-These limits apply to source templates; existing compiler-provided contextual
-inference retains its current rules.
+Existing compiler-provided contextual inference retains its current rules.
 
 A template family is not a runtime function value. Initially, storing or passing
 a function template requires explicit arguments, as in `identity<int>` above.
@@ -87,6 +83,71 @@ expected function-pointer type can be added separately.
 Omitted function results continue to mean unit. Existing `-> _` result inference
 may run separately for each concrete template instance; it does not introduce an
 additional template parameter. Unresolved local or result holes remain errors.
+
+## Unsuffixed integers and contextual deduction
+
+Ordinary Resin calls and assignments already allow unsuffixed literals to acquire
+their type from context. The [existing inference tests](../tests/inference.rs)
+cover this behavior for every numeric width, including constraints from later
+uses of a local. Templates must preserve it: `42` is initially a numeric literal
+constraint, not an already committed `long` argument. Suffixes select a fixed
+type when the programmer wants one; they are optional in ordinary examples.
+
+```resin
+def total() -> int = { add(1, 2) };          // result context selects int
+def increment(value: int) -> int = { add(value, 1) };
+def reversed(value: int) -> int = { add(1, value) };
+def narrow() -> ubyte = { identity(255) };   // fits the selected type
+```
+
+Collect constraints before committing an instance:
+
+1. Apply explicit type arguments, or deduce from already concrete argument
+   types. Keep unsuffixed numeric arguments flexible, including those nested in
+   aggregates and those linked through still-unresolved local bindings.
+2. Fill remaining parameters from an available expected result type where it
+   matches the template's declared result shape unambiguously. Context may come
+   from assignment, a function's annotated return, a typed field, or an enclosing
+   call parameter. Propagate it through nested calls before defaulting literals.
+3. Solve the pending constraints in the caller's dependency group to a fixed
+   point. Instances whose own type arguments are already fixed may be checked
+   now; their completed inferred results can constrain enclosing calls. When no
+   further progress is possible, default remaining numeric variables to `long`
+   or `float64`. An unresolved nonnumeric parameter still requires an explicit
+   type argument.
+4. Check literal ranges as their selected types become known, and request the
+   remaining concrete instances. Range failure reports an error; it does not
+   retry a wider instance.
+
+This gives `add(1, 2)` type `long` without context, `add(existing_int, 2)` type
+`int`, and `add<int>(1, 2)` type `int`. Swapping argument order cannot change the
+result. A typed parameter of an enclosing call can also select `int` for
+`identity(42)`; nested template calls with declared result patterns participate
+in the same constraint solving before any instance body is needed.
+
+Result context does not overwrite explicit arguments or types already determined
+by concrete values. Once a parameter is fixed, apply the normal result conversion
+rules. For example, an `identity<int>(1)` result can widen into `int | None`;
+the expected union does not replace `T = int`. The same rule preserves ordinary
+Result error widening. Do not search union members or alternative instances to
+make a call compile. Existing literal-to-union inference may still use its single
+unambiguous numeric candidate where the ordinary checker already permits it.
+
+An expected `Ptr<int>` may determine `T` for a declared result `Ptr<T>`, even
+with no value arguments. A `-> _` result provides no such declared pattern:
+the compiler must not inspect or repeatedly try the template body to discover
+missing type arguments. Infer that result only after the instance is selected,
+preserving the existing rule that callers cannot determine a body's inferred
+return type. Expected-result matching also does not invert arbitrary conversions
+or dependent type computations.
+
+Concrete numeric values retain their types. `add(1_i, 2_l)` remains a deduction
+conflict; suffix-free code does not imply implicit conversion between stored
+integer widths. `identity(256)` in `ubyte` context and a negative literal in
+`ulong` context are range errors. An unconstrained integer outside the default
+`long` range still needs suitable type context. This changes neither the default
+width nor the existing floating-point conversion rules, and introduces no runtime
+arbitrary-precision integer type.
 
 ## Type templates and methods
 
@@ -216,9 +277,13 @@ rules understandable without preventing dependent body checking.
    dependent operation. Reject unsupported generic exports until import support
    is available.
 2. **Call deduction, imports, and editor analysis.** Deduce arguments through
-   nested parameter shapes, reject conflicts and missing arguments, and preserve
-   numeric defaults. Retain imported templates and private helpers. Test repeated
-   imports, lexical lookup, declared-parameter hovers, and instance diagnostics.
+   nested parameter and declared result shapes, reject conflicts and missing
+   arguments, and preserve delayed numeric defaults. Test suffix-free calls,
+   typed arguments in both orders, assignment/return/enclosing-call context,
+   nested calls, later local uses, range boundaries, fixed-type conflicts, union
+   and Result widening, and rejection of inference through a `-> _` body.
+   Retain imported templates and private helpers. Test repeated imports, lexical
+   lookup, declared-parameter hovers, and instance diagnostics.
 3. **Type templates.** Add parameterized structs and aliases, canonical nominal
    instances, layout/cycle checks, and methods/drop hooks belonging to those
    instances. Then add methods with their own type parameters. Test nested types,
