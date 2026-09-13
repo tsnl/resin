@@ -10,12 +10,30 @@ submodule checkout is required.
 
 ## Install for development
 
-From the Resin repository root:
+The tracked `.zed/settings.json` contains shared editor preferences. Keep
+host-specific executable paths and launch commands in Zed's **user settings**;
+no generated or gitignored project settings file is needed. By default, the
+extension launches an installed `resin` from PATH without building it on startup.
+
+From the Resin repository root, use the build environment appropriate to your host.
+With Nix on Linux or macOS (NixOS is not required):
 
 ```sh
 nix-shell --run 'cargo install --path . --locked'
 nix-shell --run 'rustup target add wasm32-wasip2'
 ```
+
+Without Nix, install the platform's [native build dependencies](../../README.md#development),
+then run these commands in that development environment (a Visual Studio developer
+PowerShell on Windows):
+
+```sh
+cargo install --path . --locked
+rustup target add wasm32-wasip2
+```
+
+Make sure Cargo's installation directory is on the PATH visible to Zed, or configure
+the executable's absolute path in user settings as shown below.
 
 The repository's `rust-toolchain.toml` declares the `wasm32-wasip2` target,
 so Rustup installs it when activating the project toolchain. If Zed reports
@@ -24,9 +42,10 @@ repository root, then retry installing the dev extension. Rust targets are
 installed per toolchain; adding the target outside the repository can select
 a different Rust version.
 
-Launch Zed from `nix-shell` so it inherits the native library paths, then run
-**zed: install dev extension** in the command palette and select `editors/zed/`.
-On systems whose executable is named `zeditor`, use `nix-shell --run 'zeditor .'`.
+Launch Zed from your development environment so it inherits the build tools and native
+library paths, then run **zed: install dev extension** in the command palette and
+select `editors/zed/`. With Nix, use `nix-shell --run 'zed .'` (or
+`nix-shell --run 'zeditor .'` on systems whose executable is named `zeditor`).
 Zed compiles the extension and downloads the WASI SDK to build the grammar.
 Rebuild it from Zed's Extensions view after changing the adapter or queries.
 Restarting `resin --lsp` alone does not reload highlighting queries or the pinned
@@ -37,8 +56,9 @@ See [Zed's extension development guide](https://zed.dev/docs/extensions/developi
 The adapter uses a configured binary or finds `resin` on the worktree's PATH,
 then passes `--lsp` and the worktree root. A configured `binary.arguments` replaces
 that argument list; include `--lsp` and the project directory when overriding it.
-For a local debug build, run `nix-shell --run 'cargo build -p resin'` and set
-an absolute path in Zed settings:
+For a local debug build, run `cargo build -p resin` in your development environment
+(`nix-shell --run 'cargo build -p resin'` with Nix). Open Zed's user settings with
+**zed: open settings file** and set an absolute path:
 
 ```json
 {
@@ -54,6 +74,10 @@ an absolute path in Zed settings:
   }
 }
 ```
+
+On Windows, use the path to `target/debug/resin.exe`. When replacing an earlier
+`cargo run` override, also remove its `binary.arguments` so the adapter supplies
+`--lsp` and the current worktree root.
 
 The library-root override is useful when switching worktrees or using an
 installed server built in another checkout. Alternatively, set `RESIN_LIBRARY_ROOT` in
@@ -100,7 +124,17 @@ Edits to an open imported buffer apply to its consumers before saving.
 Use **dev: open language server logs** for protocol logs and **zed: open log**
 for extension errors. A missing executable produces an installation message.
 If `$/` imports fail, check the library root. If the executable cannot
-load a native library, restart Zed from the repository's `nix-shell`.
+load a native library, restart Zed from your development environment.
+
+`Failed to find wayland-scanner` is a native build failure in GLFW's Linux Wayland
+support. It occurs when a `cargo run` launch override builds Resin without the
+required tools. Build or install Resin in the development environment above, then
+use the installed executable or an absolute binary path. If you keep an automatic
+build command in user settings, it must enter that environment too: `shell.nix`
+already supplies `wayland-scanner`; without Nix, install it with the other Linux
+build dependencies. Run Cargo from the Resin checkout so Rustup selects its pinned
+toolchain, and pass the opened project directory to `--lsp`. Restart the language
+server after updating its launch settings.
 
 ## Build and maintain
 

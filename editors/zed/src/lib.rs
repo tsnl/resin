@@ -26,7 +26,7 @@ impl zed_extension_api::Extension for Resin {
             }
             binary.path
         });
-        let command = configured.or_else(|| worktree.which("resin")).ok_or("Install resin with nix-shell --run 'cargo install --path . --locked', or configure lsp.resin-lsp.binary.path in Zed.")?;
+        let command = configured.or_else(|| worktree.which("resin")).ok_or("Install resin with 'cargo install --path . --locked' from the Resin checkout's development environment, or configure lsp.resin-lsp.binary.path in Zed's user settings.")?;
         Ok(zed_extension_api::Command {
             command,
             args,
