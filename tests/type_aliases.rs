@@ -1,0 +1,44 @@
+mod support;
+
+#[test]
+fn generic_aliases_borrow_storage_and_preserve_nominal_methods() {
+    let module = support::module(
+        r#"
+        export { main };
+        type View<T> = { data: Ptr<T>, length: ulong };
+        struct Item { value: int,
+            def read(self: Item) -> int = { self.value };
+        };
+        type Renamed<T> = Item;
+        def first<T>(view: View<T>) -> T = { view.data.* };
+        def main() -> int = {
+            var item = Renamed<bool> { value = 42 };
+            first(View<Item> { data = &item, length = 1 }).read()
+        };
+    "#,
+    );
+    let output = support::project::Project::new(&module, Some("main"))
+        .unwrap()
+        .run();
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn aliases_reuse_the_same_function_instance() {
+    let module = support::module(
+        "type First<T> = Ptr<T>; type Second<U> = First<U>; def measure<T>() -> ulong = { size_of(T) }; def main() -> ulong = { measure::<First<int>>() + measure::<Second<int>>() };",
+    );
+    assert_eq!(
+        module
+            .functions
+            .iter()
+            .filter(|function| function.name.as_deref() == Some("measure"))
+            .count(),
+        1
+    );
+}

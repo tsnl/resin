@@ -280,7 +280,12 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   a weak monomorphic inference variable in local annotations, function results, and explicit
   applications, including nested positions; it may unify with a bound type variable. A caller
   cannot determine a definition's unresolved result hole. Keep parameters, type definitions,
-  and foreign signatures fully explicit. Generic structs, aliases, and methods follow in later layers.
+  and foreign signatures fully explicit. Transparent aliases can bind named parameters, for
+  example `type View<T> = Ptr<T>`. Their completed RHS and binders stay on source scopes;
+  applications expand structurally without creating nominal types or method namespaces.
+  Local aliases may capture enclosing type binders. Aliases resolve in declaration order;
+  reject recursive expansion, and bound its depth and size independently of function instances.
+  Generic structs and methods follow in later layers.
   Check source expressions into HIR, then lower that tree to LIR in a separate pass.
   Resolve dependency groups and all inference variables before handing the tree to lowering;
   retain named binders and determining member types in HIR. Scopes store these HIR schemes.

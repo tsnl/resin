@@ -760,6 +760,46 @@ impl Solver {
             .ok_or_else(|| error(span, "cannot infer this type; add an explicit annotation"))
     }
 
+    /// Alias substitution may duplicate structure without requesting a function.
+    /// Bound that work independently of the LIR monomorph allowance.
+    pub fn require_bounded(&self, ty: &Type, span: Span) -> Result<crate::Type> {
+        self.complete_at(ty, span, 0, &mut 65536)
+    }
+
+    fn complete_at(
+        &self,
+        ty: &Type,
+        span: Span,
+        depth: usize,
+        remaining: &mut usize,
+    ) -> Result<crate::Type> {
+        if depth >= 256 {
+            return Err(error(
+                span,
+                "type expansion exceeds the HIR depth limit of 256",
+            ));
+        }
+        if *remaining == 0 {
+            return Err(error(
+                span,
+                "type expansion exceeds the HIR size limit of 65536",
+            ));
+        }
+        *remaining -= 1;
+        let Type::Node(head, children) = self.head(ty) else {
+            return Err(error(
+                span,
+                "cannot infer this type; add an explicit annotation",
+            ));
+        };
+        Ok(head.completed(
+            children
+                .iter()
+                .map(|child| self.complete_at(child, span, depth + 1, remaining))
+                .collect::<Result<_>>()?,
+        ))
+    }
+
     pub fn invalid(&self, ty: &Type) -> bool {
         match self.head(ty) {
             Type::Invalid => true,

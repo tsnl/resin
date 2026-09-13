@@ -42,6 +42,7 @@ pub(crate) struct Contexts {
     pub definitions: Vec<Definition>,
     shaders: HashSet<DeclarationId>,
     parameters: BTreeMap<DeclarationId, Vec<crate::TypeParameter>>,
+    pending_aliases: HashSet<DeclarationId>,
 }
 impl Contexts {
     fn lookup(&self, mut cursor: Cursor, name: &str, is_type: bool) -> Option<usize> {
@@ -133,7 +134,11 @@ impl ContextView {
             .contexts
             .lookup(self.cursor, name, is_type)
     }
-    pub(crate) fn resolve_type(&self, name: &Ident) -> Result<Type, super::GenerateError> {
+    pub(crate) fn resolve_type(
+        &self,
+        name: &Ident,
+        arguments: Vec<Type>,
+    ) -> Result<Type, super::GenerateError> {
         let id = self
             .lookup(&name.val, true)
             .ok_or_else(|| super::GenerateError {
@@ -142,11 +147,46 @@ impl ContextView {
                     name: name.val.clone(),
                 },
             })?;
-        Ok(self.data.borrow().contexts.definitions[id]
+        let data = self.data.borrow();
+        if data.contexts.pending_aliases.contains(&id) {
+            return Err(super::GenerateError::inference(
+                name.span,
+                format!("recursive type alias `{}`", name.val),
+            ));
+        }
+        let body = data.contexts.definitions[id]
             .ty
             .as_ref()
             .map(Type::from_hir)
-            .unwrap_or(Type::Invalid))
+            .unwrap_or(Type::Invalid);
+        let parameters = data
+            .contexts
+            .parameters
+            .get(&id)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if parameters.len() != arguments.len() {
+            return Err(super::GenerateError::inference(
+                name.span,
+                format!(
+                    "expected {} type arguments, found {}",
+                    parameters.len(),
+                    arguments.len()
+                ),
+            ));
+        }
+        Ok(if arguments.is_empty() {
+            body
+        } else {
+            Type::Apply {
+                body: Box::new(body),
+                arguments: parameters
+                    .iter()
+                    .zip(arguments)
+                    .map(|(parameter, argument)| (parameter.id, argument))
+                    .collect(),
+            }
+        })
     }
 }
 /// The only capability that can construct contexts. Pending types belong to this module's solver.
@@ -302,14 +342,6 @@ impl Scopes {
         });
         Some((id, ty, function))
     }
-    pub(crate) fn resolve_type(&self, name: &Ident) -> Result<Type, super::GenerateError> {
-        if let Some(id) = self.view.lookup(&name.val, true)
-            && let Some((ty, _)) = self.inferred.get(&id)
-        {
-            return Ok(ty.clone());
-        }
-        self.view.resolve_type(name)
-    }
     pub(crate) fn set_parameters(&self, id: DeclarationId, parameters: &[crate::TypeParameter]) {
         self.view
             .data
@@ -405,6 +437,43 @@ impl Scopes {
     }
     pub(crate) fn define_invalid_type(&mut self, name: &Ident) {
         let _ = self.declare(name, DefinitionKind::Type);
+    }
+    pub(super) fn define_type_parameter(
+        &mut self,
+        name: &Ident,
+    ) -> Result<crate::TypeParameter, super::GenerateError> {
+        let (declaration, result) = self.declare(name, DefinitionKind::Type);
+        result
+            .map_err(|_| super::GenerateError::inference(name.span, "duplicate type parameter"))?;
+        let id = crate::TypeParameterId::from_index(declaration);
+        self.view.data.borrow_mut().contexts.definitions[declaration].ty =
+            Some(crate::Type::Parameter { parameter: id });
+        Ok(crate::TypeParameter {
+            id,
+            name: name.clone(),
+        })
+    }
+    pub(super) fn begin_alias(
+        &mut self,
+        name: &Ident,
+    ) -> Result<DeclarationId, super::GenerateError> {
+        let (id, result) = self.declare(name, DefinitionKind::Type);
+        result.map_err(|duplicate| super::GenerateError {
+            span: name.span,
+            kind: super::GenerateErrorKind::DuplicateType { name: duplicate },
+        })?;
+        self.view
+            .data
+            .borrow_mut()
+            .contexts
+            .pending_aliases
+            .insert(id);
+        Ok(id)
+    }
+    pub(super) fn finish_alias(&mut self, id: DeclarationId, ty: Option<crate::Type>) {
+        let mut data = self.view.data.borrow_mut();
+        data.contexts.pending_aliases.remove(&id);
+        data.contexts.definitions[id].ty = ty;
     }
     pub(crate) fn define_type(
         &mut self,

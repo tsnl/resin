@@ -432,28 +432,18 @@ impl Scopes {
             }
         }
         for stmt in &file.stmts {
-            if let StmtKind::Struct { type_params, .. } | StmtKind::DefineType { type_params, .. } =
-                &stmt.val
+            if let StmtKind::Struct { type_params, .. } = &stmt.val
                 && let Err(error) = require_monomorphic(type_params)
             {
                 errors.push(error);
                 continue;
             }
             let result = match &stmt.val {
-                StmtKind::DefineType { name, init, .. } => match self.annotation(init, typer) {
-                    Ok(ty) => {
-                        self.define_alias(name, ty)
-                            .map(|_| ())
-                            .map_err(|name| GenerateError {
-                                span: init.span,
-                                kind: GenerateErrorKind::DuplicateType { name },
-                            })
-                    }
-                    Err(error) => {
-                        self.define_invalid_type(name);
-                        Err(error)
-                    }
-                },
+                StmtKind::DefineType {
+                    name,
+                    init,
+                    type_params,
+                } => self.alias(name, type_params, init, typer),
                 StmtKind::Struct {
                     name,
                     body,
@@ -482,6 +472,37 @@ impl Scopes {
         }
         PreparedTypes { methods, errors }
     }
+    fn alias(
+        &mut self,
+        name: &Ident,
+        parameters: &[Ident],
+        body: &resin_ast::Type,
+        typer: &Context,
+    ) -> Result<(), GenerateError> {
+        let declaration = self.begin_alias(name)?;
+        self.push_at(Span {
+            start: parameters
+                .first()
+                .map_or(body.span.start, |parameter| parameter.span.start),
+            end: body.span.end,
+        });
+        let result = (|| {
+            let parameters = parameters
+                .iter()
+                .map(|name| self.define_type_parameter(name))
+                .collect::<Result<Vec<_>, _>>()?;
+            self.set_parameters(declaration, &parameters);
+            Evaluator {
+                scopes: self.view(),
+                typer,
+            }
+            .scheme(body)
+        })();
+        self.pop();
+        self.finish_alias(declaration, result.as_ref().ok().cloned());
+        result.map(|_| ())
+    }
+
     fn annotation(&mut self, ann: &resin_ast::Type, typer: &Context) -> Result<Ty, GenerateError> {
         self.push_at(ann.span);
         let result = Evaluator {

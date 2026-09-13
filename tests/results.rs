@@ -135,7 +135,7 @@ fn mutable_pointers_do_not_widen_and_bad_matches_are_rejected() {
         "struct A {}; def f(x: Result<int, _>) = {};",
         "only allowed",
     );
-    rejects("type Recursive = Ptr<Recursive>;", "UnboundType");
+    rejects("type Recursive = Ptr<Recursive>;", "recursive type alias");
 }
 
 #[test]
