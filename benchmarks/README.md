@@ -12,7 +12,7 @@ The CPU target does not optimize SPIR-V or initialize a GPU. The GPU target requ
 `spirv-opt` and a compatible Vulkan device with timestamp support; missing tools or
 unsupported devices cause a failure rather than a skipped measurement. No window
 or display is needed. On Windows, run the Cargo commands in the development
-PowerShell described in the root [README](../README.md).
+PowerShell described in the [guide](../doc/guide.md#development).
 
 ## Workloads
 

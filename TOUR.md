@@ -2,7 +2,7 @@
 
 Resin is a systems language for host CPUs and Vulkan GPUs. This is a reading
 path through its implementation, not a language reference; keep the
-[README](README.md) nearby for syntax and command-line options.
+[guide](doc/guide.md) nearby for syntax and command-line options.
 
 The root is both a Cargo workspace and the `resin` CLI package. [src/](src/)
 contains one executable's command dispatch. [crates/](crates/) contains the
@@ -19,7 +19,7 @@ The [standard library](resin/) is written in Resin and wraps the runtime's C API
 Read [examples/eg001.resin](examples/eg001.resin). On Linux/macOS, enter
 `nix-shell` from the repository root first; [.envrc](.envrc) also loads that
 environment if you use direnv. On Windows, use the Visual Studio developer
-PowerShell and LLVM Clang setup in [Development](README.md#development).
+PowerShell and LLVM Clang setup in [Development](doc/guide.md#development).
 Then run these commands from the repository root:
 
 ```sh
@@ -426,7 +426,7 @@ Tests are executable descriptions of the boundaries above:
 | Source versions, import caching, editor queries, or recovery | [compiler API tests](crates/resin-compiler/tests/public_api.rs), [loader tests](crates/resin-source/tests/files.rs), [analysis.rs](tests/analysis.rs) |
 | LSP protocol, buffer versions, or watched files | [lsp.rs](tests/lsp.rs) |
 | Zed syntax features | [zed_queries.rs](tests/zed_queries.rs) |
-| Shader generation or execution | [glsl_backend.rs](tests/glsl_backend.rs), [gpu_backend.rs](tests/gpu_backend.rs), [window_backend.rs](tests/window_backend.rs) |
+| Shader generation or execution | [spirv_backend.rs](tests/spirv_backend.rs), [gpu_backend.rs](tests/gpu_backend.rs), [window_backend.rs](tests/window_backend.rs) |
 
 [crates/resin-runtime/tests/](crates/resin-runtime/tests/) also exercises the native runtime
 with GLSL fixtures, independently of the Resin compiler. This is useful for
@@ -466,7 +466,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
 The requirement variables prevent missing GPU tools or facilities from turning
-coverage into skipped tests. See [Development in the README](README.md#development)
+coverage into skipped tests. See [Development in the guide](doc/guide.md#development)
 for environment setup and parser regeneration. Grammar changes must include
 regenerated parser files; runtime API changes generally span the Rust
 implementation, C headers, and standard-library declarations. Most new runtime
