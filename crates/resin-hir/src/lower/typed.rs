@@ -1,7 +1,7 @@
-//! Private checking tree, retaining source forms and lexical contexts for elaboration.
+//! Private checking tree, retaining source forms and resolved declarations for elaboration.
 //! Inference first fills this tree with `Type`, then resolves every node to `Ty`.
 //! Elaboration consumes the concrete tree and erases its source-only metadata.
-use super::scope::{Cursor, DeclarationId};
+use super::scope::DeclarationId;
 use crate::GenerateError;
 use resin_source::prelude::*;
 use resin_types::prelude::*;
@@ -11,7 +11,6 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub(super) struct Term<T = Ty> {
     pub span: Span,
-    pub context: Cursor,
     pub ty: T,
     pub kind: TermKind<T>,
 }
@@ -28,6 +27,7 @@ pub(super) enum TermKind<T = Ty> {
         value: Arc<str>,
     },
     Var {
+        declaration: DeclarationId,
         name: Ident,
     },
     Type {
@@ -124,7 +124,6 @@ pub(super) struct MatchArm<T = Ty> {
 
 #[derive(Debug, Clone)]
 pub(super) struct Statement<T = Ty> {
-    pub context: Cursor,
     pub kind: StatementKind<T>,
 }
 
@@ -153,4 +152,16 @@ pub(super) struct Signature {
     pub parameters: Vec<Option<DeclarationId>>,
     pub params: Vec<(Ident, Annotation)>,
     pub result: Annotation,
+}
+
+/// Source-order function metadata retained when its declaration is reserved.
+pub(super) struct Declaration {
+    pub id: DeclarationId,
+    pub name: Ident,
+    pub kind: DeclarationKind,
+}
+
+pub(super) enum DeclarationKind {
+    Function { decorators: Vec<Ident> },
+    Foreign { header: Arc<str> },
 }

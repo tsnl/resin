@@ -8,7 +8,7 @@ use resin_source::prelude::*;
 use resin_types::prelude::*;
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, HashMap},
     rc::Rc,
     sync::Arc,
 };
@@ -76,8 +76,8 @@ impl Generator {
         let checked = check::file(file, &mut self.typer, scopes, self.source_module, methods);
         self.errors.extend(checked.errors.iter().cloned());
         self.scopes = checked.context.clone();
-        self.declare_checked_functions(file, &checked);
-        self.elaborate_functions(file, &checked);
+        self.declare_checked_functions(&checked);
+        self.elaborate_functions(&checked);
     }
 
     fn finish(mut self) -> Result<Module, GenerateError> {
@@ -764,18 +764,12 @@ fn check_parameters(signature: &typed::Signature) -> Result<(), GenerateError> {
 }
 
 impl Generator {
-    fn declare_checked_functions(&mut self, file: &SourceFile, checked: &CheckedFile) {
-        let mut declared = BTreeSet::new();
-        for stmt in file.declarations() {
-            let Some(name) = function_name(&stmt.val) else {
+    fn declare_checked_functions(&mut self, checked: &CheckedFile) {
+        for declaration in &checked.declarations {
+            let Some(signature) = checked.signatures.get(&declaration.id) else {
                 continue;
             };
-            let Some(signature) = checked.signatures.get(&name.val) else {
-                continue;
-            };
-            if declared.insert(&name.val)
-                && let Err(error) = self.declare_checked(&stmt.val, name, signature)
-            {
+            if let Err(error) = self.declare_checked(declaration, signature) {
                 self.errors.push(error);
             }
         }
@@ -783,12 +777,12 @@ impl Generator {
 
     fn declare_checked(
         &mut self,
-        stmt: &StmtKind,
-        name: &Ident,
+        declaration: &typed::Declaration,
         signature: &typed::Signature,
     ) -> Result<(), GenerateError> {
-        match stmt {
-            StmtKind::Function { decorators, .. } => {
+        let name = &declaration.name;
+        match &declaration.kind {
+            typed::DeclarationKind::Function { decorators } => {
                 if let Some(id) = self.function_identity(name, signature)? {
                     for decorator in decorators {
                         if !gpu::is_bridge(&decorator.val) || !name.val.contains('.') {
@@ -797,10 +791,9 @@ impl Generator {
                     }
                 }
             }
-            StmtKind::ForeignFunction { header, .. } => {
+            typed::DeclarationKind::Foreign { header } => {
                 self.declare_foreign(header, name, signature)?;
             }
-            _ => unreachable!("function declaration"),
         }
         Ok(())
     }
@@ -845,18 +838,15 @@ impl Generator {
         Ok(())
     }
 
-    fn elaborate_functions(&mut self, file: &SourceFile, checked: &CheckedFile) {
-        for stmt in file.declarations() {
-            let StmtKind::Function { name, .. } = &stmt.val else {
+    fn elaborate_functions(&mut self, checked: &CheckedFile) {
+        for declaration in &checked.declarations {
+            let Some(body) = checked.bodies.get(&declaration.id) else {
                 continue;
             };
-            let Some(body) = checked.bodies.get(&name.val) else {
+            let Some(signature) = checked.signatures.get(&declaration.id) else {
                 continue;
             };
-            let Some(signature) = checked.signatures.get(&name.val) else {
-                continue;
-            };
-            let Some(id) = self.lookup_function(&name.val) else {
+            let Some(&id) = self.function_bindings.get(&declaration.id) else {
                 continue;
             };
             self.elaborate_function(id, signature, body);
@@ -877,13 +867,6 @@ impl Generator {
             Err(error) if !self.errors.contains(&error) => self.errors.push(error),
             Err(_) => {}
         }
-    }
-}
-
-fn function_name(stmt: &StmtKind) -> Option<&Ident> {
-    match stmt {
-        StmtKind::Function { name, .. } | StmtKind::ForeignFunction { name, .. } => Some(name),
-        _ => None,
     }
 }
 
@@ -911,11 +894,5 @@ impl Generator {
             .lookup(name, false)
             .or_else(|| self.scopes.lookup(name, true))
             .map(|definition| Symbol { definition })
-    }
-
-    fn lookup_function(&self, name: &str) -> Option<FunctionId> {
-        self.function_bindings
-            .get(&self.scopes.lookup(name, false)?)
-            .copied()
     }
 }

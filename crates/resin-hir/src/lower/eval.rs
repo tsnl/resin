@@ -147,48 +147,47 @@ pub(crate) struct Evaluator<'a> {
     pub(crate) typer: &'a Context,
 }
 
+pub(super) fn number(
+    typer: &Context,
+    span: Span,
+    text: &str,
+    expected: Option<&Ty>,
+) -> Result<(Value, Ty), GenerateError> {
+    let ty = numeric_type(typer, span, text, expected)?;
+    let (text, _) = resin_types::literal::split(text);
+    let value = parse_number(text, &ty).map_err(|message| GenerateError {
+        span,
+        kind: GenerateErrorKind::InvalidLiteral {
+            message: message.into(),
+        },
+    })?;
+    Ok((value, ty))
+}
+
+fn numeric_type(
+    typer: &Context,
+    span: Span,
+    text: &str,
+    expected: Option<&Ty>,
+) -> Result<Ty, GenerateError> {
+    if let (_, Some(ty)) = resin_types::literal::split(text) {
+        return Ok(ty);
+    }
+    if let Some(expected) = expected {
+        let shape = typer
+            .body(expected)
+            .map_err(|err| GenerateError::typing(span, err))?;
+        if shape.is_numeric() {
+            return Ok(shape);
+        }
+    }
+    Ok(typer.type_num(text))
+}
+
 impl Evaluator<'_> {
     pub(super) fn type_name(&self, name: &Ident) -> Result<Ty, GenerateError> {
         let ty = self.scopes.resolve_type(name)?;
         crate::lower::infer::Solver::default().require(&ty, name.span)
-    }
-
-    pub(super) fn number(
-        &self,
-        span: Span,
-        text: &str,
-        expected: Option<&Ty>,
-    ) -> Result<(Value, Ty), GenerateError> {
-        let ty = self.numeric_type(span, text, expected)?;
-        let (text, _) = resin_types::literal::split(text);
-        let value = parse_number(text, &ty).map_err(|message| GenerateError {
-            span,
-            kind: GenerateErrorKind::InvalidLiteral {
-                message: message.into(),
-            },
-        })?;
-        Ok((value, ty))
-    }
-
-    fn numeric_type(
-        &self,
-        span: Span,
-        text: &str,
-        expected: Option<&Ty>,
-    ) -> Result<Ty, GenerateError> {
-        if let (_, Some(ty)) = resin_types::literal::split(text) {
-            return Ok(ty);
-        }
-        if let Some(expected) = expected {
-            let shape = self
-                .typer
-                .body(expected)
-                .map_err(|err| GenerateError::typing(span, err))?;
-            if shape.is_numeric() {
-                return Ok(shape);
-            }
-        }
-        Ok(self.typer.type_num(text))
     }
 
     pub(crate) fn ty(&self, ty: &resin_ast::Type) -> Result<Ty, GenerateError> {
@@ -341,10 +340,10 @@ mod tests {
         let ty = evaluator.ty(&named).unwrap();
         assert_eq!(ty, Ty::Int8);
         assert_eq!(
-            evaluator.number(span, "-128", Some(&ty)).unwrap(),
+            number(&typer, span, "-128", Some(&ty)).unwrap(),
             (Value::Int8 { value: -128 }, Ty::Int8),
         );
-        let error = evaluator.number(span, "128", Some(&ty)).unwrap_err();
+        let error = number(&typer, span, "128", Some(&ty)).unwrap_err();
         assert_eq!(error.span, span);
         assert!(matches!(
             error.kind,
@@ -354,12 +353,7 @@ mod tests {
 
     #[test]
     fn numeric_values_keep_the_selected_type() {
-        let scopes = Scopes::new();
         let typer = Context::new();
-        let evaluator = Evaluator {
-            scopes: scopes.view(),
-            typer: &typer,
-        };
         let span = Span { start: 0, end: 0 };
         for (text, expected, value, ty) in [
             ("0x1_e", None, Value::Int64 { value: 30 }, Ty::Int64),
@@ -378,7 +372,7 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                evaluator.number(span, text, expected.as_ref()).unwrap(),
+                number(&typer, span, text, expected.as_ref()).unwrap(),
                 (value, ty),
             );
         }

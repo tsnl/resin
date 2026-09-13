@@ -128,10 +128,14 @@ HIR construction has three internal steps:
 
 1. Declare names and check expressions into a private tree with inference types.
 2. Solve function dependency groups and resolve every annotation and expression type.
-3. Elaborate into public HIR, removing source-only lookup and syntax.
+3. Elaborate into public HIR, expanding the remaining source forms.
 
-The private checking tree retains lexical context for declaration visibility;
-those contexts never cross into public HIR. Method calls become ordinary calls
+Value lookup records declaration identities immediately. References, inference
+dependencies, and signature/body records keep those identities through resolution;
+names and spans remain diagnostic metadata. The private tree has no lexical cursors.
+Source-order declaration records carry names, decorators, and foreign headers, so
+function assembly does not rescan AST declarations. Persistent scopes remain with
+source construction and editor queries. Method calls become ordinary calls
 to resolved function IDs with explicit receiver adaptation and argument packing.
 Compiler-provided methods become intrinsic operations. Short-circuit operators
 become `If` nodes, field projections are resolved, numeric literals become values,
