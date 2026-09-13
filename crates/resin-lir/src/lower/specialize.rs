@@ -6,7 +6,7 @@ use resin_types::prelude::*;
 
 pub(super) fn function(
     source: &resin_hir::Function,
-    arguments: &[Ty],
+    arguments: &[resin_hir::Type],
     instances: &mut Instances<'_>,
     current: FunctionId,
 ) -> Result<concrete::Function, Error> {
@@ -51,7 +51,21 @@ impl Specialization<'_, '_> {
             })
     }
 
-    fn request(&mut self, function: FunctionId, arguments: Vec<Ty>) -> Result<FunctionId, Error> {
+    fn argument(&mut self, source: &resin_hir::Type) -> Result<resin_hir::Type, Error> {
+        self.substitution
+            .normalize(source, self.instances)
+            .map_err(|mut error| {
+                error.span = self.span;
+                self.instances
+                    .lower_error(error, Some(self.current), self.location.clone())
+            })
+    }
+
+    fn request(
+        &mut self,
+        function: FunctionId,
+        arguments: Vec<resin_hir::Type>,
+    ) -> Result<FunctionId, Error> {
         self.request_profile(function, arguments, self.instances.profile(self.current))
     }
 
@@ -62,7 +76,7 @@ impl Specialization<'_, '_> {
     fn request_profile(
         &mut self,
         function: FunctionId,
-        arguments: Vec<Ty>,
+        arguments: Vec<resin_hir::Type>,
         profile: crate::Profile,
     ) -> Result<FunctionId, Error> {
         let location = self.location.as_ref().map(|location| SourceLocation {
@@ -449,7 +463,7 @@ impl Specialization<'_, '_> {
             } => {
                 let arguments = type_args
                     .iter()
-                    .map(|ty| self.ty(ty))
+                    .map(|ty| self.argument(ty))
                     .collect::<Result<_, _>>()?;
                 concrete::TermKind::Function {
                     function: self.request(*function, arguments)?,

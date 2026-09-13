@@ -206,13 +206,24 @@ group reaches a fixed point. Only then do unseeded error sets become `Never`.
 Concrete operation support and determining field types are resolved during LIR
 construction, with application traces for failures.
 
+HIR nominal declarations also bind named parameters. A nominal type expression
+retains its declaration origin and arguments. LIR normalizes application keys with
+these identities, without expanding field definitions just to compare arguments.
+Only a signature, value, field, layout query, or other operation that uses the type
+materializes its concrete representation. An unused type argument therefore does
+not request its fields or drop hook. Member-derived arguments restore source
+origins and canonical union order before memoization. Concrete names and diagnostic
+arguments retain names such as `Node<int>` instead of private catalog indices.
+
 `resin_lir::instantiate` accepts closed HIR applications and constructs their target
 program. The whole-module `generate`/`analyze` helpers explicitly request all ordinary
-functions and nominal declarations through the same machinery, for direct language
+functions and nongeneric nominal declarations through the same machinery, for direct language
 clients. Requested programs discover nominal types lazily and translate every embedded
-nominal identity. Field and cast representation steps are selected against that concrete catalog. Recursive identities remain private
-until their bodies and real drop-hook IDs are installed. Nominal expansion has its own
-depth guard across declarations.
+nominal application. Field and cast representation steps are selected against that concrete catalog.
+Each requested nominal instance substitutes its owner arguments into fields and
+drop hooks. Recursive identities remain private until their bodies and real hook
+IDs are installed. Nominal expansion has its own depth guard across declarations
+and growing nominal arguments.
 
 The worklist translates each application into a private concrete expression tree,
 substituting types and selecting supported builtin operations without inference.

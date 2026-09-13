@@ -287,7 +287,8 @@ pub struct Error {
 #[derive(Debug)]
 pub struct ApplicationNote {
     pub function: Arc<str>,
-    pub arguments: Vec<Ty>,
+    /// Rendered with source nominal names, independent of a partial concrete catalog.
+    pub arguments: Vec<Arc<str>>,
     pub profile: Profile,
     pub location: Option<SourceLocation>,
 }
@@ -304,7 +305,7 @@ pub enum ErrorKind {
     MonomorphLimit {
         function: Arc<str>,
         limit: usize,
-        arguments: Vec<Ty>,
+        arguments: Vec<Arc<str>>,
         profile: Profile,
     },
     TypeExpansionLimit {
@@ -369,7 +370,7 @@ pub enum Profile {
 }
 
 /// One externally requested application. Arguments are closed HIR type expressions;
-/// nominal identities are translated into this compilation's concrete catalog.
+/// nominal origins become concrete identities only when an operation demands their types.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Entry {
     pub name: Arc<str>,

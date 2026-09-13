@@ -18,6 +18,7 @@ pub(crate) enum Head {
     Atom(Ty),
     Parameter { id: crate::TypeParameterId },
     Member { name: Arc<str> },
+    Nominal { definition: TypeId },
     Pointer,
     GpuPointer,
     GpuSpan,
@@ -124,10 +125,22 @@ impl Type {
             crate::Type::Str => Ty::Str.into(),
             crate::Type::GpuArguments => Ty::GpuArguments.into(),
             crate::Type::Foreign { name } => Ty::Foreign { name: name.clone() }.into(),
-            crate::Type::Defined { definition } => Ty::Defined {
+            crate::Type::Defined {
+                definition,
+                arguments,
+            } if arguments.is_empty() => Ty::Defined {
                 definition: *definition,
             }
             .into(),
+            crate::Type::Defined {
+                definition,
+                arguments,
+            } => Self::Node(
+                Head::Nominal {
+                    definition: *definition,
+                },
+                arguments.iter().map(Self::from_hir).collect(),
+            ),
             crate::Type::Parameter { parameter } => {
                 Self::Node(Head::Parameter { id: *parameter }, vec![])
             }
@@ -223,7 +236,7 @@ impl Head {
     pub fn concrete(&self, children: Vec<Ty>) -> Option<Ty> {
         let mut children = children.into_iter();
         Some(match self {
-            Self::Parameter { .. } | Self::Member { .. } => return None,
+            Self::Parameter { .. } | Self::Member { .. } | Self::Nominal { .. } => return None,
             Self::Atom(ty) => ty.clone(),
             Self::Union => Ty::union_of(children),
             Self::Arc => Ty::Arc {
@@ -285,6 +298,10 @@ impl Head {
                 variants: children.collect(),
             },
             Self::Parameter { id } => crate::Type::Parameter { parameter: *id },
+            Self::Nominal { definition } => crate::Type::Defined {
+                definition: *definition,
+                arguments: children.collect(),
+            },
             Self::Member { name } => crate::Type::Member {
                 base: Box::new(children.next().unwrap()),
                 name: name.clone(),

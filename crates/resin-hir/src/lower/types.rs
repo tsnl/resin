@@ -22,6 +22,7 @@ pub(super) fn ty(source: &Ty) -> crate::Type {
         Ty::GpuArguments => crate::Type::GpuArguments,
         Ty::Foreign { name } => crate::Type::Foreign { name: name.clone() },
         Ty::Defined { definition } => crate::Type::Defined {
+            arguments: vec![],
             definition: *definition,
         },
         Ty::Pointer { pointee } => crate::Type::Pointer {
@@ -90,6 +91,7 @@ pub(super) fn definition(
         unreachable!("completed source type declaration");
     };
     crate::TypeDefinition {
+        type_params: vec![],
         name: name.clone(),
         body: ty(body),
         methods,

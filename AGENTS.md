@@ -289,6 +289,11 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Check source expressions into HIR, then lower that tree to LIR in a separate pass.
   Resolve dependency groups and all inference variables before handing the tree to lowering;
   retain named binders and determining member types in HIR. Scopes store these HIR schemes.
+  HIR nominal declarations bind type parameters, and applications retain their source
+  origin and arguments. LIR normalizes function and nominal instance keys before
+  materializing layouts; an unused type argument must not force field or hook expansion.
+  Materialized nominal instances close recursive fields and receive specialized drop hooks
+  before storage lowering. Diagnostics render source type names instead of private type IDs.
   keep inference solvers and deferred emission callbacks out of the lowering pass.
 - Shader entries use `@compute_shader`, `@vertex_shader`, or `@fragment_shader` decorators.
   Compute entries take `(ulong, Ptr<T>)` and return unit; their index is the global X invocation

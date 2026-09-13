@@ -311,10 +311,12 @@ fn ordinary_and_foreign_parameters_share_one_unit_single_or_tuple_slot() {
 fn invalid_nominal_type_expressions_report_errors_before_storage_lowering() {
     let invalid_reference = Type::Pointer {
         pointee: Box::new(Type::Defined {
+            arguments: vec![],
             definition: TypeId::from_index(99),
         }),
     };
     let inline_cycle = Type::Defined {
+        arguments: vec![],
         definition: TypeId::from_index(0),
     };
     for body in [
@@ -334,6 +336,7 @@ fn invalid_nominal_type_expressions_report_errors_before_storage_lowering() {
     ] {
         let mut tree = conditional();
         tree.types.push(resin_hir::TypeDefinition {
+            type_params: vec![],
             name: "Invalid".into(),
             body,
             methods: Default::default(),

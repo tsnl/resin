@@ -69,6 +69,8 @@ pub enum Type {
     },
     Defined {
         definition: TypeId,
+        /// Arguments to this nominal declaration, retaining its original identity.
+        arguments: Vec<Type>,
     },
     Pointer {
         pointee: Box<Type>,
@@ -165,9 +167,11 @@ pub enum Constant {
 
 #[derive(Debug, Clone)]
 pub struct TypeDefinition {
+    pub type_params: Vec<TypeParameter>,
     pub name: Arc<str>,
     pub body: Type,
     pub methods: BTreeMap<Arc<str>, FunctionId>,
+    /// A hook whose type parameters are supplied by this nominal application.
     pub drop: Option<FunctionId>,
 }
 
@@ -445,6 +449,11 @@ pub fn generate_program(program: &resin_ast::Program) -> Result<Module, SourceEr
 
 pub fn format_module(module: &Module) -> String {
     print::format_module(module)
+}
+
+/// Render a type using nominal declaration names and their parameter names.
+pub fn format_type(ty: &Type, definitions: &[TypeDefinition]) -> String {
+    print::format_type(ty, definitions)
 }
 
 //
@@ -1092,7 +1101,7 @@ impl Analysis {
             .get_mut(location)
             .and_then(|members| members.iter_mut().find(|member| member.name == name))
         {
-            member.ty = format_type(&signature, typer);
+            member.ty = format_concrete_type(&signature, typer);
         }
     }
 
@@ -1110,7 +1119,7 @@ impl Analysis {
         {
             members.extend(fields.into_iter().map(|field| Member {
                 name: field.name.to_string(),
-                ty: format_type(&field.ty, typer),
+                ty: format_concrete_type(&field.ty, typer),
                 kind: DefinitionKind::Field,
                 origin: None,
                 compiler_signature: false,
@@ -1143,7 +1152,7 @@ impl Analysis {
                 name: name.to_string(),
                 ty: typer
                     .gpu_method_label(&method, associated)
-                    .unwrap_or_else(|| format_type(&signature, typer)),
+                    .unwrap_or_else(|| format_concrete_type(&signature, typer)),
                 kind: DefinitionKind::Function,
                 origin,
                 compiler_signature: typer.gpu_method_label(&method, associated).is_some(),
@@ -1162,7 +1171,7 @@ impl Analysis {
         self.fields.insert(location, members);
     }
 }
-fn format_type(ty: &Ty, typer: &lower::context::Context) -> String {
+fn format_concrete_type(ty: &Ty, typer: &lower::context::Context) -> String {
     resin_types::format_type(ty, typer.definitions())
 }
 

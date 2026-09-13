@@ -4,11 +4,12 @@ use crate::{ApplicationNote, Error, ErrorKind, LoweringOptions, Profile};
 use resin_source::prelude::*;
 use resin_types::prelude::*;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct Instance {
     definition: FunctionId,
-    arguments: Vec<Ty>,
+    arguments: Vec<resin_hir::Type>,
     profile: Profile,
 }
 
@@ -18,8 +19,14 @@ struct Request {
     location: Option<SourceLocation>,
 }
 
-struct NominalRequest {
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct Nominal {
     definition: TypeId,
+    arguments: Vec<resin_hir::Type>,
+}
+
+struct NominalRequest {
+    instance: Nominal,
     depth: usize,
 }
 
@@ -29,7 +36,7 @@ pub(super) struct Instances<'a> {
     identities: BTreeMap<Instance, FunctionId>,
     requests: Vec<Request>,
     counts: Vec<usize>,
-    type_identities: BTreeMap<TypeId, TypeId>,
+    type_identities: BTreeMap<Nominal, TypeId>,
     definitions: Vec<TypeDef>,
     type_requests: Vec<NominalRequest>,
     type_cursor: usize,
@@ -132,7 +139,7 @@ impl<'a> Instances<'a> {
                 .iter()
                 .map(|ty| {
                     super::substitute::Substitution::default()
-                        .ty(ty, self)
+                        .normalize(ty, self)
                         .map_err(|error| self.lower_error(error, None, None))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -200,7 +207,7 @@ impl<'a> Instances<'a> {
     pub(super) fn request(
         &mut self,
         definition: FunctionId,
-        arguments: Vec<Ty>,
+        arguments: Vec<resin_hir::Type>,
         profile: Profile,
         predecessor: Option<FunctionId>,
         location: Option<SourceLocation>,
@@ -254,7 +261,7 @@ impl<'a> Instances<'a> {
                 ErrorKind::MonomorphLimit {
                     function: function.name.clone(),
                     limit,
-                    arguments: instance.arguments,
+                    arguments: self.argument_names(&instance.arguments),
                     profile,
                 },
                 predecessor,
@@ -286,19 +293,73 @@ impl<'a> Instances<'a> {
         // Whole-module clients retain every declaration in source order. Requested
         // programs instead discover nominal declarations through their roots.
         for index in 0..self.source.types.len() {
-            self.reserve_type(TypeId::from_index(index))?;
+            if self.source.types[index].type_params.is_empty() {
+                self.reserve_type(TypeId::from_index(index), vec![])?;
+            }
         }
         self.complete_types()
     }
 
-    pub(super) fn nominal(&mut self, definition: TypeId) -> Result<TypeId, LowerError> {
+    fn argument_names(&self, arguments: &[resin_hir::Type]) -> Vec<Arc<str>> {
+        arguments
+            .iter()
+            .map(|argument| resin_hir::format_type(argument, &self.source.types).into())
+            .collect()
+    }
+
+    fn nominal_name(&self, instance: &Nominal) -> Arc<str> {
+        resin_hir::format_type(
+            &resin_hir::Type::Defined {
+                definition: instance.definition,
+                arguments: instance.arguments.clone(),
+            },
+            &self.source.types,
+        )
+        .into()
+    }
+
+    pub(super) fn nominal_arity(&self, definition: TypeId, count: usize) -> Result<(), LowerError> {
+        let source = self.source.types.get(definition.index()).ok_or_else(|| {
+            LowerError::typing(
+                Span { start: 0, end: 0 },
+                TypeError {
+                    kind: TypeErrorKind::InvalidTypeDefinition { definition },
+                },
+            )
+        })?;
+        if source.type_params.len() != count {
+            return Err(LowerError::invalid_hir(
+                Span { start: 0, end: 0 },
+                format!(
+                    "type {} expects {} type arguments, found {count}",
+                    source.name,
+                    source.type_params.len()
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn nominal_origin(&self, definition: TypeId) -> resin_hir::Type {
+        let instance = &self.type_requests[definition.index()].instance;
+        resin_hir::Type::Defined {
+            definition: instance.definition,
+            arguments: instance.arguments.clone(),
+        }
+    }
+
+    pub(super) fn nominal(
+        &mut self,
+        definition: TypeId,
+        arguments: Vec<resin_hir::Type>,
+    ) -> Result<TypeId, LowerError> {
         if let Some(kind) = &self.type_error {
             return Err(LowerError {
                 span: Span { start: 0, end: 0 },
                 kind: kind.clone(),
             });
         }
-        let id = self.reserve_type(definition)?;
+        let id = self.reserve_type(definition, arguments)?;
         if self.active_type_depth.is_none() && self.type_cursor < self.type_requests.len() {
             self.complete_types().inspect_err(|error| {
                 self.type_error = Some(error.kind.clone());
@@ -307,18 +368,19 @@ impl<'a> Instances<'a> {
         Ok(id)
     }
 
-    fn reserve_type(&mut self, definition: TypeId) -> Result<TypeId, LowerError> {
-        if let Some(&id) = self.type_identities.get(&definition) {
+    fn reserve_type(
+        &mut self,
+        definition: TypeId,
+        arguments: Vec<resin_hir::Type>,
+    ) -> Result<TypeId, LowerError> {
+        self.nominal_arity(definition, arguments.len())?;
+        let instance = Nominal {
+            definition,
+            arguments,
+        };
+        if let Some(&id) = self.type_identities.get(&instance) {
             return Ok(id);
         }
-        let Some(source) = self.source.types.get(definition.index()) else {
-            return Err(LowerError::typing(
-                Span { start: 0, end: 0 },
-                TypeError {
-                    kind: TypeErrorKind::InvalidTypeDefinition { definition },
-                },
-            ));
-        };
         let depth = self.active_type_depth.map_or(0, |depth| depth + 1);
         if depth == 256 {
             return Err(LowerError {
@@ -327,11 +389,10 @@ impl<'a> Instances<'a> {
             });
         }
         let id = TypeId::from_index(self.definitions.len());
-        self.type_identities.insert(definition, id);
-        self.type_requests
-            .push(NominalRequest { definition, depth });
+        self.type_identities.insert(instance.clone(), id);
+        self.type_requests.push(NominalRequest { instance, depth });
         self.definitions.push(TypeDef::Nominal {
-            name: source.name.clone(),
+            name: self.nominal_name(&self.type_requests[id.index()].instance),
             body: None,
             drop: None,
         });
@@ -361,19 +422,20 @@ impl<'a> Instances<'a> {
     }
 
     fn expand_type(&mut self, index: usize) -> Result<(), LowerError> {
-        let definition = self.type_requests[index].definition;
-        let source = &self.source.types[definition.index()];
-        let body = super::substitute::Substitution::default().ty(&source.body, self)?;
+        let instance = self.type_requests[index].instance.clone();
+        let source = &self.source.types[instance.definition.index()];
+        let body = super::substitute::Substitution::new(&source.type_params, &instance.arguments)?
+            .ty(&source.body, self)?;
         let drop = source
             .drop
-            .map(|hook| self.request(hook, vec![], Profile::Host, None, None))
+            .map(|hook| self.request(hook, instance.arguments.clone(), Profile::Host, None, None))
             .transpose()
             .map_err(|error| LowerError {
                 span: error.span,
                 kind: error.kind,
             })?;
         self.definitions[index] = TypeDef::Nominal {
-            name: source.name.clone(),
+            name: self.nominal_name(&instance),
             body: Some(body),
             drop,
         };
@@ -515,7 +577,7 @@ impl<'a> Instances<'a> {
                 function: self.source.functions[request.instance.definition.index()]
                     .name
                     .clone(),
-                arguments: request.instance.arguments.clone(),
+                arguments: self.argument_names(&request.instance.arguments),
                 profile: request.instance.profile,
                 location: request.location.clone(),
             });
