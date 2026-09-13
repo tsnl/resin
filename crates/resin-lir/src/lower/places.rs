@@ -3,7 +3,7 @@ use crate::Instr;
 use resin_hir::{Term, TermKind};
 use resin_types::prelude::*;
 
-use super::Generator;
+use super::FunctionLowering;
 use super::Initialization;
 
 pub(super) enum Operand {
@@ -11,7 +11,7 @@ pub(super) enum Operand {
     Place { ty: Ty, gpu: bool },
 }
 
-impl Generator {
+impl FunctionLowering<'_> {
     pub(super) fn gen_assign(&mut self, place: &Term, value: &Term) -> Result<Ty, LowerError> {
         let place_ty = self.gen_place(place)?;
         let (Ty::Pointer { pointee } | Ty::GpuPointer { pointee }) = place_ty else {

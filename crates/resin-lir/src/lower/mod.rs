@@ -4,7 +4,10 @@ use builder::FunctionBuilder;
 use resin_hir::{BindingId, Term};
 use resin_source::prelude::*;
 use resin_types::prelude::*;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 mod arguments;
 mod bindings;
@@ -23,23 +26,50 @@ pub fn generate(source: &resin_hir::Module) -> Result<Module, Error> {
 }
 
 pub fn analyze(source: &resin_hir::Module) -> Result<Module, Vec<Error>> {
-    let mut generator = Generator::new(source);
+    let typer = TyperContext::from_definitions(source.types.clone());
+    let mut functions = Vec::with_capacity(source.functions.len());
     let mut errors = vec![];
-    for (index, function) in source.functions.iter().enumerate() {
-        let id = FunctionId::from_index(index);
-        if let Err(error) = generator.gen_function(id, function) {
-            errors.push(Error {
-                function: id,
-                span: error.span,
-                kind: error.kind,
-            });
+    for function in &source.functions {
+        match functions::lower(function, &typer) {
+            Ok(function) => functions.push(function),
+            Err(error) => errors.push(error),
         }
     }
     if errors.is_empty() {
-        Ok(generator.module)
+        Ok(assemble(source, functions))
     } else {
         Err(errors)
     }
+}
+
+/// A completed function uses local instruction positions; assembly supplies its ID.
+struct LoweredFunction {
+    function: crate::Function,
+    location: Option<SourceLocation>,
+    origins: BTreeMap<(BlockId, usize), SourceLocation>,
+}
+
+fn assemble(source: &resin_hir::Module, functions: Vec<LoweredFunction>) -> Module {
+    let mut module = Module {
+        types: source.types.clone(),
+        entries: source.entries.clone(),
+        shaders: source.shaders.clone(),
+        ..Default::default()
+    };
+    for (index, lowered) in functions.into_iter().enumerate() {
+        let id = FunctionId::from_index(index);
+        module.functions.push(lowered.function);
+        if let Some(location) = lowered.location {
+            module.origins.functions.insert(id, location);
+        }
+        module.origins.instructions.extend(
+            lowered
+                .origins
+                .into_iter()
+                .map(|((block, instruction), location)| ((id, block, instruction), location)),
+        );
+    }
+    module
 }
 
 //
@@ -60,49 +90,16 @@ enum Initialization {
     Initialized,
 }
 
-struct Generator {
-    module: Module,
+struct FunctionLowering<'types> {
     source: Option<Source>,
     source_span: Span,
-    function_id: Option<FunctionId>,
-    typer: TyperContext,
-    function: Option<FunctionBuilder>,
+    origins: BTreeMap<(BlockId, usize), SourceLocation>,
+    typer: &'types TyperContext,
+    function: FunctionBuilder,
     bindings: HashMap<BindingId, ValueBinding>,
     owned: Vec<Vec<LocalId>>,
 }
-impl Generator {
-    fn new(source: &resin_hir::Module) -> Self {
-        let module = Module {
-            types: source.types.clone(),
-            entries: source.entries.clone(),
-            shaders: source.shaders.clone(),
-            origins: crate::SourceMap {
-                functions: source
-                    .functions
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, function)| {
-                        function
-                            .location
-                            .clone()
-                            .map(|location| (FunctionId::from_index(index), location))
-                    })
-                    .collect(),
-                instructions: Default::default(),
-            },
-            functions: source.functions.iter().map(functions::prototype).collect(),
-        };
-        Self {
-            module,
-            source: None,
-            source_span: Span { start: 0, end: 0 },
-            function_id: None,
-            typer: TyperContext::from_definitions(source.types.clone()),
-            function: None,
-            bindings: HashMap::new(),
-            owned: vec![],
-        }
-    }
+impl FunctionLowering<'_> {
     fn gen_term(&mut self, term: &Term, to: Option<&Ty>) -> Result<Ty, LowerError> {
         let before = std::mem::replace(&mut self.source_span, term.span);
         let result = self
@@ -116,7 +113,7 @@ impl Generator {
         result
     }
     fn alloc_local(&mut self, ty: Ty, name: Option<Arc<str>>) -> LocalId {
-        let local = self.function().local(ty, name);
+        let local = self.function.local(ty, name);
         if let Some(owned) = self.owned.last_mut() {
             owned.push(local);
         }
@@ -135,12 +132,12 @@ impl Generator {
     }
 
     fn record_origin(&mut self) {
-        let (Some(function), Some(source)) = (self.function_id, self.source.clone()) else {
+        let Some(source) = self.source.clone() else {
             return;
         };
-        let (block, instruction) = self.function().position();
-        self.module.origins.instructions.insert(
-            (function, block, instruction),
+        let (block, instruction) = self.function.position();
+        self.origins.insert(
+            (block, instruction),
             SourceLocation {
                 source,
                 span: self.source_span,
@@ -150,24 +147,20 @@ impl Generator {
 
     fn emit(&mut self, instr: Instr) {
         self.record_origin();
-        self.function().emit(instr);
+        self.function.emit(instr);
     }
 
     fn terminate(&mut self, terminator: Terminator) {
         self.record_origin();
-        self.function().terminate(terminator);
+        self.function.terminate(terminator);
     }
 
     fn new_block(&mut self, hint: &str, height: usize) -> BlockId {
-        self.function().new_block(hint, height)
+        self.function.new_block(hint, height)
     }
 
     fn switch(&mut self, block: BlockId) {
-        self.function().switch(block);
-    }
-
-    fn function(&mut self) -> &mut FunctionBuilder {
-        self.function.as_mut().expect("inside a function body")
+        self.function.switch(block);
     }
 }
 
@@ -175,7 +168,7 @@ impl Generator {
 // Preserve the result while destroying owned locals in reverse scope order
 //
 
-impl Generator {
+impl FunctionLowering<'_> {
     fn cleanup(&mut self, first_scope: usize, result: &Ty) {
         let owned = self.locals_to_drop(first_scope);
         if owned.is_empty() {
@@ -193,7 +186,7 @@ impl Generator {
     }
 
     fn locals_to_drop(&self, first_scope: usize) -> Vec<LocalId> {
-        let function = self.function.as_ref().expect("inside a function body");
+        let function = &self.function;
         self.owned[first_scope..]
             .iter()
             .rev()
@@ -211,7 +204,7 @@ impl Generator {
 // A binding is initialized after a join only when incoming paths agree
 //
 
-impl Generator {
+impl FunctionLowering<'_> {
     fn intersect_initialization(&mut self, other: &HashMap<BindingId, ValueBinding>) {
         for (id, binding) in &mut self.bindings {
             if let Some(other) = other.get(id)
@@ -223,7 +216,7 @@ impl Generator {
     }
 }
 
-// Failures acquire their function identity when the function lowering returns.
+// Failures acquire their source when the function lowering returns.
 struct LowerError {
     span: Span,
     kind: ErrorKind,

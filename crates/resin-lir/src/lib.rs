@@ -270,10 +270,11 @@ pub struct SourceMap {
     pub instructions: BTreeMap<(FunctionId, BlockId, usize), SourceLocation>,
 }
 
-/// A rejected HIR operation, with its function and source span.
+/// A rejected HIR operation, with its span and optional immutable source.
+/// Constructed HIR can omit sources; its spans are still preserved.
 #[derive(Debug)]
 pub struct Error {
-    pub function: FunctionId,
+    pub source: Option<Source>,
     pub span: Span,
     pub kind: ErrorKind,
 }

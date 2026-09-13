@@ -1,63 +1,70 @@
 //! Allocate storage for parameters and turn one structured body into blocks.
-use super::Generator;
-use super::LowerError;
 use super::builder::FunctionBuilder;
+use super::{FunctionLowering, LowerError, LoweredFunction};
 use super::{Initialization, ValueBinding};
 use crate::{Instr, Terminator};
 use resin_hir::{Function, Parameter, Signature};
 use resin_source::prelude::*;
 use resin_types::prelude::*;
 
-impl Generator {
-    pub(super) fn gen_function(
-        &mut self,
-        id: FunctionId,
-        source: &Function,
-    ) -> Result<(), LowerError> {
-        self.begin_function(id, source);
+pub(super) fn lower(
+    source: &Function,
+    typer: &TyperContext,
+) -> Result<LoweredFunction, crate::Error> {
+    let mut lowering = FunctionLowering::new(source, typer);
+    lowering.lower_body(source).map_err(|error| crate::Error {
+        source: lowering.source.clone(),
+        span: error.span,
+        kind: error.kind,
+    })?;
+    let mut function = lowering.function.finish();
+    set_foreign(&mut function, source);
+    Ok(LoweredFunction {
+        function,
+        location: source.location.clone(),
+        origins: lowering.origins,
+    })
+}
+
+impl<'types> FunctionLowering<'types> {
+    fn new(source: &Function, typer: &'types TyperContext) -> Self {
+        let mut function = FunctionBuilder::new(Some(source.name.clone()));
+        function.result(source.signature.result.ty.clone());
+        Self {
+            source: source
+                .location
+                .as_ref()
+                .map(|location| location.source.clone()),
+            source_span: source
+                .location
+                .as_ref()
+                .map_or(Span { start: 0, end: 0 }, |location| location.span),
+            origins: Default::default(),
+            typer,
+            function,
+            bindings: Default::default(),
+            owned: vec![vec![LocalId::from_index(0)]],
+        }
+    }
+
+    fn lower_body(&mut self, source: &Function) -> Result<(), LowerError> {
         if let Some(body) = &source.body {
             self.bind_params(&source.signature);
             self.gen_term(body, Some(&source.signature.result.ty))?;
             self.cleanup(0, &source.signature.result.ty);
             self.terminate(Terminator::Return);
         } else {
-            self.function()
+            self.function
                 .parameter(None, source.signature.parameter_type());
         }
-        self.finish_function(id, source);
         Ok(())
-    }
-
-    fn begin_function(&mut self, id: FunctionId, source: &Function) {
-        self.function_id = Some(id);
-        self.bindings.clear();
-        self.owned.clear();
-        self.owned.push(vec![LocalId::from_index(0)]);
-        self.set_function_origin(id);
-        let mut builder = FunctionBuilder::new(Some(source.name.clone()));
-        builder.result(source.signature.result.ty.clone());
-        self.function = Some(builder);
-    }
-
-    fn set_function_origin(&mut self, id: FunctionId) {
-        let origin = self.module.origins.functions.get(&id);
-        self.source = origin.map(|origin| origin.source.clone());
-        self.source_span = origin.map_or(Span { start: 0, end: 0 }, |origin| origin.span);
-    }
-
-    fn finish_function(&mut self, id: FunctionId, source: &Function) {
-        self.owned.pop();
-        let mut function = self.function.take().unwrap().finish();
-        set_foreign(&mut function, source);
-        self.module.functions[id.index()] = function;
-        self.function_id = None;
     }
 
     fn bind_params(&mut self, signature: &Signature) {
         let params = &signature.params;
         let ty = signature.parameter_type();
         let name = (params.len() == 1).then(|| params[0].name.val.clone());
-        self.function().parameter(name, ty.clone());
+        self.function.parameter(name, ty.clone());
         for (index, parameter) in params.iter().enumerate() {
             self.bind_parameter(parameter, index, params.len() == 1);
         }
@@ -107,15 +114,6 @@ impl Generator {
         });
         self.emit(Instr::AccessStatic { index });
     }
-}
-
-pub(super) fn prototype(source: &Function) -> crate::Function {
-    let mut builder = FunctionBuilder::new(Some(source.name.clone()));
-    builder.parameter(None, source.signature.parameter_type());
-    builder.result(source.signature.result.ty.clone());
-    let mut function = builder.finish();
-    set_foreign(&mut function, source);
-    function
 }
 
 fn set_foreign(function: &mut crate::Function, source: &Function) {

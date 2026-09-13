@@ -62,21 +62,141 @@ fn resolved_tree_is_sufficient_to_lower_control_flow() {
 #[test]
 fn lowering_preserves_source_handles_without_inventing_missing_origins() {
     let source = Source::new("editor://scratch", "choose");
+    let other = Source::new("editor://other", "choose");
     let mut tree = conditional();
+    tree.functions.push(tree.functions[0].clone());
     tree.functions.push(tree.functions[0].clone());
     tree.functions[0].location = Some(SourceLocation {
         source: source.clone(),
         span: Span { start: 0, end: 6 },
     });
+    tree.functions[2].location = Some(SourceLocation {
+        source: other.clone(),
+        span: Span { start: 0, end: 6 },
+    });
     let module = resin_lir::generate(&tree).unwrap();
     drop(tree);
-    assert_eq!(module.origins.functions.len(), 1);
+    assert_eq!(module.origins.functions.len(), 2);
+    assert_eq!(
+        module.origins.functions[&FunctionId::from_index(0)].source,
+        source
+    );
+    assert_eq!(
+        module.origins.functions[&FunctionId::from_index(2)].source,
+        other
+    );
     assert!(!module.origins.instructions.is_empty());
     for ((function, _, _), origin) in &module.origins.instructions {
-        assert_eq!(*function, FunctionId::from_index(0));
-        assert_eq!(origin.source, source);
+        let expected = match function.index() {
+            0 => &source,
+            2 => &other,
+            _ => panic!("source-less function acquired an origin"),
+        };
+        assert_eq!(&origin.source, expected);
         assert_eq!(origin.source.text(), "choose");
     }
+    assert_eq!(
+        module
+            .origins
+            .instructions
+            .keys()
+            .filter(|(id, _, _)| id.index() == 0)
+            .count(),
+        module
+            .origins
+            .instructions
+            .keys()
+            .filter(|(id, _, _)| id.index() == 2)
+            .count(),
+    );
+}
+
+#[test]
+fn failed_functions_keep_their_own_bindings_cleanup_and_error_origins() {
+    let source = Source::new("editor://scratch", "owner missing");
+    let changed = source.with_text("a later source version");
+    let missing_span = Span { start: 6, end: 13 };
+    let owner = Ident {
+        val: "owner".into(),
+        span: Span { start: 0, end: 5 },
+    };
+    let mut first = parameter_function(&[], false);
+    first.location = Some(SourceLocation {
+        source: source.clone(),
+        span: Span { start: 0, end: 13 },
+    });
+    first.body = Some(Term {
+        span: Span { start: 0, end: 13 },
+        ty: Ty::Int32,
+        kind: TermKind::Block {
+            stmts: vec![resin_hir::Statement::Define {
+                binding: 0,
+                name: owner.clone(),
+                init: Term {
+                    span: owner.span,
+                    ty: Ty::Arc {
+                        pointee: Box::new(Ty::Int32),
+                    },
+                    kind: TermKind::ArcNew {
+                        value: Box::new(constant(Value::Int32 { value: 7 }, Ty::Int32)),
+                    },
+                },
+            }],
+            tail: Box::new(Term {
+                span: missing_span,
+                ty: Ty::Int32,
+                kind: TermKind::Local {
+                    binding: 1,
+                    name: Ident {
+                        val: "missing".into(),
+                        span: missing_span,
+                    },
+                },
+            }),
+        },
+    });
+    let detached_span = Span { start: 20, end: 25 };
+    let mut last = parameter_function(&[], false);
+    last.body = Some(Term {
+        span: detached_span,
+        ty: Ty::Int32,
+        kind: TermKind::Local {
+            binding: 0,
+            name: Ident {
+                span: detached_span,
+                ..owner
+            },
+        },
+    });
+    let tree = Module {
+        // The middle function has no owner slots for failed cleanup state to reuse.
+        functions: vec![first, parameter_function(&[], false), last],
+        ..Default::default()
+    };
+    let errors = resin_lir::analyze(&tree).unwrap_err();
+    drop(tree);
+    drop(source);
+
+    assert_eq!(errors.len(), 2);
+    let origin = errors[0].source.as_ref().unwrap();
+    assert_eq!(origin.id(), changed.id());
+    assert_ne!(origin, &changed);
+    assert_eq!(origin.text(), "owner missing");
+    assert_eq!(errors[0].span, missing_span);
+    assert_eq!(
+        errors[0].kind,
+        resin_lir::ErrorKind::UnboundValue {
+            name: "missing".into(),
+        }
+    );
+    assert!(errors[1].source.is_none());
+    assert_eq!(errors[1].span, detached_span);
+    assert_eq!(
+        errors[1].kind,
+        resin_lir::ErrorKind::UnboundValue {
+            name: "owner".into(),
+        }
+    );
 }
 
 fn parameter(index: usize, ty: Ty, foreign: bool) -> resin_hir::Parameter {

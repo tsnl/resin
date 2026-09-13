@@ -1,4 +1,4 @@
-use super::Generator;
+use super::FunctionLowering;
 use super::{ErrorKind, LowerError};
 use super::{Initialization, ValueBinding};
 use crate::Instr;
@@ -6,7 +6,7 @@ use resin_hir::{BindingId, Term};
 use resin_source::prelude::*;
 use resin_types::prelude::*;
 
-impl Generator {
+impl FunctionLowering<'_> {
     pub(super) fn gen_define(
         &mut self,
         id: BindingId,
