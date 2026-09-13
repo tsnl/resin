@@ -158,6 +158,78 @@ Overall this is a medium refactor spread across several focused PRs, with most
 work in the frontend. Exact patch sizes depend on how much of the existing private
 tree can become direct HIR.
 
+## Stack order and methods inside structs
+
+Deliver the implementation as a stack managed with `gh stack`: the refactor PRs
+above first, then the language migration below, then incremental polymorphism.
+Each PR must compile and pass its relevant tests on its parent. Land from the
+bottom and update descendants through the stack workflow. These documentation
+drafts describe the work; they are not the implementation stack itself.
+
+The polymorphism portion starts by moving ordinary programs onto the new HIR and
+LIR ownership contracts, then adds bounded specialization, named function type
+parameters with contextual deduction, and finally generic structs, transparent
+generic aliases, and methods with their own type parameters.
+Keep editor support, imports, diagnostics, and lifecycle behavior working in each
+slice. Do not publish parser syntax whose basic lowering path is absent.
+
+Before generic structs, replace source `impl` blocks with methods declared inside
+their owning `struct`. This is a separate language-migration PR after the
+behavior-preserving refactor, rather than a hidden syntax change within it:
+
+```resin
+struct Counter {
+    value: int,
+
+    def read(self: Counter) -> int = { self.value };
+    def increment(self: Ptr<Counter>) = { self.value := self.value + 1; };
+};
+```
+
+The initial grammar keeps comma-separated fields followed by method declarations;
+methods use ordinary `def` syntax and occupy no runtime field storage. Their
+owner is the enclosing struct's declaration identity, not a type name looked up
+from an `impl` header. Keep the explicit receiver parameter and current static
+calls, receiver adaptation, and `drop(self: Ptr<Owner>)` rules. Do not introduce
+implicit `self`, unqualified field access, or captured runtime variables.
+
+Current [method ownership](../crates/resin-hir/src/lower/mod.rs) already restricts
+`impl` to nominal structs from the defining module; its header accepts one type
+name. There are no general blanket implementations today. The simplification is
+to make the owner and closed source method set structural, and to avoid designing
+a future `impl<T>` binder and owner-pattern matching system. For `struct Cell<T>`,
+its methods inherit that same bound `T`; later method parameters such as `<U>`
+add their own binders. One source member set applies to every substitution, with
+operation support determined when a method is specialized.
+
+Aliases retain their underlying type's methods but cannot declare another method
+set. A bare `extern type` cannot gain methods today either; nominal wrappers keep
+their methods inside their structs. Compiler-provided methods on `Ptr`, `Span`,
+`Arc`, GPU pointers, and other builtins remain registered declarations with their
+existing operations. Receiver type deduction, defining-namespace lookup,
+pointer/Arc adaptation, and duplicate-name diagnostics still have to work.
+
+Preserve method signature/body visibility when moving declarations. For example,
+[GPU owners](../resin/gpu.resin) currently have an `Arc<Owner>` alias between the
+struct and its `impl`, and use that alias in method signatures. Collect and resolve
+module type declarations before method signatures and bodies; placing a method
+textually inside the owner must not make those existing aliases disappear.
+Reserve all method declarations before their bodies so recursion and sibling
+method references keep their existing behavior. Field declaration visibility
+continues to follow the current type rules.
+
+The syntax migration initially covers module-level methods, matching today's
+`impl` placement. Keep local field-only structs working; methods on local structs
+need a separate decision about declaration scheduling and remain outside this
+migration. Merely nesting a method in source must not give it closure captures.
+
+Update the Tree-sitter grammar and generated parser, AST ownership, formatter,
+queries/editor recovery, standard library, examples, tests, and language guidance
+together. Remove the old source `impl` form rather than retaining two method
+declaration mechanisms. Preserve layout, method-versus-field call behavior,
+destruction, alias navigation, and GPU method decorators. Test incomplete method
+bodies without losing the surrounding struct's fields or later declarations.
+
 ## Work that can wait
 
 Today's HIR is already a concrete expression language. Keep using it as the input
