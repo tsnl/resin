@@ -1,7 +1,6 @@
 use super::{CheckedFile, Scopes};
 use crate::lower::Generator;
 use crate::{Statement, TermKind};
-use resin_types::prelude::*;
 
 fn check(source: &str, generator: &mut Generator) -> CheckedFile {
     let file = resin_ast::generate(&resin_cst::Document::reparse(source.into(), None)).unwrap();
@@ -37,7 +36,7 @@ fn checking_resolves_types_in_earlier_expressions_and_annotations() {
             .all(|function| function.body.is_none())
     );
     let value = checked.context.lookup("value", false).unwrap();
-    assert_eq!(checked.signatures[&value].result.ty, Ty::Int32);
+    assert_eq!(checked.signatures[&value].result.ty, crate::Type::Int32);
     let TermKind::Block { stmts, .. } = &checked.bodies[&value].kind else {
         panic!()
     };
@@ -65,7 +64,7 @@ fn recovery_keeps_signatures_and_healthy_trees_without_lowering_failed_bodies() 
     assert!(!checked.errors.is_empty());
     let bad = checked.context.lookup("bad", false).unwrap();
     let healthy = checked.context.lookup("healthy", false).unwrap();
-    assert_eq!(checked.signatures[&bad].result.ty, Ty::Int32);
+    assert_eq!(checked.signatures[&bad].result.ty, crate::Type::Int32);
     assert!(!checked.bodies.contains_key(&bad));
     assert_eq!(checked.bodies[&healthy].ty, crate::Type::Int32);
 }

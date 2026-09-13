@@ -41,6 +41,7 @@ impl Annotation {
     }
 }
 pub(super) struct Signature {
+    pub type_params: Vec<crate::TypeParameter>,
     pub declaration: Option<DeclarationId>,
     pub parameters: Vec<Option<DeclarationId>>,
     pub params: Vec<(Ident, Annotation)>,
@@ -101,6 +102,7 @@ impl Checker<'_> {
             .collect();
         let result = self.ann(result, infer);
         Signature {
+            type_params: vec![],
             params,
             result,
             declaration: None,
@@ -156,21 +158,36 @@ impl Checker<'_> {
             })
     }
 
-    pub fn value(&mut self, name: &Ident) -> Result<(DeclarationId, Type)> {
-        self.scopes
-            .lookup_inferred(&name.val)
-            .map(|(declaration, ty, function)| {
-                if function {
-                    self.dependencies.insert(declaration);
-                }
-                (declaration, ty)
-            })
-            .ok_or_else(|| GenerateError {
-                span: name.span,
-                kind: GenerateErrorKind::UnboundValue {
-                    name: name.val.clone(),
-                },
-            })
+    pub fn value(
+        &mut self,
+        name: &Ident,
+        explicit: Option<Vec<Type>>,
+    ) -> Result<(DeclarationId, Type, Vec<Type>)> {
+        let (declaration, ty, function) =
+            self.scopes
+                .lookup_inferred(&name.val)
+                .ok_or_else(|| GenerateError {
+                    span: name.span,
+                    kind: GenerateErrorKind::UnboundValue {
+                        name: name.val.clone(),
+                    },
+                })?;
+        if !function {
+            if explicit.is_some() {
+                return Err(GenerateError::inference(
+                    name.span,
+                    "only a function declaration accepts type arguments",
+                ));
+            }
+            return Ok((declaration, ty, vec![]));
+        }
+        self.dependencies.insert(declaration);
+        let parameters = self.scopes.parameters(declaration);
+        let (ty, arguments) = self
+            .typing
+            .solver
+            .apply(ty, &parameters, explicit, name.span)?;
+        Ok((declaration, ty, arguments))
     }
 }
 
@@ -280,12 +297,6 @@ impl Checker<'_> {
         stmt: &'s StmtKind,
         methods: &mut BTreeMap<Arc<str>, DeclarationId>,
     ) -> Option<(typed::Declaration, Option<&'s resin_ast::Term>, Signature)> {
-        if let StmtKind::Function { type_params, .. } = stmt
-            && let Err(error) = crate::lower::require_monomorphic(type_params)
-        {
-            self.errors.push(error);
-            return None;
-        }
         let (name, params, result, body) = match stmt {
             StmtKind::Function {
                 name,
@@ -302,7 +313,47 @@ impl Checker<'_> {
             } => (name, params, result, None),
             _ => return None,
         };
+        let type_scope = match stmt {
+            StmtKind::Function { type_params, .. } => type_params.first().map(|parameter| Span {
+                start: parameter.span.start,
+                end: body.map_or(result.span.end, |body| body.span.start),
+            }),
+            _ => None,
+        };
+        if let Some(span) = type_scope {
+            self.scopes.push_at(span);
+        }
+        let mut binders = vec![];
+        if let StmtKind::Function { type_params, .. } = stmt {
+            for parameter in type_params {
+                let declaration = match self.scopes.define_inferred(
+                    parameter,
+                    Type::Invalid,
+                    DefinitionKind::Type,
+                ) {
+                    Ok(id) => id,
+                    Err(_) => {
+                        self.errors.push(GenerateError::inference(
+                            parameter.span,
+                            "duplicate type parameter",
+                        ));
+                        continue;
+                    }
+                };
+                let id = crate::TypeParameterId::from_index(declaration);
+                self.scopes
+                    .set_inferred(declaration, Type::Node(Head::Parameter { id }, vec![]));
+                binders.push(crate::TypeParameter {
+                    id,
+                    name: parameter.clone(),
+                });
+            }
+        }
         let mut signature = self.signature(params, result, body.is_some());
+        signature.type_params = binders;
+        if type_scope.is_some() {
+            self.scopes.pop();
+        }
         match self.declare(name, signature.ty(), methods.remove(&name.val)) {
             Ok(id) => signature.declaration = Some(id),
             Err(error) => {
@@ -310,8 +361,10 @@ impl Checker<'_> {
                 return None;
             }
         }
+        let id = signature.declaration.unwrap();
+        self.scopes.set_parameters(id, &signature.type_params);
         if is_shader(stmt) {
-            self.scopes.mark_shader(signature.declaration.unwrap());
+            self.scopes.mark_shader(id);
         }
         let kind = match stmt {
             StmtKind::Function { decorators, .. } => typed::DeclarationKind::Function {
@@ -368,6 +421,14 @@ impl Checker<'_> {
     fn function_body(&mut self, source: &resin_ast::Term, signature: &mut Signature) -> Term {
         let errors_before = self.errors.len();
         self.scopes.push_at(source.span);
+        for parameter in &signature.type_params {
+            self.scopes.import(
+                parameter.name.val.clone(),
+                super::scope::Symbol {
+                    definition: parameter.id.index(),
+                },
+            );
+        }
         self.result = signature.result.ty.clone();
         self.bind_parameters(signature);
         let (rule, term) = self.term(source, Some(signature.result.ty.clone()));
@@ -441,7 +502,7 @@ impl Checker<'_> {
         }
         self.typing
             .solver
-            .require(ty, span)
+            .require_complete(ty, span)
             .map(|_| ())
             .map_err(|error| {
                 if matches!(self.typing.solver.head(ty), Type::Node(Head::Array(0), _)) {
@@ -461,7 +522,7 @@ impl Checker<'_> {
         for (span, variable) in &self.holes {
             let ty = variable.ty();
             if !self.typing.solver.invalid(&ty)
-                && let Err(error) = self.typing.solver.require(&ty, *span)
+                && let Err(error) = self.typing.solver.require_complete(&ty, *span)
             {
                 self.errors.push(error);
             }
@@ -503,6 +564,7 @@ impl Signature {
 
     fn resolve(self, solver: &Solver) -> Result<typed::Signature> {
         Ok(typed::Signature {
+            type_params: self.type_params,
             declaration: self.declaration,
             parameters: self.parameters,
             params: self
@@ -685,18 +747,35 @@ impl Expression<'_, '_> {
                 }
             }
             resin_ast::TermKind::Var { name } => {
-                let (declaration, ty) = self.checker.value(name)?;
+                let (declaration, ty, type_args) = self.checker.value(name, None)?;
                 equate = Some(ty);
                 TermKind::Var {
                     declaration,
                     name: name.clone(),
+                    type_args,
                 }
             }
-            resin_ast::TermKind::TypeApply { .. } => {
-                return Err(GenerateError::inference(
-                    span,
-                    "template application lowering is not implemented yet",
-                ));
+            resin_ast::TermKind::TypeApply {
+                function: func,
+                args: type_args,
+            } => {
+                let resin_ast::TermKind::Var { name } = &func.val else {
+                    return Err(GenerateError::inference(
+                        span,
+                        "type arguments require a function declaration",
+                    ));
+                };
+                let arguments = type_args
+                    .iter()
+                    .map(|ann| self.annotation(ann, true).ty)
+                    .collect();
+                let (declaration, ty, type_args) = self.checker.value(name, Some(arguments))?;
+                equate = Some(ty);
+                TermKind::Var {
+                    declaration,
+                    name: name.clone(),
+                    type_args,
+                }
             }
             resin_ast::TermKind::Type { ty } => {
                 let ann = self.annotation(ty, true);
@@ -1179,9 +1258,9 @@ impl Expression<'_, '_> {
 //
 
 impl typed::Annotation<Type> {
-    fn resolve(self, solver: &Solver) -> Result<typed::Annotation> {
+    fn resolve(self, solver: &Solver) -> Result<typed::Annotation<crate::Type>> {
         Ok(typed::Annotation {
-            ty: solver.require(&self.ty, self.span)?,
+            ty: solver.require_complete(&self.ty, self.span)?,
             span: self.span,
         })
     }

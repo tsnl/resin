@@ -41,6 +41,7 @@ pub(crate) struct Contexts {
     scopes: Vec<LexicalScope>,
     pub definitions: Vec<Definition>,
     shaders: HashSet<DeclarationId>,
+    parameters: BTreeMap<DeclarationId, Vec<crate::TypeParameter>>,
 }
 impl Contexts {
     fn lookup(&self, mut cursor: Cursor, name: &str, is_type: bool) -> Option<usize> {
@@ -143,8 +144,8 @@ impl ContextView {
             })?;
         Ok(self.data.borrow().contexts.definitions[id]
             .ty
-            .clone()
-            .map(Type::from)
+            .as_ref()
+            .map(Type::from_hir)
             .unwrap_or(Type::Invalid))
     }
 }
@@ -290,19 +291,42 @@ impl Scopes {
     pub(crate) fn lookup_inferred(&self, name: &str) -> Option<(DeclarationId, Type, bool)> {
         let id = self.view.lookup(name, false)?;
         let (ty, function) = self.inferred.get(&id).cloned().unwrap_or_else(|| {
-            (
-                self.view.data.borrow().contexts.definitions[id]
-                    .ty
-                    .clone()
-                    .map(Type::from)
-                    .unwrap_or(Type::Invalid),
-                false,
-            )
+            let data = self.view.data.borrow();
+            let definition = &data.contexts.definitions[id];
+            let ty = definition
+                .ty
+                .as_ref()
+                .map(Type::from_hir)
+                .unwrap_or(Type::Invalid);
+            (ty, definition.kind == DefinitionKind::Function)
         });
         Some((id, ty, function))
     }
     pub(crate) fn resolve_type(&self, name: &Ident) -> Result<Type, super::GenerateError> {
+        if let Some(id) = self.view.lookup(&name.val, true)
+            && let Some((ty, _)) = self.inferred.get(&id)
+        {
+            return Ok(ty.clone());
+        }
         self.view.resolve_type(name)
+    }
+    pub(crate) fn set_parameters(&self, id: DeclarationId, parameters: &[crate::TypeParameter]) {
+        self.view
+            .data
+            .borrow_mut()
+            .contexts
+            .parameters
+            .insert(id, parameters.to_vec());
+    }
+    pub(crate) fn parameters(&self, id: DeclarationId) -> Vec<crate::TypeParameter> {
+        self.view
+            .data
+            .borrow()
+            .contexts
+            .parameters
+            .get(&id)
+            .cloned()
+            .unwrap_or_default()
     }
     pub(crate) fn mark_shader(&self, id: DeclarationId) {
         self.view.data.borrow_mut().contexts.shaders.insert(id);
@@ -351,7 +375,7 @@ impl Scopes {
     pub(crate) fn resolve_inferred(&mut self, solver: &Solver, typer: &Context) {
         let mut data = self.view.data.borrow_mut();
         for (id, (ty, _)) in self.inferred.drain() {
-            data.contexts.definitions[id].ty = solver.resolve(&ty);
+            data.contexts.definitions[id].ty = solver.complete(&ty);
         }
         for (location, ty, associated) in self.expressions.drain(..) {
             if let Some(ty) = solver.resolve(&ty) {
@@ -391,7 +415,7 @@ impl Scopes {
     }
     pub(crate) fn define_alias(&mut self, name: &Ident, ty: Ty) -> Result<DeclarationId, Arc<str>> {
         let (id, result) = self.declare(name, DefinitionKind::Type);
-        self.view.data.borrow_mut().contexts.definitions[id].ty = Some(ty);
+        self.view.data.borrow_mut().contexts.definitions[id].ty = Some(super::types::ty(&ty));
         result.map(|()| id)
     }
 }

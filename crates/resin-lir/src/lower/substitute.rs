@@ -118,10 +118,22 @@ impl Substitution {
                 param: Box::new(self.ty_at(param, depth + 1, remaining, instances)?),
                 result: Box::new(self.ty_at(result, depth + 1, remaining, instances)?),
             },
-            resin_hir::Type::Result { value, error } => Ty::Result {
-                value: Box::new(self.ty_at(value, depth + 1, remaining, instances)?),
-                error: Box::new(self.ty_at(error, depth + 1, remaining, instances)?),
-            },
+            resin_hir::Type::Result { value, error } => {
+                let value = self.ty_at(value, depth + 1, remaining, instances)?;
+                let error = self.ty_at(error, depth + 1, remaining, instances)?;
+                if error.variants().is_none() {
+                    return Err(super::LowerError {
+                        span: Span { start: 0, end: 0 },
+                        kind: crate::ErrorKind::InvalidInstance {
+                            message: "Result errors must be structs or unions of structs".into(),
+                        },
+                    });
+                }
+                Ty::Result {
+                    value: Box::new(value),
+                    error: Box::new(error),
+                }
+            }
             resin_hir::Type::Array { element, length } => Ty::Array {
                 element: Box::new(self.ty_at(element, depth + 1, remaining, instances)?),
                 length: *length,

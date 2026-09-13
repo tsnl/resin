@@ -257,6 +257,36 @@ impl Specialization<'_, '_> {
         })
     }
 
+    fn match_expression(
+        &mut self,
+        value: &resin_hir::Term,
+        arms: &[resin_hir::MatchArm],
+    ) -> Result<concrete::TermKind, Error> {
+        let value = self.boxed(value)?;
+        let mut tags = match &value.ty {
+            Ty::Result { .. } => vec![Case::Ok, Case::Err],
+            ty => ty.members().into_iter().map(Case::Type).collect(),
+        };
+        let mut completed = vec![];
+        for arm in arms {
+            let arm = self.arm(arm)?;
+            let Some(index) = tags.iter().position(|tag| *tag == arm.tag) else {
+                return Err(
+                    self.instance_error("unknown or duplicate match variant after substitution")
+                );
+            };
+            tags.remove(index);
+            completed.push(arm);
+        }
+        if !tags.is_empty() || completed.is_empty() {
+            return Err(self.instance_error("match must cover every concrete variant exactly once"));
+        }
+        Ok(concrete::TermKind::Match {
+            value,
+            arms: completed,
+        })
+    }
+
     fn receiver(&self, source: resin_hir::ReceiverConversion) -> concrete::ReceiverConversion {
         match source {
             resin_hir::ReceiverConversion::Value => concrete::ReceiverConversion::Value,
@@ -435,13 +465,7 @@ impl Specialization<'_, '_> {
             resin_hir::TermKind::Try { value } => concrete::TermKind::Try {
                 value: self.boxed(value)?,
             },
-            resin_hir::TermKind::Match { value, arms } => concrete::TermKind::Match {
-                value: self.boxed(value)?,
-                arms: arms
-                    .iter()
-                    .map(|value| self.arm(value))
-                    .collect::<Result<_, _>>()?,
-            },
+            resin_hir::TermKind::Match { value, arms } => self.match_expression(value, arms)?,
             resin_hir::TermKind::If { cond, then, els } => concrete::TermKind::If {
                 cond: self.boxed(cond)?,
                 then: self.boxed(then)?,

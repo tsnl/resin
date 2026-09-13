@@ -96,11 +96,3 @@ pub(super) fn definition(
         drop: *drop,
     }
 }
-
-pub(super) fn case(source: &Case) -> crate::Case {
-    match source {
-        Case::Ok => crate::Case::Ok,
-        Case::Err => crate::Case::Err,
-        Case::Type(value) => crate::Case::Type { ty: ty(value) },
-    }
-}

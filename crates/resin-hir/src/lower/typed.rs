@@ -29,6 +29,7 @@ pub(super) enum TermKind {
     Var {
         declaration: DeclarationId,
         name: Ident,
+        type_args: Vec<Type>,
     },
     Type {
         ty: Annotation<Type>,
@@ -149,10 +150,11 @@ pub(super) enum StatementKind {
 
 #[derive(Debug, Clone)]
 pub(super) struct Signature {
+    pub type_params: Vec<crate::TypeParameter>,
     pub declaration: Option<DeclarationId>,
     pub parameters: Vec<Option<DeclarationId>>,
-    pub params: Vec<(Ident, Annotation)>,
-    pub result: Annotation,
+    pub params: Vec<(Ident, Annotation<crate::Type>)>,
+    pub result: Annotation<crate::Type>,
 }
 
 /// Source-order function metadata retained when its declaration is reserved.

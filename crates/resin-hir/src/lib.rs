@@ -646,6 +646,30 @@ impl Analysis {
             .then(|| format!("{}: {}", member.name, member.ty))
     }
 
+    fn type_names(&self) -> print::TypeNames {
+        print::TypeNames {
+            definitions: self
+                .typer
+                .definitions()
+                .iter()
+                .map(|definition| definition.name().cloned().unwrap_or_else(|| "?".into()))
+                .collect(),
+            parameters: self
+                .contexts
+                .definitions
+                .iter()
+                .filter_map(|definition| {
+                    if let Some(Type::Parameter { parameter }) = &definition.ty {
+                        (definition.kind == DefinitionKind::Type)
+                            .then(|| (*parameter, definition.name.clone().into()))
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+        }
+    }
+
     fn definition_label(
         &self,
         documents: &BTreeMap<Source, Arc<resin_cst::Document>>,
@@ -658,7 +682,7 @@ impl Analysis {
             let ty = definition
                 .ty
                 .as_ref()
-                .map(|ty| format_type(ty, &self.typer))
+                .map(|ty| self.type_names().format(ty))
                 .unwrap_or_else(|| "?".into());
             return format!("{}: {ty}", definition.name);
         }
@@ -1009,7 +1033,7 @@ struct Definition {
     location: SourceLocation,
     kind: DefinitionKind,
     label: String,
-    ty: Option<Ty>,
+    ty: Option<Type>,
     member: bool,
 }
 #[derive(Debug, Clone)]

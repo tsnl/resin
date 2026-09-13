@@ -68,7 +68,7 @@ impl Completion<'_> {
     fn elaborate(&mut self, source: &typed::Term) -> Result<Term> {
         Ok(Term {
             span: source.span,
-            ty: types::ty(&self.ty(source)?),
+            ty: self.solver.require_complete(&source.ty, source.span)?,
             kind: self.elaborate_kind(source)?,
         })
     }
@@ -105,12 +105,14 @@ impl Completion<'_> {
             },
             typed::TermKind::Type { ty } => TermKind::Constant {
                 value: crate::Constant::Type {
-                    ty: types::ty(&self.annotation(ty)?.ty),
+                    ty: self.solver.require_complete(&ty.ty, ty.span)?,
                 },
             },
-            typed::TermKind::Var { declaration, name } => {
-                self.reference(*declaration, name, true)?
-            }
+            typed::TermKind::Var {
+                declaration,
+                name,
+                type_args,
+            } => self.reference(*declaration, name, type_args, true)?,
             typed::TermKind::Layout { ty, size } => self.layout(ty, *size)?,
             typed::TermKind::Unwrap { value } => TermKind::Unwrap {
                 value: self.boxed(value)?,
@@ -158,7 +160,23 @@ impl Completion<'_> {
             )?,
             typed::TermKind::Call { func, arg } => self.call(func, arg)?,
             typed::TermKind::Ascribe { ty, arg } => {
-                self.ascription(source.span, &self.annotation(ty)?.ty, arg)?
+                if let Some(to) = self.solver.resolve(&ty.ty) {
+                    self.ascription(source.span, &to, arg)?
+                } else {
+                    match self.solver.require_complete(&ty.ty, ty.span)? {
+                        crate::Type::Arc { .. } => TermKind::ArcNew {
+                            value: self.boxed(arg)?,
+                        },
+                        crate::Type::Weak { pointee }
+                            if matches!(arg.kind, typed::TermKind::Unit) =>
+                        {
+                            TermKind::WeakEmpty { pointee: *pointee }
+                        }
+                        _ => TermKind::Convert {
+                            arg: self.boxed(arg)?,
+                        },
+                    }
+                }
             }
             typed::TermKind::Result { failure, arg } => TermKind::Result {
                 failure: *failure,
@@ -178,11 +196,20 @@ impl Completion<'_> {
         })
     }
 
-    fn reference(&self, declaration: DeclarationId, name: &Ident, read: bool) -> Result<TermKind> {
+    fn reference(
+        &self,
+        declaration: DeclarationId,
+        name: &Ident,
+        type_args: &[Type],
+        read: bool,
+    ) -> Result<TermKind> {
         if let Some(&function) = self.function_bindings.get(&declaration) {
             return Ok(TermKind::Function {
                 function,
-                type_args: vec![],
+                type_args: type_args
+                    .iter()
+                    .map(|ty| self.solver.require_complete(ty, name.span))
+                    .collect::<Result<_>>()?,
             });
         }
         let kind = match self.initialization.get(&declaration) {
@@ -212,11 +239,16 @@ impl Completion<'_> {
     }
 
     fn place(&mut self, source: &typed::Term) -> Result<Box<Term>> {
-        if let typed::TermKind::Var { declaration, name } = &source.kind {
+        if let typed::TermKind::Var {
+            declaration,
+            name,
+            type_args,
+        } = &source.kind
+        {
             return Ok(Box::new(Term {
                 span: source.span,
-                ty: types::ty(&self.ty(source)?),
-                kind: self.reference(*declaration, name, false)?,
+                ty: self.solver.require_complete(&source.ty, source.span)?,
+                kind: self.reference(*declaration, name, type_args, false)?,
             }));
         }
         // Field access and pointer dereference need their base initialized even
@@ -266,13 +298,15 @@ impl Completion<'_> {
     }
 
     fn number(&self, source: &typed::Term, text: &str) -> Result<TermKind> {
-        super::eval::number(self.typer, source.span, text, Some(&self.ty(source)?))?;
+        if let Some(ty) = self.solver.resolve(&source.ty) {
+            super::eval::number(self.typer, source.span, text, Some(&ty))?;
+        }
         Ok(TermKind::Numeric { text: text.into() })
     }
 
     fn layout(&self, ty: &typed::Annotation<Type>, size: bool) -> Result<TermKind> {
         Ok(TermKind::Layout {
-            of: types::ty(&self.annotation(ty)?.ty),
+            of: self.solver.require_complete(&ty.ty, ty.span)?,
             size,
         })
     }
@@ -516,6 +550,15 @@ impl Completion<'_> {
     }
 
     fn call(&mut self, func: &typed::Term, arg: &typed::Term) -> Result<TermKind> {
+        if matches!(
+            self.solver.head(&func.ty),
+            Type::Node(super::infer::Head::Function, _)
+        ) {
+            return Ok(TermKind::Call {
+                func: self.boxed(func)?,
+                arg: self.boxed(arg)?,
+            });
+        }
         let function_type = self.ty(func)?;
         let shape = self
             .typer
@@ -579,7 +622,7 @@ impl Completion<'_> {
                     binding: *binding,
                     name: name.clone(),
                     ty: crate::Annotation {
-                        ty: types::ty(&self.annotation(ty)?.ty),
+                        ty: self.solver.require_complete(&ty.ty, ty.span)?,
                         span: ty.span,
                     },
                 }
@@ -596,10 +639,15 @@ impl Completion<'_> {
         value: &typed::Term,
         arms: &[typed::MatchArm],
     ) -> Result<TermKind> {
-        let value_type = self.ty(value)?;
+        let value_type = self.solver.require_complete(&value.ty, value.span)?;
         let tags = match &value_type {
-            Ty::Result { .. } => vec![Case::Ok, Case::Err],
-            ty => ty.members().into_iter().map(Case::Type).collect(),
+            crate::Type::Result { .. } => vec![crate::Case::Ok, crate::Case::Err],
+            crate::Type::Union { variants } => variants
+                .iter()
+                .cloned()
+                .map(|ty| crate::Case::Type { ty })
+                .collect(),
+            ty => vec![crate::Case::Type { ty: ty.clone() }],
         };
         let value = self.boxed(value)?;
         let before = self.initialization.clone();
@@ -626,7 +674,7 @@ impl Completion<'_> {
             }
             after = Some(self.initialization.clone());
             checked.push(MatchArm {
-                tag: types::case(&tag),
+                tag,
                 binding: arm.binding,
                 body,
             });
@@ -646,18 +694,22 @@ impl Completion<'_> {
 }
 
 impl Completion<'_> {
-    fn pattern(&self, arm: &typed::MatchArm, ty: &Ty) -> Result<Case> {
+    fn pattern(&self, arm: &typed::MatchArm, ty: &crate::Type) -> Result<crate::Case> {
         match (&arm.variant, ty) {
-            (None, Ty::Result { .. }) => Ok(if arm.failure { Case::Err } else { Case::Ok }),
-            (Some(ann), ty) if !matches!(ty, Ty::Result { .. }) => {
-                let annotation = self.annotation(ann)?;
-                if matches!(annotation.ty, Ty::Union { .. }) {
+            (None, crate::Type::Result { .. }) => Ok(if arm.failure {
+                crate::Case::Err
+            } else {
+                crate::Case::Ok
+            }),
+            (Some(ann), ty) if !matches!(ty, crate::Type::Result { .. }) => {
+                let ty = self.solver.require_complete(&ann.ty, ann.span)?;
+                if matches!(ty, crate::Type::Union { .. }) {
                     return Err(GenerateError::inference(
                         ann.span,
                         "union patterns must name a single member type",
                     ));
                 }
-                Ok(Case::Type(annotation.ty))
+                Ok(crate::Case::Type { ty })
             }
             _ => Err(GenerateError::inference(
                 arm.body.span,
@@ -681,11 +733,11 @@ impl Completion<'_> {
                 pointee: types::ty(pointee),
             });
         }
-        let (from, value) = self.constructor_argument(to, source)?;
-        self.conversion(span, value, &from, to)
+        let value = self.constructor_argument(to, source)?;
+        self.conversion(span, value, to)
     }
 
-    fn constructor_argument(&mut self, to: &Ty, source: &typed::Term) -> Result<(Ty, Term)> {
+    fn constructor_argument(&mut self, to: &Ty, source: &typed::Term) -> Result<Term> {
         let body = self
             .typer
             .body(to)
@@ -694,16 +746,13 @@ impl Completion<'_> {
         if matches!(&body, Ty::Record { fields } if fields.is_empty())
             && matches!(source.kind, typed::TermKind::Unit)
         {
-            return Ok((
-                body.clone(),
-                Term {
-                    span: source.span,
-                    ty: types::ty(&body),
-                    kind: TermKind::Record { fields: vec![] },
-                },
-            ));
+            return Ok(Term {
+                span: source.span,
+                ty: types::ty(&body),
+                kind: TermKind::Record { fields: vec![] },
+            });
         }
-        Ok((self.ty(source)?, self.elaborate(source)?))
+        self.elaborate(source)
     }
 
     fn shared_payload(&mut self, to: &Ty, source: &typed::Term) -> Result<Term> {
@@ -713,11 +762,11 @@ impl Completion<'_> {
         ) {
             return self.elaborate(source);
         }
-        let (from, value) = self.constructor_argument(to, source)?;
-        if &from == to {
+        let value = self.constructor_argument(to, source)?;
+        if value.ty == types::ty(to) {
             return Ok(value);
         }
-        let kind = self.conversion(source.span, value, &from, to)?;
+        let kind = self.conversion(source.span, value, to)?;
         Ok(Term {
             span: source.span,
             ty: types::ty(to),
@@ -725,10 +774,12 @@ impl Completion<'_> {
         })
     }
 
-    fn conversion(&self, span: Span, value: Term, from: &Ty, to: &Ty) -> Result<TermKind> {
-        self.typer
-            .explicit_conversion(from, to)
-            .map_err(|e| GenerateError::typing(span, e))?;
+    fn conversion(&self, span: Span, value: Term, to: &Ty) -> Result<TermKind> {
+        if let Some(from) = self.solver.resolve(&Type::from_hir(&value.ty)) {
+            self.typer
+                .explicit_conversion(&from, to)
+                .map_err(|e| GenerateError::typing(span, e))?;
+        }
         Ok(TermKind::Convert {
             arg: Box::new(value),
         })

@@ -274,10 +274,16 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   infer their type from context, defaulting to `long` for integers and `float64` for floats.
   One-armed `if` is equivalent to an explicit `else {}` and requires a unit-valued body.
 - Function result annotations default to unit when omitted, including foreign functions.
-  Explicit `_` holes opt into inference in local annotations and function results, including
-  nested type positions. Keep parameters, type definitions, and foreign signatures fully explicit.
+  Named function parameters (`def identity<T>(value: T) -> T`) bind rigid type variables.
+  Each declaration reference deduces fresh type arguments from operands and expected results,
+  or accepts explicit `identity::<int>` arguments. Locals remain monomorphic. `_` introduces
+  a weak monomorphic inference variable in local annotations, function results, and explicit
+  applications, including nested positions; it may unify with a bound type variable. A caller
+  cannot determine a definition's unresolved result hole. Keep parameters, type definitions,
+  and foreign signatures fully explicit. Generic structs, aliases, and methods follow in later layers.
   Check source expressions into HIR, then lower that tree to LIR in a separate pass.
   Resolve dependency groups and all inference variables before handing the tree to lowering;
+  retain named binders and determining member types in HIR. Scopes store these HIR schemes.
   keep inference solvers and deferred emission callbacks out of the lowering pass.
 - Shader entries use `@compute_shader`, `@vertex_shader`, or `@fragment_shader` decorators.
   Compute entries take `(ulong, Ptr<T>)` and return unit; their index is the global X invocation

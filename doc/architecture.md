@@ -128,7 +128,7 @@ HIR construction has three internal steps:
 
 1. Declare names and check expressions into a private tree with inference types.
 2. Solve function dependency groups and retain the selected method declarations.
-3. Reserve concrete signatures and complete solved expressions directly into public HIR.
+3. Complete schemes and solved expressions directly into public HIR.
 
 Value lookup records declaration identities immediately. References, inference
 dependencies, and signature/body records keep those identities through resolution;
@@ -177,9 +177,25 @@ profile. It reserves each ID before translating its body, so recursion reuses pe
 requests. Compilation supplies exported target roots; only their transitive function
 and type dependencies enter the worklist. Decorated functions remain host-callable;
 shader artifacts and pipeline creation request separate shader instances. C emits
-host instances, while SPIR-V follows the requested shader graph. Source inference
-still rejects template syntax in this preparatory layer. Producing polymorphic schemes
-from source is the next stage of the implementation.
+host instances, while SPIR-V follows the requested shader graph.
+
+Source functions bind named parameters with `def identity<T>(value: T) -> T`.
+Every declaration reference creates a fresh application, deduced from operands and
+expected results or supplied with `identity::<int>`. Bound parameters remain rigid
+inside the definition; local function values remain monomorphic. A `_` is a weak
+monomorphic variable and can unify with an enclosing named parameter. Applications
+retain substitutions around unresolved definition variables, so recursive dependency
+groups can finish a result from its body without a caller determining it. Unseeded
+cycles and undetermined arguments require annotations. Generic nominal declarations,
+aliases, and method binders are the next source layers.
+
+Persistent scopes store completed HIR schemes for imports, navigation, and hover.
+HIR keeps one body per source definition, including symbolic literals, arithmetic,
+fields, casts, layouts, and Result payloads. Error holes accumulate unions of symbolic
+contributors; applications substitute the current contributors until the dependency
+group reaches a fixed point. Only then do unseeded error sets become `Never`.
+Concrete operation support and determining field types are resolved during LIR
+construction, with application traces for failures.
 
 `resin_lir::instantiate` accepts closed HIR applications and constructs their target
 program. The whole-module `generate`/`analyze` helpers explicitly request all ordinary
