@@ -1,4 +1,4 @@
-//! Persistent lexical scopes used by checking, elaboration, and editor queries.
+//! Persistent lexical scopes used by HIR construction and editor queries.
 use crate::lower::context::Context;
 use crate::lower::infer::{Solver, Type};
 use crate::{Analysis, Definition, DefinitionKind};
@@ -112,7 +112,7 @@ impl Contexts {
     }
 }
 
-/// Lookup capability shared by checking and elaboration.
+/// Lookup capability for source declarations and type annotations.
 #[derive(Clone)]
 pub(crate) struct ContextView {
     cursor: Cursor,
@@ -287,9 +287,9 @@ impl Scopes {
             self.view.data.borrow().contexts.definitions[id].kind == DefinitionKind::Function;
         self.inferred.insert(id, (ty, function));
     }
-    pub(crate) fn lookup_inferred(&self, name: &str) -> Option<(Type, bool)> {
+    pub(crate) fn lookup_inferred(&self, name: &str) -> Option<(DeclarationId, Type, bool)> {
         let id = self.view.lookup(name, false)?;
-        Some(self.inferred.get(&id).cloned().unwrap_or_else(|| {
+        let (ty, function) = self.inferred.get(&id).cloned().unwrap_or_else(|| {
             (
                 self.view.data.borrow().contexts.definitions[id]
                     .ty
@@ -298,20 +298,17 @@ impl Scopes {
                     .unwrap_or(Type::Invalid),
                 false,
             )
-        }))
+        });
+        Some((id, ty, function))
     }
     pub(crate) fn resolve_type(&self, name: &Ident) -> Result<Type, super::GenerateError> {
         self.view.resolve_type(name)
     }
-    pub(crate) fn mark_shader(&self, name: &Ident) {
-        if let Some(id) = self.view.lookup(&name.val, false) {
-            self.view.data.borrow_mut().contexts.shaders.insert(id);
-        }
+    pub(crate) fn mark_shader(&self, id: DeclarationId) {
+        self.view.data.borrow_mut().contexts.shaders.insert(id);
     }
-    pub(crate) fn is_shader(&self, name: &str) -> bool {
-        self.view
-            .lookup(name, false)
-            .is_some_and(|id| self.view.data.borrow().contexts.shaders.contains(&id))
+    pub(crate) fn is_shader(&self, id: DeclarationId) -> bool {
+        self.view.data.borrow().contexts.shaders.contains(&id)
     }
     pub(crate) fn record_inferred(&mut self, span: Span, ty: Type) {
         self.record_members(span, ty, false);

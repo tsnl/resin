@@ -1,6 +1,6 @@
-//! Discard source contexts and express sugar using the HIR language.
+//! Express resolved source forms using the HIR language.
 use super::elaborate_annotation;
-use super::eval::Evaluator;
+use super::scope::DeclarationId;
 use super::{Generator, typed};
 use crate::ReceiverConversion;
 use crate::lower::context::FunctionBody;
@@ -14,13 +14,10 @@ type Result<T> = std::result::Result<T, GenerateError>;
 
 impl Generator {
     pub(super) fn elaborate(&mut self, source: &typed::Term) -> Result<Term> {
-        let before = self.scopes.select(source.context);
-        let kind = self.elaborate_kind(source);
-        self.scopes.select(before);
         Ok(Term {
             span: source.span,
             ty: source.ty.clone(),
-            kind: kind?,
+            kind: self.elaborate_kind(source)?,
         })
     }
 
@@ -42,7 +39,7 @@ impl Generator {
             typed::TermKind::Type { ty } => TermKind::Constant {
                 value: Value::Type { ty: ty.ty.clone() },
             },
-            typed::TermKind::Var { name } => self.reference(name)?,
+            typed::TermKind::Var { declaration, name } => self.reference(*declaration, name),
             typed::TermKind::Layout { ty, size } => self.layout(ty, *size)?,
             typed::TermKind::Unwrap { value } => TermKind::Unwrap {
                 value: self.boxed(value)?,
@@ -111,31 +108,18 @@ impl Generator {
         })
     }
 
-    fn reference(&self, name: &Ident) -> Result<TermKind> {
-        let binding = self
-            .scopes
-            .lookup(&name.val, false)
-            .ok_or_else(|| GenerateError {
-                span: name.span,
-                kind: GenerateErrorKind::UnboundValue {
-                    name: name.val.clone(),
-                },
-            })?;
-        Ok(match self.function_bindings.get(&binding).copied() {
+    fn reference(&self, declaration: DeclarationId, name: &Ident) -> TermKind {
+        match self.function_bindings.get(&declaration).copied() {
             Some(function) => TermKind::Function { function },
             None => TermKind::Local {
-                binding,
+                binding: declaration,
                 name: name.clone(),
             },
-        })
+        }
     }
 
     fn number(&self, source: &typed::Term, text: &str) -> Result<TermKind> {
-        let evaluator = Evaluator {
-            scopes: &self.scopes,
-            typer: &self.typer,
-        };
-        let (value, _) = evaluator.number(source.span, text, Some(&source.ty))?;
+        let (value, _) = super::eval::number(&self.typer, source.span, text, Some(&source.ty))?;
         Ok(TermKind::Constant { value })
     }
 

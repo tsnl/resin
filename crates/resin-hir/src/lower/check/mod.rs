@@ -8,7 +8,7 @@ use crate::lower::{
         Constraint, Equation, Head, Inference, Pattern, Rule, Solver, Type, VariableId,
         check_binding_name,
     },
-    scope::{ContextView, Cursor, DeclarationId, Scopes},
+    scope::{ContextView, DeclarationId, Scopes},
     typed::{self, StatementKind, TermKind},
 };
 use crate::{GenerateError, GenerateErrorKind};
@@ -112,15 +112,16 @@ impl Checker<'_> {
 
 pub(super) struct CheckedFile {
     pub context: ContextView,
-    pub signatures: BTreeMap<Arc<str>, typed::Signature>,
-    pub bodies: BTreeMap<Arc<str>, typed::Term>,
+    pub declarations: Vec<typed::Declaration>,
+    pub signatures: BTreeMap<DeclarationId, typed::Signature>,
+    pub bodies: BTreeMap<DeclarationId, typed::Term>,
     pub errors: Vec<GenerateError>,
 }
 struct Checker<'a> {
     typing: Inference<'a>,
     scopes: Scopes,
     errors: Vec<GenerateError>,
-    dependencies: BTreeSet<Arc<str>>,
+    dependencies: BTreeSet<DeclarationId>,
     holes: Vec<(Span, VariableId)>,
     expressions: Vec<(Span, Type)>,
     result: Type,
@@ -156,14 +157,14 @@ impl Checker<'_> {
             })
     }
 
-    pub fn value(&mut self, name: &Ident) -> Result<Type> {
+    pub fn value(&mut self, name: &Ident) -> Result<(DeclarationId, Type)> {
         self.scopes
             .lookup_inferred(&name.val)
-            .map(|(ty, function)| {
+            .map(|(declaration, ty, function)| {
                 if function {
-                    self.dependencies.insert(name.val.clone());
+                    self.dependencies.insert(declaration);
                 }
-                ty
+                (declaration, ty)
             })
             .ok_or_else(|| GenerateError {
                 span: name.span,
@@ -178,13 +179,13 @@ impl Checker<'_> {
 // Declarations, bodies, and dependency solving
 //
 
-type Signatures = BTreeMap<Arc<str>, Signature>;
-type SourceBodies<'a> = Vec<(&'a Ident, &'a resin_ast::Term)>;
+type Signatures = BTreeMap<DeclarationId, Signature>;
+type SourceBodies<'a> = Vec<(DeclarationId, &'a resin_ast::Term)>;
 
 struct Body {
-    name: Arc<str>,
+    declaration: DeclarationId,
     term: Term,
-    dependencies: BTreeSet<Arc<str>>,
+    dependencies: BTreeSet<DeclarationId>,
     constraints: Vec<Equation>,
     expressions: Vec<(Span, Type)>,
 }
@@ -197,11 +198,11 @@ pub(in crate::lower) fn file(
     methods: BTreeMap<Arc<str>, DeclarationId>,
 ) -> CheckedFile {
     let mut checker = Checker::new(typer, scopes, source_module);
-    let (mut signatures, sources) = checker.declarations(file, methods);
+    let (declarations, mut signatures, sources) = checker.declarations(file, methods);
     let mut bodies = checker.bodies(&mut signatures, sources);
     checker.solve_functions(&signatures, &mut bodies);
     checker.require_holes();
-    checker.finish(signatures, bodies)
+    checker.finish(declarations, signatures, bodies)
 }
 
 impl Checker<'_> {
@@ -209,25 +210,28 @@ impl Checker<'_> {
         &mut self,
         file: &'s SourceFile,
         mut methods: BTreeMap<Arc<str>, DeclarationId>,
-    ) -> (Signatures, SourceBodies<'s>) {
+    ) -> (Vec<typed::Declaration>, Signatures, SourceBodies<'s>) {
+        let mut declarations = vec![];
         let mut signatures = BTreeMap::new();
         let mut bodies = vec![];
         for stmt in file.declarations() {
-            if let Some((name, body, signature)) = self.declaration(&stmt.val, &mut methods) {
+            if let Some((declaration, body, signature)) = self.declaration(&stmt.val, &mut methods)
+            {
                 if let Some(body) = body {
-                    bodies.push((name, body));
+                    bodies.push((declaration.id, body));
                 }
-                signatures.insert(name.val.clone(), signature);
+                signatures.insert(declaration.id, signature);
+                declarations.push(declaration);
             }
         }
-        (signatures, bodies)
+        (declarations, signatures, bodies)
     }
 
     fn declaration<'s>(
         &mut self,
         stmt: &'s StmtKind,
         methods: &mut BTreeMap<Arc<str>, DeclarationId>,
-    ) -> Option<(&'s Ident, Option<&'s resin_ast::Term>, Signature)> {
+    ) -> Option<(typed::Declaration, Option<&'s resin_ast::Term>, Signature)> {
         let (name, params, result, body) = match stmt {
             StmtKind::Function {
                 name,
@@ -253,9 +257,23 @@ impl Checker<'_> {
             }
         }
         if is_shader(stmt) {
-            self.scopes.mark_shader(name);
+            self.scopes.mark_shader(signature.declaration.unwrap());
         }
-        Some((name, body, signature))
+        let kind = match stmt {
+            StmtKind::Function { decorators, .. } => typed::DeclarationKind::Function {
+                decorators: decorators.clone(),
+            },
+            StmtKind::ForeignFunction { header, .. } => typed::DeclarationKind::Foreign {
+                header: header.clone(),
+            },
+            _ => unreachable!("function declaration"),
+        };
+        let declaration = typed::Declaration {
+            id: signature.declaration.unwrap(),
+            name: name.clone(),
+            kind,
+        };
+        Some((declaration, body, signature))
     }
 
     fn declare(
@@ -280,10 +298,10 @@ impl Checker<'_> {
     fn bodies(&mut self, signatures: &mut Signatures, sources: SourceBodies<'_>) -> Vec<Body> {
         sources
             .into_iter()
-            .map(|(name, body)| {
-                let term = self.function_body(body, signatures.get_mut(&name.val).unwrap());
+            .map(|(declaration, body)| {
+                let term = self.function_body(body, signatures.get_mut(&declaration).unwrap());
                 Body {
-                    name: name.val.clone(),
+                    declaration,
                     term,
                     dependencies: std::mem::take(&mut self.dependencies),
                     constraints: std::mem::take(&mut self.typing.constraints),
@@ -327,7 +345,7 @@ impl Checker<'_> {
             self.errors.extend(self.typing.solve(&roots));
             for index in group {
                 self.require_function(
-                    &signatures[&bodies[index].name].result,
+                    &signatures[&bodies[index].declaration].result,
                     &bodies[index].expressions,
                 );
             }
@@ -345,7 +363,7 @@ impl Checker<'_> {
             let body = &mut bodies[index];
             self.typing.constraints.append(&mut body.constraints);
             roots.extend(body.expressions.iter().map(|(_, ty)| ty.clone()));
-            roots.push(signatures[&body.name].result.ty.clone());
+            roots.push(signatures[&body.declaration].result.ty.clone());
         }
         roots
     }
@@ -396,13 +414,19 @@ impl Checker<'_> {
         }
     }
 
-    fn finish(mut self, signatures: Signatures, bodies: Vec<Body>) -> CheckedFile {
+    fn finish(
+        mut self,
+        declarations: Vec<typed::Declaration>,
+        signatures: Signatures,
+        bodies: Vec<Body>,
+    ) -> CheckedFile {
         self.scopes
             .resolve_inferred(&self.typing.solver, self.typing.typer);
         let signatures = self.resolve_signatures(signatures);
         let bodies = self.resolve_bodies(bodies);
         CheckedFile {
             context: self.scopes.finish(),
+            declarations,
             signatures,
             bodies,
             errors: self.errors,
@@ -412,17 +436,18 @@ impl Checker<'_> {
     fn resolve_signatures(
         &mut self,
         signatures: Signatures,
-    ) -> BTreeMap<Arc<str>, typed::Signature> {
+    ) -> BTreeMap<DeclarationId, typed::Signature> {
         signatures
             .into_iter()
-            .filter_map(|(name, signature)| {
+            .filter_map(|(declaration, signature)| {
                 let resolved = signature.resolve(&self.typing.solver);
-                self.record(resolved).map(|signature| (name, signature))
+                self.record(resolved)
+                    .map(|signature| (declaration, signature))
             })
             .collect()
     }
 
-    fn resolve_bodies(&mut self, bodies: Vec<Body>) -> BTreeMap<Arc<str>, typed::Term> {
+    fn resolve_bodies(&mut self, bodies: Vec<Body>) -> BTreeMap<DeclarationId, typed::Term> {
         bodies
             .into_iter()
             .filter_map(|body| {
@@ -430,7 +455,7 @@ impl Checker<'_> {
                     return None;
                 }
                 let resolved = body.term.resolve(&self.typing.solver);
-                self.record(resolved).map(|term| (body.name, term))
+                self.record(resolved).map(|term| (body.declaration, term))
             })
             .collect()
     }
@@ -469,17 +494,17 @@ impl Signature {
 }
 
 fn dependencies(bodies: &[Body]) -> Vec<Vec<usize>> {
-    let names: BTreeMap<_, _> = bodies
+    let declarations: BTreeMap<_, _> = bodies
         .iter()
         .enumerate()
-        .map(|(i, body)| (&body.name, i))
+        .map(|(i, body)| (&body.declaration, i))
         .collect();
     bodies
         .iter()
         .map(|body| {
             body.dependencies
                 .iter()
-                .filter_map(|name| names.get(name).copied())
+                .filter_map(|declaration| declarations.get(declaration).copied())
                 .collect()
         })
         .collect()
@@ -539,7 +564,7 @@ impl Expression<'_, '_> {
 
     fn check(&mut self, term: &resin_ast::Term, expected: Option<Type>, out: Type) -> Term {
         let context = self.checker.scopes.capture();
-        let checked = self.term_inner(term, expected, out.clone(), context);
+        let checked = self.term_inner(term, expected, out.clone());
         let checked = match checked {
             Ok(checked) => checked,
             Err(error) => {
@@ -547,7 +572,6 @@ impl Expression<'_, '_> {
                 self.checker.errors.push(error.clone());
                 self.checker.typing.fail(self.rule);
                 Term {
-                    context,
                     span: term.span,
                     ty: out.clone(),
                     kind: TermKind::Error(error),
@@ -564,7 +588,6 @@ impl Expression<'_, '_> {
         term: &resin_ast::Term,
         expected: Option<Type>,
         out: Type,
-        context: Cursor,
     ) -> Result<Term> {
         let propagate = matches!(
             term.val,
@@ -592,7 +615,9 @@ impl Expression<'_, '_> {
                 let base = self.child(base, None);
                 let (ty, associated) = match &base.kind {
                     TermKind::Type { ty } => (ty.ty.clone(), true),
-                    TermKind::Var { name } if self.checker.scopes.is_shader(&name.val) => {
+                    TermKind::Var { declaration, .. }
+                        if self.checker.scopes.is_shader(*declaration) =>
+                    {
                         (crate::lower::context::shader_properties().into(), false)
                     }
                     _ => (base.ty.clone(), false),
@@ -638,8 +663,12 @@ impl Expression<'_, '_> {
                 }
             }
             resin_ast::TermKind::Var { name } => {
-                equate = Some(self.checker.value(name)?);
-                TermKind::Var { name: name.clone() }
+                let (declaration, ty) = self.checker.value(name)?;
+                equate = Some(ty);
+                TermKind::Var {
+                    declaration,
+                    name: name.clone(),
+                }
             }
             resin_ast::TermKind::Type { ty } => {
                 let ann = self.annotation(ty, true);
@@ -957,7 +986,9 @@ impl Expression<'_, '_> {
                 let base = self.child(base, None);
                 let (receiver, associated) = match &base.kind {
                     TermKind::Type { ty } => (ty.ty.clone(), true),
-                    TermKind::Var { name } if self.checker.scopes.is_shader(&name.val) => {
+                    TermKind::Var { declaration, .. }
+                        if self.checker.scopes.is_shader(*declaration) =>
+                    {
                         (crate::lower::context::shader_properties().into(), false)
                     }
                     _ => (base.ty.clone(), false),
@@ -986,7 +1017,6 @@ impl Expression<'_, '_> {
             self.constrain((span, Constraint::Coerce(out.clone(), expected)));
         }
         Ok(Term {
-            context,
             span,
             ty: out,
             kind,
@@ -994,7 +1024,6 @@ impl Expression<'_, '_> {
     }
 
     fn statement(&mut self, stmt: &resin_ast::Stmt) -> Statement {
-        let context = self.checker.scopes.capture();
         let result = self.statement_inner(stmt);
         let kind = match result {
             Ok(statement) => statement,
@@ -1014,7 +1043,7 @@ impl Expression<'_, '_> {
                 StatementKind::Error(error)
             }
         };
-        Statement { context, kind }
+        Statement { kind }
     }
 
     fn statement_inner(&mut self, stmt: &resin_ast::Stmt) -> Result<StatementKind<Type>> {
@@ -1111,7 +1140,7 @@ impl typed::Annotation<Type> {
     }
 }
 
-fn child(term: Box<typed::Term<Type>>, solver: &Solver) -> Result<Box<typed::Term>> {
+fn child(term: typed::Term<Type>, solver: &Solver) -> Result<Box<typed::Term>> {
     Ok(Box::new(term.resolve(solver)?))
 }
 
@@ -1123,18 +1152,18 @@ impl typed::Term<Type> {
             TermKind::None => TermKind::None,
             TermKind::Num { value } => TermKind::Num { value },
             TermKind::String { value } => TermKind::String { value },
-            TermKind::Var { name } => TermKind::Var { name },
+            TermKind::Var { declaration, name } => TermKind::Var { declaration, name },
             TermKind::Type { ty } => TermKind::Type {
                 ty: ty.resolve(solver)?,
             },
             TermKind::Unwrap { value } => TermKind::Unwrap {
-                value: child(value, solver)?,
+                value: child(*value, solver)?,
             },
             TermKind::Try { value } => TermKind::Try {
-                value: child(value, solver)?,
+                value: child(*value, solver)?,
             },
             TermKind::Match { value, arms } => TermKind::Match {
-                value: child(value, solver)?,
+                value: child(*value, solver)?,
                 arms: arms
                     .into_iter()
                     .map(|arm| {
@@ -1148,20 +1177,20 @@ impl typed::Term<Type> {
                     .collect::<Result<_>>()?,
             },
             TermKind::If { cond, then, els } => TermKind::If {
-                cond: child(cond, solver)?,
-                then: child(then, solver)?,
-                els: child(els, solver)?,
+                cond: child(*cond, solver)?,
+                then: child(*then, solver)?,
+                els: child(*els, solver)?,
             },
             TermKind::While { cond, body } => TermKind::While {
-                cond: child(cond, solver)?,
-                body: child(body, solver)?,
+                cond: child(*cond, solver)?,
+                body: child(*body, solver)?,
             },
             TermKind::Block { stmts, tail } => TermKind::Block {
                 stmts: stmts
                     .into_iter()
                     .map(|stmt| stmt.resolve(solver))
                     .collect::<Result<_>>()?,
-                tail: child(tail, solver)?,
+                tail: child(*tail, solver)?,
             },
             TermKind::Record { fields } => TermKind::Record {
                 fields: fields
@@ -1188,48 +1217,47 @@ impl typed::Term<Type> {
                 name,
                 arg,
             } => TermKind::MethodCall {
-                receiver: receiver.map(|term| child(term, solver)).transpose()?,
+                receiver: receiver.map(|term| child(*term, solver)).transpose()?,
                 receiver_type: receiver_type.resolve(solver)?,
                 name,
-                arg: child(arg, solver)?,
+                arg: child(*arg, solver)?,
             },
             TermKind::Call { func, arg } => TermKind::Call {
-                func: child(func, solver)?,
-                arg: child(arg, solver)?,
+                func: child(*func, solver)?,
+                arg: child(*arg, solver)?,
             },
             TermKind::Ascribe { ty, arg } => TermKind::Ascribe {
                 ty: ty.resolve(solver)?,
-                arg: child(arg, solver)?,
+                arg: child(*arg, solver)?,
             },
             TermKind::Result { failure, arg } => TermKind::Result {
                 failure,
-                arg: child(arg, solver)?,
+                arg: child(*arg, solver)?,
             },
             TermKind::Absurd { arg } => TermKind::Absurd {
-                arg: child(arg, solver)?,
+                arg: child(*arg, solver)?,
             },
             TermKind::Layout { ty, size } => TermKind::Layout {
                 ty: ty.resolve(solver)?,
                 size,
             },
             TermKind::Assign { place, value } => TermKind::Assign {
-                place: child(place, solver)?,
-                value: child(value, solver)?,
+                place: child(*place, solver)?,
+                value: child(*value, solver)?,
             },
             TermKind::Address { place } => TermKind::Address {
-                place: child(place, solver)?,
+                place: child(*place, solver)?,
             },
             TermKind::Deref { pointer } => TermKind::Deref {
-                pointer: child(pointer, solver)?,
+                pointer: child(*pointer, solver)?,
             },
             TermKind::Field { base, name } => TermKind::Field {
-                base: child(base, solver)?,
+                base: child(*base, solver)?,
                 name,
             },
         };
         Ok(typed::Term {
             span: self.span,
-            context: self.context,
             ty: solver.require(&self.ty, self.span)?,
             kind,
         })
@@ -1259,10 +1287,7 @@ impl typed::Statement<Type> {
                 term: term.resolve(solver)?,
             },
         };
-        Ok(typed::Statement {
-            context: self.context,
-            kind,
-        })
+        Ok(typed::Statement { kind })
     }
 }
 
