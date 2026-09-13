@@ -1,0 +1,15 @@
+{
+    "format_on_save": "on",
+    "tab_size": 4,
+    "lsp": {
+        "resin-lsp": {
+            "binary": {
+                "path": "nix-shell",
+                "arguments": [
+                    "--run",
+                    "cargo run --quiet --manifest-path Cargo.toml -- --lsp",
+                ],
+            },
+        },
+    },
+}

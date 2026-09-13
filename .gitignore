@@ -2,3 +2,4 @@
 /build
 /crates/*/build/
 /.direnv/
+/.zed/settings.json
