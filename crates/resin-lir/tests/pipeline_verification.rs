@@ -27,6 +27,7 @@ fn id(index: usize) -> FunctionId {
 fn declaration(index: usize, parameter: Ty, result: Ty) -> Function {
     Function {
         name: None,
+        profile: resin_lir::Profile::Host,
         foreign: None,
         result,
         locals: vec![Local {
@@ -92,6 +93,7 @@ fn fixture() -> Module {
         ],
         ..Default::default()
     };
+    module.functions[2].profile = resin_lir::Profile::Shader;
     module.shaders.insert(
         id(2),
         ShaderEntry {
@@ -188,7 +190,7 @@ fn recording_checks_arguments_context_and_allocator_together() {
     };
     assert_eq!(
         resin_lir::verify(&bad_allocator).unwrap_err().kind,
-        VerifyErrorKind::InvalidGpuOperation
+        VerifyErrorKind::InvalidFunction { function: 500 }
     );
 }
 
@@ -207,4 +209,17 @@ fn pipeline_owner_cannot_be_forged_by_ascription_or_reused_for_another_stage() {
         resin_lir::verify(&graphics_dispatch).unwrap_err().kind,
         VerifyErrorKind::InvalidGpuOperation
     );
+}
+
+#[test]
+fn native_pipeline_bridges_require_host_instances() {
+    let mut module = fixture();
+    module.functions[1].profile = resin_lir::Profile::Shader;
+    assert!(matches!(
+        resin_lir::verify(&module).unwrap_err().kind,
+        VerifyErrorKind::InvalidProfile {
+            expected: resin_lir::Profile::Host,
+            found: resin_lir::Profile::Shader
+        }
+    ));
 }

@@ -9,11 +9,7 @@ fn sources(compilation: &Compilation) -> BTreeSet<Source> {
 }
 
 fn valid(compilation: &Compilation) {
-    assert!(
-        compilation.module().is_ok(),
-        "{:?}",
-        compilation.diagnostics()
-    );
+    assert!(compilation.hir().is_ok(), "{:?}", compilation.diagnostics());
 }
 
 #[test]
@@ -31,9 +27,9 @@ fn unchanged_graph_reuses_the_completed_result_after_resolving_imports() {
         .set_import(&entry, "dependency", dependency.clone())
         .unwrap();
     let mut compiler = Compiler::new();
-    let first = compiler.compile(entry.clone(), &mut loader);
+    let first = compiler.analyze(entry.clone(), &mut loader);
     valid(&first);
-    let second = compiler.compile(entry.clone(), &mut loader);
+    let second = compiler.analyze(entry.clone(), &mut loader);
     assert!(Arc::ptr_eq(&first, &second));
     assert_eq!(second.entry(), &entry);
     assert_eq!(sources(&second), [entry, dependency].into());
@@ -54,13 +50,13 @@ fn changing_a_transitive_source_invalidates_an_unchanged_entry() {
     loader.set_import(&entry, "middle", middle.clone()).unwrap();
     loader.set_import(&middle, "leaf", leaf.clone()).unwrap();
     let mut compiler = Compiler::default();
-    let before = compiler.compile(entry.clone(), &mut loader);
+    let before = compiler.analyze(entry.clone(), &mut loader);
     valid(&before);
     let changed = leaf.with_text("export { leaf }; def leaf() -> bool = { 1 == 1 };");
     loader.set_import(&middle, "leaf", changed.clone()).unwrap();
-    let after = compiler.compile(entry.clone(), &mut loader);
+    let after = compiler.analyze(entry.clone(), &mut loader);
     assert!(!Arc::ptr_eq(&before, &after));
-    assert!(after.module().is_err());
+    assert!(after.hir().is_err());
     assert_eq!(after.entry(), &entry);
     assert!(sources(&before).contains(&leaf));
     assert!(sources(&after).contains(&changed));
@@ -76,20 +72,17 @@ fn a_missing_transitive_import_recovers_without_notifications() {
     let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "middle", middle.clone()).unwrap();
     let mut compiler = Compiler::default();
-    let before = compiler.compile(entry.clone(), &mut loader);
-    assert!(before.module().is_err());
+    let before = compiler.analyze(entry.clone(), &mut loader);
+    assert!(before.hir().is_err());
     assert!(before.diagnostics().iter().any(|diagnostic| {
         diagnostic.location.source == middle
             && diagnostic.location.span.end > diagnostic.location.span.start
     }));
     loader.set_import(&middle, "leaf", leaf.clone()).unwrap();
-    let after = compiler.compile(entry, &mut loader);
+    let after = compiler.analyze(entry, &mut loader);
     valid(&after);
     assert!(!Arc::ptr_eq(&before, &after));
-    assert!(
-        before.module().is_err(),
-        "retained failure remains immutable"
-    );
+    assert!(before.hir().is_err(), "retained failure remains immutable");
     assert!(sources(&after).contains(&leaf));
 }
 
@@ -120,16 +113,16 @@ fn changed_import_edges_invalidate_cache_even_with_the_same_source_set() {
         .set_import(&second, "value", boolean.clone())
         .unwrap();
     let mut compiler = Compiler::default();
-    let before = compiler.compile(entry.clone(), &mut loader);
+    let before = compiler.analyze(entry.clone(), &mut loader);
     valid(&before);
     loader.set_import(&first, "value", boolean.clone()).unwrap();
     loader
         .set_import(&second, "value", integer.clone())
         .unwrap();
-    let after = compiler.compile(entry, &mut loader);
+    let after = compiler.analyze(entry, &mut loader);
     assert_eq!(sources(&before), sources(&after));
     assert!(!Arc::ptr_eq(&before, &after));
-    assert!(after.module().is_err());
+    assert!(after.hir().is_err());
     valid(&before);
 }
 
@@ -143,8 +136,8 @@ fn inconsistent_versions_of_one_logical_source_are_diagnosed() {
     let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "first", first.clone()).unwrap();
     loader.set_import(&entry, "second", second.clone()).unwrap();
-    let result = Compiler::default().compile(entry.clone(), &mut loader);
-    assert!(result.module().is_err());
+    let result = Compiler::default().analyze(entry.clone(), &mut loader);
+    assert!(result.hir().is_err());
     assert!(
         result
             .diagnostics()
@@ -161,8 +154,8 @@ fn import_cycles_are_diagnosed_with_source_ranges() {
     let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "next", next.clone()).unwrap();
     loader.set_import(&next, "entry", entry.clone()).unwrap();
-    let result = Compiler::default().compile(entry.clone(), &mut loader);
-    assert!(result.module().is_err());
+    let result = Compiler::default().analyze(entry.clone(), &mut loader);
+    assert!(result.hir().is_err());
     assert!(result.diagnostics().iter().any(|diagnostic| {
         diagnostic.message.contains("cyclic")
             && diagnostic.location.span.end > diagnostic.location.span.start
@@ -179,8 +172,8 @@ fn identical_diagnostic_names_do_not_merge_distinct_sources() {
     let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "first", first.clone()).unwrap();
     loader.set_import(&entry, "second", second.clone()).unwrap();
-    let result = Compiler::default().compile(entry.clone(), &mut loader);
-    assert!(result.module().is_err());
+    let result = Compiler::default().analyze(entry.clone(), &mut loader);
+    assert!(result.hir().is_err());
     assert_eq!(
         sources(&result),
         [entry, first.clone(), second.clone()].into()
@@ -201,10 +194,10 @@ fn retained_compilations_keep_their_own_source_versions_and_editor_queries() {
     );
     let mut loader = Loader::new(resin_source::library_root());
     let mut compiler = Compiler::default();
-    let old = compiler.compile(before.clone(), &mut loader);
+    let old = compiler.analyze(before.clone(), &mut loader);
     let after =
         before.with_text("def value() -> bool = { 1 == 1 }; def main() -> bool = { value() };");
-    let new = compiler.compile(after.clone(), &mut loader);
+    let new = compiler.analyze(after.clone(), &mut loader);
     valid(&old);
     valid(&new);
     assert_eq!(before.id(), after.id());
@@ -230,11 +223,22 @@ fn retained_compilations_keep_their_own_source_versions_and_editor_queries() {
 fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
     let source = Source::new(
         "entry",
-        "def first() -> bool = { (1 == 1) + (1 == 1) }; def second() -> int = { var r = { n = 1 }; r + r; 0 };",
+        "export { first, second }; def first() -> bool = { (1 == 1) + (1 == 1) }; def second() -> int = { var r = { n = 1 }; r + r; 0 };",
     );
     let mut loader = Loader::new(resin_source::library_root());
     let mut compiler = Compiler::default();
-    let lowered = compiler.compile(source.clone(), &mut loader);
+    let lowered = compiler.compile(
+        source.clone(),
+        &mut loader,
+        &[
+            resin_compiler::Target::Host {
+                entry: "first".into(),
+            },
+            resin_compiler::Target::Host {
+                entry: "second".into(),
+            },
+        ],
+    );
     assert!(lowered.program().is_ok());
     assert!(lowered.hir().is_ok());
     assert!(lowered.module().is_err());
@@ -246,11 +250,11 @@ fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
             .all(|diagnostic| diagnostic.location.source == source)
     );
     let typed_source = source.with_text("def main() -> int = { 1 == 2 };");
-    let typed = compiler.compile(typed_source, &mut loader);
+    let typed = compiler.analyze(typed_source, &mut loader);
     assert!(typed.program().is_ok());
     assert!(typed.hir().is_err());
     let parsed_source = source.with_text("def main( = { 1 == 2 };");
-    let parsed = compiler.compile(parsed_source.clone(), &mut loader);
+    let parsed = compiler.analyze(parsed_source.clone(), &mut loader);
     assert!(parsed.program().is_err());
     assert!(parsed.recovered_file(&parsed_source).is_some());
     assert_eq!(lowered.diagnostics().len(), 2);
@@ -272,9 +276,9 @@ fn imported_initialization_errors_keep_the_dependency_source_version() {
         .set_import(&entry, "dependency", dependency.clone())
         .unwrap();
     let mut compiler = Compiler::default();
-    let failed = compiler.compile(entry.clone(), &mut loader);
+    let failed = compiler.analyze(entry.clone(), &mut loader);
     assert!(failed.hir().is_err());
-    assert!(failed.module().is_err());
+    assert!(failed.hir().is_err());
     assert_eq!(failed.diagnostics().len(), 1);
     let diagnostic = &failed.diagnostics()[0];
     assert_eq!(diagnostic.location.source, dependency);
@@ -291,7 +295,7 @@ fn imported_initialization_errors_keep_the_dependency_source_version() {
 
     let repaired = dependency.with_text("export { value }; def value() -> int = { 7 };");
     loader.set_import(&entry, "dependency", repaired).unwrap();
-    valid(&compiler.compile(entry, &mut loader));
+    valid(&compiler.analyze(entry, &mut loader));
     drop(compiler);
     drop(loader);
     let diagnostic = &failed.diagnostics()[0];
@@ -318,8 +322,8 @@ fn conflicting_versions_do_not_displace_the_first_accepted_version() {
     loader
         .set_import(&entry, "original", original.clone())
         .unwrap();
-    let result = Compiler::default().compile(entry.clone(), &mut loader);
-    assert!(result.module().is_err());
+    let result = Compiler::default().analyze(entry.clone(), &mut loader);
+    assert!(result.hir().is_err());
     assert_eq!(result.diagnostics().len(), 1, "{:?}", result.diagnostics());
     let diagnostic = &result.diagnostics()[0];
     assert!(diagnostic.message.contains("different versions"));

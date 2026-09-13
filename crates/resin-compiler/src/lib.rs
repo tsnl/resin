@@ -31,6 +31,20 @@ impl Default for CompilerConfig {
     }
 }
 
+/// Exported entry and semantic target to construct. A decorated function can be
+/// requested on the host as well as for its shader artifact.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Target {
+    Host { entry: Arc<str> },
+    Shader { entry: Arc<str> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Request {
+    Declarations,
+    Targets { entries: Vec<Target> },
+}
+
 /// Reusable compilation caches. Sources and compilations are immutable.
 #[derive(Default)]
 pub struct Compiler {
@@ -48,23 +62,51 @@ impl Compiler {
             ..Default::default()
         }
     }
-    /// Resolve all imports, then reuse or construct the complete compilation.
+    /// Construct HIR and retained editor facts for every declaration, without LIR.
+    /// Target-specific operation diagnostics require `compile` with explicit targets.
+    pub fn analyze(
+        &mut self,
+        entry: Source,
+        loader: &mut resin_source::Loader,
+    ) -> Arc<Compilation> {
+        self.construct(entry, loader, Request::Declarations)
+    }
+
+    /// Resolve all imports, then reuse or construct the requested target program.
     /// Source and import errors are retained as diagnostics in the result.
     pub fn compile(
         &mut self,
         entry: Source,
         loader: &mut resin_source::Loader,
+        targets: &[Target],
+    ) -> Arc<Compilation> {
+        let mut entries = targets.to_vec();
+        entries.sort();
+        entries.dedup();
+        self.construct(entry, loader, Request::Targets { entries })
+    }
+
+    fn construct(
+        &mut self,
+        entry: Source,
+        loader: &mut resin_source::Loader,
+        request: Request,
     ) -> Arc<Compilation> {
         let loaded = self.load_sources(entry.clone(), loader);
         self.checked
             .retain(|id, old| *id == entry.id() || Arc::strong_count(old) > 1);
         let old = self.checked.get(&entry.id());
         if loaded.errors.is_empty()
-            && let Some(old) = old.filter(|old| old.matches(&loaded))
+            && let Some(old) = old.filter(|old| old.matches(&loaded, &request))
         {
             return old.clone();
         }
-        let result = Arc::new(Compilation::new(entry.clone(), loaded, &self.config));
+        let result = Arc::new(Compilation::new(
+            entry.clone(),
+            loaded,
+            &self.config,
+            request,
+        ));
         self.checked.insert(entry.id(), result.clone());
         self.parsed
             .retain(|_, document| document.strong_count() > 0);
@@ -100,7 +142,8 @@ pub struct Compilation {
     graph: Vec<(Source, Vec<(Span, usize)>)>,
     program: Result<resin_ast::Program, SourceError>,
     hir: Result<resin_hir::Module, SourceError>,
-    module: Result<resin_lir::VerifiedModule, SourceError>,
+    request: Request,
+    module: Option<Result<resin_lir::VerifiedModule, SourceError>>,
 }
 impl Compilation {
     pub fn entry(&self) -> &Source {
@@ -118,18 +161,30 @@ impl Compilation {
     pub fn hir(&self) -> Result<&resin_hir::Module, SourceError> {
         self.hir.as_ref().map_err(Clone::clone)
     }
+    /// Borrow requested LIR. Declaration-only analysis has no LIR artifact.
     pub fn module(&self) -> Result<&resin_lir::Module, SourceError> {
-        self.module
+        self.target_module()?
             .as_ref()
             .map(|checked| checked.view().module())
             .map_err(Clone::clone)
     }
     /// Borrow the verified LIR certificate required by code generation.
     pub fn verified(&self) -> Result<resin_lir::Verified<'_>, SourceError> {
-        self.module
+        self.target_module()?
             .as_ref()
             .map(|module| module.view())
             .map_err(Clone::clone)
+    }
+    fn target_module(
+        &self,
+    ) -> Result<&Result<resin_lir::VerifiedModule, SourceError>, SourceError> {
+        self.module.as_ref().ok_or_else(|| {
+            SourceError::new(
+                self.entry.clone(),
+                None,
+                "declaration analysis did not request a LIR artifact".into(),
+            )
+        })
     }
     pub fn recovered_file(&self, source: &Source) -> Option<&resin_ast::SourceFile> {
         self.documents.get(source).map(|document| &document.file)
@@ -184,11 +239,11 @@ impl Compiler {
 }
 
 impl Compilation {
-    fn matches(&self, loaded: &Loaded) -> bool {
-        self.program.is_ok() && self.graph == loaded.graph()
+    fn matches(&self, loaded: &Loaded, request: &Request) -> bool {
+        &self.request == request && self.program.is_ok() && self.graph == loaded.graph()
     }
 
-    fn new(entry: Source, loaded: Loaded, config: &CompilerConfig) -> Self {
+    fn new(entry: Source, loaded: Loaded, config: &CompilerConfig, request: Request) -> Self {
         let graph = loaded.graph();
         let load_error = loaded.errors.first().cloned();
         let mut checked = resin_hir::analyze_program(&loaded.program);
@@ -196,8 +251,10 @@ impl Compilation {
             .clone()
             .or_else(|| checked.diagnostics.first().cloned());
         let mut lowered = None;
-        if let Some(hir) = &checked.module {
-            match lower_to_verified_lir(&loaded.program, hir, config) {
+        if let Some(hir) = &checked.module
+            && let Request::Targets { entries } = &request
+        {
+            match lower_to_verified_lir(&loaded.program, hir, config, entries) {
                 Ok(module) => lowered = Some(module),
                 Err(errors) => checked.diagnostics.extend(errors),
             }
@@ -221,10 +278,14 @@ impl Compilation {
             semantics: checked.semantics,
             program: load_error.map_or(Ok(loaded.program), Err),
             hir: hir_error.map_or_else(|| Ok(checked.module.expect("successful HIR")), Err),
-            module: compile_error.map_or_else(
-                || Ok(lowered.expect("successful compilation has verified LIR")),
-                Err,
-            ),
+            module: match &request {
+                Request::Declarations => None,
+                Request::Targets { .. } => Some(compile_error.map_or_else(
+                    || Ok(lowered.expect("successful compilation has verified LIR")),
+                    Err,
+                )),
+            },
+            request,
         }
     }
 }
@@ -395,11 +456,13 @@ fn lower_to_verified_lir(
     program: &resin_ast::Program,
     hir: &resin_hir::Module,
     config: &CompilerConfig,
+    targets: &[Target],
 ) -> Result<resin_lir::VerifiedModule, Vec<SourceError>> {
     let options = resin_lir::LoweringOptions {
         max_monomorphs_per_function: config.max_monomorphs_per_function,
     };
-    let lir = resin_lir::analyze_with_options(hir, &options).map_err(|errors| {
+    let entries = entry_requests(program, hir, targets).map_err(|error| vec![error])?;
+    let lir = resin_lir::instantiate(hir, &entries, &options).map_err(|errors| {
         errors
             .into_iter()
             .map(|error| lowering_error(program, error))
@@ -414,6 +477,43 @@ fn lower_to_verified_lir(
     })
 }
 
+fn entry_requests(
+    program: &resin_ast::Program,
+    hir: &resin_hir::Module,
+    targets: &[Target],
+) -> Result<Vec<resin_lir::Entry>, SourceError> {
+    let source = &program.modules.last().expect("entry module").source;
+    if targets.is_empty() {
+        return Err(SourceError::new(
+            source.clone(),
+            None,
+            "compilation requires at least one target; use analyze for declaration analysis".into(),
+        ));
+    }
+    targets
+        .iter()
+        .map(|target| {
+            let (name, profile) = match target {
+                Target::Host { entry } => (entry, resin_lir::Profile::Host),
+                Target::Shader { entry } => (entry, resin_lir::Profile::Shader),
+            };
+            let function = hir.entries.get(name).ok_or_else(|| {
+                SourceError::new(
+                    source.clone(),
+                    None,
+                    format!("entry {name} is not exported as a function"),
+                )
+            })?;
+            Ok(resin_lir::Entry {
+                name: name.clone(),
+                function: *function,
+                arguments: vec![],
+                profile,
+            })
+        })
+        .collect()
+}
+
 fn lowering_error(program: &resin_ast::Program, error: resin_lir::Error) -> SourceError {
     let mut diagnostic = lowering_origin(program, &error);
     diagnostic
@@ -422,8 +522,8 @@ fn lowering_error(program: &resin_ast::Program, error: resin_lir::Error) -> Sour
             application.location.map(|location| SourceNote {
                 location,
                 message: format!(
-                    "while instantiating {} with {:?}",
-                    application.function, application.arguments
+                    "while instantiating {} with {:?} for {:?}",
+                    application.function, application.arguments, application.profile
                 ),
             })
         }));

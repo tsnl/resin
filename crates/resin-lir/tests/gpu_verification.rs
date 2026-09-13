@@ -9,6 +9,7 @@ fn module(parameter: Ty, result: Ty, operations: Vec<Instr>) -> Module {
     Module {
         functions: vec![Function {
             name: None,
+            profile: resin_lir::Profile::Host,
             foreign: None,
             result,
             locals: vec![Local {

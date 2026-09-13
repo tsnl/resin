@@ -125,7 +125,8 @@ fn instances_are_memoized_and_the_exact_allowance_is_admitted() {
         ErrorKind::MonomorphLimit {
             function: "mark".into(),
             limit: 1,
-            arguments: vec![Ty::Bool]
+            arguments: vec![Ty::Bool],
+            profile: resin_lir::Profile::Host,
         }
     );
     assert_eq!(error.source.unwrap().name(), "test://main");
@@ -356,4 +357,243 @@ fn failed_requests_are_memoized_without_publishing_an_incomplete_module() {
     let errors = resin_lir::analyze_with_options(&hir, &options(1)).unwrap_err();
     assert_eq!(errors.len(), 1);
     assert!(matches!(errors[0].kind, ErrorKind::InvalidHir { .. }));
+}
+
+fn entry(name: &str, function: usize, profile: resin_lir::Profile) -> resin_lir::Entry {
+    resin_lir::Entry {
+        name: name.into(),
+        function: FunctionId::from_index(function),
+        arguments: vec![],
+        profile,
+    }
+}
+
+#[test]
+fn requested_roots_exclude_unused_functions_types_and_drop_hooks() {
+    let mut hir = program(vec![Type::Int32]);
+    hir.functions.push(function(
+        "unused",
+        term(
+            Type::Bool,
+            TermKind::Builtin {
+                name: "+".into(),
+                args: vec![
+                    term(
+                        Type::Bool,
+                        TermKind::Constant {
+                            value: Constant::Bool { value: true }
+                        }
+                    );
+                    2
+                ],
+            },
+        ),
+    ));
+    hir.types.push(resin_hir::TypeDefinition {
+        name: "Unused".into(),
+        body: Type::Defined {
+            definition: TypeId::from_index(99),
+        },
+        methods: Default::default(),
+        drop: Some(FunctionId::from_index(99)),
+    });
+    let lir = resin_lir::instantiate(
+        &hir,
+        &[entry("main", 1, resin_lir::Profile::Host)],
+        &options(1),
+    )
+    .unwrap();
+    resin_lir::verify(&lir).unwrap();
+    assert_eq!(lir.functions.len(), 2);
+    assert!(lir.types.is_empty());
+    assert!(
+        resin_lir::generate(&hir).is_err(),
+        "whole-module construction still requests all declarations"
+    );
+}
+
+#[test]
+fn explicit_root_arguments_normalize_and_preserve_recursive_nominal_identity() {
+    let mut hir = program(vec![]);
+    hir.types = (0..3)
+        .map(|index| resin_hir::TypeDefinition {
+            name: format!("Type{index}").into(),
+            body: Type::Record { fields: vec![] },
+            methods: Default::default(),
+            drop: None,
+        })
+        .collect();
+    hir.types[2].body = Type::Record {
+        fields: vec![resin_hir::RecordField {
+            name: "next".into(),
+            ty: Type::Pointer {
+                pointee: Box::new(Type::Defined {
+                    definition: TypeId::from_index(2),
+                }),
+            },
+        }],
+    };
+    let mut root = entry("mark", 0, resin_lir::Profile::Host);
+    let nominal = Type::Defined {
+        definition: TypeId::from_index(2),
+    };
+    root.arguments = vec![Type::Union {
+        variants: vec![nominal.clone(), nominal.clone()],
+    }];
+    let mut duplicate = root.clone();
+    duplicate.arguments = vec![nominal];
+    let lir = resin_lir::instantiate(&hir, &[root, duplicate], &options(1)).unwrap();
+    resin_lir::verify(&lir).unwrap();
+    assert_eq!(lir.functions.len(), 1);
+    assert_eq!(lir.types.len(), 1);
+    assert_eq!(lir.types[0].name().unwrap().as_ref(), "Type2");
+    assert_eq!(
+        lir.types[0].body().unwrap(),
+        &Ty::Record {
+            fields: vec![resin_types::RecordField {
+                name: "next".into(),
+                ty: Ty::Pointer {
+                    pointee: Box::new(Ty::Defined {
+                        definition: TypeId::from_index(0)
+                    })
+                },
+            }]
+        }
+    );
+}
+
+fn add_shader(hir: &mut Module, body: Term) -> usize {
+    let index = hir.functions.len();
+    let mut shader = function("kernel", body);
+    for (binding, ty) in [
+        Type::UInt64,
+        Type::Pointer {
+            pointee: Box::new(Type::UInt32),
+        },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        shader.signature.params.push(Parameter {
+            binding: Some(binding),
+            name: Ident {
+                val: format!("p{binding}").into(),
+                span: SPAN,
+            },
+            annotation: annotation(ty),
+        });
+    }
+    hir.functions.push(shader);
+    hir.shaders.insert(
+        FunctionId::from_index(index),
+        resin_types::shader::ShaderEntry {
+            stage: "compute".into(),
+            embedded: false,
+        },
+    );
+    index
+}
+
+#[test]
+fn shader_artifacts_request_a_separate_profile_and_both_count_toward_the_limit() {
+    let mut hir = program(vec![Type::Int32]);
+    let shader = add_shader(&mut hir, block([reference(0, Type::Int32)]));
+    hir.functions[1].body = Some(block([
+        reference(0, Type::Int32),
+        term(
+            Type::Span {
+                element: Box::new(Type::UInt8),
+            },
+            TermKind::Shader {
+                function: FunctionId::from_index(shader),
+                stage: "compute".into(),
+            },
+        ),
+    ]));
+    let roots = [entry("main", 1, resin_lir::Profile::Host)];
+    let lir = resin_lir::instantiate(&hir, &roots, &options(2)).unwrap();
+    resin_lir::verify(&lir).unwrap();
+    let profiles: Vec<_> = lir
+        .functions
+        .iter()
+        .filter(|f| f.name.as_deref() == Some("mark"))
+        .map(|f| f.profile)
+        .collect();
+    assert_eq!(
+        profiles,
+        [resin_lir::Profile::Host, resin_lir::Profile::Shader]
+    );
+    assert_eq!(lir.shaders.len(), 1);
+    assert!(lir.shaders.values().all(|shader| shader.embedded));
+    let error = resin_lir::instantiate(&hir, &roots, &options(1))
+        .unwrap_err()
+        .remove(0);
+    assert!(matches!(
+        error.kind,
+        ErrorKind::MonomorphLimit {
+            profile: resin_lir::Profile::Shader,
+            ..
+        }
+    ));
+    assert_eq!(error.applications[0].profile, resin_lir::Profile::Shader);
+}
+
+#[test]
+fn requesting_only_a_shader_does_not_create_host_instances_or_exports() {
+    let mut hir = program(vec![Type::Bool]);
+    let shader = add_shader(&mut hir, block([reference(0, Type::Int32)]));
+    let lir = resin_lir::instantiate(
+        &hir,
+        &[entry("kernel", shader, resin_lir::Profile::Shader)],
+        &options(1),
+    )
+    .unwrap();
+    resin_lir::verify(&lir).unwrap();
+    assert!(lir.entries.is_empty());
+    assert_eq!(lir.functions.len(), 2);
+    assert!(
+        lir.functions
+            .iter()
+            .all(|f| f.profile == resin_lir::Profile::Shader)
+    );
+    assert!(!lir.shaders.values().next().unwrap().embedded);
+    let mut invalid = lir.clone();
+    invalid.functions[1].profile = resin_lir::Profile::Host;
+    assert!(matches!(
+        resin_lir::verify(&invalid).unwrap_err().kind,
+        resin_lir::VerifyErrorKind::InvalidProfile {
+            expected: resin_lir::Profile::Shader,
+            found: resin_lir::Profile::Host
+        }
+    ));
+}
+
+#[test]
+fn nominal_expansion_is_bounded_across_declaration_boundaries() {
+    let mut hir = program(vec![]);
+    hir.types = (0..300)
+        .map(|index| resin_hir::TypeDefinition {
+            name: format!("Type{index}").into(),
+            methods: Default::default(),
+            drop: None,
+            body: Type::Record {
+                fields: vec![resin_hir::RecordField {
+                    name: "next".into(),
+                    ty: Type::Pointer {
+                        pointee: Box::new(Type::Defined {
+                            definition: TypeId::from_index((index + 1) % 300),
+                        }),
+                    },
+                }],
+            },
+        })
+        .collect();
+    let mut root = entry("mark", 0, resin_lir::Profile::Host);
+    root.arguments = vec![Type::Defined {
+        definition: TypeId::from_index(0),
+    }];
+    let error = resin_lir::instantiate(&hir, &[root], &options(1))
+        .unwrap_err()
+        .remove(0);
+    assert!(matches!(error.kind, ErrorKind::TypeExpansionLimit { .. }));
 }

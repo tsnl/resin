@@ -68,6 +68,7 @@ fn both_emitters_use_payload_table_indices_as_union_tags() {
     let type_function = module.functions.len();
     module.functions.push(resin_lir::Function {
         name: Some("type_value".into()),
+        profile: resin_lir::Profile::Host,
         foreign: None,
         result: Ty::Type,
         locals: vec![resin_lir::Local {

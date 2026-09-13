@@ -9,7 +9,6 @@ pub(super) fn function(
     arguments: &[Ty],
     instances: &mut Instances<'_>,
     current: FunctionId,
-    typer: &TyperContext,
 ) -> Result<concrete::Function, Error> {
     let substitution = Substitution::new(&source.signature.type_params, arguments)
         .map_err(|error| instances.lower_error(error, Some(current), source.location.clone()))?;
@@ -19,7 +18,6 @@ pub(super) fn function(
         .map_or(Span { start: 0, end: 0 }, |location| location.span);
     Specialization {
         substitution,
-        typer,
         instances,
         current,
         location: source.location.clone(),
@@ -30,7 +28,6 @@ pub(super) fn function(
 
 struct Specialization<'a, 'source> {
     substitution: Substitution,
-    typer: &'a TyperContext,
     instances: &'a mut Instances<'source>,
     current: FunctionId,
     location: Option<SourceLocation>,
@@ -38,25 +35,49 @@ struct Specialization<'a, 'source> {
 }
 
 impl Specialization<'_, '_> {
-    fn ty(&self, source: &resin_hir::Type) -> Result<Ty, Error> {
-        self.substitution.ty(source).map_err(|mut error| {
-            error.span = self.span;
-            self.instances
-                .lower_error(error, Some(self.current), self.location.clone())
-        })
+    fn ty(&mut self, source: &resin_hir::Type) -> Result<Ty, Error> {
+        self.substitution
+            .ty(source, self.instances)
+            .map_err(|mut error| {
+                error.span = self.span;
+                self.instances
+                    .lower_error(error, Some(self.current), self.location.clone())
+            })
     }
 
     fn request(&mut self, function: FunctionId, arguments: Vec<Ty>) -> Result<FunctionId, Error> {
+        self.request_profile(function, arguments, self.instances.profile(self.current))
+    }
+
+    fn host_bridge(&mut self, function: FunctionId) -> Result<FunctionId, Error> {
+        self.request_profile(function, vec![], crate::Profile::Host)
+    }
+
+    fn request_profile(
+        &mut self,
+        function: FunctionId,
+        arguments: Vec<Ty>,
+        profile: crate::Profile,
+    ) -> Result<FunctionId, Error> {
         let location = self.location.as_ref().map(|location| SourceLocation {
             span: self.span,
             ..location.clone()
         });
         self.instances
-            .request(function, arguments, Some(self.current), location)
+            .request(function, arguments, profile, Some(self.current), location)
             .map_err(|mut error| {
                 error.span = self.span;
                 error
             })
+    }
+
+    fn shader(&mut self, function: FunctionId) -> Result<FunctionId, Error> {
+        let location = self.location.as_ref().map(|location| SourceLocation {
+            span: self.span,
+            ..location.clone()
+        });
+        self.instances
+            .shader(function, true, Some(self.current), location)
     }
 
     fn function(&mut self, source: &resin_hir::Function) -> Result<concrete::Function, Error> {
@@ -94,7 +115,7 @@ impl Specialization<'_, '_> {
         })
     }
 
-    fn constant(&self, value: &resin_hir::Constant) -> Result<Value, Error> {
+    fn constant(&mut self, value: &resin_hir::Constant) -> Result<Value, Error> {
         Ok(match value {
             resin_hir::Constant::Unit => Value::Unit,
             resin_hir::Constant::None => Value::None,
@@ -200,6 +221,38 @@ impl Specialization<'_, '_> {
         }
     }
 
+    fn steps(&mut self, source: &[Conv]) -> Result<Vec<Conv>, Error> {
+        source
+            .iter()
+            .map(|step| {
+                Ok(match step {
+                    Conv::Wrap { definition } => Conv::Wrap {
+                        definition: self.nominal(*definition)?,
+                    },
+                    Conv::Unwrap { definition } => Conv::Unwrap {
+                        definition: self.nominal(*definition)?,
+                    },
+                    other => *other,
+                })
+            })
+            .collect()
+    }
+
+    fn nominal(&mut self, definition: TypeId) -> Result<TypeId, Error> {
+        self.instances.nominal(definition).map_err(|mut error| {
+            error.span = self.span;
+            self.instances
+                .lower_error(error, Some(self.current), self.location.clone())
+        })
+    }
+
+    fn conversion(&mut self, conversion: &ExplicitConversion) -> Result<ExplicitConversion, Error> {
+        Ok(match conversion {
+            ExplicitConversion::Ascribe(steps) => ExplicitConversion::Ascribe(self.steps(steps)?),
+            other => other.clone(),
+        })
+    }
+
     fn builtin(
         &mut self,
         name: &std::sync::Arc<str>,
@@ -212,9 +265,10 @@ impl Specialization<'_, '_> {
             .collect::<Result<Vec<_>, _>>()?;
         let params = args.iter().map(|arg| arg.ty.clone()).collect::<Vec<_>>();
         let expected = self.ty(expected)?;
-        self.typer
+        self.instances
+            .typer()
             .builtin_instance(name, &params)
-            .and_then(|signature| self.typer.same(&expected, &signature.result))
+            .and_then(|signature| self.instances.typer().same(&expected, &signature.result))
             .map_err(|error| {
                 self.instances.lower_error(
                     super::LowerError::typing(self.span, error),
@@ -254,7 +308,7 @@ impl Specialization<'_, '_> {
                 }
             }
             resin_hir::TermKind::Shader { function, stage } => concrete::TermKind::Shader {
-                function: self.request(*function, vec![])?,
+                function: self.shader(*function)?,
                 stage: stage.clone(),
             },
             resin_hir::TermKind::Unwrap { value } => concrete::TermKind::Unwrap {
@@ -315,19 +369,19 @@ impl Specialization<'_, '_> {
                 arg: self.boxed(arg)?,
             },
             resin_hir::TermKind::Convert { conversion, arg } => concrete::TermKind::Convert {
-                conversion: conversion.clone(),
+                conversion: self.conversion(conversion)?,
                 arg: self.boxed(arg)?,
             },
             resin_hir::TermKind::ArcNew { value } => concrete::TermKind::ArcNew {
                 value: self.boxed(value)?,
             },
             resin_hir::TermKind::GpuNew { allocator, args } => concrete::TermKind::GpuNew {
-                allocator: self.request(*allocator, vec![])?,
+                allocator: self.host_bridge(*allocator)?,
                 args: self.arguments(args)?,
             },
             resin_hir::TermKind::GpuAllocate { allocator, args } => {
                 concrete::TermKind::GpuAllocate {
-                    allocator: self.request(*allocator, vec![])?,
+                    allocator: self.host_bridge(*allocator)?,
                     args: self.arguments(args)?,
                 }
             }
@@ -336,10 +390,10 @@ impl Specialization<'_, '_> {
                 shaders,
                 args,
             } => concrete::TermKind::GpuPipelineCreate {
-                factory: self.request(*factory, vec![])?,
+                factory: self.host_bridge(*factory)?,
                 shaders: shaders
                     .iter()
-                    .map(|id| self.request(*id, vec![]))
+                    .map(|id| self.shader(*id))
                     .collect::<Result<_, _>>()?,
                 args: self.arguments(args)?,
             },
@@ -349,9 +403,9 @@ impl Specialization<'_, '_> {
                 record,
                 args,
             } => concrete::TermKind::GpuPipelineDispatch {
-                context: self.request(*context, vec![])?,
-                allocator: allocator.map(|id| self.request(id, vec![])).transpose()?,
-                record: self.request(*record, vec![])?,
+                context: self.host_bridge(*context)?,
+                allocator: allocator.map(|id| self.host_bridge(id)).transpose()?,
+                record: self.host_bridge(*record)?,
                 args: self.arguments(args)?,
             },
             resin_hir::TermKind::WeakEmpty { pointee } => concrete::TermKind::WeakEmpty {
@@ -379,7 +433,7 @@ impl Specialization<'_, '_> {
                 access: FieldAccess {
                     ty: self.ty(&access.ty)?,
                     index: access.index,
-                    steps: access.steps.clone(),
+                    steps: self.steps(&access.steps)?,
                 },
             },
         })

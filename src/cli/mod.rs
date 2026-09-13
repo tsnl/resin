@@ -56,7 +56,13 @@ fn compile(
 ) -> Result<resin_toolchain::Executable> {
     let mut loader = resin_source::Loader::new(library_root);
     let source = loader.load_file(&request.input.path)?;
-    let compilation = Compiler::new().compile(source, &mut loader);
+    let compilation = Compiler::new().compile(
+        source,
+        &mut loader,
+        &[resin_compiler::Target::Host {
+            entry: request.input.entry.clone().into(),
+        }],
+    );
     let directory = tempfile::TempDir::new_in(&request.options.temporary)?;
     let project = resin_codegen::generate(
         compilation.verified()?,

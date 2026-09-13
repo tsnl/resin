@@ -117,7 +117,7 @@ use the same captured environment.
 The CLI's private [Request](src/cli/request.rs) validates the input/output combination,
 resolves directory destinations, and rejects outputs that would overwrite the source.
 A [resin_source::Loader](crates/resin-source/src/lib.rs) reads the entry into an immutable `Source`.
-`Compiler::compile(entry, &mut loader)` resolves imports and returns an
+`Compiler::compile(entry, &mut loader, targets)` resolves imports and returns an
 `Arc<Compilation>` containing analysis and phase products.
 
 The CLI passes `compilation.verified()` to

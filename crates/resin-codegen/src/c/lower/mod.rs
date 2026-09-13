@@ -32,6 +32,7 @@ pub fn generate(checked: Verified<'_>, entry: &str) -> Result<crate::c::CModule,
         .functions
         .iter()
         .enumerate()
+        .filter(|(i, _)| module.functions[*i].profile == resin_lir::Profile::Host)
         .map(|(i, flow)| function::lower(&types, i, flow))
         .collect::<Result<_, _>>()?;
     Ok(crate::c::CModule {
@@ -45,6 +46,7 @@ pub fn generate(checked: Verified<'_>, entry: &str) -> Result<crate::c::CModule,
             .map(|(&function, _)| crate::shader_header(function))
             .collect(),
         prototypes: (0..module.functions.len())
+            .filter(|&i| module.functions[i].profile == resin_lir::Profile::Host)
             .map(|i| function::signature(&types, i))
             .collect(),
         lifecycle: types.lifecycle(),
@@ -69,6 +71,7 @@ fn includes(module: &Module) -> Vec<String> {
     let foreign: std::collections::BTreeSet<_> = module
         .functions
         .iter()
+        .filter(|f| f.profile == resin_lir::Profile::Host)
         .filter_map(|f| f.foreign.as_ref().map(|f| f.header.to_string()))
         .collect();
     headers.extend(foreign);

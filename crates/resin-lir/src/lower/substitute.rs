@@ -32,8 +32,12 @@ impl Substitution {
         Ok(result)
     }
 
-    pub(super) fn ty(&self, source: &resin_hir::Type) -> Result<Ty, super::LowerError> {
-        self.ty_at(source, 0, &mut { TYPE_SIZE_LIMIT })
+    pub(super) fn ty(
+        &self,
+        source: &resin_hir::Type,
+        instances: &mut super::instances::Instances<'_>,
+    ) -> Result<Ty, super::LowerError> {
+        self.ty_at(source, 0, &mut { TYPE_SIZE_LIMIT }, instances)
     }
 
     fn ty_at(
@@ -41,6 +45,7 @@ impl Substitution {
         source: &resin_hir::Type,
         depth: usize,
         remaining: &mut usize,
+        instances: &mut super::instances::Instances<'_>,
     ) -> Result<Ty, super::LowerError> {
         consume_node(depth, remaining)?;
         Ok(match source {
@@ -75,44 +80,44 @@ impl Substitution {
             resin_hir::Type::GpuArguments => Ty::GpuArguments,
             resin_hir::Type::Foreign { name } => Ty::Foreign { name: name.clone() },
             resin_hir::Type::Defined { definition } => Ty::Defined {
-                definition: *definition,
+                definition: instances.nominal(*definition)?,
             },
             resin_hir::Type::Pointer { pointee } => Ty::Pointer {
-                pointee: Box::new(self.ty_at(pointee, depth + 1, remaining)?),
+                pointee: Box::new(self.ty_at(pointee, depth + 1, remaining, instances)?),
             },
             resin_hir::Type::Span { element } => Ty::Span {
-                element: Box::new(self.ty_at(element, depth + 1, remaining)?),
+                element: Box::new(self.ty_at(element, depth + 1, remaining, instances)?),
             },
             resin_hir::Type::GpuPointer { pointee } => Ty::GpuPointer {
-                pointee: Box::new(self.ty_at(pointee, depth + 1, remaining)?),
+                pointee: Box::new(self.ty_at(pointee, depth + 1, remaining, instances)?),
             },
             resin_hir::Type::GpuSpan { element } => Ty::GpuSpan {
-                element: Box::new(self.ty_at(element, depth + 1, remaining)?),
+                element: Box::new(self.ty_at(element, depth + 1, remaining, instances)?),
             },
             resin_hir::Type::Arc { pointee } => Ty::Arc {
-                pointee: Box::new(self.ty_at(pointee, depth + 1, remaining)?),
+                pointee: Box::new(self.ty_at(pointee, depth + 1, remaining, instances)?),
             },
             resin_hir::Type::Weak { pointee } => Ty::Weak {
-                pointee: Box::new(self.ty_at(pointee, depth + 1, remaining)?),
+                pointee: Box::new(self.ty_at(pointee, depth + 1, remaining, instances)?),
             },
             resin_hir::Type::GpuComputePipeline { root, owner } => Ty::GpuComputePipeline {
-                root: Box::new(self.ty_at(root, depth + 1, remaining)?),
-                owner: Box::new(self.ty_at(owner, depth + 1, remaining)?),
+                root: Box::new(self.ty_at(root, depth + 1, remaining, instances)?),
+                owner: Box::new(self.ty_at(owner, depth + 1, remaining, instances)?),
             },
             resin_hir::Type::GpuGraphicsPipeline { root, owner } => Ty::GpuGraphicsPipeline {
-                root: Box::new(self.ty_at(root, depth + 1, remaining)?),
-                owner: Box::new(self.ty_at(owner, depth + 1, remaining)?),
+                root: Box::new(self.ty_at(root, depth + 1, remaining, instances)?),
+                owner: Box::new(self.ty_at(owner, depth + 1, remaining, instances)?),
             },
             resin_hir::Type::Function { param, result } => Ty::Function {
-                param: Box::new(self.ty_at(param, depth + 1, remaining)?),
-                result: Box::new(self.ty_at(result, depth + 1, remaining)?),
+                param: Box::new(self.ty_at(param, depth + 1, remaining, instances)?),
+                result: Box::new(self.ty_at(result, depth + 1, remaining, instances)?),
             },
             resin_hir::Type::Result { value, error } => Ty::Result {
-                value: Box::new(self.ty_at(value, depth + 1, remaining)?),
-                error: Box::new(self.ty_at(error, depth + 1, remaining)?),
+                value: Box::new(self.ty_at(value, depth + 1, remaining, instances)?),
+                error: Box::new(self.ty_at(error, depth + 1, remaining, instances)?),
             },
             resin_hir::Type::Array { element, length } => Ty::Array {
-                element: Box::new(self.ty_at(element, depth + 1, remaining)?),
+                element: Box::new(self.ty_at(element, depth + 1, remaining, instances)?),
                 length: *length,
             },
             resin_hir::Type::Record { fields } => Ty::Record {
@@ -121,7 +126,7 @@ impl Substitution {
                     .map(|f| {
                         Ok(RecordField {
                             name: f.name.clone(),
-                            ty: self.ty_at(&f.ty, depth + 1, remaining)?,
+                            ty: self.ty_at(&f.ty, depth + 1, remaining, instances)?,
                         })
                     })
                     .collect::<Result<_, super::LowerError>>()?,
@@ -129,7 +134,7 @@ impl Substitution {
             resin_hir::Type::Union { variants } => Ty::union_of(
                 variants
                     .iter()
-                    .map(|ty| self.ty_at(ty, depth + 1, remaining))
+                    .map(|ty| self.ty_at(ty, depth + 1, remaining, instances))
                     .collect::<Result<Vec<_>, _>>()?,
             ),
         })

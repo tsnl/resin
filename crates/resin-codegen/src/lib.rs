@@ -120,7 +120,7 @@ impl GeneratedShader {
 
 /// Generate a source project and its complete build graph before running native tools.
 /// All target lowering succeeds before any files are written.
-/// A host entry emits C and its embedded shaders; `None` emits all declared shaders.
+/// A requested host entry emits C and its embedded shaders; `None` emits the requested shaders.
 /// The toolchain configures and runs the returned Ninja graph. Optimized SPIR-V, headers, and
 /// executables are planned outputs until then. Paths in the result are absolute.
 /// I/O failure may leave partially written files.
@@ -174,6 +174,9 @@ fn describe_project(
     entry: Option<&str>,
     directory: &Path,
 ) -> Result<GeneratedProject, Error> {
+    if entry.is_none() && module.shaders.is_empty() {
+        return Err(Error("no shader entries were requested".into()));
+    }
     let directory = std::path::absolute(directory)?;
     let shaders = module
         .shaders

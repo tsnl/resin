@@ -27,6 +27,7 @@ define_id! {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: Option<Arc<str>>,
+    pub profile: Profile,
     pub foreign: Option<Foreign>,
     pub result: Ty,
     /// Local zero holds the function's single argument value and starts initialized.
@@ -286,6 +287,7 @@ pub struct Error {
 pub struct ApplicationNote {
     pub function: Arc<str>,
     pub arguments: Vec<Ty>,
+    pub profile: Profile,
     pub location: Option<SourceLocation>,
 }
 
@@ -295,6 +297,7 @@ pub enum ErrorKind {
         function: Arc<str>,
         limit: usize,
         arguments: Vec<Ty>,
+        profile: Profile,
     },
     TypeExpansionLimit {
         limit: usize,
@@ -327,9 +330,10 @@ impl std::fmt::Display for Error {
                 function,
                 limit,
                 arguments,
+                profile,
             } => write!(
                 f,
-                "function {function} exceeds its limit of {limit} monomorphs while requesting {arguments:?}"
+                "function {function} exceeds its limit of {limit} monomorphs while requesting {arguments:?} for {profile:?}"
             ),
             ErrorKind::TypeExpansionLimit { limit } => write!(
                 f,
@@ -345,6 +349,34 @@ impl std::fmt::Display for Error {
     }
 }
 impl std::error::Error for Error {}
+
+/// Semantic target of a concrete function instance. Shader stages share helper rules;
+/// their entry conventions are retained separately in `Module::shaders`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Profile {
+    Host,
+    Shader,
+}
+
+/// One externally requested application. Arguments are closed HIR type expressions;
+/// nominal identities are translated into this compilation's concrete catalog.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Entry {
+    pub name: Arc<str>,
+    pub function: FunctionId,
+    pub arguments: Vec<resin_hir::Type>,
+    pub profile: Profile,
+}
+
+/// Construct only requested entries and their transitive function/type dependencies.
+/// The input still contains all structurally completed source declarations.
+pub fn instantiate(
+    source: &resin_hir::Module,
+    entries: &[Entry],
+    options: &LoweringOptions,
+) -> Result<Module, Vec<Error>> {
+    lower::instantiate(source, entries, options)
+}
 
 /// Resource limits for one HIR-to-LIR construction run.
 #[derive(Debug, Clone)]
@@ -417,6 +449,7 @@ pub enum VerifyErrorKind {
     InvalidForeignSignature,
     OpaqueValue { ty: Ty },
     InvalidShader,
+    InvalidProfile { expected: Profile, found: Profile },
     PointerArithmetic,
     InvalidBuiltin(TypeError),
     InvalidPointerCast { from: Ty, to: Ty },

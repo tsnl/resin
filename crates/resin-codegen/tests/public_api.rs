@@ -7,6 +7,7 @@ use tempfile::TempDir;
 
 fn constant_function(parameter: Ty, result: Ty, value: Value) -> Function {
     Function {
+        profile: resin_lir::Profile::Host,
         name: None,
         foreign: None,
         result,
@@ -27,7 +28,7 @@ fn module() -> Module {
     let pointer = Ty::Pointer {
         pointee: Box::new(Ty::UInt64),
     };
-    Module {
+    let mut module = Module {
         functions: vec![
             constant_function(Ty::Unit, Ty::Int32, Value::Int32 { value: 42 }),
             constant_function(Ty::parameter(&[Ty::UInt64, pointer]), Ty::Unit, Value::Unit),
@@ -42,7 +43,9 @@ fn module() -> Module {
         )]
         .into(),
         ..Default::default()
-    }
+    };
+    module.functions[1].profile = resin_lir::Profile::Shader;
+    module
 }
 
 fn embedded_module() -> Module {
@@ -148,6 +151,11 @@ fn host_generation_does_not_lower_unrequested_shader_bodies() {
     let project = resin_codegen::generate(checked.view(), Some("main"), directory.path()).unwrap();
     assert!(project.shaders().is_empty());
     assert!(project.c_source().unwrap().is_file());
+    assert!(
+        !fs::read_to_string(project.c_source().unwrap())
+            .unwrap()
+            .contains("r_fn1(")
+    );
     let shader_directory = directory.path().join("shaders");
     assert!(resin_codegen::generate(checked.view(), None, &shader_directory).is_err());
     assert!(!shader_directory.exists());
@@ -202,4 +210,18 @@ fn build_graph_orders_shader_optimization_embedding_and_c_compilation() {
         !graph.contains("command ="),
         "native commands belong to the toolchain"
     );
+}
+
+#[test]
+fn code_generation_cannot_select_an_absent_entry_or_profile() {
+    let mut module = module();
+    module.shaders.clear();
+    module.functions.truncate(1);
+    let checked = VerifiedModule::new(module).unwrap();
+    let parent = TempDir::new().unwrap();
+    for entry in [None, Some("missing")] {
+        let directory = parent.path().join("unrequested");
+        assert!(resin_codegen::generate(checked.view(), entry, &directory).is_err());
+        assert!(!directory.exists());
+    }
 }
