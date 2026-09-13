@@ -16,6 +16,8 @@ use std::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Head {
     Atom(Ty),
+    Parameter { id: crate::TypeParameterId },
+    Member { name: Arc<str> },
     Pointer,
     GpuPointer,
     GpuSpan,
@@ -28,6 +30,7 @@ pub(crate) enum Head {
     Record(Vec<Arc<str>>),
     Function,
     Result,
+    Union,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -35,6 +38,11 @@ pub(crate) enum Type {
     Invalid,
     Variable(usize),
     Node(Head, Vec<Type>),
+    /// Preserve a definition's unresolved weak variables under this call's substitution.
+    Apply {
+        body: Box<Type>,
+        arguments: Vec<(crate::TypeParameterId, Type)>,
+    },
 }
 
 impl Type {
@@ -96,6 +104,91 @@ impl Type {
     }
 }
 
+impl Type {
+    pub fn from_hir(source: &crate::Type) -> Self {
+        match source {
+            crate::Type::Type => Ty::Type.into(),
+            crate::Type::Unit => Ty::Unit.into(),
+            crate::Type::None => Ty::None.into(),
+            crate::Type::Bool => Ty::Bool.into(),
+            crate::Type::Int8 => Ty::Int8.into(),
+            crate::Type::Int16 => Ty::Int16.into(),
+            crate::Type::Int32 => Ty::Int32.into(),
+            crate::Type::Int64 => Ty::Int64.into(),
+            crate::Type::UInt8 => Ty::UInt8.into(),
+            crate::Type::UInt16 => Ty::UInt16.into(),
+            crate::Type::UInt32 => Ty::UInt32.into(),
+            crate::Type::UInt64 => Ty::UInt64.into(),
+            crate::Type::Float32 => Ty::Float32.into(),
+            crate::Type::Float64 => Ty::Float64.into(),
+            crate::Type::Str => Ty::Str.into(),
+            crate::Type::GpuArguments => Ty::GpuArguments.into(),
+            crate::Type::Foreign { name } => Ty::Foreign { name: name.clone() }.into(),
+            crate::Type::Defined { definition } => Ty::Defined {
+                definition: *definition,
+            }
+            .into(),
+            crate::Type::Parameter { parameter } => {
+                Self::Node(Head::Parameter { id: *parameter }, vec![])
+            }
+            crate::Type::Member { base, name } => Self::Node(
+                Head::Member { name: name.clone() },
+                vec![Self::from_hir(base)],
+            ),
+            crate::Type::Pointer { pointee } => {
+                Self::Node(Head::Pointer, vec![Self::from_hir(pointee)])
+            }
+            crate::Type::GpuPointer { pointee } => {
+                Self::Node(Head::GpuPointer, vec![Self::from_hir(pointee)])
+            }
+            crate::Type::GpuSpan { element } => {
+                Self::Node(Head::GpuSpan, vec![Self::from_hir(element)])
+            }
+            crate::Type::Span { element } => Self::Node(Head::Span, vec![Self::from_hir(element)]),
+            crate::Type::Arc { pointee } => Self::Node(Head::Arc, vec![Self::from_hir(pointee)]),
+            crate::Type::Weak { pointee } => Self::Node(Head::Weak, vec![Self::from_hir(pointee)]),
+            crate::Type::GpuComputePipeline { root, owner } => Self::Node(
+                Head::GpuComputePipeline,
+                vec![Self::from_hir(root), Self::from_hir(owner)],
+            ),
+            crate::Type::GpuGraphicsPipeline { root, owner } => Self::Node(
+                Head::GpuGraphicsPipeline,
+                vec![Self::from_hir(root), Self::from_hir(owner)],
+            ),
+            crate::Type::Function { param, result } => Self::Node(
+                Head::Function,
+                vec![Self::from_hir(param), Self::from_hir(result)],
+            ),
+            crate::Type::Result { value, error } => Self::Node(
+                Head::Result,
+                vec![Self::from_hir(value), Self::from_hir(error)],
+            ),
+            crate::Type::Array { element, length } => {
+                Self::Node(Head::Array(*length), vec![Self::from_hir(element)])
+            }
+            crate::Type::Record { fields } => Self::record(
+                fields
+                    .iter()
+                    .map(|f| (f.name.clone(), Self::from_hir(&f.ty)))
+                    .collect(),
+            ),
+            crate::Type::Union { variants } => {
+                let parts: Vec<_> = variants.iter().map(Self::from_hir).collect();
+                let solver = Solver::default();
+                if let Some(parts) = parts
+                    .iter()
+                    .map(|ty| solver.resolve(ty))
+                    .collect::<Option<Vec<_>>>()
+                {
+                    Ty::union_of(parts).into()
+                } else {
+                    Self::Node(Head::Union, parts)
+                }
+            }
+        }
+    }
+}
+
 impl From<Ty> for Type {
     fn from(ty: Ty) -> Self {
         match ty {
@@ -127,10 +220,12 @@ impl From<Ty> for Type {
 }
 
 impl Head {
-    pub fn concrete(&self, children: Vec<Ty>) -> Ty {
+    pub fn concrete(&self, children: Vec<Ty>) -> Option<Ty> {
         let mut children = children.into_iter();
-        match self {
+        Some(match self {
+            Self::Parameter { .. } | Self::Member { .. } => return None,
             Self::Atom(ty) => ty.clone(),
+            Self::Union => Ty::union_of(children),
             Self::Arc => Ty::Arc {
                 pointee: Box::new(children.next().unwrap()),
             },
@@ -177,6 +272,69 @@ impl Head {
                 value: Box::new(children.next().unwrap()),
                 error: Box::new(children.next().unwrap()),
             },
+        })
+    }
+}
+
+impl Head {
+    fn completed(&self, children: Vec<crate::Type>) -> crate::Type {
+        let mut children = children.into_iter();
+        match self {
+            Self::Atom(ty) => super::types::ty(ty),
+            Self::Union => crate::Type::Union {
+                variants: children.collect(),
+            },
+            Self::Parameter { id } => crate::Type::Parameter { parameter: *id },
+            Self::Member { name } => crate::Type::Member {
+                base: Box::new(children.next().unwrap()),
+                name: name.clone(),
+            },
+            Self::Pointer => crate::Type::Pointer {
+                pointee: Box::new(children.next().unwrap()),
+            },
+            Self::GpuPointer => crate::Type::GpuPointer {
+                pointee: Box::new(children.next().unwrap()),
+            },
+            Self::GpuSpan => crate::Type::GpuSpan {
+                element: Box::new(children.next().unwrap()),
+            },
+            Self::GpuComputePipeline => crate::Type::GpuComputePipeline {
+                root: Box::new(children.next().unwrap()),
+                owner: Box::new(children.next().unwrap()),
+            },
+            Self::GpuGraphicsPipeline => crate::Type::GpuGraphicsPipeline {
+                root: Box::new(children.next().unwrap()),
+                owner: Box::new(children.next().unwrap()),
+            },
+            Self::Arc => crate::Type::Arc {
+                pointee: Box::new(children.next().unwrap()),
+            },
+            Self::Weak => crate::Type::Weak {
+                pointee: Box::new(children.next().unwrap()),
+            },
+            Self::Span => crate::Type::Span {
+                element: Box::new(children.next().unwrap()),
+            },
+            Self::Array(length) => crate::Type::Array {
+                element: Box::new(children.next().unwrap()),
+                length: *length,
+            },
+            Self::Record(names) => crate::Type::Record {
+                fields: names
+                    .iter()
+                    .cloned()
+                    .zip(children)
+                    .map(|(name, ty)| crate::RecordField { name, ty })
+                    .collect(),
+            },
+            Self::Function => crate::Type::Function {
+                param: Box::new(children.next().unwrap()),
+                result: Box::new(children.next().unwrap()),
+            },
+            Self::Result => crate::Type::Result {
+                value: Box::new(children.next().unwrap()),
+                error: Box::new(children.next().unwrap()),
+            },
         }
     }
 }
@@ -197,7 +355,7 @@ enum Class {
 struct Variable {
     value: Option<Type>,
     class: Class,
-    variants: Vec<TypeId>,
+    variants: Vec<Type>,
 }
 
 /// An allocated inference variable, retained independently of its resolved type.
@@ -217,6 +375,39 @@ pub(crate) struct Solver {
 }
 
 impl Solver {
+    pub fn apply(
+        &mut self,
+        signature: Type,
+        parameters: &[crate::TypeParameter],
+        explicit: Option<Vec<Type>>,
+        span: Span,
+    ) -> Result<(Type, Vec<Type>)> {
+        let arguments =
+            explicit.unwrap_or_else(|| parameters.iter().map(|_| self.fresh()).collect());
+        if parameters.len() != arguments.len() {
+            return Err(error(
+                span,
+                format!(
+                    "expected {} type arguments, found {}",
+                    parameters.len(),
+                    arguments.len()
+                ),
+            ));
+        }
+        let substitution = parameters
+            .iter()
+            .zip(&arguments)
+            .map(|(p, a)| (p.id, a.clone()))
+            .collect();
+        Ok((
+            Type::Apply {
+                body: Box::new(signature),
+                arguments: substitution,
+            },
+            arguments,
+        ))
+    }
+
     pub fn fresh(&mut self) -> Type {
         self.fresh_variable().ty()
     }
@@ -258,6 +449,15 @@ impl Solver {
                 Ok(())
             }
             Type::Node(Head::Atom(ty), _) if ty.variants().is_some() => Ok(()),
+            Type::Node(Head::Parameter { .. } | Head::Member { .. }, _) | Type::Apply { .. } => {
+                Ok(())
+            }
+            Type::Node(Head::Union, members) => {
+                for member in members {
+                    self.errors(&member, span)?;
+                }
+                Ok(())
+            }
             _ => Err(error(
                 span,
                 "Result errors must be structs or unions of structs",
@@ -265,50 +465,111 @@ impl Solver {
         }
     }
 
-    pub fn include(&mut self, from: &Type, to: &Type, span: Span) -> Result<bool> {
-        self.errors(to, span)?;
-        let variants = match self.head(from) {
+    fn error_members(&self, ty: &Type, span: Span) -> Result<Option<Vec<Type>>> {
+        match self.head(ty) {
             Type::Variable(id) if self.variables[id].class == Class::Errors => {
-                self.variables[id].variants.clone()
+                Ok(Some(self.variables[id].variants.clone()))
             }
-            Type::Variable(_) => return Ok(false),
+            Type::Variable(_) => Ok(None),
+            Type::Apply { body, arguments } => {
+                Ok(self.error_members(&body, span)?.map(|members| {
+                    members
+                        .into_iter()
+                        .map(|body| {
+                            self.head(&Type::Apply {
+                                body: Box::new(body),
+                                arguments: arguments.clone(),
+                            })
+                        })
+                        .collect()
+                }))
+            }
             Type::Node(Head::Atom(ty), _) => ty
                 .variants()
-                .ok_or_else(|| error(span, "error and union payloads must be nominal structs"))?,
-            _ => {
+                .map(|ids| {
+                    Some(
+                        ids.into_iter()
+                            .map(|definition| Ty::Defined { definition }.into())
+                            .collect(),
+                    )
+                })
+                .ok_or_else(|| error(span, "error and union payloads must be nominal structs")),
+            Type::Node(Head::Union, members) => {
+                let mut result = vec![];
+                for member in members {
+                    let Some(members) = self.error_members(&member, span)? else {
+                        return Ok(None);
+                    };
+                    result.extend(members);
+                }
+                Ok(Some(result))
+            }
+            ty @ Type::Node(Head::Parameter { .. } | Head::Member { .. }, _) => Ok(Some(vec![ty])),
+            _ => Err(error(
+                span,
+                "error and union payloads must be nominal structs",
+            )),
+        }
+    }
+
+    pub fn include(&mut self, from: &Type, to: &Type, span: Span) -> Result<bool> {
+        self.errors(to, span)?;
+        let Some(variants) = self.error_members(from, span)? else {
+            return Ok(false);
+        };
+        if let Type::Variable(id) = self.head(to) {
+            for variant in variants {
+                if !self.variables[id].variants.contains(&variant) {
+                    self.variables[id].variants.push(variant);
+                    self.revision += 1;
+                }
+            }
+            return Ok(false);
+        }
+        if let (Some(source), Some(target)) = (self.resolve(from), self.resolve(to)) {
+            if !source.widens_to(&target) {
                 return Err(error(
                     span,
-                    "error and union payloads must be nominal structs",
+                    "the destination error set does not include every propagated error",
                 ));
             }
-        };
-        match self.head(to) {
-            Type::Variable(id) => {
-                for variant in variants {
-                    if !self.variables[id].variants.contains(&variant) {
-                        self.variables[id].variants.push(variant);
-                        self.revision += 1;
-                    }
-                }
-                Ok(false)
+            return Ok(true);
+        }
+        // Propagation retains this ground inclusion in the Result operations. It
+        // does not equate independent error parameters or choose a new argument.
+        Ok(self.complete(from).is_some() && self.complete(to).is_some())
+    }
+
+    pub fn union(&self, members: Vec<Type>) -> Type {
+        if let Some(types) = members
+            .iter()
+            .map(|ty| self.resolve(ty))
+            .collect::<Option<Vec<_>>>()
+        {
+            return Ty::union_of(types).into();
+        }
+        let mut unique = vec![];
+        for member in members {
+            if !unique.contains(&member) {
+                unique.push(member);
             }
-            Type::Node(Head::Atom(target), _) => {
-                if !variants
-                    .iter()
-                    .all(|id| target.variants().unwrap().contains(id))
-                {
-                    return Err(error(
-                        span,
-                        "the destination error set does not include every propagated error",
-                    ));
-                }
-                Ok(self.resolve(from).is_some())
-            }
-            _ => unreachable!(),
+        }
+        match unique.len() {
+            0 => Ty::union([]).into(),
+            1 => unique.pop().unwrap(),
+            _ => Type::Node(Head::Union, unique),
         }
     }
 
     pub fn coerce(&mut self, from: &Type, to: &Type, span: Span) -> Result<bool> {
+        if matches!(self.head(to), Type::Node(Head::Union, _)) {
+            if let Some(target) = self.resolve(to) {
+                return self.coerce(from, &target.into(), span);
+            }
+            // A union does not determine its constituent arguments. Keep the
+            // ground widening operation for specialization once both sides finish.
+            return Ok(self.complete(from).is_some() && self.complete(to).is_some());
+        }
         match (self.head(from), self.head(to)) {
             (Type::Node(Head::Record(a), aa), Type::Node(Head::Record(b), bb)) if a == b => {
                 let mut complete = true;
@@ -318,8 +579,8 @@ impl Solver {
                 Ok(complete)
             }
             (Type::Node(Head::Result, a), Type::Node(Head::Result, b)) => {
-                self.unify(&a[0], &b[0], span)?;
-                self.include(&a[1], &b[1], span)
+                let value = self.unify(&a[0], &b[0], span)?;
+                Ok(self.include(&a[1], &b[1], span)? && value)
             }
             (_, Type::Node(Head::Atom(target @ Ty::Union { .. }), _)) => {
                 // Literal context may select one numeric member, but pointers and
@@ -363,10 +624,7 @@ impl Solver {
             (Type::Node(Head::Atom(Ty::Union { variants }), _), _) if variants.is_empty() => {
                 Ok(true)
             }
-            _ => {
-                self.unify(from, to, span)?;
-                Ok(true)
-            }
+            _ => self.unify(from, to, span),
         }
     }
 
@@ -384,6 +642,12 @@ impl Solver {
                         collect(solver, &arg, ids);
                     }
                 }
+                Type::Apply { body, arguments } => {
+                    collect(solver, &body, ids);
+                    for (_, argument) in arguments {
+                        collect(solver, &argument, ids);
+                    }
+                }
             }
         }
         let mut ids = vec![];
@@ -396,9 +660,8 @@ impl Solver {
     pub fn finish_errors(&mut self, roots: &[Type]) -> bool {
         let before = self.revision;
         for id in self.variables_in(roots) {
-            let variable = &mut self.variables[id];
-            if variable.class == Class::Errors {
-                variable.value = Some(Ty::union(variable.variants.clone()).into());
+            if self.variables[id].class == Class::Errors {
+                self.variables[id].value = Some(self.union(self.variables[id].variants.clone()));
                 self.revision += 1;
             }
         }
@@ -413,31 +676,88 @@ impl Solver {
                 None => break,
             }
         }
-        ty.clone()
+        let Type::Apply { body, arguments } = ty else {
+            return ty.clone();
+        };
+        match self.head(body) {
+            Type::Invalid => Type::Invalid,
+            Type::Node(Head::Parameter { id }, _) => arguments
+                .iter()
+                .find(|(parameter, _)| *parameter == id)
+                .map(|(_, argument)| self.head(argument))
+                .unwrap_or_else(|| Type::Node(Head::Parameter { id }, vec![])),
+            Type::Node(head, children) => Type::Node(
+                head,
+                children
+                    .into_iter()
+                    .map(|body| Type::Apply {
+                        body: Box::new(body),
+                        arguments: arguments.clone(),
+                    })
+                    .collect(),
+            ),
+            _ => ty.clone(),
+        }
     }
 
     pub fn shape_hint(&self, ty: &Type) -> Type {
         let head = self.head(ty);
+        if let Type::Apply { body, arguments } = &head {
+            let hint = self.shape_hint(body);
+            if &hint != body.as_ref() {
+                return self.head(&Type::Apply {
+                    body: Box::new(hint),
+                    arguments: arguments.clone(),
+                });
+            }
+        }
         if let Type::Variable(id) = head
             && self.variables[id].class == Class::Errors
             && !self.variables[id].variants.is_empty()
         {
-            return Ty::union(self.variables[id].variants.clone()).into();
+            return self.union(self.variables[id].variants.clone());
         }
         head
     }
 
     pub fn resolve(&self, ty: &Type) -> Option<Ty> {
         match self.head(ty) {
-            Type::Invalid | Type::Variable(_) => None,
-            Type::Node(head, args) => Some(
-                head.concrete(
-                    args.iter()
-                        .map(|t| self.resolve(t))
+            Type::Invalid | Type::Variable(_) | Type::Apply { .. } => None,
+            Type::Node(head, args) => head.concrete(
+                args.iter()
+                    .map(|t| self.resolve(t))
+                    .collect::<Option<_>>()?,
+            ),
+        }
+    }
+
+    pub fn complete(&self, ty: &Type) -> Option<crate::Type> {
+        match self.head(ty) {
+            Type::Invalid | Type::Variable(_) | Type::Apply { .. } => None,
+            Type::Node(head, children) => Some(
+                head.completed(
+                    children
+                        .iter()
+                        .map(|child| self.complete(child))
                         .collect::<Option<_>>()?,
                 ),
             ),
         }
+    }
+
+    fn dependent(&self, ty: &Type) -> bool {
+        match self.head(ty) {
+            Type::Apply { .. } | Type::Node(Head::Parameter { .. } | Head::Member { .. }, _) => {
+                true
+            }
+            Type::Node(_, children) => children.iter().any(|ty| self.dependent(ty)),
+            _ => false,
+        }
+    }
+
+    pub fn require_complete(&self, ty: &Type, span: Span) -> Result<crate::Type> {
+        self.complete(ty)
+            .ok_or_else(|| error(span, "cannot infer this type; add an explicit annotation"))
     }
 
     pub fn invalid(&self, ty: &Type) -> bool {
@@ -445,6 +765,9 @@ impl Solver {
             Type::Invalid => true,
             Type::Node(_, children) => children.iter().any(|ty| self.invalid(ty)),
             Type::Variable(_) => false,
+            Type::Apply { body, arguments } => {
+                self.invalid(&body) || arguments.iter().any(|(_, ty)| self.invalid(ty))
+            }
         }
     }
 
@@ -457,21 +780,29 @@ impl Solver {
             .ok_or_else(|| error(span, "cannot infer this type; add an explicit annotation"))
     }
 
-    pub fn unify(&mut self, left: &Type, right: &Type, span: Span) -> Result<()> {
+    pub fn unify(&mut self, left: &Type, right: &Type, span: Span) -> Result<bool> {
         let left = self.head(left);
         let right = self.head(right);
         if left == right {
-            return Ok(());
+            return Ok(true);
         }
         match (&left, &right) {
             (Type::Variable(id), _) => self.bind(*id, right, span),
             (_, Type::Variable(id)) => self.bind(*id, left, span),
-            (Type::Node(a, aa), Type::Node(b, bb)) if a == b && aa.len() == bb.len() => {
-                for (a, b) in aa.iter().zip(bb) {
-                    self.unify(a, b, span)?;
-                }
-                Ok(())
+            (Type::Node(Head::Member { .. } | Head::Union, _), _)
+            | (_, Type::Node(Head::Member { .. } | Head::Union, _)) => {
+                // Members and unions are not injective. Their consumers retain
+                // ground relations; they cannot determine receivers or constituents.
+                Ok(self.complete(&left).is_some() && self.complete(&right).is_some())
             }
+            (Type::Node(a, aa), Type::Node(b, bb)) if a == b && aa.len() == bb.len() => {
+                let mut complete = true;
+                for (a, b) in aa.iter().zip(bb) {
+                    complete &= self.unify(a, b, span)?;
+                }
+                Ok(complete)
+            }
+            (Type::Apply { .. }, _) | (_, Type::Apply { .. }) => Ok(false),
             _ => {
                 if let (Some(found), Some(expected)) = (self.resolve(&left), self.resolve(&right)) {
                     Err(GenerateError::typing(
@@ -494,7 +825,7 @@ impl Solver {
     // A cast from Ptr<[T; N]> to Ptr<U> must not equate the array with U.
     pub fn cast(&mut self, from: &Type, to: &Type, span: Span) -> Result<()> {
         match (self.head(from), self.head(to)) {
-            (_, Type::Variable(_)) => self.unify(to, from, span),
+            (_, Type::Variable(_)) => self.unify(to, from, span).map(|_| ()),
             (Type::Node(a, aa), Type::Node(b, bb)) if a == b => {
                 for (a, b) in aa.iter().zip(bb.iter()) {
                     self.cast(a, b, span)?;
@@ -505,8 +836,11 @@ impl Solver {
         }
     }
 
-    fn bind(&mut self, id: usize, ty: Type, span: Span) -> Result<()> {
+    fn bind(&mut self, id: usize, ty: Type, span: Span) -> Result<bool> {
         if self.occurs(id, &ty) {
+            if matches!(ty, Type::Apply { .. }) {
+                return Ok(false);
+            }
             return Err(error(span, "inference would create an infinite type"));
         }
         let class = self.variables[id].class;
@@ -531,20 +865,10 @@ impl Solver {
             }
         } else if class == Class::Errors {
             self.errors(&ty, span)?;
-            let Type::Node(Head::Atom(ref concrete), _) = ty else {
-                unreachable!()
-            };
-            if !self.variables[id]
-                .variants
-                .iter()
-                .all(|v| concrete.variants().unwrap().contains(v))
-            {
-                return Err(error(
-                    span,
-                    "inferred errors are not included in the annotated error set",
-                ));
+            for variant in self.variables[id].variants.clone() {
+                self.include(&variant, &ty, span)?;
             }
-        } else if class != Class::Any {
+        } else if class != Class::Any && !self.dependent(&ty) {
             let numeric = matches!(&ty, Type::Node(Head::Atom(t), _) if t.is_numeric());
             let float = matches!(&ty, Type::Node(Head::Atom(Ty::Float32 | Ty::Float64), _));
             if !numeric || (class == Class::Float && !float) {
@@ -569,7 +893,7 @@ impl Solver {
         }
         self.variables[id].value = Some(ty);
         self.revision += 1;
-        Ok(())
+        Ok(true)
     }
 
     fn occurs(&self, id: usize, ty: &Type) -> bool {
@@ -577,6 +901,9 @@ impl Solver {
             Type::Invalid => false,
             Type::Variable(other) => id == other,
             Type::Node(_, args) => args.iter().any(|arg| self.occurs(id, arg)),
+            Type::Apply { body, arguments } => {
+                self.occurs(id, &body) || arguments.iter().any(|(_, ty)| self.occurs(id, ty))
+            }
         }
     }
 
@@ -1073,12 +1400,12 @@ impl Inference<'_> {
             Constraint::Depends(_) => {}
             Constraint::Equal(from, to) => {
                 if !self.solver.invalid(to) {
-                    self.solver.unify(from, to, span)?;
+                    return self.solver.unify(from, to, span);
                 }
             }
             Constraint::Layout(ty) => {
                 let Some(ty) = self.solver.resolve(ty) else {
-                    return Ok(false);
+                    return Ok(self.solver.complete(ty).is_some());
                 };
                 resin_types::layout::layout(self.typer.definitions(), &ty)
                     .map_err(|e| error(span, e.to_string()))?;
@@ -1090,7 +1417,9 @@ impl Inference<'_> {
                 let remaining = input
                     .without_none()
                     .ok_or_else(|| error(span, "postfix ! requires a type containing None"))?;
-                self.solver.unify(out, &remaining.into(), span)?;
+                if !self.solver.unify(out, &remaining.into(), span)? {
+                    return Ok(false);
+                }
             }
             Constraint::Coerce(from, to) => {
                 if !self.solver.invalid(to) {
@@ -1103,19 +1432,19 @@ impl Inference<'_> {
                 }
             }
             Constraint::Variant(input, variant, out) => match (self.solver.head(input), variant) {
-                (Type::Variable(_), _) => return Ok(false),
+                (Type::Variable(_) | Type::Apply { .. }, _) => return Ok(false),
                 (Type::Node(Head::Result, parts), Pattern::Ok) => {
-                    self.solver.unify(out, &parts[0], span)?
+                    return self.solver.unify(out, &parts[0], span);
                 }
                 (Type::Node(Head::Result, parts), Pattern::Err) => {
-                    self.solver.unify(out, &parts[1], span)?
+                    return self.solver.unify(out, &parts[1], span);
                 }
-                (_, Pattern::Type(ty)) => self.solver.unify(out, ty, span)?,
+                (_, Pattern::Type(ty)) => return self.solver.unify(out, ty, span),
                 _ => return Err(error(span, "match pattern does not belong to this type")),
             },
             Constraint::Boolean(input) => {
                 let Some(ty) = self.solver.resolve(input) else {
-                    return Ok(false);
+                    return Ok(self.solver.complete(input).is_some());
                 };
                 self.typer
                     .as_bool(&ty)
@@ -1131,24 +1460,30 @@ impl Inference<'_> {
                 } else {
                     Type::pointer(pointee.clone())
                 };
-                self.solver.unify(out, &pointer, span)?;
+                if !self.solver.unify(out, &pointer, span)? {
+                    return Ok(false);
+                }
             }
             Constraint::Deref(input, out) => {
                 let shape = self.shape(input, false, span)?;
-                if matches!(shape, Type::Variable(_)) {
+                if matches!(shape, Type::Variable(_) | Type::Apply { .. }) {
                     return Ok(false);
                 }
                 let pointee = shape
                     .deref_target()
                     .ok_or_else(|| error(span, "dereference requires a pointer"))?;
-                self.solver.unify(out, pointee, span)?;
+                if !self.solver.unify(out, pointee, span)? {
+                    return Ok(false);
+                }
             }
             Constraint::Field(input, name, out) => {
                 let shape = self.shape(input, true, span)?;
                 if let Type::Node(Head::Function, _) = &shape
                     && name.as_ref() == "spirv"
                 {
-                    self.solver.unify(out, &Ty::shader().into(), span)?;
+                    if !self.solver.unify(out, &Ty::shader().into(), span)? {
+                        return Ok(false);
+                    }
                     return Ok(true);
                 }
                 if let Some(element) = shape.view_element() {
@@ -1160,18 +1495,27 @@ impl Inference<'_> {
                         "length" => Ty::UInt64.into(),
                         _ => return Err(error(span, "unknown string or span field")),
                     };
-                    self.solver.unify(out, &ty, span)?;
+                    if !self.solver.unify(out, &ty, span)? {
+                        return Ok(false);
+                    }
                     return Ok(true);
                 }
 
                 match shape {
-                    Type::Variable(_) => return Ok(false),
+                    Type::Variable(_) | Type::Apply { .. } => return Ok(false),
+                    Type::Node(Head::Parameter { .. } | Head::Member { .. }, _) => {
+                        let member =
+                            Type::Node(Head::Member { name: name.clone() }, vec![input.clone()]);
+                        return self.solver.unify(out, &member, span);
+                    }
                     Type::Node(Head::Record(names), children) => {
                         let index = names
                             .iter()
                             .position(|n| n == name)
                             .ok_or_else(|| error(span, format!("unknown field `{name}`")))?;
-                        self.solver.unify(out, &children[index], span)?;
+                        if !self.solver.unify(out, &children[index], span)? {
+                            return Ok(false);
+                        }
                     }
                     _ => return Err(error(span, "field access requires a record")),
                 }
@@ -1185,7 +1529,9 @@ impl Inference<'_> {
                         } else {
                             Type::pointer(element)
                         };
-                    self.solver.unify(out, &pointer, span)?;
+                    if !self.solver.unify(out, &pointer, span)? {
+                        return Ok(false);
+                    }
                     let Some(index) = self.solver.resolve(arg) else {
                         return Ok(false);
                     };
@@ -1196,7 +1542,7 @@ impl Inference<'_> {
                 }
 
                 match shape {
-                    Type::Variable(_) => return Ok(false),
+                    Type::Variable(_) | Type::Apply { .. } => return Ok(false),
                     Type::Node(Head::Function, children) => {
                         let a = self.solver.coerce(arg, &children[0], span)?;
                         let b = self.solver.coerce(&children[1], out, span)?;
@@ -1214,7 +1560,9 @@ impl Inference<'_> {
                     if self.solver.resolve(&record).is_none() {
                         return Ok(false);
                     }
-                    self.solver.unify(&record, out, span)?;
+                    if !self.solver.unify(&record, out, span)? {
+                        return Ok(false);
+                    }
                     unreachable!("a record cannot equal a non-record");
                 };
                 let unique: HashSet<_> = fields.iter().map(|(name, _)| name).collect();
@@ -1243,17 +1591,21 @@ impl Inference<'_> {
                         return Ok(false);
                     }
                     if self.solver.resolve(from) == Some(Ty::Str) {
-                        self.solver.unify(&children[0], &Ty::UInt8.into(), span)?;
+                        if !self.solver.unify(&children[0], &Ty::UInt8.into(), span)? {
+                            return Ok(false);
+                        }
                         return Ok(true);
                     }
                     if matches!(self.solver.head(from), Type::Node(Head::Span, _)) {
-                        return self.solver.unify(from, to, span).map(|_| true);
+                        return self.solver.unify(from, to, span);
                     }
                     let repr = Type::record(vec![
                         ("data".into(), Type::pointer(children[0].clone())),
                         ("length".into(), Ty::UInt64.into()),
                     ]);
-                    self.solver.unify(from, &repr, span)?;
+                    if !self.solver.unify(from, &repr, span)? {
+                        return Ok(false);
+                    }
                     return Ok(true);
                 }
                 if matches!(self.solver.head(to), Type::Node(Head::Result, _)) {
@@ -1272,7 +1624,9 @@ impl Inference<'_> {
                     let source = self.solver.head(from);
                     let target = self.solver.head(to);
                     match (&source, &target) {
-                        (_, Type::Variable(_)) => self.solver.unify(to, from, span)?,
+                        (_, Type::Variable(_)) => {
+                            self.solver.unify(to, from, span)?;
+                        }
                         (Type::Variable(_), _) => {
                             if !literal && self.solver.resolve(to).is_some_and(|ty| ty.is_numeric())
                             {
@@ -1288,21 +1642,25 @@ impl Inference<'_> {
                             } else {
                                 target
                             };
-                            self.solver.unify(from, &context, span)?;
+                            if !self.solver.unify(from, &context, span)? {
+                                return Ok(false);
+                            }
                         }
                         (Type::Node(Head::Pointer, _), Type::Node(Head::Pointer, _)) => {
                             self.solver.cast(from, to, span)?
                         }
                         _ => {}
                     }
-                    return Ok(false);
+                    return Ok(
+                        self.solver.complete(from).is_some() && self.solver.complete(to).is_some()
+                    );
                 }
             }
             Constraint::Builtin(name, args, out) => {
                 use resin_types::BuiltinRule;
                 let rule = BuiltinRule::lookup(name, args.len())
                     .map_err(|e| GenerateError::typing(span, e))?;
-                match rule {
+                let complete = match rule {
                     BuiltinRule::Print => self.solver.unify(out, &Ty::Unit.into(), span)?,
                     BuiltinRule::Format | BuiltinRule::StringFromBytes => self.solver.unify(
                         out,
@@ -1315,36 +1673,43 @@ impl Inference<'_> {
                         span,
                     )?,
                     BuiltinRule::Boolean => {
-                        self.solver.unify(out, &Ty::Bool.into(), span)?;
+                        let complete = self.solver.unify(out, &Ty::Bool.into(), span)?;
                         for arg in args {
                             if !self.constraint(owner, &Constraint::Boolean(arg.clone()), span)? {
                                 return Ok(false);
                             }
                         }
+                        complete
                     }
                     BuiltinRule::Arithmetic | BuiltinRule::Comparison => {
-                        if rule == BuiltinRule::Comparison {
-                            self.solver.unify(out, &Ty::Bool.into(), span)?;
+                        let mut complete = if rule == BuiltinRule::Comparison {
+                            self.solver.unify(out, &Ty::Bool.into(), span)?
                         } else {
-                            self.solver.unify(out, &args[0], span)?;
-                        }
+                            self.solver.unify(out, &args[0], span)?
+                        };
                         for arg in &args[1..] {
-                            self.solver.unify(&args[0], arg, span)?;
+                            complete &= self.solver.unify(&args[0], arg, span)?;
                         }
+                        complete
                     }
+                };
+                if !complete {
+                    return Ok(false);
                 }
                 let Some(args) = args
                     .iter()
                     .map(|t| self.solver.resolve(t))
                     .collect::<Option<Vec<_>>>()
                 else {
-                    return Ok(false);
+                    return Ok(args.iter().all(|ty| self.solver.complete(ty).is_some()));
                 };
                 let call = self
                     .typer
                     .type_builtin_call(name, &args)
                     .map_err(|e| GenerateError::typing(span, e))?;
-                self.solver.unify(out, &call.result.into(), span)?;
+                if !self.solver.unify(out, &call.result.into(), span)? {
+                    return Ok(false);
+                }
             }
         }
         Ok(true)

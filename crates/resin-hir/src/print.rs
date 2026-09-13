@@ -2,12 +2,26 @@
 use crate::{Arguments, Function, MatchArm, Module, Parameter, Statement, Term, TermKind};
 use crate::{Case, Type, TypeDefinition};
 use resin_types::TypeId;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use sexpfmt::{PrinterConfig, SExp, SExpBookendStyle, sexp_to_string};
 
 pub fn format_module(module: &Module) -> String {
     let printer = Printer {
-        types: &module.types,
+        types: TypeNames {
+            definitions: module
+                .types
+                .iter()
+                .map(|definition| definition.name.clone())
+                .collect(),
+            parameters: module
+                .functions
+                .iter()
+                .flat_map(|function| &function.signature.type_params)
+                .map(|parameter| (parameter.id, parameter.name.val.clone()))
+                .collect(),
+        },
     };
     sexp_to_string(
         &printer.module(module),
@@ -18,11 +32,11 @@ pub fn format_module(module: &Module) -> String {
     )
 }
 
-struct Printer<'a> {
-    types: &'a [TypeDefinition],
+struct Printer {
+    types: TypeNames,
 }
 
-impl Printer<'_> {
+impl Printer {
     fn module(&self, module: &Module) -> SExp {
         let types = module
             .types
@@ -110,7 +124,7 @@ impl Printer<'_> {
     }
 
     fn ty(&self, ty: &Type) -> SExp {
-        quoted(format_type(ty, self.types))
+        quoted(self.types.format(ty))
     }
 
     fn term(&self, term: &Term) -> SExp {
@@ -312,78 +326,86 @@ fn list(head: &str, fields: Vec<SExp>) -> SExp {
     )
 }
 
-fn format_type(ty: &Type, definitions: &[TypeDefinition]) -> String {
-    match ty {
-        Type::Union { variants } => {
-            if variants.is_empty() {
-                return "Never".into();
+/// Names needed to render HIR types, independent of concrete layout or inference.
+pub(super) struct TypeNames {
+    pub definitions: Vec<Arc<str>>,
+    pub parameters: BTreeMap<crate::TypeParameterId, Arc<str>>,
+}
+
+impl TypeNames {
+    pub(super) fn format(&self, ty: &Type) -> String {
+        match ty {
+            Type::Union { variants } => {
+                if variants.is_empty() {
+                    return "Never".into();
+                }
+                variants
+                    .iter()
+                    .map(|member| self.format(member))
+                    .collect::<Vec<_>>()
+                    .join(" | ")
             }
-            variants
-                .iter()
-                .map(|member| format_type(member, definitions))
-                .collect::<Vec<_>>()
-                .join(" | ")
+            Type::Result { value, error } => {
+                format!("Result<{}, {}>", self.format(value), self.format(error))
+            }
+            Type::Type => "type".into(),
+            Type::Unit => "()".into(),
+            Type::None => "None".into(),
+            Type::Bool => "bool".into(),
+            Type::Int8 => "sbyte".into(),
+            Type::Int16 => "short".into(),
+            Type::Int32 => "int".into(),
+            Type::Int64 => "long".into(),
+            Type::UInt8 => "ubyte".into(),
+            Type::UInt16 => "ushort".into(),
+            Type::UInt32 => "uint".into(),
+            Type::UInt64 => "ulong".into(),
+            Type::Float32 => "float32".into(),
+            Type::Float64 => "float64".into(),
+            Type::Str => "str".into(),
+            Type::Foreign { name } => name.to_string(),
+            Type::Parameter { parameter } => self
+                .parameters
+                .get(parameter)
+                .map(ToString::to_string)
+                .unwrap_or_else(|| format!("T{}", parameter.index())),
+            Type::Member { base, name } => format!("{}.{}", self.format(base), name),
+            Type::Defined { definition } => self
+                .definitions
+                .get(definition.index())
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "?".into()),
+            Type::Pointer { pointee } => format!("Ptr<{}>", self.format(pointee)),
+            Type::GpuPointer { pointee } => format!("GpuPtr<{}>", self.format(pointee)),
+            Type::GpuSpan { element } => format!("GpuSpan<{}>", self.format(element)),
+            Type::GpuArguments => "GpuArguments".into(),
+            Type::GpuComputePipeline { root, owner } => format!(
+                "GpuComputePipeline<{}, {}>",
+                self.format(root),
+                self.format(owner)
+            ),
+            Type::GpuGraphicsPipeline { root, owner } => format!(
+                "GpuGraphicsPipeline<{}, {}>",
+                self.format(root),
+                self.format(owner)
+            ),
+            Type::Arc { pointee } => format!("Arc<{}>", self.format(pointee)),
+            Type::Weak { pointee } => format!("Weak<{}>", self.format(pointee)),
+            Type::Span { element } => format!("Span<{}>", self.format(element)),
+            Type::Array { element, length } => {
+                format!("[{}; {length}]", self.format(element))
+            }
+            Type::Record { fields } => format!(
+                "{{ {} }}",
+                fields
+                    .iter()
+                    .map(|f| format!("{}: {}", f.name, self.format(&f.ty)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Type::Function { param, result } => {
+                format!("({}) -> {}", self.format(param), self.format(result))
+            }
         }
-        Type::Result { value, error } => format!(
-            "Result<{}, {}>",
-            format_type(value, definitions),
-            format_type(error, definitions)
-        ),
-        Type::Type => "type".into(),
-        Type::Unit => "()".into(),
-        Type::None => "None".into(),
-        Type::Bool => "bool".into(),
-        Type::Int8 => "sbyte".into(),
-        Type::Int16 => "short".into(),
-        Type::Int32 => "int".into(),
-        Type::Int64 => "long".into(),
-        Type::UInt8 => "ubyte".into(),
-        Type::UInt16 => "ushort".into(),
-        Type::UInt32 => "uint".into(),
-        Type::UInt64 => "ulong".into(),
-        Type::Float32 => "float32".into(),
-        Type::Float64 => "float64".into(),
-        Type::Str => "str".into(),
-        Type::Foreign { name } => name.to_string(),
-        Type::Parameter { parameter } => format!("T{}", parameter.index()),
-        Type::Member { base, name } => format!("{}.{}", format_type(base, definitions), name),
-        Type::Defined { definition } => definitions
-            .get(definition.index())
-            .map(|d| &d.name)
-            .map(ToString::to_string)
-            .unwrap_or_else(|| "?".into()),
-        Type::Pointer { pointee } => format!("Ptr<{}>", format_type(pointee, definitions)),
-        Type::GpuPointer { pointee } => format!("GpuPtr<{}>", format_type(pointee, definitions)),
-        Type::GpuSpan { element } => format!("GpuSpan<{}>", format_type(element, definitions)),
-        Type::GpuArguments => "GpuArguments".into(),
-        Type::GpuComputePipeline { root, owner } => format!(
-            "GpuComputePipeline<{}, {}>",
-            format_type(root, definitions),
-            format_type(owner, definitions)
-        ),
-        Type::GpuGraphicsPipeline { root, owner } => format!(
-            "GpuGraphicsPipeline<{}, {}>",
-            format_type(root, definitions),
-            format_type(owner, definitions)
-        ),
-        Type::Arc { pointee } => format!("Arc<{}>", format_type(pointee, definitions)),
-        Type::Weak { pointee } => format!("Weak<{}>", format_type(pointee, definitions)),
-        Type::Span { element } => format!("Span<{}>", format_type(element, definitions)),
-        Type::Array { element, length } => {
-            format!("[{}; {length}]", format_type(element, definitions))
-        }
-        Type::Record { fields } => format!(
-            "{{ {} }}",
-            fields
-                .iter()
-                .map(|f| format!("{}: {}", f.name, format_type(&f.ty, definitions)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Type::Function { param, result } => format!(
-            "({}) -> {}",
-            format_type(param, definitions),
-            format_type(result, definitions)
-        ),
     }
 }

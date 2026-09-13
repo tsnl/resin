@@ -6,6 +6,38 @@ use std::{collections::BTreeMap, path::Path, sync::Arc};
 use tempfile::TempDir;
 
 #[test]
+fn template_scopes_retain_named_types_and_imported_schemes() {
+    let library = "export { identity }; def identity<T>(value: T) -> _ = { value };";
+    let source = "import { \"library.resin\" }; def forward<U>(input: U) -> U = { var copy = identity(input); copy }; def main() -> int = { forward(42) };";
+    let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
+    let analysis = project.analyze();
+    assert!(
+        analysis.diagnostics().is_empty(),
+        "{:?}",
+        analysis.diagnostics()
+    );
+    let input = project.source("main.resin");
+    let hover = analysis
+        .hover(&input, source.rfind("copy").unwrap())
+        .unwrap();
+    assert_eq!(hover.text, "copy: U");
+    let origin = analysis
+        .definition(&input, source.find("input: U").unwrap() + 7)
+        .unwrap();
+    assert_eq!(origin.source, input);
+    assert_eq!(origin.span.start, source.find("<U>").unwrap() + 1);
+    let origin = analysis
+        .definition(&input, source.find("identity(input)").unwrap())
+        .unwrap();
+    assert_eq!(origin.source, project.source("library.resin"));
+    let completions = analysis.completions(&input, source.rfind("copy").unwrap() + 4);
+    assert!(
+        completions.iter().any(|item| item.detail == "copy: U"),
+        "{completions:?}"
+    );
+}
+
+#[test]
 fn option_payload_fields_remain_available_in_incomplete_code() {
     let source = "struct Item { count: int }; def f(value: Item | None) = { value!.; };";
     let project = Project::new(&[("main.resin", source)]);

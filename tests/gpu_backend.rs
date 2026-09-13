@@ -499,6 +499,24 @@ fn inherent_methods_execute_in_shader_helpers() {
 }
 
 #[test]
+fn template_helpers_execute_with_shader_specific_instances() {
+    compute_values(
+        r#"export { kernel };
+        struct Root { count: uint, pixels: Ptr<uint> };
+        def increment<T>(value: T) -> T = { value + 1 };
+        def twice<U>(value: U) -> U = { increment(increment(value)) };
+        @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = {
+            var index = uint(invocation);
+            if (index < root.count) {
+                var output = Span<uint> { data = root.pixels, length = 67_ul };
+                output.at(invocation).* := twice(index);
+            };
+        };"#,
+        |index| index + 2,
+    );
+}
+
+#[test]
 fn at_indexing_mutates_shader_arrays_and_span_fields() {
     compute_values(
         r#"export { kernel };

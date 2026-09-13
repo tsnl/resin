@@ -20,7 +20,7 @@ impl FunctionLowering<'_> {
         });
 
         self.switch(condition);
-        self.gen_term(cond, None)?;
+        self.gen_term(cond, Some(&Ty::Bool))?;
         self.terminate(Terminator::LoopTest);
 
         self.switch(body_block);
@@ -40,7 +40,7 @@ impl FunctionLowering<'_> {
         els: &Term,
         expected: &Ty,
     ) -> Result<Ty, LowerError> {
-        self.gen_term(cond, None)?;
+        self.gen_term(cond, Some(&Ty::Bool))?;
         let height = self.function.stack_len() - 1;
         let then_block = self.new_block("then", height);
         let else_block = self.new_block("else", height);

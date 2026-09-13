@@ -659,6 +659,7 @@ fn method_signature(
     result: &resin_ast::Type,
 ) -> Result<typed::Signature, GenerateError> {
     Ok(typed::Signature {
+        type_params: vec![],
         declaration: Some(declaration),
         parameters: vec![],
         params: params
@@ -672,16 +673,16 @@ fn method_signature(
 fn method_annotation(
     evaluator: &Evaluator<'_>,
     source: &resin_ast::Type,
-) -> Result<typed::Annotation, GenerateError> {
+) -> Result<typed::Annotation<crate::Type>, GenerateError> {
     Ok(typed::Annotation {
-        ty: evaluator.ty(source)?,
+        ty: types::ty(&evaluator.ty(source)?),
         span: source.span,
     })
 }
 
 fn elaborate_signature(source: &typed::Signature) -> Signature {
     Signature {
-        type_params: vec![],
+        type_params: source.type_params.clone(),
         params: source
             .params
             .iter()
@@ -695,9 +696,9 @@ fn elaborate_signature(source: &typed::Signature) -> Signature {
         result: elaborate_annotation(&source.result),
     }
 }
-fn elaborate_annotation(source: &typed::Annotation) -> Annotation {
+fn elaborate_annotation(source: &typed::Annotation<crate::Type>) -> Annotation {
     Annotation {
-        ty: types::ty(&source.ty),
+        ty: source.ty.clone(),
         span: source.span,
     }
 }
@@ -710,9 +711,20 @@ impl Generator {
     ) -> Result<FunctionId, GenerateError> {
         check_parameters(source)?;
         let id = FunctionId::from_index(self.module.functions.len());
-        let params = source.params.iter().map(|(_, a)| a.ty.clone()).collect();
-        self.typer
-            .register_function(id, params, source.result.ty.clone());
+        // Native bridges and the remaining compiler-provided method declarations
+        // consume concrete signatures. Ordinary source calls use schemes in scopes.
+        let solver = infer::Solver::default();
+        let params = source
+            .params
+            .iter()
+            .map(|(_, a)| solver.resolve(&infer::Type::from_hir(&a.ty)))
+            .collect::<Option<Vec<_>>>();
+        if let (Some(params), Some(result)) = (
+            params,
+            solver.resolve(&infer::Type::from_hir(&source.result.ty)),
+        ) {
+            self.typer.register_function(id, params, result);
+        }
         self.module.functions.push(Function {
             location: Some(SourceLocation {
                 source: self.source.clone(),
@@ -739,7 +751,7 @@ impl Generator {
             header: header.into(),
             params,
         };
-        if !foreign.valid(&signature.result.ty) {
+        if !foreign.valid(&self.typer.declared_function(id).result) {
             return Err(GenerateError {
                 span: name.span,
                 kind: GenerateErrorKind::InvalidForeignSignature,
@@ -817,6 +829,16 @@ impl Generator {
     }
 
     fn declare_shader(&mut self, id: FunctionId, decorator: &Ident) -> Result<(), GenerateError> {
+        if !self.module.functions[id.index()]
+            .signature
+            .type_params
+            .is_empty()
+        {
+            return Err(shader_error(
+                decorator,
+                "shader entries require a fixed signature without template parameters",
+            ));
+        }
         let stage = shader_stage(decorator)?;
         if self.module.shaders.contains_key(&id) {
             return Err(shader_error(

@@ -117,11 +117,7 @@ impl Decoder<'_> {
             TypeKind::Union { left, right } => {
                 let left = self.ty(left, false)?;
                 let right = self.ty(right, false)?;
-                Ty::union_of([
-                    self.solver.require(&left, ann.span)?,
-                    self.solver.require(&right, ann.span)?,
-                ])
-                .into()
+                self.solver.union(vec![left, right])
             }
         })
     }

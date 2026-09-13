@@ -249,3 +249,112 @@ fn retries_discard_failed_method_choices_and_preserve_completed_groups() {
         assert_eq!(inference.solver.require(&ty, span).unwrap(), pointer);
     }
 }
+
+fn parameter(index: usize) -> infer::Type {
+    infer::Type::Node(
+        infer::Head::Parameter {
+            id: crate::TypeParameterId::from_index(index),
+        },
+        vec![],
+    )
+}
+fn application(body: &infer::Type, argument: infer::Type) -> infer::Type {
+    infer::Type::Apply {
+        body: Box::new(body.clone()),
+        arguments: vec![(crate::TypeParameterId::from_index(0), argument)],
+    }
+}
+
+#[test]
+fn applications_read_definition_results_without_freshening_weak_variables() {
+    let mut solver = infer::Solver::default();
+    let result = solver.fresh();
+    let int_call = application(&result, Ty::Int32.into());
+    let bool_call = application(&result, Ty::Bool.into());
+    let span = Span { start: 0, end: 1 };
+    assert!(!solver.unify(&int_call, &Ty::Int32.into(), span).unwrap());
+    assert!(solver.complete(&result).is_none());
+    assert!(solver.unify(&result, &parameter(0), span).unwrap());
+    assert_eq!(
+        solver.require_complete(&int_call, span).unwrap(),
+        crate::Type::Int32
+    );
+    assert_eq!(
+        solver.require_complete(&bool_call, span).unwrap(),
+        crate::Type::Bool
+    );
+    assert_eq!(
+        solver.require_complete(&result, span).unwrap(),
+        crate::Type::Parameter {
+            parameter: crate::TypeParameterId::from_index(0)
+        }
+    );
+}
+
+#[test]
+fn recursive_applications_retain_distinct_substitutions_until_a_result_is_determined() {
+    let mut solver = infer::Solver::default();
+    let result = solver.fresh();
+    let span = Span { start: 0, end: 1 };
+    let recursive = application(&result, infer::Type::pointer(parameter(0)));
+    assert!(!solver.unify(&result, &recursive, span).unwrap());
+    assert!(solver.complete(&result).is_none());
+    assert!(solver.unify(&result, &parameter(0), span).unwrap());
+    assert_eq!(
+        solver.require_complete(&recursive, span).unwrap(),
+        crate::Type::Pointer {
+            pointee: Box::new(crate::Type::Parameter {
+                parameter: crate::TypeParameterId::from_index(0)
+            })
+        }
+    );
+    assert!(solver.unify(&recursive, &Ty::Int32.into(), span).is_err());
+}
+
+#[test]
+fn bound_numeric_types_and_member_types_are_not_default_candidates() {
+    let mut solver = infer::Solver::default();
+    let span = Span { start: 0, end: 1 };
+    let number = solver.number("1");
+    assert!(solver.unify(&number, &parameter(0), span).unwrap());
+    let member = infer::Type::Node(
+        infer::Head::Member {
+            name: "value".into(),
+        },
+        vec![parameter(1)],
+    );
+    let other = solver.number("2");
+    assert!(solver.unify(&other, &member, span).unwrap());
+    assert!(!solver.default_numbers(&[number.clone(), other.clone()]));
+    assert_eq!(
+        solver.require_complete(&number, span).unwrap(),
+        crate::Type::Parameter {
+            parameter: crate::TypeParameterId::from_index(0)
+        }
+    );
+    assert!(matches!(
+        solver.require_complete(&other, span).unwrap(),
+        crate::Type::Member { .. }
+    ));
+    assert!(solver.unify(&parameter(0), &parameter(1), span).is_err());
+}
+
+#[test]
+fn nested_applications_substitute_without_capturing_definition_binders() {
+    let mut solver = infer::Solver::default();
+    let result = solver.fresh();
+    let span = Span { start: 0, end: 1 };
+    let inner = application(&result, infer::Type::pointer(parameter(1)));
+    let outer = infer::Type::Apply {
+        body: Box::new(inner),
+        arguments: vec![(crate::TypeParameterId::from_index(1), Ty::Int32.into())],
+    };
+    assert!(solver.complete(&outer).is_none());
+    solver.unify(&result, &parameter(0), span).unwrap();
+    assert_eq!(
+        solver.require_complete(&outer, span).unwrap(),
+        crate::Type::Pointer {
+            pointee: Box::new(crate::Type::Int32)
+        }
+    );
+}
