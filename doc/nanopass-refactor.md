@@ -1,11 +1,31 @@
 # Scope: Nanopass refactoring before polymorphism
 
-Status: proposed behavior-preserving refactor, reviewed against main at
+Status: the prerequisite refactor is implemented across the PRs below. The
+assessment and gap analysis record the original review against main at
 `12c90003`, including the agreed [Nanopass conventions](../AGENTS.md#nanopass-design).
-This scopes implementation work; it does not implement it.
-The [polymorphism draft](https://github.com/tsnl/resin/pull/159) remains separate.
+This document tracks the scope; the implementation changes are in their own stack.
 
-## Assessment
+| Layer | Implementation | Review status |
+| --- | --- | --- |
+| Per-function LIR translation and source origins | [#162](https://github.com/tsnl/resin/pull/162) | Merged |
+| Declaration identities, cursor removal, and declaration metadata | [#165](https://github.com/tsnl/resin/pull/165) | Ready for review, based on main |
+| Direct completion of solved expressions into HIR and retained method choices | [#166](https://github.com/tsnl/resin/pull/166) | Ready for review, based on #165 |
+
+The implementation takes the direct-HIR option: no second private expression tree
+with concrete types is retained. Body completion reads the finished inference
+solution and returns public HIR plus shader references. Module assembly receives
+completed bodies without inference or lexical construction state. Method choices
+survive successful solving and roll back with failed dependency-group attempts.
+The two frontend layers passed their workspace suites (735 and 737 tests,
+respectively), with required GPU/SPIR-V paths and the three display tests excluded.
+
+The next implementation is the separate migration to methods inside structs,
+followed by incremental polymorphism. The design-review stack is
+`main → #160 → #159`; the [polymorphism draft](https://github.com/tsnl/resin/pull/159)
+is stacked above this scope and includes additional method type parameters for
+`Gpu.create<T>()` and `Gpu.alloc<T>(count)`.
+
+## Original assessment
 
 Resin already follows the central Nanopass idea at its major boundaries:
 explicit languages, translations between them, and downstream consumers that
@@ -37,7 +57,7 @@ after source construction state is dropped, generated files outliving their inpu
 and edits invalidating the LIR certificate. These are concrete reasons to preserve
 the existing architecture rather than restart it.
 
-## Where the data stops short
+## Original handoff gaps
 
 The private [typed tree](../crates/resin-hir/src/lower/typed.rs) is parameterized by
 inference types and then concrete types. Both forms still contain `Cursor`,
