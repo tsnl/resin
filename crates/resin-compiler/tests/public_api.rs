@@ -230,7 +230,7 @@ fn retained_compilations_keep_their_own_source_versions_and_editor_queries() {
 fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
     let source = Source::new(
         "entry",
-        "def first() -> int = { var n: int; n }; def second() -> bool = { var b: bool; b };",
+        "def first() -> bool = { (1 == 1) + (1 == 1) }; def second() -> int = { var r = { n = 1 }; r + r; 0 };",
     );
     let mut loader = Loader::new(resin_source::library_root());
     let mut compiler = Compiler::default();
@@ -257,7 +257,7 @@ fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
 }
 
 #[test]
-fn imported_lowering_errors_keep_the_dependency_source_version() {
+fn imported_initialization_errors_keep_the_dependency_source_version() {
     let entry = Source::new(
         "entry",
         "import { \"dependency\" }; def main() -> int = { value() };",
@@ -273,7 +273,7 @@ fn imported_lowering_errors_keep_the_dependency_source_version() {
         .unwrap();
     let mut compiler = Compiler::default();
     let failed = compiler.compile(entry.clone(), &mut loader);
-    assert!(failed.hir().is_ok());
+    assert!(failed.hir().is_err());
     assert!(failed.module().is_err());
     assert_eq!(failed.diagnostics().len(), 1);
     let diagnostic = &failed.diagnostics()[0];

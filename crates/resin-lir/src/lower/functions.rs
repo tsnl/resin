@@ -1,7 +1,7 @@
 //! Allocate storage for parameters and turn one structured body into blocks.
+use super::ValueBinding;
 use super::builder::FunctionBuilder;
 use super::{FunctionLowering, LowerError, LoweredFunction};
-use super::{Initialization, ValueBinding};
 use crate::lower::concrete::{Function, Parameter, Signature};
 use crate::{BlockId, Instr, Local, Terminator};
 use resin_source::prelude::*;
@@ -109,7 +109,6 @@ impl<'types> FunctionLowering<'types> {
             ValueBinding {
                 local,
                 ty: ty.clone(),
-                initialization: Initialization::Initialized,
             },
         );
     }

@@ -120,21 +120,13 @@ fn assemble(
 }
 
 //
-// Resolved bindings and initialization across control-flow paths
+// Resolved bindings and their concrete storage
 //
 
 #[derive(Clone)]
 struct ValueBinding {
     local: LocalId,
     ty: Ty,
-    initialization: Initialization,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Initialization {
-    Uninitialized,
-    Initializing,
-    Initialized,
 }
 
 struct FunctionLowering<'types> {
@@ -244,22 +236,6 @@ impl FunctionLowering<'_> {
                     .needs_drop(self.typer.definitions())
             })
             .collect()
-    }
-}
-
-//
-// A binding is initialized after a join only when incoming paths agree
-//
-
-impl FunctionLowering<'_> {
-    fn intersect_initialization(&mut self, other: &HashMap<BindingId, ValueBinding>) {
-        for (id, binding) in &mut self.bindings {
-            if let Some(other) = other.get(id)
-                && binding.initialization != other.initialization
-            {
-                binding.initialization = Initialization::Uninitialized;
-            }
-        }
     }
 }
 

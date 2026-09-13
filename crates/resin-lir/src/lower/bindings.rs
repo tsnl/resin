@@ -1,6 +1,6 @@
 use super::FunctionLowering;
+use super::ValueBinding;
 use super::{ErrorKind, LowerError};
-use super::{Initialization, ValueBinding};
 use crate::Instr;
 use crate::lower::concrete::Term;
 use resin_hir::BindingId;
@@ -20,11 +20,9 @@ impl FunctionLowering<'_> {
             ValueBinding {
                 local,
                 ty: init.ty.clone(),
-                initialization: Initialization::Initializing,
             },
         );
         self.gen_term(init, None)?;
-        self.bindings.get_mut(&id).unwrap().initialization = Initialization::Initialized;
         self.emit(Instr::SetLocal { local });
         Ok(())
     }
@@ -36,55 +34,26 @@ impl FunctionLowering<'_> {
         ty: Ty,
     ) -> Result<(), LowerError> {
         let local = self.alloc_local(ty.clone(), Some(name.val.clone()));
-        self.bindings.insert(
-            id,
-            ValueBinding {
-                local,
-                ty,
-                initialization: Initialization::Uninitialized,
-            },
-        );
+        self.bindings.insert(id, ValueBinding { local, ty });
         Ok(())
     }
 
     pub(super) fn gen_var(&mut self, id: BindingId, name: &Ident) -> Result<Ty, LowerError> {
-        let binding = self.resolve_value(id, name)?;
+        let binding = self.resolve_binding(id, name)?;
         self.load_local(binding.local);
         Ok(binding.ty)
-    }
-
-    pub(super) fn resolve_value(
-        &self,
-        id: BindingId,
-        name: &Ident,
-    ) -> Result<ValueBinding, LowerError> {
-        self.resolve_binding(id, name, true)
     }
 
     pub(super) fn resolve_binding(
         &self,
         id: BindingId,
         name: &Ident,
-        read: bool,
     ) -> Result<ValueBinding, LowerError> {
-        let binding = self.bindings.get(&id).cloned().ok_or_else(|| LowerError {
+        self.bindings.get(&id).cloned().ok_or_else(|| LowerError {
             span: name.span,
             kind: ErrorKind::UnboundValue {
                 name: name.val.clone(),
             },
-        })?;
-        let kind = match binding.initialization {
-            Initialization::Initializing => ErrorKind::EagerRecursion {
-                name: name.val.clone(),
-            },
-            Initialization::Uninitialized if read => ErrorKind::UninitializedValue {
-                name: name.val.clone(),
-            },
-            _ => return Ok(binding),
-        };
-        Err(LowerError {
-            span: name.span,
-            kind,
         })
     }
 }

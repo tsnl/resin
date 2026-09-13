@@ -4,7 +4,6 @@ use crate::lower::concrete::{Term, TermKind};
 use resin_types::prelude::*;
 
 use super::FunctionLowering;
-use super::Initialization;
 
 pub(super) enum Operand {
     Value(Ty),
@@ -24,12 +23,6 @@ impl FunctionLowering<'_> {
         };
         let ty = self.gen_term(value, Some(&pointee))?;
         self.emit(Instr::Store);
-        if let TermKind::Local { binding: id, .. } = &place.kind {
-            self.bindings
-                .get_mut(id)
-                .expect("assigned binding")
-                .initialization = Initialization::Initialized;
-        }
         Ok(ty)
     }
 
@@ -38,7 +31,6 @@ impl FunctionLowering<'_> {
         base: &Term,
         access: &FieldAccess,
     ) -> Result<Ty, LowerError> {
-        self.check_place_initialized(base)?;
         let base = self.gen_operand(base)?;
         match self.gen_field_operand(base, access)? {
             Operand::Place { ty, .. } => {
@@ -72,7 +64,7 @@ impl FunctionLowering<'_> {
     pub(super) fn gen_operand(&mut self, term: &Term) -> Result<Operand, LowerError> {
         match &term.kind {
             TermKind::Local { binding: id, name } => {
-                let binding = self.resolve_binding(*id, name, false)?;
+                let binding = self.resolve_binding(*id, name)?;
                 let ty = binding.ty;
                 self.emit(Instr::LocalAddress {
                     local: binding.local,
@@ -80,7 +72,6 @@ impl FunctionLowering<'_> {
                 Ok(Operand::Place { ty, gpu: false })
             }
             TermKind::Field { base, access } => {
-                self.check_place_initialized(base)?;
                 let base = self.gen_operand(base)?;
                 self.gen_field_operand(base, access)
             }
@@ -166,16 +157,5 @@ impl FunctionLowering<'_> {
                 self.emit(Instr::Load);
             }
         }
-    }
-
-    pub(super) fn check_place_initialized(&self, term: &Term) -> Result<(), LowerError> {
-        match &term.kind {
-            TermKind::Local { binding: id, name } => {
-                self.resolve_value(*id, name)?;
-            }
-            TermKind::Field { base, .. } => self.check_place_initialized(base)?,
-            _ => {}
-        }
-        Ok(())
     }
 }

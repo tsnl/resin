@@ -21,6 +21,7 @@ pub(super) struct CompletedBody {
 
 pub(super) fn function(
     source: &typed::Term,
+    parameters: &[Option<DeclarationId>],
     solver: &Solver,
     methods: &BTreeMap<Rule, FunctionDecl>,
     typer: &TyperContext,
@@ -34,12 +35,24 @@ pub(super) fn function(
         function_bindings,
         shaders,
         embedded: BTreeSet::new(),
+        initialization: parameters
+            .iter()
+            .flatten()
+            .map(|id| (*id, Initialization::Initialized))
+            .collect(),
     };
     let body = completion.elaborate(source)?;
     Ok(CompletedBody {
         body,
         shaders: completion.embedded,
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Initialization {
+    Uninitialized,
+    Initializing,
+    Initialized,
 }
 
 struct Completion<'a> {
@@ -49,6 +62,7 @@ struct Completion<'a> {
     function_bindings: &'a HashMap<DeclarationId, FunctionId>,
     shaders: &'a BTreeMap<FunctionId, ShaderEntry>,
     embedded: BTreeSet<FunctionId>,
+    initialization: BTreeMap<DeclarationId, Initialization>,
 }
 
 impl Completion<'_> {
@@ -95,7 +109,9 @@ impl Completion<'_> {
                     ty: types::ty(&self.annotation(ty)?.ty),
                 },
             },
-            typed::TermKind::Var { declaration, name } => self.reference(*declaration, name),
+            typed::TermKind::Var { declaration, name } => {
+                self.reference(*declaration, name, true)?
+            }
             typed::TermKind::Layout { ty, size } => self.layout(ty, *size)?,
             typed::TermKind::Unwrap { value } => TermKind::Unwrap {
                 value: self.boxed(value)?,
@@ -106,15 +122,8 @@ impl Completion<'_> {
             typed::TermKind::Match { value, arms } => {
                 self.match_expression(source.span, value, arms)?
             }
-            typed::TermKind::If { cond, then, els } => TermKind::If {
-                cond: self.boxed(cond)?,
-                then: self.boxed(then)?,
-                els: self.boxed(els)?,
-            },
-            typed::TermKind::While { cond, body } => TermKind::While {
-                cond: self.boxed(cond)?,
-                body: self.boxed(body)?,
-            },
+            typed::TermKind::If { cond, then, els } => self.if_expression(cond, then, els)?,
+            typed::TermKind::While { cond, body } => self.while_expression(cond, body)?,
             typed::TermKind::Block { stmts, tail } => TermKind::Block {
                 stmts: stmts
                     .iter()
@@ -159,12 +168,9 @@ impl Completion<'_> {
             typed::TermKind::Absurd { arg } => TermKind::Absurd {
                 arg: self.boxed(arg)?,
             },
-            typed::TermKind::Assign { place, value } => TermKind::Assign {
-                place: self.boxed(place)?,
-                value: self.boxed(value)?,
-            },
+            typed::TermKind::Assign { place, value } => self.assign(place, value)?,
             typed::TermKind::Address { place } => TermKind::Address {
-                place: self.boxed(place)?,
+                place: self.place(place)?,
             },
             typed::TermKind::Deref { pointer } => TermKind::Deref {
                 pointer: self.boxed(pointer)?,
@@ -173,16 +179,90 @@ impl Completion<'_> {
         })
     }
 
-    fn reference(&self, declaration: DeclarationId, name: &Ident) -> TermKind {
-        match self.function_bindings.get(&declaration).copied() {
-            Some(function) => TermKind::Function {
+    fn reference(&self, declaration: DeclarationId, name: &Ident, read: bool) -> Result<TermKind> {
+        if let Some(&function) = self.function_bindings.get(&declaration) {
+            return Ok(TermKind::Function {
                 function,
                 type_args: vec![],
-            },
-            None => TermKind::Local {
-                binding: declaration,
-                name: name.clone(),
-            },
+            });
+        }
+        let kind = match self.initialization.get(&declaration) {
+            None => Some(GenerateErrorKind::UnboundValue {
+                name: name.val.clone(),
+            }),
+            Some(Initialization::Initializing) => Some(GenerateErrorKind::EagerRecursion {
+                name: name.val.clone(),
+            }),
+            Some(Initialization::Uninitialized) if read => {
+                Some(GenerateErrorKind::UninitializedValue {
+                    name: name.val.clone(),
+                })
+            }
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            return Err(GenerateError {
+                span: name.span,
+                kind,
+            });
+        }
+        Ok(TermKind::Local {
+            binding: declaration,
+            name: name.clone(),
+        })
+    }
+
+    fn place(&mut self, source: &typed::Term) -> Result<Box<Term>> {
+        if let typed::TermKind::Var { declaration, name } = &source.kind {
+            return Ok(Box::new(Term {
+                span: source.span,
+                ty: types::ty(&self.ty(source)?),
+                kind: self.reference(*declaration, name, false)?,
+            }));
+        }
+        // Field access and pointer dereference need their base initialized even
+        // when the resulting place will be written rather than read.
+        self.boxed(source)
+    }
+
+    fn assign(&mut self, place: &typed::Term, value: &typed::Term) -> Result<TermKind> {
+        let place = self.place(place)?;
+        let value = self.boxed(value)?;
+        if let TermKind::Local { binding, .. } = place.kind {
+            self.initialization
+                .insert(binding, Initialization::Initialized);
+        }
+        Ok(TermKind::Assign { place, value })
+    }
+
+    fn if_expression(
+        &mut self,
+        cond: &typed::Term,
+        then: &typed::Term,
+        els: &typed::Term,
+    ) -> Result<TermKind> {
+        let cond = self.boxed(cond)?;
+        let before = self.initialization.clone();
+        let then = self.boxed(then)?;
+        let after_then = std::mem::replace(&mut self.initialization, before);
+        let els = self.boxed(els)?;
+        self.intersect_initialization(&after_then);
+        Ok(TermKind::If { cond, then, els })
+    }
+
+    fn while_expression(&mut self, cond: &typed::Term, body: &typed::Term) -> Result<TermKind> {
+        let cond = self.boxed(cond)?;
+        let after_condition = self.initialization.clone();
+        let body = self.boxed(body)?;
+        self.initialization = after_condition;
+        Ok(TermKind::While { cond, body })
+    }
+
+    fn intersect_initialization(&mut self, other: &BTreeMap<DeclarationId, Initialization>) {
+        for (binding, state) in &mut self.initialization {
+            if other.get(binding) != Some(state) {
+                *state = Initialization::Uninitialized;
+            }
         }
     }
 
@@ -246,17 +326,16 @@ impl Completion<'_> {
                 },
             },
         });
+        let cond = self.boxed(&args[0])?;
+        let before_right = self.initialization.clone();
         let right = self.boxed(&args[1])?;
+        self.intersect_initialization(&before_right);
         let (then, els) = if name == "&&" {
             (right, fixed)
         } else {
             (fixed, right)
         };
-        Ok(TermKind::If {
-            cond: self.boxed(&args[0])?,
-            then,
-            els,
-        })
+        Ok(TermKind::If { cond, then, els })
     }
 
     fn field(&mut self, span: Span, base: &typed::Term, name: &Ident) -> Result<TermKind> {
@@ -497,19 +576,31 @@ impl Completion<'_> {
                 binding,
                 name,
                 init,
-            } => Statement::Define {
-                binding: binding.expect("checked declaration"),
-                name: name.clone(),
-                init: self.elaborate(init)?,
-            },
-            typed::StatementKind::Declare { binding, name, ty } => Statement::Declare {
-                binding: *binding,
-                name: name.clone(),
-                ty: crate::Annotation {
-                    ty: types::ty(&self.annotation(ty)?.ty),
-                    span: ty.span,
-                },
-            },
+            } => {
+                let binding = binding.expect("checked declaration");
+                self.initialization
+                    .insert(binding, Initialization::Initializing);
+                let init = self.elaborate(init)?;
+                self.initialization
+                    .insert(binding, Initialization::Initialized);
+                Statement::Define {
+                    binding,
+                    name: name.clone(),
+                    init,
+                }
+            }
+            typed::StatementKind::Declare { binding, name, ty } => {
+                self.initialization
+                    .insert(*binding, Initialization::Uninitialized);
+                Statement::Declare {
+                    binding: *binding,
+                    name: name.clone(),
+                    ty: crate::Annotation {
+                        ty: types::ty(&self.annotation(ty)?.ty),
+                        span: ty.span,
+                    },
+                }
+            }
             typed::StatementKind::Expr { term } => Statement::Expr {
                 term: self.elaborate(term)?,
             },
@@ -527,6 +618,9 @@ impl Completion<'_> {
             Ty::Result { .. } => vec![Case::Ok, Case::Err],
             ty => ty.members().into_iter().map(Case::Type).collect(),
         };
+        let value = self.boxed(value)?;
+        let before = self.initialization.clone();
+        let mut after = None;
         let mut seen = vec![];
         let mut checked = vec![];
         for arm in arms {
@@ -538,10 +632,20 @@ impl Completion<'_> {
                 ));
             }
             seen.push(tag.clone());
+            self.initialization = before.clone();
+            if let Some(binding) = arm.binding {
+                self.initialization
+                    .insert(binding, Initialization::Initialized);
+            }
+            let body = self.elaborate(&arm.body)?;
+            if let Some(previous) = &after {
+                self.intersect_initialization(previous);
+            }
+            after = Some(self.initialization.clone());
             checked.push(MatchArm {
                 tag: types::case(&tag),
                 binding: arm.binding,
-                body: self.elaborate(&arm.body)?,
+                body,
             });
         }
         if tags.len() != seen.len() || tags.is_empty() {
@@ -550,8 +654,9 @@ impl Completion<'_> {
                 "match must cover every variant exactly once",
             ));
         }
+        self.initialization = after.expect("nonempty exhaustive match");
         Ok(TermKind::Match {
-            value: self.boxed(value)?,
+            value,
             arms: checked,
         })
     }
@@ -724,6 +829,7 @@ mod tests {
         };
         let completed = function(
             &source,
+            &[],
             &solver,
             &methods,
             &TyperContext::new(),

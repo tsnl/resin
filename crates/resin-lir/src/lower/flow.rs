@@ -21,7 +21,6 @@ impl FunctionLowering<'_> {
 
         self.switch(condition);
         self.gen_term(cond, None)?;
-        let after_condition = self.bindings.clone();
         self.terminate(Terminator::LoopTest);
 
         self.switch(body_block);
@@ -29,7 +28,6 @@ impl FunctionLowering<'_> {
         self.emit(Instr::Discard);
         self.terminate(Terminator::Continue);
 
-        self.bindings = after_condition;
         self.switch(exit);
         self.emit(Instr::Push { value: Value::Unit });
         Ok(Ty::Unit)
@@ -53,17 +51,13 @@ impl FunctionLowering<'_> {
             next: Some(join_block),
         });
 
-        let before = self.bindings.clone();
         self.switch(then_block);
         let _ = self.gen_term(then, Some(expected))?;
         self.terminate(Terminator::Merge);
-        let after_then = self.bindings.clone();
 
-        self.bindings = before;
         self.switch(else_block);
         let _ = self.gen_term(els, Some(expected))?;
         self.terminate(Terminator::Merge);
-        self.intersect_initialization(&after_then);
 
         self.switch(join_block);
         Ok(expected.clone())

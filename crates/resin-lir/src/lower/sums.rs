@@ -5,7 +5,7 @@ use resin_source::prelude::*;
 use resin_types::prelude::*;
 
 use super::FunctionLowering;
-use super::{Initialization, ValueBinding};
+use super::ValueBinding;
 
 impl FunctionLowering<'_> {
     pub(super) fn coerce(&mut self, span: Span, from: Ty, to: &Ty) -> Result<Ty, LowerError> {
@@ -99,10 +99,8 @@ impl FunctionLowering<'_> {
             ty: result.clone(),
             tag: Case::Err,
         });
-        let before_cleanup = self.bindings.clone();
         self.cleanup(0, &result);
         self.terminate(Terminator::Return);
-        self.bindings = before_cleanup;
         self.switch(success);
         self.emit(Instr::TakeLocal { local: saved });
         self.emit(Instr::VariantPayload { tag: Case::Ok });
@@ -119,8 +117,6 @@ impl FunctionLowering<'_> {
     ) -> Result<Ty, LowerError> {
         let ty = self.gen_term(term, None)?;
         let saved = self.save_top(&ty);
-        let before = self.bindings.clone();
-        let mut after = None;
         let mut result = Some(expected.clone());
         let height = self.function.stack_len();
         let join = (arms.len() > 1).then(|| self.new_block("match.join", height + 1));
@@ -141,29 +137,18 @@ impl FunctionLowering<'_> {
             } else {
                 None
             };
-            self.bindings = before.clone();
             self.owned.push(vec![]);
             self.emit(Instr::TakeLocal { local: saved });
             self.emit(Instr::VariantPayload { tag: tag.clone() });
             let payload = ty.payload(tag).unwrap();
             let local = self.save_top(&payload);
             if let Some(binding) = arm.binding {
-                self.bindings.insert(
-                    binding,
-                    ValueBinding {
-                        local,
-                        ty: payload,
-                        initialization: Initialization::Initialized,
-                    },
-                );
+                self.bindings
+                    .insert(binding, ValueBinding { local, ty: payload });
             }
             result = Some(self.gen_term(&arm.body, result.as_ref())?);
             self.cleanup(self.owned.len() - 1, result.as_ref().unwrap());
             self.owned.pop();
-            if let Some(previous) = &after {
-                self.intersect_initialization(previous);
-            }
-            after = Some(self.bindings.clone());
             if join.is_some() {
                 self.terminate(Terminator::Merge);
             }
@@ -171,7 +156,6 @@ impl FunctionLowering<'_> {
                 self.switch(next);
             }
         }
-        self.bindings = after.unwrap();
         if let Some(join) = join {
             self.switch(join);
         }

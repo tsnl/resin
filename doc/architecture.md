@@ -155,10 +155,17 @@ its constants and type expressions use its own language rather than concrete
 storage values and a `resin_types::TypeTable`.
 
 HIR remains a tree: `If`, `While`, blocks, matches, Result propagation, places,
-and values retain their structure. LIR lowering assigns storage to binding IDs,
-checks definite initialization, and makes evaluation, ownership cleanup, and
-control flow explicit. Thus a HIR module can still fail storage/initialization
-checks during LIR lowering. Every LIR function reserves local zero for its unary
+and values retain their structure. Completing each body also establishes definite
+initialization, including unused definitions. Parameters and pattern bindings begin
+initialized; local initializers cannot read or address their own binding. Assignment
+and address acquisition do not read a whole local, while field projections require
+an initialized base. Completion follows runtime evaluation order, intersects branch
+states, and retains only the loop condition's guaranteed effects. Layout queries
+retain no operand effects.
+
+LIR lowering assigns storage to binding IDs and makes evaluation, ownership cleanup,
+and control flow explicit. It has no source initialization states or branch snapshots;
+runtime flags still protect partially initialized managed storage during cleanup. Every LIR function reserves local zero for its unary
 parameter, including unit, tuples, and foreign declarations. Each `Instr` documents
 its consumed operands and produced values.
 
