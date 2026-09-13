@@ -294,6 +294,9 @@ pub struct ApplicationNote {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorKind {
+    InvalidInstance {
+        message: Arc<str>,
+    },
     UnsupportedProfile {
         profile: Profile,
         message: Arc<str>,
@@ -330,9 +333,9 @@ impl std::fmt::Display for Error {
             self.span.start, self.span.end
         )?;
         match &self.kind {
-            ErrorKind::InvalidHir { message } | ErrorKind::UnsupportedProfile { message, .. } => {
-                f.write_str(message)
-            }
+            ErrorKind::InvalidHir { message }
+            | ErrorKind::InvalidInstance { message }
+            | ErrorKind::UnsupportedProfile { message, .. } => f.write_str(message),
             ErrorKind::MonomorphLimit {
                 function,
                 limit,

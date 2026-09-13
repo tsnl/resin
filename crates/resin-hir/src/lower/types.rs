@@ -77,32 +77,6 @@ pub(super) fn ty(source: &Ty) -> crate::Type {
     }
 }
 
-pub(super) fn constant(value: &Value) -> crate::Constant {
-    match value {
-        Value::Unit => crate::Constant::Unit,
-        Value::None => crate::Constant::None,
-        Value::Bool { value } => crate::Constant::Bool { value: *value },
-        Value::Int8 { value } => crate::Constant::Int8 { value: *value },
-        Value::Int16 { value } => crate::Constant::Int16 { value: *value },
-        Value::Int32 { value } => crate::Constant::Int32 { value: *value },
-        Value::Int64 { value } => crate::Constant::Int64 { value: *value },
-        Value::UInt8 { value } => crate::Constant::UInt8 { value: *value },
-        Value::UInt16 { value } => crate::Constant::UInt16 { value: *value },
-        Value::UInt32 { value } => crate::Constant::UInt32 { value: *value },
-        Value::UInt64 { value } => crate::Constant::UInt64 { value: *value },
-        Value::Float32 { value } => crate::Constant::Float32 { value: *value },
-        Value::Float64 { value } => crate::Constant::Float64 { value: *value },
-        Value::Type { ty: value } => crate::Constant::Type { ty: ty(value) },
-        Value::Str { value } => crate::Constant::Str {
-            value: value.clone(),
-        },
-        Value::StaticAddress { .. }
-        | Value::DynamicAddress { .. }
-        | Value::Array { .. }
-        | Value::Record { .. } => unreachable!("HIR constants have no storage"),
-    }
-}
-
 pub(super) fn definition(
     source: &TypeDef,
     methods: BTreeMap<Arc<str>, FunctionId>,
@@ -128,13 +102,5 @@ pub(super) fn case(source: &Case) -> crate::Case {
         Case::Ok => crate::Case::Ok,
         Case::Err => crate::Case::Err,
         Case::Type(value) => crate::Case::Type { ty: ty(value) },
-    }
-}
-
-pub(super) fn field(source: FieldAccess) -> crate::FieldAccess {
-    crate::FieldAccess {
-        ty: ty(&source.ty),
-        index: source.index,
-        steps: source.steps,
     }
 }

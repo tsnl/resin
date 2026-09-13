@@ -62,6 +62,12 @@ impl Substitution {
                 check_size(argument, depth, remaining)?;
                 argument.clone()
             }
+            resin_hir::Type::Member { base, name } => {
+                let base = self.ty_at(base, depth + 1, remaining, instances)?;
+                let result = member(instances.typer(), &base, name)?.ty;
+                check_size(&result, depth, remaining)?;
+                result
+            }
             resin_hir::Type::Type => Ty::Type,
             resin_hir::Type::Unit => Ty::Unit,
             resin_hir::Type::None => Ty::None,
@@ -139,6 +145,20 @@ impl Substitution {
             ),
         })
     }
+}
+
+pub(super) fn member(
+    typer: &TyperContext,
+    base: &Ty,
+    name: &str,
+) -> Result<FieldAccess, super::LowerError> {
+    let mut base = base;
+    while let Some(pointee) = base.deref_target() {
+        base = pointee;
+    }
+    typer
+        .type_field(base, name)
+        .map_err(|error| super::LowerError::typing(Span { start: 0, end: 0 }, error))
 }
 
 fn expansion_limit() -> super::LowerError {

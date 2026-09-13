@@ -73,7 +73,17 @@ pub(super) fn explicit_conversion(
             return Ok(ExplicitConversion::PointerCast);
         }
     }
-    context.ascribe(from, to).map(ExplicitConversion::Ascribe)
+    let steps = context.ascribe(from, to)?;
+    for step in &steps {
+        if let Conv::Unwrap { definition } = step
+            && context.definition(*definition)?.drop_hook().is_some()
+        {
+            return Err(TypeError::new(TypeErrorKind::UnwrapManaged {
+                definition: *definition,
+            }));
+        }
+    }
+    Ok(ExplicitConversion::Ascribe(steps))
 }
 
 pub(super) fn as_bool(ty: &Ty) -> Result<(), TypeError> {

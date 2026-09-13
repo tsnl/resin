@@ -639,3 +639,288 @@ fn shader_dependency_order_is_iterative_and_rejects_cycles_with_bounded_notes() 
     assert!(matches!(error.kind, ErrorKind::UnsupportedProfile { .. }));
     assert_eq!(error.applications.len(), 32);
 }
+
+fn requested_template(
+    function: Function,
+    argument: Type,
+) -> Result<resin_lir::Module, Vec<resin_lir::Error>> {
+    resin_lir::instantiate(
+        &Module {
+            functions: vec![function],
+            ..Default::default()
+        },
+        &[resin_lir::Entry {
+            name: "entry".into(),
+            function: FunctionId::from_index(0),
+            arguments: vec![argument],
+            profile: resin_lir::Profile::Host,
+        }],
+        &LoweringOptions::default(),
+    )
+}
+
+#[test]
+fn numeric_representation_and_layout_follow_the_selected_argument() {
+    let t = Type::Parameter { parameter: T };
+    let mut measure = template(
+        "measure",
+        term(
+            Type::UInt64,
+            TermKind::Block {
+                stmts: vec![Statement::Expr {
+                    term: term(t.clone(), TermKind::Numeric { text: "7".into() }),
+                }],
+                tail: Box::new(term(Type::UInt64, TermKind::Layout { of: t, size: true })),
+            },
+        ),
+    );
+    for (argument, value, size) in [
+        (Type::UInt8, resin_types::Value::UInt8 { value: 7 }, 1),
+        (Type::UInt32, resin_types::Value::UInt32 { value: 7 }, 4),
+    ] {
+        let lir = requested_template(measure.clone(), argument).unwrap();
+        resin_lir::verify(&lir).unwrap();
+        let pushes: Vec<_> = lir.functions[0]
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instrs)
+            .filter_map(|op| match op {
+                Instr::Push { value } => Some(value),
+                _ => None,
+            })
+            .collect();
+        assert!(pushes.contains(&&value));
+        assert!(pushes.contains(&&resin_types::Value::UInt64 { value: size }));
+    }
+    measure.body = Some(term(
+        Type::UInt64,
+        TermKind::Layout {
+            of: Type::Parameter { parameter: T },
+            size: false,
+        },
+    ));
+    let lir = requested_template(measure, Type::UInt32).unwrap();
+    assert!(lir.functions[0].blocks[0].instrs.contains(&Instr::Push {
+        value: resin_types::Value::UInt64 { value: 4 }
+    }));
+}
+
+#[test]
+fn numeric_specialization_checks_range_suffix_and_type_without_defaulting() {
+    for (text, argument, message) in [
+        ("256", Type::UInt8, "out of range"),
+        ("7_ui", Type::UInt8, "suffix does not match"),
+        ("7", Type::Bool, "cannot use numeric literal"),
+        ("1.5", Type::Int32, "invalid integer literal"),
+    ] {
+        let numeric = template(
+            "numeric",
+            term(
+                Type::Parameter { parameter: T },
+                TermKind::Numeric { text: text.into() },
+            ),
+        );
+        let error = requested_template(numeric, argument).unwrap_err().remove(0);
+        assert!(
+            matches!(&error.kind, ErrorKind::InvalidInstance { message: found } if found.contains(message)),
+            "{error}"
+        );
+        assert_eq!(error.span, SPAN);
+        assert_eq!(error.applications.len(), 1);
+        assert_eq!(error.applications[0].function.as_ref(), "numeric");
+    }
+}
+
+#[test]
+fn member_types_and_field_indices_are_determined_from_concrete_receivers() {
+    let t = Type::Parameter { parameter: T };
+    let member = Type::Member {
+        base: Box::new(t.clone()),
+        name: "value".into(),
+    };
+    let pointer = Type::Pointer {
+        pointee: Box::new(t),
+    };
+    let name = Ident::new("receiver".into(), SPAN);
+    let mut read = template(
+        "read",
+        term(
+            member,
+            TermKind::Field {
+                base: Box::new(term(
+                    pointer.clone(),
+                    TermKind::Local {
+                        binding: 0,
+                        name: name.clone(),
+                    },
+                )),
+                name: "value".into(),
+            },
+        ),
+    );
+    read.signature.params.push(Parameter {
+        binding: Some(0),
+        name,
+        annotation: annotation(pointer),
+    });
+    for (fields, index, result) in [
+        (vec![("value", Type::UInt8)], 0, Ty::UInt8),
+        (
+            vec![("padding", Type::UInt64), ("value", Type::UInt32)],
+            1,
+            Ty::UInt32,
+        ),
+    ] {
+        let argument = Type::Record {
+            fields: fields
+                .into_iter()
+                .map(|(name, ty)| resin_hir::RecordField {
+                    name: name.into(),
+                    ty,
+                })
+                .collect(),
+        };
+        let lir = requested_template(read.clone(), argument).unwrap();
+        resin_lir::verify(&lir).unwrap();
+        assert_eq!(lir.functions[0].result, result);
+        assert!(
+            lir.functions[0]
+                .blocks
+                .iter()
+                .flat_map(|block| &block.instrs)
+                .any(|op| matches!(op, Instr::AccessStatic { index: found } if *found == index))
+        );
+    }
+    let error = requested_template(read, Type::UInt32)
+        .unwrap_err()
+        .remove(0);
+    assert!(matches!(error.kind, ErrorKind::Type { .. }));
+}
+
+#[test]
+fn conversions_select_the_concrete_operation_after_substitution() {
+    let name = Ident::new("value".into(), SPAN);
+    let mut cast = template(
+        "cast",
+        term(
+            Type::Parameter { parameter: T },
+            TermKind::Convert {
+                arg: Box::new(term(
+                    Type::UInt64,
+                    TermKind::Local {
+                        binding: 0,
+                        name: name.clone(),
+                    },
+                )),
+            },
+        ),
+    );
+    cast.signature.params.push(Parameter {
+        binding: Some(0),
+        name,
+        annotation: annotation(Type::UInt64),
+    });
+    for (argument, operation) in [
+        (Type::UInt8, Instr::NumericCast { ty: Ty::UInt8 }),
+        (
+            Type::Pointer {
+                pointee: Box::new(Type::UInt8),
+            },
+            Instr::PointerCast {
+                ty: Ty::Pointer {
+                    pointee: Box::new(Ty::UInt8),
+                },
+            },
+        ),
+    ] {
+        let lir = requested_template(cast.clone(), argument).unwrap();
+        resin_lir::verify(&lir).unwrap();
+        assert!(
+            lir.functions[0]
+                .blocks
+                .iter()
+                .flat_map(|block| &block.instrs)
+                .any(|op| *op == operation)
+        );
+    }
+    let error = requested_template(cast, Type::Record { fields: vec![] })
+        .unwrap_err()
+        .remove(0);
+    assert!(matches!(error.kind, ErrorKind::Type { .. }));
+    assert_eq!(error.applications[0].function.as_ref(), "cast");
+}
+
+#[test]
+fn determining_member_types_normalize_before_instance_memoization() {
+    let member = Type::Member {
+        base: Box::new(Type::Record {
+            fields: vec![resin_hir::RecordField {
+                name: "value".into(),
+                ty: Type::Int32,
+            }],
+        }),
+        name: "value".into(),
+    };
+    let hir = program(vec![member, Type::Int32]);
+    let lir = resin_lir::analyze_with_options(&hir, &options(1)).unwrap();
+    assert_eq!(lir.functions.len(), 2);
+}
+
+#[test]
+fn generic_conversions_cannot_bypass_custom_destruction() {
+    let t = Type::Parameter { parameter: T };
+    let name = Ident::new("value".into(), SPAN);
+    let mut unwrap = template(
+        "unwrap",
+        term(
+            Type::Record { fields: vec![] },
+            TermKind::Convert {
+                arg: Box::new(term(
+                    t.clone(),
+                    TermKind::Local {
+                        binding: 0,
+                        name: name.clone(),
+                    },
+                )),
+            },
+        ),
+    );
+    unwrap.signature.params.push(Parameter {
+        binding: Some(0),
+        name: name.clone(),
+        annotation: annotation(t),
+    });
+    let owner = Type::Defined {
+        definition: TypeId::from_index(0),
+    };
+    let mut drop = function("drop", unit());
+    drop.signature.params.push(Parameter {
+        binding: Some(0),
+        name,
+        annotation: annotation(Type::Pointer {
+            pointee: Box::new(owner.clone()),
+        }),
+    });
+    let hir = Module {
+        functions: vec![unwrap, drop],
+        types: vec![resin_hir::TypeDefinition {
+            name: "Owner".into(),
+            body: Type::Record { fields: vec![] },
+            methods: Default::default(),
+            drop: Some(FunctionId::from_index(1)),
+        }],
+        ..Default::default()
+    };
+    let mut request = entry("unwrap", 0, resin_lir::Profile::Host);
+    request.arguments = vec![owner];
+    let error = resin_lir::instantiate(&hir, &[request], &LoweringOptions::default())
+        .unwrap_err()
+        .remove(0);
+    assert!(matches!(
+        error.kind,
+        ErrorKind::Type {
+            kind: resin_types::TypeErrorKind::UnwrapManaged { .. }
+        }
+    ));
+    assert_eq!(error.applications[0].function.as_ref(), "unwrap");
+}

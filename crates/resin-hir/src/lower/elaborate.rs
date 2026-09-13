@@ -8,7 +8,6 @@ use crate::lower::context::{FunctionBody, FunctionDecl};
 use crate::{Arguments, MatchArm, Statement, Term, TermKind};
 use crate::{GenerateError, GenerateErrorKind};
 use resin_source::prelude::*;
-use resin_types::ExplicitConversion;
 use resin_types::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -267,21 +266,14 @@ impl Completion<'_> {
     }
 
     fn number(&self, source: &typed::Term, text: &str) -> Result<TermKind> {
-        let (value, _) =
-            super::eval::number(self.typer, source.span, text, Some(&self.ty(source)?))?;
-        Ok(TermKind::Constant {
-            value: types::constant(&value),
-        })
+        super::eval::number(self.typer, source.span, text, Some(&self.ty(source)?))?;
+        Ok(TermKind::Numeric { text: text.into() })
     }
 
     fn layout(&self, ty: &typed::Annotation<Type>, size: bool) -> Result<TermKind> {
-        let layout =
-            resin_types::layout::layout(self.typer.definitions(), &self.annotation(ty)?.ty)
-                .map_err(|e| GenerateError::inference(ty.span, e.to_string()))?;
-        Ok(TermKind::Constant {
-            value: crate::Constant::UInt64 {
-                value: if size { layout.size } else { layout.align } as u64,
-            },
+        Ok(TermKind::Layout {
+            of: types::ty(&self.annotation(ty)?.ty),
+            size,
         })
     }
 
@@ -339,24 +331,15 @@ impl Completion<'_> {
     }
 
     fn field(&mut self, span: Span, base: &typed::Term, name: &Ident) -> Result<TermKind> {
-        let base_type = self.ty(base)?;
         let base = self.boxed(base)?;
         if name.val.as_ref() == "spirv"
             && let TermKind::Function { function, .. } = base.kind
         {
             return self.shader(span, function);
         }
-        let mut shape = &base_type;
-        while let Some(pointee) = shape.deref_target() {
-            shape = pointee;
-        }
-        let access = self
-            .typer
-            .type_field(shape, &name.val)
-            .map_err(|e| GenerateError::typing(span, e))?;
         Ok(TermKind::Field {
             base,
-            access: types::field(access),
+            name: name.val.clone(),
         })
     }
 
@@ -743,30 +726,12 @@ impl Completion<'_> {
     }
 
     fn conversion(&self, span: Span, value: Term, from: &Ty, to: &Ty) -> Result<TermKind> {
-        let conversion = self
-            .typer
+        self.typer
             .explicit_conversion(from, to)
             .map_err(|e| GenerateError::typing(span, e))?;
-        if let ExplicitConversion::Ascribe(steps) = &conversion {
-            self.check_unwrap(span, steps)?;
-        }
         Ok(TermKind::Convert {
-            conversion,
             arg: Box::new(value),
         })
-    }
-
-    fn check_unwrap(&self, span: Span, steps: &[Conv]) -> Result<()> {
-        if steps.iter().any(|step| {
-            matches!(step, Conv::Unwrap { definition }
-            if self.typer.definition(*definition).unwrap().drop_hook().is_some())
-        }) {
-            return Err(GenerateError::inference(
-                span,
-                "cannot unwrap a type with drop; access its fields through a pointer or use Ptr.replace",
-            ));
-        }
-        Ok(())
     }
 }
 

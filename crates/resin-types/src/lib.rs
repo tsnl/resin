@@ -573,6 +573,7 @@ pub enum TypeErrorKind {
     IncompleteTypeDefinition { definition: TypeId },
     NominalTypeMustBeRecord { definition: TypeId },
     TypeAlreadyDefined { definition: TypeId },
+    UnwrapManaged { definition: TypeId },
     RecursiveTypeWithoutIndirection { definition: TypeId },
 }
 
@@ -586,6 +587,9 @@ impl fmt::Display for TypeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.kind == TypeErrorKind::PointerArithmetic {
             return f.write_str("pointer arithmetic is not allowed; index a Span or explicitly convert the pointer to ulong for byte arithmetic");
+        }
+        if matches!(self.kind, TypeErrorKind::UnwrapManaged { .. }) {
+            return f.write_str("cannot unwrap a type with drop; access its fields through a pointer or use Ptr.replace");
         }
         write!(f, "type error: {:?}", self.kind)
     }
@@ -666,7 +670,8 @@ impl TyperContext {
     }
 
     /// Select the operation for an explicit source conversion. Unlike IR
-    /// ascription, this also permits widening and numeric or pointer casts.
+    /// ascription, this also permits widening and numeric or pointer casts, and
+    /// rejects unwrapping owners whose custom destruction would be bypassed.
     pub fn explicit_conversion(&self, from: &Ty, to: &Ty) -> Result<ExplicitConversion, TypeError> {
         typer::explicit_conversion(self, from, to)
     }
@@ -845,6 +850,18 @@ pub mod literal {
     /// Hexadecimal e/E digits are not decimal exponents.
     pub fn unsuffixed_type(text: &str) -> Ty {
         super::types::unsuffixed_literal_type(text)
+    }
+
+    /// Parse into an already selected primitive type, checking suffix and range.
+    /// This operation never infers a type or applies a numeric default.
+    pub fn parse(text: &str, ty: &Ty) -> Result<super::Value, String> {
+        let (digits, suffix) = split(text);
+        if suffix.as_ref().is_some_and(|suffix| suffix != ty) {
+            return Err(format!(
+                "numeric suffix does not match the selected type {ty:?}"
+            ));
+        }
+        super::types::parse_number(digits, ty)
     }
 }
 
