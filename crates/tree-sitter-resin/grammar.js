@@ -182,6 +182,7 @@ export default grammar({
       seq(
         "struct",
         field("name", $.uid),
+        optional(field("type_params", $.type_parameters)),
         "{",
         list("fields", $.declare, ","),
         repeat(field("method", $.function_definition)),
@@ -196,6 +197,7 @@ export default grammar({
         repeat(field("decorator", $.decorator)),
         "def",
         field("name", $.lid),
+        optional(field("type_params", $.type_parameters)),
         "(",
         list("params", $.declare, ","),
         ")",
@@ -230,7 +232,15 @@ export default grammar({
         seq("type", field("type", $.type_define)),
       ),
     term_define: ($) => seq(field("name", $.lid), "=", field("init", $.term)),
-    type_define: ($) => seq(field("name", $.uid), "=", field("init", $.type)),
+    type_define: ($) =>
+      seq(
+        field("name", $.uid),
+        optional(field("type_params", $.type_parameters)),
+        "=",
+        field("init", $.type),
+      ),
+    type_parameters: ($) => seq("<", list1("params", $.uid, ","), ">"),
+    type_arguments: ($) => seq("<", list1("args", $.type, ","), ">"),
     declare: ($) => seq(field("name", $.lid), ":", field("ann", $.type)),
 
     //
@@ -304,6 +314,7 @@ export default grammar({
                 $.closed_term,
                 $.field_access,
                 $.method_call,
+                $.type_application,
                 $.pointer_deref,
                 $.try_suffix,
                 $.unwrap_suffix,
@@ -319,6 +330,7 @@ export default grammar({
         seq(
           ".",
           field("name", $.lid),
+          optional(field("type_args", $.type_application)),
           field(
             "args",
             choice(
@@ -329,6 +341,7 @@ export default grammar({
           ),
         ),
       ),
+    type_application: ($) => seq("::", field("types", $.type_arguments)),
     pointer_deref: () => ".*",
     try_suffix: () => "?",
     unwrap_suffix: () => "!",
@@ -449,6 +462,7 @@ export default grammar({
 
     unary_type: ($) =>
       choice(
+        prec(1, seq(field("former", $.uid), field("args", $.type_arguments))),
         seq(
           field("former", choice("GpuComputePipeline", "GpuGraphicsPipeline")),
           "<",

@@ -185,6 +185,7 @@ impl<'a> AstGen<'a> {
                 .collect();
             return Spanned::new(
                 StmtKind::Struct {
+                    type_params: self.type_parameters(node),
                     name,
                     body: Spanned::new(TypeKind::Record { fields }, self.span(node)),
                     methods,
@@ -264,7 +265,14 @@ impl<'a> AstGen<'a> {
     fn gen_type_define(&self, node: Node, span: Span) -> Stmt {
         let name = self.ident(node.child_by_field_name("name").unwrap_or(node));
         let init = self.gen_type(node.child_by_field_name("init").unwrap_or(node));
-        Spanned::new(StmtKind::DefineType { name, init }, span)
+        Spanned::new(
+            StmtKind::DefineType {
+                type_params: self.type_parameters(node),
+                name,
+                init,
+            },
+            span,
+        )
     }
 
     fn gen_term(&self, node: Node) -> Term {
@@ -366,6 +374,19 @@ impl<'a> AstGen<'a> {
                         span,
                     );
                 }
+                "type_application" => {
+                    let span = Span {
+                        start: base.span.start,
+                        end: child.end_byte(),
+                    };
+                    base = Spanned::new(
+                        TermKind::TypeApply {
+                            function: Box::new(base),
+                            args: self.type_arguments(child.child_by_field_name("types")),
+                        },
+                        span,
+                    );
+                }
                 "method_call" => {
                     let name = self.ident(child.child_by_field_name("name").unwrap_or(child));
                     let args = child.child_by_field_name("args").unwrap_or(child);
@@ -383,6 +404,11 @@ impl<'a> AstGen<'a> {
                         TermKind::MethodCall {
                             receiver: Box::new(base),
                             name,
+                            type_args: self.type_arguments(
+                                child
+                                    .child_by_field_name("type_args")
+                                    .and_then(|n| n.child_by_field_name("types")),
+                            ),
                             arg: Box::new(arg),
                         },
                         span,
@@ -547,7 +573,7 @@ impl<'a> AstGen<'a> {
         let mut next = node
             .child_by_field_name("name")
             .and_then(|name| name.next_sibling());
-        while next.is_some_and(|node| node.kind() == "comment") {
+        while next.is_some_and(|node| matches!(node.kind(), "comment" | "type_parameters")) {
             next = next.and_then(|node| node.next_sibling());
         }
         if !next.is_some_and(|node| node.kind() == "(" && !node.is_missing()) {
@@ -590,6 +616,7 @@ impl<'a> AstGen<'a> {
             .unwrap_or_else(|| self.hole(node));
         Spanned::new(
             StmtKind::Function {
+                type_params: self.type_parameters(node),
                 decorators: node
                     .children_by_field_name("decorator", &mut node.walk())
                     .filter_map(|n| n.child_by_field_name("name"))
@@ -711,6 +738,24 @@ impl<'a> AstGen<'a> {
         )
     }
 
+    fn type_parameters(&self, node: Node) -> Vec<Ident> {
+        node.child_by_field_name("type_params")
+            .map_or_else(Vec::new, |params| {
+                params
+                    .children_by_field_name("params", &mut params.walk())
+                    .map(|name| self.ident(name))
+                    .collect()
+            })
+    }
+
+    fn type_arguments(&self, node: Option<Node>) -> Vec<Type> {
+        node.map_or_else(Vec::new, |args| {
+            args.children_by_field_name("args", &mut args.walk())
+                .map(|ty| self.gen_type(ty))
+                .collect()
+        })
+    }
+
     fn gen_type(&self, node: Node) -> Type {
         if node.kind() != "type" || node.is_missing() || node.is_error() {
             return Spanned::new(TypeKind::Hole, self.span(node));
@@ -780,14 +825,12 @@ impl<'a> AstGen<'a> {
                     self.span(node),
                 );
             }
-            let arg = self.gen_type(node.child_by_field_name("arg").unwrap_or(node));
-            return Spanned::new(
-                TypeKind::App {
-                    head,
-                    arg: Box::new(arg),
-                },
-                self.span(node),
-            );
+            let args = if let Some(arg) = node.child_by_field_name("arg") {
+                vec![self.gen_type(arg)]
+            } else {
+                self.type_arguments(node.child_by_field_name("args"))
+            };
+            return Spanned::new(TypeKind::App { head, args }, self.span(node));
         }
         self.gen_primary_type(node.child(0).unwrap_or(node))
     }

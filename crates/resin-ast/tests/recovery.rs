@@ -70,16 +70,18 @@ fn gpu_type_formers_lower_with_their_element_annotations() {
     let StmtKind::Function { params, result, .. } = &file.stmts[0].val else {
         panic!("expected function");
     };
-    let resin_ast::TypeKind::App { head, arg } = &params[0].1.val else {
+    let resin_ast::TypeKind::App { head, args } = &params[0].1.val else {
         panic!("expected GPU span type former");
     };
     assert_eq!(head.val.as_ref(), "GpuSpan");
-    assert!(matches!(&arg.val, resin_ast::TypeKind::Atom { name } if name.val.as_ref() == "uint"));
-    let resin_ast::TypeKind::App { head, arg } = &result.val else {
+    assert!(
+        matches!(&args[0].val, resin_ast::TypeKind::Atom { name } if name.val.as_ref() == "uint")
+    );
+    let resin_ast::TypeKind::App { head, args } = &result.val else {
         panic!("expected GPU pointer type former");
     };
     assert_eq!(head.val.as_ref(), "GpuPtr");
-    assert!(matches!(arg.val, resin_ast::TypeKind::Infer));
+    assert!(matches!(args[0].val, resin_ast::TypeKind::Infer));
 }
 
 #[test]

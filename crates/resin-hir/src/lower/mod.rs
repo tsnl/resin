@@ -419,8 +419,15 @@ impl Scopes {
             }
         }
         for stmt in &file.stmts {
+            if let StmtKind::Struct { type_params, .. } | StmtKind::DefineType { type_params, .. } =
+                &stmt.val
+                && let Err(error) = require_monomorphic(type_params)
+            {
+                errors.push(error);
+                continue;
+            }
             let result = match &stmt.val {
-                StmtKind::DefineType { name, init } => match self.annotation(init, typer) {
+                StmtKind::DefineType { name, init, .. } => match self.annotation(init, typer) {
                     Ok(ty) => {
                         self.define_alias(name, ty)
                             .map(|_| ())
@@ -438,6 +445,7 @@ impl Scopes {
                     name,
                     body,
                     methods: owned,
+                    ..
                 } => (|| {
                     let id = typer.declare_type(name.val.clone());
                     self.define_type(name, id).map_err(|name| GenerateError {
@@ -494,6 +502,7 @@ impl Generator {
         declarations: &mut Declarations,
     ) -> Result<(), GenerateError> {
         let StmtKind::Function {
+            type_params,
             name,
             params,
             result,
@@ -503,6 +512,7 @@ impl Generator {
         else {
             return Ok(());
         };
+        require_monomorphic(type_params)?;
         let declaration = reserve_method(name, scopes, declarations)?;
         let definition = method.owner;
         scopes.record_method_definition(definition, declaration);
@@ -857,5 +867,16 @@ impl Generator {
             .lookup(name, false)
             .or_else(|| self.scopes.lookup(name, true))
             .map(|definition| Symbol { definition })
+    }
+}
+
+// The syntax/AST layer can retain binders before polymorphic HIR is introduced.
+fn require_monomorphic(params: &[Ident]) -> Result<(), GenerateError> {
+    match params.first() {
+        None => Ok(()),
+        Some(parameter) => Err(GenerateError::inference(
+            parameter.span,
+            "template definition lowering is not implemented yet",
+        )),
     }
 }

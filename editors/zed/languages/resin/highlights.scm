@@ -33,8 +33,12 @@
 ["=" ":=" "->" "=>" "||" "&&" "|" "^" "&" "==" "!=" "<" "<=" ">" ">="
  "<<" ">>" "+" "-" "*" "/" "%" "!" "~"] @operator
 ["(" ")" "[" "]" "{" "}"] @punctuation.bracket
-[";" "," ":" "."] @punctuation.delimiter
+[";" "," ":" "." "::"] @punctuation.delimiter
 (unary_type "<" @punctuation.bracket ">" @punctuation.bracket)
 
 
 (decorator "@" @attribute name: (lid) @attribute)
+
+(type_parameters "<" @punctuation.bracket ">" @punctuation.bracket)
+(type_arguments "<" @punctuation.bracket ">" @punctuation.bracket)
+(postfix_term prefix: (primary_term (lid) @function) . suffix: (type_application))

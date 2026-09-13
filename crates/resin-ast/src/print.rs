@@ -59,13 +59,14 @@ fn sexp_source(file: &SourceFile) -> SExp {
 fn sexp_stmt(stmt: &Stmt) -> SExp {
     match &stmt.val {
         StmtKind::Struct {
+            type_params,
             name,
             body,
             methods,
         } => list_sp(
             "struct",
             stmt.span,
-            [symbol(name.val.as_ref()), sexp_typespec(body)]
+            [declaration_name(name, type_params), sexp_typespec(body)]
                 .into_iter()
                 .chain(methods.iter().map(sexp_stmt))
                 .collect(),
@@ -96,6 +97,7 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
             ],
         ),
         StmtKind::Function {
+            type_params,
             name,
             params,
             result,
@@ -106,7 +108,7 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
             "def",
             stmt.span,
             vec![
-                symbol(name.val.as_ref()),
+                declaration_name(name, type_params),
                 group(
                     params
                         .iter()
@@ -131,10 +133,14 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
             stmt.span,
             vec![symbol(name.val.as_ref()), sexp_term(init)],
         ),
-        StmtKind::DefineType { name, init } => list_sp(
+        StmtKind::DefineType {
+            type_params,
+            name,
+            init,
+        } => list_sp(
             "define-type",
             stmt.span,
-            vec![symbol(name.val.as_ref()), sexp_typespec(init)],
+            vec![declaration_name(name, type_params), sexp_typespec(init)],
         ),
         StmtKind::Declare { name, ann } => list_sp(
             "declare",
@@ -204,15 +210,17 @@ fn sexp_term(term: &Term) -> SExp {
         TermKind::MethodCall {
             receiver,
             name,
+            type_args,
             arg,
         } => list(
             "method-call",
             vec![
                 sexp_term(receiver),
-                symbol(name.val.as_ref()),
+                type_application(symbol(name.val.as_ref()), type_args),
                 sexp_term(arg),
             ],
         ),
+        TermKind::TypeApply { function, args } => type_application(sexp_term(function), args),
         TermKind::Call { func, arg } => {
             list_sp("call", term.span, vec![sexp_term(func), sexp_term(arg)])
         }
@@ -256,10 +264,12 @@ fn sexp_typespec(ts: &Type) -> SExp {
         TypeKind::Infer => list_sp("infer-type", ts.span, vec![]),
         TypeKind::Unit => list_sp("unit-type", ts.span, vec![]),
         TypeKind::Atom { name } => symbol(name.val.as_ref()),
-        TypeKind::App { head, arg } => list_sp(
+        TypeKind::App { head, args } => list_sp(
             "type-app",
             ts.span,
-            vec![symbol(head.val.as_ref()), sexp_typespec(arg)],
+            std::iter::once(symbol(head.val.as_ref()))
+                .chain(args.iter().map(sexp_typespec))
+                .collect(),
         ),
         TypeKind::GpuPipeline { head, root, owner } => list_sp(
             "gpu-pipeline-type",
@@ -321,4 +331,28 @@ fn string(s: impl Into<String>) -> SExp {
 
 fn span_str(span: Span) -> SExp {
     string(format!("{}:{}", span.start, span.end))
+}
+
+fn declaration_name(name: &Ident, params: &[Ident]) -> SExp {
+    if params.is_empty() {
+        return symbol(name.val.as_ref());
+    }
+    list(
+        "template",
+        std::iter::once(symbol(name.val.as_ref()))
+            .chain(params.iter().map(|p| symbol(p.val.as_ref())))
+            .collect(),
+    )
+}
+
+fn type_application(function: SExp, args: &[Type]) -> SExp {
+    if args.is_empty() {
+        return function;
+    }
+    list(
+        "type-apply",
+        std::iter::once(function)
+            .chain(args.iter().map(sexp_typespec))
+            .collect(),
+    )
 }

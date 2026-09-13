@@ -53,7 +53,13 @@ impl Decoder<'_> {
             TypeKind::Atom { name } => builtin_ty(&name.val)
                 .map(|ty| Ok(ty.into()))
                 .unwrap_or_else(|| (self.resolve)(name))?,
-            TypeKind::App { head, arg } => {
+            TypeKind::App { head, args } => {
+                let [arg] = args.as_slice() else {
+                    return Err(GenerateError::inference(
+                        ann.span,
+                        "type application has the wrong number of arguments",
+                    ));
+                };
                 let arg = self.ty(arg, infer)?;
                 let head = match head.val.as_ref() {
                     "Ptr" => Head::Pointer,
