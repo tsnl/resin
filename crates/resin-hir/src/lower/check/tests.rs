@@ -129,7 +129,9 @@ fn completed_bodies_keep_shadowed_references_after_discarding_construction_state
     let crate::TermKind::Call { func, .. } = &tail.kind else {
         panic!()
     };
-    assert!(matches!(func.kind, crate::TermKind::Function { function } if function.index() == 0));
+    assert!(
+        matches!(func.kind, crate::TermKind::Function { function, .. } if function.index() == 0)
+    );
 }
 
 #[test]

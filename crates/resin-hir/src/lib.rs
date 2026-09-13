@@ -1,7 +1,7 @@
 //! High-level language: resolved, typed expressions with structured control flow.
 //!
-//! The public tree is the complete pass contract: resolved bindings and concrete
-//! type expressions, with no source scopes, inference variables, or stack instructions.
+//! The public tree is the complete pass contract: resolved bindings, type schemes,
+//! and completed applications, with no source scopes, inference variables, or stack instructions.
 //! Construction and editor recovery stay behind the lowering and query operations.
 //!
 //! Implementation modules are deliberately private:
@@ -14,11 +14,23 @@ use resin_types::prelude::*;
 mod lower;
 mod print;
 
+use resin_common::define_id;
 use std::{collections::BTreeMap, fmt, sync::Arc};
 
 //
 // HIR language
 //
+
+define_id! {
+    /// A named binder in a definition's type scheme.
+    pub struct TypeParameterId(usize);
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeParameter {
+    pub id: TypeParameterId,
+    pub name: Ident,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RecordField {
@@ -44,6 +56,7 @@ pub enum Type {
     Float64,
     Str,
     Foreign { name: Arc<str> },
+    Parameter { parameter: TypeParameterId },
     Defined { definition: TypeId },
     Pointer { pointee: Box<Type> },
     Span { element: Box<Type> },
@@ -171,6 +184,7 @@ pub struct Function {
 
 #[derive(Debug, Clone)]
 pub struct Signature {
+    pub type_params: Vec<TypeParameter>,
     pub params: Vec<Parameter>,
     pub result: Annotation,
 }
@@ -219,6 +233,7 @@ pub enum TermKind {
     },
     Function {
         function: FunctionId,
+        type_args: Vec<Type>,
     },
     Shader {
         function: FunctionId,

@@ -10,6 +10,7 @@
 use resin_source::prelude::*;
 use std::{
     collections::BTreeMap,
+    num::NonZeroUsize,
     sync::{Arc, Weak},
 };
 
@@ -17,15 +18,35 @@ use std::{
 // Compilation
 //
 
+/// Immutable resource limits for every compilation made by this compiler.
+#[derive(Debug, Clone)]
+pub struct CompilerConfig {
+    pub max_monomorphs_per_function: NonZeroUsize,
+}
+impl Default for CompilerConfig {
+    fn default() -> Self {
+        Self {
+            max_monomorphs_per_function: NonZeroUsize::new(16 * 1024).unwrap(),
+        }
+    }
+}
+
 /// Reusable compilation caches. Sources and compilations are immutable.
 #[derive(Default)]
 pub struct Compiler {
+    config: CompilerConfig,
     parsed: BTreeMap<SourceId, Weak<ParsedDocument>>,
     checked: BTreeMap<SourceId, Arc<Compilation>>,
 }
 impl Compiler {
     pub fn new() -> Self {
         Self::default()
+    }
+    pub fn with_config(config: CompilerConfig) -> Self {
+        Self {
+            config,
+            ..Default::default()
+        }
     }
     /// Resolve all imports, then reuse or construct the complete compilation.
     /// Source and import errors are retained as diagnostics in the result.
@@ -43,7 +64,7 @@ impl Compiler {
         {
             return old.clone();
         }
-        let result = Arc::new(Compilation::new(entry.clone(), loaded));
+        let result = Arc::new(Compilation::new(entry.clone(), loaded, &self.config));
         self.checked.insert(entry.id(), result.clone());
         self.parsed
             .retain(|_, document| document.strong_count() > 0);
@@ -167,7 +188,7 @@ impl Compilation {
         self.program.is_ok() && self.graph == loaded.graph()
     }
 
-    fn new(entry: Source, loaded: Loaded) -> Self {
+    fn new(entry: Source, loaded: Loaded, config: &CompilerConfig) -> Self {
         let graph = loaded.graph();
         let load_error = loaded.errors.first().cloned();
         let mut checked = resin_hir::analyze_program(&loaded.program);
@@ -176,7 +197,7 @@ impl Compilation {
             .or_else(|| checked.diagnostics.first().cloned());
         let mut lowered = None;
         if let Some(hir) = &checked.module {
-            match lower_to_verified_lir(&loaded.program, hir) {
+            match lower_to_verified_lir(&loaded.program, hir, config) {
                 Ok(module) => lowered = Some(module),
                 Err(errors) => checked.diagnostics.extend(errors),
             }
@@ -373,8 +394,12 @@ fn imported_at(error: &mut SourceError, importer: &resin_ast::SourceModule, span
 fn lower_to_verified_lir(
     program: &resin_ast::Program,
     hir: &resin_hir::Module,
+    config: &CompilerConfig,
 ) -> Result<resin_lir::VerifiedModule, Vec<SourceError>> {
-    let lir = resin_lir::analyze(hir).map_err(|errors| {
+    let options = resin_lir::LoweringOptions {
+        max_monomorphs_per_function: config.max_monomorphs_per_function,
+    };
+    let lir = resin_lir::analyze_with_options(hir, &options).map_err(|errors| {
         errors
             .into_iter()
             .map(|error| lowering_error(program, error))
@@ -390,6 +415,22 @@ fn lower_to_verified_lir(
 }
 
 fn lowering_error(program: &resin_ast::Program, error: resin_lir::Error) -> SourceError {
+    let mut diagnostic = lowering_origin(program, &error);
+    diagnostic
+        .related
+        .extend(error.applications.into_iter().filter_map(|application| {
+            application.location.map(|location| SourceNote {
+                location,
+                message: format!(
+                    "while instantiating {} with {:?}",
+                    application.function, application.arguments
+                ),
+            })
+        }));
+    diagnostic
+}
+
+fn lowering_origin(program: &resin_ast::Program, error: &resin_lir::Error) -> SourceError {
     let Some(source) = &error.source else {
         return SourceError::new(
             program.modules.last().expect("entry module").source.clone(),
@@ -402,7 +443,7 @@ fn lowering_error(program: &resin_ast::Program, error: resin_lir::Error) -> Sour
         .iter()
         .find(|module| module.source == *source)
     {
-        return module.error(error.span, &error);
+        return module.error(error.span, error);
     }
     SourceError::new(source.clone(), Some(error.span), error.to_string())
 }

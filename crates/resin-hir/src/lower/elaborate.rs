@@ -175,7 +175,10 @@ impl Completion<'_> {
 
     fn reference(&self, declaration: DeclarationId, name: &Ident) -> TermKind {
         match self.function_bindings.get(&declaration).copied() {
-            Some(function) => TermKind::Function { function },
+            Some(function) => TermKind::Function {
+                function,
+                type_args: vec![],
+            },
             None => TermKind::Local {
                 binding: declaration,
                 name: name.clone(),
@@ -260,7 +263,7 @@ impl Completion<'_> {
         let base_type = self.ty(base)?;
         let base = self.boxed(base)?;
         if name.val.as_ref() == "spirv"
-            && let TermKind::Function { function } = base.kind
+            && let TermKind::Function { function, .. } = base.kind
         {
             return self.shader(span, function);
         }
@@ -344,7 +347,10 @@ impl Completion<'_> {
                 let func = Box::new(Term {
                     span: name.span,
                     ty: types::ty(&ty),
-                    kind: TermKind::Function { function },
+                    kind: TermKind::Function {
+                        function,
+                        type_args: vec![],
+                    },
                 });
                 let arg = if args.receiver.is_some() {
                     Box::new(Term {
@@ -388,7 +394,7 @@ impl Completion<'_> {
         let mut shaders = Vec::new();
         for (shader, stage) in terms[usize::from(receiver.is_none())..].iter().zip(stages) {
             let term = self.elaborate(shader)?;
-            let TermKind::Function { function } = term.kind else {
+            let TermKind::Function { function, .. } = term.kind else {
                 return Err(GenerateError::inference(
                     shader.span,
                     "pipeline creation requires direct shader declarations; runtime aliases are unsupported",

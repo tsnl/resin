@@ -17,39 +17,61 @@ mod concrete;
 mod expressions;
 mod flow;
 mod functions;
+mod instances;
 mod places;
 mod specialize;
+mod substitute;
 mod sums;
 mod terms;
 
 use crate::{Error, ErrorKind};
 
-pub fn generate(source: &resin_hir::Module) -> Result<Module, Error> {
-    analyze(source).map_err(|mut errors| errors.remove(0))
+pub fn analyze(
+    source: &resin_hir::Module,
+    options: &crate::LoweringOptions,
+) -> Result<Module, Vec<Error>> {
+    let mut instances = instances::Instances::new(source, options);
+    instances.reserve_roots().map_err(|error| vec![error])?;
+    let definitions = definitions(source, &mut instances).map_err(|error| vec![error])?;
+    let typer = TyperContext::from_definitions(definitions);
+    let functions = instances.lower(&typer)?;
+    Ok(assemble(source, &instances, typer, functions))
 }
 
-pub fn analyze(source: &resin_hir::Module) -> Result<Module, Vec<Error>> {
-    let definitions = specialize::definitions(&source.types).map_err(|error| {
-        vec![Error {
-            source: None,
-            span: Span { start: 0, end: 0 },
-            kind: ErrorKind::Type { kind: error.kind },
-        }]
-    })?;
-    let typer = TyperContext::from_definitions(definitions);
-    let mut functions = Vec::with_capacity(source.functions.len());
-    let mut errors = vec![];
-    for function in &source.functions {
-        match functions::lower(&specialize::function(function), &typer) {
-            Ok(function) => functions.push(function),
-            Err(error) => errors.push(error),
-        }
+fn definitions(
+    source: &resin_hir::Module,
+    instances: &mut instances::Instances<'_>,
+) -> Result<TypeTable, Error> {
+    let substitution = substitute::Substitution::default();
+    let mut definitions = Vec::with_capacity(source.types.len());
+    for definition in &source.types {
+        let body = substitution
+            .ty(&definition.body)
+            .map_err(|error| instances.lower_error(error, None, None))?;
+        let drop = definition
+            .drop
+            .map(|id| instances.request(id, vec![], None, None))
+            .transpose()?;
+        definitions.push(TypeDef::Nominal {
+            name: definition.name.clone(),
+            body: Some(body),
+            drop,
+        });
     }
-    if errors.is_empty() {
-        Ok(assemble(source, typer, functions))
-    } else {
-        Err(errors)
+    let definitions = TypeTable::from(definitions);
+    for (index, definition) in definitions.iter().enumerate() {
+        let body = definition.body().expect("completed nominal body");
+        resin_types::check_references(&definitions, body)
+            .and_then(|()| resin_types::check_layout(&definitions, TypeId::from_index(index), body))
+            .map_err(|error| {
+                instances.lower_error(
+                    LowerError::typing(Span { start: 0, end: 0 }, error),
+                    None,
+                    None,
+                )
+            })?;
     }
+    Ok(definitions)
 }
 
 /// A completed function uses local instruction positions; assembly supplies its ID.
@@ -61,6 +83,7 @@ struct LoweredFunction {
 
 fn assemble(
     source: &resin_hir::Module,
+    instances: &instances::Instances<'_>,
     typer: TyperContext,
     functions: Vec<LoweredFunction>,
 ) -> Module {
@@ -68,8 +91,16 @@ fn assemble(
         types: typer
             .into_definitions()
             .expect("completed nominal definitions"),
-        entries: source.entries.clone(),
-        shaders: source.shaders.clone(),
+        entries: source
+            .entries
+            .iter()
+            .filter_map(|(name, id)| instances.ordinary(*id).map(|id| (name.clone(), id)))
+            .collect(),
+        shaders: source
+            .shaders
+            .iter()
+            .filter_map(|(id, shader)| instances.ordinary(*id).map(|id| (id, shader.clone())))
+            .collect(),
         ..Default::default()
     };
     for (index, lowered) in functions.into_iter().enumerate() {

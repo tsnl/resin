@@ -37,7 +37,7 @@ fn hir_resolves_calls_short_circuiting_and_layout_before_lir() {
     let resin_hir::TermKind::Call { func, arg } = &tail(read).kind else {
         panic!("ordinary call")
     };
-    let resin_hir::TermKind::Function { function: id } = func.kind else {
+    let resin_hir::TermKind::Function { function: id, .. } = func.kind else {
         panic!("resolved function")
     };
     assert_eq!(module.functions[id.index()].name.as_ref(), "Item.read");

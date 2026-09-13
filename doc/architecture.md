@@ -162,18 +162,33 @@ checks during LIR lowering. Every LIR function reserves local zero for its unary
 parameter, including unit, tuples, and foreign declarations. Each `Instr` documents
 its consumed operands and produced values.
 
-LIR construction translates the nominal declarations into concrete definitions
-and establishes their reference and layout rules. It translates each HIR function
-into a private concrete expression tree, then lowers that tree against the shared,
-read-only concrete definitions using fresh per-function state. The concrete tree
-has concrete types and values, with foreign ABI parameters derived from the
-signature; it is discarded after its storage translation. Each translation returns a completed
-function and source origins; module assembly assigns function IDs and combines
-those results after all functions succeed. Lowering collects independent failures
-across functions. Each failure carries its span and optional immutable source, so
-diagnostics do not recover sources by matching HIR and LIR function indices.
-Foreign declarations are constructed directly with parameter local zero and no
-blocks; they do not create function-body lowering state.
+HIR signatures can bind named type parameters, and function references carry
+completed type arguments. LIR construction owns a memoized worklist of concrete
+applications, keyed by definition and normalized arguments. It reserves each ID
+before translating its body, so recursion reuses pending requests. All ordinary
+functions currently enter that same worklist with empty arguments; template
+families enter only through applications. Source inference still rejects template
+syntax in this preparatory layer. Selecting roots and target profiles during
+compilation, then producing polymorphic schemes from source, are subsequent layers.
+
+The worklist translates each application into a private concrete expression tree,
+substituting types and selecting supported builtin operations without inference.
+It lowers that tree against completed concrete nominal definitions using fresh
+per-function state, then discards the tree. Foreign ABI parameters come from the
+concrete signature. Function references, shader artifacts, pipeline bridges, exports,
+and drop hooks use reserved LIR identities. Module assembly combines completed
+functions and source origins only after every request succeeds. Independent failures
+retain their own source locations and a bounded application trace; diagnostics never
+assume HIR and LIR indices agree. Foreign declarations have parameter local zero and
+no blocks; they do not create function-body lowering state.
+
+`CompilerConfig.max_monomorphs_per_function` defaults to 16,384 and cannot be zero.
+The compiler retains its configuration immutably; LIR receives the relevant limit
+through `LoweringOptions`. Existing canonical requests cost nothing, including
+pending and failed requests. A new request consumes its allowance before body
+translation. Independent type-depth and type-size guards bound structural expansion
+before substituted trees are cloned. These are resource diagnostics, not a claim
+that every program has a finite successful set of instances.
 
 LIR retains a structured tree of blocks. Each block contains straight-line stack
 instructions and an `If`, `Loop`, `Merge`, `LoopTest`, `Continue`, or `Return`

@@ -22,6 +22,11 @@ fn lowering_error(error: resin_lir::Error) -> GenerateError {
         resin_lir::ErrorKind::UninitializedValue { name } => {
             GenerateErrorKind::UninitializedValue { name }
         }
+        kind @ (resin_lir::ErrorKind::MonomorphLimit { .. }
+        | resin_lir::ErrorKind::TypeExpansionLimit { .. }
+        | resin_lir::ErrorKind::TypeSizeLimit { .. }) => {
+            panic!("unexpected resource limit in source test: {kind:?}")
+        }
         resin_lir::ErrorKind::NotAPlace => GenerateErrorKind::NotAPlace,
         resin_lir::ErrorKind::InvalidHir { message } => {
             panic!("HIR generation produced an invalid tree: {message}")
