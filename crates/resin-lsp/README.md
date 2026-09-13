@@ -85,7 +85,7 @@ var xs = [
 
 The CLI shares this formatter: `resin --format examples` formats files recursively,
 and `resin --format --check examples` checks them without writing. See the
-[CLI formatting guide](../../README.md#formatting) for exit codes and file selection.
+[CLI formatting guide](../../doc/guide.md#formatting) for exit codes and file selection.
 Only whole-document LSP formatting is supported; range/on-type formatting is not
 implemented.
 

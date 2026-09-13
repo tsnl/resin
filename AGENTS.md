@@ -282,7 +282,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Use the development environment in `shell.nix` on Linux/macOS for builds, tests, parser generation, and
   examples. Enter it with `nix-shell` from the repository root, or run a command non-interactively
   with `nix-shell --run 'cargo test --workspace --all-features'`. On Windows, use a Visual Studio
-  developer PowerShell with Rustup, LLVM Clang, and CMake on PATH, as described in `README.md`.
+  developer PowerShell with Rustup, LLVM Clang, and CMake on PATH, as described in `doc/guide.md`.
 - The shell supplies Rustup, a C compiler, CMake, Ninja, GLFW's native build dependencies, SPIR-V Tools, `glslc` for handwritten test fixtures,
   and, on Linux, Vulkan tools and libraries. On macOS, GPU execution uses the Vulkan SDK's loader
   and MoltenVK. Cargo builds and statically links GLFW via `glfw-sys`. Rustup uses
