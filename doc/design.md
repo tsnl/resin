@@ -3,8 +3,8 @@
 The [ownership specification](lifetimes.md) describes `Arc<T>`, `Weak<T>`,
 automatic destruction, and inherent methods through `impl`.
 
-The [let-polymorphism proposal](let-polymorphism.md) describes a draft extension
-for inferred generic functions and immutable aliases; it is not implemented.
+The [template proposal](templates.md) describes a draft extension for named type
+parameters, argument deduction, and concrete instantiation; it is not implemented.
 
 Resin is a deliberately small systems programming language in the spirit of C and Go.
 Data layout, mutation, pointers, control flow, and cost stay visible. Reading existing values performs compiler-defined copying; function and type
