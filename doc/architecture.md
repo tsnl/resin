@@ -124,6 +124,10 @@ indices. The compiler traverses imports through `resin_source::Loader::load_impo
 then orders the modules into a `Program`. The loader resolves explicit bindings or
 file references; AST generation performs no source I/O and imports never execute code.
 
+The [template implementation proposal](template-implementation.md) describes a
+planned restructuring around a resolved program and concrete instance checking.
+The following describes the current implementation.
+
 HIR construction has three internal steps:
 
 1. Declare names and check expressions into a private tree with inference types.

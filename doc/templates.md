@@ -30,6 +30,10 @@ declared result shape, so contextual numeric literals remain convenient. This is
 an extension to ordinary C++ call deduction; it does not adopt C++'s complete
 overload, conversion, or specialization system.
 
+The [implementation architecture](template-implementation.md) defines the
+resolved program, instance engine, deduction scheduler, and migration of existing
+monomorphic code onto the same machinery.
+
 ## Function templates
 
 Proposed spelling:
@@ -109,12 +113,13 @@ Collect constraints before committing an instance:
    matches the template's declared result shape unambiguously. Context may come
    from assignment, a function's annotated return, a typed field, or an enclosing
    call parameter. Propagate it through nested calls before defaulting literals.
-3. Solve the pending constraints in the caller's dependency group to a fixed
-   point. Instances whose own type arguments are already fixed may be checked
-   now; their completed inferred results can constrain enclosing calls. When no
-   further progress is possible, default remaining numeric variables to `long`
-   or `float64`. An unresolved nonnumeric parameter still requires an explicit
-   type argument.
+3. Solve pending constraints and check instances whose own type arguments are
+   already fixed; their completed inferred results can constrain enclosing calls.
+   When deduction needs a numeric fallback, default only the request's key
+   variables that have no pending external result producer, to `long` or
+   `float64`. Defer unrelated local defaults until their result dependencies
+   close. The implementation architecture specifies this scheduling rule.
+   An unresolved nonnumeric parameter still requires an explicit type argument.
 4. Check literal ranges as their selected types become known, and request the
    remaining concrete instances. Range failure reports an error; it does not
    retry a wider instance.
@@ -185,14 +190,15 @@ already supports templates.
 
 ## Checking and instantiation
 
-Keep template declarations and their type parameters private to HIR construction.
-Parse all bodies and establish lexical bindings in the defining module. Diagnose
-syntax errors, duplicate parameters, unbound non-dependent names, and invalid
-non-dependent operations even in unused templates. Retain the source body and
-its definition environment for checks that depend on template arguments.
+Resolve the complete program into immutable declarations and bodies with bound
+references before checking instances. Keep this representation private to HIR
+construction. Diagnose syntax errors, duplicate parameters, unbound non-dependent
+names, and invalid non-dependent operations even in unused templates. Checking
+and elaboration consume resolved references without repeating lexical lookup.
 
-On instantiation, bind the declared parameters to concrete types and check the
-body using the ordinary checker. Resolve dependent operators, fields, methods,
+Ordinary functions enter the same instance engine with zero type arguments. On
+instantiation, bind the declared parameters to concrete types and check the body
+using the shared checker. Resolve dependent operators, fields, methods,
 layout queries, and intrinsic calls at this point. A concrete receiver's method
 namespace remains its defining module's namespace. Caller-local declarations
 cannot change the meaning of names in the template body.
@@ -205,15 +211,15 @@ Failures in instances should show the concrete type arguments and the chain of
 uses that requested them.
 
 Use an explicit instance worklist keyed by declaration identity and canonical
-concrete type arguments. Reserve a function ID before checking recursive calls
-to the same instance; repeated calls reuse it. Calls requesting different type
+concrete type arguments. Reserve an instance identity before checking recursive
+calls to the same instance; repeated calls reuse it. Calls requesting different type
 arguments create different instances. Diagnose unbounded instantiation expansion
 with a bounded work limit and a useful chain, rather than overflowing the host
 stack. Apply the existing dependency-group result inference to concrete recursive
 instances; callers must not invent a missing result for an ambiguous cycle.
 
-Importing a template retains its declaration, definition environment, and access
-to private helpers in the owning compilation. Instances requested in different
+Importing a template retains its resolved declaration and references to private
+helpers in the owning compilation. Instances requested in different
 modules use the same declaration identity and are deduplicated. This requires
 retaining declarations across module checking instead of immediately replacing
 every source function with one concrete function ID.
@@ -270,31 +276,20 @@ rules understandable without preventing dependent body checking.
 
 ## Delivery and acceptance
 
-1. **Explicit function instances.** Add named type parameters and explicit
-   function type application. Keep parser changes and generated files together.
-   Cover instances at two types, reuse of one instance, concrete function values,
-   recursive instance reuse and expansion errors, and diagnostics for a failing
-   dependent operation. Reject unsupported generic exports until import support
-   is available.
-2. **Call deduction, imports, and editor analysis.** Deduce arguments through
-   nested parameter and declared result shapes, reject conflicts and missing
-   arguments, and preserve delayed numeric defaults. Test suffix-free calls,
-   typed arguments in both orders, assignment/return/enclosing-call context,
-   nested calls, later local uses, range boundaries, fixed-type conflicts, union
-   and Result widening, and rejection of inference through a `-> _` body.
-   Retain imported templates and private helpers. Test repeated imports, lexical
-   lookup, declared-parameter hovers, and instance diagnostics.
-3. **Type templates.** Add parameterized structs and aliases, canonical nominal
-   instances, layout/cycle checks, and methods/drop hooks belonging to those
-   instances. Then add methods with their own type parameters. Test nested types,
-   nominal distinctions, transparent aliases, and deduced `Pair<T>` arguments.
-4. **Host/GPU integration and documentation.** Exercise generic arithmetic and
-   field access, Result error parameters, `Arc` and custom-drop values, and direct
-   shader helpers. Verify argument evaluation and cleanup, concrete HIR, and
-   rejection of invalid GPU instances. Update the language guide and instructions
-   with the implemented syntax and deduction limits.
+Follow the migration in the [implementation architecture](template-implementation.md):
+resolve existing programs, move ordinary functions onto the instance engine, then
+enable function and type templates. Contextual deduction, imports, and editor
+analysis are part of the function-template implementation from the outset.
 
-Each stage should leave ordinary programs working and add positive and negative
-tests for the behavior it introduces. The essential guarantees are independent
-instances, stable declaration lookup, concrete public IR, and unchanged runtime
-evaluation and ownership semantics.
+Language acceptance includes explicit and deduced instances, concrete function
+values, dependent arithmetic and field access, suffix-free nested calls and later
+local uses, argument-order independence, range errors, and fixed-type conflicts.
+Preserve union/Result widening and reject deduction through an inferred body
+result. Verify nominal distinctions, aliases, methods, and drop hooks across
+instances and imports. Exercise C and direct shader-helper paths, including
+ownership-sensitive values and rejected managed GPU types.
+
+Every migration step leaves ordinary programs usable. The new architecture must
+also pass its boundary tests for resolved identities, result-dependency isolation,
+instance reuse, numeric scheduling, failure recovery, and immutable editor facts.
+Update the language guide and instructions with implemented syntax and limits.
