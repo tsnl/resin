@@ -6,6 +6,33 @@ use std::{collections::BTreeMap, path::Path, sync::Arc};
 use tempfile::TempDir;
 
 #[test]
+fn imported_generic_aliases_keep_binder_navigation_and_concrete_hover() {
+    let library = "export { View }; type View<T> = Ptr<T>;";
+    let source = "import { \"library.resin\" }; def use_view<T>(view: View<T>) -> T = { view.* }; def main() -> int = { var value = 42; var pointer: View<int>; pointer := &value; use_view(pointer) };";
+    let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
+    let analysis = project.analyze();
+    assert!(
+        analysis.diagnostics().is_empty(),
+        "{:?}",
+        analysis.diagnostics()
+    );
+    let input = project.source("main.resin");
+    let origin = analysis
+        .definition(&input, source.find("View<T>").unwrap())
+        .unwrap();
+    assert_eq!(origin.source, project.source("library.resin"));
+    let hover = analysis
+        .hover(&input, source.rfind("pointer").unwrap())
+        .unwrap();
+    assert_eq!(hover.text, "pointer: Ptr<int>");
+    let library_source = project.source("library.resin");
+    let origin = analysis
+        .definition(&library_source, library.find("Ptr<T>").unwrap() + 4)
+        .unwrap();
+    assert_eq!(origin.span.start, library.find("View<T>").unwrap() + 5);
+}
+
+#[test]
 fn template_scopes_retain_named_types_and_imported_schemes() {
     let library = "export { identity }; def identity<T>(value: T) -> _ = { value };";
     let source = "import { \"library.resin\" }; def forward<U>(input: U) -> U = { var copy = identity(input); copy }; def main() -> int = { forward(42) };";

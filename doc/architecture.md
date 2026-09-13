@@ -186,8 +186,17 @@ inside the definition; local function values remain monomorphic. A `_` is a weak
 monomorphic variable and can unify with an enclosing named parameter. Applications
 retain substitutions around unresolved definition variables, so recursive dependency
 groups can finish a result from its body without a caller determining it. Unseeded
-cycles and undetermined arguments require annotations. Generic nominal declarations,
-aliases, and method binders are the next source layers.
+cycles and undetermined arguments require annotations. Generic nominal declarations
+and method binders are the next source layers.
+
+Transparent aliases use the same lexical type binders, for example
+`type View<T> = Ptr<T>`. Source scopes retain their completed RHS and named parameters;
+applications expose the substituted structure to ordinary deduction. A local alias
+can capture its enclosing function's parameters without capturing arguments to its
+own binders. Aliases keep the target's nominal origin and method namespace and do
+not generate functions. Definitions resolve in declaration order; references to an
+alias while its RHS is being constructed report recursive expansion, even beneath
+a pointer. Expansion has separate HIR limits of 256 levels and 65,536 nodes.
 
 Persistent scopes store completed HIR schemes for imports, navigation, and hover.
 HIR keeps one body per source definition, including symbolic literals, arithmetic,

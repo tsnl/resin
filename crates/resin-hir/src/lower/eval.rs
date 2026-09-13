@@ -18,7 +18,8 @@ pub(super) struct Decoded {
 pub(super) struct Decoder<'a> {
     pub solver: &'a mut Solver,
     pub holes: Vec<(Span, VariableId)>,
-    pub resolve: &'a mut dyn FnMut(&Ident) -> Result<Type, GenerateError>,
+    pub scopes: &'a ContextView,
+    pub string: Option<&'a Ty>,
 }
 
 impl Decoder<'_> {
@@ -28,6 +29,13 @@ impl Decoder<'_> {
             ty,
             holes: self.holes,
         })
+    }
+
+    fn named(&self, name: &Ident, arguments: Vec<Type>) -> Result<Type, GenerateError> {
+        if name.val.as_ref() == "String" && arguments.is_empty() {
+            return Ok(self.string.expect("builtin String").clone().into());
+        }
+        self.scopes.resolve_type(name, arguments)
     }
 
     fn ty(&mut self, ann: &resin_ast::Type, infer: bool) -> Result<Type, GenerateError> {
@@ -52,32 +60,32 @@ impl Decoder<'_> {
             }
             TypeKind::Atom { name } => builtin_ty(&name.val)
                 .map(|ty| Ok(ty.into()))
-                .unwrap_or_else(|| (self.resolve)(name))?,
+                .unwrap_or_else(|| self.named(name, vec![]))?,
             TypeKind::App { head, args } => {
-                let [arg] = args.as_slice() else {
-                    return Err(GenerateError::inference(
-                        ann.span,
-                        "type application has the wrong number of arguments",
-                    ));
+                let arguments = args
+                    .iter()
+                    .map(|arg| self.ty(arg, infer))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let builtin = match head.val.as_ref() {
+                    "Ptr" => Some(Head::Pointer),
+                    "GpuPtr" => Some(Head::GpuPointer),
+                    "GpuSpan" => Some(Head::GpuSpan),
+                    "Arc" => Some(Head::Arc),
+                    "Weak" => Some(Head::Weak),
+                    "Span" => Some(Head::Span),
+                    _ => None,
                 };
-                let arg = self.ty(arg, infer)?;
-                let head = match head.val.as_ref() {
-                    "Ptr" => Head::Pointer,
-                    "GpuPtr" => Head::GpuPointer,
-                    "GpuSpan" => Head::GpuSpan,
-                    "Arc" => Head::Arc,
-                    "Weak" => Head::Weak,
-                    "Span" => Head::Span,
-                    _ => {
-                        return Err(GenerateError {
-                            span: head.span,
-                            kind: GenerateErrorKind::UnknownTypeFormer {
-                                name: head.val.clone(),
-                            },
-                        });
+                if let Some(builtin) = builtin {
+                    if arguments.len() != 1 {
+                        return Err(GenerateError::inference(
+                            ann.span,
+                            "type application has the wrong number of arguments",
+                        ));
                     }
-                };
-                Type::Node(head, vec![arg])
+                    Type::Node(builtin, arguments)
+                } else {
+                    self.named(head, arguments)?
+                }
             }
             TypeKind::GpuPipeline { head, root, owner } => {
                 let kind = match head.val.as_ref() {
@@ -187,24 +195,19 @@ fn numeric_type(
 
 impl Evaluator<'_> {
     pub(crate) fn ty(&self, ty: &resin_ast::Type) -> Result<Ty, GenerateError> {
+        Solver::default().require(&Type::from_hir(&self.scheme(ty)?), ty.span)
+    }
+
+    pub(super) fn scheme(&self, ty: &resin_ast::Type) -> Result<crate::Type, GenerateError> {
         let mut solver = crate::lower::infer::Solver::default();
         let inferred = Decoder {
             solver: &mut solver,
             holes: Vec::new(),
-            resolve: &mut |name| {
-                if name.val.as_ref() == "String" {
-                    return Ok(self
-                        .typer
-                        .string_type()
-                        .cloned()
-                        .expect("builtin String")
-                        .into());
-                }
-                self.scopes.resolve_type(name)
-            },
+            scopes: self.scopes,
+            string: self.typer.string_type(),
         }
         .decode(ty, false)?;
-        solver.require(&inferred.ty, ty.span)
+        solver.require_bounded(&inferred.ty, ty.span)
     }
 }
 

@@ -57,18 +57,8 @@ impl Checker<'_> {
         let result = super::eval::Decoder {
             solver: &mut self.typing.solver,
             holes: Vec::new(),
-            resolve: &mut |name| {
-                if name.val.as_ref() == "String" {
-                    return Ok(self
-                        .typing
-                        .typer
-                        .string_type()
-                        .cloned()
-                        .expect("builtin String")
-                        .into());
-                }
-                self.scopes.resolve_type(name)
-            },
+            scopes: self.scopes.view(),
+            string: self.typing.typer.string_type(),
         }
         .decode(ann, infer);
         if scoped {
@@ -326,27 +316,10 @@ impl Checker<'_> {
         let mut binders = vec![];
         if let StmtKind::Function { type_params, .. } = stmt {
             for parameter in type_params {
-                let declaration = match self.scopes.define_inferred(
-                    parameter,
-                    Type::Invalid,
-                    DefinitionKind::Type,
-                ) {
-                    Ok(id) => id,
-                    Err(_) => {
-                        self.errors.push(GenerateError::inference(
-                            parameter.span,
-                            "duplicate type parameter",
-                        ));
-                        continue;
-                    }
-                };
-                let id = crate::TypeParameterId::from_index(declaration);
-                self.scopes
-                    .set_inferred(declaration, Type::Node(Head::Parameter { id }, vec![]));
-                binders.push(crate::TypeParameter {
-                    id,
-                    name: parameter.clone(),
-                });
+                match self.scopes.define_type_parameter(parameter) {
+                    Ok(parameter) => binders.push(parameter),
+                    Err(error) => self.errors.push(error),
+                }
             }
         }
         let mut signature = self.signature(params, result, body.is_some());
@@ -1227,16 +1200,9 @@ impl Expression<'_, '_> {
                 init,
                 type_params,
             } => {
-                crate::lower::require_monomorphic(type_params)?;
-                let ann = self.annotation(init, false);
-                let ty = self.checker.typing.solver.require(&ann.ty, ann.span)?;
                 self.checker
                     .scopes
-                    .define_alias(name, ty)
-                    .map_err(|name| GenerateError {
-                        span,
-                        kind: GenerateErrorKind::DuplicateType { name },
-                    })?;
+                    .alias(name, type_params, init, self.checker.typing.typer)?;
                 StatementKind::TypeDefinition
             }
             StmtKind::Expr { term } => {
