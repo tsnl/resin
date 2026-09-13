@@ -1,7 +1,8 @@
 # Scope: Nanopass refactoring before polymorphism
 
 Status: proposed behavior-preserving refactor, reviewed against main at
-`a7e3e8b7`. This scopes implementation work; it does not implement it.
+`12c90003`, including the agreed [Nanopass conventions](../AGENTS.md#nanopass-design).
+This scopes implementation work; it does not implement it.
 The [polymorphism draft](https://github.com/tsnl/resin/pull/159) remains separate.
 
 ## Assessment
@@ -10,14 +11,17 @@ Resin already follows the central Nanopass idea at its major boundaries:
 explicit languages, translations between them, and downstream consumers that
 receive completed data. The [Nanopass framework](https://nanopass.org/) emphasizes
 small passes and multiple intermediate representations. We can adopt that style
-more consistently inside the frontend without replacing the compiler's crate
-structure or introducing a framework.
+more consistently inside the frontend using its existing enums, exhaustive
+matches, and ordinary recursive functions or methods. Each translation chooses
+its own arguments, results, and private state. Visitor traits, generated traversal,
+and a wholesale change to variant structs or allocation are not prerequisites.
 
 The main prerequisite is a focused frontend refactor: preserve binding and
-operation decisions in the intermediate data, and separate completed products
-from the context used to construct them. A smaller per-function LIR translation
-refactor also gives us a useful preparation for specialization. Adding more arrows
-to the public pipeline would not by itself improve those contracts.
+operation decisions in the intermediate data, and make the completed body handoff
+independent of construction state. A smaller per-function LIR translation
+refactor also prepares for specialization. Reuse the existing representations
+where they establish these guarantees; neither a separate full bound tree nor
+a redesign of retained editor facts is required before polymorphism.
 
 | Existing boundary | Evidence and assessment |
 | --- | --- |
@@ -56,10 +60,10 @@ metadata together with its signatures and bodies.
 
 Editor [Analysis](../crates/resin-hir/src/lib.rs) retains scope data and the
 frontend's `Context`, including type/method construction vocabulary. Its queries
-are immutable today, and it does not retain the inference solver. The opportunity
-is to give completed editor facts their own representation, so their contract no
-longer depends on the source-construction implementation. Recovering an unfinished
-receiver still needs useful facts even when there is no complete executable HIR.
+are immutable today, and it does not retain the inference solver. Preserve that
+contract and useful facts for unfinished receivers even when there is no complete
+executable HIR. Narrowing the retained catalog may help when schemes are introduced,
+but a wholesale editor representation rewrite is outside the prerequisite stack.
 
 Within LIR construction, the [module generator](../crates/resin-lir/src/lower/mod.rs)
 owns both module output and per-function mutable state. Its
@@ -79,8 +83,12 @@ for later one-to-many specialization, independent of changing function-ID types.
 
 Keep the public sequence `AST → HIR → LIR → verified LIR → target`. Each pass
 produces the representation it promises, or diagnostics. Smaller private passes
-must have explicit input/output data with an identifiable difference. Ordinary
-Rust structs, enums, and direct functions are sufficient.
+must have explicit input/output data with an identifiable difference. Use ordinary
+Rust structs, enums, and direct functions. Keep recursion under each translation's
+control so scope extension, evaluation order, short-circuiting, and cleanup remain
+visible. Share walkers only where traversal requirements agree. Dependency groups,
+constraint solving, and worklists remain explicit algorithms inside their owning
+pass; individual algorithm steps need not introduce more languages or public APIs.
 
 For LIR, make the unit of translation one HIR function with the concrete
 definitions it needs. A private per-function state object always contains its
@@ -96,10 +104,11 @@ another whole-program representation. Binding IDs can be recorded when lexical
 lookup first succeeds. Inference can continue using local equations, dependency
 groups, and recovery state. Its outgoing translation must establish a completed
 body whose subsequent translation no longer selects lexical cursors or resolves
-source names.
+source names. This body may be public HIR directly; a distinct completed private
+tree is an option only when it simplifies a meaningful remaining translation.
 
-The completed private body may preserve surface constructs whose expansion is a
-separate useful translation, such as short-circuiting and receiver argument
+If a completed private body is useful, it may preserve surface constructs whose
+expansion is a separate translation, such as short-circuiting and receiver argument
 packing. Its language must describe those constructs with the information needed
 to expand them: concrete operand/result types, chosen declaration or intrinsic,
 receiver adaptation, field identity, literal value, and conversion descriptions.
@@ -113,20 +122,22 @@ Retain a private intermediate only for the source constructs whose distinct
 translation makes the implementation easier to understand. A separate full bound
 AST is not a prerequisite merely because it appeared in the polymorphism sketch.
 
-Each completed body must own or explicitly reference an immutable declaration/type
-catalog sufficient for its translation, including source names and locations,
-foreign headers, decorators, and other function metadata. Reserve identities for recursive functions,
+The completed handoff must include the immutable declaration/type data needed by
+remaining translations, including source names and locations, foreign headers,
+decorators, and other function metadata. Module data can hold information shared
+by its bodies. Reserve identities for recursive functions,
 nominal types, and drop hooks before resolving uses. Do not require a callee's body
 to finish before referring to its completed signature. Keep dependency solving and
 numeric defaulting at their current boundaries.
 
-Editor output is a separate completed product of the same source translation:
+Preserve existing editor output independently of successful executable HIR:
 definition identities and locations, visibility scopes, resolved use sites,
-determined types, and member/signature facts. Preserve source-version identity and
+determined types, and member/signature facts. Keep source-version identity and
 the visibility point in parent scopes. CST may still provide token ranges and
-identify incomplete syntax; it must not trigger inference or code generation.
-Failed definitions can produce diagnostics and partial editor facts without
-fabricating a completed body or erasing independent healthy facts.
+identify incomplete syntax; queries must not trigger inference or code generation.
+Failed definitions must preserve diagnostics and partial editor facts without
+fabricating a completed body or erasing independent healthy facts. Maintain these
+guarantees through the frontend changes using the existing immutable analysis API.
 
 ## Suggested implementation PRs
 
@@ -141,22 +152,19 @@ fabricating a completed body or erasing independent healthy facts.
    by those identities as well. Carry resolved operation decisions when available;
    defer type-dependent choices until inference completes. Keep diagnostics and
    source names as metadata. Remove lexical re-lookup from the outgoing translation.
-3. **Make the frontend handoff a completed language.** Separate the unfinished
-   inference/recovery representation from completed bodies and catalogs. Translate
-   completed bodies to HIR without a solver, `ContextView`, or mutable frontend
-   `Context`. Include function metadata so this translation no longer rereads AST
-   declarations. Make the coordinating function visibly compose these translations.
-4. **Retain editor facts independently of construction.** Freeze the declarations,
-   scopes, type/member information, and use-site facts consumed by queries. Drop
-   the construction context after producing HIR and analysis. Preserve useful
-   output after malformed syntax, failed inference, and unrelated errors.
+3. **Complete the frontend handoff.** Preserve the remaining operation choices,
+   conversions, and declaration metadata after inference. Produce HIR directly
+   where possible. If a separate completed private body is useful, its translation
+   to HIR consumes explicit data without a solver, `ContextView`, mutable frontend
+   `Context`, or another scan of AST declarations. Make the coordinating function
+   show the remaining translations and retain current editor recovery throughout.
 
 These are review boundaries, not an estimate of equal-sized patches. The first is
 small relative to the frontend work. Steps two and three touch inference and
-elaboration closely; the fourth has substantial recovery and editor coverage.
-Overall this is a medium refactor spread across several focused PRs, with most
-work in the frontend. Exact patch sizes depend on how much of the existing private
-tree can become direct HIR.
+elaboration closely and need recovery and editor regression coverage. Their exact
+patch boundaries depend on how much of the existing private tree can become
+direct HIR. The stack strengthens these contracts without adding a separate
+visitor migration, mandatory bound tree, or editor-facts redesign.
 
 ## Stack order and methods inside structs
 
@@ -238,6 +246,10 @@ polymorphic HIR, HIR-owned schemes, moving concrete type interning into LIR, and
 the configurable monomorph allowance belong to the polymorphism implementation.
 Adding them now would enlarge a behavior-preserving prerequisite into that feature.
 
+Retained editor catalogs can evolve when new scheme or query requirements make
+that useful. The current immutable, solver-free query contract already supports
+this prerequisite. Do not require a wholesale representation rewrite first.
+
 Do not split initialization, cleanup, and region formation solely because they
 are different activities. Their existing local state cooperates to produce LIR.
 A further pass would need an output representation that preserves initialization
@@ -269,9 +281,10 @@ Use existing coverage as the baseline and add tests for the new guarantees:
   aliases, contextual literals, layout-operand non-evaluation, and identity despite
   equal source spans.
 - [HIR boundaries](../crates/resin-hir/tests/boundary.rs) and
-  [phase boundaries](../tests/phase_boundaries.rs): translate completed private
-  bodies with lexical builders and inference state dropped; confirm HIR still
-  lowers independently and codegen accepts only verified LIR.
+  [phase boundaries](../tests/phase_boundaries.rs): confirm completed HIR lowers
+  after lexical builders and inference state are dropped. If a completed private
+  body is retained, its outgoing translation must work under the same condition.
+  Confirm codegen still accepts only verified LIR.
 - [LIR public API](../crates/resin-lir/tests/public_api.rs) and
   [structured flow](../crates/resin-lir/tests/structured_flow.rs): preserve local
   zero, foreign signatures, initialization/cleanup, and region structure; ensure
@@ -296,7 +309,10 @@ PR, followed by the required workspace checks. Only expand GPU/window execution
 coverage when a change affects those paths, using the repository's required flags.
 This scoping PR itself changes documentation only.
 
-The prerequisite is complete when downstream translations and editor queries can
-consume their declared data without retaining frontend construction capabilities.
-At that point polymorphism can change the HIR type vocabulary and introduce
-specialization without simultaneously repairing these existing handoffs.
+The prerequisite is complete when body translations preserve resolved decisions
+and consume completed data without source re-lookup or mutable construction state,
+and each function's LIR translation owns its state and returns its origins.
+Existing immutable editor queries and recovery must still work; their retained
+representation need not be replaced. Polymorphism can then change the HIR type
+vocabulary and introduce specialization without repairing these handoffs at the
+same time.
