@@ -109,6 +109,40 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   that establish complete guarantees, and control flow that teaches the problem.
   Adapt that taste to Resin's behavior, explicit phase boundaries, and idiomatic Rust.
 
+### Nanopass design
+
+- Follow the [Nanopass](https://docs.racket-lang.org/nanopass/index.html) approach by
+  convention: explicit languages and translations whose outputs establish useful
+  guarantees. Build on the existing phase boundaries and enum trees. A pass's signature
+  should identify its inputs, completed outputs, and diagnostics.
+- Write translations with ordinary Rust functions or methods and exhaustive matches.
+  Keep simple cases inline and extract substantial cases into descriptive helpers.
+  Each translation chooses its own context arguments and result types, including extra
+  computed facts. Introduce visitor traits, generated traversal, or tree macros only
+  when concrete reuse justifies them; adopting this style does not require changing
+  every enum variant into a separate struct or changing its allocation strategy.
+- Keep recursion under the translation's control. Scope extension, evaluation order,
+  short-circuiting, and cleanup may require different treatment of children. Use shared
+  walkers when traversal requirements actually agree. Dependency groups, constraint
+  solving, and fixed-point worklists remain explicit algorithms inside their owning pass.
+- Private mutable state is compatible with a translation that returns completed data.
+  Give state the lifetime of the work it serves: per-function LIR lowering owns its
+  builder, bindings, cleanup scopes, and source tracking, and returns a function and
+  its origins to module assembly. Preserve source origins independently of any assumed
+  one-to-one correspondence between function IDs in different languages.
+- Preserve resolved decisions when they become available: declaration identities,
+  chosen operations, field access, conversions, and declaration metadata. Completed
+  outputs must carry the data needed by the next translation, without repeating source
+  lookup or consulting mutable construction state. Keep inference and recovery inside
+  HIR construction; editor facts must remain useful even when executable HIR cannot
+  be completed.
+- Add a private intermediate language when its distinct forms or guarantees simplify
+  a meaningful translation. Prefer adapting existing data or constructing HIR directly
+  when that establishes the same contract. Internal algorithm steps need not each
+  become a separate language, public pass, or crate. Spend refactor churn on stronger
+  data contracts and bounded ownership of state; retain existing representations and
+  direct translations where they already express those contracts clearly.
+
 ## Cost control
 
 - Run automatic CI for pull requests and pushes on Linux only. Keep Windows and macOS
