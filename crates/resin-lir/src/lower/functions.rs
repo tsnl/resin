@@ -2,7 +2,7 @@
 use super::builder::FunctionBuilder;
 use super::{FunctionLowering, LowerError, LoweredFunction};
 use super::{Initialization, ValueBinding};
-use crate::{Instr, Terminator};
+use crate::{BlockId, Instr, Local, Terminator};
 use resin_hir::{Function, Parameter, Signature};
 use resin_source::prelude::*;
 use resin_types::prelude::*;
@@ -11,19 +11,38 @@ pub(super) fn lower(
     source: &Function,
     typer: &TyperContext,
 ) -> Result<LoweredFunction, crate::Error> {
+    if let Some(foreign) = &source.foreign {
+        return Ok(lower_foreign(source, foreign));
+    }
     let mut lowering = FunctionLowering::new(source, typer);
     lowering.lower_body(source).map_err(|error| crate::Error {
         source: lowering.source.clone(),
         span: error.span,
         kind: error.kind,
     })?;
-    let mut function = lowering.function.finish();
-    set_foreign(&mut function, source);
     Ok(LoweredFunction {
-        function,
+        function: lowering.function.finish(),
         location: source.location.clone(),
         origins: lowering.origins,
     })
+}
+
+fn lower_foreign(source: &Function, foreign: &Foreign) -> LoweredFunction {
+    LoweredFunction {
+        function: crate::Function {
+            name: Some(source.name.clone()),
+            foreign: Some(foreign.clone()),
+            result: source.signature.result.ty.clone(),
+            locals: vec![Local {
+                name: None,
+                ty: source.signature.parameter_type(),
+            }],
+            entry: BlockId::from_index(0),
+            blocks: vec![],
+        },
+        location: source.location.clone(),
+        origins: Default::default(),
+    }
 }
 
 impl<'types> FunctionLowering<'types> {
@@ -113,12 +132,5 @@ impl<'types> FunctionLowering<'types> {
             local: LocalId::from_index(0),
         });
         self.emit(Instr::AccessStatic { index });
-    }
-}
-
-fn set_foreign(function: &mut crate::Function, source: &Function) {
-    function.foreign = source.foreign.clone();
-    if function.foreign.is_some() {
-        function.blocks.clear();
     }
 }

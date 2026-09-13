@@ -267,13 +267,24 @@ fn ordinary_and_foreign_parameters_share_one_unit_single_or_tuple_slot() {
         (vec![Ty::Bool, Ty::Int32], tuple),
     ] {
         for foreign in [false, true] {
+            let location = SourceLocation {
+                source: Source::new("callee.resin", "callee"),
+                span: Span { start: 0, end: 6 },
+            };
+            let mut declaration = parameter_function(&params, foreign);
+            declaration.location = Some(location.clone());
             let tree = Module {
-                functions: vec![parameter_function(&params, foreign)],
+                functions: vec![declaration],
                 ..Default::default()
             };
             let checked =
                 resin_lir::VerifiedModule::new(resin_lir::generate(&tree).unwrap()).unwrap();
             let function = &checked.view().module().functions[0];
+            assert_eq!(function.foreign.is_some(), foreign);
+            assert_eq!(
+                checked.view().module().origins.functions[&FunctionId::from_index(0)],
+                location,
+            );
             assert_eq!(function.locals[0].ty, expected);
             assert_eq!(
                 function.ty(),
@@ -284,8 +295,10 @@ fn ordinary_and_foreign_parameters_share_one_unit_single_or_tuple_slot() {
             );
             assert_eq!(function.blocks.is_empty(), foreign);
             if foreign {
+                assert_eq!(function.locals.len(), 1);
                 assert_eq!(function.foreign.as_ref().unwrap().params, params);
                 assert!(checked.view().analysis().functions[0].inputs.is_empty());
+                assert!(checked.view().module().origins.instructions.is_empty());
             }
         }
     }
