@@ -9,12 +9,13 @@ fn generate(source: &str) -> Result<Module, resin_hir::GenerateError> {
 
 const ALLOCATOR: &str = r#"
 struct Failure {};
-struct Device {};
-impl Device {
+struct Device {
     def new() -> Device = { Device {} };
+    // PIPELINE_METHODS
     @gpu_allocator
     def malloc(self: Device, bytes: ulong, alignment: ulong, memory: int) -> Result<GpuPtr<ubyte>, Failure> = { err(Failure {}) };
-}
+};
+
 "#;
 
 #[test]
@@ -77,13 +78,13 @@ fn nested_host_indirection_preserves_gpu_field_addresses_but_host_metadata_stays
 #[test]
 fn gpu_method_receivers_keep_the_storage_category() {
     let types = r#"
-        struct Item { value: int };
-        struct Outer { item: Item };
-        impl Item {
+        struct Item { value: int,
             def gpu(self: GpuPtr<Item>) -> int = { self.value };
             def host(self: Ptr<Item>) -> int = { self.value };
             def value(self: Item) -> int = { self.value };
-        }
+        };
+        struct Outer { item: Item };
+
     "#;
     generate(&format!("{types} def gpu(p: GpuPtr<Outer>) -> int = {{ p.item.gpu() }}; def copied(p: GpuPtr<Item>) -> int = {{ p.value() }}; def replaced(p: GpuPtr<int>) -> int = {{ p.replace(4_i) }};")).unwrap();
     let error = generate(&format!(
@@ -119,7 +120,7 @@ fn allocation_rejects_managed_elements_and_ordinary_new_is_unchanged() {
         ))
         .is_err()
     );
-    generate("struct Other {}; impl Other { def new(self: Other, value: int) -> int = { value }; } def main() -> int = { Other {}.new(42) };").unwrap();
+    generate("struct Other { def new(self: Other, value: int) -> int = { value }; };  def main() -> int = { Other {}.new(42) };").unwrap();
 }
 
 #[test]
@@ -152,12 +153,22 @@ fn gpu_new_defaults_unconstrained_integer_elements_to_long() {
 const SHADER: &str = "struct Params { scale: float32, values: Span<int> }; @compute_shader def kernel(index: ulong, root: Ptr<Params>) = {};";
 
 const PIPELINES: &str = r#"
-struct PipelineOwner { gpu: Device };
-impl PipelineOwner {
+struct PipelineOwner { gpu: Device,
     @gpu_pipeline_context
     def context(self: Arc<PipelineOwner>) -> Device = { self.gpu };
-}
-impl Device {
+};
+
+
+struct Commands {
+    @gpu_dispatch
+    def dispatch(self: Commands, pipeline: Arc<PipelineOwner>, root: GpuArguments, x: uint, y: uint, z: uint) -> Result<(), Failure> = { ok(()) };
+    @gpu_draw
+    def draw(self: Commands, pipeline: Arc<PipelineOwner>, root: GpuArguments | None, count: uint) -> Result<(), Failure> = { ok(()) };
+};
+
+"#;
+
+const PIPELINE_METHODS: &str = r#"
     @gpu_compute_pipeline
     def compute(self: Device, code: Span<ubyte>) -> Result<Arc<PipelineOwner>, Failure> = {
         ok(Arc<PipelineOwner>(PipelineOwner { gpu = self }))
@@ -165,19 +176,15 @@ impl Device {
     @gpu_graphics_pipeline
     def graphics(self: Device, vertex: Span<ubyte>, fragment: Span<ubyte>) -> Result<Arc<PipelineOwner>, Failure> = {
         ok(Arc<PipelineOwner>(PipelineOwner { gpu = self }))
-    };
+    };"#;
+
+fn pipeline_source(source: &str) -> String {
+    let allocator = ALLOCATOR.replace("// PIPELINE_METHODS", PIPELINE_METHODS);
+    format!("{allocator} {PIPELINES} {source}")
 }
-struct Commands {};
-impl Commands {
-    @gpu_dispatch
-    def dispatch(self: Commands, pipeline: Arc<PipelineOwner>, root: GpuArguments, x: uint, y: uint, z: uint) -> Result<(), Failure> = { ok(()) };
-    @gpu_draw
-    def draw(self: Commands, pipeline: Arc<PipelineOwner>, root: GpuArguments | None, count: uint) -> Result<(), Failure> = { ok(()) };
-}
-"#;
 
 fn pipelines(source: &str) -> Result<Module, resin_hir::GenerateError> {
-    generate(&format!("{ALLOCATOR} {PIPELINES} {source}"))
+    generate(&pipeline_source(source))
 }
 
 #[test]
@@ -276,15 +283,20 @@ fn native_bridge_signatures_cannot_escape_through_method_references() {
 #[test]
 fn gpu_bridge_decorators_require_one_valid_native_signature() {
     for source in [
-        "struct Device {}; impl Device { @gpu_compute_pipeline def create(self: Device, shader: int) -> int = { 0_i }; }",
-        "struct Device {}; impl Device { @gpu_dispatch def dispatch(self: Device) = {}; }",
-        "struct Device {}; impl Device { @gpu_pipeline_context def context(self: Device) -> Device = { self }; }",
-        "struct Device {}; impl Device { @gpu_compute_pipeline @gpu_graphics_pipeline def create(self: Device) = {}; }",
+        "struct Device { @gpu_compute_pipeline def create(self: Device, shader: int) -> int = { 0_i }; }; ",
+        "struct Device { @gpu_dispatch def dispatch(self: Device) = {}; }; ",
+        "struct Device { @gpu_pipeline_context def context(self: Device) -> Device = { self }; }; ",
+        "struct Device { @gpu_compute_pipeline @gpu_graphics_pipeline def create(self: Device) = {}; }; ",
         "@gpu_compute_pipeline def create() = {};",
     ] {
         assert!(generate(source).is_err(), "{source}");
     }
-    assert!(pipelines("impl PipelineOwner { @gpu_pipeline_context def again(self: Arc<PipelineOwner>) -> Device = { self.gpu }; }").is_err());
+    let source = pipeline_source("").replace(
+        "struct PipelineOwner { gpu: Device,",
+        "struct PipelineOwner { gpu: Device, @gpu_pipeline_context def again(self: Arc<PipelineOwner>) -> Device = { self.gpu };",
+    );
+    let error = generate(&source).unwrap_err();
+    assert!(error.to_string().contains("only one"), "{error}");
 }
 
 #[test]

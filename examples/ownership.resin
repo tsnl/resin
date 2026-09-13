@@ -4,13 +4,13 @@ import { "$/host.resin", "$/status.resin" };
 
 struct Failed {};
 
-struct Allocation { data: Ptr<int> };
-impl Allocation {
+struct Allocation {
+	data: Ptr<int>,
 	def drop(self: Ptr<Allocation>) = {
 		Host.free(Ptr<ubyte>(self.data));
 		print("freed memory\n");
 	};
-}
+};
 
 def allocate() -> Result<Arc<Allocation>, OutOfMemory> = {
 	var memory = Host.malloc(size_of(int))?;

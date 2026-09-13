@@ -466,10 +466,9 @@ directly into fields or elements. Fresh expression results do not incur an extra
 copy or destruction simply because they cross an application boundary.
 
 ```resin
-struct Resource { handle: Ptr<ubyte> };
-impl Resource {
+struct Resource { handle: Ptr<ubyte>,
     def drop(self: Ptr<Resource>) = { release_native_handle(self.handle); };
-}
+};
 
 // Inside a function:
 var shared = Arc<Resource> { handle = acquire_native_handle() };
@@ -625,7 +624,7 @@ importing file; each canonical file is loaded once. Imports never execute code. 
 functions within one file remain supported.
 `include` has been replaced by `import`.
 
-Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `impl`, `def`, `var`, `if`,
+Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `def`, `var`, `if`,
 `else`, `while`, and `match`), primitive type names, `Never`, and
 `Ptr`/`Span`/`Arc`/`Weak`/`Result`/`None` are reserved, including in parameters and field names.
 Names such as `if_value` are ordinary identifiers. `fmt`, `print`, `ok`, `err`,
@@ -677,16 +676,15 @@ export { Gpu };
 import { "$/status.resin" };
 
 extern type ResinGpu;
-struct GpuOwner { handle: Ptr<ResinGpu> };
-type Gpu = Arc<GpuOwner>;
-impl GpuOwner {
+struct GpuOwner { handle: Ptr<ResinGpu>,
     def new() -> Result<Gpu, RuntimeError> = {
         var handle = Ptr<ResinGpu>(0_ul);
         RuntimeStatus.from_code(resin_gpu_create(&handle))?;
         ok(Gpu { handle = handle })
     };
     def drop(self: Ptr<GpuOwner>) = { resin_gpu_destroy(self.handle); };
-}
+};
+type Gpu = Arc<GpuOwner>;
 
 extern "resin_runtime.h" def resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
 extern "resin_runtime.h" def resin_gpu_destroy(gpu: Ptr<ResinGpu>);
@@ -1046,7 +1044,7 @@ scope destruction. Matches over inhabited variants still require exhaustive, uni
 [`T | None`](options.md) supports direct widening, exhaustive matching,
 and postfix `!` to exclude `None` or trap.
 
-Inherent methods and associated functions use [`impl` blocks](methods.md).
+Inherent methods and associated functions are declared [inside their struct](methods.md).
 
 ## Resources
 

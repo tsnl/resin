@@ -270,7 +270,7 @@ struct Project {
 
 #[test]
 fn inherent_methods_have_navigation_hover_and_member_completion() {
-    let library = "export { Counter }; struct Counter { count: int }; impl Counter { def new() -> Counter = { Counter { count = 7 } }; def read(self: Ptr<Counter>) -> int = { self.count }; }";
+    let library = "export { Counter }; struct Counter { count: int, def new() -> Counter = { Counter { count = 7 } }; def read(self: Ptr<Counter>) -> int = { self.count }; }; ";
     for incomplete in [None, Some("c"), Some("Counter")] {
         let tail = incomplete
             .map(|base| format!("{base}.;"))
@@ -385,7 +385,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
 
 #[test]
 fn shared_receiver_completion_and_navigation_include_ordinary_drop_methods() {
-    let library = "export { Counter }; struct Counter { count: int }; impl Counter { def drop(self: Ptr<Counter>) = {}; def read(self: Ptr<Counter>) -> int = { self.count }; }";
+    let library = "export { Counter }; struct Counter { count: int, def drop(self: Ptr<Counter>) = {}; def read(self: Ptr<Counter>) -> int = { self.count }; }; ";
     for tail in ["", "c.;"] {
         let source =
             format!("import {{ \"lib.resin\" }}; def f(c: Arc<Counter>) = {{ c.read(); {tail} }};");
@@ -1294,7 +1294,7 @@ fn editor_analysis_tolerates_truncation_and_deleted_tokens() {
         "export { main }; struct Point { x: int }; def main(arg: Ptr<Point>) = { var value = arg.x + 1; print(fmt(\"{}\", value)); };",
         "def main(arg: int) -> int = { var pair = { left = arg, right = 1 }; if (arg == 0) (pair.left) else (pair.right) };",
         "def main() = { var values = [1, 2]; while (1 == 1) { var missing: Ptr<int>; }; };",
-        "struct Cleanup { value: Ptr<int> }; impl Cleanup { def drop(self: Ptr<Cleanup>) = { self.value.* := 42; }; } def main() = { var n = 0; var cleanup = Cleanup { value = &n }; };",
+        "struct Cleanup { value: Ptr<int>, def drop(self: Ptr<Cleanup>) = { self.value.* := 42; }; };  def main() = { var n = 0; var cleanup = Cleanup { value = &n }; };",
         "struct Item { value: int }; def main() = { var owner = Arc<Item> { value = 42 }; var weak = owner.downgrade(); match (weak.upgrade()) { Arc<Item>(item) => { item.value; }, None => {} }; };",
     ] {
         for end in 0..=source.len() {
@@ -1602,7 +1602,7 @@ fn recursive_failure_discards_copied_caller_result_facts() {
 
 #[test]
 fn incomplete_impls_and_method_arguments_keep_editor_recovery() {
-    let source = "struct Counter { count: int }; impl Counter { def add(counter: Counter, amount: int) -> int = { counter.count + amount }; } def f(c: Counter) -> int = { c.add(1) };";
+    let source = "struct Counter { count: int, def add(counter: Counter, amount: int) -> int = { counter.count + amount }; };  def f(c: Counter) -> int = { c.add(1) };";
     for end in source
         .char_indices()
         .map(|(index, _)| index)
@@ -1611,7 +1611,7 @@ fn incomplete_impls_and_method_arguments_keep_editor_recovery() {
         let project = Project::new(&[("main.resin", &source[..end])]);
         project.analyze();
     }
-    let source = "struct Counter { count: int }; impl Counter { def read(counter: Counter) -> int = { counter.count }; } def f(c: Counter) = { c.read(; };";
+    let source = "struct Counter { count: int, def read(counter: Counter) -> int = { counter.count }; };  def f(c: Counter) = { c.read(; };";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.analyze();
     let offset = source.rfind("read").unwrap();
@@ -1678,7 +1678,7 @@ fn formatted_string_and_literal_string_types_survive_editor_recovery() {
 fn invalid_method_arguments_preserve_receiver_facts_and_later_bindings() {
     for duplicate in ["", "def read(self: Missing) -> int = { 0 };"] {
         let source = format!(
-            "struct Item {{ count: int }}; impl Item {{ def read(self: Ptr<Item>) -> int = {{ self.count }}; {duplicate} }} def f(c: Item) = {{ var bad = c.read(missing); var alias = bad; var healthy = 1.5f; alias; healthy; c.; }};"
+            "struct Item {{ count: int, def read(self: Ptr<Item>) -> int = {{ self.count }}; {duplicate} }};  def f(c: Item) = {{ var bad = c.read(missing); var alias = bad; var healthy = 1.5f; alias; healthy; c.; }};"
         );
         let project = Project::new(&[("main.resin", &source)]);
         let analysis = project.analyze();

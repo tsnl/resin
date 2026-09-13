@@ -77,7 +77,7 @@ fn omitted_unit_returns_run_and_reject_non_unit_tails() {
 #[test]
 fn destruction_runs_when_native_status_propagates_to_the_entry() {
     let output = cli(
-        "export { main }; import { \"$/status.resin\" }; struct Cleanup {}; impl Cleanup { def drop(self: Ptr<Cleanup>) = { print(fmt(\"cleanup\\n\", ())); }; } def main() -> Result<(), _> = { RuntimeStatus.from_code(0)?; var cleanup = Cleanup {}; RuntimeStatus.from_code(8)?; ok(()) };",
+        "export { main }; import { \"$/status.resin\" }; struct Cleanup { def drop(self: Ptr<Cleanup>) = { print(fmt(\"cleanup\\n\", ())); }; };  def main() -> Result<(), _> = { RuntimeStatus.from_code(0)?; var cleanup = Cleanup {}; RuntimeStatus.from_code(8)?; ok(()) };",
         &[],
     );
     assert_eq!(output.status.code(), Some(1));

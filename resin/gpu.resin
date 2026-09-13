@@ -19,10 +19,20 @@ extern type ResinImage;
 extern type ResinPipeline;
 extern type ResinCommandBuffer;
 
-struct Memory {};
-struct GpuOwner { handle: Ptr<ResinGpu>, window: Window | None };
-type Gpu = Arc<GpuOwner>;
-impl GpuOwner {
+struct Memory {
+	def default() -> int = {
+		0
+	};
+	def gpu() -> int = {
+		1
+	};
+	def readback() -> int = {
+		2
+	};
+};
+struct GpuOwner {
+	handle: Ptr<ResinGpu>,
+	window: Window | None,
 	def drop(self: Ptr<GpuOwner>) = {
 		resin_gpu_destroy(self.handle);
 	};
@@ -87,11 +97,12 @@ impl GpuOwner {
 			ok(1 == 1)
 		}
 	};
-}
+};
+type Gpu = Arc<GpuOwner>;
 
-struct ImageOwner { handle: Ptr<ResinImage>, gpu: Gpu };
-type GpuImage = Arc<ImageOwner>;
-impl ImageOwner {
+struct ImageOwner {
+	handle: Ptr<ResinImage>,
+	gpu: Gpu,
 	def drop(self: Ptr<ImageOwner>) = {
 		resin_gpu_free_image(self.gpu.handle, self.handle);
 	};
@@ -102,11 +113,12 @@ impl ImageOwner {
 	def height(self: GpuImage) -> uint = {
 		resin_image_height(self.handle)
 	};
-}
+};
+type GpuImage = Arc<ImageOwner>;
 
-struct PipelineOwner { handle: Ptr<ResinPipeline>, gpu: Gpu };
-type GpuPipelineOwner = Arc<PipelineOwner>;
-impl PipelineOwner {
+struct PipelineOwner {
+	handle: Ptr<ResinPipeline>,
+	gpu: Gpu,
 	@gpu_pipeline_context
 	def context(self: GpuPipelineOwner) -> Gpu = {
 		self.gpu
@@ -115,7 +127,8 @@ impl PipelineOwner {
 	def drop(self: Ptr<PipelineOwner>) = {
 		resin_gpu_free_pipeline(self.gpu.handle, self.handle);
 	};
-}
+};
+type GpuPipelineOwner = Arc<PipelineOwner>;
 
 // Retain resources mentioned by recorded commands until synchronous submit or cancellation.
 struct RecordedResources {
@@ -123,9 +136,10 @@ struct RecordedResources {
 	image: GpuImage | None,
 	previous: Arc<RecordedResources> | None,
 };
-struct CommandsOwner { handle: Ptr<ResinCommandBuffer>, gpu: Gpu, retained: Arc<RecordedResources> | None };
-type GpuCommands = Arc<CommandsOwner>;
-impl CommandsOwner {
+struct CommandsOwner {
+	handle: Ptr<ResinCommandBuffer>,
+	gpu: Gpu,
+	retained: Arc<RecordedResources> | None,
 	def drop(self: Ptr<CommandsOwner>) = {
 		resin_gpu_cancel_command_buffer(self.gpu.handle, self.handle);
 	};
@@ -176,19 +190,8 @@ impl CommandsOwner {
 		resin_gpu_cancel_command_buffer(self.gpu.handle, recording);
 		self.retained := None;
 	};
-}
-
-impl Memory {
-	def default() -> int = {
-		0
-	};
-	def gpu() -> int = {
-		1
-	};
-	def readback() -> int = {
-		2
-	};
-}
+};
+type GpuCommands = Arc<CommandsOwner>;
 
 extern "resin_runtime.h" def resin_gpu_device_count(count: Ptr<uint>) -> int;
 extern "resin_runtime.h" def resin_gpu_enumerate_devices(infos: Ptr<ResinGpuDeviceInfo>, count: uint) -> int;

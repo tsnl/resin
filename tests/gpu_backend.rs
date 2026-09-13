@@ -479,12 +479,12 @@ fn inherent_methods_execute_in_shader_helpers() {
     compute_values(
         r#"export { kernel };
         struct Root { count: uint, pixels: Ptr<uint> };
-        struct Counter { value: uint };
-        impl Counter {
+        struct Counter { value: uint,
             def new(value: uint) -> Counter = { Counter { value = value } };
             def add(self: Counter, n: uint, m: uint) -> Counter = { Counter { value = self.value + n + m } };
             def read(self: Counter) -> uint = { self.value };
-        }
+        };
+
         @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = { var id = uint(invocation);
             if (id < root.count) {
                 var counter = Counter.new(id);

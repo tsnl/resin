@@ -173,43 +173,21 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_stmt(&self, node: Node) -> Stmt {
-        if node.kind() == "impl_definition" {
-            let Some(receiver) = node.child_by_field_name("receiver") else {
-                return Spanned::new(
-                    StmtKind::Expr {
-                        term: self.hole(node),
-                    },
-                    self.span(node),
-                );
-            };
-            let receiver = self.ident(receiver);
+        if node.kind() == "struct_definition" {
+            let name = self.ident(node.child_by_field_name("name").unwrap_or(node));
             let methods = node
                 .children_by_field_name("method", &mut node.walk())
-                .map(|method| {
-                    let mut stmt = self.gen_function(method);
-                    if let StmtKind::Function {
-                        receiver: target,
-                        name,
-                        ..
-                    } = &mut stmt.val
-                    {
-                        name.val = format!("{}.{}", receiver.val, name.val).into();
-                        *target = Some(receiver.clone());
-                    }
-                    stmt
-                })
+                .map(|node| self.gen_method(node, &name))
                 .collect();
-            return Spanned::new(StmtKind::Impl { receiver, methods }, self.span(node));
-        }
-        if node.kind() == "struct_definition" {
             let fields = node
                 .children_by_field_name("fields", &mut node.walk())
                 .map(|field| self.gen_declare(field))
                 .collect();
             return Spanned::new(
                 StmtKind::Struct {
-                    name: self.ident(node.child_by_field_name("name").unwrap_or(node)),
+                    name,
                     body: Spanned::new(TypeKind::Record { fields }, self.span(node)),
+                    methods,
                 },
                 self.span(node),
             );
@@ -259,6 +237,14 @@ impl<'a> AstGen<'a> {
             node,
         );
         Spanned::new(StmtKind::Expr { term: expr }, self.span(node))
+    }
+
+    fn gen_method(&self, node: Node, owner: &Ident) -> Stmt {
+        let mut method = self.gen_function(node);
+        if let StmtKind::Function { name, .. } = &mut method.val {
+            name.val = format!("{}.{}", owner.val, name.val).into();
+        }
+        method
     }
 
     fn gen_define(&self, node: Node, span: Span) -> Stmt {
@@ -604,7 +590,6 @@ impl<'a> AstGen<'a> {
             .unwrap_or_else(|| self.hole(node));
         Spanned::new(
             StmtKind::Function {
-                receiver: None,
                 decorators: node
                     .children_by_field_name("decorator", &mut node.walk())
                     .filter_map(|n| n.child_by_field_name("name"))

@@ -9,13 +9,15 @@ export {
 };
 
 // Owns length bytes followed by a NUL. Copies retain the allocation.
-struct InputLineOwner { data: Ptr<ubyte>, length: ulong };
-type InputLine = Arc<InputLineOwner>;
-impl InputLineOwner {
+struct InputLineOwner {
+	data: Ptr<ubyte>,
+	length: ulong,
 	def drop(self: Ptr<InputLineOwner>) = {
 		free(self.data);
 	};
-}
+};
+type InputLine = Arc<InputLineOwner>;
+
 struct EndOfInput {};
 struct InputReadError {};
 struct InputOutOfMemory {};
@@ -43,9 +45,7 @@ def check_input_end(byte: int, length: ulong) -> Result<(), EndOfInput | InputRe
 	}
 };
 
-struct Console {};
-
-impl Console {
+struct Console {
 	// Writes every byte (including embedded NULs), flushes, and adds no newline.
 	def print(line: InputLine) -> Result<(), InputWriteError> = {
 		var bytes = Span<ubyte> { data = line.data, length = line.length };
@@ -103,7 +103,7 @@ impl Console {
 		buffer.length := length;
 		ok(buffer)
 	};
-}
+};
 
 extern "stdio.h" def getchar() -> int;
 extern "resin_runtime/console.h" def resin_console_byte(byte: int) -> ubyte;

@@ -8,7 +8,8 @@ fn check(source: &str, generator: &mut Generator) -> CheckedFile {
     let mut scopes = Scopes::new();
     assert!(
         scopes
-            .prepare(&file, &mut generator.typer, generator.source_module)
+            .prepare(&file, &mut generator.typer)
+            .errors
             .is_empty()
     );
     super::file(&file, generator, scopes, Default::default())

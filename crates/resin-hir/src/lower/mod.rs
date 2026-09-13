@@ -51,7 +51,6 @@ pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
 struct Generator {
     module: Module,
     source: Source,
-    source_module: SourceModuleId,
     typer: Context,
     scopes: ContextView,
     function_bindings: HashMap<DeclarationId, FunctionId>,
@@ -62,7 +61,6 @@ impl Generator {
         Self {
             module: Module::default(),
             source: Source::new("<source>", ""),
-            source_module: SourceModuleId::from_index(0),
             typer: Context::with_builtins(),
             scopes: Scopes::new().finish(),
             function_bindings: HashMap::new(),
@@ -70,9 +68,9 @@ impl Generator {
         }
     }
     fn generate_file(&mut self, file: &SourceFile, mut scopes: Scopes) {
-        self.errors
-            .extend(scopes.prepare(file, &mut self.typer, self.source_module));
-        let methods = self.declare_methods(file, &mut scopes);
+        let prepared = scopes.prepare(file, &mut self.typer);
+        self.errors.extend(prepared.errors);
+        let methods = self.declare_methods(prepared.methods, &mut scopes);
         let checked = check::file(file, self, scopes, methods);
         self.errors.extend(checked.errors.iter().cloned());
         self.scopes = checked.context.clone();
@@ -172,7 +170,6 @@ impl<'a> ProgramBuilder<'a> {
     fn begin_module(&mut self, index: usize) {
         let source = &self.program.modules[index];
         self.generator.source = source.source.clone();
-        self.generator.source_module = SourceModuleId::from_index(index);
     }
 
     fn imports(
@@ -381,15 +378,21 @@ impl Generator {
     }
 }
 
+struct Method<'a> {
+    owner: TypeId,
+    statement: &'a resin_ast::Stmt,
+}
+
+struct PreparedTypes<'a> {
+    methods: Vec<Method<'a>>,
+    errors: Vec<GenerateError>,
+}
+
 impl Scopes {
-    fn prepare(
-        &mut self,
-        file: &SourceFile,
-        typer: &mut Context,
-        source_module: crate::lower::context::SourceModuleId,
-    ) -> Vec<GenerateError> {
+    fn prepare<'a>(&mut self, file: &'a SourceFile, typer: &mut Context) -> PreparedTypes<'a> {
         let mut errors = Vec::new();
-        for stmt in file.declarations() {
+        let mut methods = Vec::new();
+        for stmt in &file.stmts {
             let result = match &stmt.val {
                 StmtKind::Define { .. } | StmtKind::Declare { .. } | StmtKind::Expr { .. } => {
                     Err(GenerateError {
@@ -415,7 +418,7 @@ impl Scopes {
                 errors.push(error);
             }
         }
-        for stmt in file.declarations() {
+        for stmt in &file.stmts {
             let result = match &stmt.val {
                 StmtKind::DefineType { name, init } => match self.annotation(init, typer) {
                     Ok(ty) => {
@@ -431,18 +434,20 @@ impl Scopes {
                         Err(error)
                     }
                 },
-                StmtKind::Struct { name, body } => (|| {
-                    let id = typer.declare_type(
-                        name.val.clone(),
-                        crate::lower::context::SourceOrigin {
-                            module: source_module,
-                            span: name.span,
-                        },
-                    );
+                StmtKind::Struct {
+                    name,
+                    body,
+                    methods: owned,
+                } => (|| {
+                    let id = typer.declare_type(name.val.clone());
                     self.define_type(name, id).map_err(|name| GenerateError {
                         span: stmt.span,
                         kind: GenerateErrorKind::DuplicateType { name },
                     })?;
+                    methods.extend(owned.iter().map(|statement| Method {
+                        owner: id,
+                        statement,
+                    }));
                     let ty = self.annotation(body, typer)?;
                     typer
                         .define_type(id, ty)
@@ -454,7 +459,7 @@ impl Scopes {
                 errors.push(error);
             }
         }
-        errors
+        PreparedTypes { methods, errors }
     }
     fn annotation(&mut self, ann: &resin_ast::Type, typer: &Context) -> Result<Ty, GenerateError> {
         self.push_at(ann.span);
@@ -471,10 +476,11 @@ impl Scopes {
 type Declarations = BTreeMap<Arc<str>, DeclarationId>;
 
 impl Generator {
-    fn declare_methods(&mut self, file: &SourceFile, scopes: &mut Scopes) -> Declarations {
+    fn declare_methods(&mut self, methods: Vec<Method<'_>>, scopes: &mut Scopes) -> Declarations {
         let mut declarations = BTreeMap::new();
-        for stmt in file.declarations() {
-            if let Err(error) = self.declare_method(&stmt.val, scopes, &mut declarations) {
+        // All module types and aliases are available before method signatures.
+        for method in methods {
+            if let Err(error) = self.declare_method(method, scopes, &mut declarations) {
                 self.errors.push(error);
             }
         }
@@ -483,23 +489,22 @@ impl Generator {
 
     fn declare_method(
         &mut self,
-        stmt: &StmtKind,
+        method: Method<'_>,
         scopes: &mut Scopes,
         declarations: &mut Declarations,
     ) -> Result<(), GenerateError> {
         let StmtKind::Function {
-            receiver: Some(receiver),
             name,
             params,
             result,
             decorators,
             ..
-        } = stmt
+        } = &method.statement.val
         else {
             return Ok(());
         };
         let declaration = reserve_method(name, scopes, declarations)?;
-        let definition = self.method_owner(receiver, scopes)?;
+        let definition = method.owner;
         scopes.record_method_definition(definition, declaration);
         if decorators
             .iter()
@@ -561,31 +566,6 @@ impl Generator {
             ));
         }
         Ok(())
-    }
-
-    fn method_owner(&self, receiver: &Ident, scopes: &Scopes) -> Result<TypeId, GenerateError> {
-        let evaluator = Evaluator {
-            scopes: scopes.view(),
-            typer: &self.typer,
-        };
-        let Ty::Defined { definition } = evaluator.type_name(receiver)? else {
-            return Err(GenerateError::inference(
-                receiver.span,
-                "impl requires a nominal struct type",
-            ));
-        };
-        if self
-            .typer
-            .type_origin(definition)
-            .map(|origin| origin.module)
-            != Some(self.source_module)
-        {
-            return Err(GenerateError::inference(
-                receiver.span,
-                "impl requires a type defined in this module",
-            ));
-        }
-        Ok(definition)
     }
 
     fn register_method(

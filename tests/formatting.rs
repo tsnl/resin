@@ -226,10 +226,10 @@ fn optional_unwrap_suffix_stays_attached_and_preserves_operators() {
 }
 
 #[test]
-fn impl_blocks_format_methods_as_declarations() {
+fn structs_format_fields_before_method_declarations() {
     check(
-        "struct N{v:int};impl N{def new(v:int)->N={N{v=v}};def read(self:N)->int={self.v};}def main()->int={N.new(42).read()};",
-        "struct N { v: int };\nimpl N {\n\tdef new(v: int) -> N = {\n\t\tN { v = v }\n\t};\n\tdef read(self: N) -> int = {\n\t\tself.v\n\t};\n}\ndef main() -> int = {\n\tN.new(42).read()\n};\n",
+        "struct N{v:int, def new(v:int)->N={N{v=v}};def read(self:N)->int={self.v}; };def main()->int={N.new(42).read()};",
+        "struct N {\n\tv: int,\n\tdef new(v: int) -> N = {\n\t\tN { v = v }\n\t};\n\tdef read(self: N) -> int = {\n\t\tself.v\n\t};\n};\ndef main() -> int = {\n\tN.new(42).read()\n};\n",
     );
 }
 

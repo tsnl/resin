@@ -19,11 +19,14 @@ pub struct SourceFile {
 }
 
 impl SourceFile {
-    /// Visit declarations inside impl blocks without erasing their AST structure.
+    /// Visit module declarations and the methods owned by their structs.
     pub fn declarations(&self) -> impl Iterator<Item = &Stmt> {
-        self.stmts.iter().flat_map(|stmt| match &stmt.val {
-            StmtKind::Impl { methods, .. } => methods.as_slice(),
-            _ => std::slice::from_ref(stmt),
+        self.stmts.iter().flat_map(|stmt| {
+            let methods = match &stmt.val {
+                StmtKind::Struct { methods, .. } => methods.as_slice(),
+                _ => &[],
+            };
+            std::iter::once(stmt).chain(methods)
         })
     }
 }
@@ -178,12 +181,7 @@ pub enum StmtKind {
         params: Vec<(Ident, Type)>,
         result: Type,
     },
-    Impl {
-        receiver: Ident,
-        methods: Vec<Stmt>,
-    },
     Function {
-        receiver: Option<Ident>,
         decorators: Vec<Ident>,
         name: Ident,
         params: Vec<(Ident, Type)>,
@@ -203,6 +201,7 @@ pub enum StmtKind {
     Struct {
         name: Ident,
         body: Type,
+        methods: Vec<Stmt>,
     },
     /// `var name: ann;`
     Declare {

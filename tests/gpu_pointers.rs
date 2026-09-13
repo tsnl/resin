@@ -95,12 +95,12 @@ fn nested_host_owners_and_gpu_method_receivers_preserve_allocation_lifetimes() {
     let Some(output) = run(r#"
         export { main };
         import { "$/gpu.resin" };
-        struct Item { value: int };
-        struct Outer { item: Item };
-        impl Item {
+        struct Item { value: int,
             def increment(self: GpuPtr<Item>) = { self.value := self.value + 1_i; };
             def read(self: Item) -> int = { self.value };
-        }
+        };
+        struct Outer { item: Item };
+
         def field() -> Result<GpuPtr<int>, _> = {
             var gpu = Gpu.new()?;
             var pointer = gpu.new(Outer { item = Item { value = 40_i } })?;

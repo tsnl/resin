@@ -185,11 +185,6 @@ fn numeric_type(
 }
 
 impl Evaluator<'_> {
-    pub(super) fn type_name(&self, name: &Ident) -> Result<Ty, GenerateError> {
-        let ty = self.scopes.resolve_type(name)?;
-        crate::lower::infer::Solver::default().require(&ty, name.span)
-    }
-
     pub(crate) fn ty(&self, ty: &resin_ast::Type) -> Result<Ty, GenerateError> {
         let mut solver = crate::lower::infer::Solver::default();
         let inferred = Decoder {

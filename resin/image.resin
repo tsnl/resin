@@ -2,10 +2,11 @@ export { ImageData };
 
 import { "status.resin" };
 
-struct ImageDataOwner { width: uint, height: uint, channels: uint, pixels: Ptr<ubyte> };
-
-type ImageData = Arc<ImageDataOwner>;
-impl ImageDataOwner {
+struct ImageDataOwner {
+	width: uint,
+	height: uint,
+	channels: uint,
+	pixels: Ptr<ubyte>,
 	def drop(self: Ptr<ImageDataOwner>) = {
 		resin_image_free(self.pixels);
 	};
@@ -25,7 +26,9 @@ impl ImageDataOwner {
 	def write_png(self: Ptr<ImageDataOwner>, path: Ptr<ubyte>) -> Result<(), RuntimeError> = {
 		RuntimeStatus.from_code(resin_image_write_png(path, self.width, self.height, self.channels, self.pixels, 0_ul))
 	};
-}
+};
+
+type ImageData = Arc<ImageDataOwner>;
 
 extern "resin_runtime.h" def resin_image_write_png(path: Ptr<ubyte>, width: uint, height: uint, channels: uint, pixels: Ptr<ubyte>, stride: ulong) -> int;
 extern "resin_runtime.h" def resin_image_read_png(path: Ptr<ubyte>, channels: uint, width: Ptr<uint>, height: Ptr<uint>, actual_channels: Ptr<uint>, pixels: Ptr<Ptr<ubyte>>) -> int;

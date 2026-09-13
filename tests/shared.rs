@@ -2,17 +2,17 @@ use support::pipeline;
 mod support;
 
 const RESOURCE: &str = r#"
-struct Resource { trace: Ptr<int>, digit: int };
-def optional_resource(trace: Ptr<int>, digit: int) -> Resource | None = { Resource.make(trace, digit) };
-def optional_shared(trace: Ptr<int>, digit: int) -> Arc<Resource> | None = { Arc<Resource> { trace = trace, digit = digit } };
-def optional_int(value: int) -> int | None = { value };
-impl Resource {
+struct Resource { trace: Ptr<int>, digit: int,
     def drop(dying: Ptr<Resource>) = {
         if (dying.digit != 0) { dying.trace.* := dying.trace.* * 10 + dying.digit; };
     };
     def read(self: Ptr<Resource>) -> int = { self.digit };
     def make(trace: Ptr<int>, digit: int) -> Resource = { Resource { trace = trace, digit = digit } };
-}
+};
+def optional_resource(trace: Ptr<int>, digit: int) -> Resource | None = { Resource.make(trace, digit) };
+def optional_shared(trace: Ptr<int>, digit: int) -> Arc<Resource> | None = { Arc<Resource> { trace = trace, digit = digit } };
+def optional_int(value: int) -> int | None = { value };
+
 "#;
 
 fn run(source: &str) {
@@ -59,8 +59,10 @@ fn at_indexing_preserves_shared_array_owners_and_overwrite_cleanup() {
 #[test]
 fn assignment_branches_preserve_initialization_and_overwrite_cleanup() {
     run(r#"
-    struct Tracked { drops: Ptr<int>, value: int };
-    impl Tracked { def drop(self: Ptr<Tracked>) = { self.drops.* := self.drops.* + 1; }; }
+    struct Tracked { drops: Ptr<int>, value: int,
+        def drop(self: Ptr<Tracked>) = { self.drops.* := self.drops.* + 1; };
+    };
+
     def main() -> int = {
         var drops = 0; var index = 0; var valid = 1 == 1;
         while (index < 2) {
@@ -123,8 +125,10 @@ fn assignment_propagation_tracks_success_and_error_cleanup() {
 #[test]
 fn temporary_projection_keeps_nominal_and_nested_destructors() {
     run(r#"
-    struct Outer { trace: Ptr<int>, inner: Arc<Resource> };
-    impl Outer { def drop(self: Ptr<Outer>) = { self.trace.* := self.trace.* * 10 + 2; }; }
+    struct Outer { trace: Ptr<int>, inner: Arc<Resource>,
+        def drop(self: Ptr<Outer>) = { self.trace.* := self.trace.* * 10 + 2; };
+    };
+
     def make(trace: Ptr<int>) -> Outer = { Outer { trace = trace, inner = Arc<Resource> { trace = trace, digit = 3 } } };
     def main() -> int = {
         var trace = 0;
@@ -250,10 +254,10 @@ fn early_errors_destroy_only_acquired_owners() {
 fn arrays_options_and_methods_consume_fresh_payloads() {
     run(r#"
     struct Pair { value: Resource };
-    struct Sink {};
-    impl Sink {
+    struct Sink {
         def consume(self: Ptr<Sink>, a: Resource, b: Resource) = {};
-    }
+    };
+
     def main() -> int = {
         var trace = 0;
         {
@@ -290,8 +294,10 @@ fn indexing_preserves_array_storage_and_only_value_reads_copy_elements() {
 #[test]
 fn destruction_preserves_results_and_runs_per_scope_and_iteration() {
     run(r#"
-    struct Set { target: Ptr<int>, value: int };
-    impl Set { def drop(self: Ptr<Set>) = { self.target.* := self.value; }; }
+    struct Set { target: Ptr<int>, value: int,
+        def drop(self: Ptr<Set>) = { self.target.* := self.value; };
+    };
+
     def result_before_cleanup() -> int = {
         var value = 42;
         var cleanup = Set { target = &value, value = 99 };
@@ -349,8 +355,10 @@ fn former_defer_keyword_can_name_an_ordinary_immediate_call() {
 #[test]
 fn weak_cycles_and_nested_pointer_handle_access() {
     run(r#"
-    struct Node { trace: Ptr<int>, parent: Weak<Node> };
-    impl Node { def drop(self: Ptr<Node>) = { self.trace.* := self.trace.* + 1; }; }
+    struct Node { trace: Ptr<int>, parent: Weak<Node>,
+        def drop(self: Ptr<Node>) = { self.trace.* := self.trace.* + 1; };
+    };
+
     def main() -> int = {
         var trace = 0;
         var weak = {
@@ -385,11 +393,11 @@ fn named_argument_to_arc_copies_the_pointee_value() {
 #[test]
 fn methods_require_a_compatible_receiver_and_valid_destructor() {
     rejects(
-        "struct Item {}; impl Item { def shared(self: Arc<Item>) = {}; } def f(item: Item) = { item.shared(); };",
+        "struct Item { def shared(self: Arc<Item>) = {}; };  def f(item: Item) = { item.shared(); };",
         "method receiver does not match",
     );
     rejects(
-        "struct Item {}; impl Item { def drop(self: Item) = {}; }",
+        "struct Item { def drop(self: Item) = {}; }; ",
         "drop must have signature",
     );
 }
@@ -420,13 +428,13 @@ fn option_unwrap_transfers_fresh_payloads_and_copies_named_options() {
 #[test]
 fn destruction_hooks_are_ordinary_calls_and_remain_automatic() {
     run(r#"
-    struct Manual { trace: Ptr<int>, digit: int };
-    impl Manual {
+    struct Manual { trace: Ptr<int>, digit: int,
         def drop(self: Ptr<Manual>) = {
             if (self.digit != 0) { self.trace.* := self.trace.* * 10 + self.digit; };
             self.digit := 0;
         };
-    }
+    };
+
     def main() -> int = {
         var trace = 0;
         {

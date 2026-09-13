@@ -9,9 +9,8 @@ def button_state(bits: uint) -> ButtonState = {
 };
 
 extern type ResinWindow;
-struct WindowOwner { handle: Ptr<ResinWindow> };
-type Window = Arc<WindowOwner>;
-impl WindowOwner {
+struct WindowOwner {
+	handle: Ptr<ResinWindow>,
 	def drop(self: Ptr<WindowOwner>) = {
 		resin_window_destroy(self.handle);
 	};
@@ -215,7 +214,8 @@ impl WindowOwner {
 	def mouse_buttons() -> MouseButtons = {
 		MouseButtons { left = 0, right = 1, middle = 2, button_4 = 3, button_5 = 4, button_6 = 5, button_7 = 6, button_8 = 7 }
 	};
-}
+};
+type Window = Arc<WindowOwner>;
 
 // GLFW physical key codes, independent of typed characters or keyboard layout.
 struct KeyCodes {

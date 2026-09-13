@@ -1,16 +1,16 @@
 ==================
 Method calls and function-valued field calls
 ==================
-struct Item {};
-impl Item { def read(item: Item, value: int) -> int = { value }; }
+struct Item {
+ def read(item: Item, value: int) -> int = { value };
+};
+
 def calls(item: Item) = { item.read(1); (item.read)(1); Item.read(item, 1); };
 
 ---
 
 (source_file
   (struct_definition
-    (uid))
-  (impl_definition
     (uid)
     (function_definition
       (lid)

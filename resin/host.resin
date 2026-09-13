@@ -2,9 +2,7 @@ export { Host };
 
 import { "status.resin" };
 
-struct Host {};
-
-impl Host {
+struct Host {
 	// A successful empty allocation still has a non-null, freeable pointer.
 	def malloc(bytes: ulong) -> Result<Ptr<ubyte>, OutOfMemory> = {
 		var memory = malloc(
@@ -24,7 +22,7 @@ impl Host {
 	def free(memory: Ptr<ubyte>) = {
 		free(memory);
 	};
-}
+};
 
 extern "stdlib.h" def malloc(bytes: ulong) -> Ptr<ubyte>;
 extern "stdlib.h" def free(memory: Ptr<ubyte>);

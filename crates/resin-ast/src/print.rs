@@ -58,10 +58,17 @@ fn sexp_source(file: &SourceFile) -> SExp {
 
 fn sexp_stmt(stmt: &Stmt) -> SExp {
     match &stmt.val {
-        StmtKind::Struct { name, body } => list_sp(
+        StmtKind::Struct {
+            name,
+            body,
+            methods,
+        } => list_sp(
             "struct",
             stmt.span,
-            vec![symbol(name.val.as_ref()), sexp_typespec(body)],
+            [symbol(name.val.as_ref()), sexp_typespec(body)]
+                .into_iter()
+                .chain(methods.iter().map(sexp_stmt))
+                .collect(),
         ),
         StmtKind::ForeignType { name } => {
             list_sp("extern-type", stmt.span, vec![symbol(name.val.as_ref())])
@@ -87,13 +94,6 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
                 ),
                 sexp_typespec(result),
             ],
-        ),
-        StmtKind::Impl { receiver, methods } => list_sp(
-            "impl",
-            stmt.span,
-            std::iter::once(symbol(receiver.val.as_ref()))
-                .chain(methods.iter().map(sexp_stmt))
-                .collect(),
         ),
         StmtKind::Function {
             name,
