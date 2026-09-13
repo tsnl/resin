@@ -2,7 +2,8 @@
 //!
 //! The public tree is the complete pass contract: resolved bindings, type schemes,
 //! and completed applications, with no source scopes, inference variables, or stack instructions.
-//! Construction and editor recovery stay behind the lowering and query operations.
+//! Construction establishes definite initialization for every source body. Editor
+//! recovery stays behind the lowering and query operations.
 //!
 //! Implementation modules are deliberately private:
 //! ```compile_fail

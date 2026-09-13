@@ -65,8 +65,9 @@ impl Function {
 /// Typed operand-stack operations. Contracts show the stack top on the right;
 /// an unchanged prefix is omitted. Popped values transfer ownership unless an
 /// instruction specifies copying, borrowing, or destruction. Addresses borrow storage.
-/// The verifier checks types and stack shape; lowering establishes ownership and
-/// initialization, with runtime initialization flags protecting managed locals.
+/// HIR construction establishes definite initialization. Storage lowering makes ownership
+/// explicit and emits runtime initialization flags for managed locals. The verifier
+/// checks instruction types and stack shape.
 ///
 /// ```compile_fail,E0432
 /// use resin_lir::StackEffect;
@@ -308,12 +309,6 @@ pub enum ErrorKind {
         kind: TypeErrorKind,
     },
     UnboundValue {
-        name: std::sync::Arc<str>,
-    },
-    EagerRecursion {
-        name: std::sync::Arc<str>,
-    },
-    UninitializedValue {
         name: std::sync::Arc<str>,
     },
     NotAPlace,

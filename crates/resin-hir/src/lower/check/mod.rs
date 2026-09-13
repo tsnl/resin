@@ -227,8 +227,12 @@ pub(in crate::lower) fn file(
         if solver.invalid(&body.term.ty) {
             continue;
         }
+        let Some(signature) = checked.signatures.get(&body.declaration) else {
+            continue;
+        };
         let completed = super::elaborate::function(
             &body.term,
+            &signature.parameters,
             &solver,
             &methods,
             &generator.typer,

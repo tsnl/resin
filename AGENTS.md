@@ -13,6 +13,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   A crate's complete public contract should be discoverable from its entry point.
 - HIR is a typed, desugared tree with resolved bindings, calls, and operations. Source
   scopes, method namespaces, inference variables, and recovery belong to HIR construction.
+  HIR construction establishes definite initialization while completing each body,
+  including unused definitions. Follow runtime evaluation order and intersect branch
+  states there; LIR storage lowering has no source initialization states or branch snapshots.
   LIR describes storage, cleanup, stack operations, and structured control-flow regions.
   If/Loop children form a tree; retain this structure through C and SPIR-V emission.
   Selection arms end in Merge, loop conditions in LoopTest, and loop bodies in Continue;

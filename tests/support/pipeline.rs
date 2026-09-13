@@ -18,10 +18,6 @@ fn lowering_error(error: resin_lir::Error) -> GenerateError {
     let kind = match error.kind {
         resin_lir::ErrorKind::Type { kind } => GenerateErrorKind::Type { kind },
         resin_lir::ErrorKind::UnboundValue { name } => GenerateErrorKind::UnboundValue { name },
-        resin_lir::ErrorKind::EagerRecursion { name } => GenerateErrorKind::EagerRecursion { name },
-        resin_lir::ErrorKind::UninitializedValue { name } => {
-            GenerateErrorKind::UninitializedValue { name }
-        }
         kind @ (resin_lir::ErrorKind::MonomorphLimit { .. }
         | resin_lir::ErrorKind::TypeExpansionLimit { .. }
         | resin_lir::ErrorKind::TypeSizeLimit { .. }) => {
