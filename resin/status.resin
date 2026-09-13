@@ -23,9 +23,7 @@ struct WindowUnavailable {};
 struct UnknownRuntimeError { code: int };
 type RuntimeError = InvalidArgument | VulkanUnavailable | Unsupported | OutOfMemory | VulkanError | IoError | Incomplete | WindowUnavailable | UnknownRuntimeError;
 
-struct RuntimeStatus {};
-
-impl RuntimeStatus {
+struct RuntimeStatus {
 	def from_code(code: int) -> Result<(), RuntimeError> = {
 		if (code == 1) {
 			err(InvalidArgument {})
@@ -107,6 +105,6 @@ impl RuntimeStatus {
 	def message(error: RuntimeError) -> Ptr<ubyte> = {
 		resin_status_string(RuntimeStatus.code(error))
 	};
-}
+};
 
 extern "resin_runtime.h" def resin_status_string(status: int) -> Ptr<ubyte>;

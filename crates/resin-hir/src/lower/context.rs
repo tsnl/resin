@@ -1,4 +1,4 @@
-//! Source type namespaces, nominal origins, and builtin method signatures.
+//! Source type namespaces and builtin method signatures.
 use crate::ReceiverConversion;
 use resin_common::define_id;
 use resin_source::prelude::*;
@@ -12,7 +12,7 @@ use std::{
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Context {
     pub(super) typer: TyperContext,
-    pub(super) namespaces: BTreeMap<TypeId, Namespace>,
+    pub(super) namespaces: BTreeMap<TypeId, BTreeMap<Arc<str>, FunctionId>>,
     pub(super) functions: BTreeMap<FunctionId, FunctionDecl>,
     pub(super) gpu_allocators: BTreeMap<TypeId, FunctionId>,
     pub(super) gpu_pipeline_contexts: BTreeMap<TypeId, FunctionId>,
@@ -94,12 +94,6 @@ pub(crate) enum FunctionBody {
 
 pub(crate) type MethodDefinitions = fn(&Ty, &Context) -> Vec<(Arc<str>, FunctionDecl)>;
 
-#[derive(Debug, Clone)]
-pub(super) struct Namespace {
-    origin: SourceOrigin,
-    functions: BTreeMap<Arc<str>, FunctionId>,
-}
-
 impl FunctionDecl {
     pub fn arguments(&self, receiver: &Ty, associated: bool) -> Option<&[Ty]> {
         if associated {
@@ -112,19 +106,10 @@ impl FunctionDecl {
 }
 
 impl Context {
-    pub(crate) fn declare_type(&mut self, name: Arc<str>, origin: SourceOrigin) -> TypeId {
+    pub(crate) fn declare_type(&mut self, name: Arc<str>) -> TypeId {
         let ty = self.typer.reserve_type(name);
-        self.namespaces.insert(
-            ty,
-            Namespace {
-                origin,
-                functions: BTreeMap::new(),
-            },
-        );
+        self.namespaces.insert(ty, BTreeMap::new());
         ty
-    }
-    pub(crate) fn type_origin(&self, ty: TypeId) -> Option<SourceOrigin> {
-        self.namespaces.get(&ty).map(|scope| scope.origin)
     }
     pub(crate) fn register_function(&mut self, function: FunctionId, params: Vec<Ty>, result: Ty) {
         self.functions.insert(
@@ -148,8 +133,7 @@ impl Context {
         match self
             .namespaces
             .get_mut(&ty)
-            .expect("nominal type has an origin")
-            .functions
+            .expect("nominal type has a method namespace")
             .entry(name)
         {
             Entry::Vacant(entry) => {
@@ -310,7 +294,7 @@ impl Context {
             .receiver_definition(ty)
             .and_then(|id| self.namespaces.get(&id))
         {
-            for (name, id) in &namespace.functions {
+            for (name, id) in namespace {
                 methods.insert(name.clone(), self.functions[id].clone());
             }
         }
@@ -563,25 +547,4 @@ fn gpu_methods(receiver: &Ty, element: &Ty) -> Vec<(Arc<str>, FunctionDecl)> {
             Intrinsic::GpuWriteOnly,
         ),
     ]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn source_declarations_have_an_origin_before_the_body_is_defined() {
-        let mut typer = Context::new();
-        let origin = SourceOrigin {
-            module: SourceModuleId::from_index(3),
-            span: Span { start: 17, end: 21 },
-        };
-        let id = typer.declare_type("Node".into(), origin);
-        assert_eq!(typer.type_origin(id), Some(origin));
-        assert_eq!(typer.definitions()[id.index()].body(), None);
-        typer
-            .define_type(id, Ty::Record { fields: vec![] })
-            .unwrap();
-        assert_eq!(typer.type_origin(id), Some(origin));
-    }
 }

@@ -275,7 +275,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     ] {
         let output = run(
             &format!(
-                "export {{ main }}; import {{ \"$/image.resin\" }}; struct Cleanup {{}}; impl Cleanup {{ def drop(self: Ptr<Cleanup>) = {{ print(fmt(\"cleanup\\n\", ())); }}; }} def main() -> Result<(), _> = {{ var path = \"missing/pixel.png\"; var pixels = [uint(0)]; var cleanup = Cleanup {{}}; {call}; ok(()) }};"
+                "export {{ main }}; import {{ \"$/image.resin\" }}; struct Cleanup {{ def drop(self: Ptr<Cleanup>) = {{ print(fmt(\"cleanup\\n\", ())); }}; }};  def main() -> Result<(), _> = {{ var path = \"missing/pixel.png\"; var pixels = [uint(0)]; var cleanup = Cleanup {{}}; {call}; ok(()) }};"
             ),
             "",
         );
@@ -507,8 +507,10 @@ fn byte_input_reports_stream_errors_instead_of_eof() {
         r#"
         export { main };
         import { "$/console.resin" };
-        struct Cleanup {};
-        impl Cleanup { def drop(self: Ptr<Cleanup>) = { print("cleanup\n"); }; }
+        struct Cleanup {
+            def drop(self: Ptr<Cleanup>) = { print("cleanup\n"); };
+        };
+
         def main() -> Result<(), _> = {
             var cleanup = Cleanup {};
             Console.read_byte()?;

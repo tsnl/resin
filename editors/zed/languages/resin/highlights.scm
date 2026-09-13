@@ -5,7 +5,7 @@
 ["Ptr" "Span" "GpuPtr" "GpuSpan" "GpuComputePipeline" "GpuGraphicsPipeline" "Result" "Arc" "Weak" "None"] @type.builtin
 
 ; Keep declaration and control keywords in sync with the grammar's reserved words.
-["export" "import" "extern" "type" "struct" "impl" "def" "var"] @keyword
+["export" "import" "extern" "type" "struct" "def" "var"] @keyword
 ["if" "else" "while" "match"] @keyword
 
 (function_definition name: (lid) @function)

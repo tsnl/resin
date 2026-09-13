@@ -3,7 +3,6 @@
 use crate::DefinitionKind;
 use crate::lower::{
     context::Context,
-    context::SourceModuleId,
     infer::{
         Constraint, Equation, Head, Inference, Pattern, Rule, Solver, Type, VariableId,
         check_binding_name,
@@ -127,10 +126,9 @@ struct Checker<'a> {
     holes: Vec<(Span, VariableId)>,
     expressions: Vec<(Span, Type)>,
     result: Type,
-    source_module: SourceModuleId,
 }
 impl<'a> Checker<'a> {
-    fn new(typer: &'a mut Context, scopes: Scopes, source_module: SourceModuleId) -> Self {
+    fn new(typer: &'a mut Context, scopes: Scopes) -> Self {
         Self {
             typing: Inference::new(typer),
             scopes,
@@ -139,7 +137,6 @@ impl<'a> Checker<'a> {
             holes: vec![],
             expressions: vec![],
             result: Ty::Unit.into(),
-            source_module,
         }
     }
 }
@@ -198,7 +195,7 @@ pub(in crate::lower) fn file(
     scopes: Scopes,
     methods: BTreeMap<Arc<str>, DeclarationId>,
 ) -> CheckedFile {
-    let mut checker = Checker::new(&mut generator.typer, scopes, generator.source_module);
+    let mut checker = Checker::new(&mut generator.typer, scopes);
     let (declarations, mut signatures, sources) = checker.declarations(file, methods);
     let mut bodies = checker.bodies(&mut signatures, sources);
     checker.solve_functions(&signatures, &mut bodies);
@@ -1093,14 +1090,18 @@ impl Expression<'_, '_> {
                     ty: ann.into_tree(),
                 }
             }
-            StmtKind::Struct { name, body } => {
-                let definition = self.checker.typing.typer.declare_type(
-                    name.val.clone(),
-                    crate::lower::context::SourceOrigin {
-                        module: self.checker.source_module,
-                        span: name.span,
-                    },
-                );
+            StmtKind::Struct {
+                name,
+                body,
+                methods,
+            } => {
+                if let Some(method) = methods.first() {
+                    return Err(GenerateError::inference(
+                        method.span,
+                        "local structs cannot define methods",
+                    ));
+                }
+                let definition = self.checker.typing.typer.declare_type(name.val.clone());
                 self.checker
                     .scopes
                     .define_type(name, definition)

@@ -59,12 +59,12 @@ fn array_value_projections_copy_the_element_and_destroy_the_container() {
         let mut program = module(
             r#"
             export { main };
-            struct Resource { trace: Ptr<int>, digit: int };
-            impl Resource {
+            struct Resource { trace: Ptr<int>, digit: int,
                 def drop(self: Ptr<Resource>) = {
                     self.trace.* := self.trace.* * 10 + self.digit;
                 };
-            }
+            };
+
             def make(trace: Ptr<int>, digit: int) -> Arc<Resource> = {
                 Arc<Resource> { trace = trace, digit = digit }
             };
@@ -834,8 +834,10 @@ fn else_if_chains_select_one_branch_and_short_circuit_conditions() {
 fn one_armed_if_evaluates_once_and_runs_branch_cleanup() {
     runs(
         r#"export { main };
-    struct Add { value: Ptr<int> };
-    impl Add { def drop(self: Ptr<Add>) = { self.value.* := self.value.* + 10; }; }
+    struct Add { value: Ptr<int>,
+        def drop(self: Ptr<Add>) = { self.value.* := self.value.* + 10; };
+    };
+
     def condition(calls: Ptr<int>) -> bool = { calls.* := calls.* + 1; 1 == 1 };
     def main() -> int = {
         var calls = 0; var value = 0;
@@ -856,8 +858,10 @@ fn dedicated_cleanup_bindings_retain_acquisitions_on_both_exits() {
                 r#"
             export {{ main }};
             struct E {{}};
-            struct Capture {{ resource: Ptr<int>, trace: Ptr<int> }};
-            impl Capture {{ def drop(self: Ptr<Capture>) = {{ self.trace.* := self.trace.* * 10 + self.resource.*; }}; }}
+            struct Capture {{ resource: Ptr<int>, trace: Ptr<int>,
+                def drop(self: Ptr<Capture>) = {{ self.trace.* := self.trace.* * 10 + self.resource.*; }};
+            }};
+
             def work(trace: Ptr<int>, fail: bool) -> Result<(), E> = {{
                 var resource = 1;
                 var captured = resource;

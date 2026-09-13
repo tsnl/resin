@@ -1,20 +1,24 @@
 # Inherent methods
 
-An `impl` block adds functions to a nominal type's namespace. Each nominal type
-records its defining module; only that module can add functions. Transparent
-aliases use the underlying nominal type's namespace and origin. An alias of a
-primitive or anonymous record does not create a new nominal namespace.
+A struct owns its methods directly. Declare fields first, followed by `def`
+statements inside the same braces. There are no separate implementation blocks.
+Transparent aliases inherit the underlying nominal type's namespace and origin;
+they cannot add methods. Local structs currently contain fields only.
+
+All module types and aliases are available when method signatures are resolved,
+including an `Arc<Owner>` alias written after the owner. Methods are declared
+before bodies, so sibling methods and recursive calls can refer to each other.
 
 Functions accompany the type when it is exported and need no separate exports.
 There are no user-defined traits, interfaces, or dynamic dispatch.
 
 ```resin
-struct Counter { value: int };
-impl Counter {
+struct Counter { value: int,
     def new(value: int) -> Counter = { Counter { value = value } };
     def increment(counter: Ptr<Counter>) = { counter.value := counter.value + 1; };
     def read(counter: Counter) -> int = { counter.value };
-}
+};
+
 def example() -> int = {
     var counter = Counter.new(41);
     counter.increment();
@@ -40,7 +44,7 @@ can return ordinary pointers, including wrappers around array indexing. Paramete
 and result types are explicit; an omitted result means unit.
 
 Arrays and spans provide the builtin `.at(index)` method for indexing.
-It accepts any integer index and returns `Ptr<T>`, so a field can be indexed as
+It accepts a `ulong` index and returns `Ptr<T>`, so a field can be indexed as
 `root.particles.at(i).*`. Use `items.at(i).* := value` to update an element.
 The receiver and index are evaluated once; indexing an array place keeps its
 storage address instead of copying the array. The existing `items(i)` spelling

@@ -1,19 +1,8 @@
 export { Io, Output, WriteError };
 
 struct WriteError {};
-struct Output { stream: uint };
-struct Io {};
-
-impl Io {
-	def stdout() -> Output = {
-		Output { stream = 0_ui }
-	};
-	def stderr() -> Output = {
-		Output { stream = 1_ui }
-	};
-}
-
-impl Output {
+struct Output {
+	stream: uint,
 	// Writes bytes verbatim and flushes. No formatting or newline is added.
 	def write(self: Output, text: str | Span<ubyte> | String) -> Result<(), WriteError> = {
 		var status = match (text) {
@@ -33,6 +22,14 @@ impl Output {
 			err(WriteError {})
 		}
 	};
-}
+};
+struct Io {
+	def stdout() -> Output = {
+		Output { stream = 0_ui }
+	};
+	def stderr() -> Output = {
+		Output { stream = 1_ui }
+	};
+};
 
 extern "resin_runtime/print.h" def resin_stream_write(stream: uint, data: Ptr<ubyte>, length: ulong) -> int;

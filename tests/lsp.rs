@@ -360,12 +360,12 @@ fn dot_completion_sorts_fields_before_methods() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("members.resin"));
-    let source = "struct Record { zebra: int, middle: int };\n\
-        impl Record {\n\
-            def beta(self: Ptr<Record>) = {};\n\
-            def alpha(self: Ptr<Record>) = {};\n\
-        }\n\
-        def main() = { var value = Record { zebra = 1, middle = 2 }; value.; };";
+    let source = "struct Record { zebra: int, middle: int,
+def beta(self: Ptr<Record>) = {};
+def alpha(self: Ptr<Record>) = {};
+};
+
+def main() = { var value = Record { zebra = 1, middle = 2 }; value.; };";
     client.open(&uri, source);
     client.diagnostics(&uri, Some(1), true);
     let column = source.lines().last().unwrap().rfind('.').unwrap() as u32 + 1;

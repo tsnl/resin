@@ -2,10 +2,10 @@
 Inherent destruction and shared ownership
 ==================
 
-struct Item { value: int };
-impl Item {
+struct Item { value: int,
     def drop(self: Ptr<Item>) = {};
-}
+};
+
 def main() = {
     var owner = Arc<Item> { value = 42 };
     var weak: Weak<Item>;
@@ -30,9 +30,7 @@ def main() = {
           (union_type
             (unary_type
               (primary_type
-                (builtin_type))))))))
-  (impl_definition
-    (uid)
+                (builtin_type)))))))
     (function_definition
       (lid)
       (declare

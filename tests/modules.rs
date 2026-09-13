@@ -657,24 +657,24 @@ fn shader_objects_can_reference_private_helpers() {
 }
 
 #[test]
-fn inherent_methods_keep_impl_nodes_and_follow_exported_types() {
+fn inherent_methods_belong_to_structs_and_follow_exported_types() {
     let source = r#"
         export { Counter };
-        struct Counter { value: int };
-        impl Counter {
+        struct Counter { value: int,
             def new(value: int) -> Counter = { Counter { value = value } };
             def add(self: Ptr<Counter>, a: int, b: int) = { self.value := self.value + a + b; };
             def read(self: Counter) -> int = { self.value };
-        }
+        };
+
     "#;
     let file = support::parse(source);
-    assert_eq!(file.stmts.len(), 2);
-    let resin_ast::StmtKind::Impl { receiver, methods } = &file.stmts[1].val else {
-        panic!("expected an impl declaration");
+    assert_eq!(file.stmts.len(), 1);
+    let resin_ast::StmtKind::Struct { name, methods, .. } = &file.stmts[0].val else {
+        panic!("expected a struct declaration");
     };
-    assert_eq!(receiver.val.as_ref(), "Counter");
+    assert_eq!(name.val.as_ref(), "Counter");
     assert_eq!(methods.len(), 3);
-    assert!(resin_ast::format_source(&file).contains("(impl"));
+    assert!(resin_ast::format_source(&file).contains("(struct"));
     let project = Project::new(&[
         ("counter.resin", source),
         (
@@ -703,19 +703,19 @@ fn inherent_methods_keep_impl_nodes_and_follow_exported_types() {
 fn methods_validate_declarations_and_call_receivers() {
     for (source, message) in [
         (
-            "struct A {}; impl A { def f(self: int) = {}; } def g(a: A) = { a.f(); };",
+            "struct A { def f(self: int) = {}; };  def g(a: A) = { a.f(); };",
             "method receiver does not match",
         ),
         (
-            "struct A {}; impl A { def f() = {}; def f() = {}; }",
+            "struct A { def f() = {}; def f() = {}; }; ",
             "DuplicateValue",
         ),
         (
-            "struct A {}; impl A { def f(self: A) = {}; } def g() = { A.f(); };",
+            "struct A { def f(self: A) = {}; };  def g() = { A.f(); };",
             "TypeMismatch",
         ),
         (
-            "struct A {}; impl A { def f() = {}; } def g(a: A) = { a.f(); };",
+            "struct A { def f() = {}; };  def g(a: A) = { a.f(); };",
             "method receiver does not match",
         ),
     ] {
@@ -731,19 +731,19 @@ fn methods_validate_declarations_and_call_receivers() {
             "import { \"a.resin\" }; impl A { def f() = {}; }",
         ),
     ]);
-    project.error("impl requires a type defined in this module");
+    project.error("parse error");
 }
 
 #[test]
 fn method_syntax_and_field_calls_have_distinct_meanings() {
     let source = r#"
         export { main };
-        struct Counter { read: (int) -> int };
-        def field(n: int) -> int = { n + 1 };
-        impl Counter {
+        struct Counter { read: (int) -> int,
             def read(counter: Counter, n: int) -> int = { (counter.read)(n) + 40 };
             def other(self: int) -> int = { self };
-        }
+        };
+        def field(n: int) -> int = { n + 1 };
+
         def main() -> int = {
             var c = Counter { read = field };
             if (c.read(1) == 42 && (c.read)(1) == 2 && Counter.read(c, 1) == 42 && Counter.other(42) == 42) { 0 } else { 1 }
@@ -775,7 +775,7 @@ fn indexing_methods_require_ulong_and_do_not_replace_nominal_methods() {
     }
     let project = Project::new(&[(
         "main.resin",
-        "export { main }; struct Item { value: int }; impl Item { def at(item: Item, flag: bool) -> int = { if (flag) { item.value } else { 0 } }; } def main() -> int = { var item = Item { value = 42 }; item.at(1 == 1) };",
+        "export { main }; struct Item { value: int, def at(item: Item, flag: bool) -> int = { if (flag) { item.value } else { 0 } }; };  def main() -> int = { var item = Item { value = 42 }; item.at(1 == 1) };",
     )]);
     assert_eq!(project.run().status.code(), Some(42));
 }
@@ -785,7 +785,7 @@ fn aliases_share_the_nominal_namespace_and_origin() {
     let project = Project::new(&[
         (
             "library.resin",
-            "export { Alias, Item }; struct Item { value: int }; type Alias = Item; impl Alias { def read(value: Item) -> int = { value.value }; }",
+            "export { Alias, Item }; struct Item { value: int, def read(value: Item) -> int = { value.value }; }; type Alias = Item; ",
         ),
         (
             "main.resin",
@@ -800,19 +800,51 @@ fn aliases_share_the_nominal_namespace_and_origin() {
             "import { \"library.resin\" }; type Alias = Item; impl Alias { def f() = {}; }",
         ),
     ]);
-    project.error("defined in this module");
-    let source = "struct Item {}; type Alias = Item; impl Item { def f() = {}; } impl Alias { def f() = {}; }";
+    project.error("parse error");
+    for source in [
+        "struct Item {}; impl Item { def f() = {}; }",
+        "struct Item {}; type Alias = Item; impl Alias { def f() = {}; }",
+        "type Number = int; impl Number { def f() = {}; }",
+    ] {
+        let document = resin_cst::Document::reparse(source.into(), None);
+        assert!(resin_ast::generate(&document).is_err());
+    }
+}
+
+#[test]
+fn struct_methods_resolve_later_aliases_and_recursive_siblings() {
+    let project = Project::new(&[(
+        "main.resin",
+        r#"
+        export { main };
+        struct Owner {
+            value: int,
+            def new(value: int) -> Shared = { Shared { value = value } };
+            def read(self: Shared) -> int = { self.value };
+            def even(n: int) -> bool = { if (n == 0) { 1 == 1 } else { Owner.odd(n - 1) } };
+            def odd(n: int) -> bool = { if (n == 0) { 1 == 0 } else { Owner.even(n - 1) } };
+        };
+        type Shared = Arc<Owner>;
+        def main() -> int = {
+            var owner = Shared.new(42);
+            if (Shared.even(owner.read())) { 0 } else { 1 }
+        };
+    "#,
+    )]);
+    assert_eq!(project.run().status.code(), Some(0));
+}
+
+#[test]
+fn local_structs_are_field_only() {
+    let source = "def f() -> int = { struct Local { value: int }; Local { value = 42 }.value };";
+    pipeline::generate(&support::parse(source)).unwrap();
+    let source =
+        "def f() = { var captured = 42; struct Local { def read() -> int = { captured }; }; };";
+    let error = pipeline::generate(&support::parse(source)).unwrap_err();
     assert!(
-        pipeline::generate(&support::parse(source))
-            .unwrap_err()
+        error
             .to_string()
-            .contains("duplicate method")
-    );
-    let source = "type Number = int; impl Number { def f() = {}; }";
-    assert!(
-        pipeline::generate(&support::parse(source))
-            .unwrap_err()
-            .to_string()
-            .contains("nominal struct")
+            .contains("local structs cannot define methods"),
+        "{error}"
     );
 }

@@ -1,14 +1,14 @@
 export { main };
 
-struct Tracked { value: int };
-impl Tracked {
+struct Tracked {
+	value: int,
 	def read(self: Ptr<Tracked>) -> int = {
 		self.value
 	};
 	def drop(self: Ptr<Tracked>) = {
 		print(fmt("released {0}\n", (self.value,)));
 	};
-}
+};
 
 def main() = {
 	var weak = {

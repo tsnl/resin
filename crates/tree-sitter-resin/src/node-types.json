@@ -547,32 +547,6 @@
     }
   },
   {
-    "type": "impl_definition",
-    "named": true,
-    "fields": {
-      "method": {
-        "multiple": true,
-        "required": false,
-        "types": [
-          {
-            "type": "function_definition",
-            "named": true
-          }
-        ]
-      },
-      "receiver": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "uid",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "import_clause",
     "named": true,
     "fields": {
@@ -967,10 +941,6 @@
             "named": true
           },
           {
-            "type": "impl_definition",
-            "named": true
-          },
-          {
             "type": "struct_definition",
             "named": true
           },
@@ -1038,6 +1008,16 @@
         "types": [
           {
             "type": "declare",
+            "named": true
+          }
+        ]
+      },
+      "method": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "function_definition",
             "named": true
           }
         ]
@@ -1624,10 +1604,6 @@
   },
   {
     "type": "if",
-    "named": false
-  },
-  {
-    "type": "impl",
     "named": false
   },
   {

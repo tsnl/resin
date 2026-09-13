@@ -26,8 +26,10 @@ fn tail(function: &resin_hir::Function) -> &resin_hir::Term {
 #[test]
 fn hir_resolves_calls_short_circuiting_and_layout_before_lir() {
     let module = hir(r#"
-        struct Item { value: int };
-        impl Item { def read(item: Item) -> int = { item.value }; }
+        struct Item { value: int,
+            def read(item: Item) -> int = { item.value };
+        };
+
         def read(item: Item) -> int = { item.read() };
         def both(a: bool, b: bool) -> bool = { a && b };
         def measure() -> ulong = { size_of(int) };

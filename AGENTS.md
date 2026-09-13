@@ -201,8 +201,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Functions use `def`, nominal records use `struct`, transparent aliases use `type`, and local value bindings use `var`, including
   uninitialized locals. Record initializers and parameters do not take these keywords. Foreign functions use
   `extern "header.h" def name(...) -> Type;`.
-- `impl` adds functions to the defining module's nominal type namespace; aliases retain
-  that origin. `value.method(args)` supplies the receiver as the first argument,
+- Methods are declared inside their owning `struct`, after its fields. Aliases inherit
+  the target namespace and cannot add methods. Local structs are field-only.
+  `value.method(args)` supplies the receiver as the first argument,
   while `(value.field)(args)` calls a field value. Receiver parameter names are ordinary
   identifiers. Desugar method calls into ordinary functions before IR; method namespaces
   and module origins belong to frontend metadata. Compiler-provided methods use the
@@ -211,7 +212,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   HIR construction recognizes `drop` as a hook; direct calls remain ordinary calls.
 - Reading existing values performs compiler-defined copying. Function and type
   applications consume their argument results; operators do the same, and aggregate
-  constructors consume their field initializers. `impl` defines inherent methods and
+  constructors consume their field initializers. Structs define inherent methods and
   `drop(self: Ptr<T>)` hooks. There is no static move checking or borrow checker.
   Native wrappers must make their copying safe or expose Arc-based ownership;
   `pointer.replace(replacement)` can disarm a native owner during deliberate transfer.

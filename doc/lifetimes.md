@@ -96,17 +96,17 @@ A type alias for `Arc<T>` supports the same construction syntax. This is value
 transfer, not a promise that a temporary's machine address is preserved;
 self-referential stack values are not pinned.
 
-An `impl` belongs to a struct declared in the same module:
+Methods and destruction hooks belong inside their owning struct:
 
 ```resin
-struct Resource { handle: Ptr<ubyte> };
-impl Resource {
+struct Resource { handle: Ptr<ubyte>,
     def make() -> Arc<Resource> = {
         Arc<Resource> { handle = acquire_native_handle() }
     };
     def address(self: Ptr<Resource>) -> Ptr<ubyte> = { self.handle };
     def drop(self: Ptr<Resource>) = { release_native_handle(self.handle); };
-}
+};
+
 ```
 
 `self` as the first parameter declares an instance method. Its type is `T`, `Ptr<T>`,
@@ -235,6 +235,6 @@ Those language-facing release functions have been removed. The native C ABI rema
 explicit and unsafe. Native-handle fields remain an interoperability escape hatch;
 fabricating or mutating them can violate the wrapper's lifecycle invariants.
 
-Use `impl` destruction hooks for native resource cleanup, as shown in the
+Use struct destruction hooks for native resource cleanup, as shown in the
 [ownership example](../examples/ownership.resin). Do not combine explicit native
 destruction with automatic ownership of the same resource.
