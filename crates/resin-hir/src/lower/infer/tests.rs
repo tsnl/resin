@@ -204,3 +204,48 @@ fn numeric_defaults_wait_for_context() {
     assert_eq!(solver.resolve(&other), Some(Ty::Float64));
     assert_eq!(solver.resolve(&hex), Some(Ty::Int64));
 }
+
+#[test]
+fn retries_discard_failed_method_choices_and_preserve_completed_groups() {
+    let mut typer = Context::with_builtins();
+    let mut inference = infer::Inference::new(&mut typer);
+    let span = Span { start: 0, end: 0 };
+    let method = |out| {
+        infer::Constraint::Method(
+            Ty::Str.into(),
+            "at".into(),
+            Ty::UInt64.into(),
+            out,
+            false,
+            vec![],
+        )
+    };
+    let (earlier, first) = inference.expression();
+    inference.constrain(earlier, (span, method(first.clone())));
+    assert!(inference.solve(std::slice::from_ref(&first)).is_empty());
+    assert!(inference.methods.contains_key(&earlier));
+
+    let (failed, bad) = inference.expression();
+    let (healthy, good) = inference.expression();
+    inference.constrain(failed, (span, method(bad.clone())));
+    inference.constrain(healthy, (span, method(good.clone())));
+    // Fail after both choices were recorded, forcing the SCC to retry.
+    inference.constrain(
+        failed,
+        (
+            span,
+            infer::Constraint::Equal(Ty::Int32.into(), Ty::Bool.into()),
+        ),
+    );
+    assert_eq!(inference.solve(&[bad.clone(), good.clone()]).len(), 1);
+    assert!(inference.solver.invalid(&bad));
+    assert_eq!(inference.methods.len(), 2);
+    assert!(!inference.methods.contains_key(&failed));
+    for (rule, ty) in [(earlier, first), (healthy, good)] {
+        let pointer = Ty::Pointer {
+            pointee: Box::new(Ty::UInt8),
+        };
+        assert_eq!(inference.methods[&rule].result, pointer);
+        assert_eq!(inference.solver.require(&ty, span).unwrap(), pointer);
+    }
+}

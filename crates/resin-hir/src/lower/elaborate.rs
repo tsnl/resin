@@ -1,23 +1,73 @@
-//! Express resolved source forms using the HIR language.
-use super::elaborate_annotation;
+//! Complete solved expressions directly into public HIR.
+//! This is the last part of HIR construction; no concrete private tree is retained.
+use super::infer::{Rule, Solver, Type};
 use super::scope::DeclarationId;
-use super::{Generator, typed};
+use super::typed;
 use crate::ReceiverConversion;
-use crate::lower::context::FunctionBody;
+use crate::lower::context::{FunctionBody, FunctionDecl};
 use crate::{Arguments, MatchArm, Statement, Term, TermKind};
 use crate::{GenerateError, GenerateErrorKind};
 use resin_source::prelude::*;
 use resin_types::ExplicitConversion;
 use resin_types::prelude::*;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 type Result<T> = std::result::Result<T, GenerateError>;
 
-impl Generator {
-    pub(super) fn elaborate(&mut self, source: &typed::Term) -> Result<Term> {
+pub(super) struct CompletedBody {
+    pub body: Term,
+    pub shaders: BTreeSet<FunctionId>,
+}
+
+pub(super) fn function(
+    source: &typed::Term,
+    solver: &Solver,
+    methods: &BTreeMap<Rule, FunctionDecl>,
+    typer: &TyperContext,
+    function_bindings: &HashMap<DeclarationId, FunctionId>,
+    shaders: &BTreeMap<FunctionId, ShaderEntry>,
+) -> Result<CompletedBody> {
+    let mut completion = Completion {
+        solver,
+        methods,
+        typer,
+        function_bindings,
+        shaders,
+        embedded: BTreeSet::new(),
+    };
+    let body = completion.elaborate(source)?;
+    Ok(CompletedBody {
+        body,
+        shaders: completion.embedded,
+    })
+}
+
+struct Completion<'a> {
+    solver: &'a Solver,
+    methods: &'a BTreeMap<Rule, FunctionDecl>,
+    typer: &'a TyperContext,
+    function_bindings: &'a HashMap<DeclarationId, FunctionId>,
+    shaders: &'a BTreeMap<FunctionId, ShaderEntry>,
+    embedded: BTreeSet<FunctionId>,
+}
+
+impl Completion<'_> {
+    fn elaborate(&mut self, source: &typed::Term) -> Result<Term> {
         Ok(Term {
             span: source.span,
-            ty: source.ty.clone(),
+            ty: self.ty(source)?,
             kind: self.elaborate_kind(source)?,
+        })
+    }
+
+    fn ty(&self, source: &typed::Term) -> Result<Ty> {
+        self.solver.require(&source.ty, source.span)
+    }
+
+    fn annotation(&self, source: &typed::Annotation<Type>) -> Result<crate::Annotation> {
+        Ok(crate::Annotation {
+            ty: self.solver.require(&source.ty, source.span)?,
+            span: source.span,
         })
     }
 
@@ -37,7 +87,9 @@ impl Generator {
                 },
             },
             typed::TermKind::Type { ty } => TermKind::Constant {
-                value: Value::Type { ty: ty.ty.clone() },
+                value: Value::Type {
+                    ty: self.annotation(ty)?.ty,
+                },
             },
             typed::TermKind::Var { declaration, name } => self.reference(*declaration, name),
             typed::TermKind::Layout { ty, size } => self.layout(ty, *size)?,
@@ -80,13 +132,22 @@ impl Generator {
             },
             typed::TermKind::Builtin { name, args } => self.builtin(source, name, args)?,
             typed::TermKind::MethodCall {
+                rule,
                 receiver,
                 receiver_type,
                 name,
                 arg,
-            } => self.method(receiver.as_deref(), &receiver_type.ty, name, arg)?,
+            } => self.method(
+                self.methods.get(rule).expect("solved method").clone(),
+                receiver.as_deref(),
+                &self.annotation(receiver_type)?.ty,
+                name,
+                arg,
+            )?,
             typed::TermKind::Call { func, arg } => self.call(func, arg)?,
-            typed::TermKind::Ascribe { ty, arg } => self.ascription(source.span, &ty.ty, arg)?,
+            typed::TermKind::Ascribe { ty, arg } => {
+                self.ascription(source.span, &self.annotation(ty)?.ty, arg)?
+            }
             typed::TermKind::Result { failure, arg } => TermKind::Result {
                 failure: *failure,
                 arg: self.boxed(arg)?,
@@ -119,13 +180,15 @@ impl Generator {
     }
 
     fn number(&self, source: &typed::Term, text: &str) -> Result<TermKind> {
-        let (value, _) = super::eval::number(&self.typer, source.span, text, Some(&source.ty))?;
+        let (value, _) =
+            super::eval::number(self.typer, source.span, text, Some(&self.ty(source)?))?;
         Ok(TermKind::Constant { value })
     }
 
-    fn layout(&self, ty: &typed::Annotation, size: bool) -> Result<TermKind> {
-        let layout = resin_types::layout::layout(self.typer.definitions(), &ty.ty)
-            .map_err(|e| GenerateError::inference(ty.span, e.to_string()))?;
+    fn layout(&self, ty: &typed::Annotation<Type>, size: bool) -> Result<TermKind> {
+        let layout =
+            resin_types::layout::layout(self.typer.definitions(), &self.annotation(ty)?.ty)
+                .map_err(|e| GenerateError::inference(ty.span, e.to_string()))?;
         Ok(TermKind::Constant {
             value: Value::UInt64 {
                 value: if size { layout.size } else { layout.align } as u64,
@@ -206,17 +269,13 @@ impl Generator {
     }
 
     fn shader(&mut self, span: Span, function: FunctionId) -> Result<TermKind> {
-        let entry = self
-            .module
-            .shaders
-            .get_mut(&function)
-            .ok_or_else(|| GenerateError {
-                span,
-                kind: GenerateErrorKind::InvalidShader {
-                    message: "`.spirv` requires a function with a shader decorator".into(),
-                },
-            })?;
-        entry.embedded = true;
+        let entry = self.shaders.get(&function).ok_or_else(|| GenerateError {
+            span,
+            kind: GenerateErrorKind::InvalidShader {
+                message: "`.spirv` requires a function with a shader decorator".into(),
+            },
+        })?;
+        self.embedded.insert(function);
         Ok(TermKind::Shader {
             function,
             stage: entry.stage.clone(),
@@ -225,34 +284,12 @@ impl Generator {
 
     fn method(
         &mut self,
+        declaration: FunctionDecl,
         receiver: Option<&typed::Term>,
         receiver_ty: &Ty,
         name: &Ident,
         argument: &typed::Term,
     ) -> Result<TermKind> {
-        let declaration = self
-            .typer
-            .method_call(receiver_ty, &name.val, &argument.ty, receiver.is_none())
-            .ok_or_else(|| GenerateError::inference(name.span, "unknown method"))?;
-        let declaration = if matches!(
-            declaration.body,
-            FunctionBody::GpuPipelineFactory { .. } | FunctionBody::GpuPipelineRecord { .. }
-        ) {
-            let count = declaration.params.len() - usize::from(receiver.is_some());
-            let arguments = if count == 1 {
-                vec![argument.ty.clone()]
-            } else {
-                let Ty::Record { fields } = &argument.ty else {
-                    unreachable!("checked pipeline arguments")
-                };
-                fields.iter().map(|field| field.ty.clone()).collect()
-            };
-            self.typer
-                .specialize_gpu_method(declaration, &arguments[usize::from(receiver.is_none())..])
-                .map_err(|message| GenerateError::inference(name.span, message))?
-        } else {
-            declaration
-        };
         if let FunctionBody::GpuPipelineFactory { factory, graphics } = declaration.body {
             return self.pipeline_create(
                 receiver,
@@ -347,7 +384,7 @@ impl Generator {
                     "pipeline creation requires direct shader declarations; runtime aliases are unsupported",
                 ));
             };
-            let entry = self.module.shaders.get_mut(&function).ok_or_else(|| {
+            let entry = self.shaders.get(&function).ok_or_else(|| {
                 GenerateError::inference(
                     shader.span,
                     "pipeline creation requires a decorated shader declaration",
@@ -359,12 +396,12 @@ impl Generator {
                     format!("pipeline requires a @{stage}_shader declaration"),
                 ));
             }
-            entry.embedded = true;
+            self.embedded.insert(function);
             shaders.push(function);
         }
         let args = if let Some(receiver) = receiver {
             Arguments {
-                receiver: Some(self.adapt(receiver, &receiver.ty, &params[0])?),
+                receiver: Some(self.adapt(receiver, &self.ty(receiver)?, &params[0])?),
                 argument: Box::new(Term {
                     span: argument.span,
                     ty: Ty::Unit,
@@ -399,27 +436,28 @@ impl Generator {
     }
 
     fn call(&mut self, func: &typed::Term, arg: &typed::Term) -> Result<TermKind> {
+        let function_type = self.ty(func)?;
         let shape = self
             .typer
-            .body(&func.ty)
+            .body(&function_type)
             .map_err(|e| GenerateError::typing(func.span, e))?;
         let to = match shape {
             Ty::Array { .. } => Some(Ty::Pointer {
-                pointee: Box::new(func.ty.clone()),
+                pointee: Box::new(function_type.clone()),
             }),
             Ty::Str | Ty::Span { .. } | Ty::GpuPointer { .. } | Ty::GpuSpan { .. } => {
-                Some(func.ty.clone())
+                Some(function_type.clone())
             }
             _ => None,
         };
         if let Some(to) = to {
             let args = Arguments {
-                receiver: Some(self.adapt(func, &func.ty, &to)?),
+                receiver: Some(self.adapt(func, &function_type, &to)?),
                 argument: self.boxed(arg)?,
-                params: vec![arg.ty.clone()],
+                params: vec![self.ty(arg)?],
             };
             return Ok(TermKind::Intrinsic {
-                op: if matches!(func.ty, Ty::GpuPointer { .. } | Ty::GpuSpan { .. }) {
+                op: if matches!(function_type, Ty::GpuPointer { .. } | Ty::GpuSpan { .. }) {
                     Intrinsic::GpuIndex
                 } else {
                     Intrinsic::Index
@@ -449,7 +487,7 @@ impl Generator {
             typed::StatementKind::Declare { binding, name, ty } => Statement::Declare {
                 binding: *binding,
                 name: name.clone(),
-                ty: elaborate_annotation(ty),
+                ty: self.annotation(ty)?,
             },
             typed::StatementKind::Expr { term } => Statement::Expr {
                 term: self.elaborate(term)?,
@@ -463,14 +501,15 @@ impl Generator {
         value: &typed::Term,
         arms: &[typed::MatchArm],
     ) -> Result<TermKind> {
-        let tags = match &value.ty {
+        let value_type = self.ty(value)?;
+        let tags = match &value_type {
             Ty::Result { .. } => vec![Case::Ok, Case::Err],
             ty => ty.members().into_iter().map(Case::Type).collect(),
         };
         let mut seen = vec![];
         let mut checked = vec![];
         for arm in arms {
-            let tag = pattern(arm, &value.ty)?;
+            let tag = self.pattern(arm, &value_type)?;
             if !tags.contains(&tag) || seen.contains(&tag) {
                 return Err(GenerateError::inference(
                     arm.body.span,
@@ -497,32 +536,30 @@ impl Generator {
     }
 }
 
-fn pattern(arm: &typed::MatchArm, ty: &Ty) -> Result<Case> {
-    match (&arm.variant, ty) {
-        (None, Ty::Result { .. }) => Ok(if arm.failure { Case::Err } else { Case::Ok }),
-        (Some(ann), ty) if !matches!(ty, Ty::Result { .. }) => {
-            if matches!(ann.ty, Ty::Union { .. }) {
-                return Err(GenerateError::inference(
-                    ann.span,
-                    "union patterns must name a single member type",
-                ));
+impl Completion<'_> {
+    fn pattern(&self, arm: &typed::MatchArm, ty: &Ty) -> Result<Case> {
+        match (&arm.variant, ty) {
+            (None, Ty::Result { .. }) => Ok(if arm.failure { Case::Err } else { Case::Ok }),
+            (Some(ann), ty) if !matches!(ty, Ty::Result { .. }) => {
+                let annotation = self.annotation(ann)?;
+                if matches!(annotation.ty, Ty::Union { .. }) {
+                    return Err(GenerateError::inference(
+                        ann.span,
+                        "union patterns must name a single member type",
+                    ));
+                }
+                Ok(Case::Type(annotation.ty))
             }
-            Ok(Case::Type(ann.ty.clone()))
+            _ => Err(GenerateError::inference(
+                arm.body.span,
+                "pattern does not belong to this match type",
+            )),
         }
-        _ => Err(GenerateError::inference(
-            arm.body.span,
-            "pattern does not belong to this match type",
-        )),
     }
 }
 
-impl Generator {
-    pub(super) fn ascription(
-        &mut self,
-        span: Span,
-        to: &Ty,
-        source: &typed::Term,
-    ) -> Result<TermKind> {
+impl Completion<'_> {
+    fn ascription(&mut self, span: Span, to: &Ty, source: &typed::Term) -> Result<TermKind> {
         if let Ty::Arc { pointee } = to {
             return Ok(TermKind::ArcNew {
                 value: Box::new(self.shared_payload(pointee, source)?),
@@ -601,5 +638,88 @@ impl Generator {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lower::{
+        context::Context,
+        infer::{Constraint, Inference},
+    };
+
+    #[test]
+    fn completion_uses_the_selected_method_after_its_namespace_is_gone() {
+        let span = Span { start: 0, end: 0 };
+        let (solver, methods, rule, ty) = {
+            let mut context = Context::with_builtins();
+            let mut inference = Inference::new(&mut context);
+            let (rule, ty) = inference.expression();
+            inference.constrain(
+                rule,
+                (
+                    span,
+                    Constraint::Method(
+                        Ty::Str.into(),
+                        "at".into(),
+                        Ty::UInt64.into(),
+                        ty.clone(),
+                        false,
+                        vec![],
+                    ),
+                ),
+            );
+            assert!(inference.solve(std::slice::from_ref(&ty)).is_empty());
+            (inference.solver, inference.methods, rule, ty)
+        };
+        let source = typed::Term {
+            span,
+            ty,
+            kind: typed::TermKind::MethodCall {
+                rule,
+                receiver: Some(Box::new(typed::Term {
+                    span,
+                    ty: Ty::Str.into(),
+                    kind: typed::TermKind::String {
+                        value: "bytes".into(),
+                    },
+                })),
+                receiver_type: typed::Annotation {
+                    span,
+                    ty: Ty::Str.into(),
+                },
+                // Names remain diagnostic metadata; completion must not resolve it again.
+                name: Ident::new("no_such_method".into(), span),
+                arg: Box::new(typed::Term {
+                    span,
+                    ty: Ty::UInt64.into(),
+                    kind: typed::TermKind::Num { value: "0".into() },
+                }),
+            },
+        };
+        let completed = function(
+            &source,
+            &solver,
+            &methods,
+            &TyperContext::new(),
+            &HashMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert!(matches!(
+            completed.body.kind,
+            TermKind::Intrinsic {
+                op: Intrinsic::Index,
+                ..
+            }
+        ));
+        assert_eq!(
+            completed.body.ty,
+            Ty::Pointer {
+                pointee: Box::new(Ty::UInt8)
+            }
+        );
+        assert!(completed.shaders.is_empty());
     }
 }

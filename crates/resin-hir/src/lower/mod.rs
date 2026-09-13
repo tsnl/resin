@@ -1,4 +1,4 @@
-//! AST → HIR: declare modules and functions, check bodies, then elaborate a resolved tree.
+//! AST → HIR: resolve declarations, infer dependency groups, and complete function bodies.
 use crate::{
     Analysis, Annotation, CheckedProgram, DefinitionKind, Function, Module, Parameter, Signature,
 };
@@ -73,11 +73,10 @@ impl Generator {
         self.errors
             .extend(scopes.prepare(file, &mut self.typer, self.source_module));
         let methods = self.declare_methods(file, &mut scopes);
-        let checked = check::file(file, &mut self.typer, scopes, self.source_module, methods);
+        let checked = check::file(file, self, scopes, methods);
         self.errors.extend(checked.errors.iter().cloned());
         self.scopes = checked.context.clone();
-        self.declare_checked_functions(&checked);
-        self.elaborate_functions(&checked);
+        self.define_functions(checked);
     }
 
     fn finish(mut self) -> Result<Module, GenerateError> {
@@ -764,15 +763,17 @@ fn check_parameters(signature: &typed::Signature) -> Result<(), GenerateError> {
 }
 
 impl Generator {
-    fn declare_checked_functions(&mut self, checked: &CheckedFile) {
+    fn declare_checked_functions(&mut self, checked: &CheckedFile) -> Vec<GenerateError> {
+        let mut errors = Vec::new();
         for declaration in &checked.declarations {
             let Some(signature) = checked.signatures.get(&declaration.id) else {
                 continue;
             };
             if let Err(error) = self.declare_checked(declaration, signature) {
-                self.errors.push(error);
+                errors.push(error);
             }
         }
+        errors
     }
 
     fn declare_checked(
@@ -838,34 +839,16 @@ impl Generator {
         Ok(())
     }
 
-    fn elaborate_functions(&mut self, checked: &CheckedFile) {
-        for declaration in &checked.declarations {
-            let Some(body) = checked.bodies.get(&declaration.id) else {
+    fn define_functions(&mut self, checked: CheckedFile) {
+        for (declaration, body) in checked.bodies {
+            let Some(signature) = checked.signatures.get(&declaration) else {
                 continue;
             };
-            let Some(signature) = checked.signatures.get(&declaration.id) else {
+            let Some(&id) = self.function_bindings.get(&declaration) else {
                 continue;
             };
-            let Some(&id) = self.function_bindings.get(&declaration.id) else {
-                continue;
-            };
-            self.elaborate_function(id, signature, body);
-        }
-    }
-
-    fn elaborate_function(
-        &mut self,
-        id: FunctionId,
-        signature: &typed::Signature,
-        body: &typed::Term,
-    ) {
-        match self.elaborate(body) {
-            Ok(body) => {
-                self.module.functions[id.index()].signature = elaborate_signature(signature);
-                self.module.functions[id.index()].body = Some(body);
-            }
-            Err(error) if !self.errors.contains(&error) => self.errors.push(error),
-            Err(_) => {}
+            self.module.functions[id.index()].signature = elaborate_signature(signature);
+            self.module.functions[id.index()].body = Some(body);
         }
     }
 }

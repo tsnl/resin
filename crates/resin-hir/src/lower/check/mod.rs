@@ -1,5 +1,5 @@
-//! First expression pass: resolve declarations and types, producing a typed tree.
-//! No IR instructions or deferred code-generation operations are created here.
+//! Infer source expressions and complete public HIR within one construction boundary.
+//! Scopes, recovery, and the solver stay here; only completed bodies reach assembly.
 use crate::DefinitionKind;
 use crate::lower::{
     context::Context,
@@ -25,9 +25,9 @@ use std::{
 //
 
 type Result<T> = std::result::Result<T, GenerateError>;
-type Term = typed::Term<Type>;
-type Statement = typed::Statement<Type>;
-type MatchArm = typed::MatchArm<Type>;
+type Term = typed::Term;
+type Statement = typed::Statement;
+type MatchArm = typed::MatchArm;
 pub(super) struct Annotation {
     holes: Vec<(Span, VariableId)>,
     pub ty: Type,
@@ -110,11 +110,13 @@ impl Checker<'_> {
     }
 }
 
+/// Completed signatures and HIR bodies, with independent editor facts and diagnostics.
+/// Failed definitions do not discard healthy bodies; no inference state survives here.
 pub(super) struct CheckedFile {
     pub context: ContextView,
     pub declarations: Vec<typed::Declaration>,
     pub signatures: BTreeMap<DeclarationId, typed::Signature>,
-    pub bodies: BTreeMap<DeclarationId, typed::Term>,
+    pub bodies: BTreeMap<DeclarationId, crate::Term>,
     pub errors: Vec<GenerateError>,
 }
 struct Checker<'a> {
@@ -192,17 +194,62 @@ struct Body {
 
 pub(in crate::lower) fn file(
     file: &SourceFile,
-    typer: &mut Context,
+    generator: &mut super::Generator,
     scopes: Scopes,
-    source_module: SourceModuleId,
     methods: BTreeMap<Arc<str>, DeclarationId>,
 ) -> CheckedFile {
-    let mut checker = Checker::new(typer, scopes, source_module);
+    let mut checker = Checker::new(&mut generator.typer, scopes, generator.source_module);
     let (declarations, mut signatures, sources) = checker.declarations(file, methods);
     let mut bodies = checker.bodies(&mut signatures, sources);
     checker.solve_functions(&signatures, &mut bodies);
     checker.require_holes();
-    checker.finish(declarations, signatures, bodies)
+    checker
+        .scopes
+        .resolve_inferred(&checker.typing.solver, checker.typing.typer);
+    let signatures = checker.resolve_signatures(signatures);
+    let Checker {
+        mut typing,
+        scopes,
+        errors,
+        ..
+    } = checker;
+    let solver = std::mem::take(&mut typing.solver);
+    let methods = std::mem::take(&mut typing.methods);
+    drop(typing);
+    let mut checked = CheckedFile {
+        context: scopes.finish(),
+        declarations,
+        signatures,
+        bodies: BTreeMap::new(),
+        errors,
+    };
+    // Reserve every concrete signature before completing any body, including recursion.
+    let errors = generator.declare_checked_functions(&checked);
+    checked.errors.extend(errors);
+    for body in bodies {
+        if solver.invalid(&body.term.ty) {
+            continue;
+        }
+        let completed = super::elaborate::function(
+            &body.term,
+            &solver,
+            &methods,
+            &generator.typer,
+            &generator.function_bindings,
+            &generator.module.shaders,
+        );
+        match completed {
+            Ok(completed) => {
+                for shader in completed.shaders {
+                    generator.module.shaders.get_mut(&shader).unwrap().embedded = true;
+                }
+                checked.bodies.insert(body.declaration, completed.body);
+            }
+            Err(error) if !checked.errors.contains(&error) => checked.errors.push(error),
+            Err(_) => {}
+        }
+    }
+    checked
 }
 
 impl Checker<'_> {
@@ -414,25 +461,6 @@ impl Checker<'_> {
         }
     }
 
-    fn finish(
-        mut self,
-        declarations: Vec<typed::Declaration>,
-        signatures: Signatures,
-        bodies: Vec<Body>,
-    ) -> CheckedFile {
-        self.scopes
-            .resolve_inferred(&self.typing.solver, self.typing.typer);
-        let signatures = self.resolve_signatures(signatures);
-        let bodies = self.resolve_bodies(bodies);
-        CheckedFile {
-            context: self.scopes.finish(),
-            declarations,
-            signatures,
-            bodies,
-            errors: self.errors,
-        }
-    }
-
     fn resolve_signatures(
         &mut self,
         signatures: Signatures,
@@ -443,19 +471,6 @@ impl Checker<'_> {
                 let resolved = signature.resolve(&self.typing.solver);
                 self.record(resolved)
                     .map(|signature| (declaration, signature))
-            })
-            .collect()
-    }
-
-    fn resolve_bodies(&mut self, bodies: Vec<Body>) -> BTreeMap<DeclarationId, typed::Term> {
-        bodies
-            .into_iter()
-            .filter_map(|body| {
-                if self.typing.solver.invalid(&body.term.ty) {
-                    return None;
-                }
-                let resolved = body.term.resolve(&self.typing.solver);
-                self.record(resolved).map(|term| (body.declaration, term))
             })
             .collect()
     }
@@ -840,6 +855,7 @@ impl Expression<'_, '_> {
                 );
                 self.constrain((span, constraint));
                 TermKind::MethodCall {
+                    rule: self.rule,
                     receiver: receiver.map(Box::new),
                     receiver_type: annotation.map(Annotation::into_tree).unwrap_or(
                         typed::Annotation {
@@ -1046,7 +1062,7 @@ impl Expression<'_, '_> {
         Statement { kind }
     }
 
-    fn statement_inner(&mut self, stmt: &resin_ast::Stmt) -> Result<StatementKind<Type>> {
+    fn statement_inner(&mut self, stmt: &resin_ast::Stmt) -> Result<StatementKind> {
         let span = stmt.span;
         Ok(match &stmt.val {
             StmtKind::Define { name, init } => {
@@ -1128,7 +1144,7 @@ impl Expression<'_, '_> {
 }
 
 //
-// Concrete tree resolution
+// Signature annotation resolution
 //
 
 impl typed::Annotation<Type> {
@@ -1137,157 +1153,6 @@ impl typed::Annotation<Type> {
             ty: solver.require(&self.ty, self.span)?,
             span: self.span,
         })
-    }
-}
-
-fn child(term: typed::Term<Type>, solver: &Solver) -> Result<Box<typed::Term>> {
-    Ok(Box::new(term.resolve(solver)?))
-}
-
-impl typed::Term<Type> {
-    fn resolve(self, solver: &Solver) -> Result<typed::Term> {
-        let kind = match self.kind {
-            TermKind::Error(error) => return Err(error),
-            TermKind::Unit => TermKind::Unit,
-            TermKind::None => TermKind::None,
-            TermKind::Num { value } => TermKind::Num { value },
-            TermKind::String { value } => TermKind::String { value },
-            TermKind::Var { declaration, name } => TermKind::Var { declaration, name },
-            TermKind::Type { ty } => TermKind::Type {
-                ty: ty.resolve(solver)?,
-            },
-            TermKind::Unwrap { value } => TermKind::Unwrap {
-                value: child(*value, solver)?,
-            },
-            TermKind::Try { value } => TermKind::Try {
-                value: child(*value, solver)?,
-            },
-            TermKind::Match { value, arms } => TermKind::Match {
-                value: child(*value, solver)?,
-                arms: arms
-                    .into_iter()
-                    .map(|arm| {
-                        Ok(typed::MatchArm {
-                            variant: arm.variant.map(|ty| ty.resolve(solver)).transpose()?,
-                            failure: arm.failure,
-                            binding: arm.binding,
-                            body: arm.body.resolve(solver)?,
-                        })
-                    })
-                    .collect::<Result<_>>()?,
-            },
-            TermKind::If { cond, then, els } => TermKind::If {
-                cond: child(*cond, solver)?,
-                then: child(*then, solver)?,
-                els: child(*els, solver)?,
-            },
-            TermKind::While { cond, body } => TermKind::While {
-                cond: child(*cond, solver)?,
-                body: child(*body, solver)?,
-            },
-            TermKind::Block { stmts, tail } => TermKind::Block {
-                stmts: stmts
-                    .into_iter()
-                    .map(|stmt| stmt.resolve(solver))
-                    .collect::<Result<_>>()?,
-                tail: child(*tail, solver)?,
-            },
-            TermKind::Record { fields } => TermKind::Record {
-                fields: fields
-                    .into_iter()
-                    .map(|(name, term)| Ok((name, term.resolve(solver)?)))
-                    .collect::<Result<_>>()?,
-            },
-            TermKind::Array { elems } => TermKind::Array {
-                elems: elems
-                    .into_iter()
-                    .map(|term| term.resolve(solver))
-                    .collect::<Result<_>>()?,
-            },
-            TermKind::Builtin { name, args } => TermKind::Builtin {
-                name,
-                args: args
-                    .into_iter()
-                    .map(|term| term.resolve(solver))
-                    .collect::<Result<_>>()?,
-            },
-            TermKind::MethodCall {
-                receiver,
-                receiver_type,
-                name,
-                arg,
-            } => TermKind::MethodCall {
-                receiver: receiver.map(|term| child(*term, solver)).transpose()?,
-                receiver_type: receiver_type.resolve(solver)?,
-                name,
-                arg: child(*arg, solver)?,
-            },
-            TermKind::Call { func, arg } => TermKind::Call {
-                func: child(*func, solver)?,
-                arg: child(*arg, solver)?,
-            },
-            TermKind::Ascribe { ty, arg } => TermKind::Ascribe {
-                ty: ty.resolve(solver)?,
-                arg: child(*arg, solver)?,
-            },
-            TermKind::Result { failure, arg } => TermKind::Result {
-                failure,
-                arg: child(*arg, solver)?,
-            },
-            TermKind::Absurd { arg } => TermKind::Absurd {
-                arg: child(*arg, solver)?,
-            },
-            TermKind::Layout { ty, size } => TermKind::Layout {
-                ty: ty.resolve(solver)?,
-                size,
-            },
-            TermKind::Assign { place, value } => TermKind::Assign {
-                place: child(*place, solver)?,
-                value: child(*value, solver)?,
-            },
-            TermKind::Address { place } => TermKind::Address {
-                place: child(*place, solver)?,
-            },
-            TermKind::Deref { pointer } => TermKind::Deref {
-                pointer: child(*pointer, solver)?,
-            },
-            TermKind::Field { base, name } => TermKind::Field {
-                base: child(*base, solver)?,
-                name,
-            },
-        };
-        Ok(typed::Term {
-            span: self.span,
-            ty: solver.require(&self.ty, self.span)?,
-            kind,
-        })
-    }
-}
-
-impl typed::Statement<Type> {
-    fn resolve(self, solver: &Solver) -> Result<typed::Statement> {
-        let kind = match self.kind {
-            StatementKind::Error(error) => return Err(error),
-            StatementKind::Define {
-                binding,
-                name,
-                init,
-            } => StatementKind::Define {
-                binding,
-                name,
-                init: init.resolve(solver)?,
-            },
-            StatementKind::Declare { binding, name, ty } => StatementKind::Declare {
-                binding,
-                name,
-                ty: ty.resolve(solver)?,
-            },
-            StatementKind::TypeDefinition => StatementKind::TypeDefinition,
-            StatementKind::Expr { term } => StatementKind::Expr {
-                term: term.resolve(solver)?,
-            },
-        };
-        Ok(typed::Statement { kind })
     }
 }
 
