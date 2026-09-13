@@ -21,7 +21,21 @@ pub(super) fn analyze(module: &Module) -> Result<ModuleTypes, VerifyError> {
         .map(|(index, function)| check_function(module, FunctionId::from_index(index), function))
         .collect::<Result<Vec<_>, _>>()?;
     let types = table::collect(module, &functions);
-    Ok(ModuleTypes { functions, types })
+    let typer = TyperContext::from_definitions(module.types.clone());
+    for (index, function) in module.functions.iter().enumerate() {
+        crate::profile::function(&typer, FunctionId::from_index(index), function)
+            .map_err(crate::profile::Error::verify)?;
+        if function.profile == crate::Profile::Shader {
+            crate::profile::stack_types(&typer, FunctionId::from_index(index), &functions[index])
+                .map_err(crate::profile::Error::verify)?;
+        }
+    }
+    let shaders = crate::profile::shaders(module).map_err(crate::profile::Error::verify)?;
+    Ok(ModuleTypes {
+        functions,
+        types,
+        shaders,
+    })
 }
 
 //

@@ -23,6 +23,9 @@ fn lowering_error(error: resin_lir::Error) -> GenerateError {
         | resin_lir::ErrorKind::TypeSizeLimit { .. }) => {
             panic!("unexpected resource limit in source test: {kind:?}")
         }
+        resin_lir::ErrorKind::UnsupportedProfile { profile, message } => {
+            panic!("unexpected target failure in source test ({profile:?}): {message}")
+        }
         resin_lir::ErrorKind::NotAPlace => GenerateErrorKind::NotAPlace,
         resin_lir::ErrorKind::InvalidHir { message } => {
             panic!("HIR generation produced an invalid tree: {message}")
@@ -75,4 +78,25 @@ pub fn load(path: &Path) -> Result<resin_ast::Program, SourceError> {
         .analyze(source, &mut loader)
         .program()
         .cloned()
+}
+
+pub fn shader_error(source: &str) -> String {
+    let source = Source::new("shader-test.resin", source);
+    let mut loader = resin_source::Loader::new(library_root());
+    let compilation = Compiler::new().compile(
+        source,
+        &mut loader,
+        &[resin_compiler::Target::Shader {
+            entry: "kernel".into(),
+        }],
+    );
+    match compilation.module() {
+        Err(error) => error.to_string(),
+        Ok(_) => {
+            let directory = tempfile::TempDir::new().unwrap();
+            resin_codegen::generate(compilation.verified().unwrap(), None, directory.path())
+                .unwrap_err()
+                .to_string()
+        }
+    }
 }

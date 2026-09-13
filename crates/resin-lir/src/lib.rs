@@ -16,6 +16,7 @@ use resin_source::prelude::*;
 use resin_types::prelude::*;
 mod lower;
 mod print;
+mod profile;
 mod verify;
 
 use std::{collections::BTreeMap, num::NonZeroUsize, sync::Arc};
@@ -293,6 +294,10 @@ pub struct ApplicationNote {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorKind {
+    UnsupportedProfile {
+        profile: Profile,
+        message: Arc<str>,
+    },
     MonomorphLimit {
         function: Arc<str>,
         limit: usize,
@@ -325,7 +330,9 @@ impl std::fmt::Display for Error {
             self.span.start, self.span.end
         )?;
         match &self.kind {
-            ErrorKind::InvalidHir { message } => f.write_str(message),
+            ErrorKind::InvalidHir { message } | ErrorKind::UnsupportedProfile { message, .. } => {
+                f.write_str(message)
+            }
             ErrorKind::MonomorphLimit {
                 function,
                 limit,
@@ -449,6 +456,7 @@ pub enum VerifyErrorKind {
     InvalidForeignSignature,
     OpaqueValue { ty: Ty },
     InvalidShader,
+    UnsupportedProfile { profile: Profile, message: Arc<str> },
     InvalidProfile { expected: Profile, found: Profile },
     PointerArithmetic,
     InvalidBuiltin(TypeError),
@@ -505,6 +513,11 @@ pub struct Verified<'a> {
 impl<'a> Verified<'a> {
     pub fn module(self) -> &'a Module {
         self.module
+    }
+
+    /// Dependency order for a requested shader entry, established during verification.
+    pub fn shader_functions(self, entry: FunctionId) -> Option<&'a [FunctionId]> {
+        self.analysis.shaders.get(&entry).map(Vec::as_slice)
     }
 
     pub fn analysis(self) -> &'a ModuleTypes {
@@ -564,6 +577,7 @@ pub fn with_verified<T, E: From<VerifyError>>(
 }
 
 pub struct ModuleTypes {
+    shaders: BTreeMap<FunctionId, Vec<FunctionId>>,
     pub functions: Vec<FunctionTypes>,
     pub types: TypeTable,
 }

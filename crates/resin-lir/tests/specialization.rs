@@ -597,3 +597,45 @@ fn nominal_expansion_is_bounded_across_declaration_boundaries() {
         .remove(0);
     assert!(matches!(error.kind, ErrorKind::TypeExpansionLimit { .. }));
 }
+
+#[test]
+fn shader_dependency_order_is_iterative_and_rejects_cycles_with_bounded_notes() {
+    let reference = |index| {
+        term(
+            Type::Function {
+                param: Box::new(Type::Unit),
+                result: Box::new(Type::Unit),
+            },
+            TermKind::Function {
+                function: FunctionId::from_index(index),
+                type_args: vec![],
+            },
+        )
+    };
+    let count = 2000;
+    let mut hir = Module::default();
+    for index in 0..count {
+        hir.functions.push(function(
+            &format!("helper{index}"),
+            if index + 1 == count {
+                unit()
+            } else {
+                block([reference(index + 1)])
+            },
+        ));
+    }
+    let shader = add_shader(&mut hir, block([reference(0)]));
+    let roots = [entry("kernel", shader, resin_lir::Profile::Shader)];
+    let lir = resin_lir::instantiate(&hir, &roots, &options(1)).unwrap();
+    let checked = resin_lir::VerifiedModule::new(lir).unwrap();
+    let root = *checked.view().module().shaders.keys().next().unwrap();
+    let order = checked.view().shader_functions(root).unwrap();
+    assert_eq!(order.len(), count + 1);
+    assert_eq!(order.last(), Some(&root));
+    hir.functions[count - 1].body = Some(block([reference(0)]));
+    let error = resin_lir::instantiate(&hir, &roots, &options(1))
+        .unwrap_err()
+        .remove(0);
+    assert!(matches!(error.kind, ErrorKind::UnsupportedProfile { .. }));
+    assert_eq!(error.applications.len(), 32);
+}

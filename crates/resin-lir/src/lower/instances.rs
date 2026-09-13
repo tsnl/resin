@@ -122,6 +122,11 @@ impl<'a> Instances<'a> {
         entries.sort();
         entries.dedup();
         for entry in entries {
+            let location = self
+                .source
+                .functions
+                .get(entry.function.index())
+                .and_then(|function| function.location.clone());
             let arguments = entry
                 .arguments
                 .iter()
@@ -141,9 +146,9 @@ impl<'a> Instances<'a> {
                         None,
                     ));
                 }
-                self.shader(entry.function, false, None, None)?
+                self.shader(entry.function, false, None, location.clone())?
             } else {
-                self.request(entry.function, arguments, entry.profile, None, None)?
+                self.request(entry.function, arguments, entry.profile, None, location)?
             };
             if entry.profile == Profile::Host
                 && let Some(previous) = self.entries.insert(entry.name.clone(), id)
@@ -378,13 +383,50 @@ impl<'a> Instances<'a> {
     pub(super) fn typer(&self) -> &TyperContext {
         &self.typer
     }
-    pub(super) fn module(self) -> crate::Module {
-        crate::Module {
-            entries: self.entries,
-            shaders: self.shaders,
-            types: TypeTable::from(self.definitions),
+    pub(super) fn assemble(
+        mut self,
+        functions: Vec<LoweredFunction>,
+    ) -> Result<crate::Module, Vec<Error>> {
+        let mut module = crate::Module {
+            entries: std::mem::take(&mut self.entries),
+            shaders: std::mem::take(&mut self.shaders),
+            types: TypeTable::from(std::mem::take(&mut self.definitions)),
             ..Default::default()
+        };
+        for (index, lowered) in functions.into_iter().enumerate() {
+            let id = FunctionId::from_index(index);
+            module.functions.push(lowered.function);
+            if let Some(location) = lowered.location {
+                module.origins.functions.insert(id, location);
+            }
+            module.origins.instructions.extend(
+                lowered
+                    .origins
+                    .into_iter()
+                    .map(|((block, instruction), location)| ((id, block, instruction), location)),
+            );
         }
+        crate::profile::shaders(&module).map_err(|error| {
+            let location = error
+                .instruction
+                .and_then(|(block, instruction)| {
+                    module
+                        .origins
+                        .instructions
+                        .get(&(error.function, block, instruction))
+                })
+                .or_else(|| module.origins.functions.get(&error.function))
+                .cloned();
+            vec![self.error(
+                ErrorKind::UnsupportedProfile {
+                    profile: Profile::Shader,
+                    message: error.message,
+                },
+                Some(error.function),
+                location,
+            )]
+        })?;
+        Ok(module)
     }
 
     pub(super) fn lower(&mut self) -> Result<Vec<LoweredFunction>, Vec<Error>> {
@@ -410,10 +452,27 @@ impl<'a> Instances<'a> {
         let instance = self.requests[id.index()].instance.clone();
         let function = &self.source.functions[instance.definition.index()];
         let body = specialize::function(function, &instance.arguments, self, id)?;
-        functions::lower(&body, &self.typer, instance.profile).map_err(|mut error| {
-            error.applications = self.trace(Some(id));
-            error
-        })
+        let lowered =
+            functions::lower(&body, &self.typer, instance.profile).map_err(|mut error| {
+                error.applications = self.trace(Some(id));
+                error
+            })?;
+        crate::profile::function(&self.typer, id, &lowered.function).map_err(|error| {
+            let location = error
+                .instruction
+                .and_then(|instruction| lowered.origins.get(&instruction))
+                .or(lowered.location.as_ref())
+                .cloned();
+            self.error(
+                ErrorKind::UnsupportedProfile {
+                    profile: Profile::Shader,
+                    message: error.message,
+                },
+                Some(id),
+                location,
+            )
+        })?;
+        Ok(lowered)
     }
 
     pub(super) fn lower_error(

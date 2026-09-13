@@ -533,3 +533,67 @@ fn graphics_root(
         (None, None) => Ok(None),
     }
 }
+
+pub(super) fn shader_builtin_instance(
+    context: &TyperContext,
+    name: &str,
+    arguments: &[Ty],
+) -> Result<BuiltinCall, String> {
+    if matches!(name, "print" | "fmt" | "string_from_bytes") {
+        return Err(format!("{name} is only supported in host programs"));
+    }
+    let signature =
+        builtin_instance(context, name, arguments).map_err(|error| error.to_string())?;
+    let operand = context
+        .body(&arguments[0])
+        .map_err(|error| error.to_string())?;
+    let supported = match (name, arguments.len()) {
+        ("+" | "-" | "~" | "!", 1) => true,
+        (
+            "+" | "-" | "*" | "&" | "|" | "^" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||",
+            2,
+        ) => true,
+        ("/", 2) => operand == Ty::Float32,
+        _ => false,
+    };
+    if !supported || operand == Ty::Type {
+        return Err(format!(
+            "unsupported shader builtin {name:?} for {operand:?}"
+        ));
+    }
+    shader_value_type(context.definitions(), &operand)?;
+    Ok(signature)
+}
+
+pub(super) fn shader_value_type(definitions: &[TypeDef], ty: &Ty) -> Result<(), String> {
+    let mut pending = vec![ty];
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(ty) = pending.pop() {
+        if !seen.insert(ty) {
+            continue;
+        }
+        match ty {
+            Ty::Unit | Ty::None | Ty::Bool | Ty::Int32 | Ty::UInt8 | Ty::UInt32
+            | Ty::UInt64 | Ty::Int64 | Ty::Float32 | Ty::Arc { .. } | Ty::Weak { .. } => {},
+            Ty::Str => return Err("shader string literals need device-backed storage; pass a Span<ubyte> in the shader root".into()),
+            Ty::GpuPointer { .. } | Ty::GpuSpan { .. } | Ty::GpuArguments
+            | Ty::GpuComputePipeline { .. } | Ty::GpuGraphicsPipeline { .. } => {
+                return Err("shader cannot consume a managed GPU view or projected arguments".into());
+            }
+            Ty::Pointer { pointee: element } | Ty::Span { element } => {
+                crate::layout::layout(definitions, element).map_err(|error| error.to_string())?;
+                pending.push(element);
+            }
+            Ty::Array { element, length } => {
+                if *length == 0 { return Err("shader arrays must not be empty".into()); }
+                pending.push(element);
+            }
+            Ty::Record { fields } => pending.extend(fields.iter().map(|field| &field.ty)),
+            Ty::Defined { definition } => pending.push(crate::definition_body(definitions, *definition).map_err(|error| error.to_string())?),
+            Ty::Union { variants } => pending.extend(variants),
+            Ty::Result { value, error } => pending.extend([value.as_ref(), error.as_ref()]),
+            _ => return Err(format!("shader profile does not support type {ty:?}")),
+        }
+    }
+    Ok(())
+}

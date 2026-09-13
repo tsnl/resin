@@ -21,64 +21,11 @@ impl Context<'_> {
     }
 
     pub(super) fn validate(&mut self, ty: &Ty) -> Result<(), Error> {
-        if !self.validated.insert(ty.clone()) {
-            return Ok(());
-        }
-        match ty {
-            Ty::Unit
-            | Ty::None
-            | Ty::Bool
-            | Ty::Int32
-            | Ty::UInt8
-            | Ty::UInt32
-            | Ty::UInt64
-            | Ty::Int64
-            | Ty::Float32
-            | Ty::Arc { .. }
-            | Ty::Weak { .. } => {}
-            Ty::Str => return Err(super::str_storage_error()),
-            Ty::GpuPointer { .. }
-            | Ty::GpuSpan { .. }
-            | Ty::GpuArguments
-            | Ty::GpuComputePipeline { .. }
-            | Ty::GpuGraphicsPipeline { .. } => {
-                return Err(Error(
-                    "shader cannot consume a managed GPU view or projected arguments".into(),
-                ));
-            }
-            Ty::Pointer { pointee } => self.validate_buffer(pointee)?,
-            Ty::Span { element } => self.validate_buffer(element)?,
-            Ty::Array { element, length } => {
-                if *length == 0 {
-                    return Err(Error("shader arrays must not be empty".into()));
-                }
-                self.validate(element)?;
-            }
-            Ty::Record { fields } => {
-                for field in fields {
-                    self.validate(&field.ty)?;
-                }
-            }
-            Ty::Defined { definition } => {
-                self.validate(self.module.types[definition.index()].body().unwrap())?;
-            }
-            Ty::Union { .. } | Ty::Result { .. } => {
-                for (_, payload) in ty.payloads().unwrap() {
-                    self.validate(&payload)?;
-                }
-            }
-            _ => {
-                return Err(Error(format!(
-                    "shader profile does not support type {ty:?}"
-                )));
-            }
+        if !self.validated.contains(ty) {
+            resin_types::shader::value_type(&self.module.types, ty).map_err(Error)?;
+            self.validated.insert(ty.clone());
         }
         Ok(())
-    }
-
-    fn validate_buffer(&mut self, ty: &Ty) -> Result<(), Error> {
-        crate::layout::layout(self.module, ty)?;
-        self.validate(ty)
     }
 
     pub(super) fn ty(&mut self, ty: &Ty) -> Result<Word, Error> {

@@ -26,6 +26,12 @@ pub(super) fn function(
     .function(source)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Access {
+    Value,
+    Place,
+}
+
 struct Specialization<'a, 'source> {
     substitution: Substitution,
     instances: &'a mut Instances<'source>,
@@ -140,16 +146,56 @@ impl Specialization<'_, '_> {
     }
 
     fn term(&mut self, source: &resin_hir::Term) -> Result<concrete::Term, Error> {
+        self.complete_term(source, Access::Value)
+    }
+
+    fn place(&mut self, source: &resin_hir::Term) -> Result<Box<concrete::Term>, Error> {
+        let access = match source.kind {
+            resin_hir::TermKind::Local { .. }
+            | resin_hir::TermKind::Field { .. }
+            | resin_hir::TermKind::Deref { .. } => Access::Place,
+            _ => Access::Value,
+        };
+        self.complete_term(source, access).map(Box::new)
+    }
+
+    fn complete_term(
+        &mut self,
+        source: &resin_hir::Term,
+        access: Access,
+    ) -> Result<concrete::Term, Error> {
         let previous_span = std::mem::replace(&mut self.span, source.span);
         let result = (|| {
+            let ty = self.ty(&source.ty)?;
+            if self.instances.profile(self.current) == crate::Profile::Shader {
+                if access == Access::Value && ty.needs_drop(self.instances.typer().definitions()) {
+                    return Err(self.profile_error("shader cannot consume managed values: reference counting and destruction are host-only".into()));
+                }
+                crate::profile::expression_type(self.instances.typer(), &ty)
+                    .map_err(|message| self.profile_error(message))?;
+            }
             Ok(concrete::Term {
                 span: source.span,
-                ty: self.ty(&source.ty)?,
+                ty,
                 kind: self.kind(&source.kind, &source.ty)?,
             })
         })();
         self.span = previous_span;
         result
+    }
+
+    fn profile_error(&self, message: String) -> Error {
+        self.instances.lower_error(
+            super::LowerError {
+                span: self.span,
+                kind: crate::ErrorKind::UnsupportedProfile {
+                    profile: crate::Profile::Shader,
+                    message: message.into(),
+                },
+            },
+            Some(self.current),
+            self.location.clone(),
+        )
     }
 
     fn boxed(&mut self, source: &resin_hir::Term) -> Result<Box<concrete::Term>, Error> {
@@ -259,16 +305,29 @@ impl Specialization<'_, '_> {
         args: &[resin_hir::Term],
         expected: &resin_hir::Type,
     ) -> Result<concrete::TermKind, Error> {
-        let args = args
+        let params = args
             .iter()
-            .map(|arg| self.term(arg))
+            .map(|arg| self.ty(&arg.ty))
             .collect::<Result<Vec<_>, _>>()?;
-        let params = args.iter().map(|arg| arg.ty.clone()).collect::<Vec<_>>();
         let expected = self.ty(expected)?;
+        let signature = if self.instances.profile(self.current) == crate::Profile::Shader {
+            resin_types::shader::builtin_instance(self.instances.typer(), name, &params)
+                .map_err(|message| self.profile_error(message))?
+        } else {
+            self.instances
+                .typer()
+                .builtin_instance(name, &params)
+                .map_err(|error| {
+                    self.instances.lower_error(
+                        super::LowerError::typing(self.span, error),
+                        Some(self.current),
+                        self.location.clone(),
+                    )
+                })?
+        };
         self.instances
             .typer()
-            .builtin_instance(name, &params)
-            .and_then(|signature| self.instances.typer().same(&expected, &signature.result))
+            .same(&expected, &signature.result)
             .map_err(|error| {
                 self.instances.lower_error(
                     super::LowerError::typing(self.span, error),
@@ -276,6 +335,10 @@ impl Specialization<'_, '_> {
                     self.location.clone(),
                 )
             })?;
+        let args = args
+            .iter()
+            .map(|arg| self.term(arg))
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(concrete::TermKind::Builtin {
             name: name.clone(),
             args,
@@ -366,7 +429,11 @@ impl Specialization<'_, '_> {
             },
             resin_hir::TermKind::Adapt { conversion, arg } => concrete::TermKind::Adapt {
                 conversion: self.receiver(*conversion),
-                arg: self.boxed(arg)?,
+                arg: if *conversion == resin_hir::ReceiverConversion::Address {
+                    self.place(arg)?
+                } else {
+                    self.boxed(arg)?
+                },
             },
             resin_hir::TermKind::Convert { conversion, arg } => concrete::TermKind::Convert {
                 conversion: self.conversion(conversion)?,
@@ -419,17 +486,17 @@ impl Specialization<'_, '_> {
                 arg: self.boxed(arg)?,
             },
             resin_hir::TermKind::Assign { place, value } => concrete::TermKind::Assign {
-                place: self.boxed(place)?,
+                place: self.place(place)?,
                 value: self.boxed(value)?,
             },
             resin_hir::TermKind::Address { place } => concrete::TermKind::Address {
-                place: self.boxed(place)?,
+                place: self.place(place)?,
             },
             resin_hir::TermKind::Deref { pointer } => concrete::TermKind::Deref {
                 pointer: self.boxed(pointer)?,
             },
             resin_hir::TermKind::Field { base, access } => concrete::TermKind::Field {
-                base: self.boxed(base)?,
+                base: self.place(base)?,
                 access: FieldAccess {
                     ty: self.ty(&access.ty)?,
                     index: access.index,

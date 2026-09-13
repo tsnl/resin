@@ -277,14 +277,13 @@ fn invalid_print_types_are_rejected() {
 
 #[test]
 fn shader_print_has_a_host_only_diagnostic() {
-    let m = module(
+    let error = pipeline::shader_error(
         r#"export { kernel }; @compute_shader def kernel (invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); print(fmt("{0}", (i,))); output.* := i; };"#,
     );
-    let error = support::project::Project::new(&m, None).unwrap_err();
     assert!(
         error
             .to_string()
-            .contains("fmt is only supported in host programs")
+            .contains("print is only supported in host programs")
     );
 }
 
