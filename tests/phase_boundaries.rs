@@ -1,7 +1,6 @@
 //! Exercise public phase APIs without retaining construction state between them.
 
 use resin_source::prelude::*;
-use resin_types::prelude::*;
 fn hir(source: &str) -> resin_hir::Module {
     let syntax = resin_cst::Document::reparse(source.to_owned(), None);
     let file = resin_ast::generate(&syntax).unwrap();
@@ -71,7 +70,10 @@ fn lir_lowering_needs_only_the_resolved_tree() {
             narrow(pointer.*)
         };
     "#);
-    assert_eq!(function(&module, "main").signature.result.ty, Ty::Int32);
+    assert_eq!(
+        function(&module, "main").signature.result.ty,
+        resin_hir::Type::Int32
+    );
     // Source text and AST have already been dropped. Origins are optional metadata.
     for function in &mut module.functions {
         function.location = None;

@@ -1,10 +1,10 @@
 //! Lower a resolved tree without a parser, source provider, or compiler session.
-use resin_hir::{Annotation, Function, Module, Signature, Term, TermKind};
+use resin_hir::{Annotation, Constant, Function, Module, Signature, Term, TermKind, Type};
 use resin_lir::Instr;
 use resin_source::prelude::*;
 use resin_types::prelude::*;
 
-fn constant(value: Value, ty: Ty) -> Term {
+fn constant(value: Constant, ty: Type) -> Term {
     Term {
         span: Span { start: 0, end: 0 },
         ty,
@@ -20,18 +20,18 @@ fn conditional() -> Module {
             signature: Signature {
                 params: vec![],
                 result: Annotation {
-                    ty: Ty::Int32,
+                    ty: Type::Int32,
                     span: Span { start: 0, end: 0 },
                 },
             },
-            foreign: None,
+            foreign_header: None,
             body: Some(Term {
                 span: Span { start: 0, end: 0 },
-                ty: Ty::Int32,
+                ty: Type::Int32,
                 kind: TermKind::If {
-                    cond: Box::new(constant(Value::Bool { value: true }, Ty::Bool)),
-                    then: Box::new(constant(Value::Int32 { value: 1 }, Ty::Int32)),
-                    els: Box::new(constant(Value::Int32 { value: 2 }, Ty::Int32)),
+                    cond: Box::new(constant(Constant::Bool { value: true }, Type::Bool)),
+                    then: Box::new(constant(Constant::Int32 { value: 1 }, Type::Int32)),
+                    els: Box::new(constant(Constant::Int32 { value: 2 }, Type::Int32)),
                 },
             }),
         }],
@@ -127,24 +127,24 @@ fn failed_functions_keep_their_own_bindings_cleanup_and_error_origins() {
     });
     first.body = Some(Term {
         span: Span { start: 0, end: 13 },
-        ty: Ty::Int32,
+        ty: Type::Int32,
         kind: TermKind::Block {
             stmts: vec![resin_hir::Statement::Define {
                 binding: 0,
                 name: owner.clone(),
                 init: Term {
                     span: owner.span,
-                    ty: Ty::Arc {
-                        pointee: Box::new(Ty::Int32),
+                    ty: Type::Arc {
+                        pointee: Box::new(Type::Int32),
                     },
                     kind: TermKind::ArcNew {
-                        value: Box::new(constant(Value::Int32 { value: 7 }, Ty::Int32)),
+                        value: Box::new(constant(Constant::Int32 { value: 7 }, Type::Int32)),
                     },
                 },
             }],
             tail: Box::new(Term {
                 span: missing_span,
-                ty: Ty::Int32,
+                ty: Type::Int32,
                 kind: TermKind::Local {
                     binding: 1,
                     name: Ident {
@@ -159,7 +159,7 @@ fn failed_functions_keep_their_own_bindings_cleanup_and_error_origins() {
     let mut last = parameter_function(&[], false);
     last.body = Some(Term {
         span: detached_span,
-        ty: Ty::Int32,
+        ty: Type::Int32,
         kind: TermKind::Local {
             binding: 0,
             name: Ident {
@@ -199,7 +199,7 @@ fn failed_functions_keep_their_own_bindings_cleanup_and_error_origins() {
     );
 }
 
-fn parameter(index: usize, ty: Ty, foreign: bool) -> resin_hir::Parameter {
+fn parameter(index: usize, ty: Type, foreign: bool) -> resin_hir::Parameter {
     let span = Span { start: 0, end: 0 };
     resin_hir::Parameter {
         binding: (!foreign).then_some(index),
@@ -211,7 +211,7 @@ fn parameter(index: usize, ty: Ty, foreign: bool) -> resin_hir::Parameter {
     }
 }
 
-fn parameter_function(types: &[Ty], foreign: bool) -> Function {
+fn parameter_function(types: &[Type], foreign: bool) -> Function {
     let span = Span { start: 0, end: 0 };
     let params: Vec<_> = types
         .iter()
@@ -219,10 +219,10 @@ fn parameter_function(types: &[Ty], foreign: bool) -> Function {
         .map(|(index, ty)| parameter(index, ty.clone(), foreign))
         .collect();
     let body = params.last().filter(|_| !foreign).map_or_else(
-        || constant(Value::Int32 { value: 42 }, Ty::Int32),
+        || constant(Constant::Int32 { value: 42 }, Type::Int32),
         |parameter| Term {
             span,
-            ty: Ty::Int32,
+            ty: Type::Int32,
             kind: TermKind::Local {
                 binding: parameter.binding.unwrap(),
                 name: parameter.name.clone(),
@@ -235,14 +235,11 @@ fn parameter_function(types: &[Ty], foreign: bool) -> Function {
         signature: Signature {
             params,
             result: Annotation {
-                ty: Ty::Int32,
+                ty: Type::Int32,
                 span,
             },
         },
-        foreign: foreign.then(|| Foreign {
-            header: "callee.h".into(),
-            params: types.to_vec(),
-        }),
+        foreign_header: foreign.then(|| "callee.h".into()),
         body: (!foreign).then_some(body),
     }
 }
@@ -261,10 +258,14 @@ fn ordinary_and_foreign_parameters_share_one_unit_single_or_tuple_slot() {
             },
         ],
     };
-    for (params, expected) in [
-        (vec![], Ty::Unit),
-        (vec![Ty::Int32], Ty::Int32),
-        (vec![Ty::Bool, Ty::Int32], tuple),
+    for (params, expected, foreign_params) in [
+        (vec![], Ty::Unit, vec![]),
+        (vec![Type::Int32], Ty::Int32, vec![Ty::Int32]),
+        (
+            vec![Type::Bool, Type::Int32],
+            tuple,
+            vec![Ty::Bool, Ty::Int32],
+        ),
     ] {
         for foreign in [false, true] {
             let location = SourceLocation {
@@ -296,10 +297,50 @@ fn ordinary_and_foreign_parameters_share_one_unit_single_or_tuple_slot() {
             assert_eq!(function.blocks.is_empty(), foreign);
             if foreign {
                 assert_eq!(function.locals.len(), 1);
-                assert_eq!(function.foreign.as_ref().unwrap().params, params);
+                assert_eq!(function.foreign.as_ref().unwrap().params, foreign_params);
                 assert!(checked.view().analysis().functions[0].inputs.is_empty());
                 assert!(checked.view().module().origins.instructions.is_empty());
             }
         }
+    }
+}
+
+#[test]
+fn invalid_nominal_type_expressions_report_errors_before_storage_lowering() {
+    let invalid_reference = Type::Pointer {
+        pointee: Box::new(Type::Defined {
+            definition: TypeId::from_index(99),
+        }),
+    };
+    let inline_cycle = Type::Defined {
+        definition: TypeId::from_index(0),
+    };
+    for body in [
+        Type::Int32,
+        Type::Record {
+            fields: vec![resin_hir::RecordField {
+                name: "bad".into(),
+                ty: invalid_reference,
+            }],
+        },
+        Type::Record {
+            fields: vec![resin_hir::RecordField {
+                name: "self".into(),
+                ty: inline_cycle,
+            }],
+        },
+    ] {
+        let mut tree = conditional();
+        tree.types.push(resin_hir::TypeDefinition {
+            name: "Invalid".into(),
+            body,
+            methods: Default::default(),
+            drop: None,
+        });
+        let error = resin_lir::generate(&tree).unwrap_err();
+        assert!(
+            matches!(error.kind, resin_lir::ErrorKind::Type { .. }),
+            "{error}"
+        );
     }
 }

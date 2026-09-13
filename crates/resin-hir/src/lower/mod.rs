@@ -28,6 +28,7 @@ mod gpu;
 pub(crate) mod infer;
 pub(crate) mod scope;
 mod typed;
+mod types;
 
 /// Check a standalone source file. Imports require `generate_program`.
 pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
@@ -78,10 +79,22 @@ impl Generator {
     }
 
     fn finish(mut self) -> Result<Module, GenerateError> {
+        let mut namespaces = std::mem::take(&mut self.typer.namespaces);
         self.module.types = self
             .typer
             .into_definitions()
-            .map_err(|error| GenerateError::typing(Span { start: 0, end: 0 }, error))?;
+            .map_err(|error| GenerateError::typing(Span { start: 0, end: 0 }, error))?
+            .iter()
+            .enumerate()
+            .map(|(index, definition)| {
+                types::definition(
+                    definition,
+                    namespaces
+                        .remove(&TypeId::from_index(index))
+                        .unwrap_or_default(),
+                )
+            })
+            .collect();
         Ok(self.module)
     }
 }
@@ -683,7 +696,7 @@ fn elaborate_signature(source: &typed::Signature) -> Signature {
 }
 fn elaborate_annotation(source: &typed::Annotation) -> Annotation {
     Annotation {
-        ty: source.ty.clone(),
+        ty: types::ty(&source.ty),
         span: source.span,
     }
 }
@@ -707,7 +720,7 @@ impl Generator {
             name: name.val.clone(),
             signature: elaborate_signature(source),
             body: None,
-            foreign: None,
+            foreign_header: None,
         });
         self.function_bindings
             .insert(source.declaration.expect("checked function"), id);
@@ -731,7 +744,7 @@ impl Generator {
                 kind: GenerateErrorKind::InvalidForeignSignature,
             });
         }
-        self.module.functions[id.index()].foreign = Some(foreign);
+        self.module.functions[id.index()].foreign_header = Some(foreign.header);
         Ok(id)
     }
 }
@@ -810,11 +823,11 @@ impl Generator {
                 "a function can have only one shader decorator",
             ));
         }
-        let signature = &self.module.functions[id.index()].signature;
+        let signature = self.typer.declared_function(id);
         resin_types::shader::validate(
             &self.typer,
-            &signature.parameter_type(),
-            &signature.result.ty,
+            &Ty::parameter(&signature.params),
+            &signature.result,
             false,
             stage,
         )

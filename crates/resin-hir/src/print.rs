@@ -1,7 +1,7 @@
 //! Inspect the resolved tree without the AST, scopes, or inference state.
 use crate::{Arguments, Function, MatchArm, Module, Parameter, Statement, Term, TermKind};
-use resin_types::format_type;
-use resin_types::prelude::*;
+use crate::{Case, Type, TypeDefinition};
+use resin_types::TypeId;
 
 use sexpfmt::{PrinterConfig, SExp, SExpBookendStyle, sexp_to_string};
 
@@ -19,7 +19,7 @@ pub fn format_module(module: &Module) -> String {
 }
 
 struct Printer<'a> {
-    types: &'a [TypeDef],
+    types: &'a [TypeDefinition],
 }
 
 impl Printer<'_> {
@@ -58,15 +58,18 @@ impl Printer<'_> {
         )
     }
 
-    fn definition(&self, index: usize, definition: &TypeDef) -> SExp {
+    fn definition(&self, index: usize, definition: &TypeDefinition) -> SExp {
         let mut fields = vec![
             atom(format!("type{index}")),
-            self.ty(&definition.ty(TypeId::from_index(index))),
+            self.ty(&Type::Defined {
+                definition: TypeId::from_index(index),
+            }),
         ];
-        if let Some(body) = definition.body() {
-            fields.push(self.ty(body));
-        }
-        if let Some(drop) = definition.drop_hook() {
+        fields.push(self.ty(&definition.body));
+        fields.extend(definition.methods.iter().map(|(name, function)| {
+            list("method", vec![atom(name), function_id(function.index())])
+        }));
+        if let Some(drop) = definition.drop {
             fields.push(list("drop", vec![function_id(drop.index())]));
         }
         list("type", fields)
@@ -79,8 +82,8 @@ impl Printer<'_> {
             self.ty(&function.signature.result.ty),
         ];
         fields.extend(function.signature.params.iter().map(|p| self.parameter(p)));
-        if let Some(foreign) = &function.foreign {
-            fields.push(list("extern", vec![quoted(&foreign.header)]));
+        if let Some(foreign) = &function.foreign_header {
+            fields.push(list("extern", vec![quoted(foreign)]));
         }
         if let Some(body) = &function.body {
             fields.push(self.term(body));
@@ -100,7 +103,7 @@ impl Printer<'_> {
         )
     }
 
-    fn ty(&self, ty: &Ty) -> SExp {
+    fn ty(&self, ty: &Type) -> SExp {
         quoted(format_type(ty, self.types))
     }
 
@@ -243,7 +246,7 @@ impl Printer<'_> {
         let tag = match &arm.tag {
             Case::Ok => atom("ok"),
             Case::Err => atom("err"),
-            Case::Type(ty) => self.ty(ty),
+            Case::Type { ty } => self.ty(ty),
         };
         list(
             "arm",
@@ -295,4 +298,78 @@ fn list(head: &str, fields: Vec<SExp>) -> SExp {
         std::iter::once(atom(head)).chain(fields).collect(),
         SExpBookendStyle::Parentheses,
     )
+}
+
+fn format_type(ty: &Type, definitions: &[TypeDefinition]) -> String {
+    match ty {
+        Type::Union { variants } => {
+            if variants.is_empty() {
+                return "Never".into();
+            }
+            variants
+                .iter()
+                .map(|member| format_type(member, definitions))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        }
+        Type::Result { value, error } => format!(
+            "Result<{}, {}>",
+            format_type(value, definitions),
+            format_type(error, definitions)
+        ),
+        Type::Type => "type".into(),
+        Type::Unit => "()".into(),
+        Type::None => "None".into(),
+        Type::Bool => "bool".into(),
+        Type::Int8 => "sbyte".into(),
+        Type::Int16 => "short".into(),
+        Type::Int32 => "int".into(),
+        Type::Int64 => "long".into(),
+        Type::UInt8 => "ubyte".into(),
+        Type::UInt16 => "ushort".into(),
+        Type::UInt32 => "uint".into(),
+        Type::UInt64 => "ulong".into(),
+        Type::Float32 => "float32".into(),
+        Type::Float64 => "float64".into(),
+        Type::Str => "str".into(),
+        Type::Foreign { name } => name.to_string(),
+        Type::Defined { definition } => definitions
+            .get(definition.index())
+            .map(|d| &d.name)
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "?".into()),
+        Type::Pointer { pointee } => format!("Ptr<{}>", format_type(pointee, definitions)),
+        Type::GpuPointer { pointee } => format!("GpuPtr<{}>", format_type(pointee, definitions)),
+        Type::GpuSpan { element } => format!("GpuSpan<{}>", format_type(element, definitions)),
+        Type::GpuArguments => "GpuArguments".into(),
+        Type::GpuComputePipeline { root, owner } => format!(
+            "GpuComputePipeline<{}, {}>",
+            format_type(root, definitions),
+            format_type(owner, definitions)
+        ),
+        Type::GpuGraphicsPipeline { root, owner } => format!(
+            "GpuGraphicsPipeline<{}, {}>",
+            format_type(root, definitions),
+            format_type(owner, definitions)
+        ),
+        Type::Arc { pointee } => format!("Arc<{}>", format_type(pointee, definitions)),
+        Type::Weak { pointee } => format!("Weak<{}>", format_type(pointee, definitions)),
+        Type::Span { element } => format!("Span<{}>", format_type(element, definitions)),
+        Type::Array { element, length } => {
+            format!("[{}; {length}]", format_type(element, definitions))
+        }
+        Type::Record { fields } => format!(
+            "{{ {} }}",
+            fields
+                .iter()
+                .map(|f| format!("{}: {}", f.name, format_type(&f.ty, definitions)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Type::Function { param, result } => format!(
+            "({}) -> {}",
+            format_type(param, definitions),
+            format_type(result, definitions)
+        ),
+    }
 }

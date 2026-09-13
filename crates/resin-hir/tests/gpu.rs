@@ -1,5 +1,5 @@
+use resin_hir::Type;
 use resin_hir::{Module, TermKind};
-use resin_types::prelude::*;
 
 fn generate(source: &str) -> Result<Module, resin_hir::GenerateError> {
     let document = resin_cst::Document::reparse(source.into(), None);
@@ -35,7 +35,7 @@ fn gpu_new_infers_element_from_context_and_keeps_associated_constructor() {
     let TermKind::GpuNew { args, .. } = &tail.kind else {
         panic!()
     };
-    assert_eq!(args.argument.ty, Ty::Int32);
+    assert_eq!(args.argument.ty, Type::Int32);
 }
 
 #[test]
@@ -139,13 +139,13 @@ fn gpu_new_defaults_unconstrained_integer_elements_to_long() {
         .iter()
         .find(|function| function.name.as_ref() == "main")
         .unwrap();
-    let Ty::Result { value, .. } = &main.signature.result.ty else {
+    let Type::Result { value, .. } = &main.signature.result.ty else {
         panic!()
     };
     assert_eq!(
         **value,
-        Ty::GpuPointer {
-            pointee: Box::new(Ty::Int64)
+        Type::GpuPointer {
+            pointee: Box::new(Type::Int64)
         }
     );
 }
@@ -205,14 +205,14 @@ fn dispatch_infers_host_fields_from_the_pipeline_root() {
         panic!()
     };
     assert!(allocator.is_some());
-    let Ty::Record { fields } = &args.params[1] else {
+    let Type::Record { fields } = &args.params[1] else {
         panic!()
     };
-    assert_eq!(fields[0].ty, Ty::Float32);
+    assert_eq!(fields[0].ty, Type::Float32);
     assert_eq!(
         fields[1].ty,
-        Ty::GpuSpan {
-            element: Box::new(Ty::Int32)
+        Type::GpuSpan {
+            element: Box::new(Type::Int32)
         }
     );
     assert!(module.shaders.values().all(|entry| entry.embedded));

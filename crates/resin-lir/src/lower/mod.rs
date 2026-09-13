@@ -1,7 +1,8 @@
 //! HIR → LIR: choose storage and make evaluation, cleanup, and control flow explicit.
+use crate::lower::concrete::Term;
 use crate::{BlockId, Instr, Module, Terminator};
 use builder::FunctionBuilder;
-use resin_hir::{BindingId, Term};
+use resin_hir::BindingId;
 use resin_source::prelude::*;
 use resin_types::prelude::*;
 use std::{
@@ -12,10 +13,12 @@ use std::{
 mod arguments;
 mod bindings;
 mod builder;
+mod concrete;
 mod expressions;
 mod flow;
 mod functions;
 mod places;
+mod specialize;
 mod sums;
 mod terms;
 
@@ -26,17 +29,24 @@ pub fn generate(source: &resin_hir::Module) -> Result<Module, Error> {
 }
 
 pub fn analyze(source: &resin_hir::Module) -> Result<Module, Vec<Error>> {
-    let typer = TyperContext::from_definitions(source.types.clone());
+    let definitions = specialize::definitions(&source.types).map_err(|error| {
+        vec![Error {
+            source: None,
+            span: Span { start: 0, end: 0 },
+            kind: ErrorKind::Type { kind: error.kind },
+        }]
+    })?;
+    let typer = TyperContext::from_definitions(definitions);
     let mut functions = Vec::with_capacity(source.functions.len());
     let mut errors = vec![];
     for function in &source.functions {
-        match functions::lower(function, &typer) {
+        match functions::lower(&specialize::function(function), &typer) {
             Ok(function) => functions.push(function),
             Err(error) => errors.push(error),
         }
     }
     if errors.is_empty() {
-        Ok(assemble(source, functions))
+        Ok(assemble(source, typer, functions))
     } else {
         Err(errors)
     }
@@ -49,9 +59,15 @@ struct LoweredFunction {
     origins: BTreeMap<(BlockId, usize), SourceLocation>,
 }
 
-fn assemble(source: &resin_hir::Module, functions: Vec<LoweredFunction>) -> Module {
+fn assemble(
+    source: &resin_hir::Module,
+    typer: TyperContext,
+    functions: Vec<LoweredFunction>,
+) -> Module {
     let mut module = Module {
-        types: source.types.clone(),
+        types: typer
+            .into_definitions()
+            .expect("completed nominal definitions"),
         entries: source.entries.clone(),
         shaders: source.shaders.clone(),
         ..Default::default()

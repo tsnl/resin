@@ -19,6 +19,10 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   keep these distinct and reject exits that do not match their region.
   Keep LIR verification in private `crates/resin-lir/src/verify/` modules, with the
   verification API beside the language in `lib.rs`; constructing LIR does not verify it.
+- HIR owns type expressions and completed nominal declarations, including method identities;
+  it has no concrete type interner. LIR construction creates the concrete catalog and
+  translates each HIR function into a private concrete expression tree before assigning
+  storage. Discard that concrete tree after lowering the function.
 - Keep resolved types and layout rules in `crates/resin-types`; they must not depend on a
   frontend, backend, or verifier. Keep the public contract in `lib.rs`, with substantial
   representation algorithms in private `types.rs` and concrete checking/conversion rules

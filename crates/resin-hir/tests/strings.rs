@@ -1,5 +1,5 @@
+use resin_hir::Type;
 use resin_source::prelude::*;
-use resin_types::prelude::*;
 
 fn generate(text: &str) -> Result<resin_hir::Module, SourceError> {
     let source = Source::new("strings", text);
@@ -14,7 +14,7 @@ fn generate(text: &str) -> Result<resin_hir::Module, SourceError> {
     })
 }
 
-fn result(module: &resin_hir::Module, name: &str) -> Ty {
+fn result(module: &resin_hir::Module, name: &str) -> Type {
     module
         .functions
         .iter()
@@ -37,7 +37,7 @@ fn literals_infer_str_across_function_calls_and_annotations() {
     )
     .unwrap();
     for name in ["text", "identity", "answer"] {
-        assert_eq!(result(&module, name), Ty::Str);
+        assert_eq!(result(&module, name), Type::Str);
     }
 }
 
@@ -52,12 +52,12 @@ fn string_views_support_fields_and_indexing() {
         "#,
     )
     .unwrap();
-    assert_eq!(result(&module, "length"), Ty::UInt64);
+    assert_eq!(result(&module, "length"), Type::UInt64);
     for name in ["data", "byte", "legacy"] {
         assert_eq!(
             result(&module, name),
-            Ty::Pointer {
-                pointee: Box::new(Ty::UInt8)
+            Type::Pointer {
+                pointee: Box::new(Type::UInt8)
             }
         );
     }
@@ -78,8 +78,18 @@ fn string_views_convert_explicitly_and_copy_into_owned_strings() {
         "#,
     )
     .unwrap();
-    assert_eq!(result(&module, "bytes"), Ty::byte_span());
-    assert_eq!(result(&module, "forwarded_bytes"), Ty::byte_span());
+    assert_eq!(
+        result(&module, "bytes"),
+        Type::Span {
+            element: Box::new(Type::UInt8)
+        }
+    );
+    assert_eq!(
+        result(&module, "forwarded_bytes"),
+        Type::Span {
+            element: Box::new(Type::UInt8)
+        }
+    );
 }
 
 #[test]

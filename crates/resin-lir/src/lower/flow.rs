@@ -1,8 +1,8 @@
 //! Preserve source control-flow regions while making storage and cleanup explicit.
 use super::LowerError;
 
+use crate::lower::concrete::{Statement, Term};
 use crate::{Instr, Terminator};
-use resin_hir::{Statement, Term};
 use resin_types::prelude::*;
 
 use super::FunctionLowering;

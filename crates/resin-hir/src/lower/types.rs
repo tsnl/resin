@@ -1,0 +1,140 @@
+//! Complete the frontend's solved types as HIR expressions.
+use resin_types::prelude::*;
+use std::{collections::BTreeMap, sync::Arc};
+
+pub(super) fn ty(source: &Ty) -> crate::Type {
+    match source {
+        Ty::Type => crate::Type::Type,
+        Ty::Unit => crate::Type::Unit,
+        Ty::None => crate::Type::None,
+        Ty::Bool => crate::Type::Bool,
+        Ty::Int8 => crate::Type::Int8,
+        Ty::Int16 => crate::Type::Int16,
+        Ty::Int32 => crate::Type::Int32,
+        Ty::Int64 => crate::Type::Int64,
+        Ty::UInt8 => crate::Type::UInt8,
+        Ty::UInt16 => crate::Type::UInt16,
+        Ty::UInt32 => crate::Type::UInt32,
+        Ty::UInt64 => crate::Type::UInt64,
+        Ty::Float32 => crate::Type::Float32,
+        Ty::Float64 => crate::Type::Float64,
+        Ty::Str => crate::Type::Str,
+        Ty::GpuArguments => crate::Type::GpuArguments,
+        Ty::Foreign { name } => crate::Type::Foreign { name: name.clone() },
+        Ty::Defined { definition } => crate::Type::Defined {
+            definition: *definition,
+        },
+        Ty::Pointer { pointee } => crate::Type::Pointer {
+            pointee: Box::new(ty(pointee)),
+        },
+        Ty::Span { element } => crate::Type::Span {
+            element: Box::new(ty(element)),
+        },
+        Ty::GpuPointer { pointee } => crate::Type::GpuPointer {
+            pointee: Box::new(ty(pointee)),
+        },
+        Ty::GpuSpan { element } => crate::Type::GpuSpan {
+            element: Box::new(ty(element)),
+        },
+        Ty::Arc { pointee } => crate::Type::Arc {
+            pointee: Box::new(ty(pointee)),
+        },
+        Ty::Weak { pointee } => crate::Type::Weak {
+            pointee: Box::new(ty(pointee)),
+        },
+        Ty::GpuComputePipeline { root, owner } => crate::Type::GpuComputePipeline {
+            root: Box::new(ty(root)),
+            owner: Box::new(ty(owner)),
+        },
+        Ty::GpuGraphicsPipeline { root, owner } => crate::Type::GpuGraphicsPipeline {
+            root: Box::new(ty(root)),
+            owner: Box::new(ty(owner)),
+        },
+        Ty::Function { param, result } => crate::Type::Function {
+            param: Box::new(ty(param)),
+            result: Box::new(ty(result)),
+        },
+        Ty::Result { value, error } => crate::Type::Result {
+            value: Box::new(ty(value)),
+            error: Box::new(ty(error)),
+        },
+        Ty::Array { element, length } => crate::Type::Array {
+            element: Box::new(ty(element)),
+            length: *length,
+        },
+        Ty::Record { fields } => crate::Type::Record {
+            fields: fields
+                .iter()
+                .map(|f| crate::RecordField {
+                    name: f.name.clone(),
+                    ty: ty(&f.ty),
+                })
+                .collect(),
+        },
+        Ty::Union { variants } => crate::Type::Union {
+            variants: variants.iter().map(ty).collect(),
+        },
+    }
+}
+
+pub(super) fn constant(value: &Value) -> crate::Constant {
+    match value {
+        Value::Unit => crate::Constant::Unit,
+        Value::None => crate::Constant::None,
+        Value::Bool { value } => crate::Constant::Bool { value: *value },
+        Value::Int8 { value } => crate::Constant::Int8 { value: *value },
+        Value::Int16 { value } => crate::Constant::Int16 { value: *value },
+        Value::Int32 { value } => crate::Constant::Int32 { value: *value },
+        Value::Int64 { value } => crate::Constant::Int64 { value: *value },
+        Value::UInt8 { value } => crate::Constant::UInt8 { value: *value },
+        Value::UInt16 { value } => crate::Constant::UInt16 { value: *value },
+        Value::UInt32 { value } => crate::Constant::UInt32 { value: *value },
+        Value::UInt64 { value } => crate::Constant::UInt64 { value: *value },
+        Value::Float32 { value } => crate::Constant::Float32 { value: *value },
+        Value::Float64 { value } => crate::Constant::Float64 { value: *value },
+        Value::Type { ty: value } => crate::Constant::Type { ty: ty(value) },
+        Value::Str { value } => crate::Constant::Str {
+            value: value.clone(),
+        },
+        Value::StaticAddress { .. }
+        | Value::DynamicAddress { .. }
+        | Value::Array { .. }
+        | Value::Record { .. } => unreachable!("HIR constants have no storage"),
+    }
+}
+
+pub(super) fn definition(
+    source: &TypeDef,
+    methods: BTreeMap<Arc<str>, FunctionId>,
+) -> crate::TypeDefinition {
+    let TypeDef::Nominal {
+        name,
+        body: Some(body),
+        drop,
+    } = source
+    else {
+        unreachable!("completed source type declaration");
+    };
+    crate::TypeDefinition {
+        name: name.clone(),
+        body: ty(body),
+        methods,
+        drop: *drop,
+    }
+}
+
+pub(super) fn case(source: &Case) -> crate::Case {
+    match source {
+        Case::Ok => crate::Case::Ok,
+        Case::Err => crate::Case::Err,
+        Case::Type(value) => crate::Case::Type { ty: ty(value) },
+    }
+}
+
+pub(super) fn field(source: FieldAccess) -> crate::FieldAccess {
+    crate::FieldAccess {
+        ty: ty(&source.ty),
+        index: source.index,
+        steps: source.steps,
+    }
+}

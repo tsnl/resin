@@ -2,7 +2,7 @@
 use super::FunctionLowering;
 use super::LowerError;
 use crate::Instr;
-use resin_hir::{Arguments, Statement, Term, TermKind};
+use crate::lower::concrete::{Arguments, Statement, Term, TermKind};
 use resin_types::prelude::*;
 
 impl FunctionLowering<'_> {
@@ -152,7 +152,7 @@ impl FunctionLowering<'_> {
                 init,
             } => self.gen_define(*binding, name, init),
             Statement::Declare { binding, name, ty } => {
-                self.gen_declare(*binding, name, ty.ty.clone())
+                self.gen_declare(*binding, name, ty.clone())
             }
             Statement::Expr { term } => {
                 self.gen_term(term, None)?;

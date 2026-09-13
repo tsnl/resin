@@ -1,6 +1,6 @@
 use resin_ast::{Program, SourceModule};
+use resin_hir::Type;
 use resin_source::prelude::*;
-use resin_types::prelude::*;
 
 use resin_cst::Document;
 use std::{collections::BTreeMap, sync::Arc};
@@ -58,7 +58,7 @@ fn resolved_program_infers_through_an_import_and_exposes_only_root_exports() {
     })
     .unwrap();
     let main = &module.functions[module.entries["main"].index()];
-    assert_eq!(main.signature.result.ty, Ty::Int32);
+    assert_eq!(main.signature.result.ty, Type::Int32);
     assert_eq!(module.entries.len(), 1);
     assert!(main.body.is_some());
 }
@@ -179,5 +179,33 @@ fn revised_source_cannot_borrow_editor_facts_from_its_previous_version() {
             .unwrap()
             .text,
         "value: int"
+    );
+}
+
+#[test]
+fn nominal_declarations_retain_method_identities_with_their_type_expressions() {
+    let source = module(
+        "owner.resin",
+        "struct Owner { value: int, def read(self: Owner) -> int = { self.value }; def drop(self: Ptr<Owner>) = {}; }; type Alias = Owner;",
+    );
+    let hir = resin_hir::generate(&source.file).unwrap();
+    let owner = hir
+        .types
+        .iter()
+        .find(|definition| definition.name.as_ref() == "Owner")
+        .unwrap();
+    let Type::Record { fields } = &owner.body else {
+        panic!()
+    };
+    assert_eq!(fields[0].ty, Type::Int32);
+    assert_eq!(
+        hir.functions[owner.methods["read"].index()].name.as_ref(),
+        "Owner.read"
+    );
+    assert_eq!(owner.drop, Some(owner.methods["drop"]));
+    assert!(
+        !hir.types
+            .iter()
+            .any(|definition| definition.name.as_ref() == "Alias")
     );
 }

@@ -44,14 +44,14 @@ fn checking_resolves_types_in_earlier_expressions_and_annotations() {
     let Statement::Define { init, .. } = &stmts[0] else {
         panic!()
     };
-    assert_eq!(init.ty, Ty::Int32); // The later call constrained the earlier literal.
+    assert_eq!(init.ty, crate::Type::Int32); // The later call constrained the earlier literal.
     let Statement::Declare { ty, .. } = &stmts[1] else {
         panic!()
     };
     assert_eq!(
         ty.ty,
-        Ty::Pointer {
-            pointee: Box::new(Ty::Int32)
+        crate::Type::Pointer {
+            pointee: Box::new(crate::Type::Int32)
         }
     );
 }
@@ -67,7 +67,7 @@ fn recovery_keeps_signatures_and_healthy_trees_without_lowering_failed_bodies() 
     let healthy = checked.context.lookup("healthy", false).unwrap();
     assert_eq!(checked.signatures[&bad].result.ty, Ty::Int32);
     assert!(!checked.bodies.contains_key(&bad));
-    assert_eq!(checked.bodies[&healthy].ty, Ty::Int32);
+    assert_eq!(checked.bodies[&healthy].ty, crate::Type::Int32);
 }
 
 #[test]
@@ -165,8 +165,8 @@ fn declaration_identities_do_not_depend_on_unique_source_spans() {
     generator.generate_file(&file, Scopes::new());
     assert!(generator.errors.is_empty(), "{:?}", generator.errors);
     let functions = &generator.module.functions;
-    assert_eq!(functions[0].signature.result.ty, Ty::Int32);
-    assert_eq!(functions[1].signature.result.ty, Ty::Bool);
+    assert_eq!(functions[0].signature.result.ty, crate::Type::Int32);
+    assert_eq!(functions[1].signature.result.ty, crate::Type::Bool);
     assert_ne!(
         functions[0].signature.params[0].binding,
         functions[1].signature.params[0].binding
