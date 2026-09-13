@@ -5,6 +5,10 @@ unpublished Cargo workspace crate. Public data describes its output; a small set
 of public operations constructs, prints, or queries that data. Each crate lists
 its full public interface in `lib.rs`; implementation modules stay private.
 
+The [Nanopass refactor scope](nanopass-refactor.md) assesses these existing
+boundaries and proposes frontend improvements before polymorphism. It describes
+future work; the architecture below is the current implementation.
+
 The root manifest is both a package and a workspace. Root `src/` contains the
 `resin` CLI: `resin FILE` builds and runs, `resin FILE --output PATH` builds an
 executable, `resin --format DIR` formats source, and `resin --lsp DIR` serves the
