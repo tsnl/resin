@@ -18,7 +18,7 @@ mod lower;
 mod print;
 mod verify;
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, num::NonZeroUsize, sync::Arc};
 
 define_id! {
     pub struct BlockId(usize);
@@ -277,15 +277,45 @@ pub struct Error {
     pub source: Option<Source>,
     pub span: Span,
     pub kind: ErrorKind,
+    /// Bounded application trace, from the immediate requester toward its root.
+    pub applications: Vec<ApplicationNote>,
+}
+
+#[derive(Debug)]
+pub struct ApplicationNote {
+    pub function: Arc<str>,
+    pub arguments: Vec<Ty>,
+    pub location: Option<SourceLocation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorKind {
-    InvalidHir { message: std::sync::Arc<str> },
-    Type { kind: TypeErrorKind },
-    UnboundValue { name: std::sync::Arc<str> },
-    EagerRecursion { name: std::sync::Arc<str> },
-    UninitializedValue { name: std::sync::Arc<str> },
+    MonomorphLimit {
+        function: Arc<str>,
+        limit: usize,
+        arguments: Vec<Ty>,
+    },
+    TypeExpansionLimit {
+        limit: usize,
+    },
+    TypeSizeLimit {
+        limit: usize,
+    },
+    InvalidHir {
+        message: std::sync::Arc<str>,
+    },
+    Type {
+        kind: TypeErrorKind,
+    },
+    UnboundValue {
+        name: std::sync::Arc<str>,
+    },
+    EagerRecursion {
+        name: std::sync::Arc<str>,
+    },
+    UninitializedValue {
+        name: std::sync::Arc<str>,
+    },
     NotAPlace,
 }
 
@@ -298,6 +328,22 @@ impl std::fmt::Display for Error {
         )?;
         match &self.kind {
             ErrorKind::InvalidHir { message } => f.write_str(message),
+            ErrorKind::MonomorphLimit {
+                function,
+                limit,
+                arguments,
+            } => write!(
+                f,
+                "function {function} exceeds its limit of {limit} monomorphs while requesting {arguments:?}"
+            ),
+            ErrorKind::TypeExpansionLimit { limit } => write!(
+                f,
+                "type expression exceeds the expansion depth limit of {limit}"
+            ),
+            ErrorKind::TypeSizeLimit { limit } => write!(
+                f,
+                "type expression exceeds the expansion size limit of {limit} nodes"
+            ),
             ErrorKind::Type { kind } => TypeError { kind: kind.clone() }.fmt(f),
             kind => write!(f, "{kind:?}"),
         }
@@ -305,14 +351,37 @@ impl std::fmt::Display for Error {
 }
 impl std::error::Error for Error {}
 
-/// Lower a typed tree into storage and control flow; verification is a separate pass.
-pub fn generate(source: &resin_hir::Module) -> Result<Module, Error> {
-    lower::generate(source)
+/// Resource limits for one HIR-to-LIR construction run.
+#[derive(Debug, Clone)]
+pub struct LoweringOptions {
+    pub max_monomorphs_per_function: NonZeroUsize,
 }
 
-/// Collect independent lowering errors across functions.
+impl Default for LoweringOptions {
+    fn default() -> Self {
+        Self {
+            max_monomorphs_per_function: NonZeroUsize::new(16 * 1024).unwrap(),
+        }
+    }
+}
+
+/// Lower a typed tree into storage and control flow; verification is a separate pass.
+pub fn generate(source: &resin_hir::Module) -> Result<Module, Error> {
+    analyze(source).map_err(|mut errors| errors.remove(0))
+}
+
+/// Collect independent lowering errors across functions with default limits.
 pub fn analyze(source: &resin_hir::Module) -> Result<Module, Vec<Error>> {
-    lower::analyze(source)
+    analyze_with_options(source, &LoweringOptions::default())
+}
+
+/// Instantiate completed schemes, then lower each concrete body into storage.
+/// The source retains one body per definition; only the result contains instances.
+pub fn analyze_with_options(
+    source: &resin_hir::Module,
+    options: &LoweringOptions,
+) -> Result<Module, Vec<Error>> {
+    lower::analyze(source, options)
 }
 
 pub fn format_module(module: &Module) -> String {

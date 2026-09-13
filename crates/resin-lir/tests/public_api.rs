@@ -18,6 +18,7 @@ fn conditional() -> Module {
             location: None,
             name: "choose".into(),
             signature: Signature {
+                type_params: vec![],
                 params: vec![],
                 result: Annotation {
                     ty: Type::Int32,
@@ -233,6 +234,7 @@ fn parameter_function(types: &[Type], foreign: bool) -> Function {
         location: None,
         name: "callee".into(),
         signature: Signature {
+            type_params: vec![],
             params,
             result: Annotation {
                 ty: Type::Int32,

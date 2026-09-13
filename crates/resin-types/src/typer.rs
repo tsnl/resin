@@ -244,6 +244,32 @@ pub(super) fn type_builtin_call(
     })
 }
 
+pub(super) fn builtin_instance(
+    context: &TyperContext,
+    name: &str,
+    args: &[Ty],
+) -> Result<BuiltinCall, TypeError> {
+    let signature = type_builtin_call(context, name, args)?;
+    let rule = BuiltinRule::lookup(name, args.len())?;
+    if matches!(rule, BuiltinRule::Arithmetic | BuiltinRule::Comparison) {
+        let operand = context.body(&args[0])?;
+        let supported = match name {
+            "==" | "!=" => {
+                operand.is_numeric() || matches!(operand, Ty::Bool | Ty::Type | Ty::Pointer { .. })
+            }
+            "~" | "%" | "<<" | ">>" | "&" | "|" | "^" => operand.is_integer(),
+            _ => operand.is_numeric(),
+        };
+        if !supported {
+            return Err(TypeError::new(TypeErrorKind::UnsupportedBuiltin {
+                name: name.into(),
+                operand,
+            }));
+        }
+    }
+    Ok(signature)
+}
+
 impl TyperContext {
     pub(super) fn definition_body(&self, definition: TypeId) -> Result<&Ty, TypeError> {
         Ok(types::body(&self.definitions, definition)?)

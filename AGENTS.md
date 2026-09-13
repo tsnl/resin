@@ -23,6 +23,13 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   it has no concrete type interner. LIR construction creates the concrete catalog and
   translates each HIR function into a private concrete expression tree before assigning
   storage. Discard that concrete tree after lowering the function.
+- HIR function signatures retain named type binders; function references retain completed
+  type arguments. LIR owns memoized instance requests and reserves their function IDs before
+  translating bodies. Calls, shader references, native bridges, and drop hooks use those IDs.
+  Keep substitution and concrete builtin selection in the incoming concrete-body translation;
+  storage lowering receives no bound parameters. The default per-function allowance is 16,384,
+  configurable through immutable `CompilerConfig` and LIR `LoweringOptions`. Repeated requests
+  cost nothing. Type depth/size guards and bounded application traces are separate from that cap.
 - Keep resolved types and layout rules in `crates/resin-types`; they must not depend on a
   frontend, backend, or verifier. Keep the public contract in `lib.rs`, with substantial
   representation algorithms in private `types.rs` and concrete checking/conversion rules

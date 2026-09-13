@@ -37,7 +37,7 @@ fn hir_resolves_calls_short_circuiting_and_layout_before_lir() {
     let resin_hir::TermKind::Call { func, arg } = &tail(read).kind else {
         panic!("ordinary call")
     };
-    let resin_hir::TermKind::Function { function: id } = func.kind else {
+    let resin_hir::TermKind::Function { function: id, .. } = func.kind else {
         panic!("resolved function")
     };
     assert_eq!(module.functions[id.index()].name.as_ref(), "Item.read");
@@ -138,4 +138,18 @@ fn a_later_phase_error_preserves_earlier_compilation_products() {
             .iter()
             .any(|d| d.message.to_lowercase().contains("uninitialized"))
     );
+}
+
+#[test]
+fn unsupported_concrete_operations_fail_during_lir_construction() {
+    let source = "export { main }; def main() -> int = { var r = { x = 1 }; r + r; 0 };";
+    let hir = hir(source);
+    let error = resin_lir::generate(&hir).unwrap_err();
+    assert!(matches!(
+        error.kind,
+        resin_lir::ErrorKind::Type {
+            kind: resin_types::TypeErrorKind::UnsupportedBuiltin { .. }
+        }
+    ));
+    assert_eq!(&source[error.span.start..error.span.end], "r + r");
 }

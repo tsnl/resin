@@ -681,6 +681,7 @@ fn method_annotation(
 
 fn elaborate_signature(source: &typed::Signature) -> Signature {
     Signature {
+        type_params: vec![],
         params: source
             .params
             .iter()

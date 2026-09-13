@@ -81,6 +81,12 @@ impl Printer<'_> {
             atom(&function.name),
             self.ty(&function.signature.result.ty),
         ];
+        fields.extend(function.signature.type_params.iter().map(|parameter| {
+            list(
+                "type-param",
+                vec![atom(parameter.id.index()), atom(&parameter.name.val)],
+            )
+        }));
         fields.extend(function.signature.params.iter().map(|p| self.parameter(p)));
         if let Some(foreign) = &function.foreign_header {
             fields.push(list("extern", vec![quoted(foreign)]));
@@ -117,7 +123,15 @@ impl Printer<'_> {
             TermKind::Local { binding: id, name } => {
                 list("local", vec![binding(*id), atom(&name.val)])
             }
-            TermKind::Function { function } => function_id(function.index()),
+            TermKind::Function {
+                function,
+                type_args,
+            } => list(
+                "apply",
+                std::iter::once(function_id(function.index()))
+                    .chain(type_args.iter().map(|ty| self.ty(ty)))
+                    .collect(),
+            ),
             TermKind::Shader { function, stage } => {
                 list("spirv", vec![function_id(function.index()), atom(stage)])
             }
@@ -333,6 +347,7 @@ fn format_type(ty: &Type, definitions: &[TypeDefinition]) -> String {
         Type::Float64 => "float64".into(),
         Type::Str => "str".into(),
         Type::Foreign { name } => name.to_string(),
+        Type::Parameter { parameter } => format!("T{}", parameter.index()),
         Type::Defined { definition } => definitions
             .get(definition.index())
             .map(|d| &d.name)

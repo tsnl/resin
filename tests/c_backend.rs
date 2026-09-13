@@ -395,17 +395,6 @@ fn invalid_integer_operations_fail_at_runtime() {
 }
 
 #[test]
-fn unsupported_operations_report_backend_errors() {
-    let error = support::project::Project::new(
-        &module("export { main }; def main () -> int = { var r = { x = 1 }; r + r; 0 };"),
-        Some("main"),
-    )
-    .unwrap_err();
-    assert!(error.to_string().contains("unsupported builtin"));
-    assert!(error.to_string().contains("instruction"));
-}
-
-#[test]
 fn entry_selection_and_invalid_ir_have_distinct_boundaries() {
     assert!(
         support::project::Project::new(&resin_lir::Module::default(), Some("main"))

@@ -19,6 +19,7 @@ pub(super) fn lower(
         source: lowering.source.clone(),
         span: error.span,
         kind: error.kind,
+        applications: vec![],
     })?;
     Ok(LoweredFunction {
         function: lowering.function.finish(),

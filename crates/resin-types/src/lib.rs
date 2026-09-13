@@ -563,6 +563,7 @@ pub enum TypeErrorKind {
     ExpectedFunction { found: Ty },
     InvalidBuiltinArgumentCount { name: Arc<str>, found: usize },
     UnknownBuiltin { name: Arc<str> },
+    UnsupportedBuiltin { name: Arc<str>, operand: Ty },
     InvalidPrintArguments { found: Ty },
     InvalidFormatArguments { found: Ty },
     UnformattableType { found: Ty },
@@ -778,6 +779,13 @@ impl TyperContext {
 
     pub fn type_builtin_call(&self, name: &str, args: &[Ty]) -> Result<BuiltinCall, TypeError> {
         typer::type_builtin_call(self, name, args)
+    }
+
+    /// Construct a supported concrete builtin call after scheme substitution.
+    /// Structural operand relationships alone do not establish scalar operation support.
+    /// Target-specific restrictions may further narrow these common operations.
+    pub fn builtin_instance(&self, name: &str, args: &[Ty]) -> Result<BuiltinCall, TypeError> {
+        typer::builtin_instance(self, name, args)
     }
 }
 
