@@ -3,10 +3,12 @@
 Status: draft design. The syntax below is illustrative and is not implemented.
 
 Allow functions and types to declare named type parameters. Each use supplies or
-deduces concrete type arguments, and the compiler checks the resulting instance.
-Dependent operations such as arithmetic, field access, and method calls are
-resolved using those concrete types. This follows the useful core of C++ templates
-while retaining Resin's language rules and concrete public HIR.
+deduces type arguments. HIR retains polymorphic definitions and their schemes;
+checking instantiates schemes as needed, while HIR-to-LIR lowering enumerates
+concrete instances. Dependent operations such as arithmetic, field access, and
+method calls carry requirements that are checked when their types are known.
+This follows the useful core of C++ templates while retaining Resin's language
+rules and a monomorphic LIR.
 
 ## Templates, inference holes, and let-polymorphism
 
@@ -16,7 +18,7 @@ These are distinct mechanisms:
 | --- | --- |
 | Inference hole `_` | Find one type from the constraints of this expression or declaration. |
 | Let-polymorphism | Generalize a binding's inferred type, then instantiate its quantified variables at each use. |
-| Type template | Declare named type parameters, choose concrete arguments for a use, and instantiate the declaration. |
+| Type template | Declare named type parameters and apply the declaration with chosen or deduced types. |
 
 This proposal adds type templates and argument deduction. Existing `_` holes keep
 their inference meaning. There is no new `let` keyword, generalized mutable
@@ -26,13 +28,13 @@ to have explicit annotations, which may refer to declared template parameters.
 The model draws on C++ [call argument deduction](https://eel.is/c++draft/temp.deduct.call)
 and [template instantiation](https://eel.is/c++draft/temp.inst). Resin also uses a
 call's expected result type to deduce still-undetermined parameters through the
-declared result shape, so contextual numeric literals remain convenient. This is
+completed result shape, so contextual numeric literals remain convenient. This is
 an extension to ordinary C++ call deduction; it does not adopt C++'s complete
 overload, conversion, or specialization system.
 
-The [implementation architecture](template-implementation.md) defines the
-resolved program, instance engine, deduction scheduler, and migration of existing
-monomorphic code onto the same machinery.
+The [implementation architecture](template-implementation.md) defines polymorphic
+HIR, scheme checking, dependent requirements, and specialization during LIR
+lowering. Ordinary functions use the same machinery with no type parameters.
 
 ## Function templates
 
@@ -59,9 +61,11 @@ a runtime value. An undeclared type name remains an error.
 
 `add` is valid for an instance whose operands support Resin's existing `+`
 operation. An `add<bool>` use reports an error at the operation and the use that
-requested the instance. Checking this dependent operation waits for instantiation;
+requested the instance. The definition retains this dependent requirement;
 the compiler does not have to prove `+` exists for every possible `T`. This does
-not introduce user-defined operator overloading.
+not introduce user-defined operator overloading. A call inside another template
+can use its enclosing parameters, such as `add<U>`, until specialization makes
+them concrete.
 
 Deduction matches annotated parameter shapes against call argument types, retaining
 unresolved literal constraints. Repeated occurrences of one template parameter
@@ -79,14 +83,17 @@ Existing compiler-provided contextual inference retains its current rules.
 
 A template family is not a runtime function value. Initially, storing or passing
 a function template requires explicit arguments, as in `identity<int>` above.
-The resulting value has one concrete function-pointer signature and obeys normal
-assignment and ownership rules. `var function = identity` is insufficient, and
+The resulting value has one function-pointer signature per enclosing application
+and obeys normal assignment and ownership rules. Inside a template, explicit
+arguments may themselves be bound parameters, such as `identity<T>`.
+`var function = identity` is insufficient, and
 later uses do not turn the variable into a family of functions. Deduction from an
 expected function-pointer type can be added separately.
 
-Omitted function results continue to mean unit. Existing `-> _` result inference
-may run separately for each concrete template instance; it does not introduce an
-additional template parameter. Unresolved local or result holes remain errors.
+Omitted function results continue to mean unit. Explicit `-> _` infers a result
+while checking the polymorphic definition. That result may be `T` or a dependent
+type such as the type of a member of `T`; it does not introduce another template
+parameter. An unresolved hole without a determining operation remains an error.
 
 ## Unsuffixed integers and contextual deduction
 
@@ -104,31 +111,31 @@ def reversed(value: int) -> int = { add(1, value) };
 def narrow() -> ubyte = { identity(255) };   // fits the selected type
 ```
 
-Collect constraints before committing an instance:
+Collect constraints before fixing a call's type arguments:
 
-1. Apply explicit type arguments, or deduce from already concrete argument
+1. Apply explicit type arguments, or deduce from already determined argument
    types. Keep unsuffixed numeric arguments flexible, including those nested in
    aggregates and those linked through still-unresolved local bindings.
 2. Fill remaining parameters from an available expected result type where it
-   matches the template's declared result shape unambiguously. Context may come
+   matches the template's completed result shape unambiguously. Context may come
    from assignment, a function's annotated return, a typed field, or an enclosing
    call parameter. Propagate it through nested calls before defaulting literals.
-3. Solve pending constraints and check instances whose own type arguments are
-   already fixed; their completed inferred results can constrain enclosing calls.
-   When deduction needs a numeric fallback, default only the request's key
-   variables that have no pending external result producer, to `long` or
-   `float64`. Defer unrelated local defaults until their result dependencies
-   close. The implementation architecture specifies this scheduling rule.
+3. Solve pending constraints and normalize dependent types whose inputs are known.
+   Use completed callee schemes without rechecking their bodies. When deduction
+   needs a numeric fallback, default unconstrained numeric components to `long`
+   or `float64` after their productive dependencies settle. Do not default a
+   literal connected to an enclosing bound parameter or a pending external
+   result producer. The implementation architecture specifies this scheduling rule.
    An unresolved nonnumeric parameter still requires an explicit type argument.
-4. Check literal ranges as their selected types become known, and request the
-   remaining concrete instances. Range failure reports an error; it does not
-   retry a wider instance.
+4. Check literal ranges and other requirements as their types become known.
+   Retain requirements that depend on enclosing parameters in HIR. Range failure
+   reports an error; it does not retry a wider instance.
 
 This gives `add(1, 2)` type `long` without context, `add(existing_int, 2)` type
 `int`, and `add<int>(1, 2)` type `int`. Swapping argument order cannot change the
 result. A typed parameter of an enclosing call can also select `int` for
-`identity(42)`; nested template calls with declared result patterns participate
-in the same constraint solving before any instance body is needed.
+`identity(42)`; nested template calls with completed result patterns participate
+in the same constraint solving without constructing monomorphic bodies.
 
 Result context does not overwrite explicit arguments or types already determined
 by concrete values. Once a parameter is fixed, apply the normal result conversion
@@ -138,13 +145,20 @@ Result error widening. Do not search union members or alternative instances to
 make a call compile. Existing literal-to-union inference may still use its single
 unambiguous numeric candidate where the ordinary checker already permits it.
 
-An expected `Ptr<int>` may determine `T` for a declared result `Ptr<T>`, even
-with no value arguments. A `-> _` result provides no such declared pattern:
-the compiler must not inspect or repeatedly try the template body to discover
-missing type arguments. Infer that result only after the instance is selected,
-preserving the existing rule that callers cannot determine a body's inferred
-return type. Expected-result matching also does not invert arbitrary conversions
-or dependent type computations.
+An expected `Ptr<int>` may determine `T` for a completed result `Ptr<T>`, even
+with no value arguments. A result inferred once as `T` is equally useful:
+
+```resin
+def inferred_identity<T>(value: T) -> _ = { value };
+def contextual() -> int = { inferred_identity(42) };
+```
+
+The completed scheme is `forall T. T -> T`; context selects `T = int` without
+changing the definition's inference. Meanwhile,
+`def plain() -> _ = { 1 };` completes to `() -> long` and stays fixed.
+Expected-result matching does not invert arbitrary conversions or dependent
+computations such as the type of `T.member`. The compiler never tries different
+bodies or type arguments to find an instance that succeeds.
 
 Concrete numeric values retain their types. `add(1_i, 2_l)` remains a deduction
 conflict; suffix-free code does not imply implicit conversion between stored
@@ -180,7 +194,7 @@ declarations while preserving builtin representation rules. Canonical instance
 identity, recursive record layout, and alias-cycle checking must be established
 before an instance enters the shared concrete type table.
 
-Methods belonging to a generic nominal type use its concrete type arguments.
+Methods belonging to a generic nominal type use its owner type arguments.
 Method lookup continues to use the type's defining module, including through
 aliases. Each instantiated drop hook has a concrete `Ptr<Owner>` receiver and
 uses the existing lifecycle rules. Method templates with additional type
@@ -190,18 +204,25 @@ already supports templates.
 
 ## Checking and instantiation
 
-Resolve the complete program into immutable declarations and bodies with bound
-references before checking instances. Keep this representation private to HIR
-construction. Diagnose syntax errors, duplicate parameters, unbound non-dependent
-names, and invalid non-dependent operations even in unused templates. Checking
-and elaboration consume resolved references without repeating lexical lookup.
+Resolve names and check definitions into polymorphic HIR. Its immutable scopes
+retain declarations and their completed schemes; bodies reference bindings and
+definitions directly. There is one body per definition and no retained list of
+monomorphs. Diagnose syntax errors, duplicate parameters, unbound non-dependent
+names, and invalid non-dependent operations even in unused templates.
 
-Ordinary functions enter the same instance engine with zero type arguments. On
-instantiation, bind the declared parameters to concrete types and check the body
-using the shared checker. Resolve dependent operators, fields, methods,
-layout queries, and intrinsic calls at this point. A concrete receiver's method
-namespace remains its defining module's namespace. Caller-local declarations
-cannot change the meaning of names in the template body.
+Applying a scheme introduces fresh deduction variables for its named parameters.
+They may resolve to concrete types or expressions over enclosing parameters.
+Check operations whose types are known, and retain explicit dependent operations
+and requirements for the rest. An inferred member result remains tied to its
+receiver and member, never an unconstrained result a caller can choose. Concrete
+uses check those requirements ad hoc using HIR's semantic operations.
+
+Ordinary functions have schemes with no quantified parameters. Complete inferred
+signatures by definition dependency groups before exposing them to unrelated
+callers. Recursive groups may solve their result equations together; callers
+cannot invent a result for an ambiguous cycle. A receiver's method namespace
+remains its defining module's namespace. Caller-local declarations cannot change
+the meaning of names in the template body.
 
 This deliberately changes when some errors can be diagnosed: a bad dependent
 operation in an unused template can remain undiagnosed until an instance needs
@@ -210,15 +231,15 @@ errors, show declared parameters in hovers, and navigate to the source template.
 Failures in instances should show the concrete type arguments and the chain of
 uses that requested them.
 
-Use an explicit instance worklist keyed by declaration identity and canonical
-concrete type arguments. Reserve an instance identity before checking recursive
-calls to the same instance; repeated calls reuse it. Calls requesting different type
-arguments create different instances. Diagnose unbounded instantiation expansion
-with a bounded work limit and a useful chain, rather than overflowing the host
-stack. Apply the existing dependency-group result inference to concrete recursive
-instances; callers must not invent a missing result for an ambiguous cycle.
+HIR-to-LIR lowering owns the instance worklist, keyed by definition and canonical
+closed type arguments. Reserve a LIR function identity before lowering recursive
+references to the same instance; repeated references reuse it. Function values,
+shader artifacts, pipeline bridges, and implicit drop hooks also request work.
+Use HIR's shared substitution and requirement checking to specialize one body,
+lower it, and discard the temporary specialization. Diagnose unbounded expansion
+with a bounded work limit and a useful application chain.
 
-Importing a template retains its resolved declaration and references to private
+Importing a template retains its HIR definition and references to private
 helpers in the owning compilation. Instances requested in different
 modules use the same declaration identity and are deduplicated. This requires
 retaining declarations across module checking instead of immediately replacing
@@ -230,10 +251,11 @@ declarations and decorated shader entries remain concrete initially. The export
 and entry APIs must represent that distinction without assigning a template an
 arbitrary ABI.
 
-Elaborate checked instances into [public HIR](../crates/resin-hir/src/lib.rs) with
-concrete `Ty` values and function IDs. HIR-to-LIR lowering, verification, C, and
-SPIR-V continue to consume concrete programs. Keep source template parameters and
-deduction state out of `resin-types`, LIR, and the backends.
+Change [public HIR](../crates/resin-hir/src/lib.rs) to express schemes, symbolic
+types, and typed dependent operations. Private inference variables still cannot
+escape HIR construction. LIR owns final concrete `Ty` and function identities;
+verification, C, and SPIR-V continue to consume concrete programs. Keep template
+parameters and deduction state out of `resin-types`, LIR, and the backends.
 
 ## Ownership, errors, and GPU behavior
 
@@ -242,11 +264,11 @@ instantiation does not run an initializer or allocate runtime storage. Concrete
 instances select the existing copy, drop, layout, and ABI rules: `identity<int>`
 and `identity<Arc<int>>` may require different cleanup operations.
 
-Named error parameters such as `E` in `Result<T, E>` are fixed before body checking.
-Validate their concrete error types using the existing Result rules. Inferred
-error holes inside an instance then collect its least propagated error union,
-including `Never` when empty. There is no need to generalize an error accumulator
-into an error-set scheme.
+Named error parameters such as `E` in `Result<T, E>` carry the existing error-type
+requirements. Inferred error holes collect a symbolic least union of propagated
+errors, normalized after substitution and equal to `Never` when empty. Recursive
+groups finish their inclusion equations together. Pending contributors cannot be
+treated as empty, and an accumulator does not become an extra template parameter.
 
 Direct shader helper calls can request concrete template instances. Device
 lowering still rejects managed host values, illegal escaping addresses, and
@@ -277,19 +299,22 @@ rules understandable without preventing dependent body checking.
 ## Delivery and acceptance
 
 Follow the migration in the [implementation architecture](template-implementation.md):
-resolve existing programs, move ordinary functions onto the instance engine, then
-enable function and type templates. Contextual deduction, imports, and editor
-analysis are part of the function-template implementation from the outset.
+move ordinary programs onto HIR scopes and schemes, move concrete instance
+enumeration into LIR lowering, then enable function and type templates.
+Contextual deduction, imports, and editor analysis are part of the function-template
+implementation from the outset.
 
 Language acceptance includes explicit and deduced instances, concrete function
 values, dependent arithmetic and field access, suffix-free nested calls and later
 local uses, argument-order independence, range errors, and fixed-type conflicts.
-Preserve union/Result widening and reject deduction through an inferred body
-result. Verify nominal distinctions, aliases, methods, and drop hooks across
-instances and imports. Exercise C and direct shader-helper paths, including
+Preserve union/Result widening, allow completed inferred result patterns to guide
+deduction, and reject inversion of dependent results. Verify nominal distinctions,
+aliases, methods, and drop hooks across instances and imports. Exercise C and
+direct shader-helper paths, including
 ownership-sensitive values and rejected managed GPU types.
 
 Every migration step leaves ordinary programs usable. The new architecture must
-also pass its boundary tests for resolved identities, result-dependency isolation,
-instance reuse, numeric scheduling, failure recovery, and immutable editor facts.
-Update the language guide and instructions with implemented syntax and limits.
+also pass its boundary tests for resolved identities, scheme isolation, one HIR
+body per definition, LIR instance reuse, numeric scheduling, failure recovery,
+and immutable editor facts. Update the language guide and instructions with
+implemented syntax and limits.

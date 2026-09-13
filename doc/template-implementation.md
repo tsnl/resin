@@ -1,232 +1,213 @@
 # Template implementation architecture
 
 Status: proposed implementation of the [template language design](templates.md).
-This document describes the intended replacement for HIR construction, not the
-current implementation. Templates, contextual deduction, and editor analysis
-should share that architecture from the beginning.
+This changes the HIR contract and HIR-to-LIR lowering; it does not describe the
+current compiler. Templates, contextual deduction, and editor analysis use the
+same architecture as ordinary functions from the beginning.
 
-## The frontend's organizing model
+## The retained program is polymorphic HIR
 
-Build one immutable resolved program, then check concrete instances of its
-declarations. An ordinary function is a declaration with zero type arguments.
-Function templates, nominal type instances, methods, and compiler operations use
-the same declaration identities and call-checking vocabulary.
+HIR stores definitions, their type schemes, and one typed body per definition.
+Checking a use instantiates its scheme as needed to determine types and validate
+requirements. It does not append a concrete function body to HIR. HIR-to-LIR
+lowering discovers the required monomorphs and emits concrete LIR.
 
 ```mermaid
 flowchart LR
-    ast[AST program] --> resolve[Resolve declarations and bodies]
-    resolve --> program[Immutable resolved program]
-    program --> validate[Check independent declaration facts]
-    program --> instances[Deduce and check concrete instances]
-    validate --> facts[Immutable editor facts and diagnostics]
-    instances --> facts
-    instances --> checked[Completed concrete instances]
-    checked --> elaborate[Elaborate]
-    elaborate --> hir[Concrete HIR]
-    hir --> lir[LIR and verification]
+    ast[AST] --> check[Resolve and check definitions]
+    check --> hir[Polymorphic HIR: scopes, schemes, bodies]
+    hir --> lower[Discover, specialize, and lower applications]
+    lower --> lir[Monomorphic LIR]
+    lir --> verify[Verified LIR]
+    verify --> codegen[C / SPIR-V]
 ```
 
-These are named private stages of `resin-hir` construction. Each has a completed
-data result and an explicit owner for unfinished work. Keep the public HIR
-contract concrete and keep the compiler driver responsible for pass sequencing.
-A new public crate is unnecessary while these stages have one consumer: the
-operation that constructs HIR and editor facts. Their internal contracts still
-need to be independently readable and testable.
+There are no additional public passes for a resolved program or checked instance
+program. Name resolution and inference are private work inside HIR construction;
+enumerating monomorphs is private work inside LIR lowering. The driver continues
+to sequence the existing language boundaries.
 
-This replaces several current arrangements:
+The HIR guarantee becomes: names are bound, definitions have completed schemes,
+and bodies are typed subject to explicit requirements on their parameters.
+There are no live inference variables, unresolved ordinary names, or callbacks
+into construction state. Dependent operations are part of HIR's language, with
+defined substitution and checking rules. LIR's guarantee remains fully concrete.
 
-| Current arrangement | Replacement |
+This is a substantial redesign of [HIR](../crates/resin-hir/src/lib.rs), not an
+extra template path attached to the existing concrete checker:
+
+| Current arrangement | Proposed arrangement |
 | --- | --- |
-| [Each module is checked and elaborated immediately](../crates/resin-hir/src/lower/mod.rs) | Resolve the complete import-ordered program before scheduling bodies. |
-| One declaration maps to one HIR function | A declaration identifies a family; each concrete instance has its own identity. |
-| [Checked terms retain lexical cursors and identifier names](../crates/resin-hir/src/lower/typed.rs) | Terms retain resolved references and source-node identities. |
-| [Elaboration performs lexical and method lookup](../crates/resin-hir/src/lower/elaborate.rs) | Completed terms already identify their callees, fields, conversions, and argument packing. |
-| [Scope construction mutates retained editor analysis](../crates/resin-hir/src/lower/scope.rs) | Construction produces lexical facts and instance facts that are frozen for queries. |
-| A file-level solver owns all inferred signatures | Instance-owned inference with explicit dependencies on callee results. |
+| A HIR function identifies one concrete signature and body | A definition identifies a scheme and one polymorphic body. |
+| HIR owns the final concrete type and function tables | HIR owns source type families; LIR construction owns concrete output identities. |
+| [Checked terms retain lexical cursors and names](../crates/resin-hir/src/lower/typed.rs) | Terms reference definitions and bindings directly. |
+| [Elaboration repeats lexical lookup](../crates/resin-hir/src/lower/elaborate.rs) | Binding is completed during HIR construction; dependent lookup is an explicit typed operation. |
+| [LIR copies HIR's tables and lowers functions one for one](../crates/resin-lir/src/lower/mod.rs) | LIR owns an application worklist, concrete type construction, and function emission. |
+| Editor analysis retains construction contexts | Queries read immutable HIR scopes, schemes, and recorded use-site facts. |
 
-Do the replacement for existing monomorphic programs first. Keeping an old
-ordinary-function compiler beside a new template compiler would preserve the
-wrong boundaries and give numeric inference two sets of rules.
+## Scopes, definitions, and types
 
-## Resolved source data
+Give HIR its own definition, binding, scope, and source-node identities. A source
+span is a diagnostic location, not a unique expression identity. Identities are
+stable within an immutable program version; cross-edit identity is not required.
+Retain the defining module and nominal namespace as explicit references.
 
-Resolution consumes the AST program and produces declarations, resolved bodies,
-exports, and a lexical visibility index. It allocates module and declaration
-identities before resolving references, preserving forward declarations and
-mutual recursion. Imports and exports identify declarations, including templates.
-They do not require a concrete function ID.
+An immutable scope records its parent, declarations, and their visibility order;
+each definition carries its completed scheme. Retain the parent visibility point
+where needed so editor queries do not expose later local bindings earlier in the
+source. These are retained language data, useful for imports and editor queries.
+Mutable scope builders, lookup cursors, recovery state, and solver
+arenas remain private to construction. A body references a resolved definition
+directly rather than asking a scope to reinterpret an identifier during lowering.
+Dependent member lookup uses the eventual receiver's defining namespace, never
+the caller's lexical scope.
 
-Use distinct identities for declarations, local bindings, type parameters, and
-source expression nodes. IDs are stable within one immutable program version;
-their numeric values need not survive an edit. Source spans describe diagnostics,
-not identity: separate expressions can have the same span in recovered or
-constructed trees.
+HIR needs a type vocabulary distinct from concrete `resin_types::Ty`:
 
-A resolved reference names a declaration or local binding directly. A type
-parameter reference names its binder. Preserve field and method names when their
-receiver types are dependent; choosing a member later is type-directed lookup,
-not a second lookup in the caller's lexical scope. A failed lookup produces a
-diagnostic and a recoverable error node so unrelated declarations remain usable.
-
-Signatures retain bound type expressions: concrete primitive types, named
-parameters, structural constructors, applications of named declarations, and
-explicit inference holes. Represent application with a constructor identity and
-an argument list rather than adding AST/HIR cases for every new user type name.
-Builtin constructors retain explicit representation and arity rules. Array
-lengths remain concrete values in their dedicated representation.
-
-The lexical visibility index supports completion and navigation. Instance
-checking and elaboration receive resolved bodies, and must have no capability
-to perform lexical lookup through that index. Retaining an AST plus a scope cursor
-would not establish this boundary.
-
-## Three distinct kinds of type information
-
-| Representation | Meaning and lifetime |
+| Representation | Meaning |
 | --- | --- |
-| Bound type expression | Immutable declaration syntax with named parameters and holes. It describes what may be instantiated. |
-| Inference type | A constraint term containing variables owned by a checking session. It describes unfinished deduction or result inference. |
-| `resin_types::Ty` | A concrete type, usable for identity, layout, conversions, and published HIR. |
+| HIR type | A primitive, bound parameter, structural constructor, nominal application, or explicitly derived dependent type. |
+| HIR scheme | Named quantified parameters, a signature, and the requirements that make its body valid. |
+| Private inference type | An unfinished equation term with variables owned by a definition-checking group or call deduction. |
+| `resin_types::Ty` | A concrete type used for layout, representation, LIR, and backend operations. |
 
-A named template parameter is never a solver variable. A use of the declaration
-allocates deduction variables for its parameters, and then fixes them to concrete
-types before the body is checked. An explicit `_` inside that body allocates a
-fresh variable in that instance's session. No solver variable is stored in a
-template declaration or in `resin-types`.
+For example, a scheme for `identity` is `forall T. (T) -> T`, with no additional
+requirements. A scheme for `add` has the same parameter repeated twice and a
+requirement that Resin's addition operation is valid for it. Ordinary functions
+have schemes with no quantified parameters and use the same checker.
 
-Use one expression-constraint generator for declaration checks and instance
-checks. Declaration checks treat bound parameters as dependent types and retain
-only justified facts. An operation connected to dependent constraints waits for
-an instance. In particular, do not default a literal during declaration checking
-when a dependent use could later supply its type. Closed, non-dependent invalid
-operations and unbound names still produce declaration diagnostics.
+Only declared type parameters are quantified. A local `var` still has one type
+within its enclosing application. An inferred `_` must resolve to a concrete or
+symbolic HIR type; it never silently becomes another universally quantified
+parameter. Bound parameters are rigid while checking their definition. Applying
+a callee scheme introduces fresh deduction variables in the caller's session;
+those variables may resolve to types containing the caller's bound parameters.
 
-Checking an instance supplies concrete substitutions to the same resolved body
-and checking rules. It does not consume a supposedly fully typed generic HIR and
-then redo overload resolution behind that HIR's contract.
-
-## One engine for concrete instances
-
-The construction owner contains the immutable resolved program, concrete type
-construction state, instance records, checking sessions, and explicit work queues.
-Store those fields on that owner; avoid forwarding context wrappers and
-callback-based query frameworks. Requests, pending constraints, and dependency
-edges are ordinary inspectable data.
-
-Conceptually, a function instance key contains:
-
-```rust
-struct FunctionInstanceKey {
-    declaration: DeclarationId,
-    owner: Option<TypeId>,
-    arguments: Box<[Ty]>,
-}
+```resin
+def add<T>(left: T, right: T) -> T = { left + right };
+def twice<U>(value: U) -> U = { add(value, value) };
 ```
 
-`owner` identifies a concrete nominal receiver for an associated method; ordinary
-functions have none. Empty `arguments` are normal. Type instance keys also record
-an enclosing function instance for a type declared locally inside a function.
-This makes a local nominal type in `f<int>` distinct from the corresponding type
-in `f<float32>`, even if their layouts happen to agree.
+The call in `twice` records `add<U>`. HIR contains one definition of each function,
+regardless of how many concrete applications the eventual program needs.
 
-Maintain an explicit progression: reserved identity, collected constraints,
-waiting on dependencies, completed instance, or failed instance. A reserved
-function identity is sufficient for a recursive reference, but is not evidence
-that its signature or body has passed checking. Record each requesting call site
-separately from the deduplicated instance so diagnostics can explain every use.
+## Dependent operations are typed data
 
-Seed ordinary declarations with empty argument lists to preserve diagnostics in
-unused ordinary functions. Validate every template declaration, and request its
-concrete instances when calls, explicit references, or required methods need them.
-Use deterministic source/declaration order for equally ready requests. Deduplicate
-instances by their complete keys; apply explicit expansion limits to growing
-type/instance requests with an explanatory request chain.
+Template behavior does not require proving that a body works for every possible
+type. Check what is known and retain the exact requirements that depend on bound
+parameters. Invalid independent operations, unbound names, and duplicate
+parameters are errors even in unused templates. An unused `add<T>` may retain an
+addition requirement; `add<bool>` must fail when that requirement is checked.
 
-The checker returns a concrete checked body only after all of its obligations
-are discharged. No pending instance, unknown field, receiver adaptation, or
-inference hole crosses into elaboration.
+Use explicit operations and derived types for the dependent cases. Illustratively:
 
-## Deduction and result dependencies
+| Expression or operation | Information retained in HIR |
+| --- | --- |
+| `left + right` of the same parameter type `T` | Operand/result type `T` and the requirement that builtin addition accepts `T`. |
+| `value.member` for unknown `T` | A member projection, its derived type, and requirements on field selection, addressability, and permitted access. |
+| `value.method(args)` for unknown `T` | A dependent method application with receiver, argument terms, lookup policy, derived parameter/result types, and adaptation requirements. |
+| A literal whose type is `T` | Its exact magnitude/sign, numeric kind, and range requirement for `T`. |
+| A layout query involving `T` | A typed compile-time layout operation, to evaluate after substitution. |
+| A conversion or branch join involving `T` | The appropriate conversion or join relation, with its dependent result if needed. |
 
-A source call first creates a call request: its declaration, explicit arguments,
-runtime argument terms, expected-result information, deduction variables, and
-location. A request exists before its concrete instance key is known. This is
-necessary to explain why deduction is blocked without choosing a speculative
-instance.
+These requirements are compiler language data, not user-written traits or a new
+operator-overloading mechanism. Operations on known nominal families can often
+resolve immediately: accessing `Pair<T>.left` already has type `T` and a known
+field identity. Fully dependent operations retain only the selection they can
+justify; specialization completes it using the same language rules.
 
-An explicit function reference such as `function<int>` also requests a signature,
-even if it is never called directly. Its inferred result dependencies participate
-in the same scheduling and recursion rules as calls.
+Dependent access must retain enough information for assignment and taking an
+address, as well as reading a value. Field selection, receiver dereferencing,
+place category, and required read/write access belong to the operation's contract.
+Specialization resolves those facts or diagnoses the use; it also preserves
+required runtime access checks for GPU-backed pointers and spans. A member name
+plus a result type alone is not a complete field-access operation.
 
-Match concrete arguments and explicit type arguments against the declaration's
-parameter patterns. Keep literal constraints flexible. Expected-result matching
-can fill remaining parameters through declared result patterns; once an argument
-is fixed, preserve the ordinary result conversion relation, including union and
-Result widening. The solver must distinguish equality, deduction, and conversion
-obligations rather than represent all three as equality.
+In particular, consider:
 
-For example, an expected `int` can determine `T` through `identity<T>(x: T) -> T`.
-It cannot determine `T` by examining the body of `f<T>() -> _`. A partially
-declared result such as `Result<T, _>` can expose the `T` pattern while keeping
-the error hole owned by the callee.
+```resin
+def field<T>(value: T) -> _ = { value.member };
+```
 
-Result holes introduce a directional dependency. The caller owns a result-use
-variable; the callee owns its inferred result variable. Until the callee's result
-is completed, the call records that dependency instead of unifying the two across
-sessions. On completion, copy the concrete result type into the caller's checks.
-Thus `def plain() -> _ = { 1 };` still returns `long` even if a caller wants `int`.
+Its result is the type of `T.member`, with a requirement that the member exist.
+It is not a fresh caller-selectable `R` in `forall T, R. T -> R`. Every derived
+type identifies the operation that determines it. Substitution normalizes that
+operation once its inputs are known. An unresolved private inference variable
+without such a producer is an error, not a dependent HIR type.
 
-Recursive instances form the exception to this publication boundary. Discover
-signature dependencies from calls and selected function references, and check
-each strongly connected component together: results can constrain bodies inside
-the component, but incoming caller constraints cannot
-choose its inferred signatures. If discovery adds an edge that changes a pending
-component, recompute it before finalization. Completed external dependencies are
-immutable inputs. Inside a recursive component, error-inclusion equations reach
-their least fixed point; close its accumulators together once every external
-contributor is complete. Do not turn a pending external error result into `Never`
-or require mutually dependent accumulators to finish one at a time.
+Call requirements compose: applying `twice<U>` brings the requirements of
+`add<U>` into checking. Keep references to requirement sets and application
+arguments where expanding them would duplicate recursive bodies. Concrete uses
+can evaluate these semantic dependencies ad hoc during HIR construction; symbolic
+uses retain them. Bounded request state prevents infinitely expanding dependent
+type computations from overflowing the compiler stack.
 
-Inference variables remain instance-qualified even while solving a recursive
-component. Retain each instance's equations as data over identities such as
-`VariableId { instance, local }`. Construct a solver for the eligible component
-from those equations and completed external signatures, admitting recursive
-result links explicitly. Rebuild and replay when the component grows or recovery
-removes a failed producer. Record chosen numeric defaults as explicit request
-facts. This avoids merging live solver arenas or publishing a solver handle as
-an inferred signature.
+Method parameter types are producers too:
 
-## Scheduling and numeric defaulting
+```resin
+def call<T>(value: T) -> _ = { value.take(1) };
+```
 
-The scheduler alternates explicit operations until it can publish complete
-instances. It does not recursively invoke the compiler from inside unification.
+Until `T` selects `take`, the literal depends on that method's parameter type.
+Retain this dependency and its argument/receiver adaptation requirements; do not
+default `1` to `long` during definition checking. A specialization whose method
+takes `int` selects an `int` literal, while one taking `ulong` selects `ulong`.
+The literal's type is derived from the method parameter, not a free variable
+stored in HIR. The same rule covers fields and other dependent expected types.
 
-1. Collect constraints for reserved instances and resolve currently decidable
-   equations, conversions, member operations, and call requests. Check literal
-   ranges as soon as their types are fixed, before requesting bodies that depend
-   on those arguments.
-2. Request instances whose arguments have become concrete. Make their known
-   declared signature parts available, and record dependencies for inferred parts.
-3. Check ready producers and propagate their completed results. Update recursive
-   components when new instance edges are discovered.
-4. When deduction is blocked only by unconstrained numeric arguments, default
-   the numeric components necessary to determine a request's key. First wait for
-   pending result producers that could still constrain those components.
-5. At a closed component with no remaining productive external dependencies,
-   apply remaining numeric defaults, finish error sets, and check literal ranges.
-   Complete the checked bodies or report a concrete unresolved/cyclic obligation.
+## Scheme inference and contextual literals
 
-Track dependencies for call requests as well as known instances. If one request's
-numeric key depends on another request's result, schedule that producer first.
-An edge from request A to request B means an unpublished inferred result of B can
-still constrain A's key. At quiescence, process sink components of this wait graph:
-fallback is permitted only when every unfinished key producer is inside the
-component. Default the necessary numeric key components together in stable order,
-then resume solving. An unfinished external producer requires waiting. Unresolved
-nonnumeric key cycles remain deduction errors. Never try several instantiations
-and keep whichever body happens to type-check.
+Check definition dependency groups and complete their schemes before publishing
+them to unrelated callers. A call instantiates a completed scheme; it cannot
+mutate the definition's inference session. Within a recursive group, solve the
+group's result equations together, with its bound parameters kept distinct.
+Incoming caller constraints do not choose its inferred signatures. Recursive
+signature applications are explicit dependencies; reject a cycle that has no
+determinate result rather than retaining an arbitrary result variable.
 
-Defaulting the entire caller when one call needs a numeric argument is incorrect:
+Each recursive reference carries its type-argument substitution. Being in one
+dependency group does not equate distinct binders or make `f<T>` and `f<Ptr<T>>`
+share one instantiated result variable. Solve equations over the definitions'
+symbolic signatures and their applications. Retain recursive applications with
+determinate signatures; diagnose unanchored result derivations. Bound expanding
+applications when evaluating dependent requirements and when enumerating LIR.
+
+An inferred result can normalize to a useful pattern:
+
+```resin
+def identity<T>(value: T) -> _ = { value }; // completed result is T
+def plain() -> _ = { 1 };                 // completed result is long
+def total() -> int = { identity(42) };     // identity<int>
+```
+
+Deduction uses the completed result shape, whether declared or inferred once.
+`plain` remains `() -> long`; its callers cannot specialize its unsuffixed `1`.
+Opaque member-result or other non-invertible type computations cannot be used
+backwards to guess a missing type argument. The checker never searches for a
+type whose instantiated body or requirements happen to succeed.
+
+One call-checking path handles ordinary functions, templates, methods, and
+compiler-provided operations:
+
+1. Apply explicit type arguments and match already determined argument types
+   against parameter patterns. Leave unsuffixed literal constraints flexible.
+2. Use an available expected result to fill remaining parameters through the
+   completed result pattern. Preserve equality, deduction, and conversion as
+   distinct relations; expected context must not overwrite fixed arguments.
+3. Propagate constraints through nested calls, aggregates, and later uses of
+   local bindings. Normalize derived results whose inputs are known. Check
+   decidable requirements; retain parameter-dependent ones in the enclosing HIR.
+4. After productive dependencies settle, default unconstrained numeric components
+   to `long` or `float64`. Check selected literal ranges and diagnose remaining
+   ambiguous nonnumeric arguments. Never retry a wider type after range failure.
+
+Keep literal payloads exact until their type is known. A literal connected to a
+bound parameter retains a numeric/range requirement; it is not an unconstrained
+number eligible for defaulting. A literal independent of parameters defaults
+while completing the definition's scheme. This distinction prevents an arbitrary
+first caller from choosing the meaning of a template body.
+
+Completed schemes remove many apparent instance-scheduling dependencies:
 
 ```resin
 def value<T>(unused: T) -> _ = { int(3) };
@@ -239,142 +220,200 @@ def example() -> _ = {
 };
 ```
 
-Default the argument `2` to `long` to request `value<long>`. Its body determines
-an `int` result; the assignment then selects `int` for `n` and the enclosing
-function's inferred result. Defaulting both `1` and `2` to `long` first would
-invent a type conflict. The same
-dependency ordering must handle `var n = identity(1); n := value(2);`: the
-`identity` key waits for the concrete result of `value<long>`.
+`value` already has result `int` in its scheme. The assignment selects `int` for
+`n` and the enclosing result; the independent argument `2` defaults to `long`.
+There is no need to build `value<long>` before learning its return type. Likewise,
+`var n = identity(1); n := value(2);` selects `identity<int>`.
 
-For `def total() -> int = { add(1, 2) };`, the sequence is simpler: the declared
-`T` result pattern matches `int`, both literal constraints become `int`, and only
-`add<int>` is requested. There is no temporary `add<long>` instance to discard.
-Conversely, a known `value<bool>` may be checked before an enclosing `identity`
-request has an argument type; its completed inferred result then selects that
-outer instance. This checks an already selected body, not a body used to guess
-its own missing type arguments.
+Some derived results genuinely need their inputs first. Represent these as
+pending semantic requirements with explicit producer dependencies. At a fixed
+point, default only numeric components whose possible producers have completed
+or lie within the same blocked dependency component, then resume normalization.
+An unfinished external producer requires waiting. Unrelated literals must not
+default merely because one dependent request needs a type. An unresolved cycle
+without a numeric fallback is a deduction error. This is local type inference
+over schemes and requirements, not a queue of emitted function instances.
 
-## Types, methods, and compiler operations
+Named error parameters obey Result's error-kind requirements. Inferred error
+holes collect a symbolic least union of propagated errors, which substitution
+normalizes to a concrete union. Recursive groups close their inclusion equations
+together; `Never` is correct only when all contributors are known to be empty.
+Do not treat a pending error producer as empty or generalize its accumulator.
 
-Concrete nominal construction uses the same reserve/complete discipline. Reserve
-a `TypeId` before resolving recursive fields; record the originating declaration,
-concrete arguments, and enclosing instance in frontend metadata. Complete fields,
-reject infinite inline layouts and alias cycles, and resolve required drop hooks
-before publishing a type table. A reserved pointer-recursive type is legitimate
-construction state; an incomplete published type is not.
+## Specialization belongs to HIR-to-LIR lowering
 
-Distinguish identity reservation, field completion, and hook-signature validation
-from completion of method bodies. A method may inspect its owner's completed
-fields while its own body is being checked; do not create a cycle by waiting for
-every method body before making those fields available. Pending type/layout
-requirements are explicit producer dependencies alongside function-result ones.
+[LIR lowering](../crates/resin-lir/src/lower/mod.rs) owns a worklist keyed by HIR
+definition and closed type arguments. Associated methods include their owner
+application; definitions nested in a generic context include its type arguments.
+Keys use normalized closed HIR types before final concrete `TypeId`s need to
+exist. Normalize aliases and derived argument types before comparing keys, so
+an inferred member type that resolves to `int` reuses an explicit `int`
+application. Preserve nominal origins and arguments without recursively expanding
+their fields to compare identities. Closed argument types contain no bound
+parameters or undecided projections; dependent operations in the body resolve
+when specializing that application.
 
-Lifecycle readiness is a separate required fact. Frontend GPU-storage checks
-already depend on copy/drop classification, so they must wait for fields and
-hook signatures to be established. Reserve the hook's actual output `FunctionId`
-early when registering its concrete drop metadata; finalize the output mapping
-before elaboration. Never use a placeholder ID or temporary `drop = None` as
-evidence that a type is unmanaged. The hook's body may still be pending, but it
-must pass checking before completed HIR can be published.
+The worklist does the following:
 
-Deduction through a nominal application uses its recorded origin and arguments,
-never its printed name or structural layout. Transparent aliases substitute into
-the underlying type and preserve its nominal origin. `resin-types` continues to
-own concrete layout and conversion algorithms without depending on source IDs.
+1. Seed concrete entries and required declarations. Initially include every
+   ordinary function with zero type parameters to preserve existing unused-function
+   diagnostics, including initialization errors diagnosed by LIR lowering.
+2. Reserve a LIR `FunctionId` when a new application is requested. Recursive
+   references reuse that identity; they do not recursively lower another body.
+3. Substitute its arguments and discharge the HIR requirements. Obtain a
+   temporary specialized view or body with resolved operations and closed types.
+4. Materialize concrete types, then lower local storage, evaluation, copies,
+   cleanup, and structured control flow. Callee applications request worklist
+   entries and become concrete LIR function references.
+5. Discard the temporary body. Finish every requested function and type before
+   returning a LIR module; report specialization or storage errors otherwise.
 
-Associate method declarations with the source nominal declaration. A concrete
-receiver contributes its owner arguments; method-specific arguments are deduced
-using the ordinary call rules. Register and validate the concrete destruction
-hook before LIR needs lifecycle classification. Do not clone a method namespace
-and then repair its signatures at each call.
+Calls are not the only references. Function values, shader artifacts, pipeline
+bridges, compiler operations, and implicit drop hooks also request functions.
+Preserve source evaluation order and evaluate runtime arguments exactly once.
+No worklist operation executes Resin initializers at compile time. Use stable
+request order, deduplicate complete application keys, and bound unbounded growth
+with a diagnostic showing the application chain.
 
-Source functions, foreign functions, and compiler-provided methods share lookup,
-signature application, receiver adaptation, and argument checking. Their
-implementations remain explicit alternatives: source body, foreign declaration,
-or compiler operation. Compiler operations may require domain facts such as a
-decorated shader identity; that does not introduce general value parameters.
+Substitution and requirement checking remain HIR semantic operations, used both
+by ad hoc frontend checking and LIR specialization. For example, the public HIR
+API may provide the following completed-result operation:
 
-Some intrinsics deliberately elaborate at the call site because shader-local
-addresses cannot cross an ordinary function call. Sharing the call checker must
-preserve that behavior. Typed GPU allocation and pipeline projection remain
-compiler operations with checked signatures, rather than a second inference path
-that templates must emulate.
+```rust
+pub fn specialize_function(
+    module: &Module,
+    application: &FunctionApplication,
+) -> Result<SpecializedFunction, SpecializationError>;
+```
 
-## Elaboration, diagnostics, and immutable results
+This illustrative operation specializes one body. Its callee references remain
+HIR definitions with closed applications; it assigns no LIR IDs and enumerates
+no emitted bodies. It may resolve dependent signature requirements using bounded
+temporary state. It never reparses source, repeats lexical name resolution, or
+runs a second set of type rules. Its result is consumed and discarded by lowering,
+not retained as another whole-program representation or a monomorph list in HIR.
 
-Elaboration consumes completed concrete checking trees and an immutable mapping
-from instance identities to output function/type IDs. It translates known
-operations and sugar, preserving source evaluation order. It cannot request
-instances, solve types, consult source scopes, or select another method. Assemble
-and publish HIR only when every required instance and nominal definition is
-complete. Existing LIR storage checks, ownership lowering, verification, and
-backend target checks remain separate operations.
+The existing `resin-lir` dependency on `resin-hir` supports this API without a
+reverse dependency. Publish the symbolic language and its small semantic API in
+HIR's `lib.rs`; keep substantial substitution/checking algorithms private.
+LIR's public API continues to accept HIR and return concrete LIR or diagnostics.
+LIR verification and code generation never see schemes or dependent operations.
 
-Recover failed producer constraints transactionally within their checking
-component. Preserve the current guarantee that a failed inference attempt cannot
-leave speculative types in healthy editor results. Record the originating error
-once, retain the requesting call chain as related locations, and invalidate
-dependent facts without treating a failed result as an unconstrained fresh type.
-An error prevents completed HIR while independent declaration analysis survives.
+## Concrete types, methods, and lifecycle
 
-Separate declaration facts from instance facts. A generic source expression may
-have an `int` type in one instance and `float32` in another. Store concrete facts
-under an instance and source-node identity; do not overwrite a source-span entry
-with whichever instance was checked last. Generic definition hovers describe the
-declared parameters, while a concrete use can show its selected arguments and
-signature. Member completion inside an unconstrained template must not invent
-members from a convenient previously checked instance.
+HIR retains nominal declarations, field types, method namespaces, and drop
+declarations. A nominal application is identified by its definition and arguments,
+including enclosing generic arguments for any local nominal declaration. Thus
+the local type of `f<int>` is distinct from the corresponding type of `f<float32>`.
+Transparent aliases normalize to their targets without changing nominal origins.
+Deduction uses those origins, never names or equivalent record layouts.
 
-Keep [Compiler's immutable compilation cache](../crates/resin-compiler/src/lib.rs):
-resolve the import graph on every compile, and reuse a complete result only for
-the same source versions and graph. Instance work tables and solvers belong to
-one construction run. Final results retain completed semantic facts, not resumable
-checker state. Hover, completion, and definition queries never trigger compilation
-or mutate an existing result. Old compilations remain valid after edits.
+LIR construction owns the canonical mapping from closed nominal applications to
+the final `TypeId`s. Reserve identities for recursive types, resolve fields and
+hook signatures, reject infinite inline layouts and alias cycles, and publish
+complete concrete definitions. A method can inspect completed owner fields
+without waiting for every method body to finish.
+
+Lifecycle classification must know both fields and drop declarations. Reserve
+the real LIR function identity for a required drop application before installing
+its concrete hook metadata. A pending hook body does not make its owner unmanaged.
+Copy/drop and GPU-admissibility queries must not observe placeholder hook IDs or
+a temporary `drop = None` used to break a construction cycle.
+
+`resin-types` remains independent of HIR and owns concrete layout and conversion
+rules. HIR semantic checking can use private concrete checking tables when these
+rules are needed early. Temporary table IDs must never escape through retained
+HIR or a specialized result. This applies to every type-bearing payload, including
+conversion plans, field selections, type values, and aggregate constants. Translate
+concrete checking results back to HIR types and nominal applications before
+returning them; LIR materializes those in its final table. Nominal identity and
+symbolic substitution remain HIR concepts. This avoids either making `Ty` partly
+unresolved or teaching the concrete types crate about source declarations and
+schemes.
+
+Source functions, foreign declarations, and compiler-provided methods share
+scheme application and argument checking. Their implementations remain explicit
+alternatives: source body, foreign declaration, or compiler operation. Builtin
+registration stays in [HIR context construction](../crates/resin-hir/src/lower/context.rs).
+Operations requiring decorated shader identity retain that domain fact; this
+does not introduce general value parameters. Intrinsics that must execute at
+the call site remain inline operations during specialization and LIR lowering.
+GPU allocation and pipeline projection use these same checked signatures.
+
+## Diagnostics, imports, and immutable analysis
+
+Source exports identify definitions, including template families. Executable
+entries and decorated shader entries select concrete signatures initially.
+Imported definitions retain access to resolved private helpers in their defining
+module. The same application requested through different importers has one LIR
+identity. Templates must not be flattened into arbitrary concrete exports.
+
+Report independent definition errors during HIR construction, concrete use errors
+as soon as their requirements can be checked, and remaining specialization
+errors while producing LIR. Each failure carries its source location and the
+applications that required it. Error ownership follows the producing phase;
+specialization failures remain HIR errors transported through LIR's result.
+
+The [compiler's current error mapping](../crates/resin-compiler/src/lib.rs)
+indexes HIR functions with a LIR function ID. Remove that assumption: one HIR
+definition can now produce several LIR functions. Lowering diagnostics need
+their source origin and specialization trace directly. `Compilation.hir()` can
+retain the polymorphic program even if a required LIR specialization fails.
+
+Editor queries read declaration schemes and completed use-site application facts.
+A source expression in a template has a symbolic type; a concrete use may have
+an instantiated signature. Keep use-site facts separate from definition facts,
+keyed by source-node identity and application as appropriate. Never overwrite a
+generic expression's type with the last specialization inspected. Completion for
+an unconstrained parameter cannot invent members from an unrelated application.
+
+Keep construction solvers and temporary semantic request tables out of retained
+analysis. Recover failed constraints without publishing speculative deductions
+into healthy facts. Freeze completed HIR and analysis together; hover, completion,
+and navigation do not enumerate monomorphs or mutate old results. Preserve the
+compiler's immutable source/compilation cache and reload the import graph before
+reusing a result after edits.
 
 ## Implementation layout and migration
 
-Organize the substantial private work by responsibility:
+Keep the public languages and operations in each crate's `lib.rs`. HIR's private
+`lower` modules own AST translation, binding, and scheme inference. Substantial
+semantic substitution and requirement algorithms may live in a private HIR
+module shared by construction and specialization. LIR's private `lower` modules
+own the application worklist, concrete identity maps, and storage lowering. These
+are cohesive responsibilities, not a mandate for many small forwarding modules.
 
-| Location under `resin-hir/src/lower` | Responsibility |
-| --- | --- |
-| `mod.rs` | Coordinate resolution, checking, publication, and diagnostics. |
-| `resolve.rs` | Define the private resolved program and construct it from AST. |
-| `instances.rs` | Own canonical requests, checking sessions, dependency components, and completion. |
-| `check/` | Generate expression constraints and checked terms from resolved bodies. |
-| `infer/` | Solve explicit type relations; return progress or pending requirements as data. |
-| `typed.rs` | Define checking trees with resolved references and instance-owned inference types. |
-| `elaborate.rs` | Translate completed concrete trees into HIR. |
-| `context.rs` | Declare builtin signatures and compiler operations; remove mixed lexical/solver state and forwarding to the concrete typer. |
+1. **Introduce the HIR model for ordinary programs.** Store immutable scopes,
+   resolved references, symbolic type constructors, and completed schemes with
+   empty parameter lists. Move editor queries onto those facts. Remove lexical
+   re-lookup during elaboration and keep private inference state out of HIR.
+2. **Move concrete identity and emission into LIR lowering.** Replace one-for-one
+   function traversal and table copying with the application worklist. Give
+   diagnostics direct origins. Establish HIR's semantic specialization operation
+   on ordinary definitions, using the same checking rules as construction.
+3. **Enable function templates and contextual deduction.** Add syntax, bound
+   parameters, derived dependent types, and requirement inference. Check bodies
+   polymorphically and instantiate schemes at uses. Ship imports, inferred-result
+   patterns, suffix-free literals, and editor analysis together.
+4. **Enable nominal and method templates.** Add family applications, aliases,
+   owner substitution, and specialized destruction hooks. Reuse the same scheme
+   application rules for source methods and compiler-provided operations.
 
-These names describe ownership boundaries, not a requirement to split every
-operation into a file. Keep coherent algorithms and their data together.
+Each step leaves ordinary programs usable and replaces the relevant old path.
+Do not keep a separate ordinary-function checker as a compatibility architecture.
+The implementation must update the HIR contract in the architecture guide and
+repository instructions when the new boundary actually ships.
 
-1. **Resolve existing programs.** Introduce the resolved representation and make
-   checking/elaboration consume IDs. Remove cursor-based re-lookup. Prove import,
-   shadowing, method, and source-diagnostic behavior with existing tests before
-   enabling template syntax.
-2. **Unify instance checking.** Route ordinary functions through zero-argument
-   instances. Introduce directional result dependencies, recursive components,
-   and immutable editor publication. Remove the one-function-per-declaration
-   generator and file-level inferred-signature ownership.
-3. **Enable function templates and deduction.** Add syntax and bound parameters,
-   declaration checks, concrete substitution, and contextual call requests. Ship
-   imports and suffix-free deduction with this feature rather than temporary
-   public restrictions caused by the old architecture.
-4. **Enable type and method templates.** Add nominal instance origins, aliases,
-   owner substitutions, and concrete drop hooks. Reuse the same call checker for
-   method type arguments and existing compiler-provided operations.
+Boundary tests should establish that HIR retains one body per definition, contains
+no live inference variables or emitted monomorph table, and can be lowered after
+construction state is discarded. Verify symbolic member results cannot be chosen
+by callers; inferred `T` results can guide deduction; independent results remain
+fixed; numeric producer ordering, literal ranges, and union/Result widening work.
+Exercise shadowing, distinct nodes with equal spans, recursive schemes and growing
+applications, instance reuse across imports, and local nominal origins.
 
-Each stage needs tests at its new boundary and existing end-to-end coverage.
-Required architectural tests include source-ID resolution under shadowing,
-equal spans on distinct nodes, instance reuse across imports, local nominal types
-across instances, mutual recursion and growing requests, the numeric scheduling
-examples above, union/Result widening, failed-result isolation, and old editor
-results surviving edits. Also assert that completed HIR has no pending instances
-or types and that elaboration works after lexical construction state is discarded.
-
-Validate C and direct shader-helper instances, including ownership-sensitive
-arguments and rejected managed GPU types. Preserve argument evaluation counts,
-copy/drop behavior, and native ABI checks. No compatibility path should remain
-solely to keep the old ordinary-function checker running alongside templates.
+Check failure recovery and old editor results after edits. Verify monomorphic
+LIR's complete function/type/drop mappings, including implicit references. Run
+end-to-end C and direct shader-helper examples with ownership-sensitive arguments,
+rejected managed GPU values, recursive shader rejection, argument evaluation
+counts, and native ABI checks. Backends should need no template-specific rules.
