@@ -126,6 +126,8 @@ file references; AST generation performs no source I/O and imports never execute
 
 The [template implementation proposal](template-implementation.md) describes
 polymorphic HIR with definition schemes and specialization during LIR lowering.
+HIR retains structural type constraints; LIR construction resolves concrete types
+and checks the requested platforms under configurable monomorph limits.
 The following describes the current implementation.
 
 HIR construction has three internal steps:

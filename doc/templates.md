@@ -1,29 +1,37 @@
-# Proposal: templates with inferred type arguments
+# Proposal: polymorphic definitions and type templates
 
 Status: draft design. The syntax below is illustrative and is not implemented.
 
-Allow functions and types to declare named type parameters. Each use supplies or
-deduces type arguments. HIR retains polymorphic definitions and their schemes;
-checking instantiates schemes as needed, while HIR-to-LIR lowering enumerates
-concrete instances. Dependent operations such as arithmetic, field access, and
-method calls carry requirements that are checked when their types are known.
-This follows the useful core of C++ templates while retaining Resin's language
-rules and a monomorphic LIR.
+Functions and types can declare named type parameters. Each use supplies or
+deduces type arguments. `_` introduces a weak, monomorphic inference variable,
+never another template parameter. HIR retains schemes,
+type constraints, and one body per definition. HIR-to-LIR lowering enumerates
+concrete applications and checks whether their operations are supported for each
+requested platform. HIR does not constrain the space of all supported monomorphs.
+LIR remains monomorphic, and code generation consumes verified LIR.
 
-## Templates, inference holes, and let-polymorphism
+## Named parameters and weak type variables
 
-These are distinct mechanisms:
+Named parameters are explicitly bound by declarations. Each `_` introduces a
+fresh weak, monomorphic variable into ordinary inference. It may unify with a
+concrete type, an existing bound parameter, or a determining type expression.
+It is never generalized, and separate occurrences start independently.
 
-| Mechanism | Meaning |
-| --- | --- |
-| Inference hole `_` | Find one type from the constraints of this expression or declaration. |
-| Let-polymorphism | Generalize a binding's inferred type, then instantiate its quantified variables at each use. |
-| Type template | Declare named type parameters and apply the declaration with chosen or deduced types. |
+```resin
+def do_something<T>(x: T) -> Result<_, String> = { ok(x) };
+```
 
-This proposal adds type templates and argument deduction. Existing `_` holes keep
-their inference meaning. There is no new `let` keyword, generalized mutable
-storage, or change to the meaning of an ordinary `var` binding. Parameters continue
-to have explicit annotations, which may refer to declared template parameters.
+Unification equates `_` with `T`, completing this signature as
+`forall T. T -> Result<T, String>`. There is exactly one template parameter.
+Remove special hole-solving machinery; the source spelling uses the same weak
+variables and constraints as ordinary inference.
+
+Local `var` storage, runtime parameters, and object fields retain one type per
+enclosing application. `var value: _;` joins constraints from its uses instead of
+making every read independently polymorphic. Only named parameters, in written
+order, participate in explicit template argument lists. Foreign declarations and
+decorated shader entries retain fixed ABI signatures. There is no new `let`
+keyword or automatic generalization of bindings.
 
 The model draws on C++ [call argument deduction](https://eel.is/c++draft/temp.deduct.call)
 and [template instantiation](https://eel.is/c++draft/temp.inst). Resin also uses a
@@ -32,9 +40,9 @@ completed result shape, so contextual numeric literals remain convenient. This i
 an extension to ordinary C++ call deduction; it does not adopt C++'s complete
 overload, conversion, or specialization system.
 
-The [implementation architecture](template-implementation.md) defines polymorphic
-HIR, scheme checking, dependent requirements, and specialization during LIR
-lowering. Ordinary functions use the same machinery with no type parameters.
+The [implementation architecture](template-implementation.md) defines structural
+HIR checking, weak-variable inference, dependent type constraints, and concrete checking
+during LIR lowering. Concrete ordinary functions use schemes with no parameters.
 
 ## Function templates
 
@@ -56,16 +64,16 @@ def main() = {
 ```
 
 `T` is bound by the declaration's type-parameter list. Each reference to `T` in
-that declaration denotes the same parameter. It is neither an inference hole nor
-a runtime value. An undeclared type name remains an error.
+that declaration denotes the same parameter. It is not a runtime value or a
+fresh anonymous variable. An undeclared type name remains an error.
 
-`add` is valid for an instance whose operands support Resin's existing `+`
-operation. An `add<bool>` use reports an error at the operation and the use that
-requested the instance. The definition retains this dependent requirement;
-the compiler does not have to prove `+` exists for every possible `T`. This does
-not introduce user-defined operator overloading. A call inside another template
-can use its enclosing parameters, such as `add<U>`, until specialization makes
-them concrete.
+Builtin `+` has the structural scheme `forall T. (T, T) -> T`. HIR can check
+`add<T>` without finding which `T`s have addition implementations. An `add<bool>`
+request fails during LIR construction if that operation is unsupported; the error
+names the operation and requesting use. Implementations may differ between host
+and shader platforms. This introduces no user-defined operator overloading or
+propagated `SupportsAdd` constraint. A call inside another template can record
+an enclosing parameter, such as `add<U>`, until specialization makes it concrete.
 
 Deduction matches annotated parameter shapes against call argument types, retaining
 unresolved literal constraints. Repeated occurrences of one template parameter
@@ -75,11 +83,12 @@ Preserve nominal identity and mutable-pointer invariance; do not widen conflicti
 deductions to manufacture a common `T`. Once type arguments are fixed, check the
 ordinary call using Resin's existing conversion rules.
 
-Initially, a call either provides all type arguments or deduces them from its
-arguments and expected result, using the rules below. A parameter that cannot be
-deduced requires an explicit type argument. Partial explicit argument lists,
-default template arguments, and `_` inside explicit argument lists are deferred.
-Existing compiler-provided contextual inference retains its current rules.
+Initially, a call either provides a full list of type expressions or omits the
+list and deduces its arguments using the rules below. `_` in a provided type
+expression introduces the same ordinary variable, to be determined during HIR
+checking. A remaining undetermined argument needs an annotation or explicit type.
+Partial argument lists and default template arguments are deferred. Existing
+compiler-provided contextual inference joins this same checking machinery.
 
 A template family is not a runtime function value. Initially, storing or passing
 a function template requires explicit arguments, as in `identity<int>` above.
@@ -90,10 +99,11 @@ arguments may themselves be bound parameters, such as `identity<T>`.
 later uses do not turn the variable into a family of functions. Deduction from an
 expected function-pointer type can be added separately.
 
-Omitted function results continue to mean unit. Explicit `-> _` infers a result
-while checking the polymorphic definition. That result may be `T` or a dependent
-type such as the type of a member of `T`; it does not introduce another template
-parameter. An unresolved hole without a determining operation remains an error.
+Omitted function results continue to mean unit. `-> _` introduces a weak variable
+related to the body's type. It may become `T`, a concrete type, or a dependent
+expression such as the type of a member of `T`. An undetermined weak variable
+requires an annotation rather than becoming a template parameter. Every requested
+application must have concrete types before LIR emission.
 
 ## Unsuffixed integers and contextual deduction
 
@@ -120,16 +130,14 @@ Collect constraints before fixing a call's type arguments:
    matches the template's completed result shape unambiguously. Context may come
    from assignment, a function's annotated return, a typed field, or an enclosing
    call parameter. Propagate it through nested calls before defaulting literals.
-3. Solve pending constraints and normalize dependent types whose inputs are known.
-   Use completed callee schemes without rechecking their bodies. When deduction
-   needs a numeric fallback, default unconstrained numeric components to `long`
-   or `float64` after their productive dependencies settle. Do not default a
-   literal connected to an enclosing bound parameter or a pending external
-   result producer. The implementation architecture specifies this scheduling rule.
-   An unresolved nonnumeric parameter still requires an explicit type argument.
-4. Check literal ranges and other requirements as their types become known.
-   Retain requirements that depend on enclosing parameters in HIR. Range failure
-   reports an error; it does not retry a wider instance.
+3. Solve structural constraints using completed callee schemes. Default eligible
+   unconstrained numeric components to `long` or `float64` in HIR, after known
+   dependencies settle. Keep a literal tied to a dependent expected type as an
+   expression over that type producer, without defaulting it prematurely.
+4. Retain dependent type relations in HIR without generalizing weak variables.
+   LIR substitutes concrete arguments, resolves determining
+   expressions, and checks literal ranges and operation support. It cannot infer
+   a missing argument, choose another numeric default, or retry a wider instance.
 
 This gives `add(1, 2)` type `long` without context, `add(existing_int, 2)` type
 `int`, and `add<int>(1, 2)` type `int`. Swapping argument order cannot change the
@@ -160,6 +168,17 @@ Expected-result matching does not invert arbitrary conversions or dependent
 computations such as the type of `T.member`. The compiler never tries different
 bodies or type arguments to find an instance that succeeds.
 
+Recursive reuse alone cannot resolve an unknown type:
+
+```resin
+def looped() -> _ = { looped() }; // weak R = R; needs a result annotation
+```
+
+This does not declare an anonymous result parameter. If a requested application's
+type remains unknown after substitution and resolution, report an annotation
+error before LIR emission. A derived result such as `MemberType(T, "member")`
+remains tied to its determining operation; it is not a free result either.
+
 Concrete numeric values retain their types. `add(1_i, 2_l)` remains a deduction
 conflict; suffix-free code does not imply implicit conversion between stored
 integer widths. `identity(256)` in `ubyte` context and a negative literal in
@@ -188,6 +207,10 @@ the originating template and its arguments, not merely equal record layouts.
 Start with explicit type arguments in record constructors; constructor argument
 deduction can be designed separately.
 
+`_` does not make an alias or struct into an anonymous type family. Use named
+parameters for generic fields, recursive relationships, and shared element types.
+Any weak variables still need a determining type before concrete use.
+
 The current [type decoder](../crates/resin-hir/src/lower/eval.rs) recognizes a fixed
 set of builtin constructors. Extend source type lookup to parameterized
 declarations while preserving builtin representation rules. Canonical instance
@@ -208,36 +231,49 @@ Resolve names and check definitions into polymorphic HIR. Its immutable scopes
 retain declarations and their completed schemes; bodies reference bindings and
 definitions directly. There is one body per definition and no retained list of
 monomorphs. Diagnose syntax errors, duplicate parameters, unbound non-dependent
-names, and invalid non-dependent operations even in unused templates.
+names, and inconsistent structural types even in unused templates. Concrete
+operation support is checked for requested monomorphs during LIR construction.
 
-Applying a scheme introduces fresh deduction variables for its named parameters.
-They may resolve to concrete types or expressions over enclosing parameters.
-Check operations whose types are known, and retain explicit dependent operations
-and requirements for the rest. An inferred member result remains tied to its
-receiver and member, never an unconstrained result a caller can choose. Concrete
-uses check those requirements ad hoc using HIR's semantic operations.
+Applying a scheme introduces fresh deduction variables for its quantified
+parameters. They may resolve to concrete types or expressions over enclosing
+parameters. HIR checks structural relationships and retains determining type
+expressions for dependent operations. It does not validate a concrete catalog
+of supported operator implementations or retain an instantiated function list.
 
-Ordinary functions have schemes with no quantified parameters. Complete inferred
-signatures by definition dependency groups before exposing them to unrelated
-callers. Recursive groups may solve their result equations together; callers
-cannot invent a result for an ambiguous cycle. A receiver's method namespace
-remains its defining module's namespace. Caller-local declarations cannot change
-the meaning of names in the template body.
+Complete signatures by definition dependency groups before exposing them to
+unrelated callers. Recursive groups may solve structural
+equations together; calls instantiate the resulting schemes. A receiver's method
+namespace remains its defining module's namespace. Caller-local declarations
+cannot change the meaning of names in the template body.
 
-This deliberately changes when some errors can be diagnosed: a bad dependent
-operation in an unused template can remain undiagnosed until an instance needs
-it. Editor analysis should distinguish unresolved dependent operations from
-errors, show declared parameters in hovers, and navigate to the source template.
-Failures in instances should show the concrete type arguments and the chain of
-uses that requested them.
+This deliberately changes the phase guarantee: structurally valid HIR can contain
+an application that is unsupported on a requested platform. LIR construction
+reports that error. Unused families need not support all possible substitutions.
+Editor analysis distinguishes dependent types from concrete errors, shows named
+parameters and determined weak-variable types in hovers, and navigates to source
+definitions. Instantiating a scheme freshens only its named parameters; unresolved
+weak variables must not become independently selectable types at each use.
 
-HIR-to-LIR lowering owns the instance worklist, keyed by definition and canonical
-closed type arguments. Reserve a LIR function identity before lowering recursive
-references to the same instance; repeated references reuse it. Function values,
+HIR-to-LIR lowering owns the instance worklist, keyed by definition, canonical
+concrete substitution, and semantic target profile. Reserve an identity before
+lowering recursive references; repeated requests reuse it. Function values,
 shader artifacts, pipeline bridges, and implicit drop hooks also request work.
-Use HIR's shared substitution and requirement checking to specialize one body,
-lower it, and discard the temporary specialization. Diagnose unbounded expansion
-with a bounded work limit and a useful application chain.
+LIR construction owns concrete type interning and memoization, resolves field
+types and other determining expressions, and checks the resulting ground type
+relations and operation implementations. It does not infer new type arguments.
+
+For `value.take(1)`, a concrete method parameter can determine the literal's type
+without a new deduction session. If the selected method has its own type parameters,
+HIR must already have recorded their substitution. While lookup remains dependent,
+use explicit arguments such as `value.take<int>(1)`, or annotate the receiver so
+HIR can deduce them. LIR does not match operands to a newly discovered generic
+signature to infer those arguments. Every type must be concrete before storage
+or instructions depending on it enter LIR. Unknown types are errors, not a prompt
+to try another instance.
+
+Validate every requested platform even when an identical concrete body can be
+shared. Host success does not imply shader validity. Checks requiring the complete
+call graph, such as shader recursion, run after discovery reaches a fixed point.
 
 Importing a template retains its HIR definition and references to private
 helpers in the owning compilation. Instances requested in different
@@ -252,10 +288,26 @@ and entry APIs must represent that distinction without assigning a template an
 arbitrary ABI.
 
 Change [public HIR](../crates/resin-hir/src/lib.rs) to express schemes, symbolic
-types, and typed dependent operations. Private inference variables still cannot
-escape HIR construction. LIR owns final concrete `Ty` and function identities;
-verification, C, and SPIR-V continue to consume concrete programs. Keep template
-parameters and deduction state out of `resin-types`, LIR, and the backends.
+types, type constraints, and determining operations. Private solver state stays
+in HIR construction. LIR owns concrete `Ty`, type tables, and function identities;
+verification, C, and SPIR-V consume concrete programs. Keep template parameters
+and deduction state out of `resin-types`, published LIR, and the backends.
+
+## Monomorph allowance
+
+Set `CompilerConfig.max_monomorphs_per_function` to 16,384 by default. The
+configurable allowance counts distinct requests per original function definition
+over the whole compilation, including owner/enclosing arguments and target
+profiles. Repeated requests cost nothing. Check the limit before reserving a new
+request; the default rejects request 16,385 and reports its arguments, platform,
+and requesting chain. Keep configuration fixed for each compiler's caches.
+
+This permits general specialization with bounded function-request growth; it
+does not prove that every program has a finite set of monomorphs. A function
+calling itself at `Ptr<T>` repeatedly produces new keys despite memoization.
+Independent type-normalization and expansion safeguards are also required. The
+[implementation architecture](template-implementation.md) specifies accounting,
+configuration ownership, diagnostics, and the limit's practical scope.
 
 ## Ownership, errors, and GPU behavior
 
@@ -264,11 +316,12 @@ instantiation does not run an initializer or allocate runtime storage. Concrete
 instances select the existing copy, drop, layout, and ABI rules: `identity<int>`
 and `identity<Arc<int>>` may require different cleanup operations.
 
-Named error parameters such as `E` in `Result<T, E>` carry the existing error-type
-requirements. Inferred error holes collect a symbolic least union of propagated
-errors, normalized after substitution and equal to `Never` when empty. Recursive
-groups finish their inclusion equations together. Pending contributors cannot be
-treated as empty, and an accumulator does not become an extra template parameter.
+Error types use the same weak variables and constraints as other types. An input
+error variable does not become `Never` merely because it occupies a Result slot.
+An error type determined by `?` propagation is tied to the least union of its
+contributors; LIR normalizes that union and validates the concrete error
+types. A closed empty union is `Never`. Pending contributors cannot be treated
+as empty, or their determining relation discarded to generalize another parameter.
 
 Direct shader helper calls can request concrete template instances. Device
 lowering still rejects managed host values, illegal escaping addresses, and
@@ -300,13 +353,15 @@ rules understandable without preventing dependent body checking.
 
 Follow the migration in the [implementation architecture](template-implementation.md):
 move ordinary programs onto HIR scopes and schemes, move concrete instance
-enumeration into LIR lowering, then enable function and type templates.
+enumeration and checking into LIR lowering, then enable named polymorphic function
+and type definitions with ordinary weak-variable inference.
 Contextual deduction, imports, and editor analysis are part of the function-template
 implementation from the outset.
 
-Language acceptance includes explicit and deduced instances, concrete function
-values, dependent arithmetic and field access, suffix-free nested calls and later
-local uses, argument-order independence, range errors, and fixed-type conflicts.
+Language acceptance includes named scheme parameters, weak `_` variables, explicit and
+deduced applications, monomorphic local storage, concrete function values,
+dependent arithmetic and field access, suffix-free nested calls and later local
+uses, argument-order independence, range errors, and fixed-type conflicts.
 Preserve union/Result widening, allow completed inferred result patterns to guide
 deduction, and reject inversion of dependent results. Verify nominal distinctions,
 aliases, methods, and drop hooks across instances and imports. Exercise C and
@@ -316,5 +371,7 @@ ownership-sensitive values and rejected managed GPU types.
 Every migration step leaves ordinary programs usable. The new architecture must
 also pass its boundary tests for resolved identities, scheme isolation, one HIR
 body per definition, LIR instance reuse, numeric scheduling, failure recovery,
-and immutable editor facts. Update the language guide and instructions with
-implemented syntax and limits.
+and immutable editor facts. Test configurable request limits, target-specific
+validation, and nonconcrete types producing annotation errors during LIR
+construction. Update the language guide and instructions with implemented syntax
+and limits.
