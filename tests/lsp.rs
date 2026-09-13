@@ -293,6 +293,57 @@ fn formatting_uses_current_buffers_and_returns_utf16_edits() {
 }
 
 #[test]
+fn gradient_dot_completion_survives_edits_before_kernel_statements() {
+    let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
+    let library = Path::new(env!("CARGO_MANIFEST_DIR")).join("resin");
+    let mut client = Client::start_with_library_root(temp.path(), Value::Null, Some(&library));
+    let uri = uri(&temp.path().join("gradient.resin"));
+    let original = include_str!("../examples/gradient.resin");
+    client.open(&uri, original);
+    client.diagnostics(&uri, Some(1), false);
+    let positions = [
+        original.find("\tif (index").unwrap(),
+        original.find("\n};\n\ndef main").unwrap() + 1,
+    ];
+    for (index, offset) in positions.into_iter().enumerate() {
+        let mut source = original.to_owned();
+        source.insert_str(offset, "\troot.\n");
+        let version = index as i32 + 2;
+        client.change(&uri, version, &source);
+        client.diagnostics(&uri, Some(version), true);
+        let line = original[..offset].lines().count() as u32;
+        let mut params = at(&uri, line, 6);
+        params["context"] = json!({"triggerKind": 2, "triggerCharacter": "."});
+        let completion = client.request("textDocument/completion", params);
+        let fields = completion["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["kind"] == 5)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            fields
+                .iter()
+                .map(|item| item["label"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["height", "pixels", "width"]
+        );
+        for item in fields {
+            assert_eq!(
+                item["textEdit"]["range"],
+                json!({
+                    "start": {"line": line, "character": 6},
+                    "end": {"line": line, "character": 6}
+                })
+            );
+        }
+    }
+    client.change(&uri, 4, original);
+    client.diagnostics(&uri, Some(4), false);
+    client.stop();
+}
+
+#[test]
 fn dot_completion_updates_unsaved_receiver_types_and_uses_utf16_edits() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);

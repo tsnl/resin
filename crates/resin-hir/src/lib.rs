@@ -734,11 +734,15 @@ impl Analysis {
     ) -> Vec<Completion> {
         let prefix = &document.source()[replace.start..offset];
         let dot = document.source()[..replace.start].trim_end().len() - 1;
+        // While typing after a dot, the parser may use an identifier on the
+        // following line as the member name. Its receiver still applies here.
         let fields = self.fields.iter().find_map(|(location, fields)| {
             (&location.source == source
                 && location.span.start > dot
-                && location.span.start <= replace.start)
-                .then_some(fields)
+                && document.source()[dot + 1..location.span.start]
+                    .trim()
+                    .is_empty())
+            .then_some(fields)
         });
         let mut items = fields
             .into_iter()

@@ -577,6 +577,66 @@ fn inference_does_not_publish_speculative_type_references() {
 }
 
 #[test]
+fn field_completion_before_existing_statements() {
+    for (receiver, fields) in [
+        ("root", vec!["height", "pixels", "width"]),
+        ("(root)", vec!["height", "pixels", "width"]),
+        ("root.pixels", vec!["data", "length"]),
+    ] {
+        for following in [
+            "if (index < ulong(root.width)) { root.pixels.at(index).* := 0_ui; };",
+            "var later = root.width; later;",
+            "while (false) { root.width; };",
+            "root.width;",
+            "",
+        ] {
+            for preceding in ["", "var earlier = root.height;"] {
+                let source = format!(
+                    "// é🌲\nstruct Root {{ width: uint, height: uint, pixels: Span<uint> }};\n\
+                    @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {{\n\
+                    {preceding}\n{receiver}.\n{following}\n}};"
+                );
+                let project = Project::new(&[("main.resin", &source)]);
+                let analysis = project.analyze();
+                let input = project.source("main.resin");
+                let offset = source.find(&format!("{receiver}.\n")).unwrap() + receiver.len() + 1;
+                let items = analysis.completions(&input, offset);
+                let names = items
+                    .iter()
+                    .filter(|item| item.kind == resin_hir::DefinitionKind::Field)
+                    .map(|item| item.name.as_str())
+                    .collect::<Vec<_>>();
+                assert_eq!(names, fields, "{source}");
+                for item in &items {
+                    assert_eq!(
+                        item.replace,
+                        Span {
+                            start: offset,
+                            end: offset
+                        }
+                    );
+                }
+                if following.starts_with("var later") {
+                    assert_eq!(
+                        analysis
+                            .hover(&input, source.rfind("later;").unwrap())
+                            .unwrap()
+                            .text,
+                        "later: uint"
+                    );
+                }
+                if following != "root.width;" {
+                    assert!(
+                        analysis.hir().is_err(),
+                        "unfinished access must remain invalid"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn field_completion_uses_receiver_types_and_replaces_only_the_field() {
     for (setup, receiver) in [
         ("var value = { count = 1, label = 2 };", "value"),
