@@ -2,7 +2,8 @@ use super::FunctionLowering;
 use super::{ErrorKind, LowerError};
 use super::{Initialization, ValueBinding};
 use crate::Instr;
-use resin_hir::{BindingId, Term};
+use crate::lower::concrete::Term;
+use resin_hir::BindingId;
 use resin_source::prelude::*;
 use resin_types::prelude::*;
 

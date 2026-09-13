@@ -1,8 +1,8 @@
 use super::FunctionLowering;
 use super::LowerError;
 use crate::Instr;
-use resin_hir::ReceiverConversion;
-use resin_hir::Term;
+use crate::lower::concrete::ReceiverConversion;
+use crate::lower::concrete::Term;
 use resin_types::prelude::*;
 
 impl FunctionLowering<'_> {

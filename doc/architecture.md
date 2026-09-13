@@ -63,8 +63,8 @@ pass consumes. Source and type vocabulary are independent foundations.
 | `resin-lsp` | `resin-compiler`, `resin-hir`, `resin-cst` | Compiler queries and formatting over LSP |
 
 The HIR dependency on CST supports editor queries at a syntax position. Its public
-language uses only shared source identities and concrete types. LIR lowering never
-receives CST, AST, source namespaces, or an inference solver. Codegen consumes the
+language owns its type expressions and nominal declarations. LIR lowering never
+receives CST, AST, mutable source scopes, or an inference solver. Codegen consumes the
 LIR certificate; it cannot reach the checker's private state.
 
 All workspace packages have `publish = false`. Path dependencies are declared
@@ -149,8 +149,10 @@ to resolved function IDs with explicit receiver adaptation and argument packing.
 Compiler-provided methods become intrinsic operations. Short-circuit operators
 become `If` nodes, field projections are resolved, numeric literals become values,
 and layout queries become constants whose operands cannot execute. Type aliases
-and method namespaces disappear. Nominal identities and destruction hooks remain
-in the shared type table because later phases need them.
+expand into their targets. Completed nominal declarations retain names, bodies,
+method identities, and destruction hooks in HIR. HIR has no concrete interner;
+its constants and type expressions use its own language rather than concrete
+storage values and a `resin_types::TypeTable`.
 
 HIR remains a tree: `If`, `While`, blocks, matches, Result propagation, places,
 and values retain their structure. LIR lowering assigns storage to binding IDs,
@@ -160,8 +162,12 @@ checks during LIR lowering. Every LIR function reserves local zero for its unary
 parameter, including unit, tuples, and foreign declarations. Each `Instr` documents
 its consumed operands and produced values.
 
-LIR construction lowers each HIR function against shared, read-only concrete
-definitions using fresh per-function state. Each translation returns a completed
+LIR construction translates the nominal declarations into concrete definitions
+and establishes their reference and layout rules. It translates each HIR function
+into a private concrete expression tree, then lowers that tree against the shared,
+read-only concrete definitions using fresh per-function state. The concrete tree
+has concrete types and values, with foreign ABI parameters derived from the
+signature; it is discarded after its storage translation. Each translation returns a completed
 function and source origins; module assembly assigns function IDs and combines
 those results after all functions succeed. Lowering collects independent failures
 across functions. Each failure carries its span and optional immutable source, so

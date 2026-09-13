@@ -1,6 +1,6 @@
 use super::LowerError;
+use crate::lower::concrete::{MatchArm, Term};
 use crate::{Instr, Terminator};
-use resin_hir::{MatchArm, Term};
 use resin_source::prelude::*;
 use resin_types::prelude::*;
 

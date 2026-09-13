@@ -1,7 +1,7 @@
 //! High-level language: resolved, typed expressions with structured control flow.
 //!
 //! The public tree is the complete pass contract: resolved bindings and concrete
-//! types, with no source scopes, inference variables, or stack instructions.
+//! type expressions, with no source scopes, inference variables, or stack instructions.
 //! Construction and editor recovery stay behind the lowering and query operations.
 //!
 //! Implementation modules are deliberately private:
@@ -20,13 +20,141 @@ use std::{collections::BTreeMap, fmt, sync::Arc};
 // HIR language
 //
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RecordField {
+    pub name: Arc<str>,
+    pub ty: Type,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Type {
+    Type,
+    Unit,
+    None,
+    Bool,
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    UInt8,
+    UInt16,
+    UInt32,
+    UInt64,
+    Float32,
+    Float64,
+    Str,
+    Foreign { name: Arc<str> },
+    Defined { definition: TypeId },
+    Pointer { pointee: Box<Type> },
+    Span { element: Box<Type> },
+    GpuPointer { pointee: Box<Type> },
+    GpuSpan { element: Box<Type> },
+    GpuArguments,
+    GpuComputePipeline { root: Box<Type>, owner: Box<Type> },
+    GpuGraphicsPipeline { root: Box<Type>, owner: Box<Type> },
+    Arc { pointee: Box<Type> },
+    Weak { pointee: Box<Type> },
+    Array { element: Box<Type>, length: usize },
+    Record { fields: Vec<RecordField> },
+    Function { param: Box<Type>, result: Box<Type> },
+    Union { variants: Vec<Type> },
+    Result { value: Box<Type>, error: Box<Type> },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Constant {
+    Type {
+        ty: Type,
+    },
+    /// Literal bytes, excluding the trailing NUL added to their static storage.
+    Str {
+        value: Arc<[u8]>,
+    },
+    Unit,
+    None,
+    Bool {
+        value: bool,
+    },
+    Int8 {
+        value: i8,
+    },
+    Int16 {
+        value: i16,
+    },
+    Int32 {
+        value: i32,
+    },
+    Int64 {
+        value: i64,
+    },
+    UInt8 {
+        value: u8,
+    },
+    UInt16 {
+        value: u16,
+    },
+    UInt32 {
+        value: u32,
+    },
+    UInt64 {
+        value: u64,
+    },
+    Float32 {
+        value: f32,
+    },
+    Float64 {
+        value: f64,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeDefinition {
+    pub name: Arc<str>,
+    pub body: Type,
+    pub methods: BTreeMap<Arc<str>, FunctionId>,
+    pub drop: Option<FunctionId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Case {
+    Ok,
+    Err,
+    Type { ty: Type },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldAccess {
+    pub ty: Type,
+    pub index: usize,
+    pub steps: Vec<Conv>,
+}
+
+impl Type {
+    pub fn parameter(types: &[Type]) -> Self {
+        match types {
+            [] => Self::Unit,
+            [ty] => ty.clone(),
+            types => Self::Record {
+                fields: types
+                    .iter()
+                    .enumerate()
+                    .map(|(index, ty)| RecordField {
+                        name: format!("_{index}").into(),
+                        ty: ty.clone(),
+                    })
+                    .collect(),
+            },
+        }
+    }
+}
+
 /// A lexical declaration's identity. Names survive only for diagnostics.
 pub type BindingId = usize;
 
 #[derive(Debug, Clone, Default)]
 pub struct Module {
     pub entries: BTreeMap<Arc<str>, FunctionId>,
-    pub types: TypeTable,
+    pub types: Vec<TypeDefinition>,
     pub functions: Vec<Function>,
     pub shaders: BTreeMap<FunctionId, ShaderEntry>,
 }
@@ -37,7 +165,7 @@ pub struct Function {
     pub name: Arc<str>,
     pub signature: Signature,
     /// External declarations have no function body.
-    pub foreign: Option<Foreign>,
+    pub foreign_header: Option<Arc<str>>,
     pub body: Option<Term>,
 }
 
@@ -48,8 +176,8 @@ pub struct Signature {
 }
 
 impl Signature {
-    pub fn parameter_type(&self) -> Ty {
-        Ty::parameter(
+    pub fn parameter_type(&self) -> Type {
+        Type::parameter(
             &self
                 .params
                 .iter()
@@ -69,21 +197,21 @@ pub struct Parameter {
 
 #[derive(Debug, Clone)]
 pub struct Annotation {
-    pub ty: Ty,
+    pub ty: Type,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct Term {
     pub span: Span,
-    pub ty: Ty,
+    pub ty: Type,
     pub kind: TermKind,
 }
 
 #[derive(Debug, Clone)]
 pub enum TermKind {
     Constant {
-        value: Value,
+        value: Constant,
     },
     Local {
         binding: BindingId,
@@ -176,7 +304,7 @@ pub enum TermKind {
         args: Arguments,
     },
     WeakEmpty {
-        pointee: Ty,
+        pointee: Type,
     },
     Result {
         failure: bool,
@@ -206,7 +334,7 @@ pub enum TermKind {
 pub struct Arguments {
     pub receiver: Option<Box<Term>>,
     pub argument: Box<Term>,
-    pub params: Vec<Ty>,
+    pub params: Vec<Type>,
 }
 
 #[derive(Debug, Clone)]

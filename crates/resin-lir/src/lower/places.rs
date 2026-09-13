@@ -1,6 +1,6 @@
 use super::{ErrorKind, LowerError};
 use crate::Instr;
-use resin_hir::{Term, TermKind};
+use crate::lower::concrete::{Term, TermKind};
 use resin_types::prelude::*;
 
 use super::FunctionLowering;

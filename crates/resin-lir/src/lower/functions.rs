@@ -2,8 +2,8 @@
 use super::builder::FunctionBuilder;
 use super::{FunctionLowering, LowerError, LoweredFunction};
 use super::{Initialization, ValueBinding};
+use crate::lower::concrete::{Function, Parameter, Signature};
 use crate::{BlockId, Instr, Local, Terminator};
-use resin_hir::{Function, Parameter, Signature};
 use resin_source::prelude::*;
 use resin_types::prelude::*;
 
@@ -32,7 +32,7 @@ fn lower_foreign(source: &Function, foreign: &Foreign) -> LoweredFunction {
         function: crate::Function {
             name: Some(source.name.clone()),
             foreign: Some(foreign.clone()),
-            result: source.signature.result.ty.clone(),
+            result: source.signature.result.clone(),
             locals: vec![Local {
                 name: None,
                 ty: source.signature.parameter_type(),
@@ -48,7 +48,7 @@ fn lower_foreign(source: &Function, foreign: &Foreign) -> LoweredFunction {
 impl<'types> FunctionLowering<'types> {
     fn new(source: &Function, typer: &'types TyperContext) -> Self {
         let mut function = FunctionBuilder::new(Some(source.name.clone()));
-        function.result(source.signature.result.ty.clone());
+        function.result(source.signature.result.clone());
         Self {
             source: source
                 .location
@@ -69,8 +69,8 @@ impl<'types> FunctionLowering<'types> {
     fn lower_body(&mut self, source: &Function) -> Result<(), LowerError> {
         if let Some(body) = &source.body {
             self.bind_params(&source.signature);
-            self.gen_term(body, Some(&source.signature.result.ty))?;
-            self.cleanup(0, &source.signature.result.ty);
+            self.gen_term(body, Some(&source.signature.result))?;
+            self.cleanup(0, &source.signature.result);
             self.terminate(Terminator::Return);
         } else {
             self.function
@@ -95,7 +95,7 @@ impl<'types> FunctionLowering<'types> {
     }
 
     fn bind_parameter(&mut self, parameter: &Parameter, index: usize, single: bool) {
-        let ty = &parameter.annotation.ty;
+        let ty = &parameter.ty;
         let local = if single {
             LocalId::from_index(0)
         } else {

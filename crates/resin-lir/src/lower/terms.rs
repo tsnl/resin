@@ -4,7 +4,7 @@ use resin_types::prelude::*;
 use std::{collections::HashMap, sync::Arc};
 
 use crate::Instr;
-use resin_hir::Term;
+use crate::lower::concrete::Term;
 
 use super::FunctionLowering;
 

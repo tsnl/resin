@@ -2,7 +2,7 @@
 //! This is the last part of HIR construction; no concrete private tree is retained.
 use super::infer::{Rule, Solver, Type};
 use super::scope::DeclarationId;
-use super::typed;
+use super::{typed, types};
 use crate::ReceiverConversion;
 use crate::lower::context::{FunctionBody, FunctionDecl};
 use crate::{Arguments, MatchArm, Statement, Term, TermKind};
@@ -55,7 +55,7 @@ impl Completion<'_> {
     fn elaborate(&mut self, source: &typed::Term) -> Result<Term> {
         Ok(Term {
             span: source.span,
-            ty: self.ty(source)?,
+            ty: types::ty(&self.ty(source)?),
             kind: self.elaborate_kind(source)?,
         })
     }
@@ -64,8 +64,8 @@ impl Completion<'_> {
         self.solver.require(&source.ty, source.span)
     }
 
-    fn annotation(&self, source: &typed::Annotation<Type>) -> Result<crate::Annotation> {
-        Ok(crate::Annotation {
+    fn annotation(&self, source: &typed::Annotation<Type>) -> Result<typed::Annotation> {
+        Ok(typed::Annotation {
             ty: self.solver.require(&source.ty, source.span)?,
             span: source.span,
         })
@@ -78,17 +78,21 @@ impl Completion<'_> {
     fn elaborate_kind(&mut self, source: &typed::Term) -> Result<TermKind> {
         Ok(match &source.kind {
             typed::TermKind::Error(error) => return Err(error.clone()),
-            typed::TermKind::Unit => TermKind::Constant { value: Value::Unit },
-            typed::TermKind::None => TermKind::Constant { value: Value::None },
+            typed::TermKind::Unit => TermKind::Constant {
+                value: crate::Constant::Unit,
+            },
+            typed::TermKind::None => TermKind::Constant {
+                value: crate::Constant::None,
+            },
             typed::TermKind::Num { value } => self.number(source, value)?,
             typed::TermKind::String { value } => TermKind::Constant {
-                value: Value::Str {
+                value: crate::Constant::Str {
                     value: value.as_bytes().into(),
                 },
             },
             typed::TermKind::Type { ty } => TermKind::Constant {
-                value: Value::Type {
-                    ty: self.annotation(ty)?.ty,
+                value: crate::Constant::Type {
+                    ty: types::ty(&self.annotation(ty)?.ty),
                 },
             },
             typed::TermKind::Var { declaration, name } => self.reference(*declaration, name),
@@ -182,7 +186,9 @@ impl Completion<'_> {
     fn number(&self, source: &typed::Term, text: &str) -> Result<TermKind> {
         let (value, _) =
             super::eval::number(self.typer, source.span, text, Some(&self.ty(source)?))?;
-        Ok(TermKind::Constant { value })
+        Ok(TermKind::Constant {
+            value: types::constant(&value),
+        })
     }
 
     fn layout(&self, ty: &typed::Annotation<Type>, size: bool) -> Result<TermKind> {
@@ -190,7 +196,7 @@ impl Completion<'_> {
             resin_types::layout::layout(self.typer.definitions(), &self.annotation(ty)?.ty)
                 .map_err(|e| GenerateError::inference(ty.span, e.to_string()))?;
         Ok(TermKind::Constant {
-            value: Value::UInt64 {
+            value: crate::Constant::UInt64 {
                 value: if size { layout.size } else { layout.align } as u64,
             },
         })
@@ -230,9 +236,9 @@ impl Completion<'_> {
     fn short_circuit(&mut self, span: Span, name: &str, args: &[typed::Term]) -> Result<TermKind> {
         let fixed = Box::new(Term {
             span,
-            ty: Ty::Bool,
+            ty: crate::Type::Bool,
             kind: TermKind::Constant {
-                value: Value::Bool {
+                value: crate::Constant::Bool {
                     value: name == "||",
                 },
             },
@@ -251,13 +257,14 @@ impl Completion<'_> {
     }
 
     fn field(&mut self, span: Span, base: &typed::Term, name: &Ident) -> Result<TermKind> {
+        let base_type = self.ty(base)?;
         let base = self.boxed(base)?;
         if name.val.as_ref() == "spirv"
             && let TermKind::Function { function } = base.kind
         {
             return self.shader(span, function);
         }
-        let mut shape = &base.ty;
+        let mut shape = &base_type;
         while let Some(pointee) = shape.deref_target() {
             shape = pointee;
         }
@@ -265,7 +272,10 @@ impl Completion<'_> {
             .typer
             .type_field(shape, &name.val)
             .map_err(|e| GenerateError::typing(span, e))?;
-        Ok(TermKind::Field { base, access })
+        Ok(TermKind::Field {
+            base,
+            access: types::field(access),
+        })
     }
 
     fn shader(&mut self, span: Span, function: FunctionId) -> Result<TermKind> {
@@ -306,7 +316,7 @@ impl Completion<'_> {
         let args = Arguments {
             receiver,
             argument: self.boxed(argument)?,
-            params,
+            params: params.iter().map(types::ty).collect(),
         };
         Ok(match declaration.body {
             FunctionBody::Intrinsic(op) => TermKind::Intrinsic { op, args },
@@ -333,13 +343,13 @@ impl Completion<'_> {
                 };
                 let func = Box::new(Term {
                     span: name.span,
-                    ty,
+                    ty: types::ty(&ty),
                     kind: TermKind::Function { function },
                 });
                 let arg = if args.receiver.is_some() {
                     Box::new(Term {
                         span: argument.span,
-                        ty: param,
+                        ty: types::ty(&param),
                         kind: TermKind::Pack { args },
                     })
                 } else {
@@ -404,8 +414,10 @@ impl Completion<'_> {
                 receiver: Some(self.adapt(receiver, &self.ty(receiver)?, &params[0])?),
                 argument: Box::new(Term {
                     span: argument.span,
-                    ty: Ty::Unit,
-                    kind: TermKind::Constant { value: Value::Unit },
+                    ty: crate::Type::Unit,
+                    kind: TermKind::Constant {
+                        value: crate::Constant::Unit,
+                    },
                 }),
                 params: vec![],
             }
@@ -413,7 +425,7 @@ impl Completion<'_> {
             Arguments {
                 receiver: None,
                 argument: self.boxed(terms[0])?,
-                params: vec![params[0].clone()],
+                params: vec![types::ty(&params[0])],
             }
         };
         Ok(TermKind::GpuPipelineCreate {
@@ -427,7 +439,7 @@ impl Completion<'_> {
         let conversion = ReceiverConversion::between(from, to).expect("checked receiver");
         Ok(Box::new(Term {
             span: source.span,
-            ty: to.clone(),
+            ty: types::ty(to),
             kind: TermKind::Adapt {
                 conversion,
                 arg: self.boxed(source)?,
@@ -454,7 +466,7 @@ impl Completion<'_> {
             let args = Arguments {
                 receiver: Some(self.adapt(func, &function_type, &to)?),
                 argument: self.boxed(arg)?,
-                params: vec![self.ty(arg)?],
+                params: vec![types::ty(&self.ty(arg)?)],
             };
             return Ok(TermKind::Intrinsic {
                 op: if matches!(function_type, Ty::GpuPointer { .. } | Ty::GpuSpan { .. }) {
@@ -487,7 +499,10 @@ impl Completion<'_> {
             typed::StatementKind::Declare { binding, name, ty } => Statement::Declare {
                 binding: *binding,
                 name: name.clone(),
-                ty: self.annotation(ty)?,
+                ty: crate::Annotation {
+                    ty: types::ty(&self.annotation(ty)?.ty),
+                    span: ty.span,
+                },
             },
             typed::StatementKind::Expr { term } => Statement::Expr {
                 term: self.elaborate(term)?,
@@ -518,7 +533,7 @@ impl Completion<'_> {
             }
             seen.push(tag.clone());
             checked.push(MatchArm {
-                tag,
+                tag: types::case(&tag),
                 binding: arm.binding,
                 body: self.elaborate(&arm.body)?,
             });
@@ -569,14 +584,14 @@ impl Completion<'_> {
             && matches!(source.kind, typed::TermKind::Unit)
         {
             return Ok(TermKind::WeakEmpty {
-                pointee: *pointee.clone(),
+                pointee: types::ty(pointee),
             });
         }
-        let value = self.constructor_argument(to, source)?;
-        self.conversion(span, value, to)
+        let (from, value) = self.constructor_argument(to, source)?;
+        self.conversion(span, value, &from, to)
     }
 
-    fn constructor_argument(&mut self, to: &Ty, source: &typed::Term) -> Result<Term> {
+    fn constructor_argument(&mut self, to: &Ty, source: &typed::Term) -> Result<(Ty, Term)> {
         let body = self
             .typer
             .body(to)
@@ -585,13 +600,16 @@ impl Completion<'_> {
         if matches!(&body, Ty::Record { fields } if fields.is_empty())
             && matches!(source.kind, typed::TermKind::Unit)
         {
-            return Ok(Term {
-                span: source.span,
-                ty: body,
-                kind: TermKind::Record { fields: vec![] },
-            });
+            return Ok((
+                body.clone(),
+                Term {
+                    span: source.span,
+                    ty: types::ty(&body),
+                    kind: TermKind::Record { fields: vec![] },
+                },
+            ));
         }
-        self.elaborate(source)
+        Ok((self.ty(source)?, self.elaborate(source)?))
     }
 
     fn shared_payload(&mut self, to: &Ty, source: &typed::Term) -> Result<Term> {
@@ -601,22 +619,22 @@ impl Completion<'_> {
         ) {
             return self.elaborate(source);
         }
-        let value = self.constructor_argument(to, source)?;
-        if &value.ty == to {
+        let (from, value) = self.constructor_argument(to, source)?;
+        if &from == to {
             return Ok(value);
         }
-        let kind = self.conversion(source.span, value, to)?;
+        let kind = self.conversion(source.span, value, &from, to)?;
         Ok(Term {
             span: source.span,
-            ty: to.clone(),
+            ty: types::ty(to),
             kind,
         })
     }
 
-    fn conversion(&self, span: Span, value: Term, to: &Ty) -> Result<TermKind> {
+    fn conversion(&self, span: Span, value: Term, from: &Ty, to: &Ty) -> Result<TermKind> {
         let conversion = self
             .typer
-            .explicit_conversion(&value.ty, to)
+            .explicit_conversion(from, to)
             .map_err(|e| GenerateError::typing(span, e))?;
         if let ExplicitConversion::Ascribe(steps) = &conversion {
             self.check_unwrap(span, steps)?;
@@ -716,8 +734,8 @@ mod tests {
         ));
         assert_eq!(
             completed.body.ty,
-            Ty::Pointer {
-                pointee: Box::new(Ty::UInt8)
+            crate::Type::Pointer {
+                pointee: Box::new(crate::Type::UInt8)
             }
         );
         assert!(completed.shaders.is_empty());
