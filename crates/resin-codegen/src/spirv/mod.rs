@@ -8,7 +8,6 @@ use rspirv::{binary::Assemble, dr::Builder, spirv::*};
 mod entry;
 mod function;
 mod ops;
-mod reachable;
 mod symbols;
 mod types;
 
@@ -19,12 +18,16 @@ pub(super) fn generate(
 ) -> Result<Vec<u8>, Error> {
     let module = checked.module();
     let analysis = checked.analysis();
-    let reachable = reachable::functions(module, entry.index())?;
+    let reachable = checked
+        .shader_functions(entry)
+        .ok_or_else(|| Error("shader entry was not requested".into()))?;
     let mut context = Context::new(module, &analysis.types);
-    for &index in &reachable {
+    for &function in reachable {
+        let index = function.index();
         register_function_types(&mut context, index, &analysis.functions[index])?;
     }
-    for index in reachable {
+    for &function in reachable {
+        let index = function.index();
         function::lower(
             &mut context,
             &module.functions[index],

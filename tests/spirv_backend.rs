@@ -209,7 +209,7 @@ fn shader_addresses_cannot_hide_unsupported_layouts_or_escape_locals() {
             "cannot return a local address",
         ),
     ] {
-        let error = support::project::Project::new(&module(source), None).unwrap_err();
+        let error = pipeline::shader_error(source);
         assert!(error.to_string().contains(expected), "{source}\n{error}");
     }
 }
@@ -238,7 +238,7 @@ fn unsupported_shader_features_are_diagnosed() {
             "does not support type",
         ),
     ] {
-        let error = support::project::Project::new(&module(source), None).unwrap_err();
+        let error = pipeline::shader_error(source);
         assert!(error.to_string().contains(expected), "{source}\n{error}");
     }
 }
@@ -293,11 +293,11 @@ fn compound_control_flow_compiles_to_spirv() {
 fn imported_backend_errors_retain_expression_origins() {
     let helper = Source::new(
         "helper.resin",
-        "export { helper }; struct E {}; def helper(n: uint) -> Result<uint, E> = { n / 2_ui; var r: Result<(), E>; r := if (n == 0_ui) { err(E {}) } else { ok(()) }; r?; ok(n) };",
+        "export { helper }; def helper(n: uint) -> Ptr<uint> = { var value = n; &value };",
     );
     let entry = Source::new(
         "main.resin",
-        "export { kernel }; import { \"helper.resin\" }; @compute_shader def kernel(invocation: ulong, p: Ptr<uint>) = { var i = uint(invocation); match (helper(i)) { ok(n) => { p.* := n; }, err(e) => {} }; };",
+        "export { kernel }; import { \"helper.resin\" }; @compute_shader def kernel(invocation: ulong, p: Ptr<uint>) = { p.* := helper(uint(invocation)).*; };",
     );
     let mut loader = resin_source::Loader::new(Default::default());
     loader
@@ -316,7 +316,7 @@ fn imported_backend_errors_retain_expression_origins() {
         .instructions
         .values()
         .filter(|o| {
-            o.source == helper && o.source.text().get(o.span.start..o.span.end) == Some("n / 2_ui")
+            o.source == helper && o.source.text().get(o.span.start..o.span.end) == Some("&value")
         })
         .collect();
     assert!(
@@ -328,10 +328,10 @@ fn imported_backend_errors_retain_expression_origins() {
         .to_string();
     assert!(error.contains(&format!("{}:1:", helper.name())), "{error}");
     assert!(
-        error.contains("n / 2_ui") && error.contains("function helper"),
+        error.contains("helper.resin:1:") && error.contains("function helper"),
         "{error}"
     );
-    assert!(error.contains("unsupported shader builtin"), "{error}");
+    assert!(error.contains("cannot return a local address"), "{error}");
     let mut without = m.clone();
     without.origins = Default::default();
     let error = support::project::Project::new(&without, None)
@@ -358,14 +358,11 @@ fn managed_fields_are_opaque_until_consumed_by_a_shader() {
         "root.owner := root.owner;",
         "var result = root.weak.upgrade();",
     ] {
-        let m = module(&format!(
+        let error = pipeline::shader_error(&format!(
             "{prefix} @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = {{ var i = uint(invocation); {body} }};"
         ));
-        let error = support::project::Project::new(&m, None)
-            .unwrap_err()
-            .to_string();
         assert!(
-            error.contains("shader cannot consume a managed value"),
+            error.contains("shader cannot consume managed values"),
             "{error}"
         );
     }
@@ -384,10 +381,9 @@ fn options_of_plain_values_work_in_shaders() {
 
 #[test]
 fn literal_strings_report_the_missing_shader_storage_support() {
-    let m = module(
+    let error = pipeline::shader_error(
         r#"export { kernel }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); var text = "abc"; output.* := uint(text.length); };"#,
     );
-    let error = support::project::Project::new(&m, None).unwrap_err();
     assert!(
         error
             .to_string()

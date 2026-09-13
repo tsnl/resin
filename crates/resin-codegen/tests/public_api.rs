@@ -133,32 +133,18 @@ fn shader_only_generation_batches_declared_functions_without_a_host_entry() {
 }
 
 #[test]
-fn host_generation_does_not_lower_unrequested_shader_bodies() {
+fn host_generation_does_not_emit_shader_instances() {
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
-    let mut module = module();
-    module.functions[1].blocks[0].instrs.splice(
-        0..0,
-        [
-            Instr::Push {
-                value: Value::Str {
-                    value: "host only".as_bytes().to_vec().into(),
-                },
-            },
-            Instr::Discard,
-        ],
-    );
-    let checked = VerifiedModule::new(module).unwrap();
+    let checked = VerifiedModule::new(module()).unwrap();
     let project = resin_codegen::generate(checked.view(), Some("main"), directory.path()).unwrap();
     assert!(project.shaders().is_empty());
-    assert!(project.c_source().unwrap().is_file());
     assert!(
         !fs::read_to_string(project.c_source().unwrap())
             .unwrap()
             .contains("r_fn1(")
     );
     let shader_directory = directory.path().join("shaders");
-    assert!(resin_codegen::generate(checked.view(), None, &shader_directory).is_err());
-    assert!(!shader_directory.exists());
+    assert!(resin_codegen::generate(checked.view(), None, &shader_directory).is_ok());
 }
 
 #[test]
@@ -172,21 +158,35 @@ fn lowering_failure_leaves_existing_outputs_untouched() {
         resin_codegen::generate(checked.view(), Some("missing"), directory.path()).unwrap_err();
     assert!(error.to_string().contains("not exported"));
     let mut bad = embedded_module();
+    // The language permits pointers, but this backend representation cannot store a
+    // shader-local address in a physical pointer value. This remains a target-lowering error.
+    bad.functions[1].locals.extend([
+        Local {
+            name: None,
+            ty: Ty::UInt64,
+        },
+        Local {
+            name: None,
+            ty: Ty::Pointer {
+                pointee: Box::new(Ty::UInt64),
+            },
+        },
+    ]);
     bad.functions[1].blocks[0].instrs.splice(
         0..0,
         [
-            Instr::Push {
-                value: Value::Str {
-                    value: "host only".as_bytes().to_vec().into(),
-                },
+            Instr::LocalAddress {
+                local: LocalId::from_index(1),
             },
-            Instr::Discard,
+            Instr::SetLocal {
+                local: LocalId::from_index(2),
+            },
         ],
     );
     let checked = VerifiedModule::new(bad).unwrap();
     let error =
         resin_codegen::generate(checked.view(), Some("main"), directory.path()).unwrap_err();
-    assert!(error.to_string().contains("shader string literals"));
+    assert!(error.to_string().contains("shader-local addresses"));
     assert_eq!(fs::read(project.c_source().unwrap()).unwrap(), before_c);
     assert_eq!(
         fs::read(project.shaders()[0].unoptimized_spirv()).unwrap(),

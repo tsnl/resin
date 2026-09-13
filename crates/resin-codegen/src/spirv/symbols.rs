@@ -51,12 +51,7 @@ pub(super) fn agree(left: &[Slot], right: &[Slot]) -> Result<(), Error> {
     Ok(())
 }
 
-pub(super) fn check(
-    module: &resin_lir::Module,
-    instruction: &Instr,
-    args: &[Slot],
-    result: Option<&Ty>,
-) -> Result<(), Error> {
+pub(super) fn check(instruction: &Instr, args: &[Slot]) -> Result<(), Error> {
     if args
         .iter()
         .enumerate()
@@ -64,26 +59,6 @@ pub(super) fn check(
     {
         return Err(Error(
             "shader-local addresses cannot escape through values, casts, or calls".into(),
-        ));
-    }
-    let managed = args
-        .iter()
-        .map(|arg| &arg.ty)
-        .chain(result)
-        .any(|ty| ty.needs_drop(&module.types));
-    if managed
-        || matches!(
-            instruction,
-            Instr::ArcNew
-                | Instr::ArcData
-                | Instr::Downgrade
-                | Instr::Upgrade
-                | Instr::WeakEmpty { .. }
-                | Instr::DropLocal { .. }
-        )
-    {
-        return Err(Error(
-            "shader cannot consume a managed value or invoke automatic destruction".into(),
         ));
     }
     Ok(())

@@ -178,7 +178,7 @@ and type dependencies enter the worklist. Decorated functions remain host-callab
 shader artifacts and pipeline creation request separate shader instances. C emits
 host instances, while SPIR-V follows the requested shader graph. Source inference
 still rejects template syntax in this preparatory layer. Producing polymorphic schemes
-from source and completing target operation selection in LIR are subsequent layers.
+from source is the next stage of the implementation.
 
 `resin_lir::instantiate` accepts closed HIR applications and constructs their target
 program. The whole-module `generate`/`analyze` helpers explicitly request all ordinary
@@ -190,6 +190,15 @@ depth guard across declarations.
 
 The worklist translates each application into a private concrete expression tree,
 substituting types and selecting supported builtin operations without inference.
+Shader scalar/type rules live in `resin-types` and are also used by certification and
+emission. Specialization distinguishes value reads from place access, so taking the
+address of an opaque managed field remains valid while copying its value is rejected.
+Completed shader instances cannot call foreign functions or perform host ownership
+operations. An iterative graph traversal rejects shader recursion before publishing LIR.
+Verification independently certifies these guarantees for direct language clients and
+retains dependency order, exposed by `Verified::shader_functions`. SPIR-V consumes that
+order instead of discovering the target call graph. Its remaining local-address escape
+and merge restrictions concern SPIR-V representation and remain in target lowering.
 It lowers that tree against completed concrete nominal definitions using fresh
 per-function state, then discards the tree. Foreign ABI parameters come from the
 concrete signature. Function references, shader artifacts, pipeline bridges, exports,

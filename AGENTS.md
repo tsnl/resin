@@ -40,6 +40,13 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   discovery reserves recursive identities privately and installs real drop IDs before storage
   lowering. `Compiler::analyze` produces HIR/editor facts without a LIR artifact. The whole-module
   LIR helpers remain explicit operations for direct language clients and tests.
+- Specialization selects concrete shader operations before storage lowering. Preserve
+  place access separately from value reads: an opaque managed field may be addressed,
+  while reading, copying, replacing, or destroying its value is host-only. LIR construction
+  completes shader call graphs iteratively and rejects recursion/foreign calls; verification
+  certifies the same rules and retains shader dependency order for code generation.
+  Keep concrete shader type/operation rules in `resin-types`, with instruction and graph
+  rules private to LIR. SPIR-V owns representation restrictions such as local-address escape.
 - Keep resolved types and layout rules in `crates/resin-types`; they must not depend on a
   frontend, backend, or verifier. Keep the public contract in `lib.rs`, with substantial
   representation algorithms in private `types.rs` and concrete checking/conversion rules

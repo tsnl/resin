@@ -161,3 +161,104 @@ fn demanded_nominals_retain_field_conversions_and_real_drop_identities() {
     );
     assert_eq!(module.functions.len(), 2);
 }
+
+#[test]
+fn unsupported_shader_operations_fail_during_compilation_with_application_notes() {
+    let source = Source::new(
+        "entry",
+        "export { main, kernel }; def main() -> int = { 42 }; @compute_shader def kernel(i: ulong, out: Ptr<uint>) = { out.* := uint(i) / 2_ui; };",
+    );
+    let mut compiler = Compiler::new();
+    let mut loader = loader();
+    assert!(
+        compiler
+            .compile(source.clone(), &mut loader, &[host("main")])
+            .module()
+            .is_ok()
+    );
+    assert!(
+        compiler
+            .compile(source.clone(), &mut loader, &[host("kernel")])
+            .module()
+            .is_ok()
+    );
+    let failed = compiler.compile(source.clone(), &mut loader, &[shader("kernel")]);
+    assert!(failed.hir().is_ok());
+    assert!(failed.module().is_err());
+    let diagnostic = &failed.diagnostics()[0];
+    assert!(diagnostic.message.contains("unsupported shader builtin"));
+    assert_eq!(
+        &source.text()[diagnostic.location.span.start..diagnostic.location.span.end],
+        "uint(i) / 2_ui"
+    );
+    assert!(
+        diagnostic
+            .related
+            .iter()
+            .any(|note| note.message.contains("kernel") && note.message.contains("Shader"))
+    );
+}
+
+#[test]
+fn shader_recursion_is_rejected_before_publishing_lir() {
+    let source = Source::new(
+        "entry",
+        "export { kernel }; def helper(i: ulong, out: Ptr<uint>) = { kernel(i, out); }; @compute_shader def kernel(i: ulong, out: Ptr<uint>) = { helper(i, out); };",
+    );
+    let mut compiler = Compiler::new();
+    let mut loader = loader();
+    assert!(
+        compiler
+            .compile(source.clone(), &mut loader, &[host("kernel")])
+            .module()
+            .is_ok()
+    );
+    let failed = compiler.compile(source, &mut loader, &[shader("kernel")]);
+    assert!(failed.hir().is_ok());
+    assert!(failed.module().is_err());
+    assert!(
+        failed.diagnostics()[0]
+            .message
+            .contains("recursive shader call graph")
+    );
+    assert!(
+        failed.diagnostics()[0]
+            .related
+            .iter()
+            .any(|note| note.message.contains("helper"))
+    );
+}
+
+#[test]
+fn shader_calls_cannot_enter_foreign_functions_or_store_function_values() {
+    for (helper, body, message) in [
+        (
+            "extern \"stdlib.h\" def abs(i: int) -> int;",
+            "out.* := uint(abs(int(i)));",
+            "foreign",
+        ),
+        (
+            "def helper(i: uint) -> uint = { i };",
+            "var f = helper; out.* := f(uint(i));",
+            "does not support type",
+        ),
+    ] {
+        let source = Source::new(
+            "entry",
+            format!(
+                "export {{ kernel }}; {helper} @compute_shader def kernel(i: ulong, out: Ptr<uint>) = {{ {body} }};"
+            ),
+        );
+        let failed = Compiler::new().compile(source, &mut loader(), &[shader("kernel")]);
+        assert!(failed.hir().is_ok());
+        assert!(failed.module().is_err());
+        assert!(
+            failed
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(message)),
+            "{:?}",
+            failed.diagnostics()
+        );
+    }
+}

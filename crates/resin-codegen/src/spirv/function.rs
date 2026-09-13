@@ -246,7 +246,7 @@ impl FunctionLowering<'_, '_> {
         args: &[Slot],
         result: Option<&Ty>,
     ) -> Result<Option<Slot>, Error> {
-        symbols::check(self.context.module, instruction, args, result)?;
+        symbols::check(instruction, args)?;
         if let Some(invalid) = ops::invalid(self.context, instruction, args)? {
             self.check(invalid, true)?;
         }

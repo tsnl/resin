@@ -36,7 +36,7 @@ pub fn analyze(
         .reserve_types()
         .map_err(|error| vec![instances.lower_error(error, None, None)])?;
     let functions = instances.lower()?;
-    Ok(assemble(instances, functions))
+    instances.assemble(functions)
 }
 
 pub fn instantiate(
@@ -49,7 +49,7 @@ pub fn instantiate(
         .reserve_entries(entries)
         .map_err(|error| vec![error])?;
     let functions = instances.lower()?;
-    Ok(assemble(instances, functions))
+    instances.assemble(functions)
 }
 
 /// A completed function uses local instruction positions; assembly supplies its ID.
@@ -57,24 +57,6 @@ struct LoweredFunction {
     function: crate::Function,
     location: Option<SourceLocation>,
     origins: BTreeMap<(BlockId, usize), SourceLocation>,
-}
-
-fn assemble(instances: instances::Instances<'_>, functions: Vec<LoweredFunction>) -> Module {
-    let mut module = instances.module();
-    for (index, lowered) in functions.into_iter().enumerate() {
-        let id = FunctionId::from_index(index);
-        module.functions.push(lowered.function);
-        if let Some(location) = lowered.location {
-            module.origins.functions.insert(id, location);
-        }
-        module.origins.instructions.extend(
-            lowered
-                .origins
-                .into_iter()
-                .map(|((block, instruction), location)| ((id, block, instruction), location)),
-        );
-    }
-    module
 }
 
 //

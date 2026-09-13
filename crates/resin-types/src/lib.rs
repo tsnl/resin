@@ -890,6 +890,23 @@ pub mod shader {
         super::typer::validate_shader(typer, parameter, result, foreign, stage)
     }
 
+    /// Select a supported concrete shader builtin after ordinary operand typing.
+    /// Arithmetic schemes remain unconstrained in HIR; unsupported ground operations
+    /// fail when constructing a shader instance.
+    pub fn builtin_instance(
+        typer: &TyperContext,
+        name: &str,
+        arguments: &[Ty],
+    ) -> Result<super::BuiltinCall, String> {
+        super::typer::shader_builtin_instance(typer, name, arguments)
+    }
+
+    /// Concrete value/storage types admitted by the shader profile. Managed reference
+    /// fields are opaque; copying or destroying them is a separate operation restriction.
+    pub fn value_type(definitions: &[super::TypeDef], ty: &Ty) -> Result<(), String> {
+        super::typer::shader_value_type(definitions, ty)
+    }
+
     /// Validate a compute stage or an ordered vertex/fragment pair for pipeline creation.
     /// Graphics stages must agree on their color type and any declared root; every root
     /// must support host GPU-view projection. Rootless graphics returns None.
