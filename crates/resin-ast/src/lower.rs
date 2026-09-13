@@ -45,12 +45,18 @@ impl<'a> AstGen<'a> {
     }
 
     fn hole(&self, node: Node) -> Term {
-        Spanned::new(
-            TermKind::Hole {
-                children: Vec::new(),
-            },
-            self.span(node),
-        )
+        // An abandoned postfix expression can live entirely inside ERROR,
+        // without a surrounding term node. Keep its receiver for editor facts.
+        let children = if node.is_error() {
+            node.named_child(0)
+                .filter(|child| child.kind() == "primary_term")
+                .map(|prefix| self.gen_postfix_suffixes(self.gen_primary_term(prefix), node))
+                .into_iter()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Spanned::new(TermKind::Hole { children }, self.span(node))
     }
 
     // Tree-sitter sometimes places an unfinished postfix/operator next to the
@@ -346,9 +352,20 @@ impl<'a> AstGen<'a> {
         if node.kind() != "postfix_term" || node.is_missing() || node.is_error() {
             return self.hole(node);
         }
-        let mut base = self.gen_primary_term(node.child_by_field_name("prefix").unwrap_or(node));
+        let base = self.gen_primary_term(node.child_by_field_name("prefix").unwrap_or(node));
+        self.gen_postfix_suffixes(base, node)
+    }
+
+    fn gen_postfix_suffixes(&self, mut base: Term, node: Node) -> Term {
         let mut cursor = node.walk();
-        for child in node.children_by_field_name("suffix", &mut cursor) {
+        for (index, child) in node.children(&mut cursor).enumerate() {
+            if child.kind() == "." || child.is_error() {
+                base = self.postfix_error(base, child);
+                continue;
+            }
+            if node.field_name_for_child(index as u32) != Some("suffix") {
+                continue;
+            }
             match child.kind() {
                 "unwrap_suffix" => {
                     let span = Span {
@@ -468,6 +485,29 @@ impl<'a> AstGen<'a> {
             }
         }
         base
+    }
+
+    fn postfix_error(&self, base: Term, node: Node) -> Term {
+        // ERROR can also contain the next keyword. Anchor the missing member
+        // immediately after the dot, where the user is requesting completion.
+        let dot = if node.kind() == "." {
+            Some(node)
+        } else {
+            node.child(0).filter(|child| child.kind() == ".")
+        };
+        let Some(dot) = dot else {
+            return base;
+        };
+        let span = Span {
+            start: base.span.start,
+            end: dot.end_byte().min(self.source_len),
+        };
+        Spanned::new(
+            TermKind::FieldHole {
+                base: Box::new(base),
+            },
+            span,
+        )
     }
 
     fn gen_primary_term(&self, node: Node) -> Term {
@@ -636,13 +676,29 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_block(&self, node: Node, statement_field: &str) -> Term {
+        let tail = node.child_by_field_name("tail");
         let mut cursor = node.walk();
         let stmts = node
-            .children_by_field_name(statement_field, &mut cursor)
-            .map(|stmt| self.gen_stmt(stmt))
+            .children(&mut cursor)
+            .enumerate()
+            .filter_map(|(index, child)| {
+                if node.field_name_for_child(index as u32) == Some(statement_field) {
+                    Some(self.gen_stmt(child))
+                } else if child.is_error()
+                    && tail.is_none_or(|tail| child.start_byte() < tail.start_byte())
+                {
+                    Some(Spanned::new(
+                        StmtKind::Expr {
+                            term: self.hole(child),
+                        },
+                        self.span(child),
+                    ))
+                } else {
+                    None
+                }
+            })
             .collect();
-        let tail = node
-            .child_by_field_name("tail")
+        let tail = tail
             .map(|term| self.gen_term(term))
             .unwrap_or_else(|| Spanned::new(TermKind::Unit, self.span(node)));
         let tail = self.trailing_errors(tail, node);
