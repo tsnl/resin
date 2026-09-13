@@ -23,7 +23,7 @@ fn tail(function: &resin_hir::Function) -> &resin_hir::Term {
 }
 
 #[test]
-fn hir_resolves_calls_short_circuiting_and_layout_before_lir() {
+fn hir_resolves_calls_and_preserves_type_dependent_operations_for_lir() {
     let module = hir(r#"
         struct Item { value: int,
             def read(item: Item) -> int = { item.value };
@@ -51,7 +51,14 @@ fn hir_resolves_calls_short_circuiting_and_layout_before_lir() {
     ));
     assert!(matches!(
         tail(function(&module, "measure")).kind,
-        resin_hir::TermKind::Constant { .. }
+        resin_hir::TermKind::Layout {
+            of: resin_hir::Type::Int32,
+            size: true
+        }
+    ));
+    assert!(matches!(
+        tail(function(&module, "Item.read")).kind,
+        resin_hir::TermKind::Field { ref name, .. } if name.as_ref() == "value"
     ));
     let printed = resin_hir::format_module(&module);
     assert!(printed.contains("Item.read") && printed.contains("(if") && printed.contains("(pack"));

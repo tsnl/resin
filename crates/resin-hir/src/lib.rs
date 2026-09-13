@@ -56,23 +56,65 @@ pub enum Type {
     Float32,
     Float64,
     Str,
-    Foreign { name: Arc<str> },
-    Parameter { parameter: TypeParameterId },
-    Defined { definition: TypeId },
-    Pointer { pointee: Box<Type> },
-    Span { element: Box<Type> },
-    GpuPointer { pointee: Box<Type> },
-    GpuSpan { element: Box<Type> },
+    Foreign {
+        name: Arc<str>,
+    },
+    Parameter {
+        parameter: TypeParameterId,
+    },
+    /// Determined by a field of the substituted base, without inverse inference.
+    Member {
+        base: Box<Type>,
+        name: Arc<str>,
+    },
+    Defined {
+        definition: TypeId,
+    },
+    Pointer {
+        pointee: Box<Type>,
+    },
+    Span {
+        element: Box<Type>,
+    },
+    GpuPointer {
+        pointee: Box<Type>,
+    },
+    GpuSpan {
+        element: Box<Type>,
+    },
     GpuArguments,
-    GpuComputePipeline { root: Box<Type>, owner: Box<Type> },
-    GpuGraphicsPipeline { root: Box<Type>, owner: Box<Type> },
-    Arc { pointee: Box<Type> },
-    Weak { pointee: Box<Type> },
-    Array { element: Box<Type>, length: usize },
-    Record { fields: Vec<RecordField> },
-    Function { param: Box<Type>, result: Box<Type> },
-    Union { variants: Vec<Type> },
-    Result { value: Box<Type>, error: Box<Type> },
+    GpuComputePipeline {
+        root: Box<Type>,
+        owner: Box<Type>,
+    },
+    GpuGraphicsPipeline {
+        root: Box<Type>,
+        owner: Box<Type>,
+    },
+    Arc {
+        pointee: Box<Type>,
+    },
+    Weak {
+        pointee: Box<Type>,
+    },
+    Array {
+        element: Box<Type>,
+        length: usize,
+    },
+    Record {
+        fields: Vec<RecordField>,
+    },
+    Function {
+        param: Box<Type>,
+        result: Box<Type>,
+    },
+    Union {
+        variants: Vec<Type>,
+    },
+    Result {
+        value: Box<Type>,
+        error: Box<Type>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -134,13 +176,6 @@ pub enum Case {
     Ok,
     Err,
     Type { ty: Type },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FieldAccess {
-    pub ty: Type,
-    pub index: usize,
-    pub steps: Vec<Conv>,
 }
 
 impl Type {
@@ -228,6 +263,15 @@ pub enum TermKind {
     Constant {
         value: Constant,
     },
+    /// Its type is already determined; specialization checks the concrete range.
+    Numeric {
+        text: Arc<str>,
+    },
+    /// A type-only query: the source operand is never evaluated.
+    Layout {
+        of: Type,
+        size: bool,
+    },
     Local {
         binding: BindingId,
         name: Ident,
@@ -290,7 +334,6 @@ pub enum TermKind {
         arg: Box<Term>,
     },
     Convert {
-        conversion: resin_types::ExplicitConversion,
         arg: Box<Term>,
     },
     ArcNew {
@@ -339,10 +382,10 @@ pub enum TermKind {
     Deref {
         pointer: Box<Term>,
     },
-    /// The projection is resolved during HIR construction; names are not looked up again.
+    /// The member name is resolved; its concrete index and representation belong to LIR.
     Field {
         base: Box<Term>,
-        access: FieldAccess,
+        name: Arc<str>,
     },
 }
 

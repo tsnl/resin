@@ -147,8 +147,9 @@ Each body returns its HIR and referenced shader entries. Assembly marks those
 entries for embedding only after that body completes successfully. Method calls become ordinary calls
 to resolved function IDs with explicit receiver adaptation and argument packing.
 Compiler-provided methods become intrinsic operations. Short-circuit operators
-become `If` nodes, field projections are resolved, numeric literals become values,
-and layout queries become constants whose operands cannot execute. Type aliases
+become `If` nodes. Field projections retain member names, numeric literals retain
+text and their determined types, explicit conversions retain their source and destination
+types, and layout queries retain only the queried type. Their operand effects cannot execute. Type aliases
 expand into their targets. Completed nominal declarations retain names, bodies,
 method identities, and destruction hooks in HIR. HIR has no concrete interner;
 its constants and type expressions use its own language rather than concrete
@@ -184,12 +185,19 @@ from source is the next stage of the implementation.
 program. The whole-module `generate`/`analyze` helpers explicitly request all ordinary
 functions and nominal declarations through the same machinery, for direct language
 clients. Requested programs discover nominal types lazily and translate every embedded
-nominal identity, including field conversion steps. Recursive identities remain private
+nominal identity. Field and cast representation steps are selected against that concrete catalog. Recursive identities remain private
 until their bodies and real drop-hook IDs are installed. Nominal expansion has its own
 depth guard across declarations.
 
 The worklist translates each application into a private concrete expression tree,
 substituting types and selecting supported builtin operations without inference.
+It also selects numeric representations, computes layout constants, resolves field indices,
+and chooses explicit conversion operations. A determining `Type::Member` resolves the type
+of a named field from a substituted receiver; it never deduces a receiver from the field.
+Numeric parsing and range checks use the same `resin-types` operation as source construction,
+with an explicit type and no defaults. Concrete conversion rules reject unwrapping custom
+owners before their destruction can be bypassed. Source-known errors remain HIR diagnostics;
+errors that depend on an application carry the LIR worklist's application trace.
 Shader scalar/type rules live in `resin-types` and are also used by certification and
 emission. Specialization distinguishes value reads from place access, so taking the
 address of an opaque managed field remains valid while copying its value is rejected.

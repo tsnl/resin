@@ -120,6 +120,10 @@ impl Printer<'_> {
     fn kind(&self, kind: &TermKind) -> SExp {
         match kind {
             TermKind::Constant { value } => list("constant", vec![quoted(format!("{value:?}"))]),
+            TermKind::Numeric { text } => list("numeric", vec![quoted(text)]),
+            TermKind::Layout { of, size } => {
+                list(if *size { "sizeof" } else { "alignof" }, vec![self.ty(of)])
+            }
             TermKind::Local { binding: id, name } => {
                 list("local", vec![binding(*id), atom(&name.val)])
             }
@@ -178,10 +182,7 @@ impl Printer<'_> {
                 "adapt",
                 vec![quoted(format!("{conversion:?}")), self.term(arg)],
             ),
-            TermKind::Convert { conversion, arg } => list(
-                "convert",
-                vec![quoted(format!("{conversion:?}")), self.term(arg)],
-            ),
+            TermKind::Convert { arg } => list("convert", vec![self.term(arg)]),
             TermKind::ArcNew { value } => list("arc", vec![self.term(value)]),
             TermKind::GpuNew { allocator, args } => list(
                 "gpu-new",
@@ -237,10 +238,7 @@ impl Printer<'_> {
             }
             TermKind::Address { place } => list("address", vec![self.term(place)]),
             TermKind::Deref { pointer } => list("deref", vec![self.term(pointer)]),
-            TermKind::Field { base, access } => list(
-                "field",
-                vec![self.term(base), quoted(format!("{access:?}"))],
-            ),
+            TermKind::Field { base, name } => list("field", vec![self.term(base), atom(name)]),
         }
     }
 
@@ -348,6 +346,7 @@ fn format_type(ty: &Type, definitions: &[TypeDefinition]) -> String {
         Type::Str => "str".into(),
         Type::Foreign { name } => name.to_string(),
         Type::Parameter { parameter } => format!("T{}", parameter.index()),
+        Type::Member { base, name } => format!("{}.{}", format_type(base, definitions), name),
         Type::Defined { definition } => definitions
             .get(definition.index())
             .map(|d| &d.name)

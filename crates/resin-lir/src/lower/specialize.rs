@@ -267,35 +267,88 @@ impl Specialization<'_, '_> {
         }
     }
 
-    fn steps(&mut self, source: &[Conv]) -> Result<Vec<Conv>, Error> {
-        source
-            .iter()
-            .map(|step| {
-                Ok(match step {
-                    Conv::Wrap { definition } => Conv::Wrap {
-                        definition: self.nominal(*definition)?,
-                    },
-                    Conv::Unwrap { definition } => Conv::Unwrap {
-                        definition: self.nominal(*definition)?,
-                    },
-                    other => *other,
-                })
-            })
-            .collect()
+    fn error(&self, kind: crate::ErrorKind) -> Error {
+        self.instances.lower_error(
+            super::LowerError {
+                span: self.span,
+                kind,
+            },
+            Some(self.current),
+            self.location.clone(),
+        )
     }
 
-    fn nominal(&mut self, definition: TypeId) -> Result<TypeId, Error> {
-        self.instances.nominal(definition).map_err(|mut error| {
-            error.span = self.span;
-            self.instances
-                .lower_error(error, Some(self.current), self.location.clone())
+    fn typing_error(&self, error: TypeError) -> Error {
+        self.error(crate::ErrorKind::Type { kind: error.kind })
+    }
+
+    fn instance_error(&self, message: impl Into<std::sync::Arc<str>>) -> Error {
+        self.error(crate::ErrorKind::InvalidInstance {
+            message: message.into(),
         })
     }
 
-    fn conversion(&mut self, conversion: &ExplicitConversion) -> Result<ExplicitConversion, Error> {
-        Ok(match conversion {
-            ExplicitConversion::Ascribe(steps) => ExplicitConversion::Ascribe(self.steps(steps)?),
-            other => other.clone(),
+    fn numeric(
+        &mut self,
+        text: &str,
+        expected: &resin_hir::Type,
+    ) -> Result<concrete::TermKind, Error> {
+        let ty = self.ty(expected)?;
+        let ty = self
+            .instances
+            .typer()
+            .body(&ty)
+            .map_err(|error| self.typing_error(error))?;
+        let value = resin_types::literal::parse(text, &ty)
+            .map_err(|message| self.instance_error(message))?;
+        Ok(concrete::TermKind::Constant { value })
+    }
+
+    fn layout(&mut self, of: &resin_hir::Type, size: bool) -> Result<concrete::TermKind, Error> {
+        let ty = self.ty(of)?;
+        let layout = resin_types::layout::layout(self.instances.typer().definitions(), &ty)
+            .map_err(|error| self.instance_error(error.to_string()))?;
+        let value = if size { layout.size } else { layout.align } as u64;
+        Ok(concrete::TermKind::Constant {
+            value: Value::UInt64 { value },
+        })
+    }
+
+    fn conversion(
+        &mut self,
+        arg: &resin_hir::Term,
+        expected: &resin_hir::Type,
+    ) -> Result<concrete::TermKind, Error> {
+        let from = self.ty(&arg.ty)?;
+        let to = self.ty(expected)?;
+        let conversion = self
+            .instances
+            .typer()
+            .explicit_conversion(&from, &to)
+            .map_err(|error| self.typing_error(error))?;
+        Ok(concrete::TermKind::Convert {
+            conversion,
+            arg: self.boxed(arg)?,
+        })
+    }
+
+    fn field(
+        &mut self,
+        base: &resin_hir::Term,
+        name: &str,
+        expected: &resin_hir::Type,
+    ) -> Result<concrete::TermKind, Error> {
+        let ty = self.ty(&base.ty)?;
+        let expected = self.ty(expected)?;
+        let access = super::substitute::member(self.instances.typer(), &ty, name)
+            .map_err(|error| self.error(error.kind))?;
+        self.instances
+            .typer()
+            .same(&expected, &access.ty)
+            .map_err(|error| self.typing_error(error))?;
+        Ok(concrete::TermKind::Field {
+            base: self.place(base)?,
+            access,
         })
     }
 
@@ -354,6 +407,8 @@ impl Specialization<'_, '_> {
             resin_hir::TermKind::Constant { value } => concrete::TermKind::Constant {
                 value: self.constant(value)?,
             },
+            resin_hir::TermKind::Numeric { text } => self.numeric(text, expected)?,
+            resin_hir::TermKind::Layout { of, size } => self.layout(of, *size)?,
             resin_hir::TermKind::Local { binding, name } => concrete::TermKind::Local {
                 binding: *binding,
                 name: name.clone(),
@@ -435,10 +490,7 @@ impl Specialization<'_, '_> {
                     self.boxed(arg)?
                 },
             },
-            resin_hir::TermKind::Convert { conversion, arg } => concrete::TermKind::Convert {
-                conversion: self.conversion(conversion)?,
-                arg: self.boxed(arg)?,
-            },
+            resin_hir::TermKind::Convert { arg } => self.conversion(arg, expected)?,
             resin_hir::TermKind::ArcNew { value } => concrete::TermKind::ArcNew {
                 value: self.boxed(value)?,
             },
@@ -495,14 +547,7 @@ impl Specialization<'_, '_> {
             resin_hir::TermKind::Deref { pointer } => concrete::TermKind::Deref {
                 pointer: self.boxed(pointer)?,
             },
-            resin_hir::TermKind::Field { base, access } => concrete::TermKind::Field {
-                base: self.place(base)?,
-                access: FieldAccess {
-                    ty: self.ty(&access.ty)?,
-                    index: access.index,
-                    steps: self.steps(&access.steps)?,
-                },
-            },
+            resin_hir::TermKind::Field { base, name } => self.field(base, name, expected)?,
         })
     }
 }

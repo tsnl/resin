@@ -26,6 +26,9 @@ fn lowering_error(error: resin_lir::Error) -> GenerateError {
         resin_lir::ErrorKind::UnsupportedProfile { profile, message } => {
             panic!("unexpected target failure in source test ({profile:?}): {message}")
         }
+        resin_lir::ErrorKind::InvalidInstance { message } => {
+            panic!("unexpected concrete instance failure in source test: {message}")
+        }
         resin_lir::ErrorKind::NotAPlace => GenerateErrorKind::NotAPlace,
         resin_lir::ErrorKind::InvalidHir { message } => {
             panic!("HIR generation produced an invalid tree: {message}")

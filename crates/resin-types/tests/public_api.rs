@@ -36,3 +36,26 @@ fn recursive_records_share_one_table_for_conversions_and_layout() {
     );
     assert_eq!(resin_types::format_type(&node, &table), "Node");
 }
+
+#[test]
+fn explicit_owner_unwrapping_is_rejected_without_forbidding_field_projection() {
+    let definition = TypeId::from_index(0);
+    let owner = Ty::Defined { definition };
+    let body = Ty::Record {
+        fields: vec![RecordField {
+            name: "value".into(),
+            ty: Ty::UInt32,
+        }],
+    };
+    let context = TyperContext::from_definitions(vec![TypeDef::Nominal {
+        name: "Owner".into(),
+        body: Some(body.clone()),
+        drop: Some(FunctionId::from_index(0)),
+    }]);
+    assert!(
+        matches!(context.explicit_conversion(&owner, &body).unwrap_err().kind,
+        TypeErrorKind::UnwrapManaged { definition: found } if found == definition)
+    );
+    assert_eq!(context.type_field(&owner, "value").unwrap().ty, Ty::UInt32);
+    assert!(context.explicit_conversion(&body, &owner).is_ok());
+}

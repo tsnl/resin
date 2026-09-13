@@ -8,7 +8,7 @@ use crate::{GenerateError, GenerateErrorKind};
 use resin_ast::TypeKind;
 use resin_source::prelude::*;
 use resin_types::prelude::*;
-use std::{collections::HashSet, fmt};
+use std::collections::HashSet;
 
 pub(super) struct Decoded {
     pub ty: Type,
@@ -160,8 +160,7 @@ pub(super) fn number(
     expected: Option<&Ty>,
 ) -> Result<(Value, Ty), GenerateError> {
     let ty = numeric_type(typer, span, text, expected)?;
-    let (text, _) = resin_types::literal::split(text);
-    let value = parse_number(text, &ty).map_err(|message| GenerateError {
+    let value = resin_types::literal::parse(text, &ty).map_err(|message| GenerateError {
         span,
         kind: GenerateErrorKind::InvalidLiteral {
             message: message.into(),
@@ -211,104 +210,6 @@ impl Evaluator<'_> {
         .decode(ty, false)?;
         solver.require(&inferred.ty, ty.span)
     }
-}
-
-fn parse_number(text: &str, ty: &Ty) -> Result<Value, String> {
-    let compact: String = text.chars().filter(|c| *c != '_').collect();
-    match ty {
-        Ty::Float32 => {
-            if is_hex_literal(&compact) {
-                return Err("hexadecimal float literals are not supported".into());
-            }
-            let value: f32 = compact
-                .parse()
-                .map_err(|err| format!("invalid float literal: {err}"))?;
-            if !value.is_finite() {
-                return Err("float literal out of range for float32".into());
-            }
-            Ok(Value::Float32 { value })
-        }
-        Ty::Float64 => Ok(Value::Float64 {
-            value: parse_float(&compact)?,
-        }),
-        Ty::Int8 => Ok(Value::Int8 {
-            value: parse_signed(&compact)?,
-        }),
-        Ty::Int16 => Ok(Value::Int16 {
-            value: parse_signed(&compact)?,
-        }),
-        Ty::Int32 => Ok(Value::Int32 {
-            value: parse_signed(&compact)?,
-        }),
-        Ty::Int64 => Ok(Value::Int64 {
-            value: parse_signed(&compact)?,
-        }),
-        Ty::UInt8 => Ok(Value::UInt8 {
-            value: parse_unsigned(&compact)?,
-        }),
-        Ty::UInt16 => Ok(Value::UInt16 {
-            value: parse_unsigned(&compact)?,
-        }),
-        Ty::UInt32 => Ok(Value::UInt32 {
-            value: parse_unsigned(&compact)?,
-        }),
-        Ty::UInt64 => Ok(Value::UInt64 {
-            value: parse_unsigned(&compact)?,
-        }),
-        other => Err(format!("cannot use numeric literal as {other:?}")),
-    }
-}
-
-fn parse_float(text: &str) -> Result<f64, String> {
-    if is_hex_literal(text) {
-        return Err("hexadecimal float literals are not supported".into());
-    }
-    let value: f64 = text
-        .parse()
-        .map_err(|err| format!("invalid float literal: {err}"))?;
-    if !value.is_finite() {
-        return Err("float literal out of range for float64".into());
-    }
-    Ok(value)
-}
-
-fn parse_signed<T: TryFrom<i128>>(text: &str) -> Result<T, String>
-where
-    T::Error: fmt::Display,
-{
-    let (negative, magnitude) = text.strip_prefix('-').map_or((false, text), |s| (true, s));
-    let value = if let Some(hex) = magnitude
-        .strip_prefix("0x")
-        .or_else(|| magnitude.strip_prefix("0X"))
-    {
-        i128::from_str_radix(hex, 16).map_err(|err| format!("invalid hex literal: {err}"))?
-    } else {
-        magnitude
-            .parse::<i128>()
-            .map_err(|err| format!("invalid integer literal: {err}"))?
-    };
-    let value = if negative { -value } else { value };
-    T::try_from(value).map_err(|err| format!("integer literal out of range: {err}"))
-}
-
-fn parse_unsigned<T: TryFrom<u128>>(text: &str) -> Result<T, String>
-where
-    T::Error: fmt::Display,
-{
-    let value = if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
-        u128::from_str_radix(hex, 16).map_err(|err| format!("invalid hex literal: {err}"))?
-    } else {
-        text.parse()
-            .map_err(|err| format!("invalid integer literal: {err}"))?
-    };
-    T::try_from(value).map_err(|err| format!("integer literal out of range: {err}"))
-}
-
-fn is_hex_literal(value: &str) -> bool {
-    let value = value.strip_prefix('-').unwrap_or(value);
-    value.len() >= 2
-        && value.as_bytes()[0] == b'0'
-        && (value.as_bytes()[1] == b'x' || value.as_bytes()[1] == b'X')
 }
 
 #[cfg(test)]

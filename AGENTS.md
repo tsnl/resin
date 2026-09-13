@@ -26,6 +26,12 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   it has no concrete type interner. LIR construction creates the concrete catalog and
   translates each HIR function into a private concrete expression tree before assigning
   storage. Discard that concrete tree after lowering the function.
+- HIR retains numeric text with its determined type, type-only layout queries, member
+  names, and explicit conversion relations. Select numeric representations, field indices,
+  and conversion operations during LIR specialization. `Type::Member` determines a field
+  type from its substituted receiver; it does not infer the receiver from a desired field
+  type. Keep literal parsing and concrete conversion rules in `resin-types`; LIR never
+  chooses numeric defaults. Source-known failures are still diagnosed during HIR construction.
 - HIR function signatures retain named type binders; function references retain completed
   type arguments. LIR keys instances by definition, normalized arguments, and Host/Shader
   profile; each profile counts toward the original function's allowance. LIR reserves IDs before
