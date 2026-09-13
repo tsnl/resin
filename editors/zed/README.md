@@ -30,8 +30,11 @@ On systems whose executable is named `zeditor`, use `nix-shell --run 'zeditor .'
 Zed compiles the extension and downloads the WASI SDK to build the grammar.
 Rebuild it from Zed's Extensions view after changing the adapter or queries.
 Restarting `resin --lsp` alone does not reload highlighting queries or the pinned
-Tree-sitter grammar. If `struct`, `match`, or `impl` still look like ordinary
+Tree-sitter grammar. If `struct`, `match`, or `def` still look like ordinary
 identifiers, rebuild/reinstall the dev extension from this checkout's `editors/zed/`.
+An `Error loading highlights query` with `Invalid node type "::"` means the
+queries require a newer parser than the extension's grammar pin. Update the
+checkout to include the corrected pin, then rebuild/reinstall the dev extension.
 See [Zed's extension development guide](https://zed.dev/docs/extensions/developing-extensions).
 
 The adapter uses a configured binary or finds `resin` on the worktree's PATH,
@@ -114,6 +117,9 @@ The extension is an independent Cargo workspace depending only on
 `path = "crates/tree-sitter-resin"`. After a grammar change, commit the regenerated
 parser in Resin and update that pin. Query tests compile every query and check
 captures against representative syntax, examples, and standard-library files.
+These tests use the local parser, so also verify that the pinned commit contains
+the parser changes required by the queries. The `a4c6939` pin includes generic
+type parameters and explicit `::<T>` applications, as well as methods inside structs.
 
 The extension is not published in Zed's registry yet. A future registry entry
 can point to this repository with `path = "editors/zed"`; see the
