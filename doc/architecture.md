@@ -127,15 +127,24 @@ file references; AST generation performs no source I/O and imports never execute
 HIR construction has three internal steps:
 
 1. Declare names and check expressions into a private tree with inference types.
-2. Solve function dependency groups and resolve every annotation and expression type.
-3. Elaborate into public HIR, expanding the remaining source forms.
+2. Solve function dependency groups and retain the selected method declarations.
+3. Reserve concrete signatures and complete solved expressions directly into public HIR.
 
 Value lookup records declaration identities immediately. References, inference
 dependencies, and signature/body records keep those identities through resolution;
 names and spans remain diagnostic metadata. The private tree has no lexical cursors.
 Source-order declaration records carry names, decorators, and foreign headers, so
 function assembly does not rescan AST declarations. Persistent scopes remain with
-source construction and editor queries. Method calls become ordinary calls
+source construction and editor queries. There is no second private expression tree
+with concrete types: body completion reads the solved types and constructs public
+HIR once. Its inputs include concrete type rules, function identities, shader
+signatures, and method choices; it cannot access lexical scopes or frontend method
+namespaces. The solver is read-only during completion and is dropped before the
+completed file returns to module assembly. Inference retries restore method choices
+alongside the solver so failed attempts cannot leak a stale selection.
+
+Each body returns its HIR and referenced shader entries. Assembly marks those
+entries for embedding only after that body completes successfully. Method calls become ordinary calls
 to resolved function IDs with explicit receiver adaptation and argument packing.
 Compiler-provided methods become intrinsic operations. Short-circuit operators
 become `If` nodes, field projections are resolved, numeric literals become values,

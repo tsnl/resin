@@ -4,7 +4,10 @@ use crate::lower::context::{Context, FunctionBody, FunctionDecl};
 use crate::{GenerateError, GenerateErrorKind};
 use resin_source::prelude::*;
 use resin_types::prelude::*;
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+};
 
 //
 // Inference types
@@ -623,7 +626,7 @@ pub(crate) fn check_binding_name(name: &Ident) -> Result<()> {
 }
 
 /// Identity of one typing operation; its owned variables are private to Inference.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Rule(usize);
 
 #[derive(Clone)]
@@ -639,6 +642,8 @@ pub(crate) struct Inference<'a> {
     pub solver: Solver,
     pub constraints: Vec<Equation>,
     owners: Vec<Vec<VariableId>>,
+    // Choices belong to typing operations, not source spans; retries restore them with the solver.
+    pub methods: BTreeMap<Rule, FunctionDecl>,
 }
 impl<'a> Inference<'a> {
     pub fn new(typer: &'a mut Context) -> Self {
@@ -647,6 +652,7 @@ impl<'a> Inference<'a> {
             solver: Solver::default(),
             constraints: vec![],
             owners: vec![],
+            methods: BTreeMap::new(),
         }
     }
     fn rule(&mut self, variables: Vec<VariableId>) -> Rule {
@@ -755,11 +761,13 @@ impl Inference<'_> {
     /// attempts, so rolling back only the final attempt is insufficient.
     pub fn solve(&mut self, roots: &[Type]) -> Vec<GenerateError> {
         let baseline = self.solver.clone();
+        let methods = self.methods.clone();
         let equations = std::mem::take(&mut self.constraints);
         let mut failed = Vec::new();
         let mut errors = Vec::new();
         'retry: loop {
             self.solver = baseline.clone();
+            self.methods = methods.clone();
             for owner in &failed {
                 self.fail(*owner);
             }
@@ -781,7 +789,7 @@ impl Inference<'_> {
                         failed.push(owner);
                         continue 'retry;
                     }
-                    match self.constraint(&constraint, span) {
+                    match self.constraint(owner, &constraint, span) {
                         Ok(true) => {}
                         Ok(false) => self.constraints.push(Equation {
                             span,
@@ -941,7 +949,7 @@ impl Inference<'_> {
             .map_err(|message| error(span, message))
     }
 
-    fn constraint(&mut self, constraint: &Constraint, span: Span) -> Result<bool> {
+    fn constraint(&mut self, owner: Rule, constraint: &Constraint, span: Span) -> Result<bool> {
         match constraint {
             Constraint::Method(receiver_type, name, arg, out, associated, origins) => {
                 let Some(receiver_type) = self.solver.resolve(receiver_type) else {
@@ -960,6 +968,11 @@ impl Inference<'_> {
                         return Ok(false);
                     };
                     self.require_gpu_element(&element, span)?;
+                    let method = self
+                        .typer
+                        .method_call(&receiver_type, name, &element, false)
+                        .expect("registered GPU allocator");
+                    self.methods.insert(owner, method);
                     return Ok(true);
                 }
                 let method = if *associated
@@ -1052,6 +1065,9 @@ impl Inference<'_> {
                 let b = self
                     .solver
                     .coerce(&method.result.clone().into(), out, span)?;
+                if a && b {
+                    self.methods.insert(owner, method);
+                }
                 return Ok(a && b);
             }
             Constraint::Depends(_) => {}
@@ -1301,7 +1317,7 @@ impl Inference<'_> {
                     BuiltinRule::Boolean => {
                         self.solver.unify(out, &Ty::Bool.into(), span)?;
                         for arg in args {
-                            if !self.constraint(&Constraint::Boolean(arg.clone()), span)? {
+                            if !self.constraint(owner, &Constraint::Boolean(arg.clone()), span)? {
                                 return Ok(false);
                             }
                         }

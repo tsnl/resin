@@ -148,7 +148,7 @@ pub(crate) struct Evaluator<'a> {
 }
 
 pub(super) fn number(
-    typer: &Context,
+    typer: &TyperContext,
     span: Span,
     text: &str,
     expected: Option<&Ty>,
@@ -165,7 +165,7 @@ pub(super) fn number(
 }
 
 fn numeric_type(
-    typer: &Context,
+    typer: &TyperContext,
     span: Span,
     text: &str,
     expected: Option<&Ty>,

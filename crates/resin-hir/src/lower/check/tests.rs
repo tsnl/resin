@@ -1,8 +1,6 @@
 use super::{CheckedFile, Scopes};
-use crate::lower::{
-    Generator,
-    typed::{StatementKind, TermKind},
-};
+use crate::lower::Generator;
+use crate::{Statement, TermKind};
 use resin_types::prelude::*;
 
 fn check(source: &str, generator: &mut Generator) -> CheckedFile {
@@ -13,13 +11,7 @@ fn check(source: &str, generator: &mut Generator) -> CheckedFile {
             .prepare(&file, &mut generator.typer, generator.source_module)
             .is_empty()
     );
-    super::file(
-        &file,
-        &mut generator.typer,
-        scopes,
-        generator.source_module,
-        Default::default(),
-    )
+    super::file(&file, generator, scopes, Default::default())
 }
 
 #[test]
@@ -36,17 +28,23 @@ fn checking_resolves_types_in_earlier_expressions_and_annotations() {
         &mut generator,
     );
     assert!(checked.errors.is_empty(), "{:?}", checked.errors);
-    assert!(generator.module.functions.is_empty());
+    assert!(
+        generator
+            .module
+            .functions
+            .iter()
+            .all(|function| function.body.is_none())
+    );
     let value = checked.context.lookup("value", false).unwrap();
     assert_eq!(checked.signatures[&value].result.ty, Ty::Int32);
     let TermKind::Block { stmts, .. } = &checked.bodies[&value].kind else {
         panic!()
     };
-    let StatementKind::Define { init, .. } = &stmts[0].kind else {
+    let Statement::Define { init, .. } = &stmts[0] else {
         panic!()
     };
     assert_eq!(init.ty, Ty::Int32); // The later call constrained the earlier literal.
-    let StatementKind::Declare { ty, .. } = &stmts[1].kind else {
+    let Statement::Declare { ty, .. } = &stmts[1] else {
         panic!()
     };
     assert_eq!(
@@ -80,7 +78,7 @@ fn recursive_groups_follow_dependencies() {
 }
 
 #[test]
-fn elaboration_keeps_shadowed_references_after_discarding_lexical_contexts() {
+fn completed_bodies_keep_shadowed_references_after_discarding_construction_state() {
     let mut generator = Generator::new();
     let mut checked = check(
         "def target(n: int) -> int = { n };\n\
@@ -92,10 +90,10 @@ fn elaboration_keeps_shadowed_references_after_discarding_lexical_contexts() {
         &mut generator,
     );
     assert!(checked.errors.is_empty(), "{:?}", checked.errors);
-    generator.declare_checked_functions(&checked);
-    // The outgoing translation cannot recover any source names from this scope.
+    // Assembly only consumes completed HIR, even after construction state is gone.
+    generator.typer = Default::default();
     checked.context = Scopes::new().finish();
-    generator.elaborate_functions(&checked);
+    generator.define_functions(checked);
     assert!(generator.errors.is_empty(), "{:?}", generator.errors);
 
     let caller = &generator.module.functions[1];

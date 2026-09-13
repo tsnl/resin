@@ -1,6 +1,6 @@
 //! Private checking tree, retaining source forms and resolved declarations for elaboration.
-//! Inference first fills this tree with `Type`, then resolves every node to `Ty`.
-//! Elaboration consumes the concrete tree and erases its source-only metadata.
+//! Inference fills this tree with `Type`; completion constructs public HIR directly.
+use super::infer::{Rule, Type};
 use super::scope::DeclarationId;
 use crate::GenerateError;
 use resin_source::prelude::*;
@@ -9,14 +9,14 @@ use resin_types::prelude::*;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
-pub(super) struct Term<T = Ty> {
+pub(super) struct Term {
     pub span: Span,
-    pub ty: T,
-    pub kind: TermKind<T>,
+    pub ty: Type,
+    pub kind: TermKind,
 }
 
 #[derive(Debug, Clone)]
-pub(super) enum TermKind<T = Ty> {
+pub(super) enum TermKind {
     Error(GenerateError),
     Unit,
     None,
@@ -31,79 +31,80 @@ pub(super) enum TermKind<T = Ty> {
         name: Ident,
     },
     Type {
-        ty: Annotation<T>,
+        ty: Annotation<Type>,
     },
     Unwrap {
-        value: Box<Term<T>>,
+        value: Box<Term>,
     },
     Try {
-        value: Box<Term<T>>,
+        value: Box<Term>,
     },
     Match {
-        value: Box<Term<T>>,
-        arms: Vec<MatchArm<T>>,
+        value: Box<Term>,
+        arms: Vec<MatchArm>,
     },
     If {
-        cond: Box<Term<T>>,
-        then: Box<Term<T>>,
-        els: Box<Term<T>>,
+        cond: Box<Term>,
+        then: Box<Term>,
+        els: Box<Term>,
     },
     While {
-        cond: Box<Term<T>>,
-        body: Box<Term<T>>,
+        cond: Box<Term>,
+        body: Box<Term>,
     },
     Block {
-        stmts: Vec<Statement<T>>,
-        tail: Box<Term<T>>,
+        stmts: Vec<Statement>,
+        tail: Box<Term>,
     },
     Record {
-        fields: Vec<(Ident, Term<T>)>,
+        fields: Vec<(Ident, Term)>,
     },
     Array {
-        elems: Vec<Term<T>>,
+        elems: Vec<Term>,
     },
     Builtin {
         name: Arc<str>,
-        args: Vec<Term<T>>,
+        args: Vec<Term>,
     },
     MethodCall {
-        receiver: Option<Box<Term<T>>>,
-        receiver_type: Annotation<T>,
+        rule: Rule,
+        receiver: Option<Box<Term>>,
+        receiver_type: Annotation<Type>,
         name: Ident,
-        arg: Box<Term<T>>,
+        arg: Box<Term>,
     },
     Call {
-        func: Box<Term<T>>,
-        arg: Box<Term<T>>,
+        func: Box<Term>,
+        arg: Box<Term>,
     },
     Ascribe {
-        ty: Annotation<T>,
-        arg: Box<Term<T>>,
+        ty: Annotation<Type>,
+        arg: Box<Term>,
     },
     Result {
         failure: bool,
-        arg: Box<Term<T>>,
+        arg: Box<Term>,
     },
     Absurd {
-        arg: Box<Term<T>>,
+        arg: Box<Term>,
     },
     // Only the operand's type survives checking; querying layout cannot run it.
     Layout {
-        ty: Annotation<T>,
+        ty: Annotation<Type>,
         size: bool,
     },
     Assign {
-        place: Box<Term<T>>,
-        value: Box<Term<T>>,
+        place: Box<Term>,
+        value: Box<Term>,
     },
     Address {
-        place: Box<Term<T>>,
+        place: Box<Term>,
     },
     Deref {
-        pointer: Box<Term<T>>,
+        pointer: Box<Term>,
     },
     Field {
-        base: Box<Term<T>>,
+        base: Box<Term>,
         name: Ident,
     },
 }
@@ -115,34 +116,34 @@ pub(super) struct Annotation<T = Ty> {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct MatchArm<T = Ty> {
-    pub variant: Option<Annotation<T>>,
+pub(super) struct MatchArm {
+    pub variant: Option<Annotation<Type>>,
     pub failure: bool,
     pub binding: Option<DeclarationId>,
-    pub body: Term<T>,
+    pub body: Term,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct Statement<T = Ty> {
-    pub kind: StatementKind<T>,
+pub(super) struct Statement {
+    pub kind: StatementKind,
 }
 
 #[derive(Debug, Clone)]
-pub(super) enum StatementKind<T = Ty> {
+pub(super) enum StatementKind {
     Error(GenerateError),
     Define {
         binding: Option<DeclarationId>,
         name: Ident,
-        init: Term<T>,
+        init: Term,
     },
     Declare {
         binding: DeclarationId,
         name: Ident,
-        ty: Annotation<T>,
+        ty: Annotation<Type>,
     },
     TypeDefinition,
     Expr {
-        term: Term<T>,
+        term: Term,
     },
 }
 
