@@ -126,7 +126,10 @@ fn mutating_lir_discards_the_certificate_and_requires_reverification() {
 
 #[test]
 fn a_later_phase_error_preserves_earlier_compilation_products() {
-    let source = Source::new("phase-error.resin", "def f() -> int = { var n: int; n };");
+    let source = Source::new(
+        "phase-error.resin",
+        "def f() -> bool = { (1 == 1) + (1 == 1) };",
+    );
     let mut loader = resin_source::Loader::new(Default::default());
     let compilation = resin_compiler::Compiler::new().compile(source, &mut loader);
     assert!(compilation.program().is_ok());
@@ -136,7 +139,7 @@ fn a_later_phase_error_preserves_earlier_compilation_products() {
         compilation
             .diagnostics()
             .iter()
-            .any(|d| d.message.to_lowercase().contains("uninitialized"))
+            .any(|d| d.message.contains("UnsupportedBuiltin"))
     );
 }
 
