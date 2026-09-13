@@ -139,3 +139,12 @@ fn a_later_phase_error_preserves_earlier_compilation_products() {
             .any(|d| d.message.to_lowercase().contains("uninitialized"))
     );
 }
+
+#[test]
+fn unsupported_concrete_operations_fail_during_lir_construction() {
+    let source = "export { main }; def main() -> int = { var r = { x = 1 }; r + r; 0 };";
+    let hir = hir(source);
+    let error = resin_lir::generate(&hir).unwrap_err();
+    assert!(matches!(error.kind, resin_lir::ErrorKind::Type { kind: resin_types::TypeErrorKind::UnsupportedBuiltin { .. } }));
+    assert_eq!(&source[error.span.start..error.span.end], "r + r");
+}
