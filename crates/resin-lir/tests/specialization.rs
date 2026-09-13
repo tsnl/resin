@@ -125,7 +125,7 @@ fn instances_are_memoized_and_the_exact_allowance_is_admitted() {
         ErrorKind::MonomorphLimit {
             function: "mark".into(),
             limit: 1,
-            arguments: vec![Ty::Bool],
+            arguments: vec!["bool".into()],
             profile: resin_lir::Profile::Host,
         }
     );
@@ -289,6 +289,7 @@ fn unused_families_do_not_constrain_supported_concrete_operations() {
 fn implicit_drop_references_use_concrete_function_identities() {
     let mut hir = program(vec![]);
     hir.types.push(resin_hir::TypeDefinition {
+        type_params: vec![],
         name: "Owner".into(),
         body: Type::Record { fields: vec![] },
         methods: Default::default(),
@@ -303,6 +304,7 @@ fn implicit_drop_references_use_concrete_function_identities() {
         },
         annotation: annotation(Type::Pointer {
             pointee: Box::new(Type::Defined {
+                arguments: vec![],
                 definition: TypeId::from_index(0),
             }),
         }),
@@ -390,8 +392,10 @@ fn requested_roots_exclude_unused_functions_types_and_drop_hooks() {
         ),
     ));
     hir.types.push(resin_hir::TypeDefinition {
+        type_params: vec![],
         name: "Unused".into(),
         body: Type::Defined {
+            arguments: vec![],
             definition: TypeId::from_index(99),
         },
         methods: Default::default(),
@@ -415,8 +419,16 @@ fn requested_roots_exclude_unused_functions_types_and_drop_hooks() {
 #[test]
 fn explicit_root_arguments_normalize_and_preserve_recursive_nominal_identity() {
     let mut hir = program(vec![]);
+    hir.functions[0].body = Some(block([term(
+        Type::UInt64,
+        TermKind::Layout {
+            of: Type::Parameter { parameter: T },
+            size: true,
+        },
+    )]));
     hir.types = (0..3)
         .map(|index| resin_hir::TypeDefinition {
+            type_params: vec![],
             name: format!("Type{index}").into(),
             body: Type::Record { fields: vec![] },
             methods: Default::default(),
@@ -428,6 +440,7 @@ fn explicit_root_arguments_normalize_and_preserve_recursive_nominal_identity() {
             name: "next".into(),
             ty: Type::Pointer {
                 pointee: Box::new(Type::Defined {
+                    arguments: vec![],
                     definition: TypeId::from_index(2),
                 }),
             },
@@ -435,6 +448,7 @@ fn explicit_root_arguments_normalize_and_preserve_recursive_nominal_identity() {
     };
     let mut root = entry("mark", 0, resin_lir::Profile::Host);
     let nominal = Type::Defined {
+        arguments: vec![],
         definition: TypeId::from_index(2),
     };
     root.arguments = vec![Type::Union {
@@ -571,8 +585,16 @@ fn requesting_only_a_shader_does_not_create_host_instances_or_exports() {
 #[test]
 fn nominal_expansion_is_bounded_across_declaration_boundaries() {
     let mut hir = program(vec![]);
+    hir.functions[0].body = Some(block([term(
+        Type::UInt64,
+        TermKind::Layout {
+            of: Type::Parameter { parameter: T },
+            size: true,
+        },
+    )]));
     hir.types = (0..300)
         .map(|index| resin_hir::TypeDefinition {
+            type_params: vec![],
             name: format!("Type{index}").into(),
             methods: Default::default(),
             drop: None,
@@ -581,6 +603,7 @@ fn nominal_expansion_is_bounded_across_declaration_boundaries() {
                     name: "next".into(),
                     ty: Type::Pointer {
                         pointee: Box::new(Type::Defined {
+                            arguments: vec![],
                             definition: TypeId::from_index((index + 1) % 300),
                         }),
                     },
@@ -590,12 +613,230 @@ fn nominal_expansion_is_bounded_across_declaration_boundaries() {
         .collect();
     let mut root = entry("mark", 0, resin_lir::Profile::Host);
     root.arguments = vec![Type::Defined {
+        arguments: vec![],
         definition: TypeId::from_index(0),
     }];
     let error = resin_lir::instantiate(&hir, &[root], &options(1))
         .unwrap_err()
         .remove(0);
     assert!(matches!(error.kind, ErrorKind::TypeExpansionLimit { .. }));
+}
+
+const U: TypeParameterId = TypeParameterId::from_index(1);
+
+fn nominal(argument: Type) -> Type {
+    Type::Defined {
+        definition: TypeId::from_index(0),
+        arguments: vec![argument],
+    }
+}
+
+fn nominal_program(body: Type) -> Module {
+    let mut hir = program(vec![]);
+    hir.types.push(resin_hir::TypeDefinition {
+        type_params: vec![TypeParameter {
+            id: U,
+            name: Ident::new("U".into(), SPAN),
+        }],
+        name: "Node".into(),
+        body,
+        methods: Default::default(),
+        drop: None,
+    });
+    hir
+}
+
+fn measure_parameter(hir: &mut Module) {
+    hir.functions[0].body = Some(block([term(
+        Type::UInt64,
+        TermKind::Layout {
+            of: Type::Parameter { parameter: T },
+            size: true,
+        },
+    )]));
+}
+
+fn nominal_roots() -> Vec<resin_lir::Entry> {
+    [Type::Int32, Type::Int64]
+        .into_iter()
+        .enumerate()
+        .map(|(index, argument)| {
+            let mut request = entry(&format!("root{index}"), 0, resin_lir::Profile::Host);
+            request.arguments = vec![nominal(argument)];
+            request
+        })
+        .collect()
+}
+
+#[test]
+fn nominal_arguments_have_identity_without_demanding_their_layout() {
+    let mut hir = nominal_program(Type::Unit); // A nominal body must be a record when used.
+    let requests = nominal_roots();
+    let lir = resin_lir::instantiate(&hir, &requests, &options(2)).unwrap();
+    resin_lir::verify(&lir).unwrap();
+    assert_eq!(lir.functions.len(), 2);
+    assert!(lir.types.is_empty());
+    let error = resin_lir::instantiate(&hir, &requests, &options(1))
+        .unwrap_err()
+        .remove(0);
+    assert!(
+        matches!(error.kind, ErrorKind::MonomorphLimit { arguments, .. } if arguments == [std::sync::Arc::from("Node<long>")])
+    );
+    measure_parameter(&mut hir);
+    assert!(resin_lir::instantiate(&hir, &requests, &options(2)).is_err());
+}
+
+#[test]
+fn nominal_instances_substitute_fields_and_close_recursive_edges() {
+    let mut hir = nominal_program(Type::Record {
+        fields: vec![
+            resin_hir::RecordField {
+                name: "value".into(),
+                ty: Type::Parameter { parameter: U },
+            },
+            resin_hir::RecordField {
+                name: "next".into(),
+                ty: Type::Pointer {
+                    pointee: Box::new(nominal(Type::Parameter { parameter: U })),
+                },
+            },
+        ],
+    });
+    measure_parameter(&mut hir);
+    let lir = resin_lir::instantiate(&hir, &nominal_roots(), &options(2)).unwrap();
+    resin_lir::verify(&lir).unwrap();
+    assert_eq!(lir.types.len(), 2);
+    for (index, expected) in [Ty::Int32, Ty::Int64].into_iter().enumerate() {
+        let Ty::Record { fields } = lir.types[index].body().unwrap() else {
+            panic!("record")
+        };
+        assert_eq!(fields[0].ty, expected);
+        assert_eq!(
+            fields[1].ty,
+            Ty::Pointer {
+                pointee: Box::new(Ty::Defined {
+                    definition: TypeId::from_index(index)
+                })
+            }
+        );
+    }
+    assert_eq!(lir.types[0].name().unwrap().as_ref(), "Node<int>");
+    assert_eq!(lir.types[1].name().unwrap().as_ref(), "Node<long>");
+}
+
+#[test]
+fn nominal_hooks_receive_owner_arguments_before_storage_lowering() {
+    let mut hir = nominal_program(Type::Record {
+        fields: vec![resin_hir::RecordField {
+            name: "value".into(),
+            ty: Type::Parameter { parameter: U },
+        }],
+    });
+    measure_parameter(&mut hir);
+    let mut drop = function("drop", unit());
+    drop.signature.type_params = hir.types[0].type_params.clone();
+    drop.signature.params.push(Parameter {
+        name: Ident::new("self".into(), SPAN),
+        binding: Some(0),
+        annotation: annotation(Type::Pointer {
+            pointee: Box::new(nominal(Type::Parameter { parameter: U })),
+        }),
+    });
+    hir.types[0].drop = Some(FunctionId::from_index(hir.functions.len()));
+    hir.functions.push(drop);
+    let lir = resin_lir::instantiate(&hir, &nominal_roots(), &options(2)).unwrap();
+    resin_lir::verify(&lir).unwrap();
+    assert_eq!(lir.functions.len(), 4);
+    for (index, definition) in lir.types.iter().enumerate() {
+        let hook = definition.drop_hook().unwrap();
+        assert_eq!(
+            lir.functions[hook.index()].locals[0].ty,
+            Ty::Pointer {
+                pointee: Box::new(Ty::Defined {
+                    definition: TypeId::from_index(index)
+                })
+            }
+        );
+    }
+    assert_ne!(lir.types[0].drop_hook(), lir.types[1].drop_hook());
+}
+
+#[test]
+fn nominal_recursion_with_growing_arguments_reports_a_type_limit() {
+    let mut hir = nominal_program(Type::Record {
+        fields: vec![resin_hir::RecordField {
+            name: "next".into(),
+            ty: Type::Pointer {
+                pointee: Box::new(nominal(Type::Pointer {
+                    pointee: Box::new(Type::Parameter { parameter: U }),
+                })),
+            },
+        }],
+    });
+    measure_parameter(&mut hir);
+    let error = resin_lir::instantiate(&hir, &nominal_roots()[..1], &options(1))
+        .unwrap_err()
+        .remove(0);
+    assert!(
+        matches!(error.kind, ErrorKind::TypeExpansionLimit { .. }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn member_derived_unions_normalize_independently_of_layout_discovery_order() {
+    let a = Type::Defined {
+        definition: TypeId::from_index(0),
+        arguments: vec![],
+    };
+    let b = Type::Defined {
+        definition: TypeId::from_index(1),
+        arguments: vec![],
+    };
+    let holder = Type::Defined {
+        definition: TypeId::from_index(2),
+        arguments: vec![],
+    };
+    let choice = Type::Union {
+        variants: vec![a, b.clone()],
+    };
+    let mut hir = program(vec![
+        Type::Member {
+            base: Box::new(holder),
+            name: "choice".into(),
+        },
+        choice.clone(),
+    ]);
+    hir.types = ["A", "B", "Holder"]
+        .into_iter()
+        .map(|name| resin_hir::TypeDefinition {
+            type_params: vec![],
+            name: name.into(),
+            body: Type::Record { fields: vec![] },
+            methods: Default::default(),
+            drop: None,
+        })
+        .collect();
+    hir.types[2].body = Type::Record {
+        fields: vec![
+            resin_hir::RecordField {
+                name: "first".into(),
+                ty: b,
+            },
+            resin_hir::RecordField {
+                name: "choice".into(),
+                ty: choice,
+            },
+        ],
+    };
+    let lir = resin_lir::instantiate(
+        &hir,
+        &[entry("main", 1, resin_lir::Profile::Host)],
+        &options(1),
+    )
+    .unwrap();
+    resin_lir::verify(&lir).unwrap();
+    assert_eq!(lir.functions.len(), 2);
 }
 
 #[test]
@@ -891,6 +1132,7 @@ fn generic_conversions_cannot_bypass_custom_destruction() {
         annotation: annotation(t),
     });
     let owner = Type::Defined {
+        arguments: vec![],
         definition: TypeId::from_index(0),
     };
     let mut drop = function("drop", unit());
@@ -904,6 +1146,7 @@ fn generic_conversions_cannot_bypass_custom_destruction() {
     let hir = Module {
         functions: vec![unwrap, drop],
         types: vec![resin_hir::TypeDefinition {
+            type_params: vec![],
             name: "Owner".into(),
             body: Type::Record { fields: vec![] },
             methods: Default::default(),

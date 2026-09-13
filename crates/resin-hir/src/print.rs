@@ -7,6 +7,21 @@ use std::sync::Arc;
 
 use sexpfmt::{PrinterConfig, SExp, SExpBookendStyle, sexp_to_string};
 
+pub(super) fn format_type(ty: &Type, definitions: &[TypeDefinition]) -> String {
+    TypeNames {
+        definitions: definitions
+            .iter()
+            .map(|definition| definition.name.clone())
+            .collect(),
+        parameters: definitions
+            .iter()
+            .flat_map(|definition| &definition.type_params)
+            .map(|parameter| (parameter.id, parameter.name.val.clone()))
+            .collect(),
+    }
+    .format(ty)
+}
+
 pub fn format_module(module: &Module) -> String {
     let printer = Printer {
         types: TypeNames {
@@ -19,6 +34,12 @@ pub fn format_module(module: &Module) -> String {
                 .functions
                 .iter()
                 .flat_map(|function| &function.signature.type_params)
+                .chain(
+                    module
+                        .types
+                        .iter()
+                        .flat_map(|definition| &definition.type_params),
+                )
                 .map(|parameter| (parameter.id, parameter.name.val.clone()))
                 .collect(),
         },
@@ -76,6 +97,13 @@ impl Printer {
         let mut fields = vec![
             atom(format!("type{index}")),
             self.ty(&Type::Defined {
+                arguments: definition
+                    .type_params
+                    .iter()
+                    .map(|parameter| Type::Parameter {
+                        parameter: parameter.id,
+                    })
+                    .collect(),
                 definition: TypeId::from_index(index),
             }),
         ];
@@ -370,11 +398,28 @@ impl TypeNames {
                 .map(ToString::to_string)
                 .unwrap_or_else(|| format!("T{}", parameter.index())),
             Type::Member { base, name } => format!("{}.{}", self.format(base), name),
-            Type::Defined { definition } => self
-                .definitions
-                .get(definition.index())
-                .map(ToString::to_string)
-                .unwrap_or_else(|| "?".into()),
+            Type::Defined {
+                definition,
+                arguments,
+            } => {
+                let name = self
+                    .definitions
+                    .get(definition.index())
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "?".into());
+                if arguments.is_empty() {
+                    name
+                } else {
+                    format!(
+                        "{name}<{}>",
+                        arguments
+                            .iter()
+                            .map(|argument| self.format(argument))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }
+            }
             Type::Pointer { pointee } => format!("Ptr<{}>", self.format(pointee)),
             Type::GpuPointer { pointee } => format!("GpuPtr<{}>", self.format(pointee)),
             Type::GpuSpan { element } => format!("GpuSpan<{}>", self.format(element)),
