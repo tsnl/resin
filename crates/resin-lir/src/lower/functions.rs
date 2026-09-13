@@ -10,11 +10,12 @@ use resin_types::prelude::*;
 pub(super) fn lower(
     source: &Function,
     typer: &TyperContext,
+    profile: crate::Profile,
 ) -> Result<LoweredFunction, crate::Error> {
     if let Some(foreign) = &source.foreign {
-        return Ok(lower_foreign(source, foreign));
+        return Ok(lower_foreign(source, foreign, profile));
     }
-    let mut lowering = FunctionLowering::new(source, typer);
+    let mut lowering = FunctionLowering::new(source, typer, profile);
     lowering.lower_body(source).map_err(|error| crate::Error {
         source: lowering.source.clone(),
         span: error.span,
@@ -28,10 +29,11 @@ pub(super) fn lower(
     })
 }
 
-fn lower_foreign(source: &Function, foreign: &Foreign) -> LoweredFunction {
+fn lower_foreign(source: &Function, foreign: &Foreign, profile: crate::Profile) -> LoweredFunction {
     LoweredFunction {
         function: crate::Function {
             name: Some(source.name.clone()),
+            profile,
             foreign: Some(foreign.clone()),
             result: source.signature.result.clone(),
             locals: vec![Local {
@@ -47,8 +49,8 @@ fn lower_foreign(source: &Function, foreign: &Foreign) -> LoweredFunction {
 }
 
 impl<'types> FunctionLowering<'types> {
-    fn new(source: &Function, typer: &'types TyperContext) -> Self {
-        let mut function = FunctionBuilder::new(Some(source.name.clone()));
+    fn new(source: &Function, typer: &'types TyperContext, profile: crate::Profile) -> Self {
+        let mut function = FunctionBuilder::new(Some(source.name.clone()), profile);
         function.result(source.signature.result.clone());
         Self {
             source: source

@@ -12,10 +12,11 @@ pub(super) struct FunctionBuilder {
 }
 
 impl FunctionBuilder {
-    pub(super) fn new(name: Option<Arc<str>>) -> Self {
+    pub(super) fn new(name: Option<Arc<str>>, profile: crate::Profile) -> Self {
         Self {
             function: Function {
                 name,
+                profile,
                 foreign: None,
                 result: Ty::Unit,
                 locals: vec![Local {
@@ -139,7 +140,7 @@ mod tests {
 
     #[test]
     fn builds_a_function_without_syntax_or_scopes() {
-        let mut builder = FunctionBuilder::new(Some("identity".into()));
+        let mut builder = FunctionBuilder::new(Some("identity".into()), crate::Profile::Host);
         builder.parameter(Some("value".into()), Ty::Int32);
         builder.result(Ty::Int32);
         assert_eq!(builder.local(Ty::Bool, Some("temporary".into())).index(), 1);
@@ -158,7 +159,7 @@ mod tests {
 
     #[test]
     fn block_names_stay_unique_when_hints_collide() {
-        let mut builder = FunctionBuilder::new(None);
+        let mut builder = FunctionBuilder::new(None, crate::Profile::Host);
         for hint in ["body", "body", "body.1", "body"] {
             builder.new_block(hint, 0);
         }

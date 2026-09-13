@@ -72,6 +72,13 @@ fn sexp_function(names: &Names, index: usize, function: &Function) -> SExp {
         symbol(fn_names.locals[0].as_ref()),
         sexp_ty(names, &function.result),
     ];
+    items.push(list(
+        "profile",
+        vec![symbol(match function.profile {
+            crate::Profile::Host => "host",
+            crate::Profile::Shader => "shader",
+        })],
+    ));
     if let Some(foreign) = &function.foreign {
         items.push(list("extern", vec![symbol(foreign.header.as_ref())]));
     }

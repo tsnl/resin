@@ -17,6 +17,7 @@ fn module(blocks: Vec<BasicBlock>) -> Module {
     Module {
         functions: vec![Function {
             name: None,
+            profile: resin_lir::Profile::Host,
             foreign: None,
             result: Ty::Unit,
             locals: vec![Local {

@@ -303,7 +303,13 @@ fn imported_backend_errors_retain_expression_origins() {
     loader
         .set_import(&entry, "helper.resin", helper.clone())
         .unwrap();
-    let compilation = resin_compiler::Compiler::new().compile(entry, &mut loader);
+    let compilation = resin_compiler::Compiler::new().compile(
+        entry,
+        &mut loader,
+        &[resin_compiler::Target::Shader {
+            entry: "kernel".into(),
+        }],
+    );
     let m = compilation.module().unwrap();
     let origins: Vec<_> = m
         .origins

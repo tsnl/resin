@@ -94,7 +94,7 @@ implemented.
 `resin_source::Source` is immutable named text with a stable logical
 identity. Cloning shares a version; `with_text` creates a new version of the same
 source. Names are diagnostic labels and need not be filesystem paths or unique.
-`resin_compiler::Compiler` retains syntax and compilation caches. Its `compile`
+`resin_compiler::Compiler` retains syntax and compilation caches. Its `analyze`
 method receives an entry source and a concrete `resin_source::Loader`, resolves the import
 graph, and returns an immutable `Compilation` with diagnostics and editor queries.
 
@@ -115,17 +115,17 @@ fn main() {
     let mut loader = resin_source::Loader::new(resin_source::library_root());
     loader.set_import(&entry, "library", library.clone()).unwrap();
     let mut compiler = resin_compiler::Compiler::new();
-    let before = compiler.compile(entry.clone(), &mut loader);
-    assert!(before.module().is_ok());
+    let before = compiler.analyze(entry.clone(), &mut loader);
+    assert!(before.hir().is_ok());
 
     loader.set_import(
         &entry,
         "library",
         library.with_text("export { answer }; def answer() -> int = { missing };"),
     ).unwrap();
-    let after = compiler.compile(entry, &mut loader);
+    let after = compiler.analyze(entry, &mut loader);
     assert!(!after.diagnostics().is_empty());
-    assert!(before.module().is_ok()); // Retained results keep their original sources.
+    assert!(before.hir().is_ok()); // Retained results keep their original sources.
 }
 ```
 

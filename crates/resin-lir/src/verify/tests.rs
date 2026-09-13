@@ -24,6 +24,7 @@ fn ascribe_wraps_and_unwraps_a_nominal_representation() {
         verify(&Module {
             types: vec![TypeDef::new("Meters", record())].into(),
             functions: vec![Function {
+                profile: crate::Profile::Host,
                 foreign: None,
                 name: None,
                 result,
@@ -56,6 +57,7 @@ fn record() -> Ty {
 #[test]
 fn chained_assignment_preserves_the_value() {
     let function = Function {
+        profile: crate::Profile::Host,
         foreign: None,
         name: None,
         result: Ty::Int32,
@@ -99,6 +101,7 @@ fn chained_assignment_preserves_the_value() {
 #[test]
 fn conflicting_join_stacks_are_rejected() {
     let function = Function {
+        profile: crate::Profile::Host,
         foreign: None,
         name: None,
         result: Ty::Int32,
@@ -156,6 +159,7 @@ fn conflicting_join_stacks_are_rejected() {
 #[test]
 fn indirect_calls_use_the_callee_on_the_stack() {
     let target = Function {
+        profile: crate::Profile::Host,
         foreign: None,
         name: None,
         result: Ty::Int32,
@@ -176,6 +180,7 @@ fn indirect_calls_use_the_callee_on_the_stack() {
         }],
     };
     let caller = Function {
+        profile: crate::Profile::Host,
         foreign: None,
         name: None,
         result: Ty::Int32,
@@ -209,6 +214,7 @@ fn indirect_calls_use_the_callee_on_the_stack() {
 #[test]
 fn loop_body_preserves_the_condition_stack() {
     let function = Function {
+        profile: crate::Profile::Host,
         foreign: None,
         name: None,
         result: Ty::Unit,
@@ -264,6 +270,7 @@ fn all_functions_require_parameter_local_zero() {
         }),
     ] {
         let mut function = Function {
+            profile: crate::Profile::Host,
             name: Some("f".into()),
             foreign,
             result: Ty::Unit,
@@ -322,6 +329,7 @@ fn builtin_module(name: &str, params: &[Ty], result: Ty) -> Module {
     });
     Module {
         functions: vec![Function {
+            profile: crate::Profile::Host,
             foreign: None,
             name: None,
             result,
@@ -431,6 +439,7 @@ fn ascription_cannot_stand_in_for_cast_or_widen_instructions() {
         ),
     ] {
         let function = Function {
+            profile: crate::Profile::Host,
             foreign: None,
             name: None,
             result: to.clone(),
@@ -487,6 +496,7 @@ fn destruction_hooks_reference_a_function_with_the_nominal_pointer_signature() {
     );
     module.functions.push(Function {
         name: None,
+        profile: crate::Profile::Host,
         foreign: None,
         result: Ty::Unit,
         locals: vec![Local {
@@ -589,6 +599,7 @@ fn parameter_expression(param: Ty, result: Ty, instructions: Vec<Instr>) -> Modu
 fn expression_module(param: Ty, result: Ty, instrs: Vec<Instr>) -> Module {
     Module {
         functions: vec![Function {
+            profile: crate::Profile::Host,
             foreign: None,
             name: None,
             result,

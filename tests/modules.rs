@@ -435,7 +435,20 @@ fn shader_declarations_preserve_the_entry_files_export_scope() {
     ]);
     let module = project.compile().unwrap();
     let kernel = module.entries["kernel"];
-    assert!(module.shaders[&kernel].embedded);
+    assert_eq!(
+        module.functions[kernel.index()].profile,
+        resin_lir::Profile::Host
+    );
+    let (&shader, _) = module
+        .shaders
+        .iter()
+        .find(|(_, shader)| shader.embedded)
+        .unwrap();
+    assert_ne!(kernel, shader);
+    assert_eq!(
+        module.origins.functions[&kernel],
+        module.origins.functions[&shader]
+    );
     assert_eq!(module.shaders.len(), 3);
     assert_eq!(
         module

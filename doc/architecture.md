@@ -171,12 +171,22 @@ its consumed operands and produced values.
 
 HIR signatures can bind named type parameters, and function references carry
 completed type arguments. LIR construction owns a memoized worklist of concrete
-applications, keyed by definition and normalized arguments. It reserves each ID
-before translating its body, so recursion reuses pending requests. All ordinary
-functions currently enter that same worklist with empty arguments; template
-families enter only through applications. Source inference still rejects template
-syntax in this preparatory layer. Selecting roots and target profiles during
-compilation, then producing polymorphic schemes from source, are subsequent layers.
+applications, keyed by definition, normalized arguments, and semantic Host/Shader
+profile. It reserves each ID before translating its body, so recursion reuses pending
+requests. Compilation supplies exported target roots; only their transitive function
+and type dependencies enter the worklist. Decorated functions remain host-callable;
+shader artifacts and pipeline creation request separate shader instances. C emits
+host instances, while SPIR-V follows the requested shader graph. Source inference
+still rejects template syntax in this preparatory layer. Producing polymorphic schemes
+from source and completing target operation selection in LIR are subsequent layers.
+
+`resin_lir::instantiate` accepts closed HIR applications and constructs their target
+program. The whole-module `generate`/`analyze` helpers explicitly request all ordinary
+functions and nominal declarations through the same machinery, for direct language
+clients. Requested programs discover nominal types lazily and translate every embedded
+nominal identity, including field conversion steps. Recursive identities remain private
+until their bodies and real drop-hook IDs are installed. Nominal expansion has its own
+depth guard across declarations.
 
 The worklist translates each application into a private concrete expression tree,
 substituting types and selecting supported builtin operations without inference.
@@ -191,7 +201,8 @@ no blocks; they do not create function-body lowering state.
 
 `CompilerConfig.max_monomorphs_per_function` defaults to 16,384 and cannot be zero.
 The compiler retains its configuration immutably; LIR receives the relevant limit
-through `LoweringOptions`. Existing canonical requests cost nothing, including
+through `LoweringOptions`. Different semantic profiles count separately toward the
+same source function's allowance. Existing canonical requests cost nothing, including
 pending and failed requests. A new request consumes its allowance before body
 translation. Independent type-depth and type-size guards bound structural expansion
 before substituted trees are cloned. These are resource diagnostics, not a claim
@@ -263,7 +274,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-For imports, call `Compiler::compile(entry, &mut loader)` with an immutable `Source`
+For imports, call `Compiler::analyze(entry, &mut loader)` with an immutable `Source`
 and a concrete `resin_source::Loader`. Explicit bindings let the same loader work
 with generated or in-memory sources:
 
@@ -281,7 +292,7 @@ fn main() {
     let mut loader = resin_source::Loader::new(resin_source::library_root());
     loader.set_import(&entry, "math", math).unwrap();
     let mut compiler = resin_compiler::Compiler::new();
-    let compilation = compiler.compile(entry.clone(), &mut loader);
+    let compilation = compiler.analyze(entry.clone(), &mut loader);
     assert!(compilation.diagnostics().is_empty(), "{:?}", compilation.diagnostics());
     assert_eq!(compilation.entry(), &entry);
 }
@@ -339,7 +350,11 @@ with the same logical ID, leaving the original intact. Equality identifies versi
 equal text or equal diagnostic names do not make independently created sources equal.
 Names have no filesystem meaning inside the compiler.
 
-`Compiler::compile(entry, loader)` returns an `Arc<Compilation>`. Each call resolves
+`Compiler::compile(entry, loader, targets)` returns an `Arc<Compilation>` for explicit
+`Target::Host` and `Target::Shader` exported entries. `Compiler::analyze(entry, loader)`
+retains HIR and editor facts without a LIR artifact; requesting `module()` or `verified()`
+from that result returns an error without adding a source diagnostic. An empty compile
+target set is an error, not an analysis request. Each operation resolves
 the complete import graph before considering cached analysis, so changed resolutions
 and newly available dependencies are observed. The loader reuses unchanged source
 handles; supplied text and explicit bindings determine the versions returned for imports.
@@ -347,8 +362,9 @@ The compiler diagnoses cycles and inconsistent versions instead of mixing their 
 
 The compiler caches CST/AST documents by logical source ID. An unchanged version
 reuses its document; a changed version can reuse the previous tree for incremental
-CST parsing. A matching successfully loaded graph can reuse its compilation. When
-that graph changes, semantic checking reruns the entry's import closure. Native
+CST parsing. A matching successfully loaded graph and canonical target set can reuse
+its compilation. Target order and duplicates do not affect matching. When the graph
+or request changes, semantic checking reruns the entry's import closure. Native
 artifact caching is separate. This is not a per-function incremental solver or backend.
 
 A `Compilation` retains diagnostics, recovered AST, completed phase products, and

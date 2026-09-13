@@ -54,7 +54,7 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
         let input = loader
             .source_from_text(Path::new("main.resin"), source.clone())
             .unwrap();
-        let analysis = Compiler::new().compile(input.clone(), &mut loader);
+        let analysis = Compiler::new().analyze(input.clone(), &mut loader);
         if tail != "buffer." {
             assert!(
                 analysis.diagnostics().is_empty(),
@@ -168,7 +168,7 @@ fn gpu_commands_check_pipeline_stages_and_host_arguments() {
         let input = loader
             .source_from_text(Path::new("main.resin"), source)
             .unwrap();
-        let analysis = Compiler::new().compile(input.clone(), &mut loader);
+        let analysis = Compiler::new().analyze(input.clone(), &mut loader);
         assert_eq!(
             analysis.diagnostics().is_empty(),
             valid,
@@ -201,7 +201,7 @@ fn typed_pipeline_calls_show_shader_contracts_in_editor_signatures() {
     let input = loader
         .source_from_text(Path::new("main.resin"), source)
         .unwrap();
-    let analysis = Compiler::new().compile(input.clone(), &mut loader);
+    let analysis = Compiler::new().analyze(input.clone(), &mut loader);
     assert!(
         analysis.diagnostics().is_empty(),
         "{:?}",
@@ -641,7 +641,7 @@ impl Project {
                     .unwrap();
             }
         }
-        Compiler::new().compile(self.source("main.resin"), &mut loader)
+        Compiler::new().analyze(self.source("main.resin"), &mut loader)
     }
     fn source(&self, name: &str) -> Source {
         self.sources[name].clone()
@@ -881,7 +881,7 @@ fn malformed_foreign_headers_are_diagnostics_not_panics() {
         assert_eq!(error.source, input);
         assert!(error.span.is_some(), "{source}: {error}");
         assert!(!analysis.diagnostics().is_empty(), "{source}");
-        assert!(analysis.module().is_err(), "{source}");
+        assert!(analysis.hir().is_err(), "{source}");
     }
 }
 
@@ -891,7 +891,7 @@ fn malformed_function_names_do_not_create_editor_definitions() {
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.analyze();
     let input = project.source("main.resin");
-    assert!(analysis.module().is_err());
+    assert!(analysis.hir().is_err());
     assert!(
         analysis
             .definition(&input, source.find("releasex").unwrap())
@@ -1025,7 +1025,7 @@ fn module_analysis_needs_no_entry_and_rejects_runtime_globals() {
     );
     assert_eq!(
         analysis
-            .module()
+            .hir()
             .unwrap()
             .entries
             .keys()
@@ -1042,7 +1042,7 @@ fn module_analysis_needs_no_entry_and_rejects_runtime_globals() {
         source.find("run ()").unwrap()
     );
     let project = Project::new(&[("main.resin", "export {}; def helper () -> int = { 1 };")]);
-    assert!(project.analyze().module().unwrap().entries.is_empty());
+    assert!(project.analyze().hir().unwrap().entries.is_empty());
 
     for source in [
         "var global = 1; def main () -> int = { glo };",
@@ -1125,7 +1125,7 @@ fn holes_preserve_later_locals_and_functions_without_producing_ir() {
         let project = Project::new(&[("main.resin", &source)]);
         let analysis = project.analyze();
         let input = project.source("main.resin");
-        assert!(analysis.module().is_err(), "{source}");
+        assert!(analysis.hir().is_err(), "{source}");
         assert!(!analysis.diagnostics().is_empty(), "{source}");
         let items = analysis.completions(&input, source.find("point.").unwrap() + 6);
         assert_eq!(
@@ -1169,7 +1169,7 @@ fn unknown_bindings_shadow_outer_values_without_fabricating_types() {
                 .start,
             source.find("var point").unwrap() + 4
         );
-        assert!(analysis.module().is_err());
+        assert!(analysis.hir().is_err());
         let fields = analysis.completions(&input, source.rfind("count").unwrap());
         assert_eq!(
             fields
@@ -1207,7 +1207,7 @@ fn unrelated_errors_preserve_expression_types_and_field_completion() {
                 "{source}: {:?}",
                 analysis.diagnostics()
             );
-            assert_eq!(analysis.module().is_ok(), broken.is_empty(), "{source}");
+            assert_eq!(analysis.hir().is_ok(), broken.is_empty(), "{source}");
             let hover = analysis
                 .hover(&input, source.find("value;").unwrap())
                 .unwrap();
@@ -1232,7 +1232,7 @@ fn failed_compound_constraints_do_not_poison_independent_inference() {
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.analyze();
     assert!(!analysis.diagnostics().is_empty());
-    assert!(analysis.module().is_err());
+    assert!(analysis.hir().is_err());
     let input = project.source("main.resin");
     assert_eq!(
         analysis
@@ -1269,7 +1269,7 @@ fn recovery_uses_unsaved_imports_and_keeps_nominal_field_types() {
     );
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].detail, "x: float32");
-    assert!(analysis.module().is_err());
+    assert!(analysis.hir().is_err());
 }
 
 #[test]
@@ -1421,7 +1421,7 @@ fn failed_children_invalidate_composites_without_hiding_later_bindings() {
         let analysis = project.analyze();
         let input = project.source("main.resin");
         assert!(!analysis.diagnostics().is_empty(), "{source}");
-        assert!(analysis.module().is_err());
+        assert!(analysis.hir().is_err());
         for (name, expected) in [
             ("bad", "bad: ?"),
             ("alias", "alias: ?"),
@@ -1461,7 +1461,7 @@ fn broken_annotations_and_duplicate_declarations_retain_recognizable_children() 
         let project = Project::new(&[("main.resin", source)]);
         let analysis = project.analyze();
         assert!(!analysis.diagnostics().is_empty());
-        assert!(analysis.module().is_err());
+        assert!(analysis.hir().is_err());
         assert_eq!(
             analysis
                 .hover(&project.source("main.resin"), source.rfind(name).unwrap())
@@ -1491,7 +1491,7 @@ fn unknown_exports_retain_identity_and_poison_consumers_through_reexports() {
         ),
     ]);
     let analysis = project.analyze();
-    assert!(analysis.module().is_err());
+    assert!(analysis.hir().is_err());
     let input = project.source("main.resin");
     for name in ["Broken", "broken"] {
         let offset = source.rfind(name).unwrap();
@@ -1556,7 +1556,7 @@ fn callers_cannot_resurrect_failed_result_inference() {
         let input = project.source("main.resin");
         assert!(analysis.program().is_ok(), "{source}");
         assert!(!analysis.diagnostics().is_empty());
-        assert!(analysis.module().is_err());
+        assert!(analysis.hir().is_err());
         assert_eq!(
             analysis
                 .hover(&input, source.rfind("alias").unwrap())
@@ -1582,7 +1582,7 @@ fn recursive_failure_discards_copied_caller_result_facts() {
     let analysis = project.analyze();
     assert!(analysis.program().is_ok());
     assert!(!analysis.diagnostics().is_empty());
-    assert!(analysis.module().is_err());
+    assert!(analysis.hir().is_err());
     let input = project.source("main.resin");
     assert_eq!(
         analysis
@@ -1683,7 +1683,7 @@ fn invalid_method_arguments_preserve_receiver_facts_and_later_bindings() {
         let project = Project::new(&[("main.resin", &source)]);
         let analysis = project.analyze();
         let input = project.source("main.resin");
-        assert!(analysis.module().is_err());
+        assert!(analysis.hir().is_err());
         for (name, expected) in [("alias", "alias: ?"), ("healthy", "healthy: float32")] {
             assert_eq!(
                 analysis

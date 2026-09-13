@@ -72,7 +72,7 @@ pub fn load(path: &Path) -> Result<resin_ast::Program, SourceError> {
         )
     })?;
     Compiler::new()
-        .compile(source, &mut loader)
+        .analyze(source, &mut loader)
         .program()
         .cloned()
 }

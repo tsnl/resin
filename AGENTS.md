@@ -27,12 +27,19 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   translates each HIR function into a private concrete expression tree before assigning
   storage. Discard that concrete tree after lowering the function.
 - HIR function signatures retain named type binders; function references retain completed
-  type arguments. LIR owns memoized instance requests and reserves their function IDs before
+  type arguments. LIR keys instances by definition, normalized arguments, and Host/Shader
+  profile; each profile counts toward the original function's allowance. LIR reserves IDs before
   translating bodies. Calls, shader references, native bridges, and drop hooks use those IDs.
   Keep substitution and concrete builtin selection in the incoming concrete-body translation;
   storage lowering receives no bound parameters. The default per-function allowance is 16,384,
   configurable through immutable `CompilerConfig` and LIR `LoweringOptions`. Repeated requests
   cost nothing. Type depth/size guards and bounded application traces are separate from that cap.
+- Compilation requests name exported host/shader entries. Canonicalize target sets for cache
+  matching; lower only their transitive function/type dependencies. Shader artifacts and
+  pipeline creation add shader roots while retaining host bridge functions. Concrete nominal
+  discovery reserves recursive identities privately and installs real drop IDs before storage
+  lowering. `Compiler::analyze` produces HIR/editor facts without a LIR artifact. The whole-module
+  LIR helpers remain explicit operations for direct language clients and tests.
 - Keep resolved types and layout rules in `crates/resin-types`; they must not depend on a
   frontend, backend, or verifier. Keep the public contract in `lib.rs`, with substantial
   representation algorithms in private `types.rs` and concrete checking/conversion rules
@@ -194,7 +201,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   lives in `src/cli/`. Capture process settings through the platform toolchain's
   `Environment`, then choose CLI defaults and the build profile explicitly.
   Validate file selections and output destinations in the CLI. `Compiler::compile`
-  consumes immutable sources and a loader to produce a `Compilation`. The separate
+  consumes immutable sources, a loader, and explicit targets to produce a `Compilation`. The separate
   `resin_codegen::generate` operation takes verified LIR and writes C, unoptimized SPIR-V, and a Ninja
   dependency graph to disk in one call. Target representations and individual emitters stay private.
   `resin-toolchain` stages that directory, configures native tools, and invokes Ninja.

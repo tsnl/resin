@@ -32,46 +32,24 @@ pub fn analyze(
 ) -> Result<Module, Vec<Error>> {
     let mut instances = instances::Instances::new(source, options);
     instances.reserve_roots().map_err(|error| vec![error])?;
-    let definitions = definitions(source, &mut instances).map_err(|error| vec![error])?;
-    let typer = TyperContext::from_definitions(definitions);
-    let functions = instances.lower(&typer)?;
-    Ok(assemble(source, &instances, typer, functions))
+    instances
+        .reserve_types()
+        .map_err(|error| vec![instances.lower_error(error, None, None)])?;
+    let functions = instances.lower()?;
+    Ok(assemble(instances, functions))
 }
 
-fn definitions(
+pub fn instantiate(
     source: &resin_hir::Module,
-    instances: &mut instances::Instances<'_>,
-) -> Result<TypeTable, Error> {
-    let substitution = substitute::Substitution::default();
-    let mut definitions = Vec::with_capacity(source.types.len());
-    for definition in &source.types {
-        let body = substitution
-            .ty(&definition.body)
-            .map_err(|error| instances.lower_error(error, None, None))?;
-        let drop = definition
-            .drop
-            .map(|id| instances.request(id, vec![], None, None))
-            .transpose()?;
-        definitions.push(TypeDef::Nominal {
-            name: definition.name.clone(),
-            body: Some(body),
-            drop,
-        });
-    }
-    let definitions = TypeTable::from(definitions);
-    for (index, definition) in definitions.iter().enumerate() {
-        let body = definition.body().expect("completed nominal body");
-        resin_types::check_references(&definitions, body)
-            .and_then(|()| resin_types::check_layout(&definitions, TypeId::from_index(index), body))
-            .map_err(|error| {
-                instances.lower_error(
-                    LowerError::typing(Span { start: 0, end: 0 }, error),
-                    None,
-                    None,
-                )
-            })?;
-    }
-    Ok(definitions)
+    entries: &[crate::Entry],
+    options: &crate::LoweringOptions,
+) -> Result<Module, Vec<Error>> {
+    let mut instances = instances::Instances::new(source, options);
+    instances
+        .reserve_entries(entries)
+        .map_err(|error| vec![error])?;
+    let functions = instances.lower()?;
+    Ok(assemble(instances, functions))
 }
 
 /// A completed function uses local instruction positions; assembly supplies its ID.
@@ -81,28 +59,8 @@ struct LoweredFunction {
     origins: BTreeMap<(BlockId, usize), SourceLocation>,
 }
 
-fn assemble(
-    source: &resin_hir::Module,
-    instances: &instances::Instances<'_>,
-    typer: TyperContext,
-    functions: Vec<LoweredFunction>,
-) -> Module {
-    let mut module = Module {
-        types: typer
-            .into_definitions()
-            .expect("completed nominal definitions"),
-        entries: source
-            .entries
-            .iter()
-            .filter_map(|(name, id)| instances.ordinary(*id).map(|id| (name.clone(), id)))
-            .collect(),
-        shaders: source
-            .shaders
-            .iter()
-            .filter_map(|(id, shader)| instances.ordinary(*id).map(|id| (id, shader.clone())))
-            .collect(),
-        ..Default::default()
-    };
+fn assemble(instances: instances::Instances<'_>, functions: Vec<LoweredFunction>) -> Module {
+    let mut module = instances.module();
     for (index, lowered) in functions.into_iter().enumerate() {
         let id = FunctionId::from_index(index);
         module.functions.push(lowered.function);

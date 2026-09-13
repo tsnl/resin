@@ -49,7 +49,13 @@ fn compilation_uses_supplied_source_versions_and_explicit_profiles() {
         (CProfile::Release, None, 43, "release"),
     ] {
         let source = loader.source_from_text(&path, format!("export {{ main }}; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = {{ var i = uint(invocation); output.* := i; }}; def main() -> int = {{ var output = 0_ui; kernel({code}_ul, &output); if (output == {code}_ui) {{ {code} }} else {{ 0 }} }};")).unwrap();
-        let compilation = compiler.compile(source.clone(), &mut loader);
+        let compilation = compiler.compile(
+            source.clone(),
+            &mut loader,
+            &[resin_compiler::Target::Host {
+                entry: "main".into(),
+            }],
+        );
         let artifact = build(&compilation, &environment, profile);
         assert_eq!(
             artifact.path().parent().unwrap().file_name().unwrap(),
@@ -57,7 +63,16 @@ fn compilation_uses_supplied_source_versions_and_explicit_profiles() {
         );
         assert_eq!(artifact.run().unwrap(), code);
         assert!(
-            Arc::ptr_eq(&compilation, &compiler.compile(source, &mut loader)),
+            Arc::ptr_eq(
+                &compilation,
+                &compiler.compile(
+                    source,
+                    &mut loader,
+                    &[resin_compiler::Target::Host {
+                        entry: "main".into()
+                    }]
+                )
+            ),
             "unchanged sources should reuse the completed compilation"
         );
         if let Some(path) = destination {
@@ -82,9 +97,21 @@ fn retained_compilations_build_their_own_source_version_after_later_edits() {
     let mut compiler = Compiler::new();
     let path = temp.path().join("main.resin");
     fs::write(&path, "export { main }; def main() -> int = { 41 };").unwrap();
-    let first = compiler.compile(loader.load_file(&path).unwrap(), &mut loader);
+    let first = compiler.compile(
+        loader.load_file(&path).unwrap(),
+        &mut loader,
+        &[resin_compiler::Target::Host {
+            entry: "main".into(),
+        }],
+    );
     fs::write(&path, "export { main }; def main() -> int = { 42 };").unwrap();
-    let second = compiler.compile(loader.load_file(&path).unwrap(), &mut loader);
+    let second = compiler.compile(
+        loader.load_file(&path).unwrap(),
+        &mut loader,
+        &[resin_compiler::Target::Host {
+            entry: "main".into(),
+        }],
+    );
     assert_eq!(first.entry().id(), second.entry().id());
     assert_ne!(first.entry(), second.entry());
     fs::remove_file(path).unwrap();
