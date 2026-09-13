@@ -279,3 +279,11 @@ fn numeric_suffixes_format_with_lowercase_and_one_separator() {
         "// 42UL\ndef main() = {\n\tvar text = \"42UL 1.5F\";\n};\n",
     );
 }
+
+#[test]
+fn template_delimiters_and_turbofish_are_attached() {
+    check(
+        "def id <T>(x:T)->T={x};def main()={var f=id :: <Ptr<int>>;gpu.alloc :: < Pair<int,long> > (4);var n=2>1;};",
+        "def id<T>(x: T) -> T = {\n\tx\n};\ndef main() = {\n\tvar f = id::<Ptr<int>>;\n\tgpu.alloc::<Pair<int, long>>(4);\n\tvar n = 2 > 1;\n};\n",
+    );
+}

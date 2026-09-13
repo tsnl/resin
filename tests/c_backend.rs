@@ -705,10 +705,10 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
             assert_eq!(head.val.as_ref(), "GpuSpan");
             head.val = "Span".into();
         } else if name.val.as_ref() == "apply_camera" {
-            let resin_ast::TypeKind::App { arg, .. } = &mut params[1].1.val else {
+            let resin_ast::TypeKind::App { args, .. } = &mut params[1].1.val else {
                 panic!()
             };
-            let resin_ast::TypeKind::Atom { name } = &mut arg.val else {
+            let resin_ast::TypeKind::Atom { name } = &mut args[0].val else {
                 panic!()
             };
             assert_eq!(name.val.as_ref(), "HostParams");

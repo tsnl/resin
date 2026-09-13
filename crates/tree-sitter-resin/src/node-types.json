@@ -503,6 +503,16 @@
             "named": true
           }
         ]
+      },
+      "type_params": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_parameters",
+            "named": true
+          }
+        ]
       }
     }
   },
@@ -703,6 +713,16 @@
             "named": true
           }
         ]
+      },
+      "type_args": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_application",
+            "named": true
+          }
+        ]
       }
     }
   },
@@ -774,6 +794,10 @@
           },
           {
             "type": "try_suffix",
+            "named": true
+          },
+          {
+            "type": "type_application",
             "named": true
           },
           {
@@ -1031,6 +1055,16 @@
             "named": true
           }
         ]
+      },
+      "type_params": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_parameters",
+            "named": true
+          }
+        ]
       }
     }
   },
@@ -1123,6 +1157,38 @@
     }
   },
   {
+    "type": "type_application",
+    "named": true,
+    "fields": {
+      "types": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "type_arguments",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "type_arguments",
+    "named": true,
+    "fields": {
+      "args": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "type",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "type_define",
     "named": true,
     "fields": {
@@ -1145,6 +1211,16 @@
             "named": true
           }
         ]
+      },
+      "type_params": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_parameters",
+            "named": true
+          }
+        ]
       }
     }
   },
@@ -1158,6 +1234,22 @@
         "types": [
           {
             "type": "type_define",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "type_parameters",
+    "named": true,
+    "fields": {
+      "params": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "uid",
             "named": true
           }
         ]
@@ -1230,6 +1322,16 @@
           }
         ]
       },
+      "args": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_arguments",
+            "named": true
+          }
+        ]
+      },
       "error": {
         "multiple": false,
         "required": false,
@@ -1275,6 +1377,10 @@
           {
             "type": "Weak",
             "named": false
+          },
+          {
+            "type": "uid",
+            "named": true
           }
         ]
       },
@@ -1455,6 +1561,10 @@
   },
   {
     "type": ":",
+    "named": false
+  },
+  {
+    "type": "::",
     "named": false
   },
   {

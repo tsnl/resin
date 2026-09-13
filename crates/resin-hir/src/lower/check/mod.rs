@@ -276,6 +276,12 @@ impl Checker<'_> {
         stmt: &'s StmtKind,
         methods: &mut BTreeMap<Arc<str>, DeclarationId>,
     ) -> Option<(typed::Declaration, Option<&'s resin_ast::Term>, Signature)> {
+        if let StmtKind::Function { type_params, .. } = stmt
+            && let Err(error) = crate::lower::require_monomorphic(type_params)
+        {
+            self.errors.push(error);
+            return None;
+        }
         let (name, params, result, body) = match stmt {
             StmtKind::Function {
                 name,
@@ -682,6 +688,12 @@ impl Expression<'_, '_> {
                     name: name.clone(),
                 }
             }
+            resin_ast::TermKind::TypeApply { .. } => {
+                return Err(GenerateError::inference(
+                    span,
+                    "template application lowering is not implemented yet",
+                ));
+            }
             resin_ast::TermKind::Type { ty } => {
                 let ann = self.annotation(ty, true);
                 equate = Some(Ty::Type.into());
@@ -820,8 +832,15 @@ impl Expression<'_, '_> {
             resin_ast::TermKind::MethodCall {
                 receiver,
                 name,
+                type_args,
                 arg,
             } => {
+                if !type_args.is_empty() {
+                    return Err(GenerateError::inference(
+                        span,
+                        "template application lowering is not implemented yet",
+                    ));
+                }
                 let (receiver, annotation, receiver_type, associated) =
                     if let resin_ast::TermKind::Type { ty } = &receiver.val {
                         let annotation = self.annotation(ty, false);
@@ -1094,7 +1113,9 @@ impl Expression<'_, '_> {
                 name,
                 body,
                 methods,
+                type_params,
             } => {
+                crate::lower::require_monomorphic(type_params)?;
                 if let Some(method) = methods.first() {
                     return Err(GenerateError::inference(
                         method.span,
@@ -1118,7 +1139,12 @@ impl Expression<'_, '_> {
                     .map_err(|e| GenerateError::typing(ann.span, e))?;
                 StatementKind::TypeDefinition
             }
-            StmtKind::DefineType { name, init } => {
+            StmtKind::DefineType {
+                name,
+                init,
+                type_params,
+            } => {
+                crate::lower::require_monomorphic(type_params)?;
                 let ann = self.annotation(init, false);
                 let ty = self.checker.typing.solver.require(&ann.ty, ann.span)?;
                 self.checker

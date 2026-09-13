@@ -45,7 +45,7 @@ pub enum TypeKind {
     },
     App {
         head: Ident,
-        arg: Box<Type>,
+        args: Vec<Type>,
     },
     GpuPipeline {
         head: Ident,
@@ -124,7 +124,12 @@ pub enum TermKind {
     MethodCall {
         receiver: Box<Term>,
         name: Ident,
+        type_args: Vec<Type>,
         arg: Box<Term>,
+    },
+    TypeApply {
+        function: Box<Term>,
+        args: Vec<Type>,
     },
     Call {
         func: Box<Term>,
@@ -182,6 +187,7 @@ pub enum StmtKind {
         result: Type,
     },
     Function {
+        type_params: Vec<Ident>,
         decorators: Vec<Ident>,
         name: Ident,
         params: Vec<(Ident, Type)>,
@@ -195,10 +201,12 @@ pub enum StmtKind {
     },
     /// `type Name = init;` A transparent alias.
     DefineType {
+        type_params: Vec<Ident>,
         name: Ident,
         init: Type,
     },
     Struct {
+        type_params: Vec<Ident>,
         name: Ident,
         body: Type,
         methods: Vec<Stmt>,

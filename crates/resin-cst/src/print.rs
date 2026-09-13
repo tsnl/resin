@@ -21,7 +21,7 @@ pub fn format_source(source: &str) -> Option<String> {
     let mut groups = vec![None; tokens.len()];
     let mut stack = Vec::new();
     for (i, node) in tokens.iter().enumerate() {
-        let generic = node.parent().is_some_and(|p| p.kind() == "unary_type");
+        let generic = generic_delimiter(*node);
         match node.kind() {
             "(" | "[" | "{" => stack.push(i),
             "<" if generic => stack.push(i),
@@ -197,11 +197,14 @@ fn space_between(left: Node<'_>, right: Node<'_>) -> bool {
     if a == "comment" || b == "comment" {
         return true;
     }
+    if a == "::" || b == "::" {
+        return false;
+    }
     if matches!(a, "(" | "[" | ".") {
         return false;
     }
-    let generic_left = left.parent().is_some_and(|p| p.kind() == "unary_type");
-    let generic_right = right.parent().is_some_and(|p| p.kind() == "unary_type");
+    let generic_left = generic_delimiter(left);
+    let generic_right = generic_delimiter(right);
     if (a == "<" && generic_left) || (matches!(b, "<" | ">") && generic_right) {
         return false;
     }
@@ -220,6 +223,15 @@ fn space_between(left: Node<'_>, right: Node<'_>) -> bool {
             || (is_operator(left) && !(a == ">" && generic_left));
     }
     true
+}
+
+fn generic_delimiter(node: Node<'_>) -> bool {
+    node.parent().is_some_and(|p| {
+        matches!(
+            p.kind(),
+            "unary_type" | "type_parameters" | "type_arguments"
+        )
+    })
 }
 
 fn is_operator(node: Node<'_>) -> bool {
