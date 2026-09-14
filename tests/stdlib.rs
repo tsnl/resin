@@ -450,7 +450,10 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
                 .find(|function| function.name.as_ref() == qualified.as_str())
                 .unwrap_or_else(|| panic!("missing source function {qualified}"));
             assert!(function.foreign_header.is_none(), "{name}");
-            assert!(matches!(function.signature.result.ty, resin_hir::Type::Result { .. }), "{name}");
+            assert!(
+                matches!(function.signature.result.ty, resin_hir::Type::Result { .. }),
+                "{name}"
+            );
             checked += 1;
         }
         assert!(checked > 0 || name == "console");

@@ -102,3 +102,13 @@ pub fn shader_error(source: &str) -> String {
         }
     }
 }
+
+/// Find a source nominal identity without depending on catalog insertion order.
+pub fn nominal(module: &resin_lir::Module, name: &str) -> resin_types::TypeId {
+    let index = module
+        .types
+        .iter()
+        .position(|ty| ty.name().map(|name| name.as_ref()) == Some(name))
+        .unwrap_or_else(|| panic!("missing nominal type {name}"));
+    resin_types::TypeId::from_index(index)
+}

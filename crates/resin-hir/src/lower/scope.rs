@@ -451,7 +451,9 @@ impl Scopes {
         } in self.calls.drain(..)
         {
             if let Some(
-                method @ (ResolvedMethod::Source { .. } | ResolvedMethod::Intrinsic { .. } | ResolvedMethod::GpuPipeline { .. }),
+                method @ (ResolvedMethod::Source { .. }
+                | ResolvedMethod::Intrinsic { .. }
+                | ResolvedMethod::GpuPipeline { .. }),
             ) = methods.get(&rule)
             {
                 data.record_resolved_method_call(

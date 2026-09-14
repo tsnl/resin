@@ -883,28 +883,28 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
         DefinitionKind::Type,
     ),
     (
-        "GpuPtr",
-        "GpuPtr<T>\n\nAn owning GPU allocation view with checked host access. Indexing and field addresses retain its allocation.",
+        "StrongOwner",
+        "StrongOwner\n\nAn opaque shared host allocation handle. Copies retain its initialized payload; the final release destroys it.",
         DefinitionKind::Type,
     ),
     (
-        "GpuSpan",
-        "GpuSpan<T>\n\nAn owning GPU range. Indexing and slicing preserve its owner and access permissions.",
+        "WeakOwner",
+        "WeakOwner\n\nAn opaque weak allocation handle. It retains bookkeeping without keeping the payload alive.",
+        DefinitionKind::Type,
+    ),
+    (
+        "GpuView",
+        "GpuView\n\nAn opaque GPU allocation view retaining its owner, byte offset, and host access permissions.",
+        DefinitionKind::Type,
+    ),
+    (
+        "GpuPipelineContract",
+        "GpuPipelineContract\n\nAn opaque pipeline token retaining its native owner and binding its shader root, owner type, and stage.",
         DefinitionKind::Type,
     ),
     (
         "GpuArguments",
         "GpuArguments\n\nAn internal dispatch projection retaining referenced GPU allocations.",
-        DefinitionKind::Type,
-    ),
-    (
-        "GpuComputePipeline",
-        "GpuComputePipeline<T, Owner>\n\nAn owning compute pipeline retaining its shader root type T. Dispatch checks and projects its host arguments.",
-        DefinitionKind::Type,
-    ),
-    (
-        "GpuGraphicsPipeline",
-        "GpuGraphicsPipeline<T, Owner>\n\nAn owning graphics pipeline retaining the shared shader root T. Rootless shaders use None.",
         DefinitionKind::Type,
     ),
     (

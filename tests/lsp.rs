@@ -385,9 +385,9 @@ fn string_completions_distinguish_literal_views_and_owned_constructors() {
     let uri = uri(&temp.path().join("strings.resin"));
     for (version, expression, labels) in [
         (1, "\"text\".", vec!["data", "length", "at"]),
-        (2, "String.", vec!["from_bytes", "from_str"]),
+        (2, "String.", vec!["bytes", "from_bytes", "from_str", "get"]),
     ] {
-        let source = format!("def main() = {{ {expression}; }};");
+        let source = format!("import {{ \"$/string.resin\" }}; def main() = {{ {expression}; }};");
         if version == 1 {
             client.open(&uri, &source);
         } else {

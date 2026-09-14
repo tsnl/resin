@@ -264,7 +264,7 @@ mod tests {
             "type P = GpuSpan<int, int>;",
             "type G = GpuPtr<int>; type S = GpuSpan<{ x: uint }>; type Nested = Ptr<GpuSpan<GpuPtr<int>>>;",
             "def launch(args: GpuArguments) -> GpuArguments = { args };",
-            "def first(p: GpuSpan<int>) -> GpuPtr<int> = { p.at(0_ul) }; def make() -> GpuPtr<_> = { GpuPtr<int>.new(gpu, 3_i) };",
+            "def first(p: GpuSpan<int>) -> GpuPtr<int> = { p.at(0_ul) }; def make() -> GpuPtr<_> = { gpu.create::<int>(3_i) };",
             "type P = Ptr<()>; type S = Span<(int, int)>; type R = Ptr<{ x: int }>; type F = Ptr<(int) -> int>;",
             "def main() -> () = { var p = Ptr<int>(ulong(0)); var x = ulong(p) > ulong(0); var y = 8 >> 1; var z = 1 < 2; };",
             "def main() -> () = { var p = Ptr < Ptr < int > > (ulong (0)); };",
