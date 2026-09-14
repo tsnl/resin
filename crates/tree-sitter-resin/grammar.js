@@ -323,7 +323,12 @@ export default grammar({
           ),
         ),
       ),
-    field_access: ($) => seq(".", field("name", $.lid)),
+    field_access: ($) =>
+      seq(
+        ".",
+        field("name", $.lid),
+        optional(field("type_args", $.type_application)),
+      ),
     method_call: ($) =>
       prec(
         1,

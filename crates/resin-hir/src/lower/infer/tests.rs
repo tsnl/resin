@@ -210,15 +210,14 @@ fn retries_discard_failed_method_choices_and_preserve_completed_groups() {
     let mut typer = Context::with_builtins();
     let mut inference = infer::Inference::new(&mut typer);
     let span = Span { start: 0, end: 0 };
-    let method = |out| {
-        infer::Constraint::Method(
-            Ty::Str.into(),
-            "at".into(),
-            Ty::UInt64.into(),
-            out,
-            false,
-            vec![],
-        )
+    let method = |out| infer::Constraint::Method {
+        receiver: Ty::Str.into(),
+        name: "at".into(),
+        type_args: None,
+        arg: Ty::UInt64.into(),
+        out,
+        associated: false,
+        origins: vec![],
     };
     let (earlier, first) = inference.expression();
     inference.constrain(earlier, (span, method(first.clone())));
@@ -245,7 +244,10 @@ fn retries_discard_failed_method_choices_and_preserve_completed_groups() {
         let pointer = Ty::Pointer {
             pointee: Box::new(Ty::UInt8),
         };
-        assert_eq!(inference.methods[&rule].result, pointer);
+        let infer::ResolvedMethod::Compiler { declaration } = &inference.methods[&rule] else {
+            panic!("compiler method");
+        };
+        assert_eq!(declaration.result, pointer);
         assert_eq!(inference.solver.require(&ty, span).unwrap(), pointer);
     }
 }

@@ -207,10 +207,13 @@ pub(in crate::lower) fn file(
     let mut bodies = checker.bodies(&mut signatures, sources);
     checker.solve_functions(&signatures, &mut bodies);
     checker.require_holes();
-    checker
-        .scopes
-        .resolve_inferred(&checker.typing.solver, checker.typing.typer);
     let signatures = checker.resolve_signatures(signatures);
+    checker.complete_method_signatures(&declarations, &signatures);
+    checker.scopes.resolve_inferred(
+        &checker.typing.solver,
+        checker.typing.typer,
+        &checker.typing.methods,
+    );
     let Checker {
         mut typing,
         scopes,
@@ -303,17 +306,40 @@ impl Checker<'_> {
             } => (name, params, result, None),
             _ => return None,
         };
+        let method = methods.get(&name.val).copied();
+        let owner = method.and_then(|id| self.typing.typer.method_owners.get(&id).copied());
+        let owner_parameters = owner
+            .map(|owner| {
+                self.typing.typer.nominal_schemes[&owner]
+                    .type_params
+                    .clone()
+            })
+            .unwrap_or_default();
         let type_scope = match stmt {
             StmtKind::Function { type_params, .. } => type_params.first().map(|parameter| Span {
                 start: parameter.span.start,
                 end: body.map_or(result.span.end, |body| body.span.start),
             }),
             _ => None,
-        };
+        }
+        .or_else(|| {
+            (!owner_parameters.is_empty()).then_some(Span {
+                start: name.span.start,
+                end: body.map_or(result.span.end, |body| body.span.start),
+            })
+        });
         if let Some(span) = type_scope {
             self.scopes.push_at(span);
         }
-        let mut binders = vec![];
+        let mut binders = owner_parameters.clone();
+        for parameter in &owner_parameters {
+            self.scopes.import(
+                parameter.name.val.clone(),
+                super::scope::Symbol {
+                    definition: parameter.id.index(),
+                },
+            );
+        }
         if let StmtKind::Function { type_params, .. } = stmt {
             for parameter in type_params {
                 match self.scopes.define_type_parameter(parameter) {
@@ -336,6 +362,24 @@ impl Checker<'_> {
         }
         let id = signature.declaration.unwrap();
         self.scopes.set_parameters(id, &signature.type_params);
+        if let Some(owner) = owner
+            && matches!(stmt, StmtKind::Function { decorators, .. } if decorators.is_empty())
+        {
+            self.typing.typer.source_methods.insert(
+                (owner, name.val.rsplit('.').next().unwrap().into()),
+                super::context::SourceMethod {
+                    declaration: id,
+                    type_params: signature.type_params[owner_parameters.len()..].to_vec(),
+                    owner_params: owner_parameters,
+                    params: signature
+                        .params
+                        .iter()
+                        .map(|(_, annotation)| annotation.ty.clone())
+                        .collect(),
+                    result: signature.result.ty.clone(),
+                },
+            );
+        }
         if is_shader(stmt) {
             self.scopes.mark_shader(id);
         }
@@ -354,6 +398,45 @@ impl Checker<'_> {
             kind,
         };
         Some((declaration, body, signature))
+    }
+
+    fn complete_method_signatures(
+        &mut self,
+        declarations: &[typed::Declaration],
+        signatures: &BTreeMap<DeclarationId, typed::Signature>,
+    ) {
+        let local = declarations
+            .iter()
+            .map(|declaration| declaration.id)
+            .collect::<BTreeSet<_>>();
+        for method in self.typing.typer.source_methods.values_mut() {
+            let Some(signature) = signatures.get(&method.declaration) else {
+                if local.contains(&method.declaration) {
+                    method.params.fill(Type::Invalid);
+                    method.result = Type::Invalid;
+                }
+                continue;
+            };
+            method.params = signature
+                .params
+                .iter()
+                .map(|(_, annotation)| Type::from_hir(&annotation.ty))
+                .collect();
+            method.result = Type::from_hir(&signature.result.ty);
+        }
+    }
+
+    fn method_dependencies(&mut self, name: &str) {
+        // Receiver ownership may depend on an earlier call's inferred result.
+        // Include same-name candidates until solving selects the nominal owner.
+        self.dependencies.extend(
+            self.typing
+                .typer
+                .source_methods
+                .iter()
+                .filter(|((_, candidate), _)| candidate.as_ref() == name)
+                .map(|(_, method)| method.declaration),
+        );
     }
 
     fn declare(
@@ -595,6 +678,39 @@ struct Expression<'p, 'a> {
 }
 
 impl Expression<'_, '_> {
+    fn method_reference(
+        &mut self,
+        receiver_type: typed::Annotation<Type>,
+        name: &Ident,
+        type_args: Option<Vec<Type>>,
+        out: Type,
+    ) -> TermKind {
+        self.checker.method_dependencies(&name.val);
+        self.checker
+            .scopes
+            .record_members(name.span, receiver_type.ty.clone(), true);
+        self.checker.scopes.record_call(
+            name,
+            receiver_type.ty.clone(),
+            Ty::Unit.into(),
+            true,
+            self.rule,
+        );
+        self.constrain((
+            name.span,
+            Constraint::MethodReference {
+                receiver: receiver_type.ty.clone(),
+                name: name.val.clone(),
+                type_args,
+                out,
+            },
+        ));
+        TermKind::MethodReference {
+            rule: self.rule,
+            name: name.clone(),
+        }
+    }
+
     fn child(&mut self, term: &resin_ast::Term, expected: Option<Type>) -> Term {
         let (_, child) = self.checker.term(term, expected);
         self.checker
@@ -732,22 +848,37 @@ impl Expression<'_, '_> {
                 function: func,
                 args: type_args,
             } => {
-                let resin_ast::TermKind::Var { name } = &func.val else {
-                    return Err(GenerateError::inference(
-                        span,
-                        "type arguments require a function declaration",
-                    ));
-                };
                 let arguments = type_args
                     .iter()
                     .map(|ann| self.annotation(ann, true).ty)
                     .collect();
-                let (declaration, ty, type_args) = self.checker.value(name, Some(arguments))?;
-                equate = Some(ty);
-                TermKind::Var {
-                    declaration,
-                    name: name.clone(),
-                    type_args,
+                match &func.val {
+                    resin_ast::TermKind::Var { name } => {
+                        let (declaration, ty, type_args) =
+                            self.checker.value(name, Some(arguments))?;
+                        equate = Some(ty);
+                        TermKind::Var {
+                            declaration,
+                            name: name.clone(),
+                            type_args,
+                        }
+                    }
+                    resin_ast::TermKind::Field { base, name } => {
+                        let base = self.child(base, None);
+                        let TermKind::Type { ty } = base.kind else {
+                            return Err(GenerateError::inference(
+                                span,
+                                "method references require a type receiver",
+                            ));
+                        };
+                        self.method_reference(ty, name, Some(arguments), out.clone())
+                    }
+                    _ => {
+                        return Err(GenerateError::inference(
+                            span,
+                            "type arguments require a function declaration",
+                        ));
+                    }
                 }
             }
             resin_ast::TermKind::Type { ty } => {
@@ -891,12 +1022,13 @@ impl Expression<'_, '_> {
                 type_args,
                 arg,
             } => {
-                if !type_args.is_empty() {
-                    return Err(GenerateError::inference(
-                        span,
-                        "template application lowering is not implemented yet",
-                    ));
-                }
+                let type_args = (!type_args.is_empty()).then(|| {
+                    type_args
+                        .iter()
+                        .map(|ann| self.annotation(ann, true).ty)
+                        .collect()
+                });
+                self.checker.method_dependencies(&name.val);
                 let (receiver, annotation, receiver_type, associated) =
                     if let resin_ast::TermKind::Type { ty } = &receiver.val {
                         let annotation = self.annotation(ty, false);
@@ -916,15 +1048,17 @@ impl Expression<'_, '_> {
                     receiver_type.clone(),
                     arg.ty.clone(),
                     associated,
+                    self.rule,
                 );
-                let constraint = Constraint::Method(
-                    receiver_type.clone(),
-                    name.val.clone(),
-                    arg.ty.clone(),
-                    out.clone(),
+                let constraint = Constraint::Method {
+                    receiver: receiver_type.clone(),
+                    name: name.val.clone(),
+                    type_args,
+                    arg: arg.ty.clone(),
+                    out: out.clone(),
                     associated,
-                    receiver.as_ref().map(address_origins).unwrap_or_default(),
-                );
+                    origins: receiver.as_ref().map(address_origins).unwrap_or_default(),
+                };
                 self.constrain((span, constraint));
                 TermKind::MethodCall {
                     rule: self.rule,
@@ -1079,25 +1213,29 @@ impl Expression<'_, '_> {
             }
             resin_ast::TermKind::Field { base, name } => {
                 let base = self.child(base, None);
-                let (receiver, associated) = match &base.kind {
-                    TermKind::Type { ty } => (ty.ty.clone(), true),
-                    TermKind::Var { declaration, .. }
-                        if self.checker.scopes.is_shader(*declaration) =>
-                    {
-                        (crate::lower::context::shader_properties().into(), false)
+                if let TermKind::Type { ty } = &base.kind {
+                    self.method_reference(ty.clone(), name, None, out.clone())
+                } else {
+                    let (receiver, associated) = match &base.kind {
+                        TermKind::Type { ty } => (ty.ty.clone(), true),
+                        TermKind::Var { declaration, .. }
+                            if self.checker.scopes.is_shader(*declaration) =>
+                        {
+                            (crate::lower::context::shader_properties().into(), false)
+                        }
+                        _ => (base.ty.clone(), false),
+                    };
+                    self.checker
+                        .scopes
+                        .record_members(name.span, receiver, associated);
+                    self.constrain((
+                        span,
+                        Constraint::Field(base.ty.clone(), name.val.clone(), out.clone()),
+                    ));
+                    TermKind::Field {
+                        base: Box::new(base),
+                        name: name.clone(),
                     }
-                    _ => (base.ty.clone(), false),
-                };
-                self.checker
-                    .scopes
-                    .record_members(name.span, receiver, associated);
-                self.constrain((
-                    span,
-                    Constraint::Field(base.ty.clone(), name.val.clone(), out.clone()),
-                ));
-                TermKind::Field {
-                    base: Box::new(base),
-                    name: name.clone(),
                 }
             }
         };

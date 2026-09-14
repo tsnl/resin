@@ -1,6 +1,6 @@
 //! Complete solved expressions directly into public HIR.
 //! This is the last part of HIR construction; no concrete private tree is retained.
-use super::infer::{Rule, Solver, Type};
+use super::infer::{ResolvedMethod, Rule, Solver, Type};
 use super::scope::DeclarationId;
 use super::{typed, types};
 use crate::ReceiverConversion;
@@ -22,7 +22,7 @@ pub(super) fn function(
     source: &typed::Term,
     parameters: &[Option<DeclarationId>],
     solver: &Solver,
-    methods: &BTreeMap<Rule, FunctionDecl>,
+    methods: &BTreeMap<Rule, ResolvedMethod>,
     typer: &TyperContext,
     function_bindings: &HashMap<DeclarationId, FunctionId>,
     shaders: &BTreeMap<FunctionId, ShaderEntry>,
@@ -56,7 +56,7 @@ enum Initialization {
 
 struct Completion<'a> {
     solver: &'a Solver,
-    methods: &'a BTreeMap<Rule, FunctionDecl>,
+    methods: &'a BTreeMap<Rule, ResolvedMethod>,
     typer: &'a TyperContext,
     function_bindings: &'a HashMap<DeclarationId, FunctionId>,
     shaders: &'a BTreeMap<FunctionId, ShaderEntry>,
@@ -151,13 +151,30 @@ impl Completion<'_> {
                 receiver_type,
                 name,
                 arg,
-            } => self.method(
-                self.methods.get(rule).expect("solved method").clone(),
-                receiver.as_deref(),
-                &self.annotation(receiver_type)?.ty,
-                name,
-                arg,
-            )?,
+            } => {
+                let method = self.methods.get(rule).expect("solved method").clone();
+                match method {
+                    ResolvedMethod::Compiler { declaration } => self.method(
+                        declaration,
+                        receiver.as_deref(),
+                        &self.annotation(receiver_type)?.ty,
+                        name,
+                        arg,
+                    )?,
+                    source => self.source_method_call(&source, receiver.as_deref(), name, arg)?,
+                }
+            }
+            typed::TermKind::MethodReference { rule, name } => {
+                let ResolvedMethod::Source {
+                    declaration,
+                    type_args,
+                    ..
+                } = self.methods.get(rule).expect("solved method reference")
+                else {
+                    unreachable!("source method reference");
+                };
+                self.reference(*declaration, name, type_args, true)?
+            }
             typed::TermKind::Call { func, arg } => self.call(func, arg)?,
             typed::TermKind::Ascribe { ty, arg } => {
                 if let Some(to) = self.solver.resolve(&ty.ty) {
@@ -378,6 +395,65 @@ impl Completion<'_> {
             function,
             stage: entry.stage.clone(),
         })
+    }
+
+    fn source_method_call(
+        &mut self,
+        method: &ResolvedMethod,
+        receiver: Option<&typed::Term>,
+        name: &Ident,
+        argument: &typed::Term,
+    ) -> Result<TermKind> {
+        let ResolvedMethod::Source {
+            declaration,
+            type_args,
+            params,
+            result,
+            receiver_conversion,
+        } = method
+        else {
+            unreachable!("source method completion");
+        };
+        let parameter = Type::parameter(params.clone());
+        let function_type = Type::function(parameter.clone(), result.clone());
+        let func = Box::new(Term {
+            span: name.span,
+            ty: self.solver.require_complete(&function_type, name.span)?,
+            kind: self.reference(*declaration, name, type_args, true)?,
+        });
+        let receiver = receiver
+            .map(|receiver| {
+                Ok::<_, GenerateError>(Box::new(Term {
+                    span: receiver.span,
+                    ty: self.solver.require_complete(&params[0], receiver.span)?,
+                    kind: TermKind::Adapt {
+                        conversion: receiver_conversion.expect("checked source receiver"),
+                        arg: self.boxed(receiver)?,
+                    },
+                }))
+            })
+            .transpose()?;
+        let argument = self.boxed(argument)?;
+        let arg = if receiver.is_some() {
+            let params = params[1..]
+                .iter()
+                .map(|ty| self.solver.require_complete(ty, name.span))
+                .collect::<Result<_>>()?;
+            Box::new(Term {
+                span: argument.span,
+                ty: self.solver.require_complete(&parameter, name.span)?,
+                kind: TermKind::Pack {
+                    args: Arguments {
+                        receiver,
+                        argument,
+                        params,
+                    },
+                },
+            })
+        } else {
+            argument
+        };
+        Ok(TermKind::Call { func, arg })
     }
 
     fn method(
@@ -856,14 +932,15 @@ mod tests {
                 rule,
                 (
                     span,
-                    Constraint::Method(
-                        Ty::Str.into(),
-                        "at".into(),
-                        Ty::UInt64.into(),
-                        ty.clone(),
-                        false,
-                        vec![],
-                    ),
+                    Constraint::Method {
+                        receiver: Ty::Str.into(),
+                        name: "at".into(),
+                        type_args: None,
+                        arg: Ty::UInt64.into(),
+                        out: ty.clone(),
+                        associated: false,
+                        origins: vec![],
+                    },
                 ),
             );
             assert!(inference.solve(std::slice::from_ref(&ty)).is_empty());

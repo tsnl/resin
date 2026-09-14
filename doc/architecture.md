@@ -192,8 +192,14 @@ representation used by LIR; constructors constrain field values against the appl
 scheme. Local field-only structs retain enclosing type parameters as implicit
 arguments before their explicitly declared parameters. Imports and aliases keep
 the source nominal identity, and editor facts retain substituted fields without
-materializing their layouts. Methods on generic owners and additional method
-binders are the next source layers.
+materializing their layouts. Methods reuse the owner's binder identities and append
+their own named parameters. Source method namespaces select a declaration by nominal
+origin; HIR construction applies its signature once per call and emits an ordinary
+function application, including receiver adaptation. Method dependencies participate
+in result-inference groups. The completed HIR retains one method body; LIR specializes
+it, and generic drop hooks, with the owner's arguments before the method's arguments.
+Method lookup currently requires a known nominal receiver origin; selecting a
+method on an unconstrained type parameter still needs a dependent method relation.
 
 Transparent aliases use the same lexical type binders, for example
 `type View<T> = Ptr<T>`. Source scopes retain their completed RHS and named parameters;

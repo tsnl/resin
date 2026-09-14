@@ -74,6 +74,10 @@ pub(super) enum TermKind {
         name: Ident,
         arg: Box<Term>,
     },
+    MethodReference {
+        rule: Rule,
+        name: Ident,
+    },
     Call {
         func: Box<Term>,
         arg: Box<Term>,

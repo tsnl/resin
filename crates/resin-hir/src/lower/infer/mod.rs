@@ -1,6 +1,7 @@
 //! Inference variables, unification, and expression constraints.
 //! All handles are resolved before the typed tree reaches LIR lowering.
 use crate::lower::context::{Context, FunctionBody, FunctionDecl};
+use crate::lower::scope::DeclarationId;
 use crate::{GenerateError, GenerateErrorKind};
 use resin_source::prelude::*;
 use resin_types::prelude::*;
@@ -1041,6 +1042,40 @@ pub(crate) struct Equation {
     relation: Constraint,
 }
 
+#[derive(Clone)]
+pub(crate) struct AppliedMethod {
+    pub declaration: DeclarationId,
+    pub type_args: Vec<Type>,
+    pub params: Vec<Type>,
+    pub result: Type,
+}
+
+#[derive(Clone)]
+pub(crate) enum ResolvedMethod {
+    Source {
+        declaration: DeclarationId,
+        type_args: Vec<Type>,
+        params: Vec<Type>,
+        result: Type,
+        receiver_conversion: Option<crate::ReceiverConversion>,
+    },
+    Compiler {
+        declaration: FunctionDecl,
+    },
+}
+
+impl AppliedMethod {
+    fn resolved(self, receiver_conversion: Option<crate::ReceiverConversion>) -> ResolvedMethod {
+        ResolvedMethod::Source {
+            declaration: self.declaration,
+            type_args: self.type_args,
+            params: self.params,
+            result: self.result,
+            receiver_conversion,
+        }
+    }
+}
+
 /// Constraint services injected into source checking; this layer never traverses expressions.
 pub(crate) struct Inference<'a> {
     pub typer: &'a mut Context,
@@ -1048,7 +1083,8 @@ pub(crate) struct Inference<'a> {
     pub constraints: Vec<Equation>,
     owners: Vec<Vec<VariableId>>,
     // Choices belong to typing operations, not source spans; retries restore them with the solver.
-    pub methods: BTreeMap<Rule, FunctionDecl>,
+    pub methods: BTreeMap<Rule, ResolvedMethod>,
+    applications: BTreeMap<Rule, AppliedMethod>,
 }
 impl<'a> Inference<'a> {
     pub fn new(typer: &'a mut Context) -> Self {
@@ -1058,6 +1094,7 @@ impl<'a> Inference<'a> {
             constraints: vec![],
             owners: vec![],
             methods: BTreeMap::new(),
+            applications: BTreeMap::new(),
         }
     }
     fn rule(&mut self, variables: Vec<VariableId>) -> Rule {
@@ -1147,7 +1184,21 @@ pub(crate) enum Constraint {
     Address(Vec<AddressOrigin>, Type, Type),
     Field(Type, Arc<str>, Type),
     Call(Type, Type, Type),
-    Method(Type, Arc<str>, Type, Type, bool, Vec<AddressOrigin>),
+    Method {
+        receiver: Type,
+        name: Arc<str>,
+        type_args: Option<Vec<Type>>,
+        arg: Type,
+        out: Type,
+        associated: bool,
+        origins: Vec<AddressOrigin>,
+    },
+    MethodReference {
+        receiver: Type,
+        name: Arc<str>,
+        type_args: Option<Vec<Type>>,
+        out: Type,
+    },
     Ascribe(Type, Type, bool),
     Record(Vec<(Arc<str>, Type)>, Type),
     Builtin(Arc<str>, Vec<Type>, Type),
@@ -1167,12 +1218,14 @@ impl Inference<'_> {
     pub fn solve(&mut self, roots: &[Type]) -> Vec<GenerateError> {
         let baseline = self.solver.clone();
         let methods = self.methods.clone();
+        let applications = self.applications.clone();
         let equations = std::mem::take(&mut self.constraints);
         let mut failed = Vec::new();
         let mut errors = Vec::new();
         'retry: loop {
             self.solver = baseline.clone();
             self.methods = methods.clone();
+            self.applications = applications.clone();
             for owner in &failed {
                 self.fail(*owner);
             }
@@ -1236,7 +1289,9 @@ impl Inference<'_> {
                     ..
                 } in &self.constraints
                 {
-                    if let Constraint::Method(receiver, ..) = constraint {
+                    if let Constraint::Method { receiver, .. }
+                    | Constraint::MethodReference { receiver, .. } = constraint
+                    {
                         seeded |= self.solver.default_numbers(std::slice::from_ref(receiver));
                     }
                 }
@@ -1361,6 +1416,19 @@ impl Inference<'_> {
         ))
     }
 
+    fn nominal_drop(&self, ty: &Type) -> Option<TypeId> {
+        let Type::Node(Head::Nominal { definition } | Head::Atom(Ty::Defined { definition }), _) =
+            self.solver.head(ty)
+        else {
+            return None;
+        };
+        self.typer
+            .definition(definition)
+            .ok()?
+            .drop_hook()
+            .map(|_| definition)
+    }
+
     fn gpu_address(&self, origins: &[AddressOrigin]) -> Option<bool> {
         let mut gpu = false;
         for origin in origins {
@@ -1429,10 +1497,235 @@ impl Inference<'_> {
             .map_err(|message| error(span, message))
     }
 
+    fn method_receiver(&self, receiver: &Type) -> Type {
+        let mut receiver = self.solver.head(receiver);
+        while let Some(pointee) = receiver.deref_target() {
+            receiver = self.solver.head(pointee);
+        }
+        receiver
+    }
+
+    fn method_application(
+        &mut self,
+        owner: Rule,
+        receiver: &Type,
+        name: &str,
+        explicit: &Option<Vec<Type>>,
+        span: Span,
+    ) -> Result<Option<AppliedMethod>> {
+        if let Some(application) = self.applications.get(&owner) {
+            return Ok(Some(application.clone()));
+        }
+        let (definition, mut arguments) = match self.method_receiver(receiver) {
+            Type::Node(Head::Nominal { definition }, arguments) => (definition, arguments),
+            Type::Node(Head::Atom(Ty::Defined { definition }), _) => (definition, vec![]),
+            _ => return Ok(None),
+        };
+        let Some(method) = self.typer.source_method(definition, name).cloned() else {
+            return Ok(None);
+        };
+        if arguments.len() != method.owner_params.len() {
+            return Err(error(
+                span,
+                "method receiver has the wrong number of owner type arguments",
+            ));
+        }
+        if let Some(explicit) = explicit {
+            if explicit.len() != method.type_params.len() {
+                return Err(error(
+                    span,
+                    format!(
+                        "expected {} method type arguments, found {}",
+                        method.type_params.len(),
+                        explicit.len()
+                    ),
+                ));
+            }
+            arguments.extend(explicit.iter().cloned());
+        } else {
+            arguments.extend(method.type_params.iter().map(|_| self.solver.fresh()));
+        }
+        let parameters = method
+            .owner_params
+            .into_iter()
+            .chain(method.type_params)
+            .collect::<Vec<_>>();
+        let count = method.params.len();
+        let signature = Type::function(Type::parameter(method.params), method.result);
+        let (signature, type_args) =
+            self.solver
+                .apply(signature, &parameters, Some(arguments), span)?;
+        let Type::Node(Head::Function, parts) = self.solver.head(&signature) else {
+            unreachable!("method signature");
+        };
+        let params = match count {
+            0 => vec![],
+            1 => vec![parts[0].clone()],
+            _ => match self.solver.head(&parts[0]) {
+                Type::Node(Head::Record(_), params) => params,
+                _ => unreachable!("method parameters"),
+            },
+        };
+        let application = AppliedMethod {
+            declaration: method.declaration,
+            type_args,
+            params,
+            result: parts[1].clone(),
+        };
+        self.applications.insert(owner, application.clone());
+        Ok(Some(application))
+    }
+
+    fn source_method_call(
+        &mut self,
+        owner: Rule,
+        application: AppliedMethod,
+        constraint: &Constraint,
+        span: Span,
+    ) -> Result<bool> {
+        let Constraint::Method {
+            receiver,
+            arg,
+            out,
+            associated,
+            origins,
+            ..
+        } = constraint
+        else {
+            unreachable!("source method call constraint");
+        };
+        let offset = usize::from(!associated);
+        let params = application.params.get(offset..).ok_or_else(|| {
+            error(
+                span,
+                "method receiver does not match: this function has no receiver parameter",
+            )
+        })?;
+        let arguments = self
+            .solver
+            .coerce(arg, &Type::parameter(params.to_vec()), span)?;
+        let result = self.solver.coerce(&application.result, out, span)?;
+        let conversion = if *associated {
+            None
+        } else {
+            let Some(conversion) =
+                self.source_receiver(receiver, &application.params[0], origins, span)?
+            else {
+                return Ok(false);
+            };
+            Some(conversion)
+        };
+        if arguments && result {
+            self.methods.insert(owner, application.resolved(conversion));
+        }
+        Ok(arguments && result)
+    }
+
+    fn source_receiver(
+        &mut self,
+        from: &Type,
+        to: &Type,
+        origins: &[AddressOrigin],
+        span: Span,
+    ) -> Result<Option<crate::ReceiverConversion>> {
+        use crate::ReceiverConversion;
+        let source = self.solver.head(from);
+        let target = self.solver.head(to);
+        if matches!(source, Type::Variable(_) | Type::Apply { .. })
+            || matches!(target, Type::Apply { .. })
+        {
+            return Ok(None);
+        }
+        let (conversion, adapted) = match (&source, &target) {
+            (_, Type::Variable(_)) => (ReceiverConversion::Value, from.clone()),
+            (Type::Node(a, _), Type::Node(b, _)) if a == b => {
+                (ReceiverConversion::Value, from.clone())
+            }
+            (Type::Node(Head::Arc, parts), Type::Node(Head::Pointer, _)) => (
+                ReceiverConversion::ArcAddress,
+                Type::pointer(parts[0].clone()),
+            ),
+            (Type::Node(Head::Pointer | Head::GpuPointer, parts), _) => {
+                (ReceiverConversion::Load, parts[0].clone())
+            }
+            (Type::Node(Head::Arc, parts), _) => (ReceiverConversion::ArcLoad, parts[0].clone()),
+            (_, Type::Node(Head::Pointer | Head::GpuPointer, _)) => {
+                let Some(gpu) = self.gpu_address(origins) else {
+                    return Ok(None);
+                };
+                if gpu != matches!(target, Type::Node(Head::GpuPointer, _)) {
+                    return Err(error(
+                        span,
+                        if gpu {
+                            "GPU storage requires a GpuPtr receiver; it cannot be borrowed as a raw Ptr"
+                        } else {
+                            "a GpuPtr receiver requires an address in GPU storage"
+                        },
+                    ));
+                }
+                (
+                    ReceiverConversion::Address,
+                    if gpu {
+                        Type::gpu_pointer(from.clone())
+                    } else {
+                        Type::pointer(from.clone())
+                    },
+                )
+            }
+            _ => {
+                return Err(error(
+                    span,
+                    "method receiver does not match the first parameter",
+                ));
+            }
+        };
+        if !self.solver.unify(&adapted, to, span)? {
+            return Ok(None);
+        }
+        Ok(Some(conversion))
+    }
+
     fn constraint(&mut self, owner: Rule, constraint: &Constraint, span: Span) -> Result<bool> {
         match constraint {
-            Constraint::Method(receiver_type, name, arg, out, associated, origins) => {
+            Constraint::Method {
+                receiver: receiver_type,
+                name,
+                type_args,
+                arg,
+                out,
+                associated,
+                origins,
+            } => {
+                if matches!(
+                    self.method_receiver(receiver_type),
+                    Type::Variable(_) | Type::Apply { .. }
+                ) {
+                    return Ok(false);
+                }
+                let allocation = !associated
+                    && name.as_ref() == "new"
+                    && type_args.is_none()
+                    && self
+                        .solver
+                        .resolve(receiver_type)
+                        .and_then(|receiver| self.typer.gpu_allocator(&receiver))
+                        .is_some();
+                if !allocation
+                    && let Some(application) =
+                        self.method_application(owner, receiver_type, name, type_args, span)?
+                {
+                    return self.source_method_call(owner, application, constraint, span);
+                }
+                if type_args.is_some() {
+                    return Err(error(span, "compiler methods do not accept type arguments"));
+                }
                 let Some(receiver_type) = self.solver.resolve(receiver_type) else {
+                    if matches!(
+                        self.solver.head(receiver_type),
+                        Type::Node(Head::Nominal { .. }, _)
+                    ) {
+                        return Err(error(span, format!("unknown method `{name}`")));
+                    }
                     return Ok(false);
                 };
                 if !associated
@@ -1444,6 +1737,9 @@ impl Inference<'_> {
                         self.typer.gpu_error(allocator).into(),
                     );
                     self.solver.coerce(&result, out, span)?;
+                    if self.nominal_drop(arg).is_some() {
+                        return Err(error(span, "GPU elements cannot have drop hooks"));
+                    }
                     let Some(element) = self.solver.resolve(arg) else {
                         return Ok(false);
                     };
@@ -1452,7 +1748,12 @@ impl Inference<'_> {
                         .typer
                         .method_call(&receiver_type, name, &element, false)
                         .expect("registered GPU allocator");
-                    self.methods.insert(owner, method);
+                    self.methods.insert(
+                        owner,
+                        ResolvedMethod::Compiler {
+                            declaration: method,
+                        },
+                    );
                     return Ok(true);
                 }
                 let method = if *associated
@@ -1546,9 +1847,38 @@ impl Inference<'_> {
                     .solver
                     .coerce(&method.result.clone().into(), out, span)?;
                 if a && b {
-                    self.methods.insert(owner, method);
+                    self.methods.insert(
+                        owner,
+                        ResolvedMethod::Compiler {
+                            declaration: method,
+                        },
+                    );
                 }
                 return Ok(a && b);
+            }
+            Constraint::MethodReference {
+                receiver,
+                name,
+                type_args,
+                out,
+            } => {
+                let Some(application) =
+                    self.method_application(owner, receiver, name, type_args, span)?
+                else {
+                    return Err(error(
+                        span,
+                        "only source methods can be referenced as function values",
+                    ));
+                };
+                let signature = Type::function(
+                    Type::parameter(application.params.clone()),
+                    application.result.clone(),
+                );
+                let complete = self.solver.coerce(&signature, out, span)?;
+                if complete {
+                    self.methods.insert(owner, application.resolved(None));
+                }
+                return Ok(complete);
             }
             Constraint::Depends(_) => {}
             Constraint::Equal(from, to) => {
@@ -1743,6 +2073,16 @@ impl Inference<'_> {
                 return Ok(complete);
             }
             Constraint::Ascribe(from, to, literal) => {
+                if matches!(self.solver.head(to), Type::Node(Head::Record(_), _))
+                    && let Some(definition) = self.nominal_drop(from)
+                {
+                    return Err(GenerateError::typing(
+                        span,
+                        TypeError {
+                            kind: TypeErrorKind::UnwrapManaged { definition },
+                        },
+                    ));
+                }
                 if matches!(self.solver.head(to), Type::Node(Head::Weak, _))
                     && self.solver.resolve(from) == Some(Ty::Unit)
                 {
@@ -1897,10 +2237,24 @@ impl Constraint {
             | Self::Ascribe(from, _, _)
             | Self::Variant(from, _, _) => vec![from],
             Self::Call(func, arg, _) => vec![func, arg],
-            Self::Method(func, _, arg, _, _, origins) => origins
+            Self::Method {
+                receiver,
+                arg,
+                type_args,
+                origins,
+                ..
+            } => origins
                 .iter()
                 .map(AddressOrigin::input)
-                .chain([func, arg])
+                .chain([receiver, arg])
+                .chain(type_args.iter().flatten())
+                .collect(),
+            Self::MethodReference {
+                receiver,
+                type_args,
+                ..
+            } => std::iter::once(receiver)
+                .chain(type_args.iter().flatten())
                 .collect(),
             Self::Address(origins, pointee, _) => origins
                 .iter()

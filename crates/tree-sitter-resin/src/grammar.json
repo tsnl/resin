@@ -1851,6 +1851,22 @@
             "type": "SYMBOL",
             "name": "lid"
           }
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "type_args",
+              "content": {
+                "type": "SYMBOL",
+                "name": "type_application"
+              }
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
         }
       ]
     },

@@ -51,6 +51,7 @@ pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
 
 struct Generator {
     module: Module,
+    functions: Vec<Option<Function>>,
     source: Source,
     typer: Context,
     scopes: ContextView,
@@ -61,6 +62,7 @@ impl Generator {
     fn new() -> Self {
         Self {
             module: Module::default(),
+            functions: vec![],
             source: Source::new("<source>", ""),
             typer: Context::with_builtins(),
             scopes: Scopes::new().finish(),
@@ -80,7 +82,34 @@ impl Generator {
 
     fn finish(mut self) -> Module {
         self.module.types = self.typer.into_definitions();
+        self.module.functions = self
+            .functions
+            .into_iter()
+            .map(|function| function.expect("completed declaration"))
+            .collect();
         self.module
+    }
+
+    fn reserve_function(&mut self, declaration: DeclarationId) -> FunctionId {
+        if let Some(&function) = self.function_bindings.get(&declaration) {
+            return function;
+        }
+        let function = FunctionId::from_index(self.functions.len());
+        self.functions.push(None);
+        self.function_bindings.insert(declaration, function);
+        function
+    }
+
+    fn function(&self, function: FunctionId) -> &Function {
+        self.functions[function.index()]
+            .as_ref()
+            .expect("completed signature")
+    }
+
+    fn function_mut(&mut self, function: FunctionId) -> &mut Function {
+        self.functions[function.index()]
+            .as_mut()
+            .expect("completed signature")
     }
 }
 
@@ -413,12 +442,6 @@ impl Scopes {
                     type_params,
                 } => (|| {
                     let id = self.nominal(name, type_params, body, typer)?;
-                    if !type_params.is_empty() && !owned.is_empty() {
-                        return Err(GenerateError::inference(
-                            owned[0].span,
-                            "methods on generic structs are not implemented yet",
-                        ));
-                    }
                     methods.extend(owned.iter().map(|statement| Method {
                         owner: id,
                         statement,
@@ -539,9 +562,9 @@ impl Generator {
         else {
             return Ok(());
         };
-        require_monomorphic(type_params)?;
         let declaration = reserve_method(name, scopes, declarations)?;
         let definition = method.owner;
+        self.typer.method_owners.insert(declaration, definition);
         scopes.record_method_definition(definition, declaration);
         if decorators
             .iter()
@@ -550,6 +573,29 @@ impl Generator {
             return Err(GenerateError::inference(
                 name.span,
                 "methods cannot be shader entries",
+            ));
+        }
+        // Ordinary methods are reserved here and their schemes are constructed
+        // once, with other function declarations. Native GPU bridges still need
+        // concrete metadata before checking any calls in this file.
+        if decorators.is_empty() {
+            let function = self.reserve_function(declaration);
+            if name.val.rsplit('.').next() == Some("drop") {
+                // Ownership affects every signature's operations, including GPU
+                // projection. Reserve its identity before inference; validate the
+                // completed hook signature with the other method declarations.
+                self.typer.define_drop(definition, function);
+            }
+            return Ok(());
+        }
+        require_fixed_bridge_signature(type_params)?;
+        if !self.typer.nominal_schemes[&definition]
+            .type_params
+            .is_empty()
+        {
+            return Err(GenerateError::inference(
+                name.span,
+                "GPU bridges require a fixed owner type",
             ));
         }
         let evaluator = Evaluator {
@@ -627,11 +673,28 @@ impl Generator {
         name: &Ident,
         function: FunctionId,
     ) -> Result<(), GenerateError> {
-        let declaration = self.typer.declared_function(function);
-        let pointer = Ty::Pointer {
-            pointee: Box::new(Ty::Defined { definition: owner }),
+        let signature = &self.function(function).signature;
+        let owner_parameters = &self.typer.nominal_schemes[&owner].type_params;
+        let pointer = crate::Type::Pointer {
+            pointee: Box::new(crate::Type::Defined {
+                definition: owner,
+                arguments: owner_parameters
+                    .iter()
+                    .map(|parameter| crate::Type::Parameter {
+                        parameter: parameter.id,
+                    })
+                    .collect(),
+            }),
         };
-        if declaration.params != [pointer] || declaration.result != Ty::Unit {
+        if !signature
+            .type_params
+            .iter()
+            .map(|parameter| parameter.id)
+            .eq(owner_parameters.iter().map(|parameter| parameter.id))
+            || signature.params.len() != 1
+            || signature.params[0].annotation.ty != pointer
+            || signature.result.ty != crate::Type::Unit
+        {
             return Err(GenerateError::inference(
                 name.span,
                 "drop must have signature drop(receiver: Ptr<T>) -> ()",
@@ -724,7 +787,7 @@ impl Generator {
         source: &typed::Signature,
     ) -> Result<FunctionId, GenerateError> {
         check_parameters(source)?;
-        let id = FunctionId::from_index(self.module.functions.len());
+        let id = self.reserve_function(source.declaration.expect("checked function"));
         // Native bridges and the remaining compiler-provided method declarations
         // consume concrete signatures. Ordinary source calls use schemes in scopes.
         let solver = infer::Solver::default();
@@ -739,7 +802,7 @@ impl Generator {
         ) {
             self.typer.register_function(id, params, result);
         }
-        self.module.functions.push(Function {
+        self.functions[id.index()] = Some(Function {
             location: Some(SourceLocation {
                 source: self.source.clone(),
                 span: name.span,
@@ -749,8 +812,6 @@ impl Generator {
             body: None,
             foreign_header: None,
         });
-        self.function_bindings
-            .insert(source.declaration.expect("checked function"), id);
         Ok(id)
     }
     fn declare_foreign(
@@ -792,7 +853,7 @@ impl Generator {
                 kind: GenerateErrorKind::InvalidForeignSignature,
             });
         }
-        self.module.functions[id.index()].foreign_header = Some(foreign.header);
+        self.function_mut(id).foreign_header = Some(foreign.header);
         Ok(id)
     }
 }
@@ -835,11 +896,10 @@ impl Generator {
         let name = &declaration.name;
         match &declaration.kind {
             typed::DeclarationKind::Function { decorators } => {
-                if let Some(id) = self.function_identity(name, signature)? {
-                    for decorator in decorators {
-                        if !gpu::is_bridge(&decorator.val) || !name.val.contains('.') {
-                            self.declare_shader(id, decorator)?;
-                        }
+                let id = self.declare_source_function(name, signature)?;
+                for decorator in decorators {
+                    if !gpu::is_bridge(&decorator.val) || !name.val.contains('.') {
+                        self.declare_shader(id, decorator)?;
                     }
                 }
             }
@@ -850,25 +910,26 @@ impl Generator {
         Ok(())
     }
 
-    fn function_identity(
+    fn declare_source_function(
         &mut self,
         name: &Ident,
         signature: &typed::Signature,
-    ) -> Result<Option<FunctionId>, GenerateError> {
-        if name.val.contains('.') {
-            return Ok(signature
-                .declaration
-                .and_then(|id| self.function_bindings.get(&id).copied()));
+    ) -> Result<FunctionId, GenerateError> {
+        let declaration = signature.declaration.expect("checked declaration");
+        if let Some(&function) = self.function_bindings.get(&declaration)
+            && self.functions[function.index()].is_some()
+        {
+            return Ok(function);
         }
-        self.declare_function(name, signature).map(Some)
+        let function = self.declare_function(name, signature)?;
+        if let Some(&owner) = self.typer.method_owners.get(&declaration) {
+            self.register_method(owner, name, function)?;
+        }
+        Ok(function)
     }
 
     fn declare_shader(&mut self, id: FunctionId, decorator: &Ident) -> Result<(), GenerateError> {
-        if !self.module.functions[id.index()]
-            .signature
-            .type_params
-            .is_empty()
-        {
+        if !self.function(id).signature.type_params.is_empty() {
             return Err(shader_error(
                 decorator,
                 "shader entries require a fixed signature without template parameters",
@@ -881,7 +942,7 @@ impl Generator {
                 "a function can have only one shader decorator",
             ));
         }
-        let signature = &self.module.functions[id.index()].signature;
+        let signature = &self.function(id).signature;
         let parameters = signature
             .params
             .iter()
@@ -1004,8 +1065,9 @@ impl Generator {
             let Some(&id) = self.function_bindings.get(&declaration) else {
                 continue;
             };
-            self.module.functions[id.index()].signature = elaborate_signature(signature);
-            self.module.functions[id.index()].body = Some(body);
+            let function = self.function_mut(id);
+            function.signature = elaborate_signature(signature);
+            function.body = Some(body);
         }
     }
 }
@@ -1037,13 +1099,12 @@ impl Generator {
     }
 }
 
-// The syntax/AST layer can retain binders before polymorphic HIR is introduced.
-fn require_monomorphic(params: &[Ident]) -> Result<(), GenerateError> {
+fn require_fixed_bridge_signature(params: &[Ident]) -> Result<(), GenerateError> {
     match params.first() {
         None => Ok(()),
         Some(parameter) => Err(GenerateError::inference(
             parameter.span,
-            "template definition lowering is not implemented yet",
+            "GPU bridge declarations require a fixed signature without template parameters",
         )),
     }
 }

@@ -28,13 +28,11 @@ fn checking_resolves_types_in_earlier_expressions_and_annotations() {
         &mut generator,
     );
     assert!(checked.errors.is_empty(), "{:?}", checked.errors);
-    assert!(
-        generator
-            .module
-            .functions
-            .iter()
-            .all(|function| function.body.is_none())
-    );
+    assert!(generator.functions.iter().all(|function| {
+        function
+            .as_ref()
+            .is_some_and(|function| function.body.is_none())
+    }));
     let value = checked.context.lookup("value", false).unwrap();
     assert_eq!(checked.signatures[&value].result.ty, crate::Type::Int32);
     let TermKind::Block { stmts, .. } = &checked.bodies[&value].kind else {
@@ -95,8 +93,9 @@ fn completed_bodies_keep_shadowed_references_after_discarding_construction_state
     checked.context = Scopes::new().finish();
     generator.define_functions(checked);
     assert!(generator.errors.is_empty(), "{:?}", generator.errors);
+    let module = generator.finish();
 
-    let caller = &generator.module.functions[1];
+    let caller = &module.functions[1];
     let parameter = caller.signature.params[0].binding.unwrap();
     let crate::TermKind::Block { stmts, tail } = &caller.body.as_ref().unwrap().kind else {
         panic!()
@@ -120,8 +119,7 @@ fn completed_bodies_keep_shadowed_references_after_discarding_construction_state
         matches!(tail.kind, crate::TermKind::Local { binding: local, .. } if local == *binding)
     );
 
-    let crate::TermKind::Block { tail, .. } =
-        &generator.module.functions[2].body.as_ref().unwrap().kind
+    let crate::TermKind::Block { tail, .. } = &module.functions[2].body.as_ref().unwrap().kind
     else {
         panic!()
     };
@@ -165,7 +163,7 @@ fn declaration_identities_do_not_depend_on_unique_source_spans() {
     let mut generator = Generator::new();
     generator.generate_file(&file, Scopes::new());
     assert!(generator.errors.is_empty(), "{:?}", generator.errors);
-    let functions = &generator.module.functions;
+    let functions = &generator.finish().functions;
     assert_eq!(functions[0].signature.result.ty, crate::Type::Int32);
     assert_eq!(functions[1].signature.result.ty, crate::Type::Bool);
     assert_ne!(

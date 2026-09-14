@@ -1233,6 +1233,162 @@ impl Analysis {
             }
         }
     }
+
+    fn record_source_methods(
+        &mut self,
+        location: SourceLocation,
+        ty: &Type,
+        associated: bool,
+        typer: &lower::context::Context,
+        solver: &lower::infer::Solver,
+    ) {
+        let mut owner = ty;
+        while let Type::Pointer { pointee } | Type::GpuPointer { pointee } | Type::Arc { pointee } =
+            owner
+        {
+            owner = pointee;
+        }
+        let Type::Defined {
+            definition,
+            arguments,
+        } = owner
+        else {
+            return;
+        };
+        let names = self.type_names_with(typer);
+        let mut members = Vec::new();
+        for (name, method) in typer.source_methods_for(*definition) {
+            let substitute = |body: &lower::infer::Type| lower::infer::Type::Apply {
+                body: Box::new(body.clone()),
+                arguments: method
+                    .owner_params
+                    .iter()
+                    .zip(arguments)
+                    .map(|(parameter, argument)| {
+                        (parameter.id, lower::infer::Type::from_hir(argument))
+                    })
+                    .collect(),
+            };
+            let params = method.params.iter().map(substitute).collect::<Vec<_>>();
+            if !associated
+                && !source_method_receiver(ty, params.first(), method, solver, location.span)
+            {
+                continue;
+            }
+            let signature = lower::infer::Type::function(
+                lower::infer::Type::parameter(params[usize::from(!associated)..].to_vec()),
+                substitute(&method.result),
+            );
+            let Some(signature) = solver.complete(&signature) else {
+                continue;
+            };
+            let binders = method
+                .type_params
+                .iter()
+                .map(|parameter| parameter.name.val.as_ref())
+                .collect::<Vec<_>>();
+            let signature = if binders.is_empty() {
+                names.format(&signature)
+            } else {
+                format!("<{}> {}", binders.join(", "), names.format(&signature))
+            };
+            members.push(Member {
+                name: name.to_string(),
+                ty: signature,
+                kind: DefinitionKind::Function,
+                origin: Some(
+                    self.contexts.definitions[method.declaration]
+                        .location
+                        .clone(),
+                ),
+                compiler_signature: !method.owner_params.is_empty()
+                    || !method.type_params.is_empty(),
+            });
+        }
+        let existing = self.fields.entry(location).or_default();
+        for member in members {
+            existing.retain(|existing| existing.name != member.name);
+            existing.push(member);
+        }
+    }
+
+    fn record_source_method_call(
+        &mut self,
+        location: &SourceLocation,
+        name: &str,
+        method: &lower::infer::ResolvedMethod,
+        associated: bool,
+        typer: &lower::context::Context,
+        solver: &lower::infer::Solver,
+    ) {
+        let lower::infer::ResolvedMethod::Source {
+            declaration,
+            type_args,
+            params,
+            result,
+            ..
+        } = method
+        else {
+            return;
+        };
+        let signature = lower::infer::Type::function(
+            lower::infer::Type::parameter(params[usize::from(!associated)..].to_vec()),
+            result.clone(),
+        );
+        let Some(signature) = solver.complete(&signature) else {
+            return;
+        };
+        let member = Member {
+            name: name.to_owned(),
+            ty: self.type_names_with(typer).format(&signature),
+            kind: DefinitionKind::Function,
+            origin: Some(self.contexts.definitions[*declaration].location.clone()),
+            compiler_signature: !type_args.is_empty(),
+        };
+        let existing = self.fields.entry(location.clone()).or_default();
+        existing.retain(|existing| existing.name != name);
+        existing.push(member);
+    }
+}
+
+fn source_method_receiver(
+    receiver: &Type,
+    first: Option<&lower::infer::Type>,
+    method: &lower::context::SourceMethod,
+    solver: &lower::infer::Solver,
+    span: Span,
+) -> bool {
+    let Some(first) = first else {
+        return false;
+    };
+    let mut solver = solver.clone();
+    let Ok((first, _)) = solver.apply(first.clone(), &method.type_params, None, span) else {
+        return false;
+    };
+    let source = lower::infer::Type::from_hir(receiver);
+    let mut candidates = vec![
+        source.clone(),
+        lower::infer::Type::pointer(source.clone()),
+        lower::infer::Type::gpu_pointer(source),
+    ];
+    match receiver {
+        Type::Pointer { pointee } | Type::GpuPointer { pointee } => {
+            candidates.push(lower::infer::Type::from_hir(pointee));
+        }
+        Type::Arc { pointee } => {
+            candidates.push(lower::infer::Type::from_hir(pointee));
+            candidates.push(lower::infer::Type::pointer(lower::infer::Type::from_hir(
+                pointee,
+            )));
+        }
+        _ => {}
+    }
+    candidates.into_iter().any(|candidate| {
+        solver
+            .clone()
+            .unify(&candidate, &first, span)
+            .is_ok_and(|complete| complete)
+    })
 }
 fn format_concrete_type(ty: &Ty, typer: &lower::context::Context) -> String {
     resin_types::format_type(ty, typer.definitions())

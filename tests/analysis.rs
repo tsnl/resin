@@ -6,6 +6,127 @@ use std::{collections::BTreeMap, path::Path, sync::Arc};
 use tempfile::TempDir;
 
 #[test]
+fn generic_method_calls_show_substituted_signatures_and_original_definitions() {
+    let library = "export { Cell }; struct Cell<T> { value: T, def read(self: Ptr<Cell<T>>) -> T = { self.value }; def choose<U>(self: Ptr<Cell<T>>, value: U) -> U = { value }; };";
+    let source = "import { \"library.resin\" }; type IntCell = Cell<int>; def use(cell: Ptr<IntCell>) -> ulong = { cell.read(); cell.choose::<ulong>(42) };";
+    let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
+    let analysis = project.analyze();
+    assert!(
+        analysis.diagnostics().is_empty(),
+        "{:?}",
+        analysis.diagnostics()
+    );
+    let input = project.source("main.resin");
+    for (name, expected) in [
+        ("read", "read: (()) -> int"),
+        ("choose", "choose: (ulong) -> ulong"),
+    ] {
+        let offset = source.find(&format!("cell.{name}")).unwrap() + 5;
+        assert_eq!(analysis.hover(&input, offset).unwrap().text, expected);
+        let items = analysis.completions(&input, offset);
+        assert_eq!(
+            items.iter().find(|item| item.name == name).unwrap().detail,
+            expected
+        );
+        let origin = analysis.definition(&input, offset).unwrap();
+        assert_eq!(origin.source, project.source("library.resin"));
+        assert_eq!(
+            origin.span.start,
+            library.find(&format!("def {name}")).unwrap() + 4
+        );
+    }
+}
+
+#[test]
+fn unfinished_generic_method_access_keeps_owner_substitution_and_method_binders() {
+    let library = "export { Cell }; struct Cell<T> { value: T, def read(self: Ptr<Cell<T>>) -> T = { self.value }; def choose<U>(self: Ptr<Cell<T>>, value: U) -> U = { value }; def make(value: T) -> Cell<T> = { Cell<T> { value = value } }; };";
+    for receiver in ["cell", "Cell<int>"] {
+        let source = format!(
+            "import {{ \"library.resin\" }}; def use(cell: Ptr<Cell<int>>) = {{ {receiver}.; }};"
+        );
+        let project = Project::new(&[("main.resin", &source), ("library.resin", library)]);
+        let analysis = project.analyze();
+        assert!(!analysis.diagnostics().is_empty());
+        let input = project.source("main.resin");
+        let items = analysis.completions(&input, source.find(".;").unwrap() + 1);
+        let choose = items.iter().find(|item| item.name == "choose").unwrap();
+        assert!(choose.detail.contains("<U>"), "{choose:?}");
+        assert!(!choose.detail.contains("Cell<T>"), "{choose:?}");
+        let read = items.iter().find(|item| item.name == "read").unwrap();
+        if receiver == "cell" {
+            assert_eq!(read.detail, "read: (()) -> int");
+            assert_eq!(choose.detail, "choose: <U> (U) -> U");
+            assert!(!items.iter().any(|item| item.name == "make"), "{items:?}");
+        } else {
+            assert!(read.detail.contains("Ptr<Cell<int>>"), "{read:?}");
+            assert!(items.iter().any(|item| item.name == "make"), "{items:?}");
+        }
+    }
+}
+
+#[test]
+fn generic_method_references_show_the_expected_function_instantiation() {
+    let source = "struct Factory { def create<T>() -> T = { 42 }; }; def main() -> int = { var create: () -> int; create := Factory.create; create() };";
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.analyze();
+    assert!(
+        analysis.diagnostics().is_empty(),
+        "{:?}",
+        analysis.diagnostics()
+    );
+    let input = project.source("main.resin");
+    let offset = source.find("Factory.create").unwrap() + 8;
+    assert_eq!(
+        analysis.hover(&input, offset).unwrap().text,
+        "create: (()) -> int"
+    );
+    let origin = analysis.definition(&input, offset).unwrap();
+    assert_eq!(origin.span.start, source.find("def create").unwrap() + 4);
+}
+
+#[test]
+fn generic_method_editor_snapshots_keep_completed_imported_schemes() {
+    let input = Source::new(
+        "main.resin",
+        "import { \"library.resin\" }; def use(cell: Ptr<Cell<int>>) -> _ = { cell.read() };",
+    );
+    let original = Source::new(
+        "library.resin",
+        "export { Cell }; struct Cell<T> { value: T, def read(self: Ptr<Cell<T>>) -> T = { self.value }; };",
+    );
+    let changed = original.with_text("export { Cell }; struct Cell<T> { padding: ubyte, value: T, def read(self: Ptr<Cell<T>>) -> long = { 42 }; };");
+    let mut loader = resin_source::Loader::new(Default::default());
+    let mut compiler = Compiler::new();
+    loader
+        .set_import(&input, "library.resin", original.clone())
+        .unwrap();
+    let before = compiler.analyze(input.clone(), &mut loader);
+    loader
+        .set_import(&input, "library.resin", changed.clone())
+        .unwrap();
+    let after = compiler.analyze(input.clone(), &mut loader);
+    let offset = input.text().find("cell.read").unwrap() + 5;
+    for (analysis, library, expected) in [
+        (&before, &original, "read: (()) -> int"),
+        (&after, &changed, "read: (()) -> long"),
+        (&before, &original, "read: (()) -> int"),
+    ] {
+        assert!(
+            analysis.diagnostics().is_empty(),
+            "{:?}",
+            analysis.diagnostics()
+        );
+        assert_eq!(analysis.hover(&input, offset).unwrap().text, expected);
+        let origin = analysis.definition(&input, offset).unwrap();
+        assert_eq!(&origin.source, library);
+        assert_eq!(
+            origin.span.start,
+            library.text().find("def read").unwrap() + 4
+        );
+    }
+}
+
+#[test]
 fn generic_nominal_fields_retain_substitution_and_declaration_navigation() {
     let library = "export { Cell }; struct Cell<T> { value: T };";
     for (parameters, receiver, result) in [
