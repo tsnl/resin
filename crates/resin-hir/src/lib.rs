@@ -1214,6 +1214,38 @@ impl Analysis {
         }
     }
 
+    fn record_intrinsic_methods(
+        &mut self,
+        location: SourceLocation,
+        ty: &lower::infer::Type,
+        associated: bool,
+        typer: &lower::context::Context,
+        solver: &lower::infer::Solver,
+    ) {
+        let names = self.type_names_with(typer);
+        let members = lower::context::intrinsic_methods(ty, solver)
+            .into_iter()
+            .filter_map(|(name, method)| {
+                let signature = lower::infer::Type::function(
+                    method.params[usize::from(!associated)..].to_vec(),
+                    method.result,
+                );
+                Some(Member {
+                    name: name.into(),
+                    ty: names.format(&solver.complete(&signature)?),
+                    kind: DefinitionKind::Function,
+                    origin: None,
+                    compiler_signature: true,
+                })
+            })
+            .collect::<Vec<_>>();
+        let existing = self.fields.entry(location).or_default();
+        for member in members {
+            existing.retain(|existing| existing.name != member.name);
+            existing.push(member);
+        }
+    }
+
     fn record_source_methods(
         &mut self,
         location: SourceLocation,
@@ -1290,7 +1322,7 @@ impl Analysis {
         }
     }
 
-    fn record_source_method_call(
+    fn record_resolved_method_call(
         &mut self,
         location: &SourceLocation,
         name: &str,
@@ -1299,15 +1331,23 @@ impl Analysis {
         typer: &lower::context::Context,
         solver: &lower::infer::Solver,
     ) {
-        let lower::infer::ResolvedMethod::Source {
-            declaration,
-            type_args,
-            params,
-            result,
-            ..
-        } = method
-        else {
-            return;
+        let (params, result, origin, compiler_signature) = match method {
+            lower::infer::ResolvedMethod::Source {
+                declaration,
+                type_args,
+                params,
+                result,
+                ..
+            } => (
+                params,
+                result,
+                Some(self.contexts.definitions[*declaration].location.clone()),
+                !type_args.is_empty(),
+            ),
+            lower::infer::ResolvedMethod::Intrinsic { signature, .. } => {
+                (&signature.params, &signature.result, None, true)
+            }
+            _ => return,
         };
         let signature = lower::infer::Type::function(
             params[usize::from(!associated)..].to_vec(),
@@ -1320,8 +1360,8 @@ impl Analysis {
             name: name.to_owned(),
             ty: self.type_names_with(typer).format(&signature),
             kind: DefinitionKind::Function,
-            origin: Some(self.contexts.definitions[*declaration].location.clone()),
-            compiler_signature: !type_args.is_empty(),
+            origin,
+            compiler_signature,
         };
         let existing = self.fields.entry(location.clone()).or_default();
         existing.retain(|existing| existing.name != name);

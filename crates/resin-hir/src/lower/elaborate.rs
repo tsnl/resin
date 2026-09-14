@@ -189,6 +189,22 @@ impl Completion<'_> {
                     ResolvedMethod::GpuPipeline { method } => {
                         self.source_pipeline(method, receiver.as_deref(), name, args)?
                     }
+                    ResolvedMethod::Intrinsic {
+                        signature,
+                        receiver_conversion,
+                    } => {
+                        let result = self
+                            .solver
+                            .require_complete(&signature.result, source.span)?;
+                        let kind = self.intrinsic_method(
+                            signature,
+                            receiver_conversion,
+                            receiver.as_deref(),
+                            args,
+                            source.span,
+                        )?;
+                        self.convert_method_result(source, result, kind)?
+                    }
                     ResolvedMethod::Compiler { declaration } => {
                         let result = types::ty(&declaration.result);
                         let kind = self.method(
@@ -213,7 +229,9 @@ impl Completion<'_> {
                     ResolvedMethod::Dependent { signature } => TermKind::DependentMethod {
                         lookup: self.method_lookup(signature, name.span)?,
                     },
-                    ResolvedMethod::Compiler { .. } | ResolvedMethod::GpuPipeline { .. } => {
+                    ResolvedMethod::Compiler { .. }
+                    | ResolvedMethod::GpuPipeline { .. }
+                    | ResolvedMethod::Intrinsic { .. } => {
                         unreachable!("source method reference")
                     }
                 }
@@ -495,15 +513,86 @@ impl Completion<'_> {
         Ok(TermKind::Call { func, args })
     }
 
-    fn source_pipeline(&mut self, method: super::gpu::PipelineMethod, receiver: Option<&typed::Term>, _name: &Ident, arguments: &[typed::Term]) -> Result<TermKind> {
+    fn intrinsic_method(
+        &mut self,
+        signature: super::context::IntrinsicMethod,
+        conversion: Option<crate::ReceiverConversion>,
+        receiver: Option<&typed::Term>,
+        arguments: &[typed::Term],
+        span: Span,
+    ) -> Result<TermKind> {
+        let receiver = receiver
+            .map(|receiver| {
+                Ok::<_, GenerateError>(Term {
+                    span: receiver.span,
+                    ty: self
+                        .solver
+                        .require_complete(&signature.params[0], receiver.span)?,
+                    kind: TermKind::Adapt {
+                        conversion: conversion.expect("checked primitive receiver"),
+                        arg: self.boxed(receiver)?,
+                    },
+                })
+            })
+            .transpose()?;
+        let values = receiver
+            .into_iter()
+            .chain(
+                arguments
+                    .iter()
+                    .map(|arg| self.elaborate(arg))
+                    .collect::<Result<Vec<_>>>()?,
+            )
+            .collect();
+        let params = signature
+            .params
+            .iter()
+            .map(|ty| self.solver.require_complete(ty, span))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(TermKind::Intrinsic {
+            op: signature.op,
+            type_args: vec![],
+            args: Arguments { values, params },
+        })
+    }
+
+    fn source_pipeline(
+        &mut self,
+        method: super::gpu::PipelineMethod,
+        receiver: Option<&typed::Term>,
+        _name: &Ident,
+        arguments: &[typed::Term],
+    ) -> Result<TermKind> {
         if let FunctionBody::GpuPipelineFactory { factory, graphics } = method.body {
-            let receiver_type = self.solver.resolve(&Type::from_hir(&method.params[0])).expect("fixed native GPU receiver");
+            let receiver_type = self
+                .solver
+                .resolve(&Type::from_hir(&method.params[0]))
+                .expect("fixed native GPU receiver");
             return self.pipeline_create(receiver, arguments, &[receiver_type], factory, graphics);
         }
-        let values = receiver.into_iter().chain(arguments.iter()).map(|term| self.elaborate(term)).collect::<Result<Vec<_>>>()?;
-        let args = Arguments { values, params: method.params };
-        let FunctionBody::GpuPipelineDispatch { context, allocator, record } = method.body else { unreachable!("completed pipeline bridge") };
-        Ok(TermKind::GpuPipelineDispatch { context, allocator, record, args })
+        let values = receiver
+            .into_iter()
+            .chain(arguments.iter())
+            .map(|term| self.elaborate(term))
+            .collect::<Result<Vec<_>>>()?;
+        let args = Arguments {
+            values,
+            params: method.params,
+        };
+        let FunctionBody::GpuPipelineDispatch {
+            context,
+            allocator,
+            record,
+        } = method.body
+        else {
+            unreachable!("completed pipeline bridge")
+        };
+        Ok(TermKind::GpuPipelineDispatch {
+            context,
+            allocator,
+            record,
+            args,
+        })
     }
 
     fn method(

@@ -428,6 +428,7 @@ impl Scopes {
             if let Some(concrete) = solver.resolve(&ty) {
                 data.record_members(location.clone(), &concrete, associated, typer);
             }
+            data.record_intrinsic_methods(location.clone(), &ty, associated, typer, solver);
             // A nominal identity can resolve even when its fields have no legacy concrete view.
             if let Some(completed) = solver.complete(&ty) {
                 data.record_symbolic_members(
@@ -449,8 +450,13 @@ impl Scopes {
             rule,
         } in self.calls.drain(..)
         {
-            if let Some(method @ ResolvedMethod::Source { .. }) = methods.get(&rule) {
-                data.record_source_method_call(&location, &name, method, associated, typer, solver);
+            if let Some(
+                method @ (ResolvedMethod::Source { .. } | ResolvedMethod::Intrinsic { .. }),
+            ) = methods.get(&rule)
+            {
+                data.record_resolved_method_call(
+                    &location, &name, method, associated, typer, solver,
+                );
                 continue;
             }
             if let (Some(receiver), Some(argument)) = (

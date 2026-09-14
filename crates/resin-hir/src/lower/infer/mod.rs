@@ -1104,7 +1104,13 @@ pub(crate) struct AppliedMethod {
 
 #[derive(Clone)]
 pub(crate) enum ResolvedMethod {
-    GpuPipeline { method: super::gpu::PipelineMethod },
+    Intrinsic {
+        signature: super::context::IntrinsicMethod,
+        receiver_conversion: Option<crate::ReceiverConversion>,
+    },
+    GpuPipeline {
+        method: super::gpu::PipelineMethod,
+    },
     Dependent {
         signature: Type,
     },
@@ -1652,6 +1658,49 @@ impl Inference<'_> {
         Ok(Some(application))
     }
 
+    fn intrinsic_method_call(
+        &mut self,
+        owner: Rule,
+        signature: super::context::IntrinsicMethod,
+        constraint: &Constraint,
+        span: Span,
+    ) -> Result<bool> {
+        let Constraint::Method {
+            receiver,
+            args,
+            out,
+            associated,
+            origins,
+            ..
+        } = constraint
+        else {
+            unreachable!("primitive method call");
+        };
+        let arguments =
+            self.arguments(args, &signature.params[usize::from(!associated)..], span)?;
+        let result = self.solver.coerce(&signature.result, out, span)?;
+        let receiver_conversion = if *associated {
+            None
+        } else {
+            let Some(conversion) =
+                self.source_receiver(receiver, &signature.params[0], origins, span)?
+            else {
+                return Ok(false);
+            };
+            Some(conversion)
+        };
+        if arguments && result {
+            self.methods.insert(
+                owner,
+                ResolvedMethod::Intrinsic {
+                    signature,
+                    receiver_conversion,
+                },
+            );
+        }
+        Ok(arguments && result)
+    }
+
     fn source_method_call(
         &mut self,
         owner: Rule,
@@ -1782,17 +1831,47 @@ impl Inference<'_> {
                 }
                 if let Some(receiver) = self.solver.resolve(receiver_type)
                     && let Some(method) = self.typer.method(&receiver, name)
-                    && matches!(method.body, FunctionBody::GpuPipelineFactory { .. } | FunctionBody::GpuPipelineRecord { .. })
+                    && matches!(
+                        method.body,
+                        FunctionBody::GpuPipelineFactory { .. }
+                            | FunctionBody::GpuPipelineRecord { .. }
+                    )
                 {
-                    argument_count(method.params.len() - usize::from(!associated), args.len(), span)?;
+                    argument_count(
+                        method.params.len() - usize::from(!associated),
+                        args.len(),
+                        span,
+                    )?;
                     let inputs = &args[usize::from(*associated)..];
-                    let needed = if matches!(method.body, FunctionBody::GpuPipelineFactory { .. }) { inputs.len() } else { 1 };
-                    let Some(inputs) = inputs.iter().take(needed).map(|ty| self.solver.complete(ty)).collect::<Option<Vec<_>>>() else { return Ok(false); };
-                    let method = self.typer.source_pipeline_method(&method, &inputs).map_err(|message| error(span, message))?;
-                    let params = method.params[usize::from(!associated)..].iter().map(Type::from_hir).collect::<Vec<_>>();
+                    let needed = if matches!(method.body, FunctionBody::GpuPipelineFactory { .. }) {
+                        inputs.len()
+                    } else {
+                        1
+                    };
+                    let Some(inputs) = inputs
+                        .iter()
+                        .take(needed)
+                        .map(|ty| self.solver.complete(ty))
+                        .collect::<Option<Vec<_>>>()
+                    else {
+                        return Ok(false);
+                    };
+                    let method = self
+                        .typer
+                        .source_pipeline_method(&method, &inputs)
+                        .map_err(|message| error(span, message))?;
+                    let params = method.params[usize::from(!associated)..]
+                        .iter()
+                        .map(Type::from_hir)
+                        .collect::<Vec<_>>();
                     let a = self.arguments(args, &params, span)?;
-                    let b = self.solver.coerce(&Type::from_hir(&method.result), out, span)?;
-                    if a && b { self.methods.insert(owner, ResolvedMethod::GpuPipeline { method }); }
+                    let b = self
+                        .solver
+                        .coerce(&Type::from_hir(&method.result), out, span)?;
+                    if a && b {
+                        self.methods
+                            .insert(owner, ResolvedMethod::GpuPipeline { method });
+                    }
                     return Ok(a && b);
                 }
                 let allocation = !associated
@@ -1808,6 +1887,16 @@ impl Inference<'_> {
                         self.method_application(owner, receiver_type, name, type_args, span)?
                 {
                     return self.source_method_call(owner, application, constraint, span);
+                }
+                if let Some((_, signature)) =
+                    super::context::intrinsic_methods(receiver_type, &self.solver)
+                        .into_iter()
+                        .find(|(candidate, _)| *candidate == name.as_ref())
+                {
+                    if type_args.is_some() {
+                        return Err(error(span, "compiler methods do not accept type arguments"));
+                    }
+                    return self.intrinsic_method_call(owner, signature, constraint, span);
                 }
                 if let Some(signature) =
                     self.dependent_method(receiver_type, name, type_args, *associated)

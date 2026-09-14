@@ -244,10 +244,13 @@ fn retries_discard_failed_method_choices_and_preserve_completed_groups() {
         let pointer = Ty::Pointer {
             pointee: Box::new(Ty::UInt8),
         };
-        let infer::ResolvedMethod::Compiler { declaration } = &inference.methods[&rule] else {
+        let infer::ResolvedMethod::Intrinsic { signature, .. } = &inference.methods[&rule] else {
             panic!("compiler method");
         };
-        assert_eq!(declaration.result, pointer);
+        assert_eq!(
+            inference.solver.resolve(&signature.result),
+            Some(pointer.clone())
+        );
         assert_eq!(inference.solver.require(&ty, span).unwrap(), pointer);
     }
 }

@@ -452,14 +452,76 @@ fn pointer(ty: Ty) -> Ty {
     }
 }
 
-fn builtin_methods(receiver: &Ty, _typer: &Context) -> Vec<(Arc<str>, FunctionDecl)> {
-    match receiver {
-        Ty::Pointer { pointee } => vec![method(
+// Primitive method signatures keep element types symbolic. Materialization belongs to LIR.
+#[derive(Clone)]
+pub(crate) struct IntrinsicMethod {
+    pub op: Intrinsic,
+    pub params: Vec<super::infer::Type>,
+    pub result: super::infer::Type,
+}
+
+pub(crate) fn intrinsic_methods(
+    receiver: &super::infer::Type,
+    solver: &super::infer::Solver,
+) -> Vec<(&'static str, IntrinsicMethod)> {
+    use super::infer::{Head, Type};
+    let receiver = solver.head(receiver);
+    let mut methods = Vec::new();
+    if let Type::Node(Head::Pointer, parts) = &receiver {
+        methods.push((
             "replace",
-            vec![receiver.clone(), *pointee.clone()],
-            *pointee.clone(),
-            Intrinsic::Replace,
-        )],
+            IntrinsicMethod {
+                op: Intrinsic::Replace,
+                params: vec![receiver.clone(), parts[0].clone()],
+                result: parts[0].clone(),
+            },
+        ));
+    }
+    let mut base = receiver;
+    while let Type::Node(Head::Pointer, parts) = &base {
+        base = solver.head(&parts[0]);
+    }
+    let index = match &base {
+        Type::Node(Head::Array(_), parts) => Some((Type::pointer(base.clone()), parts[0].clone())),
+        Type::Node(Head::Atom(Ty::Str), _) => Some((base.clone(), Ty::UInt8.into())),
+        _ => None,
+    };
+    if let Some((receiver, element)) = index {
+        methods.push((
+            "at",
+            IntrinsicMethod {
+                op: Intrinsic::Index,
+                params: vec![receiver, Ty::UInt64.into()],
+                result: Type::pointer(element),
+            },
+        ));
+    }
+    methods
+}
+
+fn builtin_methods(receiver: &Ty, _typer: &Context) -> Vec<(Arc<str>, FunctionDecl)> {
+    let solver = super::infer::Solver::default();
+    let primitive = intrinsic_methods(&receiver.clone().into(), &solver);
+    if !primitive.is_empty() {
+        return primitive
+            .into_iter()
+            .map(|(name, signature)| {
+                method(
+                    name,
+                    signature
+                        .params
+                        .iter()
+                        .map(|ty| solver.resolve(ty).expect("concrete primitive parameter"))
+                        .collect(),
+                    solver
+                        .resolve(&signature.result)
+                        .expect("concrete primitive result"),
+                    signature.op,
+                )
+            })
+            .collect();
+    }
+    match receiver {
         Ty::GpuPointer { pointee } => {
             let mut methods = gpu_methods(receiver, pointee);
             methods.push(method(
@@ -508,19 +570,6 @@ fn builtin_methods(receiver: &Ty, _typer: &Context) -> Vec<(Arc<str>, FunctionDe
                 Intrinsic::GpuArgumentsDraw,
             ),
         ],
-        Ty::Array { element, .. } => vec![method(
-            "at",
-            vec![pointer(receiver.clone()), Ty::UInt64],
-            pointer(*element.clone()),
-            Intrinsic::Index,
-        )],
-        Ty::Str => vec![method(
-            "at",
-            vec![Ty::Str, Ty::UInt64],
-            pointer(Ty::UInt8),
-            Intrinsic::Index,
-        )],
-
         _ => vec![],
     }
 }

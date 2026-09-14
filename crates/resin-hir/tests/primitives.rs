@@ -35,3 +35,18 @@ fn intrinsic_contracts_reject_unknown_operations_and_forged_signatures() {
         assert!(generate(source).is_err(), "{source}");
     }
 }
+
+#[test]
+fn pointer_and_array_methods_keep_generic_nominal_payloads_symbolic() {
+    let source = r#"
+        struct Cell<T> { value: T };
+        def replace<T>(storage: Ptr<Cell<T>>, value: T) -> Cell<T> = {
+            storage.replace(Cell<T> { value = value })
+        };
+        def first<T>(value: T) -> T = {
+            var cells = [Cell<T> { value = value }];
+            cells.at(0).*.value
+        };
+    "#;
+    generate(source).unwrap();
+}

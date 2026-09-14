@@ -147,9 +147,16 @@ fn generic_nominal_fields_retain_substitution_and_declaration_navigation() {
         let input = project.source("main.resin");
         let field = source.rfind("value").unwrap();
         let items = analysis.completions(&input, field);
-        assert_eq!(items.len(), 1, "{source}: {items:?}");
-        assert_eq!(items[0].detail, format!("value: {result}"));
-        assert_eq!(analysis.hover(&input, field).unwrap().text, items[0].detail);
+        let fields = items
+            .iter()
+            .filter(|item| item.kind == resin_hir::DefinitionKind::Field)
+            .collect::<Vec<_>>();
+        assert_eq!(fields.len(), 1, "{items:?}");
+        assert_eq!(fields[0].detail, format!("value: {result}"));
+        assert_eq!(
+            analysis.hover(&input, field).unwrap().text,
+            fields[0].detail
+        );
         let origin = analysis.definition(&input, field).unwrap();
         assert_eq!(origin.source, project.source("library.resin"));
         assert_eq!(origin.span.start, library.find("value").unwrap());
@@ -206,8 +213,17 @@ fn generic_field_completion_survives_an_unfinished_access() {
         &project.source("main.resin"),
         source.find("cell.;").unwrap() + 5,
     );
-    assert_eq!(items.len(), 1, "{items:?}");
-    assert_eq!(items[0].detail, "value: int");
+    let fields = items
+        .iter()
+        .filter(|item| item.kind == resin_hir::DefinitionKind::Field)
+        .collect::<Vec<_>>();
+    assert_eq!(fields.len(), 1, "{items:?}");
+    assert_eq!(fields[0].detail, "value: int");
+    assert!(
+        items
+            .iter()
+            .any(|item| item.detail == "replace: (Cell<int>) -> Cell<int>")
+    );
 }
 
 #[test]
