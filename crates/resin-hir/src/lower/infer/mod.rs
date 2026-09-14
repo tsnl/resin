@@ -1837,6 +1837,15 @@ impl Inference<'_> {
                             | FunctionBody::GpuPipelineRecord { .. }
                     )
                 {
+                    if !associated
+                        && crate::ReceiverConversion::between(&receiver, &method.params[0])
+                            .is_none()
+                    {
+                        return Err(error(
+                            span,
+                            "pipeline method receiver does not match its native bridge",
+                        ));
+                    }
                     argument_count(
                         method.params.len() - usize::from(!associated),
                         args.len(),

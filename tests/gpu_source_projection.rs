@@ -66,8 +66,8 @@ fn source_sequences_project_offsets_and_retain_resources_through_submit() {
             var scalar = gpu.create(0_ui)?;
             var commands = gpu.start_command_recording()?;
             {
-                var pipeline = gpu.create_compute_pipeline(kernel)?;
-                commands.dispatch(pipeline, { values = values.slice(2_ul, 2_ul), scalar = scalar }, 2_ui, 1_ui, 1_ui)?;
+                var pipeline = (&gpu).create_compute_pipeline(kernel)?;
+                (&commands).dispatch(pipeline, { values = values.slice(2_ul, 2_ul), scalar = scalar }, 2_ui, 1_ui, 1_ui)?;
             };
             commands.submit()?;
             ok(if (values.at(1_ul).load() == 1_ui && values.at(2_ul).load() == 12_ui && values.at(3_ul).load() == 13_ui && values.at(4_ul).load() == 4_ui && scalar.load() == 42_ui) { 0_i } else { 1_i })

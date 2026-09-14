@@ -570,11 +570,23 @@ impl Completion<'_> {
                 .expect("fixed native GPU receiver");
             return self.pipeline_create(receiver, arguments, &[receiver_type], factory, graphics);
         }
+        let receiver_type = self
+            .solver
+            .resolve(&Type::from_hir(&method.params[0]))
+            .expect("fixed native GPU receiver");
+        let receiver = receiver
+            .map(|value| self.adapt(value, &self.ty(value)?, &receiver_type))
+            .transpose()?;
         let values = receiver
             .into_iter()
-            .chain(arguments.iter())
-            .map(|term| self.elaborate(term))
-            .collect::<Result<Vec<_>>>()?;
+            .map(|value| *value)
+            .chain(
+                arguments
+                    .iter()
+                    .map(|value| self.elaborate(value))
+                    .collect::<Result<Vec<_>>>()?,
+            )
+            .collect();
         let args = Arguments {
             values,
             params: method.params,
