@@ -1,9 +1,7 @@
 #[test]
 fn template_syntax_cannot_silently_acquire_monomorphic_meaning() {
     for source in [
-        "struct Unused<T> {};",
         "struct Owner { def unused<T>() -> int = { 42 }; };",
-        "def main() = { struct Local<T> {}; };",
         "struct Owner { def f() -> int = { 42 }; }; def main() = { Owner.f::<int>(); };",
     ] {
         let document = resin_cst::Document::reparse(source.into(), None);

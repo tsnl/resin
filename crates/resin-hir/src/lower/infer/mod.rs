@@ -466,9 +466,8 @@ impl Solver {
                 Ok(())
             }
             Type::Node(Head::Atom(ty), _) if ty.variants().is_some() => Ok(()),
-            Type::Node(Head::Parameter { .. } | Head::Member { .. }, _) | Type::Apply { .. } => {
-                Ok(())
-            }
+            Type::Node(Head::Parameter { .. } | Head::Member { .. } | Head::Nominal { .. }, _)
+            | Type::Apply { .. } => Ok(()),
             Type::Node(Head::Union, members) => {
                 for member in members {
                     self.errors(&member, span)?;
@@ -521,7 +520,10 @@ impl Solver {
                 }
                 Ok(Some(result))
             }
-            ty @ Type::Node(Head::Parameter { .. } | Head::Member { .. }, _) => Ok(Some(vec![ty])),
+            ty @ Type::Node(
+                Head::Parameter { .. } | Head::Member { .. } | Head::Nominal { .. },
+                _,
+            ) => Ok(Some(vec![ty])),
             _ => Err(error(
                 span,
                 "error and union payloads must be nominal structs",
@@ -578,6 +580,25 @@ impl Solver {
         }
     }
 
+    fn known_union_members(&self, ty: &Type) -> Option<Vec<Type>> {
+        let mut pending = vec![ty.clone()];
+        let mut members = vec![];
+        while let Some(ty) = pending.pop() {
+            match self.head(&ty) {
+                Type::Node(Head::Union, children) => pending.extend(children.into_iter().rev()),
+                Type::Node(Head::Atom(ty @ Ty::Union { .. }), _) => {
+                    pending.extend(ty.members().into_iter().rev().map(Type::from));
+                }
+                Type::Invalid
+                | Type::Variable(_)
+                | Type::Apply { .. }
+                | Type::Node(Head::Parameter { .. } | Head::Member { .. }, _) => return None,
+                ty => members.push(ty),
+            }
+        }
+        Some(members)
+    }
+
     pub fn coerce(&mut self, from: &Type, to: &Type, span: Span) -> Result<bool> {
         if matches!(self.head(to), Type::Node(Head::Union, _)) {
             if let Some(target) = self.resolve(to) {
@@ -622,7 +643,7 @@ impl Solver {
                     }
                 }
                 let Some(source) = self.resolve(from) else {
-                    return Ok(false);
+                    return Ok(self.complete(from).is_some());
                 };
                 if source.widens_to(&target) {
                     Ok(true)
@@ -1245,7 +1266,9 @@ impl Inference<'_> {
                 ty = self.solver.shape_hint(pointee);
             }
         }
-        if let Type::Node(Head::Atom(t @ Ty::Defined { .. }), _) = &ty {
+        if let Some(body) = self.typer.nominal_body(&ty, &self.solver) {
+            ty = self.solver.shape_hint(&body);
+        } else if let Type::Node(Head::Atom(t @ Ty::Defined { .. }), _) = &ty {
             ty = self
                 .typer
                 .body(t)
@@ -1253,6 +1276,79 @@ impl Inference<'_> {
                 .into();
         }
         Ok(ty)
+    }
+
+    fn nominal_ascription(&mut self, from: &Type, to: &Type, span: Span) -> Result<Option<bool>> {
+        let source = self.solver.head(from);
+        let target = self.solver.head(to);
+        let source_body = self.typer.nominal_body(from, &self.solver);
+        let target_body = self.typer.nominal_body(to, &self.solver);
+        let application = matches!(source, Type::Node(Head::Nominal { .. }, _))
+            || matches!(target, Type::Node(Head::Nominal { .. }, _));
+        let symbolic_body = [source_body.as_ref(), target_body.as_ref()]
+            .into_iter()
+            .flatten()
+            .any(|body| self.solver.resolve(body).is_none());
+        let incomplete_view = [&source, &target].into_iter().any(|ty| {
+            matches!(ty, Type::Node(Head::Atom(Ty::Defined { definition }), _)
+                if self.typer.definition(*definition).is_ok_and(|definition| definition.body().is_none()))
+        });
+        if !application && !symbolic_body && !incomplete_view {
+            return Ok(None);
+        }
+        let nominal = |ty: &Type| {
+            matches!(
+                ty,
+                Type::Node(Head::Nominal { .. } | Head::Atom(Ty::Defined { .. }), _)
+            )
+        };
+        let representation = match (&source, &target) {
+            _ if nominal(&source) && nominal(&target) => {
+                return self.solver.unify(from, to, span).map(Some);
+            }
+            (Type::Variable(_) | Type::Node(Head::Record(_) | Head::Atom(Ty::Unit), _), _)
+                if nominal(&target) =>
+            {
+                target_body.map(|body| (from, body))
+            }
+            (_, Type::Node(Head::Record(_), _)) if nominal(&source) => {
+                source_body.map(|body| (to, body))
+            }
+            _ => return Ok(None),
+        };
+        let Some((value, representation)) = representation else {
+            return Ok(Some(false));
+        };
+        if self.solver.head(value) == Type::from(Ty::Unit)
+            && matches!(self.solver.head(&representation), Type::Node(Head::Record(names), _) if names.is_empty())
+        {
+            return Ok(Some(true));
+        }
+        self.solver.unify(value, &representation, span).map(Some)
+    }
+
+    fn has_layout_bodies(&self, ty: &Ty) -> bool {
+        let mut pending = vec![ty];
+        let mut visited = HashSet::new();
+        while let Some(ty) = pending.pop() {
+            match ty {
+                Ty::Defined { definition } if visited.insert(*definition) => {
+                    let Some(body) = self
+                        .typer
+                        .definitions()
+                        .get(definition.index())
+                        .and_then(TypeDef::body)
+                    else {
+                        return false;
+                    };
+                    pending.push(body);
+                }
+                Ty::Record { fields } => pending.extend(fields.iter().map(|field| &field.ty)),
+                Ty::Array { element, length } if *length != 0 => pending.push(element),
+                _ => {}
+            }
+        }
+        true
     }
 
     fn require_gpu_element(&self, element: &Ty, span: Span) -> Result<()> {
@@ -1464,17 +1560,27 @@ impl Inference<'_> {
                 let Some(ty) = self.solver.resolve(ty) else {
                     return Ok(self.solver.complete(ty).is_some());
                 };
+                if !self.has_layout_bodies(&ty) {
+                    return Ok(true);
+                }
                 resin_types::layout::layout(self.typer.definitions(), &ty)
                     .map_err(|e| error(span, e.to_string()))?;
             }
             Constraint::ExcludeNone(input, out) => {
-                let Some(input) = self.solver.resolve(input) else {
+                let Some(members) = self.solver.known_union_members(input) else {
                     return Ok(false);
                 };
-                let remaining = input
-                    .without_none()
-                    .ok_or_else(|| error(span, "postfix ! requires a type containing None"))?;
-                if !self.solver.unify(out, &remaining.into(), span)? {
+                let none = Type::from(Ty::None);
+                if !members.contains(&none) {
+                    return Err(error(span, "postfix ! requires a type containing None"));
+                }
+                let remaining = self.solver.union(
+                    members
+                        .into_iter()
+                        .filter(|member| member != &none)
+                        .collect(),
+                );
+                if !self.solver.unify(out, &remaining, span)? {
                     return Ok(false);
                 }
             }
@@ -1614,7 +1720,7 @@ impl Inference<'_> {
                         return Ok(false);
                     }
                     let record = Type::record(fields.clone());
-                    if self.solver.resolve(&record).is_none() {
+                    if self.solver.complete(&record).is_none() {
                         return Ok(false);
                     }
                     if !self.solver.unify(&record, out, span)? {
@@ -1667,6 +1773,9 @@ impl Inference<'_> {
                 }
                 if matches!(self.solver.head(to), Type::Node(Head::Result, _)) {
                     return self.solver.coerce(from, to, span);
+                }
+                if let Some(complete) = self.nominal_ascription(from, to, span)? {
+                    return Ok(complete);
                 }
                 if let (Some(from), Some(to)) = (self.solver.resolve(from), self.solver.resolve(to))
                 {

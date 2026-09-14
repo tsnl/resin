@@ -410,8 +410,12 @@ impl Scopes {
             data.contexts.definitions[id].ty = solver.complete(&ty);
         }
         for (location, ty, associated) in self.expressions.drain(..) {
-            if let Some(ty) = solver.resolve(&ty) {
-                data.record_members(location, &ty, associated, typer);
+            if let Some(concrete) = solver.resolve(&ty) {
+                data.record_members(location.clone(), &concrete, associated, typer);
+            }
+            // A nominal identity can resolve even when its fields have no legacy concrete view.
+            if let Some(completed) = solver.complete(&ty) {
+                data.record_symbolic_members(location, &completed, associated, typer, solver);
             }
         }
         for (location, receiver, name, argument, associated) in self.calls.drain(..) {
@@ -475,6 +479,67 @@ impl Scopes {
         data.contexts.pending_aliases.remove(&id);
         data.contexts.definitions[id].ty = ty;
     }
+    pub(super) fn define_nominal_scheme(
+        &self,
+        declaration: DeclarationId,
+        definition: TypeId,
+        parameters: &[crate::TypeParameter],
+        captures: &[crate::TypeParameter],
+    ) {
+        self.set_parameters(declaration, parameters);
+        self.view.data.borrow_mut().contexts.definitions[declaration].ty =
+            Some(crate::Type::Defined {
+                definition,
+                arguments: captures
+                    .iter()
+                    .chain(parameters)
+                    .map(|p| crate::Type::Parameter { parameter: p.id })
+                    .collect(),
+            });
+    }
+
+    pub(super) fn type_parameters(&self) -> Vec<crate::TypeParameter> {
+        let data = self.view.data.borrow();
+        let mut cursor = Some(self.view.cursor);
+        let mut parameters = BTreeMap::new();
+        while let Some(at) = cursor {
+            let scope = &data.contexts.scopes[at.scope];
+            for entry in &scope.entries[..at.prefix] {
+                let definition = &data.contexts.definitions[entry.definition];
+                if let Some(crate::Type::Parameter { parameter }) = definition.ty {
+                    parameters
+                        .entry(parameter)
+                        .or_insert_with(|| crate::TypeParameter {
+                            id: parameter,
+                            name: Ident::new(
+                                definition.name.clone().into(),
+                                definition.location.span,
+                            ),
+                        });
+                }
+            }
+            cursor = scope.parent;
+        }
+        parameters.into_values().collect()
+    }
+
+    pub(super) fn record_field_definitions(
+        &self,
+        definition: TypeId,
+        fields: &[(Ident, resin_ast::Type)],
+    ) {
+        let mut data = self.view.data.borrow_mut();
+        for (name, _) in fields {
+            data.field_origins.insert(
+                (definition, name.val.to_string()),
+                SourceLocation {
+                    source: self.view.source.clone(),
+                    span: name.span,
+                },
+            );
+        }
+    }
+
     pub(crate) fn define_type(
         &mut self,
         name: &Ident,

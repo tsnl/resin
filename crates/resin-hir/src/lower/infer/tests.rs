@@ -358,3 +358,227 @@ fn nested_applications_substitute_without_capturing_definition_binders() {
         }
     );
 }
+
+fn nominal(definition: TypeId, argument: Type) -> Type {
+    Type::Node(infer::Head::Nominal { definition }, vec![argument])
+}
+
+#[test]
+fn nominal_applications_preserve_origins_and_invariant_arguments() {
+    let mut solver = Solver::default();
+    let argument = solver.fresh();
+    let definition = TypeId::from_index(0);
+    let expected = nominal(definition, argument.clone());
+    let supplied = nominal(definition, Ty::Int32.into());
+    assert!(solver.unify(&supplied, &expected, SPAN).unwrap());
+    assert_eq!(solver.resolve(&argument), Some(Ty::Int32));
+    assert!(solver.resolve(&expected).is_none());
+    assert!(
+        solver
+            .unify(&expected, &nominal(definition, Ty::Bool.into()), SPAN)
+            .is_err()
+    );
+    assert!(
+        solver
+            .unify(
+                &expected,
+                &nominal(TypeId::from_index(1), Ty::Int32.into()),
+                SPAN
+            )
+            .is_err()
+    );
+}
+
+#[test]
+fn error_collection_retains_distinct_applications_of_one_nominal() {
+    let mut solver = Solver::default();
+    let errors = solver.fresh();
+    let definition = TypeId::from_index(0);
+    let int = nominal(definition, Ty::Int32.into());
+    let bool = nominal(definition, Ty::Bool.into());
+    solver.include(&int, &errors, SPAN).unwrap();
+    solver.include(&bool, &errors, SPAN).unwrap();
+    assert!(solver.finish_errors(std::slice::from_ref(&errors)));
+    assert_eq!(
+        solver.complete(&errors),
+        Some(crate::Type::Union {
+            variants: vec![
+                solver.complete(&int).unwrap(),
+                solver.complete(&bool).unwrap()
+            ],
+        })
+    );
+}
+
+#[test]
+fn nominal_constructors_supply_field_context_without_materializing_layouts() {
+    let mut context = Context::new();
+    let definition = context.reserve_type("Box");
+    context
+        .define_nominal(
+            definition,
+            vec![crate::TypeParameter {
+                id: crate::TypeParameterId::from_index(0),
+                name: Ident {
+                    span: SPAN,
+                    val: "T".into(),
+                },
+            }],
+            crate::Type::Record {
+                fields: vec![crate::RecordField {
+                    name: "value".into(),
+                    ty: crate::Type::Parameter {
+                        parameter: crate::TypeParameterId::from_index(0),
+                    },
+                }],
+            },
+        )
+        .unwrap();
+    let mut inference = infer::Inference::new(&mut context);
+    let (record_rule, fields) = inference.expression();
+    let number = inference.solver.number("7");
+    let constructed = nominal(definition, Ty::Int32.into());
+    inference.constrain(
+        record_rule,
+        (
+            SPAN,
+            infer::Constraint::Record(vec![("value".into(), number.clone())], fields.clone()),
+        ),
+    );
+    inference.constrain(
+        record_rule,
+        (
+            SPAN,
+            infer::Constraint::Ascribe(fields.clone(), constructed.clone(), false),
+        ),
+    );
+    let (field_rule, field) = inference.expression();
+    inference.constrain(
+        field_rule,
+        (
+            SPAN,
+            infer::Constraint::Field(
+                Type::pointer(constructed.clone()),
+                "value".into(),
+                field.clone(),
+            ),
+        ),
+    );
+    assert!(
+        inference
+            .solve(&[constructed.clone(), fields, field.clone()])
+            .is_empty()
+    );
+    assert_eq!(inference.solver.resolve(&number), Some(Ty::Int32));
+    assert_eq!(inference.solver.resolve(&field), Some(Ty::Int32));
+    assert!(inference.solver.resolve(&constructed).is_none());
+}
+
+#[test]
+fn optional_nominals_remove_none_without_resolving_their_arguments() {
+    let mut context = Context::new();
+    let mut inference = infer::Inference::new(&mut context);
+    let value = nominal(TypeId::from_index(0), parameter(0));
+    let optional = inference.solver.union(vec![value.clone(), Ty::None.into()]);
+    let (rule, result) = inference.expression();
+    inference.constrain(
+        rule,
+        (
+            SPAN,
+            infer::Constraint::ExcludeNone(optional, result.clone()),
+        ),
+    );
+    assert!(inference.solve(std::slice::from_ref(&result)).is_empty());
+    assert_eq!(
+        inference.solver.complete(&result),
+        inference.solver.complete(&value)
+    );
+}
+
+#[test]
+fn nongeneric_nominal_constructors_can_contain_generic_fields() {
+    let mut context = Context::new();
+    let inner_definition = context.reserve_type("Inner");
+    let wrapped = context.reserve_type("Wrapped");
+    let inner = nominal(inner_definition, Ty::Int32.into());
+    context
+        .define_nominal(
+            wrapped,
+            vec![],
+            crate::Type::Record {
+                fields: vec![crate::RecordField {
+                    name: "value".into(),
+                    ty: Solver::default().complete(&inner).unwrap(),
+                }],
+            },
+        )
+        .unwrap();
+    let outer = context.reserve_type("Outer");
+    context
+        .define_nominal(
+            outer,
+            vec![],
+            crate::Type::Record {
+                fields: vec![crate::RecordField {
+                    name: "wrapped".into(),
+                    ty: crate::Type::Defined {
+                        definition: wrapped,
+                        arguments: vec![],
+                    },
+                }],
+            },
+        )
+        .unwrap();
+    let mut inference = infer::Inference::new(&mut context);
+    let (rule, fields) = inference.expression();
+    inference.constrain(
+        rule,
+        (
+            SPAN,
+            infer::Constraint::Record(vec![("value".into(), inner)], fields.clone()),
+        ),
+    );
+    inference.constrain(
+        rule,
+        (
+            SPAN,
+            infer::Constraint::Ascribe(
+                fields.clone(),
+                Ty::Defined {
+                    definition: wrapped,
+                }
+                .into(),
+                false,
+            ),
+        ),
+    );
+    let (outer_rule, outer_fields) = inference.expression();
+    inference.constrain(
+        outer_rule,
+        (
+            SPAN,
+            infer::Constraint::Record(
+                vec![(
+                    "wrapped".into(),
+                    Ty::Defined {
+                        definition: wrapped,
+                    }
+                    .into(),
+                )],
+                outer_fields.clone(),
+            ),
+        ),
+    );
+    inference.constrain(
+        outer_rule,
+        (
+            SPAN,
+            infer::Constraint::Ascribe(
+                outer_fields.clone(),
+                Ty::Defined { definition: outer }.into(),
+                false,
+            ),
+        ),
+    );
+    assert!(inference.solve(&[fields, outer_fields]).is_empty());
+}

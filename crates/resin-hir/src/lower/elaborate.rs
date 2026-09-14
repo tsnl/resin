@@ -163,19 +163,8 @@ impl Completion<'_> {
                 if let Some(to) = self.solver.resolve(&ty.ty) {
                     self.ascription(source.span, &to, arg)?
                 } else {
-                    match self.solver.require_complete(&ty.ty, ty.span)? {
-                        crate::Type::Arc { .. } => TermKind::ArcNew {
-                            value: self.boxed(arg)?,
-                        },
-                        crate::Type::Weak { pointee }
-                            if matches!(arg.kind, typed::TermKind::Unit) =>
-                        {
-                            TermKind::WeakEmpty { pointee: *pointee }
-                        }
-                        _ => TermKind::Convert {
-                            arg: self.boxed(arg)?,
-                        },
-                    }
+                    let target = self.solver.require_complete(&ty.ty, ty.span)?;
+                    self.symbolic_ascription(&target, arg)?
                 }
             }
             typed::TermKind::Result { failure, arg } => TermKind::Result {
@@ -559,28 +548,40 @@ impl Completion<'_> {
                 arg: self.boxed(arg)?,
             });
         }
-        let function_type = self.ty(func)?;
-        let shape = self
-            .typer
-            .body(&function_type)
-            .map_err(|e| GenerateError::typing(func.span, e))?;
-        let to = match shape {
-            Ty::Array { .. } => Some(Ty::Pointer {
-                pointee: Box::new(function_type.clone()),
-            }),
-            Ty::Str | Ty::Span { .. } | Ty::GpuPointer { .. } | Ty::GpuSpan { .. } => {
-                Some(function_type.clone())
+        let function_type = self.solver.require_complete(&func.ty, func.span)?;
+        let receiver = match &function_type {
+            crate::Type::Array { .. } => Some((
+                crate::Type::Pointer {
+                    pointee: Box::new(function_type.clone()),
+                },
+                ReceiverConversion::Address,
+            )),
+            crate::Type::Str
+            | crate::Type::Span { .. }
+            | crate::Type::GpuPointer { .. }
+            | crate::Type::GpuSpan { .. } => {
+                Some((function_type.clone(), ReceiverConversion::Value))
             }
             _ => None,
         };
-        if let Some(to) = to {
+        if let Some((ty, conversion)) = receiver {
             let args = Arguments {
-                receiver: Some(self.adapt(func, &function_type, &to)?),
+                receiver: Some(Box::new(Term {
+                    span: func.span,
+                    ty,
+                    kind: TermKind::Adapt {
+                        conversion,
+                        arg: self.boxed(func)?,
+                    },
+                })),
                 argument: self.boxed(arg)?,
-                params: vec![types::ty(&self.ty(arg)?)],
+                params: vec![self.solver.require_complete(&arg.ty, arg.span)?],
             };
             return Ok(TermKind::Intrinsic {
-                op: if matches!(function_type, Ty::GpuPointer { .. } | Ty::GpuSpan { .. }) {
+                op: if matches!(
+                    function_type,
+                    crate::Type::GpuPointer { .. } | crate::Type::GpuSpan { .. }
+                ) {
                     Intrinsic::GpuIndex
                 } else {
                     Intrinsic::Index
@@ -720,7 +721,57 @@ impl Completion<'_> {
 }
 
 impl Completion<'_> {
+    fn symbolic_ascription(&mut self, to: &crate::Type, source: &typed::Term) -> Result<TermKind> {
+        match to {
+            crate::Type::Arc { pointee } => {
+                let mut value = self.nominal_argument(pointee, source)?;
+                if value.ty != **pointee {
+                    value = Term {
+                        span: value.span,
+                        ty: *pointee.clone(),
+                        kind: TermKind::Convert {
+                            arg: Box::new(value),
+                        },
+                    };
+                }
+                Ok(TermKind::ArcNew {
+                    value: Box::new(value),
+                })
+            }
+            crate::Type::Weak { pointee } if matches!(source.kind, typed::TermKind::Unit) => {
+                Ok(TermKind::WeakEmpty {
+                    pointee: *pointee.clone(),
+                })
+            }
+            _ => Ok(TermKind::Convert {
+                arg: Box::new(self.nominal_argument(to, source)?),
+            }),
+        }
+    }
+
+    fn nominal_argument(&mut self, to: &crate::Type, source: &typed::Term) -> Result<Term> {
+        if matches!(to, crate::Type::Defined { .. }) && matches!(source.kind, typed::TermKind::Unit)
+        {
+            return Ok(Term {
+                span: source.span,
+                ty: crate::Type::Record { fields: vec![] },
+                kind: TermKind::Record { fields: vec![] },
+            });
+        }
+        self.elaborate(source)
+    }
+
     fn ascription(&mut self, span: Span, to: &Ty, source: &typed::Term) -> Result<TermKind> {
+        let payload = if let Ty::Arc { pointee } = to {
+            pointee.as_ref()
+        } else {
+            to
+        };
+        if self.typer.body(payload).is_err() {
+            // A source nominal may contain a generic application even when its
+            // own argument list is empty. Its representation belongs to LIR.
+            return self.symbolic_ascription(&types::ty(to), source);
+        }
         if let Ty::Arc { pointee } = to {
             return Ok(TermKind::ArcNew {
                 value: Box::new(self.shared_payload(pointee, source)?),
