@@ -228,3 +228,28 @@ fn pointer_returning_index_wrappers_preserve_nested_places() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn opaque_native_elements_cannot_be_indexed_or_sliced() {
+    for operation in ["view.at(0_ul)", "view.slice(0_ul, 1_ul)"] {
+        let source = format!(
+            r#"
+            export {{ main }};
+            import {{ "$/span.resin" }};
+            extern type NativeHandle;
+            def main() = {{
+                var view = Span<NativeHandle> {{ data = Ptr<NativeHandle>(0_ul), length = 1_ul }};
+                {operation};
+            }};
+        "#
+        );
+        let compilation = compile(
+            &source,
+            Target::Host {
+                entry: "main".into(),
+            },
+        );
+        let error = compilation.module().unwrap_err();
+        assert!(error.to_string().contains("OpaqueValue"), "{error}");
+    }
+}

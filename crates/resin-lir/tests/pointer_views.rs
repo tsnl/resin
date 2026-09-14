@@ -99,3 +99,22 @@ fn byte_and_range_checks_stay_host_only_while_pointer_indexing_is_shader_legal()
         assert_eq!(VerifiedModule::new(program).is_ok(), accepted);
     }
 }
+
+#[test]
+fn pointer_steps_require_a_sized_element_representation() {
+    let opaque = Ty::Foreign {
+        name: "NativeHandle".into(),
+    };
+    for (operation, bounds) in [(Instr::PointerIndex, 2), (Instr::PointerRange, 3)] {
+        let result = pointer(opaque.clone());
+        let mut params = vec![result.clone()];
+        params.extend(vec![Ty::UInt64; bounds]);
+        let error = VerifiedModule::new(module(&params, result, operation))
+            .err()
+            .expect("opaque pointers cannot be stepped without an element size");
+        assert_eq!(
+            error.kind,
+            VerifyErrorKind::OpaqueValue { ty: opaque.clone() }
+        );
+    }
+}

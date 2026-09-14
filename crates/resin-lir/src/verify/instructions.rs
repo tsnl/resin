@@ -225,11 +225,14 @@ pub(super) fn check_instr(
                 3
             };
             let args = pop(stack, count, location)?;
-            if !matches!(&args[0], Ty::Pointer { .. }) {
+            let Ty::Pointer { pointee } = &args[0] else {
                 return Err(location.error(VerifyErrorKind::ExpectedPointer {
                     found: args[0].clone(),
                 }));
-            }
+            };
+            // Stepping a typed pointer requires a concrete element representation;
+            // opaque native handles may be passed around only behind pointers.
+            super::rules::check_value(&module.types, pointee, location)?;
             expect_types(&vec![Ty::UInt64; count - 1], &args[1..], location)?;
             stack.push(args[0].clone());
         }
