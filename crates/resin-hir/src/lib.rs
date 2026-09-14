@@ -104,6 +104,10 @@ pub enum Type {
         element: Box<Type>,
     },
     GpuArguments,
+    /// Opaque shared allocation handle; copies retain and destruction releases.
+    StrongOwner,
+    /// Opaque weak allocation handle; it does not keep payloads alive.
+    WeakOwner,
     GpuComputePipeline {
         root: Box<Type>,
         owner: Box<Type>,
@@ -111,18 +115,6 @@ pub enum Type {
     GpuGraphicsPipeline {
         root: Box<Type>,
         owner: Box<Type>,
-    },
-    ArcPtr {
-        pointee: Box<Type>,
-    },
-    ArcSpan {
-        element: Box<Type>,
-    },
-    WeakSpan {
-        element: Box<Type>,
-    },
-    WeakPtr {
-        pointee: Box<Type>,
     },
     Array {
         element: Box<Type>,
@@ -340,9 +332,6 @@ pub enum TermKind {
     Convert {
         arg: Box<Term>,
     },
-    ArcNew {
-        value: Box<Term>,
-    },
     /// Allocate and initialize a GPU element through the registered allocator.
     GpuNew {
         allocator: FunctionId,
@@ -365,13 +354,6 @@ pub enum TermKind {
         allocator: Option<FunctionId>,
         record: FunctionId,
         args: Arguments,
-    },
-    HostAllocate {
-        error: FunctionId,
-        args: Arguments,
-    },
-    WeakEmpty {
-        ty: Type,
     },
     Result {
         failure: bool,
@@ -434,8 +416,6 @@ pub enum ReceiverConversion {
     Value,
     Address,
     Load,
-    ArcAddress,
-    ArcLoad,
 }
 
 //
@@ -784,10 +764,6 @@ fn builtin_hover(document: &resin_cst::Document, token: resin_cst::Node<'_>) -> 
                 | "GpuComputePipeline"
                 | "GpuGraphicsPipeline"
                 | "Result"
-                | "ArcSpan"
-                | "WeakSpan"
-                | "ArcPtr"
-                | "WeakPtr"
                 | "None"
         )
     {
@@ -964,26 +940,6 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     (
         "None",
         "None — singleton value and type; T | None permits absence, postfix ! excludes it or traps.",
-        DefinitionKind::Type,
-    ),
-    (
-        "ArcPtr",
-        "ArcPtr<T> — a copyable shared owner; copying retains the allocation.",
-        DefinitionKind::Type,
-    ),
-    (
-        "WeakPtr",
-        "WeakPtr<T> — a weak handle; upgrade() returns ArcPtr<T> | None.",
-        DefinitionKind::Type,
-    ),
-    (
-        "ArcSpan",
-        "ArcSpan<T> — shared ownership of an initialized sequence; get() borrows a Span<T>.",
-        DefinitionKind::Type,
-    ),
-    (
-        "WeakSpan",
-        "WeakSpan<T> — a weak sequence handle; upgrade() returns ArcSpan<T> | None.",
         DefinitionKind::Type,
     ),
     ("bool", "bool", DefinitionKind::Type),
@@ -1215,10 +1171,7 @@ impl Analysis {
             return;
         }
         let mut receiver = ty;
-        while let Type::Pointer { pointee }
-        | Type::GpuPointer { pointee }
-        | Type::ArcPtr { pointee } = receiver
-        {
+        while let Type::Pointer { pointee } | Type::GpuPointer { pointee } = receiver {
             receiver = pointee;
         }
         let body = match receiver {
@@ -1270,10 +1223,7 @@ impl Analysis {
         solver: &lower::infer::Solver,
     ) {
         let mut owner = ty;
-        while let Type::Pointer { pointee }
-        | Type::GpuPointer { pointee }
-        | Type::ArcPtr { pointee } = owner
-        {
+        while let Type::Pointer { pointee } | Type::GpuPointer { pointee } = owner {
             owner = pointee;
         }
         let Type::Defined {
@@ -1403,12 +1353,7 @@ fn source_method_receiver(
         Type::Pointer { pointee } | Type::GpuPointer { pointee } => {
             candidates.push(lower::infer::Type::from_hir(pointee));
         }
-        Type::ArcPtr { pointee } => {
-            candidates.push(lower::infer::Type::from_hir(pointee));
-            candidates.push(lower::infer::Type::pointer(lower::infer::Type::from_hir(
-                pointee,
-            )));
-        }
+
         _ => {}
     }
     candidates.into_iter().any(|candidate| {

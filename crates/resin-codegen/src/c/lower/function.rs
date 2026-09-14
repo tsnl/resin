@@ -141,12 +141,11 @@ fn lower_region(
                 instr,
                 Instr::IsVariant { .. }
                     | Instr::CallBuiltin { .. }
-                    | Instr::ArcData
-                    | Instr::ArcSpanData
-                    | Instr::ArcSpanTryNew { .. }
-                    | Instr::HostAllocate { .. }
-                    | Instr::Downgrade
-                    | Instr::Upgrade
+                    | Instr::OwnerData { .. }
+                    | Instr::OwnerLength
+                    | Instr::OwnerAllocate { .. }
+                    | Instr::OwnerDowngrade
+                    | Instr::OwnerUpgrade
                     | Instr::GpuAllocateNative
                     | Instr::GpuCopyTo
                     | Instr::GpuComputePipeline { .. }
@@ -429,58 +428,27 @@ fn instruction(
             }
             return Ok(None);
         }
-        Instr::ArcNew => {
-            let ty = &args[0].ty;
-            writeln!(
-                out,
-                "  ResinArc *{temp}_allocated = resin_arc_new(sizeof({}), _Alignof({}), r_drop{});",
-                types.name(ty),
-                types.name(ty),
-                types.id(ty)
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "  *({} *)resin_arc_data({temp}_allocated) = {};",
-                types.name(ty),
-                args[0].expr
-            )
-            .unwrap();
-            format!("{temp}_allocated")
-        }
-        Instr::ArcData => format!(
-            "({})resin_arc_data({})",
+        Instr::OwnerData { .. } => format!(
+            "({})resin_arc_data(*({}))",
             types.name(result.unwrap()),
             args[0].expr
         ),
-        Instr::ArcSpanTryNew { element } => {
+        Instr::OwnerAllocate { element } => {
             let owner = allocate_span(types, temp, element, args, out);
             let ty = result.unwrap();
             let present = variant(types, ty, &Case::Type(ty.without_none().unwrap()), &owner);
             let absent = variant(types, ty, &Case::Type(Ty::None), "0");
             format!("({owner} ? {present} : {absent})")
         }
-        Instr::HostAllocate { error, element } => {
-            let owner = allocate_span(types, temp, element, args, out);
-            let ty = result.unwrap();
-            let present = variant(types, ty, &Case::Ok, &owner);
-            let absent = variant(types, ty, &Case::Err, &format!("r_fn{}()", error.index()));
-            format!("({owner} ? {present} : {absent})")
+        Instr::OwnerLength => format!("resin_arc_span_length(*({}))", args[0].expr),
+        Instr::OwnerDowngrade => {
+            writeln!(out, "  resin_weak_retain(*({}));", args[0].expr).unwrap();
+            format!("*({})", args[0].expr)
         }
-        Instr::ArcSpanData => format!(
-            "({}){{ resin_arc_data({}), resin_arc_span_length({}) }}",
-            types.name(result.unwrap()),
-            args[0].expr,
-            args[0].expr
-        ),
-        Instr::Downgrade => {
-            writeln!(out, "  resin_weak_retain({});", args[0].expr).unwrap();
-            args[0].expr.clone()
-        }
-        Instr::Upgrade => {
+        Instr::OwnerUpgrade => {
             writeln!(
                 out,
-                "  ResinArc *{temp}_upgraded = resin_weak_upgrade({});",
+                "  ResinArc *{temp}_upgraded = resin_weak_upgrade(*({}));",
                 args[0].expr
             )
             .unwrap();
@@ -494,7 +462,7 @@ fn instruction(
             let absent = variant(types, ty, &Case::Type(Ty::None), "0");
             format!("({temp}_upgraded ? {present} : {absent})")
         }
-        Instr::WeakEmpty { .. } => "NULL".into(),
+        Instr::WeakEmpty => "NULL".into(),
         Instr::TakeLocal { local } => {
             if function.locals[local.index()]
                 .ty

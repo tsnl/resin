@@ -42,92 +42,46 @@ pub(super) fn check_instr(
                 stack.push(target.ty.clone());
             }
         }
-        Instr::WeakEmpty { ty } => {
-            check_type(&module.types, ty, location)?;
-            if !matches!(ty, Ty::WeakPtr { .. } | Ty::WeakSpan { .. }) {
-                return Err(location.error(VerifyErrorKind::TypeMismatch {
-                    expected: Ty::WeakPtr {
-                        pointee: Box::new(Ty::Unit),
-                    },
-                    found: ty.clone(),
-                }));
-            }
-            stack.push(ty.clone());
-        }
-        Instr::ArcNew => {
-            let ty = pop_one(stack, location)?;
-            super::rules::check_value(&module.types, &ty, location)?;
-            stack.push(Ty::ArcPtr {
-                pointee: Box::new(ty),
-            });
-        }
-        Instr::ArcSpanTryNew { element } | Instr::HostAllocate { element, .. } => {
+        Instr::WeakEmpty => stack.push(Ty::WeakOwner),
+        Instr::OwnerAllocate { element } => {
             check_type(&module.types, element, location)?;
             super::rules::check_value(&module.types, element, location)?;
             let values = pop(stack, 2, location)?;
             expect_types(&[Ty::UInt64, element.clone()], &values, location)?;
-            let owner = Ty::ArcSpan {
-                element: Box::new(element.clone()),
-            };
-            let result = if let Instr::HostAllocate { error, .. } = instr {
-                let factory = module.functions.get(error.index()).ok_or_else(|| {
-                    location.error(VerifyErrorKind::InvalidFunction {
-                        function: error.index(),
-                    })
-                })?;
-                let signature = function_type(factory, location)?;
-                let Ty::Function { params, result } = signature else {
-                    unreachable!()
-                };
-                expect_types(&[], &params, location)?;
-                super::rules::check_value(&module.types, &result, location)?;
-                Ty::Result {
-                    value: Box::new(owner),
-                    error: result,
-                }
-            } else {
-                Ty::union_of([owner, Ty::None])
-            };
-            super::rules::check_value(&module.types, &result, location)?;
-            stack.push(result);
+            stack.push(Ty::union_of([Ty::StrongOwner, Ty::None]));
         }
-        Instr::ArcData | Instr::ArcSpanData | Instr::Downgrade | Instr::Upgrade => {
-            let source = pop_one(stack, location)?;
-            let result = match (instr, &source) {
-                (Instr::ArcData, Ty::ArcPtr { pointee }) => Ty::Pointer {
-                    pointee: pointee.clone(),
+        Instr::OwnerData { pointee } => {
+            check_type(&module.types, pointee, location)?;
+            expect_type(
+                Ty::Pointer {
+                    pointee: Box::new(Ty::StrongOwner),
                 },
-                (Instr::ArcSpanData, Ty::ArcSpan { element }) => {
-                    Ty::pointer_length(*element.clone())
-                }
-                (Instr::Downgrade, Ty::ArcPtr { pointee }) => Ty::WeakPtr {
-                    pointee: pointee.clone(),
-                },
-                (Instr::Upgrade, Ty::WeakPtr { pointee }) => Ty::union_of([
-                    Ty::ArcPtr {
-                        pointee: pointee.clone(),
-                    },
-                    Ty::None,
-                ]),
-                (Instr::Downgrade, Ty::ArcSpan { element }) => Ty::WeakSpan {
-                    element: element.clone(),
-                },
-                (Instr::Upgrade, Ty::WeakSpan { element }) => Ty::union_of([
-                    Ty::ArcSpan {
-                        element: element.clone(),
-                    },
-                    Ty::None,
-                ]),
-                _ => {
-                    return Err(location.error(VerifyErrorKind::TypeMismatch {
-                        expected: Ty::ArcPtr {
-                            pointee: Box::new(Ty::Unit),
-                        },
-                        found: source,
-                    }));
-                }
+                pop_one(stack, location)?,
+                location,
+            )?;
+            stack.push(Ty::Pointer {
+                pointee: Box::new(pointee.clone()),
+            });
+        }
+        Instr::OwnerLength | Instr::OwnerDowngrade | Instr::OwnerUpgrade => {
+            let owner = if matches!(instr, Instr::OwnerUpgrade) {
+                Ty::WeakOwner
+            } else {
+                Ty::StrongOwner
             };
-            stack.push(result);
+            expect_type(
+                Ty::Pointer {
+                    pointee: Box::new(owner),
+                },
+                pop_one(stack, location)?,
+                location,
+            )?;
+            stack.push(match instr {
+                Instr::OwnerLength => Ty::UInt64,
+                Instr::OwnerDowngrade => Ty::WeakOwner,
+                Instr::OwnerUpgrade => Ty::union_of([Ty::StrongOwner, Ty::None]),
+                _ => unreachable!(),
+            });
         }
         Instr::SetLocal { local } => {
             let target = function.locals.get(local.index()).ok_or_else(|| {

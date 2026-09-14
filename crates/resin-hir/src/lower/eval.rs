@@ -70,10 +70,6 @@ impl Decoder<'_> {
                     "Ptr" => Some(Head::Pointer),
                     "GpuPtr" => Some(Head::GpuPointer),
                     "GpuSpan" => Some(Head::GpuSpan),
-                    "ArcPtr" => Some(Head::ArcPtr),
-                    "WeakPtr" => Some(Head::WeakPtr),
-                    "ArcSpan" => Some(Head::ArcSpan),
-                    "WeakSpan" => Some(Head::WeakSpan),
                     _ => None,
                 };
                 if let Some(builtin) = builtin {
@@ -141,6 +137,8 @@ fn builtin_ty(name: &str) -> Option<Ty> {
         "Never" => Ty::union([]),
         "None" => Ty::None,
         "GpuArguments" => Ty::GpuArguments,
+        "StrongOwner" => Ty::StrongOwner,
+        "WeakOwner" => Ty::WeakOwner,
         "bool" => Ty::Bool,
         "str" => Ty::Str,
         "sbyte" => Ty::Int8,

@@ -51,18 +51,17 @@ pub(crate) struct StackEffect {
 pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
     use crate::Instr;
     match instr {
-        Instr::WeakEmpty { .. }
+        Instr::WeakEmpty
         | Instr::TakeLocal { .. }
         | Instr::Shader { .. }
         | Instr::Push { .. }
         | Instr::Function { .. }
         | Instr::LocalAddress { .. } => StackEffect { pops: 0, pushes: 1 },
         Instr::TransferLoad
-        | Instr::ArcNew
-        | Instr::ArcData
-        | Instr::ArcSpanData
-        | Instr::Downgrade
-        | Instr::Upgrade
+        | Instr::OwnerData { .. }
+        | Instr::OwnerLength
+        | Instr::OwnerDowngrade
+        | Instr::OwnerUpgrade
         | Instr::AccessStatic { .. }
         | Instr::MakeVariant { .. }
         | Instr::ExcludeNone
@@ -84,8 +83,7 @@ pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
         | Instr::GpuAllocate { .. }
         | Instr::GpuCopyTo
         | Instr::PointerBytes
-        | Instr::ArcSpanTryNew { .. }
-        | Instr::HostAllocate { .. } => StackEffect { pops: 2, pushes: 1 },
+        | Instr::OwnerAllocate { .. } => StackEffect { pops: 2, pushes: 1 },
         Instr::PointerIndex | Instr::GpuSlice | Instr::GpuArgumentsDraw | Instr::GpuCopyImage => {
             StackEffect { pops: 3, pushes: 1 }
         }

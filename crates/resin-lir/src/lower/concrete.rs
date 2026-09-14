@@ -100,14 +100,7 @@ pub(super) enum TermKind {
         conversion: resin_types::ExplicitConversion,
         arg: Box<Term>,
     },
-    ArcNew {
-        value: Box<Term>,
-    },
     /// Allocate fully initialized host elements, using the source error factory on failure.
-    HostAllocate {
-        error: FunctionId,
-        args: Arguments,
-    },
     /// Allocate and initialize a GPU element through the registered allocator.
     GpuNew {
         allocator: FunctionId,
@@ -130,9 +123,6 @@ pub(super) enum TermKind {
         allocator: Option<FunctionId>,
         record: FunctionId,
         args: Arguments,
-    },
-    WeakEmpty {
-        ty: Ty,
     },
     Result {
         failure: bool,
@@ -193,6 +183,4 @@ pub(super) enum ReceiverConversion {
     Value,
     Address,
     Load,
-    ArcAddress,
-    ArcLoad,
 }

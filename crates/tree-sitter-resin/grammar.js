@@ -71,10 +71,6 @@ const TYPE_FORMERS = [
   "GpuSpan",
   "GpuComputePipeline",
   "GpuGraphicsPipeline",
-  "ArcPtr",
-  "WeakPtr",
-  "ArcSpan",
-  "WeakSpan",
   "Result",
 ];
 
@@ -512,10 +508,6 @@ export default grammar({
               "Ptr",
               "GpuPtr",
               "GpuSpan",
-              "ArcPtr",
-              "WeakPtr",
-              "ArcSpan",
-              "WeakSpan",
             ),
           ),
           "<",

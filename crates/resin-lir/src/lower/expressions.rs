@@ -41,26 +41,6 @@ impl FunctionLowering<'_> {
             TermKind::Convert { conversion, arg } => {
                 return self.gen_conversion(term, arg, conversion);
             }
-            TermKind::ArcNew { value } => {
-                let Ty::ArcPtr { pointee } = expected else {
-                    unreachable!("checked Arc constructor")
-                };
-                self.gen_term(value, Some(pointee))?;
-                self.emit(Instr::ArcNew);
-            }
-            TermKind::HostAllocate { error, args } => {
-                let Ty::Result { value, .. } = expected else {
-                    unreachable!("host allocation result")
-                };
-                let Ty::ArcSpan { element } = &**value else {
-                    unreachable!("host allocation span")
-                };
-                self.gen_arguments(args)?;
-                self.emit(Instr::HostAllocate {
-                    error: *error,
-                    element: *element.clone(),
-                });
-            }
             TermKind::GpuNew { allocator, args } => {
                 let Ty::Result { value, .. } = expected else {
                     unreachable!("GPU allocation result")
@@ -127,7 +107,6 @@ impl FunctionLowering<'_> {
                     }
                 });
             }
-            TermKind::WeakEmpty { ty } => self.emit(Instr::WeakEmpty { ty: ty.clone() }),
             TermKind::Result { failure, arg } => {
                 return self.gen_result(span, *failure, arg, expected);
             }
@@ -140,11 +119,7 @@ impl FunctionLowering<'_> {
             TermKind::Assign { place, value } => return self.gen_assign(place, value),
             TermKind::Address { place } => return self.gen_place(place),
             TermKind::Deref { pointer } => {
-                if matches!(pointer.ty, Ty::ArcPtr { .. }) {
-                    self.hold_arc_address(pointer)?;
-                } else {
-                    self.gen_term(pointer, None)?;
-                }
+                self.gen_term(pointer, None)?;
                 self.emit(Instr::Load);
             }
             TermKind::Field { base, access } => return self.gen_field_value(base, access),
@@ -210,22 +185,21 @@ impl FunctionLowering<'_> {
             Intrinsic::GpuArgumentsDispatch => self.emit(Instr::GpuArgumentsDispatch),
             Intrinsic::GpuArgumentsDraw => self.emit(Instr::GpuArgumentsDraw),
             Intrinsic::GpuCopyImage => self.emit(Instr::GpuCopyImage),
-            Intrinsic::ArcGet => {
-                self.emit(Instr::Load);
-                self.emit(Instr::ArcData);
-            }
-            Intrinsic::ArcSpanGet => {
-                self.emit(Instr::Load);
-                self.emit(Instr::ArcSpanData);
-            }
-            Intrinsic::ArcSpanTryNew => {
-                let Some(Ty::ArcSpan { element }) = result.without_none() else {
-                    unreachable!("optional shared span allocation result")
+            Intrinsic::OwnerAllocate => self.emit(Instr::OwnerAllocate {
+                element: args.params[1].clone(),
+            }),
+            Intrinsic::OwnerData => {
+                let Ty::Pointer { pointee } = result else {
+                    unreachable!("owner payload pointer")
                 };
-                self.emit(Instr::ArcSpanTryNew { element: *element });
+                self.emit(Instr::OwnerData {
+                    pointee: *pointee.clone(),
+                });
             }
-            Intrinsic::Downgrade => self.emit(Instr::Downgrade),
-            Intrinsic::Upgrade => self.emit(Instr::Upgrade),
+            Intrinsic::OwnerLength => self.emit(Instr::OwnerLength),
+            Intrinsic::OwnerDowngrade => self.emit(Instr::OwnerDowngrade),
+            Intrinsic::OwnerUpgrade => self.emit(Instr::OwnerUpgrade),
+            Intrinsic::WeakEmpty => self.emit(Instr::WeakEmpty),
         }
         Ok(())
     }

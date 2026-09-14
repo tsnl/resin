@@ -164,7 +164,6 @@ fn check_instruction_profiles(
     let host = |id| check_profile(module, id, crate::Profile::Host, location);
     match op {
         crate::Instr::Function { function } => check_profile(module, *function, profile, location),
-        crate::Instr::HostAllocate { error, .. } => host(*error),
         crate::Instr::GpuNew { allocator, .. } | crate::Instr::GpuAllocate { allocator, .. } => {
             host(*allocator)
         }

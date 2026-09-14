@@ -1140,37 +1140,7 @@ impl Expression<'_, '_> {
                         single_argument(args, span)?
                     };
                     let ann = self.annotation(ty, true);
-                    let arg = if let Type::Node(Head::ArcPtr, parts) = &ann.ty {
-                        let context = if matches!(
-                            arg.val,
-                            resin_ast::TermKind::Record { .. } | resin_ast::TermKind::Unit
-                        ) {
-                            let solver = &self.checker.typing.solver;
-                            let body = if let Some(body) =
-                                self.checker.typing.typer.nominal_body(&parts[0], solver)
-                            {
-                                solver.shape_hint(&body)
-                            } else {
-                                let payload = solver.require(&parts[0], span)?;
-                                self.checker
-                                    .typing
-                                    .typer
-                                    .body(&payload)
-                                    .map_err(|e| GenerateError::typing(span, e))?
-                                    .into()
-                            };
-                            if matches!(arg.val, resin_ast::TermKind::Unit)
-                                && matches!(&body, Type::Node(Head::Record(fields), _) if fields.is_empty())
-                            {
-                                Ty::Unit.into()
-                            } else {
-                                body
-                            }
-                        } else {
-                            parts[0].clone()
-                        };
-                        self.child(arg, Some(context))
-                    } else {
+                    let arg = {
                         let literal = matches!(arg.val, resin_ast::TermKind::Num { .. })
                             || matches!(&arg.val, resin_ast::TermKind::Builtin { name, args } if matches!(name.as_ref(), "+" | "-") && matches!(args.as_slice(), [resin_ast::Term { val: resin_ast::TermKind::Num { .. }, .. }]));
                         let arg = self.child(arg, None);

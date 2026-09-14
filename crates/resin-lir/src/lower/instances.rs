@@ -354,9 +354,8 @@ impl<'a> Instances<'a> {
         name: &str,
     ) -> Result<(FunctionId, resin_hir::Signature, Vec<resin_hir::Type>), LowerError> {
         let mut owner = receiver;
-        while let resin_hir::Type::Pointer { pointee }
-        | resin_hir::Type::GpuPointer { pointee }
-        | resin_hir::Type::ArcPtr { pointee } = owner
+        while let resin_hir::Type::Pointer { pointee } | resin_hir::Type::GpuPointer { pointee } =
+            owner
         {
             owner = pointee;
         }

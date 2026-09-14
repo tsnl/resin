@@ -68,10 +68,6 @@ pub(super) fn check_value(
                     seen,
                 )?;
             }
-            Ty::ArcPtr { pointee: value }
-            | Ty::WeakPtr { pointee: value }
-            | Ty::ArcSpan { element: value }
-            | Ty::WeakSpan { element: value } => visit(table, value, location, seen)?,
             Ty::GpuPointer { pointee: element } | Ty::GpuSpan { element } => {
                 if !element.gpu_element(table) {
                     return Err(location.error(VerifyErrorKind::UnsupportedGpuElement {

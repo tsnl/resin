@@ -1479,14 +1479,6 @@
         "required": false,
         "types": [
           {
-            "type": "ArcPtr",
-            "named": false
-          },
-          {
-            "type": "ArcSpan",
-            "named": false
-          },
-          {
             "type": "GpuComputePipeline",
             "named": false
           },
@@ -1504,14 +1496,6 @@
           },
           {
             "type": "Ptr",
-            "named": false
-          },
-          {
-            "type": "WeakPtr",
-            "named": false
-          },
-          {
-            "type": "WeakSpan",
             "named": false
           },
           {
@@ -1752,14 +1736,6 @@
     "named": false
   },
   {
-    "type": "ArcPtr",
-    "named": false
-  },
-  {
-    "type": "ArcSpan",
-    "named": false
-  },
-  {
     "type": "GpuArguments",
     "named": false
   },
@@ -1793,14 +1769,6 @@
   },
   {
     "type": "Result",
-    "named": false
-  },
-  {
-    "type": "WeakPtr",
-    "named": false
-  },
-  {
-    "type": "WeakSpan",
     "named": false
   },
   {

@@ -77,11 +77,7 @@ impl FunctionLowering<'_> {
             }
             TermKind::Deref { pointer } => {
                 let checked = &pointer.ty;
-                if matches!(checked, Ty::ArcPtr { .. }) {
-                    self.hold_arc_address(pointer)?
-                } else {
-                    self.gen_term(pointer, None)?
-                };
+                self.gen_term(pointer, None)?;
                 let pointee = term.ty.clone();
                 Ok(Operand::Place {
                     ty: pointee,
@@ -112,19 +108,7 @@ impl FunctionLowering<'_> {
                 is_place = true;
                 continue;
             }
-            let Ty::ArcPtr { pointee } = &base_ty else {
-                break;
-            };
-            let pointee = *pointee.clone();
-            if is_place {
-                self.emit(Instr::Load);
-            }
-            let owner = self.save_top(&base_ty);
-            self.load_local(owner);
-            self.emit(Instr::ArcData);
-            base_ty = pointee;
-            is_place = true;
-            gpu = false;
+            break;
         }
         if is_place {
             self.emit_place_conv(&access.steps);

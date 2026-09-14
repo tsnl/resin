@@ -33,9 +33,7 @@ fn span(element: Ty) -> Ty {
 }
 
 fn owner(element: Ty) -> Ty {
-    Ty::ArcSpan {
-        element: Box::new(element),
-    }
+    Ty::StrongOwner
 }
 
 fn parameter() -> Vec<Instr> {
@@ -71,22 +69,10 @@ fn allocation_and_weak_upgrade_preserve_the_sequence_family() {
     let mut program = module(
         Ty::Unit,
         result,
-        vec![
-            Instr::WeakEmpty {
-                ty: Ty::WeakSpan {
-                    element: Box::new(Ty::Int32),
-                },
-            },
-            Instr::Upgrade,
-        ],
+        vec![Instr::WeakEmpty { ty: Ty::WeakOwner }, Instr::Upgrade],
     );
     VerifiedModule::new(program.clone()).unwrap();
-    program.functions[0].result = Ty::union_of([
-        Ty::ArcPtr {
-            pointee: Box::new(Ty::Int32),
-        },
-        Ty::None,
-    ]);
+    program.functions[0].result = Ty::union_of([Ty::StrongOwner, Ty::None]);
     assert!(VerifiedModule::new(program).is_err());
 }
 
@@ -111,12 +97,7 @@ fn allocation_requires_an_unsigned_count_and_matching_initializer() {
 
 #[test]
 fn span_data_requires_a_sequence_owner_and_weak_empty_requires_a_weak_type() {
-    for source in [
-        Ty::ArcPtr {
-            pointee: Box::new(Ty::Int32),
-        },
-        Ty::Int32,
-    ] {
+    for source in [Ty::StrongOwner, Ty::Int32] {
         let mut instrs = parameter();
         instrs.push(Instr::ArcSpanData);
         assert!(VerifiedModule::new(module(source, span(Ty::Int32), instrs)).is_err());
@@ -136,16 +117,7 @@ fn byte_views_reject_elements_with_ownership() {
     let mut instrs = parameter();
     instrs.push(Instr::SpanBytes);
     VerifiedModule::new(module(span(Ty::UInt32), span(Ty::UInt8), instrs.clone())).unwrap();
-    assert!(
-        VerifiedModule::new(module(
-            span(Ty::ArcPtr {
-                pointee: Box::new(Ty::Int32)
-            }),
-            span(Ty::UInt8),
-            instrs,
-        ))
-        .is_err()
-    );
+    assert!(VerifiedModule::new(module(span(Ty::StrongOwner), span(Ty::UInt8), instrs,)).is_err());
 }
 
 #[test]

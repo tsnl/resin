@@ -128,33 +128,24 @@ pub enum Instr {
     GpuArgumentsDraw,
     /// `[GpuSpan<ubyte>, commands, image] -> [int]`: record an image copy retaining its buffer.
     GpuCopyImage,
-    /// `[payload] -> [ArcPtr<payload>]`: transfer the payload into a new shared allocation.
-    ArcNew,
-    /// `[count, initial] -> [ArcSpan<T> | None]`: allocate and copy the initial
-    /// value into every element. Failure consumes the initializer and returns None.
-    ArcSpanTryNew { element: Ty },
-    /// `[count, initial] -> [Result<ArcSpan<T>, E>]`: allocate initialized elements;
-    /// call the unit-parameter error factory only if allocation fails.
-    HostAllocate { error: FunctionId, element: Ty },
-    /// `[ArcSpan<T>] -> [Span<T>]`: release this owner and borrow its elements.
-    /// Another owner must retain the allocation throughout the access.
-    ArcSpanData,
+    /// `[count, initial] -> [StrongOwner | None]`: allocate initialized element storage.
+    /// Installs the concrete element destructor; failed allocations publish no owner.
+    OwnerAllocate { element: Ty },
+    /// `[Ptr<StrongOwner>] -> [Ptr<T>]`: borrow live payload storage.
+    OwnerData { pointee: Ty },
+    /// `[Ptr<StrongOwner>] -> [ulong]`: read the immutable element count.
+    OwnerLength,
+    /// `[Ptr<StrongOwner>] -> [WeakOwner]`: acquire a weak reference.
+    OwnerDowngrade,
+    /// `[Ptr<WeakOwner>] -> [StrongOwner | None]`: acquire a strong reference if live.
+    OwnerUpgrade,
+    /// `[] -> [WeakOwner]`: construct an empty weak reference.
+    WeakEmpty,
     /// `[address] -> [value]`: transfer a pointee without copying or clearing storage.
     /// Lowering must disarm its previous owner, typically with `ForgetLocal`.
     TransferLoad,
     /// `[] -> []`: clear a local's initialization flag without destroying its value.
     ForgetLocal { local: LocalId },
-    /// `[ArcPtr<T>] -> [Ptr<T>]`: release this owner and borrow its payload address.
-    /// Another owner must keep the allocation alive for the entire access.
-    ArcData,
-    /// `[ArcPtr<T> or ArcSpan<T>] -> [matching weak]`: create a weak reference
-    /// and release this strong owner.
-    Downgrade,
-    /// `[weak] -> [matching owner | None]`: acquire a live owner if possible;
-    /// release the WeakPtr or WeakSpan reference.
-    Upgrade,
-    /// `[] -> [ty]`: create an empty WeakPtr or WeakSpan reference.
-    WeakEmpty { ty: Ty },
     /// `[] -> [value]`: transfer an initialized local and clear its initialization flag.
     /// Used for compiler temporaries; source reads still copy.
     TakeLocal { local: LocalId },

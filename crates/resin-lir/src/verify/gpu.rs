@@ -43,7 +43,7 @@ pub(super) fn check(
             }
         }
         Instr::GpuAllocateNative => {
-            if !matches!(&args[0], Ty::Pointer { .. }) || !matches!(&args[1], Ty::ArcPtr { .. }) {
+            if !matches!(&args[0], Ty::Pointer { .. }) || !matches!(&args[1], Ty::StrongOwner) {
                 return Err(invalid());
             }
             for (expected, found) in [Ty::UInt64, Ty::UInt64, Ty::Int32]

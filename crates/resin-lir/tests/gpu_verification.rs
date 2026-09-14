@@ -99,9 +99,7 @@ fn gpu_index_returns_owner_and_load_returns_plain_element() {
 
 #[test]
 fn managed_gpu_elements_and_permission_changes_on_raw_pointers_are_rejected() {
-    let managed = gpu(Ty::ArcPtr {
-        pointee: Box::new(Ty::UInt32),
-    });
+    let managed = gpu(Ty::StrongOwner);
     let module = module(managed.clone(), managed, vec![]);
     assert!(matches!(
         resin_lir::verify(&module).unwrap_err().kind,

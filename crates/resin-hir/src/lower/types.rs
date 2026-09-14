@@ -34,18 +34,8 @@ pub(super) fn ty(source: &Ty) -> crate::Type {
         Ty::GpuSpan { element } => crate::Type::GpuSpan {
             element: Box::new(ty(element)),
         },
-        Ty::ArcPtr { pointee } => crate::Type::ArcPtr {
-            pointee: Box::new(ty(pointee)),
-        },
-        Ty::ArcSpan { element } => crate::Type::ArcSpan {
-            element: Box::new(ty(element)),
-        },
-        Ty::WeakSpan { element } => crate::Type::WeakSpan {
-            element: Box::new(ty(element)),
-        },
-        Ty::WeakPtr { pointee } => crate::Type::WeakPtr {
-            pointee: Box::new(ty(pointee)),
-        },
+        Ty::StrongOwner => crate::Type::StrongOwner,
+        Ty::WeakOwner => crate::Type::WeakOwner,
         Ty::GpuComputePipeline { root, owner } => crate::Type::GpuComputePipeline {
             root: Box::new(ty(root)),
             owner: Box::new(ty(owner)),

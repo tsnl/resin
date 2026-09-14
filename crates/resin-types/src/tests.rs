@@ -367,9 +367,7 @@ fn gpu_element_storage_excludes_references_and_custom_destruction() {
         Ty::GpuSpan {
             element: Box::new(Ty::UInt32),
         },
-        Ty::ArcPtr {
-            pointee: Box::new(Ty::UInt32),
-        },
+        Ty::StrongOwner,
         Ty::Array {
             element: Box::new(Ty::UInt32),
             length: 0,
@@ -439,9 +437,7 @@ fn pipeline_types_preserve_root_identity_and_opaque_shared_ownership() {
     let root = record(Ty::Span {
         element: Box::new(Ty::UInt32),
     });
-    let owner = Ty::ArcPtr {
-        pointee: Box::new(Ty::Int32),
-    };
+    let owner = Ty::StrongOwner;
     let compute = Ty::GpuComputePipeline {
         root: Box::new(root.clone()),
         owner: Box::new(owner.clone()),
@@ -488,9 +484,7 @@ fn pipeline_types_preserve_root_identity_and_opaque_shared_ownership() {
 
 #[test]
 fn pipeline_argument_contract_rejects_invalid_owners_roots_and_rootless_compute() {
-    let owner = Box::new(Ty::ArcPtr {
-        pointee: Box::new(Ty::Int32),
-    });
+    let owner = Box::new(Ty::StrongOwner);
     let graphics = Ty::GpuGraphicsPipeline {
         root: Box::new(Ty::None),
         owner: owner.clone(),

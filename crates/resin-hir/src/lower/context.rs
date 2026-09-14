@@ -17,7 +17,6 @@ pub(crate) struct Context {
     pub(super) method_owners: BTreeMap<super::scope::DeclarationId, TypeId>,
     pub(super) source_methods: BTreeMap<(TypeId, Arc<str>), SourceMethod>,
     pub(super) functions: BTreeMap<FunctionId, FunctionDecl>,
-    pub(super) host_allocation_errors: BTreeMap<TypeId, FunctionId>,
     pub(super) gpu_allocators: BTreeMap<TypeId, FunctionId>,
     pub(super) gpu_pipeline_contexts: BTreeMap<TypeId, FunctionId>,
     pub(super) method_definitions: Vec<MethodDefinitions>,
@@ -176,9 +175,6 @@ pub(crate) enum FunctionBody {
     /// Primitive operation elaborated at its call site, preserving addresses
     /// that cannot cross shader calls.
     Intrinsic(Intrinsic),
-    HostAllocate {
-        error: FunctionId,
-    },
     GpuNew {
         allocator: FunctionId,
     },
@@ -200,13 +196,6 @@ pub(crate) enum FunctionBody {
     },
 }
 
-/// A builtin signature whose payload types may retain source type parameters.
-#[derive(Debug, Clone)]
-pub(crate) struct MethodScheme {
-    pub body: FunctionBody,
-    pub params: Vec<super::infer::Type>,
-    pub result: super::infer::Type,
-}
 
 pub(crate) type MethodDefinitions = fn(&Ty, &Context) -> Vec<(Arc<str>, FunctionDecl)>;
 
@@ -263,17 +252,6 @@ impl Context {
         self.method_definitions.push(definitions);
     }
 
-    pub(crate) fn host_allocation_error(&self, receiver: &Ty) -> Option<FunctionId> {
-        let Ty::Defined { definition } = receiver else {
-            return None;
-        };
-        self.host_allocation_errors.get(definition).copied()
-    }
-
-    pub(crate) fn host_error(&self, factory: FunctionId) -> Ty {
-        self.functions[&factory].result.clone()
-    }
-
     pub(crate) fn gpu_allocator(&self, receiver: &Ty) -> Option<FunctionId> {
         let definition = self.receiver_definition(receiver)?;
         let function = *self.gpu_allocators.get(&definition)?;
@@ -295,24 +273,6 @@ impl Context {
         arguments: &[Ty],
         associated: bool,
     ) -> Option<FunctionDecl> {
-        if associated
-            && name == "alloc"
-            && let Some(error) = self.host_allocation_error(ty)
-        {
-            let [_, initial] = arguments else {
-                return None;
-            };
-            return Some(FunctionDecl {
-                body: FunctionBody::HostAllocate { error },
-                params: vec![Ty::UInt64, initial.clone()],
-                result: gpu_result(
-                    Ty::ArcSpan {
-                        element: Box::new(initial.clone()),
-                    },
-                    self.host_error(error),
-                ),
-            });
-        }
         if !associated
             && name == "new"
             && let Some(allocator) = self.gpu_allocator(ty)
@@ -338,7 +298,7 @@ impl Context {
             let [handle, owner, ..] = arguments else {
                 return None;
             };
-            if !matches!(handle, Ty::Pointer { .. }) || !matches!(owner, Ty::ArcPtr { .. }) {
+            if !matches!(handle, Ty::Pointer { .. }) || !matches!(owner, Ty::StrongOwner) {
                 return None;
             }
             return Some(FunctionDecl {
@@ -397,15 +357,6 @@ impl Context {
         associated: bool,
     ) -> Option<(&'static str, String)> {
         let label = |ty: &Ty| resin_types::format_type(ty, self.definitions());
-        if associated && let Some(error) = self.host_allocation_error(ty) {
-            return Some((
-                "alloc",
-                format!(
-                    "(count: ulong, initial: T) -> Result<ArcSpan<T>, {}>",
-                    label(&self.host_error(error))
-                ),
-            ));
-        }
         match (ty, associated) {
             (Ty::GpuPointer { pointee }, true) => Some((
                 "new",
@@ -471,11 +422,6 @@ impl ReceiverConversion {
         } else if matches!(from, Ty::Pointer { pointee } | Ty::GpuPointer { pointee } if pointee.as_ref() == to)
         {
             Some(Self::Load)
-        } else if matches!(from, Ty::ArcPtr { pointee } if to == &Ty::Pointer { pointee: pointee.clone() })
-        {
-            Some(Self::ArcAddress)
-        } else if matches!(from, Ty::ArcPtr { pointee } if pointee.as_ref() == to) {
-            Some(Self::ArcLoad)
         } else {
             None
         }
@@ -588,66 +534,7 @@ fn builtin_methods(receiver: &Ty, typer: &Context) -> Vec<(Arc<str>, FunctionDec
             pointer(Ty::UInt8),
             Intrinsic::Index,
         )],
-        Ty::ArcPtr { pointee } => vec![
-            method(
-                "get",
-                vec![pointer(receiver.clone())],
-                pointer(*pointee.clone()),
-                Intrinsic::ArcGet,
-            ),
-            method(
-                "downgrade",
-                vec![receiver.clone()],
-                Ty::WeakPtr {
-                    pointee: pointee.clone(),
-                },
-                Intrinsic::Downgrade,
-            ),
-        ],
-        Ty::ArcSpan { element } => vec![
-            method(
-                "try_new",
-                vec![Ty::UInt64, *element.clone()],
-                Ty::union_of([receiver.clone(), Ty::None]),
-                Intrinsic::ArcSpanTryNew,
-            ),
-            method(
-                "get",
-                vec![pointer(receiver.clone())],
-                Ty::pointer_length(*element.clone()),
-                Intrinsic::ArcSpanGet,
-            ),
-            method(
-                "downgrade",
-                vec![receiver.clone()],
-                Ty::WeakSpan {
-                    element: element.clone(),
-                },
-                Intrinsic::Downgrade,
-            ),
-        ],
-        Ty::WeakSpan { element } => vec![method(
-            "upgrade",
-            vec![receiver.clone()],
-            Ty::union_of([
-                Ty::ArcSpan {
-                    element: element.clone(),
-                },
-                Ty::None,
-            ]),
-            Intrinsic::Upgrade,
-        )],
-        Ty::WeakPtr { pointee } => vec![method(
-            "upgrade",
-            vec![receiver.clone()],
-            Ty::union_of([
-                Ty::ArcPtr {
-                    pointee: pointee.clone(),
-                },
-                Ty::None,
-            ]),
-            Intrinsic::Upgrade,
-        )],
+
         _ => vec![],
     }
 }
@@ -723,125 +610,65 @@ fn gpu_methods(receiver: &Ty, element: &Ty) -> Vec<(Arc<str>, FunctionDecl)> {
         ),
     ]
 }
-impl Context {
-    /// Select compiler-defined operations from the receiver's constructor without
-    /// demanding concrete payload layouts during HIR construction.
-    pub(crate) fn method_scheme(
-        &self,
-        receiver: &super::infer::Type,
-        name: &str,
-        arguments: &[super::infer::Type],
-        associated: bool,
-    ) -> Option<MethodScheme> {
-        use super::infer::{Head, Type};
-        let node = |head, value| Type::Node(head, vec![value]);
-        let optional = |value| Type::Node(Head::Union, vec![value, Ty::None.into()]);
-        let Type::Node(head, children) = receiver else {
-            return None;
-        };
-        let host_error = match head {
-            Head::Atom(ty) => self.host_allocation_error(ty),
-            Head::Nominal { definition } => self.host_allocation_errors.get(definition).copied(),
-            _ => None,
-        };
-        if associated
-            && name == "alloc"
-            && let Some(error) = host_error
-        {
-            let [_, initial] = arguments else {
-                return None;
-            };
-            return Some(MethodScheme {
-                body: FunctionBody::HostAllocate { error },
-                params: vec![Ty::UInt64.into(), initial.clone()],
-                result: Type::result(
-                    node(Head::ArcSpan, initial.clone()),
-                    self.host_error(error).into(),
-                ),
-            });
-        }
-        let element = children.first()?.clone();
-        let (op, params, result) = match (head, name) {
-            (Head::ArcSpan, "try_new") => (
-                Intrinsic::ArcSpanTryNew,
-                vec![Ty::UInt64.into(), element],
-                optional(receiver.clone()),
-            ),
-            (Head::ArcSpan, "get") => (
-                Intrinsic::ArcSpanGet,
-                vec![Type::pointer(receiver.clone())],
-                Type::record(vec![
-                    ("data".into(), Type::pointer(element)),
-                    ("length".into(), Ty::UInt64.into()),
-                ]),
-            ),
-            (Head::ArcPtr, "get") => (
-                Intrinsic::ArcGet,
-                vec![Type::pointer(receiver.clone())],
-                Type::pointer(element),
-            ),
-            (Head::ArcSpan, "downgrade") => (
-                Intrinsic::Downgrade,
-                vec![receiver.clone()],
-                node(Head::WeakSpan, element),
-            ),
-            (Head::ArcPtr, "downgrade") => (
-                Intrinsic::Downgrade,
-                vec![receiver.clone()],
-                node(Head::WeakPtr, element),
-            ),
-            (Head::WeakSpan, "upgrade") => (
-                Intrinsic::Upgrade,
-                vec![receiver.clone()],
-                optional(node(Head::ArcSpan, element)),
-            ),
-            (Head::WeakPtr, "upgrade") => (
-                Intrinsic::Upgrade,
-                vec![receiver.clone()],
-                optional(node(Head::ArcPtr, element)),
-            ),
-            _ => return None,
-        };
-        Some(MethodScheme {
-            body: FunctionBody::Intrinsic(op),
-            params,
-            result,
-        })
-    }
-}
-
 /// Representation operations have signatures independent of library wrapper names.
 pub(super) fn primitive_signature(
     operation: &str,
     parameters: &[crate::Type],
 ) -> Option<(crate::Intrinsic, Vec<crate::Type>, crate::Type)> {
-    let [element] = parameters else {
-        return None;
+    use crate::{Intrinsic, Type};
+    let pointer = |pointee: Type| Type::Pointer {
+        pointee: Box::new(pointee),
     };
-    let pointer = crate::Type::Pointer {
-        pointee: Box::new(element.clone()),
+    let optional = |ty| Type::Union {
+        variants: vec![Type::None, ty],
     };
-    match operation {
-        "pointer_index" => Some((
-            crate::Intrinsic::PointerIndex,
-            vec![pointer.clone(), crate::Type::UInt64, crate::Type::UInt64],
-            pointer,
-        )),
-        "pointer_range" => Some((
-            crate::Intrinsic::PointerRange,
+    Some(match (operation, parameters) {
+        ("pointer_index", [element]) => (
+            Intrinsic::PointerIndex,
+            vec![pointer(element.clone()), Type::UInt64, Type::UInt64],
+            pointer(element.clone()),
+        ),
+        ("pointer_range", [element]) => (
+            Intrinsic::PointerRange,
             vec![
-                pointer.clone(),
-                crate::Type::UInt64,
-                crate::Type::UInt64,
-                crate::Type::UInt64,
+                pointer(element.clone()),
+                Type::UInt64,
+                Type::UInt64,
+                Type::UInt64,
             ],
-            pointer,
-        )),
-        "pointer_bytes" => Some((
-            crate::Intrinsic::PointerBytes,
-            vec![pointer, crate::Type::UInt64],
+            pointer(element.clone()),
+        ),
+        ("pointer_bytes", [element]) => (
+            Intrinsic::PointerBytes,
+            vec![pointer(element.clone()), Type::UInt64],
             super::types::ty(&Ty::byte_span()),
-        )),
-        _ => None,
-    }
+        ),
+        ("owner_allocate", [element]) => (
+            Intrinsic::OwnerAllocate,
+            vec![Type::UInt64, element.clone()],
+            optional(Type::StrongOwner),
+        ),
+        ("owner_data", [element]) => (
+            Intrinsic::OwnerData,
+            vec![pointer(Type::StrongOwner)],
+            pointer(element.clone()),
+        ),
+        ("owner_length", []) => (
+            Intrinsic::OwnerLength,
+            vec![pointer(Type::StrongOwner)],
+            Type::UInt64,
+        ),
+        ("owner_downgrade", []) => (
+            Intrinsic::OwnerDowngrade,
+            vec![pointer(Type::StrongOwner)],
+            Type::WeakOwner,
+        ),
+        ("owner_upgrade", []) => (
+            Intrinsic::OwnerUpgrade,
+            vec![pointer(Type::WeakOwner)],
+            optional(Type::StrongOwner),
+        ),
+        ("weak_empty", []) => (Intrinsic::WeakEmpty, vec![], Type::WeakOwner),
+        _ => return None,
+    })
 }

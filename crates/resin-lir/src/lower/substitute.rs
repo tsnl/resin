@@ -269,18 +269,8 @@ impl Substitution {
             resin_hir::Type::GpuPointer { pointee } => resin_hir::Type::GpuPointer {
                 pointee: Box::new(self.normalize_at(pointee, depth + 1, state, instances)?),
             },
-            resin_hir::Type::ArcPtr { pointee } => resin_hir::Type::ArcPtr {
-                pointee: Box::new(self.normalize_at(pointee, depth + 1, state, instances)?),
-            },
-            resin_hir::Type::WeakPtr { pointee } => resin_hir::Type::WeakPtr {
-                pointee: Box::new(self.normalize_at(pointee, depth + 1, state, instances)?),
-            },
-            resin_hir::Type::ArcSpan { element } => resin_hir::Type::ArcSpan {
-                element: Box::new(self.normalize_at(element, depth + 1, state, instances)?),
-            },
-            resin_hir::Type::WeakSpan { element } => resin_hir::Type::WeakSpan {
-                element: Box::new(self.normalize_at(element, depth + 1, state, instances)?),
-            },
+            resin_hir::Type::StrongOwner => resin_hir::Type::StrongOwner,
+            resin_hir::Type::WeakOwner => resin_hir::Type::WeakOwner,
             resin_hir::Type::GpuSpan { element } => resin_hir::Type::GpuSpan {
                 element: Box::new(self.normalize_at(element, depth + 1, state, instances)?),
             },
@@ -383,18 +373,8 @@ fn materialize(
         resin_hir::Type::GpuPointer { pointee } => Ty::GpuPointer {
             pointee: Box::new(materialize(pointee, instances)?),
         },
-        resin_hir::Type::ArcPtr { pointee } => Ty::ArcPtr {
-            pointee: Box::new(materialize(pointee, instances)?),
-        },
-        resin_hir::Type::WeakPtr { pointee } => Ty::WeakPtr {
-            pointee: Box::new(materialize(pointee, instances)?),
-        },
-        resin_hir::Type::ArcSpan { element } => Ty::ArcSpan {
-            element: Box::new(materialize(element, instances)?),
-        },
-        resin_hir::Type::WeakSpan { element } => Ty::WeakSpan {
-            element: Box::new(materialize(element, instances)?),
-        },
+        resin_hir::Type::StrongOwner => Ty::StrongOwner,
+        resin_hir::Type::WeakOwner => Ty::WeakOwner,
         resin_hir::Type::GpuSpan { element } => Ty::GpuSpan {
             element: Box::new(materialize(element, instances)?),
         },
@@ -480,18 +460,8 @@ fn expression(source: &Ty, instances: &super::instances::Instances<'_>) -> resin
         Ty::GpuPointer { pointee } => resin_hir::Type::GpuPointer {
             pointee: Box::new(expression(pointee, instances)),
         },
-        Ty::ArcPtr { pointee } => resin_hir::Type::ArcPtr {
-            pointee: Box::new(expression(pointee, instances)),
-        },
-        Ty::WeakPtr { pointee } => resin_hir::Type::WeakPtr {
-            pointee: Box::new(expression(pointee, instances)),
-        },
-        Ty::ArcSpan { element } => resin_hir::Type::ArcSpan {
-            element: Box::new(expression(element, instances)),
-        },
-        Ty::WeakSpan { element } => resin_hir::Type::WeakSpan {
-            element: Box::new(expression(element, instances)),
-        },
+        Ty::StrongOwner => resin_hir::Type::StrongOwner,
+        Ty::WeakOwner => resin_hir::Type::WeakOwner,
         Ty::GpuSpan { element } => resin_hir::Type::GpuSpan {
             element: Box::new(expression(element, instances)),
         },
@@ -586,11 +556,6 @@ fn check_size(
         }
         resin_hir::Type::Pointer { pointee } => check_size(pointee, depth + 1, remaining)?,
         resin_hir::Type::GpuPointer { pointee } => check_size(pointee, depth + 1, remaining)?,
-        resin_hir::Type::ArcPtr { pointee } => check_size(pointee, depth + 1, remaining)?,
-        resin_hir::Type::WeakPtr { pointee } => check_size(pointee, depth + 1, remaining)?,
-        resin_hir::Type::ArcSpan { element } | resin_hir::Type::WeakSpan { element } => {
-            check_size(element, depth + 1, remaining)?
-        }
         resin_hir::Type::GpuSpan { element } => check_size(element, depth + 1, remaining)?,
         resin_hir::Type::GpuComputePipeline { root, owner } => {
             check_size(root, depth + 1, remaining)?;
@@ -636,6 +601,8 @@ fn check_size(
         | resin_hir::Type::Float32
         | resin_hir::Type::Float64
         | resin_hir::Type::Str
+        | resin_hir::Type::StrongOwner
+        | resin_hir::Type::WeakOwner
         | resin_hir::Type::GpuArguments
         | resin_hir::Type::Foreign { .. } => {}
     }

@@ -130,6 +130,10 @@ pub enum Ty {
     },
     /// Opaque projected shader arguments, retained by a host ArcPtr handle.
     GpuArguments,
+    /// Opaque shared allocation handle; copies retain and destruction releases.
+    StrongOwner,
+    /// Opaque weak allocation handle; it does not keep payloads alive.
+    WeakOwner,
     /// A compute pipeline whose shader root and shared host owner stay in its type.
     /// Storage is the owner's ArcPtr handle; neither type parameter is device storage.
     GpuComputePipeline {
@@ -141,18 +145,6 @@ pub enum Ty {
     GpuGraphicsPipeline {
         root: Box<Ty>,
         owner: Box<Ty>,
-    },
-    ArcPtr {
-        pointee: Box<Ty>,
-    },
-    ArcSpan {
-        element: Box<Ty>,
-    },
-    WeakSpan {
-        element: Box<Ty>,
-    },
-    WeakPtr {
-        pointee: Box<Ty>,
     },
     Array {
         element: Box<Ty>,
@@ -198,9 +190,7 @@ impl Ty {
     /// successfully; their payload may already have been destroyed.
     pub fn deref_target(&self) -> Option<&Ty> {
         match self {
-            Self::Pointer { pointee } | Self::GpuPointer { pointee } | Self::ArcPtr { pointee } => {
-                Some(pointee)
-            }
+            Self::Pointer { pointee } | Self::GpuPointer { pointee } => Some(pointee),
             _ => None,
         }
     }
@@ -234,7 +224,7 @@ impl Ty {
     /// Invalid pipeline owners and roots have no argument contract.
     pub fn gpu_pipeline_argument(&self, definitions: &[TypeDef]) -> Option<Ty> {
         let (root, owner) = self.gpu_pipeline()?;
-        if !matches!(owner, Self::ArcPtr { .. }) {
+        if !matches!(owner, Self::StrongOwner) {
             return None;
         }
         if *root == Self::None {
@@ -339,9 +329,7 @@ impl TypeId {
 impl Ty {
     /// An owned sequence whose bytes share one reference-counted allocation.
     pub fn formatted_bytes() -> Self {
-        Self::ArcSpan {
-            element: Box::new(Self::UInt8),
-        }
+        Self::StrongOwner
     }
 
     /// Structural pointer/count transport used by compiler operation boundaries.
@@ -373,14 +361,15 @@ pub enum Intrinsic {
     PointerIndex,
     PointerRange,
     PointerBytes,
+    OwnerAllocate,
+    OwnerData,
+    OwnerLength,
+    OwnerDowngrade,
+    OwnerUpgrade,
+    WeakEmpty,
     StringFromBytes,
     Replace,
     Index,
-    ArcGet,
-    ArcSpanTryNew,
-    ArcSpanGet,
-    Downgrade,
-    Upgrade,
     GpuIndex,
     GpuSlice,
     GpuReadOnly,

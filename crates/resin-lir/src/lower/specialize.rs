@@ -323,8 +323,6 @@ impl Specialization<'_, '_> {
             resin_hir::ReceiverConversion::Value => concrete::ReceiverConversion::Value,
             resin_hir::ReceiverConversion::Address => concrete::ReceiverConversion::Address,
             resin_hir::ReceiverConversion::Load => concrete::ReceiverConversion::Load,
-            resin_hir::ReceiverConversion::ArcAddress => concrete::ReceiverConversion::ArcAddress,
-            resin_hir::ReceiverConversion::ArcLoad => concrete::ReceiverConversion::ArcLoad,
         }
     }
 
@@ -563,11 +561,6 @@ impl Specialization<'_, '_> {
         } else if matches!(&from, Ty::Pointer { pointee } | Ty::GpuPointer { pointee } if pointee.as_ref() == to)
         {
             ReceiverConversion::Load
-        } else if matches!(&from, Ty::ArcPtr { pointee } if to == &Ty::Pointer { pointee: pointee.clone() })
-        {
-            ReceiverConversion::ArcAddress
-        } else if matches!(&from, Ty::ArcPtr { pointee } if pointee.as_ref() == to) {
-            ReceiverConversion::ArcLoad
         } else {
             return Err(self.instance_error("method receiver does not match the first parameter"));
         };
@@ -789,13 +782,6 @@ impl Specialization<'_, '_> {
                 },
             },
             resin_hir::TermKind::Convert { arg } => self.conversion(arg, expected)?,
-            resin_hir::TermKind::ArcNew { value } => concrete::TermKind::ArcNew {
-                value: self.boxed(value)?,
-            },
-            resin_hir::TermKind::HostAllocate { error, args } => concrete::TermKind::HostAllocate {
-                error: self.host_bridge(*error)?,
-                args: self.arguments(args)?,
-            },
             resin_hir::TermKind::GpuNew { allocator, args } => concrete::TermKind::GpuNew {
                 allocator: self.host_bridge(*allocator)?,
                 args: self.arguments(args)?,
@@ -829,9 +815,6 @@ impl Specialization<'_, '_> {
                 record: self.host_bridge(*record)?,
                 args: self.arguments(args)?,
             },
-            resin_hir::TermKind::WeakEmpty { ty } => {
-                concrete::TermKind::WeakEmpty { ty: self.ty(ty)? }
-            }
             resin_hir::TermKind::Result { failure, arg } => concrete::TermKind::Result {
                 failure: *failure,
                 arg: self.boxed(arg)?,

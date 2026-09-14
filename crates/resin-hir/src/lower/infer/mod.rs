@@ -1,6 +1,6 @@
 //! Inference variables, unification, and expression constraints.
 //! All handles are resolved before the typed tree reaches LIR lowering.
-use crate::lower::context::{Context, FunctionBody, FunctionDecl, MethodScheme};
+use crate::lower::context::{Context, FunctionBody, FunctionDecl};
 use crate::lower::scope::DeclarationId;
 use crate::{GenerateError, GenerateErrorKind};
 use resin_source::prelude::*;
@@ -28,10 +28,6 @@ pub(crate) enum Head {
     GpuSpan,
     GpuComputePipeline,
     GpuGraphicsPipeline,
-    ArcPtr,
-    WeakPtr,
-    ArcSpan,
-    WeakSpan,
     Array(usize),
     Record(Vec<Arc<str>>),
     // Result first, followed by the parameter types in declaration order.
@@ -64,9 +60,7 @@ impl Type {
     /// The inference representation of Ty::deref_target; Weak is not dereferenceable.
     pub fn deref_target(&self) -> Option<&Type> {
         match self {
-            Self::Node(Head::Pointer | Head::GpuPointer | Head::ArcPtr, children) => {
-                children.first()
-            }
+            Self::Node(Head::Pointer | Head::GpuPointer, children) => children.first(),
             _ => None,
         }
     }
@@ -129,6 +123,8 @@ impl Type {
             crate::Type::Float64 => Ty::Float64.into(),
             crate::Type::Str => Ty::Str.into(),
             crate::Type::GpuArguments => Ty::GpuArguments.into(),
+            crate::Type::StrongOwner => Ty::StrongOwner.into(),
+            crate::Type::WeakOwner => Ty::WeakOwner.into(),
             crate::Type::Foreign { name } => Ty::Foreign { name: name.clone() }.into(),
             crate::Type::Defined {
                 definition,
@@ -178,18 +174,6 @@ impl Type {
             crate::Type::GpuSpan { element } => {
                 Self::Node(Head::GpuSpan, vec![Self::from_hir(element)])
             }
-            crate::Type::ArcPtr { pointee } => {
-                Self::Node(Head::ArcPtr, vec![Self::from_hir(pointee)])
-            }
-            crate::Type::ArcSpan { element } => {
-                Self::Node(Head::ArcSpan, vec![Self::from_hir(element)])
-            }
-            crate::Type::WeakSpan { element } => {
-                Self::Node(Head::WeakSpan, vec![Self::from_hir(element)])
-            }
-            crate::Type::WeakPtr { pointee } => {
-                Self::Node(Head::WeakPtr, vec![Self::from_hir(pointee)])
-            }
             crate::Type::GpuComputePipeline { root, owner } => Self::Node(
                 Head::GpuComputePipeline,
                 vec![Self::from_hir(root), Self::from_hir(owner)],
@@ -235,10 +219,6 @@ impl Type {
 impl From<Ty> for Type {
     fn from(ty: Ty) -> Self {
         match ty {
-            Ty::ArcPtr { pointee } => Self::Node(Head::ArcPtr, vec![(*pointee).into()]),
-            Ty::ArcSpan { element } => Self::Node(Head::ArcSpan, vec![(*element).into()]),
-            Ty::WeakSpan { element } => Self::Node(Head::WeakSpan, vec![(*element).into()]),
-            Ty::WeakPtr { pointee } => Self::Node(Head::WeakPtr, vec![(*pointee).into()]),
             Ty::Pointer { pointee } => Self::pointer((*pointee).into()),
             Ty::GpuPointer { pointee } => Self::gpu_pointer((*pointee).into()),
             Ty::GpuSpan { element } => Self::Node(Head::GpuSpan, vec![(*element).into()]),
@@ -294,18 +274,6 @@ impl Head {
             | Self::Nominal { .. } => return None,
             Self::Atom(ty) => ty.clone(),
             Self::Union => Ty::union_of(children),
-            Self::ArcPtr => Ty::ArcPtr {
-                pointee: Box::new(children.next().unwrap()),
-            },
-            Self::ArcSpan => Ty::ArcSpan {
-                element: Box::new(children.next().unwrap()),
-            },
-            Self::WeakSpan => Ty::WeakSpan {
-                element: Box::new(children.next().unwrap()),
-            },
-            Self::WeakPtr => Ty::WeakPtr {
-                pointee: Box::new(children.next().unwrap()),
-            },
             Self::Pointer => Ty::Pointer {
                 pointee: Box::new(children.next().unwrap()),
             },
@@ -412,18 +380,6 @@ impl Head {
             Self::GpuGraphicsPipeline => crate::Type::GpuGraphicsPipeline {
                 root: Box::new(children.next().unwrap()),
                 owner: Box::new(children.next().unwrap()),
-            },
-            Self::ArcPtr => crate::Type::ArcPtr {
-                pointee: Box::new(children.next().unwrap()),
-            },
-            Self::ArcSpan => crate::Type::ArcSpan {
-                element: Box::new(children.next().unwrap()),
-            },
-            Self::WeakSpan => crate::Type::WeakSpan {
-                element: Box::new(children.next().unwrap()),
-            },
-            Self::WeakPtr => crate::Type::WeakPtr {
-                pointee: Box::new(children.next().unwrap()),
             },
             Self::Array(length) => crate::Type::Array {
                 element: Box::new(children.next().unwrap()),
@@ -1146,10 +1102,6 @@ pub(crate) struct AppliedMethod {
 
 #[derive(Clone)]
 pub(crate) enum ResolvedMethod {
-    Symbolic {
-        signature: MethodScheme,
-        receiver: Option<crate::ReceiverConversion>,
-    },
     Dependent {
         signature: Type,
     },
@@ -1760,14 +1712,9 @@ impl Inference<'_> {
             (Type::Node(a, _), Type::Node(b, _)) if a == b => {
                 (ReceiverConversion::Value, from.clone())
             }
-            (Type::Node(Head::ArcPtr, parts), Type::Node(Head::Pointer, _)) => (
-                ReceiverConversion::ArcAddress,
-                Type::pointer(parts[0].clone()),
-            ),
             (Type::Node(Head::Pointer | Head::GpuPointer, parts), _) => {
                 (ReceiverConversion::Load, parts[0].clone())
             }
-            (Type::Node(Head::ArcPtr, parts), _) => (ReceiverConversion::ArcLoad, parts[0].clone()),
             (_, Type::Node(Head::Pointer | Head::GpuPointer, _)) => {
                 let Some(gpu) = self.gpu_address(origins) else {
                     return Ok(None);
@@ -1857,22 +1804,6 @@ impl Inference<'_> {
                 if type_args.is_some() {
                     return Err(error(span, "compiler methods do not accept type arguments"));
                 }
-                let shape = self.solver.head(receiver_type);
-                let base = match &shape {
-                    Type::Node(Head::Pointer, parts) => self.solver.head(&parts[0]),
-                    _ => shape,
-                };
-                let arguments = args
-                    .iter()
-                    .map(|arg| self.solver.head(arg))
-                    .collect::<Vec<_>>();
-                if let Some(signature) =
-                    self.typer
-                        .method_scheme(&base, name, &arguments, *associated)
-                {
-                    return self.symbolic_method(owner, signature, constraint, span);
-                }
-
                 let Some(receiver_type) = self.solver.resolve(receiver_type) else {
                     if matches!(
                         self.solver.head(receiver_type),
@@ -2264,13 +2195,6 @@ impl Inference<'_> {
                         },
                     ));
                 }
-                if matches!(
-                    self.solver.head(to),
-                    Type::Node(Head::WeakPtr | Head::WeakSpan, _)
-                ) && self.solver.resolve(from) == Some(Ty::Unit)
-                {
-                    return Ok(true);
-                }
                 if matches!(self.solver.head(to), Type::Node(Head::Result, _)) {
                     return self.solver.coerce(from, to, span);
                 }
@@ -2425,90 +2349,6 @@ impl Constraint {
             Self::Record(fields, _) => fields.iter().map(|(_, ty)| ty).collect(),
             Self::Builtin(_, args, _) => args.iter().collect(),
         }
-    }
-}
-
-impl Inference<'_> {
-    fn symbolic_method(
-        &mut self,
-        owner: Rule,
-        signature: MethodScheme,
-        constraint: &Constraint,
-        span: Span,
-    ) -> Result<bool> {
-        let Constraint::Method {
-            receiver,
-            args: arguments,
-            out: result,
-            associated,
-            origins,
-            ..
-        } = constraint
-        else {
-            unreachable!("selected method constraint");
-        };
-        let conversion = if *associated {
-            None
-        } else {
-            let Some(first) = signature.params.first() else {
-                return Err(error(span, "method requires an associated call"));
-            };
-            let conversion = self.symbolic_receiver(receiver, first, span)?;
-            if conversion == crate::ReceiverConversion::Address {
-                let Some(gpu) = self.gpu_address(origins) else {
-                    return Ok(false);
-                };
-                if gpu {
-                    return Err(error(span, "GPU storage cannot be borrowed as a raw Ptr"));
-                }
-            }
-            Some(conversion)
-        };
-        let parameters = &signature.params[usize::from(conversion.is_some())..];
-        let arguments_match = self.arguments(arguments, parameters, span)?;
-        let result_matches = self.solver.coerce(&signature.result, result, span)?;
-        if arguments_match && result_matches {
-            self.methods.insert(
-                owner,
-                ResolvedMethod::Symbolic {
-                    signature,
-                    receiver: conversion,
-                },
-            );
-        }
-        Ok(arguments_match && result_matches)
-    }
-}
-
-impl Inference<'_> {
-    fn symbolic_receiver(
-        &mut self,
-        from: &Type,
-        to: &Type,
-        span: Span,
-    ) -> Result<crate::ReceiverConversion> {
-        use crate::ReceiverConversion;
-        let from = self.solver.head(from);
-        let to = self.solver.head(to);
-        let (conversion, actual, expected) = match (&from, &to) {
-            (Type::Node(left, _), Type::Node(right, _)) if left == right => {
-                (ReceiverConversion::Value, &from, &to)
-            }
-            (_, Type::Node(Head::Pointer, children)) => {
-                (ReceiverConversion::Address, &from, &children[0])
-            }
-            (Type::Node(Head::Pointer, children), _) => {
-                (ReceiverConversion::Load, &children[0], &to)
-            }
-            _ => {
-                return Err(error(
-                    span,
-                    "method receiver does not match the first parameter",
-                ));
-            }
-        };
-        self.solver.unify(actual, expected, span)?;
-        Ok(conversion)
     }
 }
 

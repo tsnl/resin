@@ -243,7 +243,6 @@ impl Printer {
                 vec![quoted(format!("{conversion:?}")), self.term(arg)],
             ),
             TermKind::Convert { arg } => list("convert", vec![self.term(arg)]),
-            TermKind::ArcNew { value } => list("arc", vec![self.term(value)]),
             TermKind::GpuNew { allocator, args } => list(
                 "gpu-new",
                 vec![function_id(allocator.index()), self.arguments(args)],
@@ -288,11 +287,6 @@ impl Printer {
                     self.arguments(args),
                 ],
             ),
-            TermKind::HostAllocate { error, args } => list(
-                "host-allocate",
-                vec![function_id(error.index()), self.arguments(args)],
-            ),
-            TermKind::WeakEmpty { ty } => list("weak-empty", vec![self.ty(ty)]),
             TermKind::Result { failure, arg } => {
                 list(if *failure { "err" } else { "ok" }, vec![self.term(arg)])
             }
@@ -460,10 +454,8 @@ impl TypeNames {
                 self.format(root),
                 self.format(owner)
             ),
-            Type::ArcPtr { pointee } => format!("ArcPtr<{}>", self.format(pointee)),
-            Type::ArcSpan { element } => format!("ArcSpan<{}>", self.format(element)),
-            Type::WeakSpan { element } => format!("WeakSpan<{}>", self.format(element)),
-            Type::WeakPtr { pointee } => format!("WeakPtr<{}>", self.format(pointee)),
+            Type::StrongOwner => "StrongOwner".into(),
+            Type::WeakOwner => "WeakOwner".into(),
             Type::Array { element, length } => {
                 format!("[{}; {length}]", self.format(element))
             }

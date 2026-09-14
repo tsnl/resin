@@ -41,6 +41,47 @@ fn success(output: &std::process::Output) {
 }
 
 #[test]
+fn source_owned_wrappers_retain_payloads_and_borrow_temporary_receivers() {
+    success(&run(
+        r#"
+        export { main };
+        import { "$/shared.resin", "$/status.resin" };
+        struct Item { trace: Ptr<int>, digit: int,
+            def drop(self: Ptr<Item>) = {
+                if (self.digit != 0) { self.trace.* := self.trace.* * 10 + self.digit; };
+            };
+        };
+        def main() -> Result<int, _> = {
+            var trace = 0;
+            var weak = WeakPtr<Item>.empty();
+            var valid = 1 == 1;
+            {
+                var owner = ArcPtr<Item>.alloc(Item { trace = &trace, digit = 0 })?;
+                owner.get().digit := 7;
+                weak := owner.downgrade();
+                var copy = owner;
+                valid := valid && copy.get().digit == 7 && weak.upgrade()!.get().digit == 7;
+                var values = ArcSpan<uint>.alloc(3, 42_ui)?;
+                values.get().at(2).* := 9_ui;
+                valid := valid && values.get().at(0).* == 42_ui && values.get().at(2).* == 9_ui;
+                var borrowed = ArcSpan<uint>.alloc(1, 13_ui)?.get();
+                valid := valid && borrowed.at(0).* == 13_ui;
+                var empty = ArcSpan<uint>.alloc(0, 0_ui)?;
+                valid := valid && empty.get().length == 0_ul;
+            };
+            valid := valid && trace == 7;
+            valid := valid && match (weak.upgrade()) { ArcPtr<Item>(live) => { 1 == 0 }, None => { 1 == 1 } };
+            valid := valid && match (ArcSpan<uint>.alloc(0xffffffffffffffff_ul, 0_ui)) {
+                ok(owner) => { 1 == 0 }, err(error) => { 1 == 1 },
+            };
+            ok(if (valid) { 0 } else { 1 })
+        };
+    "#,
+        "",
+    ));
+}
+
+#[test]
 fn host_allocates_initialized_typed_storage_and_reports_overflow() {
     let output = run(
         r#"

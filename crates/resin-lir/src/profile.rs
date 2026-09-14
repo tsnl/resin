@@ -105,9 +105,8 @@ fn instruction(typer: &TyperContext, op: &Instr) -> Result<(), String> {
         | Instr::NumericCast { .. } | Instr::PointerCast { .. } | Instr::Ascribe { .. }
         | Instr::MakeArray { .. } | Instr::MakeRecord { .. } | Instr::AccessStatic { .. }
         | Instr::AccessDynamic | Instr::PointerIndex | Instr::Eliminate { .. } => Ok(()),
-        Instr::ArcNew | Instr::ArcData | Instr::ArcSpanData | Instr::ArcSpanTryNew { .. }
-        | Instr::HostAllocate { .. } | Instr::Downgrade | Instr::Upgrade
-        | Instr::WeakEmpty { .. } | Instr::DropLocal { .. } => Err("shader cannot consume managed values: reference counting and destruction are host-only".into()),
+        Instr::OwnerData { .. } | Instr::OwnerLength | Instr::OwnerAllocate { .. } | Instr::OwnerDowngrade | Instr::OwnerUpgrade
+        | Instr::WeakEmpty | Instr::DropLocal { .. } => Err("shader cannot consume managed values: reference counting and destruction are host-only".into()),
         Instr::GpuNew { .. } | Instr::GpuAllocate { .. } | Instr::GpuAllocateNative
         | Instr::GpuSlice | Instr::GpuReadOnly | Instr::GpuWriteOnly | Instr::GpuCopyTo
         | Instr::GpuComputePipeline { .. } | Instr::GpuGraphicsPipeline { .. }
