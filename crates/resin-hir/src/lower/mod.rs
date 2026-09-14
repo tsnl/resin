@@ -25,6 +25,7 @@ pub(crate) mod context;
 mod elaborate;
 pub(crate) mod eval;
 mod gpu;
+mod gpu_projections;
 pub(crate) mod infer;
 mod primitives;
 pub(crate) mod scope;
@@ -903,7 +904,14 @@ impl Generator {
             }
             typed::DeclarationKind::Intrinsic { operation } => {
                 let id = self.declare_source_function(name, signature)?;
-                primitives::define(self.function_mut(id), operation)?;
+                if !gpu_projections::define(
+                    &mut self.typer,
+                    self.functions[id.index()].as_mut().unwrap(),
+                    id,
+                    operation,
+                )? {
+                    primitives::define(self.function_mut(id), operation)?;
+                }
             }
             typed::DeclarationKind::Foreign { header } => {
                 self.declare_foreign(header, name, signature)?;

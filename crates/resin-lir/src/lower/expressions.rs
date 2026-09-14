@@ -171,6 +171,12 @@ impl FunctionLowering<'_> {
     ) -> Result<(), LowerError> {
         self.gen_arguments(args)?;
         match op {
+            Intrinsic::GpuPointerProjection | Intrinsic::GpuSequenceProjection => {
+                return Err(LowerError::invalid_hir(
+                    self.source_span,
+                    "GPU projection contract reached storage lowering",
+                ));
+            }
             Intrinsic::GpuElementLayout => self.emit(Instr::GpuElementLayout {
                 element: type_args[0].clone(),
             }),

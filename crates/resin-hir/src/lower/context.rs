@@ -120,6 +120,7 @@ impl Context {
         self.nominal_schemes.insert(
             definition,
             crate::TypeDefinition {
+                gpu_projection: None,
                 type_params: parameters,
                 name,
                 body,

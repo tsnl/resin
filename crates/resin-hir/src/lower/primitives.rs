@@ -27,6 +27,25 @@ pub(super) fn define(function: &mut Function, operation: &str) -> Result<(), Gen
             format!("invalid signature for intrinsic `{operation}`"),
         ));
     }
+    body(function, op);
+    Ok(())
+}
+
+pub(super) fn body(function: &mut Function, op: crate::Intrinsic) {
+    let span = function.signature.result.span;
+    let result = function.signature.result.ty.clone();
+    let params = function
+        .signature
+        .params
+        .iter()
+        .map(|p| p.annotation.ty.clone())
+        .collect();
+    let parameters = function
+        .signature
+        .type_params
+        .iter()
+        .map(|p| Type::Parameter { parameter: p.id })
+        .collect();
     let values = function
         .signature
         .params
@@ -54,5 +73,4 @@ pub(super) fn define(function: &mut Function, operation: &str) -> Result<(), Gen
             args: Arguments { values, params },
         },
     });
-    Ok(())
 }

@@ -341,6 +341,7 @@ fn invalid_nominal_type_expressions_report_errors_before_storage_lowering() {
     ] {
         let mut tree = conditional();
         tree.types.push(resin_hir::TypeDefinition {
+            gpu_projection: None,
             type_params: vec![],
             name: "Invalid".into(),
             body,

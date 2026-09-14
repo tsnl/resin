@@ -144,6 +144,7 @@ mod definition_tests {
         let id = TypeId::from_index(0);
         assert_eq!(body(&[], id), Err(DefinitionError::Invalid(id)));
         let table = [TypeDef::Nominal {
+            gpu_projection: None,
             name: "Pending".into(),
             body: None,
             drop: None,
@@ -368,6 +369,7 @@ impl TypeTable {
     pub(super) fn reserve(&mut self, name: Arc<str>) -> TypeId {
         let id = TypeId::from_index(self.len());
         self.definitions.push(TypeDef::Nominal {
+            gpu_projection: None,
             name,
             body: None,
             drop: None,
@@ -903,4 +905,160 @@ fn is_hex_literal(value: &str) -> bool {
     value.len() >= 2
         && value.as_bytes()[0] == b'0'
         && (value.as_bytes()[1] == b'x' || value.as_bytes()[1] == b'X')
+}
+
+pub(super) fn gpu_projection_plan(
+    definitions: &[TypeDef],
+    source: &Ty,
+    target: &Ty,
+) -> Result<crate::GpuProjectionPlan, String> {
+    let operation = projection_operation(definitions, source, target)?;
+    Ok(crate::GpuProjectionPlan {
+        source: source.clone(),
+        target: target.clone(),
+        operation,
+    })
+}
+
+fn projection_operation(
+    definitions: &[TypeDef],
+    source: &Ty,
+    target: &Ty,
+) -> Result<crate::GpuProjectionOperation, String> {
+    use crate::{GpuProjectionKind, GpuProjectionOperation};
+    let invalid = || {
+        format!(
+            "cannot project {} into shader {}",
+            format_type(source, definitions),
+            format_type(target, definitions)
+        )
+    };
+    if let Ty::Defined { definition } = source
+        && let Some(projection) = get(definitions, *definition)
+            .map_err(|_| invalid())?
+            .gpu_projection()
+    {
+        if projection.target != *target {
+            return Err(invalid());
+        }
+        return match projection.kind {
+            GpuProjectionKind::Pointer => {
+                let element =
+                    projection_pointer(definitions, source, target).ok_or_else(invalid)?;
+                Ok(GpuProjectionOperation::Pointer {
+                    element: element.clone(),
+                })
+            }
+            GpuProjectionKind::Sequence => {
+                let Ty::Record {
+                    fields: source_fields,
+                } = projection_shape(definitions, source).ok_or_else(invalid)?
+                else {
+                    return Err(invalid());
+                };
+                let Ty::Record {
+                    fields: target_fields,
+                } = projection_shape(definitions, target).ok_or_else(invalid)?
+                else {
+                    return Err(invalid());
+                };
+                if source_fields.len() != 2
+                    || target_fields.len() != 2
+                    || source_fields[1].ty != Ty::UInt64
+                    || target_fields[1].ty != Ty::UInt64
+                {
+                    return Err(invalid());
+                }
+                let element =
+                    projection_pointer(definitions, &source_fields[0].ty, &target_fields[0].ty)
+                        .ok_or_else(invalid)?;
+                Ok(GpuProjectionOperation::Sequence {
+                    element: element.clone(),
+                })
+            }
+        };
+    }
+    if source == target && target.gpu_element(definitions) {
+        return Ok(GpuProjectionOperation::Copy);
+    }
+    if let Ty::Defined { definition } = target
+        && get(definitions, *definition)
+            .map_err(|_| invalid())?
+            .drop_hook()
+            .is_some()
+    {
+        return Err(invalid());
+    }
+    match (
+        projection_shape(definitions, source),
+        projection_shape(definitions, target),
+    ) {
+        (Some(Ty::Record { fields: input }), Some(Ty::Record { fields: output }))
+            if !output.is_empty() && input.len() == output.len() =>
+        {
+            let fields = input
+                .iter()
+                .zip(output)
+                .map(|(input, output)| {
+                    if input.name != output.name {
+                        return Err(invalid());
+                    }
+                    gpu_projection_plan(definitions, &input.ty, &output.ty)
+                })
+                .collect::<Result<_, _>>()?;
+            Ok(GpuProjectionOperation::Record { fields })
+        }
+        (
+            Some(Ty::Array {
+                element: input,
+                length: input_length,
+            }),
+            Some(Ty::Array {
+                element: output,
+                length,
+            }),
+        ) if *length > 0 && input_length == length => Ok(GpuProjectionOperation::Array {
+            element: Box::new(gpu_projection_plan(definitions, input, output)?),
+            length: *length,
+        }),
+        _ => Err(invalid()),
+    }
+}
+
+fn projection_shape<'a>(definitions: &'a [TypeDef], ty: &'a Ty) -> Option<&'a Ty> {
+    match ty {
+        Ty::Defined { definition } => get(definitions, *definition).ok()?.body(),
+        _ => Some(ty),
+    }
+}
+
+fn projection_pointer<'a>(
+    definitions: &'a [TypeDef],
+    source: &'a Ty,
+    target: &'a Ty,
+) -> Option<&'a Ty> {
+    let Ty::Defined { definition } = source else {
+        return None;
+    };
+    let definition = get(definitions, *definition).ok()?;
+    let projection = definition.gpu_projection()?;
+    if projection.kind != crate::GpuProjectionKind::Pointer
+        || projection.target != *target
+        || definition.drop_hook().is_some()
+    {
+        return None;
+    }
+    let Ty::Record { fields } = definition.body()? else {
+        return None;
+    };
+    let [field] = fields.as_slice() else {
+        return None;
+    };
+    if field.ty != Ty::GpuView {
+        return None;
+    }
+    let Ty::Pointer { pointee } = target else {
+        return None;
+    };
+    pointee.gpu_element(definitions).then_some(pointee)
 }

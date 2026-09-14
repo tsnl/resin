@@ -80,11 +80,13 @@ pub(super) fn definition(
         name,
         body: Some(body),
         drop,
+        ..
     } = source
     else {
         unreachable!("completed source type declaration");
     };
     crate::TypeDefinition {
+        gpu_projection: None,
         type_params: vec![],
         name: name.clone(),
         body: ty(body),

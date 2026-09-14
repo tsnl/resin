@@ -192,6 +192,15 @@ pub struct TypeDefinition {
     pub methods: BTreeMap<Arc<str>, FunctionId>,
     /// A hook whose type parameters are supplied by this nominal application.
     pub drop: Option<FunctionId>,
+    pub gpu_projection: Option<GpuProjection>,
+}
+
+/// A source declaration explicitly registers a wrapper's shader projection.
+#[derive(Debug, Clone)]
+pub struct GpuProjection {
+    pub declaration: FunctionId,
+    pub kind: resin_types::GpuProjectionKind,
+    pub target: Type,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

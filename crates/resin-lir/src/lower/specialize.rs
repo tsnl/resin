@@ -704,6 +704,12 @@ impl Specialization<'_, '_> {
         parameters: &[resin_hir::Type],
         args: &resin_hir::Arguments,
     ) -> Result<concrete::TermKind, Error> {
+        if matches!(
+            op,
+            Intrinsic::GpuPointerProjection | Intrinsic::GpuSequenceProjection
+        ) {
+            return Err(self.instance_error("GPU projection declarations are contracts for dispatch and draw; they cannot be called directly"));
+        }
         let type_args = parameters
             .iter()
             .map(|ty| self.ty(ty))

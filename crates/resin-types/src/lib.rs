@@ -47,6 +47,7 @@ pub enum TypeDef {
         body: Option<Ty>,
         /// Builtin destruction hook; ordinary method namespaces remain in the frontend.
         drop: Option<FunctionId>,
+        gpu_projection: Option<GpuProjection>,
     },
     Structural(Ty),
 }
@@ -57,6 +58,7 @@ impl TypeDef {
             name: name.into(),
             body: Some(body),
             drop: None,
+            gpu_projection: None,
         }
     }
     pub fn name(&self) -> Option<&Arc<str>> {
@@ -68,6 +70,12 @@ impl TypeDef {
     pub fn drop_hook(&self) -> Option<FunctionId> {
         match self {
             Self::Nominal { drop, .. } => *drop,
+            Self::Structural(_) => None,
+        }
+    }
+    pub fn gpu_projection(&self) -> Option<&GpuProjection> {
+        match self {
+            Self::Nominal { gpu_projection, .. } => gpu_projection.as_ref(),
             Self::Structural(_) => None,
         }
     }
@@ -83,6 +91,55 @@ impl TypeDef {
             Self::Structural(ty) => ty.clone(),
         }
     }
+}
+
+/// The explicitly registered conversion from a source GPU wrapper to shader storage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GpuProjection {
+    pub kind: GpuProjectionKind,
+    pub target: Ty,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpuProjectionKind {
+    Pointer,
+    Sequence,
+}
+
+/// A completed conversion plan. Each child identifies both representations;
+/// target lowering never rediscovers a wrapper protocol from its public name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GpuProjectionPlan {
+    pub source: Ty,
+    pub target: Ty,
+    pub operation: GpuProjectionOperation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GpuProjectionOperation {
+    Copy,
+    Pointer {
+        element: Ty,
+    },
+    Sequence {
+        element: Ty,
+    },
+    Record {
+        fields: Vec<GpuProjectionPlan>,
+    },
+    Array {
+        element: Box<GpuProjectionPlan>,
+        length: usize,
+    },
+}
+
+/// Check a host argument against shader storage and retain every conversion decision.
+pub fn gpu_projection_plan(
+    definitions: &[TypeDef],
+    source: &Ty,
+    target: &Ty,
+) -> Result<GpuProjectionPlan, String> {
+    types::gpu_projection_plan(definitions, source, target)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -355,6 +412,8 @@ impl Ty {
 /// Primitive operations exposed through compiler-provided methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Intrinsic {
+    GpuPointerProjection,
+    GpuSequenceProjection,
     GpuElementLayout,
     GpuViewAllocate,
     GpuViewOffset,
