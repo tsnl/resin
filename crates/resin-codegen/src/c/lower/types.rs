@@ -213,14 +213,9 @@ impl<'a> Types<'a> {
 
 fn scalar(ty: &Ty) -> Option<&'static str> {
     Some(match ty {
-        Ty::StrongOwner
-        | Ty::WeakOwner
-        | Ty::GpuArguments
-        | Ty::GpuComputePipeline { .. }
-        | Ty::GpuGraphicsPipeline { .. } => "ResinArc *",
-        Ty::GpuPointer { .. } | Ty::GpuView => "ResinGpuPtr",
+        Ty::StrongOwner | Ty::WeakOwner | Ty::GpuArguments => "ResinArc *",
+        Ty::GpuView => "ResinGpuPtr",
         Ty::GpuPipelineContract => "ResinGpuPipelineContract",
-        Ty::GpuSpan { .. } => "ResinGpuSpan",
         Ty::Unit | Ty::None => "uint8_t",
         Ty::Type => "size_t",
         Ty::Bool => "bool",

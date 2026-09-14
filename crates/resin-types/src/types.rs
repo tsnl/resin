@@ -65,16 +65,8 @@ pub(super) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), D
                 return Err(DefinitionError::NonRecord(*definition));
             }
         }
-        Ty::Pointer { pointee } | Ty::GpuPointer { pointee } => {
-            check_references(definitions, pointee)?
-        }
-        Ty::GpuSpan { element } | Ty::Array { element, .. } => {
-            check_references(definitions, element)?
-        }
-        Ty::GpuComputePipeline { root, owner } | Ty::GpuGraphicsPipeline { root, owner } => {
-            check_references(definitions, root)?;
-            check_references(definitions, owner)?;
-        }
+        Ty::Pointer { pointee } => check_references(definitions, pointee)?,
+        Ty::Array { element, .. } => check_references(definitions, element)?,
         Ty::Record { fields } => {
             for field in fields {
                 check_references(definitions, &field.ty)?;
@@ -198,13 +190,9 @@ pub(super) fn needs_drop(ty: &Ty, definitions: &[TypeDef]) -> bool {
     match ty {
         Ty::StrongOwner
         | Ty::WeakOwner
-        | Ty::GpuPointer { .. }
-        | Ty::GpuSpan { .. }
         | Ty::GpuView
         | Ty::GpuPipelineContract
-        | Ty::GpuArguments
-        | Ty::GpuComputePipeline { .. }
-        | Ty::GpuGraphicsPipeline { .. } => true,
+        | Ty::GpuArguments => true,
         Ty::Defined { definition } => {
             let d = &definitions[definition.index()];
             d.drop_hook().is_some() || d.body().is_some_and(|t| t.needs_drop(definitions))
@@ -235,38 +223,6 @@ pub(super) fn gpu_element(ty: &Ty, definitions: &[TypeDef]) -> bool {
         _ => false,
     };
     plain && storage_layout(definitions, ty).is_ok()
-}
-
-pub(super) fn gpu_projection(ty: &Ty, definitions: &[TypeDef]) -> Option<Ty> {
-    Some(match ty {
-        Ty::Pointer { pointee } if pointee.gpu_element(definitions) => Ty::GpuPointer {
-            pointee: pointee.clone(),
-        },
-        Ty::Array { element, length } if *length > 0 => Ty::Array {
-            element: Box::new(gpu_projection(element, definitions)?),
-            length: *length,
-        },
-        Ty::Record { fields } if !fields.is_empty() => Ty::Record {
-            fields: fields
-                .iter()
-                .map(|field| {
-                    Some(RecordField {
-                        name: field.name.clone(),
-                        ty: gpu_projection(&field.ty, definitions)?,
-                    })
-                })
-                .collect::<Option<_>>()?,
-        },
-        Ty::Defined { definition } => {
-            let definition = definitions.get(definition.index())?;
-            if definition.drop_hook().is_some() {
-                return None;
-            }
-            gpu_projection(definition.body()?, definitions)?
-        }
-        ty if ty.gpu_element(definitions) => ty.clone(),
-        _ => return None,
-    })
 }
 
 pub(super) fn payloads(ty: &Ty) -> Option<Vec<(Case, Ty)>> {
@@ -326,9 +282,6 @@ pub(super) fn widens_to(ty: &Ty, to: &Ty) -> bool {
 
 pub(super) fn view_record(ty: &Ty) -> Option<Ty> {
     let pointer = match ty {
-        Ty::GpuSpan { element } => Ty::GpuPointer {
-            pointee: element.clone(),
-        },
         Ty::Str => Ty::Pointer {
             pointee: Box::new(Ty::UInt8),
         },
@@ -425,18 +378,8 @@ impl TypeTable {
                 self.intern(error);
                 self.intern(&Ty::UInt32);
             }
-            Ty::Pointer { pointee } | Ty::GpuPointer { pointee } => {
+            Ty::Pointer { pointee } => {
                 self.intern(pointee);
-            }
-            Ty::GpuSpan { element } => {
-                self.intern(&Ty::GpuPointer {
-                    pointee: element.clone(),
-                });
-                self.intern(&Ty::UInt64);
-            }
-            Ty::GpuComputePipeline { root, owner } | Ty::GpuGraphicsPipeline { root, owner } => {
-                self.intern(root);
-                self.intern(owner);
             }
             Ty::Array { element, .. } => {
                 self.intern(element);
@@ -500,21 +443,9 @@ pub(super) fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
             .map(ToString::to_string)
             .unwrap_or_else(|| "?".into()),
         Ty::Pointer { pointee } => format!("Ptr<{}>", format_type(pointee, definitions)),
-        Ty::GpuPointer { pointee } => format!("GpuPtr<{}>", format_type(pointee, definitions)),
-        Ty::GpuSpan { element } => format!("GpuSpan<{}>", format_type(element, definitions)),
         Ty::GpuView => "GpuView".into(),
         Ty::GpuPipelineContract => "GpuPipelineContract".into(),
         Ty::GpuArguments => "GpuArguments".into(),
-        Ty::GpuComputePipeline { root, owner } => format!(
-            "GpuComputePipeline<{}, {}>",
-            format_type(root, definitions),
-            format_type(owner, definitions)
-        ),
-        Ty::GpuGraphicsPipeline { root, owner } => format!(
-            "GpuGraphicsPipeline<{}, {}>",
-            format_type(root, definitions),
-            format_type(owner, definitions)
-        ),
         Ty::StrongOwner => "StrongOwner".into(),
         Ty::WeakOwner => "WeakOwner".into(),
         Ty::Array { element, length } => {

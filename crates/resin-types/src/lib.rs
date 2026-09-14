@@ -155,7 +155,6 @@ pub enum GpuProjectionOperation {
     },
 }
 
-/// Check a host argument against shader storage and retain every conversion decision.
 /// Validate a source pipeline wrapper and its native owner facade.
 /// Only a single opaque contract field may be exposed by the wrapper. The
 /// owner facade must contain exactly one strong handle through nominal records.
@@ -204,6 +203,7 @@ fn gpu_owner_storage(definitions: &[TypeDef], ty: &Ty, depth: usize) -> bool {
     }
 }
 
+/// Check a host argument against shader storage and retain every conversion decision.
 pub fn gpu_projection_plan(
     definitions: &[TypeDef],
     source: &Ty,
@@ -245,16 +245,6 @@ pub enum Ty {
     Pointer {
         pointee: Box<Ty>,
     },
-    /// An owning GPU allocation view with a byte offset and CPU access permissions.
-    /// Host storage occupies 24 bytes aligned to 8; shader projection produces Ptr<T>.
-    GpuPointer {
-        pointee: Box<Ty>,
-    },
-    /// An owning GPU pointer and element count: 32 host bytes aligned to 8.
-    /// Shader projection produces Span<T>; owners never reside in device storage.
-    GpuSpan {
-        element: Box<Ty>,
-    },
     /// Opaque allocation ownership, checked byte offset, and host access permissions.
     GpuView,
     GpuPipelineContract,
@@ -264,18 +254,6 @@ pub enum Ty {
     StrongOwner,
     /// Opaque weak allocation handle; it does not keep payloads alive.
     WeakOwner,
-    /// A compute pipeline whose shader root and shared host owner stay in its type.
-    /// Storage is the owner's ArcPtr handle; neither type parameter is device storage.
-    GpuComputePipeline {
-        root: Box<Ty>,
-        owner: Box<Ty>,
-    },
-    /// A graphics pipeline with one root shared by its vertex and fragment stages.
-    /// A None root denotes shaders without a root argument. Storage is the owner's ArcPtr.
-    GpuGraphicsPipeline {
-        root: Box<Ty>,
-        owner: Box<Ty>,
-    },
     Array {
         element: Box<Ty>,
         length: usize,
@@ -316,11 +294,10 @@ impl Case {
 }
 
 impl Ty {
-    /// Types that permit direct pointee access. WeakPtr handles must first upgrade
-    /// successfully; their payload may already have been destroyed.
+    /// The payload addressed by a primitive pointer. Source owners require explicit access.
     pub fn deref_target(&self) -> Option<&Ty> {
         match self {
-            Self::Pointer { pointee } | Self::GpuPointer { pointee } => Some(pointee),
+            Self::Pointer { pointee } => Some(pointee),
             _ => None,
         }
     }
@@ -333,34 +310,6 @@ impl Ty {
     /// with no pointers, spans, managed owners, or custom destruction hooks.
     pub fn gpu_element(&self, definitions: &[TypeDef]) -> bool {
         types::gpu_element(self, definitions)
-    }
-
-    /// Host argument shape whose GPU views project into this shader root type.
-    /// Nominal records expose structural host fields; raw pointer graphs are rejected.
-    pub fn gpu_projection(&self, definitions: &[TypeDef]) -> Option<Ty> {
-        types::gpu_projection(self, definitions)
-    }
-
-    /// Shader root and shared owner carried by an opaque pipeline value.
-    pub fn gpu_pipeline(&self) -> Option<(&Ty, &Ty)> {
-        match self {
-            Self::GpuComputePipeline { root, owner }
-            | Self::GpuGraphicsPipeline { root, owner } => Some((root, owner)),
-            _ => None,
-        }
-    }
-
-    /// Host arguments accepted by dispatch or draw, including None for rootless draw.
-    /// Invalid pipeline owners and roots have no argument contract.
-    pub fn gpu_pipeline_argument(&self, definitions: &[TypeDef]) -> Option<Ty> {
-        let (root, owner) = self.gpu_pipeline()?;
-        if !matches!(owner, Self::StrongOwner) {
-            return None;
-        }
-        if *root == Self::None {
-            return matches!(self, Self::GpuGraphicsPipeline { .. }).then_some(Self::None);
-        }
-        root.gpu_projection(definitions)
     }
 
     pub fn payloads(&self) -> Option<Vec<(Case, Ty)>> {
@@ -511,15 +460,8 @@ pub enum Intrinsic {
     FormatBytes,
     Replace,
     Index,
-    GpuIndex,
-    GpuSlice,
-    GpuReadOnly,
-    GpuWriteOnly,
-    GpuAllocateNative,
     GpuArgumentsDispatch,
     GpuArgumentsDraw,
-    GpuCopyTo,
-    GpuCopyImage,
 }
 
 /// Validate references in a concrete type against a program's canonical table.
@@ -1058,8 +1000,8 @@ pub mod shader {
     }
 
     /// Validate a compute stage or an ordered vertex/fragment pair for pipeline creation.
-    /// Graphics stages must agree on their color type and any declared root; every root
-    /// must support host GPU-view projection. Rootless graphics returns None.
+    /// Graphics stages must agree on their color type and any declared root.
+    /// Rootless graphics returns None; recording checks the host argument projection.
     pub fn pipeline_root(
         typer: &TyperContext,
         stages: &[(&[Ty], &Ty, &str)],

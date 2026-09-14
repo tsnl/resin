@@ -217,7 +217,6 @@ fn retries_discard_failed_method_choices_and_preserve_completed_groups() {
         args: vec![Ty::UInt64.into()],
         out,
         associated: false,
-        origins: vec![],
     };
     let (earlier, first) = inference.expression();
     inference.constrain(earlier, (span, method(first.clone())));

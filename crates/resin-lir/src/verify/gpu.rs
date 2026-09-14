@@ -100,109 +100,12 @@ pub(super) fn check(
             Ty::Int32
         }
 
-        Instr::GpuNew { allocator, element } | Instr::GpuAllocate { allocator, element } => {
-            check_type(&module.types, element, location)?;
-            if !element.gpu_element(&module.types) {
-                return Err(location.error(VerifyErrorKind::UnsupportedGpuElement {
-                    ty: element.clone(),
-                }));
-            }
-            let expected = if matches!(instr, Instr::GpuNew { .. }) {
-                element.clone()
-            } else {
-                Ty::UInt64
-            };
-            expect_type(expected, args[1].clone(), location)?;
-            let error = allocation_error(module, *allocator, &args[0], location)?;
-            let value = if matches!(instr, Instr::GpuNew { .. }) {
-                Ty::GpuPointer {
-                    pointee: Box::new(element.clone()),
-                }
-            } else {
-                Ty::GpuSpan {
-                    element: Box::new(element.clone()),
-                }
-            };
-            Ty::Result {
-                value: Box::new(value),
-                error: Box::new(error),
-            }
-        }
-        Instr::GpuAllocateNative => {
-            if !matches!(&args[0], Ty::Pointer { .. }) || !matches!(&args[1], Ty::StrongOwner) {
-                return Err(invalid());
-            }
-            for (expected, found) in [Ty::UInt64, Ty::UInt64, Ty::Int32]
-                .into_iter()
-                .zip(&args[2..])
-            {
-                expect_type(expected, found.clone(), location)?;
-            }
-            Ty::Record {
-                fields: vec![
-                    RecordField {
-                        name: "value".into(),
-                        ty: Ty::union_of([
-                            Ty::GpuPointer {
-                                pointee: Box::new(Ty::UInt8),
-                            },
-                            Ty::None,
-                        ]),
-                    },
-                    RecordField {
-                        name: "status".into(),
-                        ty: Ty::Int32,
-                    },
-                ],
-            }
-        }
-        Instr::GpuReadOnly | Instr::GpuWriteOnly => {
-            if !matches!(&args[0], Ty::GpuPointer { .. } | Ty::GpuSpan { .. }) {
-                return Err(invalid());
-            }
-            args[0].clone()
-        }
-        Instr::GpuSlice => {
-            let element = match &args[0] {
-                Ty::GpuSpan { element } | Ty::GpuPointer { pointee: element } => element.clone(),
-                _ => return Err(invalid()),
-            };
-            expect_type(Ty::UInt64, args[1].clone(), location)?;
-            expect_type(Ty::UInt64, args[2].clone(), location)?;
-            Ty::GpuSpan { element }
-        }
-        Instr::GpuCopyTo => {
-            let Ty::GpuSpan { element } = &args[0] else {
-                return Err(invalid());
-            };
-            if !element.gpu_element(&module.types) {
-                return Err(invalid());
-            }
-            expect_type(
-                Ty::pointer_length(*element.clone()),
-                args[1].clone(),
-                location,
-            )?;
-            Ty::Unit
-        }
         Instr::GpuArgumentsDispatch | Instr::GpuArgumentsDraw => {
             expect_type(Ty::GpuArguments, args[0].clone(), location)?;
             expect_type(byte_pointer(), args[1].clone(), location)?;
             for arg in &args[2..] {
                 expect_type(Ty::UInt32, arg.clone(), location)?;
             }
-            Ty::Int32
-        }
-        Instr::GpuCopyImage => {
-            expect_type(
-                Ty::GpuSpan {
-                    element: Box::new(Ty::UInt8),
-                },
-                args[0].clone(),
-                location,
-            )?;
-            expect_type(byte_pointer(), args[1].clone(), location)?;
-            expect_type(byte_pointer(), args[2].clone(), location)?;
             Ty::Int32
         }
         _ => unreachable!("GPU instruction dispatch"),

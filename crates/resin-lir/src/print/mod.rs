@@ -118,20 +118,6 @@ fn sexp_function(names: &Names, index: usize, function: &Function) -> SExp {
 
 fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
     match instr {
-        Instr::GpuNew { allocator, element } => list(
-            "gpu-new",
-            vec![
-                symbol(names.functions[allocator.index()].as_ref()),
-                sexp_ty(names, element),
-            ],
-        ),
-        Instr::GpuAllocate { allocator, element } => list(
-            "gpu-allocate",
-            vec![
-                symbol(names.functions[allocator.index()].as_ref()),
-                sexp_ty(names, element),
-            ],
-        ),
         Instr::GpuElementLayout { element } => {
             list("gpu-element-layout", vec![sexp_ty(names, element)])
         }
@@ -145,11 +131,6 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
         Instr::GpuViewReplace => symbol("gpu-view-replace"),
         Instr::GpuViewCopyTo => symbol("gpu-view-copy-to"),
         Instr::GpuViewCopyImage => symbol("gpu-view-copy-image"),
-        Instr::GpuAllocateNative => symbol("gpu-allocate-native"),
-        Instr::GpuSlice => symbol("gpu-slice"),
-        Instr::GpuReadOnly => symbol("gpu-read-only"),
-        Instr::GpuWriteOnly => symbol("gpu-write-only"),
-        Instr::GpuCopyTo => symbol("gpu-copy-to"),
         Instr::GpuComputePipeline {
             factory, shader, ..
         } => list(
@@ -202,7 +183,6 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
         ),
         Instr::GpuArgumentsDispatch => symbol("gpu-dispatch"),
         Instr::GpuArgumentsDraw => symbol("gpu-draw"),
-        Instr::GpuCopyImage => symbol("gpu-copy-image"),
         Instr::TransferLoad => symbol("transfer-load"),
         Instr::ForgetLocal { local } => list(
             "forget-local",
@@ -436,19 +416,9 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
             .map(|name| symbol(name.as_ref()))
             .unwrap_or_else(|| symbol(format!("type.{}", definition.index()))),
         Ty::Pointer { pointee } => list("ptr", vec![sexp_ty(names, pointee)]),
-        Ty::GpuPointer { pointee } => list("gpu-ptr", vec![sexp_ty(names, pointee)]),
-        Ty::GpuSpan { element } => list("gpu-span", vec![sexp_ty(names, element)]),
         Ty::GpuView => symbol("GpuView"),
         Ty::GpuPipelineContract => symbol("GpuPipelineContract"),
         Ty::GpuArguments => symbol("GpuArguments"),
-        Ty::GpuComputePipeline { root, owner } => list(
-            "gpu-compute-pipeline",
-            vec![sexp_ty(names, root), sexp_ty(names, owner)],
-        ),
-        Ty::GpuGraphicsPipeline { root, owner } => list(
-            "gpu-graphics-pipeline",
-            vec![sexp_ty(names, root), sexp_ty(names, owner)],
-        ),
         Ty::StrongOwner => symbol("strong-owner"),
         Ty::WeakOwner => symbol("weak-owner"),
         Ty::Array { element, length } => list(

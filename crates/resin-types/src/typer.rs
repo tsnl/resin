@@ -106,7 +106,7 @@ pub(super) fn as_record(context: &TyperContext, ty: &Ty) -> Result<Converted, Ty
         steps.push(Conv::Unwrap { definition });
         current = context.definition_body(definition)?.clone();
     }
-    if matches!(current, Ty::Record { .. } | Ty::GpuSpan { .. } | Ty::Str) {
+    if matches!(current, Ty::Record { .. } | Ty::Str) {
         Ok(Converted { ty: current, steps })
     } else {
         Err(TypeError::new(TypeErrorKind::ExpectedRecord {
@@ -207,9 +207,7 @@ pub(super) fn type_builtin_call(
         }
         BuiltinRule::Arithmetic | BuiltinRule::Comparison => {
             if rule == BuiltinRule::Arithmetic
-                && args
-                    .iter()
-                    .any(|ty| matches!(ty, Ty::Pointer { .. } | Ty::GpuPointer { .. }))
+                && args.iter().any(|ty| matches!(ty, Ty::Pointer { .. }))
             {
                 return Err(TypeError::new(TypeErrorKind::PointerArithmetic));
             }
@@ -435,13 +433,7 @@ pub(super) fn pipeline_root(
                     .into(),
             ),
         };
-    match root {
-        Some(root) if root.gpu_projection(typer.definitions()).is_none() => {
-            Err("pipeline shader root does not support GPU argument projection".into())
-        }
-        Some(root) => Ok(root),
-        None => Ok(Ty::None),
-    }
+    Ok(root.unwrap_or(Ty::None))
 }
 
 fn shader_root(parameters: &[Ty]) -> Result<Ty, String> {
@@ -539,8 +531,7 @@ pub(super) fn shader_value_type(definitions: &[TypeDef], ty: &Ty) -> Result<(), 
             Ty::Unit | Ty::None | Ty::Bool | Ty::Int32 | Ty::UInt8 | Ty::UInt32
             | Ty::UInt64 | Ty::Int64 | Ty::Float32 | Ty::StrongOwner | Ty::WeakOwner => {},
             Ty::Str => return Err("shader string literals need device-backed storage; pass a Span<ubyte> in the shader root".into()),
-            Ty::GpuPointer { .. } | Ty::GpuSpan { .. } | Ty::GpuPipelineContract | Ty::GpuView | Ty::GpuArguments
-            | Ty::GpuComputePipeline { .. } | Ty::GpuGraphicsPipeline { .. } => {
+            Ty::GpuPipelineContract | Ty::GpuView | Ty::GpuArguments => {
                 return Err("shader cannot consume a managed GPU view or projected arguments".into());
             }
             Ty::Pointer { pointee: element } => {

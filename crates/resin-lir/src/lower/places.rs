@@ -7,13 +7,13 @@ use super::FunctionLowering;
 
 pub(super) enum Operand {
     Value(Ty),
-    Place { ty: Ty, gpu: bool },
+    Place { ty: Ty },
 }
 
 impl FunctionLowering<'_> {
     pub(super) fn gen_assign(&mut self, place: &Term, value: &Term) -> Result<Ty, LowerError> {
         let place_ty = self.gen_place(place)?;
-        let (Ty::Pointer { pointee } | Ty::GpuPointer { pointee }) = place_ty else {
+        let Ty::Pointer { pointee } = place_ty else {
             return Err(LowerError::typing(
                 place.span,
                 TypeError {
@@ -43,14 +43,8 @@ impl FunctionLowering<'_> {
 
     pub(super) fn gen_place(&mut self, term: &Term) -> Result<Ty, LowerError> {
         match self.gen_operand(term)? {
-            Operand::Place { ty, gpu } => Ok(if gpu {
-                Ty::GpuPointer {
-                    pointee: Box::new(ty),
-                }
-            } else {
-                Ty::Pointer {
-                    pointee: Box::new(ty),
-                }
+            Operand::Place { ty } => Ok(Ty::Pointer {
+                pointee: Box::new(ty),
             }),
             Operand::Value(_) => Err(LowerError {
                 span: term.span,
@@ -69,20 +63,16 @@ impl FunctionLowering<'_> {
                 self.emit(Instr::LocalAddress {
                     local: binding.local,
                 });
-                Ok(Operand::Place { ty, gpu: false })
+                Ok(Operand::Place { ty })
             }
             TermKind::Field { base, access } => {
                 let base = self.gen_operand(base)?;
                 self.gen_field_operand(base, access)
             }
             TermKind::Deref { pointer } => {
-                let checked = &pointer.ty;
                 self.gen_term(pointer, None)?;
                 let pointee = term.ty.clone();
-                Ok(Operand::Place {
-                    ty: pointee,
-                    gpu: matches!(checked, Ty::GpuPointer { .. }),
-                })
+                Ok(Operand::Place { ty: pointee })
             }
             _ => self.gen_term(term, None).map(Operand::Value),
         }
@@ -93,13 +83,12 @@ impl FunctionLowering<'_> {
         base: Operand,
         access: &FieldAccess,
     ) -> Result<Operand, LowerError> {
-        let (mut base_ty, mut is_place, mut gpu) = match base {
-            Operand::Value(ty) => (ty, false, false),
-            Operand::Place { ty, gpu } => (ty, true, gpu),
+        let (mut base_ty, mut is_place) = match base {
+            Operand::Value(ty) => (ty, false),
+            Operand::Place { ty } => (ty, true),
         };
         loop {
-            if let Ty::Pointer { pointee } | Ty::GpuPointer { pointee } = &base_ty {
-                gpu = matches!(base_ty, Ty::GpuPointer { .. });
+            if let Ty::Pointer { pointee } = &base_ty {
                 let pointee = *pointee.clone();
                 if is_place {
                     self.emit(Instr::Load);
@@ -129,7 +118,6 @@ impl FunctionLowering<'_> {
         Ok(if is_place {
             Operand::Place {
                 ty: access.ty.clone(),
-                gpu,
             }
         } else {
             Operand::Value(access.ty.clone())

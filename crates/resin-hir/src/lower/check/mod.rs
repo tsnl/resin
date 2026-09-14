@@ -1069,7 +1069,6 @@ impl Expression<'_, '_> {
                     args: args.iter().map(|arg| arg.ty.clone()).collect(),
                     out: out.clone(),
                     associated,
-                    origins: receiver.as_ref().map(address_origins).unwrap_or_default(),
                 };
                 self.constrain((span, constraint));
                 TermKind::MethodCall {
@@ -1185,10 +1184,7 @@ impl Expression<'_, '_> {
             }
             resin_ast::TermKind::Address { place } => {
                 let place = self.child(place, None);
-                self.constrain((
-                    span,
-                    Constraint::Address(address_origins(&place), place.ty.clone(), out.clone()),
-                ));
+                self.constrain((span, Constraint::Address(place.ty.clone(), out.clone())));
                 TermKind::Address {
                     place: Box::new(place),
                 }
@@ -1415,24 +1411,6 @@ fn groups(edges: &[Vec<usize>]) -> Vec<Vec<usize>> {
 
 #[cfg(test)]
 mod tests;
-
-/// Implicit field dereferences and explicit dereferences preserve a GPU allocation owner.
-fn address_origins(term: &Term) -> Vec<super::infer::AddressOrigin> {
-    use super::infer::AddressOrigin;
-    match &term.kind {
-        TermKind::Deref { pointer } => vec![AddressOrigin::Deref {
-            pointer: pointer.ty.clone(),
-        }],
-        TermKind::Field { base, .. } => {
-            let mut origins = address_origins(base);
-            origins.push(AddressOrigin::Field {
-                base: base.ty.clone(),
-            });
-            origins
-        }
-        _ => vec![],
-    }
-}
 
 fn single_argument(args: &[resin_ast::Term], span: Span) -> Result<&resin_ast::Term> {
     match args {

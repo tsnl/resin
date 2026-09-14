@@ -302,56 +302,37 @@ fn string_views_expose_bytes_without_accepting_arbitrary_storage() {
 }
 
 #[test]
-fn gpu_views_preserve_ownership_and_reject_raw_pointer_conversions() {
+fn opaque_gpu_values_preserve_ownership_without_exposing_pointer_operations() {
     let context = TyperContext::new();
-    let gpu = Ty::GpuPointer {
-        pointee: Box::new(Ty::UInt32),
-    };
-    let span = Ty::GpuSpan {
-        element: Box::new(Ty::UInt32),
-    };
-    assert_eq!(gpu.deref_target(), Some(&Ty::UInt32));
-    assert_eq!(context.type_field(&span, "data").unwrap().ty, gpu);
-    assert_eq!(context.type_field(&span, "length").unwrap().ty, Ty::UInt64);
-    assert!(context.type_field(&gpu, "host").is_err());
-    for ty in [&gpu, &span] {
-        assert!(ty.needs_drop(&[]));
-        assert!(record(ty.clone()).needs_drop(&[]));
-        assert!(!ty.foreign_value());
-        assert!(layout::layout(&[], ty).is_err());
+    for gpu in [Ty::GpuView, Ty::GpuArguments, Ty::GpuPipelineContract] {
+        assert!(gpu.needs_drop(&[]));
+        assert!(record(gpu.clone()).needs_drop(&[]));
+        assert!(!gpu.foreign_value());
+        assert!(layout::layout(&[], &gpu).is_err());
+        assert!(gpu.deref_target().is_none());
+        assert!(gpu.view_record().is_none());
+        assert!(context.type_field(&gpu, "data").is_err());
+        for other in [
+            Ty::UInt64,
+            Ty::StrongOwner,
+            Ty::Pointer {
+                pointee: Box::new(Ty::UInt32),
+            },
+        ] {
+            assert!(!gpu.pointer_cast(&other));
+            assert!(!other.pointer_cast(&gpu));
+            assert!(context.explicit_conversion(&gpu, &other).is_err());
+            assert!(context.explicit_conversion(&other, &gpu).is_err());
+        }
     }
-    for other in [
-        Ty::UInt64,
-        Ty::Pointer {
-            pointee: Box::new(Ty::UInt32),
-        },
-        Ty::GpuPointer {
-            pointee: Box::new(Ty::UInt64),
-        },
-    ] {
-        assert!(!gpu.pointer_cast(&other));
-        assert!(!other.pointer_cast(&gpu));
-        assert!(context.explicit_conversion(&gpu, &other).is_err());
-        assert!(context.explicit_conversion(&other, &gpu).is_err());
-    }
-    let wider = Ty::GpuPointer {
-        pointee: Box::new(Ty::union_of([Ty::UInt32, Ty::UInt64])),
-    };
-    assert!(!gpu.widens_to(&wider));
-    assert!(
-        context
-            .ascribe(&span.view_record().unwrap(), &span)
-            .is_err()
-    );
 }
 
 #[test]
 fn gpu_element_storage_excludes_references_and_custom_destruction() {
     let mut context = TyperContext::new();
     let id = context.create_type("Element", record(Ty::UInt32)).unwrap();
-    let element = Ty::Defined { definition: id };
     let array = Ty::Array {
-        element: Box::new(element.clone()),
+        element: Box::new(Ty::Defined { definition: id }),
         length: 8,
     };
     assert!(array.gpu_element(context.definitions()));
@@ -362,13 +343,11 @@ fn gpu_element_storage_excludes_references_and_custom_destruction() {
             pointee: Box::new(Ty::UInt32),
         },
         Ty::pointer_length(Ty::UInt32),
-        Ty::GpuPointer {
-            pointee: Box::new(Ty::UInt32),
-        },
-        Ty::GpuSpan {
-            element: Box::new(Ty::UInt32),
-        },
+        Ty::GpuView,
+        Ty::GpuPipelineContract,
+        Ty::GpuArguments,
         Ty::StrongOwner,
+        Ty::WeakOwner,
         Ty::Array {
             element: Box::new(Ty::UInt32),
             length: 0,
@@ -382,138 +361,97 @@ fn gpu_element_storage_excludes_references_and_custom_destruction() {
 }
 
 #[test]
-fn gpu_types_intern_components_and_render_source_spellings() {
-    let span = Ty::GpuSpan {
-        element: Box::new(Ty::UInt32),
-    };
-    let pointer = Ty::GpuPointer {
+fn gpu_primitive_types_intern_and_render_independently_of_source_wrappers() {
+    let mut table = TypeTable::default();
+    for (ty, name) in [
+        (Ty::GpuView, "GpuView"),
+        (Ty::GpuArguments, "GpuArguments"),
+        (Ty::GpuPipelineContract, "GpuPipelineContract"),
+    ] {
+        table.intern(&ty);
+        assert!(table.id(&ty).is_some());
+        assert_eq!(format_type(&ty, &table), name);
+    }
+}
+
+#[test]
+fn gpu_projection_requires_explicit_nominal_metadata_and_preserves_element_types() {
+    let pointer = Ty::Pointer {
         pointee: Box::new(Ty::UInt32),
     };
-    let mut table = TypeTable::default();
-    table.intern(&span);
-    for ty in [&span, &pointer, &Ty::UInt32, &Ty::UInt64] {
-        assert!(table.id(ty).is_some());
-    }
-    assert_eq!(format_type(&span, &table), "GpuSpan<uint>");
-    assert_eq!(format_type(&pointer, &table), "GpuPtr<uint>");
-}
-
-#[test]
-fn gpu_arguments_are_opaque_managed_values_and_projection_is_type_directed() {
-    let arguments = Ty::GpuArguments;
-    let context = TyperContext::new();
-    assert!(arguments.needs_drop(&[]));
-    assert!(!arguments.foreign_value());
-    assert!(arguments.view_record().is_none());
-    assert!(arguments.deref_target().is_none());
-    assert!(layout::layout(&[], &arguments).is_err());
-    assert!(
-        context
-            .explicit_conversion(&Ty::UInt64, &arguments)
-            .is_err()
-    );
-    let root = record(Ty::pointer_length(Ty::Int32));
-    let table = [TypeDef::new("Root", root)];
-    let root = Ty::Defined {
+    let view = Ty::Defined {
         definition: TypeId::from_index(0),
     };
+    let mut table = [TypeDef::new("DeviceReference", record(Ty::GpuView))];
+    assert!(crate::gpu_projection_plan(&table, &view, &pointer).is_err());
+    let TypeDef::Nominal { gpu_projection, .. } = &mut table[0] else {
+        unreachable!()
+    };
+    *gpu_projection = Some(crate::GpuProjection {
+        kind: crate::GpuProjectionKind::Pointer,
+        target: pointer.clone(),
+    });
+    let plan = crate::gpu_projection_plan(&table, &view, &pointer).unwrap();
+    assert_eq!(plan.source, view);
+    assert_eq!(plan.target, pointer);
     assert_eq!(
-        root.gpu_projection(&table),
-        Some(record(Ty::Record {
-            fields: vec![
-                RecordField {
-                    name: "data".into(),
-                    ty: Ty::GpuPointer {
-                        pointee: Box::new(Ty::Int32)
-                    }
-                },
-                RecordField {
-                    name: "length".into(),
-                    ty: Ty::UInt64
-                },
-            ],
-        }))
-    );
-    let graph = Ty::Pointer {
-        pointee: Box::new(root),
-    };
-    assert_eq!(graph.gpu_projection(&table), None);
-    assert_eq!(Ty::GpuArguments.gpu_projection(&[]), None);
-}
-
-#[test]
-fn pipeline_types_preserve_root_identity_and_opaque_shared_ownership() {
-    let context = TyperContext::new();
-    let root = record(Ty::pointer_length(Ty::UInt32));
-    let owner = Ty::StrongOwner;
-    let compute = Ty::GpuComputePipeline {
-        root: Box::new(root.clone()),
-        owner: Box::new(owner.clone()),
-    };
-    let graphics = Ty::GpuGraphicsPipeline {
-        root: Box::new(root.clone()),
-        owner: Box::new(owner.clone()),
-    };
-    assert_ne!(compute, graphics);
-    for pipeline in [&compute, &graphics] {
-        assert_eq!(pipeline.gpu_pipeline(), Some((&root, &owner)));
-        assert_eq!(
-            pipeline.gpu_pipeline_argument(&[]),
-            root.gpu_projection(&[])
-        );
-        assert!(pipeline.needs_drop(&[]));
-        assert!(pipeline.deref_target().is_none());
-        assert!(pipeline.view_record().is_none());
-        assert!(!pipeline.foreign_value());
-        assert!(layout::layout(&[], pipeline).is_err());
-        assert!(!pipeline.gpu_element(&[]));
-        assert!(pipeline.gpu_projection(&[]).is_none());
-        for other in [&owner, &Ty::UInt64] {
-            assert!(context.explicit_conversion(pipeline, other).is_err());
-            assert!(context.explicit_conversion(other, pipeline).is_err());
+        plan.operation,
+        crate::GpuProjectionOperation::Pointer {
+            element: Ty::UInt32
         }
-    }
-    assert!(context.explicit_conversion(&compute, &graphics).is_err());
-    let mut table = TypeTable::default();
-    table.intern(&compute);
-    table.intern(&graphics);
-    for ty in [&root, &owner, &Ty::Int32, &Ty::UInt32] {
-        assert!(table.id(ty).is_some());
-    }
-    assert_eq!(
-        format_type(&compute, &table),
-        "GpuComputePipeline<{ value: { data: Ptr<uint>, length: ulong } }, ArcPtr<int>>"
     );
-    assert_eq!(
-        format_type(&graphics, &table),
-        "GpuGraphicsPipeline<{ value: { data: Ptr<uint>, length: ulong } }, ArcPtr<int>>"
-    );
+    let retagged = Ty::Pointer {
+        pointee: Box::new(Ty::Float32),
+    };
+    assert!(crate::gpu_projection_plan(&table, &view, &retagged).is_err());
+    assert!(crate::gpu_projection_plan(&table, &pointer, &pointer).is_err());
+    assert!(crate::gpu_projection_plan(&table, &Ty::GpuArguments, &pointer).is_err());
+    let TypeDef::Nominal { drop, .. } = &mut table[0] else {
+        unreachable!()
+    };
+    *drop = Some(FunctionId::from_index(0));
+    assert!(crate::gpu_projection_plan(&table, &view, &pointer).is_err());
 }
 
 #[test]
-fn pipeline_argument_contract_rejects_invalid_owners_roots_and_rootless_compute() {
-    let owner = Box::new(Ty::StrongOwner);
-    let graphics = Ty::GpuGraphicsPipeline {
-        root: Box::new(Ty::None),
-        owner: owner.clone(),
+fn source_pipeline_contract_preserves_stage_root_and_shared_owner() {
+    let root = record(Ty::UInt32);
+    let owner = Ty::Defined {
+        definition: TypeId::from_index(0),
     };
-    assert_eq!(graphics.gpu_pipeline_argument(&[]), Some(Ty::None));
-    for pipeline in [
-        Ty::GpuComputePipeline {
-            root: Box::new(Ty::None),
-            owner: owner.clone(),
-        },
-        Ty::GpuComputePipeline {
-            root: Box::new(Ty::UInt32),
-            owner: Box::new(Ty::Int32),
-        },
-        Ty::GpuGraphicsPipeline {
-            root: Box::new(Ty::GpuArguments),
-            owner,
-        },
+    let pipeline = Ty::Defined {
+        definition: TypeId::from_index(1),
+    };
+    let mut table = [
+        TypeDef::new("DeviceOwner", record(Ty::StrongOwner)),
+        TypeDef::new("Program", record(Ty::GpuPipelineContract)),
+    ];
+    assert!(crate::gpu_pipeline_contract(&table, &pipeline).is_err());
+    for kind in [
+        crate::GpuPipelineKind::Compute,
+        crate::GpuPipelineKind::Graphics,
     ] {
-        assert_eq!(pipeline.gpu_pipeline_argument(&[]), None);
+        let expected = crate::GpuPipeline {
+            kind,
+            root: root.clone(),
+            owner: owner.clone(),
+        };
+        let TypeDef::Nominal { gpu_pipeline, .. } = &mut table[1] else {
+            unreachable!()
+        };
+        *gpu_pipeline = Some(expected.clone());
+        assert_eq!(
+            crate::gpu_pipeline_contract(&table, &pipeline).unwrap(),
+            &expected
+        );
+        assert!(pipeline.needs_drop(&table));
+        assert!(!pipeline.gpu_element(&table));
     }
+    let TypeDef::Nominal { body, .. } = &mut table[0] else {
+        unreachable!()
+    };
+    *body = Some(record(Ty::UInt64));
+    assert!(crate::gpu_pipeline_contract(&table, &pipeline).is_err());
 }
 
 fn shader_parameter(input: Ty, root: Ty) -> Vec<Ty> {
@@ -561,7 +499,7 @@ fn shader_graphics_types(context: &mut TyperContext) -> (Ty, Ty, Ty) {
 }
 
 #[test]
-fn compute_pipeline_root_checks_stage_signature_and_projection_support() {
+fn compute_pipeline_root_checks_stage_signature_before_host_projection() {
     let context = TyperContext::new();
     let parameter = shader_parameter(Ty::UInt64, Ty::UInt32);
     assert_eq!(
@@ -581,11 +519,10 @@ fn compute_pipeline_root_checks_stage_signature_and_projection_support() {
         assert!(shader::pipeline_root(&context, &stages).is_err());
     }
     let parameter = shader_parameter(Ty::UInt64, Ty::Bool);
-    assert!(
-        shader::pipeline_root(&context, &[(parameter.as_slice(), &Ty::Unit, "compute")])
-            .unwrap_err()
-            .contains("projection")
-    );
+    let root =
+        shader::pipeline_root(&context, &[(parameter.as_slice(), &Ty::Unit, "compute")]).unwrap();
+    assert_eq!(root, Ty::Bool);
+    assert!(crate::gpu_projection_plan(&[], &Ty::Bool, &root).is_err());
 }
 
 #[test]

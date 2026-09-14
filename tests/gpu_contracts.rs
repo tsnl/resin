@@ -143,3 +143,47 @@ fn pipeline_type_contracts_reject_invalid_storage_and_direct_calls() {
             .contains("cannot be called directly")
     );
 }
+
+#[test]
+fn source_drop_hooks_reject_gpu_elements_before_and_after_importing() {
+    for (declaration, owner) in [
+        (
+            "struct Managed { value: int, def drop(self: Ptr<Managed>) = {}; };",
+            "Managed",
+        ),
+        (
+            "struct Managed<T> { value: T, def drop(self: Ptr<Managed<T>>) = {}; };",
+            "Managed<int>",
+        ),
+    ] {
+        let use_site = format!(
+            r#"
+            intrinsic "gpu_element_layout" def layout<T>() -> {{size: ulong, alignment: ulong}};
+            def main() = {{ layout::<{owner}>(); }};
+            "#
+        );
+        let local = format!("{declaration} {use_site}");
+        let hir = resin_hir::generate(&support::parse(&local)).unwrap();
+        let error = resin_lir::generate(&hir).unwrap_err();
+        assert!(
+            error.to_string().contains("plain shared storage"),
+            "{error}"
+        );
+
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("owner.resin"),
+            format!("export {{ Managed }}; {declaration}"),
+        )
+        .unwrap();
+        let entry = directory.path().join("main.resin");
+        std::fs::write(&entry, format!("import {{ \"owner.resin\" }}; {use_site}")).unwrap();
+        let program = support::pipeline::load(&entry).unwrap();
+        let hir = resin_hir::generate_program(&program).unwrap();
+        let error = resin_lir::generate(&hir).unwrap_err();
+        assert!(
+            error.to_string().contains("plain shared storage"),
+            "{error}"
+        );
+    }
+}

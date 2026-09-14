@@ -101,17 +101,6 @@ pub(super) enum TermKind {
         conversion: resin_types::ExplicitConversion,
         arg: Box<Term>,
     },
-    /// Allocate fully initialized host elements, using the source error factory on failure.
-    /// Allocate and initialize a GPU element through the registered allocator.
-    GpuNew {
-        allocator: FunctionId,
-        args: Arguments,
-    },
-    /// Allocate uninitialized GPU elements through the registered allocator.
-    GpuAllocate {
-        allocator: FunctionId,
-        args: Arguments,
-    },
     /// Create an owning pipeline whose root type comes from its shader declarations.
     GpuPipelineCreate {
         factory: FunctionId,

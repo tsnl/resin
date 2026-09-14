@@ -30,22 +30,8 @@ pub(super) fn ty(source: &Ty) -> crate::Type {
         Ty::Pointer { pointee } => crate::Type::Pointer {
             pointee: Box::new(ty(pointee)),
         },
-        Ty::GpuPointer { pointee } => crate::Type::GpuPointer {
-            pointee: Box::new(ty(pointee)),
-        },
-        Ty::GpuSpan { element } => crate::Type::GpuSpan {
-            element: Box::new(ty(element)),
-        },
         Ty::StrongOwner => crate::Type::StrongOwner,
         Ty::WeakOwner => crate::Type::WeakOwner,
-        Ty::GpuComputePipeline { root, owner } => crate::Type::GpuComputePipeline {
-            root: Box::new(ty(root)),
-            owner: Box::new(ty(owner)),
-        },
-        Ty::GpuGraphicsPipeline { root, owner } => crate::Type::GpuGraphicsPipeline {
-            root: Box::new(ty(root)),
-            owner: Box::new(ty(owner)),
-        },
         Ty::Function { params, result } => crate::Type::Function {
             params: params.iter().map(ty).collect(),
             result: Box::new(ty(result)),

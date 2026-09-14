@@ -68,19 +68,6 @@ pub(super) fn check_value(
                     seen,
                 )?;
             }
-            Ty::GpuPointer { pointee: element } | Ty::GpuSpan { element } => {
-                if !element.gpu_element(table) {
-                    return Err(location.error(VerifyErrorKind::UnsupportedGpuElement {
-                        ty: *element.clone(),
-                    }));
-                }
-            }
-            Ty::GpuComputePipeline { owner, .. } | Ty::GpuGraphicsPipeline { owner, .. } => {
-                if ty.gpu_pipeline_argument(table).is_none() {
-                    return Err(location.error(VerifyErrorKind::InvalidGpuOperation));
-                }
-                visit(table, owner, location, seen)?;
-            }
             Ty::Array { element, .. } => visit(table, element, location, seen)?,
             Ty::Record { fields } => {
                 for field in fields {

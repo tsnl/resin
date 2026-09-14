@@ -251,14 +251,6 @@ impl Printer {
                 vec![quoted(format!("{conversion:?}")), self.term(arg)],
             ),
             TermKind::Convert { arg } => list("convert", vec![self.term(arg)]),
-            TermKind::GpuNew { allocator, args } => list(
-                "gpu-new",
-                vec![function_id(allocator.index()), self.arguments(args)],
-            ),
-            TermKind::GpuAllocate { allocator, args } => list(
-                "gpu-allocate",
-                vec![function_id(allocator.index()), self.arguments(args)],
-            ),
             TermKind::GpuPipelineCreate {
                 factory,
                 shaders,
@@ -449,21 +441,9 @@ impl TypeNames {
                 }
             }
             Type::Pointer { pointee } => format!("Ptr<{}>", self.format(pointee)),
-            Type::GpuPointer { pointee } => format!("GpuPtr<{}>", self.format(pointee)),
-            Type::GpuSpan { element } => format!("GpuSpan<{}>", self.format(element)),
             Type::GpuView => "GpuView".into(),
             Type::GpuPipelineContract => "GpuPipelineContract".into(),
             Type::GpuArguments => "GpuArguments".into(),
-            Type::GpuComputePipeline { root, owner } => format!(
-                "GpuComputePipeline<{}, {}>",
-                self.format(root),
-                self.format(owner)
-            ),
-            Type::GpuGraphicsPipeline { root, owner } => format!(
-                "GpuGraphicsPipeline<{}, {}>",
-                self.format(root),
-                self.format(owner)
-            ),
             Type::StrongOwner => "StrongOwner".into(),
             Type::WeakOwner => "WeakOwner".into(),
             Type::Array { element, length } => {

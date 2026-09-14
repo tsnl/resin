@@ -104,21 +104,6 @@ pub enum Instr {
     /// `[view, length, commands, image] -> [int]`: record an image copy retaining its allocation.
     GpuViewCopyImage,
 
-    /// `[gpu, value] -> [Result<GpuPtr<T>, E>]`: allocate and initialize plain GPU storage.
-    GpuNew { allocator: FunctionId, element: Ty },
-    /// `[gpu, count] -> [Result<GpuSpan<T>, E>]`: allocate checked count * sizeof(T) bytes.
-    GpuAllocate { allocator: FunctionId, element: Ty },
-    /// `[native_gpu, gpu_owner, bytes, alignment, memory] -> [{ value: GpuPtr<ubyte> | None, status: int }]`.
-    /// The runtime retains the GPU owner on success; operands are consumed.
-    GpuAllocateNative,
-    /// `[GPU view, start, length] -> [GpuSpan<T>]`: transfer ownership to a checked slice.
-    GpuSlice,
-    /// `[GPU view] -> [GPU view]`: transfer ownership while removing write permission.
-    GpuReadOnly,
-    /// `[GPU view] -> [GPU view]`: transfer ownership while removing read permission.
-    GpuWriteOnly,
-    /// `[GpuSpan<T>, Span<T>] -> [unit]`: copy readable GPU elements into host storage.
-    GpuCopyTo,
     /// `[gpu] -> [Result<GpuComputePipeline<Root, Owner>, E>]`: create a pipeline
     /// from the declared compute shader, retaining its root type and factory owner.
     GpuComputePipeline {
@@ -154,8 +139,6 @@ pub enum Instr {
     GpuArgumentsDispatch,
     /// `[arguments, commands, count] -> [int]`: record a draw with retained arguments.
     GpuArgumentsDraw,
-    /// `[GpuSpan<ubyte>, commands, image] -> [int]`: record an image copy retaining its buffer.
-    GpuCopyImage,
     /// `[count, initial] -> [StrongOwner | None]`: allocate initialized element storage.
     /// Installs the concrete element destructor; failed allocations publish no owner.
     OwnerAllocate { element: Ty },

@@ -647,8 +647,6 @@ impl Completion<'_> {
                 type_args: vec![],
                 args,
             },
-            FunctionBody::GpuNew { allocator } => TermKind::GpuNew { allocator, args },
-            FunctionBody::GpuAllocate { allocator } => TermKind::GpuAllocate { allocator, args },
             FunctionBody::GpuPipelineDispatch {
                 context,
                 allocator,
@@ -770,9 +768,7 @@ impl Completion<'_> {
                 },
                 ReceiverConversion::Address,
             )),
-            crate::Type::Str | crate::Type::GpuPointer { .. } | crate::Type::GpuSpan { .. } => {
-                Some((function_type.clone(), ReceiverConversion::Value))
-            }
+            crate::Type::Str => Some((function_type.clone(), ReceiverConversion::Value)),
             _ => None,
         };
         if let Some((ty, conversion)) = receiver {
@@ -795,14 +791,7 @@ impl Completion<'_> {
             };
             return Ok(TermKind::Intrinsic {
                 type_args: vec![],
-                op: if matches!(
-                    function_type,
-                    crate::Type::GpuPointer { .. } | crate::Type::GpuSpan { .. }
-                ) {
-                    Intrinsic::GpuIndex
-                } else {
-                    Intrinsic::Index
-                },
+                op: Intrinsic::Index,
                 args,
             });
         }
@@ -1023,7 +1012,6 @@ mod tests {
                         args: vec![Ty::UInt64.into()],
                         out: ty.clone(),
                         associated: false,
-                        origins: vec![],
                     },
                 ),
             );

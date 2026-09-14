@@ -97,12 +97,6 @@ pub enum Type {
     Pointer {
         pointee: Box<Type>,
     },
-    GpuPointer {
-        pointee: Box<Type>,
-    },
-    GpuSpan {
-        element: Box<Type>,
-    },
     /// An opaque shared allocation view with checked byte offsets and host permissions.
     GpuView,
     GpuPipelineContract,
@@ -111,14 +105,6 @@ pub enum Type {
     StrongOwner,
     /// Opaque weak allocation handle; it does not keep payloads alive.
     WeakOwner,
-    GpuComputePipeline {
-        root: Box<Type>,
-        owner: Box<Type>,
-    },
-    GpuGraphicsPipeline {
-        root: Box<Type>,
-        owner: Box<Type>,
-    },
     Array {
         element: Box<Type>,
         length: usize,
@@ -354,16 +340,6 @@ pub enum TermKind {
     },
     Convert {
         arg: Box<Term>,
-    },
-    /// Allocate and initialize a GPU element through the registered allocator.
-    GpuNew {
-        allocator: FunctionId,
-        args: Arguments,
-    },
-    /// Allocate uninitialized GPU elements through the registered allocator.
-    GpuAllocate {
-        allocator: FunctionId,
-        args: Arguments,
     },
     /// Create an owning pipeline whose root type comes from its shader declarations.
     GpuPipelineCreate {
@@ -780,14 +756,9 @@ fn builtin_hover(document: &resin_cst::Document, token: resin_cst::Node<'_>) -> 
             token.kind(),
             "builtin_type"
                 | "Ptr"
-                | "Span"
-                | "GpuPtr"
-                | "GpuSpan"
                 | "GpuPipelineContract"
                 | "GpuView"
                 | "GpuArguments"
-                | "GpuComputePipeline"
-                | "GpuGraphicsPipeline"
                 | "Result"
                 | "None"
         )
@@ -1151,16 +1122,6 @@ impl Analysis {
                 compiler_signature: typer.gpu_method_label(&method, associated).is_some(),
             });
         }
-        if let Some((name, signature)) = typer.generic_method_label(ty, associated) {
-            members.retain(|member| member.name != name);
-            members.push(Member {
-                name: name.into(),
-                ty: signature,
-                kind: DefinitionKind::Function,
-                origin: None,
-                compiler_signature: true,
-            });
-        }
         self.fields.insert(location, members);
     }
 
@@ -1176,7 +1137,7 @@ impl Analysis {
             return;
         }
         let mut receiver = ty;
-        while let Type::Pointer { pointee } | Type::GpuPointer { pointee } = receiver {
+        while let Type::Pointer { pointee } = receiver {
             receiver = pointee;
         }
         let body = match receiver {
@@ -1260,7 +1221,7 @@ impl Analysis {
         solver: &lower::infer::Solver,
     ) {
         let mut owner = ty;
-        while let Type::Pointer { pointee } | Type::GpuPointer { pointee } = owner {
+        while let Type::Pointer { pointee } = owner {
             owner = pointee;
         }
         let Type::Defined {
@@ -1401,17 +1362,9 @@ fn source_method_receiver(
         return false;
     };
     let source = lower::infer::Type::from_hir(receiver);
-    let mut candidates = vec![
-        source.clone(),
-        lower::infer::Type::pointer(source.clone()),
-        lower::infer::Type::gpu_pointer(source),
-    ];
-    match receiver {
-        Type::Pointer { pointee } | Type::GpuPointer { pointee } => {
-            candidates.push(lower::infer::Type::from_hir(pointee));
-        }
-
-        _ => {}
+    let mut candidates = vec![source.clone(), lower::infer::Type::pointer(source)];
+    if let Type::Pointer { pointee } = receiver {
+        candidates.push(lower::infer::Type::from_hir(pointee));
     }
     candidates.into_iter().any(|candidate| {
         solver

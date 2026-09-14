@@ -185,35 +185,6 @@ fn rejects_local_and_imported_owner(declaration: &str, use_site: &str, expected:
 }
 
 #[test]
-fn source_drop_hooks_reject_gpu_elements_before_and_after_importing() {
-    let allocator = r#"
-        struct Failure {};
-        struct Device {
-            @gpu_allocator
-            def malloc(self: Device, bytes: ulong, alignment: ulong, memory: int) -> Result<GpuPtr<ubyte>, Failure> = { err(Failure {}) };
-        };
-    "#;
-    for (declaration, owner) in [
-        (
-            "struct Managed { value: int, def drop(self: Ptr<Managed>) = {}; };",
-            "Managed",
-        ),
-        (
-            "struct Managed<T> { value: T, def drop(self: Ptr<Managed<T>>) = {}; };",
-            "Managed<int>",
-        ),
-    ] {
-        rejects_local_and_imported_owner(
-            declaration,
-            &format!(
-                "{allocator} def main() -> _ = {{ Device {{}}.new({owner} {{ value = 1 }}) }};"
-            ),
-            "drop",
-        );
-    }
-}
-
-#[test]
 fn source_drop_hooks_reject_structural_unwrapping_before_and_after_importing() {
     for (declaration, owner) in [
         (

@@ -33,16 +33,8 @@ pub(super) fn check_instr(
         | Instr::GpuViewReplace
         | Instr::GpuViewCopyTo
         | Instr::GpuViewCopyImage
-        | Instr::GpuNew { .. }
-        | Instr::GpuAllocate { .. }
-        | Instr::GpuAllocateNative
-        | Instr::GpuSlice
-        | Instr::GpuReadOnly
-        | Instr::GpuWriteOnly
-        | Instr::GpuCopyTo
         | Instr::GpuArgumentsDispatch
-        | Instr::GpuArgumentsDraw
-        | Instr::GpuCopyImage => super::gpu::check(module, instr, stack, location)?,
+        | Instr::GpuArgumentsDraw => super::gpu::check(module, instr, stack, location)?,
         Instr::ForgetLocal { local } | Instr::DropLocal { local } | Instr::TakeLocal { local } => {
             let target = function.locals.get(local.index()).ok_or_else(|| {
                 location.error(VerifyErrorKind::InvalidLocal {
@@ -247,7 +239,7 @@ pub(super) fn check_instr(
         Instr::Load | Instr::TransferLoad => {
             let address = pop_one(stack, location)?;
             let shape = shape(&module.types, address.clone(), location)?;
-            let (Ty::Pointer { pointee } | Ty::GpuPointer { pointee }) = shape else {
+            let Ty::Pointer { pointee } = shape else {
                 return Err(location.error(VerifyErrorKind::ExpectedPointer { found: address }));
             };
             stack.push(*pointee);
@@ -256,7 +248,7 @@ pub(super) fn check_instr(
             let value = pop_one(stack, location)?;
             let address = pop_one(stack, location)?;
             let shape = shape(&module.types, address.clone(), location)?;
-            let (Ty::Pointer { pointee } | Ty::GpuPointer { pointee }) = shape else {
+            let Ty::Pointer { pointee } = shape else {
                 return Err(location.error(VerifyErrorKind::ExpectedPointer { found: address }));
             };
             expect_type(*pointee, value.clone(), location)?;
@@ -395,18 +387,13 @@ fn project_static(
     location: Location,
 ) -> Result<Ty, VerifyError> {
     match source {
-        Ty::GpuPointer { pointee } => Ok(Ty::GpuPointer {
-            pointee: Box::new(project_static(table, *pointee, index, location)?),
-        }),
         Ty::Pointer { pointee } => Ok(Ty::Pointer {
             pointee: Box::new(project_static(table, *pointee, index, location)?),
         }),
         Ty::Defined { .. } => {
             project_static(table, shape(table, source, location)?, index, location)
         }
-        view @ (Ty::Str | Ty::GpuSpan { .. }) => {
-            project_static(table, view.view_record().unwrap(), index, location)
-        }
+        view @ Ty::Str => project_static(table, view.view_record().unwrap(), index, location),
         Ty::Record { fields } => fields
             .get(index)
             .map(|field| field.ty.clone())
@@ -429,8 +416,6 @@ fn project_static(
 
 fn project_dynamic(table: &[TypeDef], source: Ty, location: Location) -> Result<Ty, VerifyError> {
     match source {
-        Ty::GpuPointer { pointee } => Ok(Ty::GpuPointer { pointee }),
-        Ty::GpuSpan { element } => Ok(Ty::GpuPointer { pointee: element }),
         Ty::Pointer { pointee } => match shape(table, *pointee, location)? {
             Ty::Array { element, .. } => Ok(Ty::Pointer { pointee: element }),
             found => Err(location.error(VerifyErrorKind::ExpectedArray { found })),

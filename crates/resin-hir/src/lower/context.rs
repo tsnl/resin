@@ -177,12 +177,6 @@ pub(crate) enum FunctionBody {
     /// Primitive operation elaborated at its call site, preserving addresses
     /// that cannot cross shader calls.
     Intrinsic(Intrinsic),
-    GpuNew {
-        allocator: FunctionId,
-    },
-    GpuAllocate {
-        allocator: FunctionId,
-    },
     GpuPipelineFactory {
         factory: FunctionId,
         graphics: bool,
@@ -266,125 +260,6 @@ impl Context {
         *error.clone()
     }
 
-    /// Instantiate compiler allocation methods from the registered allocator's receiver.
-    pub(crate) fn method_call(
-        &self,
-        ty: &Ty,
-        name: &str,
-        arguments: &[Ty],
-        associated: bool,
-    ) -> Option<FunctionDecl> {
-        if !associated
-            && name == "new"
-            && let Some(allocator) = self.gpu_allocator(ty)
-        {
-            return Some(FunctionDecl {
-                body: FunctionBody::GpuNew { allocator },
-                params: vec![ty.clone(), arguments.first()?.clone()],
-                result: gpu_result(
-                    Ty::GpuPointer {
-                        pointee: Box::new(arguments.first()?.clone()),
-                    },
-                    self.gpu_error(allocator),
-                ),
-            });
-        }
-        if associated
-            && name == "allocate_native"
-            && *ty
-                == (Ty::GpuPointer {
-                    pointee: Box::new(Ty::UInt8),
-                })
-        {
-            let [handle, owner, ..] = arguments else {
-                return None;
-            };
-            if !matches!(handle, Ty::Pointer { .. }) || !matches!(owner, Ty::StrongOwner) {
-                return None;
-            }
-            return Some(FunctionDecl {
-                body: FunctionBody::Intrinsic(Intrinsic::GpuAllocateNative),
-                params: vec![
-                    handle.clone(),
-                    owner.clone(),
-                    Ty::UInt64,
-                    Ty::UInt64,
-                    Ty::Int32,
-                ],
-                result: Ty::Record {
-                    fields: vec![
-                        RecordField {
-                            name: "value".into(),
-                            ty: Ty::union_of([ty.clone(), Ty::None]),
-                        },
-                        RecordField {
-                            name: "status".into(),
-                            ty: Ty::Int32,
-                        },
-                    ],
-                },
-            });
-        }
-        if associated {
-            let first = arguments.first()?;
-            let body = match (ty, name) {
-                (Ty::GpuPointer { .. }, "new") => FunctionBody::GpuNew {
-                    allocator: self.gpu_allocator(first)?,
-                },
-                (Ty::GpuSpan { .. }, "allocate") => FunctionBody::GpuAllocate {
-                    allocator: self.gpu_allocator(first)?,
-                },
-                _ => return self.method(ty, name),
-            };
-            let allocator = self.gpu_allocator(first)?;
-            let value = match ty {
-                Ty::GpuPointer { pointee } => *pointee.clone(),
-                _ => Ty::UInt64,
-            };
-            return Some(FunctionDecl {
-                body,
-                params: vec![first.clone(), value],
-                result: gpu_result(ty.clone(), self.gpu_error(allocator)),
-            });
-        }
-        self.method(ty, name)
-    }
-
-    /// Generic signatures for editor queries before a call provides its arguments.
-    /// These labels describe inference parameters, not concrete language types.
-    pub(crate) fn generic_method_label(
-        &self,
-        ty: &Ty,
-        associated: bool,
-    ) -> Option<(&'static str, String)> {
-        let label = |ty: &Ty| resin_types::format_type(ty, self.definitions());
-        match (ty, associated) {
-            (Ty::GpuPointer { pointee }, true) => Some((
-                "new",
-                format!(
-                    "(gpu: _, value: {}) -> Result<{}, _>",
-                    label(pointee),
-                    label(ty)
-                ),
-            )),
-            (Ty::GpuSpan { .. }, true) => Some((
-                "allocate",
-                format!("(gpu: _, count: ulong) -> Result<{}, _>", label(ty)),
-            )),
-            (_, false) => {
-                let allocator = self.gpu_allocator(ty)?;
-                Some((
-                    "new",
-                    format!(
-                        "(value: T) -> Result<GpuPtr<T>, {}>",
-                        label(&self.gpu_error(allocator))
-                    ),
-                ))
-            }
-            _ => None,
-        }
-    }
-
     pub(crate) fn method(&self, ty: &Ty, name: &str) -> Option<FunctionDecl> {
         self.methods(ty)
             .into_iter()
@@ -417,11 +292,9 @@ impl ReceiverConversion {
     pub(crate) fn between(from: &Ty, to: &Ty) -> Option<Self> {
         if from == to {
             Some(Self::Value)
-        } else if matches!(to, Ty::Pointer { pointee } | Ty::GpuPointer { pointee } if pointee.as_ref() == from)
-        {
+        } else if matches!(to, Ty::Pointer { pointee } if pointee.as_ref() == from) {
             Some(Self::Address)
-        } else if matches!(from, Ty::Pointer { pointee } | Ty::GpuPointer { pointee } if pointee.as_ref() == to)
-        {
+        } else if matches!(from, Ty::Pointer { pointee } if pointee.as_ref() == to) {
             Some(Self::Load)
         } else {
             None
@@ -522,34 +395,6 @@ fn builtin_methods(receiver: &Ty, _typer: &Context) -> Vec<(Arc<str>, FunctionDe
             .collect();
     }
     match receiver {
-        Ty::GpuPointer { pointee } => {
-            let mut methods = gpu_methods(receiver, pointee);
-            methods.push(method(
-                "replace",
-                vec![receiver.clone(), *pointee.clone()],
-                *pointee.clone(),
-                Intrinsic::Replace,
-            ));
-            methods
-        }
-        Ty::GpuSpan { element } => {
-            let mut methods = gpu_methods(receiver, element);
-            methods.push(method(
-                "copy_to",
-                vec![receiver.clone(), Ty::pointer_length(*element.clone())],
-                Ty::Unit,
-                Intrinsic::GpuCopyTo,
-            ));
-            if **element == Ty::UInt8 {
-                methods.push(method(
-                    "copy_image_native",
-                    vec![receiver.clone(), pointer(Ty::UInt8), pointer(Ty::UInt8)],
-                    Ty::Int32,
-                    Intrinsic::GpuCopyImage,
-                ));
-            }
-            methods
-        }
         Ty::GpuArguments => vec![
             method(
                 "dispatch_native",
@@ -590,47 +435,6 @@ fn method(
     )
 }
 
-fn gpu_result(value: Ty, error: Ty) -> Ty {
-    Ty::Result {
-        value: Box::new(value),
-        error: Box::new(error),
-    }
-}
-
-fn gpu_methods(receiver: &Ty, element: &Ty) -> Vec<(Arc<str>, FunctionDecl)> {
-    let pointer = Ty::GpuPointer {
-        pointee: Box::new(element.clone()),
-    };
-    let span = Ty::GpuSpan {
-        element: Box::new(element.clone()),
-    };
-    vec![
-        method(
-            "at",
-            vec![receiver.clone(), Ty::UInt64],
-            pointer,
-            Intrinsic::GpuIndex,
-        ),
-        method(
-            "slice",
-            vec![receiver.clone(), Ty::UInt64, Ty::UInt64],
-            span,
-            Intrinsic::GpuSlice,
-        ),
-        method(
-            "read_only",
-            vec![receiver.clone()],
-            receiver.clone(),
-            Intrinsic::GpuReadOnly,
-        ),
-        method(
-            "write_only",
-            vec![receiver.clone()],
-            receiver.clone(),
-            Intrinsic::GpuWriteOnly,
-        ),
-    ]
-}
 /// Representation operations have signatures independent of library wrapper names.
 pub(super) fn primitive_signature(
     operation: &str,

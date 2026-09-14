@@ -40,24 +40,6 @@ struct Specialization<'a, 'source> {
     span: Span,
 }
 
-// Mirror address provenance while the concrete tree still exposes its places.
-// A method taking Ptr<T> must never turn a field in GPU storage into a raw pointer.
-fn gpu_place(term: &concrete::Term) -> bool {
-    match &term.kind {
-        concrete::TermKind::Deref { pointer } => matches!(pointer.ty, Ty::GpuPointer { .. }),
-        concrete::TermKind::Field { base, .. } => {
-            let mut gpu = gpu_place(base);
-            let mut ty = &base.ty;
-            while let Some(pointee) = ty.deref_target() {
-                gpu = matches!(ty, Ty::GpuPointer { .. });
-                ty = pointee;
-            }
-            gpu
-        }
-        _ => false,
-    }
-}
-
 impl Specialization<'_, '_> {
     fn ty(&mut self, source: &resin_hir::Type) -> Result<Ty, Error> {
         self.substitution
@@ -555,26 +537,15 @@ impl Specialization<'_, '_> {
         let from = self.ty(&source.ty)?;
         let conversion = if &from == to {
             ReceiverConversion::Value
-        } else if matches!(to, Ty::Pointer { pointee } | Ty::GpuPointer { pointee } if **pointee == from)
-        {
+        } else if matches!(to, Ty::Pointer { pointee } if **pointee == from) {
             ReceiverConversion::Address
-        } else if matches!(&from, Ty::Pointer { pointee } | Ty::GpuPointer { pointee } if pointee.as_ref() == to)
-        {
+        } else if matches!(&from, Ty::Pointer { pointee } if pointee.as_ref() == to) {
             ReceiverConversion::Load
         } else {
             return Err(self.instance_error("method receiver does not match the first parameter"));
         };
         let argument = if conversion == ReceiverConversion::Address {
-            let argument = self.place(source)?;
-            let gpu = gpu_place(&argument);
-            if gpu != matches!(to, Ty::GpuPointer { .. }) {
-                return Err(self.instance_error(if gpu {
-                    "GPU storage requires a GpuPtr receiver; it cannot be borrowed as a raw Ptr"
-                } else {
-                    "a GpuPtr receiver requires an address in GPU storage"
-                }));
-            }
-            argument
+            self.place(source)?
         } else {
             self.boxed(source)?
         };
@@ -829,16 +800,6 @@ impl Specialization<'_, '_> {
                 },
             },
             resin_hir::TermKind::Convert { arg } => self.conversion(arg, expected)?,
-            resin_hir::TermKind::GpuNew { allocator, args } => concrete::TermKind::GpuNew {
-                allocator: self.host_bridge(*allocator)?,
-                args: self.arguments(args)?,
-            },
-            resin_hir::TermKind::GpuAllocate { allocator, args } => {
-                concrete::TermKind::GpuAllocate {
-                    allocator: self.host_bridge(*allocator)?,
-                    args: self.arguments(args)?,
-                }
-            }
             resin_hir::TermKind::GpuPipelineCreate {
                 factory,
                 shaders,
