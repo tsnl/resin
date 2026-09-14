@@ -379,7 +379,7 @@ impl<'a> AstGen<'a> {
                 "unwrap_suffix" => {
                     let span = Span {
                         start: base.span.start,
-                        end: child.end_byte(),
+                        end: self.span(child).end,
                     };
                     base = Spanned::new(
                         TermKind::Unwrap {
@@ -391,7 +391,7 @@ impl<'a> AstGen<'a> {
                 "try_suffix" => {
                     let span = Span {
                         start: base.span.start,
-                        end: child.end_byte(),
+                        end: self.span(child).end,
                     };
                     base = Spanned::new(
                         TermKind::Try {
@@ -403,7 +403,7 @@ impl<'a> AstGen<'a> {
                 "type_application" => {
                     let span = Span {
                         start: base.span.start,
-                        end: child.end_byte(),
+                        end: self.span(child).end,
                     };
                     base = Spanned::new(
                         TermKind::TypeApply {
@@ -419,7 +419,7 @@ impl<'a> AstGen<'a> {
                     let args = self.gen_arguments(args);
                     let span = Span {
                         start: base.span.start,
-                        end: child.end_byte(),
+                        end: self.span(child).end,
                     };
                     base = Spanned::new(
                         TermKind::MethodCall {
@@ -469,7 +469,7 @@ impl<'a> AstGen<'a> {
                     if let Some(arguments) = child.child_by_field_name("type_args") {
                         let span = Span {
                             start: base.span.start,
-                            end: child.end_byte(),
+                            end: self.span(child).end,
                         };
                         base = Spanned::new(
                             TermKind::TypeApply {
@@ -493,7 +493,7 @@ impl<'a> AstGen<'a> {
                 "pointer_deref" => {
                     let span = Span {
                         start: base.span.start,
-                        end: child.end_byte(),
+                        end: self.span(child).end,
                     };
                     base = Spanned::new(
                         TermKind::Deref {
@@ -824,8 +824,8 @@ impl<'a> AstGen<'a> {
                 Spanned::new(
                     TermKind::Unit,
                     Span {
-                        start: node.end_byte(),
-                        end: node.end_byte(),
+                        start: self.span(node).end,
+                        end: self.span(node).end,
                     },
                 )
             },
