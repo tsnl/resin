@@ -42,9 +42,7 @@ pub(super) fn check(
             record,
         } => record_call(
             module,
-            *context,
-            Some(*allocator),
-            *record,
+            (*context, Some(*allocator), *record),
             &args,
             Some(projection),
             false,
@@ -57,9 +55,7 @@ pub(super) fn check(
             record,
         } => record_call(
             module,
-            *context,
-            *allocator,
-            *record,
+            (*context, *allocator, *record),
             &args,
             projection.as_ref(),
             true,
@@ -150,15 +146,14 @@ fn create(
 
 fn record_call(
     module: &Module,
-    context: FunctionId,
-    allocator: Option<FunctionId>,
-    record: FunctionId,
+    bridges: (FunctionId, Option<FunctionId>, FunctionId),
     args: &[Ty],
     projection: Option<&resin_types::GpuProjectionPlan>,
     draw: bool,
     location: Location,
 ) -> Result<Ty, VerifyError> {
     let invalid = || location.error(VerifyErrorKind::InvalidGpuOperation);
+    let (context, allocator, record) = bridges;
     let pipeline = &args[1];
     let metadata =
         resin_types::gpu_pipeline_contract(&module.types, pipeline).map_err(|_| invalid())?;

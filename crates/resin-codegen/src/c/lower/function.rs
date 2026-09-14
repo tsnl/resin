@@ -520,7 +520,19 @@ fn instruction(
             writeln!(out, "  r_l{} = {};", local.index(), args[0].expr).unwrap();
             return Ok(None);
         }
-        Instr::MakeVariant { ty, tag } => variant(types, ty, tag, &args[0].expr),
+        Instr::MakeVariant { ty, tag } => {
+            if matches!(tag, Case::Type(member) if member == ty) {
+                args[0].expr.clone()
+            } else {
+                let tag = types.tag(tag);
+                // Initialize the complete union storage before selecting a smaller
+                // payload. Branch transfers may copy the entire Result value.
+                writeln!(out, "  {} {temp}_variant = {{0}};", types.name(ty)).unwrap();
+                writeln!(out, "  {temp}_variant.tag = {tag}u;").unwrap();
+                writeln!(out, "  {temp}_variant.payload.v{tag} = {};", args[0].expr).unwrap();
+                format!("{temp}_variant")
+            }
+        }
         Instr::ExcludeNone => {
             let condition = is_variant(types, &args[0].ty, &Case::Type(Ty::None), &args[0].expr);
             writeln!(

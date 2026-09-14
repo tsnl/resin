@@ -182,7 +182,9 @@ impl FunctionLowering<'_> {
     ) -> Result<(), LowerError> {
         self.gen_arguments(args)?;
         match op {
-            Intrinsic::GpuPointerProjection | Intrinsic::GpuSequenceProjection => {
+            Intrinsic::GpuPointerProjection
+            | Intrinsic::GpuSequenceProjection
+            | Intrinsic::GpuPipelineType => {
                 return Err(LowerError::invalid_hir(
                     self.source_span,
                     "GPU projection contract reached storage lowering",

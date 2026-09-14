@@ -232,6 +232,6 @@ fn pipeline(
         .get_mut(definition)
         .unwrap()
         .gpu_pipeline = Some(contract);
-    super::primitives::body(function, Intrinsic::GpuPointerProjection);
+    super::primitives::body(function, Intrinsic::GpuPipelineType);
     Ok(true)
 }

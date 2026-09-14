@@ -1062,9 +1062,15 @@ impl Analysis {
         if arguments.len() != count {
             return;
         }
-        let arguments = arguments[usize::from(associated)..].iter().map(|ty| lower::infer::Solver::default().complete(&ty.clone().into()).expect("concrete bridge argument")).collect::<Vec<_>>();
-        let Ok(method) = typer.source_pipeline_method(&method, &arguments)
-        else {
+        let arguments = arguments[usize::from(associated)..]
+            .iter()
+            .map(|ty| {
+                lower::infer::Solver::default()
+                    .complete(&ty.clone().into())
+                    .expect("concrete bridge argument")
+            })
+            .collect::<Vec<_>>();
+        let Ok(method) = typer.source_pipeline_method(&method, &arguments) else {
             return;
         };
         let signature = Type::Function {
@@ -1330,6 +1336,18 @@ impl Analysis {
         typer: &lower::context::Context,
         solver: &lower::infer::Solver,
     ) {
+        if let lower::infer::ResolvedMethod::GpuPipeline { method } = method {
+            let signature = Type::Function {
+                params: method.params[usize::from(!associated)..].to_vec(),
+                result: Box::new(method.result.clone()),
+            };
+            let label = self.type_names_with(typer).format(&signature);
+            let members = self.fields.entry(location.clone()).or_default();
+            if let Some(member) = members.iter_mut().find(|member| member.name == name) {
+                member.ty = label;
+            }
+            return;
+        }
         let (params, result, origin, compiler_signature) = match method {
             lower::infer::ResolvedMethod::Source {
                 declaration,

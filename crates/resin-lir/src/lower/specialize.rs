@@ -706,9 +706,11 @@ impl Specialization<'_, '_> {
     ) -> Result<concrete::TermKind, Error> {
         if matches!(
             op,
-            Intrinsic::GpuPointerProjection | Intrinsic::GpuSequenceProjection
+            Intrinsic::GpuPointerProjection
+                | Intrinsic::GpuSequenceProjection
+                | Intrinsic::GpuPipelineType
         ) {
-            return Err(self.instance_error("GPU projection declarations are contracts for dispatch and draw; they cannot be called directly"));
+            return Err(self.instance_error("GPU projection and pipeline type declarations are contracts for dispatch and draw; they cannot be called directly"));
         }
         let type_args = parameters
             .iter()

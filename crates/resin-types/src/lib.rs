@@ -485,6 +485,7 @@ impl Ty {
 pub enum Intrinsic {
     GpuPointerProjection,
     GpuSequenceProjection,
+    GpuPipelineType,
     GpuElementLayout,
     GpuViewAllocate,
     GpuViewOffset,

@@ -94,3 +94,52 @@ fn source_cannot_call_a_projection_contract_to_escape_a_device_address() {
         "{error}"
     );
 }
+
+#[test]
+fn pipeline_contracts_are_explicit_and_preserve_source_parameter_identity() {
+    let source = r#"
+        struct Compute<R, O> { token: GpuPipelineContract };
+        intrinsic "gpu_compute_pipeline_type" def register<R, O>(token: GpuPipelineContract) -> Compute<R, O>;
+        def materialize(value: Compute<uint, StrongOwner>) = {};
+    "#;
+    let hir = resin_hir::generate(&support::parse(source)).unwrap();
+    let declaration = hir
+        .types
+        .iter()
+        .find(|source| source.gpu_pipeline.is_some())
+        .unwrap();
+    assert_eq!(declaration.name.as_ref(), "Compute");
+    let module = support::module(source);
+    let function = module
+        .functions
+        .iter()
+        .find(|function| function.name.as_deref() == Some("materialize"))
+        .unwrap();
+    let contract =
+        resin_types::gpu_pipeline_contract(&module.types, &function.locals[0].ty).unwrap();
+    assert_eq!(contract.root, Ty::UInt32);
+    assert_eq!(contract.owner, Ty::StrongOwner);
+}
+
+#[test]
+fn pipeline_type_contracts_reject_invalid_storage_and_direct_calls() {
+    for source in [
+        r#"struct Compute<R, O> { token: StrongOwner }; intrinsic "gpu_compute_pipeline_type" def register<R, O>(token: GpuPipelineContract) -> Compute<R, O>;"#,
+        r#"struct Compute<R, O> { token: GpuPipelineContract }; intrinsic "gpu_compute_pipeline_type" def register<R, O>(token: GpuPipelineContract) -> Compute<O, R>;"#,
+        r#"struct Compute<R, O> { token: GpuPipelineContract, extra: uint }; intrinsic "gpu_compute_pipeline_type" def register<R, O>(token: GpuPipelineContract) -> Compute<R, O>;"#,
+    ] {
+        assert!(resin_hir::generate(&support::parse(source)).is_err());
+    }
+    let source = r#"
+        struct Compute<R, O> { token: GpuPipelineContract };
+        intrinsic "gpu_compute_pipeline_type" def register<R, O>(token: GpuPipelineContract) -> Compute<R, O>;
+        def forge(token: GpuPipelineContract) -> Compute<uint, StrongOwner> = { register(token) };
+    "#;
+    let hir = resin_hir::generate(&support::parse(source)).unwrap();
+    assert!(
+        resin_lir::generate(&hir)
+            .unwrap_err()
+            .to_string()
+            .contains("cannot be called directly")
+    );
+}
