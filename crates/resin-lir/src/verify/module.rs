@@ -173,6 +173,7 @@ fn check_instruction_profiles(
             context,
             allocator,
             record,
+            ..
         } => {
             host(*context)?;
             host(*allocator)?;
@@ -182,6 +183,7 @@ fn check_instruction_profiles(
             context,
             allocator,
             record,
+            ..
         } => {
             host(*context)?;
             if let Some(allocator) = allocator {

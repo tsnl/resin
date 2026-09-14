@@ -244,9 +244,7 @@ pub(super) fn allocation_error(
         return Err(invalid());
     };
     expect_type(
-        Ty::GpuPointer {
-            pointee: Box::new(Ty::UInt8),
-        },
+        Ty::GpuView,
         *value.clone(),
         location,
     )?;

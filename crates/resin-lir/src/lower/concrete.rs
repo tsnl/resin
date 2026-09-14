@@ -120,6 +120,7 @@ pub(super) enum TermKind {
     },
     /// Project the checked host arguments and record a dispatch or draw.
     GpuPipelineDispatch {
+        projection: Option<resin_types::GpuProjectionPlan>,
         context: FunctionId,
         allocator: Option<FunctionId>,
         record: FunctionId,

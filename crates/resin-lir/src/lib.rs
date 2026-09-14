@@ -122,12 +122,14 @@ pub enum Instr {
     /// `[gpu] -> [Result<GpuComputePipeline<Root, Owner>, E>]`: create a pipeline
     /// from the declared compute shader, retaining its root type and factory owner.
     GpuComputePipeline {
+        pipeline: Ty,
         factory: FunctionId,
         shader: FunctionId,
     },
     /// `[gpu] -> [Result<GpuGraphicsPipeline<Root, Owner>, E>]`: create a pipeline
     /// from compatible vertex and fragment declarations. Rootless stages use None.
     GpuGraphicsPipeline {
+        pipeline: Ty,
         factory: FunctionId,
         vertex: FunctionId,
         fragment: FunctionId,
@@ -135,6 +137,7 @@ pub enum Instr {
     /// `[commands, pipeline, host root, x, y, z] -> [Result<(), E>]`: project
     /// checked arguments and pass them with the pipeline owner to the recording function.
     GpuDispatch {
+        projection: resin_types::GpuProjectionPlan,
         context: FunctionId,
         allocator: FunctionId,
         record: FunctionId,
@@ -142,6 +145,7 @@ pub enum Instr {
     /// `[commands, pipeline, host root or None, count] -> [Result<(), E>]`.
     /// Rootless graphics performs no allocation or projection.
     GpuDraw {
+        projection: Option<resin_types::GpuProjectionPlan>,
         context: FunctionId,
         allocator: Option<FunctionId>,
         record: FunctionId,

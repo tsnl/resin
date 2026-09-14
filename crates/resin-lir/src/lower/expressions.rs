@@ -77,12 +77,15 @@ impl FunctionLowering<'_> {
                 args,
             } => {
                 self.gen_arguments(args)?;
+                let Ty::Result { value: pipeline, .. } = expected else { unreachable!("pipeline creation result") };
                 self.emit(match shaders.as_slice() {
                     [shader] => Instr::GpuComputePipeline {
+                        pipeline: *pipeline.clone(),
                         factory: *factory,
                         shader: *shader,
                     },
                     [vertex, fragment] => Instr::GpuGraphicsPipeline {
+                        pipeline: *pipeline.clone(),
                         factory: *factory,
                         vertex: *vertex,
                         fragment: *fragment,
@@ -91,6 +94,7 @@ impl FunctionLowering<'_> {
                 });
             }
             TermKind::GpuPipelineDispatch {
+                projection,
                 context,
                 allocator,
                 record,
@@ -99,12 +103,14 @@ impl FunctionLowering<'_> {
                 self.gen_arguments(args)?;
                 self.emit(if args.values.len() == 6 {
                     Instr::GpuDispatch {
+                        projection: projection.clone().expect("compute projection"),
                         context: *context,
                         allocator: allocator.expect("compute root"),
                         record: *record,
                     }
                 } else {
                     Instr::GpuDraw {
+                        projection: projection.clone(),
                         context: *context,
                         allocator: *allocator,
                         record: *record,

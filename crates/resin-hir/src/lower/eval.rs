@@ -63,8 +63,6 @@ impl Decoder<'_> {
                     .collect::<Result<Vec<_>, _>>()?;
                 let builtin = match head.val.as_ref() {
                     "Ptr" => Some(Head::Pointer),
-                    "GpuPtr" => Some(Head::GpuPointer),
-                    "GpuSpan" => Some(Head::GpuSpan),
                     _ => None,
                 };
                 if let Some(builtin) = builtin {

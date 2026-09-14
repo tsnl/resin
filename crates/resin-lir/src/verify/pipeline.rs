@@ -17,15 +17,17 @@ pub(super) fn check(
 ) -> Result<(), VerifyError> {
     let args = pop(stack, super::stack_effect(instr).pops, location)?;
     let result = match instr {
-        Instr::GpuComputePipeline { factory, shader } => {
-            create(module, *factory, &[*shader], &args[0], location)?
+        Instr::GpuComputePipeline { pipeline, factory, shader } => {
+            create(module, pipeline, *factory, &[*shader], &args[0], location)?
         }
         Instr::GpuGraphicsPipeline {
+            pipeline,
             factory,
             vertex,
             fragment,
-        } => create(module, *factory, &[*vertex, *fragment], &args[0], location)?,
+        } => create(module, pipeline, *factory, &[*vertex, *fragment], &args[0], location)?,
         Instr::GpuDispatch {
+            projection,
             context,
             allocator,
             record,
@@ -35,14 +37,16 @@ pub(super) fn check(
             Some(*allocator),
             *record,
             &args,
+            Some(projection),
             false,
             location,
         )?,
         Instr::GpuDraw {
+            projection,
             context,
             allocator,
             record,
-        } => record_call(module, *context, *allocator, *record, &args, true, location)?,
+        } => record_call(module, *context, *allocator, *record, &args, projection.as_ref(), true, location)?,
         _ => unreachable!("pipeline instruction dispatch"),
     };
     stack.push(result);
@@ -59,6 +63,7 @@ fn function(module: &Module, id: FunctionId, location: Location) -> Result<&Func
 
 fn create(
     module: &Module,
+    pipeline: &Ty,
     factory: FunctionId,
     shaders: &[FunctionId],
     gpu: &Ty,
@@ -109,25 +114,11 @@ fn create(
     else {
         return Err(invalid());
     };
-    if !matches!(&**owner, Ty::StrongOwner) {
-        return Err(invalid());
-    }
-    let value = if shaders.len() == 1 {
-        Ty::GpuComputePipeline {
-            root: Box::new(root),
-            owner: owner.clone(),
-        }
-    } else {
-        Ty::GpuGraphicsPipeline {
-            root: Box::new(root),
-            owner: owner.clone(),
-        }
-    };
-    if value.gpu_pipeline_argument(&module.types).is_none() {
-        return Err(invalid());
-    }
+    let metadata = resin_types::gpu_pipeline_contract(&module.types, pipeline).map_err(|_| invalid())?;
+    let kind = if shaders.len() == 1 { resin_types::GpuPipelineKind::Compute } else { resin_types::GpuPipelineKind::Graphics };
+    if metadata.root != root || metadata.owner != **owner || metadata.kind != kind { return Err(invalid()); }
     Ok(Ty::Result {
-        value: Box::new(value),
+        value: Box::new(pipeline.clone()),
         error: error.clone(),
     })
 }
@@ -138,25 +129,22 @@ fn record_call(
     allocator: Option<FunctionId>,
     record: FunctionId,
     args: &[Ty],
+    projection: Option<&resin_types::GpuProjectionPlan>,
     draw: bool,
     location: Location,
 ) -> Result<Ty, VerifyError> {
     let invalid = || location.error(VerifyErrorKind::InvalidGpuOperation);
     let pipeline = &args[1];
-    if !matches!(
-        (draw, pipeline),
-        (false, Ty::GpuComputePipeline { .. }) | (true, Ty::GpuGraphicsPipeline { .. })
-    ) {
-        return Err(invalid());
+    let metadata = resin_types::gpu_pipeline_contract(&module.types, pipeline).map_err(|_| invalid())?;
+    let kind = if draw { resin_types::GpuPipelineKind::Graphics } else { resin_types::GpuPipelineKind::Compute };
+    if metadata.kind != kind { return Err(invalid()); }
+    let (root, owner) = (&metadata.root, &metadata.owner);
+    if *root == Ty::None {
+        if projection.is_some() || args[2] != Ty::None { return Err(invalid()); }
+    } else {
+        let plan = resin_types::gpu_projection_plan(&module.types, &args[2], root).map_err(|_| invalid())?;
+        if projection != Some(&plan) { return Err(invalid()); }
     }
-    let (root, owner) = pipeline.gpu_pipeline().ok_or_else(invalid)?;
-    expect_type(
-        pipeline
-            .gpu_pipeline_argument(&module.types)
-            .ok_or_else(invalid)?,
-        args[2].clone(),
-        location,
-    )?;
     let context = function(module, context, location)?;
     expect_types(
         std::slice::from_ref(owner),
