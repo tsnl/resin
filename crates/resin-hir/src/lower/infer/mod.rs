@@ -122,6 +122,7 @@ impl Type {
             crate::Type::Float32 => Ty::Float32.into(),
             crate::Type::Float64 => Ty::Float64.into(),
             crate::Type::Str => Ty::Str.into(),
+            crate::Type::GpuView => Ty::GpuView.into(),
             crate::Type::GpuArguments => Ty::GpuArguments.into(),
             crate::Type::StrongOwner => Ty::StrongOwner.into(),
             crate::Type::WeakOwner => Ty::WeakOwner.into(),

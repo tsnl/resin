@@ -103,6 +103,8 @@ pub enum Type {
     GpuSpan {
         element: Box<Type>,
     },
+    /// An opaque shared allocation view with checked byte offsets and host permissions.
+    GpuView,
     GpuArguments,
     /// Opaque shared allocation handle; copies retain and destruction releases.
     StrongOwner,
@@ -323,6 +325,7 @@ pub enum TermKind {
     },
     Intrinsic {
         op: Intrinsic,
+        type_args: Vec<Type>,
         args: Arguments,
     },
     Adapt {
@@ -760,6 +763,7 @@ fn builtin_hover(document: &resin_cst::Document, token: resin_cst::Node<'_>) -> 
                 | "Span"
                 | "GpuPtr"
                 | "GpuSpan"
+                | "GpuView"
                 | "GpuArguments"
                 | "GpuComputePipeline"
                 | "GpuGraphicsPipeline"

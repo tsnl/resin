@@ -22,7 +22,16 @@ pub(super) fn check_instr(
             super::pipeline::check(module, instr, stack, location)?;
         }
 
-        Instr::GpuNew { .. }
+        Instr::GpuElementLayout { .. }
+        | Instr::GpuViewAllocate
+        | Instr::GpuViewOffset
+        | Instr::GpuViewRestrict
+        | Instr::GpuViewLoad { .. }
+        | Instr::GpuViewStore
+        | Instr::GpuViewReplace
+        | Instr::GpuViewCopyTo
+        | Instr::GpuViewCopyImage
+        | Instr::GpuNew { .. }
         | Instr::GpuAllocate { .. }
         | Instr::GpuAllocateNative
         | Instr::GpuSlice

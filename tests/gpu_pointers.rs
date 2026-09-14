@@ -455,3 +455,108 @@ fn rooted_graphics_stages_receive_automatically_projected_arguments() {
     };
     success(&output);
 }
+
+const VIEW_PRIMITIVES: &str = r#"
+    intrinsic "gpu_element_layout" def element_layout<T>() -> { size: ulong, alignment: ulong };
+    intrinsic "gpu_view_allocate" def allocate<N, O>(gpu: Ptr<N>, owner: ArcPtr<O>, bytes: ulong, alignment: ulong, memory: int) -> { value: GpuView | None, status: int };
+    intrinsic "gpu_view_offset" def offset(view: GpuView, bytes: ulong, size: ulong, alignment: ulong) -> GpuView;
+    intrinsic "gpu_view_restrict" def restrict(view: GpuView, access: uint) -> GpuView;
+    intrinsic "gpu_view_load" def load<T>(view: GpuView) -> T;
+    intrinsic "gpu_view_store" def store<T>(view: GpuView, value: T) -> ();
+    intrinsic "gpu_view_replace" def replace<T>(view: GpuView, value: T) -> T;
+    intrinsic "gpu_view_copy_to" def copy_to<T>(view: GpuView, count: ulong, destination: Ptr<T>, length: ulong) -> ();
+    struct DeviceScalar<T> {
+        view: GpuView,
+        def read(self: DeviceScalar<T>) -> T = { load::<T>(self.view) };
+        def write(self: DeviceScalar<T>, value: T) = { store(self.view, value); };
+    };
+    def allocate_ints(count: ulong) -> Result<GpuView, RuntimeError> = {
+        var gpu = Gpu.new()?;
+        var layout = element_layout::<int>();
+        var allocated = allocate(gpu.handle, gpu, count * layout.size, layout.alignment, 0);
+        RuntimeStatus.from_code(allocated.status)?;
+        ok(allocated.value!)
+    };
+"#;
+
+#[test]
+fn gpu_view_primitives_keep_owners_offsets_and_typed_source_methods() {
+    let source = format!(
+        r#"
+        export {{ main }};
+        import {{ "$/gpu.resin", "$/status.resin" }};
+        {VIEW_PRIMITIVES}
+        def main() -> Result<int, _> = {{
+            var original = allocate_ints(3)?;
+            var first = DeviceScalar<int> {{ view = original }};
+            var second = DeviceScalar<int> {{ view = offset(original, 4, 4, 4) }};
+            first.write(7);
+            second.write(11);
+            var previous = replace(offset(original, 4, 4, 4), 42_i);
+            store(offset(original, 8, 4, 4), 19_i);
+            var copied = [0_i, 0_i, 0_i];
+            copy_to(restrict(original, 1), 3, copied.at(0), 3);
+            ok(if (first.read() == 7 && second.read() == 42 && previous == 11 && copied.at(2).* == 19) {{ 0 }} else {{ 1 }})
+        }};
+    "#
+    );
+    let Some(output) = run(&source) else {
+        return;
+    };
+    success(&output);
+}
+
+#[test]
+fn gpu_view_primitives_preserve_access_bounds_and_alignment_checks() {
+    for (operation, diagnostic) in [
+        ("store(restrict(view, 1), 8_i);", "permission"),
+        ("var value = load::<int>(restrict(view, 2));", "permission"),
+        ("var value = replace(restrict(view, 1), 8_i);", "permission"),
+        ("var value = offset(view, 1, 4, 4);", "misaligned"),
+        ("var value = offset(view, 8, 4, 4);", "out of bounds"),
+        ("copy_to(view, 2, result.at(0), 1);", "too short"),
+    ] {
+        let source = format!(
+            r#"
+            export {{ main }};
+            import {{ "$/gpu.resin", "$/status.resin" }};
+            {VIEW_PRIMITIVES}
+            def main() -> Result<int, _> = {{
+                var view = allocate_ints(2)?;
+                var result = [0_i, 0_i];
+                {operation}
+                ok(0)
+            }};
+        "#
+        );
+        let Some(output) = run(&source) else {
+            return;
+        };
+        assert!(!output.status.success(), "{operation}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(diagnostic),
+            "{operation}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn gpu_element_layout_rejects_managed_storage_before_access() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("main.resin");
+    fs::write(
+        &path,
+        r#"
+        export { main };
+        intrinsic "gpu_element_layout" def layout<T>() -> { size: ulong, alignment: ulong };
+        def main() = { var invalid = layout::<ArcPtr<int>>(); };
+    "#,
+    )
+    .unwrap();
+    let error = pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap_err();
+    assert!(
+        error.to_string().contains("plain shared storage"),
+        "{error}"
+    );
+}

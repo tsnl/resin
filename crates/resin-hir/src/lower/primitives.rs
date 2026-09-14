@@ -50,6 +50,7 @@ pub(super) fn define(function: &mut Function, operation: &str) -> Result<(), Gen
         ty: result,
         kind: TermKind::Intrinsic {
             op,
+            type_args: parameters,
             args: Arguments { values, params },
         },
     });

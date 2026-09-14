@@ -59,7 +59,9 @@ impl Types<'_> {
                 | Ty::GpuArguments
                 | Ty::GpuComputePipeline { .. }
                 | Ty::GpuGraphicsPipeline { .. } => out.push_str("  resin_arc_release(*p);\n"),
-                Ty::GpuPointer { .. } => out.push_str("  resin_arc_release(p->owner);\n"),
+                Ty::GpuPointer { .. } | Ty::GpuView => {
+                    out.push_str("  resin_arc_release(p->owner);\n")
+                }
                 Ty::GpuSpan { .. } => out.push_str("  resin_arc_release(p->data.owner);\n"),
                 Ty::WeakOwner => out.push_str("  resin_weak_release(*p);\n"),
                 Ty::Defined { definition } => {
@@ -107,7 +109,7 @@ impl Types<'_> {
             | Ty::GpuGraphicsPipeline { .. } => {
                 writeln!(out, "  resin_arc_retain({value});").unwrap();
             }
-            Ty::GpuPointer { .. } => {
+            Ty::GpuPointer { .. } | Ty::GpuView => {
                 writeln!(out, "  resin_arc_retain(({value}).owner);").unwrap();
             }
             Ty::GpuSpan { .. } => {

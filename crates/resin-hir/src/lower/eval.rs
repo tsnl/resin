@@ -136,6 +136,7 @@ fn builtin_ty(name: &str) -> Option<Ty> {
     Some(match name {
         "Never" => Ty::union([]),
         "None" => Ty::None,
+        "GpuView" => Ty::GpuView,
         "GpuArguments" => Ty::GpuArguments,
         "StrongOwner" => Ty::StrongOwner,
         "WeakOwner" => Ty::WeakOwner,

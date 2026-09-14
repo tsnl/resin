@@ -527,7 +527,11 @@ impl Completion<'_> {
             params: declaration.params.iter().map(types::ty).collect(),
         };
         Ok(match declaration.body {
-            FunctionBody::Intrinsic(op) => TermKind::Intrinsic { op, args },
+            FunctionBody::Intrinsic(op) => TermKind::Intrinsic {
+                op,
+                type_args: vec![],
+                args,
+            },
             FunctionBody::GpuNew { allocator } => TermKind::GpuNew { allocator, args },
             FunctionBody::GpuAllocate { allocator } => TermKind::GpuAllocate { allocator, args },
             FunctionBody::GpuPipelineDispatch {
@@ -675,6 +679,7 @@ impl Completion<'_> {
                 ],
             };
             return Ok(TermKind::Intrinsic {
+                type_args: vec![],
                 op: if matches!(
                     function_type,
                     crate::Type::GpuPointer { .. } | crate::Type::GpuSpan { .. }

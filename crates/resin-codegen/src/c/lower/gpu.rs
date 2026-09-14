@@ -14,6 +14,66 @@ pub(super) fn instruction(
     out: &mut String,
 ) -> Result<String, Error> {
     match instr {
+        Instr::GpuElementLayout { element } => Ok(format!(
+            "({}){{ .f0 = sizeof({}), .f1 = _Alignof({}) }}",
+            types.name(result),
+            types.name(element),
+            types.name(element)
+        )),
+        Instr::GpuViewAllocate => native(types, name, args, result, out),
+        Instr::GpuViewOffset => Ok(format!(
+            "resin_gpu_ptr_offset({}, {}, {}, {})",
+            args[0].expr, args[1].expr, args[2].expr, args[3].expr
+        )),
+        Instr::GpuViewRestrict => {
+            writeln!(out, "  ResinGpuPtr {name}_view = {};", args[0].expr).unwrap();
+            writeln!(out, "  {name}_view.access &= {};", args[1].expr).unwrap();
+            Ok(format!("{name}_view"))
+        }
+        Instr::GpuViewLoad { element } => Ok(format!(
+            "*({} *)resin_gpu_ptr_host({}, sizeof({}), _Alignof({}), 1u)",
+            types.name(element),
+            args[0].expr,
+            types.name(element),
+            types.name(element)
+        )),
+        Instr::GpuViewStore | Instr::GpuViewReplace => {
+            let element = types.name(&args[1].ty);
+            let access = if matches!(instr, Instr::GpuViewReplace) {
+                3
+            } else {
+                2
+            };
+            writeln!(out, "  {element} *{name}_address = resin_gpu_ptr_host({}, sizeof({element}), _Alignof({element}), {access}u);", args[0].expr).unwrap();
+            if access == 3 {
+                writeln!(out, "  {element} {name}_previous = *{name}_address;").unwrap();
+            }
+            writeln!(out, "  *{name}_address = {};", args[1].expr).unwrap();
+            Ok(if access == 3 {
+                format!("{name}_previous")
+            } else {
+                "0".into()
+            })
+        }
+        Instr::GpuViewCopyTo => {
+            let Ty::Pointer { pointee } = &args[2].ty else {
+                unreachable!("verified GPU copy")
+            };
+            let bytes = checked_bytes(types, pointee, &args[1].expr, name, out);
+            writeln!(
+                out,
+                "  if ({} < {}) resin_fail(\"GPU copy destination is too short\");",
+                args[3].expr, args[1].expr
+            )
+            .unwrap();
+            writeln!(out, "  if ({bytes}) memmove({}, resin_gpu_ptr_host({}, {bytes}, _Alignof({}), 1u), {bytes});", args[2].expr, args[0].expr, types.name(pointee)).unwrap();
+            Ok("0".into())
+        }
+        Instr::GpuViewCopyImage => Ok(format!(
+            "resin_gpu_copy_image_to_span((ResinCommandBuffer *){}, (ResinImage *){}, (ResinGpuSpan){{ .data = {}, .length = {} }})",
+            args[2].expr, args[3].expr, args[0].expr, args[1].expr
+        )),
+
         Instr::GpuNew { allocator, element } | Instr::GpuAllocate { allocator, element } => {
             allocate(types, name, *allocator, element, args, result, out)
         }
@@ -83,9 +143,10 @@ fn native(
     let Ty::Record { fields } = result else {
         unreachable!()
     };
-    let gpu = Ty::GpuPointer {
-        pointee: Box::new(Ty::UInt8),
-    };
+    let gpu = fields[0]
+        .ty
+        .without_none()
+        .expect("verified GPU allocation result");
     let success = types.tag(&Case::Type(gpu));
     let none = types.tag(&Case::Type(Ty::None));
     writeln!(out, "  ResinGpuPtr {name}_pointer = {{0}};").unwrap();

@@ -234,9 +234,17 @@ impl Printer {
                     list("args", args.iter().map(|arg| self.term(arg)).collect()),
                 ],
             ),
-            TermKind::Intrinsic { op, args } => list(
+            TermKind::Intrinsic {
+                op,
+                args,
+                type_args,
+            } => list(
                 "intrinsic",
-                vec![atom(format!("{op:?}")), self.arguments(args)],
+                vec![
+                    atom(format!("{op:?}")),
+                    list("types", type_args.iter().map(|ty| self.ty(ty)).collect()),
+                    self.arguments(args),
+                ],
             ),
             TermKind::Adapt { conversion, arg } => list(
                 "adapt",
@@ -443,6 +451,7 @@ impl TypeNames {
             Type::Pointer { pointee } => format!("Ptr<{}>", self.format(pointee)),
             Type::GpuPointer { pointee } => format!("GpuPtr<{}>", self.format(pointee)),
             Type::GpuSpan { element } => format!("GpuSpan<{}>", self.format(element)),
+            Type::GpuView => "GpuView".into(),
             Type::GpuArguments => "GpuArguments".into(),
             Type::GpuComputePipeline { root, owner } => format!(
                 "GpuComputePipeline<{}, {}>",

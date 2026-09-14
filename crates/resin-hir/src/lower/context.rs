@@ -196,7 +196,6 @@ pub(crate) enum FunctionBody {
     },
 }
 
-
 pub(crate) type MethodDefinitions = fn(&Ty, &Context) -> Vec<(Arc<str>, FunctionDecl)>;
 
 impl FunctionDecl {
@@ -615,12 +614,21 @@ pub(super) fn primitive_signature(
     operation: &str,
     parameters: &[crate::Type],
 ) -> Option<(crate::Intrinsic, Vec<crate::Type>, crate::Type)> {
-    use crate::{Intrinsic, Type};
+    use crate::{Intrinsic, RecordField, Type};
     let pointer = |pointee: Type| Type::Pointer {
         pointee: Box::new(pointee),
     };
     let optional = |ty| Type::Union {
         variants: vec![Type::None, ty],
+    };
+    let record = |fields: &[(&str, Type)]| Type::Record {
+        fields: fields
+            .iter()
+            .map(|(name, ty)| RecordField {
+                name: (*name).into(),
+                ty: ty.clone(),
+            })
+            .collect(),
     };
     Some(match (operation, parameters) {
         ("pointer_index", [element]) => (
@@ -669,6 +677,73 @@ pub(super) fn primitive_signature(
             optional(Type::StrongOwner),
         ),
         ("weak_empty", []) => (Intrinsic::WeakEmpty, vec![], Type::WeakOwner),
+        ("gpu_element_layout", [_]) => (
+            Intrinsic::GpuElementLayout,
+            vec![],
+            record(&[("size", Type::UInt64), ("alignment", Type::UInt64)]),
+        ),
+        ("gpu_view_allocate", [native]) => (
+            Intrinsic::GpuViewAllocate,
+            vec![
+                pointer(native.clone()),
+                Type::StrongOwner,
+                Type::UInt64,
+                Type::UInt64,
+                Type::Int32,
+            ],
+            record(&[
+                (
+                    "value",
+                    Type::Union {
+                        variants: vec![Type::None, Type::GpuView],
+                    },
+                ),
+                ("status", Type::Int32),
+            ]),
+        ),
+        ("gpu_view_offset", []) => (
+            Intrinsic::GpuViewOffset,
+            vec![Type::GpuView, Type::UInt64, Type::UInt64, Type::UInt64],
+            Type::GpuView,
+        ),
+        ("gpu_view_restrict", []) => (
+            Intrinsic::GpuViewRestrict,
+            vec![Type::GpuView, Type::UInt32],
+            Type::GpuView,
+        ),
+        ("gpu_view_load", [element]) => {
+            (Intrinsic::GpuViewLoad, vec![Type::GpuView], element.clone())
+        }
+        ("gpu_view_store", [element]) => (
+            Intrinsic::GpuViewStore,
+            vec![Type::GpuView, element.clone()],
+            Type::Unit,
+        ),
+        ("gpu_view_replace", [element]) => (
+            Intrinsic::GpuViewReplace,
+            vec![Type::GpuView, element.clone()],
+            element.clone(),
+        ),
+        ("gpu_view_copy_to", [element]) => (
+            Intrinsic::GpuViewCopyTo,
+            vec![
+                Type::GpuView,
+                Type::UInt64,
+                pointer(element.clone()),
+                Type::UInt64,
+            ],
+            Type::Unit,
+        ),
+        ("gpu_view_copy_image", []) => (
+            Intrinsic::GpuViewCopyImage,
+            vec![
+                Type::GpuView,
+                Type::UInt64,
+                pointer(Type::UInt8),
+                pointer(Type::UInt8),
+            ],
+            Type::Int32,
+        ),
         _ => return None,
     })
 }

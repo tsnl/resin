@@ -218,7 +218,7 @@ fn scalar(ty: &Ty) -> Option<&'static str> {
         | Ty::GpuArguments
         | Ty::GpuComputePipeline { .. }
         | Ty::GpuGraphicsPipeline { .. } => "ResinArc *",
-        Ty::GpuPointer { .. } => "ResinGpuPtr",
+        Ty::GpuPointer { .. } | Ty::GpuView => "ResinGpuPtr",
         Ty::GpuSpan { .. } => "ResinGpuSpan",
         Ty::Unit | Ty::None => "uint8_t",
         Ty::Type => "size_t",

@@ -36,7 +36,11 @@ impl FunctionLowering<'_> {
                 return self.gen_builtin(name, args, expected);
             }
             TermKind::Call { func, args } => return self.gen_call(func, args),
-            TermKind::Intrinsic { op, args } => self.gen_intrinsic(*op, args, expected)?,
+            TermKind::Intrinsic {
+                op,
+                type_args,
+                args,
+            } => self.gen_intrinsic(*op, type_args, args, expected)?,
             TermKind::Adapt { conversion, arg } => self.gen_receiver(arg, *conversion, expected)?,
             TermKind::Convert { conversion, arg } => {
                 return self.gen_conversion(term, arg, conversion);
@@ -161,11 +165,26 @@ impl FunctionLowering<'_> {
     fn gen_intrinsic(
         &mut self,
         op: Intrinsic,
+        type_args: &[Ty],
         args: &Arguments,
         result: &Ty,
     ) -> Result<(), LowerError> {
         self.gen_arguments(args)?;
         match op {
+            Intrinsic::GpuElementLayout => self.emit(Instr::GpuElementLayout {
+                element: type_args[0].clone(),
+            }),
+            Intrinsic::GpuViewLoad => self.emit(Instr::GpuViewLoad {
+                element: result.clone(),
+            }),
+            Intrinsic::GpuViewAllocate => self.emit(Instr::GpuViewAllocate),
+            Intrinsic::GpuViewOffset => self.emit(Instr::GpuViewOffset),
+            Intrinsic::GpuViewRestrict => self.emit(Instr::GpuViewRestrict),
+            Intrinsic::GpuViewStore => self.emit(Instr::GpuViewStore),
+            Intrinsic::GpuViewReplace => self.emit(Instr::GpuViewReplace),
+            Intrinsic::GpuViewCopyTo => self.emit(Instr::GpuViewCopyTo),
+            Intrinsic::GpuViewCopyImage => self.emit(Instr::GpuViewCopyImage),
+
             Intrinsic::StringFromBytes => self.emit(Instr::CallBuiltin {
                 name: "string_from_bytes".into(),
                 params: args.params.clone(),

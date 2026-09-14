@@ -90,6 +90,7 @@ pub(super) enum TermKind {
     },
     Intrinsic {
         op: Intrinsic,
+        type_args: Vec<Ty>,
         args: Arguments,
     },
     Adapt {

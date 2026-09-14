@@ -80,6 +80,26 @@ impl Function {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instr {
+    /// `[] -> [{size: ulong, alignment: ulong}]`: validate plain GPU element storage.
+    GpuElementLayout { element: Ty },
+    /// `[native_gpu, strong_owner, bytes, alignment, memory] -> [{value: GpuView | None, status: int}]`.
+    /// Allocation retains the device owner. All operands are consumed.
+    GpuViewAllocate,
+    /// `[view, byte_offset, bytes, alignment] -> [view]`: validate range/alignment and transfer its owner.
+    GpuViewOffset,
+    /// `[view, access_mask] -> [view]`: remove permissions and transfer its owner.
+    GpuViewRestrict,
+    /// `[view] -> [element]`: copy plain storage after checking read access.
+    GpuViewLoad { element: Ty },
+    /// `[view, element] -> [unit]`: copy plain storage after checking write access.
+    GpuViewStore,
+    /// `[view, element] -> [element]`: exchange plain storage after checking read/write access.
+    GpuViewReplace,
+    /// `[view, count, destination: Ptr<T>, destination_length] -> [unit]`: check and copy readable elements.
+    GpuViewCopyTo,
+    /// `[view, length, commands, image] -> [int]`: record an image copy retaining its allocation.
+    GpuViewCopyImage,
+
     /// `[gpu, value] -> [Result<GpuPtr<T>, E>]`: allocate and initialize plain GPU storage.
     GpuNew { allocator: FunctionId, element: Ty },
     /// `[gpu, count] -> [Result<GpuSpan<T>, E>]`: allocate checked count * sizeof(T) bytes.

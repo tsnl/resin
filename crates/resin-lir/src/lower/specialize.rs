@@ -698,6 +698,47 @@ impl Specialization<'_, '_> {
         })
     }
 
+    fn intrinsic(
+        &mut self,
+        op: Intrinsic,
+        parameters: &[resin_hir::Type],
+        args: &resin_hir::Arguments,
+    ) -> Result<concrete::TermKind, Error> {
+        let type_args = parameters
+            .iter()
+            .map(|ty| self.ty(ty))
+            .collect::<Result<Vec<_>, _>>()?;
+        if matches!(
+            op,
+            Intrinsic::GpuElementLayout
+                | Intrinsic::GpuViewLoad
+                | Intrinsic::GpuViewStore
+                | Intrinsic::GpuViewReplace
+                | Intrinsic::GpuViewCopyTo
+        ) {
+            let [element] = type_args.as_slice() else {
+                return Err(self.instance_error("GPU access requires exactly one element type"));
+            };
+            if !element.gpu_element(self.instances.typer().definitions()) {
+                return Err(self.instance_error(format!(
+                    "GPU element {} must have plain shared storage",
+                    resin_types::format_type(element, self.instances.typer().definitions())
+                )));
+            }
+        }
+        let args = self.arguments(args)?;
+        if op == Intrinsic::PointerBytes
+            && !matches!(args.params.first(), Some(Ty::Pointer { pointee }) if pointee.is_numeric())
+        {
+            return Err(self.instance_error("byte views require numeric elements"));
+        }
+        Ok(concrete::TermKind::Intrinsic {
+            op,
+            type_args,
+            args,
+        })
+    }
+
     fn kind(
         &mut self,
         source: &resin_hir::TermKind,
@@ -764,15 +805,11 @@ impl Specialization<'_, '_> {
             resin_hir::TermKind::Array { elems } => self.array(elems, expected)?,
             resin_hir::TermKind::Builtin { name, args } => self.builtin(name, args, expected)?,
             resin_hir::TermKind::Call { func, args } => self.call(func, args, expected)?,
-            resin_hir::TermKind::Intrinsic { op, args } => {
-                let args = self.arguments(args)?;
-                if *op == Intrinsic::PointerBytes
-                    && !matches!(args.params.first(), Some(Ty::Pointer { pointee }) if pointee.is_numeric())
-                {
-                    return Err(self.instance_error("byte views require numeric elements"));
-                }
-                concrete::TermKind::Intrinsic { op: *op, args }
-            }
+            resin_hir::TermKind::Intrinsic {
+                op,
+                type_args,
+                args,
+            } => self.intrinsic(*op, type_args, args)?,
             resin_hir::TermKind::Adapt { conversion, arg } => concrete::TermKind::Adapt {
                 conversion: self.receiver(*conversion),
                 arg: if *conversion == resin_hir::ReceiverConversion::Address {

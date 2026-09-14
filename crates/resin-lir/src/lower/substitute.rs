@@ -261,6 +261,7 @@ impl Substitution {
             resin_hir::Type::Float32 => resin_hir::Type::Float32,
             resin_hir::Type::Float64 => resin_hir::Type::Float64,
             resin_hir::Type::Str => resin_hir::Type::Str,
+            resin_hir::Type::GpuView => resin_hir::Type::GpuView,
             resin_hir::Type::GpuArguments => resin_hir::Type::GpuArguments,
             resin_hir::Type::Foreign { name } => resin_hir::Type::Foreign { name: name.clone() },
             resin_hir::Type::Pointer { pointee } => resin_hir::Type::Pointer {
@@ -365,6 +366,7 @@ fn materialize(
         resin_hir::Type::Float32 => Ty::Float32,
         resin_hir::Type::Float64 => Ty::Float64,
         resin_hir::Type::Str => Ty::Str,
+        resin_hir::Type::GpuView => Ty::GpuView,
         resin_hir::Type::GpuArguments => Ty::GpuArguments,
         resin_hir::Type::Foreign { name } => Ty::Foreign { name: name.clone() },
         resin_hir::Type::Pointer { pointee } => Ty::Pointer {
@@ -452,6 +454,7 @@ fn expression(source: &Ty, instances: &super::instances::Instances<'_>) -> resin
         Ty::Float32 => resin_hir::Type::Float32,
         Ty::Float64 => resin_hir::Type::Float64,
         Ty::Str => resin_hir::Type::Str,
+        Ty::GpuView => resin_hir::Type::GpuView,
         Ty::GpuArguments => resin_hir::Type::GpuArguments,
         Ty::Foreign { name } => resin_hir::Type::Foreign { name: name.clone() },
         Ty::Pointer { pointee } => resin_hir::Type::Pointer {
@@ -603,6 +606,7 @@ fn check_size(
         | resin_hir::Type::Str
         | resin_hir::Type::StrongOwner
         | resin_hir::Type::WeakOwner
+        | resin_hir::Type::GpuView
         | resin_hir::Type::GpuArguments
         | resin_hir::Type::Foreign { .. } => {}
     }

@@ -198,6 +198,7 @@ pub(super) fn needs_drop(ty: &Ty, definitions: &[TypeDef]) -> bool {
         | Ty::WeakOwner
         | Ty::GpuPointer { .. }
         | Ty::GpuSpan { .. }
+        | Ty::GpuView
         | Ty::GpuArguments
         | Ty::GpuComputePipeline { .. }
         | Ty::GpuGraphicsPipeline { .. } => true,
@@ -496,6 +497,7 @@ pub(super) fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
         Ty::Pointer { pointee } => format!("Ptr<{}>", format_type(pointee, definitions)),
         Ty::GpuPointer { pointee } => format!("GpuPtr<{}>", format_type(pointee, definitions)),
         Ty::GpuSpan { element } => format!("GpuSpan<{}>", format_type(element, definitions)),
+        Ty::GpuView => "GpuView".into(),
         Ty::GpuArguments => "GpuArguments".into(),
         Ty::GpuComputePipeline { root, owner } => format!(
             "GpuComputePipeline<{}, {}>",

@@ -51,6 +51,16 @@ pub(crate) struct StackEffect {
 pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
     use crate::Instr;
     match instr {
+        Instr::GpuElementLayout { .. } => StackEffect { pops: 0, pushes: 1 },
+        Instr::GpuViewLoad { .. } => StackEffect { pops: 1, pushes: 1 },
+        Instr::GpuViewRestrict | Instr::GpuViewStore | Instr::GpuViewReplace => {
+            StackEffect { pops: 2, pushes: 1 }
+        }
+        Instr::GpuViewOffset | Instr::GpuViewCopyTo | Instr::GpuViewCopyImage => {
+            StackEffect { pops: 4, pushes: 1 }
+        }
+        Instr::GpuViewAllocate => StackEffect { pops: 5, pushes: 1 },
+
         Instr::WeakEmpty
         | Instr::TakeLocal { .. }
         | Instr::Shader { .. }

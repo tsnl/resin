@@ -40,6 +40,9 @@ pub(super) fn collect(module: &Module, analysis: &[FunctionTypes]) -> TypeTable 
                         error: error.clone(),
                     });
                 }
+                if let Instr::GpuElementLayout { element } = instr {
+                    table.intern(element);
+                }
                 if let Instr::Push { value } = instr {
                     collect_value(&mut table, value);
                 }

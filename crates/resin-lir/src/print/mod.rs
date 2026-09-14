@@ -132,6 +132,17 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
                 sexp_ty(names, element),
             ],
         ),
+        Instr::GpuElementLayout { element } => {
+            list("gpu-element-layout", vec![sexp_ty(names, element)])
+        }
+        Instr::GpuViewLoad { element } => list("gpu-view-load", vec![sexp_ty(names, element)]),
+        Instr::GpuViewAllocate => symbol("gpu-view-allocate"),
+        Instr::GpuViewOffset => symbol("gpu-view-offset"),
+        Instr::GpuViewRestrict => symbol("gpu-view-restrict"),
+        Instr::GpuViewStore => symbol("gpu-view-store"),
+        Instr::GpuViewReplace => symbol("gpu-view-replace"),
+        Instr::GpuViewCopyTo => symbol("gpu-view-copy-to"),
+        Instr::GpuViewCopyImage => symbol("gpu-view-copy-image"),
         Instr::GpuAllocateNative => symbol("gpu-allocate-native"),
         Instr::GpuSlice => symbol("gpu-slice"),
         Instr::GpuReadOnly => symbol("gpu-read-only"),
@@ -420,6 +431,7 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
         Ty::Pointer { pointee } => list("ptr", vec![sexp_ty(names, pointee)]),
         Ty::GpuPointer { pointee } => list("gpu-ptr", vec![sexp_ty(names, pointee)]),
         Ty::GpuSpan { element } => list("gpu-span", vec![sexp_ty(names, element)]),
+        Ty::GpuView => symbol("GpuView"),
         Ty::GpuArguments => symbol("GpuArguments"),
         Ty::GpuComputePipeline { root, owner } => list(
             "gpu-compute-pipeline",

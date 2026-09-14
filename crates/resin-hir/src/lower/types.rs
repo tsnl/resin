@@ -19,6 +19,7 @@ pub(super) fn ty(source: &Ty) -> crate::Type {
         Ty::Float32 => crate::Type::Float32,
         Ty::Float64 => crate::Type::Float64,
         Ty::Str => crate::Type::Str,
+        Ty::GpuView => crate::Type::GpuView,
         Ty::GpuArguments => crate::Type::GpuArguments,
         Ty::Foreign { name } => crate::Type::Foreign { name: name.clone() },
         Ty::Defined { definition } => crate::Type::Defined {

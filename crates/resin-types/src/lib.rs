@@ -128,6 +128,8 @@ pub enum Ty {
     GpuSpan {
         element: Box<Ty>,
     },
+    /// Opaque allocation ownership, checked byte offset, and host access permissions.
+    GpuView,
     /// Opaque projected shader arguments, retained by a host ArcPtr handle.
     GpuArguments,
     /// Opaque shared allocation handle; copies retain and destruction releases.
@@ -358,6 +360,16 @@ impl Ty {
 /// Primitive operations exposed through compiler-provided methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Intrinsic {
+    GpuElementLayout,
+    GpuViewAllocate,
+    GpuViewOffset,
+    GpuViewRestrict,
+    GpuViewLoad,
+    GpuViewStore,
+    GpuViewReplace,
+    GpuViewCopyTo,
+    GpuViewCopyImage,
+
     PointerIndex,
     PointerRange,
     PointerBytes,

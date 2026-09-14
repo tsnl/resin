@@ -146,6 +146,12 @@ fn lower_region(
                     | Instr::OwnerAllocate { .. }
                     | Instr::OwnerDowngrade
                     | Instr::OwnerUpgrade
+                    | Instr::GpuViewAllocate
+                    | Instr::GpuViewLoad { .. }
+                    | Instr::GpuViewStore
+                    | Instr::GpuViewReplace
+                    | Instr::GpuViewCopyTo
+                    | Instr::GpuViewCopyImage
                     | Instr::GpuAllocateNative
                     | Instr::GpuCopyTo
                     | Instr::GpuComputePipeline { .. }
@@ -403,7 +409,16 @@ fn instruction(
     out: &mut String,
 ) -> Result<Option<String>, Error> {
     let expr = match instr {
-        Instr::GpuNew { .. }
+        Instr::GpuElementLayout { .. }
+        | Instr::GpuViewAllocate
+        | Instr::GpuViewOffset
+        | Instr::GpuViewRestrict
+        | Instr::GpuViewLoad { .. }
+        | Instr::GpuViewStore
+        | Instr::GpuViewReplace
+        | Instr::GpuViewCopyTo
+        | Instr::GpuViewCopyImage
+        | Instr::GpuNew { .. }
         | Instr::GpuAllocate { .. }
         | Instr::GpuAllocateNative
         | Instr::GpuSlice
