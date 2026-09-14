@@ -364,6 +364,8 @@ impl Ty {
         Self::byte_span()
     }
 
+    /// Structural byte fields exposed by a primitive string literal.
+    /// Source records already expose their own declared representation.
     pub fn view_record(&self) -> Option<Self> {
         types::view_record(self)
     }
@@ -429,7 +431,7 @@ impl Ty {
     }
 }
 
-/// Primitive operations exposed through compiler-provided methods.
+/// Primitive operations selected by compiler methods or explicit intrinsic declarations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Intrinsic {
     GpuPointerProjection,

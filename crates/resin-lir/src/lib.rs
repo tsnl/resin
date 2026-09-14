@@ -104,14 +104,14 @@ pub enum Instr {
     /// `[view, length, commands, image] -> [int]`: record an image copy retaining its allocation.
     GpuViewCopyImage,
 
-    /// `[gpu] -> [Result<GpuComputePipeline<Root, Owner>, E>]`: create a pipeline
+    /// `[gpu] -> [Result<Pipeline, E>]`: create the registered source pipeline
     /// from the declared compute shader, retaining its root type and factory owner.
     GpuComputePipeline {
         pipeline: Ty,
         factory: FunctionId,
         shader: FunctionId,
     },
-    /// `[gpu] -> [Result<GpuGraphicsPipeline<Root, Owner>, E>]`: create a pipeline
+    /// `[gpu] -> [Result<Pipeline, E>]`: create the registered source pipeline
     /// from compatible vertex and fragment declarations. Rootless stages use None.
     GpuGraphicsPipeline {
         pipeline: Ty,
@@ -176,7 +176,8 @@ pub enum Instr {
     VariantPayload { tag: Case },
     /// `[value] -> [widened value]`: transfer union/Result payloads into the wider type.
     Widen { ty: Ty },
-    /// `[] -> [Span<ubyte>]`: borrow the decorated function's embedded SPIR-V bytes.
+    /// `[] -> [{data: Ptr<ubyte>, length: ulong}]`: borrow the decorated
+    /// function's embedded SPIR-V bytes as structural byte transport.
     Shader {
         function: FunctionId,
         stage: Arc<str>,
@@ -189,11 +190,10 @@ pub enum Instr {
     LocalAddress { local: LocalId },
     /// `[aggregate or address] -> [child or address]`: project by declaration index.
     /// A value operand copies the child and destroys the aggregate; raw addresses borrow.
-    /// GPU addresses transfer their owner into the projected GPU address.
     AccessStatic { index: usize },
-    /// `[base, index] -> [element or address]`: index an array, array address, or span.
-    /// Array addresses and ordinary spans produce borrowed element addresses.
-    /// GPU views transfer their owner into the resulting GPU element address.
+    /// `[base, index] -> [element or address]`: index an array, array address, or `str`.
+    /// Array addresses and string literals produce borrowed element addresses;
+    /// array values copy the element and destroy the consumed array.
     AccessDynamic,
     /// `[Ptr<T>, length, index] -> [Ptr<T>]`: typed element addressing; the host
     /// diagnoses an index outside length, while shaders require a valid index.
@@ -213,7 +213,7 @@ pub enum Instr {
     /// with an owned replacement, transferring both values without copying or destruction.
     Replace,
     /// `[value] -> [ascribed value]`: preserve ownership while changing its type view.
-    /// Types must match, differ by one nominal layer, or bridge a span and its record layout.
+    /// Types must match, differ by one nominal layer, or expose a `str` byte view.
     Ascribe { ty: Ty },
     /// `[number] -> [converted number]`: convert explicitly, trapping on integer overflow.
     NumericCast { ty: Ty },

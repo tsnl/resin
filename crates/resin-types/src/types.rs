@@ -281,24 +281,7 @@ pub(super) fn widens_to(ty: &Ty, to: &Ty) -> bool {
 }
 
 pub(super) fn view_record(ty: &Ty) -> Option<Ty> {
-    let pointer = match ty {
-        Ty::Str => Ty::Pointer {
-            pointee: Box::new(Ty::UInt8),
-        },
-        _ => return None,
-    };
-    Some(Ty::Record {
-        fields: vec![
-            RecordField {
-                name: "data".into(),
-                ty: pointer,
-            },
-            RecordField {
-                name: "length".into(),
-                ty: Ty::UInt64,
-            },
-        ],
-    })
+    matches!(ty, Ty::Str).then(Ty::byte_span)
 }
 
 //
