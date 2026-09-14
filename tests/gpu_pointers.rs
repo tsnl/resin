@@ -226,6 +226,59 @@ fn projected_scalar_and_span_arguments_dispatch_and_allow_readback_after_submit(
 }
 
 #[test]
+fn source_sequences_project_offsets_and_retain_resources_through_submit() {
+    let Some(output) = run(r#"
+        export { main };
+        import { "$/gpu.resin", "$/span.resin" };
+        struct Root { values: Span<uint>, scalar: Ptr<uint> };
+        @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {
+            if (index < root.values.length) { root.values.at(index).* := root.values.at(index).* + 10_ui; };
+            if (index == 0_ul) { root.scalar.* := 42_ui; };
+        };
+        def main() -> Result<int, _> = {
+            var gpu = Gpu.new()?;
+            var values = gpu.alloc::<uint>(5_ul)?;
+            var i = 0_ul;
+            while (i < 5_ul) { values.at(i).store(uint(i)); i := i + 1_ul; };
+            var scalar = gpu.create(0_ui)?;
+            var commands = gpu.start_command_recording()?;
+            {
+                var pipeline = (&gpu).create_compute_pipeline(kernel)?;
+                (&commands).dispatch(pipeline, { values = values.slice(2_ul, 2_ul), scalar = scalar }, 2_ui, 1_ui, 1_ui)?;
+            };
+            commands.submit()?;
+            ok(if (values.at(1_ul).load() == 1_ui && values.at(2_ul).load() == 12_ui && values.at(3_ul).load() == 13_ui && values.at(4_ul).load() == 4_ui && scalar.load() == 42_ui) { 0_i } else { 1_i })
+        };
+    "#) else {
+        return;
+    };
+    success(&output);
+}
+
+#[test]
+fn source_pipeline_contract_retagging_cannot_change_the_shader_root() {
+    let Some(output) = run(r#"
+        export { main };
+        import { "$/gpu.resin" };
+        struct Root { value: uint };
+        struct Other { value: uint };
+        @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {};
+        def main() -> Result<int, _> = {
+            var gpu = Gpu.new()?;
+            var pipeline = gpu.create_compute_pipeline(kernel)?;
+            var forged = GpuComputePipeline<Other, GpuPipelineOwner> { contract = pipeline.contract };
+            var commands = gpu.start_command_recording()?;
+            commands.dispatch(forged, { value = 0_ui }, 1_ui, 1_ui, 1_ui)?;
+            ok(0_i)
+        };
+    "#) else {
+        return;
+    };
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("pipeline contract"));
+}
+
+#[test]
 fn failed_dispatch_and_cancel_restore_cpu_access_and_last_command_alias_cancels() {
     let source = COMPUTE.replace(
         "ACTION",
