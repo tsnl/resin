@@ -422,6 +422,7 @@ fn span_and_literal_locals_are_typed() {
     let module = compile(
         r#"export { main };
 
+struct Span<T> { data: Ptr<T>, length: ulong };
 type Buf = Span<int>;
 
 def main() -> () = {
@@ -430,10 +431,13 @@ def main() -> () = {
 };"#,
     );
     verify(&module).unwrap();
-    assert!(matches!(
-        &module.functions[0].locals[1].ty,
-        Ty::Span { element } if **element == Ty::Int32
-    ));
+    let Ty::Defined { definition } = &module.functions[0].locals[1].ty else {
+        panic!("nominal source span")
+    };
+    assert_eq!(
+        module.types[definition.index()].body(),
+        Some(&Ty::pointer_length(Ty::Int32))
+    );
     assert_eq!(module.functions[0].locals[0].ty, Ty::Int64);
 }
 

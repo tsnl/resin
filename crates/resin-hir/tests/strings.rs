@@ -78,18 +78,11 @@ fn string_views_convert_explicitly_and_copy_into_owned_strings() {
         "#,
     )
     .unwrap();
-    assert_eq!(
-        result(&module, "bytes"),
-        Type::Span {
-            element: Box::new(Type::UInt8)
-        }
-    );
-    assert_eq!(
-        result(&module, "forwarded_bytes"),
-        Type::Span {
-            element: Box::new(Type::UInt8)
-        }
-    );
+    for name in ["bytes", "forwarded_bytes"] {
+        assert!(
+            matches!(result(&module, name), Type::Defined { arguments, .. } if arguments == [Type::UInt8])
+        );
+    }
 }
 
 #[test]

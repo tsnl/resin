@@ -515,8 +515,19 @@ fn shader_artifacts_request_a_separate_profile_and_both_count_toward_the_limit()
     hir.functions[1].body = Some(block([
         reference(0, Type::Int32),
         term(
-            Type::Span {
-                element: Box::new(Type::UInt8),
+            Type::Record {
+                fields: vec![
+                    resin_hir::RecordField {
+                        name: "data".into(),
+                        ty: Type::Pointer {
+                            pointee: Box::new(Type::UInt8),
+                        },
+                    },
+                    resin_hir::RecordField {
+                        name: "length".into(),
+                        ty: Type::UInt64,
+                    },
+                ],
             },
             TermKind::Shader {
                 function: FunctionId::from_index(shader),

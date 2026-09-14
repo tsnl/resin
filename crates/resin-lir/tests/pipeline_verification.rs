@@ -51,9 +51,7 @@ fn declaration(index: usize, parameters: Vec<Ty>, result: Ty) -> Function {
 }
 
 fn fixture() -> Module {
-    let bytes = Ty::Span {
-        element: Box::new(Ty::UInt8),
-    };
+    let bytes = Ty::byte_span();
     let pointer = Ty::GpuPointer {
         pointee: Box::new(Ty::UInt8),
     };

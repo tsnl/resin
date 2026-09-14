@@ -21,9 +21,6 @@ fn nominal_nonrecords_are_rejected_at_creation_and_verification() {
             params: vec![Ty::Unit],
             result: Box::new(Ty::Unit),
         },
-        Ty::Span {
-            element: Box::new(Ty::Int32),
-        },
         Ty::Array {
             element: Box::new(Ty::Int32),
             length: 1,
@@ -87,9 +84,7 @@ fn recursive_span_and_function_fields_have_finite_layouts() {
         let definition = context.reserve_type("Node");
         let named = Ty::Defined { definition };
         let field = if indirect == 0 {
-            Ty::Span {
-                element: Box::new(named),
-            }
+            Ty::pointer_length(named)
         } else {
             Ty::Function {
                 params: vec![named.clone()],

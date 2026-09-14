@@ -75,9 +75,7 @@ fn invalid_references_and_layouts_leave_the_reservation_retryable() {
         Ty::Pointer {
             pointee: Box::new(invalid.clone()),
         },
-        Ty::Span {
-            element: Box::new(invalid.clone()),
-        },
+        Ty::pointer_length(invalid.clone()),
         Ty::Function {
             params: vec![Ty::Unit],
             result: Box::new(invalid),
@@ -207,10 +205,11 @@ fn explicit_conversions_preserve_ascription_and_pointer_boundaries() {
     let pointer = |ty| Ty::Pointer {
         pointee: Box::new(ty),
     };
-    let span = Ty::Span {
-        element: Box::new(Ty::Int32),
+    let span_record = Ty::pointer_length(Ty::Int32);
+    let span_id = context.create_type("View", span_record.clone()).unwrap();
+    let span = Ty::Defined {
+        definition: span_id,
     };
-    let span_record = span.view_record().unwrap();
     for (from, to, expected) in [
         (Ty::Int32, Ty::Int32, ExplicitConversion::Ascribe(vec![])),
         (
@@ -231,12 +230,16 @@ fn explicit_conversions_preserve_ascription_and_pointer_boundaries() {
         (
             span.clone(),
             span_record.clone(),
-            ExplicitConversion::Ascribe(vec![Conv::ViewRecord]),
+            ExplicitConversion::Ascribe(vec![Conv::Unwrap {
+                definition: span_id,
+            }]),
         ),
         (
             span_record,
             span,
-            ExplicitConversion::Ascribe(vec![Conv::MakeSpan]),
+            ExplicitConversion::Ascribe(vec![Conv::Wrap {
+                definition: span_id,
+            }]),
         ),
         (Ty::Int32, Ty::Float64, ExplicitConversion::NumericCast),
         (nominal.clone(), union.clone(), ExplicitConversion::Widen),
@@ -286,7 +289,7 @@ fn string_views_expose_bytes_without_accepting_arbitrary_storage() {
     );
     assert_eq!(
         context.ascribe(&Ty::Str, &Ty::byte_span()).unwrap(),
-        vec![Conv::StrSpan]
+        vec![Conv::ViewRecord]
     );
     assert!(!Ty::Str.widens_to(&Ty::byte_span()));
     assert!(!Ty::byte_span().widens_to(&Ty::Str));
@@ -358,9 +361,7 @@ fn gpu_element_storage_excludes_references_and_custom_destruction() {
         Ty::Pointer {
             pointee: Box::new(Ty::UInt32),
         },
-        Ty::Span {
-            element: Box::new(Ty::UInt32),
-        },
+        Ty::pointer_length(Ty::UInt32),
         Ty::GpuPointer {
             pointee: Box::new(Ty::UInt32),
         },
@@ -411,17 +412,26 @@ fn gpu_arguments_are_opaque_managed_values_and_projection_is_type_directed() {
             .explicit_conversion(&Ty::UInt64, &arguments)
             .is_err()
     );
-    let root = record(Ty::Span {
-        element: Box::new(Ty::Int32),
-    });
+    let root = record(Ty::pointer_length(Ty::Int32));
     let table = [TypeDef::new("Root", root)];
     let root = Ty::Defined {
         definition: TypeId::from_index(0),
     };
     assert_eq!(
         root.gpu_projection(&table),
-        Some(record(Ty::GpuSpan {
-            element: Box::new(Ty::Int32)
+        Some(record(Ty::Record {
+            fields: vec![
+                RecordField {
+                    name: "data".into(),
+                    ty: Ty::GpuPointer {
+                        pointee: Box::new(Ty::Int32)
+                    }
+                },
+                RecordField {
+                    name: "length".into(),
+                    ty: Ty::UInt64
+                },
+            ],
         }))
     );
     let graph = Ty::Pointer {
@@ -434,9 +444,7 @@ fn gpu_arguments_are_opaque_managed_values_and_projection_is_type_directed() {
 #[test]
 fn pipeline_types_preserve_root_identity_and_opaque_shared_ownership() {
     let context = TyperContext::new();
-    let root = record(Ty::Span {
-        element: Box::new(Ty::UInt32),
-    });
+    let root = record(Ty::pointer_length(Ty::UInt32));
     let owner = Ty::StrongOwner;
     let compute = Ty::GpuComputePipeline {
         root: Box::new(root.clone()),
@@ -474,11 +482,11 @@ fn pipeline_types_preserve_root_identity_and_opaque_shared_ownership() {
     }
     assert_eq!(
         format_type(&compute, &table),
-        "GpuComputePipeline<{ value: Span<uint> }, ArcPtr<int>>"
+        "GpuComputePipeline<{ value: { data: Ptr<uint>, length: ulong } }, ArcPtr<int>>"
     );
     assert_eq!(
         format_type(&graphics, &table),
-        "GpuGraphicsPipeline<{ value: Span<uint> }, ArcPtr<int>>"
+        "GpuGraphicsPipeline<{ value: { data: Ptr<uint>, length: ulong } }, ArcPtr<int>>"
     );
 }
 
