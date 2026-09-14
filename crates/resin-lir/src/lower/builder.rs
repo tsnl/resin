@@ -8,11 +8,9 @@ pub(super) struct FunctionBuilder {
     current: BlockId,
     terminated: Vec<bool>,
     inputs: Vec<BlockInput>,
-    // Stack results and local registrations share an order so cleanup can
-    // interleave pending expression values with their surrounding owners.
-    stack_orders: Vec<usize>,
-    local_orders: Vec<usize>,
-    next_order: usize,
+    // Each operand records how many locals existed when it was produced.
+    // Local IDs give registration order; the stack gives operand order.
+    stack_boundaries: Vec<usize>,
 }
 
 struct BlockInput {
@@ -43,9 +41,7 @@ impl FunctionBuilder {
                 inherited: vec![],
                 produced: 0,
             }],
-            stack_orders: vec![],
-            local_orders: vec![],
-            next_order: 0,
+            stack_boundaries: vec![],
         }
     }
 
@@ -71,20 +67,18 @@ impl FunctionBuilder {
         &self.function.result
     }
     pub(super) fn stack_len(&self) -> usize {
-        self.stack_orders.len()
+        self.stack_boundaries.len()
     }
 
     pub(super) fn stack_is_newer_than(&self, local: LocalId) -> bool {
-        self.stack_orders
+        self.stack_boundaries
             .last()
-            .is_some_and(|order| *order > self.local_orders[local.index()])
+            .is_some_and(|boundary| *boundary > local.index())
     }
 
     pub(super) fn local(&mut self, ty: Ty, name: Option<Arc<str>>) -> LocalId {
         let id = LocalId::from_index(self.function.locals.len());
-        let order = self.fresh_order();
         self.function.locals.push(Local { name, ty });
-        self.local_orders.push(order);
         id
     }
 
@@ -100,11 +94,11 @@ impl FunctionBuilder {
         debug_assert!(!self.terminated[current]);
         let effect = crate::verify::stack_effect(&instr);
         let remaining = self
-            .stack_orders
+            .stack_boundaries
             .len()
             .checked_sub(effect.pops)
             .expect("valid generated stack");
-        self.stack_orders.truncate(remaining);
+        self.stack_boundaries.truncate(remaining);
         self.push_results(effect.pushes);
         self.function.blocks[current].instrs.push(instr);
     }
@@ -118,7 +112,7 @@ impl FunctionBuilder {
 
     pub(super) fn switch(&mut self, block: BlockId) {
         self.current = block;
-        self.stack_orders = self.inputs[block.index()].inherited.clone();
+        self.stack_boundaries = self.inputs[block.index()].inherited.clone();
         self.push_results(self.inputs[block.index()].produced);
     }
 
@@ -131,25 +125,17 @@ impl FunctionBuilder {
         });
         self.terminated.push(false);
         self.inputs.push(BlockInput {
-            inherited: self.stack_orders[..inherited].to_vec(),
+            inherited: self.stack_boundaries[..inherited].to_vec(),
             produced,
         });
         id
     }
 
-    fn fresh_order(&mut self) -> usize {
-        let order = self.next_order;
-        self.next_order += 1;
-        order
-    }
-
     fn push_results(&mut self, count: usize) {
         // Replacing an operand or merging a region produces a new value. Only
         // inherited stack prefixes keep their order relative to existing locals.
-        for _ in 0..count {
-            let order = self.fresh_order();
-            self.stack_orders.push(order);
-        }
+        self.stack_boundaries
+            .extend(std::iter::repeat_n(self.function.locals.len(), count));
     }
 
     fn unique_block_name(&self, hint: &str) -> Arc<str> {

@@ -173,10 +173,10 @@ functions reserve no parameter local; a tuple parameter occupies one local. Call
 operands to those locals, and C and SPIR-V emission preserve the parameter list. Each `Instr`
 documents its consumed operands and produced values.
 
-Lowering tracks the relative creation order of operand values and local storage so cleanup
-can interleave unfinished expressions with scoped owners. Structured regions preserve the
-identities of carried operands and give their results fresh identities. This bookkeeping
-is private to lowering; it introduces no source initialization state or argument storage.
+Lowering records how many locals exist when each operand is produced, so cleanup can
+interleave unfinished expressions with scoped owners. Structured regions preserve these
+boundaries for carried operands; new results follow the region's local registrations.
+This bookkeeping is private to lowering.
 
 HIR signatures can bind named type parameters, and function references carry
 completed type arguments. LIR construction owns a memoized worklist of concrete

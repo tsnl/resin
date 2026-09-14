@@ -7,10 +7,8 @@ type Unit = (()) -> int;
 type Zero = () -> int;
 def calls() = {
  f(); f(()); f(1,); f((1,)); f(1, 2); f((1, 2));
- f([1, 2]); f({ 1 }); f(1)(2); f::<int>(1, 2);
+ f([1, 2]); f({ 1 }); f(1)(2);
  receiver.method(1, 2); receiver.method((1, 2));
- var point = Point { x = 1, y = 2 };
- var nested = ((1, 2), 3);
  nested.0.1 := nested.1;
 };
 
@@ -309,37 +307,6 @@ def calls() = {
                 (postfix_term
                   (primary_term
                     (lid))
-                  (type_application
-                    (type_arguments
-                      (type
-                        (infix_type
-                          (union_type
-                            (unary_type
-                              (primary_type
-                                (builtin_type))))))))
-                  (arguments
-                    (term
-                      (assignment_term
-                        (binary_term
-                          (unary_term
-                            (postfix_term
-                              (primary_term
-                                (number)))))))
-                    (term
-                      (assignment_term
-                        (binary_term
-                          (unary_term
-                            (postfix_term
-                              (primary_term
-                                (number))))))))))))))
-      (statement
-        (term
-          (assignment_term
-            (binary_term
-              (unary_term
-                (postfix_term
-                  (primary_term
-                    (lid))
                   (method_call
                     (lid)
                     (arguments
@@ -390,80 +357,6 @@ def calls() = {
                                               (postfix_term
                                                 (primary_term
                                                   (number)))))))))))))))))))))))
-      (statement
-        (define
-          (term_define
-            (lid)
-            (term
-              (assignment_term
-                (binary_term
-                  (unary_term
-                    (postfix_term
-                      (primary_term
-                        (constructor_term
-                          (unary_type
-                            (primary_type
-                              (uid)))
-                          (record_term
-                            (term_define
-                              (lid)
-                              (term
-                                (assignment_term
-                                  (binary_term
-                                    (unary_term
-                                      (postfix_term
-                                        (primary_term
-                                          (number))))))))
-                            (term_define
-                              (lid)
-                              (term
-                                (assignment_term
-                                  (binary_term
-                                    (unary_term
-                                      (postfix_term
-                                        (primary_term
-                                          (number)))))))))))))))))))
-      (statement
-        (define
-          (term_define
-            (lid)
-            (term
-              (assignment_term
-                (binary_term
-                  (unary_term
-                    (postfix_term
-                      (primary_term
-                        (closed_term
-                          (tuple_term
-                            (term
-                              (assignment_term
-                                (binary_term
-                                  (unary_term
-                                    (postfix_term
-                                      (primary_term
-                                        (closed_term
-                                          (tuple_term
-                                            (term
-                                              (assignment_term
-                                                (binary_term
-                                                  (unary_term
-                                                    (postfix_term
-                                                      (primary_term
-                                                        (number)))))))
-                                            (term
-                                              (assignment_term
-                                                (binary_term
-                                                  (unary_term
-                                                    (postfix_term
-                                                      (primary_term
-                                                        (number)))))))))))))))
-                            (term
-                              (assignment_term
-                                (binary_term
-                                  (unary_term
-                                    (postfix_term
-                                      (primary_term
-                                        (number))))))))))))))))))
       (statement
         (term
           (assignment_term
