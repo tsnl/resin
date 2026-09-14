@@ -359,6 +359,7 @@ impl Ty {
 /// Primitive operations exposed through compiler-provided methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Intrinsic {
+    PointerIndex,
     StringFromBytes,
     Replace,
     Index,

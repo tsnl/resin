@@ -180,6 +180,13 @@ pub enum StmtKind {
     ForeignType {
         name: Ident,
     },
+    IntrinsicFunction {
+        operation: Arc<str>,
+        type_params: Vec<Ident>,
+        name: Ident,
+        params: Vec<(Ident, Type)>,
+        result: Type,
+    },
     ForeignFunction {
         header: Arc<str>,
         name: Ident,

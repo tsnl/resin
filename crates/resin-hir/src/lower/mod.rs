@@ -26,6 +26,7 @@ mod elaborate;
 pub(crate) mod eval;
 mod gpu;
 pub(crate) mod infer;
+mod primitives;
 pub(crate) mod scope;
 mod typed;
 mod types;
@@ -297,6 +298,7 @@ fn declaration_name(stmt: &StmtKind) -> Option<&Ident> {
     match stmt {
         StmtKind::ForeignType { name }
         | StmtKind::ForeignFunction { name, .. }
+        | StmtKind::IntrinsicFunction { name, .. }
         | StmtKind::Function { name, .. }
         | StmtKind::Define { name, .. }
         | StmtKind::DefineType { name, .. }
@@ -933,6 +935,10 @@ impl Generator {
                         self.declare_shader(id, decorator)?;
                     }
                 }
+            }
+            typed::DeclarationKind::Intrinsic { operation } => {
+                let id = self.declare_source_function(name, signature)?;
+                primitives::define(self.function_mut(id), operation)?;
             }
             typed::DeclarationKind::Foreign { header } => {
                 self.declare_foreign(header, name, signature)?;

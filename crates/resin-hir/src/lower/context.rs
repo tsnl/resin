@@ -848,3 +848,24 @@ impl Context {
         })
     }
 }
+
+/// Representation operations have signatures independent of library wrapper names.
+pub(super) fn primitive_signature(
+    operation: &str,
+    parameters: &[crate::Type],
+) -> Option<(crate::Intrinsic, Vec<crate::Type>, crate::Type)> {
+    let [element] = parameters else {
+        return None;
+    };
+    let pointer = crate::Type::Pointer {
+        pointee: Box::new(element.clone()),
+    };
+    match operation {
+        "pointer_index" => Some((
+            crate::Intrinsic::PointerIndex,
+            vec![pointer.clone(), crate::Type::UInt64, crate::Type::UInt64],
+            pointer,
+        )),
+        _ => None,
+    }
+}

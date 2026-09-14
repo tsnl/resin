@@ -74,6 +74,29 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
         StmtKind::ForeignType { name } => {
             list_sp("extern-type", stmt.span, vec![symbol(name.val.as_ref())])
         }
+        StmtKind::IntrinsicFunction {
+            operation,
+            type_params,
+            name,
+            params,
+            result,
+        } => list_sp(
+            "intrinsic",
+            stmt.span,
+            vec![
+                string(operation.as_ref()),
+                declaration_name(name, type_params),
+                group(
+                    params
+                        .iter()
+                        .map(|(name, ann)| {
+                            list("param", vec![symbol(name.val.as_ref()), sexp_typespec(ann)])
+                        })
+                        .collect(),
+                ),
+                sexp_typespec(result),
+            ],
+        ),
         StmtKind::ForeignFunction {
             header,
             name,

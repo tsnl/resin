@@ -303,6 +303,12 @@ impl Checker<'_> {
                 params,
                 result,
                 ..
+            }
+            | StmtKind::IntrinsicFunction {
+                name,
+                params,
+                result,
+                ..
             } => (name, params, result, None),
             _ => return None,
         };
@@ -316,10 +322,13 @@ impl Checker<'_> {
             })
             .unwrap_or_default();
         let type_scope = match stmt {
-            StmtKind::Function { type_params, .. } => type_params.first().map(|parameter| Span {
-                start: parameter.span.start,
-                end: body.map_or(result.span.end, |body| body.span.start),
-            }),
+            StmtKind::Function { type_params, .. }
+            | StmtKind::IntrinsicFunction { type_params, .. } => {
+                type_params.first().map(|parameter| Span {
+                    start: parameter.span.start,
+                    end: body.map_or(result.span.end, |body| body.span.start),
+                })
+            }
             _ => None,
         }
         .or_else(|| {
@@ -340,7 +349,9 @@ impl Checker<'_> {
                 },
             );
         }
-        if let StmtKind::Function { type_params, .. } = stmt {
+        if let StmtKind::Function { type_params, .. }
+        | StmtKind::IntrinsicFunction { type_params, .. } = stmt
+        {
             for parameter in type_params {
                 match self.scopes.define_type_parameter(parameter) {
                     Ok(parameter) => binders.push(parameter),
@@ -386,6 +397,9 @@ impl Checker<'_> {
         let kind = match stmt {
             StmtKind::Function { decorators, .. } => typed::DeclarationKind::Function {
                 decorators: decorators.clone(),
+            },
+            StmtKind::IntrinsicFunction { operation, .. } => typed::DeclarationKind::Intrinsic {
+                operation: operation.clone(),
             },
             StmtKind::ForeignFunction { header, .. } => typed::DeclarationKind::Foreign {
                 header: header.clone(),

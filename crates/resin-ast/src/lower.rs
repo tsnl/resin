@@ -208,7 +208,10 @@ impl<'a> AstGen<'a> {
                 self.span(node),
             );
         }
-        if matches!(node.kind(), "function_definition" | "foreign_function") {
+        if matches!(
+            node.kind(),
+            "function_definition" | "foreign_function" | "intrinsic_function"
+        ) {
             return self.gen_function(node);
         }
         if node.kind() == "foreign_type" {
@@ -669,6 +672,18 @@ impl<'a> AstGen<'a> {
         for p in node.children_by_field_name("params", &mut cursor) {
             let (name, ann) = self.gen_declare(p);
             params.push((name, ann));
+        }
+        if let Some(operation) = node.child_by_field_name("operation") {
+            return Spanned::new(
+                StmtKind::IntrinsicFunction {
+                    operation: decode_string(self.text(operation)).into(),
+                    type_params: self.type_parameters(node),
+                    name,
+                    params,
+                    result,
+                },
+                self.span(node),
+            );
         }
         if let Some(header) = node.child_by_field_name("header") {
             return Spanned::new(

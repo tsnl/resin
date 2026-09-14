@@ -197,6 +197,7 @@ impl FunctionLowering<'_> {
                 result: result.clone(),
             }),
             Intrinsic::Replace => self.emit(Instr::Replace),
+            Intrinsic::PointerIndex => self.emit(Instr::PointerIndex),
             Intrinsic::Index => self.emit(Instr::AccessDynamic),
             Intrinsic::GpuIndex => self.emit(Instr::AccessDynamic),
             Intrinsic::GpuSlice => self.emit(Instr::GpuSlice),

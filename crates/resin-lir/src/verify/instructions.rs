@@ -260,6 +260,16 @@ pub(super) fn check_instr(
             let source = pop_one(stack, location)?;
             stack.push(project_static(&module.types, source, *index, location)?);
         }
+        Instr::PointerIndex => {
+            let args = pop(stack, 3, location)?;
+            if !matches!(&args[0], Ty::Pointer { .. }) {
+                return Err(location.error(VerifyErrorKind::ExpectedArray {
+                    found: args[0].clone(),
+                }));
+            }
+            expect_types(&[Ty::UInt64, Ty::UInt64], &args[1..], location)?;
+            stack.push(args[0].clone());
+        }
         Instr::AccessDynamic => {
             let index = pop_one(stack, location)?;
             if !is_integer(&module.types, &index, location)? {

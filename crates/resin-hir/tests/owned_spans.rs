@@ -158,7 +158,10 @@ fn host_allocation_requires_positional_count_and_initial_arguments() {
     "#,
     )
     .unwrap_err();
-    assert!(error.to_string().contains("unknown method `alloc`"), "{error}");
+    assert!(
+        error.to_string().contains("unknown method `alloc`"),
+        "{error}"
+    );
 }
 
 #[test]

@@ -669,6 +669,62 @@
     }
   },
   {
+    "type": "intrinsic_function",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "lid",
+            "named": true
+          }
+        ]
+      },
+      "operation": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "string",
+            "named": true
+          }
+        ]
+      },
+      "params": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "declare",
+            "named": true
+          }
+        ]
+      },
+      "result": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "type",
+            "named": true
+          }
+        ]
+      },
+      "type_params": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_parameters",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "match_arm",
     "named": true,
     "fields": {
@@ -1034,6 +1090,10 @@
           },
           {
             "type": "function_definition",
+            "named": true
+          },
+          {
+            "type": "intrinsic_function",
             "named": true
           },
           {
@@ -1814,6 +1874,10 @@
   },
   {
     "type": "int",
+    "named": false
+  },
+  {
+    "type": "intrinsic",
     "named": false
   },
   {

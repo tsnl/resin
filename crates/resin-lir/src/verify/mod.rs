@@ -86,9 +86,11 @@ pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
         | Instr::GpuCopyTo
         | Instr::ArcSpanTryNew { .. }
         | Instr::HostAllocate { .. } => StackEffect { pops: 2, pushes: 1 },
-        Instr::GpuSlice | Instr::GpuArgumentsDraw | Instr::GpuCopyImage | Instr::SpanSlice => {
-            StackEffect { pops: 3, pushes: 1 }
-        }
+        Instr::PointerIndex
+        | Instr::GpuSlice
+        | Instr::GpuArgumentsDraw
+        | Instr::GpuCopyImage
+        | Instr::SpanSlice => StackEffect { pops: 3, pushes: 1 },
         Instr::GpuAllocateNative | Instr::GpuArgumentsDispatch => {
             StackEffect { pops: 5, pushes: 1 }
         }

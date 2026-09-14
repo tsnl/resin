@@ -82,6 +82,16 @@ pub(super) fn instruction(
         Instr::AccessStatic { index } => {
             return project(context, &args[0], *index, result.unwrap()).map(Some);
         }
+        Instr::PointerIndex => {
+            let Ty::Pointer { pointee } = &args[0].ty else {
+                unreachable!("verified pointer indexing")
+            };
+            let size = crate::layout::layout(context.module, pointee)?.size;
+            let stride = context.constant_u64(size as u64);
+            let offset = emit(context, Op::IMul, &Ty::UInt64, &[args[2].id, stride])?;
+            let id = emit(context, Op::IAdd, &Ty::UInt64, &[args[0].id, offset])?;
+            return Ok(Some(Slot::value(result.unwrap().clone(), id)));
+        }
         Instr::AccessDynamic => {
             return index(context, &args[0], &args[1], result.unwrap(), arrays).map(Some);
         }

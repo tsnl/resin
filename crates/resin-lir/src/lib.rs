@@ -197,6 +197,9 @@ pub enum Instr {
     /// Array addresses and ordinary spans produce borrowed element addresses.
     /// GPU views transfer their owner into the resulting GPU element address.
     AccessDynamic,
+    /// `[Ptr<T>, length, index] -> [Ptr<T>]`: typed element addressing; the host
+    /// diagnoses an index outside length, while shaders require a valid index.
+    PointerIndex,
     /// `[address] -> [value]`: copy an initialized pointee, retaining managed owners.
     Load,
     /// `[address, value] -> [value]`: copy into storage, destroying its previous live

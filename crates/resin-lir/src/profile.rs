@@ -104,7 +104,7 @@ fn instruction(typer: &TyperContext, op: &Instr) -> Result<(), String> {
         | Instr::VariantPayload { .. } | Instr::ExcludeNone | Instr::Widen { .. }
         | Instr::NumericCast { .. } | Instr::PointerCast { .. } | Instr::Ascribe { .. }
         | Instr::MakeArray { .. } | Instr::MakeRecord { .. } | Instr::AccessStatic { .. }
-        | Instr::AccessDynamic | Instr::Eliminate { .. } => Ok(()),
+        | Instr::AccessDynamic | Instr::PointerIndex | Instr::Eliminate { .. } => Ok(()),
         Instr::ArcNew | Instr::ArcData | Instr::ArcSpanData | Instr::ArcSpanTryNew { .. }
         | Instr::HostAllocate { .. } | Instr::Downgrade | Instr::Upgrade
         | Instr::WeakEmpty { .. } | Instr::DropLocal { .. } => Err("shader cannot consume managed values: reference counting and destruction are host-only".into()),

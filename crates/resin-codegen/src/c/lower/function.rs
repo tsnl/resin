@@ -464,7 +464,7 @@ fn instruction(
             let owner = allocate_span(types, temp, element, args, out);
             let ty = result.unwrap();
             let present = variant(types, ty, &Case::Ok, &owner);
-            let absent = variant(types, ty, &Case::Err, &format!("r_fn{}(0)", error.index()));
+            let absent = variant(types, ty, &Case::Err, &format!("r_fn{}()", error.index()));
             format!("({owner} ? {present} : {absent})")
         }
         Instr::ArcSpanData => format!(
@@ -701,6 +701,10 @@ fn instruction(
             temp,
             out,
         )?,
+        Instr::PointerIndex => format!(
+            "({} + resin_index({}, {}))",
+            args[0].expr, args[2].expr, args[1].expr
+        ),
         Instr::AccessDynamic => project(
             types,
             &args[0],

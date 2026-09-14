@@ -118,6 +118,7 @@ export default grammar({
       "export",
       "import",
       "extern",
+      "intrinsic",
       "type",
       "struct",
       "def",
@@ -152,6 +153,7 @@ export default grammar({
             choice(
               $.function_definition,
               $.foreign_function,
+              $.intrinsic_function,
               $.foreign_type,
               $.type_definition,
               $.struct_definition,
@@ -177,6 +179,11 @@ export default grammar({
         optional(seq("->", field("result", $.type))),
         ";",
       ),
+    intrinsic_function: ($) => seq(
+      "intrinsic", field("operation", $.string), "def", field("name", $.lid),
+      optional(field("type_params", $.type_parameters)), "(", list("params", $.declare, ","), ")",
+      "->", field("result", $.type), ";",
+    ),
     foreign_type: ($) => seq("extern", "type", field("name", $.uid), ";"),
 
     type_definition: ($) =>

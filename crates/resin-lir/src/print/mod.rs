@@ -242,6 +242,7 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
             vec![symbol(fn_names.locals[local.index()].as_ref())],
         ),
         Instr::AccessStatic { index } => list("access-static", vec![symbol(index.to_string())]),
+        Instr::PointerIndex => symbol("pointer-index"),
         Instr::AccessDynamic => symbol("access-dynamic"),
         Instr::Load => symbol("load"),
         Instr::Store => symbol("store"),
