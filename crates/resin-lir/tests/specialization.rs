@@ -1167,3 +1167,247 @@ fn generic_conversions_cannot_bypass_custom_destruction() {
     ));
     assert_eq!(error.applications[0].function.as_ref(), "unwrap");
 }
+
+fn method_lookup(receiver: Type) -> resin_hir::MethodLookup {
+    resin_hir::MethodLookup {
+        receiver,
+        name: "read".into(),
+        type_args: vec![],
+        associated: true,
+    }
+}
+
+fn method_result(lookup: resin_hir::MethodLookup) -> Type {
+    Type::FunctionResult {
+        function: Box::new(Type::Method {
+            lookup: Box::new(lookup),
+        }),
+    }
+}
+
+fn dependent_methods() -> Module {
+    let lookup = method_lookup(Type::Parameter { parameter: T });
+    Module {
+        functions: vec![
+            template(
+                "invoke",
+                term(
+                    method_result(lookup.clone()),
+                    TermKind::DependentMethodCall {
+                        lookup,
+                        receiver: None,
+                        arg: Box::new(unit()),
+                    },
+                ),
+            ),
+            function(
+                "Owner.read",
+                term(
+                    Type::Int32,
+                    TermKind::Constant {
+                        value: Constant::Int32 { value: 42 },
+                    },
+                ),
+            ),
+        ],
+        types: vec![resin_hir::TypeDefinition {
+            type_params: vec![],
+            name: "Owner".into(),
+            body: Type::Record { fields: vec![] },
+            methods: [("read".into(), FunctionId::from_index(1))].into(),
+            drop: None,
+        }],
+        ..Default::default()
+    }
+}
+
+fn method_owner() -> Type {
+    Type::Defined {
+        definition: TypeId::from_index(0),
+        arguments: vec![],
+    }
+}
+
+fn instantiate_method(hir: &Module) -> Result<resin_lir::Module, Vec<resin_lir::Error>> {
+    let mut request = entry("invoke", 0, resin_lir::Profile::Host);
+    request.arguments = vec![method_owner()];
+    resin_lir::instantiate(hir, &[request], &options(1))
+}
+
+#[test]
+fn dependent_calls_request_selected_methods_and_return_their_results() {
+    let lir = instantiate_method(&dependent_methods()).unwrap();
+    resin_lir::verify(&lir).unwrap();
+    assert_eq!(lir.functions.len(), 2);
+    assert_eq!(lir.functions[0].result, Ty::Int32);
+    assert_eq!(lir.functions[1].name.as_deref(), Some("Owner.read"));
+}
+
+#[test]
+fn method_results_normalize_before_instance_memoization_without_layout_discovery() {
+    let mut hir = dependent_methods();
+    hir.functions[0] = template("mark", unit());
+    hir.types[0].body = method_owner();
+    hir.functions.push(function(
+        "main",
+        block([
+            reference(0, method_result(method_lookup(method_owner()))),
+            reference(0, Type::Int32),
+        ]),
+    ));
+    let lir = resin_lir::instantiate(
+        &hir,
+        &[entry("main", 2, resin_lir::Profile::Host)],
+        &options(1),
+    )
+    .unwrap();
+    resin_lir::verify(&lir).unwrap();
+    assert_eq!(lir.functions.len(), 2);
+    assert!(lir.types.is_empty());
+}
+
+#[test]
+fn recursive_method_result_queries_report_a_cycle() {
+    let mut hir = dependent_methods();
+    hir.functions[1].signature.result = annotation(method_result(method_lookup(method_owner())));
+    let error = instantiate_method(&hir).unwrap_err().remove(0);
+    assert!(
+        matches!(&error.kind, ErrorKind::InvalidInstance { message } if message.contains("cyclic dependent method signature")),
+        "{error:?}"
+    );
+    assert_eq!(error.applications[0].function.as_ref(), "invoke");
+}
+
+#[test]
+fn growing_method_result_queries_are_bounded_before_exhausting_the_host_stack() {
+    let mut hir = dependent_methods();
+    let parameter = TypeParameterId::from_index(1);
+    hir.functions[1].signature.type_params.push(TypeParameter {
+        id: parameter,
+        name: Ident::new("U".into(), SPAN),
+    });
+    let mut next = method_lookup(method_owner());
+    next.type_args = vec![Type::Pointer {
+        pointee: Box::new(Type::Parameter { parameter }),
+    }];
+    hir.functions[1].signature.result = annotation(method_result(next));
+    let mut initial = method_lookup(Type::Parameter { parameter: T });
+    initial.type_args = vec![Type::Int32];
+    hir.functions[0].signature.result = annotation(method_result(initial));
+    let error = instantiate_method(&hir).unwrap_err().remove(0);
+    assert!(
+        matches!(error.kind, ErrorKind::TypeExpansionLimit { limit: 32 }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn dependent_lookup_reports_missing_methods_with_the_application_trace() {
+    let mut hir = dependent_methods();
+    hir.types[0].methods.clear();
+    let error = instantiate_method(&hir).unwrap_err().remove(0);
+    assert!(
+        matches!(&error.kind, ErrorKind::InvalidInstance { message } if message.contains("Owner has no method read")),
+        "{error:?}"
+    );
+    assert_eq!(error.applications[0].function.as_ref(), "invoke");
+}
+
+#[test]
+fn dependent_method_arguments_are_substituted_without_deduction() {
+    let mut hir = dependent_methods();
+    hir.functions[1].signature.type_params.push(TypeParameter {
+        id: TypeParameterId::from_index(1),
+        name: Ident::new("U".into(), SPAN),
+    });
+    let result = Type::Parameter {
+        parameter: TypeParameterId::from_index(1),
+    };
+    hir.functions[1].signature.result = annotation(result.clone());
+    hir.functions[1].body = Some(term(result, TermKind::Numeric { text: "42".into() }));
+    let error = instantiate_method(&hir).unwrap_err().remove(0);
+    assert!(
+        matches!(&error.kind, ErrorKind::InvalidInstance { message } if message.contains("1 explicit type arguments")),
+        "{error:?}"
+    );
+    let mut lookup = method_lookup(Type::Parameter { parameter: T });
+    lookup.type_args = vec![Type::Int32];
+    hir.functions[0] = template(
+        "invoke",
+        term(
+            method_result(lookup.clone()),
+            TermKind::DependentMethodCall {
+                lookup,
+                receiver: None,
+                arg: Box::new(unit()),
+            },
+        ),
+    );
+    let lir = instantiate_method(&hir).unwrap();
+    resin_lir::verify(&lir).unwrap();
+    assert_eq!(lir.functions.len(), 2);
+}
+
+#[test]
+fn dependent_calls_preserve_argument_and_result_widening() {
+    let mut hir = dependent_methods();
+    let optional = Type::Union {
+        variants: vec![Type::Int32, Type::None],
+    };
+    hir.functions[1].signature.params.push(Parameter {
+        binding: Some(0),
+        name: Ident::new("value".into(), SPAN),
+        annotation: annotation(optional.clone()),
+    });
+    hir.functions[0] = template(
+        "invoke",
+        term(
+            optional,
+            TermKind::DependentMethodCall {
+                lookup: method_lookup(Type::Parameter { parameter: T }),
+                receiver: None,
+                arg: Box::new(term(
+                    Type::Int32,
+                    TermKind::Constant {
+                        value: Constant::Int32 { value: 7 },
+                    },
+                )),
+            },
+        ),
+    );
+    let lir = instantiate_method(&hir).unwrap();
+    resin_lir::verify(&lir).unwrap();
+    assert_eq!(
+        lir.functions[0]
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instrs)
+            .filter(|instruction| matches!(instruction, Instr::Widen { .. }))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn function_projections_reject_noncallable_instances_with_a_source_error() {
+    let error = requested_template(
+        template(
+            "invoke",
+            term(
+                Type::FunctionResult {
+                    function: Box::new(Type::Parameter { parameter: T }),
+                },
+                TermKind::Constant {
+                    value: Constant::Unit,
+                },
+            ),
+        ),
+        Type::Int32,
+    )
+    .unwrap_err()
+    .remove(0);
+    assert!(
+        matches!(error.kind, ErrorKind::InvalidInstance { .. }),
+        "{error:?}"
+    );
+}

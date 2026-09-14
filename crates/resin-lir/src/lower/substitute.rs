@@ -2,14 +2,36 @@
 //! Neither operation performs inference or numeric defaulting.
 use resin_source::prelude::*;
 use resin_types::prelude::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 const TYPE_DEPTH_LIMIT: usize = 256;
 const TYPE_SIZE_LIMIT: usize = 65536;
+const METHOD_DEPTH_LIMIT: usize = 32;
+
+struct Normalization {
+    remaining: usize,
+    methods: BTreeSet<resin_hir::MethodLookup>,
+}
+
+impl Default for Normalization {
+    fn default() -> Self {
+        Self {
+            remaining: TYPE_SIZE_LIMIT,
+            methods: BTreeSet::new(),
+        }
+    }
+}
 
 #[derive(Default)]
 pub(super) struct Substitution {
     arguments: BTreeMap<resin_hir::TypeParameterId, resin_hir::Type>,
+}
+
+pub(super) struct ResolvedMethod {
+    pub(super) function: FunctionId,
+    pub(super) arguments: Vec<resin_hir::Type>,
+    pub(super) params: Vec<resin_hir::Type>,
+    pub(super) result: resin_hir::Type,
 }
 
 impl Substitution {
@@ -46,17 +68,119 @@ impl Substitution {
         source: &resin_hir::Type,
         instances: &mut super::instances::Instances<'_>,
     ) -> Result<resin_hir::Type, super::LowerError> {
-        self.normalize_at(source, 0, &mut { TYPE_SIZE_LIMIT }, instances)
+        self.normalize_at(source, 0, &mut Normalization::default(), instances)
+    }
+
+    pub(super) fn method(
+        &self,
+        lookup: &resin_hir::MethodLookup,
+        instances: &mut super::instances::Instances<'_>,
+    ) -> Result<ResolvedMethod, super::LowerError> {
+        self.method_at(lookup, 0, &mut Normalization::default(), instances)
+    }
+
+    fn method_at(
+        &self,
+        lookup: &resin_hir::MethodLookup,
+        depth: usize,
+        state: &mut Normalization,
+        instances: &mut super::instances::Instances<'_>,
+    ) -> Result<ResolvedMethod, super::LowerError> {
+        consume_node(depth, &mut state.remaining)?;
+        let receiver = self.normalize_at(&lookup.receiver, depth + 1, state, instances)?;
+        let (function, signature, mut arguments) = instances.method(&receiver, &lookup.name)?;
+        let count = signature
+            .type_params
+            .len()
+            .checked_sub(arguments.len())
+            .ok_or_else(|| {
+                super::LowerError::invalid_hir(
+                    Span { start: 0, end: 0 },
+                    "method signature omits its owner's type parameters",
+                )
+            })?;
+        if lookup.type_args.len() != count {
+            return Err(super::LowerError {
+                span: Span { start: 0, end: 0 },
+                kind: crate::ErrorKind::InvalidInstance {
+                    message: format!(
+                        "method {} expects {count} explicit type arguments, found {}; annotate the dependent method application",
+                        lookup.name, lookup.type_args.len()
+                    )
+                    .into(),
+                },
+            });
+        }
+        for argument in &lookup.type_args {
+            arguments.push(self.normalize_at(argument, depth + 1, state, instances)?);
+        }
+        if !lookup.associated && signature.params.is_empty() {
+            return Err(super::LowerError {
+                span: Span { start: 0, end: 0 },
+                kind: crate::ErrorKind::InvalidInstance {
+                    message: format!("method {} has no receiver parameter", lookup.name).into(),
+                },
+            });
+        }
+        let query = resin_hir::MethodLookup {
+            receiver,
+            name: lookup.name.clone(),
+            type_args: arguments[arguments.len() - count..].to_vec(),
+            associated: lookup.associated,
+        };
+        if state.methods.contains(&query) {
+            return Err(super::LowerError {
+                span: Span { start: 0, end: 0 },
+                kind: crate::ErrorKind::InvalidInstance {
+                    message: format!(
+                        "cyclic dependent method signature for {}; annotate its result type",
+                        lookup.name
+                    )
+                    .into(),
+                },
+            });
+        }
+        if state.methods.len() == METHOD_DEPTH_LIMIT {
+            return Err(super::LowerError {
+                span: Span { start: 0, end: 0 },
+                kind: crate::ErrorKind::TypeExpansionLimit {
+                    limit: METHOD_DEPTH_LIMIT,
+                },
+            });
+        }
+        state.methods.insert(query.clone());
+        // Method lookup selects a declaration and substitutes completed arguments.
+        // It never creates variables, deduces arguments, or chooses literal defaults.
+        let completed = (|| {
+            let substitution = Self::new(&signature.type_params, &arguments)?;
+            let params = signature
+                .params
+                .iter()
+                .map(|parameter| {
+                    substitution.normalize_at(&parameter.annotation.ty, depth + 1, state, instances)
+                })
+                .collect::<Result<_, _>>()?;
+            let result =
+                substitution.normalize_at(&signature.result.ty, depth + 1, state, instances)?;
+            Ok(ResolvedMethod {
+                function,
+                arguments,
+                params,
+                result,
+            })
+        })();
+        state.methods.remove(&query);
+        completed
     }
 
     fn normalize_at(
         &self,
         source: &resin_hir::Type,
         depth: usize,
-        remaining: &mut usize,
+        state: &mut Normalization,
         instances: &mut super::instances::Instances<'_>,
     ) -> Result<resin_hir::Type, super::LowerError> {
-        consume_node(depth, remaining)?;
+        consume_node(depth, &mut state.remaining)?;
         Ok(match source {
             resin_hir::Type::Parameter { parameter } => {
                 let argument = self.arguments.get(parameter).ok_or_else(|| {
@@ -66,16 +190,40 @@ impl Substitution {
                     )
                 })?;
                 // Charge substituted structure before cloning: recursive requests may double it.
-                *remaining += 1;
-                check_size(argument, depth, remaining)?;
+                state.remaining += 1;
+                check_size(argument, depth, &mut state.remaining)?;
                 argument.clone()
             }
             resin_hir::Type::Member { base, name } => {
-                let base = self.normalize_at(base, depth + 1, remaining, instances)?;
+                let base = self.normalize_at(base, depth + 1, state, instances)?;
                 let base = materialize(&base, instances)?;
                 let result = expression(&member(instances.typer(), &base, name)?.ty, instances);
-                check_size(&result, depth, remaining)?;
+                check_size(&result, depth, &mut state.remaining)?;
                 result
+            }
+            resin_hir::Type::Method { lookup } => {
+                let method = self.method_at(lookup, depth + 1, state, instances)?;
+                resin_hir::Type::Function {
+                    param: Box::new(parameter(&method.params[usize::from(!lookup.associated)..])),
+                    result: Box::new(method.result),
+                }
+            }
+            resin_hir::Type::FunctionParameter { function }
+            | resin_hir::Type::FunctionResult { function } => {
+                let function = self.normalize_at(function, depth + 1, state, instances)?;
+                let resin_hir::Type::Function { param, result } = function else {
+                    return Err(super::LowerError {
+                        span: Span { start: 0, end: 0 },
+                        kind: crate::ErrorKind::InvalidInstance {
+                            message: "a function type projection requires a function".into(),
+                        },
+                    });
+                };
+                if matches!(source, resin_hir::Type::FunctionParameter { .. }) {
+                    *param
+                } else {
+                    *result
+                }
             }
             resin_hir::Type::Defined {
                 definition,
@@ -86,9 +234,7 @@ impl Substitution {
                     definition: *definition,
                     arguments: arguments
                         .iter()
-                        .map(|argument| {
-                            self.normalize_at(argument, depth + 1, remaining, instances)
-                        })
+                        .map(|argument| self.normalize_at(argument, depth + 1, state, instances))
                         .collect::<Result<_, _>>()?,
                 }
             }
@@ -110,45 +256,45 @@ impl Substitution {
             resin_hir::Type::GpuArguments => resin_hir::Type::GpuArguments,
             resin_hir::Type::Foreign { name } => resin_hir::Type::Foreign { name: name.clone() },
             resin_hir::Type::Pointer { pointee } => resin_hir::Type::Pointer {
-                pointee: Box::new(self.normalize_at(pointee, depth + 1, remaining, instances)?),
+                pointee: Box::new(self.normalize_at(pointee, depth + 1, state, instances)?),
             },
             resin_hir::Type::GpuPointer { pointee } => resin_hir::Type::GpuPointer {
-                pointee: Box::new(self.normalize_at(pointee, depth + 1, remaining, instances)?),
+                pointee: Box::new(self.normalize_at(pointee, depth + 1, state, instances)?),
             },
             resin_hir::Type::Arc { pointee } => resin_hir::Type::Arc {
-                pointee: Box::new(self.normalize_at(pointee, depth + 1, remaining, instances)?),
+                pointee: Box::new(self.normalize_at(pointee, depth + 1, state, instances)?),
             },
             resin_hir::Type::Weak { pointee } => resin_hir::Type::Weak {
-                pointee: Box::new(self.normalize_at(pointee, depth + 1, remaining, instances)?),
+                pointee: Box::new(self.normalize_at(pointee, depth + 1, state, instances)?),
             },
             resin_hir::Type::Span { element } => resin_hir::Type::Span {
-                element: Box::new(self.normalize_at(element, depth + 1, remaining, instances)?),
+                element: Box::new(self.normalize_at(element, depth + 1, state, instances)?),
             },
             resin_hir::Type::GpuSpan { element } => resin_hir::Type::GpuSpan {
-                element: Box::new(self.normalize_at(element, depth + 1, remaining, instances)?),
+                element: Box::new(self.normalize_at(element, depth + 1, state, instances)?),
             },
             resin_hir::Type::GpuComputePipeline { root, owner } => {
                 resin_hir::Type::GpuComputePipeline {
-                    root: Box::new(self.normalize_at(root, depth + 1, remaining, instances)?),
-                    owner: Box::new(self.normalize_at(owner, depth + 1, remaining, instances)?),
+                    root: Box::new(self.normalize_at(root, depth + 1, state, instances)?),
+                    owner: Box::new(self.normalize_at(owner, depth + 1, state, instances)?),
                 }
             }
             resin_hir::Type::GpuGraphicsPipeline { root, owner } => {
                 resin_hir::Type::GpuGraphicsPipeline {
-                    root: Box::new(self.normalize_at(root, depth + 1, remaining, instances)?),
-                    owner: Box::new(self.normalize_at(owner, depth + 1, remaining, instances)?),
+                    root: Box::new(self.normalize_at(root, depth + 1, state, instances)?),
+                    owner: Box::new(self.normalize_at(owner, depth + 1, state, instances)?),
                 }
             }
             resin_hir::Type::Function { param, result } => resin_hir::Type::Function {
-                param: Box::new(self.normalize_at(param, depth + 1, remaining, instances)?),
-                result: Box::new(self.normalize_at(result, depth + 1, remaining, instances)?),
+                param: Box::new(self.normalize_at(param, depth + 1, state, instances)?),
+                result: Box::new(self.normalize_at(result, depth + 1, state, instances)?),
             },
             resin_hir::Type::Result { value, error } => resin_hir::Type::Result {
-                value: Box::new(self.normalize_at(value, depth + 1, remaining, instances)?),
-                error: Box::new(self.normalize_at(error, depth + 1, remaining, instances)?),
+                value: Box::new(self.normalize_at(value, depth + 1, state, instances)?),
+                error: Box::new(self.normalize_at(error, depth + 1, state, instances)?),
             },
             resin_hir::Type::Array { element, length } => resin_hir::Type::Array {
-                element: Box::new(self.normalize_at(element, depth + 1, remaining, instances)?),
+                element: Box::new(self.normalize_at(element, depth + 1, state, instances)?),
                 length: *length,
             },
             resin_hir::Type::Record { fields } => resin_hir::Type::Record {
@@ -157,7 +303,7 @@ impl Substitution {
                     .map(|field| {
                         Ok(resin_hir::RecordField {
                             name: field.name.clone(),
-                            ty: self.normalize_at(&field.ty, depth + 1, remaining, instances)?,
+                            ty: self.normalize_at(&field.ty, depth + 1, state, instances)?,
                         })
                     })
                     .collect::<Result<_, super::LowerError>>()?,
@@ -165,7 +311,7 @@ impl Substitution {
             resin_hir::Type::Union { variants } => {
                 let mut members = vec![];
                 for variant in variants {
-                    match self.normalize_at(variant, depth + 1, remaining, instances)? {
+                    match self.normalize_at(variant, depth + 1, state, instances)? {
                         resin_hir::Type::Union { variants } => members.extend(variants),
                         ty => members.push(ty),
                     }
@@ -182,12 +328,33 @@ impl Substitution {
     }
 }
 
+fn parameter(types: &[resin_hir::Type]) -> resin_hir::Type {
+    match types {
+        [] => resin_hir::Type::Unit,
+        [ty] => ty.clone(),
+        _ => resin_hir::Type::Record {
+            fields: types
+                .iter()
+                .enumerate()
+                .map(|(index, ty)| resin_hir::RecordField {
+                    name: format!("_{index}").into(),
+                    ty: ty.clone(),
+                })
+                .collect(),
+        },
+    }
+}
+
 fn materialize(
     source: &resin_hir::Type,
     instances: &mut super::instances::Instances<'_>,
 ) -> Result<Ty, super::LowerError> {
     Ok(match source {
-        resin_hir::Type::Parameter { .. } | resin_hir::Type::Member { .. } => {
+        resin_hir::Type::Parameter { .. }
+        | resin_hir::Type::Member { .. }
+        | resin_hir::Type::Method { .. }
+        | resin_hir::Type::FunctionParameter { .. }
+        | resin_hir::Type::FunctionResult { .. } => {
             unreachable!("normalized type")
         }
         resin_hir::Type::Defined {
@@ -404,7 +571,11 @@ fn check_size(
                 check_size(argument, depth + 1, remaining)?;
             }
         }
-        resin_hir::Type::Parameter { .. } | resin_hir::Type::Member { .. } => {
+        resin_hir::Type::Parameter { .. }
+        | resin_hir::Type::Member { .. }
+        | resin_hir::Type::Method { .. }
+        | resin_hir::Type::FunctionParameter { .. }
+        | resin_hir::Type::FunctionResult { .. } => {
             unreachable!("normalized argument")
         }
         resin_hir::Type::Pointer { pointee } => check_size(pointee, depth + 1, remaining)?,

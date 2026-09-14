@@ -154,6 +154,14 @@ impl Completion<'_> {
             } => {
                 let method = self.methods.get(rule).expect("solved method").clone();
                 match method {
+                    ResolvedMethod::Dependent { signature } => TermKind::DependentMethodCall {
+                        lookup: self.method_lookup(&signature, name.span)?,
+                        receiver: receiver
+                            .as_deref()
+                            .map(|receiver| self.boxed(receiver))
+                            .transpose()?,
+                        arg: self.boxed(arg)?,
+                    },
                     ResolvedMethod::Compiler { declaration } => self.method(
                         declaration,
                         receiver.as_deref(),
@@ -165,15 +173,17 @@ impl Completion<'_> {
                 }
             }
             typed::TermKind::MethodReference { rule, name } => {
-                let ResolvedMethod::Source {
-                    declaration,
-                    type_args,
-                    ..
-                } = self.methods.get(rule).expect("solved method reference")
-                else {
-                    unreachable!("source method reference");
-                };
-                self.reference(*declaration, name, type_args, true)?
+                match self.methods.get(rule).expect("solved method reference") {
+                    ResolvedMethod::Source {
+                        declaration,
+                        type_args,
+                        ..
+                    } => self.reference(*declaration, name, type_args, true)?,
+                    ResolvedMethod::Dependent { signature } => TermKind::DependentMethod {
+                        lookup: self.method_lookup(signature, name.span)?,
+                    },
+                    ResolvedMethod::Compiler { .. } => unreachable!("source method reference"),
+                }
             }
             typed::TermKind::Call { func, arg } => self.call(func, arg)?,
             typed::TermKind::Ascribe { ty, arg } => {
@@ -395,6 +405,13 @@ impl Completion<'_> {
             function,
             stage: entry.stage.clone(),
         })
+    }
+
+    fn method_lookup(&self, signature: &Type, span: Span) -> Result<crate::MethodLookup> {
+        let crate::Type::Method { lookup } = self.solver.require_complete(signature, span)? else {
+            unreachable!("dependent method signature");
+        };
+        Ok(*lookup)
     }
 
     fn source_method_call(

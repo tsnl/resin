@@ -11,8 +11,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Put each phase's public language definitions and operations in `lib.rs`. Keep incoming
   translation in private `lower` modules and textual rendering in private `print` modules.
   A crate's complete public contract should be discoverable from its entry point.
-- HIR is a typed, desugared tree with resolved bindings, calls, and operations. Source
-  scopes, method namespaces, inference variables, and recovery belong to HIR construction.
+- HIR is a typed, desugared tree with resolved bindings and explicit operation relations.
+  Source scopes, inference variables, and recovery belong to HIR construction. Completed
+  nominal declarations retain method identities for dependent lookup during specialization.
   HIR construction establishes definite initialization while completing each body,
   including unused definitions. Follow runtime evaluation order and intersect branch
   states there; LIR storage lowering has no source initialization states or branch snapshots.
@@ -30,7 +31,10 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   names, and explicit conversion relations. Select numeric representations, field indices,
   and conversion operations during LIR specialization. `Type::Member` determines a field
   type from its substituted receiver; it does not infer the receiver from a desired field
-  type. Keep literal parsing and concrete conversion rules in `resin-types`; LIR never
+  type. `Type::Method` retains a receiver namespace and completed method arguments;
+  `FunctionParameter` and `FunctionResult` project its caller-facing signature. Dependent
+  calls and references select source nominal methods during specialization, without
+  inferring receivers or method arguments. Keep literal parsing and concrete conversion rules in `resin-types`; LIR never
   chooses numeric defaults. Source-known failures are still diagnosed during HIR construction.
 - HIR function signatures retain named type binders; function references retain completed
   type arguments. LIR keys instances by definition, normalized arguments, and Host/Shader
@@ -239,8 +243,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   the target namespace and cannot add methods. Local structs are field-only.
   `value.method(args)` supplies the receiver as the first argument,
   while `(value.field)(args)` calls a field value. Receiver parameter names are ordinary
-  identifiers. Desugar method calls into ordinary functions before IR; method namespaces
-  and module origins belong to frontend metadata. Compiler-provided methods use the
+  identifiers. Resolve source-known methods into ordinary HIR calls; dependent methods
+  become ordinary calls during LIR specialization, before storage lowering. Compiler-provided methods use the
   same declaration lookup, argument checking, and editor analysis as source methods;
   register their signatures and intrinsic operations in `crates/resin-hir/src/lower/context.rs`.
   HIR construction recognizes `drop` as a hook; direct calls remain ordinary calls.
@@ -292,6 +296,10 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Method turbofish arguments supply only those additional parameters; owner arguments
   come from the receiver or applied type. An associated method reference includes its
   receiver parameter, with no implicit bound closure. Drop hooks bind only owner parameters.
+  A bound receiver whose nominal origin is unknown retains dependent field/method lookup.
+  Such method applications require explicit additional type arguments; a missing turbofish
+  supplies none. This lookup selects source-declared nominal methods. Signature queries
+  determine argument and result types without adding inference to LIR.
   Check source expressions into HIR, then lower that tree to LIR in a separate pass.
   Resolve dependency groups and all inference variables before handing the tree to lowering;
   retain named binders and determining member types in HIR. Scopes store these HIR schemes.

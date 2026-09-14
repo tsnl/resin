@@ -124,6 +124,7 @@ impl FunctionLowering<'_> {
             self.emit(Instr::ArcData);
             base_ty = pointee;
             is_place = true;
+            gpu = false;
         }
         if is_place {
             self.emit_place_conv(&access.steps);

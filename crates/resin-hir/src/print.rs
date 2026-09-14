@@ -178,6 +178,19 @@ impl Printer {
                     .chain(type_args.iter().map(|ty| self.ty(ty)))
                     .collect(),
             ),
+            TermKind::DependentMethod { lookup } => {
+                list("dependent-method", vec![quoted(self.types.method(lookup))])
+            }
+            TermKind::DependentMethodCall {
+                lookup,
+                receiver,
+                arg,
+            } => {
+                let mut fields = vec![quoted(self.types.method(lookup))];
+                fields.extend(receiver.iter().map(|receiver| self.term(receiver)));
+                fields.push(self.term(arg));
+                list("dependent-method-call", fields)
+            }
             TermKind::Shader { function, stage } => {
                 list("spirv", vec![function_id(function.index()), atom(stage)])
             }
@@ -398,6 +411,13 @@ impl TypeNames {
                 .map(ToString::to_string)
                 .unwrap_or_else(|| format!("T{}", parameter.index())),
             Type::Member { base, name } => format!("{}.{}", self.format(base), name),
+            Type::Method { lookup } => self.method(lookup),
+            Type::FunctionParameter { function } => {
+                format!("parameter({})", self.format(function))
+            }
+            Type::FunctionResult { function } => {
+                format!("result({})", self.format(function))
+            }
             Type::Defined {
                 definition,
                 arguments,
@@ -452,5 +472,17 @@ impl TypeNames {
                 format!("({}) -> {}", self.format(param), self.format(result))
             }
         }
+    }
+
+    fn method(&self, lookup: &crate::MethodLookup) -> String {
+        let receiver = self.format(&lookup.receiver);
+        let arguments = lookup
+            .type_args
+            .iter()
+            .map(|ty| self.format(ty))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let access = if lookup.associated { "::" } else { "." };
+        format!("method({receiver}{access}{}::<{arguments}>)", lookup.name)
     }
 }

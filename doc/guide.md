@@ -569,6 +569,20 @@ results. `Cell<int>.read` is a function value whose first parameter is still the
 receiver. A generic `drop(self: Ptr<Cell<T>>)` hook uses the owner's parameters
 and cannot add its own.
 
+When a receiver's nominal type is itself a parameter, method lookup is dependent:
+
+```resin
+def read<T>(value: T) -> _ = { value.read() };
+def replace<T, U>(value: T, next: U) -> _ = {
+    value.replace_with::<U>(next)
+};
+```
+
+Each concrete application selects the source-declared method and checks the call.
+Dependent methods can be chained with field accesses, and associated calls or
+references can use `T.method::<U>`. Additional method parameters require explicit
+arguments when the receiver's namespace is unknown. See [methods](methods.md).
+
 `_` is a weak inference variable in local annotations, function results, and
 explicit applications. It may resolve to a named parameter but never creates
 another generic parameter. Unsuffixed literals follow expected types before
