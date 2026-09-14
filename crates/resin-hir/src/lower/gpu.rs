@@ -127,11 +127,8 @@ impl Context {
         };
         match method.body {
             FunctionBody::GpuPipelineFactory { graphics, .. } => {
-                let kind = if graphics {
-                    "GpuGraphicsPipeline"
-                } else {
-                    "GpuComputePipeline"
-                };
+                let (_, pipeline) = self.source_pipeline_type(graphics)?;
+                let kind = &pipeline.name;
                 let shaders = if graphics {
                     "vertex: @vertex_shader, fragment: @fragment_shader"
                 } else {
@@ -144,11 +141,8 @@ impl Context {
                 ))
             }
             FunctionBody::GpuPipelineRecord { graphics, .. } => {
-                let kind = if graphics {
-                    "GpuGraphicsPipeline"
-                } else {
-                    "GpuComputePipeline"
-                };
+                let (_, pipeline) = self.source_pipeline_type(graphics)?;
+                let kind = &pipeline.name;
                 let dimensions = if graphics {
                     "count: uint"
                 } else {
@@ -190,6 +184,21 @@ impl Context {
         }
     }
 
+    fn source_pipeline_type(&self, graphics: bool) -> Option<(TypeId, &crate::TypeDefinition)> {
+        let kind = if graphics {
+            resin_types::GpuPipelineKind::Graphics
+        } else {
+            resin_types::GpuPipelineKind::Compute
+        };
+        self.nominal_schemes.iter().find_map(|(id, source)| {
+            source
+                .gpu_pipeline
+                .as_ref()
+                .filter(|pipeline| pipeline.kind == kind)
+                .map(|_| (*id, source))
+        })
+    }
+
     fn source_pipeline_factory(
         &self,
         factory: FunctionId,
@@ -225,21 +234,8 @@ impl Context {
         else {
             unreachable!()
         };
-        let kind = if graphics {
-            resin_types::GpuPipelineKind::Graphics
-        } else {
-            resin_types::GpuPipelineKind::Compute
-        };
-        let definition = self
-            .nominal_schemes
-            .iter()
-            .find_map(|(id, scheme)| {
-                scheme
-                    .gpu_pipeline
-                    .as_ref()
-                    .filter(|p| p.kind == kind)
-                    .map(|_| *id)
-            })
+        let (definition, _) = self
+            .source_pipeline_type(graphics)
             .ok_or("no source pipeline type is registered for this shader stage")?;
         let value = Type::Defined {
             definition,
@@ -350,6 +346,40 @@ impl Context {
         if depth >= 128 {
             return Err("GPU projection type exceeds the depth limit".into());
         }
+        if let Some(projection) = self.registered_projection(target)? {
+            return Ok(projection);
+        }
+        match target {
+            Type::Defined { .. } => {
+                let body = super::gpu_projections::body(self, target)
+                    .ok_or("incomplete shader root declaration")?;
+                self.source_projection(&body, depth + 1)
+            }
+            Type::Record { fields } => Ok(Type::Record {
+                fields: fields
+                    .iter()
+                    .map(|field| {
+                        Ok(crate::RecordField {
+                            name: field.name.clone(),
+                            ty: self.source_projection(&field.ty, depth + 1)?,
+                        })
+                    })
+                    .collect::<Result<_, String>>()?,
+            }),
+            Type::Array { element, length } => Ok(Type::Array {
+                element: Box::new(self.source_projection(element, depth + 1)?),
+                length: *length,
+            }),
+            Type::Pointer { .. } => {
+                Err("shader pointer requires an explicitly registered GPU projection".into())
+            }
+            _ => Ok(target.clone()),
+        }
+    }
+
+    fn registered_projection(&self, target: &crate::Type) -> Result<Option<crate::Type>, String> {
+        use crate::Type;
+        let mut candidates = Vec::new();
         for (definition, source) in &self.nominal_schemes {
             let Some(projection) = &source.gpu_projection else {
                 continue;
@@ -378,38 +408,29 @@ impl Context {
                 .as_ref()
                     == Some(target)
                 {
-                    return Ok(Type::Defined {
+                    candidates.push(Type::Defined {
                         definition: *definition,
                         arguments,
                     });
                 }
             }
         }
-        match target {
-            Type::Defined { .. } => {
-                let body = super::gpu_projections::body(self, target)
-                    .ok_or("incomplete shader root declaration")?;
-                self.source_projection(&body, depth + 1)
-            }
-            Type::Record { fields } => Ok(Type::Record {
-                fields: fields
-                    .iter()
-                    .map(|field| {
-                        Ok(crate::RecordField {
-                            name: field.name.clone(),
-                            ty: self.source_projection(&field.ty, depth + 1)?,
-                        })
-                    })
-                    .collect::<Result<_, String>>()?,
-            }),
-            Type::Array { element, length } => Ok(Type::Array {
-                element: Box::new(self.source_projection(element, depth + 1)?),
-                length: *length,
-            }),
-            Type::Pointer { .. } => {
-                Err("shader pointer requires an explicitly registered GPU projection".into())
-            }
-            _ => Ok(target.clone()),
+        if candidates.len() <= 1 {
+            return Ok(candidates.pop());
         }
+        let mut names = candidates
+            .iter()
+            .map(|candidate| {
+                let Type::Defined { definition, .. } = candidate else {
+                    unreachable!("registered projection candidate")
+                };
+                format!("`{}`", self.nominal_schemes[definition].name)
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        Err(format!(
+            "shader storage has ambiguous GPU projections: {}",
+            names.join(", ")
+        ))
     }
 }
