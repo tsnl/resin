@@ -138,18 +138,18 @@ fn source_owned_wrappers_retain_payloads_and_borrow_temporary_receivers() {
 }
 
 #[test]
-fn host_allocates_initialized_typed_storage_and_reports_overflow() {
+fn source_owners_allocate_initialized_typed_storage_and_reports_overflow() {
     let output = run(
         r#"
         export { main };
-        import { "$/host.resin", "$/status.resin" };
+        import { "$/shared.resin", "$/span.resin", "$/status.resin" };
         struct Empty {};
         def main() -> Result<int, _> = {
-            var weak = WeakSpan<uint>();
+            var weak = WeakSpan<uint>.empty();
             var valid = 1 == 1;
             {
                 var memory: ArcSpan<uint>;
-                memory := Host.alloc(4, 7_ui)?;
+                memory := ArcSpan<uint>.alloc(4, 7_ui)?;
                 weak := memory.downgrade();
                 var alias = memory;
                 var values = memory.get();
@@ -159,21 +159,21 @@ fn host_allocates_initialized_typed_storage_and_reports_overflow() {
                 valid := valid && values.as_bytes().length == 4_ul * size_of(uint);
                 var upgraded = weak.upgrade()!;
                 valid := valid && upgraded.get().at(3).* == 42_ui;
-                var descriptor = ArcPtr<Span<uint>>(values);
+                var descriptor = ArcPtr<Span<uint>>.alloc(values)?;
                 var previous = descriptor.get().replace(Span<uint> { data = values.data, length = 2_ul });
-                valid := valid && previous.length == 4_ul && descriptor.length == 2_ul;
+                valid := valid && previous.length == 4_ul && descriptor.get().length == 2_ul;
                 valid := valid && memory.get().length == 4_ul;
             };
             var expired = match (weak.upgrade()) {
                 ArcSpan<uint>(owner) => { 1 == 0 },
                 None => { 1 == 1 },
             };
-            var empty = Host.alloc(0, 0_ui)?;
+            var empty = ArcSpan<uint>.alloc(0, 0_ui)?;
             valid := valid && empty.get().length == 0_ul;
-            var empty_elements = Host.alloc(19, Empty {})?;
+            var empty_elements = ArcSpan<Empty>.alloc(19, Empty {})?;
             valid := valid && empty_elements.get().length == 19_ul;
             var failure: Result<ArcSpan<uint>, OutOfMemory>;
-            failure := Host.alloc(0xffffffffffffffff_ul, 0_ui);
+            failure := ArcSpan<uint>.alloc(0xffffffffffffffff_ul, 0_ui);
             var failed = match (failure) {
                 ok(memory) => { 1 == 0 },
                 err(error) => { 1 == 1 },
@@ -189,9 +189,9 @@ fn host_allocates_initialized_typed_storage_and_reports_overflow() {
     let output = run(
         r#"
         export { main };
-        import { "$/host.resin" };
+        import { "$/shared.resin" };
         def main() -> Result<(), _> = {
-            Host.alloc(0xffffffffffffffff_ul, 0_ui)?;
+            ArcSpan<uint>.alloc(0xffffffffffffffff_ul, 0_ui)?;
             ok(())
         };
         "#,
@@ -209,16 +209,21 @@ fn owned_spans_release_managed_elements_on_success_and_error() {
     let output = run(
         r#"
         export { main };
-        import { "$/host.resin" };
+        import { "$/shared.resin" };
         struct Failed {};
         struct Item {
             trace: Ptr<int>,
             digit: int,
-            def drop(self: Ptr<Item>) = { self.trace.* := self.trace.* * 10 + self.digit; };
+            def drop(self: Ptr<Item>) = { if (self.digit != 0) { self.trace.* := self.trace.* * 10 + self.digit; }; };
+        };
+        def item(trace: Ptr<int>, digit: int) -> Result<ArcPtr<Item>, _> = {
+            var owner = ArcPtr<Item>.alloc(Item { trace = trace, digit = 0 })?;
+            owner.get().digit := digit;
+            ok(owner)
         };
         def work(trace: Ptr<int>, fail: bool) -> Result<(), _> = {
-            var values = Host.alloc(2, ArcPtr<Item> { trace = trace, digit = 1 })?;
-            values.get().at(1).* := ArcPtr<Item> { trace = trace, digit = 2 };
+            var values = ArcSpan<ArcPtr<Item>>.alloc(2, item(trace, 1)?)?;
+            values.get().at(1).* := item(trace, 2)?;
             var alias = values;
             if (fail) { err(Failed {}) } else { ok(()) }
         };
@@ -233,7 +238,7 @@ fn owned_spans_release_managed_elements_on_success_and_error() {
             };
             valid := valid && failed && trace == 21;
             trace := 0;
-            var rejected = match (Host.alloc(0xffffffffffffffff_ul, ArcPtr<Item> { trace = &trace, digit = 3 })) {
+            var rejected = match (ArcSpan<ArcPtr<Item>>.alloc(0xffffffffffffffff_ul, item(&trace, 3)?)) {
                 ok(values) => { 1 == 0 },
                 err(error) => { 1 == 1 },
             };
@@ -246,48 +251,27 @@ fn owned_spans_release_managed_elements_on_success_and_error() {
 }
 
 #[test]
-fn direct_owned_span_construction_returns_optional_initialized_storage() {
-    let output = run(
-        r#"
-        export { main };
-        def main() -> int = {
-            var values = ArcSpan<uint>.try_new(3, 7_ui)!;
-            var view = values.get();
-            var valid = view.length == 3_ul && view.at(0).* == 7_ui && view.at(2).* == 7_ui;
-            var rejected = match (ArcSpan<uint>.try_new(0xffffffffffffffff_ul, 0_ui)) {
-                ArcSpan<uint>(owner) => { 1 == 0 },
-                None => { 1 == 1 },
-            };
-            if (valid && rejected) { 0 } else { 1 }
-        };
-        "#,
-        "",
-    );
-    success(&output);
-}
-
-#[test]
 fn generic_owned_span_methods_preserve_lifetimes_and_widened_results() {
     let output = run(
         r#"
         export { main };
-        import { "$/host.resin", "$/status.resin" };
+        import { "$/shared.resin", "$/span.resin", "$/status.resin" };
         struct Other {};
         def allocate<T>(count: ulong, initial: T) -> Result<ArcSpan<T>, OutOfMemory | Other> = {
-            Host.alloc(count, initial)
+            ArcSpan<T>.alloc(count, initial)
         };
         def optional<T>(count: ulong, initial: T) -> ArcSpan<T> | None = {
-            ArcSpan<T>.try_new(count, initial)
+            match (ArcSpan<T>.alloc(count, initial)) { ok(owner) => { owner }, err(error) => { None } }
         };
         def borrowed<T>(owner: Ptr<ArcSpan<T>>) -> Span<T> = { owner.get() };
         def weaken<T>(owner: ArcSpan<T>) -> WeakSpan<T> = { owner.downgrade() };
         def upgrade<T>(weak: WeakSpan<T>) -> ArcSpan<T> | None | Other = { weak.upgrade() };
         def first<T>(initial: T) -> T = {
-            var owner = ArcSpan<T>.try_new(1, initial)!;
+            var owner = optional(1, initial)!;
             owner.get().at(0).*
         };
         def main() -> Result<int, _> = {
-            var weak = WeakSpan<uint>();
+            var weak = WeakSpan<uint>.empty();
             var valid = 1 == 1;
             {
                 var owner = allocate(2, 7_ui)?;
@@ -330,9 +314,9 @@ fn generic_owned_span_methods_preserve_lifetimes_and_widened_results() {
 fn borrowed_span_slices_preserve_aliases_and_accept_empty_null_views() {
     let output = run(
         r#"
-        export { main };
-        def main() -> int = {
-            var values = ArcSpan<uint>.try_new(4, 0_ui)!;
+        export { main }; import { "$/shared.resin", "$/span.resin" };
+        def main() -> Result<int, _> = {
+            var values = ArcSpan<uint>.alloc(4, 0_ui)?;
             var view = values.get();
             var middle = view.slice(1, 2);
             var alias = middle;
@@ -344,7 +328,7 @@ fn borrowed_span_slices_preserve_aliases_and_accept_empty_null_views() {
             var null_view = Span<uint> { data = Ptr<uint>(0_ul), length = 0_ul };
             var empty = null_view.slice(0, 0);
             valid := valid && empty.length == 0_ul && ulong(empty.data) == 0_ul;
-            if (valid) { 0 } else { 1 }
+            ok(if (valid) { 0 } else { 1 })
         };
         "#,
         "",
@@ -369,7 +353,7 @@ fn borrowed_span_slice_and_byte_length_overflow_trap_before_memory_access() {
         let output = run(
             &format!(
                 r#"
-                export {{ main }};
+                export {{ main }}; import {{ "$/span.resin", "$/string.resin" }};
                 def main() = {{
                     var view = Span<uint> {{ data = Ptr<uint>(0_ul), length = 2_ul }};
                     {operation};
@@ -531,7 +515,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     let output = run(
         r#"
         export { main };
-        import { "$/image.resin", "$/status.resin" };
+        import { "$/image.resin", "$/span.resin", "$/status.resin" };
         def main() -> Result<int, _> = {
             var path = "pixel.png";
             var pixels = [ubyte(1), ubyte(2), ubyte(3), ubyte(255)];
@@ -555,7 +539,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     ] {
         let output = run(
             &format!(
-                "export {{ main }}; import {{ \"$/image.resin\", \"$/string.resin\" }}; struct Cleanup {{ def drop(self: Ptr<Cleanup>) = {{ print(fmt(\"cleanup\\n\", ())); }}; }};  def main() -> Result<(), _> = {{ var path = \"missing/pixel.png\"; var pixels = [0_ub, 0_ub, 0_ub, 0_ub]; var cleanup = Cleanup {{}}; {call}; ok(()) }};"
+                "export {{ main }}; import {{ \"$/image.resin\", \"$/span.resin\", \"$/string.resin\" }}; struct Cleanup {{ def drop(self: Ptr<Cleanup>) = {{ print(fmt(\"cleanup\\n\", ())); }}; }};  def main() -> Result<(), _> = {{ var path = \"missing/pixel.png\"; var pixels = [0_ub, 0_ub, 0_ub, 0_ub]; var cleanup = Cleanup {{}}; {call}; ok(()) }};"
             ),
             "",
         );
@@ -581,7 +565,7 @@ fn png_pixel_views_check_dimensions_padding_and_storage_before_native_access() {
             &format!(
                 r#"
                 export {{ main }};
-                import {{ "$/image.resin", "$/status.resin" }};
+                import {{ "$/image.resin", "$/span.resin", "$/status.resin" }};
                 def main() -> int = {{
                     var pixels = [0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub];
                     var bytes = Span<ubyte> {{ data = pixels.at(0), length = {length}_ul }};
@@ -600,13 +584,13 @@ fn png_pixel_views_check_dimensions_padding_and_storage_before_native_access() {
     let output = run(
         r#"
         export { main };
-        import { "$/image.resin" };
+        import { "$/image.resin", "$/span.resin" };
         def main() -> Result<int, _> = {
             var pixels = [1_ub, 2_ub, 3_ub, 255_ub, 99_ub, 4_ub, 5_ub, 6_ub, 255_ub, 99_ub];
             var bytes = Span<ubyte> { data = pixels.at(0), length = 10_ul };
             ImageData.write_pixels("padded.png".data, 1, 2, 4, bytes, 5)?;
             var image = ImageData.read_png("padded.png".data, 0)?;
-            var loaded = Span<ubyte> { data = image.pixels, length = 8_ul };
+            var loaded = image.pixels();
             ok(if (loaded.at(0).* == 1_ub && loaded.at(4).* == 4_ub) { 0 } else { 1 })
         };
         "#,
@@ -836,7 +820,7 @@ fn byte_input_reports_stream_errors_instead_of_eof() {
     let output = run(
         r#"
         export { main };
-        import { "$/console.resin" };
+        import { "$/console.resin", "$/string.resin" };
         struct Cleanup {
             def drop(self: Ptr<Cleanup>) = { print("cleanup\n"); };
         };
@@ -951,10 +935,10 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
     let output = run(
         r#"
         export { main };
-        import { "$/window.resin" };
+        import { "$/window.resin", "$/string.resin" };
         def coordinates(point: (float64, float64)) -> bool = { point.0 == 12.5_d && point.1 == -3.25_d };
         def main() -> Result<int, _> = {
-            var window = Window { handle = Ptr<ResinWindow>(0_ul) };
+            var window = Window.new(16_ui, 16_ui, String.from_str("input snapshot"))?;
             var key = window.key_state(Window.keys().w);
             var mouse = window.mouse_button_state(Window.mouse_buttons().left);
             var valid = !key.down && key.pressed && key.released && mouse.down && mouse.pressed && !mouse.released;
@@ -969,6 +953,12 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
         r#"
         #include <resin_runtime.h>
         #include <assert.h>
+        static ResinStatus mock_window_create(uint32_t width, uint32_t height, const char *title, ResinWindow **out) {
+            assert(width == 16 && height == 16 && title);
+            *out = NULL;
+            return RESIN_STATUS_SUCCESS;
+        }
+        #define resin_window_create mock_window_create
         static uint32_t mock_key_state(const ResinWindow *window, int key) {
             assert(window == NULL && key == 87);
             return RESIN_INPUT_PRESSED | RESIN_INPUT_RELEASED;

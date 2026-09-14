@@ -1,12 +1,9 @@
-use resin_hir::GenerateErrorKind;
 use resin_types::prelude::*;
 use tempfile::TempDir;
 #[path = "support/toolchain.rs"]
 mod toolchain;
 use std::{ffi::OsString, process::Command};
 use support::pipeline;
-
-use resin_lir::Instr;
 
 mod support;
 use support::module;
@@ -41,38 +38,11 @@ fn prints(source: &str, expected: &[u8]) {
 }
 
 #[test]
-fn print_is_unary_and_returns_unit() {
-    let m = module(
-        r#"export { main }; def main() -> () = { var n = 42; print(fmt("x = {0}\n", (n,))); };"#,
-    );
-    let calls: Vec<_> = m
-        .functions
-        .iter()
-        .flat_map(|f| &f.blocks)
-        .flat_map(|b| &b.instrs)
-        .filter_map(|instr| match instr {
-            Instr::CallBuiltin {
-                name,
-                params,
-                result,
-            } if name.as_ref() == "print" => Some((params, result)),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(calls.len(), 1);
-    let (params, result) = calls[0];
-    assert!(
-        matches!(params.as_slice(), [Ty::Defined { definition }] if m.types[definition.index()].name().unwrap().as_ref() == "String")
-    );
-    assert_eq!(result, &Ty::Unit);
-    let typer = TyperContext::from_definitions(m.types.clone());
-    assert_eq!(
-        typer.type_builtin_call("print", params).unwrap().result,
-        Ty::Unit
-    );
-
+fn print_is_an_ordinary_source_function_returning_unit() {
     prints(
-        r#"export { main }; def main() -> () = { var n = 42; print(fmt("x = {0}\n", (n,))); };"#,
+        r#"export { main }; import { "$/string.resin" };
+        def output(value: str) = { print(value) };
+        def main() = { output("x = "); print(fmt("{0}\n", (42,))); };"#,
         b"x = 42\n",
     );
 }
@@ -80,15 +50,15 @@ fn print_is_unary_and_returns_unit() {
 #[test]
 fn formats_are_length_delimited_and_do_not_add_newlines() {
     prints(
-        r#"export { main }; def main() -> () = { print(""); print("héllo\t\"\\\r\n\0%"); };"#,
+        r#"export { main }; import { "$/string.resin" }; def main() -> () = { print(""); print("héllo\t\"\\\r\n\0%"); };"#,
         "héllo\t\"\\\r\n\0%".as_bytes(),
     );
     prints(
-        r#"export { main }; def main() -> () = { print(fmt("{{{1}}}: {0}, {1}", ("{not a format}%\0", "世界"))); };"#,
+        r#"export { main }; import { "$/string.resin" }; def main() -> () = { print(fmt("{{{1}}}: {0}, {1}", ("{not a format}%\0", "世界"))); };"#,
         "{世界}: {not a format}%\0, 世界".as_bytes(),
     );
     prints(
-        r#"export { main }; def main () -> () = { var format_text = "{0}!"; print(fmt(format_text, ("",))); };"#,
+        r#"export { main }; import { "$/string.resin" }; def main () -> () = { var format_text = "{0}!"; print(fmt(format_text, ("",))); };"#,
         b"!",
     );
 }
@@ -104,7 +74,7 @@ fn string_storage_is_terminated_without_changing_its_logical_length() {
     let c = std::fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
     assert!(c.contains("static uint8_t r_literal_"), "{c}");
     prints(
-        r#"export { main };
+        r#"export { main }; import { "$/string.resin" };
 
         extern "string.h" def strlen(text: Ptr<ubyte>) -> ulong;
         def main() -> int = {
@@ -127,7 +97,7 @@ fn string_storage_is_terminated_without_changing_its_logical_length() {
 #[test]
 fn embedded_and_explicit_trailing_nuls_are_not_truncated() {
     prints(
-        r#"export { main };
+        r#"export { main }; import { "$/string.resin" };
 
         extern "string.h" def strlen(text: Ptr<ubyte>) -> ulong;
         def main() -> int = {
@@ -143,14 +113,14 @@ fn embedded_and_explicit_trailing_nuls_are_not_truncated() {
         b"before\0a\0b\0after",
     );
     prints(
-        r#"export { main }; def main() -> () = { var bytes = [ubyte(65), ubyte(0), ubyte(66), ubyte(0)]; print(fmt("{0}", (Span<ubyte> { data = Ptr<ubyte>(&bytes), length = 4_ul },))); };"#,
+        r#"export { main }; import { "$/string.resin", "$/span.resin" }; def main() -> () = { var bytes = [ubyte(65), ubyte(0), ubyte(66), ubyte(0)]; print(fmt("{0}", (Span<ubyte> { data = Ptr<ubyte>(&bytes), length = 4_ul }.bytes(),))); };"#,
         b"A\0B\0",
     );
 }
 
 #[test]
 fn numeric_widths_and_scalar_types() {
-    prints(r#"export { main };
+    prints(r#"export { main }; import { "$/string.resin" };
 
 def main() -> () = {
     print(fmt("{0} {1} {2} {3} {4} {5} {6} {7}\n", (
@@ -165,7 +135,7 @@ def main() -> () = {
 #[test]
 fn aliases_preserve_scalar_printing() {
     prints(
-        r#"export { main }; type Meters = int; type Distance = Meters; def main() -> () = { print(fmt("{0}", (Distance (Meters (42)),))); };"#,
+        r#"export { main }; import { "$/string.resin" }; type Meters = int; type Distance = Meters; def main() -> () = { print(fmt("{0}", (Distance (Meters (42)),))); };"#,
         b"42",
     );
 }
@@ -173,7 +143,7 @@ fn aliases_preserve_scalar_printing() {
 #[test]
 fn arguments_evaluate_once_in_source_order_even_when_unused() {
     prints(
-        r#"export { main }; def main() -> () = { var n = 0; print(fmt("{1} {0} {1}", ((n := n + 1), (n := n + 1), (n := n + 1)))); print(fmt(" {0}", (n,))); };"#,
+        r#"export { main }; import { "$/string.resin" }; def main() -> () = { var n = 0; print(fmt("{1} {0} {1}", ((n := n + 1), (n := n + 1), (n := n + 1)))); print(fmt(" {0}", (n,))); };"#,
         b"2 1 2 3",
     );
 }
@@ -182,7 +152,7 @@ fn arguments_evaluate_once_in_source_order_even_when_unused() {
 fn ordinary_and_recursive_functions_can_print() {
     prints(
         r#"
-        export { main };
+        export { main }; import { "$/string.resin" };
         def show (n: int) -> () = { print(fmt("{0}", (n,))); };
         def countdown (n: int) -> int = { print(fmt("{0}", (n,))); if (n > 0) { countdown(n - 1) } else { 0 } };
         def main () -> int = {
@@ -196,17 +166,17 @@ fn ordinary_and_recursive_functions_can_print() {
 }
 
 #[test]
-fn print_cannot_be_shadowed_by_a_local_or_parameter() {
-    for source in [
-        "export { main }; def main () -> () = { var print = 1; };",
-        "def apply (print: (int) -> int) -> int = { print(41) };",
-    ] {
-        let error = pipeline::generate(&support::parse(source)).unwrap_err();
-        assert!(
-            matches!(error.kind, GenerateErrorKind::ReservedBuiltin { .. }),
-            "{error}"
-        );
-    }
+fn imported_print_can_be_shadowed_by_a_local_or_parameter() {
+    let output = run(r#"export { main }; import { "$/string.resin" };
+        def increment(value: int) -> int = { value + 1 };
+        def apply(print: (int) -> int) -> int = { print(41) };
+        def main() -> int = {
+            var print = 7;
+            if (print == 7 && apply(increment) == 42) { 0 } else { 1 }
+        };
+    "#);
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
 }
 
 #[test]
@@ -221,14 +191,14 @@ fn invalid_formats_fail_before_writing() {
         "prefix {99999999999999999999999999}",
     ] {
         let output = run(&format!(
-            "export {{ main }}; def main() -> () = {{ print(fmt({format:?}, (42,))); }};"
+            "export {{ main }}; import {{ \"$/string.resin\" }}; def main() -> () = {{ print(fmt({format:?}, (42,))); }};"
         ));
         assert_eq!(output.status.code(), Some(1), "{format}");
         assert!(output.stdout.is_empty(), "{format}");
         assert!(String::from_utf8_lossy(&output.stderr).contains("resin:"));
     }
     assert_eq!(
-        run(r#"export { main }; def main() -> () = { print(fmt("{0}", ())); };"#)
+        run(r#"export { main }; import { "$/string.resin" }; def main() -> () = { print(fmt("{0}", ())); };"#)
             .status
             .code(),
         Some(1)
@@ -239,58 +209,63 @@ fn invalid_formats_fail_before_writing() {
 fn invalid_print_types_are_rejected() {
     for (source, diagnostic) in [
         (
-            r#"export { main }; def main() -> () = { print(fmt("{0}", 1)); };"#,
+            r#"export { main }; import { "$/string.resin" }; def main() -> () = { print(fmt("{0}", 1)); };"#,
             "InvalidFormatArguments",
         ),
         (
-            r#"export { main }; def main() -> () = { print(fmt(1, (2,))); };"#,
-            "InvalidFormatArguments",
+            r#"export { main }; import { "$/string.resin" }; def main() -> () = { print(fmt(1, (2,))); };"#,
+            "TypeMismatch",
         ),
         (
-            r#"export { main }; def main() -> () = { print(fmt("hello")); };"#,
-            "InvalidBuiltinArgumentCount",
+            r#"export { main }; import { "$/string.resin" }; def main() -> () = { print(fmt("hello")); };"#,
+            "arguments, found",
         ),
         (
-            r#"export { main }; def main() -> () = { print(fmt("{0}", (1,), (2,))); };"#,
-            "InvalidBuiltinArgumentCount",
+            r#"export { main }; import { "$/string.resin" }; def main() -> () = { print(fmt("{0}", (1,), (2,))); };"#,
+            "arguments, found",
         ),
         (
-            r#"export { main }; def main() -> () = { print(fmt("{0}", ({ x = 1 },))); };"#,
+            r#"export { main }; import { "$/string.resin" }; def main() -> () = { print(fmt("{0}", ({ x = 1 },))); };"#,
             "UnformattableType",
         ),
         (
-            r#"export { main }; def main() -> () = { print(fmt("{0}", ([1, 2],))); };"#,
+            r#"export { main }; import { "$/string.resin" }; def main() -> () = { print(fmt("{0}", ([1, 2],))); };"#,
             "UnformattableType",
         ),
         (
-            r#"export { main }; def f () -> int = { 1 }; def main() -> () = { print(fmt("{0}", (f,))); };"#,
+            r#"export { main }; import { "$/string.resin" }; def main() = { fmt("{0}", (String.from_str("text"),)); };"#,
+            "UnformattableType",
+        ),
+        (
+            r#"export { main }; import { "$/string.resin", "$/span.resin" }; def main() = { fmt("{0}", (bytes("text"),)); };"#,
+            "UnformattableType",
+        ),
+        (
+            r#"export { main }; import { "$/string.resin" }; struct ByteView { data: Ptr<ubyte>, length: ulong }; def main() = { fmt("{0}", (ByteView { data = "text".data, length = 4_ul },)); };"#,
+            "UnformattableType",
+        ),
+        (
+            r#"export { main }; import { "$/string.resin" }; def f () -> int = { 1 }; def main() -> () = { print(fmt("{0}", (f,))); };"#,
             "UnformattableType",
         ),
     ] {
-        let syntax = resin_cst::Document::reparse(source.to_string(), None);
-        assert!(!syntax.tree().root_node().has_error(), "{source}");
-        let ast = resin_ast::generate(&syntax).unwrap();
-        let error = pipeline::generate(&ast).unwrap_err().to_string();
+        let error = pipeline::source_module(source).unwrap_err().to_string();
         assert!(error.contains(diagnostic), "{source}: {error}");
     }
 }
 
 #[test]
-fn shader_print_has_a_host_only_diagnostic() {
+fn shader_print_rejects_host_only_string_types() {
     let error = pipeline::shader_error(
-        r#"export { kernel }; @compute_shader def kernel (invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); print(fmt("{0}", (i,))); output.* := i; };"#,
+        r#"export { kernel }; import { "$/string.resin", "$/span.resin" }; @compute_shader def kernel(invocation: ulong, text: Ptr<Span<ubyte>>) = { print(text.*); };"#,
     );
-    assert!(
-        error
-            .to_string()
-            .contains("print is only supported in host programs")
-    );
+    assert!(error.contains("shader string"), "{error}");
 }
 
 #[test]
 fn generated_c_uses_the_shared_runtime_header() {
     let project = support::project::Project::new(
-        &module(r#"export { main }; def main() -> () = { print("hello"); };"#),
+        &module(r#"export { main }; import { "$/string.resin" }; def main() -> () = { print("hello"); };"#),
         Some("main"),
     )
     .unwrap();
@@ -327,17 +302,17 @@ fn c_runtime_accepts_empty_buffers_and_pointer_values() {
 fn formatted_strings_retain_storage_and_release_the_last_owner() {
     prints(
         r#"
-        export { main };
+        export { main }; import { "$/string.resin", "$/shared.resin" };
         def make() -> String = { fmt("{0}\0{1}", ("hi", 42)) };
         def main() -> int = {
-            var weak = WeakSpan<ubyte>();
+            var weak = WeakSpan<ubyte>.empty();
             {
                 var original = make();
-                weak := original.bytes.downgrade();
+                weak := original.storage.downgrade();
                 var alias = original;
                 original := fmt("replacement", ());
                 print(alias);
-                print(fmt(fmt("{{0}} {0}", (7,)), (alias,)));
+                print(fmt(fmt("{{0}} {0}", (7,)), (alias.bytes(),)));
             };
             match (weak.upgrade()) {
                 None => { 0 },
@@ -353,14 +328,14 @@ fn formatted_strings_retain_storage_and_release_the_last_owner() {
 fn literal_strings_survive_returns_and_keep_explicit_nuls() {
     prints(
         r#"
-        export { main };
+        export { main }; import { "$/string.resin" };
         extern "string.h" def strlen(p: Ptr<ubyte>) -> ulong;
         def literal() -> str = { "a\0b" };
         def main() -> int = {
             var text = literal();
             var copy = text;
             print(copy);
-            if (text.length == 3_ul && strlen(text.data) == 1_ul && text(2_ul).* == 98_ub) { 0 } else { 1 }
+            if (text.length == 3_ul && strlen(text.data) == 1_ul && text.at(2_ul).* == 98_ub) { 0 } else { 1 }
         };
     "#,
         b"a\0b",
@@ -371,27 +346,27 @@ fn literal_strings_survive_returns_and_keep_explicit_nuls() {
 fn from_bytes_copies_unterminated_spans_verbatim_and_owns_the_result() {
     prints(
         r#"
-        export { main };
+        export { main }; import { "$/string.resin", "$/span.resin", "$/shared.resin" };
         type Caption = String;
         def copied() -> String = {
             var source = [65_ub, 0_ub, 66_ub];
             var result = Caption.from_bytes(Span<ubyte> { data = Ptr<ubyte>(&source), length = 3_ul });
-            source(0_ul).* := 90_ub;
+            source.at(0_ul).* := 90_ub;
             result
         };
         def main() -> int = {
-            var weak = WeakSpan<ubyte>();
+            var weak = WeakSpan<ubyte>.empty();
             {
                 var text = copied();
                 var alias = text;
-                weak := text.bytes.downgrade();
+                weak := text.storage.downgrade();
                 text := String.from_str("{0}} braces");
                 print(alias);
                 print(text);
-                var end = Ptr<ubyte>(ulong(alias.bytes.get().data) + 3_ul);
-                if (alias.bytes.get().length != 3_ul || end.* != 0_ub) { print("bad terminator"); };
+                var end = Ptr<ubyte>(ulong(alias.get().data) + 3_ul);
+                if (alias.get().length != 3_ul || end.* != 0_ub) { print("bad terminator"); };
                 var empty = String.from_bytes(Span<ubyte> { data = Ptr<ubyte>(0_ul), length = 0_ul });
-                if (empty.bytes.get().length != 0_ul || empty.bytes.get().data.* != 0_ub) { print("bad empty string"); };
+                if (empty.get().length != 0_ul || empty.get().data.* != 0_ub) { print("bad empty string"); };
             };
             match (weak.upgrade()) {
                 None => { 0 },
@@ -406,11 +381,11 @@ fn from_bytes_copies_unterminated_spans_verbatim_and_owns_the_result() {
 #[test]
 fn byte_spans_print_their_length_including_nuls_and_empty_views() {
     prints(
-        r#"export { main }; def main() = {
+        r#"export { main }; import { "$/string.resin", "$/span.resin" }; def main() = {
             var bytes = [65_ub, 0_ub, 66_ub, 67_ub];
-            var view = Span<ubyte> { data = bytes(0), length = 3_ul };
+            var view = Span<ubyte> { data = bytes.at(0), length = 3_ul };
             var empty = Span<ubyte> { data = Ptr<ubyte>(0_ul), length = 0_ul };
-            print(fmt("[{0}][{1}]", (view, empty)));
+            print(fmt("[{0}][{1}]", (view.bytes(), empty.bytes())));
         };"#,
         b"[A\0B][]",
     );
@@ -419,31 +394,38 @@ fn byte_spans_print_their_length_including_nuls_and_empty_views() {
 #[test]
 fn literal_strings_have_a_distinct_type_and_require_explicit_byte_views() {
     let m = module(
-        r#"def literal() -> str = { "bytes" }; def bytes() -> Span<ubyte> = { Span<ubyte>("bytes") };"#,
+        r#"import { "$/span.resin" }; def literal() -> str = { "bytes" }; def view() -> Span<ubyte> = { bytes("bytes") };"#,
     );
-    assert_eq!(m.functions[0].result, Ty::Str);
-    assert_eq!(m.functions[1].result, Ty::byte_span());
-    assert_ne!(m.types.id(&Ty::Str), m.types.id(&Ty::byte_span()));
+    let literal = m
+        .functions
+        .iter()
+        .find(|f| f.name.as_deref() == Some("literal"))
+        .unwrap();
+    let view = m
+        .functions
+        .iter()
+        .find(|f| f.name.as_deref() == Some("view"))
+        .unwrap();
+    assert_eq!(literal.result, Ty::Str);
+    assert!(matches!(view.result, Ty::Defined { .. }));
+    assert_ne!(m.types.id(&literal.result), m.types.id(&view.result));
     for source in [
-        r#"def bad() -> Span<ubyte> = { "bytes" };"#,
-        r#"def bad(bytes: Span<ubyte>) -> str = { str(bytes) };"#,
-        r#"def bad() -> str = { str() };"#,
-        r#"def bad() -> str = { str { data = "bytes".data, length = 5_ul } };"#,
-        r#"def bad() = { String.from_str(Span<ubyte>("bytes")); };"#,
-        r#"def bad() = { String.from_bytes("bytes"); };"#,
+        r#"import { "$/string.resin", "$/span.resin" }; def bad() -> Span<ubyte> = { "bytes" };"#,
+        r#"import { "$/string.resin", "$/span.resin" }; def bad(bytes: Span<ubyte>) -> str = { str(bytes) };"#,
+        r#"import { "$/string.resin", "$/span.resin" }; def bad() -> str = { str() };"#,
+        r#"import { "$/string.resin", "$/span.resin" }; def bad() -> str = { str { data = "bytes".data, length = 5_ul } };"#,
+        r#"import { "$/string.resin", "$/span.resin" }; def bad() = { String.from_str(bytes("bytes")); };"#,
+        r#"import { "$/string.resin", "$/span.resin" }; def bad() = { String.from_bytes("bytes"); };"#,
     ] {
-        assert!(
-            pipeline::generate(&support::parse(source)).is_err(),
-            "{source}"
-        );
+        assert!(pipeline::source_module(source).is_err(), "{source}");
     }
 }
 
 #[test]
 fn literal_byte_views_preserve_storage_while_owned_strings_copy_it() {
     prints(
-        r#"export { main };
-        def view(text: str) -> Span<ubyte> = { Span<ubyte>(text) };
+        r#"export { main }; import { "$/string.resin", "$/span.resin" };
+        def view(text: str) -> Span<ubyte> = { bytes(text) };
         def main() -> int = {
             var text = "hé\0";
             var bytes = view(text);
@@ -451,10 +433,10 @@ fn literal_byte_views_preserve_storage_while_owned_strings_copy_it() {
             var empty = String.from_str("");
             if (text.length == 4_ul && bytes.length == text.length &&
                 ulong(bytes.data) == ulong(text.data) && text.at(1_ul).* == 195_ub &&
-                ulong(owned.bytes.get().data) != ulong(text.data) && owned.bytes.get().length == 4_ul &&
-                Ptr<ubyte>(ulong(owned.bytes.get().data) + 4_ul).* == 0_ub &&
-                empty.bytes.get().length == 0_ul && empty.bytes.get().data.* == 0_ub) {
-                print(fmt(Span<ubyte>("{0}{1}{2}"), (text, bytes, owned)));
+                ulong(owned.get().data) != ulong(text.data) && owned.get().length == 4_ul &&
+                Ptr<ubyte>(ulong(owned.get().data) + 4_ul).* == 0_ub &&
+                empty.get().length == 0_ul && empty.get().data.* == 0_ub) {
+                print(fmt(view("{0}{1}{2}"), (text, bytes.bytes(), owned.bytes())));
                 0
             } else { 1 }
         };"#,
@@ -465,13 +447,13 @@ fn literal_byte_views_preserve_storage_while_owned_strings_copy_it() {
 #[test]
 fn raw_byte_views_and_owned_strings_preserve_non_utf8() {
     prints(
-        r#"export { main }; def main() = {
+        r#"export { main }; import { "$/string.resin", "$/span.resin" }; def main() = {
             var data = [255_ub, 0_ub, 254_ub];
             var bytes = Span<ubyte> { data = data.at(0_ul), length = 3_ul };
             var owned = String.from_bytes(bytes);
             data.at(0_ul).* := 65_ub;
             print(bytes);
-            print(fmt("{0}", (owned,)));
+            print(fmt("{0}", (owned.bytes(),)));
         };"#,
         b"A\0\xfe\xff\0\xfe",
     );

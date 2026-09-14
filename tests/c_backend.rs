@@ -59,14 +59,21 @@ fn array_value_projections_copy_the_element_and_destroy_the_container() {
         let mut program = module(
             r#"
             export { main };
+            import { "$/shared.resin" };
             struct Resource { trace: Ptr<int>, digit: int,
                 def drop(self: Ptr<Resource>) = {
-                    self.trace.* := self.trace.* * 10 + self.digit;
+                    if (self.digit != 0) { self.trace.* := self.trace.* * 10 + self.digit; };
                 };
             };
 
             def make(trace: Ptr<int>, digit: int) -> ArcPtr<Resource> = {
-                ArcPtr<Resource> { trace = trace, digit = digit }
+                var optional: ArcPtr<Resource> | None;
+                optional := match (ArcPtr<Resource>.alloc(Resource { trace = trace, digit = 0 })) {
+                    ok(value) => { value }, err(error) => { None },
+                };
+                var owner = optional!;
+                owner.get().digit := digit;
+                owner
             };
             def main() -> int = { 0 };
         "#,
@@ -79,6 +86,15 @@ fn array_value_projections_copy_the_element_and_destroy_the_container() {
                 .unwrap(),
         );
         let element = program.functions[make.index()].result.clone();
+        let payload = Ty::Defined {
+            definition: TypeId::from_index(
+                program
+                    .types
+                    .iter()
+                    .position(|ty| ty.name().is_some_and(|name| name.as_ref() == "Resource"))
+                    .unwrap(),
+            ),
+        };
         let trace = LocalId::from_index(1);
         let selected = LocalId::from_index(2);
         let int = |value| Push {
@@ -101,8 +117,8 @@ fn array_value_projections_copy_the_element_and_destroy_the_container() {
         instrs.extend([
             SetLocal { local: selected },
             LocalAddress { local: selected },
-            Load,
-            ArcData,
+            AccessStatic { index: 0 },
+            OwnerData { pointee: payload },
             AccessStatic { index: 1 },
             Load,
             DropLocal { local: selected },
@@ -179,7 +195,11 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
         "export { main }; struct Broken {}; def main() -> Result<(), Broken> = { err(Broken {}) };",
     );
     let mut definitions = m.types.to_vec();
-    let TypeDef::Nominal { name, .. } = &mut definitions[1] else {
+    let TypeDef::Nominal { name, .. } = definitions
+        .iter_mut()
+        .find(|ty| ty.name().is_some_and(|name| name.as_ref() == "Broken"))
+        .unwrap()
+    else {
         unreachable!()
     };
     *name = "quoted\"name\\value".into();
@@ -370,13 +390,13 @@ fn expression_cleanup_preserves_scope_order_on_failure_and_success() {
             "[make(trace, 1), { var inner = make(trace, 2); fail()? }]",
             21,
         ),
-        ("[make(trace, 1), make(trace, 2).accept(fail()?)]", 21),
+        ("[make(trace, 1), make(trace, 2).get().accept(fail()?)]", 21),
         (
             "consume(make(trace, 1), { var inner = make(trace, 2); owned_error(trace)? })",
             215,
         ),
         (
-            "last(make(trace, 1), if (make(trace, 3).truth()) { make(trace, 2) } else { make(trace, 4) }, fail()?)",
+            "last(make(trace, 1), if (make(trace, 3).get().truth()) { make(trace, 2) } else { make(trace, 4) }, fail()?)",
             231,
         ),
         (
@@ -386,14 +406,23 @@ fn expression_cleanup_preserves_scope_order_on_failure_and_success() {
     ] {
         let declarations = r#"
             export { main };
+            import { "$/shared.resin" };
             struct Resource { trace: Ptr<int>, digit: int,
-                def drop(self: Ptr<Resource>) = { self.trace.* := self.trace.* * 10 + self.digit; };
+                def drop(self: Ptr<Resource>) = { if (self.digit != 0) { self.trace.* := self.trace.* * 10 + self.digit; }; };
                 def accept(self: Ptr<Resource>, other: ArcPtr<Resource>) -> ArcPtr<Resource> = { other };
                 def truth(self: Ptr<Resource>) -> bool = { 1 == 1 };
             };
             struct Failed {};
             struct OwnedFailed { value: ArcPtr<Resource> };
-            def make(trace: Ptr<int>, digit: int) -> ArcPtr<Resource> = { ArcPtr<Resource> { trace = trace, digit = digit } };
+            def make(trace: Ptr<int>, digit: int) -> ArcPtr<Resource> = {
+                var optional: ArcPtr<Resource> | None;
+                optional := match (ArcPtr<Resource>.alloc(Resource { trace = trace, digit = 0 })) {
+                    ok(value) => { value }, err(error) => { None },
+                };
+                var owner = optional!;
+                owner.get().digit := digit;
+                owner
+            };
             def consume(a: ArcPtr<Resource>, b: ArcPtr<Resource>) = {};
             def last(a: ArcPtr<Resource>, b: ArcPtr<Resource>, c: ArcPtr<Resource>) -> ArcPtr<Resource> = { c };
             def fail() -> Result<ArcPtr<Resource>, Failed> = { err(Failed {}) };
