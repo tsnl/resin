@@ -187,7 +187,10 @@ monomorphic variable and can unify with an enclosing named parameter. Applicatio
 retain substitutions around unresolved definition variables, so recursive dependency
 groups can finish a result from its body without a caller determining it. Unseeded
 cycles and undetermined arguments require annotations. Generic nominal declarations
-and method binders are the next source layers.
+and method binders are the next source layers. The
+[remaining template implementation plan](template-implementation.md) describes
+those extensions and the library-wrapper migration; the foundation described here
+is already implemented.
 
 Transparent aliases use the same lexical type binders, for example
 `type View<T> = Ptr<T>`. Source scopes retain their completed RHS and named parameters;

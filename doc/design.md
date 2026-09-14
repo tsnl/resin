@@ -1,7 +1,12 @@
 # Resin design
 
 The [ownership specification](lifetimes.md) describes `Arc<T>`, `Weak<T>`,
-automatic destruction, and inherent methods through `impl`.
+automatic destruction, and methods inside their owning structs.
+
+The [remaining template design](templates.md) distinguishes the landed function-template
+and alias support from proposed generic structs, method parameters, and standard-library
+wrappers over compiler primitives. Its [implementation plan](template-implementation.md)
+builds on the existing polymorphic HIR and bounded LIR specialization.
 
 Resin is a deliberately small systems programming language in the spirit of C and Go.
 Data layout, mutation, pointers, control flow, and cost stay visible. Reading existing values performs compiler-defined copying; function and type
@@ -36,7 +41,7 @@ when empty.
 
 Initialized locals receive automatic destruction in reverse scope order, including
 loop iterations and early returns through `?`. Return values are preserved before
-cleanup. `impl` defines inherent methods and `drop(self: Ptr<T>)` hooks; the compiler
+cleanup. Structs define inherent methods and `drop(self: Ptr<T>)` hooks; the compiler
 runs the hook before releasing fields. Statement-only chain blocks yield unit.
 Process termination and traps do not unwind scopes.
 
