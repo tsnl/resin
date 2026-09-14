@@ -41,6 +41,62 @@ fn success(output: &std::process::Output) {
 }
 
 #[test]
+fn source_strings_format_explicit_byte_views_and_keep_the_terminator_outside_length() {
+    let output = run(
+        r#"
+        export { main };
+        import { "$/span.resin", "$/shared.resin", "$/string.resin" };
+        def main() -> int = {
+            var bytes = [65_ub, 0_ub, 66_ub];
+            var text = String.from_bytes(Span<ubyte> { data = bytes.at(0), length = 3_ul });
+            var weak = text.storage.downgrade();
+            var formatted = fmt("{0}:{1}:{2}", (42, text.bytes(), "end"));
+            var raw = formatted.get();
+            var terminated = Span<ubyte> { data = raw.data, length = raw.length + 1_ul };
+            print(formatted);
+            if (raw.length == 10_ul && terminated.at(raw.length).* == 0_ub && weak.upgrade()!.get().length == 3_ul) { 0 } else { 1 }
+        };
+    "#,
+        "",
+    );
+    success(&output);
+    assert_eq!(output.stdout, b"42:A\0B:end");
+}
+
+#[test]
+fn source_shared_elements_drop_in_reverse_and_unwind_on_allocation_failure() {
+    success(&run(
+        r#"
+        export { main };
+        import { "$/shared.resin", "$/status.resin" };
+        struct Item { trace: Ptr<int>, digit: int,
+            def drop(self: Ptr<Item>) = {
+                if (self.digit != 0) { self.trace.* := self.trace.* * 10 + self.digit; };
+            };
+        };
+        def fail(trace: Ptr<int>) -> Result<(), OutOfMemory> = {
+            var owner = ArcPtr<Item>.alloc(Item { trace = trace, digit = 0 })?;
+            owner.get().digit := 4;
+            ArcSpan<ulong>.alloc(0xffffffffffffffff_ul, 0_ul)?;
+            ok(())
+        };
+        def main() -> Result<int, _> = {
+            var trace = 0;
+            {
+                var items = ArcSpan<Item>.alloc(3, Item { trace = &trace, digit = 0 })?;
+                items.get().at(0).digit := 1;
+                items.get().at(1).digit := 2;
+                items.get().at(2).digit := 3;
+            };
+            var failed = match (fail(&trace)) { ok(value) => { 1 == 0 }, err(error) => { 1 == 1 } };
+            ok(if (failed && trace == 3214) { 0 } else { 1 })
+        };
+    "#,
+        "",
+    ));
+}
+
+#[test]
 fn source_owned_wrappers_retain_payloads_and_borrow_temporary_receivers() {
     success(&run(
         r#"
@@ -485,9 +541,9 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
             var copy_path = "copy.png";
             alias.write_png(copy_path.data)?;
             var copied = ImageData.read_png(copy_path.data, 0)?;
-            ok(if (copied.width == image.width && copied.height == image.height && copied.pixels.* == image.pixels.*
-                && image.width == uint(1) && image.height == uint(1) && image.channels == uint(4)
-                && image.pixels.* == ubyte(1) && Ptr<ubyte>(ulong(image.pixels) + ulong(3)).* == ubyte(255)) { 0 } else { 1 })
+            ok(if (copied.width() == image.width() && copied.height() == image.height() && copied.pixels().data.* == image.pixels().data.*
+                && image.width() == uint(1) && image.height() == uint(1) && image.channels() == uint(4)
+                && image.pixels().data.* == ubyte(1) && Ptr<ubyte>(ulong(image.pixels().data) + ulong(3)).* == ubyte(255)) { 0 } else { 1 })
         };
         "#,
         "",
@@ -499,7 +555,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     ] {
         let output = run(
             &format!(
-                "export {{ main }}; import {{ \"$/image.resin\" }}; struct Cleanup {{ def drop(self: Ptr<Cleanup>) = {{ print(fmt(\"cleanup\\n\", ())); }}; }};  def main() -> Result<(), _> = {{ var path = \"missing/pixel.png\"; var pixels = [0_ub, 0_ub, 0_ub, 0_ub]; var cleanup = Cleanup {{}}; {call}; ok(()) }};"
+                "export {{ main }}; import {{ \"$/image.resin\", \"$/string.resin\" }}; struct Cleanup {{ def drop(self: Ptr<Cleanup>) = {{ print(fmt(\"cleanup\\n\", ())); }}; }};  def main() -> Result<(), _> = {{ var path = \"missing/pixel.png\"; var pixels = [0_ub, 0_ub, 0_ub, 0_ub]; var cleanup = Cleanup {{}}; {call}; ok(()) }};"
             ),
             "",
         );
@@ -1095,13 +1151,13 @@ fn window_constructor_accepts_owned_titles_until_the_native_call_returns() {
     let output = run(
         r#"
         export { main };
-        import { "$/window.resin" };
+        import { "$/window.resin", "$/shared.resin", "$/string.resin" };
         extern "resin_runtime.h" def window_counts() -> int;
         def main() -> Result<int, _> = {
-            var weak = WeakSpan<ubyte>();
+            var weak = WeakSpan<ubyte>.empty();
             {
                 var title = String.from_str("named {0}");
-                weak := title.bytes.downgrade();
+                weak := title.storage.downgrade();
                 var a = Window.new(32_ui, 24_ui, title)?;
                 var b = Window.new(32_ui, 24_ui, String.from_str("temporary"))?;
                 print(title);

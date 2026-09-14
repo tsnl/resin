@@ -284,10 +284,9 @@ impl Scopes {
         let contexts = &mut data.contexts;
         let scope = &mut contexts.scopes[self.view.cursor.scope];
         let is_type = kind == DefinitionKind::Type;
-        let duplicate = (is_type && name.val.as_ref() == "String")
-            || scope.entries[..self.view.cursor.prefix]
-                .iter()
-                .any(|entry| entry.name == name.val && entry.is_type == is_type);
+        let duplicate = scope.entries[..self.view.cursor.prefix]
+            .iter()
+            .any(|entry| entry.name == name.val && entry.is_type == is_type);
         let id = contexts.definitions.len();
         contexts.definitions.push(Definition {
             name: name.val.to_string(),

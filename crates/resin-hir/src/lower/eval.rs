@@ -1,6 +1,5 @@
 //! Evaluate source types and literals, retaining inference holes during annotation decoding.
 use super::{
-    context::Context,
     infer::{Head, Solver, Type, VariableId},
     scope::ContextView,
 };
@@ -19,7 +18,6 @@ pub(super) struct Decoder<'a> {
     pub solver: &'a mut Solver,
     pub holes: Vec<(Span, VariableId)>,
     pub scopes: &'a ContextView,
-    pub string: Option<&'a Ty>,
 }
 
 impl Decoder<'_> {
@@ -32,9 +30,6 @@ impl Decoder<'_> {
     }
 
     fn named(&self, name: &Ident, arguments: Vec<Type>) -> Result<Type, GenerateError> {
-        if name.val.as_ref() == "String" && arguments.is_empty() {
-            return Ok(self.string.expect("builtin String").clone().into());
-        }
         self.scopes.resolve_type(name, arguments)
     }
 
@@ -158,7 +153,6 @@ fn builtin_ty(name: &str) -> Option<Ty> {
 
 pub(crate) struct Evaluator<'a> {
     pub(crate) scopes: &'a ContextView,
-    pub(crate) typer: &'a Context,
 }
 
 pub(super) fn number(
@@ -208,7 +202,6 @@ impl Evaluator<'_> {
             solver: &mut solver,
             holes: Vec::new(),
             scopes: self.scopes,
-            string: self.typer.string_type(),
         }
         .decode(ty, false)?;
         solver.require_bounded(&inferred.ty, ty.span)
@@ -218,7 +211,7 @@ impl Evaluator<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lower::scope::Scopes;
+    use crate::lower::{context::Context, scope::Scopes};
     use resin_ast::TypeKind;
 
     #[test]
@@ -233,7 +226,6 @@ mod tests {
             .unwrap();
         let evaluator = Evaluator {
             scopes: scopes.view(),
-            typer: &typer,
         };
         let span = Span { start: 4, end: 8 };
         let named = resin_ast::Type::new(

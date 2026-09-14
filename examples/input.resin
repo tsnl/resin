@@ -1,6 +1,6 @@
 export { main };
 
-import { "$/console.resin" };
+import { "$/console.resin", "$/string.resin" };
 
 def main() -> Result<(), _> = {
 	print("What is your name? ");

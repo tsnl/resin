@@ -4,12 +4,18 @@ import { "status.resin", "span.resin" };
 
 // The opaque handles retain on ordinary copies and release on destruction.
 // Generic wrappers associate a payload type with those handles in source code.
+// Allocation copies its initializer with the ordinary value rules. For native
+// resource payloads, allocate an inert value and initialize through get().
 struct ArcPtr<T> {
 	owner: StrongOwner,
 	def alloc(initial: T) -> Result<ArcPtr<T>, OutOfMemory> = {
 		match (owner_allocate(1_ul, initial)) {
-			StrongOwner(owner) => { ok(ArcPtr<T> { owner = owner }) },
-			None => { err(OutOfMemory {}) },
+			StrongOwner(owner) => {
+				ok(ArcPtr<T> { owner = owner })
+			},
+			None => {
+				err(OutOfMemory {})
+			},
 		}
 	};
 	def get(self: Ptr<ArcPtr<T>>) -> Ptr<T> = {
@@ -24,8 +30,12 @@ struct ArcSpan<T> {
 	owner: StrongOwner,
 	def alloc(count: ulong, initial: T) -> Result<ArcSpan<T>, OutOfMemory> = {
 		match (owner_allocate(count, initial)) {
-			StrongOwner(owner) => { ok(ArcSpan<T> { owner = owner }) },
-			None => { err(OutOfMemory {}) },
+			StrongOwner(owner) => {
+				ok(ArcSpan<T> { owner = owner })
+			},
+			None => {
+				err(OutOfMemory {})
+			},
 		}
 	};
 	def get(self: Ptr<ArcSpan<T>>) -> Span<T> = {
@@ -38,22 +48,34 @@ struct ArcSpan<T> {
 
 struct WeakPtr<T> {
 	owner: WeakOwner,
-	def empty() -> WeakPtr<T> = { WeakPtr<T> { owner = weak_empty() } };
+	def empty() -> WeakPtr<T> = {
+		WeakPtr<T> { owner = weak_empty() }
+	};
 	def upgrade(self: Ptr<WeakPtr<T>>) -> ArcPtr<T> | None = {
 		match (owner_upgrade(&self.owner)) {
-			StrongOwner(owner) => { ArcPtr<T> { owner = owner } },
-			None => { None },
+			StrongOwner(owner) => {
+				ArcPtr<T> { owner = owner }
+			},
+			None => {
+				None
+			},
 		}
 	};
 };
 
 struct WeakSpan<T> {
 	owner: WeakOwner,
-	def empty() -> WeakSpan<T> = { WeakSpan<T> { owner = weak_empty() } };
+	def empty() -> WeakSpan<T> = {
+		WeakSpan<T> { owner = weak_empty() }
+	};
 	def upgrade(self: Ptr<WeakSpan<T>>) -> ArcSpan<T> | None = {
 		match (owner_upgrade(&self.owner)) {
-			StrongOwner(owner) => { ArcSpan<T> { owner = owner } },
-			None => { None },
+			StrongOwner(owner) => {
+				ArcSpan<T> { owner = owner }
+			},
+			None => {
+				None
+			},
 		}
 	};
 };

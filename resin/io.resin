@@ -1,5 +1,7 @@
 export { Io, Output, WriteError };
 
+import { "span.resin", "string.resin" };
+
 struct WriteError {};
 struct Output {
 	stream: uint,
@@ -13,7 +15,7 @@ struct Output {
 				resin_stream_write(self.stream, bytes.data, bytes.length)
 			},
 			String(string) => {
-				resin_stream_write(self.stream, string.bytes.get().data, string.bytes.get().length)
+				resin_stream_write(self.stream, string.get().data, string.get().length)
 			},
 		};
 		if (status == 0) {

@@ -64,38 +64,33 @@ fn string_views_support_fields_and_indexing() {
 }
 
 #[test]
-fn string_views_convert_explicitly_and_copy_into_owned_strings() {
+fn owned_strings_are_ordinary_source_declarations() {
     let module = generate(
         r#"
-        def bytes() -> _ = { Span<_>("hello") };
-        def forwarded_bytes() -> _ = { Span<_>(text()) };
-        def text() -> _ = { "hello" };
-        def recursive(again: bool) -> _ = {
-            if (again) { Span<_>(recursive(0 == 1)); "hello" } else { "world" }
+        intrinsic "string_from_bytes" def copy(data: Ptr<ubyte>, length: ulong) -> StrongOwner;
+        struct String { owner: StrongOwner,
+            def from_str(text: str) -> String = { String { owner = copy(text.data, text.length) } };
         };
-        def literal_copy() -> String = { String.from_str("hello") };
-        def bytes_copy(value: Span<ubyte>) -> String = { String.from_bytes(value) };
-        "#,
+        def text() -> str = { "hello" };
+        def owned() -> String = { String.from_str(text()) };
+    "#,
     )
     .unwrap();
-    for name in ["bytes", "forwarded_bytes"] {
-        assert!(
-            matches!(result(&module, name), Type::Defined { arguments, .. } if arguments == [Type::UInt8])
-        );
-    }
+    assert_eq!(result(&module, "text"), Type::Str);
+    assert!(matches!(result(&module, "owned"), Type::Defined { .. }));
+    // The spelling carries no compiler representation or privileged methods.
+    generate("struct String { count: uint }; def make() -> String = { String { count = 7_ui } };")
+        .unwrap();
 }
 
 #[test]
-fn string_views_cannot_be_confused_with_bytes_or_owned_strings() {
+fn string_literals_cannot_be_forged_from_arbitrary_storage() {
     for source in [
-        r#"def value() -> Span<ubyte> = { "text" };"#,
-        r#"def value() -> String = { "text" };"#,
-        r#"def value(bytes: Span<ubyte>) -> str = { str(bytes) };"#,
-        r#"def value(data: Ptr<ubyte>) -> str = { str { data = data, length = 1_ul } };"#,
-        r#"def value(bytes: Span<ubyte>) -> String = { String.from_str(bytes) };"#,
-        r#"def value() -> String = { String.from_bytes("text") };"#,
-        r#"def value() -> _ = { Span<uint>("text") };"#,
-        r#"def value() -> _ = { "text".unknown };"#,
+        r#"struct Bytes { data: Ptr<ubyte>, length: ulong }; def bad() -> Bytes = { "text" };"#,
+        r#"struct String { owner: StrongOwner }; def bad() -> String = { "text" };"#,
+        r#"struct Bytes { data: Ptr<ubyte>, length: ulong }; def bad(bytes: Bytes) -> str = { str(bytes) };"#,
+        r#"def bad(data: Ptr<ubyte>) -> str = { str { data = data, length = 1_ul } };"#,
+        r#"def bad() -> _ = { "text".unknown };"#,
     ] {
         assert!(generate(source).is_err(), "accepted {source}");
     }

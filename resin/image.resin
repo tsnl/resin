@@ -1,6 +1,6 @@
 export { ImageData };
 
-import { "status.resin" };
+import { "span.resin", "status.resin", "shared.resin" };
 
 struct ImageDataOwner {
 	width: uint,
@@ -8,16 +8,40 @@ struct ImageDataOwner {
 	channels: uint,
 	pixels: Ptr<ubyte>,
 	def drop(self: Ptr<ImageDataOwner>) = {
-		resin_image_free(self.pixels);
+		if (ulong(self.pixels) != 0_ul) {
+			resin_image_free(self.pixels);
+		};
+	};
+};
+
+struct ImageData {
+	owner: ArcPtr<ImageDataOwner>,
+	def width(self: Ptr<ImageData>) -> uint = {
+		self.owner.get().width
+	};
+	def height(self: Ptr<ImageData>) -> uint = {
+		self.owner.get().height
+	};
+	def channels(self: Ptr<ImageData>) -> uint = {
+		self.owner.get().channels
+	};
+	def pixels(self: Ptr<ImageData>) -> Span<ubyte> = {
+		var data = self.owner.get();
+		Span<ubyte> { data = data.pixels, length = ulong(data.width) * ulong(data.height) * ulong(data.channels) }
 	};
 
 	def read_png(path: Ptr<ubyte>, channels: uint) -> Result<ImageData, RuntimeError> = {
-		var width = uint(0);
-		var height = uint(0);
-		var actual_channels = uint(0);
-		var pixels = Ptr<ubyte>(ulong(0));
-		RuntimeStatus.from_code(resin_image_read_png(path, channels, &width, &height, &actual_channels, &pixels))?;
-		ok(ImageData { width = width, height = height, channels = actual_channels, pixels = pixels })
+		var owner = ArcPtr<ImageDataOwner>.alloc(
+			ImageDataOwner {
+				width = 0_ui,
+				height = 0_ui,
+				channels = 0_ui,
+				pixels = Ptr<ubyte>(0_ul),
+			}
+		)?;
+		var data = owner.get();
+		RuntimeStatus.from_code(resin_image_read_png(path, channels, &data.width, &data.height, &data.channels, &data.pixels))?;
+		ok(ImageData { owner = owner })
 	};
 	def write_pixels(path: Ptr<ubyte>, width: uint, height: uint, channels: uint, pixels: Span<ubyte>, stride: ulong) -> Result<(), RuntimeError> = {
 		if (width == 0_ui || height == 0_ui || channels == 0_ui || channels > 4_ui) {
@@ -39,12 +63,10 @@ struct ImageDataOwner {
 		}
 	};
 
-	def write_png(self: Ptr<ImageDataOwner>, path: Ptr<ubyte>) -> Result<(), RuntimeError> = {
-		RuntimeStatus.from_code(resin_image_write_png(path, self.width, self.height, self.channels, self.pixels, 0_ul))
+	def write_png(self: Ptr<ImageData>, path: Ptr<ubyte>) -> Result<(), RuntimeError> = {
+		RuntimeStatus.from_code(resin_image_write_png(path, self.width(), self.height(), self.channels(), self.pixels().data, 0_ul))
 	};
 };
-
-type ImageData = ArcPtr<ImageDataOwner>;
 
 extern "resin_runtime.h" def resin_image_write_png(path: Ptr<ubyte>, width: uint, height: uint, channels: uint, pixels: Ptr<ubyte>, stride: ulong) -> int;
 extern "resin_runtime.h" def resin_image_read_png(path: Ptr<ubyte>, channels: uint, width: Ptr<uint>, height: Ptr<uint>, actual_channels: Ptr<uint>, pixels: Ptr<Ptr<ubyte>>) -> int;

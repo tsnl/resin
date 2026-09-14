@@ -144,6 +144,7 @@ fn failed_functions_keep_their_own_bindings_cleanup_and_error_origins() {
                             },
                             kind: TermKind::Intrinsic {
                                 op: resin_types::Intrinsic::OwnerAllocate,
+                                type_args: vec![Type::Int32],
                                 args: resin_hir::Arguments {
                                     values: vec![
                                         constant(Constant::UInt64 { value: 1 }, Type::UInt64),

@@ -852,24 +852,9 @@ fn matching_completions(mut items: Vec<Completion>, prefix: &str) -> Vec<Complet
 
 const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     (
-        "fmt",
-        "fmt(format, arguments) -> String\n\nFormat a tuple using numbered placeholders {0}, {1}, … into an owned String. Host-only.",
-        DefinitionKind::Function,
-    ),
-    (
         "str",
         "str\n\nA string literal view with data: Ptr<ubyte> and length: ulong. Static storage has a trailing NUL excluded from length. Span<ubyte>(text) exposes its bytes. Host-only.",
         DefinitionKind::Type,
-    ),
-    (
-        "String",
-        "String\n\nOwned bytes, wrapping ArcSpan<ubyte>. Copies retain the allocation. String literals have type str.",
-        DefinitionKind::Type,
-    ),
-    (
-        "print",
-        "print(text) -> ()\n\nWrite a str, String, or Span<ubyte> to stdout verbatim and flush.",
-        DefinitionKind::Function,
     ),
     (
         "Ptr",

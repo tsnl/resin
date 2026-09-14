@@ -58,7 +58,6 @@ impl Checker<'_> {
             solver: &mut self.typing.solver,
             holes: Vec::new(),
             scopes: self.scopes.view(),
-            string: self.typing.typer.string_type(),
         }
         .decode(ann, infer);
         if scoped {
@@ -1155,25 +1154,6 @@ impl Expression<'_, '_> {
                         ty: ann.into_tree(),
                         arg: Box::new(arg),
                     }
-                } else if let resin_ast::TermKind::Var { name } = &func.val
-                    && matches!(name.val.as_ref(), "print" | "fmt")
-                {
-                    let args = args
-                        .iter()
-                        .map(|arg| self.child(arg, None))
-                        .collect::<Vec<_>>();
-                    self.constrain((
-                        span,
-                        Constraint::Builtin(
-                            name.val.clone(),
-                            args.iter().map(|arg| arg.ty.clone()).collect(),
-                            out.clone(),
-                        ),
-                    ));
-                    TermKind::Builtin {
-                        name: name.val.clone(),
-                        args,
-                    }
                 } else {
                     let func = self.child(func, None);
                     let args = args
@@ -1341,9 +1321,7 @@ impl Expression<'_, '_> {
                 init,
                 type_params,
             } => {
-                self.checker
-                    .scopes
-                    .alias(name, type_params, init, self.checker.typing.typer)?;
+                self.checker.scopes.alias(name, type_params, init)?;
                 StatementKind::TypeDefinition
             }
             StmtKind::Expr { term } => {

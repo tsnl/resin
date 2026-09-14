@@ -329,11 +329,6 @@ impl TypeId {
 }
 
 impl Ty {
-    /// An owned sequence whose bytes share one reference-counted allocation.
-    pub fn formatted_bytes() -> Self {
-        Self::StrongOwner
-    }
-
     /// Structural pointer/count transport used by compiler operation boundaries.
     pub fn pointer_length(element: Self) -> Self {
         Self::Record {
@@ -380,6 +375,7 @@ pub enum Intrinsic {
     OwnerUpgrade,
     WeakEmpty,
     StringFromBytes,
+    FormatBytes,
     Replace,
     Index,
     GpuIndex,
@@ -641,7 +637,6 @@ pub enum BuiltinRule {
     Arithmetic,
     Comparison,
     Boolean,
-    Print,
     Format,
     StringFromBytes,
 }
@@ -710,7 +705,6 @@ pub fn ascription(table: &[TypeDef], from: &Ty, to: &Ty) -> Result<Option<Vec<Co
 #[derive(Debug, Clone, Default)]
 pub struct TyperContext {
     definitions: TypeTable,
-    string_type: Option<Ty>,
 }
 
 impl TyperContext {
@@ -761,15 +755,6 @@ impl TyperContext {
 impl TyperContext {
     pub fn define_drop(&mut self, ty: TypeId, function: FunctionId) {
         self.definitions.set_drop(ty, function);
-    }
-}
-
-impl TyperContext {
-    pub fn string_type(&self) -> Option<&Ty> {
-        self.string_type.as_ref()
-    }
-    pub fn set_string_type(&mut self, ty: Ty) {
-        self.string_type = Some(ty);
     }
 }
 

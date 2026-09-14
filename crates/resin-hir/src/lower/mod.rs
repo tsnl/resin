@@ -436,7 +436,7 @@ impl Scopes {
                     name,
                     init,
                     type_params,
-                } => self.alias(name, type_params, init, typer),
+                } => self.alias(name, type_params, init),
                 StmtKind::Struct {
                     name,
                     body,
@@ -489,7 +489,6 @@ impl Scopes {
             }
             let body = Evaluator {
                 scopes: self.view(),
-                typer,
             }
             .scheme(body)?;
             typer
@@ -506,7 +505,6 @@ impl Scopes {
         name: &Ident,
         parameters: &[Ident],
         body: &resin_ast::Type,
-        typer: &Context,
     ) -> Result<(), GenerateError> {
         let declaration = self.begin_alias(name)?;
         self.push_at(Span {
@@ -523,7 +521,6 @@ impl Scopes {
             self.set_parameters(declaration, &parameters);
             Evaluator {
                 scopes: self.view(),
-                typer,
             }
             .scheme(body)
         })();
@@ -602,7 +599,6 @@ impl Generator {
         }
         let evaluator = Evaluator {
             scopes: scopes.view(),
-            typer: &self.typer,
         };
         let signature = method_signature(&evaluator, declaration, params, result)?;
         let function = self.declare_function(name, &signature)?;

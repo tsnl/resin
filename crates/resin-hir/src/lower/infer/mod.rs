@@ -1070,7 +1070,7 @@ fn error(span: Span, message: impl Into<Arc<str>>) -> GenerateError {
 pub(crate) fn check_binding_name(name: &Ident) -> Result<()> {
     if matches!(
         name.val.as_ref(),
-        "fmt" | "print" | "ok" | "err" | "size_of" | "align_of" | "absurd"
+        "ok" | "err" | "size_of" | "align_of" | "absurd"
     ) {
         return Err(GenerateError {
             span: name.span,
@@ -2252,17 +2252,9 @@ impl Inference<'_> {
                 let rule = BuiltinRule::lookup(name, args.len())
                     .map_err(|e| GenerateError::typing(span, e))?;
                 let complete = match rule {
-                    BuiltinRule::Print => self.solver.unify(out, &Ty::Unit.into(), span)?,
-                    BuiltinRule::Format | BuiltinRule::StringFromBytes => self.solver.unify(
-                        out,
-                        &self
-                            .typer
-                            .string_type()
-                            .cloned()
-                            .expect("builtin String")
-                            .into(),
-                        span,
-                    )?,
+                    BuiltinRule::Format | BuiltinRule::StringFromBytes => {
+                        self.solver.unify(out, &Ty::StrongOwner.into(), span)?
+                    }
                     BuiltinRule::Boolean => {
                         let complete = self.solver.unify(out, &Ty::Bool.into(), span)?;
                         for arg in args {

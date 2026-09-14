@@ -430,18 +430,6 @@ impl ReceiverConversion {
 impl Context {
     pub(super) fn with_builtins() -> Self {
         let mut typer = Context::new();
-        let definition = typer
-            .create_type(
-                "String",
-                Ty::Record {
-                    fields: vec![RecordField {
-                        name: "bytes".into(),
-                        ty: Ty::formatted_bytes(),
-                    }],
-                },
-            )
-            .expect("builtin String layout");
-        typer.set_string_type(Ty::Defined { definition });
         typer.register_method_definitions(builtin_methods);
         typer
     }
@@ -462,10 +450,7 @@ fn pointer(ty: Ty) -> Ty {
     }
 }
 
-fn builtin_methods(receiver: &Ty, typer: &Context) -> Vec<(Arc<str>, FunctionDecl)> {
-    if typer.string_type() == Some(receiver) {
-        return string_constructors(receiver);
-    }
+fn builtin_methods(receiver: &Ty, _typer: &Context) -> Vec<(Arc<str>, FunctionDecl)> {
     match receiver {
         Ty::Pointer { pointee } => vec![method(
             "replace",
@@ -536,20 +521,6 @@ fn builtin_methods(receiver: &Ty, typer: &Context) -> Vec<(Arc<str>, FunctionDec
 
         _ => vec![],
     }
-}
-
-fn string_constructors(receiver: &Ty) -> Vec<(Arc<str>, FunctionDecl)> {
-    [("from_str", Ty::Str), ("from_bytes", Ty::byte_span())]
-        .into_iter()
-        .map(|(name, arg)| {
-            method(
-                name,
-                vec![arg],
-                receiver.clone(),
-                Intrinsic::StringFromBytes,
-            )
-        })
-        .collect()
 }
 
 fn method(
@@ -675,6 +646,16 @@ pub(super) fn primitive_signature(
             Intrinsic::OwnerUpgrade,
             vec![pointer(Type::WeakOwner)],
             optional(Type::StrongOwner),
+        ),
+        ("string_from_bytes", []) => (
+            Intrinsic::StringFromBytes,
+            vec![pointer(Type::UInt8), Type::UInt64],
+            Type::StrongOwner,
+        ),
+        ("format_bytes", [arguments]) => (
+            Intrinsic::FormatBytes,
+            vec![pointer(Type::UInt8), Type::UInt64, arguments.clone()],
+            Type::StrongOwner,
         ),
         ("weak_empty", []) => (Intrinsic::WeakEmpty, vec![], Type::WeakOwner),
         ("gpu_element_layout", [_]) => (
