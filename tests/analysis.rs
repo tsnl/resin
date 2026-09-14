@@ -10,12 +10,7 @@ fn generic_method_calls_show_substituted_signatures_and_original_definitions() {
     let library = "export { Cell }; struct Cell<T> { value: T, def read(self: Ptr<Cell<T>>) -> T = { self.value }; def choose<U>(self: Ptr<Cell<T>>, value: U) -> U = { value }; };";
     let source = "import { \"library.resin\" }; type IntCell = Cell<int>; def use(cell: Ptr<IntCell>) -> ulong = { cell.read(); cell.choose::<ulong>(42) };";
     let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics().is_empty(),
-        "{:?}",
-        analysis.diagnostics()
-    );
+    let analysis = project.checked();
     let input = project.source("main.resin");
     for (name, expected) in [
         ("read", "read: () -> int"),
@@ -68,12 +63,7 @@ fn unfinished_generic_method_access_keeps_owner_substitution_and_method_binders(
 fn generic_method_references_show_the_expected_function_instantiation() {
     let source = "struct Factory { def create<T>() -> T = { 42 }; }; def main() -> int = { var create: () -> int; create := Factory.create; create() };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics().is_empty(),
-        "{:?}",
-        analysis.diagnostics()
-    );
+    let analysis = project.checked();
     let input = project.source("main.resin");
     let offset = source.find("Factory.create").unwrap() + 8;
     assert_eq!(
@@ -138,12 +128,7 @@ fn generic_nominal_fields_retain_substitution_and_declaration_navigation() {
             "import {{ \"library.resin\" }}; def read{parameters}(cell: {receiver}) -> {result} = {{ cell.value }};"
         );
         let project = Project::new(&[("main.resin", &source), ("library.resin", library)]);
-        let analysis = project.analyze();
-        assert!(
-            analysis.diagnostics().is_empty(),
-            "{:?}",
-            analysis.diagnostics()
-        );
+        let analysis = project.checked();
         let input = project.source("main.resin");
         let field = source.rfind("value").unwrap();
         let items = analysis.completions(&input, field);
@@ -169,12 +154,7 @@ fn nominal_wrappers_of_generic_fields_keep_navigation_and_method_completion() {
     let library = "export { Outer }; struct Cell<T> { value: T }; struct Wrapped { cell: Cell<int> }; struct Outer { wrapped: Wrapped, read: int, def read(self: Ptr<Outer>) -> int = { self.wrapped.cell.value }; };";
     let source = "import { \"library.resin\" }; def use(outer: Ptr<Outer>) -> int = { Outer.read(outer); outer.read(); outer.wrapped.cell.value };";
     let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics().is_empty(),
-        "{:?}",
-        analysis.diagnostics()
-    );
+    let analysis = project.checked();
     let input = project.source("main.resin");
     for (name, expected) in [
         ("wrapped", "wrapped: Wrapped"),
@@ -308,12 +288,7 @@ fn imported_generic_aliases_keep_binder_navigation_and_concrete_hover() {
     let library = "export { View }; type View<T> = Ptr<T>;";
     let source = "import { \"library.resin\" }; def use_view<T>(view: View<T>) -> T = { view.* }; def main() -> int = { var value = 42; var pointer: View<int>; pointer := &value; use_view(pointer) };";
     let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics().is_empty(),
-        "{:?}",
-        analysis.diagnostics()
-    );
+    let analysis = project.checked();
     let input = project.source("main.resin");
     let origin = analysis
         .definition(&input, source.find("View<T>").unwrap())
@@ -335,12 +310,7 @@ fn template_scopes_retain_named_types_and_imported_schemes() {
     let library = "export { identity }; def identity<T>(value: T) -> _ = { value };";
     let source = "import { \"library.resin\" }; def forward<U>(input: U) -> U = { var copy = identity(input); copy }; def main() -> int = { forward(42) };";
     let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics().is_empty(),
-        "{:?}",
-        analysis.diagnostics()
-    );
+    let analysis = project.checked();
     let input = project.source("main.resin");
     let hover = analysis
         .hover(&input, source.rfind("copy").unwrap())
@@ -589,12 +559,7 @@ fn typed_pipeline_calls_show_shader_contracts_in_editor_signatures() {
 fn pointer_hover_and_completion_use_angle_bracket_types() {
     let source = "import { \"$/span.resin\" }; def main (value: Ptr<Span<int>>) -> Ptr<Span<int>> = { value };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics().is_empty(),
-        "{:?}",
-        analysis.diagnostics()
-    );
+    let analysis = project.checked();
     assert_eq!(
         analysis
             .hover(
@@ -784,12 +749,7 @@ fn shared_receiver_completion_and_navigation_include_ordinary_drop_methods() {
 fn inferred_errors_and_match_payloads_have_editor_types() {
     let source = "struct Broken { code: int }; def fail() -> Result<int, _> = { err(Broken { code = 7 }) }; def main() = { var result = fail(); match (result) { ok(value) => { value; }, err(error) => { error.code; } }; };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics().is_empty(),
-        "{:?}",
-        analysis.diagnostics()
-    );
+    let analysis = project.checked();
     let input = project.source("main.resin");
     assert_eq!(
         analysis
@@ -829,12 +789,7 @@ fn inferred_imported_results_and_local_annotations_support_editor_queries() {
         "import { \"lib.resin\" }; def main() = { var value: _; value := make(); value.count; };";
     let library = "export { make }; struct Counter { count: int }; def make() -> _ = { Counter { count = 42 } };";
     let project = Project::new(&[("main.resin", source), ("lib.resin", library)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics().is_empty(),
-        "{:?}",
-        analysis.diagnostics()
-    );
+    let analysis = project.checked();
     let input = project.source("main.resin");
     assert_eq!(
         analysis
@@ -859,12 +814,7 @@ fn inferred_imported_results_and_local_annotations_support_editor_queries() {
 fn inference_does_not_publish_speculative_type_references() {
     let source = "type Value = int; def f() -> _ = { type Value = bool; type Wrapper = Value; Wrapper(Value(1 == 1)) };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics().is_empty(),
-        "{:?}",
-        analysis.diagnostics()
-    );
+    let analysis = project.checked();
     let reference = source.find("Wrapper = Value").unwrap() + "Wrapper = ".len();
     let definition = analysis
         .definition(&project.source("main.resin"), reference)
@@ -1061,6 +1011,16 @@ impl Project {
         }
         Compiler::new().analyze(self.source("main.resin"), &mut loader)
     }
+    #[track_caller]
+    fn checked(&self) -> Arc<Compilation> {
+        let analysis = self.analyze();
+        assert!(
+            analysis.diagnostics().is_empty(),
+            "{:?}",
+            analysis.diagnostics()
+        );
+        analysis
+    }
     fn source(&self, name: &str) -> Source {
         self.sources[name].clone()
     }
@@ -1070,12 +1030,7 @@ impl Project {
 fn inferred_types_and_parameter_definitions_come_from_compilation() {
     let source = "def main (argument: int) -> int = { var value = argument + 1; value };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics().is_empty(),
-        "{:?}",
-        analysis.diagnostics()
-    );
+    let analysis = project.checked();
     let input = project.source("main.resin");
     assert_eq!(
         analysis
@@ -1110,12 +1065,7 @@ fn reexports_keep_original_definitions_through_diamond_imports() {
             "export { Number, make }; import { \"base.resin\" };",
         ),
     ]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics().is_empty(),
-        "{:?}",
-        analysis.diagnostics()
-    );
+    let analysis = project.checked();
     let input = project.source("main.resin");
     for word in ["Number", "make"] {
         assert_eq!(
@@ -1143,12 +1093,7 @@ fn nested_bindings_shadow_without_leaking_out_of_their_scope() {
     let source =
         "def main () -> int = { var value = 1; var inner = { var value = 2; value }; value };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics().is_empty(),
-        "{:?}",
-        analysis.diagnostics()
-    );
+    let analysis = project.checked();
     let input = project.source("main.resin");
     let inside = source.find("value };").unwrap();
     assert_eq!(
@@ -1435,12 +1380,7 @@ fn completion_obeys_parameter_shadowing_and_module_type_order() {
 fn module_analysis_needs_no_entry_and_rejects_runtime_globals() {
     let source = "export { run }; def run () -> int = { helper() }; def helper () -> int = { 1 };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics().is_empty(),
-        "{:?}",
-        analysis.diagnostics()
-    );
+    let analysis = project.checked();
     assert_eq!(
         analysis
             .hir()
@@ -1488,12 +1428,7 @@ fn module_analysis_needs_no_entry_and_rejects_runtime_globals() {
 fn implicit_unit_signatures_and_declaration_keywords_support_editor_features() {
     let source = "extern \"native.h\" def release(value: int); def run() = { release(1); };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics().is_empty(),
-        "{:?}",
-        analysis.diagnostics()
-    );
+    let analysis = project.checked();
     let input = project.source("main.resin");
     for (name, signature) in [
         (
@@ -1755,12 +1690,7 @@ fn checking_rejects_holes_even_when_given_a_recovered_ast() {
 fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
     let source = "@compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() = { var xs = [1, 2]; var p = xs(0); var code = kernel.spirv; code.length; };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics().is_empty(),
-        "{:?}",
-        analysis.diagnostics()
-    );
+    let analysis = project.checked();
     let input = project.source("main.resin");
     assert_eq!(
         analysis
@@ -1801,12 +1731,7 @@ fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
 fn suffixes_and_one_armed_if_have_editor_types() {
     let source = "def main() = { var count = 42_ul; if (count > 0_ul) { var speed = 1.5_f; speed; }; count; };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics().is_empty(),
-        "{:?}",
-        analysis.diagnostics()
-    );
+    let analysis = project.checked();
     let input = project.source("main.resin");
     assert_eq!(
         analysis
@@ -2178,12 +2103,7 @@ fn imported_intrinsics_keep_generic_navigation_and_declaration_signatures() {
     let source =
         "import { \"library.resin\" }; def use(data: Ptr<uint>) -> Ptr<uint> = { at(data, 4, 2) };";
     let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
-    let analysis = project.analyze();
-    assert!(
-        analysis.diagnostics().is_empty(),
-        "{:?}",
-        analysis.diagnostics()
-    );
+    let analysis = project.checked();
     let input = project.source("main.resin");
     let offset = source.find("at(data").unwrap();
     let hover = analysis.hover(&input, offset).unwrap();

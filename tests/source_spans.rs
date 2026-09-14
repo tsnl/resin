@@ -15,16 +15,9 @@ fn compile(source: &str, target: Target) -> Arc<Compilation> {
     )
 }
 
-fn run(body: &str) -> std::process::Output {
-    let source = format!(
-        r#"
-        export {{ main }};
-        import {{ "$/span.resin" }};
-        def main() -> int = {{ {body} }};
-    "#
-    );
+fn run(source: &str) -> std::process::Output {
     let compilation = compile(
-        &source,
+        source,
         Target::Host {
             entry: "main".into(),
         },
@@ -73,14 +66,18 @@ fn generic_pointer_index_preserves_stride_mutation_and_host_bounds_diagnostics()
 #[test]
 fn source_methods_preserve_element_stride_aliasing_and_explicit_literal_borrows() {
     let output = run(r#"
-        var values = [3_ul, 7_ul, 11_ul];
-        var view = Span<ulong> { data = values.at(0), length = 3_ul };
-        var alias = view.slice(1, 2);
-        alias.at(0).* := 42_ul;
-        var raw = alias.as_bytes();
-        var literal = bytes("A\0B");
-        if (values.at(1).* == 42_ul && raw.length == 16_ul
-            && literal.length == 3_ul && literal.at(1).* == 0_ub) { 0 } else { 1 }
+        export { main };
+        import { "$/span.resin" };
+        def main() -> int = {
+            var values = [3_ul, 7_ul, 11_ul];
+            var view = Span<ulong> { data = values.at(0), length = 3_ul };
+            var alias = view.slice(1, 2);
+            alias.at(0).* := 42_ul;
+            var raw = alias.as_bytes();
+            var literal = bytes("A\0B");
+            if (values.at(1).* == 42_ul && raw.length == 16_ul
+                && literal.length == 3_ul && literal.at(1).* == 0_ub) { 0 } else { 1 }
+        };
     "#);
     assert!(
         output.status.success(),
@@ -92,12 +89,16 @@ fn source_methods_preserve_element_stride_aliasing_and_explicit_literal_borrows(
 #[test]
 fn empty_slices_allow_one_past_the_end_without_advancing_null() {
     let output = run(r#"
-        var values = [1_ui, 2_ui];
-        var view = Span<uint> { data = values.at(0), length = 2_ul };
-        var end = view.slice(2, 0);
-        var empty = Span<uint> { data = Ptr<uint>(0_ul), length = 0_ul }.slice(0, 0);
-        if (end.length == 0_ul && ulong(end.data) == ulong(view.data) + 2_ul * size_of(uint)
-            && empty.length == 0_ul && ulong(empty.data) == 0_ul) { 0 } else { 1 }
+        export { main };
+        import { "$/span.resin" };
+        def main() -> int = {
+            var values = [1_ui, 2_ui];
+            var view = Span<uint> { data = values.at(0), length = 2_ul };
+            var end = view.slice(2, 0);
+            var empty = Span<uint> { data = Ptr<uint>(0_ul), length = 0_ul }.slice(0, 0);
+            if (end.length == 0_ul && ulong(end.data) == ulong(view.data) + 2_ul * size_of(uint)
+                && empty.length == 0_ul && ulong(empty.data) == 0_ul) { 0 } else { 1 }
+        };
     "#);
     assert!(
         output.status.success(),
@@ -108,31 +109,56 @@ fn empty_slices_allow_one_past_the_end_without_advancing_null() {
 
 #[test]
 fn primitive_boundaries_report_invalid_ranges_indices_and_byte_counts() {
-    for (expression, message) in [
-        ("view.at(3)", "index"),
-        ("view.slice(2, 2)", "slice out of bounds"),
+    for (storage, cases) in [
         (
-            "view.slice(0xffffffffffffffff_ul, 0)",
-            "slice out of bounds",
+            "var values = [1_ul, 2_ul, 3_ul]; var view = Span<ulong> { data = values.at(0), length = 3_ul };",
+            [
+                ("view.at(3)", "index"),
+                ("view.slice(2, 2)", "slice out of bounds"),
+                (
+                    "view.slice(0xffffffffffffffff_ul, 0)",
+                    "slice out of bounds",
+                ),
+                (
+                    "Span<ulong> { data = Ptr<ulong>(0_ul), length = 0xffffffffffffffff_ul }.as_bytes()",
+                    "byte length overflow",
+                ),
+            ],
         ),
         (
-            "Span<ulong> { data = Ptr<ulong>(0_ul), length = 0xffffffffffffffff_ul }.as_bytes()",
-            "byte length overflow",
+            "var view = Span<uint> { data = Ptr<uint>(0_ul), length = 2_ul };",
+            [
+                ("view.slice(3, 0)", "span slice out of bounds"),
+                ("view.slice(1, 2)", "span slice out of bounds"),
+                (
+                    "view.slice(0xffffffffffffffff_ul, 1)",
+                    "span slice out of bounds",
+                ),
+                (
+                    "Span<uint> { data = Ptr<uint>(0_ul), length = 0xffffffffffffffff_ul }.as_bytes()",
+                    "span byte length overflow",
+                ),
+            ],
         ),
     ] {
-        let output = run(&format!(
-            r#"
-            var values = [1_ul, 2_ul, 3_ul];
-            var view = Span<ulong> {{ data = values.at(0), length = 3_ul }};
-            {expression}; 0
-        "#
-        ));
-        assert!(!output.status.success(), "{expression}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains(message),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        for (expression, message) in cases {
+            let source = format!(
+                r#"export {{ main }}; import {{ "$/span.resin", "$/string.resin" }};
+                def main() = {{
+                    {storage}
+                    {expression};
+                    print("unreachable");
+                }};"#
+            );
+            let output = run(&source);
+            assert!(!output.status.success(), "{expression}");
+            assert!(output.stdout.is_empty(), "{expression}");
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains(message),
+                "{expression}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 }
 
@@ -158,8 +184,7 @@ fn byte_views_reject_nonnumeric_elements_after_specialization() {
 
 #[test]
 fn embedded_shader_bytes_wrap_into_the_library_span_explicitly() {
-    let compilation = compile(
-        r#"
+    let output = run(r#"
         export { main };
         import { "$/span.resin" };
         @compute_shader def kernel(index: ulong, output: Ptr<uint>) = { output.* := uint(index); };
@@ -167,14 +192,7 @@ fn embedded_shader_bytes_wrap_into_the_library_span_explicitly() {
             var code = Span<ubyte>(kernel.spirv);
             if (code.length > 0_ul && code.at(0).* == 3_ub) { 0 } else { 1 }
         };
-    "#,
-        Target::Host {
-            entry: "main".into(),
-        },
-    );
-    let output = support::project::Project::new(compilation.module().unwrap(), Some("main"))
-        .unwrap()
-        .run();
+    "#);
     assert!(
         output.status.success(),
         "{}",
@@ -230,8 +248,7 @@ fn shader_local_addresses_cannot_become_physical_pointer_index_operands() {
 
 #[test]
 fn pointer_returning_index_wrappers_preserve_nested_places() {
-    let compilation = compile(
-        r#"
+    let output = run(r#"
     export { main };
     import { "$/span.resin" };
     struct Payload { value: int };
@@ -247,14 +264,7 @@ fn pointer_returning_index_wrappers_preserve_nested_places() {
         copied.value := 99;
         if (items(1).nested.value == 43 && copied.value == 99 && items(0).nested.value == 1) { 0 } else { 1 }
     };
-    "#,
-        Target::Host {
-            entry: "main".into(),
-        },
-    );
-    let output = support::project::Project::new(compilation.module().unwrap(), Some("main"))
-        .unwrap()
-        .run();
+    "#);
     assert!(
         output.status.success(),
         "{}",
