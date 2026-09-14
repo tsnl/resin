@@ -1,5 +1,7 @@
 export { main };
 
+import { "$/string.resin" };
+
 def fibonacci(n: int) -> _ = {
 	if (n <= 1) {
 		n

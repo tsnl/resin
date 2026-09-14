@@ -1,20 +1,29 @@
 export { main, failure };
 
-import { "$/host.resin", "$/status.resin" };
+import { "$/span.resin", "$/string.resin", "$/shared.resin", "$/status.resin" };
 
 struct Failed {};
 
 struct Allocation {
-	data: ArcSpan<int>,
+	data: ArcSpan<int> | None,
+	def get(self: Ptr<Allocation>) -> Span<int> = {
+		self.data!.get()
+	};
 	def drop(self: Ptr<Allocation>) = {
 		// The owned elements are released automatically after this hook.
-		print("releasing allocation\n");
+		match (self.data) {
+			ArcSpan<int>(data) => {
+				print("releasing allocation\n");
+			},
+			None => {},
+		};
 	};
 };
 
 def allocate() -> Result<ArcPtr<Allocation>, OutOfMemory> = {
-	var memory = Host.alloc(1, 0_i)?;
-	ok(ArcPtr<Allocation> { data = memory })
+	var allocation = ArcPtr<Allocation>.alloc(Allocation { data = None })?;
+	allocation.get().data := ArcSpan<int>.alloc(1, 0_i)?;
+	ok(allocation)
 };
 
 def fail_if(fail: bool) -> Result<(), Failed> = {
@@ -27,9 +36,9 @@ def fail_if(fail: bool) -> Result<(), Failed> = {
 
 def work(fail: bool) -> Result<int, _> = {
 	var value = allocate()?;
-	value.data.get().at(0).* := 42;
+	value.get().get().at(0).* := 42;
 	fail_if(fail)?;
-	ok(value.data.get().at(0).*)
+	ok(value.get().get().at(0).*)
 };
 
 def main() -> Result<(), _> = {

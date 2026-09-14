@@ -1,5 +1,7 @@
 export { main };
 
+import { "$/string.resin" };
+
 def set(p: Ptr<int>) -> int = {
 	p.* := 1;
 	p.*

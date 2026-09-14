@@ -1,5 +1,7 @@
 export { main };
 
+import { "$/string.resin" };
+
 def add(x: int, y: int) -> int = {
 	x + y
 };

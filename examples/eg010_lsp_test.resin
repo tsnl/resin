@@ -1,5 +1,7 @@
 export { main };
 
+import { "$/string.resin" };
+
 type Point2f = { x: float32, y: float32 };
 
 def main() = {

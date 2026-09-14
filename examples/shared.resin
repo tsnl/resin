@@ -1,28 +1,35 @@
 export { main };
 
+import { "$/shared.resin", "$/string.resin" };
+
 struct Tracked {
 	value: int,
 	def read(self: Ptr<Tracked>) -> int = {
 		self.value
 	};
 	def drop(self: Ptr<Tracked>) = {
-		print(fmt("released {0}\n", (self.value,)));
+		if (self.value != 0_i) {
+			print(fmt("released {0}\n", (self.value,)));
+		};
 	};
 };
 
-def main() = {
+def main() -> Result<(), _> = {
 	var weak = {
-		var shared = ArcPtr<Tracked> { value = 42 };
+		// Allocate an inert payload, then initialize it through the borrowed pointer.
+		var shared = ArcPtr<Tracked>.alloc(Tracked { value = 0 })?;
+		shared.get().value := 42;
 		var alias = shared;
-		print(fmt("{0}\n", (alias.read(),)));
+		print(fmt("{0}\n", (alias.get().read(),)));
 		alias.downgrade()
 	};
 	match (weak.upgrade()) {
 		ArcPtr<Tracked>(owner) => {
-			print(fmt("still alive: {0}\n", (owner.read(),)));
+			print(fmt("still alive: {0}\n", (owner.get().read(),)));
 		},
 		None => {
 			print("expired\n");
 		},
 	};
+	ok(())
 };

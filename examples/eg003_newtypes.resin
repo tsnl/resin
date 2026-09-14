@@ -1,5 +1,7 @@
 export { main };
 
+import { "$/string.resin" };
+
 struct Meters { value: int };
 type Distance = Meters;
 

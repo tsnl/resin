@@ -1,5 +1,7 @@
 export { main };
 
+import { "$/string.resin" };
+
 struct List { value: int, next: Ptr<List> };
 
 def cons(value: int, next: Ptr<List>) -> List = {

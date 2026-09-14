@@ -1,6 +1,6 @@
 export { main, independent };
 
-import { "lib/counter.resin" };
+import { "$/string.resin", "lib/counter.resin" };
 
 def main() -> () = {
 	var counter = Counter { value = 0 };

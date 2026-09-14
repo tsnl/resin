@@ -1,18 +1,18 @@
 export { main };
-import { "$/process.resin" };
+import { "$/string.resin", "$/process.resin" };
 
 def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> Result<(), _> = {
 	var args = arguments(argc, argv);
 	var index = 0_ul;
 	while (index < args.length) {
-		print(fmt("argument {0}: {1}\n", (index, argument(args, index))));
+		print(fmt("argument {0}: {1}\n", (index, argument(args, index).bytes())));
 		index := index + 1_ul;
 	};
 	// Look up one deliberately chosen variable; avoid dumping the environment.
 	var name = "RESIN_GREETING";
 	match (environment_get(envp, name.data)) {
 		ok(value) => {
-			print(fmt("greeting: {0}\n", (value,)));
+			print(fmt("greeting: {0}\n", (value.bytes(),)));
 		},
 		err(error) => {
 			print("RESIN_GREETING is not set\n");
