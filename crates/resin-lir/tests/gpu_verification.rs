@@ -12,6 +12,7 @@ fn module(parameter: Ty, result: Ty, operations: Vec<Instr>) -> Module {
             profile: resin_lir::Profile::Host,
             foreign: None,
             result,
+            parameter_count: 1,
             locals: vec![Local {
                 name: None,
                 ty: parameter,

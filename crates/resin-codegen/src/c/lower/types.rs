@@ -194,8 +194,17 @@ impl<'a> Types<'a> {
             }
             Ty::Str => "uint8_t *f0; uint64_t f1;".into(),
             Ty::Span { element } => format!("{} *f0; uint64_t f1;", self.name(element)),
-            Ty::Function { param, result } => {
-                format!("{} (*call)({});", self.name(result), self.name(param))
+            Ty::Function { params, result } => {
+                let params = params
+                    .iter()
+                    .map(|ty| self.name(ty))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "{} (*call)({});",
+                    self.name(result),
+                    if params.is_empty() { "void" } else { &params }
+                )
             }
             _ => return,
         };

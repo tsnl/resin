@@ -83,7 +83,7 @@ fn create(
         out,
         "  {} {name}_factory = {};",
         types.name(&function.result),
-        call(types, factory, &args)
+        call(factory, &args)
     )
     .unwrap();
     // Both success payloads have the owner's representation. The new type is
@@ -131,7 +131,7 @@ fn record(
         "  {} {} = {};",
         types.name(gpu_type),
         gpu.expr,
-        call(types, context, &[types.copy(owner, &args[1].expr)])
+        call(context, &[types.copy(owner, &args[1].expr)])
     )
     .unwrap();
     let Ty::Result { error, .. } = result else {
@@ -203,15 +203,9 @@ fn record_call(
         root,
     ];
     values.extend(args[3..].iter().map(|arg| types.copy(&arg.ty, &arg.expr)));
-    call(types, recorder, &values)
+    call(recorder, &values)
 }
 
-fn call(types: &Types<'_>, function: FunctionId, args: &[String]) -> String {
-    let parameter = &types.module.functions[function.index()].locals[0].ty;
-    let arg = if args.len() == 1 {
-        args[0].clone()
-    } else {
-        format!("({}){{ {} }}", types.name(parameter), args.join(", "))
-    };
-    format!("r_fn{}({arg})", function.index())
+fn call(function: FunctionId, args: &[String]) -> String {
+    format!("r_fn{}({})", function.index(), args.join(", "))
 }

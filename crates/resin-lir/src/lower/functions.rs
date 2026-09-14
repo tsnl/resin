@@ -2,8 +2,8 @@
 use super::ValueBinding;
 use super::builder::FunctionBuilder;
 use super::{FunctionLowering, LowerError, LoweredFunction};
-use crate::lower::concrete::{Function, Parameter, Signature};
-use crate::{BlockId, Instr, Local, Terminator};
+use crate::lower::concrete::{Function, Signature};
+use crate::{BlockId, Local, Terminator};
 use resin_source::prelude::*;
 use resin_types::prelude::*;
 
@@ -36,10 +36,16 @@ fn lower_foreign(source: &Function, foreign: &Foreign, profile: crate::Profile) 
             profile,
             foreign: Some(foreign.clone()),
             result: source.signature.result.clone(),
-            locals: vec![Local {
-                name: None,
-                ty: source.signature.parameter_type(),
-            }],
+            parameter_count: source.signature.params.len(),
+            locals: source
+                .signature
+                .params
+                .iter()
+                .map(|parameter| Local {
+                    name: Some(parameter.name.val.clone()),
+                    ty: parameter.ty.clone(),
+                })
+                .collect(),
             entry: BlockId::from_index(0),
             blocks: vec![],
         },
@@ -65,7 +71,7 @@ impl<'types> FunctionLowering<'types> {
             typer,
             function,
             bindings: Default::default(),
-            owned: vec![vec![LocalId::from_index(0)]],
+            owned: vec![vec![]],
         }
     }
 
@@ -76,63 +82,26 @@ impl<'types> FunctionLowering<'types> {
             self.cleanup(0, &source.signature.result);
             self.terminate(Terminator::Return);
         } else {
-            self.function
-                .parameter(None, source.signature.parameter_type());
+            self.bind_params(&source.signature);
         }
         Ok(())
     }
 
     fn bind_params(&mut self, signature: &Signature) {
-        let params = &signature.params;
-        let ty = signature.parameter_type();
-        let name = (params.len() == 1).then(|| params[0].name.val.clone());
-        self.function.parameter(name, ty.clone());
-        for (index, parameter) in params.iter().enumerate() {
-            self.bind_parameter(parameter, index, params.len() == 1);
+        for parameter in &signature.params {
+            let local = self
+                .function
+                .parameter(Some(parameter.name.val.clone()), parameter.ty.clone());
+            self.owned[0].push(local);
+            if let Some(binding) = parameter.binding {
+                self.bindings.insert(
+                    binding,
+                    ValueBinding {
+                        local,
+                        ty: parameter.ty.clone(),
+                    },
+                );
+            }
         }
-        if params.len() > 1 && ty.needs_drop(self.typer.definitions()) {
-            self.emit(Instr::ForgetLocal {
-                local: LocalId::from_index(0),
-            });
-        }
-    }
-
-    fn bind_parameter(&mut self, parameter: &Parameter, index: usize, single: bool) {
-        let ty = &parameter.ty;
-        let local = if single {
-            LocalId::from_index(0)
-        } else {
-            let local = self.alloc_local(ty.clone(), Some(parameter.name.val.clone()));
-            self.unpack_parameter(local, index, ty);
-            local
-        };
-        self.bindings.insert(
-            parameter.binding.expect("checked body parameter"),
-            ValueBinding {
-                local,
-                ty: ty.clone(),
-            },
-        );
-    }
-
-    fn unpack_parameter(&mut self, local: LocalId, index: usize, ty: &Ty) {
-        if ty.needs_drop(self.typer.definitions()) {
-            self.parameter_field(index);
-            self.emit(Instr::TransferLoad);
-            self.emit(Instr::SetLocal { local });
-        } else {
-            self.emit(Instr::LocalAddress { local });
-            self.parameter_field(index);
-            self.emit(Instr::Load);
-            self.emit(Instr::Store);
-            self.emit(Instr::Discard);
-        }
-    }
-
-    fn parameter_field(&mut self, index: usize) {
-        self.emit(Instr::LocalAddress {
-            local: LocalId::from_index(0),
-        });
-        self.emit(Instr::AccessStatic { index });
     }
 }

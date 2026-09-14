@@ -14,6 +14,7 @@ pub(super) fn token(document: &Document, offset: usize) -> Option<Node<'_>> {
             && matches!(
                 node.kind(),
                 "lid"
+                    | "tuple_index"
                     | "uid"
                     | "builtin_type"
                     | "string"

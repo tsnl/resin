@@ -12,11 +12,12 @@
 (foreign_function name: (lid) @function)
 (function_definition params: (declare name: (lid) @variable.parameter))
 (foreign_function params: (declare name: (lid) @variable.parameter))
-(postfix_term prefix: (primary_term (lid) @function) . suffix: (closed_term))
+(postfix_term prefix: (primary_term (lid) @function) . suffix: (arguments))
 ((primary_term (lid) @function.builtin)
   (#any-of? @function.builtin "print" "fmt" "ok" "err"))
 
 (field_access name: (lid) @property)
+(field_access name: (tuple_index) @property)
 (method_call name: (lid) @function)
 (record_term fields: (term_define name: (lid) @property))
 (record_type field: (declare name: (lid) @property))

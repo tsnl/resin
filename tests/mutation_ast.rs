@@ -86,10 +86,10 @@ fn definition_keywords_preserve_statement_and_field_spans() {
     assert!(matches!(stmts[1].val, StmtKind::Declare { .. }));
     assert_eq!(text(stmts[1].span), "var second: int;");
     assert!(matches!(stmts[2].val, StmtKind::Expr { .. }));
-    let TermKind::Call { arg, .. } = &tail.val else {
+    let TermKind::Call { args, .. } = &tail.val else {
         panic!("expected nominal conversion");
     };
-    let TermKind::Record { fields } = &arg.val else {
+    let TermKind::Record { fields } = &args[0].val else {
         panic!("expected record initializer");
     };
     assert_eq!(text(fields[0].0.span), "first");

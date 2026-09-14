@@ -48,13 +48,16 @@ fn check_shader(
         .functions
         .get(id.index())
         .ok_or_else(|| location.error(VerifyErrorKind::InvalidShader))?;
-    let parameter = function
+    let parameters = function
         .locals
-        .first()
+        .get(..function.parameter_count)
         .ok_or_else(|| location.error(VerifyErrorKind::InvalidLocal { local: 0 }))?;
     resin_types::shader::validate(
         typer,
-        &parameter.ty,
+        &parameters
+            .iter()
+            .map(|local| local.ty.clone())
+            .collect::<Vec<_>>(),
         &function.result,
         function.foreign.is_some(),
         stage,
@@ -89,6 +92,7 @@ fn check_drop_hook(module: &Module, ty: TypeId, hook: FunctionId) -> Result<(), 
         pointee: Box::new(Ty::Defined { definition: ty }),
     };
     if function.profile != crate::Profile::Host
+        || function.parameter_count != 1
         || function.locals.first().map(|local| &local.ty) != Some(&pointer)
         || function.result != Ty::Unit
     {

@@ -20,18 +20,6 @@ pub(super) struct Signature {
     pub(super) result: Ty,
 }
 
-impl Signature {
-    pub(super) fn parameter_type(&self) -> Ty {
-        Ty::parameter(
-            &self
-                .params
-                .iter()
-                .map(|parameter| parameter.ty.clone())
-                .collect::<Vec<_>>(),
-        )
-    }
-}
-
 #[derive(Debug, Clone)]
 pub(super) struct Parameter {
     /// Required for every parameter of a function with a body, including unused ones.
@@ -98,11 +86,7 @@ pub(super) enum TermKind {
     },
     Call {
         func: Box<Term>,
-        arg: Box<Term>,
-    },
-    /// Evaluate a receiver, then unpack the remaining arguments in source order.
-    Pack {
-        args: Arguments,
+        args: Vec<Term>,
     },
     Intrinsic {
         op: Intrinsic,
@@ -171,8 +155,7 @@ pub(super) enum TermKind {
 
 #[derive(Debug, Clone)]
 pub(super) struct Arguments {
-    pub(super) receiver: Option<Box<Term>>,
-    pub(super) argument: Box<Term>,
+    pub(super) values: Vec<Term>,
     pub(super) params: Vec<Ty>,
 }
 

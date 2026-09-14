@@ -117,10 +117,9 @@ fn allocate(
     let bytes = checked_bytes(types, element, count, name, out);
     writeln!(
         out,
-        "  {} {name}_allocation = r_fn{}(({}){{ {}, {bytes}, _Alignof({}), 0 }});",
+        "  {} {name}_allocation = r_fn{}({}, {bytes}, _Alignof({}), 0);",
         types.name(&function.result),
         allocator.index(),
-        types.name(&function.locals[0].ty),
         args[0].expr,
         types.name(element)
     )

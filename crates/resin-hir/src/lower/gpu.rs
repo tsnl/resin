@@ -201,13 +201,13 @@ impl Context {
             .iter()
             .zip(stages)
             .map(|(shader, stage)| {
-                let Ty::Function { param, result } = shader else {
+                let Ty::Function { params, result } = shader else {
                     return Err(
                         "pipeline creation requires shader declarations, not SPIR-V bytes"
                             .to_string(),
                     );
                 };
-                Ok((&**param, &**result, *stage))
+                Ok((params.as_slice(), &**result, *stage))
             })
             .collect::<Result<Vec<_>, String>>()?;
         let root = resin_types::shader::pipeline_root(self, &stages)?;

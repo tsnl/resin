@@ -269,7 +269,7 @@ impl Context {
         &self,
         ty: &Ty,
         name: &str,
-        argument: &Ty,
+        arguments: &[Ty],
         associated: bool,
     ) -> Option<FunctionDecl> {
         if !associated
@@ -278,10 +278,10 @@ impl Context {
         {
             return Some(FunctionDecl {
                 body: FunctionBody::GpuNew { allocator },
-                params: vec![ty.clone(), argument.clone()],
+                params: vec![ty.clone(), arguments.first()?.clone()],
                 result: gpu_result(
                     Ty::GpuPointer {
-                        pointee: Box::new(argument.clone()),
+                        pointee: Box::new(arguments.first()?.clone()),
                     },
                     self.gpu_error(allocator),
                 ),
@@ -294,20 +294,17 @@ impl Context {
                     pointee: Box::new(Ty::UInt8),
                 })
         {
-            let Ty::Record { fields } = argument else {
+            let [handle, owner, ..] = arguments else {
                 return None;
             };
-            let [handle, owner, ..] = fields.as_slice() else {
-                return None;
-            };
-            if !matches!(handle.ty, Ty::Pointer { .. }) || !matches!(owner.ty, Ty::Arc { .. }) {
+            if !matches!(handle, Ty::Pointer { .. }) || !matches!(owner, Ty::Arc { .. }) {
                 return None;
             }
             return Some(FunctionDecl {
                 body: FunctionBody::Intrinsic(Intrinsic::GpuAllocateNative),
                 params: vec![
-                    handle.ty.clone(),
-                    owner.ty.clone(),
+                    handle.clone(),
+                    owner.clone(),
                     Ty::UInt64,
                     Ty::UInt64,
                     Ty::Int32,
@@ -326,8 +323,8 @@ impl Context {
                 },
             });
         }
-        if associated && let Ty::Record { fields } = argument {
-            let first = &fields.first()?.ty;
+        if associated {
+            let first = arguments.first()?;
             let body = match (ty, name) {
                 (Ty::GpuPointer { .. }, "new") => FunctionBody::GpuNew {
                     allocator: self.gpu_allocator(first)?,

@@ -259,7 +259,7 @@ mod tests {
             "def main() -> () = { var p = Ptr<int>(ulong(0)); var x = ulong(p) > ulong(0); var y = 8 >> 1; var z = 1 < 2; };",
             "def main() -> () = { var p = Ptr < Ptr < int > > (ulong (0)); };",
             "def fibonacci(n: int) -> int = { n }; def main() -> () = { var x = fibonacci(2); var y = fibonacci (3); };",
-            "def main() -> () = { var x = Name { value = 1 }; var y = Converter [1, 2]; };",
+            "def main() -> () = { var x = Name { value = 1 }; var y = Converter([1, 2]); };",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }

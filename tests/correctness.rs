@@ -14,27 +14,34 @@ fn compile(src: &str) -> resin_lir::Module {
 }
 
 #[test]
-fn unit_and_tuple_calls_have_one_argument_and_one_parameter() {
+fn zero_and_multiple_argument_calls_have_distinct_parameter_counts() {
     let module = compile(
-        "export { main }; def f () -> int = { 1 }; def add (a: int, b: int) -> int = { a + b }; def main() -> () = { var pair = (1, 2); var x = f(); var y = add(pair); var z = add(3, 4); };",
+        "export { main }; def f () -> int = { 1 }; def add (a: int, b: int) -> int = { a + b }; def main() -> () = { var pair = (1, 2); var x = f(); var y = add(pair.0, pair.1); var z = add(3, 4); };",
     );
     let f = module
         .functions
         .iter()
         .find(|f| f.name.as_deref() == Some("f"))
         .unwrap();
-    assert_eq!(f.locals[0].ty, Ty::Unit);
+    assert_eq!(f.parameter_count, 0);
     let add = module
         .functions
         .iter()
         .find(|f| f.name.as_deref() == Some("add"))
         .unwrap();
-    assert_eq!(add.locals[0].ty, Ty::parameter(&[Ty::Int32, Ty::Int32]));
+    assert_eq!(add.parameter_count, 2);
+    assert_eq!(
+        add.locals[..2]
+            .iter()
+            .map(|local| local.ty.clone())
+            .collect::<Vec<_>>(),
+        [Ty::Int32, Ty::Int32]
+    );
     let instructions = &module.functions[module.entries["main"].index()].blocks[0].instrs;
     assert_eq!(
         instructions
             .iter()
-            .filter(|i| matches!(i, Instr::Call))
+            .filter(|i| matches!(i, Instr::Call { .. }))
             .count(),
         3
     );
@@ -52,13 +59,13 @@ fn function_types_accept_unit_tuples_and_higher_order_calls() {
         "export { main }; type F = () -> int; def one () -> int = { 1 }; def main() -> () = { var f = F (one); var x = f(); };",
     );
     compile(
-        "export { main }; type Add = (int, int) -> int; def add (a: int, b: int) -> int = { a + b }; def main() -> () = { var f = Add (add); var p = (1, 2); var x = f(p); };",
+        "export { main }; type Add = (int, int) -> int; def add (a: int, b: int) -> int = { a + b }; def main() -> () = { var f = Add (add); var p = (1, 2); var x = f(p.0, p.1); };",
     );
     compile(
-        "export { main }; def apply (f: (int, int) -> int, p: (int, int)) -> int = { f(p) }; def add (a: int, b: int) -> int = { a + b }; def main() -> () = { var x = apply(add, (1, 2)); };",
+        "export { main }; def apply (f: (int, int) -> int, p: (int, int)) -> int = { f(p.0, p.1) }; def add (a: int, b: int) -> int = { a + b }; def main() -> () = { var x = apply(add, (1, 2)); };",
     );
     compile(
-        "export { main }; def identity (p: (int, int)) -> (int, int) = { p }; def main() -> () = { var x = identity(1, 2); };",
+        "export { main }; def identity (p: (int, int)) -> (int, int) = { p }; def main() -> () = { var x = identity((1, 2)); };",
     );
     compile(
         "export { main }; type Unit = (); def f (u: Unit) -> () = { () }; def main() -> () = { var x = Unit (()); var y = f(x); };",
@@ -93,7 +100,7 @@ fn type_formers_take_types_between_angle_brackets() {
 }
 
 #[test]
-fn unary_typechecking_rejects_wrong_argument_shapes() {
+fn typechecking_rejects_incorrect_argument_counts() {
     for src in [
         "export { main }; def f () -> int = { 1 }; def main() -> () = { var x = f(1); };",
         "export { main }; def f (a: int, b: int) -> int = { a }; def main() -> () = { var x = f(1); };",
@@ -102,9 +109,7 @@ fn unary_typechecking_rejects_wrong_argument_shapes() {
         assert!(
             matches!(
                 pipeline::generate(&parse(src).unwrap()).unwrap_err().kind,
-                GenerateErrorKind::Type {
-                    kind: TypeErrorKind::TypeMismatch { .. }
-                }
+                GenerateErrorKind::Inference { .. }
             ),
             "{src}"
         );
@@ -260,7 +265,6 @@ fn signed_literals_respect_context_and_the_minimum_integer() {
         module.functions[0]
             .locals
             .iter()
-            .skip(1)
             .map(|g| g.ty.clone())
             .collect::<Vec<_>>(),
         [Ty::Int64, Ty::Int64, Ty::Int64, Ty::Int64, Ty::Int64]
@@ -309,7 +313,7 @@ fn nested_field_access_evaluates_its_base_once() {
             f.blocks
                 .iter()
                 .flat_map(|b| &b.instrs)
-                .filter(|i| matches!(i, Instr::Call))
+                .filter(|i| matches!(i, Instr::Call { .. }))
                 .count(),
             1,
             "{src}"

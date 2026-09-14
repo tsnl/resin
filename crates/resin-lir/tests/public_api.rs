@@ -47,7 +47,7 @@ fn resolved_tree_is_sufficient_to_lower_control_flow() {
     assert_eq!(module, resin_lir::generate(&tree).unwrap());
     drop(tree);
     let function = &module.functions[0];
-    assert_eq!(function.locals[0].ty, Ty::Unit);
+    assert_eq!(function.parameter_count, 0);
     assert!(function.blocks.len() > 1);
     assert!(
         function
@@ -247,27 +247,11 @@ fn parameter_function(types: &[Type], foreign: bool) -> Function {
 }
 
 #[test]
-fn ordinary_and_foreign_parameters_share_one_unit_single_or_tuple_slot() {
-    let tuple = Ty::Record {
-        fields: vec![
-            RecordField {
-                name: "_0".into(),
-                ty: Ty::Bool,
-            },
-            RecordField {
-                name: "_1".into(),
-                ty: Ty::Int32,
-            },
-        ],
-    };
-    for (params, expected, foreign_params) in [
-        (vec![], Ty::Unit, vec![]),
-        (vec![Type::Int32], Ty::Int32, vec![Ty::Int32]),
-        (
-            vec![Type::Bool, Type::Int32],
-            tuple,
-            vec![Ty::Bool, Ty::Int32],
-        ),
+fn ordinary_and_foreign_parameters_have_separate_locals() {
+    for (params, expected) in [
+        (vec![], vec![]),
+        (vec![Type::Int32], vec![Ty::Int32]),
+        (vec![Type::Bool, Type::Int32], vec![Ty::Bool, Ty::Int32]),
     ] {
         for foreign in [false, true] {
             let location = SourceLocation {
@@ -288,18 +272,25 @@ fn ordinary_and_foreign_parameters_share_one_unit_single_or_tuple_slot() {
                 checked.view().module().origins.functions[&FunctionId::from_index(0)],
                 location,
             );
-            assert_eq!(function.locals[0].ty, expected);
+            assert_eq!(function.parameter_count, expected.len());
+            assert_eq!(
+                function.locals[..function.parameter_count]
+                    .iter()
+                    .map(|local| local.ty.clone())
+                    .collect::<Vec<_>>(),
+                expected
+            );
             assert_eq!(
                 function.ty(),
                 Some(Ty::Function {
-                    param: Box::new(expected.clone()),
+                    params: expected.clone(),
                     result: Box::new(Ty::Int32),
                 })
             );
             assert_eq!(function.blocks.is_empty(), foreign);
             if foreign {
-                assert_eq!(function.locals.len(), 1);
-                assert_eq!(function.foreign.as_ref().unwrap().params, foreign_params);
+                assert_eq!(function.locals.len(), expected.len());
+                assert_eq!(function.foreign.as_ref().unwrap().params, expected);
                 assert!(checked.view().analysis().functions[0].inputs.is_empty());
                 assert!(checked.view().module().origins.instructions.is_empty());
             }

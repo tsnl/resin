@@ -208,8 +208,8 @@ fn numeric_suffixes_and_one_armed_if_keep_their_spelling() {
 #[test]
 fn singleton_tuples_do_not_expand_for_their_trailing_comma() {
     check(
-        "type Single=(int,);def main(x:(int,))={var a=(\n1,\n);var b=((1,2),);var c=((1,),);f(x,);};",
-        "type Single = (int,);\ndef main(x: (int,)) = {\n\tvar a = (1,);\n\tvar b = ((1, 2),);\n\tvar c = ((1,),);\n\tf(x,);\n};\n",
+        "type Single=(int,);def main(x:(int,))={var a=(\n1,\n);var b=((1,2),);var c=((1,),);f((x,));};",
+        "type Single = (int,);\ndef main(x: (int,)) = {\n\tvar a = (1,);\n\tvar b = ((1, 2),);\n\tvar c = ((1,),);\n\tf((x,));\n};\n",
     );
     check(
         "def main()={var a=(1,/* note */);var b=(1,// note\n);var c=([1,],);var d=(1,2,);};",

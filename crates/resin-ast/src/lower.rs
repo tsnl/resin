@@ -348,6 +348,12 @@ impl<'a> AstGen<'a> {
         self.gen_postfix_term(node.child(0).unwrap_or(node))
     }
 
+    fn gen_arguments(&self, node: Node) -> Vec<Term> {
+        node.children_by_field_name("args", &mut node.walk())
+            .map(|node| self.gen_term(node))
+            .collect()
+    }
+
     fn gen_postfix_term(&self, node: Node) -> Term {
         if node.kind() != "postfix_term" || node.is_missing() || node.is_error() {
             return self.hole(node);
@@ -407,12 +413,7 @@ impl<'a> AstGen<'a> {
                 "method_call" => {
                     let name = self.ident(child.child_by_field_name("name").unwrap_or(child));
                     let args = child.child_by_field_name("args").unwrap_or(child);
-                    let arg = match args.kind() {
-                        "paren_term" => self.gen_paren_term(args),
-                        "tuple_term" => self.gen_tuple_term(args),
-                        "unit_term" => Spanned::new(TermKind::Unit, self.span(args)),
-                        _ => self.hole(args),
-                    };
+                    let args = self.gen_arguments(args);
                     let span = Span {
                         start: base.span.start,
                         end: child.end_byte(),
@@ -426,7 +427,7 @@ impl<'a> AstGen<'a> {
                                     .child_by_field_name("type_args")
                                     .and_then(|n| n.child_by_field_name("types")),
                             ),
-                            arg: Box::new(arg),
+                            args,
                         },
                         span,
                     );
@@ -446,7 +447,11 @@ impl<'a> AstGen<'a> {
                         );
                         continue;
                     }
-                    let name = self.ident(field.unwrap());
+                    let field = field.unwrap();
+                    let mut name = self.ident(field);
+                    if field.kind() == "tuple_index" {
+                        name.val = format!("_{}", name.val).into();
+                    }
                     let span = Span {
                         start: base.span.start,
                         end: name.span.end,
@@ -472,12 +477,12 @@ impl<'a> AstGen<'a> {
                         );
                     }
                 }
-                "closed_term" => {
-                    let arg = self.gen_closed_term(child);
+                "arguments" => {
+                    let args = self.gen_arguments(child);
                     base = Spanned::new(
                         TermKind::Call {
                             func: Box::new(base),
-                            arg: Box::new(arg),
+                            args,
                         },
                         self.span(node),
                     );
@@ -533,6 +538,23 @@ impl<'a> AstGen<'a> {
         }
         let span = self.span(node);
         match child.kind() {
+            "constructor_term" => {
+                let ty = self.gen_unary_type(child.child_by_field_name("type").unwrap_or(child));
+                let type_span = ty.span;
+                let value = child.child_by_field_name("value").unwrap_or(child);
+                let value = if value.kind() == "record_term" {
+                    self.gen_record_term(value)
+                } else {
+                    Spanned::new(TermKind::Unit, self.span(value))
+                };
+                Spanned::new(
+                    TermKind::Call {
+                        func: Box::new(Spanned::new(TermKind::Type { ty }, type_span)),
+                        args: vec![value],
+                    },
+                    self.span(child),
+                )
+            }
             "closed_term" => self.gen_closed_term(child),
             "lid" => Spanned::new(
                 TermKind::Var {
@@ -837,11 +859,15 @@ impl<'a> AstGen<'a> {
             return Spanned::new(TypeKind::Hole, self.span(node));
         }
         if let Some(ret) = node.child_by_field_name("ret_ty") {
-            let from = self.gen_closed_type(node.child_by_field_name("param_ty").unwrap_or(node));
+            let list = node.child_by_field_name("params").unwrap_or(node);
+            let params = list
+                .children_by_field_name("params", &mut list.walk())
+                .map(|node| self.gen_type(node))
+                .collect();
             let to = self.gen_infix_type(ret);
             return Spanned::new(
                 TypeKind::Func {
-                    from: Box::new(from),
+                    params,
                     to: Box::new(to),
                 },
                 self.span(node),
@@ -1002,6 +1028,7 @@ impl<'a> AstGen<'a> {
             || !matches!(
                 node.kind(),
                 "lid"
+                    | "tuple_index"
                     | "uid"
                     | "builtin_type"
                     | "Ptr"

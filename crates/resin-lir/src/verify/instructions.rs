@@ -257,14 +257,14 @@ pub(super) fn check_instr(
             })?;
             stack.push(function_type(target, location)?);
         }
-        Instr::Call => {
-            let arg = pop_one(stack, location)?;
+        Instr::Call { arguments } => {
+            let args = pop(stack, *arguments, location)?;
             let callee = pop_one(stack, location)?;
             let shape = shape(&module.types, callee.clone(), location)?;
-            let Ty::Function { param, result } = shape else {
+            let Ty::Function { params, result } = shape else {
                 return Err(location.error(VerifyErrorKind::ExpectedFunction { found: callee }));
             };
-            expect_type(*param, arg, location)?;
+            expect_types(&params, &args, location)?;
             stack.push(*result);
         }
         Instr::CallBuiltin {

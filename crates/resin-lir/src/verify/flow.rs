@@ -16,8 +16,10 @@ pub(super) fn check_function(
 ) -> Result<FunctionTypes, VerifyError> {
     let entry = function.entry;
     let function_location = Location::function(function_id);
-    if function.locals.is_empty() {
-        return Err(function_location.error(VerifyErrorKind::InvalidLocal { local: 0 }));
+    if function.parameter_count > function.locals.len() {
+        return Err(function_location.error(VerifyErrorKind::InvalidLocal {
+            local: function.parameter_count - 1,
+        }));
     }
 
     check_value(&module.types, &function.result, function_location)?;
@@ -29,7 +31,13 @@ pub(super) fn check_function(
         if function.name.is_none()
             || !function.blocks.is_empty()
             || !foreign.valid(&function.result)
-            || function.locals[0].ty != Ty::parameter(&foreign.params)
+            || function.parameter_count != foreign.params.len()
+            || function
+                .locals
+                .iter()
+                .take(function.parameter_count)
+                .map(|local| &local.ty)
+                .ne(foreign.params.iter())
         {
             return Err(function_location.error(VerifyErrorKind::InvalidForeignSignature));
         }

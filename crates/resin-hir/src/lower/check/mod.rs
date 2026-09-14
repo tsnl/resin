@@ -613,7 +613,7 @@ impl Checker<'_> {
 impl Signature {
     fn ty(&self) -> Type {
         Type::function(
-            Type::parameter(self.params.iter().map(|(_, ann)| ann.ty.clone()).collect()),
+            self.params.iter().map(|(_, ann)| ann.ty.clone()).collect(),
             self.result.ty.clone(),
         )
     }
@@ -689,13 +689,9 @@ impl Expression<'_, '_> {
         self.checker
             .scopes
             .record_members(name.span, receiver_type.ty.clone(), true);
-        self.checker.scopes.record_call(
-            name,
-            receiver_type.ty.clone(),
-            Ty::Unit.into(),
-            true,
-            self.rule,
-        );
+        self.checker
+            .scopes
+            .record_call(name, receiver_type.ty.clone(), vec![], true, self.rule);
         self.constrain((
             name.span,
             Constraint::MethodReference {
@@ -1020,7 +1016,7 @@ impl Expression<'_, '_> {
                 receiver,
                 name,
                 type_args,
-                arg,
+                args,
             } => {
                 let type_args = (!type_args.is_empty()).then(|| {
                     type_args
@@ -1042,11 +1038,14 @@ impl Expression<'_, '_> {
                 self.checker
                     .scopes
                     .record_members(name.span, receiver_type.clone(), associated);
-                let arg = self.child(arg, None);
+                let args = args
+                    .iter()
+                    .map(|arg| self.child(arg, None))
+                    .collect::<Vec<_>>();
                 self.checker.scopes.record_call(
                     name,
                     receiver_type.clone(),
-                    arg.ty.clone(),
+                    args.iter().map(|arg| arg.ty.clone()).collect(),
                     associated,
                     self.rule,
                 );
@@ -1054,7 +1053,7 @@ impl Expression<'_, '_> {
                     receiver: receiver_type.clone(),
                     name: name.val.clone(),
                     type_args,
-                    arg: arg.ty.clone(),
+                    args: args.iter().map(|arg| arg.ty.clone()).collect(),
                     out: out.clone(),
                     associated,
                     origins: receiver.as_ref().map(address_origins).unwrap_or_default(),
@@ -1070,18 +1069,20 @@ impl Expression<'_, '_> {
                         },
                     ),
                     name: name.clone(),
-                    arg: Box::new(arg),
+                    args,
                 }
             }
-            resin_ast::TermKind::Call { func, arg } => {
+            resin_ast::TermKind::Call { func, args } => {
                 if let resin_ast::TermKind::Var { name } = &func.val
                     && name.val.as_ref() == "absurd"
                 {
+                    let arg = single_argument(args, span)?;
                     let arg = self.child(arg, Some(Ty::union([]).into()));
                     TermKind::Absurd { arg: Box::new(arg) }
                 } else if let resin_ast::TermKind::Var { name } = &func.val
                     && matches!(name.val.as_ref(), "size_of" | "align_of")
                 {
+                    let arg = single_argument(args, span)?;
                     // Check the operand for typing only. Never execute its effects or read its locals.
                     let ann = if let resin_ast::TermKind::Type { ty } = &arg.val {
                         self.annotation(ty, false)
@@ -1103,6 +1104,7 @@ impl Expression<'_, '_> {
                 } else if let resin_ast::TermKind::Var { name } = &func.val
                     && matches!(name.val.as_ref(), "ok" | "err")
                 {
+                    let arg = single_argument(args, span)?;
                     let (value, errors) = self.result_parts(&out, span)?;
                     let failure = name.val.as_ref() == "err";
                     let arg = self.child(arg, if failure { None } else { Some(value) });
@@ -1114,6 +1116,15 @@ impl Expression<'_, '_> {
                         arg: Box::new(arg),
                     }
                 } else if let resin_ast::TermKind::Type { ty } = &func.val {
+                    let unit = resin_ast::Term {
+                        span,
+                        val: resin_ast::TermKind::Unit,
+                    };
+                    let arg = if args.is_empty() {
+                        &unit
+                    } else {
+                        single_argument(args, span)?
+                    };
                     let ann = self.annotation(ty, true);
                     let arg = if let Type::Node(Head::Arc, parts) = &ann.ty {
                         let context = if matches!(
@@ -1163,25 +1174,39 @@ impl Expression<'_, '_> {
                 } else if let resin_ast::TermKind::Var { name } = &func.val
                     && matches!(name.val.as_ref(), "print" | "fmt")
                 {
-                    let arg = self.child(arg, None);
+                    let args = args
+                        .iter()
+                        .map(|arg| self.child(arg, None))
+                        .collect::<Vec<_>>();
                     self.constrain((
                         span,
-                        Constraint::Builtin(name.val.clone(), vec![arg.ty.clone()], out.clone()),
+                        Constraint::Builtin(
+                            name.val.clone(),
+                            args.iter().map(|arg| arg.ty.clone()).collect(),
+                            out.clone(),
+                        ),
                     ));
                     TermKind::Builtin {
                         name: name.val.clone(),
-                        args: vec![arg],
+                        args,
                     }
                 } else {
                     let func = self.child(func, None);
-                    let arg = self.child(arg, None);
+                    let args = args
+                        .iter()
+                        .map(|arg| self.child(arg, None))
+                        .collect::<Vec<_>>();
                     self.constrain((
                         span,
-                        Constraint::Call(func.ty.clone(), arg.ty.clone(), out.clone()),
+                        Constraint::Call(
+                            func.ty.clone(),
+                            args.iter().map(|arg| arg.ty.clone()).collect(),
+                            out.clone(),
+                        ),
                     ));
                     TermKind::Call {
                         func: Box::new(func),
-                        arg: Box::new(arg),
+                        args,
                     }
                 }
             }
@@ -1444,5 +1469,15 @@ fn address_origins(term: &Term) -> Vec<super::infer::AddressOrigin> {
             origins
         }
         _ => vec![],
+    }
+}
+
+fn single_argument(args: &[resin_ast::Term], span: Span) -> Result<&resin_ast::Term> {
+    match args {
+        [arg] => Ok(arg),
+        _ => Err(GenerateError::inference(
+            span,
+            format!("expected 1 argument, found {}", args.len()),
+        )),
     }
 }

@@ -16,8 +16,11 @@ pub(super) fn lower(
     index: usize,
 ) -> Result<(), Error> {
     let result = context.ty(&function.result)?;
-    let parameter = context.ty(&function.locals[0].ty)?;
-    let signature = context.builder.type_function(result, [parameter]);
+    let parameters = function.locals[..function.parameter_count]
+        .iter()
+        .map(|local| context.ty(&local.ty))
+        .collect::<Result<Vec<_>, _>>()?;
+    let signature = context.builder.type_function(result, parameters.clone());
     if let Some(name) = &function.name {
         context
             .builder
@@ -32,16 +35,18 @@ pub(super) fn lower(
             signature,
         )
         .unwrap();
-    let argument = context.builder.function_parameter(parameter).unwrap();
+    let arguments = parameters
+        .into_iter()
+        .map(|ty| context.builder.function_parameter(ty).unwrap())
+        .collect::<Vec<_>>();
     context.builder.begin_block(None).unwrap();
     let locals = local_variables(context, function)?;
     let stacks = region_outputs(function, flow);
     let destinations = destinations(context, flow, &stacks.outputs, &stacks.tests)?;
     let arrays = array_variables(context, function, flow)?;
-    context
-        .builder
-        .store(locals[0], argument, None, [])
-        .unwrap();
+    for (local, argument) in locals.iter().zip(arguments) {
+        context.builder.store(*local, argument, None, []).unwrap();
+    }
     let mut lowering = FunctionLowering {
         context,
         function,
@@ -258,7 +263,7 @@ impl FunctionLowering<'_, '_> {
             &self.locals,
             &self.arrays,
         )?;
-        if matches!(instruction, Instr::Call) {
+        if matches!(instruction, Instr::Call { .. }) {
             let failed = ops::load(self.context, &Ty::Bool, self.context.failed)?;
             self.check(failed, false)?;
         }

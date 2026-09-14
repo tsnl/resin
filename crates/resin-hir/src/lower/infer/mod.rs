@@ -20,7 +20,7 @@ pub(crate) enum Head {
     Parameter { id: crate::TypeParameterId },
     Member { name: Arc<str> },
     Method { name: Arc<str>, associated: bool },
-    FunctionParameter,
+    FunctionParameter { index: usize },
     FunctionResult,
     Nominal { definition: TypeId },
     Pointer,
@@ -33,6 +33,7 @@ pub(crate) enum Head {
     Span,
     Array(usize),
     Record(Vec<Arc<str>>),
+    // Result first, followed by the parameter types in declaration order.
     Function,
     Result,
     Union,
@@ -51,8 +52,8 @@ pub(crate) enum Type {
 }
 
 impl Type {
-    fn function_parameter(function: Self) -> Self {
-        Self::Node(Head::FunctionParameter, vec![function])
+    fn function_parameter(function: Self, index: usize) -> Self {
+        Self::Node(Head::FunctionParameter { index }, vec![function])
     }
 
     fn function_result(function: Self) -> Self {
@@ -93,27 +94,16 @@ impl Type {
         Self::Node(Head::GpuPointer, vec![pointee])
     }
 
-    pub fn function(param: Type, result: Type) -> Self {
-        Self::Node(Head::Function, vec![param, result])
+    pub fn function(params: Vec<Type>, result: Type) -> Self {
+        Self::Node(
+            Head::Function,
+            std::iter::once(result).chain(params).collect(),
+        )
     }
 
     pub fn record(fields: Vec<(Arc<str>, Type)>) -> Self {
         let (names, types) = fields.into_iter().unzip();
         Self::Node(Head::Record(names), types)
-    }
-
-    pub fn parameter(types: Vec<Type>) -> Self {
-        match types.len() {
-            0 => Ty::Unit.into(),
-            1 => types.into_iter().next().unwrap(),
-            _ => Self::record(
-                types
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, t)| (format!("_{i}").into(), t))
-                    .collect(),
-            ),
-        }
     }
 }
 
@@ -170,8 +160,8 @@ impl Type {
                     .map(Self::from_hir)
                     .collect(),
             ),
-            crate::Type::FunctionParameter { function } => {
-                Self::function_parameter(Self::from_hir(function))
+            crate::Type::FunctionParameter { function, index } => {
+                Self::function_parameter(Self::from_hir(function), *index)
             }
             crate::Type::FunctionResult { function } => {
                 Self::function_result(Self::from_hir(function))
@@ -196,9 +186,9 @@ impl Type {
                 Head::GpuGraphicsPipeline,
                 vec![Self::from_hir(root), Self::from_hir(owner)],
             ),
-            crate::Type::Function { param, result } => Self::Node(
-                Head::Function,
-                vec![Self::from_hir(param), Self::from_hir(result)],
+            crate::Type::Function { params, result } => Self::function(
+                params.iter().map(Self::from_hir).collect(),
+                Self::from_hir(result),
             ),
             crate::Type::Result { value, error } => Self::Node(
                 Head::Result,
@@ -253,7 +243,10 @@ impl From<Ty> for Type {
             Ty::Record { fields } => {
                 Self::record(fields.into_iter().map(|f| (f.name, f.ty.into())).collect())
             }
-            Ty::Function { param, result } => Self::function((*param).into(), (*result).into()),
+            Ty::Function { params, result } => Self::function(
+                params.into_iter().map(Self::from).collect(),
+                (*result).into(),
+            ),
             Ty::Result { value, error } => Self::result((*value).into(), (*error).into()),
             atom => Self::Node(Head::Atom(atom), vec![]),
         }
@@ -272,7 +265,7 @@ impl Head {
             self,
             Self::Member { .. }
                 | Self::Method { .. }
-                | Self::FunctionParameter
+                | Self::FunctionParameter { .. }
                 | Self::FunctionResult
         )
     }
@@ -283,7 +276,7 @@ impl Head {
             Self::Parameter { .. }
             | Self::Member { .. }
             | Self::Method { .. }
-            | Self::FunctionParameter
+            | Self::FunctionParameter { .. }
             | Self::FunctionResult
             | Self::Nominal { .. } => return None,
             Self::Atom(ty) => ty.clone(),
@@ -327,8 +320,8 @@ impl Head {
                     .collect(),
             },
             Self::Function => Ty::Function {
-                param: Box::new(children.next().unwrap()),
                 result: Box::new(children.next().unwrap()),
+                params: children.collect(),
             },
             Self::Result => Ty::Result {
                 value: Box::new(children.next().unwrap()),
@@ -363,8 +356,9 @@ impl Head {
                     associated: *associated,
                 }),
             },
-            Self::FunctionParameter => crate::Type::FunctionParameter {
+            Self::FunctionParameter { index } => crate::Type::FunctionParameter {
                 function: Box::new(children.next().unwrap()),
+                index: *index,
             },
             Self::FunctionResult => crate::Type::FunctionResult {
                 function: Box::new(children.next().unwrap()),
@@ -408,8 +402,8 @@ impl Head {
                     .collect(),
             },
             Self::Function => crate::Type::Function {
-                param: Box::new(children.next().unwrap()),
                 result: Box::new(children.next().unwrap()),
+                params: children.collect(),
             },
             Self::Result => crate::Type::Result {
                 value: Box::new(children.next().unwrap()),
@@ -1247,12 +1241,12 @@ pub(crate) enum Constraint {
     Deref(Type, Type),
     Address(Vec<AddressOrigin>, Type, Type),
     Field(Type, Arc<str>, Type),
-    Call(Type, Type, Type),
+    Call(Type, Vec<Type>, Type),
     Method {
         receiver: Type,
         name: Arc<str>,
         type_args: Option<Vec<Type>>,
-        arg: Type,
+        args: Vec<Type>,
         out: Type,
         associated: bool,
         origins: Vec<AddressOrigin>,
@@ -1518,7 +1512,7 @@ impl Inference<'_> {
     fn pipeline_method(
         &self,
         method: FunctionDecl,
-        arg: &Type,
+        args: &[Type],
         associated: bool,
         span: Span,
     ) -> Result<Option<FunctionDecl>> {
@@ -1528,23 +1522,8 @@ impl Inference<'_> {
             _ => return Ok(Some(method)),
         };
         let count = method.params.len() - usize::from(!associated);
-        let inputs = if count == 1 {
-            vec![arg.clone()]
-        } else {
-            match self.solver.head(arg) {
-                Type::Variable(_) => return Ok(None),
-                Type::Node(Head::Record(names), parts)
-                    if parts.len() == count
-                        && names
-                            .iter()
-                            .enumerate()
-                            .all(|(i, name)| name.as_ref() == format!("_{i}")) =>
-                {
-                    parts
-                }
-                _ => return Err(error(span, "incorrect pipeline argument count")),
-            }
-        };
+        argument_count(count, args.len(), span)?;
+        let inputs = args;
         let inputs = &inputs[usize::from(associated)..];
         let needed = if factory { inputs.len() } else { 1 };
         let Some(arguments) = inputs
@@ -1595,17 +1574,22 @@ impl Inference<'_> {
     fn dependent_call(
         &mut self,
         function: &Type,
-        argument: &Type,
+        args: &[Type],
         result: &Type,
         span: Span,
     ) -> Result<bool> {
-        let argument =
-            self.solver
-                .coerce(argument, &Type::function_parameter(function.clone()), span)?;
+        let mut arguments = true;
+        for (index, arg) in args.iter().enumerate() {
+            arguments &= self.solver.coerce(
+                arg,
+                &Type::function_parameter(function.clone(), index),
+                span,
+            )?;
+        }
         let result = self
             .solver
             .coerce(&Type::function_result(function.clone()), result, span)?;
-        Ok(argument && result)
+        Ok(arguments && result)
     }
 
     fn method_application(
@@ -1653,27 +1637,18 @@ impl Inference<'_> {
             .into_iter()
             .chain(method.type_params)
             .collect::<Vec<_>>();
-        let count = method.params.len();
-        let signature = Type::function(Type::parameter(method.params), method.result);
+        let signature = Type::function(method.params, method.result);
         let (signature, type_args) =
             self.solver
                 .apply(signature, &parameters, Some(arguments), span)?;
         let Type::Node(Head::Function, parts) = self.solver.head(&signature) else {
             unreachable!("method signature");
         };
-        let params = match count {
-            0 => vec![],
-            1 => vec![parts[0].clone()],
-            _ => match self.solver.head(&parts[0]) {
-                Type::Node(Head::Record(_), params) => params,
-                _ => unreachable!("method parameters"),
-            },
-        };
         let application = AppliedMethod {
             declaration: method.declaration,
             type_args,
-            params,
-            result: parts[1].clone(),
+            params: parts[1..].to_vec(),
+            result: parts[0].clone(),
         };
         self.applications.insert(owner, application.clone());
         Ok(Some(application))
@@ -1688,7 +1663,7 @@ impl Inference<'_> {
     ) -> Result<bool> {
         let Constraint::Method {
             receiver,
-            arg,
+            args,
             out,
             associated,
             origins,
@@ -1704,9 +1679,7 @@ impl Inference<'_> {
                 "method receiver does not match: this function has no receiver parameter",
             )
         })?;
-        let arguments = self
-            .solver
-            .coerce(arg, &Type::parameter(params.to_vec()), span)?;
+        let arguments = self.arguments(args, params, span)?;
         let result = self.solver.coerce(&application.result, out, span)?;
         let conversion = if *associated {
             None
@@ -1788,13 +1761,22 @@ impl Inference<'_> {
         Ok(Some(conversion))
     }
 
+    fn arguments(&mut self, args: &[Type], params: &[Type], span: Span) -> Result<bool> {
+        argument_count(params.len(), args.len(), span)?;
+        let mut complete = true;
+        for (arg, param) in args.iter().zip(params) {
+            complete &= self.solver.coerce(arg, param, span)?;
+        }
+        Ok(complete)
+    }
+
     fn constraint(&mut self, owner: Rule, constraint: &Constraint, span: Span) -> Result<bool> {
         match constraint {
             Constraint::Method {
                 receiver: receiver_type,
                 name,
                 type_args,
-                arg,
+                args,
                 out,
                 associated,
                 origins,
@@ -1822,7 +1804,7 @@ impl Inference<'_> {
                 if let Some(signature) =
                     self.dependent_method(receiver_type, name, type_args, *associated)
                 {
-                    let complete = self.dependent_call(&signature, arg, out, span)?;
+                    let complete = self.dependent_call(&signature, args, out, span)?;
                     if complete {
                         self.methods
                             .insert(owner, ResolvedMethod::Dependent { signature });
@@ -1845,6 +1827,8 @@ impl Inference<'_> {
                     && name.as_ref() == "new"
                     && let Some(allocator) = self.typer.gpu_allocator(&receiver_type)
                 {
+                    argument_count(1, args.len(), span)?;
+                    let arg = &args[0];
                     let result = Type::result(
                         Type::gpu_pointer(arg.clone()),
                         self.typer.gpu_error(allocator).into(),
@@ -1859,7 +1843,7 @@ impl Inference<'_> {
                     self.require_gpu_element(&element, span)?;
                     let method = self
                         .typer
-                        .method_call(&receiver_type, name, &element, false)
+                        .method_call(&receiver_type, name, &[element], false)
                         .expect("registered GPU allocator");
                     self.methods.insert(
                         owner,
@@ -1874,9 +1858,8 @@ impl Inference<'_> {
                         (&receiver_type, name.as_ref()),
                         (Ty::GpuPointer { .. }, "new") | (Ty::GpuSpan { .. }, "allocate")
                     ) {
-                    let Type::Node(Head::Record(_), parts) = self.solver.head(arg) else {
-                        return Ok(false);
-                    };
+                    argument_count(2, args.len(), span)?;
+                    let parts = args;
                     let Some(gpu) = parts.first().and_then(|ty| self.solver.resolve(ty)) else {
                         return Ok(false);
                     };
@@ -1886,7 +1869,7 @@ impl Inference<'_> {
                         _ => unreachable!(),
                     };
                     self.require_gpu_element(element, span)?;
-                    let argument = Ty::parameter(&[gpu, element.clone()]);
+                    let argument = vec![gpu, element.clone()];
                     self.typer
                         .method_call(&receiver_type, name, &argument, true)
                 } else if *associated
@@ -1896,9 +1879,8 @@ impl Inference<'_> {
                             pointee: Box::new(Ty::UInt8),
                         })
                 {
-                    let Type::Node(Head::Record(_), parts) = self.solver.head(arg) else {
-                        return Ok(false);
-                    };
+                    argument_count(5, args.len(), span)?;
+                    let parts = args;
                     let Some(prefix) = parts
                         .iter()
                         .take(2)
@@ -1913,20 +1895,20 @@ impl Inference<'_> {
                             "native GPU allocation requires a handle and owner",
                         ));
                     }
-                    let argument = Ty::parameter(&[
+                    let argument = vec![
                         prefix[0].clone(),
                         prefix[1].clone(),
                         Ty::UInt64,
                         Ty::UInt64,
                         Ty::Int32,
-                    ]);
+                    ];
                     self.typer
                         .method_call(&receiver_type, name, &argument, true)
                 } else {
                     self.typer.method(&receiver_type, name)
                 }
                 .ok_or_else(|| error(span, format!("unknown method `{name}`")))?;
-                let Some(method) = self.pipeline_method(method, arg, *associated, span)? else {
+                let Some(method) = self.pipeline_method(method, args, *associated, span)? else {
                     return Ok(false);
                 };
                 if !associated
@@ -1953,9 +1935,8 @@ impl Inference<'_> {
                     .ok_or_else(|| {
                         error(span, "method receiver does not match the first parameter")
                     })?;
-                let a = self
-                    .solver
-                    .coerce(arg, &Ty::parameter(params).into(), span)?;
+                let params = params.iter().cloned().map(Type::from).collect::<Vec<_>>();
+                let a = self.arguments(args, &params, span)?;
                 let b = self
                     .solver
                     .coerce(&method.result.clone().into(), out, span)?;
@@ -1997,10 +1978,8 @@ impl Inference<'_> {
                         "only source methods can be referenced as function values",
                     ));
                 };
-                let signature = Type::function(
-                    Type::parameter(application.params.clone()),
-                    application.result.clone(),
-                );
+                let signature =
+                    Type::function(application.params.clone(), application.result.clone());
                 let complete = self.solver.coerce(&signature, out, span)?;
                 if complete {
                     self.methods.insert(owner, application.resolved(None));
@@ -2140,7 +2119,7 @@ impl Inference<'_> {
                     _ => return Err(error(span, "field access requires a record")),
                 }
             }
-            Constraint::Call(func, arg, out) => {
+            Constraint::Call(func, args, out) => {
                 let shape = self.shape(func, false, span)?;
                 if let Some(element) = shape.index_element() {
                     let pointer =
@@ -2152,7 +2131,8 @@ impl Inference<'_> {
                     if !self.solver.unify(out, &pointer, span)? {
                         return Ok(false);
                     }
-                    let Some(index) = self.solver.resolve(arg) else {
+                    argument_count(1, args.len(), span)?;
+                    let Some(index) = self.solver.resolve(&args[0]) else {
                         return Ok(false);
                     };
                     if !index.is_integer() {
@@ -2164,11 +2144,11 @@ impl Inference<'_> {
                 match shape {
                     Type::Variable(_) | Type::Apply { .. } => return Ok(false),
                     Type::Node(head, _) if head.determining() => {
-                        return self.dependent_call(func, arg, out, span);
+                        return self.dependent_call(func, args, out, span);
                     }
                     Type::Node(Head::Function, children) => {
-                        let a = self.solver.coerce(arg, &children[0], span)?;
-                        let b = self.solver.coerce(&children[1], out, span)?;
+                        let a = self.arguments(args, &children[1..], span)?;
+                        let b = self.solver.coerce(&children[0], out, span)?;
                         return Ok(a && b);
                     }
                     _ => return Err(error(span, "call requires a function")),
@@ -2378,17 +2358,18 @@ impl Constraint {
             | Self::Field(from, _, _)
             | Self::Ascribe(from, _, _)
             | Self::Variant(from, _, _) => vec![from],
-            Self::Call(func, arg, _) => vec![func, arg],
+            Self::Call(func, args, _) => std::iter::once(func).chain(args).collect(),
             Self::Method {
                 receiver,
-                arg,
+                args,
                 type_args,
                 origins,
                 ..
             } => origins
                 .iter()
                 .map(AddressOrigin::input)
-                .chain([receiver, arg])
+                .chain(std::iter::once(receiver))
+                .chain(args)
                 .chain(type_args.iter().flatten())
                 .collect(),
             Self::MethodReference {
@@ -2411,3 +2392,17 @@ impl Constraint {
 
 #[cfg(test)]
 mod tests;
+
+fn argument_count(expected: usize, found: usize, span: Span) -> Result<()> {
+    if expected == found {
+        Ok(())
+    } else {
+        Err(error(
+            span,
+            format!(
+                "expected {expected} argument{}, found {found}",
+                if expected == 1 { "" } else { "s" }
+            ),
+        ))
+    }
+}

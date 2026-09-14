@@ -28,6 +28,7 @@ fn ascribe_wraps_and_unwraps_a_nominal_representation() {
                 foreign: None,
                 name: None,
                 result,
+                parameter_count: 1,
                 locals: vec![Local {
                     name: None,
                     ty: Ty::Unit,
@@ -61,6 +62,7 @@ fn chained_assignment_preserves_the_value() {
         foreign: None,
         name: None,
         result: Ty::Int32,
+        parameter_count: 1,
         locals: vec![
             Local {
                 name: None,
@@ -105,6 +107,7 @@ fn conflicting_join_stacks_are_rejected() {
         foreign: None,
         name: None,
         result: Ty::Int32,
+        parameter_count: 1,
         locals: vec![Local {
             name: None,
             ty: Ty::Unit,
@@ -163,6 +166,7 @@ fn indirect_calls_use_the_callee_on_the_stack() {
         foreign: None,
         name: None,
         result: Ty::Int32,
+        parameter_count: 1,
         locals: vec![Local {
             name: None,
             ty: Ty::Int32,
@@ -184,6 +188,7 @@ fn indirect_calls_use_the_callee_on_the_stack() {
         foreign: None,
         name: None,
         result: Ty::Int32,
+        parameter_count: 1,
         locals: vec![Local {
             name: None,
             ty: Ty::Unit,
@@ -198,7 +203,7 @@ fn indirect_calls_use_the_callee_on_the_stack() {
                 Instr::Push {
                     value: Value::Int32 { value: 4 },
                 },
-                Instr::Call,
+                Instr::Call { arguments: 1 },
             ],
             terminator: Terminator::Return,
         }],
@@ -218,6 +223,7 @@ fn loop_body_preserves_the_condition_stack() {
         foreign: None,
         name: None,
         result: Ty::Unit,
+        parameter_count: 1,
         locals: vec![Local {
             name: None,
             ty: Ty::Unit,
@@ -261,7 +267,7 @@ fn loop_body_preserves_the_condition_stack() {
 }
 
 #[test]
-fn all_functions_require_parameter_local_zero() {
+fn parameter_counts_must_fit_the_declared_locals() {
     for foreign in [
         None,
         Some(Foreign {
@@ -274,6 +280,7 @@ fn all_functions_require_parameter_local_zero() {
             name: Some("f".into()),
             foreign,
             result: Ty::Unit,
+            parameter_count: 1,
             locals: vec![],
             entry: BlockId::from_index(0),
             blocks: vec![BasicBlock {
@@ -294,15 +301,12 @@ fn all_functions_require_parameter_local_zero() {
             verify(&module).unwrap_err().kind,
             VerifyErrorKind::InvalidLocal { local: 0 }
         ));
-        module.functions[0].locals.push(Local {
-            name: None,
-            ty: Ty::Unit,
-        });
+        module.functions[0].parameter_count = 0;
         verify(&module).unwrap();
         assert_eq!(
             module.functions[0].ty(),
             Some(Ty::Function {
-                param: Box::new(Ty::Unit),
+                params: vec![],
                 result: Box::new(Ty::Unit)
             })
         );
@@ -333,6 +337,7 @@ fn builtin_module(name: &str, params: &[Ty], result: Ty) -> Module {
             foreign: None,
             name: None,
             result,
+            parameter_count: 1,
             locals: std::iter::once(Ty::Unit)
                 .chain(params.iter().cloned())
                 .map(|ty| Local { name: None, ty })
@@ -443,6 +448,7 @@ fn ascription_cannot_stand_in_for_cast_or_widen_instructions() {
             foreign: None,
             name: None,
             result: to.clone(),
+            parameter_count: 1,
             locals: vec![Local {
                 name: None,
                 ty: from.clone(),
@@ -499,6 +505,7 @@ fn destruction_hooks_reference_a_function_with_the_nominal_pointer_signature() {
         profile: crate::Profile::Host,
         foreign: None,
         result: Ty::Unit,
+        parameter_count: 1,
         locals: vec![Local {
             name: None,
             ty: Ty::Unit,
@@ -603,6 +610,7 @@ fn expression_module(param: Ty, result: Ty, instrs: Vec<Instr>) -> Module {
             foreign: None,
             name: None,
             result,
+            parameter_count: 1,
             locals: vec![Local {
                 name: None,
                 ty: param,

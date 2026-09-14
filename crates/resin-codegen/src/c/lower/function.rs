@@ -31,10 +31,16 @@ pub(super) fn lower(
 
 pub(super) fn signature(types: &Types<'_>, index: usize) -> String {
     let function = &types.module.functions[index];
+    let params = function.locals[..function.parameter_count]
+        .iter()
+        .enumerate()
+        .map(|(i, local)| format!("{} r_arg{i}", types.name(&local.ty)))
+        .collect::<Vec<_>>()
+        .join(", ");
     format!(
-        "{} r_fn{index}({} r_arg)",
+        "{} r_fn{index}({})",
         types.name(&function.result),
-        types.name(&function.locals[0].ty)
+        if params.is_empty() { "void" } else { &params }
     )
 }
 
@@ -53,12 +59,18 @@ fn locals(types: &Types<'_>, function: &resin_lir::Function, flow: &FunctionType
             writeln!(
                 out,
                 "  bool r_live{i} = {};",
-                if i == 0 { "true" } else { "false" }
+                if i < function.parameter_count {
+                    "true"
+                } else {
+                    "false"
+                }
             )
             .unwrap();
         }
     }
-    writeln!(out, "  r_l0 = r_arg;").unwrap();
+    for i in 0..function.parameter_count {
+        writeln!(out, "  r_l{i} = r_arg{i};").unwrap();
+    }
     for (block, inputs) in flow.inputs.iter().enumerate() {
         for (i, ty) in inputs.iter().enumerate() {
             writeln!(out, "  {} r_b{block}_{i};", types.name(ty)).unwrap();
@@ -678,14 +690,21 @@ fn instruction(
             types.name(result.unwrap()),
             function.index()
         ),
-        Instr::Call => {
+        Instr::Call { .. } => {
             let callee = types.unwrap(&args[0].ty, args[0].expr.clone());
             writeln!(
                 out,
                 "  if (!({callee}).call) resin_fail(\"calling an uninitialized function\");"
             )
             .unwrap();
-            format!("({callee}).call({})", args[1].expr)
+            format!(
+                "({callee}).call({})",
+                args[1..]
+                    .iter()
+                    .map(|arg| arg.expr.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
         }
         Instr::CallBuiltin { name, result, .. } => ops::builtin(types, name, args, result)?,
     };

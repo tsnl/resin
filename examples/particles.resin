@@ -236,8 +236,8 @@ extern "math.h" def expf(value: float32) -> float32;
 
 struct Camera { yaw: float32, pitch: float32, zoom: float32 };
 struct MousePosition { x: float64, y: float64 };
-def mouse_position(x: float64, y: float64) -> MousePosition = {
-	MousePosition { x = x, y = y }
+def mouse_position(position: (float64, float64)) -> MousePosition = {
+	MousePosition { x = position.0, y = position.1 }
 };
 def default_camera() -> Camera = {
 	Camera { yaw = 0.0_f, pitch = 0.24_f, zoom = 1.0_f }

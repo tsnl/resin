@@ -52,7 +52,7 @@ fn holes_compose_inside_pointers_spans_records_and_functions() {
     assert_eq!(
         m.functions[3].result,
         Ty::Function {
-            param: Box::new(Ty::Int32),
+            params: vec![Ty::Int32],
             result: Box::new(Ty::Int32)
         }
     );
@@ -493,7 +493,7 @@ fn layout_operands_check_nested_declarations_without_emitting_them() {
             .flat_map(|b| &b.instrs)
             .all(|instr| !matches!(
                 instr,
-                resin_lir::Instr::Call | resin_lir::Instr::MakeRecord { .. }
+                resin_lir::Instr::Call { .. } | resin_lir::Instr::MakeRecord { .. }
             ))
     );
 

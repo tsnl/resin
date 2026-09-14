@@ -144,12 +144,16 @@ pub(super) fn allocation_error(
         .functions
         .get(allocator.index())
         .ok_or_else(invalid)?;
-    let Some(parameter) = function.locals.first() else {
-        return Err(invalid());
-    };
-    expect_type(
-        Ty::parameter(&[gpu.clone(), Ty::UInt64, Ty::UInt64, Ty::Int32]),
-        parameter.ty.clone(),
+    let parameters = function
+        .locals
+        .get(..function.parameter_count)
+        .ok_or_else(invalid)?;
+    super::rules::expect_types(
+        &[gpu.clone(), Ty::UInt64, Ty::UInt64, Ty::Int32],
+        &parameters
+            .iter()
+            .map(|local| local.ty.clone())
+            .collect::<Vec<_>>(),
         location,
     )?;
     let Ty::Result { value, error } = &function.result else {

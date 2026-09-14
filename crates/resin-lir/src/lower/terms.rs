@@ -69,13 +69,23 @@ impl FunctionLowering<'_> {
         Ok(ty.clone())
     }
 
-    pub(super) fn gen_call(&mut self, func: &Term, arg: &Term) -> Result<Ty, LowerError> {
+    pub(super) fn gen_call(&mut self, func: &Term, args: &[Term]) -> Result<Ty, LowerError> {
         let callee_ty = self.gen_term(func, None)?;
-        let Ty::Function { param, .. } = &callee_ty else {
+        let Ty::Function { params, .. } = &callee_ty else {
             unreachable!("inferred callable type")
         };
-        self.gen_term(arg, Some(param))?;
-        self.emit(Instr::Call);
+        if args.len() != params.len() {
+            return Err(LowerError::invalid_hir(
+                func.span,
+                "call argument count does not match signature",
+            ));
+        }
+        for (arg, param) in args.iter().zip(params) {
+            self.gen_term(arg, Some(param))?;
+        }
+        self.emit(Instr::Call {
+            arguments: args.len(),
+        });
         let Ty::Function { result, .. } = callee_ty else {
             unreachable!("checked call")
         };

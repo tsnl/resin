@@ -189,12 +189,21 @@ impl ContextView {
         })
     }
 }
+struct MethodCall {
+    location: SourceLocation,
+    receiver: Type,
+    name: Arc<str>,
+    arguments: Vec<Type>,
+    associated: bool,
+    rule: Rule,
+}
+
 /// The only capability that can construct contexts. Pending types belong to this module's solver.
 pub(crate) struct Scopes {
     view: ContextView,
     inferred: HashMap<DeclarationId, (Type, bool)>,
     expressions: Vec<(SourceLocation, Type, bool)>,
-    calls: Vec<(SourceLocation, Type, Arc<str>, Type, bool, Rule)>,
+    calls: Vec<MethodCall>,
 }
 impl Scopes {
     pub(super) fn for_source(source: Source, data: Rc<RefCell<Analysis>>) -> Self {
@@ -383,21 +392,21 @@ impl Scopes {
         &mut self,
         name: &Ident,
         receiver: Type,
-        argument: Type,
+        argument: Vec<Type>,
         associated: bool,
         rule: Rule,
     ) {
-        self.calls.push((
-            SourceLocation {
+        self.calls.push(MethodCall {
+            location: SourceLocation {
                 source: self.view.source.clone(),
                 span: name.span,
             },
             receiver,
-            name.val.clone(),
-            argument,
+            name: name.val.clone(),
+            arguments: argument,
             associated,
             rule,
-        ));
+        });
     }
     pub(super) fn record_method_definition(&mut self, receiver: TypeId, id: DeclarationId) {
         let mut data = self.view.data.borrow_mut();
@@ -432,14 +441,26 @@ impl Scopes {
                 data.record_source_methods(location, &completed, associated, typer, solver);
             }
         }
-        for (location, receiver, name, argument, associated, rule) in self.calls.drain(..) {
+        for MethodCall {
+            location,
+            receiver,
+            name,
+            arguments,
+            associated,
+            rule,
+        } in self.calls.drain(..)
+        {
             if let Some(method @ ResolvedMethod::Source { .. }) = methods.get(&rule) {
                 data.record_source_method_call(&location, &name, method, associated, typer, solver);
                 continue;
             }
-            if let (Some(receiver), Some(argument)) =
-                (solver.resolve(&receiver), solver.resolve(&argument))
-            {
+            if let (Some(receiver), Some(argument)) = (
+                solver.resolve(&receiver),
+                arguments
+                    .iter()
+                    .map(|ty| solver.resolve(ty))
+                    .collect::<Option<Vec<_>>>(),
+            ) {
                 data.record_method_call(&location, &receiver, &name, &argument, associated, typer);
             }
         }

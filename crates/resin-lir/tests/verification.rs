@@ -9,6 +9,7 @@ fn module() -> Module {
             profile: resin_lir::Profile::Host,
             foreign: None,
             result: Ty::Unit,
+            parameter_count: 1,
             locals: vec![Local {
                 name: None,
                 ty: Ty::Unit,
@@ -82,7 +83,7 @@ fn certified_operands_follow_block_indices_and_keep_instructions_without_results
                 Instr::MakeRecord {
                     fields: vec!["_0".into(), "_1".into()],
                 },
-                Instr::Call,
+                Instr::Call { arguments: 1 },
                 Instr::Discard,
                 Instr::Push {
                     value: Value::Int32 { value: 10 },

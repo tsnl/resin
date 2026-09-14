@@ -34,17 +34,14 @@ fn hir_resolves_calls_and_preserves_type_dependent_operations_for_lir() {
         def measure() -> ulong = { size_of(int) };
     "#);
     let read = function(&module, "read");
-    let resin_hir::TermKind::Call { func, arg } = &tail(read).kind else {
+    let resin_hir::TermKind::Call { func, args } = &tail(read).kind else {
         panic!("ordinary call")
     };
     let resin_hir::TermKind::Function { function: id, .. } = func.kind else {
         panic!("resolved function")
     };
     assert_eq!(module.functions[id.index()].name.as_ref(), "Item.read");
-    let resin_hir::TermKind::Pack { args } = &arg.kind else {
-        panic!("explicit arguments")
-    };
-    assert!(args.receiver.is_some());
+    assert_eq!(args.len(), 1);
     assert!(matches!(
         tail(function(&module, "both")).kind,
         resin_hir::TermKind::If { .. }
@@ -61,7 +58,7 @@ fn hir_resolves_calls_and_preserves_type_dependent_operations_for_lir() {
         resin_hir::TermKind::Field { ref name, .. } if name.as_ref() == "value"
     ));
     let printed = resin_hir::format_module(&module);
-    assert!(printed.contains("Item.read") && printed.contains("(if") && printed.contains("(pack"));
+    assert!(printed.contains("Item.read") && printed.contains("(if") && printed.contains("(call"));
     resin_lir::verify(&resin_lir::generate(&module).unwrap()).unwrap();
 }
 
@@ -127,7 +124,7 @@ fn mutating_lir_discards_the_certificate_and_requires_reverification() {
         resin_lir::VerifiedModule::new(resin_lir::generate(&hir("def f() = {}; ")).unwrap())
             .unwrap();
     let mut module = checked.into_module();
-    module.functions[0].locals.clear();
+    module.functions[0].parameter_count = module.functions[0].locals.len() + 1;
     assert!(resin_lir::VerifiedModule::new(module).is_err());
 }
 

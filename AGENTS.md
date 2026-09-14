@@ -208,7 +208,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Examples import standard-library functionality through `$/` paths; imports without
   a leading `$` resolve relative to their importer. Each file has a private scope with
   explicit exports; do not reintroduce textual inclusion.
-- Host entries take unit or `(int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>)` for argc/argv/envp.
+- Host entries take no arguments or three parameters `(int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>)` for argc/argv/envp.
   Startup inputs are deep-copied before Resin entry and borrowed until process exit; treat
   them as read-only. Keep environment lookups on the supplied snapshot, not live OS state.
   `--` separates run arguments from compiler options; execution arguments stay out of build requests.
@@ -234,8 +234,12 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   their exact logical length, including empty inputs, without appending a NUL.
 - Without `-o`, host compilation uses the debug cache and runs the program. With `-o`,
   build and copy the optimized executable without running it.
-- Every IR function reserves local zero for its parameter, including unit and tuple parameters
-  and foreign declarations. The verifier rejects functions with no locals.
+- Functions take a parenthesized sequence of arguments. Calls preserve callee-first,
+  left-to-right evaluation; tuples are ordinary single values, never argument packs.
+  Tuple members use decimal field indices (`pair.0`, `pair.1`).
+  Every LIR function's first `parameter_count` locals are its initialized parameters,
+  including foreign declarations. Zero-argument functions reserve no parameter local;
+  the verifier rejects parameter counts larger than the local array.
 - Functions use `def`, nominal records use `struct`, transparent aliases use `type`, and local value bindings use `var`, including
   uninitialized locals. Record initializers and parameters do not take these keywords. Foreign functions use
   `extern "header.h" def name(...) -> Type;`.

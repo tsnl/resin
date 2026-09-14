@@ -95,9 +95,13 @@ impl Decoder<'_> {
                 };
                 Type::Node(kind, vec![self.ty(root, infer)?, self.ty(owner, infer)?])
             }
-            TypeKind::Func { from, to } => {
-                Type::function(self.ty(from, infer)?, self.ty(to, infer)?)
-            }
+            TypeKind::Func { params, to } => Type::function(
+                params
+                    .iter()
+                    .map(|ty| self.ty(ty, infer))
+                    .collect::<Result<_, _>>()?,
+                self.ty(to, infer)?,
+            ),
             TypeKind::Record { fields } => {
                 let fields = fields
                     .iter()

@@ -84,6 +84,7 @@ pub enum Type {
     },
     FunctionParameter {
         function: Box<Type>,
+        index: usize,
     },
     FunctionResult {
         function: Box<Type>,
@@ -128,7 +129,7 @@ pub enum Type {
         fields: Vec<RecordField>,
     },
     Function {
-        param: Box<Type>,
+        params: Vec<Type>,
         result: Box<Type>,
     },
     Union {
@@ -203,25 +204,6 @@ pub enum Case {
     Type { ty: Type },
 }
 
-impl Type {
-    pub fn parameter(types: &[Type]) -> Self {
-        match types {
-            [] => Self::Unit,
-            [ty] => ty.clone(),
-            types => Self::Record {
-                fields: types
-                    .iter()
-                    .enumerate()
-                    .map(|(index, ty)| RecordField {
-                        name: format!("_{index}").into(),
-                        ty: ty.clone(),
-                    })
-                    .collect(),
-            },
-        }
-    }
-}
-
 /// A lexical declaration's identity. Names survive only for diagnostics.
 pub type BindingId = usize;
 
@@ -248,18 +230,6 @@ pub struct Signature {
     pub type_params: Vec<TypeParameter>,
     pub params: Vec<Parameter>,
     pub result: Annotation,
-}
-
-impl Signature {
-    pub fn parameter_type(&self) -> Type {
-        Type::parameter(
-            &self
-                .params
-                .iter()
-                .map(|parameter| parameter.annotation.ty.clone())
-                .collect::<Vec<_>>(),
-        )
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -313,7 +283,7 @@ pub enum TermKind {
     DependentMethodCall {
         lookup: MethodLookup,
         receiver: Option<Box<Term>>,
-        arg: Box<Term>,
+        args: Vec<Term>,
     },
     Shader {
         function: FunctionId,
@@ -354,11 +324,7 @@ pub enum TermKind {
     },
     Call {
         func: Box<Term>,
-        arg: Box<Term>,
-    },
-    /// Evaluate a receiver, then unpack the remaining arguments in source order.
-    Pack {
-        args: Arguments,
+        args: Vec<Term>,
     },
     Intrinsic {
         op: Intrinsic,
@@ -424,10 +390,11 @@ pub enum TermKind {
     },
 }
 
+/// Intrinsic operands in evaluation order, paired with their expected parameter types.
+/// An adapted method receiver occupies the first position; both lists have equal length.
 #[derive(Debug, Clone)]
 pub struct Arguments {
-    pub receiver: Option<Box<Term>>,
-    pub argument: Box<Term>,
+    pub values: Vec<Term>,
     pub params: Vec<Type>,
 }
 
@@ -1097,7 +1064,7 @@ impl Analysis {
         location: &SourceLocation,
         receiver: &Ty,
         name: &str,
-        argument: &Ty,
+        arguments: &[Ty],
         associated: bool,
         typer: &lower::context::Context,
     ) {
@@ -1112,17 +1079,9 @@ impl Analysis {
             return;
         }
         let count = method.params.len() - usize::from(!associated);
-        let arguments = if count == 1 {
-            vec![argument.clone()]
-        } else {
-            let Ty::Record { fields } = argument else {
-                return;
-            };
-            if fields.len() != count {
-                return;
-            }
-            fields.iter().map(|field| field.ty.clone()).collect()
-        };
+        if arguments.len() != count {
+            return;
+        }
         let Ok(method) = typer.specialize_gpu_method(method, &arguments[usize::from(associated)..])
         else {
             return;
@@ -1131,7 +1090,7 @@ impl Analysis {
             return;
         };
         let signature = Ty::Function {
-            param: Box::new(Ty::parameter(params)),
+            params: params.to_vec(),
             result: Box::new(method.result),
         };
         if let Some(member) = self
@@ -1155,16 +1114,23 @@ impl Analysis {
             && let Ok(converted) = typer.as_record(ty)
             && let Ty::Record { fields } = converted.ty.view_record().unwrap_or(converted.ty)
         {
-            members.extend(fields.into_iter().map(|field| Member {
-                name: field.name.to_string(),
-                ty: format_concrete_type(&field.ty, typer),
-                kind: DefinitionKind::Field,
-                origin: typer.receiver_definition(ty).and_then(|receiver| {
-                    self.field_origins
-                        .get(&(receiver, field.name.to_string()))
-                        .cloned()
-                }),
-                compiler_signature: false,
+            members.extend(fields.into_iter().map(|field| {
+                Member {
+                    name: field
+                        .name
+                        .strip_prefix('_')
+                        .filter(|name| name.chars().all(|c| c.is_ascii_digit()))
+                        .unwrap_or(&field.name)
+                        .to_string(),
+                    ty: format_concrete_type(&field.ty, typer),
+                    kind: DefinitionKind::Field,
+                    origin: typer.receiver_definition(ty).and_then(|receiver| {
+                        self.field_origins
+                            .get(&(receiver, field.name.to_string()))
+                            .cloned()
+                    }),
+                    compiler_signature: false,
+                }
             }));
         }
         for (name, method) in typer.methods(ty) {
@@ -1172,7 +1138,7 @@ impl Analysis {
                 continue;
             };
             let signature = Ty::Function {
-                param: Box::new(Ty::parameter(params)),
+                params: params.to_vec(),
                 result: Box::new(method.result.clone()),
             };
             let origin = if matches!(
@@ -1244,7 +1210,12 @@ impl Analysis {
         let members = fields
             .into_iter()
             .map(|field| Member {
-                name: field.name.to_string(),
+                name: field
+                    .name
+                    .strip_prefix('_')
+                    .filter(|name| name.chars().all(|c| c.is_ascii_digit()))
+                    .unwrap_or(&field.name)
+                    .to_string(),
                 ty: names.format(&field.ty),
                 kind: DefinitionKind::Field,
                 origin: match receiver {
@@ -1307,7 +1278,7 @@ impl Analysis {
                 continue;
             }
             let signature = lower::infer::Type::function(
-                lower::infer::Type::parameter(params[usize::from(!associated)..].to_vec()),
+                params[usize::from(!associated)..].to_vec(),
                 substitute(&method.result),
             );
             let Some(signature) = solver.complete(&signature) else {
@@ -1363,7 +1334,7 @@ impl Analysis {
             return;
         };
         let signature = lower::infer::Type::function(
-            lower::infer::Type::parameter(params[usize::from(!associated)..].to_vec()),
+            params[usize::from(!associated)..].to_vec(),
             result.clone(),
         );
         let Some(signature) = solver.complete(&signature) else {

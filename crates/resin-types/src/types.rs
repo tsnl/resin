@@ -81,8 +81,10 @@ pub(super) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), D
                 check_references(definitions, &field.ty)?;
             }
         }
-        Ty::Function { param, result } => {
-            check_references(definitions, param)?;
+        Ty::Function { params, result } => {
+            for param in params {
+                check_references(definitions, param)?;
+            }
             check_references(definitions, result)?;
         }
         _ => {}
@@ -163,7 +165,7 @@ mod definition_tests {
                 element: Box::new(named.clone()),
             },
             Ty::Function {
-                param: Box::new(named.clone()),
+                params: vec![named.clone()],
                 result: Box::new(named.clone()),
             },
         ] {
@@ -351,23 +353,6 @@ pub(super) fn view_record(ty: &Ty) -> Option<Ty> {
     })
 }
 
-pub(super) fn parameter(types: &[Ty]) -> Ty {
-    match types {
-        [] => Ty::Unit,
-        [ty] => ty.clone(),
-        _ => Ty::Record {
-            fields: types
-                .iter()
-                .enumerate()
-                .map(|(i, ty)| RecordField {
-                    name: format!("_{i}").into(),
-                    ty: ty.clone(),
-                })
-                .collect(),
-        },
-    }
-}
-
 //
 // Canonical type tables
 //
@@ -467,8 +452,10 @@ impl TypeTable {
                     self.intern(&field.ty);
                 }
             }
-            Ty::Function { param, result } => {
-                self.intern(param);
+            Ty::Function { params, result } => {
+                for param in params {
+                    self.intern(param);
+                }
                 self.intern(result);
             }
             _ => {}
@@ -538,6 +525,20 @@ pub(super) fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
         Ty::Array { element, length } => {
             format!("[{}; {length}]", format_type(element, definitions))
         }
+        Ty::Record { fields }
+            if !fields.is_empty()
+                && fields
+                    .iter()
+                    .enumerate()
+                    .all(|(i, field)| field.name.as_ref() == format!("_{i}")) =>
+        {
+            let values = fields
+                .iter()
+                .map(|field| format_type(&field.ty, definitions))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("({values}{})", if fields.len() == 1 { "," } else { "" })
+        }
         Ty::Record { fields } => format!(
             "{{ {} }}",
             fields
@@ -546,9 +547,13 @@ pub(super) fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        Ty::Function { param, result } => format!(
+        Ty::Function { params, result } => format!(
             "({}) -> {}",
-            format_type(param, definitions),
+            params
+                .iter()
+                .map(|ty| format_type(ty, definitions))
+                .collect::<Vec<_>>()
+                .join(", "),
             format_type(result, definitions)
         ),
     }

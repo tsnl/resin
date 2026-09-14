@@ -156,9 +156,9 @@ fn dependent_receiver_adaptation_preserves_mutation_and_evaluation_order() {
 fn dependent_callable_fields_use_function_signatures() {
     let output = run(r#"
         export { main };
-        struct Callback { invoke: (int) -> int };
-        def increment(value: int) -> int = { value + 1 };
-        def call<T>(value: T) -> _ = { (value.invoke)(41) };
+        struct Callback { invoke: (int, int) -> int };
+        def increment(value: int, amount: int) -> int = { value + amount };
+        def call<T>(value: T) -> _ = { (value.invoke)(40, 2) };
         def main() -> int = { call(Callback { invoke = increment }) };
     "#);
     assert_eq!(
@@ -187,6 +187,16 @@ fn dependent_failures_report_the_demanded_application() {
             "struct Owner { def read(self: Owner, n: int) -> int = { n }; };",
             "value.read(1_i, 2_i)",
             "",
+        ),
+        (
+            "struct Owner { def read(self: Owner, n: int) -> int = { n }; };",
+            "value.read()",
+            "arguments",
+        ),
+        (
+            "struct Owner { def read(self: Owner, a: int, b: int) -> int = { a + b }; };",
+            "value.read((1_i, 2_i))",
+            "arguments",
         ),
         (
             "struct Owner { def read(self: Owner, a: int, b: int) -> int = { a + b }; };",

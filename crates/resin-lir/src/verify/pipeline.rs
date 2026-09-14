@@ -1,6 +1,11 @@
 //! Pipeline creation establishes a shader contract; recording checks that contract
 //! together with the host argument shape and the source ownership bridges.
-use super::{error::Location, gpu::allocation_error, instructions::pop, rules::expect_type};
+use super::{
+    error::Location,
+    gpu::allocation_error,
+    instructions::pop,
+    rules::{expect_type, expect_types},
+};
 use crate::{Function, Instr, Module, VerifyError, VerifyErrorKind};
 use resin_types::prelude::*;
 
@@ -48,7 +53,7 @@ fn function(module: &Module, id: FunctionId, location: Location) -> Result<&Func
     module
         .functions
         .get(id.index())
-        .filter(|f| !f.locals.is_empty())
+        .filter(|f| f.parameter_count <= f.locals.len())
         .ok_or_else(|| location.error(VerifyErrorKind::InvalidGpuOperation))
 }
 
@@ -68,18 +73,35 @@ fn create(
             .filter(|e| e.embedded)
             .ok_or_else(invalid)?;
         let shader = function(module, shader, location)?;
-        stages.push((&shader.locals[0].ty, &shader.result, entry.stage.as_ref()));
+        stages.push((
+            shader.locals[..shader.parameter_count]
+                .iter()
+                .map(|local| local.ty.clone())
+                .collect::<Vec<_>>(),
+            &shader.result,
+            entry.stage.as_ref(),
+        ));
     }
     let typer = TyperContext::from_definitions(module.types.clone());
-    let root = resin_types::shader::pipeline_root(&typer, &stages).map_err(|_| invalid())?;
+    let root = resin_types::shader::pipeline_root(
+        &typer,
+        &stages
+            .iter()
+            .map(|(params, result, stage)| (params.as_slice(), *result, *stage))
+            .collect::<Vec<_>>(),
+    )
+    .map_err(|_| invalid())?;
     let factory = function(module, factory, location)?;
     let mut params = vec![gpu.clone()];
     params.extend(shaders.iter().map(|_| Ty::Span {
         element: Box::new(Ty::UInt8),
     }));
-    expect_type(
-        Ty::parameter(&params),
-        factory.locals[0].ty.clone(),
+    expect_types(
+        &params,
+        &factory.locals[..factory.parameter_count]
+            .iter()
+            .map(|local| local.ty.clone())
+            .collect::<Vec<_>>(),
         location,
     )?;
     let Ty::Result {
@@ -138,7 +160,14 @@ fn record_call(
         location,
     )?;
     let context = function(module, context, location)?;
-    expect_type(owner.clone(), context.locals[0].ty.clone(), location)?;
+    expect_types(
+        std::slice::from_ref(owner),
+        &context.locals[..context.parameter_count]
+            .iter()
+            .map(|local| local.ty.clone())
+            .collect::<Vec<_>>(),
+        location,
+    )?;
     let record = function(module, record, location)?;
     let root_arg = if draw {
         Ty::union_of([Ty::GpuArguments, Ty::None])
@@ -150,9 +179,12 @@ fn record_call(
         expect_type(Ty::UInt32, ty.clone(), location)?;
         params.push(ty.clone());
     }
-    expect_type(
-        Ty::parameter(&params),
-        record.locals[0].ty.clone(),
+    expect_types(
+        &params,
+        &record.locals[..record.parameter_count]
+            .iter()
+            .map(|local| local.ty.clone())
+            .collect::<Vec<_>>(),
         location,
     )?;
     let Ty::Result { value, error } = &record.result else {

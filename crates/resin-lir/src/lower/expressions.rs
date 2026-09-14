@@ -35,8 +35,7 @@ impl FunctionLowering<'_> {
             TermKind::Builtin { name, args } => {
                 return self.gen_builtin(name, args, expected);
             }
-            TermKind::Call { func, arg } => return self.gen_call(func, arg),
-            TermKind::Pack { args } => self.gen_pack(args)?,
+            TermKind::Call { func, args } => return self.gen_call(func, args),
             TermKind::Intrinsic { op, args } => self.gen_intrinsic(*op, args, expected)?,
             TermKind::Adapt { conversion, arg } => self.gen_receiver(arg, *conversion, expected)?,
             TermKind::Convert { conversion, arg } => {
@@ -101,21 +100,19 @@ impl FunctionLowering<'_> {
                 args,
             } => {
                 self.gen_arguments(args)?;
-                self.emit(
-                    if args.params.len() + usize::from(args.receiver.is_some()) == 6 {
-                        Instr::GpuDispatch {
-                            context: *context,
-                            allocator: allocator.expect("compute root"),
-                            record: *record,
-                        }
-                    } else {
-                        Instr::GpuDraw {
-                            context: *context,
-                            allocator: *allocator,
-                            record: *record,
-                        }
-                    },
-                );
+                self.emit(if args.values.len() == 6 {
+                    Instr::GpuDispatch {
+                        context: *context,
+                        allocator: allocator.expect("compute root"),
+                        record: *record,
+                    }
+                } else {
+                    Instr::GpuDraw {
+                        context: *context,
+                        allocator: *allocator,
+                        record: *record,
+                    }
+                });
             }
             TermKind::WeakEmpty { pointee } => self.emit(Instr::WeakEmpty {
                 pointee: pointee.clone(),
@@ -163,19 +160,14 @@ impl FunctionLowering<'_> {
     }
 
     fn gen_arguments(&mut self, args: &Arguments) -> Result<(), LowerError> {
-        if let Some(receiver) = &args.receiver {
-            self.gen_term(receiver, None)?;
+        if args.values.len() != args.params.len() {
+            return Err(LowerError::invalid_hir(
+                self.source_span,
+                "intrinsic argument count does not match signature",
+            ));
         }
-        self.unpack_argument(&args.argument, &args.params)
-    }
-
-    fn gen_pack(&mut self, args: &Arguments) -> Result<(), LowerError> {
-        self.gen_arguments(args)?;
-        let count = args.params.len() + usize::from(args.receiver.is_some());
-        if count > 1 {
-            self.emit(Instr::MakeRecord {
-                fields: (0..count).map(|i| format!("_{i}").into()).collect(),
-            });
+        for (arg, param) in args.values.iter().zip(&args.params) {
+            self.gen_term(arg, Some(param))?;
         }
         Ok(())
     }

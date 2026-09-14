@@ -462,7 +462,7 @@ fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
             window.set_should_close(1 == 0)?;
             valid := valid && !window.should_close();
             ok(if (valid && count == uint(2)
-                && valid_size(size) && incomplete == 7) { 0 } else { 1 })
+                && valid_size(size.0, size.1) && incomplete == 7) { 0 } else { 1 })
         };
         "#,
         r#"
@@ -622,7 +622,7 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
         r#"
         export { main };
         import { "$/window.resin" };
-        def coordinates(x: float64, y: float64) -> bool = { x == 12.5_d && y == -3.25_d };
+        def coordinates(point: (float64, float64)) -> bool = { point.0 == 12.5_d && point.1 == -3.25_d };
         def main() -> Result<int, _> = {
             var window = Window { handle = Ptr<ResinWindow>(0_ul) };
             var key = window.key_state(Window.keys().w);

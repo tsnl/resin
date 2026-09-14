@@ -19,10 +19,8 @@ impl FunctionBuilder {
                 profile,
                 foreign: None,
                 result: Ty::Unit,
-                locals: vec![Local {
-                    name: None,
-                    ty: Ty::Unit,
-                }],
+                parameter_count: 0,
+                locals: vec![],
                 entry: BlockId::from_index(0),
                 blocks: vec![BasicBlock {
                     name: Some("entry".into()),
@@ -41,8 +39,10 @@ impl FunctionBuilder {
         self.function
     }
 
-    pub(super) fn parameter(&mut self, name: Option<Arc<str>>, ty: Ty) {
-        self.function.locals[0] = Local { name, ty };
+    pub(super) fn parameter(&mut self, name: Option<Arc<str>>, ty: Ty) -> LocalId {
+        assert_eq!(self.function.parameter_count, self.function.locals.len());
+        self.function.parameter_count += 1;
+        self.local(ty, name)
     }
 
     pub(super) fn result(&mut self, ty: Ty) {

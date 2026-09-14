@@ -61,7 +61,7 @@ pub enum TypeKind {
         right: Box<Type>,
     },
     Func {
-        from: Box<Type>,
+        params: Vec<Type>,
         to: Box<Type>,
     },
     Record {
@@ -125,7 +125,7 @@ pub enum TermKind {
         receiver: Box<Term>,
         name: Ident,
         type_args: Vec<Type>,
-        arg: Box<Term>,
+        args: Vec<Term>,
     },
     TypeApply {
         function: Box<Term>,
@@ -133,7 +133,7 @@ pub enum TermKind {
     },
     Call {
         func: Box<Term>,
-        arg: Box<Term>,
+        args: Vec<Term>,
     },
     /// Privileged operator syntax; operands are evaluated in source order.
     Builtin {

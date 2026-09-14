@@ -7,11 +7,11 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
     let id = module.entries.get(entry)
         .ok_or_else(|| Error(format!("entry function `{entry}` is not exported; add `export {{ {entry} }};` to the entry file")))?;
     let function = &module.functions[id.index()];
-    let parameter = &function.locals[0].ty;
-    let process_inputs = matches!(parameter, Ty::Record { fields } if fields.len() == 3
-        && fields[0].ty == Ty::Int32 && string_array(&fields[1].ty) && string_array(&fields[2].ty));
+    let parameters = &function.locals[..function.parameter_count];
+    let process_inputs = matches!(parameters, [argc, argv, envp]
+        if argc.ty == Ty::Int32 && string_array(&argv.ty) && string_array(&envp.ty));
     if function.foreign.is_some()
-        || !(parameter == &Ty::Unit || process_inputs)
+        || !(parameters.is_empty() || process_inputs)
         || !matches!(function.result, Ty::Unit | Ty::Int32 | Ty::Result { .. })
     {
         return Err(Error(format!(
@@ -19,14 +19,15 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
         )));
     }
     let setup = if process_inputs {
-        format!(
-            "  char **r_arguments, **r_environment;\n  r_argc = resin_process_init(r_argc, (const char *const *)r_argv, &r_arguments, &r_environment);\n  {} r_entry_arg = {{r_argc, (void *)r_arguments, (void *)r_environment}};\n",
-            types.name(parameter)
-        )
+        "  char **r_arguments, **r_environment;\n  r_argc = resin_process_init(r_argc, (const char *const *)r_argv, &r_arguments, &r_environment);\n".to_owned()
     } else {
         String::new()
     };
-    let argument = if process_inputs { "r_entry_arg" } else { "0" };
+    let argument = if process_inputs {
+        "r_argc, (void *)r_arguments, (void *)r_environment"
+    } else {
+        ""
+    };
     if let Ty::Result { value, error } = &function.result {
         if !matches!(value.as_ref(), Ty::Unit | Ty::Int32) {
             return Err(Error(

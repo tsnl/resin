@@ -211,19 +211,21 @@ fn sexp_term(term: &Term) -> SExp {
             receiver,
             name,
             type_args,
-            arg,
+            args,
         } => list(
             "method-call",
             vec![
                 sexp_term(receiver),
                 type_application(symbol(name.val.as_ref()), type_args),
-                sexp_term(arg),
+                group(args.iter().map(sexp_term).collect()),
             ],
         ),
         TermKind::TypeApply { function, args } => type_application(sexp_term(function), args),
-        TermKind::Call { func, arg } => {
-            list_sp("call", term.span, vec![sexp_term(func), sexp_term(arg)])
-        }
+        TermKind::Call { func, args } => list_sp(
+            "call",
+            term.span,
+            vec![sexp_term(func), group(args.iter().map(sexp_term).collect())],
+        ),
         TermKind::Builtin { name, args } => list_sp(
             "builtin",
             term.span,
@@ -280,10 +282,13 @@ fn sexp_typespec(ts: &Type) -> SExp {
                 sexp_typespec(owner),
             ],
         ),
-        TypeKind::Func { from, to } => list_sp(
+        TypeKind::Func { params, to } => list_sp(
             "func-type",
             ts.span,
-            vec![sexp_typespec(from), sexp_typespec(to)],
+            vec![
+                group(params.iter().map(sexp_typespec).collect()),
+                sexp_typespec(to),
+            ],
         ),
         TypeKind::Record { fields } => list_sp(
             "record-type",

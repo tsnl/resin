@@ -90,10 +90,7 @@ fn array_value_projections_copy_the_element_and_destroy_the_container() {
                 Function { function: make },
                 LocalAddress { local: trace },
                 int(digit),
-                MakeRecord {
-                    fields: vec!["_0".into(), "_1".into()],
-                },
-                Call,
+                Call { arguments: 2 },
             ]);
         }
         instrs.push(MakeArray {
@@ -302,7 +299,7 @@ fn while_nests_with_branches_and_preserves_outer_values() {
 #[test]
 fn ordinary_functions_can_be_passed_and_selected() {
     runs(
-        "export { main }; def add (x: int, y: int) -> int = { x + y }; def apply (f: (int, int) -> int, args: (int, int)) -> int = { f(args) }; def main () -> int = { var a = add; var b = if (1 == 1) { a } else { add }; apply(a, (10, 3)) + b(20, 4) };",
+        "export { main }; def add (x: int, y: int) -> int = { x + y }; def apply (f: (int, int) -> int, args: (int, int)) -> int = { f(args.0, args.1) }; def main () -> int = { var a = add; var b = if (1 == 1) { a } else { add }; apply(a, (10, 3)) + b(20, 4) };",
         37,
     );
 }
@@ -324,9 +321,9 @@ fn mutual_recursion_needs_no_forward_declaration() {
 }
 
 #[test]
-fn calls_are_unary_with_unit_and_tuple_sugar() {
+fn calls_take_lists_and_tuples_are_explicit_values() {
     runs(
-        "export { main }; def zero () -> int = { 2 }; def sum (a: int, b: int) -> int = { a + b }; def apply (f: (int, int) -> int, p: (int, int)) -> int = { f(p) }; def main () -> int = { apply(sum, (zero(), 5)) };",
+        "export { main }; def zero () -> int = { 2 }; def sum (a: int, b: int) -> int = { a + b }; def apply (f: (int, int) -> int, p: (int, int)) -> int = { f(p.0, p.1) }; def main () -> int = { apply(sum, (zero(), 5)) };",
         7,
     );
 }

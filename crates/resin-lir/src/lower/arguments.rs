@@ -50,22 +50,4 @@ impl FunctionLowering<'_> {
         }
         Ok(())
     }
-
-    pub(super) fn unpack_argument(&mut self, arg: &Term, params: &[Ty]) -> Result<(), LowerError> {
-        self.gen_term(arg, Some(&Ty::parameter(params)))?;
-        match params.len() {
-            0 => self.emit(Instr::Discard),
-            1 => {}
-            count => {
-                let saved = self.save_top(&Ty::parameter(params));
-                for index in 0..count {
-                    self.emit(Instr::LocalAddress { local: saved });
-                    self.emit(Instr::AccessStatic { index });
-                    self.emit(Instr::TransferLoad);
-                }
-                self.emit(Instr::ForgetLocal { local: saved });
-            }
-        }
-        Ok(())
-    }
 }

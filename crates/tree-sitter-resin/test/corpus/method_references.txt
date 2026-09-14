@@ -95,7 +95,7 @@ def example() = {
                               (unary_type
                                 (primary_type
                                   (builtin_type))))))))
-                    (tuple_term
+                    (arguments
                       (term
                         (assignment_term
                           (binary_term
@@ -144,19 +144,18 @@ def example() = {
                                               (unary_type
                                                 (primary_type
                                                   (builtin_type)))))))))))))))))
-                  (closed_term
-                    (tuple_term
-                      (term
-                        (assignment_term
-                          (binary_term
-                            (unary_term
-                              (postfix_term
-                                (primary_term
-                                  (number)))))))
-                      (term
-                        (assignment_term
-                          (binary_term
-                            (unary_term
-                              (postfix_term
-                                (primary_term
-                                  (number))))))))))))))))))
+                  (arguments
+                    (term
+                      (assignment_term
+                        (binary_term
+                          (unary_term
+                            (postfix_term
+                              (primary_term
+                                (number)))))))
+                    (term
+                      (assignment_term
+                        (binary_term
+                          (unary_term
+                            (postfix_term
+                              (primary_term
+                                (number)))))))))))))))))

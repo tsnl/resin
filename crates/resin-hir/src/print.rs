@@ -184,11 +184,11 @@ impl Printer {
             TermKind::DependentMethodCall {
                 lookup,
                 receiver,
-                arg,
+                args,
             } => {
                 let mut fields = vec![quoted(self.types.method(lookup))];
                 fields.extend(receiver.iter().map(|receiver| self.term(receiver)));
-                fields.push(self.term(arg));
+                fields.extend(args.iter().map(|arg| self.term(arg)));
                 list("dependent-method-call", fields)
             }
             TermKind::Shader { function, stage } => {
@@ -227,8 +227,13 @@ impl Printer {
             TermKind::Builtin { name, args } => {
                 list(name, args.iter().map(|t| self.term(t)).collect())
             }
-            TermKind::Call { func, arg } => list("call", vec![self.term(func), self.term(arg)]),
-            TermKind::Pack { args } => self.arguments(args),
+            TermKind::Call { func, args } => list(
+                "call",
+                vec![
+                    self.term(func),
+                    list("args", args.iter().map(|arg| self.term(arg)).collect()),
+                ],
+            ),
             TermKind::Intrinsic { op, args } => list(
                 "intrinsic",
                 vec![atom(format!("{op:?}")), self.arguments(args)],
@@ -302,11 +307,8 @@ impl Printer {
             "params",
             args.params.iter().map(|ty| self.ty(ty)).collect(),
         )];
-        if let Some(receiver) = &args.receiver {
-            fields.push(list("receiver", vec![self.term(receiver)]));
-        }
-        fields.push(self.term(&args.argument));
-        list("pack", fields)
+        fields.extend(args.values.iter().map(|arg| self.term(arg)));
+        list("arguments", fields)
     }
 
     fn arm(&self, arm: &MatchArm) -> SExp {
@@ -412,8 +414,8 @@ impl TypeNames {
                 .unwrap_or_else(|| format!("T{}", parameter.index())),
             Type::Member { base, name } => format!("{}.{}", self.format(base), name),
             Type::Method { lookup } => self.method(lookup),
-            Type::FunctionParameter { function } => {
-                format!("parameter({})", self.format(function))
+            Type::FunctionParameter { function, index } => {
+                format!("parameter({}, {index})", self.format(function))
             }
             Type::FunctionResult { function } => {
                 format!("result({})", self.format(function))
@@ -460,6 +462,20 @@ impl TypeNames {
             Type::Array { element, length } => {
                 format!("[{}; {length}]", self.format(element))
             }
+            Type::Record { fields }
+                if !fields.is_empty()
+                    && fields
+                        .iter()
+                        .enumerate()
+                        .all(|(i, field)| field.name.as_ref() == format!("_{i}")) =>
+            {
+                let values = fields
+                    .iter()
+                    .map(|field| self.format(&field.ty))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("({values}{})", if fields.len() == 1 { "," } else { "" })
+            }
             Type::Record { fields } => format!(
                 "{{ {} }}",
                 fields
@@ -468,8 +484,16 @@ impl TypeNames {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            Type::Function { param, result } => {
-                format!("({}) -> {}", self.format(param), self.format(result))
+            Type::Function { params, result } => {
+                format!(
+                    "({}) -> {}",
+                    params
+                        .iter()
+                        .map(|ty| self.format(ty))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    self.format(result)
+                )
             }
         }
     }

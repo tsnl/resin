@@ -24,28 +24,29 @@ fn id(index: usize) -> FunctionId {
 
 // These functions are never executed. Recursive bodies give the bridge signatures
 // valid LIR without requiring a runtime or manufacturing opaque native values.
-fn declaration(index: usize, parameter: Ty, result: Ty) -> Function {
+fn declaration(index: usize, parameters: Vec<Ty>, result: Ty) -> Function {
+    let count = parameters.len();
+    let mut instrs = vec![Instr::Function {
+        function: id(index),
+    }];
+    instrs.extend((0..count).map(|index| Instr::TakeLocal {
+        local: LocalId::from_index(index),
+    }));
+    instrs.push(Instr::Call { arguments: count });
     Function {
         name: None,
         profile: resin_lir::Profile::Host,
         foreign: None,
         result,
-        locals: vec![Local {
-            name: None,
-            ty: parameter,
-        }],
+        parameter_count: count,
+        locals: parameters
+            .into_iter()
+            .map(|ty| Local { name: None, ty })
+            .collect(),
         entry: BlockId::from_index(0),
         blocks: vec![BasicBlock {
             name: None,
-            instrs: vec![
-                Instr::Function {
-                    function: id(index),
-                },
-                Instr::TakeLocal {
-                    local: LocalId::from_index(0),
-                },
-                Instr::Call,
-            ],
+            instrs,
             terminator: Terminator::Return,
         }],
     }
@@ -60,34 +61,34 @@ fn fixture() -> Module {
     };
     let mut module = Module {
         functions: vec![
-            declaration(0, owner(), result(pipeline())),
-            declaration(1, Ty::parameter(&[owner(), bytes]), result(owner())),
+            declaration(0, vec![owner()], result(pipeline())),
+            declaration(1, vec![owner(), bytes], result(owner())),
             declaration(
                 2,
-                Ty::parameter(&[
+                vec![
                     Ty::UInt64,
                     Ty::Pointer {
                         pointee: Box::new(Ty::UInt32),
                     },
-                ]),
+                ],
                 Ty::Unit,
             ),
-            declaration(3, owner(), owner()),
+            declaration(3, vec![owner()], owner()),
             declaration(
                 4,
-                Ty::parameter(&[owner(), Ty::UInt64, Ty::UInt64, Ty::Int32]),
+                vec![owner(), Ty::UInt64, Ty::UInt64, Ty::Int32],
                 result(pointer),
             ),
             declaration(
                 5,
-                Ty::parameter(&[
+                vec![
                     Ty::Unit,
                     owner(),
                     Ty::GpuArguments,
                     Ty::UInt32,
                     Ty::UInt32,
                     Ty::UInt32,
-                ]),
+                ],
                 result(Ty::Unit),
             ),
         ],

@@ -1,5 +1,21 @@
 [
   {
+    "type": "arguments",
+    "named": true,
+    "fields": {
+      "args": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "term",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "array_term",
     "named": true,
     "fields": {
@@ -285,6 +301,36 @@
     }
   },
   {
+    "type": "constructor_term",
+    "named": true,
+    "fields": {
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "unary_type",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "record_term",
+            "named": true
+          },
+          {
+            "type": "unit_term",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "declare",
     "named": true,
     "fields": {
@@ -382,6 +428,10 @@
         "types": [
           {
             "type": "lid",
+            "named": true
+          },
+          {
+            "type": "tuple_index",
             "named": true
           }
         ]
@@ -586,12 +636,12 @@
     "type": "infix_type",
     "named": true,
     "fields": {
-      "param_ty": {
+      "params": {
         "multiple": false,
         "required": false,
         "types": [
           {
-            "type": "closed_type",
+            "type": "parameter_types",
             "named": true
           }
         ]
@@ -701,15 +751,7 @@
         "required": true,
         "types": [
           {
-            "type": "paren_term",
-            "named": true
-          },
-          {
-            "type": "tuple_term",
-            "named": true
-          },
-          {
-            "type": "unit_term",
+            "type": "arguments",
             "named": true
           }
         ]
@@ -730,6 +772,22 @@
         "types": [
           {
             "type": "type_application",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "parameter_types",
+    "named": true,
+    "fields": {
+      "params": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "type",
             "named": true
           }
         ]
@@ -787,7 +845,7 @@
         "required": false,
         "types": [
           {
-            "type": "closed_term",
+            "type": "arguments",
             "named": true
           },
           {
@@ -828,6 +886,10 @@
       "types": [
         {
           "type": "closed_term",
+          "named": true
+        },
+        {
+          "type": "constructor_term",
           "named": true
         },
         {
@@ -1784,6 +1846,10 @@
   },
   {
     "type": "try_suffix",
+    "named": true
+  },
+  {
+    "type": "tuple_index",
     "named": true
   },
   {

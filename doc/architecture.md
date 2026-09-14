@@ -167,9 +167,11 @@ retain no operand effects.
 
 LIR lowering assigns storage to binding IDs and makes evaluation, ownership cleanup,
 and control flow explicit. It has no source initialization states or branch snapshots;
-runtime flags still protect partially initialized managed storage during cleanup. Every LIR function reserves local zero for its unary
-parameter, including unit, tuples, and foreign declarations. Each `Instr` documents
-its consumed operands and produced values.
+runtime flags still protect partially initialized managed storage during cleanup. A LIR function's
+`parameter_count` identifies its initial locals as parameters in declaration order. Zero-argument
+functions reserve no parameter local; a tuple parameter occupies one local. Calls transfer separate
+operands to those locals, and C and SPIR-V emission preserve the parameter list. Each `Instr`
+documents its consumed operands and produced values.
 
 HIR signatures can bind named type parameters, and function references carry
 completed type arguments. LIR construction owns a memoized worklist of concrete
@@ -282,7 +284,7 @@ concrete signature. Function references, shader artifacts, pipeline bridges, exp
 and drop hooks use reserved LIR identities. Module assembly combines completed
 functions and source origins only after every request succeeds. Independent failures
 retain their own source locations and a bounded application trace; diagnostics never
-assume HIR and LIR indices agree. Foreign declarations have parameter local zero and
+assume HIR and LIR indices agree. Foreign declarations retain one local per parameter and
 no blocks; they do not create function-body lowering state.
 
 `CompilerConfig.max_monomorphs_per_function` defaults to 16,384 and cannot be zero.

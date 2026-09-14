@@ -949,14 +949,8 @@ impl Generator {
             .map(|parameter| self.stage_shape(&parameter.annotation.ty, decorator))
             .collect::<Result<Vec<_>, _>>()?;
         let result = self.stage_shape(&signature.result.ty, decorator)?;
-        resin_types::shader::validate(
-            &self.typer,
-            &Ty::parameter(&parameters),
-            &result,
-            false,
-            stage,
-        )
-        .map_err(|message| shader_error(decorator, &message))?;
+        resin_types::shader::validate(&self.typer, &parameters, &result, false, stage)
+            .map_err(|message| shader_error(decorator, &message))?;
         self.module.shaders.insert(
             id,
             resin_types::shader::ShaderEntry {
