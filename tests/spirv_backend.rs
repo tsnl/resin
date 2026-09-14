@@ -23,11 +23,13 @@ fn shader_indexing_emits_no_bounds_checks() {
         ));
         let project = support::project::Project::new(&m, None).unwrap();
         let source = std::fs::read(project.generated.shaders()[0].unoptimized_spirv()).unwrap();
-        // Unoptimized source method calls propagate the shader failure flag.
-        // Indexing itself must introduce no signed or unsigned bounds comparisons.
+        // Unchecked indexing and its infallible source wrappers need no guards,
+        // even before optimization.
         for comparison in 172..=179 {
             assert_eq!(instructions(&source, comparison).count(), 0);
         }
+        assert_eq!(instructions(&source, 250).count(), 0);
+        assert_eq!(failure_loads(&source), 0);
         if let Some(compiler) = shaders::optimizer() {
             let built = project.build(&toolchain::spirv(&compiler)).unwrap();
             let artifact = &project.generated.shaders()[0];
@@ -38,6 +40,91 @@ fn shader_indexing_emits_no_bounds_checks() {
                 0,
                 "unchecked indexing needs no branches after optimization"
             );
+        }
+    }
+}
+
+fn failure_loads(bytes: &[u8]) -> usize {
+    // The invocation failure flag is the module's sole Private variable.
+    let private = instructions(bytes, 59)
+        .filter(|operands| operands[2] == 6)
+        .collect::<Vec<_>>();
+    assert_eq!(private.len(), 1);
+    let flag = private[0][1];
+    instructions(bytes, 61)
+        .filter(|operands| operands[2] == flag)
+        .count()
+}
+
+#[test]
+fn shader_calls_guard_only_helpers_with_emitted_failure_exits() {
+    for (helpers, expression, checks, loads) in [
+        (
+            "def outer(x: ubyte) -> ulong = { inner(x) }; def inner(x: ubyte) -> ulong = { ulong(x) + 1_ul };",
+            "outer(7_ub)",
+            0,
+            0,
+        ),
+        (
+            "def pure(x: ubyte) -> ulong = { ulong(x) + 1_ul }; def outer(x: ulong) -> uint = { inner(x) }; def inner(x: ulong) -> uint = { uint(x) };",
+            "pure(7_ub) + ulong(outer(i))",
+            3,
+            2,
+        ),
+        (
+            "def outer() -> ulong = { inner() }; def inner() -> ulong = { var value: None; value := None; var result: ulong; result := value!; result };",
+            "outer()",
+            3,
+            2,
+        ),
+    ] {
+        let source = format!(
+            "export {{ kernel }}; {helpers} @compute_shader def kernel(i: ulong, output: Ptr<ulong>) = {{ output.* := {expression}; }};"
+        );
+        let module = module(&source);
+        let project = support::project::Project::new(&module, None).unwrap();
+        let shader = &project.generated.shaders()[0];
+        let bytes = std::fs::read(shader.unoptimized_spirv()).unwrap();
+        assert_eq!(instructions(&bytes, 250).count(), checks, "{source}");
+        assert_eq!(failure_loads(&bytes), loads, "{source}");
+        shaders::validate(shader.unoptimized_spirv());
+    }
+}
+
+#[test]
+fn graphics_output_guards_follow_the_emitted_entry_fallibility() {
+    let types = "struct Position { x: float32, y: float32, z: float32, w: float32 }; struct Color { r: float32, g: float32, b: float32, a: float32 }; struct Vertex { position: Position, color: Color };";
+    for checked in [false, true] {
+        for (entry, expression, body) in [
+            (
+                "@vertex_shader def vertex(index: int) -> Vertex",
+                "ubyte(index)",
+                "Vertex { position = Position { x = 0.0_f, y = 0.0_f, z = 0.0_f, w = 1.0_f }, color = Color { r = 1.0_f, g = 0.0_f, b = 0.0_f, a = 1.0_f } }",
+            ),
+            (
+                "@fragment_shader def fragment(color: Color) -> Color",
+                "ubyte(color.r)",
+                "color",
+            ),
+        ] {
+            let name = if entry.starts_with("@vertex") {
+                "vertex"
+            } else {
+                "fragment"
+            };
+            let check = if checked {
+                format!("{expression};")
+            } else {
+                String::new()
+            };
+            let source = format!("export {{ {name} }}; {types} {entry} = {{ {check} {body} }};");
+            let module = module(&source);
+            let project = support::project::Project::new(&module, None).unwrap();
+            let shader = &project.generated.shaders()[0];
+            let bytes = std::fs::read(shader.unoptimized_spirv()).unwrap();
+            assert_eq!(instructions(&bytes, 250).count(), usize::from(checked) * 2);
+            assert_eq!(failure_loads(&bytes), usize::from(checked));
+            shaders::validate(shader.unoptimized_spirv());
         }
     }
 }

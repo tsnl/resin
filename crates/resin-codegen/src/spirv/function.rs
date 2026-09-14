@@ -9,12 +9,13 @@ use resin_types::prelude::*;
 use rspirv::spirv::{FunctionControl, LoopControl, SelectionControl, StorageClass, Word};
 use std::collections::HashMap;
 
+/// Emit a function and report whether it contains an invocation-failure exit.
 pub(super) fn lower(
     context: &mut Context<'_>,
     function: &Function,
     flow: &FunctionTypes,
     index: usize,
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
     let result = context.ty(&function.result)?;
     let parameters = function.locals[..function.parameter_count]
         .iter()
@@ -56,10 +57,11 @@ pub(super) fn lower(
         arrays,
         destinations,
         has_loop_test: stacks.tests.iter().map(Option::is_some).collect(),
+        may_fail: false,
     };
     lowering.region(function.entry.index(), vec![], None)?;
     lowering.context.builder.end_function().unwrap();
-    Ok(())
+    Ok(lowering.may_fail)
 }
 
 struct Destination {
@@ -84,6 +86,7 @@ struct FunctionLowering<'a, 'm> {
     arrays: HashMap<Ty, Word>,
     destinations: Vec<Destination>,
     has_loop_test: Vec<bool>,
+    may_fail: bool,
 }
 
 fn variable(context: &mut Context<'_>, ty: &Ty, initial: Option<Word>) -> Result<Word, Error> {
@@ -263,7 +266,7 @@ impl FunctionLowering<'_, '_> {
             &self.locals,
             &self.arrays,
         )?;
-        if matches!(instruction, Instr::Call { .. }) {
+        if matches!(instruction, Instr::Call { .. }) && self.context.function_may_fail(args[0].id) {
             let failed = ops::load(self.context, &Ty::Bool, self.context.failed)?;
             self.check(failed, false)?;
         }
@@ -303,6 +306,9 @@ impl FunctionLowering<'_, '_> {
     }
 
     fn return_zero(&mut self) -> Result<(), Error> {
+        // Record actual emitted failure exits, including failures propagated from
+        // callees. No separate instruction classifier can drift from emission.
+        self.may_fail = true;
         let zero = self.context.zero(&self.function.result)?;
         self.context.builder.ret_value(zero).unwrap();
         Ok(())

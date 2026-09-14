@@ -28,12 +28,15 @@ pub(super) fn generate(
     }
     for &function in reachable {
         let index = function.index();
-        function::lower(
+        let may_fail = function::lower(
             &mut context,
             &module.functions[index],
             &analysis.functions[index],
             index,
         )?;
+        context
+            .fallibility
+            .insert(context.functions[index], may_fail);
     }
     entry::lower(&mut context, entry, stage)?;
     Ok(context
@@ -52,6 +55,8 @@ struct Context<'a> {
     module: &'a resin_lir::Module,
     table: &'a TypeTable,
     functions: Vec<Word>,
+    // Emission completes each callee before its callers. Absence is not infallibility.
+    fallibility: HashMap<Word, bool>,
     failed: Word,
     glsl: Word,
     types: HashMap<(Ty, types::Representation), Word>,
@@ -84,6 +89,7 @@ impl<'a> Context<'a> {
             module,
             table,
             functions,
+            fallibility: HashMap::new(),
             failed,
             glsl,
             types: HashMap::new(),
@@ -92,6 +98,13 @@ impl<'a> Context<'a> {
             named_types: HashSet::new(),
             validated: HashSet::new(),
         }
+    }
+
+    fn function_may_fail(&self, function: Word) -> bool {
+        *self
+            .fallibility
+            .get(&function)
+            .expect("verified dependency order emits shader callees first")
     }
 
     fn tag(&self, case: &Case) -> u32 {

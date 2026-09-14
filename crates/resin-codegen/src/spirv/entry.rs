@@ -34,7 +34,8 @@ pub(super) fn lower(
         .builder
         .function_call(result_type, None, context.functions[entry.index()], inputs)
         .map_err(build_error)?;
-    variables.finish(context, &interface, result, output)?;
+    let may_fail = context.function_may_fail(context.functions[entry.index()]);
+    variables.finish(context, &interface, result, output, may_fail)?;
     context.builder.ret().map_err(build_error)?;
     context.builder.end_function().map_err(build_error)?;
     declare_entry(context, wrapper, stage, &variables.interfaces);
@@ -252,29 +253,35 @@ impl Variables {
         interface: &Interface,
         result: &Ty,
         output: Word,
+        may_fail: bool,
     ) -> Result<(), Error> {
         if matches!(interface, Interface::Compute { .. }) {
             return Ok(());
         }
-        let bool_type = context.ty(&Ty::Bool)?;
-        let failed = context
-            .builder
-            .load(bool_type, None, context.failed, None, [])
-            .map_err(build_error)?;
-        let end = context.builder.id();
-        let success = context.builder.id();
-        context
-            .builder
-            .selection_merge(end, SelectionControl::NONE)
-            .map_err(build_error)?;
-        context
-            .builder
-            .branch_conditional(failed, end, success, [])
-            .map_err(build_error)?;
-        context
-            .builder
-            .begin_block(Some(success))
-            .map_err(build_error)?;
+        let end = if may_fail {
+            let bool_type = context.ty(&Ty::Bool)?;
+            let failed = context
+                .builder
+                .load(bool_type, None, context.failed, None, [])
+                .map_err(build_error)?;
+            let end = context.builder.id();
+            let success = context.builder.id();
+            context
+                .builder
+                .selection_merge(end, SelectionControl::NONE)
+                .map_err(build_error)?;
+            context
+                .builder
+                .branch_conditional(failed, end, success, [])
+                .map_err(build_error)?;
+            context
+                .builder
+                .begin_block(Some(success))
+                .map_err(build_error)?;
+            Some(end)
+        } else {
+            None
+        };
         match interface {
             Interface::Vertex {
                 position, color, ..
@@ -294,11 +301,13 @@ impl Variables {
             }
             Interface::Compute { .. } => unreachable!(),
         }
-        context.builder.branch(end).map_err(build_error)?;
-        context
-            .builder
-            .begin_block(Some(end))
-            .map_err(build_error)?;
+        if let Some(end) = end {
+            context.builder.branch(end).map_err(build_error)?;
+            context
+                .builder
+                .begin_block(Some(end))
+                .map_err(build_error)?;
+        }
         Ok(())
     }
 
