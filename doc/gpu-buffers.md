@@ -3,7 +3,9 @@
 `GpuPtr<T>` owns a view into a GPU allocation. `GpuSpan<T>` adds an element count.
 Copies, indexed pointers, and slices retain the allocation and its GPU. Both are
 ordinary generic source structs over an opaque `GpuView` primitive. Neither
-exposes a raw host pointer or a device-address query.
+exposes a raw host pointer or a device-address query. Import `$/gpu.resin` for
+these wrappers and device operations. Shader roots using borrowed `Span<T>` also
+need an explicit `$/span.resin` import.
 
 ```resin
 var gpu = Gpu.new()?;

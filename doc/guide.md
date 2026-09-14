@@ -832,15 +832,15 @@ The index parameter is `ulong` (unsigned 64-bit); unsuffixed literals infer this
 other integer values need an explicit conversion, such as `.at(ulong(i))`:
 
 ```resin
-var values = [10, 20, 30];
+var values = [10_i, 20, 30];
 values.at(1).* := 42;
-var view = Span<int> { data = Ptr<int>(&values), length = ulong(3) };
+var view = Span<int> { data = values.at(0), length = 3_ul };
 var element = view.at(1);
 print(fmt("{0}\n", (element.*,)));
 ```
 
 Arrays retain the original `values(index)` spelling; source spans use `.at(index)`. `Span<T>` has `data: Ptr<T>`
-and `length: ulong` fields. Neither spelling guarantees bounds checking. Host indexing checks
+and `length: ulong` fields. Host indexing checks
 the array or span length and terminates with a diagnostic for negative or out-of-range indices,
 before forming an element address. This failure does not unwind automatic cleanup.
 Shader array and span indexing is unchecked: callers must keep indices within valid storage;

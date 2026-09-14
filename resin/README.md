@@ -22,7 +22,7 @@ import { "$/gpu.resin", "$/status.resin" };
 - `image.resin`: PNG I/O.
 - `status.resin`: native status conversion and named errors.
 - `graphics.resin`: shared shader input/output types.
-- `io.resin`: stdout and stderr streams with string-only `write` methods.
+- `io.resin`: stdout and stderr byte output accepting `str`, `Span<ubyte>`, and `String`.
 - `console.resin`: byte and line input, and shared input-line ownership and printing.
 - `process.resin`: checked argument views and lookups in the frozen startup environment.
 
@@ -82,7 +82,8 @@ dropping one already consumed does not cancel it again. Submission waits for GPU
 | `Span<T>` | `.at(index)`, `.slice(start, length)`, numeric `.as_bytes()` |
 | `WeakPtr<T>` / `WeakSpan<T>` | `.empty()`, `.upgrade()` |
 | `Gpu` | `Gpu.new()`, `Gpu.new_at(index)`, `Gpu.new_for_window(window)`, `gpu.create_compute_pipeline(kernel)`, `gpu.create_image(...)` |
-| `GpuPtr<T>` / `GpuSpan<T>` | `gpu.create(value)`, `gpu.alloc::<T>(count)`, `.at(index)`, `.slice(start, length)`, `.read_only()`, `.write_only()` |
+| `GpuPtr<T>` | `gpu.create(value)`, `.load()`, `.store(value)`, `.replace(value)`, `.slice(start, length)`, `.read_only()`, `.write_only()` |
+| `GpuSpan<T>` | `gpu.alloc::<T>(count)`, `gpu.alloc_in::<T>(count, memory)`, `.at(index)`, `.slice(start, length)`, `.copy_to(destination)`, `.read_only()`, `.write_only()` |
 | `GpuComputePipeline<Root, Owner>` / `GpuGraphicsPipeline<Root, Owner>` | `gpu.create_compute_pipeline(kernel)`, `gpu.create_graphics_pipeline(vertex, fragment)` |
 | `GpuCommands` | `gpu.start_command_recording()`, `commands.dispatch(pipeline, arguments, x, y, z)`, `commands.draw(pipeline, arguments, count)`, `commands.submit()`, `commands.cancel()` |
 | `Window` | `Window.new(width, height, String.from_str("Resin"))`, `window.poll_events()`, `window.framebuffer_size()`, input and cursor methods |
@@ -139,7 +140,8 @@ Some operations return additional information:
 `RuntimeStatus.code(error)` recovers its number and `RuntimeStatus.message(error)` returns
 a borrowed, NUL-terminated native message. Unknown codes are preserved, not treated as success.
 Unhandled entry-point errors print their variant name and exit with status 1 after scope cleanup.
-The exit-on-failure `check` helper is removed; wrappers never terminate the process.
+Fallible resource operations return errors for callers to handle or propagate.
+Invalid checked pointer access and the infallible formatting/printing operations can trap.
 
 ## Console input
 

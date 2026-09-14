@@ -6,7 +6,8 @@ Transparent aliases inherit the underlying nominal type's namespace and origin;
 they cannot add methods. Local structs currently contain fields only.
 
 All module types and aliases are available when method signatures are resolved,
-including an `ArcPtr<Owner>` alias written after the owner. Methods are declared
+including an alias written after its target struct. An alias of `ArcPtr<Owner>`
+inherits the wrapper namespace; payload methods require `.get()`. Methods are declared
 before bodies, so sibling methods and recursive calls can refer to each other.
 
 Functions accompany the type when it is exported and need no separate exports.
@@ -48,9 +49,9 @@ wrapper exposes the same signature through an ordinary method.
 It accepts a `ulong` index and returns `Ptr<T>`, so a field can be indexed as
 `root.particles.at(i).*`. Use `items.at(i).* := value` to update an element.
 The receiver and index are evaluated once; indexing an array place keeps its
-storage address instead of copying the array. Arrays also support the existing `items(i)` spelling. Neither spelling guarantees bounds checking. Host indexing
-diagnoses invalid indices; shader indexing is unchecked, so callers must stay
-within valid storage.
+storage address instead of copying the array. Arrays also support the existing
+`items(i)` spelling. Host indexing checks the declared length and diagnoses invalid
+indices; shader indexing is unchecked, so callers must stay within valid storage.
 
 Source-known method resolution happens during HIR construction. Dependent lookup
 uses the completed HIR nominal declarations during specialization. Both produce

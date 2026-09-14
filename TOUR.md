@@ -44,8 +44,9 @@ A few language choices explain much of the implementation:
   `name = value`; parameters remain `name: Type`.
 - `A | B` is a structural union of value types. `Result<T, E>` is first-class;
   `ok` and `err` construct it, `match` handles variants, and postfix `?` propagates errors.
-- `ArcPtr<T>` / `WeakPtr<T>` share single values, and `ArcSpan<T>` / `WeakSpan<T>`
-  share fixed-length sequences. `ArcSpan<T>.alloc(count, initial)?` allocates initialized
+- `ArcPtr<T>` shares single values, and `ArcSpan<T>` shares fixed-length sequences.
+  `WeakPtr<T>` and `WeakSpan<T>` observe them without keeping their payloads alive.
+  `ArcSpan<T>.alloc(count, initial)?` allocates initialized
   owned elements; `get()` borrows their span. Value reads copy; fresh results
   transfer into consumers. Structs declare inherent methods and destruction hooks.
   Initialized owners are released in reverse scope order, including through `?`.
@@ -353,8 +354,10 @@ and assemble the binary. Structured control flow remains explicit, and physical 
 use the shared host/device layout. The shader profile rejects operations such as foreign
 calls and recursion. Optimization is a separate `spirv-opt` process owned by the toolchain.
 
-The remaining GPU operations are ordinary standard-library calls. Follow one
-from [resin/gpu.resin](resin/gpu.resin), through
+GPU allocation and checked access use ordinary generic source methods backed by
+opaque compiler primitives. Pipeline creation, dispatch, and draw use explicitly
+registered compiler bridges to check shader types and project owning views. Follow
+the native resource wrappers from [resin/gpu.resin](resin/gpu.resin), through
 [resin_runtime.h](crates/resin-runtime/include/resin_runtime.h) and its included
 headers, to [the runtime](crates/resin-runtime/src/lib.rs). The same pattern applies
 to images and windows. Wrappers omit the native `resin_` prefix and return
@@ -376,26 +379,29 @@ Inside the runtime, the useful landmarks are:
 - [allocator/range.rs](crates/resin-runtime/src/allocator/range.rs): aligned
   suballocation using a sorted list of free ranges.
 
-Buffers make the host/device boundary concrete. `Span<T>` pairs an address with
-a length; both spans and arrays return a checked element pointer through `buffer(index)`.
-Use `buffer(index).*` to read or write it. Raw pointer arithmetic requires an explicit
-conversion to `ulong` and operates on byte addresses. The host allocates memory,
-writes root data, and passes its `GpuBuffer` handle to `commands.dispatch` or
-`commands.draw`. Recording obtains the device address internally; shader entry
-wrappers receive it as their declared `Ptr<T>` root according to their supported
-interface. [target layout helpers](crates/resin-codegen/src/layout.rs) keeps supported buffer
-layouts consistent between C and SPIR-V; start there when investigating a field
-offset or alignment mismatch.
+Buffers make the host/device boundary concrete. The source `Span<T>` pairs a
+borrowed address with an element count. Arrays and spans return element pointers
+through `.at(index)`; use `.at(index).*` to read or write. Host indexing checks
+bounds, while shader indexing requires callers to stay within valid storage.
+Host `GpuPtr<T>` and `GpuSpan<T>` retain their allocation and expose checked
+`load`, `store`, and `replace` operations. Create them with `gpu.create(value)?`
+and `gpu.alloc::<T>(count)?`.
 
-These APIs expose resource lifetimes explicitly. The C API and its unsafe Rust
-convenience API are not ownership-safe GPU abstractions: resources must remain
-alive while commands use them. Standard-library wrappers retain shared owners and
-propagate failures with `?`. `commands.submit()` and cancellation clear the
-shared native handle; automatic destruction cancels unfinished recordings.
-Recordings retain root buffers through synchronous submission or cancellation.
-Pointers and spans stored inside a root do not retain their backing allocations;
-callers keep those allocations alive until work completes. See
-[GPU buffers](doc/gpu-buffers.md) for command roots and borrowed pointer queries.
+Dispatch and draw accept a typed pipeline and a host argument record. Explicitly
+registered projection contracts map its owning GPU views to shader pointers and
+spans, preserving offsets and retaining the referenced allocations. Shader entry
+wrappers receive the generated root as their declared `Ptr<T>`. The public source
+API exposes neither a raw host pointer into GPU storage nor a reusable projected
+root. The [shared layout contract](crates/resin-types/src/lib.rs) keeps C and SPIR-V
+storage consistent; start there when investigating a field offset or alignment.
+
+The unsafe native C and Rust APIs retain explicit handles and addresses. Source
+resource wrappers retain shared owners and propagate failures with `?`.
+`commands.submit()` and cancellation clear the shared native handle; destruction
+cancels unfinished recordings. Recorded GPU allocations reject host access until
+synchronous submission or cancellation. Shader pointers and spans are nonowning
+views whose allocations remain pinned by the recording. See
+[GPU buffers](doc/gpu-buffers.md) for projection and command lifetimes.
 Shader bodies describe individual invocations;
 the compiler does not synthesize workgroup-local storage or barriers.
 
