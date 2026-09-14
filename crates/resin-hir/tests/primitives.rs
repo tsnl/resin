@@ -50,3 +50,18 @@ fn pointer_and_array_methods_keep_generic_nominal_payloads_symbolic() {
     "#;
     generate(source).unwrap();
 }
+
+#[test]
+fn gpu_argument_methods_accept_pointer_receivers_and_associated_calls() {
+    generate(
+        r#"
+        def record(arguments: Ptr<GpuArguments>, commands: Ptr<ubyte>) -> int = {
+            arguments.dispatch_native(commands, 1, 1, 1);
+            arguments.draw_native(commands, 3);
+            GpuArguments.dispatch_native(arguments.*, commands, 1, 1, 1);
+            GpuArguments.draw_native(arguments.*, commands, 3)
+        };
+    "#,
+    )
+    .unwrap();
+}

@@ -207,7 +207,7 @@ fn numeric_defaults_wait_for_context() {
 
 #[test]
 fn retries_discard_failed_method_choices_and_preserve_completed_groups() {
-    let mut typer = Context::with_builtins();
+    let mut typer = Context::new();
     let mut inference = infer::Inference::new(&mut typer);
     let span = Span { start: 0, end: 0 };
     let method = |out| infer::Constraint::Method {

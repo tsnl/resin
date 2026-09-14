@@ -19,7 +19,6 @@ pub(crate) struct Context {
     pub(super) functions: BTreeMap<FunctionId, FunctionDecl>,
     pub(super) gpu_allocators: BTreeMap<TypeId, FunctionId>,
     pub(super) gpu_pipeline_contexts: BTreeMap<TypeId, FunctionId>,
-    pub(super) method_definitions: Vec<MethodDefinitions>,
 }
 impl Context {
     pub(crate) fn source_method(&self, owner: TypeId, name: &str) -> Option<&SourceMethod> {
@@ -174,9 +173,6 @@ pub(crate) struct FunctionDecl {
 #[derive(Debug, Clone)]
 pub(crate) enum FunctionBody {
     Defined(FunctionId),
-    /// Primitive operation elaborated at its call site, preserving addresses
-    /// that cannot cross shader calls.
-    Intrinsic(Intrinsic),
     GpuPipelineFactory {
         factory: FunctionId,
         graphics: bool,
@@ -191,8 +187,6 @@ pub(crate) enum FunctionBody {
         record: FunctionId,
     },
 }
-
-pub(crate) type MethodDefinitions = fn(&Ty, &Context) -> Vec<(Arc<str>, FunctionDecl)>;
 
 impl FunctionDecl {
     pub fn arguments(&self, receiver: &Ty, associated: bool) -> Option<&[Ty]> {
@@ -243,10 +237,6 @@ impl Context {
             Entry::Occupied(_) => false,
         }
     }
-    pub(crate) fn register_method_definitions(&mut self, definitions: MethodDefinitions) {
-        self.method_definitions.push(definitions);
-    }
-
     pub(crate) fn gpu_allocator(&self, receiver: &Ty) -> Option<FunctionId> {
         let definition = self.receiver_definition(receiver)?;
         let function = *self.gpu_allocators.get(&definition)?;
@@ -267,24 +257,18 @@ impl Context {
     }
 
     pub(crate) fn methods(&self, ty: &Ty) -> Vec<(Arc<str>, FunctionDecl)> {
-        let mut methods = BTreeMap::new();
+        let mut methods = Vec::new();
         if let Some(namespace) = self
             .receiver_definition(ty)
             .and_then(|id| self.namespaces.get(&id))
         {
             for (name, id) in namespace {
                 if let Some(function) = self.functions.get(id) {
-                    methods.insert(name.clone(), function.clone());
+                    methods.push((name.clone(), function.clone()));
                 }
             }
         }
-        for definitions in &self.method_definitions {
-            if let Ty::Pointer { pointee } = ty {
-                methods.extend(definitions(pointee, self));
-            }
-            methods.extend(definitions(ty, self));
-        }
-        methods.into_iter().collect()
+        methods
     }
 }
 
@@ -302,26 +286,12 @@ impl ReceiverConversion {
     }
 }
 
-impl Context {
-    pub(super) fn with_builtins() -> Self {
-        let mut typer = Context::new();
-        typer.register_method_definitions(builtin_methods);
-        typer
-    }
-}
-
 pub(super) fn shader_properties() -> Ty {
     Ty::Record {
         fields: vec![RecordField {
             name: "spirv".into(),
             ty: Ty::shader(),
         }],
-    }
-}
-
-fn pointer(ty: Ty) -> Ty {
-    Ty::Pointer {
-        pointee: Box::new(ty),
     }
 }
 
@@ -350,7 +320,40 @@ pub(crate) fn intrinsic_methods(
             },
         ));
     }
-    let mut base = receiver;
+    let mut base = match receiver {
+        Type::Node(Head::Pointer, parts) => solver.head(&parts[0]),
+        receiver => receiver,
+    };
+    if matches!(base, Type::Node(Head::Atom(Ty::GpuArguments), _)) {
+        methods.extend([
+            (
+                "dispatch_native",
+                IntrinsicMethod {
+                    op: Intrinsic::GpuArgumentsDispatch,
+                    params: vec![
+                        base.clone(),
+                        Type::pointer(Ty::UInt8.into()),
+                        Ty::UInt32.into(),
+                        Ty::UInt32.into(),
+                        Ty::UInt32.into(),
+                    ],
+                    result: Ty::Int32.into(),
+                },
+            ),
+            (
+                "draw_native",
+                IntrinsicMethod {
+                    op: Intrinsic::GpuArgumentsDraw,
+                    params: vec![
+                        base.clone(),
+                        Type::pointer(Ty::UInt8.into()),
+                        Ty::UInt32.into(),
+                    ],
+                    result: Ty::Int32.into(),
+                },
+            ),
+        ]);
+    }
     while let Type::Node(Head::Pointer, parts) = &base {
         base = solver.head(&parts[0]);
     }
@@ -370,69 +373,6 @@ pub(crate) fn intrinsic_methods(
         ));
     }
     methods
-}
-
-fn builtin_methods(receiver: &Ty, _typer: &Context) -> Vec<(Arc<str>, FunctionDecl)> {
-    let solver = super::infer::Solver::default();
-    let primitive = intrinsic_methods(&receiver.clone().into(), &solver);
-    if !primitive.is_empty() {
-        return primitive
-            .into_iter()
-            .map(|(name, signature)| {
-                method(
-                    name,
-                    signature
-                        .params
-                        .iter()
-                        .map(|ty| solver.resolve(ty).expect("concrete primitive parameter"))
-                        .collect(),
-                    solver
-                        .resolve(&signature.result)
-                        .expect("concrete primitive result"),
-                    signature.op,
-                )
-            })
-            .collect();
-    }
-    match receiver {
-        Ty::GpuArguments => vec![
-            method(
-                "dispatch_native",
-                vec![
-                    receiver.clone(),
-                    pointer(Ty::UInt8),
-                    Ty::UInt32,
-                    Ty::UInt32,
-                    Ty::UInt32,
-                ],
-                Ty::Int32,
-                Intrinsic::GpuArgumentsDispatch,
-            ),
-            method(
-                "draw_native",
-                vec![receiver.clone(), pointer(Ty::UInt8), Ty::UInt32],
-                Ty::Int32,
-                Intrinsic::GpuArgumentsDraw,
-            ),
-        ],
-        _ => vec![],
-    }
-}
-
-fn method(
-    name: &str,
-    params: Vec<Ty>,
-    result: Ty,
-    intrinsic: Intrinsic,
-) -> (Arc<str>, FunctionDecl) {
-    (
-        name.into(),
-        FunctionDecl {
-            body: FunctionBody::Intrinsic(intrinsic),
-            params,
-            result,
-        },
-    )
 }
 
 /// Representation operations have signatures independent of library wrapper names.

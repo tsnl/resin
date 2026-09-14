@@ -66,7 +66,7 @@ impl Generator {
             module: Module::default(),
             functions: vec![],
             source: Source::new("<source>", ""),
-            typer: Context::with_builtins(),
+            typer: Context::new(),
             scopes: Scopes::new().finish(),
             function_bindings: HashMap::new(),
             errors: vec![],
