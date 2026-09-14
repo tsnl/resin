@@ -114,3 +114,41 @@ fn template_lists_require_named_parameters_and_nonempty_arguments() {
         );
     }
 }
+
+#[test]
+fn associated_method_references_keep_explicit_arguments_without_a_call() {
+    let source = "def example() = { var first = Cell<int>.select::<ulong>; var second = Factory.create::<Ptr<int>>; Cell<int>.select::<ulong>(7, 42); (Cell<int>.select::<ulong>)(7, 42); };";
+    let file = parse(source);
+    let StmtKind::Function { body, .. } = &file.stmts[0].val else {
+        panic!("function")
+    };
+    let TermKind::Block { stmts, .. } = &body.val else {
+        panic!("block")
+    };
+    for (statement, expected) in stmts[..2]
+        .iter()
+        .zip(["Cell<int>.select", "Factory.create"])
+    {
+        let StmtKind::Define { init, .. } = &statement.val else {
+            panic!("binding")
+        };
+        let TermKind::TypeApply { function, args } = &init.val else {
+            panic!("method application: {init:?}")
+        };
+        assert!(matches!(function.val, TermKind::Field { .. }));
+        assert_eq!(args.len(), 1);
+        assert_eq!(&source[function.span.start..function.span.end], expected);
+        assert!(source[init.span.start..init.span.end].ends_with('>'));
+    }
+    let StmtKind::Expr { term: direct } = &stmts[2].val else {
+        panic!("call")
+    };
+    assert!(matches!(&direct.val, TermKind::MethodCall { type_args, .. } if type_args.len() == 1));
+    let StmtKind::Expr { term: indirect } = &stmts[3].val else {
+        panic!("call")
+    };
+    let TermKind::Call { func, .. } = &indirect.val else {
+        panic!("ordinary call")
+    };
+    assert!(matches!(&func.val, TermKind::TypeApply { args, .. } if args.len() == 1));
+}

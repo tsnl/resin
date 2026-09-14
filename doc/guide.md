@@ -542,8 +542,32 @@ def example() -> int = {
 Struct constructors take explicit type arguments. Different applications retain
 distinct nominal types, even if their layouts agree; aliases keep their target's
 identity. Pointer fields may recurse through the same generic declaration. Local
-structs remain field-only and can use enclosing function type parameters. Methods
-on generic structs and additional method type parameters are not yet supported.
+structs remain field-only and can use enclosing function type parameters.
+
+Methods share their struct's parameters and can add their own:
+
+```resin
+struct Cell<T> {
+    value: T,
+    def read(self: Cell<T>) -> T = { self.value };
+    def replace_with<U>(self: Cell<T>, value: U) -> Cell<U> = {
+        Cell<U> { value = value }
+    };
+};
+
+def methods() -> int = {
+    var original = Cell<ulong> { value = 7 };
+    var changed = original.replace_with::<int>(42);
+    var read = Cell<int>.read;
+    read(changed)
+};
+```
+
+The receiver fixes the struct's arguments. Method `::<...>` supplies only the
+additional parameters; omitting it allows deduction from arguments and expected
+results. `Cell<int>.read` is a function value whose first parameter is still the
+receiver. A generic `drop(self: Ptr<Cell<T>>)` hook uses the owner's parameters
+and cannot add its own.
 
 `_` is a weak inference variable in local annotations, function results, and
 explicit applications. It may resolve to a named parameter but never creates

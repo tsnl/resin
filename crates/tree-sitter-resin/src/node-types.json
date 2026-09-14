@@ -385,6 +385,16 @@
             "named": true
           }
         ]
+      },
+      "type_args": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_application",
+            "named": true
+          }
+        ]
       }
     }
   },

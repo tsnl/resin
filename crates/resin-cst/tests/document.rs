@@ -117,3 +117,58 @@ fn gpu_pipeline_annotations_preserve_type_queries_and_formatting() {
         );
     }
 }
+
+#[test]
+fn associated_method_references_format_and_preserve_type_queries() {
+    let source = "def main()={var f=Cell<int>.select :: <ulong>;var g=Factory.create :: <Ptr<int>>;Cell<int>.select :: <ulong>(7,42);};";
+    let document = Document::reparse(source.into(), None);
+    assert!(!document.tree().root_node().has_error());
+    assert!(document.type_context(source.find("ulong").unwrap()));
+    assert_eq!(
+        document
+            .token(source.find("select").unwrap())
+            .unwrap()
+            .kind(),
+        "lid"
+    );
+    let formatted = resin_cst::format_source(source).unwrap();
+    assert!(
+        formatted.contains("Cell<int>.select::<ulong>"),
+        "{formatted}"
+    );
+    assert!(
+        formatted.contains("Factory.create::<Ptr<int>>"),
+        "{formatted}"
+    );
+    assert_eq!(resin_cst::format_source(&formatted).unwrap(), formatted);
+    assert!(
+        !Document::reparse(formatted, None)
+            .tree()
+            .root_node()
+            .has_error()
+    );
+}
+
+#[test]
+fn editing_method_reference_arguments_matches_fresh_parsing() {
+    let sources = [
+        "def main() = { var f = Cell<int>.",
+        "def main() = { var f = Cell<int>.select::",
+        "def main() = { var f = Cell<int>.select::<",
+        "def main() = { var f = Cell<int>.select::<ulong",
+        "def main() = { var f = Cell<int>.select::<ulong>; };",
+        "def main() = { var f = Cell<int>.select::<ulong>(7, 42); };",
+    ];
+    for before in sources {
+        let original = Document::reparse(before.into(), None);
+        for after in sources {
+            let incremental = Document::reparse(after.into(), Some(&original));
+            let fresh = Document::reparse(after.into(), None);
+            assert_eq!(
+                nodes(incremental.tree().root_node()),
+                nodes(fresh.tree().root_node())
+            );
+            assert_eq!(original.source(), before);
+        }
+    }
+}

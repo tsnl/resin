@@ -449,7 +449,7 @@ impl<'a> AstGen<'a> {
                     let name = self.ident(field.unwrap());
                     let span = Span {
                         start: base.span.start,
-                        end: child.end_byte(),
+                        end: name.span.end,
                     };
                     base = Spanned::new(
                         TermKind::Field {
@@ -458,6 +458,19 @@ impl<'a> AstGen<'a> {
                         },
                         span,
                     );
+                    if let Some(arguments) = child.child_by_field_name("type_args") {
+                        let span = Span {
+                            start: base.span.start,
+                            end: child.end_byte(),
+                        };
+                        base = Spanned::new(
+                            TermKind::TypeApply {
+                                function: Box::new(base),
+                                args: self.type_arguments(arguments.child_by_field_name("types")),
+                            },
+                            span,
+                        );
+                    }
                 }
                 "closed_term" => {
                     let arg = self.gen_closed_term(child);

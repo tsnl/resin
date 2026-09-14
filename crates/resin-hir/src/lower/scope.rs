@@ -1,6 +1,6 @@
 //! Persistent lexical scopes used by HIR construction and editor queries.
 use crate::lower::context::Context;
-use crate::lower::infer::{Solver, Type};
+use crate::lower::infer::{ResolvedMethod, Rule, Solver, Type};
 use crate::{Analysis, Definition, DefinitionKind};
 use resin_source::prelude::*;
 use resin_types::prelude::*;
@@ -194,7 +194,7 @@ pub(crate) struct Scopes {
     view: ContextView,
     inferred: HashMap<DeclarationId, (Type, bool)>,
     expressions: Vec<(SourceLocation, Type, bool)>,
-    calls: Vec<(SourceLocation, Type, Arc<str>, Type, bool)>,
+    calls: Vec<(SourceLocation, Type, Arc<str>, Type, bool, Rule)>,
 }
 impl Scopes {
     pub(super) fn for_source(source: Source, data: Rc<RefCell<Analysis>>) -> Self {
@@ -385,6 +385,7 @@ impl Scopes {
         receiver: Type,
         argument: Type,
         associated: bool,
+        rule: Rule,
     ) {
         self.calls.push((
             SourceLocation {
@@ -395,6 +396,7 @@ impl Scopes {
             name.val.clone(),
             argument,
             associated,
+            rule,
         ));
     }
     pub(super) fn record_method_definition(&mut self, receiver: TypeId, id: DeclarationId) {
@@ -404,7 +406,12 @@ impl Scopes {
         let name = definition.name.rsplit('.').next().unwrap().to_string();
         data.method_origins.entry((receiver, name)).or_insert(id);
     }
-    pub(crate) fn resolve_inferred(&mut self, solver: &Solver, typer: &Context) {
+    pub(crate) fn resolve_inferred(
+        &mut self,
+        solver: &Solver,
+        typer: &Context,
+        methods: &BTreeMap<Rule, ResolvedMethod>,
+    ) {
         let mut data = self.view.data.borrow_mut();
         for (id, (ty, _)) in self.inferred.drain() {
             data.contexts.definitions[id].ty = solver.complete(&ty);
@@ -415,10 +422,21 @@ impl Scopes {
             }
             // A nominal identity can resolve even when its fields have no legacy concrete view.
             if let Some(completed) = solver.complete(&ty) {
-                data.record_symbolic_members(location, &completed, associated, typer, solver);
+                data.record_symbolic_members(
+                    location.clone(),
+                    &completed,
+                    associated,
+                    typer,
+                    solver,
+                );
+                data.record_source_methods(location, &completed, associated, typer, solver);
             }
         }
-        for (location, receiver, name, argument, associated) in self.calls.drain(..) {
+        for (location, receiver, name, argument, associated, rule) in self.calls.drain(..) {
+            if let Some(method @ ResolvedMethod::Source { .. }) = methods.get(&rule) {
+                data.record_source_method_call(&location, &name, method, associated, typer, solver);
+                continue;
+            }
             if let (Some(receiver), Some(argument)) =
                 (solver.resolve(&receiver), solver.resolve(&argument))
             {

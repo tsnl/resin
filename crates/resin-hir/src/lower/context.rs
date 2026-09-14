@@ -14,12 +14,29 @@ pub(crate) struct Context {
     pub(super) typer: TyperContext,
     pub(super) namespaces: BTreeMap<TypeId, BTreeMap<Arc<str>, FunctionId>>,
     pub(super) nominal_schemes: BTreeMap<TypeId, crate::TypeDefinition>,
+    pub(super) method_owners: BTreeMap<super::scope::DeclarationId, TypeId>,
+    pub(super) source_methods: BTreeMap<(TypeId, Arc<str>), SourceMethod>,
     pub(super) functions: BTreeMap<FunctionId, FunctionDecl>,
     pub(super) gpu_allocators: BTreeMap<TypeId, FunctionId>,
     pub(super) gpu_pipeline_contexts: BTreeMap<TypeId, FunctionId>,
     pub(super) method_definitions: Vec<MethodDefinitions>,
 }
 impl Context {
+    pub(crate) fn source_method(&self, owner: TypeId, name: &str) -> Option<&SourceMethod> {
+        self.source_methods.get(&(owner, name.into()))
+    }
+
+    pub(crate) fn source_methods_for(
+        &self,
+        owner: TypeId,
+    ) -> impl Iterator<Item = (&Arc<str>, &SourceMethod)> {
+        self.source_methods
+            .iter()
+            .filter_map(move |((definition, name), method)| {
+                (*definition == owner).then_some((name, method))
+            })
+    }
+
     pub(crate) fn receiver_definition(&self, ty: &Ty) -> Option<TypeId> {
         let mut ty = ty;
         while let Some(pointee) = ty.deref_target() {
@@ -112,6 +129,17 @@ impl Context {
         );
         Ok(())
     }
+}
+
+/// Source signatures share inference handles with their declaration while a file
+/// is built. The completed signature replaces these handles before another file.
+#[derive(Debug, Clone)]
+pub(crate) struct SourceMethod {
+    pub declaration: super::scope::DeclarationId,
+    pub owner_params: Vec<crate::TypeParameter>,
+    pub type_params: Vec<crate::TypeParameter>,
+    pub params: Vec<super::infer::Type>,
+    pub result: super::infer::Type,
 }
 impl Deref for Context {
     type Target = TyperContext;
@@ -371,7 +399,9 @@ impl Context {
             .and_then(|id| self.namespaces.get(&id))
         {
             for (name, id) in namespace {
-                methods.insert(name.clone(), self.functions[id].clone());
+                if let Some(function) = self.functions.get(id) {
+                    methods.insert(name.clone(), function.clone());
+                }
             }
         }
         for definitions in &self.method_definitions {

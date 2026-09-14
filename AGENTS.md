@@ -288,7 +288,10 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Structs may bind named type parameters; their fields retain those parameters in
   HIR and constructors use explicit applications such as `Cell<int> { value = 1 }`.
   Local field-only structs capture enclosing type binders in their nominal identity.
-  Methods on generic owners and additional method binders follow in later layers.
+  Methods inherit their owner's type binders and may add their own named parameters.
+  Method turbofish arguments supply only those additional parameters; owner arguments
+  come from the receiver or applied type. An associated method reference includes its
+  receiver parameter, with no implicit bound closure. Drop hooks bind only owner parameters.
   Check source expressions into HIR, then lower that tree to LIR in a separate pass.
   Resolve dependency groups and all inference variables before handing the tree to lowering;
   retain named binders and determining member types in HIR. Scopes store these HIR schemes.
