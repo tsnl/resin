@@ -179,11 +179,20 @@ export default grammar({
         optional(seq("->", field("result", $.type))),
         ";",
       ),
-    intrinsic_function: ($) => seq(
-      "intrinsic", field("operation", $.string), "def", field("name", $.lid),
-      optional(field("type_params", $.type_parameters)), "(", list("params", $.declare, ","), ")",
-      "->", field("result", $.type), ";",
-    ),
+    intrinsic_function: ($) =>
+      seq(
+        "intrinsic",
+        field("operation", $.string),
+        "def",
+        field("name", $.lid),
+        optional(field("type_params", $.type_parameters)),
+        "(",
+        list("params", $.declare, ","),
+        ")",
+        "->",
+        field("result", $.type),
+        ";",
+      ),
     foreign_type: ($) => seq("extern", "type", field("name", $.uid), ";"),
 
     type_definition: ($) =>

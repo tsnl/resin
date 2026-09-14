@@ -2155,3 +2155,25 @@ fn literal_string_hover_preserves_its_distinct_primitive_type() {
         .unwrap();
     assert_eq!(hover.text, "text: str");
 }
+
+#[test]
+fn imported_intrinsics_keep_generic_navigation_and_declaration_signatures() {
+    let library = r#"export { at }; intrinsic "pointer_index" def at<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;"#;
+    let source =
+        "import { \"library.resin\" }; def use(data: Ptr<uint>) -> Ptr<uint> = { at(data, 4, 2) };";
+    let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
+    let analysis = project.analyze();
+    assert!(
+        analysis.diagnostics().is_empty(),
+        "{:?}",
+        analysis.diagnostics()
+    );
+    let input = project.source("main.resin");
+    let offset = source.find("at(data").unwrap();
+    let hover = analysis.hover(&input, offset).unwrap();
+    assert!(hover.text.contains("def at<T>"), "{hover:?}");
+    assert!(hover.text.contains("data: Ptr<T>"), "{hover:?}");
+    let origin = analysis.definition(&input, offset).unwrap();
+    assert_eq!(origin.source, project.source("library.resin"));
+    assert_eq!(origin.span.start, library.find("def at").unwrap() + 4);
+}

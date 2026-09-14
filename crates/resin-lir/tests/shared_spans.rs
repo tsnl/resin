@@ -10,6 +10,7 @@ fn module(param: Ty, result: Ty, instrs: Vec<Instr>) -> Module {
             profile: Profile::Host,
             foreign: None,
             result,
+            parameter_count: 1,
             locals: vec![Local {
                 name: None,
                 ty: param,

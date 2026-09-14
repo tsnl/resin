@@ -252,6 +252,11 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   same declaration lookup, argument checking, and editor analysis as source methods;
   register their signatures and intrinsic operations in `crates/resin-hir/src/lower/context.rs`.
   HIR construction recognizes `drop` as a hook; direct calls remain ordinary calls.
+- Libraries declare low-level compiler operations with `intrinsic "operation" def name<T>(...) -> Type;`.
+  Validate each signature against an explicit primitive contract during HIR construction.
+  Intrinsic functions use ordinary module lookup and generic calls; retain their source
+  identity. Specialize operations before storage lowering and verify concrete operands
+  independently. Do not recognize library wrappers by their public type names.
 - Reading existing values performs compiler-defined copying. Function and type
   applications consume their argument results; operators do the same, and aggregate
   constructors consume their field initializers. Structs define inherent methods and

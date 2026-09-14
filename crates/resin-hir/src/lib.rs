@@ -1036,6 +1036,11 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
         DefinitionKind::Keyword,
     ),
     (
+        "intrinsic",
+        "intrinsic \"operation\" def name<T>(parameters) -> Type;",
+        DefinitionKind::Keyword,
+    ),
+    (
         "def",
         "def name(parameters) -> Type = { body };\n\nOmitted result annotations default to ().",
         DefinitionKind::Keyword,

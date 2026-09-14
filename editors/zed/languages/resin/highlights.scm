@@ -5,13 +5,15 @@
 ["Ptr" "Span" "GpuPtr" "GpuSpan" "GpuComputePipeline" "GpuGraphicsPipeline" "Result" "ArcPtr" "WeakPtr" "ArcSpan" "WeakSpan" "None"] @type.builtin
 
 ; Keep declaration and control keywords in sync with the grammar's reserved words.
-["export" "import" "extern" "type" "struct" "def" "var"] @keyword
+["export" "import" "extern" "intrinsic" "type" "struct" "def" "var"] @keyword
 ["if" "else" "while" "match"] @keyword
 
 (function_definition name: (lid) @function)
 (foreign_function name: (lid) @function)
+(intrinsic_function name: (lid) @function)
 (function_definition params: (declare name: (lid) @variable.parameter))
 (foreign_function params: (declare name: (lid) @variable.parameter))
+(intrinsic_function params: (declare name: (lid) @variable.parameter))
 (postfix_term prefix: (primary_term (lid) @function) . suffix: (arguments))
 ((primary_term (lid) @function.builtin)
   (#any-of? @function.builtin "print" "fmt" "ok" "err"))

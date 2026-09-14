@@ -113,6 +113,27 @@ examples of visible data, direct construction, and code that teaches its impleme
 Resin uses idiomatic Rust and meaningful pass boundaries; an exhaustive language
 dispatch may remain long when splitting it would obscure the cases.
 
+## Library primitives
+
+Libraries declare compiler operations through explicit intrinsic signatures:
+
+```resin
+intrinsic "pointer_index" def pointer_at<T>(
+    data: Ptr<T>, length: ulong, index: ulong
+) -> Ptr<T>;
+```
+
+The operation string selects a compiler contract; the function name belongs to the
+source module. HIR checks the declared signature against that contract, preserving
+its type binders and source identity. Calls use ordinary import resolution, generic
+inference, and function specialization. An intrinsic declaration cannot supply an
+arbitrary foreign signature or a replacement implementation.
+
+LIR specializes the operation with its concrete types and verifies its operands
+independently. Backends implement the verified primitive operation. Public library
+wrapper names do not identify primitives, and the compiler does not locate library
+modules by scanning type names.
+
 ## What each boundary guarantees
 
 CST pairs source text with a Tree-sitter tree. `Document::reparse` may reuse a

@@ -230,3 +230,18 @@ fn shader_decorators_are_highlighted_as_attributes() {
     assert!(highlighted.contains(&("attribute".into(), "@".into())));
     assert!(highlighted.contains(&("attribute".into(), "compute_shader".into())));
 }
+
+#[test]
+fn intrinsic_declarations_have_function_navigation_and_parameter_highlights() {
+    let source = r#"intrinsic "pointer_index" def at<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;"#;
+    let highlights = captures(QUERIES[0].1, source);
+    for (kind, text) in [
+        ("keyword", "intrinsic"),
+        ("function", "at"),
+        ("variable.parameter", "data"),
+    ] {
+        assert!(highlights.contains(&(kind.into(), text.into())));
+    }
+    assert!(captures(QUERIES[3].1, source).contains(&("name".into(), "at".into())));
+    assert!(captures(QUERIES[5].1, source).contains(&("function.around".into(), source.into())));
+}
