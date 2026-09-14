@@ -238,8 +238,8 @@ fn unsupported_shader_features_are_diagnosed() {
             "foreign",
         ),
         (
-            "export { kernel }; def helper (i: uint) -> uint = { print(fmt(\"hello\", ())); i }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { helper(i) }; };",
-            "host programs",
+            "export { kernel }; intrinsic \"format_bytes\" def render<A>(data: Ptr<ubyte>, length: ulong, args: A) -> StrongOwner; struct Root { data: Ptr<ubyte>, length: ulong }; @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = { var text = render(root.data, root.length, ()); };",
+            "shader cannot consume managed values",
         ),
         (
             "export { kernel }; def helper (i: uint) -> uint = { i }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { var f = helper; f(i) }; };",
@@ -353,7 +353,7 @@ fn imported_backend_errors_retain_expression_origins() {
 
 #[test]
 fn managed_fields_are_opaque_until_consumed_by_a_shader() {
-    let prefix = "export { kernel }; struct Host { value: float64 }; struct Root { owner: ArcPtr<Host>, weak: WeakPtr<Host>, result: uint };";
+    let prefix = "export { kernel }; import { \"$/shared.resin\" }; struct Host { value: float64 }; struct Root { owner: ArcPtr<Host>, weak: WeakPtr<Host>, result: uint };";
     let m = module(&format!(
         "{prefix} @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = {{ var i = uint(invocation); root.result := i; var address = &root.owner; }};"
     ));

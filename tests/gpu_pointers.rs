@@ -569,3 +569,61 @@ fn gpu_element_layout_rejects_managed_storage_before_access() {
         "{error}"
     );
 }
+
+#[test]
+fn gpu_sequences_allow_empty_tail_views_and_report_allocation_overflow() {
+    let Some(output) = run(r#"
+        export { main };
+        import { "$/gpu.resin", "$/span.resin", "$/status.resin" };
+        def main() -> Result<int, _> = {
+            var gpu = Gpu.new()?;
+            var values = gpu.alloc::<uint>(3_ul)?;
+            var empty = values.slice(3_ul, 0_ul);
+            var alias = empty.data.slice(0_ul, 0_ul);
+            alias.copy_to(Span<uint> { data = Ptr<uint>(0_ul), length = 0_ul });
+            var zero = gpu.alloc::<uint>(0_ul)?;
+            zero.copy_to(Span<uint> { data = Ptr<uint>(0_ul), length = 0_ul });
+            var overflow = match (gpu.alloc::<uint>(18446744073709551615_ul)) {
+                ok(allocated) => { 0_i },
+                err(error) => { RuntimeStatus.code(error) },
+            };
+            ok(if (empty.length == 0_ul && alias.length == 0_ul && zero.length == 0_ul && overflow == 4_i) { 0_i } else { 1_i })
+        };
+    "#) else {
+        return;
+    };
+    success(&output);
+}
+
+#[test]
+fn gpu_sequences_reject_out_of_bounds_indices_and_overflowing_ranges() {
+    for operation in [
+        "values.at(3_ul);",
+        "values.slice(4_ul, 0_ul);",
+        "values.slice(2_ul, 2_ul);",
+        "values.slice(18446744073709551615_ul, 2_ul);",
+        "values.data.slice(18446744073709551615_ul, 1_ul);",
+    ] {
+        let source = format!(
+            r#"
+            export {{ main }};
+            import {{ "$/gpu.resin" }};
+            def main() -> Result<(), _> = {{
+                var gpu = Gpu.new()?;
+                var values = gpu.alloc::<uint>(3_ul)?;
+                {operation}
+                ok(())
+            }};
+        "#
+        );
+        let Some(output) = run(&source) else {
+            return;
+        };
+        assert_eq!(output.status.code(), Some(1), "{operation}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("out of bounds"),
+            "{operation}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
