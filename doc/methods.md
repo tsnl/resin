@@ -52,9 +52,31 @@ remains supported. Neither spelling guarantees bounds checking. Host indexing
 diagnoses invalid indices; shader indexing is unchecked, so callers must stay
 within valid storage.
 
-Method resolution and module origins belong to the frontend. Lowering emits
-ordinary function values and calls; IR types have no method tables, and the IR
+Source-known method resolution happens during HIR construction. Dependent lookup
+uses the completed HIR nominal declarations during specialization. Both produce
+ordinary function values and calls in LIR; LIR types have no method tables, and the
 verifier checks these functions and calls using its existing rules.
+
+A generic function can invoke a method before its receiver's nominal type is known:
+
+```resin
+def read<T>(value: T) -> _ = { value.read() };
+def replace<T, U>(value: T, next: U) -> _ = {
+    value.replace_with::<U>(next)
+};
+```
+
+The concrete application selects the source-declared method and checks its signature.
+Field lookup follows the same rule, so method and field accesses can be chained.
+Associated calls and references such as `T.make::<U>()` and `T.make::<U>` also
+retain their lookup until substitution. The receiver and arguments are evaluated
+once, in source order, with the ordinary pointer and shared-owner adaptation rules.
+
+When the receiver's namespace is unknown, extra method parameters must be supplied
+explicitly; omitting `::<...>` supplies zero extra arguments. HIR completes inference
+before specialization, which performs no deduction. Primitive compiler-provided
+methods still require a source-known receiver shape. Operations requiring a known
+pointer or Result shape may need a result annotation before `.*` or `?` can be used.
 
 Methods cannot be shader entry points, but shader helpers can call them.
 Pointer receivers follow the existing GPU address restrictions: a shader-local

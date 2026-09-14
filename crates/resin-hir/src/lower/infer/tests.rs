@@ -342,6 +342,40 @@ fn bound_numeric_types_and_member_types_are_not_default_candidates() {
 }
 
 #[test]
+fn method_signature_projections_preserve_literal_context_without_inferring_receivers() {
+    let mut solver = Solver::default();
+    let method = Type::Node(
+        infer::Head::Method {
+            name: "read".into(),
+            associated: false,
+        },
+        vec![parameter(0)],
+    );
+    let parameter = Type::function_parameter(method.clone());
+    let literal = solver.number("42");
+    assert!(solver.unify(&literal, &parameter, SPAN).unwrap());
+    assert!(!solver.default_numbers(std::slice::from_ref(&literal)));
+    assert!(matches!(
+        solver.require_complete(&literal, SPAN).unwrap(),
+        crate::Type::FunctionParameter { .. }
+    ));
+    assert!(solver.unify(&Ty::Int32.into(), &parameter, SPAN).unwrap());
+    assert!(solver.unify(&parameter, &Ty::Int32.into(), SPAN).unwrap());
+
+    let receiver = solver.fresh();
+    let unknown_method = Type::Node(
+        infer::Head::Method {
+            name: "read".into(),
+            associated: false,
+        },
+        vec![receiver.clone()],
+    );
+    let result = Type::function_result(unknown_method);
+    assert!(!solver.unify(&result, &Ty::Int32.into(), SPAN).unwrap());
+    assert!(solver.complete(&receiver).is_none());
+}
+
+#[test]
 fn nested_applications_substitute_without_capturing_definition_binders() {
     let mut solver = infer::Solver::default();
     let result = solver.fresh();

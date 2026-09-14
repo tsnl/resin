@@ -39,6 +39,17 @@ pub struct RecordField {
     pub ty: Type,
 }
 
+/// A method namespace and application determined by substituting the receiver type.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MethodLookup {
+    pub receiver: Type,
+    pub name: Arc<str>,
+    /// Completed method-local arguments; owner arguments come from the receiver.
+    pub type_args: Vec<Type>,
+    /// Associated lookup retains every parameter; instance lookup omits the receiver.
+    pub associated: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Type {
     Type,
@@ -66,6 +77,16 @@ pub enum Type {
     Member {
         base: Box<Type>,
         name: Arc<str>,
+    },
+    /// The selected method's caller-facing function type.
+    Method {
+        lookup: Box<MethodLookup>,
+    },
+    FunctionParameter {
+        function: Box<Type>,
+    },
+    FunctionResult {
+        function: Box<Type>,
     },
     Defined {
         definition: TypeId,
@@ -283,6 +304,16 @@ pub enum TermKind {
     Function {
         function: FunctionId,
         type_args: Vec<Type>,
+    },
+    /// An associated method reference whose declaration depends on substitution.
+    DependentMethod {
+        lookup: MethodLookup,
+    },
+    /// Select and adapt the receiver while lowering a concrete function instance.
+    DependentMethodCall {
+        lookup: MethodLookup,
+        receiver: Option<Box<Term>>,
+        arg: Box<Term>,
     },
     Shader {
         function: FunctionId,

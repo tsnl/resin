@@ -348,6 +348,68 @@ impl<'a> Instances<'a> {
         }
     }
 
+    pub(super) fn method(
+        &self,
+        receiver: &resin_hir::Type,
+        name: &str,
+    ) -> Result<(FunctionId, resin_hir::Signature, Vec<resin_hir::Type>), LowerError> {
+        let mut owner = receiver;
+        while let resin_hir::Type::Pointer { pointee }
+        | resin_hir::Type::GpuPointer { pointee }
+        | resin_hir::Type::Arc { pointee } = owner
+        {
+            owner = pointee;
+        }
+        let missing = || LowerError {
+            span: Span { start: 0, end: 0 },
+            kind: ErrorKind::InvalidInstance {
+                message: format!(
+                    "type {} has no method {name}",
+                    resin_hir::format_type(owner, &self.source.types)
+                )
+                .into(),
+            },
+        };
+        let resin_hir::Type::Defined {
+            definition,
+            arguments,
+        } = owner
+        else {
+            return Err(missing());
+        };
+        self.nominal_arity(*definition, arguments.len())?;
+        let function = self.source.types[definition.index()]
+            .methods
+            .get(name)
+            .copied()
+            .ok_or_else(missing)?;
+        let signature = self
+            .source
+            .functions
+            .get(function.index())
+            .ok_or_else(|| {
+                LowerError::invalid_hir(
+                    Span { start: 0, end: 0 },
+                    "method refers to a missing function definition",
+                )
+            })?
+            .signature
+            .clone();
+        let owner_params = &self.source.types[definition.index()].type_params;
+        if signature.type_params.len() < owner_params.len()
+            || !owner_params
+                .iter()
+                .zip(&signature.type_params)
+                .all(|(owner, method)| owner.id == method.id)
+        {
+            return Err(LowerError::invalid_hir(
+                Span { start: 0, end: 0 },
+                "method signature does not bind its owner's type parameters",
+            ));
+        }
+        Ok((function, signature, arguments.clone()))
+    }
+
     pub(super) fn nominal(
         &mut self,
         definition: TypeId,

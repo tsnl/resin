@@ -144,8 +144,9 @@ completed file returns to module assembly. Inference retries restore method choi
 alongside the solver so failed attempts cannot leak a stale selection.
 
 Each body returns its HIR and referenced shader entries. Assembly marks those
-entries for embedding only after that body completes successfully. Method calls become ordinary calls
-to resolved function IDs with explicit receiver adaptation and argument packing.
+entries for embedding only after that body completes successfully. Source-known method calls become ordinary calls
+to resolved function IDs with explicit receiver adaptation and argument packing. Dependent
+method calls retain their receiver, name, completed type arguments, and ordinary arguments.
 Compiler-provided methods become intrinsic operations. Short-circuit operators
 become `If` nodes. Field projections retain member names, numeric literals retain
 text and their determined types, explicit conversions retain their source and destination
@@ -198,8 +199,27 @@ origin; HIR construction applies its signature once per call and emits an ordina
 function application, including receiver adaptation. Method dependencies participate
 in result-inference groups. The completed HIR retains one method body; LIR specializes
 it, and generic drop hooks, with the owner's arguments before the method's arguments.
-Method lookup currently requires a known nominal receiver origin; selecting a
-method on an unconstrained type parameter still needs a dependent method relation.
+When the nominal origin depends on substitution, HIR retains a `MethodLookup`.
+Its `Type::Method` describes the caller-facing function signature: instance calls
+omit the implicit receiver, while associated references retain every parameter.
+`FunctionParameter` and `FunctionResult` project that signature; the same projections
+support calls through dependent function-valued fields. These are determining type
+expressions, not weak inference variables or constraints that infer a receiver.
+
+LIR resolves these lookups against completed source nominal declarations. It
+substitutes the owner's arguments and explicitly supplied method-local arguments,
+checks the concrete receiver adaptation and arguments, and requests the selected
+function through the existing instance worklist. It does not deduce additional
+method arguments: an unknown namespace requires explicit arguments for those binders.
+Known namespaces continue to support ordinary HIR deduction. Compiler primitive
+method generators remain private to HIR construction; dependent lookup currently
+selects source-declared methods. Lookup and signature expansion share the bounded
+type normalization traversal. Repeated active signature queries report a cycle
+requiring annotation; growing queries have a separate nesting limit of 32. These
+guards bound work within an instance independently of the function-instance limit.
+Failures retain their application trace. Concrete calls and aggregate constructors
+check the substituted signature and shape before storage lowering; fixed argument
+types cannot bypass those checks when a contextual type is a determining query.
 
 Transparent aliases use the same lexical type binders, for example
 `type View<T> = Ptr<T>`. Source scopes retain their completed RHS and named parameters;
@@ -242,6 +262,7 @@ substituting types and selecting supported builtin operations without inference.
 It also selects numeric representations, computes layout constants, resolves field indices,
 and chooses explicit conversion operations. A determining `Type::Member` resolves the type
 of a named field from a substituted receiver; it never deduces a receiver from the field.
+Dependent methods and function-signature projections use the same direction of resolution.
 Numeric parsing and range checks use the same `resin-types` operation as source construction,
 with an explicit type and no defaults. Concrete conversion rules reject unwrapping custom
 owners before their destruction can be bypassed. Source-known errors remain HIR diagnostics;

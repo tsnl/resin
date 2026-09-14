@@ -40,6 +40,24 @@ struct Specialization<'a, 'source> {
     span: Span,
 }
 
+// Mirror address provenance while the concrete tree still exposes its places.
+// A method taking Ptr<T> must never turn a field in GPU storage into a raw pointer.
+fn gpu_place(term: &concrete::Term) -> bool {
+    match &term.kind {
+        concrete::TermKind::Deref { pointer } => matches!(pointer.ty, Ty::GpuPointer { .. }),
+        concrete::TermKind::Field { base, .. } => {
+            let mut gpu = gpu_place(base);
+            let mut ty = &base.ty;
+            while let Some(pointee) = ty.deref_target() {
+                gpu = matches!(ty, Ty::GpuPointer { .. });
+                ty = pointee;
+            }
+            gpu
+        }
+        _ => false,
+    }
+}
+
 impl Specialization<'_, '_> {
     fn ty(&mut self, source: &resin_hir::Type) -> Result<Ty, Error> {
         self.substitution
@@ -332,6 +350,246 @@ impl Specialization<'_, '_> {
         })
     }
 
+    fn method(
+        &mut self,
+        lookup: &resin_hir::MethodLookup,
+    ) -> Result<super::substitute::ResolvedMethod, Error> {
+        self.substitution
+            .method(lookup, self.instances)
+            .map_err(|mut error| {
+                error.span = self.span;
+                self.instances
+                    .lower_error(error, Some(self.current), self.location.clone())
+            })
+    }
+
+    fn dependent_method(
+        &mut self,
+        lookup: &resin_hir::MethodLookup,
+        expected: &resin_hir::Type,
+    ) -> Result<concrete::TermKind, Error> {
+        if !lookup.associated {
+            return Err(self.error(crate::ErrorKind::InvalidHir {
+                message: "dependent method references must be associated functions".into(),
+            }));
+        }
+        let method = self.method(lookup)?;
+        let params = method
+            .params
+            .iter()
+            .map(|ty| self.ty(ty))
+            .collect::<Result<Vec<_>, _>>()?;
+        let signature = Ty::Function {
+            param: Box::new(Ty::parameter(&params)),
+            result: Box::new(self.ty(&method.result)?),
+        };
+        let expected = self.ty(expected)?;
+        self.instances
+            .typer()
+            .same(&expected, &signature)
+            .map_err(|error| self.typing_error(error))?;
+        Ok(concrete::TermKind::Function {
+            function: self.request(method.function, method.arguments)?,
+        })
+    }
+
+    fn dependent_method_call(
+        &mut self,
+        lookup: &resin_hir::MethodLookup,
+        receiver: Option<&resin_hir::Term>,
+        argument: &resin_hir::Term,
+        expected: &resin_hir::Type,
+    ) -> Result<concrete::TermKind, Error> {
+        if lookup.associated == receiver.is_some() {
+            return Err(self.error(crate::ErrorKind::InvalidHir {
+                message: "dependent method call has an inconsistent receiver".into(),
+            }));
+        }
+        if let Some(receiver) = receiver {
+            let owner = self.ty(&lookup.receiver)?;
+            let source = self.ty(&receiver.ty)?;
+            self.instances
+                .typer()
+                .same(&owner, &source)
+                .map_err(|error| self.typing_error(error))?;
+        }
+        let method = self.method(lookup)?;
+        let params = method
+            .params
+            .iter()
+            .map(|ty| self.ty(ty))
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = self.ty(&method.result)?;
+        let expected = self.ty(expected)?;
+        self.require_assignable(&result, &expected)?;
+        let receiver = receiver
+            .map(|receiver| self.method_receiver(receiver, &params[0]))
+            .transpose()?;
+        let argument = self.boxed(argument)?;
+        let offset = usize::from(receiver.is_some());
+        self.require_assignable(&argument.ty, &Ty::parameter(&params[offset..]))?;
+        let parameter = Ty::parameter(&params);
+        let argument = if receiver.is_some() {
+            Box::new(concrete::Term {
+                span: argument.span,
+                ty: parameter.clone(),
+                kind: concrete::TermKind::Pack {
+                    args: concrete::Arguments {
+                        receiver,
+                        argument,
+                        params: params[1..].to_vec(),
+                    },
+                },
+            })
+        } else {
+            argument
+        };
+        let function = concrete::Term {
+            span: self.span,
+            ty: Ty::Function {
+                param: Box::new(parameter),
+                result: Box::new(result),
+            },
+            kind: concrete::TermKind::Function {
+                function: self.request(method.function, method.arguments)?,
+            },
+        };
+        Ok(concrete::TermKind::Call {
+            func: Box::new(function),
+            arg: argument,
+        })
+    }
+
+    fn require_assignable(&self, from: &Ty, to: &Ty) -> Result<(), Error> {
+        if from == to || from.widens_to(to) {
+            return Ok(());
+        }
+        self.instances
+            .typer()
+            .same(to, from)
+            .map_err(|error| self.typing_error(error))
+    }
+
+    fn call(
+        &mut self,
+        function: &resin_hir::Term,
+        argument: &resin_hir::Term,
+        expected: &resin_hir::Type,
+    ) -> Result<concrete::TermKind, Error> {
+        let function = self.boxed(function)?;
+        let Ty::Function { param, result } = &function.ty else {
+            return Err(self.instance_error("a call requires a function value"));
+        };
+        let argument = self.boxed(argument)?;
+        self.require_assignable(&argument.ty, param)?;
+        let expected = self.ty(expected)?;
+        self.require_assignable(result, &expected)?;
+        Ok(concrete::TermKind::Call {
+            func: function,
+            arg: argument,
+        })
+    }
+
+    fn record(
+        &mut self,
+        fields: &[(Ident, resin_hir::Term)],
+        expected: &resin_hir::Type,
+    ) -> Result<concrete::TermKind, Error> {
+        let expected = self.ty(expected)?;
+        let Ty::Record { fields: expected } = expected else {
+            return Err(self.instance_error("record arguments require a record parameter type"));
+        };
+        if fields.len() != expected.len() {
+            return Err(self.instance_error("record arguments do not match the parameter fields"));
+        }
+        let mut names = std::collections::BTreeSet::new();
+        let mut completed = Vec::with_capacity(fields.len());
+        for (name, source) in fields {
+            let Some(field) = expected.iter().find(|field| field.name == name.val) else {
+                return Err(
+                    self.instance_error(format!("record parameter has no field {}", name.val))
+                );
+            };
+            if !names.insert(name.val.clone()) {
+                return Err(self.instance_error(format!("duplicate record argument {}", name.val)));
+            }
+            let value = self.term(source)?;
+            self.require_assignable(&value.ty, &field.ty)?;
+            completed.push((name.clone(), value));
+        }
+        Ok(concrete::TermKind::Record { fields: completed })
+    }
+
+    fn array(
+        &mut self,
+        elements: &[resin_hir::Term],
+        expected: &resin_hir::Type,
+    ) -> Result<concrete::TermKind, Error> {
+        let expected = self.ty(expected)?;
+        let Ty::Array { element, length } = expected else {
+            return Err(self.instance_error("array arguments require an array parameter type"));
+        };
+        if elements.len() != length {
+            return Err(self.instance_error("array arguments do not match the parameter length"));
+        }
+        let elements = elements
+            .iter()
+            .map(|source| {
+                let value = self.term(source)?;
+                self.require_assignable(&value.ty, &element)?;
+                Ok(value)
+            })
+            .collect::<Result<_, Error>>()?;
+        Ok(concrete::TermKind::Array { elems: elements })
+    }
+
+    fn method_receiver(
+        &mut self,
+        source: &resin_hir::Term,
+        to: &Ty,
+    ) -> Result<Box<concrete::Term>, Error> {
+        use concrete::ReceiverConversion;
+        let from = self.ty(&source.ty)?;
+        let conversion = if &from == to {
+            ReceiverConversion::Value
+        } else if matches!(to, Ty::Pointer { pointee } | Ty::GpuPointer { pointee } if **pointee == from)
+        {
+            ReceiverConversion::Address
+        } else if matches!(&from, Ty::Pointer { pointee } | Ty::GpuPointer { pointee } if pointee.as_ref() == to)
+        {
+            ReceiverConversion::Load
+        } else if matches!(&from, Ty::Arc { pointee } if to == &Ty::Pointer { pointee: pointee.clone() })
+        {
+            ReceiverConversion::ArcAddress
+        } else if matches!(&from, Ty::Arc { pointee } if pointee.as_ref() == to) {
+            ReceiverConversion::ArcLoad
+        } else {
+            return Err(self.instance_error("method receiver does not match the first parameter"));
+        };
+        let argument = if conversion == ReceiverConversion::Address {
+            let argument = self.place(source)?;
+            let gpu = gpu_place(&argument);
+            if gpu != matches!(to, Ty::GpuPointer { .. }) {
+                return Err(self.instance_error(if gpu {
+                    "GPU storage requires a GpuPtr receiver; it cannot be borrowed as a raw Ptr"
+                } else {
+                    "a GpuPtr receiver requires an address in GPU storage"
+                }));
+            }
+            argument
+        } else {
+            self.boxed(source)?
+        };
+        Ok(Box::new(concrete::Term {
+            span: source.span,
+            ty: to.clone(),
+            kind: concrete::TermKind::Adapt {
+                conversion,
+                arg: argument,
+            },
+        }))
+    }
+
     fn numeric(
         &mut self,
         text: &str,
@@ -469,6 +727,14 @@ impl Specialization<'_, '_> {
                     function: self.request(*function, arguments)?,
                 }
             }
+            resin_hir::TermKind::DependentMethod { lookup } => {
+                self.dependent_method(lookup, expected)?
+            }
+            resin_hir::TermKind::DependentMethodCall {
+                lookup,
+                receiver,
+                arg,
+            } => self.dependent_method_call(lookup, receiver.as_deref(), arg, expected)?,
             resin_hir::TermKind::Shader { function, stage } => concrete::TermKind::Shader {
                 function: self.shader(*function)?,
                 stage: stage.clone(),
@@ -496,23 +762,10 @@ impl Specialization<'_, '_> {
                     .collect::<Result<_, _>>()?,
                 tail: self.boxed(tail)?,
             },
-            resin_hir::TermKind::Record { fields } => concrete::TermKind::Record {
-                fields: fields
-                    .iter()
-                    .map(|(name, value)| Ok((name.clone(), self.term(value)?)))
-                    .collect::<Result<_, Error>>()?,
-            },
-            resin_hir::TermKind::Array { elems } => concrete::TermKind::Array {
-                elems: elems
-                    .iter()
-                    .map(|value| self.term(value))
-                    .collect::<Result<_, _>>()?,
-            },
+            resin_hir::TermKind::Record { fields } => self.record(fields, expected)?,
+            resin_hir::TermKind::Array { elems } => self.array(elems, expected)?,
             resin_hir::TermKind::Builtin { name, args } => self.builtin(name, args, expected)?,
-            resin_hir::TermKind::Call { func, arg } => concrete::TermKind::Call {
-                func: self.boxed(func)?,
-                arg: self.boxed(arg)?,
-            },
+            resin_hir::TermKind::Call { func, arg } => self.call(func, arg, expected)?,
             resin_hir::TermKind::Pack { args } => concrete::TermKind::Pack {
                 args: self.arguments(args)?,
             },

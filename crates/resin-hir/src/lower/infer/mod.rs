@@ -19,6 +19,9 @@ pub(crate) enum Head {
     Atom(Ty),
     Parameter { id: crate::TypeParameterId },
     Member { name: Arc<str> },
+    Method { name: Arc<str>, associated: bool },
+    FunctionParameter,
+    FunctionResult,
     Nominal { definition: TypeId },
     Pointer,
     GpuPointer,
@@ -48,6 +51,14 @@ pub(crate) enum Type {
 }
 
 impl Type {
+    fn function_parameter(function: Self) -> Self {
+        Self::Node(Head::FunctionParameter, vec![function])
+    }
+
+    fn function_result(function: Self) -> Self {
+        Self::Node(Head::FunctionResult, vec![function])
+    }
+
     /// The inference representation of Ty::deref_target; Weak is not dereferenceable.
     pub fn deref_target(&self) -> Option<&Type> {
         match self {
@@ -149,6 +160,22 @@ impl Type {
                 Head::Member { name: name.clone() },
                 vec![Self::from_hir(base)],
             ),
+            crate::Type::Method { lookup } => Self::Node(
+                Head::Method {
+                    name: lookup.name.clone(),
+                    associated: lookup.associated,
+                },
+                std::iter::once(&lookup.receiver)
+                    .chain(&lookup.type_args)
+                    .map(Self::from_hir)
+                    .collect(),
+            ),
+            crate::Type::FunctionParameter { function } => {
+                Self::function_parameter(Self::from_hir(function))
+            }
+            crate::Type::FunctionResult { function } => {
+                Self::function_result(Self::from_hir(function))
+            }
             crate::Type::Pointer { pointee } => {
                 Self::Node(Head::Pointer, vec![Self::from_hir(pointee)])
             }
@@ -234,10 +261,31 @@ impl From<Ty> for Type {
 }
 
 impl Head {
+    /// These expressions determine a type without revealing its structural shape.
+    fn determining(&self) -> bool {
+        matches!(self, Self::Parameter { .. }) || self.projection()
+    }
+
+    /// A projection is not injective: its result cannot infer its input.
+    fn projection(&self) -> bool {
+        matches!(
+            self,
+            Self::Member { .. }
+                | Self::Method { .. }
+                | Self::FunctionParameter
+                | Self::FunctionResult
+        )
+    }
+
     pub fn concrete(&self, children: Vec<Ty>) -> Option<Ty> {
         let mut children = children.into_iter();
         Some(match self {
-            Self::Parameter { .. } | Self::Member { .. } | Self::Nominal { .. } => return None,
+            Self::Parameter { .. }
+            | Self::Member { .. }
+            | Self::Method { .. }
+            | Self::FunctionParameter
+            | Self::FunctionResult
+            | Self::Nominal { .. } => return None,
             Self::Atom(ty) => ty.clone(),
             Self::Union => Ty::union_of(children),
             Self::Arc => Ty::Arc {
@@ -306,6 +354,20 @@ impl Head {
             Self::Member { name } => crate::Type::Member {
                 base: Box::new(children.next().unwrap()),
                 name: name.clone(),
+            },
+            Self::Method { name, associated } => crate::Type::Method {
+                lookup: Box::new(crate::MethodLookup {
+                    receiver: children.next().unwrap(),
+                    name: name.clone(),
+                    type_args: children.collect(),
+                    associated: *associated,
+                }),
+            },
+            Self::FunctionParameter => crate::Type::FunctionParameter {
+                function: Box::new(children.next().unwrap()),
+            },
+            Self::FunctionResult => crate::Type::FunctionResult {
+                function: Box::new(children.next().unwrap()),
             },
             Self::Pointer => crate::Type::Pointer {
                 pointee: Box::new(children.next().unwrap()),
@@ -467,8 +529,10 @@ impl Solver {
                 Ok(())
             }
             Type::Node(Head::Atom(ty), _) if ty.variants().is_some() => Ok(()),
-            Type::Node(Head::Parameter { .. } | Head::Member { .. } | Head::Nominal { .. }, _)
-            | Type::Apply { .. } => Ok(()),
+            Type::Node(head, _) if head.determining() || matches!(head, Head::Nominal { .. }) => {
+                Ok(())
+            }
+            Type::Apply { .. } => Ok(()),
             Type::Node(Head::Union, members) => {
                 for member in members {
                     self.errors(&member, span)?;
@@ -521,10 +585,11 @@ impl Solver {
                 }
                 Ok(Some(result))
             }
-            ty @ Type::Node(
-                Head::Parameter { .. } | Head::Member { .. } | Head::Nominal { .. },
-                _,
-            ) => Ok(Some(vec![ty])),
+            Type::Node(head, children)
+                if head.determining() || matches!(head, Head::Nominal { .. }) =>
+            {
+                Ok(Some(vec![Type::Node(head, children)]))
+            }
             _ => Err(error(
                 span,
                 "error and union payloads must be nominal structs",
@@ -590,10 +655,8 @@ impl Solver {
                 Type::Node(Head::Atom(ty @ Ty::Union { .. }), _) => {
                     pending.extend(ty.members().into_iter().rev().map(Type::from));
                 }
-                Type::Invalid
-                | Type::Variable(_)
-                | Type::Apply { .. }
-                | Type::Node(Head::Parameter { .. } | Head::Member { .. }, _) => return None,
+                Type::Invalid | Type::Variable(_) | Type::Apply { .. } => return None,
+                Type::Node(head, _) if head.determining() => return None,
                 ty => members.push(ty),
             }
         }
@@ -786,9 +849,8 @@ impl Solver {
 
     fn dependent(&self, ty: &Type) -> bool {
         match self.head(ty) {
-            Type::Apply { .. } | Type::Node(Head::Parameter { .. } | Head::Member { .. }, _) => {
-                true
-            }
+            Type::Apply { .. } => true,
+            Type::Node(head, _) if head.determining() => true,
             Type::Node(_, children) => children.iter().any(|ty| self.dependent(ty)),
             _ => false,
         }
@@ -868,10 +930,9 @@ impl Solver {
         match (&left, &right) {
             (Type::Variable(id), _) => self.bind(*id, right, span),
             (_, Type::Variable(id)) => self.bind(*id, left, span),
-            (Type::Node(Head::Member { .. } | Head::Union, _), _)
-            | (_, Type::Node(Head::Member { .. } | Head::Union, _)) => {
-                // Members and unions are not injective. Their consumers retain
-                // ground relations; they cannot determine receivers or constituents.
+            _ if [&left, &right].iter().any(|ty| matches!(ty, Type::Node(head, _) if head.projection() || matches!(head, Head::Union))) => {
+                // Projections and unions are not injective. Consumers retain
+                // ground relations without determining receivers or constituents.
                 Ok(self.complete(&left).is_some() && self.complete(&right).is_some())
             }
             (Type::Node(a, aa), Type::Node(b, bb)) if a == b && aa.len() == bb.len() => {
@@ -1052,6 +1113,9 @@ pub(crate) struct AppliedMethod {
 
 #[derive(Clone)]
 pub(crate) enum ResolvedMethod {
+    Dependent {
+        signature: Type,
+    },
     Source {
         declaration: DeclarationId,
         type_args: Vec<Type>,
@@ -1505,6 +1569,45 @@ impl Inference<'_> {
         receiver
     }
 
+    fn dependent_method(
+        &self,
+        receiver: &Type,
+        name: &Arc<str>,
+        type_args: &Option<Vec<Type>>,
+        associated: bool,
+    ) -> Option<Type> {
+        let Type::Node(head, _) = self.method_receiver(receiver) else {
+            return None;
+        };
+        head.determining().then(|| {
+            Type::Node(
+                Head::Method {
+                    name: name.clone(),
+                    associated,
+                },
+                std::iter::once(receiver.clone())
+                    .chain(type_args.iter().flatten().cloned())
+                    .collect(),
+            )
+        })
+    }
+
+    fn dependent_call(
+        &mut self,
+        function: &Type,
+        argument: &Type,
+        result: &Type,
+        span: Span,
+    ) -> Result<bool> {
+        let argument =
+            self.solver
+                .coerce(argument, &Type::function_parameter(function.clone()), span)?;
+        let result = self
+            .solver
+            .coerce(&Type::function_result(function.clone()), result, span)?;
+        Ok(argument && result)
+    }
+
     fn method_application(
         &mut self,
         owner: Rule,
@@ -1716,6 +1819,16 @@ impl Inference<'_> {
                 {
                     return self.source_method_call(owner, application, constraint, span);
                 }
+                if let Some(signature) =
+                    self.dependent_method(receiver_type, name, type_args, *associated)
+                {
+                    let complete = self.dependent_call(&signature, arg, out, span)?;
+                    if complete {
+                        self.methods
+                            .insert(owner, ResolvedMethod::Dependent { signature });
+                    }
+                    return Ok(complete);
+                }
                 if type_args.is_some() {
                     return Err(error(span, "compiler methods do not accept type arguments"));
                 }
@@ -1862,6 +1975,20 @@ impl Inference<'_> {
                 type_args,
                 out,
             } => {
+                if matches!(
+                    self.method_receiver(receiver),
+                    Type::Variable(_) | Type::Apply { .. }
+                ) {
+                    return Ok(false);
+                }
+                if let Some(signature) = self.dependent_method(receiver, name, type_args, true) {
+                    let complete = self.solver.coerce(&signature, out, span)?;
+                    if complete {
+                        self.methods
+                            .insert(owner, ResolvedMethod::Dependent { signature });
+                    }
+                    return Ok(complete);
+                }
                 let Some(application) =
                     self.method_application(owner, receiver, name, type_args, span)?
                 else {
@@ -1996,7 +2123,7 @@ impl Inference<'_> {
 
                 match shape {
                     Type::Variable(_) | Type::Apply { .. } => return Ok(false),
-                    Type::Node(Head::Parameter { .. } | Head::Member { .. }, _) => {
+                    Type::Node(head, _) if head.determining() => {
                         let member =
                             Type::Node(Head::Member { name: name.clone() }, vec![input.clone()]);
                         return self.solver.unify(out, &member, span);
@@ -2036,6 +2163,9 @@ impl Inference<'_> {
 
                 match shape {
                     Type::Variable(_) | Type::Apply { .. } => return Ok(false),
+                    Type::Node(head, _) if head.determining() => {
+                        return self.dependent_call(func, arg, out, span);
+                    }
                     Type::Node(Head::Function, children) => {
                         let a = self.solver.coerce(arg, &children[0], span)?;
                         let b = self.solver.coerce(&children[1], out, span)?;
@@ -2045,6 +2175,19 @@ impl Inference<'_> {
                 }
             }
             Constraint::Record(fields, out) => {
+                let unique: HashSet<_> = fields.iter().map(|(name, _)| name).collect();
+                if unique.len() != fields.len() {
+                    return Err(error(span, "record fields do not match the expected type"));
+                }
+                if matches!(self.solver.head(out), Type::Node(head, _) if head.determining()) {
+                    let mut complete = true;
+                    for (name, ty) in fields {
+                        let member =
+                            Type::Node(Head::Member { name: name.clone() }, vec![out.clone()]);
+                        complete &= self.solver.coerce(ty, &member, span)?;
+                    }
+                    return Ok(complete);
+                }
                 let Type::Node(Head::Record(names), types) = self.solver.head(out) else {
                     if matches!(self.solver.head(out), Type::Variable(_)) {
                         return Ok(false);
@@ -2058,8 +2201,7 @@ impl Inference<'_> {
                     }
                     unreachable!("a record cannot equal a non-record");
                 };
-                let unique: HashSet<_> = fields.iter().map(|(name, _)| name).collect();
-                if unique.len() != fields.len() || fields.len() != names.len() {
+                if fields.len() != names.len() {
                     return Err(error(span, "record fields do not match the expected type"));
                 }
                 let mut complete = true;
