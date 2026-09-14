@@ -80,15 +80,11 @@ impl Function {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instr {
-    /// `[] -> [{size: ulong, alignment: ulong}]`: validate plain GPU element storage.
-    GpuElementLayout { element: Ty },
     /// `[native_gpu, strong_owner, bytes, alignment, memory] -> [{value: GpuView | None, status: int}]`.
     /// Allocation retains the device owner. All operands are consumed.
     GpuViewAllocate,
     /// `[view, byte_offset, bytes, alignment] -> [view]`: validate range/alignment and transfer its owner.
     GpuViewOffset,
-    /// `[view, capacity, index] -> [view]`: check an element index and transfer its owner.
-    GpuViewIndex { element: Ty },
     /// `[view, capacity, start, length] -> [view]`: check an element range and transfer its owner.
     GpuViewRange { element: Ty },
     /// `[view, access_mask] -> [view]`: remove permissions and transfer its owner.

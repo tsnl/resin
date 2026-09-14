@@ -694,9 +694,7 @@ impl Specialization<'_, '_> {
             .collect::<Result<Vec<_>, _>>()?;
         if matches!(
             op,
-            Intrinsic::GpuElementLayout
-                | Intrinsic::GpuViewIndex
-                | Intrinsic::GpuViewRange
+            Intrinsic::GpuViewRange
                 | Intrinsic::GpuViewLoad
                 | Intrinsic::GpuViewStore
                 | Intrinsic::GpuViewReplace

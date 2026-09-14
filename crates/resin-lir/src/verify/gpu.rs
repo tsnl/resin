@@ -14,21 +14,6 @@ pub(super) fn check(
     let args = pop(stack, super::stack_effect(instr).pops, location)?;
     let invalid = || location.error(VerifyErrorKind::InvalidGpuOperation);
     let result = match instr {
-        Instr::GpuElementLayout { element } => {
-            gpu_element(module, element, location)?;
-            Ty::Record {
-                fields: vec![
-                    RecordField {
-                        name: "size".into(),
-                        ty: Ty::UInt64,
-                    },
-                    RecordField {
-                        name: "alignment".into(),
-                        ty: Ty::UInt64,
-                    },
-                ],
-            }
-        }
         Instr::GpuViewAllocate => {
             if !matches!(&args[0], Ty::Pointer { .. }) || !matches!(&args[1], Ty::StrongOwner) {
                 return Err(invalid());
@@ -47,7 +32,7 @@ pub(super) fn check(
                 ],
             }
         }
-        Instr::GpuViewIndex { element } | Instr::GpuViewRange { element } => {
+        Instr::GpuViewRange { element } => {
             gpu_element(module, element, location)?;
             expect_type(Ty::GpuView, args[0].clone(), location)?;
             for arg in &args[1..] {

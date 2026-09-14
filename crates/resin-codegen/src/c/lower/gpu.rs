@@ -14,27 +14,11 @@ pub(super) fn instruction(
     out: &mut String,
 ) -> Result<String, Error> {
     match instr {
-        Instr::GpuElementLayout { element } => Ok(format!(
-            "({}){{ .f0 = sizeof({}), .f1 = _Alignof({}) }}",
-            types.name(result),
-            types.name(element),
-            types.name(element)
-        )),
         Instr::GpuViewAllocate => native(types, name, args, result, out),
-        Instr::GpuViewIndex { element } => {
-            let index = format!("resin_index({}, {})", args[2].expr, args[1].expr);
-            let offset = checked_bytes(types, element, &index, name, out);
-            Ok(format!(
-                "resin_gpu_ptr_offset({}, {offset}, sizeof({}), _Alignof({}))",
-                args[0].expr,
-                types.name(element),
-                types.name(element)
-            ))
-        }
         Instr::GpuViewRange { element } => {
             writeln!(
                 out,
-                "  if ({} > {} || {} > {} - {}) resin_fail(\"GPU slice out of bounds\");",
+                "  if ({} > {} || {} > {} - {}) resin_fail(\"GPU view out of bounds\");",
                 args[2].expr, args[1].expr, args[3].expr, args[1].expr, args[2].expr
             )
             .unwrap();

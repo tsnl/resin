@@ -453,11 +453,6 @@ pub(super) fn primitive_signature(
             Type::StrongOwner,
         ),
         ("weak_empty", []) => (Intrinsic::WeakEmpty, vec![], Type::WeakOwner),
-        ("gpu_element_layout", [_]) => (
-            Intrinsic::GpuElementLayout,
-            vec![],
-            record(&[("size", Type::UInt64), ("alignment", Type::UInt64)]),
-        ),
         ("gpu_view_allocate", [native]) => (
             Intrinsic::GpuViewAllocate,
             vec![
@@ -480,11 +475,6 @@ pub(super) fn primitive_signature(
         ("gpu_view_offset", []) => (
             Intrinsic::GpuViewOffset,
             vec![Type::GpuView, Type::UInt64, Type::UInt64, Type::UInt64],
-            Type::GpuView,
-        ),
-        ("gpu_view_index", [_]) => (
-            Intrinsic::GpuViewIndex,
-            vec![Type::GpuView, Type::UInt64, Type::UInt64],
             Type::GpuView,
         ),
         ("gpu_view_range", [_]) => (

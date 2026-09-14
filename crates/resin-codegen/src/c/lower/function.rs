@@ -396,9 +396,7 @@ fn instruction(
     out: &mut String,
 ) -> Result<Option<String>, Error> {
     let expr = match instr {
-        Instr::GpuElementLayout { .. }
-        | Instr::GpuViewAllocate
-        | Instr::GpuViewIndex { .. }
+        Instr::GpuViewAllocate
         | Instr::GpuViewRange { .. }
         | Instr::GpuViewOffset
         | Instr::GpuViewRestrict
