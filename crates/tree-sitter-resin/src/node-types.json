@@ -1479,47 +1479,11 @@
         "required": false,
         "types": [
           {
-            "type": "GpuComputePipeline",
-            "named": false
-          },
-          {
-            "type": "GpuGraphicsPipeline",
-            "named": false
-          },
-          {
-            "type": "GpuPtr",
-            "named": false
-          },
-          {
-            "type": "GpuSpan",
-            "named": false
-          },
-          {
             "type": "Ptr",
             "named": false
           },
           {
             "type": "uid",
-            "named": true
-          }
-        ]
-      },
-      "owner": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "type",
-            "named": true
-          }
-        ]
-      },
-      "root": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "type",
             "named": true
           }
         ]
@@ -1740,19 +1704,11 @@
     "named": false
   },
   {
-    "type": "GpuComputePipeline",
+    "type": "GpuPipelineContract",
     "named": false
   },
   {
-    "type": "GpuGraphicsPipeline",
-    "named": false
-  },
-  {
-    "type": "GpuPtr",
-    "named": false
-  },
-  {
-    "type": "GpuSpan",
+    "type": "GpuView",
     "named": false
   },
   {
@@ -1769,6 +1725,14 @@
   },
   {
     "type": "Result",
+    "named": false
+  },
+  {
+    "type": "StrongOwner",
+    "named": false
+  },
+  {
+    "type": "WeakOwner",
     "named": false
   },
   {

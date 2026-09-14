@@ -923,18 +923,6 @@ impl<'a> AstGen<'a> {
         }
         if let Some(former) = node.child_by_field_name("former") {
             let head = self.ident(former);
-            if let Some(root) = node.child_by_field_name("root") {
-                return Spanned::new(
-                    TypeKind::GpuPipeline {
-                        head,
-                        root: Box::new(self.gen_type(root)),
-                        owner: Box::new(
-                            self.gen_type(node.child_by_field_name("owner").unwrap_or(node)),
-                        ),
-                    },
-                    self.span(node),
-                );
-            }
             let args = if let Some(arg) = node.child_by_field_name("arg") {
                 vec![self.gen_type(arg)]
             } else {
@@ -1042,16 +1030,7 @@ impl<'a> AstGen<'a> {
         let text = if node.is_missing()
             || !matches!(
                 node.kind(),
-                "lid"
-                    | "tuple_index"
-                    | "uid"
-                    | "builtin_type"
-                    | "Ptr"
-                    | "Span"
-                    | "GpuPtr"
-                    | "GpuSpan"
-                    | "GpuComputePipeline"
-                    | "GpuGraphicsPipeline"
+                "lid" | "tuple_index" | "uid" | "builtin_type" | "Ptr"
             ) {
             ""
         } else {

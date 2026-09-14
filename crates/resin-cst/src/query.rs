@@ -13,18 +13,7 @@ pub(super) fn token(document: &Document, offset: usize) -> Option<Node<'_>> {
         if contains(span(node), offset)
             && matches!(
                 node.kind(),
-                "lid"
-                    | "tuple_index"
-                    | "uid"
-                    | "builtin_type"
-                    | "string"
-                    | "comment"
-                    | "Ptr"
-                    | "Span"
-                    | "GpuPtr"
-                    | "GpuSpan"
-                    | "GpuComputePipeline"
-                    | "GpuGraphicsPipeline"
+                "lid" | "tuple_index" | "uid" | "builtin_type" | "string" | "comment" | "Ptr"
             )
         {
             return Some(node);

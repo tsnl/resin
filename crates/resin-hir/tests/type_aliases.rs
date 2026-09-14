@@ -13,7 +13,7 @@ fn transparent_aliases_expose_structure_for_deduction() {
         Type::Record { .. }
     ));
     assert_eq!(module.functions[1].signature.result.ty, Type::Int32);
-    assert_eq!(module.types.len(), 1); // Only the existing builtin String is nominal.
+    assert!(module.types.is_empty()); // Transparent aliases create no nominal definitions.
 }
 
 #[test]

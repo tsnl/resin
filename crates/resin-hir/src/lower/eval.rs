@@ -79,14 +79,6 @@ impl Decoder<'_> {
                     self.named(head, arguments)?
                 }
             }
-            TypeKind::GpuPipeline { head, root, owner } => {
-                let kind = match head.val.as_ref() {
-                    "GpuComputePipeline" => Head::GpuComputePipeline,
-                    "GpuGraphicsPipeline" => Head::GpuGraphicsPipeline,
-                    _ => unreachable!("pipeline type former"),
-                };
-                Type::Node(kind, vec![self.ty(root, infer)?, self.ty(owner, infer)?])
-            }
             TypeKind::Func { params, to } => Type::function(
                 params
                     .iter()

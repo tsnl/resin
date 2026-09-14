@@ -43,7 +43,7 @@ pub(super) fn define(
     let bound = Type::Parameter {
         parameter: parameter.id,
     };
-    if arguments != &[bound.clone()] {
+    if arguments != std::slice::from_ref(&bound) {
         return Err(invalid());
     }
     let source = context

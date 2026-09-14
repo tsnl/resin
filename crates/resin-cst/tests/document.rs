@@ -75,13 +75,13 @@ fn formatting_needs_no_semantic_context() {
 }
 
 #[test]
-fn gpu_type_formers_preserve_token_queries_and_formatting() {
+fn source_wrapper_names_preserve_token_queries_and_formatting() {
     let source = "def first(values: GpuSpan<uint>) -> GpuPtr<uint> = { values.at(0_ul) };";
     let document = Document::reparse(source.into(), None);
     assert!(!document.tree().root_node().has_error());
     for former in ["GpuSpan", "GpuPtr"] {
         let offset = source.find(former).unwrap() + 2;
-        assert_eq!(document.token(offset).unwrap().kind(), former);
+        assert_eq!(document.token(offset).unwrap().kind(), "uid");
         assert!(document.type_context(offset));
     }
     let formatted = resin_cst::format_source(source).unwrap();
@@ -97,25 +97,13 @@ fn gpu_pipeline_annotations_preserve_type_queries_and_formatting() {
     assert!(!document.tree().root_node().has_error());
     for former in ["GpuComputePipeline", "GpuGraphicsPipeline"] {
         let offset = source.find(former).unwrap() + 2;
-        assert_eq!(document.token(offset).unwrap().kind(), former);
+        assert_eq!(document.token(offset).unwrap().kind(), "uid");
         assert!(document.type_context(offset));
     }
     let formatted = resin_cst::format_source(source).unwrap();
     assert_eq!(resin_cst::format_source(&formatted).unwrap(), formatted);
     assert!(formatted.contains("GpuComputePipeline<Root, ArcPtr<Owner>>"));
     assert!(formatted.contains("GpuGraphicsPipeline<None, _>"));
-    for invalid in [
-        "GpuComputePipeline<Root>",
-        "GpuGraphicsPipeline<Root, Owner, Extra>",
-    ] {
-        let source = format!("type Invalid = {invalid};");
-        assert!(
-            Document::reparse(source, None)
-                .tree()
-                .root_node()
-                .has_error()
-        );
-    }
 }
 
 #[test]

@@ -2,7 +2,7 @@
 (uid) @type
 (builtin_type) @type.builtin
 (inferred_type) @type.builtin
-["Ptr" "Span" "GpuPtr" "GpuSpan" "GpuComputePipeline" "GpuGraphicsPipeline" "Result" "ArcPtr" "WeakPtr" "ArcSpan" "WeakSpan" "None"] @type.builtin
+["Ptr" "Result" "None"] @type.builtin
 
 ; Keep declaration and control keywords in sync with the grammar's reserved words.
 ["export" "import" "extern" "intrinsic" "type" "struct" "def" "var"] @keyword
@@ -16,7 +16,7 @@
 (intrinsic_function params: (declare name: (lid) @variable.parameter))
 (postfix_term prefix: (primary_term (lid) @function) . suffix: (arguments))
 ((primary_term (lid) @function.builtin)
-  (#any-of? @function.builtin "print" "fmt" "ok" "err"))
+  (#any-of? @function.builtin "ok" "err"))
 
 (field_access name: (lid) @property)
 (field_access name: (tuple_index) @property)

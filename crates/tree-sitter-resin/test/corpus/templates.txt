@@ -102,18 +102,20 @@ def example() = {
         (infix_type
           (union_type
             (unary_type
-              (type
-                (infix_type
-                  (union_type
-                    (unary_type
-                      (uid)
-                      (type_arguments
-                        (type
-                          (infix_type
-                            (union_type
-                              (unary_type
-                                (primary_type
-                                  (uid)))))))))))))))))
+              (uid)
+              (type_arguments
+                (type
+                  (infix_type
+                    (union_type
+                      (unary_type
+                        (uid)
+                        (type_arguments
+                          (type
+                            (infix_type
+                              (union_type
+                                (unary_type
+                                  (primary_type
+                                    (uid))))))))))))))))))
   (function_definition
     (lid)
     (type_parameters

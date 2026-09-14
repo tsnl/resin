@@ -862,17 +862,12 @@ fn matching_completions(mut items: Vec<Completion>, prefix: &str) -> Vec<Complet
 const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     (
         "str",
-        "str\n\nA string literal view with data: Ptr<ubyte> and length: ulong. Static storage has a trailing NUL excluded from length. Span<ubyte>(text) exposes its bytes. Host-only.",
+        "str\n\nA string literal view with data: Ptr<ubyte> and length: ulong. Static storage has a trailing NUL excluded from length. Import $/span.resin and use bytes(text) to borrow its bytes. Host-only.",
         DefinitionKind::Type,
     ),
     (
         "Ptr",
         "Ptr<T>\n\nAn unchecked pointer to T.",
-        DefinitionKind::Type,
-    ),
-    (
-        "Span",
-        "Span<T>\n\nA pointer and length describing elements of T. Calling span.at(index: ulong) returns Ptr<T>; shader indexing is unchecked.",
         DefinitionKind::Type,
     ),
     (
@@ -928,11 +923,6 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     (
         "match",
         "match (value) { Variant(name) => { body }, ... }",
-        DefinitionKind::Keyword,
-    ),
-    (
-        "impl",
-        "impl T { def method(self: Ptr<T>) = {}; } — inherent methods.",
         DefinitionKind::Keyword,
     ),
     (

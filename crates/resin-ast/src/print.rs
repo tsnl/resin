@@ -296,15 +296,6 @@ fn sexp_typespec(ts: &Type) -> SExp {
                 .chain(args.iter().map(sexp_typespec))
                 .collect(),
         ),
-        TypeKind::GpuPipeline { head, root, owner } => list_sp(
-            "gpu-pipeline-type",
-            ts.span,
-            vec![
-                symbol(head.val.as_ref()),
-                sexp_typespec(root),
-                sexp_typespec(owner),
-            ],
-        ),
         TypeKind::Func { params, to } => list_sp(
             "func-type",
             ts.span,
