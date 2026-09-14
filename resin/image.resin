@@ -55,8 +55,9 @@ struct ImageData {
 		} else {
 			stride
 		};
-		// Division checks the entire padded image extent without overflowing.
-		if (row_stride < row_bytes || row_stride > pixels.length / ulong(height)) {
+		// Check the final row's pixels without requiring unused trailing padding.
+		// Subtraction and division avoid overflowing the strided image extent.
+		if (row_stride < row_bytes || pixels.length < row_bytes || ulong(height - 1_ui) > (pixels.length - row_bytes) / row_stride) {
 			err(InvalidArgument {})
 		} else {
 			RuntimeStatus.from_code(resin_image_write_png(path, width, height, channels, pixels.data, row_stride))

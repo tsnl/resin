@@ -587,12 +587,15 @@ fn png_pixel_views_check_dimensions_padding_and_storage_before_native_access() {
         export { main };
         import { "$/image.resin", "$/span.resin" };
         def main() -> Result<int, _> = {
-            var pixels = [1_ub, 2_ub, 3_ub, 255_ub, 99_ub, 4_ub, 5_ub, 6_ub, 255_ub, 99_ub];
-            var bytes = Span<ubyte> { data = pixels.at(0), length = 10_ul };
+            var pixels = [1_ub, 2_ub, 3_ub, 255_ub, 99_ub, 4_ub, 5_ub, 6_ub, 255_ub];
+            var bytes = Span<ubyte> { data = pixels.at(0), length = 9_ul };
             ImageData.write_pixels("padded.png".data, 1, 2, 4, bytes, 5)?;
             var image = ImageData.read_png("padded.png".data, 0)?;
             var loaded = image.pixels();
-            ok(if (loaded.at(0).* == 1_ub && loaded.at(4).* == 4_ub) { 0 } else { 1 })
+            ImageData.write_pixels("single.png".data, 1, 1, 4, bytes.slice(0, 4), 0xffffffffffffffff_ul)?;
+            var single = ImageData.read_png("single.png".data, 0)?;
+            ok(if (loaded.at(0).* == 1_ub && loaded.at(4).* == 4_ub
+                && single.height() == 1_ui && single.pixels().at(3).* == 255_ub) { 0 } else { 1 })
         };
         "#,
         "",

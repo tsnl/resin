@@ -95,7 +95,8 @@ dropping one already consumed does not cancel it again. Submission waits for GPU
 `ImageData.write_pixels(path, width, height, channels, pixels, stride)` accepts a
 borrowed `Span<ubyte>`. It checks dimensions, channel count, row stride, and the
 span's capacity before calling the native image writer. A zero stride means packed
-rows; a nonzero stride includes padding on every row. Copy GPU output to owned host
+rows; a nonzero stride separates row starts. Storage may end at the last pixel,
+without padding after the final row. Copy GPU output to owned host
 storage with `GpuSpan<T>.copy_to` first, and keep the owner alive through the write.
 The instance method `image.write_png(path)` uses the loaded image's dimensions and pixels.
 
