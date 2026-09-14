@@ -7,7 +7,7 @@ pub fn parse(source: &str) -> resin_ast::SourceFile {
 }
 
 pub fn module(source: &str) -> resin_lir::Module {
-    pipeline::generate(&parse(source)).unwrap_or_else(|error| panic!("{source}\n{error}"))
+    pipeline::source_module(source).unwrap_or_else(|error| panic!("{source}\n{error}"))
 }
 
 #[allow(dead_code)]

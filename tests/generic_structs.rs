@@ -315,11 +315,11 @@ fn nongeneric_wrappers_copy_shared_generic_storage_and_destroy_it_once() {
             def drop(self: Ptr<Resource>) = { self.trace.* := self.trace.* + 1; };
         };
         struct Cell<T> { value: T };
-        struct Envelope { owner: Arc<Cell<Resource>> };
+        struct Envelope { owner: ArcPtr<Cell<Resource>> };
         def main() -> int = {
             var trace = 0_i;
             {
-                var owner = Arc<Cell<Resource>>(Cell<Resource> {
+                var owner = ArcPtr<Cell<Resource>>(Cell<Resource> {
                     value = Resource { trace = &trace, answer = 42 }
                 });
                 var first = Envelope { owner = owner };

@@ -388,17 +388,17 @@ fn expression_cleanup_preserves_scope_order_on_failure_and_success() {
             export { main };
             struct Resource { trace: Ptr<int>, digit: int,
                 def drop(self: Ptr<Resource>) = { self.trace.* := self.trace.* * 10 + self.digit; };
-                def accept(self: Ptr<Resource>, other: Arc<Resource>) -> Arc<Resource> = { other };
+                def accept(self: Ptr<Resource>, other: ArcPtr<Resource>) -> ArcPtr<Resource> = { other };
                 def truth(self: Ptr<Resource>) -> bool = { 1 == 1 };
             };
             struct Failed {};
-            struct OwnedFailed { value: Arc<Resource> };
-            def make(trace: Ptr<int>, digit: int) -> Arc<Resource> = { Arc<Resource> { trace = trace, digit = digit } };
-            def consume(a: Arc<Resource>, b: Arc<Resource>) = {};
-            def last(a: Arc<Resource>, b: Arc<Resource>, c: Arc<Resource>) -> Arc<Resource> = { c };
-            def fail() -> Result<Arc<Resource>, Failed> = { err(Failed {}) };
-            def succeed(trace: Ptr<int>) -> Result<Arc<Resource>, Failed> = { ok(make(trace, 5)) };
-            def owned_error(trace: Ptr<int>) -> Result<Arc<Resource>, OwnedFailed> = { err(OwnedFailed { value = make(trace, 5) }) };
+            struct OwnedFailed { value: ArcPtr<Resource> };
+            def make(trace: Ptr<int>, digit: int) -> ArcPtr<Resource> = { ArcPtr<Resource> { trace = trace, digit = digit } };
+            def consume(a: ArcPtr<Resource>, b: ArcPtr<Resource>) = {};
+            def last(a: ArcPtr<Resource>, b: ArcPtr<Resource>, c: ArcPtr<Resource>) -> ArcPtr<Resource> = { c };
+            def fail() -> Result<ArcPtr<Resource>, Failed> = { err(Failed {}) };
+            def succeed(trace: Ptr<int>) -> Result<ArcPtr<Resource>, Failed> = { ok(make(trace, 5)) };
+            def owned_error(trace: Ptr<int>) -> Result<ArcPtr<Resource>, OwnedFailed> = { err(OwnedFailed { value = make(trace, 5) }) };
         "#;
         let source = format!(
             "{declarations}

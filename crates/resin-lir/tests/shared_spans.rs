@@ -195,7 +195,7 @@ fn host_allocation_checks_the_error_factory_signature_and_profile() {
         ],
     );
     program.types = vec![TypeDef::new("OutOfMemory", Ty::Record { fields: vec![] })].into();
-    let factory = module(
+    let mut factory = module(
         Ty::Unit,
         error.clone(),
         vec![
@@ -203,6 +203,7 @@ fn host_allocation_checks_the_error_factory_signature_and_profile() {
             Instr::Ascribe { ty: error },
         ],
     );
+    factory.functions[0].parameter_count = 0;
     program.functions.push(factory.functions[0].clone());
     VerifiedModule::new(program.clone()).unwrap();
     let mut invalid_error = program.clone();
@@ -215,8 +216,10 @@ fn host_allocation_checks_the_error_factory_signature_and_profile() {
         value: Value::UInt32 { value: 1 },
     }];
     assert!(VerifiedModule::new(invalid_error).is_err());
+    program.functions[1].parameter_count = 1;
     program.functions[1].locals[0].ty = Ty::Int32;
     assert!(VerifiedModule::new(program.clone()).is_err());
+    program.functions[1].parameter_count = 0;
     program.functions[1].locals[0].ty = Ty::Unit;
     program.functions[1].profile = Profile::Shader;
     assert!(VerifiedModule::new(program).is_err());

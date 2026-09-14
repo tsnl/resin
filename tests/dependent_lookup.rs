@@ -137,7 +137,7 @@ fn dependent_receiver_adaptation_preserves_mutation_and_evaluation_order() {
         def main() -> int = {
             var trace = 0_i;
             var local = Counter { value = 37 };
-            var shared = Arc<Counter>(Counter { value = 6 });
+            var shared = ArcPtr<Counter>(Counter { value = 6 });
             add(&trace, &local);
             add(&trace, shared);
             print(fmt("{0} {1} {2}", (trace, read(&local), read(shared))));

@@ -41,32 +41,31 @@ fn lowering_error(error: resin_lir::Error) -> GenerateError {
 }
 pub fn generate_program(program: &resin_ast::Program) -> Result<resin_lir::Module, SourceError> {
     let tree = resin_hir::generate_program(program)?;
-    let module = resin_lir::generate(&tree).map_err(|error| {
-        let Some(source) = &error.source else {
-            return SourceError::new(
-                program.modules.last().expect("entry module").source.clone(),
-                None,
-                error.to_string(),
-            );
-        };
-        if let Some(module) = program
-            .modules
-            .iter()
-            .find(|module| module.source == *source)
-        {
-            return module.error(error.span, &error);
-        }
-        SourceError::new(source.clone(), Some(error.span), error.to_string())
+    lower_program(&tree, &program.modules.last().expect("entry module").source)
+}
+
+/// Resolve only the imports explicitly declared by this test's source.
+pub fn source_module(text: &str) -> Result<resin_lir::Module, SourceError> {
+    let source = Source::new("test.resin", text);
+    let mut loader = resin_source::Loader::new(library_root());
+    let compilation = Compiler::new().analyze(source.clone(), &mut loader);
+    lower_program(compilation.hir()?, &source)
+}
+
+fn lower_program(
+    tree: &resin_hir::Module,
+    entry: &Source,
+) -> Result<resin_lir::Module, SourceError> {
+    let module = resin_lir::generate(tree).map_err(|error| {
+        SourceError::new(
+            error.source.clone().unwrap_or_else(|| entry.clone()),
+            Some(error.span),
+            error.to_string(),
+        )
     })?;
     resin_lir::VerifiedModule::new(module)
-        .map(|v| v.into_module())
-        .map_err(|error| {
-            SourceError::new(
-                program.modules.last().unwrap().source.clone(),
-                None,
-                error.to_string(),
-            )
-        })
+        .map(|verified| verified.into_module())
+        .map_err(|error| SourceError::new(entry.clone(), None, error.to_string()))
 }
 pub fn load(path: &Path) -> Result<resin_ast::Program, SourceError> {
     let mut loader = resin_source::Loader::new(library_root());
