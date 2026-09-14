@@ -17,19 +17,27 @@ fn example(name: &str) -> resin_lir::Module {
 
 #[test]
 fn shader_indexing_emits_no_bounds_checks() {
-    for indexing in ["values(i)", "values.at(i)", "view(i)", "view.at(i)"] {
+    for indexing in ["values(i)", "values.at(i)", "view.at(i)"] {
         let m = module(&format!(
-            "export {{ kernel }}; @compute_shader def kernel(i: ulong, output: Ptr<uint>) = {{ var values = [1_ui, 2_ui]; var view = Span<uint> {{ data = output, length = 2_ul }}; output.* := {indexing}.*; }};"
+            "export {{ kernel }}; import {{ \"$/span.resin\" }}; @compute_shader def kernel(i: ulong, output: Ptr<uint>) = {{ var values = [1_ui, 2_ui]; var view = Span<uint> {{ data = output, length = 2_ul }}; output.* := {indexing}.*; }};"
         ));
         let project = support::project::Project::new(&m, None).unwrap();
         let source = std::fs::read(project.generated.shaders()[0].unoptimized_spirv()).unwrap();
-        assert_eq!(
-            instructions(&source, 250).count(),
-            0,
-            "indexing must not branch"
-        );
+        // Unoptimized source method calls propagate the shader failure flag.
+        // Indexing itself must introduce no signed or unsigned bounds comparisons.
+        for comparison in 172..=179 {
+            assert_eq!(instructions(&source, comparison).count(), 0);
+        }
         if let Some(compiler) = shaders::optimizer() {
-            project.build(&toolchain::spirv(&compiler)).unwrap();
+            let built = project.build(&toolchain::spirv(&compiler)).unwrap();
+            let artifact = &project.generated.shaders()[0];
+            let optimized =
+                std::fs::read(built.path(artifact.spirv().file_name().unwrap())).unwrap();
+            assert_eq!(
+                instructions(&optimized, 250).count(),
+                0,
+                "unchecked indexing needs no branches after optimization"
+            );
         }
     }
 }
@@ -159,7 +167,7 @@ fn device_pointers_and_shared_roots_compile() {
             Stage::Compute,
         ),
         (
-            "export { kernel }; struct Data { wide: ulong, values: Ptr<uint> }; @compute_shader def kernel (invocation: ulong, root: Ptr<Data>) -> () = { var i = uint(invocation); var p = Ptr<uint> (ulong (root.values)); var q = (Span<uint> { data = p, length = ulong(64) })(i); q.* := uint (3); root.wide := ulong (4294967297); };",
+            "export { kernel }; import { \"$/span.resin\" }; struct Data { wide: ulong, values: Ptr<uint> }; @compute_shader def kernel (invocation: ulong, root: Ptr<Data>) -> () = { var i = uint(invocation); var p = Ptr<uint> (ulong (root.values)); var q = Span<uint> { data = p, length = 64_ul }.at(ulong(i)); q.* := uint (3); root.wide := ulong (4294967297); };",
             Stage::Compute,
         ),
         (
@@ -395,7 +403,7 @@ fn literal_strings_report_the_missing_shader_storage_support() {
 #[test]
 fn compute_index_uses_wide_arithmetic_and_indexes_spans_directly() {
     let m = module(
-        "export { kernel }; @compute_shader def kernel(index: ulong, output: Ptr<Span<ulong>>) = { if (index < output.length) { output.at(index).* := index; }; };",
+        "export { kernel }; import { \"$/span.resin\" }; @compute_shader def kernel(index: ulong, output: Ptr<Span<ulong>>) = { if (index < output.length) { output.at(index).* := index; }; };",
     );
     let project = support::project::Project::new(&m, None).unwrap();
     let source = std::fs::read(project.generated.shaders()[0].unoptimized_spirv()).unwrap();

@@ -233,7 +233,7 @@ fn physical_byte_record_strides_and_mixed_record_copies() {
 
 #[test]
 fn an_unconditionally_failing_loop_condition_stops_before_body_and_caller_stores() {
-    let source = r#"export { kernel };
+    let source = r#"export { kernel }; import { "$/span.resin" };
         struct Root { count: ulong, inputs: Ptr<uint>, outputs: Ptr<uint> };
         @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {
             if (index < root.count) {
