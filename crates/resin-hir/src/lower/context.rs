@@ -542,12 +542,7 @@ fn builtin_methods(receiver: &Ty, typer: &Context) -> Vec<(Arc<str>, FunctionDec
             let mut methods = gpu_methods(receiver, element);
             methods.push(method(
                 "copy_to",
-                vec![
-                    receiver.clone(),
-                    Ty::Span {
-                        element: element.clone(),
-                    },
-                ],
+                vec![receiver.clone(), Ty::pointer_length(*element.clone())],
                 Ty::Unit,
                 Intrinsic::GpuCopyTo,
             ));
@@ -587,31 +582,6 @@ fn builtin_methods(receiver: &Ty, typer: &Context) -> Vec<(Arc<str>, FunctionDec
             pointer(*element.clone()),
             Intrinsic::Index,
         )],
-        Ty::Span { element } => {
-            let mut methods = vec![
-                method(
-                    "at",
-                    vec![receiver.clone(), Ty::UInt64],
-                    pointer(*element.clone()),
-                    Intrinsic::Index,
-                ),
-                method(
-                    "slice",
-                    vec![receiver.clone(), Ty::UInt64, Ty::UInt64],
-                    receiver.clone(),
-                    Intrinsic::SpanSlice,
-                ),
-            ];
-            if element.is_numeric() {
-                methods.push(method(
-                    "as_bytes",
-                    vec![receiver.clone()],
-                    Ty::byte_span(),
-                    Intrinsic::SpanBytes,
-                ));
-            }
-            methods
-        }
         Ty::Str => vec![method(
             "at",
             vec![Ty::Str, Ty::UInt64],
@@ -644,9 +614,7 @@ fn builtin_methods(receiver: &Ty, typer: &Context) -> Vec<(Arc<str>, FunctionDec
             method(
                 "get",
                 vec![pointer(receiver.clone())],
-                Ty::Span {
-                    element: element.clone(),
-                },
+                Ty::pointer_length(*element.clone()),
                 Intrinsic::ArcSpanGet,
             ),
             method(
@@ -802,7 +770,10 @@ impl Context {
             (Head::ArcSpan, "get") => (
                 Intrinsic::ArcSpanGet,
                 vec![Type::pointer(receiver.clone())],
-                node(Head::Span, element),
+                Type::record(vec![
+                    ("data".into(), Type::pointer(element)),
+                    ("length".into(), Ty::UInt64.into()),
+                ]),
             ),
             (Head::ArcPtr, "get") => (
                 Intrinsic::ArcGet,
@@ -828,16 +799,6 @@ impl Context {
                 Intrinsic::Upgrade,
                 vec![receiver.clone()],
                 optional(node(Head::ArcPtr, element)),
-            ),
-            (Head::Span, "slice") => (
-                Intrinsic::SpanSlice,
-                vec![receiver.clone(), Ty::UInt64.into(), Ty::UInt64.into()],
-                receiver.clone(),
-            ),
-            (Head::Span, "at") => (
-                Intrinsic::Index,
-                vec![receiver.clone(), Ty::UInt64.into()],
-                Type::pointer(element),
             ),
             _ => return None,
         };
@@ -865,6 +826,21 @@ pub(super) fn primitive_signature(
             crate::Intrinsic::PointerIndex,
             vec![pointer.clone(), crate::Type::UInt64, crate::Type::UInt64],
             pointer,
+        )),
+        "pointer_range" => Some((
+            crate::Intrinsic::PointerRange,
+            vec![
+                pointer.clone(),
+                crate::Type::UInt64,
+                crate::Type::UInt64,
+                crate::Type::UInt64,
+            ],
+            pointer,
+        )),
+        "pointer_bytes" => Some((
+            crate::Intrinsic::PointerBytes,
+            vec![pointer, crate::Type::UInt64],
+            super::types::ty(&Ty::byte_span()),
         )),
         _ => None,
     }

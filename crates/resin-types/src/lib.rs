@@ -118,9 +118,6 @@ pub enum Ty {
     Pointer {
         pointee: Box<Ty>,
     },
-    Span {
-        element: Box<Ty>,
-    },
     /// An owning GPU allocation view with a byte offset and CPU access permissions.
     /// Host storage occupies 24 bytes aligned to 8; shader projection produces Ptr<T>.
     GpuPointer {
@@ -295,9 +292,7 @@ impl Ty {
     }
 
     pub fn shader() -> Self {
-        Self::Span {
-            element: Box::new(Self::UInt8),
-        }
+        Self::byte_span()
     }
 
     pub fn view_record(&self) -> Option<Self> {
@@ -349,10 +344,26 @@ impl Ty {
         }
     }
 
-    pub fn byte_span() -> Self {
-        Self::Span {
-            element: Box::new(Self::UInt8),
+    /// Structural pointer/count transport used by compiler operation boundaries.
+    pub fn pointer_length(element: Self) -> Self {
+        Self::Record {
+            fields: vec![
+                RecordField {
+                    name: "data".into(),
+                    ty: Self::Pointer {
+                        pointee: Box::new(element),
+                    },
+                },
+                RecordField {
+                    name: "length".into(),
+                    ty: Self::UInt64,
+                },
+            ],
         }
+    }
+
+    pub fn byte_span() -> Self {
+        Self::pointer_length(Self::UInt8)
     }
 }
 
@@ -360,14 +371,14 @@ impl Ty {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Intrinsic {
     PointerIndex,
+    PointerRange,
+    PointerBytes,
     StringFromBytes,
     Replace,
     Index,
     ArcGet,
     ArcSpanTryNew,
     ArcSpanGet,
-    SpanBytes,
-    SpanSlice,
     Downgrade,
     Upgrade,
     GpuIndex,
@@ -646,8 +657,6 @@ pub enum Conv {
     Wrap { definition: TypeId },
     Deref,
     ViewRecord,
-    MakeSpan,
-    StrSpan,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

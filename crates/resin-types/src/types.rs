@@ -69,8 +69,7 @@ pub(super) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), D
         | Ty::GpuPointer { pointee }
         | Ty::ArcPtr { pointee }
         | Ty::WeakPtr { pointee } => check_references(definitions, pointee)?,
-        Ty::Span { element }
-        | Ty::GpuSpan { element }
+        Ty::GpuSpan { element }
         | Ty::ArcSpan { element }
         | Ty::WeakSpan { element }
         | Ty::Array { element, .. } => check_references(definitions, element)?,
@@ -163,9 +162,7 @@ mod definition_tests {
             Ty::Pointer {
                 pointee: Box::new(named.clone()),
             },
-            Ty::Span {
-                element: Box::new(named.clone()),
-            },
+            Ty::pointer_length(named.clone()),
             Ty::Function {
                 params: vec![named.clone()],
                 result: Box::new(named.clone()),
@@ -244,9 +241,6 @@ pub(super) fn gpu_projection(ty: &Ty, definitions: &[TypeDef]) -> Option<Ty> {
     Some(match ty {
         Ty::Pointer { pointee } if pointee.gpu_element(definitions) => Ty::GpuPointer {
             pointee: pointee.clone(),
-        },
-        Ty::Span { element } if element.gpu_element(definitions) => Ty::GpuSpan {
-            element: element.clone(),
         },
         Ty::Array { element, length } if *length > 0 => Ty::Array {
             element: Box::new(gpu_projection(element, definitions)?),
@@ -332,9 +326,6 @@ pub(super) fn widens_to(ty: &Ty, to: &Ty) -> bool {
 
 pub(super) fn view_record(ty: &Ty) -> Option<Ty> {
     let pointer = match ty {
-        Ty::Span { element } => Ty::Pointer {
-            pointee: element.clone(),
-        },
         Ty::GpuSpan { element } => Ty::GpuPointer {
             pointee: element.clone(),
         },
@@ -448,10 +439,7 @@ impl TypeTable {
                 self.intern(root);
                 self.intern(owner);
             }
-            Ty::Span { element }
-            | Ty::ArcSpan { element }
-            | Ty::WeakSpan { element }
-            | Ty::Array { element, .. } => {
+            Ty::ArcSpan { element } | Ty::WeakSpan { element } | Ty::Array { element, .. } => {
                 self.intern(element);
             }
             Ty::Record { fields } => {
@@ -530,7 +518,6 @@ pub(super) fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
         Ty::ArcSpan { element } => format!("ArcSpan<{}>", format_type(element, definitions)),
         Ty::WeakSpan { element } => format!("WeakSpan<{}>", format_type(element, definitions)),
         Ty::WeakPtr { pointee } => format!("WeakPtr<{}>", format_type(pointee, definitions)),
-        Ty::Span { element } => format!("Span<{}>", format_type(element, definitions)),
         Ty::Array { element, length } => {
             format!("[{}; {length}]", format_type(element, definitions))
         }
@@ -593,13 +580,6 @@ pub(super) fn storage_layout(
             size,
             align: size,
             offsets: Vec::new(),
-        });
-    }
-    if let Ty::Span { .. } = ty {
-        return Ok(layout::Layout {
-            size: 16,
-            align: 8,
-            offsets: vec![0, 8],
         });
     }
     if let Ty::Array { element, length } = ty {

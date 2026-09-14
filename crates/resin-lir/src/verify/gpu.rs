@@ -93,9 +93,7 @@ pub(super) fn check(
                 return Err(invalid());
             }
             expect_type(
-                Ty::Span {
-                    element: element.clone(),
-                },
+                Ty::pointer_length(*element.clone()),
                 args[1].clone(),
                 location,
             )?;

@@ -32,7 +32,6 @@ pub(crate) enum Head {
     WeakPtr,
     ArcSpan,
     WeakSpan,
-    Span,
     Array(usize),
     Record(Vec<Arc<str>>),
     // Result first, followed by the parameter types in declaration order.
@@ -75,7 +74,7 @@ impl Type {
     pub fn view_element(&self) -> Option<Type> {
         match self {
             Self::Node(Head::Atom(Ty::Str), _) => Some(Ty::UInt8.into()),
-            Self::Node(Head::Span | Head::GpuSpan, children) => children.first().cloned(),
+            Self::Node(Head::GpuSpan, children) => children.first().cloned(),
             _ => None,
         }
     }
@@ -179,7 +178,6 @@ impl Type {
             crate::Type::GpuSpan { element } => {
                 Self::Node(Head::GpuSpan, vec![Self::from_hir(element)])
             }
-            crate::Type::Span { element } => Self::Node(Head::Span, vec![Self::from_hir(element)]),
             crate::Type::ArcPtr { pointee } => {
                 Self::Node(Head::ArcPtr, vec![Self::from_hir(pointee)])
             }
@@ -242,7 +240,6 @@ impl From<Ty> for Type {
             Ty::WeakSpan { element } => Self::Node(Head::WeakSpan, vec![(*element).into()]),
             Ty::WeakPtr { pointee } => Self::Node(Head::WeakPtr, vec![(*pointee).into()]),
             Ty::Pointer { pointee } => Self::pointer((*pointee).into()),
-            Ty::Span { element } => Self::Node(Head::Span, vec![(*element).into()]),
             Ty::GpuPointer { pointee } => Self::gpu_pointer((*pointee).into()),
             Ty::GpuSpan { element } => Self::Node(Head::GpuSpan, vec![(*element).into()]),
             Ty::GpuComputePipeline { root, owner } => Self::Node(
@@ -325,9 +322,6 @@ impl Head {
             Self::GpuGraphicsPipeline => Ty::GpuGraphicsPipeline {
                 root: Box::new(children.next().unwrap()),
                 owner: Box::new(children.next().unwrap()),
-            },
-            Self::Span => Ty::Span {
-                element: Box::new(children.next().unwrap()),
             },
             Self::Array(length) => Ty::Array {
                 element: Box::new(children.next().unwrap()),
@@ -430,9 +424,6 @@ impl Head {
             },
             Self::WeakPtr => crate::Type::WeakPtr {
                 pointee: Box::new(children.next().unwrap()),
-            },
-            Self::Span => crate::Type::Span {
-                element: Box::new(children.next().unwrap()),
             },
             Self::Array(length) => crate::Type::Array {
                 element: Box::new(children.next().unwrap()),
@@ -2278,29 +2269,6 @@ impl Inference<'_> {
                     Type::Node(Head::WeakPtr | Head::WeakSpan, _)
                 ) && self.solver.resolve(from) == Some(Ty::Unit)
                 {
-                    return Ok(true);
-                }
-                if let Type::Node(Head::Span, children) = self.solver.head(to) {
-                    // The source may still become str, Span, or a field record.
-                    if matches!(self.solver.head(from), Type::Variable(_)) {
-                        return Ok(false);
-                    }
-                    if self.solver.resolve(from) == Some(Ty::Str) {
-                        if !self.solver.unify(&children[0], &Ty::UInt8.into(), span)? {
-                            return Ok(false);
-                        }
-                        return Ok(true);
-                    }
-                    if matches!(self.solver.head(from), Type::Node(Head::Span, _)) {
-                        return self.solver.unify(from, to, span);
-                    }
-                    let repr = Type::record(vec![
-                        ("data".into(), Type::pointer(children[0].clone())),
-                        ("length".into(), Ty::UInt64.into()),
-                    ]);
-                    if !self.solver.unify(from, &repr, span)? {
-                        return Ok(false);
-                    }
                     return Ok(true);
                 }
                 if matches!(self.solver.head(to), Type::Node(Head::Result, _)) {

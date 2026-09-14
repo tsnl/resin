@@ -35,11 +35,7 @@ impl Context<'_> {
     fn type_id(&mut self, ty: &Ty, representation: Representation) -> Result<Word, Error> {
         let representation = if matches!(
             self.shape(ty),
-            Ty::Record { .. }
-                | Ty::Array { .. }
-                | Ty::Span { .. }
-                | Ty::Union { .. }
-                | Ty::Result { .. }
+            Ty::Record { .. } | Ty::Array { .. } | Ty::Union { .. } | Ty::Result { .. }
         ) {
             representation
         } else {
@@ -81,10 +77,6 @@ impl Context<'_> {
                     self.builder.name(id, name);
                 }
                 id
-            }
-            Ty::Span { .. } => {
-                let word = self.ty(&Ty::UInt64)?;
-                self.structure(ty, vec![word, word], representation)?
             }
             Ty::Record { fields } => {
                 let mut members = fields

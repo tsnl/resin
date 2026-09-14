@@ -91,35 +91,15 @@ pub(super) fn check_instr(
             super::rules::check_value(&module.types, &result, location)?;
             stack.push(result);
         }
-        Instr::SpanBytes => {
-            let source = pop_one(stack, location)?;
-            if !matches!(&source, Ty::Span { element } if element.is_numeric()) {
-                return Err(location.error(VerifyErrorKind::TypeMismatch {
-                    expected: Ty::byte_span(),
-                    found: source,
-                }));
-            }
-            stack.push(Ty::byte_span());
-        }
-        Instr::SpanSlice => {
-            let args = pop(stack, 3, location)?;
-            if !matches!(&args[0], Ty::Span { .. }) {
-                return Err(location.error(VerifyErrorKind::ExpectedArray {
-                    found: args[0].clone(),
-                }));
-            }
-            expect_types(&[Ty::UInt64, Ty::UInt64], &args[1..], location)?;
-            stack.push(args[0].clone());
-        }
         Instr::ArcData | Instr::ArcSpanData | Instr::Downgrade | Instr::Upgrade => {
             let source = pop_one(stack, location)?;
             let result = match (instr, &source) {
                 (Instr::ArcData, Ty::ArcPtr { pointee }) => Ty::Pointer {
                     pointee: pointee.clone(),
                 },
-                (Instr::ArcSpanData, Ty::ArcSpan { element }) => Ty::Span {
-                    element: element.clone(),
-                },
+                (Instr::ArcSpanData, Ty::ArcSpan { element }) => {
+                    Ty::pointer_length(*element.clone())
+                }
                 (Instr::Downgrade, Ty::ArcPtr { pointee }) => Ty::WeakPtr {
                     pointee: pointee.clone(),
                 },
@@ -260,14 +240,32 @@ pub(super) fn check_instr(
             let source = pop_one(stack, location)?;
             stack.push(project_static(&module.types, source, *index, location)?);
         }
-        Instr::PointerIndex => {
-            let args = pop(stack, 3, location)?;
-            if !matches!(&args[0], Ty::Pointer { .. }) {
-                return Err(location.error(VerifyErrorKind::ExpectedArray {
+        Instr::PointerBytes => {
+            let args = pop(stack, 2, location)?;
+            if !matches!(&args[0], Ty::Pointer { pointee } if pointee.is_numeric()) {
+                return Err(location.error(VerifyErrorKind::TypeMismatch {
+                    expected: Ty::Pointer {
+                        pointee: Box::new(Ty::UInt8),
+                    },
                     found: args[0].clone(),
                 }));
             }
-            expect_types(&[Ty::UInt64, Ty::UInt64], &args[1..], location)?;
+            expect_types(&[Ty::UInt64], &args[1..], location)?;
+            stack.push(Ty::byte_span());
+        }
+        Instr::PointerIndex | Instr::PointerRange => {
+            let count = if matches!(instr, Instr::PointerRange) {
+                4
+            } else {
+                3
+            };
+            let args = pop(stack, count, location)?;
+            if !matches!(&args[0], Ty::Pointer { .. }) {
+                return Err(location.error(VerifyErrorKind::ExpectedPointer {
+                    found: args[0].clone(),
+                }));
+            }
+            expect_types(&vec![Ty::UInt64; count - 1], &args[1..], location)?;
             stack.push(args[0].clone());
         }
         Instr::AccessDynamic => {
@@ -438,7 +436,7 @@ fn project_static(
         Ty::Defined { .. } => {
             project_static(table, shape(table, source, location)?, index, location)
         }
-        view @ (Ty::Str | Ty::Span { .. } | Ty::GpuSpan { .. }) => {
+        view @ (Ty::Str | Ty::GpuSpan { .. }) => {
             project_static(table, view.view_record().unwrap(), index, location)
         }
         Ty::Record { fields } => fields
@@ -473,7 +471,6 @@ fn project_dynamic(table: &[TypeDef], source: Ty, location: Location) -> Result<
         Ty::Str => Ok(Ty::Pointer {
             pointee: Box::new(Ty::UInt8),
         }),
-        Ty::Span { element } => Ok(Ty::Pointer { pointee: element }),
         Ty::Array { element, .. } => Ok(*element),
         found => Err(location.error(VerifyErrorKind::ExpectedArray { found })),
     }

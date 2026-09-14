@@ -668,10 +668,7 @@ impl Completion<'_> {
                 },
                 ReceiverConversion::Address,
             )),
-            crate::Type::Str
-            | crate::Type::Span { .. }
-            | crate::Type::GpuPointer { .. }
-            | crate::Type::GpuSpan { .. } => {
+            crate::Type::Str | crate::Type::GpuPointer { .. } | crate::Type::GpuSpan { .. } => {
                 Some((function_type.clone(), ReceiverConversion::Value))
             }
             _ => None,

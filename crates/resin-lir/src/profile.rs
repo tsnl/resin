@@ -113,7 +113,7 @@ fn instruction(typer: &TyperContext, op: &Instr) -> Result<(), String> {
         | Instr::GpuComputePipeline { .. } | Instr::GpuGraphicsPipeline { .. }
         | Instr::GpuDispatch { .. } | Instr::GpuDraw { .. } | Instr::GpuArgumentsDispatch
         | Instr::GpuArgumentsDraw | Instr::GpuCopyImage | Instr::Shader { .. }
-        | Instr::SpanBytes | Instr::SpanSlice => {
+        | Instr::PointerBytes | Instr::PointerRange => {
             Err(format!("shader profile does not support {op:?}"))
         }
     }

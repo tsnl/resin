@@ -97,9 +97,6 @@ pub enum Type {
     Pointer {
         pointee: Box<Type>,
     },
-    Span {
-        element: Box<Type>,
-    },
     GpuPointer {
         pointee: Box<Type>,
     },

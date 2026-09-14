@@ -107,10 +107,7 @@ pub(super) fn as_record(context: &TyperContext, ty: &Ty) -> Result<Converted, Ty
         steps.push(Conv::Unwrap { definition });
         current = context.definition_body(definition)?.clone();
     }
-    if matches!(
-        current,
-        Ty::Record { .. } | Ty::Span { .. } | Ty::GpuSpan { .. } | Ty::Str
-    ) {
+    if matches!(current, Ty::Record { .. } | Ty::GpuSpan { .. } | Ty::Str) {
         Ok(Converted { ty: current, steps })
     } else {
         Err(TypeError::new(TypeErrorKind::ExpectedRecord {
@@ -334,10 +331,6 @@ pub(super) fn ascription(
 ) -> Result<Option<Vec<Conv>>, TypeError> {
     let step = if from == to {
         return Ok(Some(Vec::new()));
-    } else if from == &Ty::Str && to == &Ty::byte_span() {
-        Conv::StrSpan
-    } else if matches!(to, Ty::Span { .. }) && to.view_record().as_ref() == Some(from) {
-        Conv::MakeSpan
     } else if from.view_record().as_ref() == Some(to) {
         Conv::ViewRecord
     } else if let Ty::Defined { definition } = to
@@ -578,7 +571,7 @@ pub(super) fn shader_value_type(definitions: &[TypeDef], ty: &Ty) -> Result<(), 
             | Ty::GpuComputePipeline { .. } | Ty::GpuGraphicsPipeline { .. } => {
                 return Err("shader cannot consume a managed GPU view or projected arguments".into());
             }
-            Ty::Pointer { pointee: element } | Ty::Span { element } => {
+            Ty::Pointer { pointee: element } => {
                 crate::layout::layout(definitions, element).map_err(|error| error.to_string())?;
                 pending.push(element);
             }

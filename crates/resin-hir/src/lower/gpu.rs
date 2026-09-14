@@ -67,9 +67,7 @@ fn bridge_body(
     let Ty::Result { value, .. } = &declaration.result else {
         return None;
     };
-    let bytes = Ty::Span {
-        element: Box::new(Ty::UInt8),
-    };
+    let bytes = Ty::byte_span();
     match name {
         "gpu_compute_pipeline" | "gpu_graphics_pipeline" => {
             let graphics = name == "gpu_graphics_pipeline";

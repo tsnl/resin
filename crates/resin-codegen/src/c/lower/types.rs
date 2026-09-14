@@ -127,7 +127,7 @@ impl<'a> Types<'a> {
             if let Ok(layout) = crate::layout::layout(self.module, ty) {
                 let name = self.name(ty);
                 writeln!(out, "_Static_assert(sizeof({name}) == {} && _Alignof({name}) == {}, \"host/device layout mismatch\");", layout.size, layout.align).unwrap();
-                if matches!(ty, Ty::Record { .. } | Ty::Span { .. }) {
+                if matches!(ty, Ty::Record { .. }) {
                     for (i, offset) in layout.offsets.iter().enumerate() {
                         writeln!(out, "_Static_assert(offsetof({name}, f{i}) == {offset}, \"host/device field offset mismatch\");").unwrap();
                     }
@@ -193,7 +193,6 @@ impl<'a> Types<'a> {
                 }
             }
             Ty::Str => "uint8_t *f0; uint64_t f1;".into(),
-            Ty::Span { element } => format!("{} *f0; uint64_t f1;", self.name(element)),
             Ty::Function { params, result } => {
                 let params = params
                     .iter()

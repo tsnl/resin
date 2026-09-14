@@ -28,9 +28,6 @@ pub(super) fn ty(source: &Ty) -> crate::Type {
         Ty::Pointer { pointee } => crate::Type::Pointer {
             pointee: Box::new(ty(pointee)),
         },
-        Ty::Span { element } => crate::Type::Span {
-            element: Box::new(ty(element)),
-        },
         Ty::GpuPointer { pointee } => crate::Type::GpuPointer {
             pointee: Box::new(ty(pointee)),
         },

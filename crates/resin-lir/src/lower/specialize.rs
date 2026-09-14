@@ -771,10 +771,15 @@ impl Specialization<'_, '_> {
             resin_hir::TermKind::Array { elems } => self.array(elems, expected)?,
             resin_hir::TermKind::Builtin { name, args } => self.builtin(name, args, expected)?,
             resin_hir::TermKind::Call { func, args } => self.call(func, args, expected)?,
-            resin_hir::TermKind::Intrinsic { op, args } => concrete::TermKind::Intrinsic {
-                op: *op,
-                args: self.arguments(args)?,
-            },
+            resin_hir::TermKind::Intrinsic { op, args } => {
+                let args = self.arguments(args)?;
+                if *op == Intrinsic::PointerBytes
+                    && !matches!(args.params.first(), Some(Ty::Pointer { pointee }) if pointee.is_numeric())
+                {
+                    return Err(self.instance_error("byte views require numeric elements"));
+                }
+                concrete::TermKind::Intrinsic { op: *op, args }
+            }
             resin_hir::TermKind::Adapt { conversion, arg } => concrete::TermKind::Adapt {
                 conversion: self.receiver(*conversion),
                 arg: if *conversion == resin_hir::ReceiverConversion::Address {

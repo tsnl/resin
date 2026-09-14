@@ -112,7 +112,7 @@ fn value(types: &Types<'_>, ty: &Ty, expr: String) -> Result<String, Error> {
             "unsigned_value",
             format!("(uint64_t)(uintptr_t)({expr})"),
         ),
-        ty @ (Ty::Str | Ty::Span { .. } | Ty::Record { .. }) => {
+        ty @ (Ty::Str | Ty::Record { .. }) => {
             let (data, length) = bytes(types, ty, &expr)?;
             (
                 "BYTES",

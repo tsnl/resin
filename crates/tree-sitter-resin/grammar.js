@@ -67,7 +67,6 @@ const BUILTIN_TYPES = [
 
 const TYPE_FORMERS = [
   "Ptr",
-  "Span",
   "GpuPtr",
   "GpuSpan",
   "GpuComputePipeline",
@@ -511,7 +510,6 @@ export default grammar({
             "former",
             choice(
               "Ptr",
-              "Span",
               "GpuPtr",
               "GpuSpan",
               "ArcPtr",

@@ -198,6 +198,8 @@ impl FunctionLowering<'_> {
             }),
             Intrinsic::Replace => self.emit(Instr::Replace),
             Intrinsic::PointerIndex => self.emit(Instr::PointerIndex),
+            Intrinsic::PointerRange => self.emit(Instr::PointerRange),
+            Intrinsic::PointerBytes => self.emit(Instr::PointerBytes),
             Intrinsic::Index => self.emit(Instr::AccessDynamic),
             Intrinsic::GpuIndex => self.emit(Instr::AccessDynamic),
             Intrinsic::GpuSlice => self.emit(Instr::GpuSlice),
@@ -222,8 +224,6 @@ impl FunctionLowering<'_> {
                 };
                 self.emit(Instr::ArcSpanTryNew { element: *element });
             }
-            Intrinsic::SpanBytes => self.emit(Instr::SpanBytes),
-            Intrinsic::SpanSlice => self.emit(Instr::SpanSlice),
             Intrinsic::Downgrade => self.emit(Instr::Downgrade),
             Intrinsic::Upgrade => self.emit(Instr::Upgrade),
         }

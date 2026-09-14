@@ -473,8 +473,6 @@ fn instruction(
             args[0].expr,
             args[0].expr
         ),
-        Instr::SpanBytes => span_bytes(types, &args[0], result.unwrap(), out),
-        Instr::SpanSlice => span_slice(types, args, result.unwrap(), out),
         Instr::Downgrade => {
             writeln!(out, "  resin_weak_retain({});", args[0].expr).unwrap();
             args[0].expr.clone()
@@ -701,6 +699,8 @@ fn instruction(
             temp,
             out,
         )?,
+        Instr::PointerRange => pointer_range(args, out),
+        Instr::PointerBytes => pointer_bytes(types, args, result.unwrap(), out),
         Instr::PointerIndex => format!(
             "({} + resin_index({}, {}))",
             args[0].expr, args[2].expr, args[1].expr
@@ -816,12 +816,12 @@ fn project(
         Ty::GpuSpan { .. } if !dynamic => {
             format!("({expr}).{}", if index == "0" { "data" } else { "length" })
         }
-        Ty::Str | Ty::Span { .. } if dynamic => {
+        Ty::Str if dynamic => {
             return Ok(format!(
                 "&(({expr}).f0[resin_index((uint64_t)({index}), ({expr}).f1)])"
             ));
         }
-        Ty::Str | Ty::Span { .. } | Ty::Record { .. } if !dynamic => format!("({expr}).f{index}"),
+        Ty::Str | Ty::Record { .. } if !dynamic => format!("({expr}).f{index}"),
         Ty::Array { length, .. } => {
             let index = if dynamic {
                 format!("resin_index((uint64_t)({index}), {length})")
@@ -874,36 +874,38 @@ fn allocate_span(
     owner
 }
 
-fn span_bytes(types: &Types<'_>, source: &Slot, result: &Ty, out: &mut String) -> String {
-    let Ty::Span { element } = &source.ty else {
-        unreachable!("verified byte view source")
+fn is_view_conversion(from: &Ty, to: &Ty) -> bool {
+    from.view_record().as_ref() == Some(to) || to.view_record().as_ref() == Some(from)
+}
+
+fn pointer_range(args: &[Slot], out: &mut String) -> String {
+    let [data, capacity, start, count] = args else {
+        unreachable!("verified pointer range")
     };
-    let value = &source.expr;
-    let stride = format!("sizeof({})", types.name(element));
     writeln!(
         out,
-        "  if (({value}).f1 > UINT64_MAX / {stride}) resin_fail(\"span byte length overflow\");"
+        "  if ({0} > {1} || {2} > {1} - {0}) resin_fail(\"span slice out of bounds\");",
+        start.expr, capacity.expr, count.expr
+    )
+    .unwrap();
+    format!("({0} ? {1} + {0} : {1})", start.expr, data.expr)
+}
+
+fn pointer_bytes(types: &Types<'_>, args: &[Slot], result: &Ty, out: &mut String) -> String {
+    let Ty::Pointer { pointee } = &args[0].ty else {
+        unreachable!("verified numeric pointer")
+    };
+    let stride = format!("sizeof({})", types.name(pointee));
+    writeln!(
+        out,
+        "  if ({} > UINT64_MAX / {stride}) resin_fail(\"span byte length overflow\");",
+        args[1].expr
     )
     .unwrap();
     format!(
-        "({}){{ (uint8_t *)({value}).f0, ({value}).f1 * {stride} }}",
-        types.name(result)
+        "({}){{ (uint8_t *){}, {} * {stride} }}",
+        types.name(result),
+        args[0].expr,
+        args[1].expr
     )
-}
-
-fn span_slice(types: &Types<'_>, args: &[Slot], result: &Ty, out: &mut String) -> String {
-    let source = &args[0].expr;
-    let start = &args[1].expr;
-    let length = &args[2].expr;
-    writeln!(out, "  if ({start} > ({source}).f1 || {length} > ({source}).f1 - {start}) resin_fail(\"span slice out of bounds\");").unwrap();
-    format!(
-        "({}){{ {start} ? ({source}).f0 + {start} : ({source}).f0, {length} }}",
-        types.name(result)
-    )
-}
-
-fn is_view_conversion(from: &Ty, to: &Ty) -> bool {
-    from.view_record().as_ref() == Some(to)
-        || to.view_record().as_ref() == Some(from)
-        || from == &Ty::Str && to == &Ty::byte_span()
 }

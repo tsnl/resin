@@ -69,9 +69,7 @@ fn create(
 ) -> Result<String, Error> {
     let function = &types.module.functions[factory.index()];
     let mut args = vec![types.copy(&gpu.ty, &gpu.expr)];
-    let span = Ty::Span {
-        element: Box::new(Ty::UInt8),
-    };
+    let span = Ty::byte_span();
     for &shader in shaders {
         let symbol = crate::shader_symbol(shader);
         args.push(format!(

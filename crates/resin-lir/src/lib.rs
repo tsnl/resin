@@ -139,10 +139,6 @@ pub enum Instr {
     /// `[ArcSpan<T>] -> [Span<T>]`: release this owner and borrow its elements.
     /// Another owner must retain the allocation throughout the access.
     ArcSpanData,
-    /// `[Span<numeric>] -> [Span<ubyte>]`: borrow the same bytes, checking length overflow.
-    SpanBytes,
-    /// `[Span<T>, start, length] -> [Span<T>]`: borrow a checked subrange.
-    SpanSlice,
     /// `[address] -> [value]`: transfer a pointee without copying or clearing storage.
     /// Lowering must disarm its previous owner, typically with `ForgetLocal`.
     TransferLoad,
@@ -200,6 +196,12 @@ pub enum Instr {
     /// `[Ptr<T>, length, index] -> [Ptr<T>]`: typed element addressing; the host
     /// diagnoses an index outside length, while shaders require a valid index.
     PointerIndex,
+    /// `[Ptr<T>, capacity, start, count] -> [Ptr<T>]`: check and address a range.
+    /// An empty range may start one past the end. Host-only.
+    PointerRange,
+    /// `[Ptr<numeric>, count] -> [{data: Ptr<ubyte>, length: ulong}]`.
+    /// Checks byte-count overflow. Host-only.
+    PointerBytes,
     /// `[address] -> [value]`: copy an initialized pointee, retaining managed owners.
     Load,
     /// `[address, value] -> [value]`: copy into storage, destroying its previous live

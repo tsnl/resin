@@ -93,9 +93,7 @@ fn create(
     .map_err(|_| invalid())?;
     let factory = function(module, factory, location)?;
     let mut params = vec![gpu.clone()];
-    params.extend(shaders.iter().map(|_| Ty::Span {
-        element: Box::new(Ty::UInt8),
-    }));
+    params.extend(shaders.iter().map(|_| Ty::byte_span()));
     expect_types(
         &params,
         &factory.locals[..factory.parameter_count]

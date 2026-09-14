@@ -118,12 +118,6 @@ fn project_value(
             let ty = types.name(pointee);
             writeln!(out, "    {destination} = ({}) (uintptr_t) resin_gpu_projection_pointer({projection}, {source}, sizeof({ty}), _Alignof({ty}));", types.name(target)).unwrap();
         }
-        Ty::Span { element } => {
-            let ty = types.name(element);
-            writeln!(out, "    if (({source}).length > SIZE_MAX / sizeof({ty})) resin_fail(\"GPU projection size overflow\");").unwrap();
-            writeln!(out, "    ({destination}).f0 = ({ty} *) (uintptr_t) resin_gpu_projection_pointer({projection}, ({source}).data, ({source}).length * sizeof({ty}), _Alignof({ty}));").unwrap();
-            writeln!(out, "    ({destination}).f1 = ({source}).length;").unwrap();
-        }
         _ => {
             // Concrete projection validation permits only shared scalar leaves.
             crate::layout::layout(types.module, target)?;

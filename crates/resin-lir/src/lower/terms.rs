@@ -149,7 +149,7 @@ impl FunctionLowering<'_> {
                     });
                 }
                 Conv::Deref => self.emit(Instr::Load),
-                Conv::MakeSpan | Conv::ViewRecord | Conv::StrSpan => {
+                Conv::ViewRecord => {
                     unreachable!("view conversions require a target type")
                 }
             }

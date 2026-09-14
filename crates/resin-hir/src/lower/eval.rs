@@ -74,7 +74,6 @@ impl Decoder<'_> {
                     "WeakPtr" => Some(Head::WeakPtr),
                     "ArcSpan" => Some(Head::ArcSpan),
                     "WeakSpan" => Some(Head::WeakSpan),
-                    "Span" => Some(Head::Span),
                     _ => None,
                 };
                 if let Some(builtin) = builtin {

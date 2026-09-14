@@ -238,7 +238,6 @@ fn index(
         });
     }
     let (address, element) = match context.shape(&base.ty).clone() {
-        Ty::Span { element } => (extract(context, &Ty::UInt64, base.id, 0)?, element),
         Ty::Pointer { pointee } => {
             let Ty::Array { element, .. } = context.shape(&pointee).clone() else {
                 return Err(Error("array pointer required".into()));
@@ -255,7 +254,7 @@ fn index(
             let pointer = local_pointer(context, result, &local)?;
             return Ok(Slot::value(result.clone(), load(context, result, pointer)?));
         }
-        _ => return Err(Error("array or Span required".into())),
+        _ => return Err(Error("array required".into())),
     };
     let size = crate::layout::layout(context.module, &element)?.size;
     let size = context.constant_u64(size as u64);
@@ -337,7 +336,6 @@ fn select(
     let fields: Option<Vec<Ty>> = match context.shape(ty) {
         Ty::Record { fields } => Some(fields.iter().map(|field| field.ty.clone()).collect()),
         Ty::Array { element, length } => Some(vec![element.as_ref().clone(); *length]),
-        Ty::Span { .. } => Some(vec![Ty::UInt64, Ty::UInt64]),
         Ty::Union { .. } | Ty::Result { .. } => Some(
             std::iter::once(Ty::UInt32)
                 .chain(ty.payloads().unwrap().into_iter().map(|(_, ty)| ty))
@@ -361,8 +359,7 @@ fn ascribe(context: &mut Context<'_>, from: &Ty, to: &Ty, value: Word) -> Result
     if context.ty(from)? == context.ty(to)? {
         return Ok(value);
     }
-    let fields = match context.shape(to) {
-        Ty::Span { .. } => vec![Ty::UInt64, Ty::UInt64],
+    let fields: Vec<_> = match context.shape(to) {
         Ty::Record { fields } => fields.iter().map(|field| field.ty.clone()).collect(),
         _ => return Err(Error("unsupported shader ascription".into())),
     };

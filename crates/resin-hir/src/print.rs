@@ -464,7 +464,6 @@ impl TypeNames {
             Type::ArcSpan { element } => format!("ArcSpan<{}>", self.format(element)),
             Type::WeakSpan { element } => format!("WeakSpan<{}>", self.format(element)),
             Type::WeakPtr { pointee } => format!("WeakPtr<{}>", self.format(pointee)),
-            Type::Span { element } => format!("Span<{}>", self.format(element)),
             Type::Array { element, length } => {
                 format!("[{}; {length}]", self.format(element))
             }
