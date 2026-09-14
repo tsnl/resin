@@ -1,6 +1,6 @@
 export { main, vertex, fragment };
 
-import { "$/gpu.resin", "$/graphics.resin", "$/host.resin", "$/image.resin" };
+import { "$/string.resin", "$/gpu.resin", "$/graphics.resin", "$/shared.resin", "$/image.resin" };
 
 @vertex_shader
 def vertex(index: int) -> Vertex = {
@@ -64,7 +64,7 @@ def main() -> Result<(), _> = {
 
 	var image = gpu.create_image(256, 256)?;
 
-	var pixels = GpuSpan<ubyte>.allocate(gpu, 262144)?;
+	var pixels = gpu.alloc::<ubyte>(262144)?;
 
 	var commands = gpu.start_command_recording()?;
 
@@ -75,7 +75,7 @@ def main() -> Result<(), _> = {
 	commands.submit()?;
 
 	var path = "triangle.png";
-	var host = Host.alloc(pixels.length, 0_ub)?;
+	var host = ArcSpan<ubyte>.alloc(pixels.length, 0_ub)?;
 	pixels.copy_to(host.get());
 	ImageData.write_pixels(path.data, 256, 256, 4, host.get(), 0)?;
 	print("wrote triangle.png\n");

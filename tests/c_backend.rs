@@ -811,19 +811,13 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
     let mut program = pipeline::load(&path).unwrap();
     let file = &mut program.modules.last_mut().unwrap().file;
     file.stmts.retain(|s| !matches!(&s.val, resin_ast::StmtKind::Function { name, .. } if name.val.as_ref() == "main"));
-    // Exercise the unchanged host helper bodies on stack-backed storage. Their
-    // example signatures use owning GPU views, whose runtime is tested separately.
+    // Exercise random particle generation, camera math, and the shader bodies on
+    // stack-backed storage. GPU initialization stores these same generated values.
     for statement in &mut file.stmts {
         let resin_ast::StmtKind::Function { name, params, .. } = &mut statement.val else {
             continue;
         };
-        if name.val.as_ref() == "initialize" {
-            let resin_ast::TypeKind::App { head, .. } = &mut params[0].1.val else {
-                panic!()
-            };
-            assert_eq!(head.val.as_ref(), "GpuSpan");
-            head.val = "Span".into();
-        } else if name.val.as_ref() == "apply_camera" {
+        if name.val.as_ref() == "apply_camera" {
             let resin_ast::TypeKind::App { args, .. } = &mut params[1].1.val else {
                 panic!()
             };
@@ -836,13 +830,15 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
     }
     file.stmts.extend(support::parse(r#"
         def main() -> int = {
-            var particle = Particle { x = 0_f, y = 0_f, z = 0_f, vx = 0_f, vy = 0_f, vz = 0_f };
+            var state = 12345_ui | 1_ui;
+            var particle = random_particle(&state);
             var particles = Span<Particle> { data = &particle, length = 1_ul };
-            initialize(particles, 12345_ui);
             var first = particle;
-            initialize(particles, 12345_ui);
+            state := 12345_ui | 1_ui;
+            particle := random_particle(&state);
             var valid = particle.x == first.x && particle.vz == first.vz;
-            initialize(particles, 54321_ui);
+            state := 54321_ui | 1_ui;
+            particle := random_particle(&state);
             valid := valid && particle.x != first.x && particle.vx != first.vx;
             valid := valid && particle.x >= -24_f && particle.x < 24_f && particle.y >= -30_f && particle.y < 30_f && particle.z >= 0_f && particle.z < 50_f && particle.vx >= -6_f && particle.vx < 6_f && particle.vy >= -6_f && particle.vy < 6_f && particle.vz >= -6_f && particle.vz < 6_f;
             var params = Params { dt = 0.005_f, yaw_cos = 1_f, yaw_sin = 0_f, pitch_cos = 1_f, pitch_sin = 0_f, zoom = 1_f, aspect = 0.625_f, radius = 0.0012_f, particles = particles };

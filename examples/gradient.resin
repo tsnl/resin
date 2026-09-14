@@ -1,6 +1,6 @@
 export { kernel, main };
 
-import { "$/gpu.resin", "$/host.resin", "$/image.resin" };
+import { "$/span.resin", "$/string.resin", "$/gpu.resin", "$/shared.resin", "$/image.resin" };
 
 struct Root { width: uint, height: uint, pixels: Span<uint> };
 
@@ -23,7 +23,7 @@ def main() -> Result<(), _> = {
 	var width = 256_ui;
 	var height = 256_ui;
 	var count = ulong(width) * ulong(height);
-	var pixels = GpuSpan<uint>.allocate(gpu, count)?;
+	var pixels = gpu.alloc::<uint>(count)?;
 	var root = { width = width, height = height, pixels = pixels };
 	var commands = gpu.start_command_recording()?;
 
@@ -33,7 +33,7 @@ def main() -> Result<(), _> = {
 	commands.submit()?;
 
 	var path = "gradient.png";
-	var host = Host.alloc(count, 0_ui)?;
+	var host = ArcSpan<uint>.alloc(count, 0_ui)?;
 	pixels.copy_to(host.get());
 	ImageData.write_pixels(path.data, width, height, 4, host.get().as_bytes(), 0)?;
 	print("wrote gradient.png\n");
