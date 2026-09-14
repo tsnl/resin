@@ -53,7 +53,7 @@ fn opaque_gpu_offset_preserves_ownership_and_rejects_pointer_casts() {
 }
 
 #[test]
-fn gpu_range_and_index_preserve_the_opaque_view_until_explicit_load() {
+fn gpu_ranges_preserve_the_opaque_view_until_explicit_load() {
     let range = module(
         Ty::GpuView,
         Ty::GpuView,
@@ -71,7 +71,8 @@ fn gpu_range_and_index_preserve_the_opaque_view_until_explicit_load() {
         vec![
             uint(4),
             uint(1),
-            Instr::GpuViewIndex {
+            uint(1),
+            Instr::GpuViewRange {
                 element: Ty::UInt32,
             },
             Instr::GpuViewLoad {
@@ -83,7 +84,7 @@ fn gpu_range_and_index_preserve_the_opaque_view_until_explicit_load() {
 }
 
 #[test]
-fn gpu_load_and_index_reject_managed_element_types() {
+fn gpu_load_and_range_reject_managed_element_types() {
     for (result, operations) in [
         (
             Ty::StrongOwner,
@@ -96,7 +97,8 @@ fn gpu_load_and_index_reject_managed_element_types() {
             vec![
                 uint(4),
                 uint(1),
-                Instr::GpuViewIndex {
+                uint(1),
+                Instr::GpuViewRange {
                     element: Ty::StrongOwner,
                 },
             ],

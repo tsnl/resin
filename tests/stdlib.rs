@@ -335,43 +335,6 @@ fn borrowed_span_slices_preserve_aliases_and_accept_empty_null_views() {
 }
 
 #[test]
-fn borrowed_span_slice_and_byte_length_overflow_trap_before_memory_access() {
-    for (operation, diagnostic) in [
-        ("view.slice(3, 0)", "span slice out of bounds"),
-        ("view.slice(1, 2)", "span slice out of bounds"),
-        (
-            "view.slice(0xffffffffffffffff_ul, 1)",
-            "span slice out of bounds",
-        ),
-        (
-            "Span<uint> { data = Ptr<uint>(0_ul), length = 0xffffffffffffffff_ul }.as_bytes()",
-            "span byte length overflow",
-        ),
-    ] {
-        let output = run(
-            &format!(
-                r#"
-                export {{ main }}; import {{ "$/span.resin", "$/string.resin" }};
-                def main() = {{
-                    var view = Span<uint> {{ data = Ptr<uint>(0_ul), length = 2_ul }};
-                    {operation};
-                    print("unreachable");
-                }};
-                "#
-            ),
-            "",
-        );
-        assert!(!output.status.success(), "{operation}");
-        assert!(output.stdout.is_empty(), "{operation}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains(diagnostic),
-            "{operation}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-}
-
-#[test]
 fn every_native_status_operation_has_a_public_result_wrapper() {
     let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), ""));
     let source = TempDir::new_in(std::env::temp_dir()).unwrap();

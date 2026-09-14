@@ -164,16 +164,10 @@ impl FunctionLowering<'_> {
                     "GPU projection contract reached storage lowering",
                 ));
             }
-            Intrinsic::GpuElementLayout => self.emit(Instr::GpuElementLayout {
-                element: type_args[0].clone(),
-            }),
             Intrinsic::GpuViewLoad => self.emit(Instr::GpuViewLoad {
                 element: result.clone(),
             }),
             Intrinsic::GpuViewAllocate => self.emit(Instr::GpuViewAllocate),
-            Intrinsic::GpuViewIndex => self.emit(Instr::GpuViewIndex {
-                element: type_args[0].clone(),
-            }),
             Intrinsic::GpuViewRange => self.emit(Instr::GpuViewRange {
                 element: type_args[0].clone(),
             }),

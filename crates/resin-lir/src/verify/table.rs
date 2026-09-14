@@ -47,10 +47,7 @@ pub(super) fn collect(module: &Module, analysis: &[FunctionTypes]) -> TypeTable 
                         error: error.clone(),
                     });
                 }
-                if let Instr::GpuElementLayout { element }
-                | Instr::GpuViewIndex { element }
-                | Instr::GpuViewRange { element } = instr
-                {
+                if let Instr::GpuViewRange { element } = instr {
                     table.intern(element);
                 }
                 if let Instr::Push { value } = instr {

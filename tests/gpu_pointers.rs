@@ -517,7 +517,6 @@ fn rooted_graphics_stages_receive_automatically_projected_arguments() {
 }
 
 const VIEW_PRIMITIVES: &str = r#"
-    intrinsic "gpu_element_layout" def element_layout<T>() -> { size: ulong, alignment: ulong };
     intrinsic "gpu_view_allocate" def allocate<N>(gpu: Ptr<N>, owner: StrongOwner, bytes: ulong, alignment: ulong, memory: int) -> { value: GpuView | None, status: int };
     intrinsic "gpu_view_offset" def offset(view: GpuView, bytes: ulong, size: ulong, alignment: ulong) -> GpuView;
     intrinsic "gpu_view_restrict" def restrict(view: GpuView, access: uint) -> GpuView;
@@ -532,8 +531,7 @@ const VIEW_PRIMITIVES: &str = r#"
     };
     def allocate_ints(count: ulong) -> Result<GpuView, RuntimeError> = {
         var gpu = Gpu.new()?;
-        var layout = element_layout::<int>();
-        var allocated = allocate(gpu.native(), gpu.owner.owner, count * layout.size, layout.alignment, 0);
+        var allocated = allocate(gpu.native(), gpu.owner.owner, count * size_of(int), align_of(int), 0);
         RuntimeStatus.from_code(allocated.status)?;
         ok(allocated.value!)
     };
@@ -602,24 +600,26 @@ fn gpu_view_primitives_preserve_access_bounds_and_alignment_checks() {
 }
 
 #[test]
-fn gpu_element_layout_rejects_managed_storage_before_access() {
-    let directory = TempDir::new().unwrap();
-    let path = directory.path().join("main.resin");
-    fs::write(
-        &path,
-        r#"
-        export { main };
-        import { "$/shared.resin" };
-        intrinsic "gpu_element_layout" def layout<T>() -> { size: ulong, alignment: ulong };
-        def main() = { var invalid = layout::<ArcPtr<int>>(); };
-    "#,
-    )
-    .unwrap();
-    let error = pipeline::file_module(&path).unwrap_err();
-    assert!(
-        error.to_string().contains("plain shared storage"),
-        "{error}"
-    );
+fn gpu_allocation_rejects_managed_and_opaque_elements_before_access() {
+    for (element, diagnostic) in [
+        ("ArcPtr<int>", "plain shared storage"),
+        ("WeakPtr<int>", "plain shared storage"),
+        ("Ptr<Native>", "plain shared storage"),
+        ("Native", "no shared host/device layout"),
+    ] {
+        let source = format!(
+            r#"
+            import {{ "$/gpu.resin", "$/shared.resin" }};
+            extern type Native;
+            def invalid(gpu: Gpu) -> Result<(), _> = {{
+                gpu.alloc::<{element}>(0_ul)?;
+                ok(())
+            }};
+        "#
+        );
+        let error = pipeline::source_module(&source).unwrap_err();
+        assert!(error.to_string().contains(diagnostic), "{element}: {error}");
+    }
 }
 
 #[test]
@@ -651,6 +651,8 @@ fn gpu_sequences_allow_empty_tail_views_and_report_allocation_overflow() {
 fn gpu_sequences_reject_out_of_bounds_indices_and_overflowing_ranges() {
     for operation in [
         "values.at(3_ul);",
+        "values.at(18446744073709551615_ul);",
+        "values.slice(3_ul, 0_ul).at(0_ul);",
         "values.slice(4_ul, 0_ul);",
         "values.slice(2_ul, 2_ul);",
         "values.slice(18446744073709551615_ul, 2_ul);",
@@ -673,7 +675,9 @@ fn gpu_sequences_reject_out_of_bounds_indices_and_overflowing_ranges() {
         };
         assert_eq!(output.status.code(), Some(1), "{operation}");
         assert!(
-            String::from_utf8_lossy(&output.stderr).contains("out of bounds"),
+            String::from_utf8_lossy(&output.stderr)
+                .lines()
+                .any(|line| line == "resin: GPU view out of bounds"),
             "{operation}: {}",
             String::from_utf8_lossy(&output.stderr)
         );

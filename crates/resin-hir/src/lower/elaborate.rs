@@ -642,11 +642,6 @@ impl Completion<'_> {
             params: declaration.params.iter().map(types::ty).collect(),
         };
         Ok(match declaration.body {
-            FunctionBody::Intrinsic(op) => TermKind::Intrinsic {
-                op,
-                type_args: vec![],
-                args,
-            },
             FunctionBody::GpuPipelineDispatch {
                 context,
                 allocator,
@@ -998,7 +993,7 @@ mod tests {
     fn completion_uses_the_selected_method_after_its_namespace_is_gone() {
         let span = Span { start: 0, end: 0 };
         let (solver, methods, rule, ty) = {
-            let mut context = Context::with_builtins();
+            let mut context = Context::new();
             let mut inference = Inference::new(&mut context);
             let (rule, ty) = inference.expression();
             inference.constrain(

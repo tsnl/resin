@@ -160,13 +160,14 @@ fn source_drop_hooks_reject_gpu_elements_before_and_after_importing() {
     ] {
         let use_site = format!(
             r#"
-            intrinsic "gpu_element_layout" def layout<T>() -> {{size: ulong, alignment: ulong}};
-            def main() = {{ layout::<{owner}>(); }};
+            def invalid(gpu: Gpu) -> Result<(), _> = {{
+                gpu.alloc::<{owner}>(0_ul)?;
+                ok(())
+            }};
             "#
         );
-        let local = format!("{declaration} {use_site}");
-        let hir = resin_hir::generate(&support::parse(&local)).unwrap();
-        let error = resin_lir::generate(&hir).unwrap_err();
+        let local = format!("import {{ \"$/gpu.resin\" }}; {declaration} {use_site}");
+        let error = support::pipeline::source_module(&local).unwrap_err();
         assert!(
             error.to_string().contains("plain shared storage"),
             "{error}"
@@ -179,10 +180,12 @@ fn source_drop_hooks_reject_gpu_elements_before_and_after_importing() {
         )
         .unwrap();
         let entry = directory.path().join("main.resin");
-        std::fs::write(&entry, format!("import {{ \"owner.resin\" }}; {use_site}")).unwrap();
-        let program = support::pipeline::load(&entry).unwrap();
-        let hir = resin_hir::generate_program(&program).unwrap();
-        let error = resin_lir::generate(&hir).unwrap_err();
+        std::fs::write(
+            &entry,
+            format!("import {{ \"$/gpu.resin\", \"owner.resin\" }}; {use_site}"),
+        )
+        .unwrap();
+        let error = support::pipeline::file_module(&entry).unwrap_err();
         assert!(
             error.to_string().contains("plain shared storage"),
             "{error}"

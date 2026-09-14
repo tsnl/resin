@@ -85,10 +85,7 @@ pub unsafe extern "C" fn resin_image_write_png(
         Err(status) => return status,
     };
     let pixels = unsafe { slice::from_raw_parts(pixels.cast::<u8>(), layout.byte_len) };
-    match write_png(path, &layout, pixels) {
-        Ok(()) => ResinStatus::Success,
-        Err(status) => status,
-    }
+    ResinStatus::from_result(write_png(path, &layout, pixels))
 }
 
 /// # Safety

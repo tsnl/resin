@@ -299,6 +299,10 @@ pub enum ResinMemory {
 }
 
 impl ResinStatus {
+    fn from_result(result: Result<(), Self>) -> Self {
+        result.err().unwrap_or(Self::Success)
+    }
+
     fn from_raw(value: i32) -> Option<Self> {
         match value {
             0 => Some(Self::Success),
@@ -323,6 +327,17 @@ impl ResinMemory {
             2 => Some(Self::Readback),
             _ => None,
         }
+    }
+}
+
+// ABI wrappers validate and initialize their outputs before acquiring resources.
+fn write_owned_result<T>(result: Result<T, ResinStatus>, out: &mut *mut T) -> ResinStatus {
+    match result {
+        Ok(value) => {
+            *out = Box::into_raw(Box::new(value));
+            ResinStatus::Success
+        }
+        Err(status) => status,
     }
 }
 
@@ -360,10 +375,7 @@ pub unsafe extern "C" fn resin_gpu_enumerate_devices(
     } else {
         unsafe { std::slice::from_raw_parts_mut(infos, count as usize) }
     };
-    match ResinGpu::enumerate_devices(out) {
-        Ok(()) => ResinStatus::Success,
-        Err(status) => status,
-    }
+    ResinStatus::from_result(ResinGpu::enumerate_devices(out))
 }
 
 /// # Safety
@@ -374,13 +386,7 @@ pub unsafe extern "C" fn resin_gpu_create(out_gpu: *mut *mut ResinGpu) -> ResinS
         return ResinStatus::InvalidArgument;
     }
     unsafe { *out_gpu = ptr::null_mut() };
-    match ResinGpu::create() {
-        Ok(gpu) => {
-            unsafe { *out_gpu = Box::into_raw(Box::new(gpu)) };
-            ResinStatus::Success
-        }
-        Err(status) => status,
-    }
+    unsafe { write_owned_result(ResinGpu::create(), &mut *out_gpu) }
 }
 
 /// # Safety
@@ -394,13 +400,7 @@ pub unsafe extern "C" fn resin_gpu_create_at(
         return ResinStatus::InvalidArgument;
     }
     unsafe { *out_gpu = ptr::null_mut() };
-    match ResinGpu::create_at(index) {
-        Ok(gpu) => {
-            unsafe { *out_gpu = Box::into_raw(Box::new(gpu)) };
-            ResinStatus::Success
-        }
-        Err(status) => status,
-    }
+    unsafe { write_owned_result(ResinGpu::create_at(index), &mut *out_gpu) }
 }
 
 /// # Safety
@@ -429,12 +429,11 @@ pub unsafe extern "C" fn resin_gpu_malloc(
     let Some(memory) = ResinMemory::from_raw(memory) else {
         return ResinStatus::InvalidArgument;
     };
-    match unsafe { (&mut *gpu).malloc(bytes, alignment, memory) } {
-        Ok(allocation) => {
-            unsafe { *out_allocation = Box::into_raw(Box::new(allocation)) };
-            ResinStatus::Success
-        }
-        Err(status) => status,
+    unsafe {
+        write_owned_result(
+            (&mut *gpu).malloc(bytes, alignment, memory),
+            &mut *out_allocation,
+        )
     }
 }
 
@@ -503,13 +502,7 @@ pub unsafe extern "C" fn resin_gpu_create_compute_pipeline(
         return ResinStatus::InvalidArgument;
     }
     let spv = unsafe { std::slice::from_raw_parts(spv_bytes.cast::<u8>(), spv_length) };
-    match unsafe { (&*gpu).create_compute_pipeline(spv) } {
-        Ok(pipeline) => {
-            unsafe { *out_pipeline = Box::into_raw(Box::new(pipeline)) };
-            ResinStatus::Success
-        }
-        Err(status) => status,
-    }
+    unsafe { write_owned_result((&*gpu).create_compute_pipeline(spv), &mut *out_pipeline) }
 }
 
 /// # Safety
@@ -539,12 +532,11 @@ pub unsafe extern "C" fn resin_gpu_create_graphics_pipeline(
         unsafe { std::slice::from_raw_parts(vertex_spv_bytes.cast::<u8>(), vertex_spv_length) };
     let fragment =
         unsafe { std::slice::from_raw_parts(fragment_spv_bytes.cast::<u8>(), fragment_spv_length) };
-    match unsafe { (&*gpu).create_graphics_pipeline(vertex, fragment) } {
-        Ok(pipeline) => {
-            unsafe { *out_pipeline = Box::into_raw(Box::new(pipeline)) };
-            ResinStatus::Success
-        }
-        Err(status) => status,
+    unsafe {
+        write_owned_result(
+            (&*gpu).create_graphics_pipeline(vertex, fragment),
+            &mut *out_pipeline,
+        )
     }
 }
 
@@ -561,13 +553,7 @@ pub unsafe extern "C" fn resin_gpu_create_image(
         return ResinStatus::InvalidArgument;
     }
     unsafe { *out_image = ptr::null_mut() };
-    match unsafe { (&*gpu).create_image(width, height) } {
-        Ok(image) => {
-            unsafe { *out_image = Box::into_raw(Box::new(image)) };
-            ResinStatus::Success
-        }
-        Err(status) => status,
-    }
+    unsafe { write_owned_result((&*gpu).create_image(width, height), &mut *out_image) }
 }
 
 /// # Safety
@@ -619,13 +605,7 @@ pub unsafe extern "C" fn resin_gpu_start_command_recording(
         return ResinStatus::InvalidArgument;
     }
     unsafe { *out_command_buffer = ptr::null_mut() };
-    match unsafe { (&*gpu).start_command_recording() } {
-        Ok(command_buffer) => {
-            unsafe { *out_command_buffer = Box::into_raw(Box::new(command_buffer)) };
-            ResinStatus::Success
-        }
-        Err(status) => status,
-    }
+    unsafe { write_owned_result((&*gpu).start_command_recording(), &mut *out_command_buffer) }
 }
 
 /// # Safety
@@ -641,10 +621,7 @@ pub unsafe extern "C" fn resin_gpu_set_pipeline(
     let Some(pipeline) = (unsafe { pipeline.as_ref() }) else {
         return ResinStatus::InvalidArgument;
     };
-    match unsafe { command_buffer.set_pipeline(pipeline) } {
-        Ok(()) => ResinStatus::Success,
-        Err(status) => status,
-    }
+    ResinStatus::from_result(unsafe { command_buffer.set_pipeline(pipeline) })
 }
 
 /// # Safety
@@ -660,11 +637,9 @@ pub unsafe extern "C" fn resin_gpu_dispatch(
     let Some(command_buffer) = (unsafe { command_buffer.as_mut() }) else {
         return ResinStatus::InvalidArgument;
     };
-    match unsafe { command_buffer.dispatch(root_data, group_count_x, group_count_y, group_count_z) }
-    {
-        Ok(()) => ResinStatus::Success,
-        Err(status) => status,
-    }
+    ResinStatus::from_result(unsafe {
+        command_buffer.dispatch(root_data, group_count_x, group_count_y, group_count_z)
+    })
 }
 
 /// # Safety
@@ -684,10 +659,9 @@ pub unsafe extern "C" fn resin_gpu_begin_rendering(
     let Some(color) = (unsafe { color.as_mut() }) else {
         return ResinStatus::InvalidArgument;
     };
-    match unsafe { command_buffer.begin_rendering(color, [clear_r, clear_g, clear_b, clear_a]) } {
-        Ok(()) => ResinStatus::Success,
-        Err(status) => status,
-    }
+    ResinStatus::from_result(unsafe {
+        command_buffer.begin_rendering(color, [clear_r, clear_g, clear_b, clear_a])
+    })
 }
 
 /// # Safety
@@ -699,10 +673,7 @@ pub unsafe extern "C" fn resin_gpu_end_rendering(
     let Some(command_buffer) = (unsafe { command_buffer.as_mut() }) else {
         return ResinStatus::InvalidArgument;
     };
-    match unsafe { command_buffer.end_rendering() } {
-        Ok(()) => ResinStatus::Success,
-        Err(status) => status,
-    }
+    ResinStatus::from_result(unsafe { command_buffer.end_rendering() })
 }
 
 /// # Safety
@@ -716,10 +687,7 @@ pub unsafe extern "C" fn resin_gpu_draw(
     let Some(command_buffer) = (unsafe { command_buffer.as_mut() }) else {
         return ResinStatus::InvalidArgument;
     };
-    match unsafe { command_buffer.draw(root_data, vertex_count) } {
-        Ok(()) => ResinStatus::Success,
-        Err(status) => status,
-    }
+    ResinStatus::from_result(unsafe { command_buffer.draw(root_data, vertex_count) })
 }
 
 /// # Safety
@@ -740,10 +708,7 @@ pub unsafe extern "C" fn resin_gpu_copy_image_to_buffer(
     let Some(dst) = (unsafe { dst.as_ref() }) else {
         return ResinStatus::InvalidArgument;
     };
-    match unsafe { command_buffer.copy_image_to_buffer(image, dst) } {
-        Ok(()) => ResinStatus::Success,
-        Err(status) => status,
-    }
+    ResinStatus::from_result(unsafe { command_buffer.copy_image_to_buffer(image, dst) })
 }
 
 /// Submits, waits until this command buffer's work completes, then frees it.
@@ -764,10 +729,7 @@ pub unsafe extern "C" fn resin_gpu_submit(
     let Some(gpu) = (unsafe { gpu.as_ref() }) else {
         return ResinStatus::InvalidArgument;
     };
-    match unsafe { gpu.submit(*command_buffer) } {
-        Ok(()) => ResinStatus::Success,
-        Err(status) => status,
-    }
+    ResinStatus::from_result(unsafe { gpu.submit(*command_buffer) })
 }
 
 /// # Safety

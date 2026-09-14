@@ -53,7 +53,7 @@ struct GpuSpan<T> {
 	data: GpuPtr<T>,
 	length: ulong,
 	def at(self: GpuSpan<T>, index: ulong) -> GpuPtr<T> = {
-		GpuPtr<T> { view = gpu_view_index::<T>(self.data.view, self.length, index) }
+		GpuPtr<T> { view = gpu_view_range::<T>(self.data.view, self.length, index, 1_ul) }
 	};
 	def slice(self: GpuSpan<T>, start: ulong, length: ulong) -> GpuSpan<T> = {
 		GpuSpan<T> {
@@ -138,13 +138,13 @@ struct Gpu {
 		self.alloc_in::<T>(count, Memory.default())
 	};
 	def alloc_in<T>(self: Gpu, count: ulong, memory: int) -> Result<GpuSpan<T>, RuntimeError> = {
-		var layout = gpu_element_layout::<T>();
-		if (count > 18446744073709551615_ul / layout.size) {
+		var size = size_of(T);
+		if (count > 18446744073709551615_ul / size) {
 			err(OutOfMemory {})
 		} else {
 			ok(())
 		}?;
-		var view = self.malloc(count * layout.size, layout.alignment, memory)?;
+		var view = self.malloc(count * size, align_of(T), memory)?;
 		ok(GpuSpan<T> { data = GpuPtr<T> { view = gpu_view_range::<T>(view, count, 0_ul, count) }, length = count })
 	};
 	@gpu_allocator
@@ -299,12 +299,10 @@ struct GpuCommands {
 	};
 };
 
-intrinsic "gpu_element_layout" def gpu_element_layout<T>() -> { size: ulong, alignment: ulong };
 intrinsic "gpu_view_allocate" def gpu_view_allocate<N>(gpu: Ptr<N>, owner: StrongOwner, bytes: ulong, alignment: ulong, memory: int) -> { value: GpuView | None, status: int };
 intrinsic "gpu_view_load" def gpu_view_load<T>(view: GpuView) -> T;
 intrinsic "gpu_view_store" def gpu_view_store<T>(view: GpuView, value: T) -> ();
 intrinsic "gpu_view_replace" def gpu_view_replace<T>(view: GpuView, value: T) -> T;
-intrinsic "gpu_view_index" def gpu_view_index<T>(view: GpuView, capacity: ulong, index: ulong) -> GpuView;
 intrinsic "gpu_view_range" def gpu_view_range<T>(view: GpuView, capacity: ulong, start: ulong, length: ulong) -> GpuView;
 intrinsic "gpu_view_copy_to" def gpu_view_copy_to<T>(view: GpuView, count: ulong, destination: Ptr<T>, capacity: ulong) -> ();
 intrinsic "gpu_view_restrict" def gpu_view_restrict(view: GpuView, mask: uint) -> GpuView;

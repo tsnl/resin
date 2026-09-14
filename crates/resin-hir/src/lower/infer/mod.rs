@@ -1516,13 +1516,13 @@ impl Inference<'_> {
         Ok(Some(application))
     }
 
-    fn intrinsic_method_call(
+    fn check_method_call(
         &mut self,
-        owner: Rule,
-        signature: super::context::IntrinsicMethod,
         constraint: &Constraint,
+        params: &[Type],
+        result: &Type,
         span: Span,
-    ) -> Result<bool> {
+    ) -> Result<(bool, Option<crate::ReceiverConversion>)> {
         let Constraint::Method {
             receiver,
             args,
@@ -1531,71 +1531,26 @@ impl Inference<'_> {
             ..
         } = constraint
         else {
-            unreachable!("primitive method call");
-        };
-        let arguments =
-            self.arguments(args, &signature.params[usize::from(!associated)..], span)?;
-        let result = self.solver.coerce(&signature.result, out, span)?;
-        let receiver_conversion = if *associated {
-            None
-        } else {
-            let Some(conversion) = self.source_receiver(receiver, &signature.params[0], span)?
-            else {
-                return Ok(false);
-            };
-            Some(conversion)
-        };
-        if arguments && result {
-            self.methods.insert(
-                owner,
-                ResolvedMethod::Intrinsic {
-                    signature,
-                    receiver_conversion,
-                },
-            );
-        }
-        Ok(arguments && result)
-    }
-
-    fn source_method_call(
-        &mut self,
-        owner: Rule,
-        application: AppliedMethod,
-        constraint: &Constraint,
-        span: Span,
-    ) -> Result<bool> {
-        let Constraint::Method {
-            receiver,
-            args,
-            out,
-            associated,
-            ..
-        } = constraint
-        else {
-            unreachable!("source method call constraint");
+            unreachable!("method call constraint");
         };
         let offset = usize::from(!associated);
-        let params = application.params.get(offset..).ok_or_else(|| {
+        let arguments = params.get(offset..).ok_or_else(|| {
             error(
                 span,
                 "method receiver does not match: this function has no receiver parameter",
             )
         })?;
-        let arguments = self.arguments(args, params, span)?;
-        let result = self.solver.coerce(&application.result, out, span)?;
+        let arguments = self.arguments(args, arguments, span)?;
+        let result = self.solver.coerce(result, out, span)?;
         let conversion = if *associated {
             None
         } else {
-            let Some(conversion) = self.source_receiver(receiver, &application.params[0], span)?
-            else {
-                return Ok(false);
+            let Some(conversion) = self.source_receiver(receiver, &params[0], span)? else {
+                return Ok((false, None));
             };
             Some(conversion)
         };
-        if arguments && result {
-            self.methods.insert(owner, application.resolved(conversion));
-        }
-        Ok(arguments && result)
+        Ok((arguments && result, conversion))
     }
 
     fn source_receiver(
@@ -1716,7 +1671,16 @@ impl Inference<'_> {
                 if let Some(application) =
                     self.method_application(owner, receiver_type, name, type_args, span)?
                 {
-                    return self.source_method_call(owner, application, constraint, span);
+                    let (complete, conversion) = self.check_method_call(
+                        constraint,
+                        &application.params,
+                        &application.result,
+                        span,
+                    )?;
+                    if complete {
+                        self.methods.insert(owner, application.resolved(conversion));
+                    }
+                    return Ok(complete);
                 }
                 if let Some((_, signature)) =
                     super::context::intrinsic_methods(receiver_type, &self.solver)
@@ -1726,7 +1690,22 @@ impl Inference<'_> {
                     if type_args.is_some() {
                         return Err(error(span, "compiler methods do not accept type arguments"));
                     }
-                    return self.intrinsic_method_call(owner, signature, constraint, span);
+                    let (complete, receiver_conversion) = self.check_method_call(
+                        constraint,
+                        &signature.params,
+                        &signature.result,
+                        span,
+                    )?;
+                    if complete {
+                        self.methods.insert(
+                            owner,
+                            ResolvedMethod::Intrinsic {
+                                signature,
+                                receiver_conversion,
+                            },
+                        );
+                    }
+                    return Ok(complete);
                 }
                 if let Some(signature) =
                     self.dependent_method(receiver_type, name, type_args, *associated)

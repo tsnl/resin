@@ -4,7 +4,7 @@ use std::{
 };
 
 use super::ResinWindow;
-use crate::{ResinGpu, ResinImage, ResinStatus};
+use crate::{ResinGpu, ResinImage, ResinStatus, write_owned_result};
 
 /// # Safety
 /// Use only on the main thread. `title` must be a NUL-terminated UTF-8 string and
@@ -23,12 +23,11 @@ pub unsafe extern "C" fn resin_window_create(
     if title.is_null() {
         return ResinStatus::InvalidArgument;
     }
-    match unsafe { ResinWindow::create(width, height, CStr::from_ptr(title)) } {
-        Ok(window) => {
-            unsafe { *out_window = Box::into_raw(Box::new(window)) };
-            ResinStatus::Success
-        }
-        Err(status) => status,
+    unsafe {
+        write_owned_result(
+            ResinWindow::create(width, height, CStr::from_ptr(title)),
+            &mut *out_window,
+        )
     }
 }
 
@@ -110,10 +109,7 @@ pub unsafe extern "C" fn resin_window_set_size(
     let Some(window) = (unsafe { window.as_ref() }) else {
         return ResinStatus::InvalidArgument;
     };
-    match window.set_size(width, height) {
-        Ok(()) => ResinStatus::Success,
-        Err(status) => status,
-    }
+    ResinStatus::from_result(window.set_size(width, height))
 }
 
 /// # Safety
@@ -222,13 +218,7 @@ pub unsafe extern "C" fn resin_gpu_create_for_window(
     let Some(window) = (unsafe { window.as_ref() }) else {
         return ResinStatus::InvalidArgument;
     };
-    match unsafe { ResinGpu::create_for_window(window) } {
-        Ok(gpu) => {
-            unsafe { *out_gpu = Box::into_raw(Box::new(gpu)) };
-            ResinStatus::Success
-        }
-        Err(status) => status,
-    }
+    unsafe { write_owned_result(ResinGpu::create_for_window(window), &mut *out_gpu) }
 }
 
 /// # Safety
@@ -242,10 +232,7 @@ pub unsafe extern "C" fn resin_gpu_present(
     let (Some(gpu), Some(image)) = (unsafe { gpu.as_mut() }, unsafe { image.as_mut() }) else {
         return ResinStatus::InvalidArgument;
     };
-    match unsafe { gpu.present(image) } {
-        Ok(()) => ResinStatus::Success,
-        Err(status) => status,
-    }
+    ResinStatus::from_result(unsafe { gpu.present(image) })
 }
 
 #[cfg(test)]

@@ -46,6 +46,26 @@ fn pipelines(source: &str) -> Result<Module, resin_hir::GenerateError> {
 }
 
 #[test]
+fn contract_declarations_may_follow_their_users_and_dependencies() {
+    let (contracts, declarations): (Vec<_>, Vec<_>) = PIPELINES
+        .lines()
+        .partition(|line| line.starts_with("intrinsic "));
+    let contracts = contracts.into_iter().rev().collect::<Vec<_>>().join("\n");
+    let declarations = declarations.join("\n");
+    generate(&format!(
+        r#"
+        {declarations}
+        def main(values: DeviceRange<int>) -> Result<(), Failure> = {{
+            var pipeline = Device {{}}.compute(kernel)?;
+            Commands {{}}.dispatch(pipeline, {{ scale = 2.0, values = values }}, 1, 1, 1)
+        }};
+        {contracts}
+    "#
+    ))
+    .unwrap();
+}
+
+#[test]
 fn former_gpu_type_names_are_ordinary_generic_declarations() {
     generate(r#"
         struct GpuPtr<T> { value: T, def new(value: T) -> GpuPtr<T> = { GpuPtr<T> { value = value } }; };
