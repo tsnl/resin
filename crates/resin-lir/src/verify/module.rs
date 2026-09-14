@@ -164,15 +164,13 @@ fn check_instruction_profiles(
     let host = |id| check_profile(module, id, crate::Profile::Host, location);
     match op {
         crate::Instr::Function { function } => check_profile(module, *function, profile, location),
-        crate::Instr::GpuNew { allocator, .. } | crate::Instr::GpuAllocate { allocator, .. } => {
-            host(*allocator)
-        }
         crate::Instr::GpuComputePipeline { factory, .. }
         | crate::Instr::GpuGraphicsPipeline { factory, .. } => host(*factory),
         crate::Instr::GpuDispatch {
             context,
             allocator,
             record,
+            ..
         } => {
             host(*context)?;
             host(*allocator)?;
@@ -182,6 +180,7 @@ fn check_instruction_profiles(
             context,
             allocator,
             record,
+            ..
         } => {
             host(*context)?;
             if let Some(allocator) = allocator {

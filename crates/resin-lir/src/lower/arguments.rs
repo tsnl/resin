@@ -6,20 +6,6 @@ use crate::lower::concrete::Term;
 use resin_types::prelude::*;
 
 impl FunctionLowering<'_> {
-    pub(super) fn hold_arc_address(&mut self, term: &Term) -> Result<Ty, LowerError> {
-        let ty = self.gen_term(term, None)?;
-        let Ty::Arc { pointee } = &ty else {
-            return Err(LowerError::invalid_hir(term.span, "expected Arc<T>"));
-        };
-        let pointee = *pointee.clone();
-        let owner = self.save_top(&ty);
-        self.load_local(owner);
-        self.emit(Instr::ArcData);
-        Ok(Ty::Pointer {
-            pointee: Box::new(pointee),
-        })
-    }
-
     pub(super) fn gen_receiver(
         &mut self,
         receiver: &Term,
@@ -27,12 +13,6 @@ impl FunctionLowering<'_> {
         to: &Ty,
     ) -> Result<(), LowerError> {
         match conversion {
-            conversion @ (ReceiverConversion::ArcAddress | ReceiverConversion::ArcLoad) => {
-                self.hold_arc_address(receiver)?;
-                if matches!(conversion, ReceiverConversion::ArcLoad) {
-                    self.emit(Instr::Load);
-                }
-            }
             ReceiverConversion::Value => {
                 self.gen_term(receiver, Some(to))?;
             }

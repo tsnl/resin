@@ -97,30 +97,14 @@ pub enum Type {
     Pointer {
         pointee: Box<Type>,
     },
-    Span {
-        element: Box<Type>,
-    },
-    GpuPointer {
-        pointee: Box<Type>,
-    },
-    GpuSpan {
-        element: Box<Type>,
-    },
+    /// An opaque shared allocation view with checked byte offsets and host permissions.
+    GpuView,
+    GpuPipelineContract,
     GpuArguments,
-    GpuComputePipeline {
-        root: Box<Type>,
-        owner: Box<Type>,
-    },
-    GpuGraphicsPipeline {
-        root: Box<Type>,
-        owner: Box<Type>,
-    },
-    Arc {
-        pointee: Box<Type>,
-    },
-    Weak {
-        pointee: Box<Type>,
-    },
+    /// Opaque shared allocation handle; copies retain and destruction releases.
+    StrongOwner,
+    /// Opaque weak allocation handle; it does not keep payloads alive.
+    WeakOwner,
     Array {
         element: Box<Type>,
         length: usize,
@@ -195,6 +179,25 @@ pub struct TypeDefinition {
     pub methods: BTreeMap<Arc<str>, FunctionId>,
     /// A hook whose type parameters are supplied by this nominal application.
     pub drop: Option<FunctionId>,
+    pub gpu_projection: Option<GpuProjection>,
+    pub gpu_pipeline: Option<GpuPipeline>,
+}
+
+/// A source declaration binds the nominal pipeline's root and owner parameters.
+#[derive(Debug, Clone)]
+pub struct GpuPipeline {
+    pub declaration: FunctionId,
+    pub kind: resin_types::GpuPipelineKind,
+    pub root: Type,
+    pub owner: Type,
+}
+
+/// A source declaration explicitly registers a wrapper's shader projection.
+#[derive(Debug, Clone)]
+pub struct GpuProjection {
+    pub declaration: FunctionId,
+    pub kind: resin_types::GpuProjectionKind,
+    pub target: Type,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -328,6 +331,7 @@ pub enum TermKind {
     },
     Intrinsic {
         op: Intrinsic,
+        type_args: Vec<Type>,
         args: Arguments,
     },
     Adapt {
@@ -336,19 +340,6 @@ pub enum TermKind {
     },
     Convert {
         arg: Box<Term>,
-    },
-    ArcNew {
-        value: Box<Term>,
-    },
-    /// Allocate and initialize a GPU element through the registered allocator.
-    GpuNew {
-        allocator: FunctionId,
-        args: Arguments,
-    },
-    /// Allocate uninitialized GPU elements through the registered allocator.
-    GpuAllocate {
-        allocator: FunctionId,
-        args: Arguments,
     },
     /// Create an owning pipeline whose root type comes from its shader declarations.
     GpuPipelineCreate {
@@ -362,9 +353,6 @@ pub enum TermKind {
         allocator: Option<FunctionId>,
         record: FunctionId,
         args: Arguments,
-    },
-    WeakEmpty {
-        pointee: Type,
     },
     Result {
         failure: bool,
@@ -427,8 +415,6 @@ pub enum ReceiverConversion {
     Value,
     Address,
     Load,
-    ArcAddress,
-    ArcLoad,
 }
 
 //
@@ -770,15 +756,10 @@ fn builtin_hover(document: &resin_cst::Document, token: resin_cst::Node<'_>) -> 
             token.kind(),
             "builtin_type"
                 | "Ptr"
-                | "Span"
-                | "GpuPtr"
-                | "GpuSpan"
+                | "GpuPipelineContract"
+                | "GpuView"
                 | "GpuArguments"
-                | "GpuComputePipeline"
-                | "GpuGraphicsPipeline"
                 | "Result"
-                | "Arc"
-                | "Weak"
                 | "None"
         )
     {
@@ -863,24 +844,9 @@ fn matching_completions(mut items: Vec<Completion>, prefix: &str) -> Vec<Complet
 
 const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     (
-        "fmt",
-        "fmt(format, arguments) -> String\n\nFormat a tuple using numbered placeholders {0}, {1}, … into an owned String. Host-only.",
-        DefinitionKind::Function,
-    ),
-    (
         "str",
-        "str\n\nA string literal view with data: Ptr<ubyte> and length: ulong. Static storage has a trailing NUL excluded from length. Span<ubyte>(text) exposes its bytes. Host-only.",
+        "str\n\nA string literal view with data: Ptr<ubyte> and length: ulong. Static storage has a trailing NUL excluded from length. Import $/span.resin and use bytes(text) to borrow its bytes. Host-only.",
         DefinitionKind::Type,
-    ),
-    (
-        "String",
-        "String\n\nOwned bytes, wrapping Arc<Span<ubyte>>. Copies retain the allocation. String literals have type str.",
-        DefinitionKind::Type,
-    ),
-    (
-        "print",
-        "print(text) -> ()\n\nWrite a str, String, or Span<ubyte> to stdout verbatim and flush.",
-        DefinitionKind::Function,
     ),
     (
         "Ptr",
@@ -888,33 +854,28 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
         DefinitionKind::Type,
     ),
     (
-        "Span",
-        "Span<T>\n\nA pointer and length describing elements of T. Calling span.at(index: ulong) returns Ptr<T>; shader indexing is unchecked.",
+        "StrongOwner",
+        "StrongOwner\n\nAn opaque shared host allocation handle. Copies retain its initialized payload; the final release destroys it.",
         DefinitionKind::Type,
     ),
     (
-        "GpuPtr",
-        "GpuPtr<T>\n\nAn owning GPU allocation view with checked host access. Indexing and field addresses retain its allocation.",
+        "WeakOwner",
+        "WeakOwner\n\nAn opaque weak allocation handle. It retains bookkeeping without keeping the payload alive.",
         DefinitionKind::Type,
     ),
     (
-        "GpuSpan",
-        "GpuSpan<T>\n\nAn owning GPU range. Indexing and slicing preserve its owner and access permissions.",
+        "GpuView",
+        "GpuView\n\nAn opaque GPU allocation view retaining its owner, byte offset, and host access permissions.",
+        DefinitionKind::Type,
+    ),
+    (
+        "GpuPipelineContract",
+        "GpuPipelineContract\n\nAn opaque pipeline token retaining its native owner and binding its shader root, owner type, and stage.",
         DefinitionKind::Type,
     ),
     (
         "GpuArguments",
         "GpuArguments\n\nAn internal dispatch projection retaining referenced GPU allocations.",
-        DefinitionKind::Type,
-    ),
-    (
-        "GpuComputePipeline",
-        "GpuComputePipeline<T, Owner>\n\nAn owning compute pipeline retaining its shader root type T. Dispatch checks and projects its host arguments.",
-        DefinitionKind::Type,
-    ),
-    (
-        "GpuGraphicsPipeline",
-        "GpuGraphicsPipeline<T, Owner>\n\nAn owning graphics pipeline retaining the shared shader root T. Rootless shaders use None.",
         DefinitionKind::Type,
     ),
     (
@@ -948,23 +909,8 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
         DefinitionKind::Keyword,
     ),
     (
-        "impl",
-        "impl T { def method(self: Ptr<T>) = {}; } — inherent methods.",
-        DefinitionKind::Keyword,
-    ),
-    (
         "None",
         "None — singleton value and type; T | None permits absence, postfix ! excludes it or traps.",
-        DefinitionKind::Type,
-    ),
-    (
-        "Arc",
-        "Arc<T> — a copyable shared owner; copying retains the allocation.",
-        DefinitionKind::Type,
-    ),
-    (
-        "Weak",
-        "Weak<T> — a weak handle; upgrade() returns Arc<T> | None.",
         DefinitionKind::Type,
     ),
     ("bool", "bool", DefinitionKind::Type),
@@ -1011,6 +957,11 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     (
         "extern",
         "extern — foreign function or opaque type declaration",
+        DefinitionKind::Keyword,
+    ),
+    (
+        "intrinsic",
+        "intrinsic \"operation\" def name<T>(parameters) -> Type;",
         DefinitionKind::Keyword,
     ),
     (
@@ -1082,23 +1033,28 @@ impl Analysis {
         if arguments.len() != count {
             return;
         }
-        let Ok(method) = typer.specialize_gpu_method(method, &arguments[usize::from(associated)..])
-        else {
+        let arguments = arguments[usize::from(associated)..]
+            .iter()
+            .map(|ty| {
+                lower::infer::Solver::default()
+                    .complete(&ty.clone().into())
+                    .expect("concrete bridge argument")
+            })
+            .collect::<Vec<_>>();
+        let Ok(method) = typer.source_pipeline_method(&method, &arguments) else {
             return;
         };
-        let Some(params) = method.arguments(receiver, associated) else {
-            return;
-        };
-        let signature = Ty::Function {
-            params: params.to_vec(),
+        let signature = Type::Function {
+            params: method.params[usize::from(!associated)..].to_vec(),
             result: Box::new(method.result),
         };
+        let label = self.type_names_with(typer).format(&signature);
         if let Some(member) = self
             .fields
             .get_mut(location)
             .and_then(|members| members.iter_mut().find(|member| member.name == name))
         {
-            member.ty = format_concrete_type(&signature, typer);
+            member.ty = label;
         }
     }
 
@@ -1166,16 +1122,6 @@ impl Analysis {
                 compiler_signature: typer.gpu_method_label(&method, associated).is_some(),
             });
         }
-        if let Some((name, signature)) = typer.generic_method_label(ty, associated) {
-            members.retain(|member| member.name != name);
-            members.push(Member {
-                name: name.into(),
-                ty: signature,
-                kind: DefinitionKind::Function,
-                origin: None,
-                compiler_signature: true,
-            });
-        }
         self.fields.insert(location, members);
     }
 
@@ -1191,9 +1137,7 @@ impl Analysis {
             return;
         }
         let mut receiver = ty;
-        while let Type::Pointer { pointee } | Type::GpuPointer { pointee } | Type::Arc { pointee } =
-            receiver
-        {
+        while let Type::Pointer { pointee } = receiver {
             receiver = pointee;
         }
         let body = match receiver {
@@ -1236,6 +1180,38 @@ impl Analysis {
         }
     }
 
+    fn record_intrinsic_methods(
+        &mut self,
+        location: SourceLocation,
+        ty: &lower::infer::Type,
+        associated: bool,
+        typer: &lower::context::Context,
+        solver: &lower::infer::Solver,
+    ) {
+        let names = self.type_names_with(typer);
+        let members = lower::context::intrinsic_methods(ty, solver)
+            .into_iter()
+            .filter_map(|(name, method)| {
+                let signature = lower::infer::Type::function(
+                    method.params[usize::from(!associated)..].to_vec(),
+                    method.result,
+                );
+                Some(Member {
+                    name: name.into(),
+                    ty: names.format(&solver.complete(&signature)?),
+                    kind: DefinitionKind::Function,
+                    origin: None,
+                    compiler_signature: true,
+                })
+            })
+            .collect::<Vec<_>>();
+        let existing = self.fields.entry(location).or_default();
+        for member in members {
+            existing.retain(|existing| existing.name != member.name);
+            existing.push(member);
+        }
+    }
+
     fn record_source_methods(
         &mut self,
         location: SourceLocation,
@@ -1245,9 +1221,7 @@ impl Analysis {
         solver: &lower::infer::Solver,
     ) {
         let mut owner = ty;
-        while let Type::Pointer { pointee } | Type::GpuPointer { pointee } | Type::Arc { pointee } =
-            owner
-        {
+        while let Type::Pointer { pointee } = owner {
             owner = pointee;
         }
         let Type::Defined {
@@ -1314,7 +1288,7 @@ impl Analysis {
         }
     }
 
-    fn record_source_method_call(
+    fn record_resolved_method_call(
         &mut self,
         location: &SourceLocation,
         name: &str,
@@ -1323,15 +1297,35 @@ impl Analysis {
         typer: &lower::context::Context,
         solver: &lower::infer::Solver,
     ) {
-        let lower::infer::ResolvedMethod::Source {
-            declaration,
-            type_args,
-            params,
-            result,
-            ..
-        } = method
-        else {
+        if let lower::infer::ResolvedMethod::GpuPipeline { method } = method {
+            let signature = Type::Function {
+                params: method.params[usize::from(!associated)..].to_vec(),
+                result: Box::new(method.result.clone()),
+            };
+            let label = self.type_names_with(typer).format(&signature);
+            let members = self.fields.entry(location.clone()).or_default();
+            if let Some(member) = members.iter_mut().find(|member| member.name == name) {
+                member.ty = label;
+            }
             return;
+        }
+        let (params, result, origin, compiler_signature) = match method {
+            lower::infer::ResolvedMethod::Source {
+                declaration,
+                type_args,
+                params,
+                result,
+                ..
+            } => (
+                params,
+                result,
+                Some(self.contexts.definitions[*declaration].location.clone()),
+                !type_args.is_empty(),
+            ),
+            lower::infer::ResolvedMethod::Intrinsic { signature, .. } => {
+                (&signature.params, &signature.result, None, true)
+            }
+            _ => return,
         };
         let signature = lower::infer::Type::function(
             params[usize::from(!associated)..].to_vec(),
@@ -1344,8 +1338,8 @@ impl Analysis {
             name: name.to_owned(),
             ty: self.type_names_with(typer).format(&signature),
             kind: DefinitionKind::Function,
-            origin: Some(self.contexts.definitions[*declaration].location.clone()),
-            compiler_signature: !type_args.is_empty(),
+            origin,
+            compiler_signature,
         };
         let existing = self.fields.entry(location.clone()).or_default();
         existing.retain(|existing| existing.name != name);
@@ -1368,22 +1362,9 @@ fn source_method_receiver(
         return false;
     };
     let source = lower::infer::Type::from_hir(receiver);
-    let mut candidates = vec![
-        source.clone(),
-        lower::infer::Type::pointer(source.clone()),
-        lower::infer::Type::gpu_pointer(source),
-    ];
-    match receiver {
-        Type::Pointer { pointee } | Type::GpuPointer { pointee } => {
-            candidates.push(lower::infer::Type::from_hir(pointee));
-        }
-        Type::Arc { pointee } => {
-            candidates.push(lower::infer::Type::from_hir(pointee));
-            candidates.push(lower::infer::Type::pointer(lower::infer::Type::from_hir(
-                pointee,
-            )));
-        }
-        _ => {}
+    let mut candidates = vec![source.clone(), lower::infer::Type::pointer(source)];
+    if let Type::Pointer { pointee } = receiver {
+        candidates.push(lower::infer::Type::from_hir(pointee));
     }
     candidates.into_iter().any(|candidate| {
         solver

@@ -63,19 +63,13 @@ const BUILTIN_TYPES = [
   "Never",
   "None",
   "GpuArguments",
+  "StrongOwner",
+  "WeakOwner",
+  "GpuView",
+  "GpuPipelineContract",
 ];
 
-const TYPE_FORMERS = [
-  "Ptr",
-  "Span",
-  "GpuPtr",
-  "GpuSpan",
-  "GpuComputePipeline",
-  "GpuGraphicsPipeline",
-  "Arc",
-  "Weak",
-  "Result",
-];
+const TYPE_FORMERS = ["Ptr", "Result"];
 
 /**
  * Tree-sitter reserves words for only one token; uppercase names need an exclusion too.
@@ -116,6 +110,7 @@ export default grammar({
       "export",
       "import",
       "extern",
+      "intrinsic",
       "type",
       "struct",
       "def",
@@ -150,6 +145,7 @@ export default grammar({
             choice(
               $.function_definition,
               $.foreign_function,
+              $.intrinsic_function,
               $.foreign_type,
               $.type_definition,
               $.struct_definition,
@@ -173,6 +169,20 @@ export default grammar({
         list("params", $.declare, ","),
         ")",
         optional(seq("->", field("result", $.type))),
+        ";",
+      ),
+    intrinsic_function: ($) =>
+      seq(
+        "intrinsic",
+        field("operation", $.string),
+        "def",
+        field("name", $.lid),
+        optional(field("type_params", $.type_parameters)),
+        "(",
+        list("params", $.declare, ","),
+        ")",
+        "->",
+        field("result", $.type),
         ";",
       ),
     foreign_type: ($) => seq("extern", "type", field("name", $.uid), ";"),
@@ -480,23 +490,7 @@ export default grammar({
     unary_type: ($) =>
       choice(
         prec(1, seq(field("former", $.uid), field("args", $.type_arguments))),
-        seq(
-          field("former", choice("GpuComputePipeline", "GpuGraphicsPipeline")),
-          "<",
-          field("root", $.type),
-          ",",
-          field("owner", $.type),
-          ">",
-        ),
-        seq(
-          field(
-            "former",
-            choice("Ptr", "Span", "GpuPtr", "GpuSpan", "Arc", "Weak"),
-          ),
-          "<",
-          field("arg", $.type),
-          ">",
-        ),
+        seq(field("former", "Ptr"), "<", field("arg", $.type), ">"),
         seq(
           "Result",
           "<",
@@ -541,7 +535,7 @@ export default grammar({
     uid: () =>
       token(
         new RustRegex(
-          `[_]+[A-Z][a-zA-Z0-9_]*|${identifierExcept("A-Z", [...TYPE_FORMERS, "Never", "None", "GpuArguments"])}`,
+          `[_]+[A-Z][a-zA-Z0-9_]*|${identifierExcept("A-Z", [...TYPE_FORMERS, ...BUILTIN_TYPES.filter((name) => /^[A-Z]/.test(name))])}`,
         ),
       ),
 

@@ -171,4 +171,5 @@ pub(super) struct Declaration {
 pub(super) enum DeclarationKind {
     Function { decorators: Vec<Ident> },
     Foreign { header: Arc<str> },
+    Intrinsic { operation: Arc<str> },
 }

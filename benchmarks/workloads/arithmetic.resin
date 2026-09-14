@@ -1,5 +1,7 @@
 export { Root, kernel, cpu };
 
+import { "$/span.resin" };
+
 struct Root { count: uint, iterations: uint, input: Ptr<uint>, output: Ptr<uint> };
 
 // Loop-carried integer arithmetic without a data-dependent branch.

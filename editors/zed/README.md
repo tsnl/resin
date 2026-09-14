@@ -118,8 +118,9 @@ The extension is an independent Cargo workspace depending only on
 parser in Resin and update that pin. Query tests compile every query and check
 captures against representative syntax, examples, and standard-library files.
 These tests use the local parser, so also verify that the pinned commit contains
-the parser changes required by the queries. The `a4c6939` pin includes generic
-type parameters and explicit `::<T>` applications, as well as methods inside structs.
+the parser changes required by the queries. The current grammar supports ordinary generic library structs such as
+`ArcPtr`/`ArcSpan`/`WeakPtr`/`WeakSpan`, generic type parameters, explicit `::<T>`
+applications, methods inside structs, and checked `intrinsic` declarations.
 
 The extension is not published in Zed's registry yet. A future registry entry
 can point to this repository with `path = "editors/zed"`; see the
@@ -153,12 +154,13 @@ Queries highlight the new syntax and include structs in the outline; semantic te
 cover inferred error sets and match-payload navigation/completion. Rebuild the language
 server and reinstall the dev extension together. No new editor smoke test was run.
 
-The ownership grammar adds inherent `impl` methods, `Arc<T>`, `Weak<T>`, and
-`Option<T>`, and removes the legacy cleanup statement. Parser, compiler, query,
-and recovery tests cover the updated syntax. Reinstall the dev extension after
+The ownership grammar supports methods inside `struct`, single-value
+`ArcPtr<T>`/`WeakPtr<T>` handles, and sequence `ArcSpan<T>`/`WeakSpan<T>` handles.
+Optional values use `T | None`. Parser, compiler, query, and recovery tests cover
+the updated syntax. Reinstall the dev extension after
 updating so the grammar and queries stay in sync.
 
 Current queries highlight all declaration and control keywords, label top-level
 structs and aliases with `struct`/`type` in the outline, and expose struct bodies
 through Zed's class text objects. Query tests cover these captures, including
-`Result`, inference holes, `match`, and `impl`.
+`Result`, inference holes, `match`, and `struct`.

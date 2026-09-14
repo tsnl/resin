@@ -1,6 +1,6 @@
 export { main, failure };
 
-import { "$/status.resin" };
+import { "$/string.resin", "$/status.resin" };
 
 struct DivideByZero {};
 struct NegativeInput { value: int };

@@ -154,6 +154,7 @@ fn unwrapping_none_traps_before_following_side_effects() {
     for value in ["absent", "None"] {
         let output = run(&format!(
             r#"
+            import {{ "$/string.resin" }};
             def main() -> int = {{
                 var absent: int | None; absent := None;
                 var value: int; value := {value}!;
@@ -176,7 +177,7 @@ fn optional_patterns_and_unwrap_are_checked() {
         "def f(value: int) -> int = { value! };",
         "struct E {}; def f(r: Result<int, E>) -> int = { r! };",
         "struct A {}; struct B {}; def f(o: Ptr<A> | None) -> Ptr<A | B> = { o! };",
-        "def f(o: Span<int> | None) -> Span<int | None> = { o! };",
+        "struct Span<T> { data: Ptr<T>, length: ulong }; def f(o: Span<int> | None) -> Span<int | None> = { o! };",
         "def f(x: int | None) = { match (x) { int(n) => {}, None => {}, None => {} } };",
         "type Both = int | bool; def f(x: Both) = { match (x) { Both(v) => {} } };",
     ] {

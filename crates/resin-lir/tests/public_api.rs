@@ -135,11 +135,25 @@ fn failed_functions_keep_their_own_bindings_cleanup_and_error_origins() {
                 name: owner.clone(),
                 init: Term {
                     span: owner.span,
-                    ty: Type::Arc {
-                        pointee: Box::new(Type::Int32),
-                    },
-                    kind: TermKind::ArcNew {
-                        value: Box::new(constant(Constant::Int32 { value: 7 }, Type::Int32)),
+                    ty: Type::StrongOwner,
+                    kind: TermKind::Unwrap {
+                        value: Box::new(Term {
+                            span: owner.span,
+                            ty: Type::Union {
+                                variants: vec![Type::None, Type::StrongOwner],
+                            },
+                            kind: TermKind::Intrinsic {
+                                op: resin_types::Intrinsic::OwnerAllocate,
+                                type_args: vec![Type::Int32],
+                                args: resin_hir::Arguments {
+                                    values: vec![
+                                        constant(Constant::UInt64 { value: 1 }, Type::UInt64),
+                                        constant(Constant::Int32 { value: 7 }, Type::Int32),
+                                    ],
+                                    params: vec![Type::UInt64, Type::Int32],
+                                },
+                            },
+                        }),
                     },
                 },
             }],
@@ -327,6 +341,8 @@ fn invalid_nominal_type_expressions_report_errors_before_storage_lowering() {
     ] {
         let mut tree = conditional();
         tree.types.push(resin_hir::TypeDefinition {
+            gpu_projection: None,
+            gpu_pipeline: None,
             type_params: vec![],
             name: "Invalid".into(),
             body,

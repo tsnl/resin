@@ -40,24 +40,6 @@ struct Specialization<'a, 'source> {
     span: Span,
 }
 
-// Mirror address provenance while the concrete tree still exposes its places.
-// A method taking Ptr<T> must never turn a field in GPU storage into a raw pointer.
-fn gpu_place(term: &concrete::Term) -> bool {
-    match &term.kind {
-        concrete::TermKind::Deref { pointer } => matches!(pointer.ty, Ty::GpuPointer { .. }),
-        concrete::TermKind::Field { base, .. } => {
-            let mut gpu = gpu_place(base);
-            let mut ty = &base.ty;
-            while let Some(pointee) = ty.deref_target() {
-                gpu = matches!(ty, Ty::GpuPointer { .. });
-                ty = pointee;
-            }
-            gpu
-        }
-        _ => false,
-    }
-}
-
 impl Specialization<'_, '_> {
     fn ty(&mut self, source: &resin_hir::Type) -> Result<Ty, Error> {
         self.substitution
@@ -323,8 +305,6 @@ impl Specialization<'_, '_> {
             resin_hir::ReceiverConversion::Value => concrete::ReceiverConversion::Value,
             resin_hir::ReceiverConversion::Address => concrete::ReceiverConversion::Address,
             resin_hir::ReceiverConversion::Load => concrete::ReceiverConversion::Load,
-            resin_hir::ReceiverConversion::ArcAddress => concrete::ReceiverConversion::ArcAddress,
-            resin_hir::ReceiverConversion::ArcLoad => concrete::ReceiverConversion::ArcLoad,
         }
     }
 
@@ -507,20 +487,25 @@ impl Specialization<'_, '_> {
         if fields.len() != expected.len() {
             return Err(self.instance_error("record arguments do not match the parameter fields"));
         }
-        let mut names = std::collections::BTreeSet::new();
+        let mut seen = vec![false; expected.len()];
         let mut completed = Vec::with_capacity(fields.len());
         for (name, source) in fields {
-            let Some(field) = expected.iter().find(|field| field.name == name.val) else {
+            let Some((index, field)) = expected
+                .iter()
+                .enumerate()
+                .find(|(_, field)| field.name == name.val)
+            else {
                 return Err(
                     self.instance_error(format!("record parameter has no field {}", name.val))
                 );
             };
-            if !names.insert(name.val.clone()) {
+            if seen[index] {
                 return Err(self.instance_error(format!("duplicate record argument {}", name.val)));
             }
+            seen[index] = true;
             let value = self.term(source)?;
             self.require_assignable(&value.ty, &field.ty)?;
-            completed.push((name.clone(), value));
+            completed.push(concrete::RecordInitializer { index, value });
         }
         Ok(concrete::TermKind::Record { fields: completed })
     }
@@ -557,31 +542,15 @@ impl Specialization<'_, '_> {
         let from = self.ty(&source.ty)?;
         let conversion = if &from == to {
             ReceiverConversion::Value
-        } else if matches!(to, Ty::Pointer { pointee } | Ty::GpuPointer { pointee } if **pointee == from)
-        {
+        } else if matches!(to, Ty::Pointer { pointee } if **pointee == from) {
             ReceiverConversion::Address
-        } else if matches!(&from, Ty::Pointer { pointee } | Ty::GpuPointer { pointee } if pointee.as_ref() == to)
-        {
+        } else if matches!(&from, Ty::Pointer { pointee } if pointee.as_ref() == to) {
             ReceiverConversion::Load
-        } else if matches!(&from, Ty::Arc { pointee } if to == &Ty::Pointer { pointee: pointee.clone() })
-        {
-            ReceiverConversion::ArcAddress
-        } else if matches!(&from, Ty::Arc { pointee } if pointee.as_ref() == to) {
-            ReceiverConversion::ArcLoad
         } else {
             return Err(self.instance_error("method receiver does not match the first parameter"));
         };
         let argument = if conversion == ReceiverConversion::Address {
-            let argument = self.place(source)?;
-            let gpu = gpu_place(&argument);
-            if gpu != matches!(to, Ty::GpuPointer { .. }) {
-                return Err(self.instance_error(if gpu {
-                    "GPU storage requires a GpuPtr receiver; it cannot be borrowed as a raw Ptr"
-                } else {
-                    "a GpuPtr receiver requires an address in GPU storage"
-                }));
-            }
-            argument
+            self.place(source)?
         } else {
             self.boxed(source)?
         };
@@ -705,6 +674,57 @@ impl Specialization<'_, '_> {
         })
     }
 
+    fn intrinsic(
+        &mut self,
+        op: Intrinsic,
+        parameters: &[resin_hir::Type],
+        args: &resin_hir::Arguments,
+    ) -> Result<concrete::TermKind, Error> {
+        if matches!(
+            op,
+            Intrinsic::GpuPointerProjection
+                | Intrinsic::GpuSequenceProjection
+                | Intrinsic::GpuPipelineType
+        ) {
+            return Err(self.instance_error("GPU projection and pipeline type declarations are contracts for dispatch and draw; they cannot be called directly"));
+        }
+        let type_args = parameters
+            .iter()
+            .map(|ty| self.ty(ty))
+            .collect::<Result<Vec<_>, _>>()?;
+        if matches!(
+            op,
+            Intrinsic::GpuElementLayout
+                | Intrinsic::GpuViewIndex
+                | Intrinsic::GpuViewRange
+                | Intrinsic::GpuViewLoad
+                | Intrinsic::GpuViewStore
+                | Intrinsic::GpuViewReplace
+                | Intrinsic::GpuViewCopyTo
+        ) {
+            let [element] = type_args.as_slice() else {
+                return Err(self.instance_error("GPU access requires exactly one element type"));
+            };
+            if !element.gpu_element(self.instances.typer().definitions()) {
+                return Err(self.instance_error(format!(
+                    "GPU element {} must have plain shared storage",
+                    resin_types::format_type(element, self.instances.typer().definitions())
+                )));
+            }
+        }
+        let args = self.arguments(args)?;
+        if op == Intrinsic::PointerBytes
+            && !matches!(args.params.first(), Some(Ty::Pointer { pointee }) if pointee.is_numeric())
+        {
+            return Err(self.instance_error("byte views require numeric elements"));
+        }
+        Ok(concrete::TermKind::Intrinsic {
+            op,
+            type_args,
+            args,
+        })
+    }
+
     fn kind(
         &mut self,
         source: &resin_hir::TermKind,
@@ -771,10 +791,11 @@ impl Specialization<'_, '_> {
             resin_hir::TermKind::Array { elems } => self.array(elems, expected)?,
             resin_hir::TermKind::Builtin { name, args } => self.builtin(name, args, expected)?,
             resin_hir::TermKind::Call { func, args } => self.call(func, args, expected)?,
-            resin_hir::TermKind::Intrinsic { op, args } => concrete::TermKind::Intrinsic {
-                op: *op,
-                args: self.arguments(args)?,
-            },
+            resin_hir::TermKind::Intrinsic {
+                op,
+                type_args,
+                args,
+            } => self.intrinsic(*op, type_args, args)?,
             resin_hir::TermKind::Adapt { conversion, arg } => concrete::TermKind::Adapt {
                 conversion: self.receiver(*conversion),
                 arg: if *conversion == resin_hir::ReceiverConversion::Address {
@@ -784,19 +805,6 @@ impl Specialization<'_, '_> {
                 },
             },
             resin_hir::TermKind::Convert { arg } => self.conversion(arg, expected)?,
-            resin_hir::TermKind::ArcNew { value } => concrete::TermKind::ArcNew {
-                value: self.boxed(value)?,
-            },
-            resin_hir::TermKind::GpuNew { allocator, args } => concrete::TermKind::GpuNew {
-                allocator: self.host_bridge(*allocator)?,
-                args: self.arguments(args)?,
-            },
-            resin_hir::TermKind::GpuAllocate { allocator, args } => {
-                concrete::TermKind::GpuAllocate {
-                    allocator: self.host_bridge(*allocator)?,
-                    args: self.arguments(args)?,
-                }
-            }
             resin_hir::TermKind::GpuPipelineCreate {
                 factory,
                 shaders,
@@ -814,15 +822,33 @@ impl Specialization<'_, '_> {
                 allocator,
                 record,
                 args,
-            } => concrete::TermKind::GpuPipelineDispatch {
-                context: self.host_bridge(*context)?,
-                allocator: allocator.map(|id| self.host_bridge(id)).transpose()?,
-                record: self.host_bridge(*record)?,
-                args: self.arguments(args)?,
-            },
-            resin_hir::TermKind::WeakEmpty { pointee } => concrete::TermKind::WeakEmpty {
-                pointee: self.ty(pointee)?,
-            },
+            } => {
+                let args = self.arguments(args)?;
+                let pipeline = resin_types::gpu_pipeline_contract(
+                    self.instances.typer().definitions(),
+                    &args.values[1].ty,
+                )
+                .map_err(|message| self.instance_error(message))?;
+                let projection = if pipeline.root == Ty::None {
+                    None
+                } else {
+                    Some(
+                        resin_types::gpu_projection_plan(
+                            self.instances.typer().definitions(),
+                            &args.values[2].ty,
+                            &pipeline.root,
+                        )
+                        .map_err(|message| self.instance_error(message))?,
+                    )
+                };
+                concrete::TermKind::GpuPipelineDispatch {
+                    projection,
+                    context: self.host_bridge(*context)?,
+                    allocator: allocator.map(|id| self.host_bridge(id)).transpose()?,
+                    record: self.host_bridge(*record)?,
+                    args,
+                }
+            }
             resin_hir::TermKind::Result { failure, arg } => concrete::TermKind::Result {
                 failure: *failure,
                 arg: self.boxed(arg)?,

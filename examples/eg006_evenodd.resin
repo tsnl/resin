@@ -1,5 +1,7 @@
 export { main };
 
+import { "$/string.resin" };
+
 def even(n: int) -> int = {
 	if (n == 0) {
 		1

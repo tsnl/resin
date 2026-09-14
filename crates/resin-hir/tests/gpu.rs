@@ -1,5 +1,4 @@
-use resin_hir::Type;
-use resin_hir::{Module, TermKind};
+use resin_hir::{Module, TermKind, Type};
 
 fn generate(source: &str) -> Result<Module, resin_hir::GenerateError> {
     let document = resin_cst::Document::reparse(source.into(), None);
@@ -7,189 +6,89 @@ fn generate(source: &str) -> Result<Module, resin_hir::GenerateError> {
     resin_hir::generate(&ast)
 }
 
-const ALLOCATOR: &str = r#"
+// These names deliberately differ from the library. Contracts are explicit
+// declarations; no compiler type or method is selected from a public spelling.
+const PIPELINES: &str = r#"
 struct Failure {};
+struct DeviceReference<T> { allocation: GpuView };
+struct HostRange<T> { data: Ptr<T>, length: ulong };
+struct DeviceRange<T> { data: DeviceReference<T>, length: ulong };
+intrinsic "gpu_pointer_projection" def pointer_projection<T>(value: DeviceReference<T>) -> Ptr<T>;
+intrinsic "gpu_span_projection" def span_projection<T>(value: DeviceRange<T>) -> HostRange<T>;
+struct ComputeProgram<Root, Owner> { contract: GpuPipelineContract };
+struct GraphicsProgram<Root, Owner> { contract: GpuPipelineContract };
+intrinsic "gpu_compute_pipeline_type" def compute_type<Root, Owner>(contract: GpuPipelineContract) -> ComputeProgram<Root, Owner>;
+intrinsic "gpu_graphics_pipeline_type" def graphics_type<Root, Owner>(contract: GpuPipelineContract) -> GraphicsProgram<Root, Owner>;
 struct Device {
-    def new() -> Device = { Device {} };
-    // PIPELINE_METHODS
     @gpu_allocator
-    def malloc(self: Device, bytes: ulong, alignment: ulong, memory: int) -> Result<GpuPtr<ubyte>, Failure> = { err(Failure {}) };
+    def malloc(self: Device, bytes: ulong, alignment: ulong, memory: int) -> Result<GpuView, Failure> = { err(Failure {}) };
+    @gpu_compute_pipeline
+    def compute(self: Device, code: { data: Ptr<ubyte>, length: ulong }) -> Result<PipelineOwner, Failure> = { err(Failure {}) };
+    @gpu_graphics_pipeline
+    def graphics(self: Device, vertex: { data: Ptr<ubyte>, length: ulong }, fragment: { data: Ptr<ubyte>, length: ulong }) -> Result<PipelineOwner, Failure> = { err(Failure {}) };
 };
-
+struct PipelineOwner { owner: StrongOwner,
+    @gpu_pipeline_context
+    def context(self: PipelineOwner) -> Device = { Device {} };
+};
+struct Commands {
+    @gpu_dispatch
+    def dispatch(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments, x: uint, y: uint, z: uint) -> Result<(), Failure> = { ok(()) };
+    @gpu_draw
+    def draw(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments | None, count: uint) -> Result<(), Failure> = { ok(()) };
+};
+struct Params { scale: float32, values: HostRange<int> };
+@compute_shader def kernel(index: ulong, root: Ptr<Params>) = {};
 "#;
 
-#[test]
-fn gpu_new_infers_element_from_context_and_keeps_associated_constructor() {
-    let source = format!(
-        "{ALLOCATOR}\ndef main() -> Result<GpuPtr<int>, Failure> = {{ var gpu = Device.new(); gpu.new(42) }};"
-    );
-    let module = generate(&source).unwrap();
-    let function = module
-        .functions
-        .iter()
-        .find(|function| function.name.as_ref() == "main")
-        .unwrap();
-    let TermKind::Block { tail, .. } = &function.body.as_ref().unwrap().kind else {
-        panic!()
-    };
-    let TermKind::GpuNew { args, .. } = &tail.kind else {
-        panic!()
-    };
-    assert_eq!(args.values[1].ty, Type::Int32);
+fn pipelines(source: &str) -> Result<Module, resin_hir::GenerateError> {
+    generate(&format!("{PIPELINES}\n{source}"))
 }
 
 #[test]
-fn explicit_gpu_allocation_and_slicing_keep_element_and_owner_types() {
-    let source = format!(
-        "{ALLOCATOR}\ndef main() -> Result<GpuPtr<int>, Failure> = {{ var gpu = Device.new(); var values = GpuSpan<int>.allocate(gpu, 8)?; var part = values.slice(2, 3).read_only(); ok(part.at(1)) }};"
-    );
-    generate(&source).unwrap();
-    generate(&format!("{ALLOCATOR}\ndef main() -> Result<GpuPtr<int>, Failure> = {{ GpuPtr<int>.new(Device.new(), 42) }};")).unwrap();
+fn former_gpu_type_names_are_ordinary_generic_declarations() {
+    generate(r#"
+        struct GpuPtr<T> { value: T, def new(value: T) -> GpuPtr<T> = { GpuPtr<T> { value = value } }; };
+        struct GpuSpan<T> { value: T };
+        struct GpuComputePipeline<T> { value: T };
+        struct GpuGraphicsPipeline<T> { value: T };
+        def main() -> int = { GpuPtr<int>.new(42).value };
+    "#).unwrap();
 }
 
 #[test]
-fn gpu_field_addresses_retain_gpu_pointer_type() {
-    let module = generate("struct Item { value: int }; def field(p: GpuPtr<Item>) -> GpuPtr<int> = { &p.value }; def explicit(p: GpuPtr<Item>) -> GpuPtr<int> = { &p.*.value };").unwrap();
-    assert_eq!(module.functions.len(), 2);
+fn allocator_registration_does_not_synthesize_constructor_methods() {
+    let error = pipelines("def main(device: Device) = { device.new(42); };").unwrap_err();
     assert!(
-        generate(
-            "struct Item { value: int }; def field(p: GpuPtr<Item>) -> Ptr<int> = { &p.value };"
-        )
-        .is_err()
+        error.to_string().contains("unknown method `new`"),
+        "{error}"
     );
 }
 
 #[test]
-fn nested_host_indirection_preserves_gpu_field_addresses_but_host_metadata_stays_raw() {
-    generate(
+fn opaque_gpu_views_cannot_be_dereferenced_or_cast_to_raw_addresses() {
+    for (body, expected) in [
+        ("value.*", "dereference requires a pointer"),
+        ("Ptr<int>(value)", "TypeMismatch"),
+        ("ulong(value)", "TypeMismatch"),
+        ("value.data", "field access requires a record"),
+    ] {
+        let error = generate(&format!("def invalid(value: GpuView) = {{ {body}; }};")).unwrap_err();
+        assert!(error.to_string().contains(expected), "{body}: {error}");
+    }
+}
+
+#[test]
+fn dispatch_infers_source_host_fields_from_the_pipeline_root() {
+    let module = pipelines(
         r#"
-        struct Item { value: int };
-        def raw(p: Ptr<GpuPtr<Item>>) -> GpuPtr<int> = { &p.value };
-        def shared(p: Arc<GpuPtr<Item>>) -> GpuPtr<int> = { &p.value };
-        def mixed(p: Ptr<Arc<GpuPtr<Item>>>) -> GpuPtr<int> = { &p.value };
-        def raw_metadata(p: Ptr<GpuPtr<Item>>) -> Ptr<GpuPtr<Item>> = { &p.* };
-        def shared_metadata(p: Arc<GpuPtr<Item>>) -> Ptr<GpuPtr<Item>> = { &p.* };
+        def main(values: DeviceRange<int>) -> Result<(), Failure> = {
+            var pipeline = Device {}.compute(kernel)?;
+            Commands {}.dispatch(pipeline, { scale = 2.0, values = values }, 1, 1, 1)
+        };
     "#,
     )
     .unwrap();
-    assert!(generate("struct Item { value: int }; def erase(p: Ptr<GpuPtr<Item>>) -> Ptr<int> = { &p.value };").is_err());
-}
-
-#[test]
-fn gpu_method_receivers_keep_the_storage_category() {
-    let types = r#"
-        struct Item { value: int,
-            def gpu(self: GpuPtr<Item>) -> int = { self.value };
-            def host(self: Ptr<Item>) -> int = { self.value };
-            def value(self: Item) -> int = { self.value };
-        };
-        struct Outer { item: Item };
-
-    "#;
-    generate(&format!("{types} def gpu(p: GpuPtr<Outer>) -> int = {{ p.item.gpu() }}; def copied(p: GpuPtr<Item>) -> int = {{ p.value() }}; def replaced(p: GpuPtr<int>) -> int = {{ p.replace(4_i) }};")).unwrap();
-    let error = generate(&format!(
-        "{types} def erase(p: GpuPtr<Outer>) -> int = {{ p.item.host() }};"
-    ))
-    .unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("cannot be borrowed as a raw Ptr"),
-        "{error}"
-    );
-    assert!(
-        generate(&format!(
-            "{types} def forge(item: Item) -> int = {{ item.gpu() }};"
-        ))
-        .is_err()
-    );
-}
-
-#[test]
-fn gpu_pointer_casts_and_forged_gpu_views_are_rejected() {
-    assert!(generate("def erase(p: GpuPtr<int>) -> Ptr<int> = { Ptr<int>(p) };").is_err());
-    assert!(generate("def forge(p: Ptr<int>) -> GpuPtr<int> = { GpuPtr<int>(p) };").is_err());
-    assert!(generate("def forge(p: GpuPtr<int>) -> GpuSpan<int> = { GpuSpan<int> { data = p, length = 12_ul } };").is_err());
-}
-
-#[test]
-fn allocation_rejects_managed_elements_and_ordinary_new_is_unchanged() {
-    assert!(
-        generate(&format!(
-            "{ALLOCATOR}\ndef main() -> _ = {{ Device.new().new(Arc<int>(1_i)) }};"
-        ))
-        .is_err()
-    );
-    generate("struct Other { def new(self: Other, value: int) -> int = { value }; };  def main() -> int = { Other {}.new(42) };").unwrap();
-}
-
-#[test]
-fn native_gpu_allocator_accepts_nominal_arc_owner() {
-    generate("extern type Native; struct Owner { handle: Ptr<Native> }; def allocate(gpu: Arc<Owner>) -> _ = { GpuPtr<ubyte>.allocate_native(gpu.handle, gpu, 8, 4, 0) };").unwrap();
-}
-
-#[test]
-fn gpu_new_defaults_unconstrained_integer_elements_to_long() {
-    let module = generate(&format!(
-        "{ALLOCATOR}\ndef main() -> _ = {{ Device.new().new(42) }};"
-    ))
-    .unwrap();
-    let main = module
-        .functions
-        .iter()
-        .find(|function| function.name.as_ref() == "main")
-        .unwrap();
-    let Type::Result { value, .. } = &main.signature.result.ty else {
-        panic!()
-    };
-    assert_eq!(
-        **value,
-        Type::GpuPointer {
-            pointee: Box::new(Type::Int64)
-        }
-    );
-}
-
-const SHADER: &str = "struct Params { scale: float32, values: Span<int> }; @compute_shader def kernel(index: ulong, root: Ptr<Params>) = {};";
-
-const PIPELINES: &str = r#"
-struct PipelineOwner { gpu: Device,
-    @gpu_pipeline_context
-    def context(self: Arc<PipelineOwner>) -> Device = { self.gpu };
-};
-
-
-struct Commands {
-    @gpu_dispatch
-    def dispatch(self: Commands, pipeline: Arc<PipelineOwner>, root: GpuArguments, x: uint, y: uint, z: uint) -> Result<(), Failure> = { ok(()) };
-    @gpu_draw
-    def draw(self: Commands, pipeline: Arc<PipelineOwner>, root: GpuArguments | None, count: uint) -> Result<(), Failure> = { ok(()) };
-};
-
-"#;
-
-const PIPELINE_METHODS: &str = r#"
-    @gpu_compute_pipeline
-    def compute(self: Device, code: Span<ubyte>) -> Result<Arc<PipelineOwner>, Failure> = {
-        ok(Arc<PipelineOwner>(PipelineOwner { gpu = self }))
-    };
-    @gpu_graphics_pipeline
-    def graphics(self: Device, vertex: Span<ubyte>, fragment: Span<ubyte>) -> Result<Arc<PipelineOwner>, Failure> = {
-        ok(Arc<PipelineOwner>(PipelineOwner { gpu = self }))
-    };"#;
-
-fn pipeline_source(source: &str) -> String {
-    let allocator = ALLOCATOR.replace("// PIPELINE_METHODS", PIPELINE_METHODS);
-    format!("{allocator} {PIPELINES} {source}")
-}
-
-fn pipelines(source: &str) -> Result<Module, resin_hir::GenerateError> {
-    generate(&pipeline_source(source))
-}
-
-#[test]
-fn dispatch_infers_host_fields_from_the_pipeline_root() {
-    let module = pipelines(&format!("{SHADER} def main(values: GpuSpan<int>) -> Result<(), Failure> = {{ var pipeline = Device.new().compute(kernel)?; Commands {{}}.dispatch(pipeline, {{ scale = 2.0, values = values }}, 1, 1, 1) }};")).unwrap();
     let main = module
         .functions
         .iter()
@@ -209,223 +108,101 @@ fn dispatch_infers_host_fields_from_the_pipeline_root() {
         panic!()
     };
     assert_eq!(fields[0].ty, Type::Float32);
-    assert_eq!(
-        fields[1].ty,
-        Type::GpuSpan {
-            element: Box::new(Type::Int32)
-        }
-    );
+    let Type::Defined { arguments, .. } = &fields[1].ty else {
+        panic!()
+    };
+    assert_eq!(arguments, &[Type::Int32]);
     assert!(module.shaders.values().all(|entry| entry.embedded));
 }
 
 #[test]
-fn pipeline_types_cross_functions_and_dispatch_accepts_precomputed_arguments() {
-    pipelines(&format!("{SHADER}
-        def create(gpu: Device) -> Result<GpuComputePipeline<Params, Arc<PipelineOwner>>, Failure> = {{ gpu.compute(kernel) }};
-        def dispatch(pipeline: GpuComputePipeline<Params, Arc<PipelineOwner>>, values: GpuSpan<int>) -> Result<(), Failure> = {{
-            var args = (pipeline, {{ scale = 1.0_f, values = values }}, 1_ui, 1_ui, 1_ui);
-            Commands {{}}.dispatch(args.0, args.1, args.2, args.3, args.4)
-        }};
-        def associated(gpu: Device) -> _ = {{ Device.compute(gpu, kernel) }};
-    ")).unwrap();
+fn pipeline_types_cross_functions_and_accept_precomputed_arguments() {
+    pipelines(r#"
+        def create(gpu: Device) -> Result<ComputeProgram<Params, PipelineOwner>, Failure> = { gpu.compute(kernel) };
+        def dispatch(pipeline: ComputeProgram<Params, PipelineOwner>, values: DeviceRange<int>) -> Result<(), Failure> = {
+            var arguments = (pipeline, { scale = 1.0_f, values = values }, 1_ui, 1_ui, 1_ui);
+            Commands {}.dispatch(arguments.0, arguments.1, arguments.2, arguments.3, arguments.4)
+        };
+        def associated(gpu: Device) -> _ = { Device.compute(gpu, kernel) };
+    "#).unwrap();
 }
 
 #[test]
-fn creation_rejects_bytecode_runtime_aliases_and_undecorated_functions() {
-    for expression in [
-        "gpu.compute(kernel.spirv)",
-        "gpu.compute(alias)",
-        "gpu.compute(ordinary)",
-        "gpu.compute(choose())",
+fn creation_requires_direct_decorated_shader_declarations() {
+    for (expression, expected) in [
+        (
+            "gpu.compute(kernel.spirv)",
+            "requires shader declarations, not SPIR-V bytes",
+        ),
+        ("gpu.compute(alias)", "requires direct shader declarations"),
+        (
+            "gpu.compute(ordinary)",
+            "requires a decorated shader declaration",
+        ),
+        (
+            "gpu.compute(choose())",
+            "requires direct shader declarations",
+        ),
     ] {
-        let source = format!(
-            "{SHADER} def ordinary(index: ulong, root: Ptr<Params>) = {{}};
+        let error = pipelines(&format!(
+            r#"
+            def ordinary(index: ulong, root: Ptr<Params>) = {{}};
             def choose() -> (ulong, Ptr<Params>) -> () = {{ kernel }};
-            def main(gpu: Device) -> _ = {{ var alias = kernel; {expression} }};"
-        );
-        assert!(pipelines(&source).is_err(), "{expression}");
-    }
-}
-
-#[test]
-fn dispatch_rejects_raw_pointers_and_incompatible_pipeline_roots() {
-    for tail in [
-        "Commands {}.dispatch(pipeline, { scale = 1.0_f, values = raw }, 1, 1, 1)",
-        "Commands {}.dispatch(pipeline, { scale = 1.0_f, wrong = values }, 1, 1, 1)",
-        "Commands {}.draw(pipeline, { scale = 1.0_f, values = values }, 3)",
-        "Commands {}.dispatch(pipeline, None, 1, 1, 1)",
-    ] {
-        assert!(pipelines(&format!("{SHADER} def main(gpu: Device, values: GpuSpan<int>, raw: Span<int>) -> _ = {{ var pipeline = gpu.compute(kernel)?; {tail} }};")).is_err(), "{tail}");
-    }
-    assert!(pipelines(&format!("{SHADER} def create(gpu: Device) -> Result<GpuComputePipeline<int, Arc<PipelineOwner>>, Failure> = {{ gpu.compute(kernel) }};")).is_err());
-}
-
-#[test]
-fn standalone_projection_and_untyped_pipeline_owners_cannot_dispatch() {
-    assert!(pipelines(&format!("{SHADER} def main(gpu: Device, values: GpuSpan<int>) -> _ = {{ kernel.project(gpu, {{ scale = 2.0_f, values = values }}) }};")).is_err());
-    assert!(pipelines("def main(owner: Arc<PipelineOwner>, arguments: GpuArguments) -> _ = { Commands {}.dispatch(owner, arguments, 1, 1, 1) };").is_err());
-    assert!(pipelines("def forge(owner: Arc<PipelineOwner>) -> GpuComputePipeline<int, Arc<PipelineOwner>> = { GpuComputePipeline<int, Arc<PipelineOwner>>(owner) };").is_err());
-}
-
-#[test]
-fn native_bridge_signatures_cannot_escape_through_method_references() {
-    for tail in [
-        "var make = Device.compute; make(gpu, kernel.spirv)",
-        "(Device.compute)(gpu, kernel.spirv)",
-        "var make = gpu.compute; make(kernel.spirv)",
-        "var record = Commands.dispatch; record(Commands {}, owner, arguments, 1, 1, 1)",
-        "(Commands.dispatch)(Commands {}, owner, arguments, 1, 1, 1)",
-    ] {
-        assert!(pipelines(&format!("{SHADER} def main(gpu: Device, owner: Arc<PipelineOwner>, arguments: GpuArguments) -> _ = {{ {tail} }};")).is_err(), "{tail}");
-    }
-}
-
-#[test]
-fn gpu_bridge_decorators_require_one_valid_native_signature() {
-    for source in [
-        "struct Device { @gpu_compute_pipeline def create(self: Device, shader: int) -> int = { 0_i }; }; ",
-        "struct Device { @gpu_dispatch def dispatch(self: Device) = {}; }; ",
-        "struct Device { @gpu_pipeline_context def context(self: Device) -> Device = { self }; }; ",
-        "struct Device { @gpu_compute_pipeline @gpu_graphics_pipeline def create(self: Device) = {}; }; ",
-        "@gpu_compute_pipeline def create() = {};",
-    ] {
-        assert!(generate(source).is_err(), "{source}");
-    }
-    let source = pipeline_source("").replace(
-        "struct PipelineOwner { gpu: Device,",
-        "struct PipelineOwner { gpu: Device, @gpu_pipeline_context def again(self: Arc<PipelineOwner>) -> Device = { self.gpu };",
-    );
-    let error = generate(&source).unwrap_err();
-    assert!(error.to_string().contains("only one"), "{error}");
-}
-
-#[test]
-fn pipeline_creation_rejects_pointer_graph_roots() {
-    let graph = "struct Node { next: Ptr<int> }; struct Root { node: Ptr<Node> }; @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {}; def main(gpu: Device) -> _ = { gpu.compute(kernel) };";
-    assert!(pipelines(graph).is_err());
-}
-
-#[test]
-fn gpu_allocation_builtins_accept_explicit_tuple_members() {
-    generate(&format!("{ALLOCATOR} def main() -> Result<GpuPtr<int>, Failure> = {{ var gpu = Device.new(); var allocation = (gpu, 4_ul); var values = GpuSpan<int>.allocate(allocation.0, allocation.1)?; var initialization = (gpu, 42_i); GpuPtr<int>.new(initialization.0, initialization.1) }};")).unwrap();
-}
-
-#[test]
-fn generic_gpu_constructor_completion_and_hover_describe_inference() {
-    use resin_source::Source;
-    use std::{collections::BTreeMap, sync::Arc};
-
-    let text = format!(
-        "{ALLOCATOR} def main(gpu: Device) -> Result<(), Failure> = {{ gpu.new(42)?; GpuPtr<int>.new(gpu, 7)?; GpuSpan<int>.allocate(gpu, 3)?; ok(()) }};"
-    );
-    let source = Source::new("gpu.resin", text.clone());
-    let document = Arc::new(resin_cst::Document::reparse(text.clone(), None));
-    let file = resin_ast::generate(&document).unwrap();
-    let analysis = resin_hir::analyze_program(&resin_ast::Program {
-        modules: vec![resin_ast::SourceModule {
-            source: source.clone(),
-            file,
-            imports: vec![],
-        }],
-    });
-    assert!(
-        analysis.diagnostics.is_empty(),
-        "{:?}",
-        analysis.diagnostics
-    );
-    let documents = BTreeMap::from([(source.clone(), document)]);
-    for (call, name, signature) in [
-        (
-            "gpu.new(",
-            "new",
-            "new: (value: T) -> Result<GpuPtr<T>, Failure>",
-        ),
-        (
-            "GpuPtr<int>.new(",
-            "new",
-            "new: (gpu: _, value: int) -> Result<GpuPtr<int>, _>",
-        ),
-        (
-            "GpuSpan<int>.allocate(",
-            "allocate",
-            "allocate: (gpu: _, count: ulong) -> Result<GpuSpan<int>, _>",
-        ),
-    ] {
-        let offset = text.find(call).unwrap() + call.rfind('.').unwrap() + 1;
-        let completion = analysis
-            .semantics
-            .completions(&documents, &source, offset)
-            .into_iter()
-            .find(|item| item.name == name)
-            .unwrap();
-        assert_eq!(completion.detail, signature);
-        let hover = analysis
-            .semantics
-            .hover(&documents, &source, offset)
-            .unwrap();
-        assert_eq!(hover.text, signature);
+            def main(gpu: Device) -> _ = {{ var alias = kernel; {expression} }};
+        "#
+        ))
+        .unwrap_err();
         assert!(
-            analysis
-                .semantics
-                .definition(&documents, &source, offset)
-                .is_none()
+            error.to_string().contains(expected),
+            "{expression}: {error}"
         );
     }
 }
 
 #[test]
-fn generic_gpu_constructor_completion_recovers_after_a_dot() {
-    use resin_source::Source;
-    use std::{collections::BTreeMap, sync::Arc};
-
-    for (receiver, expected) in [
-        ("gpu", "new"),
-        ("GpuPtr<int>", "new"),
-        ("GpuSpan<int>", "allocate"),
+fn dispatch_rejects_raw_views_wrong_fields_and_incompatible_stages() {
+    for (tail, expected) in [
+        (
+            "Commands {}.dispatch(pipeline, { scale = 1.0_f, values = raw }, 1, 1, 1)",
+            "incompatible inferred types",
+        ),
+        (
+            "Commands {}.dispatch(pipeline, { scale = 1.0_f, wrong = values }, 1, 1, 1)",
+            "missing field `values`",
+        ),
+        (
+            "Commands {}.draw(pipeline, { scale = 1.0_f, values = values }, 3)",
+            "draw requires a graphics pipeline",
+        ),
+        (
+            "Commands {}.dispatch(pipeline, None, 1, 1, 1)",
+            "incompatible inferred types",
+        ),
     ] {
-        let text = format!("{ALLOCATOR} def main(gpu: Device) = {{ {receiver}.");
-        let source = Source::new("gpu.resin", text.clone());
-        let document = Arc::new(resin_cst::Document::reparse(text.clone(), None));
-        let file = resin_ast::recover(&document).file;
-        let analysis = resin_hir::analyze_program(&resin_ast::Program {
-            modules: vec![resin_ast::SourceModule {
-                source: source.clone(),
-                file,
-                imports: vec![],
-            }],
-        });
-        let documents = BTreeMap::from([(source.clone(), document)]);
-        let items = analysis
-            .semantics
-            .completions(&documents, &source, text.len());
-        assert!(
-            items.iter().any(|item| item.name == expected),
-            "{receiver}: {items:?}"
-        );
+        let error = pipelines(&format!("def main(gpu: Device, values: DeviceRange<int>, raw: HostRange<int>) -> _ = {{ var pipeline = gpu.compute(kernel)?; {tail} }};")).unwrap_err();
+        assert!(error.to_string().contains(expected), "{tail}: {error}");
     }
+    let error = pipelines("def create(gpu: Device) -> Result<ComputeProgram<int, PipelineOwner>, Failure> = { gpu.compute(kernel) };").unwrap_err();
+    assert!(error.to_string().contains("TypeMismatch"), "{error}");
 }
 
 #[test]
-fn shader_completion_does_not_expose_standalone_projection() {
-    use resin_source::Source;
-    use std::{collections::BTreeMap, sync::Arc};
-    let text = format!("{SHADER} def main() = {{ kernel.");
-    let source = Source::new("gpu.resin", text.clone());
-    let document = Arc::new(resin_cst::Document::reparse(text.clone(), None));
-    let file = resin_ast::recover(&document).file;
-    let analysis = resin_hir::analyze_program(&resin_ast::Program {
-        modules: vec![resin_ast::SourceModule {
-            source: source.clone(),
-            file,
-            imports: vec![],
-        }],
-    });
-    let documents = BTreeMap::from([(source.clone(), document)]);
-    let items = analysis
-        .semantics
-        .completions(&documents, &source, text.len());
-    assert!(
-        !items.iter().any(|item| item.name == "project"),
-        "{items:?}"
-    );
+fn native_bridges_cannot_escape_through_method_references() {
+    for (declaration, expected) in [
+        (
+            "def escape(gpu: Device) = { var factory = gpu.compute; };",
+            "unknown field `compute`",
+        ),
+        (
+            "def escape() = { var factory = Device.compute; };",
+            "only source methods can be referenced as function values",
+        ),
+        (
+            "def escape(commands: Commands) = { var dispatch = commands.dispatch; };",
+            "unknown field `dispatch`",
+        ),
+    ] {
+        let error = pipelines(declaration).unwrap_err();
+        assert!(error.to_string().contains(expected), "{error}");
+    }
 }

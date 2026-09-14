@@ -1,6 +1,6 @@
 export { Window, ResinWindow, ButtonState, KeyCodes, MouseButtons };
 
-import { "status.resin" };
+import { "status.resin", "shared.resin", "string.resin" };
 
 struct ButtonState { down: bool, pressed: bool, released: bool };
 
@@ -12,27 +12,36 @@ extern type ResinWindow;
 struct WindowOwner {
 	handle: Ptr<ResinWindow>,
 	def drop(self: Ptr<WindowOwner>) = {
-		resin_window_destroy(self.handle);
+		if (ulong(self.handle) != 0_ul) {
+			resin_window_destroy(self.handle);
+		};
+	};
+};
+
+struct Window {
+	owner: ArcPtr<WindowOwner>,
+	def native(self: Ptr<Window>) -> Ptr<ResinWindow> = {
+		self.owner.get().handle
 	};
 
 	def key_escape() -> int = {
 		256
 	};
 	def new(width: uint, height: uint, title: String) -> Result<Window, RuntimeError> = {
-		var window = Ptr<ResinWindow>(ulong(0));
-		RuntimeStatus.from_code(resin_window_create(width, height, title.bytes.data, &window))?;
-		ok(Window { handle = window })
+		var owner = ArcPtr<WindowOwner>.alloc(WindowOwner { handle = Ptr<ResinWindow>(0_ul) })?;
+		RuntimeStatus.from_code(resin_window_create(width, height, title.get().data, &owner.get().handle))?;
+		ok(Window { owner = owner })
 	};
 	def poll_events(self: Window) -> Result<(), RuntimeError> = {
-		RuntimeStatus.from_code(resin_window_poll_events(self.handle))
+		RuntimeStatus.from_code(resin_window_poll_events(self.native()))
 	};
 	def should_close(self: Window) -> bool = {
-		resin_window_should_close(self.handle) != 0
+		resin_window_should_close(self.native()) != 0
 	};
 	def set_should_close(self: Window, close: bool) -> Result<(), RuntimeError> = {
 		RuntimeStatus.from_code(
 			resin_window_set_should_close(
-				self.handle,
+				self.native(),
 				if (close) {
 					1
 				} else {
@@ -44,40 +53,40 @@ struct WindowOwner {
 	def framebuffer_size(self: Window) -> Result<(uint, uint), RuntimeError> = {
 		var width = uint(0);
 		var height = uint(0);
-		RuntimeStatus.from_code(resin_window_framebuffer_size(self.handle, &width, &height))?;
+		RuntimeStatus.from_code(resin_window_framebuffer_size(self.native(), &width, &height))?;
 		ok((width, height))
 	};
 	def set_size(self: Window, width: uint, height: uint) -> Result<(), RuntimeError> = {
-		RuntimeStatus.from_code(resin_window_set_size(self.handle, width, height))
+		RuntimeStatus.from_code(resin_window_set_size(self.native(), width, height))
 	};
 	def key_pressed(self: Window, key: int) -> bool = {
-		resin_window_key_pressed(self.handle, key) != 0
+		resin_window_key_pressed(self.native(), key) != 0
 	};
 	def key_state(self: Window, key: int) -> ButtonState = {
-		button_state(resin_window_key_state(self.handle, key))
+		button_state(resin_window_key_state(self.native(), key))
 	};
 	def mouse_button_state(self: Window, button: int) -> ButtonState = {
-		button_state(resin_window_mouse_button_state(self.handle, button))
+		button_state(resin_window_mouse_button_state(self.native(), button))
 	};
 	def cursor_position(self: Window) -> Result<(float64, float64), RuntimeError> = {
 		var x = 0.0_d;
 		var y = 0.0_d;
-		RuntimeStatus.from_code(resin_window_cursor_position(self.handle, &x, &y))?;
+		RuntimeStatus.from_code(resin_window_cursor_position(self.native(), &x, &y))?;
 		ok((x, y))
 	};
 	def scroll_delta(self: Window) -> Result<(float64, float64), RuntimeError> = {
 		var x = 0.0_d;
 		var y = 0.0_d;
-		RuntimeStatus.from_code(resin_window_scroll_delta(self.handle, &x, &y))?;
+		RuntimeStatus.from_code(resin_window_scroll_delta(self.native(), &x, &y))?;
 		ok((x, y))
 	};
 	def focused(self: Window) -> bool = {
-		resin_window_focused(self.handle) != 0
+		resin_window_focused(self.native()) != 0
 	};
 	def capture_cursor(self: Window, capture: bool) -> Result<(), RuntimeError> = {
 		RuntimeStatus.from_code(
 			resin_window_capture_cursor(
-				self.handle,
+				self.native(),
 				if (capture) {
 					1
 				} else {
@@ -215,7 +224,6 @@ struct WindowOwner {
 		MouseButtons { left = 0, right = 1, middle = 2, button_4 = 3, button_5 = 4, button_6 = 5, button_7 = 6, button_8 = 7 }
 	};
 };
-type Window = Arc<WindowOwner>;
 
 // GLFW physical key codes, independent of typed characters or keyboard layout.
 struct KeyCodes {

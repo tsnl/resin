@@ -354,10 +354,7 @@ impl<'a> Instances<'a> {
         name: &str,
     ) -> Result<(FunctionId, resin_hir::Signature, Vec<resin_hir::Type>), LowerError> {
         let mut owner = receiver;
-        while let resin_hir::Type::Pointer { pointee }
-        | resin_hir::Type::GpuPointer { pointee }
-        | resin_hir::Type::Arc { pointee } = owner
-        {
+        while let resin_hir::Type::Pointer { pointee } = owner {
             owner = pointee;
         }
         let missing = || LowerError {
@@ -454,6 +451,8 @@ impl<'a> Instances<'a> {
         self.type_identities.insert(instance.clone(), id);
         self.type_requests.push(NominalRequest { instance, depth });
         self.definitions.push(TypeDef::Nominal {
+            gpu_projection: None,
+            gpu_pipeline: None,
             name: self.nominal_name(&self.type_requests[id.index()].instance),
             body: None,
             drop: None,
@@ -488,6 +487,33 @@ impl<'a> Instances<'a> {
         let source = &self.source.types[instance.definition.index()];
         let body = super::substitute::Substitution::new(&source.type_params, &instance.arguments)?
             .ty(&source.body, self)?;
+        let gpu_pipeline = source
+            .gpu_pipeline
+            .as_ref()
+            .map(|pipeline| {
+                let substitution =
+                    super::substitute::Substitution::new(&source.type_params, &instance.arguments)?;
+                Ok(resin_types::GpuPipeline {
+                    kind: pipeline.kind,
+                    root: substitution.ty(&pipeline.root, self)?,
+                    owner: substitution.ty(&pipeline.owner, self)?,
+                })
+            })
+            .transpose()?;
+        let gpu_projection = source
+            .gpu_projection
+            .as_ref()
+            .map(|projection| {
+                Ok(resin_types::GpuProjection {
+                    kind: projection.kind,
+                    target: super::substitute::Substitution::new(
+                        &source.type_params,
+                        &instance.arguments,
+                    )?
+                    .ty(&projection.target, self)?,
+                })
+            })
+            .transpose()?;
         let drop = source
             .drop
             .map(|hook| self.request(hook, instance.arguments.clone(), Profile::Host, None, None))
@@ -497,6 +523,8 @@ impl<'a> Instances<'a> {
                 kind: error.kind,
             })?;
         self.definitions[index] = TypeDef::Nominal {
+            gpu_projection,
+            gpu_pipeline,
             name: self.nominal_name(&instance),
             body: Some(body),
             drop,

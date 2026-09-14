@@ -2,9 +2,7 @@ use resin_lir::{BasicBlock, BlockId, Function, Instr, Local, Module, Terminator,
 use resin_types::prelude::*;
 
 fn owner() -> Ty {
-    Ty::Arc {
-        pointee: Box::new(Ty::Unit),
-    }
+    Ty::StrongOwner
 }
 fn result(value: Ty) -> Ty {
     Ty::Result {
@@ -13,9 +11,33 @@ fn result(value: Ty) -> Ty {
     }
 }
 fn pipeline() -> Ty {
-    Ty::GpuComputePipeline {
-        root: Box::new(Ty::UInt32),
-        owner: Box::new(owner()),
+    Ty::Defined {
+        definition: TypeId::from_index(0),
+    }
+}
+fn pipeline_definition(kind: resin_types::GpuPipelineKind, root: Ty) -> TypeDef {
+    TypeDef::Nominal {
+        name: "Pipeline".into(),
+        body: Some(Ty::Record {
+            fields: vec![RecordField {
+                name: "token".into(),
+                ty: Ty::GpuPipelineContract,
+            }],
+        }),
+        drop: None,
+        gpu_projection: None,
+        gpu_pipeline: Some(resin_types::GpuPipeline {
+            kind,
+            root,
+            owner: owner(),
+        }),
+    }
+}
+fn projection() -> resin_types::GpuProjectionPlan {
+    resin_types::GpuProjectionPlan {
+        source: Ty::UInt32,
+        target: Ty::UInt32,
+        operation: resin_types::GpuProjectionOperation::Copy,
     }
 }
 fn id(index: usize) -> FunctionId {
@@ -53,13 +75,14 @@ fn declaration(index: usize, parameters: Vec<Ty>, result: Ty) -> Function {
 }
 
 fn fixture() -> Module {
-    let bytes = Ty::Span {
-        element: Box::new(Ty::UInt8),
-    };
-    let pointer = Ty::GpuPointer {
-        pointee: Box::new(Ty::UInt8),
-    };
+    let bytes = Ty::byte_span();
+    let pointer = Ty::GpuView;
     let mut module = Module {
+        types: vec![pipeline_definition(
+            resin_types::GpuPipelineKind::Compute,
+            Ty::UInt32,
+        )]
+        .into(),
         functions: vec![
             declaration(0, vec![owner()], result(pipeline())),
             declaration(1, vec![owner(), bytes], result(owner())),
@@ -108,6 +131,7 @@ fn fixture() -> Module {
             local: LocalId::from_index(0),
         },
         Instr::GpuComputePipeline {
+            pipeline: pipeline(),
             factory: id(1),
             shader: id(2),
         },
@@ -138,6 +162,7 @@ fn recording() -> Module {
             value: Value::UInt32 { value: 1 },
         },
         Instr::GpuDispatch {
+            projection: projection(),
             context: id(3),
             allocator: id(4),
             record: id(5),
@@ -163,10 +188,11 @@ fn creation_derives_root_from_an_embedded_declaration() {
         VerifyErrorKind::InvalidGpuOperation
     );
     let mut wrong_root = module;
-    wrong_root.functions[0].result = result(Ty::GpuComputePipeline {
-        root: Box::new(Ty::Int32),
-        owner: Box::new(owner()),
-    });
+    wrong_root.types = vec![pipeline_definition(
+        resin_types::GpuPipelineKind::Compute,
+        Ty::Int32,
+    )]
+    .into();
     assert!(resin_lir::verify(&wrong_root).is_err());
 }
 
@@ -180,12 +206,11 @@ fn recording_checks_arguments_context_and_allocator_together() {
     };
     assert!(resin_lir::verify(&bad_root).is_err());
     let mut bad_context = module.clone();
-    bad_context.functions[3].locals[0].ty = Ty::Arc {
-        pointee: Box::new(Ty::Int32),
-    };
+    bad_context.functions[3].locals[0].ty = Ty::Unit;
     assert!(resin_lir::verify(&bad_context).is_err());
     let mut bad_allocator = module;
     bad_allocator.functions[0].blocks[0].instrs[6] = Instr::GpuDispatch {
+        projection: projection(),
         context: id(3),
         allocator: id(500),
         record: id(5),
@@ -203,10 +228,11 @@ fn pipeline_owner_cannot_be_forged_by_ascription_or_reused_for_another_stage() {
     forged.functions[0].blocks[0].instrs[1] = Instr::Ascribe { ty: pipeline() };
     assert!(resin_lir::verify(&forged).is_err());
     let mut graphics_dispatch = recording();
-    graphics_dispatch.functions[0].locals[0].ty = Ty::GpuGraphicsPipeline {
-        root: Box::new(Ty::UInt32),
-        owner: Box::new(owner()),
-    };
+    graphics_dispatch.types = vec![pipeline_definition(
+        resin_types::GpuPipelineKind::Graphics,
+        Ty::UInt32,
+    )]
+    .into();
     assert_eq!(
         resin_lir::verify(&graphics_dispatch).unwrap_err().kind,
         VerifyErrorKind::InvalidGpuOperation
@@ -224,4 +250,27 @@ fn native_pipeline_bridges_require_host_instances() {
             found: resin_lir::Profile::Shader
         }
     ));
+}
+
+#[test]
+fn recording_rejects_forged_projection_plan_and_pipeline_layout() {
+    let mut module = recording();
+    if let Instr::GpuDispatch { projection, .. } = &mut module.functions[0].blocks[0].instrs[6] {
+        projection.target = Ty::Float32;
+    }
+    assert!(resin_lir::verify(&module).is_err());
+    let mut module = fixture();
+    let mut definition = pipeline_definition(resin_types::GpuPipelineKind::Compute, Ty::UInt32);
+    if let TypeDef::Nominal {
+        body: Some(Ty::Record { fields }),
+        ..
+    } = &mut definition
+    {
+        fields.push(RecordField {
+            name: "extra".into(),
+            ty: Ty::UInt32,
+        });
+    }
+    module.types = vec![definition].into();
+    assert!(resin_lir::verify(&module).is_err());
 }

@@ -26,12 +26,15 @@ impl PixelLayout {
             .checked_mul(channels as usize)
             .ok_or(ResinStatus::InvalidArgument)?;
         let stride = if stride == 0 { row_bytes } else { stride };
-        let byte_len = stride
-            .checked_mul(height as usize)
-            .ok_or(ResinStatus::InvalidArgument)?;
-        if width == 0 || height == 0 || stride < row_bytes || byte_len > isize::MAX as usize {
+        if width == 0 || height == 0 || stride < row_bytes {
             return Err(ResinStatus::InvalidArgument);
         }
+        // Padding separates rows; no bytes after the final pixel are accessed.
+        let byte_len = stride
+            .checked_mul(height as usize - 1)
+            .and_then(|prefix| prefix.checked_add(row_bytes))
+            .filter(|length| *length <= isize::MAX as usize)
+            .ok_or(ResinStatus::InvalidArgument)?;
         Ok(Self {
             width,
             height,
@@ -50,16 +53,18 @@ impl PixelLayout {
             return Ok(Cow::Borrowed(pixels));
         }
         let mut packed = Vec::with_capacity(self.row_bytes * self.height as usize);
-        for row in pixels.chunks_exact(self.stride) {
-            packed.extend_from_slice(&row[..self.row_bytes]);
+        for row in 0..self.height as usize {
+            let start = row * self.stride;
+            packed.extend_from_slice(&pixels[start..start + self.row_bytes]);
         }
         Ok(Cow::Owned(packed))
     }
 }
 
 /// # Safety
-/// `path` must be a valid C string; `pixels` must hold `height` rows of
-/// `row_stride` (or `width * channels`) packed 8-bit samples.
+/// `path` must be a valid C string. `pixels` must be valid through the final
+/// row's `width * channels` packed 8-bit samples, with rows separated by
+/// `row_stride` bytes (or `width * channels` when zero). Final padding is not read.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn resin_image_write_png(
     path: *const c_char,
@@ -351,10 +356,31 @@ mod tests {
     }
 
     #[test]
+    fn padded_layout_requires_only_bytes_read_from_the_final_row() {
+        let layout = PixelLayout::new(1, 2, 4, 6).unwrap();
+        let pixels = [1, 2, 3, 4, 90, 90, 5, 6, 7, 8];
+        assert_eq!(layout.byte_len, pixels.len());
+        assert_eq!(
+            layout.packed_pixels(&pixels).unwrap().as_ref(),
+            [1, 2, 3, 4, 5, 6, 7, 8]
+        );
+        assert_eq!(
+            layout.packed_pixels(&pixels[..9]),
+            Err(ResinStatus::InvalidArgument)
+        );
+        let single = PixelLayout::new(1, 1, 4, usize::MAX).unwrap();
+        assert_eq!(single.byte_len, 4);
+        assert_eq!(
+            single.packed_pixels(&pixels[..4]).unwrap().as_ref(),
+            &pixels[..4]
+        );
+    }
+
+    #[test]
     fn c_writer_removes_row_padding() {
         let path = test_path("row-padding");
         let path_c = CString::new(path.to_str().unwrap()).unwrap();
-        let pixels: [u8; 12] = [1, 2, 3, 4, 90, 90, 5, 6, 7, 8, 90, 90];
+        let pixels: [u8; 10] = [1, 2, 3, 4, 90, 90, 5, 6, 7, 8];
         assert_eq!(
             unsafe { resin_image_write_png(path_c.as_ptr(), 1, 2, 4, pixels.as_ptr().cast(), 6) },
             ResinStatus::Success
@@ -397,7 +423,6 @@ mod tests {
             (1, 1, 0, 0),
             (1, 1, 5, 0),
             (1, 1, 4, 3),
-            (1, 1, 4, usize::MAX),
             (1, 2, 4, usize::MAX),
             (u32::MAX, u32::MAX, 4, 0),
         ] {

@@ -10,6 +10,7 @@ fn run(source: &str) -> std::process::Output {
 fn generic_owner_methods_support_static_and_receiver_calls() {
     let output = run(r#"
         export { main };
+        import { "$/string.resin" };
         struct Cell<T> { value: T,
             def make(value: T) -> Cell<T> = { Cell<T> { value = value } };
             def read(self: Cell<T>) -> T = { self.value };
@@ -35,6 +36,7 @@ fn generic_owner_methods_support_static_and_receiver_calls() {
 fn factory_method_arguments_follow_expected_results_and_explicit_holes() {
     let output = run(r#"
         export { main };
+        import { "$/string.resin" };
         struct Cell<T> { value: T };
         struct Factory {
             def create<T>(self: Factory) -> Cell<T> = { Cell<T> { value = 41 } };
@@ -196,8 +198,7 @@ fn imported_generic_aliases_share_the_owners_method_instances() {
     ] {
         std::fs::write(directory.path().join(name), source).unwrap();
     }
-    let program = support::pipeline::load(&directory.path().join("main.resin")).unwrap();
-    let module = support::pipeline::generate_program(&program).unwrap();
+    let module = support::pipeline::file_module(&directory.path().join("main.resin")).unwrap();
     for name in ["Cell.make", "Cell.read"] {
         assert_eq!(
             module

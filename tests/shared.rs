@@ -2,6 +2,7 @@ use support::pipeline;
 mod support;
 
 const RESOURCE: &str = r#"
+import { "$/shared.resin" };
 struct Resource { trace: Ptr<int>, digit: int,
     def drop(dying: Ptr<Resource>) = {
         if (dying.digit != 0) { dying.trace.* := dying.trace.* * 10 + dying.digit; };
@@ -10,7 +11,16 @@ struct Resource { trace: Ptr<int>, digit: int,
     def make(trace: Ptr<int>, digit: int) -> Resource = { Resource { trace = trace, digit = digit } };
 };
 def optional_resource(trace: Ptr<int>, digit: int) -> Resource | None = { Resource.make(trace, digit) };
-def optional_shared(trace: Ptr<int>, digit: int) -> Arc<Resource> | None = { Arc<Resource> { trace = trace, digit = digit } };
+def shared_resource(trace: Ptr<int>, digit: int) -> ArcPtr<Resource> = {
+    var optional: ArcPtr<Resource> | None;
+    optional := match (ArcPtr<Resource>.alloc(Resource { trace = trace, digit = 0 })) {
+        ok(value) => { value }, err(error) => { None },
+    };
+    var owner = optional!;
+    owner.get().digit := digit;
+    owner
+};
+def optional_shared(trace: Ptr<int>, digit: int) -> ArcPtr<Resource> | None = { shared_resource(trace, digit) };
 def optional_int(value: int) -> int | None = { value };
 
 "#;
@@ -32,9 +42,7 @@ fn run(source: &str) {
 
 fn rejects(source: &str, message: &str) {
     let source = format!("{RESOURCE} {source}");
-    let error = pipeline::generate(&support::parse(&source))
-        .unwrap_err()
-        .to_string();
+    let error = pipeline::source_module(&source).unwrap_err().to_string();
     assert!(error.contains(message), "expected {message:?}: {error}");
 }
 
@@ -42,15 +50,15 @@ fn rejects(source: &str, message: &str) {
 fn at_indexing_preserves_shared_array_owners_and_overwrite_cleanup() {
     run(r#"
     def main() -> int = {
-        var trace = 0; var weak = Weak<Resource>();
+        var trace = 0; var weak = WeakPtr<Resource>.empty();
         {
-            var holder = { values = [Arc<Resource> { trace = &trace, digit = 1 }] };
-            weak := holder.values.at(0).*.downgrade();
+            var holder = { values = [shared_resource(&trace, 1)] };
+            weak := holder.values.at(0).downgrade();
             var saved = holder.values.at(0).*;
-            holder.values.at(0).* := Arc<Resource> { trace = &trace, digit = 2 };
-            if (saved.read() != 1 || holder.values.at(0).*.read() != 2 || trace != 0) { trace := 9; };
+            holder.values.at(0).* := shared_resource(&trace, 2);
+            if (saved.get().read() != 1 || holder.values.at(0).get().read() != 2 || trace != 0) { trace := 9; };
         };
-        var expired = match (weak.upgrade()) { Arc<Resource>(owner) => { 1 == 0 }, None => { 1 == 1 } };
+        var expired = match (weak.upgrade()) { ArcPtr<Resource>(owner) => { 1 == 0 }, None => { 1 == 1 } };
         if (expired && trace == 12) { 0 } else { 1 }
     };
     "#);
@@ -84,17 +92,17 @@ fn assignment_branches_preserve_initialization_and_overwrite_cleanup() {
 fn shared_assignment_branches_release_every_owner() {
     run(r#"
     def main() -> int = {
-        var trace = 0; var weak = Weak<Resource>();
+        var trace = 0; var weak = WeakPtr<Resource>.empty();
         {
-            var value: Arc<Resource>;
-            value := if (trace == 0) { Arc<Resource> { trace = &trace, digit = 1 } } else { Arc<Resource> { trace = &trace, digit = 9 } };
+            var value: ArcPtr<Resource>;
+            value := if (trace == 0) { shared_resource(&trace, 1) } else { shared_resource(&trace, 9) };
             value := match (optional_int(2)) {
-                int(n) => { Arc<Resource> { trace = &trace, digit = n } },
-                None => { Arc<Resource> { trace = &trace, digit = 9 } }
+                int(n) => { shared_resource(&trace, n) },
+                None => { shared_resource(&trace, 9) }
             };
             weak := value.downgrade();
         };
-        var expired = match (weak.upgrade()) { Arc<Resource>(owner) => { 1 == 0 }, None => { 1 == 1 } };
+        var expired = match (weak.upgrade()) { ArcPtr<Resource>(owner) => { 1 == 0 }, None => { 1 == 1 } };
         if (expired && trace == 12) { 0 } else { 1 }
     };
     "#);
@@ -104,12 +112,12 @@ fn shared_assignment_branches_release_every_owner() {
 fn assignment_propagation_tracks_success_and_error_cleanup() {
     run(r#"
     struct Failed {};
-    def acquire(trace: Ptr<int>, fail: bool) -> Result<Arc<Resource>, Failed> = {
-        if (fail) { err(Failed {}) } else { ok(Arc<Resource> { trace = trace, digit = 2 }) }
+    def acquire(trace: Ptr<int>, fail: bool) -> Result<ArcPtr<Resource>, Failed> = {
+        if (fail) { err(Failed {}) } else { ok(shared_resource(trace, 2)) }
     };
     def work(trace: Ptr<int>, fail: bool) -> Result<(), Failed> = {
-        var first = Arc<Resource> { trace = trace, digit = 1 };
-        var pending: Arc<Resource>;
+        var first = shared_resource(trace, 1);
+        var pending: ArcPtr<Resource>;
         pending := acquire(trace, fail)?;
         ok(())
     };
@@ -125,18 +133,18 @@ fn assignment_propagation_tracks_success_and_error_cleanup() {
 #[test]
 fn temporary_projection_keeps_nominal_and_nested_destructors() {
     run(r#"
-    struct Outer { trace: Ptr<int>, inner: Arc<Resource>,
+    struct Outer { trace: Ptr<int>, inner: ArcPtr<Resource>,
         def drop(self: Ptr<Outer>) = { self.trace.* := self.trace.* * 10 + 2; };
     };
 
-    def make(trace: Ptr<int>) -> Outer = { Outer { trace = trace, inner = Arc<Resource> { trace = trace, digit = 3 } } };
+    def make(trace: Ptr<int>) -> Outer = { Outer { trace = trace, inner = shared_resource(trace, 3) } };
     def main() -> int = {
         var trace = 0;
         var number = Resource.make(&trace, 1).digit;
         var valid = number == 1 && trace == 1;
         {
             var inner = make(&trace).inner;
-            valid := valid && trace == 12 && inner.digit == 3;
+            valid := valid && trace == 12 && inner.get().digit == 3;
         };
         if (valid && trace == 123) { 0 } else { 1 }
     };
@@ -166,9 +174,42 @@ fn all_applications_consume_fresh_arguments_without_an_extra_drop() {
         consume(Resource.make(&trace, 1));
         consume(Resource(Resource.make(&trace, 2)));
         { var value = Resource.make(&trace, 3); };
-        { var shared = Arc<Resource>(Resource.make(&trace, 4)); };
+        { var shared = shared_resource(&trace, 4); };
         consume_pair(Resource.make(&trace, 5), Resource.make(&trace, 6));
         if (trace == 123465) { 0 } else { 1 }
+    };
+    "#);
+}
+
+#[test]
+fn generic_record_initializers_preserve_layout_and_cleanup_on_partial_failure() {
+    run(r#"
+    struct Pair<T> { first: T, second: T };
+    struct Failed {};
+    def ready(fail: bool) -> Result<(), Failed> = {
+        if (fail) { err(Failed {}) } else { ok(()) }
+    };
+    def build<T>(create: (Ptr<int>, int) -> T, trace: Ptr<int>, fail: bool) -> Result<Pair<T>, Failed> = {
+        ok(Pair<T> {
+            second = create(trace, 2),
+            first = {
+                ready(fail)?;
+                create(trace, 1)
+            },
+        })
+    };
+    def main() -> int = {
+        var trace = 0;
+        var ordered = match (build(shared_resource, &trace, 1 == 0)) {
+            ok(pair) => { pair.first.get().digit == 1 && pair.second.get().digit == 2 },
+            err(error) => { 1 == 0 },
+        };
+        var destroyed = trace == 21;
+        var failed = match (build(shared_resource, &trace, 1 == 1)) {
+            ok(pair) => { 1 == 0 },
+            err(error) => { 1 == 1 },
+        };
+        if (ordered && destroyed && failed && trace == 212) { 0 } else { 1 }
     };
     "#);
 }
@@ -192,22 +233,22 @@ fn named_values_are_copied_even_when_the_type_has_a_destructor() {
 #[test]
 fn shared_copies_reassignment_weak_upgrade_and_expiration() {
     run(r#"
-    struct Shared { value: Arc<Resource> };
+    struct Shared { value: ArcPtr<Resource> };
     def main() -> int = {
         var trace = 0;
-        var weak = Weak<Resource>();
+        var weak = WeakPtr<Resource>.empty();
         {
-            var a = Arc<Resource> { trace = &trace, digit = 1 };
+            var a = shared_resource(&trace, 1);
             var b = Shared { value = a };
             weak := b.value.downgrade();
-            a := Arc<Resource> { trace = &trace, digit = 2 };
+            a := shared_resource(&trace, 2);
             match (weak.upgrade()) {
-                Arc<Resource>(owner) => { if (owner.read() != 1) { trace := 9; }; },
+                ArcPtr<Resource>(owner) => { if (owner.get().read() != 1) { trace := 9; }; },
                 None => { trace := 9; }
             };
             if (trace != 0) { trace := 9; };
         };
-        var expired = match (weak.upgrade()) { Arc<Resource>(owner) => { 1 == 0 }, None => { 1 == 1 } };
+        var expired = match (weak.upgrade()) { ArcPtr<Resource>(owner) => { 1 == 0 }, None => { 1 == 1 } };
         if (expired && trace == 12) { 0 } else { 1 }
     };
     "#);
@@ -223,7 +264,10 @@ fn native_wrapper_can_transfer_a_handle_by_disarming_the_source() {
         var trace = 0;
         {
             var value = Resource.make(&trace, 1);
-            { var shared = Arc<Resource>(move(&value)); };
+            {
+                var target = shared_resource(&trace, 0);
+                target.get().replace(move(&value));
+            };
             if (trace != 1 || value.digit != 0) { trace := 9; };
         };
         if (trace == 1) { 0 } else { 1 }
@@ -322,25 +366,6 @@ fn destruction_preserves_results_and_runs_per_scope_and_iteration() {
 }
 
 #[test]
-fn pointer_returning_index_wrappers_preserve_nested_places() {
-    run(r#"
-    struct Payload { value: int };
-    struct Entry { nested: Payload };
-    def at(items: Span<Entry>, index: ulong) -> Ptr<Entry> = { items(index) };
-    def main() -> int = {
-        var items = [Entry { nested = Payload { value = 1 } }, Entry { nested = Payload { value = 2 } }];
-        var span = Span<Entry> { data = Ptr<Entry>(&items), length = 2_ul };
-        at(span, 1_ul).nested.value := 42;
-        var p = &at(span, 1_ul).*.nested.value;
-        p.* := p.* + 1;
-        var copied = at(span, 1_ul).*.nested;
-        copied.value := 99;
-        if (items(1).nested.value == 43 && copied.value == 99 && items(0).nested.value == 1) { 0 } else { 1 }
-    };
-    "#);
-}
-
-#[test]
 fn former_defer_keyword_can_name_an_ordinary_immediate_call() {
     run(r#"
     def defer(trace: Ptr<int>) = { trace.* := trace.* + 1; };
@@ -355,37 +380,49 @@ fn former_defer_keyword_can_name_an_ordinary_immediate_call() {
 #[test]
 fn weak_cycles_and_nested_pointer_handle_access() {
     run(r#"
-    struct Node { trace: Ptr<int>, parent: Weak<Node>,
-        def drop(self: Ptr<Node>) = { self.trace.* := self.trace.* + 1; };
+    struct Node { trace: Ptr<int>, live: bool, parent: WeakPtr<Node>,
+        def drop(self: Ptr<Node>) = { if (self.live) { self.trace.* := self.trace.* + 1; }; };
     };
 
     def main() -> int = {
         var trace = 0;
         var weak = {
-            var node = Arc<Node> { trace = &trace, parent = Weak<Node>() };
-            node.parent := node.downgrade();
+            var optional: ArcPtr<Node> | None;
+            optional := match (ArcPtr<Node>.alloc(Node { trace = &trace, live = 1 == 0, parent = WeakPtr<Node>.empty() })) {
+                ok(value) => { value }, err(error) => { None },
+            };
+            var node = optional!;
+            node.get().live := 1 == 1;
+            node.get().parent := node.downgrade();
             var address = &node;
             var nested = &address;
-            if (nested.trace.* != 0) { trace := 9; };
+            if (nested.*.get().trace.* != 0) { trace := 9; };
             node.downgrade()
         };
-        var expired = match (weak.upgrade()) { Arc<Node>(node) => { 1 == 0 }, None => { 1 == 1 } };
+        var expired = match (weak.upgrade()) { ArcPtr<Node>(node) => { 1 == 0 }, None => { 1 == 1 } };
         if (expired && trace == 1) { 0 } else { 1 }
     };
     "#);
 }
 
 #[test]
-fn named_argument_to_arc_copies_the_pointee_value() {
+fn source_allocation_copies_shared_initializers_without_cloning_payloads() {
     run(r#"
     def main() -> int = {
         var trace = 0;
         {
-            var value = Resource.make(&trace, 1);
-            { var shared = Arc<Resource>(value); };
-            if (value.digit != 1 || trace != 1) { trace := 9; };
+            var original = shared_resource(&trace, 1);
+            {
+                var optional: ArcPtr<ArcPtr<Resource>> | None;
+                optional := match (ArcPtr<ArcPtr<Resource>>.alloc(original)) {
+                    ok(value) => { value }, err(error) => { None },
+                };
+                var nested = optional!;
+                if (nested.get().get().digit != 1 || trace != 0) { trace := 9; };
+            };
+            if (original.get().digit != 1 || trace != 0) { trace := 9; };
         };
-        if (trace == 11) { 0 } else { 1 }
+        if (trace == 1) { 0 } else { 1 }
     };
     "#);
 }
@@ -393,7 +430,7 @@ fn named_argument_to_arc_copies_the_pointee_value() {
 #[test]
 fn methods_require_a_compatible_receiver_and_valid_destructor() {
     rejects(
-        "struct Item { def shared(self: Arc<Item>) = {}; };  def f(item: Item) = { item.shared(); };",
+        "struct Item { def shared_resource(self: ArcPtr<Item>) = {}; };  def f(item: Item) = { item.shared_resource(); };",
         "method receiver does not match",
     );
     rejects(
@@ -412,14 +449,14 @@ fn option_unwrap_transfers_fresh_payloads_and_copies_named_options() {
             var named = optional_resource(&trace, 2);
             { var copied = named!; };
         };
-        var weak = Weak<Resource>();
+        var weak = WeakPtr<Resource>.empty();
         {
             var shared = optional_shared(&trace, 3)!;
             weak := shared.downgrade();
             { var upgraded = weak.upgrade()!; };
             if (trace != 122) { trace := 9; };
         };
-        var expired = match (weak.upgrade()) { Arc<Resource>(owner) => { 1 == 0 }, None => { 1 == 1 } };
+        var expired = match (weak.upgrade()) { ArcPtr<Resource>(owner) => { 1 == 0 }, None => { 1 == 1 } };
         if (trace == 1223 && expired) { 0 } else { 1 }
     };
     "#);
@@ -450,17 +487,17 @@ fn destruction_hooks_are_ordinary_calls_and_remain_automatic() {
 }
 
 #[test]
-fn generated_methods_use_ordinary_calls_and_borrow_fresh_receivers() {
+fn source_methods_use_ordinary_calls_and_borrow_fresh_receivers() {
     run(r#"
     def main() -> int = {
         var trace = 0;
         {
-            var pointer = Arc<Resource> { trace = &trace, digit = 1 }.get();
+            var pointer = shared_resource(&trace, 1).get();
             if (trace != 0 || pointer.digit != 1) { trace := 9; };
-            var second = Arc<Resource> { trace = &trace, digit = 2 };
-            var other = Arc<Resource>.get(&second);
-            var weak = Arc<Resource>.downgrade(second);
-            { var upgraded = Weak<Resource>.upgrade(weak)!; };
+            var second = shared_resource(&trace, 2);
+            var other = ArcPtr<Resource>.get(&second);
+            var weak = ArcPtr<Resource>.downgrade(&second);
+            { var upgraded = WeakPtr<Resource>.upgrade(&weak)!; };
             if (trace != 0 || other.digit != 2) { trace := 9; };
             var number = Resource.make(&trace, 3).read();
             if (trace != 0 || number != 3) { trace := 9; };
@@ -471,23 +508,78 @@ fn generated_methods_use_ordinary_calls_and_borrow_fresh_receivers() {
 }
 
 #[test]
+fn temporary_single_and_sequence_owners_live_until_scope_exit_and_error_cleanup() {
+    let source = r#"
+        export { main };
+        import { "$/shared.resin", "$/status.resin" };
+        struct Stop {};
+        struct Marker { trace: Ptr<int>, digit: int,
+            def drop(self: Ptr<Marker>) = {
+                if (self.digit != 0_i) { self.trace.* := self.trace.* * 10_i + self.digit; };
+            };
+        };
+        def single(trace: Ptr<int>) -> Result<ArcPtr<Marker>, OutOfMemory> = {
+            var owner = ArcPtr<Marker>.alloc(Marker { trace = trace, digit = 0_i })?;
+            owner.get().digit := 3_i;
+            ok(owner)
+        };
+        def sequence(trace: Ptr<int>) -> Result<ArcSpan<Marker>, OutOfMemory> = {
+            var owner = ArcSpan<Marker>.alloc(2_ul, Marker { trace = trace, digit = 0_i })?;
+            owner.get().at(0_ul).digit := 1_i;
+            owner.get().at(1_ul).digit := 2_i;
+            ok(owner)
+        };
+        def stop_if(fail: bool) -> Result<(), Stop> = {
+            if (fail) { err(Stop {}) } else { ok(()) }
+        };
+        def read(trace: Ptr<int>, fail: bool) -> Result<int, _> = {
+            var pointer = single(trace)?.get();
+            var span = sequence(trace)?.get();
+            // Observe destruction directly: freed bytes could retain old values.
+            if (trace.* != 0_i) { trace.* := 1000_i; };
+            stop_if(fail)?;
+            ok(pointer.digit + span.at(0_ul).digit + span.at(1_ul).digit)
+        };
+        def main() -> Result<int, _> = {
+            var trace = 0_i;
+            var value = read(&trace, 1 == 0)?;
+            var valid = value == 6_i && trace == 213_i;
+            trace := 0_i;
+            var stopped = match (read(&trace, 1 == 1)) {
+                ok(value) => { 1 == 0 },
+                err(error) => { match (error) { Stop(stop) => { 1 == 1 }, OutOfMemory(error) => { 1 == 0 } } },
+            };
+            ok(if (valid && stopped && trace == 213_i) { 0_i } else { 1_i })
+        };
+    "#;
+    let output = support::project::Project::new(&support::module(source), Some("main"))
+        .unwrap()
+        .run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn weak_payloads_require_upgrade_before_dereference_or_field_access() {
     for source in [
-        "def f(value: Weak<Resource>) = { value.*; };",
-        "def f(value: Weak<Resource>) = { value.digit; };",
-        "def f(value: Ptr<Weak<Resource>>) = { value.digit; };",
-        "def f(value: Weak<Resource>) = { value.read(); };",
+        "def f(value: WeakPtr<Resource>) = { value.*; };",
+        "def f(value: WeakPtr<Resource>) = { value.digit; };",
+        "def f(value: Ptr<WeakPtr<Resource>>) = { value.digit; };",
+        "def f(value: WeakPtr<Resource>) = { value.read(); };",
     ] {
         assert!(
-            pipeline::generate(&support::parse(&format!("{RESOURCE} {source}"))).is_err(),
+            pipeline::source_module(&format!("{RESOURCE} {source}")).is_err(),
             "{source}"
         );
     }
     run(r#"
-        def read(value: Weak<Resource>) -> int = { value.upgrade()!.digit };
+        def read(value: WeakPtr<Resource>) -> int = { value.upgrade()!.get().digit };
         def main() -> int = {
             var trace = 0;
-            var value = Arc<Resource> { trace = &trace, digit = 1 };
+            var value = shared_resource(&trace, 1);
             if (read(value.downgrade()) == 1) { 0 } else { 1 }
         };
     "#);

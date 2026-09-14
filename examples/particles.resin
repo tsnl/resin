@@ -1,6 +1,8 @@
 export { main, kernel, vertex, fragment };
 
 import {
+	"$/span.resin",
+	"$/string.resin",
 	"$/gpu.resin",
 	"$/window.resin",
 	"$/graphics.resin",
@@ -213,18 +215,22 @@ def random(state: Ptr<uint>) -> float32 = {
 	float32(x & 0xffffff_ui) / 16777216.0_f
 };
 
-def initialize(particles: GpuSpan<Particle>, seed: uint) -> () = {
+def random_particle(state: Ptr<uint>) -> Particle = {
+	Particle {
+		x = random(state) * 48.0_f - 24.0_f,
+		y = random(state) * 60.0_f - 30.0_f,
+		z = random(state) * 50.0_f,
+		vx = random(state) * 12.0_f - 6.0_f,
+		vy = random(state) * 12.0_f - 6.0_f,
+		vz = random(state) * 12.0_f - 6.0_f,
+	}
+};
+
+def initialize(particles: GpuSpan<Particle>, seed: uint) = {
 	var state = seed | 1_ui;
 	var index = 0_ul;
 	while (index < particles.length) {
-		particles(index).* := Particle {
-			x = random(&state) * 48.0_f - 24.0_f,
-			y = random(&state) * 60.0_f - 30.0_f,
-			z = random(&state) * 50.0_f,
-			vx = random(&state) * 12.0_f - 6.0_f,
-			vy = random(&state) * 12.0_f - 6.0_f,
-			vz = random(&state) * 12.0_f - 6.0_f,
-		};
+		particles.at(index).store(random_particle(&state));
 		index := index + 1_ul;
 	};
 };
@@ -280,7 +286,7 @@ def main() -> Result<(), _> = {
 	var graphics = gpu.create_graphics_pipeline(vertex, fragment)?;
 
 	// Initialization and shader projection share one owned particle allocation.
-	var particles = GpuSpan<Particle>.allocate(gpu, ulong(count))?;
+	var particles = gpu.alloc::<Particle>(ulong(count))?;
 
 	var seed = 0x9e3779b9_ui;
 	initialize(particles, seed);

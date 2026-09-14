@@ -9,7 +9,7 @@ fn run(source: &str) -> std::process::Output {
 #[test]
 fn constructors_and_nominal_arguments_infer_function_parameters() {
     let output = run(r#"
-        export { main };
+        export { main }; import { "$/string.resin" };
         struct Pair<T> { first: T, second: T };
         def sum<T>(pair: Pair<T>) -> T = { pair.first + pair.second };
         def make<T>(first: T, second: T) -> Pair<T> = {
@@ -98,6 +98,7 @@ fn nongeneric_wrapper_layout_queries_wait_for_nominal_specialization() {
 fn array_and_span_index_calls_preserve_generic_field_places() {
     let output = run(r#"
         export { main };
+        import { "$/span.resin" };
         struct Cell<T> { value: T };
         def copy_through_array<T>(value: T) -> T = {
             var cells = [Cell<T> { value = value }];
@@ -108,7 +109,7 @@ fn array_and_span_index_calls_preserve_generic_field_places() {
             var view = Span<Cell<int>> {
                 data = Ptr<Cell<int>>(&cells), length = 2
             };
-            cells(0_ul).value := copy_through_array(cells(0_ul).value) + view(1_ul).value;
+            cells(0_ul).value := copy_through_array(cells(0_ul).value) + view.at(1_ul).value;
             cells(0_ul).value
         };
     "#);
@@ -208,8 +209,7 @@ fn imported_aliases_preserve_nominal_identity_and_instance_reuse() {
     ] {
         std::fs::write(directory.path().join(name), source).unwrap();
     }
-    let program = support::pipeline::load(&directory.path().join("main.resin")).unwrap();
-    let module = support::pipeline::generate_program(&program).unwrap();
+    let module = support::pipeline::file_module(&directory.path().join("main.resin")).unwrap();
     assert_eq!(
         module
             .functions
@@ -267,7 +267,7 @@ fn generic_constructor_literals_are_range_checked_after_substitution() {
 #[test]
 fn local_structs_capture_outer_types_and_specialize_each_layout() {
     let output = run(r#"
-        export { main };
+        export { main }; import { "$/string.resin" };
         def pair<T>(value: T) -> _ = {
             struct Local<U> { outer: T, inner: U };
             Local<int> { outer = value, inner = 35 }
@@ -311,20 +311,24 @@ fn optional_generic_structs_preserve_the_payload_after_unwrapping() {
 fn nongeneric_wrappers_copy_shared_generic_storage_and_destroy_it_once() {
     let output = run(r#"
         export { main };
+        import { "$/shared.resin" };
         struct Resource { trace: Ptr<int>, answer: int,
-            def drop(self: Ptr<Resource>) = { self.trace.* := self.trace.* + 1; };
+            def drop(self: Ptr<Resource>) = { if (self.answer != 0) { self.trace.* := self.trace.* + 1; }; };
         };
         struct Cell<T> { value: T };
-        struct Envelope { owner: Arc<Cell<Resource>> };
+        struct Envelope { owner: ArcPtr<Cell<Resource>> };
         def main() -> int = {
             var trace = 0_i;
             {
-                var owner = Arc<Cell<Resource>>(Cell<Resource> {
-                    value = Resource { trace = &trace, answer = 42 }
-                });
+                var optional: ArcPtr<Cell<Resource>> | None;
+                optional := match (ArcPtr<Cell<Resource>>.alloc(Cell<Resource> {
+                    value = Resource { trace = &trace, answer = 0 }
+                })) { ok(value) => { value }, err(error) => { None } };
+                var owner = optional!;
+                owner.get().value.answer := 42;
                 var first = Envelope { owner = owner };
                 var second = first;
-                if (second.owner.value.answer != 42) { trace := 100; };
+                if (second.owner.get().value.answer != 42) { trace := 100; };
             };
             trace + 41
         };

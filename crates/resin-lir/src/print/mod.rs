@@ -118,26 +118,22 @@ fn sexp_function(names: &Names, index: usize, function: &Function) -> SExp {
 
 fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
     match instr {
-        Instr::GpuNew { allocator, element } => list(
-            "gpu-new",
-            vec![
-                symbol(names.functions[allocator.index()].as_ref()),
-                sexp_ty(names, element),
-            ],
-        ),
-        Instr::GpuAllocate { allocator, element } => list(
-            "gpu-allocate",
-            vec![
-                symbol(names.functions[allocator.index()].as_ref()),
-                sexp_ty(names, element),
-            ],
-        ),
-        Instr::GpuAllocateNative => symbol("gpu-allocate-native"),
-        Instr::GpuSlice => symbol("gpu-slice"),
-        Instr::GpuReadOnly => symbol("gpu-read-only"),
-        Instr::GpuWriteOnly => symbol("gpu-write-only"),
-        Instr::GpuCopyTo => symbol("gpu-copy-to"),
-        Instr::GpuComputePipeline { factory, shader } => list(
+        Instr::GpuElementLayout { element } => {
+            list("gpu-element-layout", vec![sexp_ty(names, element)])
+        }
+        Instr::GpuViewLoad { element } => list("gpu-view-load", vec![sexp_ty(names, element)]),
+        Instr::GpuViewAllocate => symbol("gpu-view-allocate"),
+        Instr::GpuViewIndex { element } => list("gpu-view-index", vec![sexp_ty(names, element)]),
+        Instr::GpuViewRange { element } => list("gpu-view-range", vec![sexp_ty(names, element)]),
+        Instr::GpuViewOffset => symbol("gpu-view-offset"),
+        Instr::GpuViewRestrict => symbol("gpu-view-restrict"),
+        Instr::GpuViewStore => symbol("gpu-view-store"),
+        Instr::GpuViewReplace => symbol("gpu-view-replace"),
+        Instr::GpuViewCopyTo => symbol("gpu-view-copy-to"),
+        Instr::GpuViewCopyImage => symbol("gpu-view-copy-image"),
+        Instr::GpuComputePipeline {
+            factory, shader, ..
+        } => list(
             "gpu-compute-pipeline",
             vec![
                 symbol(names.functions[factory.index()].as_ref()),
@@ -148,6 +144,7 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
             factory,
             vertex,
             fragment,
+            ..
         } => list(
             "gpu-graphics-pipeline",
             vec![
@@ -160,6 +157,7 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
             context,
             allocator,
             record,
+            ..
         } => list(
             "gpu-dispatch",
             vec![
@@ -172,6 +170,7 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
             context,
             allocator,
             record,
+            ..
         } => list(
             "gpu-draw",
             vec![
@@ -184,17 +183,17 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
         ),
         Instr::GpuArgumentsDispatch => symbol("gpu-dispatch"),
         Instr::GpuArgumentsDraw => symbol("gpu-draw"),
-        Instr::GpuCopyImage => symbol("gpu-copy-image"),
         Instr::TransferLoad => symbol("transfer-load"),
         Instr::ForgetLocal { local } => list(
             "forget-local",
             vec![symbol(fn_names.locals[local.index()].as_ref())],
         ),
-        Instr::ArcNew => symbol("arc-new"),
-        Instr::ArcData => symbol("arc-data"),
-        Instr::Downgrade => symbol("downgrade"),
-        Instr::Upgrade => symbol("upgrade"),
-        Instr::WeakEmpty { pointee } => list("weak-empty", vec![sexp_ty(names, pointee)]),
+        Instr::OwnerAllocate { element } => list("owner-allocate", vec![sexp_ty(names, element)]),
+        Instr::OwnerData { pointee } => list("owner-data", vec![sexp_ty(names, pointee)]),
+        Instr::OwnerLength => symbol("owner-length"),
+        Instr::OwnerDowngrade => symbol("downgrade"),
+        Instr::OwnerUpgrade => symbol("upgrade"),
+        Instr::WeakEmpty => symbol("weak-empty"),
         Instr::TakeLocal { local } => list(
             "take-local",
             vec![symbol(fn_names.locals[local.index()].as_ref())],
@@ -231,6 +230,9 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
             vec![symbol(fn_names.locals[local.index()].as_ref())],
         ),
         Instr::AccessStatic { index } => list("access-static", vec![symbol(index.to_string())]),
+        Instr::PointerIndex => symbol("pointer-index"),
+        Instr::PointerRange => symbol("pointer-range"),
+        Instr::PointerBytes => symbol("pointer-bytes"),
         Instr::AccessDynamic => symbol("access-dynamic"),
         Instr::Load => symbol("load"),
         Instr::Store => symbol("store"),
@@ -414,20 +416,11 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
             .map(|name| symbol(name.as_ref()))
             .unwrap_or_else(|| symbol(format!("type.{}", definition.index()))),
         Ty::Pointer { pointee } => list("ptr", vec![sexp_ty(names, pointee)]),
-        Ty::GpuPointer { pointee } => list("gpu-ptr", vec![sexp_ty(names, pointee)]),
-        Ty::GpuSpan { element } => list("gpu-span", vec![sexp_ty(names, element)]),
+        Ty::GpuView => symbol("GpuView"),
+        Ty::GpuPipelineContract => symbol("GpuPipelineContract"),
         Ty::GpuArguments => symbol("GpuArguments"),
-        Ty::GpuComputePipeline { root, owner } => list(
-            "gpu-compute-pipeline",
-            vec![sexp_ty(names, root), sexp_ty(names, owner)],
-        ),
-        Ty::GpuGraphicsPipeline { root, owner } => list(
-            "gpu-graphics-pipeline",
-            vec![sexp_ty(names, root), sexp_ty(names, owner)],
-        ),
-        Ty::Arc { pointee } => list("arc", vec![sexp_ty(names, pointee)]),
-        Ty::Weak { pointee } => list("weak", vec![sexp_ty(names, pointee)]),
-        Ty::Span { element } => list("span", vec![sexp_ty(names, element)]),
+        Ty::StrongOwner => symbol("strong-owner"),
+        Ty::WeakOwner => symbol("weak-owner"),
         Ty::Array { element, length } => list(
             "array",
             vec![sexp_ty(names, element), symbol(length.to_string())],

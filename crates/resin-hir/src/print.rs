@@ -234,24 +234,23 @@ impl Printer {
                     list("args", args.iter().map(|arg| self.term(arg)).collect()),
                 ],
             ),
-            TermKind::Intrinsic { op, args } => list(
+            TermKind::Intrinsic {
+                op,
+                args,
+                type_args,
+            } => list(
                 "intrinsic",
-                vec![atom(format!("{op:?}")), self.arguments(args)],
+                vec![
+                    atom(format!("{op:?}")),
+                    list("types", type_args.iter().map(|ty| self.ty(ty)).collect()),
+                    self.arguments(args),
+                ],
             ),
             TermKind::Adapt { conversion, arg } => list(
                 "adapt",
                 vec![quoted(format!("{conversion:?}")), self.term(arg)],
             ),
             TermKind::Convert { arg } => list("convert", vec![self.term(arg)]),
-            TermKind::ArcNew { value } => list("arc", vec![self.term(value)]),
-            TermKind::GpuNew { allocator, args } => list(
-                "gpu-new",
-                vec![function_id(allocator.index()), self.arguments(args)],
-            ),
-            TermKind::GpuAllocate { allocator, args } => list(
-                "gpu-allocate",
-                vec![function_id(allocator.index()), self.arguments(args)],
-            ),
             TermKind::GpuPipelineCreate {
                 factory,
                 shaders,
@@ -288,7 +287,6 @@ impl Printer {
                     self.arguments(args),
                 ],
             ),
-            TermKind::WeakEmpty { pointee } => list("weak-empty", vec![self.ty(pointee)]),
             TermKind::Result { failure, arg } => {
                 list(if *failure { "err" } else { "ok" }, vec![self.term(arg)])
             }
@@ -443,22 +441,11 @@ impl TypeNames {
                 }
             }
             Type::Pointer { pointee } => format!("Ptr<{}>", self.format(pointee)),
-            Type::GpuPointer { pointee } => format!("GpuPtr<{}>", self.format(pointee)),
-            Type::GpuSpan { element } => format!("GpuSpan<{}>", self.format(element)),
+            Type::GpuView => "GpuView".into(),
+            Type::GpuPipelineContract => "GpuPipelineContract".into(),
             Type::GpuArguments => "GpuArguments".into(),
-            Type::GpuComputePipeline { root, owner } => format!(
-                "GpuComputePipeline<{}, {}>",
-                self.format(root),
-                self.format(owner)
-            ),
-            Type::GpuGraphicsPipeline { root, owner } => format!(
-                "GpuGraphicsPipeline<{}, {}>",
-                self.format(root),
-                self.format(owner)
-            ),
-            Type::Arc { pointee } => format!("Arc<{}>", self.format(pointee)),
-            Type::Weak { pointee } => format!("Weak<{}>", self.format(pointee)),
-            Type::Span { element } => format!("Span<{}>", self.format(element)),
+            Type::StrongOwner => "StrongOwner".into(),
+            Type::WeakOwner => "WeakOwner".into(),
             Type::Array { element, length } => {
                 format!("[{}; {length}]", self.format(element))
             }

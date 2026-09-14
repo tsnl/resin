@@ -1,6 +1,7 @@
 # Resin design
 
-The [ownership specification](lifetimes.md) describes `Arc<T>`, `Weak<T>`,
+The [ownership specification](lifetimes.md) describes `ArcPtr<T>`, `ArcSpan<T>`,
+`WeakPtr<T>`, `WeakSpan<T>`,
 automatic destruction, and inherent methods through `impl`.
 
 Resin is a deliberately small systems programming language in the spirit of C and Go.
@@ -45,14 +46,15 @@ Process termination and traps do not unwind scopes.
 
 ## Host and GPU
 
-Host code uses builtin `GpuPtr<T>` and `GpuSpan<T>` views, carrying an allocation
+Host code uses source `GpuPtr<T>` and `GpuSpan<T>` wrappers over opaque `GpuView`
+primitives, carrying an allocation
 owner, byte offset, and access permissions. Copies and interior views retain the
 owner. Checked host operations enforce bounds, alignment, mapping state, permissions,
 and exclusion while a command recording can use the allocation. Views cannot be
 cast to ordinary pointers or constructed from raw addresses.
 
 Shader entries retain ordinary `Ptr<T>` parameters. Pipeline creation accepts shader
-declarations and preserves their stage and root type in builtin
+declarations and preserves their stage and root type in source
 `GpuComputePipeline<Root, Owner>` and `GpuGraphicsPipeline<Root, Owner>` values.
 Dispatch and draw check a host launch-record shape derived from that root: shader
 pointers and spans become owning GPU views on the host. Compiler projection builds

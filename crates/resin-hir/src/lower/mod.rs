@@ -25,7 +25,9 @@ pub(crate) mod context;
 mod elaborate;
 pub(crate) mod eval;
 mod gpu;
+mod gpu_projections;
 pub(crate) mod infer;
+mod primitives;
 pub(crate) mod scope;
 mod typed;
 mod types;
@@ -297,6 +299,7 @@ fn declaration_name(stmt: &StmtKind) -> Option<&Ident> {
     match stmt {
         StmtKind::ForeignType { name }
         | StmtKind::ForeignFunction { name, .. }
+        | StmtKind::IntrinsicFunction { name, .. }
         | StmtKind::Function { name, .. }
         | StmtKind::Define { name, .. }
         | StmtKind::DefineType { name, .. }
@@ -434,7 +437,7 @@ impl Scopes {
                     name,
                     init,
                     type_params,
-                } => self.alias(name, type_params, init, typer),
+                } => self.alias(name, type_params, init),
                 StmtKind::Struct {
                     name,
                     body,
@@ -487,7 +490,6 @@ impl Scopes {
             }
             let body = Evaluator {
                 scopes: self.view(),
-                typer,
             }
             .scheme(body)?;
             typer
@@ -504,7 +506,6 @@ impl Scopes {
         name: &Ident,
         parameters: &[Ident],
         body: &resin_ast::Type,
-        typer: &Context,
     ) -> Result<(), GenerateError> {
         let declaration = self.begin_alias(name)?;
         self.push_at(Span {
@@ -521,7 +522,6 @@ impl Scopes {
             self.set_parameters(declaration, &parameters);
             Evaluator {
                 scopes: self.view(),
-                typer,
             }
             .scheme(body)
         })();
@@ -600,7 +600,6 @@ impl Generator {
         }
         let evaluator = Evaluator {
             scopes: scopes.view(),
-            typer: &self.typer,
         };
         let signature = method_signature(&evaluator, declaration, params, result)?;
         let function = self.declare_function(name, &signature)?;
@@ -608,7 +607,7 @@ impl Generator {
         if decorators.len() > 1 {
             return Err(GenerateError::inference(
                 name.span,
-                "a method can have only one GPU decorator",
+                "a method can have only one bridge decorator",
             ));
         }
         if let Some(decorator) = decorators.first() {
@@ -632,14 +631,15 @@ impl Generator {
         let receiver_matches = params
             .first()
             .is_some_and(|receiver| self.typer.receiver_definition(receiver) == Some(owner));
-        let result_matches = matches!(&declaration.result, Ty::Result { value, .. } if **value == Ty::GpuPointer { pointee: Box::new(Ty::UInt8) });
+        let result_matches =
+            matches!(&declaration.result, Ty::Result { value, .. } if **value == Ty::GpuView);
         if !receiver_matches
             || params.get(1..) != Some(&[Ty::UInt64, Ty::UInt64, Ty::Int32][..])
             || !result_matches
         {
             return Err(GenerateError::inference(
                 name.span,
-                "@gpu_allocator requires (self, bytes: ulong, alignment: ulong, memory: int) -> Result<GpuPtr<ubyte>, E>",
+                "@gpu_allocator requires (self, bytes: ulong, alignment: ulong, memory: int) -> Result<GpuView, E>",
             ));
         }
         if self.typer.gpu_allocators.insert(owner, function).is_some() {
@@ -898,9 +898,23 @@ impl Generator {
             typed::DeclarationKind::Function { decorators } => {
                 let id = self.declare_source_function(name, signature)?;
                 for decorator in decorators {
-                    if !gpu::is_bridge(&decorator.val) || !name.val.contains('.') {
+                    if (!gpu::is_bridge(&decorator.val)) || !name.val.contains('.') {
                         self.declare_shader(id, decorator)?;
                     }
+                }
+            }
+            typed::DeclarationKind::Intrinsic { operation } => {
+                let id = self.declare_source_function(name, signature)?;
+                if self.function(id).body.is_some() {
+                    return Ok(());
+                }
+                if !gpu_projections::define(
+                    &mut self.typer,
+                    self.functions[id.index()].as_mut().unwrap(),
+                    id,
+                    operation,
+                )? {
+                    primitives::define(self.function_mut(id), operation)?;
                 }
             }
             typed::DeclarationKind::Foreign { header } => {

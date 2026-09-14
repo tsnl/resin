@@ -1,0 +1,50 @@
+==================
+Generic intrinsic declaration
+==================
+intrinsic "pointer_index" def at<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;
+---
+
+(source_file
+  (intrinsic_function
+    (string)
+    (lid)
+    (type_parameters
+      (uid))
+    (declare
+      (lid)
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (type
+                (infix_type
+                  (union_type
+                    (unary_type
+                      (primary_type
+                        (uid)))))))))))
+    (declare
+      (lid)
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (primary_type
+                (builtin_type)))))))
+    (declare
+      (lid)
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (primary_type
+                (builtin_type)))))))
+    (type
+      (infix_type
+        (union_type
+          (unary_type
+            (type
+              (infix_type
+                (union_type
+                  (unary_type
+                    (primary_type
+                      (uid))))))))))))

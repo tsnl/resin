@@ -1,25 +1,15 @@
+use super::{Slot, types::Types};
 use crate::Error;
 use resin_types::prelude::*;
 
-use super::{Slot, types::Types};
-
-pub(super) fn emit(types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<String, Error> {
-    let [arg] = args else {
-        return Err(Error("print expects one string".into()));
-    };
-    if result != &Ty::Unit {
-        return Err(Error("print returns ()".into()));
-    }
-    let (data, length) = bytes(types, &arg.ty, &arg.expr)?;
-    Ok(format!("(resin_print({data}, {length}), 0)"))
-}
-
 pub(super) fn format(types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<String, Error> {
-    let invalid = || Error("fmt expects a string and a tuple of arguments".into());
-    let [format, arguments] = args else {
+    let invalid = || Error("format_bytes expects a byte pointer, length and tuple".into());
+    let [data, length, arguments] = args else {
         return Err(invalid());
     };
-    let (data, length) = bytes(types, &format.ty, &format.expr)?;
+    if result != &Ty::StrongOwner {
+        return Err(invalid());
+    }
     let fields = match &arguments.ty {
         Ty::Unit => &[][..],
         Ty::Record { fields } => fields.as_slice(),
@@ -42,62 +32,35 @@ pub(super) fn format(types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<St
     } else {
         format!("(ResinPrintArg[]){{ {} }}", values.join(", "))
     };
-    string(
-        types,
-        result,
-        format!("resin_format({data}, {length}, {values}, {count})"),
-    )
-}
-
-pub(super) fn from_bytes(types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<String, Error> {
-    let [arg] = args else {
-        return Err(Error("string copy expects one str or byte span".into()));
-    };
-    if arg.ty != Ty::Str && arg.ty != Ty::byte_span() {
-        return Err(Error("string copy expects str or Span<ubyte>".into()));
-    }
-    let (data, length) = bytes(types, &arg.ty, &arg.expr)?;
-    string(
-        types,
-        result,
-        format!("resin_string_from_str({data}, {length})"),
-    )
-}
-
-fn string(types: &Types<'_>, result: &Ty, allocation: String) -> Result<String, Error> {
-    let body = types.shape(result);
-    let Ty::Record { fields } = body else {
-        return Err(Error("expected String result".into()));
-    };
-    if fields.len() != 1 || fields[0].ty != Ty::formatted_bytes() {
-        return Err(Error("invalid String representation".into()));
-    }
-    Ok(types.wrap(
-        result,
-        format!("({}){{ .f0 = {allocation} }}", types.name(body)),
+    Ok(format!(
+        "resin_format({}, {}, {values}, {count})",
+        data.expr, length.expr
     ))
 }
 
-fn bytes(types: &Types<'_>, ty: &Ty, expr: &str) -> Result<(String, String), Error> {
-    let expr = types.unwrap(ty, expr.into());
-    match types.shape(ty) {
-        ty if ty == &Ty::Str || ty == &Ty::byte_span() => {
-            Ok((format!("({expr}).f0"), format!("({expr}).f1")))
-        }
-        Ty::Record { fields } if fields.len() == 1 && fields[0].ty == Ty::formatted_bytes() => {
-            let Ty::Arc { pointee } = &fields[0].ty else {
-                unreachable!()
-            };
-            let span = format!("(({} *)resin_arc_data(({expr}).f0))", types.name(pointee));
-            Ok((format!("{span}->f0"), format!("{span}->f1")))
-        }
-        _ => Err(Error("expected str, Span<ubyte>, or String".into())),
+pub(super) fn from_bytes(_types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<String, Error> {
+    let [data, length] = args else {
+        return Err(Error("byte copy expects pointer and length".into()));
+    };
+    if result != &Ty::StrongOwner {
+        return Err(Error("byte copy produces an owner".into()));
+    }
+    Ok(format!(
+        "resin_string_from_str({}, {})",
+        data.expr, length.expr
+    ))
+}
+
+// Verification admits only str or the explicit structural byte transport record.
+fn bytes(ty: &Ty, expr: &str) -> Result<(String, String), Error> {
+    match ty {
+        Ty::Str | Ty::Record { .. } => Ok((format!("({expr}).f0"), format!("({expr}).f1"))),
+        _ => Err(Error("expected str or a structural byte view".into())),
     }
 }
 
-fn value(types: &Types<'_>, ty: &Ty, expr: String) -> Result<String, Error> {
-    let expr = types.unwrap(ty, expr);
-    let (kind, member, value) = match types.shape(ty) {
+fn value(_types: &Types<'_>, ty: &Ty, expr: String) -> Result<String, Error> {
+    let (kind, member, value) = match ty {
         Ty::Unit => ("UNIT", "unsigned_value", "0".into()),
         Ty::Bool => ("BOOL", "unsigned_value", expr),
         Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 => {
@@ -113,8 +76,8 @@ fn value(types: &Types<'_>, ty: &Ty, expr: String) -> Result<String, Error> {
             "unsigned_value",
             format!("(uint64_t)(uintptr_t)({expr})"),
         ),
-        ty @ (Ty::Str | Ty::Span { .. } | Ty::Record { .. }) => {
-            let (data, length) = bytes(types, ty, &expr)?;
+        ty @ (Ty::Str | Ty::Record { .. }) => {
+            let (data, length) = bytes(ty, &expr)?;
             (
                 "BYTES",
                 "bytes",

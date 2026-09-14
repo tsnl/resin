@@ -28,6 +28,14 @@ typedef struct ResinGpuPtr {
     uint32_t access;
 } ResinGpuPtr;
 
+/* The owner and shader contract cannot be separated by Resin source code. */
+typedef struct ResinGpuPipelineContract {
+    ResinArc *owner;
+    uint32_t root_type;
+    uint32_t owner_type;
+    uint32_t kind;
+} ResinGpuPipelineContract;
+
 typedef struct ResinGpuSpan {
     ResinGpuPtr data;
     size_t length;

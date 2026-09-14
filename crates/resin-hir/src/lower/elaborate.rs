@@ -65,6 +65,27 @@ struct Completion<'a> {
 }
 
 impl Completion<'_> {
+    fn convert_method_result(
+        &self,
+        source: &typed::Term,
+        result: crate::Type,
+        kind: TermKind,
+    ) -> Result<TermKind> {
+        Ok(
+            if result == self.solver.require_complete(&source.ty, source.span)? {
+                kind
+            } else {
+                TermKind::Convert {
+                    arg: Box::new(Term {
+                        span: source.span,
+                        ty: result,
+                        kind,
+                    }),
+                }
+            },
+        )
+    }
+
     fn elaborate(&mut self, source: &typed::Term) -> Result<Term> {
         Ok(Term {
             span: source.span,
@@ -165,13 +186,36 @@ impl Completion<'_> {
                             .map(|arg| self.elaborate(arg))
                             .collect::<Result<_>>()?,
                     },
-                    ResolvedMethod::Compiler { declaration } => self.method(
-                        declaration,
-                        receiver.as_deref(),
-                        &self.annotation(receiver_type)?.ty,
-                        name,
-                        args,
-                    )?,
+                    ResolvedMethod::GpuPipeline { method } => {
+                        self.source_pipeline(method, receiver.as_deref(), name, args)?
+                    }
+                    ResolvedMethod::Intrinsic {
+                        signature,
+                        receiver_conversion,
+                    } => {
+                        let result = self
+                            .solver
+                            .require_complete(&signature.result, source.span)?;
+                        let kind = self.intrinsic_method(
+                            signature,
+                            receiver_conversion,
+                            receiver.as_deref(),
+                            args,
+                            source.span,
+                        )?;
+                        self.convert_method_result(source, result, kind)?
+                    }
+                    ResolvedMethod::Compiler { declaration } => {
+                        let result = types::ty(&declaration.result);
+                        let kind = self.method(
+                            declaration,
+                            receiver.as_deref(),
+                            &self.annotation(receiver_type)?.ty,
+                            name,
+                            args,
+                        )?;
+                        self.convert_method_result(source, result, kind)?
+                    }
                     source => self.source_method_call(&source, receiver.as_deref(), name, args)?,
                 }
             }
@@ -185,7 +229,11 @@ impl Completion<'_> {
                     ResolvedMethod::Dependent { signature } => TermKind::DependentMethod {
                         lookup: self.method_lookup(signature, name.span)?,
                     },
-                    ResolvedMethod::Compiler { .. } => unreachable!("source method reference"),
+                    ResolvedMethod::Compiler { .. }
+                    | ResolvedMethod::GpuPipeline { .. }
+                    | ResolvedMethod::Intrinsic { .. } => {
+                        unreachable!("source method reference")
+                    }
                 }
             }
             typed::TermKind::Call { func, args } => self.call(func, args)?,
@@ -465,6 +513,100 @@ impl Completion<'_> {
         Ok(TermKind::Call { func, args })
     }
 
+    fn intrinsic_method(
+        &mut self,
+        signature: super::context::IntrinsicMethod,
+        conversion: Option<crate::ReceiverConversion>,
+        receiver: Option<&typed::Term>,
+        arguments: &[typed::Term],
+        span: Span,
+    ) -> Result<TermKind> {
+        let receiver = receiver
+            .map(|receiver| {
+                Ok::<_, GenerateError>(Term {
+                    span: receiver.span,
+                    ty: self
+                        .solver
+                        .require_complete(&signature.params[0], receiver.span)?,
+                    kind: TermKind::Adapt {
+                        conversion: conversion.expect("checked primitive receiver"),
+                        arg: self.boxed(receiver)?,
+                    },
+                })
+            })
+            .transpose()?;
+        let values = receiver
+            .into_iter()
+            .chain(
+                arguments
+                    .iter()
+                    .map(|arg| self.elaborate(arg))
+                    .collect::<Result<Vec<_>>>()?,
+            )
+            .collect();
+        let params = signature
+            .params
+            .iter()
+            .map(|ty| self.solver.require_complete(ty, span))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(TermKind::Intrinsic {
+            op: signature.op,
+            type_args: vec![],
+            args: Arguments { values, params },
+        })
+    }
+
+    fn source_pipeline(
+        &mut self,
+        method: super::gpu::PipelineMethod,
+        receiver: Option<&typed::Term>,
+        _name: &Ident,
+        arguments: &[typed::Term],
+    ) -> Result<TermKind> {
+        if let FunctionBody::GpuPipelineFactory { factory, graphics } = method.body {
+            let receiver_type = self
+                .solver
+                .resolve(&Type::from_hir(&method.params[0]))
+                .expect("fixed native GPU receiver");
+            return self.pipeline_create(receiver, arguments, &[receiver_type], factory, graphics);
+        }
+        let receiver_type = self
+            .solver
+            .resolve(&Type::from_hir(&method.params[0]))
+            .expect("fixed native GPU receiver");
+        let receiver = receiver
+            .map(|value| self.adapt(value, &self.ty(value)?, &receiver_type))
+            .transpose()?;
+        let values = receiver
+            .into_iter()
+            .map(|value| *value)
+            .chain(
+                arguments
+                    .iter()
+                    .map(|value| self.elaborate(value))
+                    .collect::<Result<Vec<_>>>()?,
+            )
+            .collect();
+        let args = Arguments {
+            values,
+            params: method.params,
+        };
+        let FunctionBody::GpuPipelineDispatch {
+            context,
+            allocator,
+            record,
+        } = method.body
+        else {
+            unreachable!("completed pipeline bridge")
+        };
+        Ok(TermKind::GpuPipelineDispatch {
+            context,
+            allocator,
+            record,
+            args,
+        })
+    }
+
     fn method(
         &mut self,
         declaration: FunctionDecl,
@@ -500,9 +642,11 @@ impl Completion<'_> {
             params: declaration.params.iter().map(types::ty).collect(),
         };
         Ok(match declaration.body {
-            FunctionBody::Intrinsic(op) => TermKind::Intrinsic { op, args },
-            FunctionBody::GpuNew { allocator } => TermKind::GpuNew { allocator, args },
-            FunctionBody::GpuAllocate { allocator } => TermKind::GpuAllocate { allocator, args },
+            FunctionBody::Intrinsic(op) => TermKind::Intrinsic {
+                op,
+                type_args: vec![],
+                args,
+            },
             FunctionBody::GpuPipelineDispatch {
                 context,
                 allocator,
@@ -624,12 +768,7 @@ impl Completion<'_> {
                 },
                 ReceiverConversion::Address,
             )),
-            crate::Type::Str
-            | crate::Type::Span { .. }
-            | crate::Type::GpuPointer { .. }
-            | crate::Type::GpuSpan { .. } => {
-                Some((function_type.clone(), ReceiverConversion::Value))
-            }
+            crate::Type::Str => Some((function_type.clone(), ReceiverConversion::Value)),
             _ => None,
         };
         if let Some((ty, conversion)) = receiver {
@@ -651,14 +790,8 @@ impl Completion<'_> {
                 ],
             };
             return Ok(TermKind::Intrinsic {
-                op: if matches!(
-                    function_type,
-                    crate::Type::GpuPointer { .. } | crate::Type::GpuSpan { .. }
-                ) {
-                    Intrinsic::GpuIndex
-                } else {
-                    Intrinsic::Index
-                },
+                type_args: vec![],
+                op: Intrinsic::Index,
                 args,
             });
         }
@@ -798,31 +931,9 @@ impl Completion<'_> {
 
 impl Completion<'_> {
     fn symbolic_ascription(&mut self, to: &crate::Type, source: &typed::Term) -> Result<TermKind> {
-        match to {
-            crate::Type::Arc { pointee } => {
-                let mut value = self.nominal_argument(pointee, source)?;
-                if value.ty != **pointee {
-                    value = Term {
-                        span: value.span,
-                        ty: *pointee.clone(),
-                        kind: TermKind::Convert {
-                            arg: Box::new(value),
-                        },
-                    };
-                }
-                Ok(TermKind::ArcNew {
-                    value: Box::new(value),
-                })
-            }
-            crate::Type::Weak { pointee } if matches!(source.kind, typed::TermKind::Unit) => {
-                Ok(TermKind::WeakEmpty {
-                    pointee: *pointee.clone(),
-                })
-            }
-            _ => Ok(TermKind::Convert {
-                arg: Box::new(self.nominal_argument(to, source)?),
-            }),
-        }
+        Ok(TermKind::Convert {
+            arg: Box::new(self.nominal_argument(to, source)?),
+        })
     }
 
     fn nominal_argument(&mut self, to: &crate::Type, source: &typed::Term) -> Result<Term> {
@@ -838,27 +949,8 @@ impl Completion<'_> {
     }
 
     fn ascription(&mut self, span: Span, to: &Ty, source: &typed::Term) -> Result<TermKind> {
-        let payload = if let Ty::Arc { pointee } = to {
-            pointee.as_ref()
-        } else {
-            to
-        };
-        if self.typer.body(payload).is_err() {
-            // A source nominal may contain a generic application even when its
-            // own argument list is empty. Its representation belongs to LIR.
+        if self.typer.body(to).is_err() {
             return self.symbolic_ascription(&types::ty(to), source);
-        }
-        if let Ty::Arc { pointee } = to {
-            return Ok(TermKind::ArcNew {
-                value: Box::new(self.shared_payload(pointee, source)?),
-            });
-        }
-        if let Ty::Weak { pointee } = to
-            && matches!(source.kind, typed::TermKind::Unit)
-        {
-            return Ok(TermKind::WeakEmpty {
-                pointee: types::ty(pointee),
-            });
         }
         let value = self.constructor_argument(to, source)?;
         self.conversion(span, value, to)
@@ -880,25 +972,6 @@ impl Completion<'_> {
             });
         }
         self.elaborate(source)
-    }
-
-    fn shared_payload(&mut self, to: &Ty, source: &typed::Term) -> Result<Term> {
-        if !matches!(
-            source.kind,
-            typed::TermKind::Record { .. } | typed::TermKind::Unit
-        ) {
-            return self.elaborate(source);
-        }
-        let value = self.constructor_argument(to, source)?;
-        if value.ty == types::ty(to) {
-            return Ok(value);
-        }
-        let kind = self.conversion(source.span, value, to)?;
-        Ok(Term {
-            span: source.span,
-            ty: types::ty(to),
-            kind,
-        })
     }
 
     fn conversion(&self, span: Span, value: Term, to: &Ty) -> Result<TermKind> {
@@ -939,7 +1012,6 @@ mod tests {
                         args: vec![Ty::UInt64.into()],
                         out: ty.clone(),
                         associated: false,
-                        origins: vec![],
                     },
                 ),
             );

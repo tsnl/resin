@@ -28,24 +28,18 @@ fn module(parameter: Ty, result: Ty, operations: Vec<Instr>) -> Module {
     }
 }
 
-fn gpu(ty: Ty) -> Ty {
-    Ty::GpuPointer {
-        pointee: Box::new(ty),
+fn uint(value: u64) -> Instr {
+    Instr::Push {
+        value: Value::UInt64 { value },
     }
 }
 
 #[test]
-fn gpu_field_addresses_preserve_owner_type_and_cannot_be_pointer_cast() {
-    let element = Ty::Record {
-        fields: vec![RecordField {
-            name: "value".into(),
-            ty: Ty::UInt32,
-        }],
-    };
+fn opaque_gpu_offset_preserves_ownership_and_rejects_pointer_casts() {
     let mut module = module(
-        gpu(element),
-        gpu(Ty::UInt32),
-        vec![Instr::AccessStatic { index: 0 }],
+        Ty::GpuView,
+        Ty::GpuView,
+        vec![uint(4), uint(4), uint(4), Instr::GpuViewOffset],
     );
     resin_lir::verify(&module).unwrap();
     module.functions[0].result = Ty::UInt64;
@@ -59,60 +53,79 @@ fn gpu_field_addresses_preserve_owner_type_and_cannot_be_pointer_cast() {
 }
 
 #[test]
-fn gpu_pointer_slicing_produces_an_owning_span() {
-    let span = Ty::GpuSpan {
-        element: Box::new(Ty::Int64),
-    };
-    let module = module(
-        gpu(Ty::Int64),
-        span,
+fn gpu_range_and_index_preserve_the_opaque_view_until_explicit_load() {
+    let range = module(
+        Ty::GpuView,
+        Ty::GpuView,
         vec![
-            Instr::Push {
-                value: Value::UInt64 { value: 1 },
-            },
-            Instr::Push {
-                value: Value::UInt64 { value: 2 },
-            },
-            Instr::GpuSlice,
+            uint(4),
+            uint(1),
+            uint(2),
+            Instr::GpuViewRange { element: Ty::Int64 },
         ],
     );
-    resin_lir::verify(&module).unwrap();
-}
-
-#[test]
-fn gpu_index_returns_owner_and_load_returns_plain_element() {
-    let module = module(
-        Ty::GpuSpan {
-            element: Box::new(Ty::UInt32),
-        },
+    resin_lir::verify(&range).unwrap();
+    let indexed = module(
+        Ty::GpuView,
         Ty::UInt32,
         vec![
-            Instr::Push {
-                value: Value::UInt64 { value: 1 },
+            uint(4),
+            uint(1),
+            Instr::GpuViewIndex {
+                element: Ty::UInt32,
             },
-            Instr::AccessDynamic,
-            Instr::Load,
+            Instr::GpuViewLoad {
+                element: Ty::UInt32,
+            },
         ],
     );
-    resin_lir::verify(&module).unwrap();
+    resin_lir::verify(&indexed).unwrap();
 }
 
 #[test]
-fn managed_gpu_elements_and_permission_changes_on_raw_pointers_are_rejected() {
-    let managed = gpu(Ty::Arc {
-        pointee: Box::new(Ty::UInt32),
-    });
-    let module = module(managed.clone(), managed, vec![]);
-    assert!(matches!(
-        resin_lir::verify(&module).unwrap_err().kind,
-        VerifyErrorKind::UnsupportedGpuElement { .. }
-    ));
+fn gpu_load_and_index_reject_managed_element_types() {
+    for (result, operations) in [
+        (
+            Ty::StrongOwner,
+            vec![Instr::GpuViewLoad {
+                element: Ty::StrongOwner,
+            }],
+        ),
+        (
+            Ty::GpuView,
+            vec![
+                uint(4),
+                uint(1),
+                Instr::GpuViewIndex {
+                    element: Ty::StrongOwner,
+                },
+            ],
+        ),
+    ] {
+        let module = module(Ty::GpuView, result, operations);
+        assert!(matches!(
+            resin_lir::verify(&module).unwrap_err().kind,
+            VerifyErrorKind::UnsupportedGpuElement { .. }
+        ));
+    }
+}
+
+#[test]
+fn opaque_gpu_views_do_not_support_ordinary_load_or_raw_pointer_permissions() {
+    let ordinary = module(Ty::GpuView, Ty::UInt32, vec![Instr::Load]);
+    assert!(resin_lir::verify(&ordinary).is_err());
     let raw = Ty::Pointer {
         pointee: Box::new(Ty::UInt32),
     };
-    let module = self::module(raw.clone(), raw, vec![Instr::GpuReadOnly]);
-    assert_eq!(
-        resin_lir::verify(&module).unwrap_err().kind,
-        VerifyErrorKind::InvalidGpuOperation
+    let restricted = module(
+        raw,
+        Ty::GpuView,
+        vec![
+            Instr::Push {
+                value: Value::UInt32 { value: 1 },
+            },
+            Instr::GpuViewRestrict,
+        ],
     );
+    assert!(resin_lir::verify(&restricted).is_err());
 }

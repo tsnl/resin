@@ -24,13 +24,6 @@ pub(crate) enum Head {
     FunctionResult,
     Nominal { definition: TypeId },
     Pointer,
-    GpuPointer,
-    GpuSpan,
-    GpuComputePipeline,
-    GpuGraphicsPipeline,
-    Arc,
-    Weak,
-    Span,
     Array(usize),
     Record(Vec<Arc<str>>),
     // Result first, followed by the parameter types in declaration order.
@@ -60,10 +53,10 @@ impl Type {
         Self::Node(Head::FunctionResult, vec![function])
     }
 
-    /// The inference representation of Ty::deref_target; Weak is not dereferenceable.
+    /// The symbolic counterpart of `Ty::deref_target` for primitive pointers.
     pub fn deref_target(&self) -> Option<&Type> {
         match self {
-            Self::Node(Head::Pointer | Head::GpuPointer | Head::Arc, children) => children.first(),
+            Self::Node(Head::Pointer, children) => children.first(),
             _ => None,
         }
     }
@@ -71,14 +64,13 @@ impl Type {
     pub fn view_element(&self) -> Option<Type> {
         match self {
             Self::Node(Head::Atom(Ty::Str), _) => Some(Ty::UInt8.into()),
-            Self::Node(Head::Span | Head::GpuSpan, children) => children.first().cloned(),
             _ => None,
         }
     }
 
     pub fn index_element(&self) -> Option<Type> {
         match self {
-            Self::Node(Head::Array(_) | Head::GpuPointer, children) => children.first().cloned(),
+            Self::Node(Head::Array(_), children) => children.first().cloned(),
             _ => self.view_element(),
         }
     }
@@ -88,10 +80,6 @@ impl Type {
     }
     pub fn pointer(pointee: Type) -> Self {
         Self::Node(Head::Pointer, vec![pointee])
-    }
-
-    pub fn gpu_pointer(pointee: Type) -> Self {
-        Self::Node(Head::GpuPointer, vec![pointee])
     }
 
     pub fn function(params: Vec<Type>, result: Type) -> Self {
@@ -125,7 +113,11 @@ impl Type {
             crate::Type::Float32 => Ty::Float32.into(),
             crate::Type::Float64 => Ty::Float64.into(),
             crate::Type::Str => Ty::Str.into(),
+            crate::Type::GpuView => Ty::GpuView.into(),
+            crate::Type::GpuPipelineContract => Ty::GpuPipelineContract.into(),
             crate::Type::GpuArguments => Ty::GpuArguments.into(),
+            crate::Type::StrongOwner => Ty::StrongOwner.into(),
+            crate::Type::WeakOwner => Ty::WeakOwner.into(),
             crate::Type::Foreign { name } => Ty::Foreign { name: name.clone() }.into(),
             crate::Type::Defined {
                 definition,
@@ -169,23 +161,6 @@ impl Type {
             crate::Type::Pointer { pointee } => {
                 Self::Node(Head::Pointer, vec![Self::from_hir(pointee)])
             }
-            crate::Type::GpuPointer { pointee } => {
-                Self::Node(Head::GpuPointer, vec![Self::from_hir(pointee)])
-            }
-            crate::Type::GpuSpan { element } => {
-                Self::Node(Head::GpuSpan, vec![Self::from_hir(element)])
-            }
-            crate::Type::Span { element } => Self::Node(Head::Span, vec![Self::from_hir(element)]),
-            crate::Type::Arc { pointee } => Self::Node(Head::Arc, vec![Self::from_hir(pointee)]),
-            crate::Type::Weak { pointee } => Self::Node(Head::Weak, vec![Self::from_hir(pointee)]),
-            crate::Type::GpuComputePipeline { root, owner } => Self::Node(
-                Head::GpuComputePipeline,
-                vec![Self::from_hir(root), Self::from_hir(owner)],
-            ),
-            crate::Type::GpuGraphicsPipeline { root, owner } => Self::Node(
-                Head::GpuGraphicsPipeline,
-                vec![Self::from_hir(root), Self::from_hir(owner)],
-            ),
             crate::Type::Function { params, result } => Self::function(
                 params.iter().map(Self::from_hir).collect(),
                 Self::from_hir(result),
@@ -223,20 +198,7 @@ impl Type {
 impl From<Ty> for Type {
     fn from(ty: Ty) -> Self {
         match ty {
-            Ty::Arc { pointee } => Self::Node(Head::Arc, vec![(*pointee).into()]),
-            Ty::Weak { pointee } => Self::Node(Head::Weak, vec![(*pointee).into()]),
             Ty::Pointer { pointee } => Self::pointer((*pointee).into()),
-            Ty::Span { element } => Self::Node(Head::Span, vec![(*element).into()]),
-            Ty::GpuPointer { pointee } => Self::gpu_pointer((*pointee).into()),
-            Ty::GpuSpan { element } => Self::Node(Head::GpuSpan, vec![(*element).into()]),
-            Ty::GpuComputePipeline { root, owner } => Self::Node(
-                Head::GpuComputePipeline,
-                vec![(*root).into(), (*owner).into()],
-            ),
-            Ty::GpuGraphicsPipeline { root, owner } => Self::Node(
-                Head::GpuGraphicsPipeline,
-                vec![(*root).into(), (*owner).into()],
-            ),
             Ty::Array { element, length } => {
                 Self::Node(Head::Array(length), vec![(*element).into()])
             }
@@ -281,31 +243,8 @@ impl Head {
             | Self::Nominal { .. } => return None,
             Self::Atom(ty) => ty.clone(),
             Self::Union => Ty::union_of(children),
-            Self::Arc => Ty::Arc {
-                pointee: Box::new(children.next().unwrap()),
-            },
-            Self::Weak => Ty::Weak {
-                pointee: Box::new(children.next().unwrap()),
-            },
             Self::Pointer => Ty::Pointer {
                 pointee: Box::new(children.next().unwrap()),
-            },
-            Self::GpuPointer => Ty::GpuPointer {
-                pointee: Box::new(children.next().unwrap()),
-            },
-            Self::GpuSpan => Ty::GpuSpan {
-                element: Box::new(children.next().unwrap()),
-            },
-            Self::GpuComputePipeline => Ty::GpuComputePipeline {
-                root: Box::new(children.next().unwrap()),
-                owner: Box::new(children.next().unwrap()),
-            },
-            Self::GpuGraphicsPipeline => Ty::GpuGraphicsPipeline {
-                root: Box::new(children.next().unwrap()),
-                owner: Box::new(children.next().unwrap()),
-            },
-            Self::Span => Ty::Span {
-                element: Box::new(children.next().unwrap()),
             },
             Self::Array(length) => Ty::Array {
                 element: Box::new(children.next().unwrap()),
@@ -331,14 +270,31 @@ impl Head {
     }
 }
 
+/// Substitution can reveal nested unions and equal members before a match is checked.
+fn completed_union(members: Vec<crate::Type>) -> crate::Type {
+    let mut variants = vec![];
+    let mut pending = members;
+    while let Some(member) = pending.pop() {
+        match member {
+            crate::Type::Union { variants } => pending.extend(variants),
+            member => variants.push(member),
+        }
+    }
+    variants.sort();
+    variants.dedup();
+    if variants.len() == 1 {
+        variants.pop().unwrap()
+    } else {
+        crate::Type::Union { variants }
+    }
+}
+
 impl Head {
     fn completed(&self, children: Vec<crate::Type>) -> crate::Type {
         let mut children = children.into_iter();
         match self {
             Self::Atom(ty) => super::types::ty(ty),
-            Self::Union => crate::Type::Union {
-                variants: children.collect(),
-            },
+            Self::Union => completed_union(children.collect()),
             Self::Parameter { id } => crate::Type::Parameter { parameter: *id },
             Self::Nominal { definition } => crate::Type::Defined {
                 definition: *definition,
@@ -365,29 +321,6 @@ impl Head {
             },
             Self::Pointer => crate::Type::Pointer {
                 pointee: Box::new(children.next().unwrap()),
-            },
-            Self::GpuPointer => crate::Type::GpuPointer {
-                pointee: Box::new(children.next().unwrap()),
-            },
-            Self::GpuSpan => crate::Type::GpuSpan {
-                element: Box::new(children.next().unwrap()),
-            },
-            Self::GpuComputePipeline => crate::Type::GpuComputePipeline {
-                root: Box::new(children.next().unwrap()),
-                owner: Box::new(children.next().unwrap()),
-            },
-            Self::GpuGraphicsPipeline => crate::Type::GpuGraphicsPipeline {
-                root: Box::new(children.next().unwrap()),
-                owner: Box::new(children.next().unwrap()),
-            },
-            Self::Arc => crate::Type::Arc {
-                pointee: Box::new(children.next().unwrap()),
-            },
-            Self::Weak => crate::Type::Weak {
-                pointee: Box::new(children.next().unwrap()),
-            },
-            Self::Span => crate::Type::Span {
-                element: Box::new(children.next().unwrap()),
             },
             Self::Array(length) => crate::Type::Array {
                 element: Box::new(children.next().unwrap()),
@@ -628,9 +561,12 @@ impl Solver {
             return Ty::union_of(types).into();
         }
         let mut unique = vec![];
-        for member in members {
-            if !unique.contains(&member) {
-                unique.push(member);
+        let mut pending = members;
+        while let Some(member) = pending.pop() {
+            match self.head(&member) {
+                Type::Node(Head::Union, members) => pending.extend(members),
+                member if !unique.contains(&member) => unique.push(member),
+                _ => {}
             }
         }
         match unique.len() {
@@ -1074,7 +1010,7 @@ fn error(span: Span, message: impl Into<Arc<str>>) -> GenerateError {
 pub(crate) fn check_binding_name(name: &Ident) -> Result<()> {
     if matches!(
         name.val.as_ref(),
-        "fmt" | "print" | "ok" | "err" | "size_of" | "align_of" | "absurd"
+        "ok" | "err" | "size_of" | "align_of" | "absurd"
     ) {
         return Err(GenerateError {
             span: name.span,
@@ -1107,6 +1043,13 @@ pub(crate) struct AppliedMethod {
 
 #[derive(Clone)]
 pub(crate) enum ResolvedMethod {
+    Intrinsic {
+        signature: super::context::IntrinsicMethod,
+        receiver_conversion: Option<crate::ReceiverConversion>,
+    },
+    GpuPipeline {
+        method: super::gpu::PipelineMethod,
+    },
     Dependent {
         signature: Type,
     },
@@ -1212,23 +1155,6 @@ impl<'a> Inference<'a> {
 //
 
 #[derive(Clone)]
-pub(crate) enum AddressOrigin {
-    /// Explicit `.*` dereferences exactly one pointer.
-    Deref { pointer: Type },
-    /// Field lookup implicitly follows every pointer and Arc receiver.
-    Field { base: Type },
-}
-
-impl AddressOrigin {
-    fn input(&self) -> &Type {
-        match self {
-            Self::Deref { pointer } => pointer,
-            Self::Field { base } => base,
-        }
-    }
-}
-
-#[derive(Clone)]
 pub(crate) enum Constraint {
     Equal(Type, Type),
     Depends(Type),
@@ -1239,7 +1165,7 @@ pub(crate) enum Constraint {
     Variant(Type, Pattern, Type),
     Boolean(Type),
     Deref(Type, Type),
-    Address(Vec<AddressOrigin>, Type, Type),
+    Address(Type, Type),
     Field(Type, Arc<str>, Type),
     Call(Type, Vec<Type>, Type),
     Method {
@@ -1249,7 +1175,6 @@ pub(crate) enum Constraint {
         args: Vec<Type>,
         out: Type,
         associated: bool,
-        origins: Vec<AddressOrigin>,
     },
     MethodReference {
         receiver: Type,
@@ -1464,16 +1389,6 @@ impl Inference<'_> {
         true
     }
 
-    fn require_gpu_element(&self, element: &Ty, span: Span) -> Result<()> {
-        if element.gpu_element(self.typer.definitions()) {
-            return Ok(());
-        }
-        Err(error(
-            span,
-            "GPU elements require a shared host/device layout without pointers, owners, or drop hooks",
-        ))
-    }
-
     fn nominal_drop(&self, ty: &Type) -> Option<TypeId> {
         let Type::Node(Head::Nominal { definition } | Head::Atom(Ty::Defined { definition }), _) =
             self.solver.head(ty)
@@ -1485,59 +1400,6 @@ impl Inference<'_> {
             .ok()?
             .drop_hook()
             .map(|_| definition)
-    }
-
-    fn gpu_address(&self, origins: &[AddressOrigin]) -> Option<bool> {
-        let mut gpu = false;
-        for origin in origins {
-            let mut current = self.solver.head(origin.input());
-            loop {
-                match current {
-                    Type::Variable(_) => return None,
-                    Type::Node(Head::GpuPointer, _) => gpu = true,
-                    _ => {}
-                }
-                if matches!(origin, AddressOrigin::Deref { .. }) {
-                    break;
-                }
-                let Some(pointee) = current.deref_target() else {
-                    break;
-                };
-                current = self.solver.head(pointee);
-            }
-        }
-        Some(gpu)
-    }
-
-    fn pipeline_method(
-        &self,
-        method: FunctionDecl,
-        args: &[Type],
-        associated: bool,
-        span: Span,
-    ) -> Result<Option<FunctionDecl>> {
-        let factory = match method.body {
-            FunctionBody::GpuPipelineFactory { .. } => true,
-            FunctionBody::GpuPipelineRecord { .. } => false,
-            _ => return Ok(Some(method)),
-        };
-        let count = method.params.len() - usize::from(!associated);
-        argument_count(count, args.len(), span)?;
-        let inputs = args;
-        let inputs = &inputs[usize::from(associated)..];
-        let needed = if factory { inputs.len() } else { 1 };
-        let Some(arguments) = inputs
-            .iter()
-            .take(needed)
-            .map(|ty| self.solver.resolve(ty))
-            .collect::<Option<Vec<_>>>()
-        else {
-            return Ok(None);
-        };
-        self.typer
-            .specialize_gpu_method(method, &arguments)
-            .map(Some)
-            .map_err(|message| error(span, message))
     }
 
     fn method_receiver(&self, receiver: &Type) -> Type {
@@ -1654,6 +1516,47 @@ impl Inference<'_> {
         Ok(Some(application))
     }
 
+    fn intrinsic_method_call(
+        &mut self,
+        owner: Rule,
+        signature: super::context::IntrinsicMethod,
+        constraint: &Constraint,
+        span: Span,
+    ) -> Result<bool> {
+        let Constraint::Method {
+            receiver,
+            args,
+            out,
+            associated,
+            ..
+        } = constraint
+        else {
+            unreachable!("primitive method call");
+        };
+        let arguments =
+            self.arguments(args, &signature.params[usize::from(!associated)..], span)?;
+        let result = self.solver.coerce(&signature.result, out, span)?;
+        let receiver_conversion = if *associated {
+            None
+        } else {
+            let Some(conversion) = self.source_receiver(receiver, &signature.params[0], span)?
+            else {
+                return Ok(false);
+            };
+            Some(conversion)
+        };
+        if arguments && result {
+            self.methods.insert(
+                owner,
+                ResolvedMethod::Intrinsic {
+                    signature,
+                    receiver_conversion,
+                },
+            );
+        }
+        Ok(arguments && result)
+    }
+
     fn source_method_call(
         &mut self,
         owner: Rule,
@@ -1666,7 +1569,6 @@ impl Inference<'_> {
             args,
             out,
             associated,
-            origins,
             ..
         } = constraint
         else {
@@ -1684,8 +1586,7 @@ impl Inference<'_> {
         let conversion = if *associated {
             None
         } else {
-            let Some(conversion) =
-                self.source_receiver(receiver, &application.params[0], origins, span)?
+            let Some(conversion) = self.source_receiver(receiver, &application.params[0], span)?
             else {
                 return Ok(false);
             };
@@ -1701,7 +1602,6 @@ impl Inference<'_> {
         &mut self,
         from: &Type,
         to: &Type,
-        origins: &[AddressOrigin],
         span: Span,
     ) -> Result<Option<crate::ReceiverConversion>> {
         use crate::ReceiverConversion;
@@ -1717,36 +1617,9 @@ impl Inference<'_> {
             (Type::Node(a, _), Type::Node(b, _)) if a == b => {
                 (ReceiverConversion::Value, from.clone())
             }
-            (Type::Node(Head::Arc, parts), Type::Node(Head::Pointer, _)) => (
-                ReceiverConversion::ArcAddress,
-                Type::pointer(parts[0].clone()),
-            ),
-            (Type::Node(Head::Pointer | Head::GpuPointer, parts), _) => {
-                (ReceiverConversion::Load, parts[0].clone())
-            }
-            (Type::Node(Head::Arc, parts), _) => (ReceiverConversion::ArcLoad, parts[0].clone()),
-            (_, Type::Node(Head::Pointer | Head::GpuPointer, _)) => {
-                let Some(gpu) = self.gpu_address(origins) else {
-                    return Ok(None);
-                };
-                if gpu != matches!(target, Type::Node(Head::GpuPointer, _)) {
-                    return Err(error(
-                        span,
-                        if gpu {
-                            "GPU storage requires a GpuPtr receiver; it cannot be borrowed as a raw Ptr"
-                        } else {
-                            "a GpuPtr receiver requires an address in GPU storage"
-                        },
-                    ));
-                }
-                (
-                    ReceiverConversion::Address,
-                    if gpu {
-                        Type::gpu_pointer(from.clone())
-                    } else {
-                        Type::pointer(from.clone())
-                    },
-                )
+            (Type::Node(Head::Pointer, parts), _) => (ReceiverConversion::Load, parts[0].clone()),
+            (_, Type::Node(Head::Pointer, _)) => {
+                (ReceiverConversion::Address, Type::pointer(from.clone()))
             }
             _ => {
                 return Err(error(
@@ -1779,7 +1652,6 @@ impl Inference<'_> {
                 args,
                 out,
                 associated,
-                origins,
             } => {
                 if matches!(
                     self.method_receiver(receiver_type),
@@ -1787,19 +1659,74 @@ impl Inference<'_> {
                 ) {
                     return Ok(false);
                 }
-                let allocation = !associated
-                    && name.as_ref() == "new"
-                    && type_args.is_none()
-                    && self
+                if let Some(receiver) = self.solver.resolve(receiver_type)
+                    && let Some(method) = self.typer.method(&receiver, name)
+                    && matches!(
+                        method.body,
+                        FunctionBody::GpuPipelineFactory { .. }
+                            | FunctionBody::GpuPipelineRecord { .. }
+                    )
+                {
+                    if !associated
+                        && crate::ReceiverConversion::between(&receiver, &method.params[0])
+                            .is_none()
+                    {
+                        return Err(error(
+                            span,
+                            "pipeline method receiver does not match its native bridge",
+                        ));
+                    }
+                    argument_count(
+                        method.params.len() - usize::from(!associated),
+                        args.len(),
+                        span,
+                    )?;
+                    let inputs = &args[usize::from(*associated)..];
+                    let needed = if matches!(method.body, FunctionBody::GpuPipelineFactory { .. }) {
+                        inputs.len()
+                    } else {
+                        1
+                    };
+                    let Some(inputs) = inputs
+                        .iter()
+                        .take(needed)
+                        .map(|ty| self.solver.complete(ty))
+                        .collect::<Option<Vec<_>>>()
+                    else {
+                        return Ok(false);
+                    };
+                    let method = self
+                        .typer
+                        .source_pipeline_method(&method, &inputs)
+                        .map_err(|message| error(span, message))?;
+                    let params = method.params[usize::from(!associated)..]
+                        .iter()
+                        .map(Type::from_hir)
+                        .collect::<Vec<_>>();
+                    let a = self.arguments(args, &params, span)?;
+                    let b = self
                         .solver
-                        .resolve(receiver_type)
-                        .and_then(|receiver| self.typer.gpu_allocator(&receiver))
-                        .is_some();
-                if !allocation
-                    && let Some(application) =
-                        self.method_application(owner, receiver_type, name, type_args, span)?
+                        .coerce(&Type::from_hir(&method.result), out, span)?;
+                    if a && b {
+                        self.methods
+                            .insert(owner, ResolvedMethod::GpuPipeline { method });
+                    }
+                    return Ok(a && b);
+                }
+                if let Some(application) =
+                    self.method_application(owner, receiver_type, name, type_args, span)?
                 {
                     return self.source_method_call(owner, application, constraint, span);
+                }
+                if let Some((_, signature)) =
+                    super::context::intrinsic_methods(receiver_type, &self.solver)
+                        .into_iter()
+                        .find(|(candidate, _)| *candidate == name.as_ref())
+                {
+                    if type_args.is_some() {
+                        return Err(error(span, "compiler methods do not accept type arguments"));
+                    }
+                    return self.intrinsic_method_call(owner, signature, constraint, span);
                 }
                 if let Some(signature) =
                     self.dependent_method(receiver_type, name, type_args, *associated)
@@ -1823,113 +1750,10 @@ impl Inference<'_> {
                     }
                     return Ok(false);
                 };
-                if !associated
-                    && name.as_ref() == "new"
-                    && let Some(allocator) = self.typer.gpu_allocator(&receiver_type)
-                {
-                    argument_count(1, args.len(), span)?;
-                    let arg = &args[0];
-                    let result = Type::result(
-                        Type::gpu_pointer(arg.clone()),
-                        self.typer.gpu_error(allocator).into(),
-                    );
-                    self.solver.coerce(&result, out, span)?;
-                    if self.nominal_drop(arg).is_some() {
-                        return Err(error(span, "GPU elements cannot have drop hooks"));
-                    }
-                    let Some(element) = self.solver.resolve(arg) else {
-                        return Ok(false);
-                    };
-                    self.require_gpu_element(&element, span)?;
-                    let method = self
-                        .typer
-                        .method_call(&receiver_type, name, &[element], false)
-                        .expect("registered GPU allocator");
-                    self.methods.insert(
-                        owner,
-                        ResolvedMethod::Compiler {
-                            declaration: method,
-                        },
-                    );
-                    return Ok(true);
-                }
-                let method = if *associated
-                    && matches!(
-                        (&receiver_type, name.as_ref()),
-                        (Ty::GpuPointer { .. }, "new") | (Ty::GpuSpan { .. }, "allocate")
-                    ) {
-                    argument_count(2, args.len(), span)?;
-                    let parts = args;
-                    let Some(gpu) = parts.first().and_then(|ty| self.solver.resolve(ty)) else {
-                        return Ok(false);
-                    };
-                    let element = match &receiver_type {
-                        Ty::GpuPointer { pointee } => &**pointee,
-                        Ty::GpuSpan { element } => &**element,
-                        _ => unreachable!(),
-                    };
-                    self.require_gpu_element(element, span)?;
-                    let argument = vec![gpu, element.clone()];
-                    self.typer
-                        .method_call(&receiver_type, name, &argument, true)
-                } else if *associated
-                    && name.as_ref() == "allocate_native"
-                    && receiver_type
-                        == (Ty::GpuPointer {
-                            pointee: Box::new(Ty::UInt8),
-                        })
-                {
-                    argument_count(5, args.len(), span)?;
-                    let parts = args;
-                    let Some(prefix) = parts
-                        .iter()
-                        .take(2)
-                        .map(|ty| self.solver.resolve(ty))
-                        .collect::<Option<Vec<_>>>()
-                    else {
-                        return Ok(false);
-                    };
-                    if prefix.len() != 2 {
-                        return Err(error(
-                            span,
-                            "native GPU allocation requires a handle and owner",
-                        ));
-                    }
-                    let argument = vec![
-                        prefix[0].clone(),
-                        prefix[1].clone(),
-                        Ty::UInt64,
-                        Ty::UInt64,
-                        Ty::Int32,
-                    ];
-                    self.typer
-                        .method_call(&receiver_type, name, &argument, true)
-                } else {
-                    self.typer.method(&receiver_type, name)
-                }
-                .ok_or_else(|| error(span, format!("unknown method `{name}`")))?;
-                let Some(method) = self.pipeline_method(method, args, *associated, span)? else {
-                    return Ok(false);
-                };
-                if !associated
-                    && let Some(first) = method.params.first()
-                    && crate::ReceiverConversion::between(&receiver_type, first)
-                        == Some(crate::ReceiverConversion::Address)
-                {
-                    let Some(gpu) = self.gpu_address(origins) else {
-                        return Ok(false);
-                    };
-                    if gpu != matches!(first, Ty::GpuPointer { .. }) {
-                        return Err(error(
-                            span,
-                            if gpu {
-                                "GPU storage requires a GpuPtr receiver; it cannot be borrowed as a raw Ptr"
-                            } else {
-                                "a GpuPtr receiver requires an address in GPU storage"
-                            },
-                        ));
-                    }
-                }
+                let method = self
+                    .typer
+                    .method(&receiver_type, name)
+                    .ok_or_else(|| error(span, format!("unknown method `{name}`")))?;
                 let params = method
                     .arguments(&receiver_type, *associated)
                     .ok_or_else(|| {
@@ -2050,15 +1874,8 @@ impl Inference<'_> {
                     .map_err(|e| GenerateError::typing(span, e))?;
             }
 
-            Constraint::Address(origins, pointee, out) => {
-                let Some(gpu) = self.gpu_address(origins) else {
-                    return Ok(false);
-                };
-                let pointer = if gpu {
-                    Type::gpu_pointer(pointee.clone())
-                } else {
-                    Type::pointer(pointee.clone())
-                };
+            Constraint::Address(pointee, out) => {
+                let pointer = Type::pointer(pointee.clone());
                 if !self.solver.unify(out, &pointer, span)? {
                     return Ok(false);
                 }
@@ -2087,9 +1904,6 @@ impl Inference<'_> {
                 }
                 if let Some(element) = shape.view_element() {
                     let ty = match name.as_ref() {
-                        "data" if matches!(shape, Type::Node(Head::GpuSpan, _)) => {
-                            Type::gpu_pointer(element)
-                        }
                         "data" => Type::pointer(element),
                         "length" => Ty::UInt64.into(),
                         _ => return Err(error(span, "unknown string or span field")),
@@ -2122,12 +1936,7 @@ impl Inference<'_> {
             Constraint::Call(func, args, out) => {
                 let shape = self.shape(func, false, span)?;
                 if let Some(element) = shape.index_element() {
-                    let pointer =
-                        if matches!(shape, Type::Node(Head::GpuPointer | Head::GpuSpan, _)) {
-                            Type::gpu_pointer(element)
-                        } else {
-                            Type::pointer(element)
-                        };
+                    let pointer = Type::pointer(element);
                     if !self.solver.unify(out, &pointer, span)? {
                         return Ok(false);
                     }
@@ -2205,34 +2014,6 @@ impl Inference<'_> {
                         },
                     ));
                 }
-                if matches!(self.solver.head(to), Type::Node(Head::Weak, _))
-                    && self.solver.resolve(from) == Some(Ty::Unit)
-                {
-                    return Ok(true);
-                }
-                if let Type::Node(Head::Span, children) = self.solver.head(to) {
-                    // The source may still become str, Span, or a field record.
-                    if matches!(self.solver.head(from), Type::Variable(_)) {
-                        return Ok(false);
-                    }
-                    if self.solver.resolve(from) == Some(Ty::Str) {
-                        if !self.solver.unify(&children[0], &Ty::UInt8.into(), span)? {
-                            return Ok(false);
-                        }
-                        return Ok(true);
-                    }
-                    if matches!(self.solver.head(from), Type::Node(Head::Span, _)) {
-                        return self.solver.unify(from, to, span);
-                    }
-                    let repr = Type::record(vec![
-                        ("data".into(), Type::pointer(children[0].clone())),
-                        ("length".into(), Ty::UInt64.into()),
-                    ]);
-                    if !self.solver.unify(from, &repr, span)? {
-                        return Ok(false);
-                    }
-                    return Ok(true);
-                }
                 if matches!(self.solver.head(to), Type::Node(Head::Result, _)) {
                     return self.solver.coerce(from, to, span);
                 }
@@ -2289,17 +2070,9 @@ impl Inference<'_> {
                 let rule = BuiltinRule::lookup(name, args.len())
                     .map_err(|e| GenerateError::typing(span, e))?;
                 let complete = match rule {
-                    BuiltinRule::Print => self.solver.unify(out, &Ty::Unit.into(), span)?,
-                    BuiltinRule::Format | BuiltinRule::StringFromBytes => self.solver.unify(
-                        out,
-                        &self
-                            .typer
-                            .string_type()
-                            .cloned()
-                            .expect("builtin String")
-                            .into(),
-                        span,
-                    )?,
+                    BuiltinRule::Format | BuiltinRule::StringFromBytes => {
+                        self.solver.unify(out, &Ty::StrongOwner.into(), span)?
+                    }
                     BuiltinRule::Boolean => {
                         let complete = self.solver.unify(out, &Ty::Bool.into(), span)?;
                         for arg in args {
@@ -2363,12 +2136,8 @@ impl Constraint {
                 receiver,
                 args,
                 type_args,
-                origins,
                 ..
-            } => origins
-                .iter()
-                .map(AddressOrigin::input)
-                .chain(std::iter::once(receiver))
+            } => std::iter::once(receiver)
                 .chain(args)
                 .chain(type_args.iter().flatten())
                 .collect(),
@@ -2379,11 +2148,7 @@ impl Constraint {
             } => std::iter::once(receiver)
                 .chain(type_args.iter().flatten())
                 .collect(),
-            Self::Address(origins, pointee, _) => origins
-                .iter()
-                .map(AddressOrigin::input)
-                .chain(std::iter::once(pointee))
-                .collect(),
+            Self::Address(pointee, _) => vec![pointee],
             Self::Record(fields, _) => fields.iter().map(|(_, ty)| ty).collect(),
             Self::Builtin(_, args, _) => args.iter().collect(),
         }

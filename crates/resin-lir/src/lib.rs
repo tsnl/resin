@@ -80,30 +80,41 @@ impl Function {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instr {
-    /// `[gpu, value] -> [Result<GpuPtr<T>, E>]`: allocate and initialize plain GPU storage.
-    GpuNew { allocator: FunctionId, element: Ty },
-    /// `[gpu, count] -> [Result<GpuSpan<T>, E>]`: allocate checked count * sizeof(T) bytes.
-    GpuAllocate { allocator: FunctionId, element: Ty },
-    /// `[native_gpu, gpu_owner, bytes, alignment, memory] -> [{ value: GpuPtr<ubyte> | None, status: int }]`.
-    /// The runtime retains the GPU owner on success; operands are consumed.
-    GpuAllocateNative,
-    /// `[GPU view, start, length] -> [GpuSpan<T>]`: transfer ownership to a checked slice.
-    GpuSlice,
-    /// `[GPU view] -> [GPU view]`: transfer ownership while removing write permission.
-    GpuReadOnly,
-    /// `[GPU view] -> [GPU view]`: transfer ownership while removing read permission.
-    GpuWriteOnly,
-    /// `[GpuSpan<T>, Span<T>] -> [unit]`: copy readable GPU elements into host storage.
-    GpuCopyTo,
-    /// `[gpu] -> [Result<GpuComputePipeline<Root, Owner>, E>]`: create a pipeline
+    /// `[] -> [{size: ulong, alignment: ulong}]`: validate plain GPU element storage.
+    GpuElementLayout { element: Ty },
+    /// `[native_gpu, strong_owner, bytes, alignment, memory] -> [{value: GpuView | None, status: int}]`.
+    /// Allocation retains the device owner. All operands are consumed.
+    GpuViewAllocate,
+    /// `[view, byte_offset, bytes, alignment] -> [view]`: validate range/alignment and transfer its owner.
+    GpuViewOffset,
+    /// `[view, capacity, index] -> [view]`: check an element index and transfer its owner.
+    GpuViewIndex { element: Ty },
+    /// `[view, capacity, start, length] -> [view]`: check an element range and transfer its owner.
+    GpuViewRange { element: Ty },
+    /// `[view, access_mask] -> [view]`: remove permissions and transfer its owner.
+    GpuViewRestrict,
+    /// `[view] -> [element]`: copy plain storage after checking read access.
+    GpuViewLoad { element: Ty },
+    /// `[view, element] -> [unit]`: copy plain storage after checking write access.
+    GpuViewStore,
+    /// `[view, element] -> [element]`: exchange plain storage after checking read/write access.
+    GpuViewReplace,
+    /// `[view, count, destination: Ptr<T>, destination_length] -> [unit]`: check and copy readable elements.
+    GpuViewCopyTo,
+    /// `[view, length, commands, image] -> [int]`: record an image copy retaining its allocation.
+    GpuViewCopyImage,
+
+    /// `[gpu] -> [Result<Pipeline, E>]`: create the registered source pipeline
     /// from the declared compute shader, retaining its root type and factory owner.
     GpuComputePipeline {
+        pipeline: Ty,
         factory: FunctionId,
         shader: FunctionId,
     },
-    /// `[gpu] -> [Result<GpuGraphicsPipeline<Root, Owner>, E>]`: create a pipeline
+    /// `[gpu] -> [Result<Pipeline, E>]`: create the registered source pipeline
     /// from compatible vertex and fragment declarations. Rootless stages use None.
     GpuGraphicsPipeline {
+        pipeline: Ty,
         factory: FunctionId,
         vertex: FunctionId,
         fragment: FunctionId,
@@ -111,6 +122,7 @@ pub enum Instr {
     /// `[commands, pipeline, host root, x, y, z] -> [Result<(), E>]`: project
     /// checked arguments and pass them with the pipeline owner to the recording function.
     GpuDispatch {
+        projection: resin_types::GpuProjectionPlan,
         context: FunctionId,
         allocator: FunctionId,
         record: FunctionId,
@@ -118,6 +130,7 @@ pub enum Instr {
     /// `[commands, pipeline, host root or None, count] -> [Result<(), E>]`.
     /// Rootless graphics performs no allocation or projection.
     GpuDraw {
+        projection: Option<resin_types::GpuProjectionPlan>,
         context: FunctionId,
         allocator: Option<FunctionId>,
         record: FunctionId,
@@ -126,24 +139,24 @@ pub enum Instr {
     GpuArgumentsDispatch,
     /// `[arguments, commands, count] -> [int]`: record a draw with retained arguments.
     GpuArgumentsDraw,
-    /// `[GpuSpan<ubyte>, commands, image] -> [int]`: record an image copy retaining its buffer.
-    GpuCopyImage,
-    /// `[payload] -> [Arc<payload>]`: transfer the payload into a new shared allocation.
-    ArcNew,
+    /// `[count, initial] -> [StrongOwner | None]`: allocate initialized element storage.
+    /// Installs the concrete element destructor; failed allocations publish no owner.
+    OwnerAllocate { element: Ty },
+    /// `[Ptr<StrongOwner>] -> [Ptr<T>]`: borrow live payload storage.
+    OwnerData { pointee: Ty },
+    /// `[Ptr<StrongOwner>] -> [ulong]`: read the immutable element count.
+    OwnerLength,
+    /// `[Ptr<StrongOwner>] -> [WeakOwner]`: acquire a weak reference.
+    OwnerDowngrade,
+    /// `[Ptr<WeakOwner>] -> [StrongOwner | None]`: acquire a strong reference if live.
+    OwnerUpgrade,
+    /// `[] -> [WeakOwner]`: construct an empty weak reference.
+    WeakEmpty,
     /// `[address] -> [value]`: transfer a pointee without copying or clearing storage.
     /// Lowering must disarm its previous owner, typically with `ForgetLocal`.
     TransferLoad,
     /// `[] -> []`: clear a local's initialization flag without destroying its value.
     ForgetLocal { local: LocalId },
-    /// `[Arc<T>] -> [Ptr<T>]`: release this owner and borrow its payload address.
-    /// Another owner must keep the allocation alive for the entire access.
-    ArcData,
-    /// `[Arc<T>] -> [Weak<T>]`: create a weak reference and release this strong owner.
-    Downgrade,
-    /// `[Weak<T>] -> [Arc<T> | None]`: acquire a live owner if possible; release the weak reference.
-    Upgrade,
-    /// `[] -> [Weak<T>]`: create an empty weak reference of the given pointee type.
-    WeakEmpty { pointee: Ty },
     /// `[] -> [value]`: transfer an initialized local and clear its initialization flag.
     /// Used for compiler temporaries; source reads still copy.
     TakeLocal { local: LocalId },
@@ -163,7 +176,8 @@ pub enum Instr {
     VariantPayload { tag: Case },
     /// `[value] -> [widened value]`: transfer union/Result payloads into the wider type.
     Widen { ty: Ty },
-    /// `[] -> [Span<ubyte>]`: borrow the decorated function's embedded SPIR-V bytes.
+    /// `[] -> [{data: Ptr<ubyte>, length: ulong}]`: borrow the decorated
+    /// function's embedded SPIR-V bytes as structural byte transport.
     Shader {
         function: FunctionId,
         stage: Arc<str>,
@@ -176,12 +190,20 @@ pub enum Instr {
     LocalAddress { local: LocalId },
     /// `[aggregate or address] -> [child or address]`: project by declaration index.
     /// A value operand copies the child and destroys the aggregate; raw addresses borrow.
-    /// GPU addresses transfer their owner into the projected GPU address.
     AccessStatic { index: usize },
-    /// `[base, index] -> [element or address]`: index an array, array address, or span.
-    /// Array addresses and ordinary spans produce borrowed element addresses.
-    /// GPU views transfer their owner into the resulting GPU element address.
+    /// `[base, index] -> [element or address]`: index an array, array address, or `str`.
+    /// Array addresses and string literals produce borrowed element addresses;
+    /// array values copy the element and destroy the consumed array.
     AccessDynamic,
+    /// `[Ptr<T>, length, index] -> [Ptr<T>]`: typed element addressing; the host
+    /// diagnoses an index outside length, while shaders require a valid index.
+    PointerIndex,
+    /// `[Ptr<T>, capacity, start, count] -> [Ptr<T>]`: check and address a range.
+    /// An empty range may start one past the end. Host-only.
+    PointerRange,
+    /// `[Ptr<numeric>, count] -> [{data: Ptr<ubyte>, length: ulong}]`.
+    /// Checks byte-count overflow. Host-only.
+    PointerBytes,
     /// `[address] -> [value]`: copy an initialized pointee, retaining managed owners.
     Load,
     /// `[address, value] -> [value]`: copy into storage, destroying its previous live
@@ -191,7 +213,7 @@ pub enum Instr {
     /// with an owned replacement, transferring both values without copying or destruction.
     Replace,
     /// `[value] -> [ascribed value]`: preserve ownership while changing its type view.
-    /// Types must match, differ by one nominal layer, or bridge a span and its record layout.
+    /// Types must match, differ by one nominal layer, or expose a `str` byte view.
     Ascribe { ty: Ty },
     /// `[number] -> [converted number]`: convert explicitly, trapping on integer overflow.
     NumericCast { ty: Ty },

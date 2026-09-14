@@ -141,30 +141,28 @@ fn lower_region(
                 instr,
                 Instr::IsVariant { .. }
                     | Instr::CallBuiltin { .. }
-                    | Instr::ArcData
-                    | Instr::Downgrade
-                    | Instr::Upgrade
-                    | Instr::GpuAllocateNative
-                    | Instr::GpuCopyTo
+                    | Instr::OwnerData { .. }
+                    | Instr::OwnerLength
+                    | Instr::OwnerAllocate { .. }
+                    | Instr::OwnerDowngrade
+                    | Instr::OwnerUpgrade
+                    | Instr::GpuViewAllocate
+                    | Instr::GpuViewLoad { .. }
+                    | Instr::GpuViewStore
+                    | Instr::GpuViewReplace
+                    | Instr::GpuViewCopyTo
+                    | Instr::GpuViewCopyImage
                     | Instr::GpuComputePipeline { .. }
                     | Instr::GpuGraphicsPipeline { .. }
                     | Instr::GpuDispatch { .. }
                     | Instr::GpuDraw { .. }
                     | Instr::GpuArgumentsDispatch
                     | Instr::GpuArgumentsDraw
-                    | Instr::GpuCopyImage
             ) || projected_value;
             if consume {
                 for arg in &args {
                     types.drop_value(&arg.ty, &arg.expr, &mut out);
                 }
-            }
-            if matches!(
-                instr,
-                Instr::Load | Instr::TransferLoad | Instr::Store | Instr::Replace
-            ) && matches!(&args[0].ty, Ty::GpuPointer { .. })
-            {
-                types.drop_value(&args[0].ty, &args[0].expr, &mut out);
             }
         }
         statements.push(CStatement::Text { source: out });
@@ -189,10 +187,7 @@ fn lower_region(
 
 fn projects_value(types: &Types<'_>, instr: &Instr, args: &[Slot]) -> bool {
     match instr {
-        Instr::AccessStatic { .. } => !matches!(
-            types.shape(&args[0].ty),
-            Ty::Pointer { .. } | Ty::GpuPointer { .. }
-        ),
+        Instr::AccessStatic { .. } => !matches!(types.shape(&args[0].ty), Ty::Pointer { .. }),
         Instr::AccessDynamic => matches!(types.shape(&args[0].ty), Ty::Array { .. }),
         _ => false,
     }
@@ -401,20 +396,23 @@ fn instruction(
     out: &mut String,
 ) -> Result<Option<String>, Error> {
     let expr = match instr {
-        Instr::GpuNew { .. }
-        | Instr::GpuAllocate { .. }
-        | Instr::GpuAllocateNative
-        | Instr::GpuSlice
-        | Instr::GpuReadOnly
-        | Instr::GpuWriteOnly
-        | Instr::GpuCopyTo
+        Instr::GpuElementLayout { .. }
+        | Instr::GpuViewAllocate
+        | Instr::GpuViewIndex { .. }
+        | Instr::GpuViewRange { .. }
+        | Instr::GpuViewOffset
+        | Instr::GpuViewRestrict
+        | Instr::GpuViewLoad { .. }
+        | Instr::GpuViewStore
+        | Instr::GpuViewReplace
+        | Instr::GpuViewCopyTo
+        | Instr::GpuViewCopyImage
         | Instr::GpuComputePipeline { .. }
         | Instr::GpuGraphicsPipeline { .. }
         | Instr::GpuDispatch { .. }
         | Instr::GpuDraw { .. }
         | Instr::GpuArgumentsDispatch
-        | Instr::GpuArgumentsDraw
-        | Instr::GpuCopyImage => {
+        | Instr::GpuArgumentsDraw => {
             super::gpu::instruction(types, temp, instr, args, result.unwrap(), out)?
         }
         Instr::ForgetLocal { local } => {
@@ -426,38 +424,27 @@ fn instruction(
             }
             return Ok(None);
         }
-        Instr::ArcNew => {
-            let ty = &args[0].ty;
-            writeln!(
-                out,
-                "  ResinArc *{temp}_allocated = resin_arc_new(sizeof({}), _Alignof({}), r_drop{});",
-                types.name(ty),
-                types.name(ty),
-                types.id(ty)
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "  *({} *)resin_arc_data({temp}_allocated) = {};",
-                types.name(ty),
-                args[0].expr
-            )
-            .unwrap();
-            format!("{temp}_allocated")
-        }
-        Instr::ArcData => format!(
-            "({})resin_arc_data({})",
+        Instr::OwnerData { .. } => format!(
+            "({})resin_arc_data(*({}))",
             types.name(result.unwrap()),
             args[0].expr
         ),
-        Instr::Downgrade => {
-            writeln!(out, "  resin_weak_retain({});", args[0].expr).unwrap();
-            args[0].expr.clone()
+        Instr::OwnerAllocate { element } => {
+            let owner = allocate_span(types, temp, element, args, out);
+            let ty = result.unwrap();
+            let present = variant(types, ty, &Case::Type(ty.without_none().unwrap()), &owner);
+            let absent = variant(types, ty, &Case::Type(Ty::None), "0");
+            format!("({owner} ? {present} : {absent})")
         }
-        Instr::Upgrade => {
+        Instr::OwnerLength => format!("resin_arc_span_length(*({}))", args[0].expr),
+        Instr::OwnerDowngrade => {
+            writeln!(out, "  resin_weak_retain(*({}));", args[0].expr).unwrap();
+            format!("*({})", args[0].expr)
+        }
+        Instr::OwnerUpgrade => {
             writeln!(
                 out,
-                "  ResinArc *{temp}_upgraded = resin_weak_upgrade({});",
+                "  ResinArc *{temp}_upgraded = resin_weak_upgrade(*({}));",
                 args[0].expr
             )
             .unwrap();
@@ -471,7 +458,7 @@ fn instruction(
             let absent = variant(types, ty, &Case::Type(Ty::None), "0");
             format!("({temp}_upgraded ? {present} : {absent})")
         }
-        Instr::WeakEmpty { .. } => "NULL".into(),
+        Instr::WeakEmpty => "NULL".into(),
         Instr::TakeLocal { local } => {
             if function.locals[local.index()]
                 .ty
@@ -512,7 +499,19 @@ fn instruction(
             writeln!(out, "  r_l{} = {};", local.index(), args[0].expr).unwrap();
             return Ok(None);
         }
-        Instr::MakeVariant { ty, tag } => variant(types, ty, tag, &args[0].expr),
+        Instr::MakeVariant { ty, tag } => {
+            if matches!(tag, Case::Type(member) if member == ty) {
+                args[0].expr.clone()
+            } else {
+                let tag = types.tag(tag);
+                // Initialize the complete union storage before selecting a smaller
+                // payload. Branch transfers may copy the entire Result value.
+                writeln!(out, "  {} {temp}_variant = {{0}};", types.name(ty)).unwrap();
+                writeln!(out, "  {temp}_variant.tag = {tag}u;").unwrap();
+                writeln!(out, "  {temp}_variant.payload.v{tag} = {};", args[0].expr).unwrap();
+                format!("{temp}_variant")
+            }
+        }
         Instr::ExcludeNone => {
             let condition = is_variant(types, &args[0].ty, &Case::Type(Ty::None), &args[0].expr);
             writeln!(
@@ -581,17 +580,17 @@ fn instruction(
         Instr::Push { value } => literal(types, result.unwrap(), value),
         Instr::LocalAddress { local } => format!("&r_l{}", local.index()),
         Instr::Load | Instr::TransferLoad => {
-            format!("*({})", super::gpu::host_address(types, &args[0], 1))
+            format!("*({})", types.unwrap(&args[0].ty, args[0].expr.clone()))
         }
         Instr::Replace => {
-            let target = format!("*({})", super::gpu::host_address(types, &args[0], 3));
+            let target = format!("*({})", types.unwrap(&args[0].ty, args[0].expr.clone()));
             let old = format!("{temp}_old");
             writeln!(out, "  {} {old} = {target};", types.name(&args[1].ty)).unwrap();
             writeln!(out, "  {target} = {};", args[1].expr).unwrap();
             old
         }
         Instr::Store => {
-            let target = format!("*({})", super::gpu::host_address(types, &args[0], 2));
+            let target = format!("*({})", types.unwrap(&args[0].ty, args[0].expr.clone()));
             if args[1].ty.needs_drop(&types.module.types) {
                 if let Some(live) = &args[0].live {
                     writeln!(out, "  bool *{temp}_live = {live};").unwrap();
@@ -609,7 +608,7 @@ fn instruction(
             writeln!(
                 out,
                 "  *({}) = {};",
-                super::gpu::host_address(types, &args[0], 2),
+                types.unwrap(&args[0].ty, args[0].expr.clone()),
                 types.copy(&args[1].ty, &args[1].expr)
             )
             .unwrap();
@@ -624,13 +623,8 @@ fn instruction(
             if ty == &args[0].ty {
                 args[0].expr.clone()
             } else if is_view_conversion(&args[0].ty, ty) {
-                let (first, second) = if matches!(args[0].ty, Ty::GpuSpan { .. }) {
-                    ("data", "length")
-                } else {
-                    ("f0", "f1")
-                };
                 format!(
-                    "({}){{ ({}).{first}, ({}).{second} }}",
+                    "({}){{ ({}).f0, ({}).f1 }}",
                     types.name(ty),
                     args[0].expr,
                     args[0].expr
@@ -667,23 +661,18 @@ fn instruction(
                 if values.is_empty() { "0" } else { &values }
             )
         }
-        Instr::AccessStatic { index } => project(
-            types,
-            &args[0],
-            &index.to_string(),
-            false,
-            result.unwrap(),
-            temp,
-            out,
-        )?,
+        Instr::AccessStatic { index } => project(types, &args[0], &index.to_string(), false)?,
+        Instr::PointerRange => pointer_range(args, out),
+        Instr::PointerBytes => pointer_bytes(types, args, result.unwrap(), out),
+        Instr::PointerIndex => format!(
+            "({} + resin_index({}, {}))",
+            args[0].expr, args[2].expr, args[1].expr
+        ),
         Instr::AccessDynamic => project(
             types,
             &args[0],
             &types.unwrap(&args[1].ty, args[1].expr.clone()),
             true,
-            result.unwrap(),
-            temp,
-            out,
         )?,
         Instr::Function { function } => format!(
             "({}){{ r_fn{} }}",
@@ -761,19 +750,7 @@ fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
     expression
 }
 
-fn project(
-    types: &Types<'_>,
-    source: &Slot,
-    index: &str,
-    dynamic: bool,
-    result: &Ty,
-    name: &str,
-    out: &mut String,
-) -> Result<String, Error> {
-    if let Some(projected) = super::gpu::project(types, source, index, dynamic, result, name, out)?
-    {
-        return Ok(projected);
-    }
+fn project(types: &Types<'_>, source: &Slot, index: &str, dynamic: bool) -> Result<String, Error> {
     let mut ty = types.shape(&source.ty);
     let mut expr = types.unwrap(&source.ty, source.expr.clone());
     let pointer = if let Ty::Pointer { pointee } = ty {
@@ -784,15 +761,12 @@ fn project(
         false
     };
     let expr = match ty {
-        Ty::GpuSpan { .. } if !dynamic => {
-            format!("({expr}).{}", if index == "0" { "data" } else { "length" })
-        }
-        Ty::Str | Ty::Span { .. } if dynamic => {
+        Ty::Str if dynamic => {
             return Ok(format!(
                 "&(({expr}).f0[resin_index((uint64_t)({index}), ({expr}).f1)])"
             ));
         }
-        Ty::Str | Ty::Span { .. } | Ty::Record { .. } if !dynamic => format!("({expr}).f{index}"),
+        Ty::Str | Ty::Record { .. } if !dynamic => format!("({expr}).f{index}"),
         Ty::Array { length, .. } => {
             let index = if dynamic {
                 format!("resin_index((uint64_t)({index}), {length})")
@@ -806,8 +780,77 @@ fn project(
     Ok(if pointer { format!("&({expr})") } else { expr })
 }
 
+// The argument remains owned until every element has received an ordinary copy.
+// Copies cannot fail; allocation completes before any element is initialized.
+fn allocate_span(
+    types: &Types<'_>,
+    temp: &str,
+    element: &Ty,
+    args: &[Slot],
+    out: &mut String,
+) -> String {
+    let owner = format!("{temp}_allocated");
+    let element_name = types.name(element);
+    let destroy = if element.needs_drop(&types.module.types) {
+        format!("r_drop{}", types.id(element))
+    } else {
+        "NULL".into()
+    };
+    let count = &args[0].expr;
+    writeln!(out, "  ResinArc *{owner} = resin_arc_span_try_new({count}, sizeof({element_name}), _Alignof({element_name}), {destroy});").unwrap();
+    writeln!(out, "  if ({owner}) {{").unwrap();
+    writeln!(
+        out,
+        "    {element_name} *{temp}_data = resin_arc_data({owner});"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    uint64_t {temp}_length = resin_arc_span_length({owner});"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    for (uint64_t i = 0; i < {temp}_length; ++i) {temp}_data[i] = {};",
+        types.copy(element, &args[1].expr)
+    )
+    .unwrap();
+    out.push_str("  }\n");
+    owner
+}
+
 fn is_view_conversion(from: &Ty, to: &Ty) -> bool {
-    from.view_record().as_ref() == Some(to)
-        || to.view_record().as_ref() == Some(from)
-        || from == &Ty::Str && to == &Ty::byte_span()
+    from.view_record().as_ref() == Some(to) || to.view_record().as_ref() == Some(from)
+}
+
+fn pointer_range(args: &[Slot], out: &mut String) -> String {
+    let [data, capacity, start, count] = args else {
+        unreachable!("verified pointer range")
+    };
+    writeln!(
+        out,
+        "  if ({0} > {1} || {2} > {1} - {0}) resin_fail(\"span slice out of bounds\");",
+        start.expr, capacity.expr, count.expr
+    )
+    .unwrap();
+    format!("({0} ? {1} + {0} : {1})", start.expr, data.expr)
+}
+
+fn pointer_bytes(types: &Types<'_>, args: &[Slot], result: &Ty, out: &mut String) -> String {
+    let Ty::Pointer { pointee } = &args[0].ty else {
+        unreachable!("verified numeric pointer")
+    };
+    let stride = format!("sizeof({})", types.name(pointee));
+    writeln!(
+        out,
+        "  if ({} > UINT64_MAX / {stride}) resin_fail(\"span byte length overflow\");",
+        args[1].expr
+    )
+    .unwrap();
+    format!(
+        "({}){{ (uint8_t *){}, {} * {stride} }}",
+        types.name(result),
+        args[0].expr,
+        args[1].expr
+    )
 }

@@ -51,17 +51,29 @@ pub(crate) struct StackEffect {
 pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
     use crate::Instr;
     match instr {
-        Instr::WeakEmpty { .. }
+        Instr::GpuViewIndex { .. } => StackEffect { pops: 3, pushes: 1 },
+        Instr::GpuViewRange { .. } => StackEffect { pops: 4, pushes: 1 },
+        Instr::GpuElementLayout { .. } => StackEffect { pops: 0, pushes: 1 },
+        Instr::GpuViewLoad { .. } => StackEffect { pops: 1, pushes: 1 },
+        Instr::GpuViewRestrict | Instr::GpuViewStore | Instr::GpuViewReplace => {
+            StackEffect { pops: 2, pushes: 1 }
+        }
+        Instr::GpuViewOffset | Instr::GpuViewCopyTo | Instr::GpuViewCopyImage => {
+            StackEffect { pops: 4, pushes: 1 }
+        }
+        Instr::GpuViewAllocate => StackEffect { pops: 5, pushes: 1 },
+
+        Instr::WeakEmpty
         | Instr::TakeLocal { .. }
         | Instr::Shader { .. }
         | Instr::Push { .. }
         | Instr::Function { .. }
         | Instr::LocalAddress { .. } => StackEffect { pops: 0, pushes: 1 },
         Instr::TransferLoad
-        | Instr::ArcNew
-        | Instr::ArcData
-        | Instr::Downgrade
-        | Instr::Upgrade
+        | Instr::OwnerData { .. }
+        | Instr::OwnerLength
+        | Instr::OwnerDowngrade
+        | Instr::OwnerUpgrade
         | Instr::AccessStatic { .. }
         | Instr::MakeVariant { .. }
         | Instr::ExcludeNone
@@ -73,21 +85,14 @@ pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
         | Instr::Eliminate { .. }
         | Instr::NumericCast { .. }
         | Instr::PointerCast { .. } => StackEffect { pops: 1, pushes: 1 },
-        Instr::GpuReadOnly
-        | Instr::GpuWriteOnly
-        | Instr::GpuComputePipeline { .. }
-        | Instr::GpuGraphicsPipeline { .. } => StackEffect { pops: 1, pushes: 1 },
+        Instr::GpuComputePipeline { .. } | Instr::GpuGraphicsPipeline { .. } => {
+            StackEffect { pops: 1, pushes: 1 }
+        }
         Instr::GpuDispatch { .. } => StackEffect { pops: 6, pushes: 1 },
-        Instr::GpuDraw { .. } => StackEffect { pops: 4, pushes: 1 },
-        Instr::GpuNew { .. } | Instr::GpuAllocate { .. } | Instr::GpuCopyTo => {
-            StackEffect { pops: 2, pushes: 1 }
-        }
-        Instr::GpuSlice | Instr::GpuArgumentsDraw | Instr::GpuCopyImage => {
-            StackEffect { pops: 3, pushes: 1 }
-        }
-        Instr::GpuAllocateNative | Instr::GpuArgumentsDispatch => {
-            StackEffect { pops: 5, pushes: 1 }
-        }
+        Instr::GpuDraw { .. } | Instr::PointerRange => StackEffect { pops: 4, pushes: 1 },
+        Instr::PointerBytes | Instr::OwnerAllocate { .. } => StackEffect { pops: 2, pushes: 1 },
+        Instr::PointerIndex | Instr::GpuArgumentsDraw => StackEffect { pops: 3, pushes: 1 },
+        Instr::GpuArgumentsDispatch => StackEffect { pops: 5, pushes: 1 },
         Instr::AccessDynamic | Instr::Store | Instr::Replace => StackEffect { pops: 2, pushes: 1 },
         Instr::ForgetLocal { .. } | Instr::DropLocal { .. } => StackEffect { pops: 0, pushes: 0 },
         Instr::Discard | Instr::SetLocal { .. } => StackEffect { pops: 1, pushes: 0 },

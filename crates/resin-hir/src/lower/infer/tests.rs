@@ -217,7 +217,6 @@ fn retries_discard_failed_method_choices_and_preserve_completed_groups() {
         args: vec![Ty::UInt64.into()],
         out,
         associated: false,
-        origins: vec![],
     };
     let (earlier, first) = inference.expression();
     inference.constrain(earlier, (span, method(first.clone())));
@@ -244,10 +243,13 @@ fn retries_discard_failed_method_choices_and_preserve_completed_groups() {
         let pointer = Ty::Pointer {
             pointee: Box::new(Ty::UInt8),
         };
-        let infer::ResolvedMethod::Compiler { declaration } = &inference.methods[&rule] else {
+        let infer::ResolvedMethod::Intrinsic { signature, .. } = &inference.methods[&rule] else {
             panic!("compiler method");
         };
-        assert_eq!(declaration.result, pointer);
+        assert_eq!(
+            inference.solver.resolve(&signature.result),
+            Some(pointer.clone())
+        );
         assert_eq!(inference.solver.require(&ty, span).unwrap(), pointer);
     }
 }
@@ -435,15 +437,12 @@ fn error_collection_retains_distinct_applications_of_one_nominal() {
     solver.include(&int, &errors, SPAN).unwrap();
     solver.include(&bool, &errors, SPAN).unwrap();
     assert!(solver.finish_errors(std::slice::from_ref(&errors)));
-    assert_eq!(
-        solver.complete(&errors),
-        Some(crate::Type::Union {
-            variants: vec![
-                solver.complete(&int).unwrap(),
-                solver.complete(&bool).unwrap()
-            ],
-        })
-    );
+    let Some(crate::Type::Union { variants }) = solver.complete(&errors) else {
+        panic!("expected both nominal applications");
+    };
+    assert_eq!(variants.len(), 2);
+    assert!(variants.contains(&solver.complete(&int).unwrap()));
+    assert!(variants.contains(&solver.complete(&bool).unwrap()));
 }
 
 #[test]

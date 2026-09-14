@@ -27,7 +27,7 @@ fn foreign_header_changes_rebuild_including_nested_dependencies() {
     fs::write(
         &project.input,
         format!(
-            "export {{ main }}; extern \"{}\" def value () -> int; def main() -> () = {{ print(fmt(\"{{0}}\", (value(),))); }};",
+            "export {{ main }}; import {{ \"$/string.resin\" }}; extern \"{}\" def value () -> int; def main() -> () = {{ print(fmt(\"{{0}}\", (value(),))); }};",
             header.display()
         ),
     )
@@ -45,7 +45,7 @@ fn foreign_header_changes_rebuild_including_nested_dependencies() {
     assert_eq!(project.calls(), 3);
     fs::write(
         &project.input,
-        "export { main }; def main() -> () = { print(\"no header\"); };",
+        "export { main }; import { \"$/string.resin\" }; def main() -> () = { print(\"no header\"); };",
     )
     .unwrap();
     printed(&project.run(), b"no header");
@@ -73,7 +73,7 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
         &project.input,
         r#"
         export { main };
-        import { "helper.resin" };
+        import { "helper.resin", "$/string.resin" };
         @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { pixel(i) }; };
         def main() -> () = {
             var a = kernel.spirv;
@@ -139,7 +139,7 @@ impl Project {
         let compiler = temp.path().join("compiler");
         fs::write(
             &input,
-            r#"export { main }; def main() -> () = { print("first"); };"#,
+            r#"export { main }; import { "$/string.resin" }; def main() -> () = { print("first"); };"#,
         )
         .unwrap();
         fs::write(&compiler, WRAPPER).unwrap();
@@ -215,7 +215,7 @@ fn unchanged_programs_reuse_the_executable_and_still_run() {
     );
     fs::write(
         &project.input,
-        "export { main };\n\n// comment only\n\ndef main() -> () = {\n    print(\"first\");\n};",
+        "export { main };\nimport { \"$/string.resin\" };\n\n// comment only\n\ndef main() -> () = {\n    print(\"first\");\n};",
     )
     .unwrap();
     printed(&project.run(), b"first");
@@ -228,7 +228,7 @@ fn entry_points_have_separate_reusable_artifacts() {
     fs::write(
         &project.input,
         r#"
-        export { main, second };
+        export { main, second }; import { "$/string.resin" };
         def main() -> () = { print("first"); };
         def second() -> () = { print("second"); };
     "#,
@@ -333,7 +333,7 @@ fn changed_source_rebuilds_in_the_same_directory() {
     let executable = project.executable();
     fs::write(
         &project.input,
-        r#"export { main }; def main() -> () = { print("second"); };"#,
+        r#"export { main }; import { "$/string.resin" }; def main() -> () = { print("second"); };"#,
     )
     .unwrap();
     printed(&project.run(), b"second");

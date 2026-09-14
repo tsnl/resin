@@ -252,21 +252,50 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   same declaration lookup, argument checking, and editor analysis as source methods;
   register their signatures and intrinsic operations in `crates/resin-hir/src/lower/context.rs`.
   HIR construction recognizes `drop` as a hook; direct calls remain ordinary calls.
+- Libraries declare low-level compiler operations with `intrinsic "operation" def name<T>(...) -> Type;`.
+  Validate each signature against an explicit primitive contract during HIR construction.
+  Intrinsic functions use ordinary module lookup and generic calls; retain their source
+  identity. Specialize operations before storage lowering and verify concrete operands
+  independently. Do not recognize library wrappers by their public type names.
 - Reading existing values performs compiler-defined copying. Function and type
   applications consume their argument results; operators do the same, and aggregate
   constructors consume their field initializers. Structs define inherent methods and
   `drop(self: Ptr<T>)` hooks. There is no static move checking or borrow checker.
-  Native wrappers must make their copying safe or expose Arc-based ownership;
+  Native wrappers must make their copying safe or expose ArcPtr-based ownership;
   `pointer.replace(replacement)` can disarm a native owner during deliberate transfer.
   See `doc/lifetimes.md` for lifecycle rules.
+- Pointer families distinguish one value from a sequence: `Ptr<T>` / `Span<T>` are
+  borrowed, `ArcPtr<T>` / `ArcSpan<T>` retain host ownership, `WeakPtr<T>` /
+  `WeakSpan<T>` observe host ownership, and `GpuPtr<T>` / `GpuSpan<T>` retain GPU
+  ownership. All are ordinary value types; there are no unsized payload types.
+  `ArcPtr<Span<T>>` owns a descriptor, while `ArcSpan<T>` owns its elements.
+  `ArcSpan<T>.alloc(count, initial)` returns `Result<ArcSpan<T>, OutOfMemory>`, checks
+  allocation arithmetic, and initializes every element using ordinary copying.
+  Final release destroys elements in reverse order. `get()` borrows a `Span<T>`;
+  `ArcPtr<T>.alloc(initial)` allocates one initialized value. Both are ordinary
+  source methods from `$/shared.resin`, backed by non-generic `StrongOwner` and
+  `WeakOwner` primitives. Initialize native handles inside an inert shared payload.
+  Borrowed views do not retain the owner. Numeric spans expose exact element bytes
+  through `as_bytes()`. Image pixel writes accept bounded `Span<ubyte>` views.
+- `Span`, shared/weak owners, GPU views, typed pipelines, and `String` are source structs.
+  Keep only non-generic `StrongOwner`, `WeakOwner`, `GpuView`, and `GpuPipelineContract`
+  handles in the compiler. Explicit intrinsic declarations register GPU wrapper projections;
+  dispatch/draw consume completed projection plans checked again by the verifier.
+  Pipeline tokens bind root, owner, and stage; validate them before projecting arguments.
+  Host GPU access uses `load`, `store`, and `replace`, with no raw host pointer escape.
+  `gpu.create(initial)`, `gpu.alloc::<T>(count)`, and `gpu.alloc_in::<T>(count, memory)`
+  are ordinary generic source methods. Shader-declaration factories keep explicit native bridges.
 - String literals have primitive type `str`, distinct from `Span<ubyte>` and the owned
   nominal `String`. They expose `data` and `length` over static NUL-terminated bytes;
   length excludes the appended terminator. Literal storage may be shared; treat it as read-only.
-  `Span<ubyte>(text)` explicitly borrows literal bytes; never implicitly convert a `str`
+  `bytes(text)` from `$/span.resin` explicitly borrows literal bytes; never implicitly convert a `str`
   to a span or construct a `str` from arbitrary bytes. `String.from_str(text)` copies a
   `str`, and `String.from_bytes(bytes)` copies a raw byte span. Both append a NUL outside
   their logical length. `fmt(format, arguments)` returns `String`, wrapping
-  `Arc<Span<ubyte>>`; formatting and reference counting are host-only.
+  `ArcSpan<ubyte>`; import `$/string.resin` for `String`, `fmt`, and `print`.
+  Formatting and reference counting are host-only. Format tuple arguments use
+  `value.bytes()` for source String and span wrappers; the primitive accepts an
+  explicit structural byte view and does not recognize nominal wrapper names.
   `print(text)` and the ordinary `Io.stdout().write(text)` / `Io.stderr().write(text)` methods
   accept `str`, `Span<ubyte>`, and `String` and write bytes verbatim. Use `.data` when
   passing literal storage to C. Ordinary byte arrays contain exactly their declared
@@ -316,12 +345,14 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Shader entries use `@compute_shader`, `@vertex_shader`, or `@fragment_shader` decorators.
   Compute entries take `(ulong, Ptr<T>)` and return unit; their index is the global X invocation
   index. Their signatures are checked at declaration; helpers need no decoration and remain host-callable.
-  `function.spirv` requests embedded `Span<ubyte>` bytes from a decorated declaration, never
+  `function.spirv` requests an embedded structural `{ data: Ptr<ubyte>, length: ulong }`
+  view from a decorated declaration, never
   from a runtime function alias. Keep shader definitions inline in examples.
 - Arrays, `Span<T>`, and `str` provide indexing with `items.at(index)`, returning `Ptr<T>`
   (`Ptr<ubyte>` for `str`);
   its index parameter is `ulong`, with explicit conversions for other integer types.
-  Use `items.at(index).*` to read or write. The earlier `items(index)` spelling remains supported.
+  Use `items.at(index).*` to read or write. Arrays retain the earlier `items(index)` spelling;
+  source spans use `.at(index)`.
   Bounds checking is not part of the indexing contract. Host indexing diagnoses invalid indices;
   shader indexing is unchecked, and callers must stay within valid storage.
   `Place<T>` is a compiler expression category, not a source type; pointer-returning user

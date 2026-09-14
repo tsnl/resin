@@ -287,3 +287,11 @@ fn template_delimiters_and_turbofish_are_attached() {
         "def id<T>(x: T) -> T = {\n\tx\n};\ndef main() = {\n\tvar f = id::<Ptr<int>>;\n\tgpu.alloc::<Pair<int, long>>(4);\n\tvar n = 2 > 1;\n};\n",
     );
 }
+
+#[test]
+fn intrinsic_declarations_format_without_semantic_lookup() {
+    check(
+        "intrinsic \"pointer_index\" def at <T>(data:Ptr<T>,length:ulong,index:ulong)->Ptr<T>;",
+        "intrinsic \"pointer_index\" def at<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;\n",
+    );
+}

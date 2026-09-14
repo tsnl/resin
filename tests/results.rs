@@ -1,5 +1,5 @@
 use resin_types::prelude::*;
-use support::pipeline;
+use support::pipeline::{self, nominal};
 
 mod support;
 use support::{module, parse};
@@ -14,11 +14,11 @@ fn structs_mint_identities_and_aliases_do_not() {
     let m = module(
         "struct Point { x: int }; type Position = Point; type Number = int; def copy(p: Position) -> Point = { p }; def number(n: Number) -> int = { n };",
     );
-    assert_eq!(m.types.iter().filter(|d| d.name().is_some()).count(), 2);
+    assert_eq!(m.types.iter().filter(|d| d.name().is_some()).count(), 1);
     assert_eq!(
         m.functions[0].result,
         Ty::Defined {
-            definition: TypeId::from_index(1)
+            definition: nominal(&m, "Point")
         }
     );
     assert_eq!(m.functions[1].result, Ty::Int32);
@@ -38,15 +38,14 @@ fn unions_are_canonical_and_tags_belong_to_structs() {
         Ty::Union {
             variants: vec![
                 Ty::Defined {
-                    definition: TypeId::from_index(1)
+                    definition: nominal(&m, "A")
                 },
                 Ty::Defined {
-                    definition: TypeId::from_index(2)
+                    definition: nominal(&m, "B")
                 }
             ]
         }
     );
-    assert_eq!(TypeId::from_index(0).tag(), 0);
     module("type Choice = int | bool;");
 }
 
@@ -59,7 +58,7 @@ fn errors_accumulate_across_propagation() {
         m.functions[2].result,
         Ty::Result {
             value: Box::new(Ty::Int32),
-            error: Box::new(Ty::union([TypeId::from_index(1), TypeId::from_index(2)]))
+            error: Box::new(Ty::union([nominal(&m, "A"), nominal(&m, "B")]))
         }
     );
 }
@@ -106,7 +105,7 @@ fn recursive_error_sets_reach_a_fixed_point() {
     );
     let expected = Ty::Result {
         value: Box::new(Ty::Int32),
-        error: Box::new(Ty::union([TypeId::from_index(1), TypeId::from_index(2)])),
+        error: Box::new(Ty::union([nominal(&m, "A"), nominal(&m, "B")])),
     };
     for function in m.functions {
         assert_eq!(function.result, expected);
@@ -185,10 +184,10 @@ fn verifier_rejects_invalid_sum_instructions_and_types() {
     m.functions[0].result = Ty::Union {
         variants: vec![
             Ty::Defined {
-                definition: TypeId::from_index(1),
+                definition: nominal(&m, "E"),
             },
             Ty::Defined {
-                definition: TypeId::from_index(1),
+                definition: nominal(&m, "E"),
             },
         ],
     };
@@ -232,7 +231,7 @@ fn errors_discovered_through_recursive_payloads_join_before_sets_close() {
         Ty::Result {
             value: Box::new(Ty::Int32),
             error: Box::new(Ty::Defined {
-                definition: TypeId::from_index(1)
+                definition: nominal(&m, "B")
             })
         }
     );
@@ -241,7 +240,7 @@ fn errors_discovered_through_recursive_payloads_join_before_sets_close() {
         Ty::Result {
             value: Box::new(Ty::Int32),
             error: Box::new(Ty::Defined {
-                definition: TypeId::from_index(2)
+                definition: nominal(&m, "E")
             })
         }
     );

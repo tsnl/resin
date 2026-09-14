@@ -1,10 +1,9 @@
 use super::LowerError;
-use resin_source::prelude::*;
 use resin_types::prelude::*;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use crate::Instr;
-use crate::lower::concrete::Term;
+use crate::lower::concrete::{RecordInitializer, Term};
 
 use super::FunctionLowering;
 
@@ -25,7 +24,7 @@ impl FunctionLowering<'_> {
 
     pub(super) fn gen_record(
         &mut self,
-        fields: &[(Ident, Term)],
+        fields: &[RecordInitializer],
         ty: &Ty,
     ) -> Result<Ty, LowerError> {
         let Ty::Record {
@@ -35,12 +34,9 @@ impl FunctionLowering<'_> {
             unreachable!("checked record")
         };
         // Evaluate in source order; layout order must not reorder effects.
-        let mut values = HashMap::with_capacity(fields.len());
-        for (name, value) in fields {
-            let field = expected_fields
-                .iter()
-                .find(|field| field.name == name.val)
-                .unwrap();
+        let mut values = vec![None; expected_fields.len()];
+        for RecordInitializer { index, value } in fields {
+            let field = &expected_fields[*index];
             let local = self.alloc_local(field.ty.clone(), None);
             if field.ty.needs_drop(self.typer.definitions()) {
                 self.gen_term(value, Some(&field.ty))?;
@@ -51,12 +47,13 @@ impl FunctionLowering<'_> {
                 self.emit(Instr::Store);
                 self.emit(Instr::Discard);
             }
-            values.insert(name.val.clone(), local);
+            values[*index] = Some(local);
         }
         let names = expected_fields
             .iter()
-            .map(|field| {
-                let local = values[&field.name];
+            .zip(values)
+            .map(|(field, local)| {
+                let local = local.expect("specialization assigns every record field once");
                 if field.ty.needs_drop(self.typer.definitions()) {
                     self.emit(Instr::TakeLocal { local });
                 } else {
@@ -149,7 +146,7 @@ impl FunctionLowering<'_> {
                     });
                 }
                 Conv::Deref => self.emit(Instr::Load),
-                Conv::MakeSpan | Conv::ViewRecord | Conv::StrSpan => {
+                Conv::ViewRecord => {
                     unreachable!("view conversions require a target type")
                 }
             }

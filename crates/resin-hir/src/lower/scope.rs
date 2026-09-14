@@ -284,10 +284,9 @@ impl Scopes {
         let contexts = &mut data.contexts;
         let scope = &mut contexts.scopes[self.view.cursor.scope];
         let is_type = kind == DefinitionKind::Type;
-        let duplicate = (is_type && name.val.as_ref() == "String")
-            || scope.entries[..self.view.cursor.prefix]
-                .iter()
-                .any(|entry| entry.name == name.val && entry.is_type == is_type);
+        let duplicate = scope.entries[..self.view.cursor.prefix]
+            .iter()
+            .any(|entry| entry.name == name.val && entry.is_type == is_type);
         let id = contexts.definitions.len();
         contexts.definitions.push(Definition {
             name: name.val.to_string(),
@@ -429,6 +428,7 @@ impl Scopes {
             if let Some(concrete) = solver.resolve(&ty) {
                 data.record_members(location.clone(), &concrete, associated, typer);
             }
+            data.record_intrinsic_methods(location.clone(), &ty, associated, typer, solver);
             // A nominal identity can resolve even when its fields have no legacy concrete view.
             if let Some(completed) = solver.complete(&ty) {
                 data.record_symbolic_members(
@@ -450,8 +450,15 @@ impl Scopes {
             rule,
         } in self.calls.drain(..)
         {
-            if let Some(method @ ResolvedMethod::Source { .. }) = methods.get(&rule) {
-                data.record_source_method_call(&location, &name, method, associated, typer, solver);
+            if let Some(
+                method @ (ResolvedMethod::Source { .. }
+                | ResolvedMethod::Intrinsic { .. }
+                | ResolvedMethod::GpuPipeline { .. }),
+            ) = methods.get(&rule)
+            {
+                data.record_resolved_method_call(
+                    &location, &name, method, associated, typer, solver,
+                );
                 continue;
             }
             if let (Some(receiver), Some(argument)) = (

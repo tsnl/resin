@@ -14,6 +14,7 @@ fn run(source: &str) -> std::process::Output {
 fn dependent_field_and_method_chains_use_each_concrete_owner() {
     let output = run(r#"
         export { main };
+        import { "$/string.resin" };
         struct Small { value: int,
             def read(self: Small) -> int = { self.value };
         };
@@ -92,6 +93,7 @@ fn dependent_static_calls_and_references_apply_owner_and_method_arguments() {
 fn dependent_parameters_give_unsuffixed_arguments_their_concrete_types() {
     let output = run(r#"
         export { main };
+        import { "$/string.resin" };
         struct Narrow {
             def sum(self: Narrow, first: ubyte, second: ushort) -> ulong = {
                 ulong(first) + ulong(second)
@@ -118,6 +120,7 @@ fn dependent_parameters_give_unsuffixed_arguments_their_concrete_types() {
 fn dependent_receiver_adaptation_preserves_mutation_and_evaluation_order() {
     let output = run(r#"
         export { main };
+        import { "$/string.resin", "$/shared.resin" };
         struct Counter { value: int,
             def add(self: Ptr<Counter>, amount: int) -> int = {
                 self.value := self.value + amount;
@@ -133,15 +136,18 @@ fn dependent_receiver_adaptation_preserves_mutation_and_evaluation_order() {
         def add<T>(trace: Ptr<int>, value: T) -> _ = {
             receiver(trace, value).add(argument(trace))
         };
+        def add_owned<T>(trace: Ptr<int>, value: T) -> _ = {
+            receiver(trace, value).get().add(argument(trace))
+        };
         def read<T>(value: T) -> _ = { value.read() };
-        def main() -> int = {
+        def main() -> Result<int, _> = {
             var trace = 0_i;
             var local = Counter { value = 37 };
-            var shared = Arc<Counter>(Counter { value = 6 });
+            var shared = ArcPtr<Counter>.alloc(Counter { value = 6 })?;
             add(&trace, &local);
-            add(&trace, shared);
-            print(fmt("{0} {1} {2}", (trace, read(&local), read(shared))));
-            0
+            add_owned(&trace, shared);
+            print(fmt("{0} {1} {2}", (trace, read(&local), read(shared.get()))));
+            ok(0)
         };
     "#);
     assert!(

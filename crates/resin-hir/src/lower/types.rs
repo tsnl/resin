@@ -19,6 +19,8 @@ pub(super) fn ty(source: &Ty) -> crate::Type {
         Ty::Float32 => crate::Type::Float32,
         Ty::Float64 => crate::Type::Float64,
         Ty::Str => crate::Type::Str,
+        Ty::GpuView => crate::Type::GpuView,
+        Ty::GpuPipelineContract => crate::Type::GpuPipelineContract,
         Ty::GpuArguments => crate::Type::GpuArguments,
         Ty::Foreign { name } => crate::Type::Foreign { name: name.clone() },
         Ty::Defined { definition } => crate::Type::Defined {
@@ -28,29 +30,8 @@ pub(super) fn ty(source: &Ty) -> crate::Type {
         Ty::Pointer { pointee } => crate::Type::Pointer {
             pointee: Box::new(ty(pointee)),
         },
-        Ty::Span { element } => crate::Type::Span {
-            element: Box::new(ty(element)),
-        },
-        Ty::GpuPointer { pointee } => crate::Type::GpuPointer {
-            pointee: Box::new(ty(pointee)),
-        },
-        Ty::GpuSpan { element } => crate::Type::GpuSpan {
-            element: Box::new(ty(element)),
-        },
-        Ty::Arc { pointee } => crate::Type::Arc {
-            pointee: Box::new(ty(pointee)),
-        },
-        Ty::Weak { pointee } => crate::Type::Weak {
-            pointee: Box::new(ty(pointee)),
-        },
-        Ty::GpuComputePipeline { root, owner } => crate::Type::GpuComputePipeline {
-            root: Box::new(ty(root)),
-            owner: Box::new(ty(owner)),
-        },
-        Ty::GpuGraphicsPipeline { root, owner } => crate::Type::GpuGraphicsPipeline {
-            root: Box::new(ty(root)),
-            owner: Box::new(ty(owner)),
-        },
+        Ty::StrongOwner => crate::Type::StrongOwner,
+        Ty::WeakOwner => crate::Type::WeakOwner,
         Ty::Function { params, result } => crate::Type::Function {
             params: params.iter().map(ty).collect(),
             result: Box::new(ty(result)),
@@ -86,11 +67,14 @@ pub(super) fn definition(
         name,
         body: Some(body),
         drop,
+        ..
     } = source
     else {
         unreachable!("completed source type declaration");
     };
     crate::TypeDefinition {
+        gpu_projection: None,
+        gpu_pipeline: None,
         type_params: vec![],
         name: name.clone(),
         body: ty(body),

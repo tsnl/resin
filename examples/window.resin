@@ -1,6 +1,7 @@
 export { main };
 
 import {
+	"$/string.resin",
 	"$/gpu.resin",
 	"$/graphics.resin",
 	"$/window.resin",

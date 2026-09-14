@@ -7,13 +7,13 @@ struct Item { value: int,
 };
 
 def main() = {
-    var owner = Arc<Item> { value = 42 };
-    var weak: Weak<Item>;
+    var owner = ArcPtr<Item>.alloc(Item { value = 42 })?;
+    var weak: WeakPtr<Item>;
     weak := owner.downgrade();
-    var maybe: Arc<Item> | None;
+    var maybe: ArcPtr<Item> | None;
     maybe := weak.upgrade();
     match (maybe) {
-        Arc<Item>(item) => { item.value; },
+        ArcPtr<Item>(item) => { item.get().value; },
         None => {},
     };
 };
@@ -59,24 +59,39 @@ def main() = {
                   (unary_term
                     (postfix_term
                       (primary_term
-                        (constructor_term
-                          (unary_type
+                        (unary_type
+                          (uid)
+                          (type_arguments
                             (type
                               (infix_type
                                 (union_type
                                   (unary_type
                                     (primary_type
-                                      (uid)))))))
-                          (record_term
-                            (term_define
-                              (lid)
-                              (term
-                                (assignment_term
-                                  (binary_term
-                                    (unary_term
-                                      (postfix_term
-                                        (primary_term
-                                          (number)))))))))))))))))))
+                                      (uid)))))))))
+                      (method_call
+                        (lid)
+                        (arguments
+                          (term
+                            (assignment_term
+                              (binary_term
+                                (unary_term
+                                  (postfix_term
+                                    (primary_term
+                                      (constructor_term
+                                        (unary_type
+                                          (primary_type
+                                            (uid)))
+                                        (record_term
+                                          (term_define
+                                            (lid)
+                                            (term
+                                              (assignment_term
+                                                (binary_term
+                                                  (unary_term
+                                                    (postfix_term
+                                                      (primary_term
+                                                        (number))))))))))))))))))
+                      (try_suffix)))))))))
       (statement
         (declare
           (lid)
@@ -84,12 +99,14 @@ def main() = {
             (infix_type
               (union_type
                 (unary_type
-                  (type
-                    (infix_type
-                      (union_type
-                        (unary_type
-                          (primary_type
-                            (uid))))))))))))
+                  (uid)
+                  (type_arguments
+                    (type
+                      (infix_type
+                        (union_type
+                          (unary_type
+                            (primary_type
+                              (uid)))))))))))))
       (statement
         (term
           (assignment_term
@@ -115,12 +132,14 @@ def main() = {
               (union_type
                 (union_type
                   (unary_type
-                    (type
-                      (infix_type
-                        (union_type
-                          (unary_type
-                            (primary_type
-                              (uid))))))))
+                    (uid)
+                    (type_arguments
+                      (type
+                        (infix_type
+                          (union_type
+                            (unary_type
+                              (primary_type
+                                (uid)))))))))
                 (unary_type
                   (primary_type
                     (builtin_type))))))))
@@ -161,12 +180,14 @@ def main() = {
                           (infix_type
                             (union_type
                               (unary_type
-                                (type
-                                  (infix_type
-                                    (union_type
-                                      (unary_type
-                                        (primary_type
-                                          (uid))))))))))
+                                (uid)
+                                (type_arguments
+                                  (type
+                                    (infix_type
+                                      (union_type
+                                        (unary_type
+                                          (primary_type
+                                            (uid)))))))))))
                         (lid)
                         (block_body
                           (statement
@@ -177,6 +198,9 @@ def main() = {
                                     (postfix_term
                                       (primary_term
                                         (lid))
+                                      (method_call
+                                        (lid)
+                                        (arguments))
                                       (field_access
                                         (lid))))))))))
                       (match_arm

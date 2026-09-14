@@ -21,7 +21,7 @@ fn run_entry(module: &resin_lir::Module, entry: &str) -> std::process::Output {
 #[test]
 fn ownership_example_releases_memory_on_success_and_failure() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/ownership.resin");
-    let m = pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap();
+    let m = pipeline::file_module(&path).unwrap();
     let success = run_entry(&m, "main");
     assert!(
         success.status.success(),
@@ -30,13 +30,13 @@ fn ownership_example_releases_memory_on_success_and_failure() {
     );
     assert_eq!(
         String::from_utf8_lossy(&success.stdout).replace("\r\n", "\n"),
-        "freed memory\nanswer = 42\n"
+        "releasing allocation\nanswer = 42\n"
     );
     let failure = run_entry(&m, "failure");
     assert_eq!(failure.status.code(), Some(1));
     assert_eq!(
         String::from_utf8_lossy(&failure.stdout).replace("\r\n", "\n"),
-        "freed memory\n"
+        "releasing allocation\n"
     );
     assert_eq!(
         String::from_utf8_lossy(&failure.stderr).replace("\r\n", "\n"),
@@ -59,14 +59,21 @@ fn array_value_projections_copy_the_element_and_destroy_the_container() {
         let mut program = module(
             r#"
             export { main };
+            import { "$/shared.resin" };
             struct Resource { trace: Ptr<int>, digit: int,
                 def drop(self: Ptr<Resource>) = {
-                    self.trace.* := self.trace.* * 10 + self.digit;
+                    if (self.digit != 0) { self.trace.* := self.trace.* * 10 + self.digit; };
                 };
             };
 
-            def make(trace: Ptr<int>, digit: int) -> Arc<Resource> = {
-                Arc<Resource> { trace = trace, digit = digit }
+            def make(trace: Ptr<int>, digit: int) -> ArcPtr<Resource> = {
+                var optional: ArcPtr<Resource> | None;
+                optional := match (ArcPtr<Resource>.alloc(Resource { trace = trace, digit = 0 })) {
+                    ok(value) => { value }, err(error) => { None },
+                };
+                var owner = optional!;
+                owner.get().digit := digit;
+                owner
             };
             def main() -> int = { 0 };
         "#,
@@ -79,6 +86,15 @@ fn array_value_projections_copy_the_element_and_destroy_the_container() {
                 .unwrap(),
         );
         let element = program.functions[make.index()].result.clone();
+        let payload = Ty::Defined {
+            definition: TypeId::from_index(
+                program
+                    .types
+                    .iter()
+                    .position(|ty| ty.name().is_some_and(|name| name.as_ref() == "Resource"))
+                    .unwrap(),
+            ),
+        };
         let trace = LocalId::from_index(1);
         let selected = LocalId::from_index(2);
         let int = |value| Push {
@@ -101,8 +117,8 @@ fn array_value_projections_copy_the_element_and_destroy_the_container() {
         instrs.extend([
             SetLocal { local: selected },
             LocalAddress { local: selected },
-            Load,
-            ArcData,
+            AccessStatic { index: 0 },
+            OwnerData { pointee: payload },
             AccessStatic { index: 1 },
             Load,
             DropLocal { local: selected },
@@ -179,7 +195,11 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
         "export { main }; struct Broken {}; def main() -> Result<(), Broken> = { err(Broken {}) };",
     );
     let mut definitions = m.types.to_vec();
-    let TypeDef::Nominal { name, .. } = &mut definitions[1] else {
+    let TypeDef::Nominal { name, .. } = definitions
+        .iter_mut()
+        .find(|ty| ty.name().is_some_and(|name| name.as_ref() == "Broken"))
+        .unwrap()
+    else {
         unreachable!()
     };
     *name = "quoted\"name\\value".into();
@@ -214,7 +234,7 @@ fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
 #[test]
 fn array_and_span_indexing_use_element_sizes() {
     runs(
-        "export { main }; def main () -> int = { var values = [10, 20, 30]; var p = Span<int> { data = Ptr<int>(&values), length = ulong(3) }; p(1).* := 7; var end = p(uint(2)); p(1).* + values(0).* + end.* };",
+        "export { main }; import { \"$/span.resin\" }; def main () -> int = { var values = [10, 20, 30]; var p = Span<int> { data = Ptr<int>(&values), length = ulong(3) }; p.at(1).* := 7; var end = p.at(2); p.at(1).* + values(0).* + end.* };",
         47,
     );
     runs(
@@ -234,8 +254,7 @@ fn numbered_examples_compile_as_strict_c11() {
                 .to_string_lossy()
                 .starts_with("eg")
         {
-            let program = pipeline::load(&path).unwrap();
-            let module = pipeline::generate_program(&program).unwrap();
+            let module = pipeline::file_module(&path).unwrap();
             let output = run_module(&module);
             assert_eq!(
                 output.status.code(),
@@ -370,13 +389,13 @@ fn expression_cleanup_preserves_scope_order_on_failure_and_success() {
             "[make(trace, 1), { var inner = make(trace, 2); fail()? }]",
             21,
         ),
-        ("[make(trace, 1), make(trace, 2).accept(fail()?)]", 21),
+        ("[make(trace, 1), make(trace, 2).get().accept(fail()?)]", 21),
         (
             "consume(make(trace, 1), { var inner = make(trace, 2); owned_error(trace)? })",
             215,
         ),
         (
-            "last(make(trace, 1), if (make(trace, 3).truth()) { make(trace, 2) } else { make(trace, 4) }, fail()?)",
+            "last(make(trace, 1), if (make(trace, 3).get().truth()) { make(trace, 2) } else { make(trace, 4) }, fail()?)",
             231,
         ),
         (
@@ -386,19 +405,28 @@ fn expression_cleanup_preserves_scope_order_on_failure_and_success() {
     ] {
         let declarations = r#"
             export { main };
+            import { "$/shared.resin" };
             struct Resource { trace: Ptr<int>, digit: int,
-                def drop(self: Ptr<Resource>) = { self.trace.* := self.trace.* * 10 + self.digit; };
-                def accept(self: Ptr<Resource>, other: Arc<Resource>) -> Arc<Resource> = { other };
+                def drop(self: Ptr<Resource>) = { if (self.digit != 0) { self.trace.* := self.trace.* * 10 + self.digit; }; };
+                def accept(self: Ptr<Resource>, other: ArcPtr<Resource>) -> ArcPtr<Resource> = { other };
                 def truth(self: Ptr<Resource>) -> bool = { 1 == 1 };
             };
             struct Failed {};
-            struct OwnedFailed { value: Arc<Resource> };
-            def make(trace: Ptr<int>, digit: int) -> Arc<Resource> = { Arc<Resource> { trace = trace, digit = digit } };
-            def consume(a: Arc<Resource>, b: Arc<Resource>) = {};
-            def last(a: Arc<Resource>, b: Arc<Resource>, c: Arc<Resource>) -> Arc<Resource> = { c };
-            def fail() -> Result<Arc<Resource>, Failed> = { err(Failed {}) };
-            def succeed(trace: Ptr<int>) -> Result<Arc<Resource>, Failed> = { ok(make(trace, 5)) };
-            def owned_error(trace: Ptr<int>) -> Result<Arc<Resource>, OwnedFailed> = { err(OwnedFailed { value = make(trace, 5) }) };
+            struct OwnedFailed { value: ArcPtr<Resource> };
+            def make(trace: Ptr<int>, digit: int) -> ArcPtr<Resource> = {
+                var optional: ArcPtr<Resource> | None;
+                optional := match (ArcPtr<Resource>.alloc(Resource { trace = trace, digit = 0 })) {
+                    ok(value) => { value }, err(error) => { None },
+                };
+                var owner = optional!;
+                owner.get().digit := digit;
+                owner
+            };
+            def consume(a: ArcPtr<Resource>, b: ArcPtr<Resource>) = {};
+            def last(a: ArcPtr<Resource>, b: ArcPtr<Resource>, c: ArcPtr<Resource>) -> ArcPtr<Resource> = { c };
+            def fail() -> Result<ArcPtr<Resource>, Failed> = { err(Failed {}) };
+            def succeed(trace: Ptr<int>) -> Result<ArcPtr<Resource>, Failed> = { ok(make(trace, 5)) };
+            def owned_error(trace: Ptr<int>) -> Result<ArcPtr<Resource>, OwnedFailed> = { err(OwnedFailed { value = make(trace, 5) }) };
         "#;
         let source = format!(
             "{declarations}
@@ -681,6 +709,7 @@ fn array_addresses_and_dynamic_bounds_are_executable() {
 fn indexing_returns_pointers_and_evaluates_receiver_and_index_once() {
     runs(
         r#"export { main };
+        import { "$/span.resin" };
         def view(p: Ptr<int>, calls: Ptr<int>) -> Span<int> = {
             calls.* := calls.* + 1;
             Span<int> { data = p, length = ulong(3) }
@@ -688,7 +717,7 @@ fn indexing_returns_pointers_and_evaluates_receiver_and_index_once() {
         def index(calls: Ptr<int>) -> int = { calls.* := calls.* + 1; 1 };
         def main() -> int = {
             var values = [10_i, 20, 30]; var calls = 0;
-            var p: Ptr<int>; p := view(Ptr<int>(&values), &calls)(index(&calls));
+            var p: Ptr<int>; p := view(Ptr<int>(&values), &calls).at(ulong(index(&calls)));
             p.* := 42;
             var copied = values;
             copied(0).* := 9;
@@ -703,6 +732,7 @@ fn indexing_returns_pointers_and_evaluates_receiver_and_index_once() {
 fn at_indexing_borrows_array_places_and_supports_field_receivers() {
     runs(
         r#"export { main };
+        import { "$/span.resin" };
         struct Holder { values: Span<int> };
         def view(p: Ptr<int>, calls: Ptr<int>) -> Holder = {
             calls.* := calls.* + 1;
@@ -730,11 +760,11 @@ fn at_indexing_checks_bounds_before_later_effects() {
     for receiver in ["values", "holder.values"] {
         for index in ["2", "18446744073709551615_ul"] {
             let output = run_module(&module(&format!(
-                r#"export {{ main }}; def main() -> int = {{
+                r#"export {{ main }}; import {{ "$/span.resin" }}; extern "stdio.h" def puts(text: Ptr<ubyte>) -> int; def main() -> int = {{
                     var values = [1, 2];
                     var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }};
                     {receiver}.at({index}).* := 9;
-                    print("after"); 0
+                    puts("after".data); 0
                 }};"#
             )));
             assert!(!output.status.success());
@@ -749,8 +779,8 @@ fn array_and_span_indexing_fail_before_out_of_bounds_access() {
     for source in [
         "export { main }; def main() -> int = { var xs = [1, 2]; xs(-1).* };",
         "export { main }; def main() -> int = { var xs = [1, 2]; xs(2).* := 9; 0 };",
-        "export { main }; def main() -> int = { var xs = [1, 2]; var s = Span<int> { data = Ptr<int>(&xs), length = ulong(2) }; s(ulong(18446744073709551615)).* };",
-        "export { main }; def main() -> int = { var s = Span<int> { data = Ptr<int>(ulong(0)), length = ulong(0) }; s(0).* };",
+        "export { main }; import { \"$/span.resin\" }; def main() -> int = { var xs = [1, 2]; var s = Span<int> { data = Ptr<int>(&xs), length = ulong(2) }; s.at(18446744073709551615_ul).* };",
+        "export { main }; import { \"$/span.resin\" }; def main() -> int = { var s = Span<int> { data = Ptr<int>(ulong(0)), length = ulong(0) }; s.at(0).* };",
     ] {
         let output = run_module(&module(source));
         assert!(!output.status.success());
@@ -780,19 +810,13 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
     let mut program = pipeline::load(&path).unwrap();
     let file = &mut program.modules.last_mut().unwrap().file;
     file.stmts.retain(|s| !matches!(&s.val, resin_ast::StmtKind::Function { name, .. } if name.val.as_ref() == "main"));
-    // Exercise the unchanged host helper bodies on stack-backed storage. Their
-    // example signatures use owning GPU views, whose runtime is tested separately.
+    // Exercise random particle generation, camera math, and the shader bodies on
+    // stack-backed storage. GPU initialization stores these same generated values.
     for statement in &mut file.stmts {
         let resin_ast::StmtKind::Function { name, params, .. } = &mut statement.val else {
             continue;
         };
-        if name.val.as_ref() == "initialize" {
-            let resin_ast::TypeKind::App { head, .. } = &mut params[0].1.val else {
-                panic!()
-            };
-            assert_eq!(head.val.as_ref(), "GpuSpan");
-            head.val = "Span".into();
-        } else if name.val.as_ref() == "apply_camera" {
+        if name.val.as_ref() == "apply_camera" {
             let resin_ast::TypeKind::App { args, .. } = &mut params[1].1.val else {
                 panic!()
             };
@@ -805,13 +829,15 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
     }
     file.stmts.extend(support::parse(r#"
         def main() -> int = {
-            var particle = Particle { x = 0_f, y = 0_f, z = 0_f, vx = 0_f, vy = 0_f, vz = 0_f };
+            var state = 12345_ui | 1_ui;
+            var particle = random_particle(&state);
             var particles = Span<Particle> { data = &particle, length = 1_ul };
-            initialize(particles, 12345_ui);
             var first = particle;
-            initialize(particles, 12345_ui);
+            state := 12345_ui | 1_ui;
+            particle := random_particle(&state);
             var valid = particle.x == first.x && particle.vz == first.vz;
-            initialize(particles, 54321_ui);
+            state := 54321_ui | 1_ui;
+            particle := random_particle(&state);
             valid := valid && particle.x != first.x && particle.vx != first.vx;
             valid := valid && particle.x >= -24_f && particle.x < 24_f && particle.y >= -30_f && particle.y < 30_f && particle.z >= 0_f && particle.z < 50_f && particle.vx >= -6_f && particle.vx < 6_f && particle.vy >= -6_f && particle.vy < 6_f && particle.vz >= -6_f && particle.vz < 6_f;
             var params = Params { dt = 0.005_f, yaw_cos = 1_f, yaw_sin = 0_f, pitch_cos = 1_f, pitch_sin = 0_f, zoom = 1_f, aspect = 0.625_f, radius = 0.0012_f, particles = particles };
@@ -1007,6 +1033,7 @@ fn shared_layout_queries_follow_padding_and_do_not_evaluate_operands() {
     runs(
         r#"
         export { main };
+        import { "$/span.resin" };
         struct Inner { x: uint, y: ulong, z: float32 };
         struct Outer { first: uint, inner: Inner, last: float32 };
         def main() -> int = {

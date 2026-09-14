@@ -120,6 +120,8 @@ impl Context {
         self.nominal_schemes.insert(
             definition,
             crate::TypeDefinition {
+                gpu_projection: None,
+                gpu_pipeline: None,
                 type_params: parameters,
                 name,
                 body,
@@ -175,12 +177,6 @@ pub(crate) enum FunctionBody {
     /// Primitive operation elaborated at its call site, preserving addresses
     /// that cannot cross shader calls.
     Intrinsic(Intrinsic),
-    GpuNew {
-        allocator: FunctionId,
-    },
-    GpuAllocate {
-        allocator: FunctionId,
-    },
     GpuPipelineFactory {
         factory: FunctionId,
         graphics: bool,
@@ -264,125 +260,6 @@ impl Context {
         *error.clone()
     }
 
-    /// Instantiate compiler allocation methods from the registered allocator's receiver.
-    pub(crate) fn method_call(
-        &self,
-        ty: &Ty,
-        name: &str,
-        arguments: &[Ty],
-        associated: bool,
-    ) -> Option<FunctionDecl> {
-        if !associated
-            && name == "new"
-            && let Some(allocator) = self.gpu_allocator(ty)
-        {
-            return Some(FunctionDecl {
-                body: FunctionBody::GpuNew { allocator },
-                params: vec![ty.clone(), arguments.first()?.clone()],
-                result: gpu_result(
-                    Ty::GpuPointer {
-                        pointee: Box::new(arguments.first()?.clone()),
-                    },
-                    self.gpu_error(allocator),
-                ),
-            });
-        }
-        if associated
-            && name == "allocate_native"
-            && *ty
-                == (Ty::GpuPointer {
-                    pointee: Box::new(Ty::UInt8),
-                })
-        {
-            let [handle, owner, ..] = arguments else {
-                return None;
-            };
-            if !matches!(handle, Ty::Pointer { .. }) || !matches!(owner, Ty::Arc { .. }) {
-                return None;
-            }
-            return Some(FunctionDecl {
-                body: FunctionBody::Intrinsic(Intrinsic::GpuAllocateNative),
-                params: vec![
-                    handle.clone(),
-                    owner.clone(),
-                    Ty::UInt64,
-                    Ty::UInt64,
-                    Ty::Int32,
-                ],
-                result: Ty::Record {
-                    fields: vec![
-                        RecordField {
-                            name: "value".into(),
-                            ty: Ty::union_of([ty.clone(), Ty::None]),
-                        },
-                        RecordField {
-                            name: "status".into(),
-                            ty: Ty::Int32,
-                        },
-                    ],
-                },
-            });
-        }
-        if associated {
-            let first = arguments.first()?;
-            let body = match (ty, name) {
-                (Ty::GpuPointer { .. }, "new") => FunctionBody::GpuNew {
-                    allocator: self.gpu_allocator(first)?,
-                },
-                (Ty::GpuSpan { .. }, "allocate") => FunctionBody::GpuAllocate {
-                    allocator: self.gpu_allocator(first)?,
-                },
-                _ => return self.method(ty, name),
-            };
-            let allocator = self.gpu_allocator(first)?;
-            let value = match ty {
-                Ty::GpuPointer { pointee } => *pointee.clone(),
-                _ => Ty::UInt64,
-            };
-            return Some(FunctionDecl {
-                body,
-                params: vec![first.clone(), value],
-                result: gpu_result(ty.clone(), self.gpu_error(allocator)),
-            });
-        }
-        self.method(ty, name)
-    }
-
-    /// Generic signatures for editor queries before a call provides its arguments.
-    /// These labels describe inference parameters, not concrete language types.
-    pub(crate) fn generic_method_label(
-        &self,
-        ty: &Ty,
-        associated: bool,
-    ) -> Option<(&'static str, String)> {
-        let label = |ty: &Ty| resin_types::format_type(ty, self.definitions());
-        match (ty, associated) {
-            (Ty::GpuPointer { pointee }, true) => Some((
-                "new",
-                format!(
-                    "(gpu: _, value: {}) -> Result<{}, _>",
-                    label(pointee),
-                    label(ty)
-                ),
-            )),
-            (Ty::GpuSpan { .. }, true) => Some((
-                "allocate",
-                format!("(gpu: _, count: ulong) -> Result<{}, _>", label(ty)),
-            )),
-            (_, false) => {
-                let allocator = self.gpu_allocator(ty)?;
-                Some((
-                    "new",
-                    format!(
-                        "(value: T) -> Result<GpuPtr<T>, {}>",
-                        label(&self.gpu_error(allocator))
-                    ),
-                ))
-            }
-            _ => None,
-        }
-    }
-
     pub(crate) fn method(&self, ty: &Ty, name: &str) -> Option<FunctionDecl> {
         self.methods(ty)
             .into_iter()
@@ -415,17 +292,10 @@ impl ReceiverConversion {
     pub(crate) fn between(from: &Ty, to: &Ty) -> Option<Self> {
         if from == to {
             Some(Self::Value)
-        } else if matches!(to, Ty::Pointer { pointee } | Ty::GpuPointer { pointee } if pointee.as_ref() == from)
-        {
+        } else if matches!(to, Ty::Pointer { pointee } if pointee.as_ref() == from) {
             Some(Self::Address)
-        } else if matches!(from, Ty::Pointer { pointee } | Ty::GpuPointer { pointee } if pointee.as_ref() == to)
-        {
+        } else if matches!(from, Ty::Pointer { pointee } if pointee.as_ref() == to) {
             Some(Self::Load)
-        } else if matches!(from, Ty::Arc { pointee } if to == &Ty::Pointer { pointee: pointee.clone() })
-        {
-            Some(Self::ArcAddress)
-        } else if matches!(from, Ty::Arc { pointee } if pointee.as_ref() == to) {
-            Some(Self::ArcLoad)
         } else {
             None
         }
@@ -435,18 +305,6 @@ impl ReceiverConversion {
 impl Context {
     pub(super) fn with_builtins() -> Self {
         let mut typer = Context::new();
-        let definition = typer
-            .create_type(
-                "String",
-                Ty::Record {
-                    fields: vec![RecordField {
-                        name: "bytes".into(),
-                        ty: Ty::formatted_bytes(),
-                    }],
-                },
-            )
-            .expect("builtin String layout");
-        typer.set_string_type(Ty::Defined { definition });
         typer.register_method_definitions(builtin_methods);
         typer
     }
@@ -467,50 +325,76 @@ fn pointer(ty: Ty) -> Ty {
     }
 }
 
-fn builtin_methods(receiver: &Ty, typer: &Context) -> Vec<(Arc<str>, FunctionDecl)> {
-    if typer.string_type() == Some(receiver) {
-        return string_constructors(receiver);
+// Primitive method signatures keep element types symbolic. Materialization belongs to LIR.
+#[derive(Clone)]
+pub(crate) struct IntrinsicMethod {
+    pub op: Intrinsic,
+    pub params: Vec<super::infer::Type>,
+    pub result: super::infer::Type,
+}
+
+pub(crate) fn intrinsic_methods(
+    receiver: &super::infer::Type,
+    solver: &super::infer::Solver,
+) -> Vec<(&'static str, IntrinsicMethod)> {
+    use super::infer::{Head, Type};
+    let receiver = solver.head(receiver);
+    let mut methods = Vec::new();
+    if let Type::Node(Head::Pointer, parts) = &receiver {
+        methods.push((
+            "replace",
+            IntrinsicMethod {
+                op: Intrinsic::Replace,
+                params: vec![receiver.clone(), parts[0].clone()],
+                result: parts[0].clone(),
+            },
+        ));
+    }
+    let mut base = receiver;
+    while let Type::Node(Head::Pointer, parts) = &base {
+        base = solver.head(&parts[0]);
+    }
+    let index = match &base {
+        Type::Node(Head::Array(_), parts) => Some((Type::pointer(base.clone()), parts[0].clone())),
+        Type::Node(Head::Atom(Ty::Str), _) => Some((base.clone(), Ty::UInt8.into())),
+        _ => None,
+    };
+    if let Some((receiver, element)) = index {
+        methods.push((
+            "at",
+            IntrinsicMethod {
+                op: Intrinsic::Index,
+                params: vec![receiver, Ty::UInt64.into()],
+                result: Type::pointer(element),
+            },
+        ));
+    }
+    methods
+}
+
+fn builtin_methods(receiver: &Ty, _typer: &Context) -> Vec<(Arc<str>, FunctionDecl)> {
+    let solver = super::infer::Solver::default();
+    let primitive = intrinsic_methods(&receiver.clone().into(), &solver);
+    if !primitive.is_empty() {
+        return primitive
+            .into_iter()
+            .map(|(name, signature)| {
+                method(
+                    name,
+                    signature
+                        .params
+                        .iter()
+                        .map(|ty| solver.resolve(ty).expect("concrete primitive parameter"))
+                        .collect(),
+                    solver
+                        .resolve(&signature.result)
+                        .expect("concrete primitive result"),
+                    signature.op,
+                )
+            })
+            .collect();
     }
     match receiver {
-        Ty::Pointer { pointee } => vec![method(
-            "replace",
-            vec![receiver.clone(), *pointee.clone()],
-            *pointee.clone(),
-            Intrinsic::Replace,
-        )],
-        Ty::GpuPointer { pointee } => {
-            let mut methods = gpu_methods(receiver, pointee);
-            methods.push(method(
-                "replace",
-                vec![receiver.clone(), *pointee.clone()],
-                *pointee.clone(),
-                Intrinsic::Replace,
-            ));
-            methods
-        }
-        Ty::GpuSpan { element } => {
-            let mut methods = gpu_methods(receiver, element);
-            methods.push(method(
-                "copy_to",
-                vec![
-                    receiver.clone(),
-                    Ty::Span {
-                        element: element.clone(),
-                    },
-                ],
-                Ty::Unit,
-                Intrinsic::GpuCopyTo,
-            ));
-            if **element == Ty::UInt8 {
-                methods.push(method(
-                    "copy_image_native",
-                    vec![receiver.clone(), pointer(Ty::UInt8), pointer(Ty::UInt8)],
-                    Ty::Int32,
-                    Intrinsic::GpuCopyImage,
-                ));
-            }
-            methods
-        }
         Ty::GpuArguments => vec![
             method(
                 "dispatch_native",
@@ -531,67 +415,8 @@ fn builtin_methods(receiver: &Ty, typer: &Context) -> Vec<(Arc<str>, FunctionDec
                 Intrinsic::GpuArgumentsDraw,
             ),
         ],
-        Ty::Array { element, .. } => vec![method(
-            "at",
-            vec![pointer(receiver.clone()), Ty::UInt64],
-            pointer(*element.clone()),
-            Intrinsic::Index,
-        )],
-        Ty::Span { element } => vec![method(
-            "at",
-            vec![receiver.clone(), Ty::UInt64],
-            pointer(*element.clone()),
-            Intrinsic::Index,
-        )],
-        Ty::Str => vec![method(
-            "at",
-            vec![Ty::Str, Ty::UInt64],
-            pointer(Ty::UInt8),
-            Intrinsic::Index,
-        )],
-        Ty::Arc { pointee } => vec![
-            method(
-                "get",
-                vec![pointer(receiver.clone())],
-                pointer(*pointee.clone()),
-                Intrinsic::ArcGet,
-            ),
-            method(
-                "downgrade",
-                vec![receiver.clone()],
-                Ty::Weak {
-                    pointee: pointee.clone(),
-                },
-                Intrinsic::Downgrade,
-            ),
-        ],
-        Ty::Weak { pointee } => vec![method(
-            "upgrade",
-            vec![receiver.clone()],
-            Ty::union_of([
-                Ty::Arc {
-                    pointee: pointee.clone(),
-                },
-                Ty::None,
-            ]),
-            Intrinsic::Upgrade,
-        )],
         _ => vec![],
     }
-}
-
-fn string_constructors(receiver: &Ty) -> Vec<(Arc<str>, FunctionDecl)> {
-    [("from_str", Ty::Str), ("from_bytes", Ty::byte_span())]
-        .into_iter()
-        .map(|(name, arg)| {
-            method(
-                name,
-                vec![arg],
-                receiver.clone(),
-                Intrinsic::StringFromBytes,
-            )
-        })
-        .collect()
 }
 
 fn method(
@@ -610,44 +435,161 @@ fn method(
     )
 }
 
-fn gpu_result(value: Ty, error: Ty) -> Ty {
-    Ty::Result {
-        value: Box::new(value),
-        error: Box::new(error),
-    }
-}
-
-fn gpu_methods(receiver: &Ty, element: &Ty) -> Vec<(Arc<str>, FunctionDecl)> {
-    let pointer = Ty::GpuPointer {
-        pointee: Box::new(element.clone()),
+/// Representation operations have signatures independent of library wrapper names.
+pub(super) fn primitive_signature(
+    operation: &str,
+    parameters: &[crate::Type],
+) -> Option<(crate::Intrinsic, Vec<crate::Type>, crate::Type)> {
+    use crate::{Intrinsic, RecordField, Type};
+    let pointer = |pointee: Type| Type::Pointer {
+        pointee: Box::new(pointee),
     };
-    let span = Ty::GpuSpan {
-        element: Box::new(element.clone()),
+    let optional = |ty| Type::Union {
+        variants: vec![Type::None, ty],
     };
-    vec![
-        method(
-            "at",
-            vec![receiver.clone(), Ty::UInt64],
-            pointer,
-            Intrinsic::GpuIndex,
+    let record = |fields: &[(&str, Type)]| Type::Record {
+        fields: fields
+            .iter()
+            .map(|(name, ty)| RecordField {
+                name: (*name).into(),
+                ty: ty.clone(),
+            })
+            .collect(),
+    };
+    Some(match (operation, parameters) {
+        ("pointer_index", [element]) => (
+            Intrinsic::PointerIndex,
+            vec![pointer(element.clone()), Type::UInt64, Type::UInt64],
+            pointer(element.clone()),
         ),
-        method(
-            "slice",
-            vec![receiver.clone(), Ty::UInt64, Ty::UInt64],
-            span,
-            Intrinsic::GpuSlice,
+        ("pointer_range", [element]) => (
+            Intrinsic::PointerRange,
+            vec![
+                pointer(element.clone()),
+                Type::UInt64,
+                Type::UInt64,
+                Type::UInt64,
+            ],
+            pointer(element.clone()),
         ),
-        method(
-            "read_only",
-            vec![receiver.clone()],
-            receiver.clone(),
-            Intrinsic::GpuReadOnly,
+        ("pointer_bytes", [element]) => (
+            Intrinsic::PointerBytes,
+            vec![pointer(element.clone()), Type::UInt64],
+            super::types::ty(&Ty::byte_span()),
         ),
-        method(
-            "write_only",
-            vec![receiver.clone()],
-            receiver.clone(),
-            Intrinsic::GpuWriteOnly,
+        ("owner_allocate", [element]) => (
+            Intrinsic::OwnerAllocate,
+            vec![Type::UInt64, element.clone()],
+            optional(Type::StrongOwner),
         ),
-    ]
+        ("owner_data", [element]) => (
+            Intrinsic::OwnerData,
+            vec![pointer(Type::StrongOwner)],
+            pointer(element.clone()),
+        ),
+        ("owner_length", []) => (
+            Intrinsic::OwnerLength,
+            vec![pointer(Type::StrongOwner)],
+            Type::UInt64,
+        ),
+        ("owner_downgrade", []) => (
+            Intrinsic::OwnerDowngrade,
+            vec![pointer(Type::StrongOwner)],
+            Type::WeakOwner,
+        ),
+        ("owner_upgrade", []) => (
+            Intrinsic::OwnerUpgrade,
+            vec![pointer(Type::WeakOwner)],
+            optional(Type::StrongOwner),
+        ),
+        ("string_from_bytes", []) => (
+            Intrinsic::StringFromBytes,
+            vec![pointer(Type::UInt8), Type::UInt64],
+            Type::StrongOwner,
+        ),
+        ("format_bytes", [arguments]) => (
+            Intrinsic::FormatBytes,
+            vec![pointer(Type::UInt8), Type::UInt64, arguments.clone()],
+            Type::StrongOwner,
+        ),
+        ("weak_empty", []) => (Intrinsic::WeakEmpty, vec![], Type::WeakOwner),
+        ("gpu_element_layout", [_]) => (
+            Intrinsic::GpuElementLayout,
+            vec![],
+            record(&[("size", Type::UInt64), ("alignment", Type::UInt64)]),
+        ),
+        ("gpu_view_allocate", [native]) => (
+            Intrinsic::GpuViewAllocate,
+            vec![
+                pointer(native.clone()),
+                Type::StrongOwner,
+                Type::UInt64,
+                Type::UInt64,
+                Type::Int32,
+            ],
+            record(&[
+                (
+                    "value",
+                    Type::Union {
+                        variants: vec![Type::None, Type::GpuView],
+                    },
+                ),
+                ("status", Type::Int32),
+            ]),
+        ),
+        ("gpu_view_offset", []) => (
+            Intrinsic::GpuViewOffset,
+            vec![Type::GpuView, Type::UInt64, Type::UInt64, Type::UInt64],
+            Type::GpuView,
+        ),
+        ("gpu_view_index", [_]) => (
+            Intrinsic::GpuViewIndex,
+            vec![Type::GpuView, Type::UInt64, Type::UInt64],
+            Type::GpuView,
+        ),
+        ("gpu_view_range", [_]) => (
+            Intrinsic::GpuViewRange,
+            vec![Type::GpuView, Type::UInt64, Type::UInt64, Type::UInt64],
+            Type::GpuView,
+        ),
+        ("gpu_view_restrict", []) => (
+            Intrinsic::GpuViewRestrict,
+            vec![Type::GpuView, Type::UInt32],
+            Type::GpuView,
+        ),
+        ("gpu_view_load", [element]) => {
+            (Intrinsic::GpuViewLoad, vec![Type::GpuView], element.clone())
+        }
+        ("gpu_view_store", [element]) => (
+            Intrinsic::GpuViewStore,
+            vec![Type::GpuView, element.clone()],
+            Type::Unit,
+        ),
+        ("gpu_view_replace", [element]) => (
+            Intrinsic::GpuViewReplace,
+            vec![Type::GpuView, element.clone()],
+            element.clone(),
+        ),
+        ("gpu_view_copy_to", [element]) => (
+            Intrinsic::GpuViewCopyTo,
+            vec![
+                Type::GpuView,
+                Type::UInt64,
+                pointer(element.clone()),
+                Type::UInt64,
+            ],
+            Type::Unit,
+        ),
+        ("gpu_view_copy_image", []) => (
+            Intrinsic::GpuViewCopyImage,
+            vec![
+                Type::GpuView,
+                Type::UInt64,
+                pointer(Type::UInt8),
+                pointer(Type::UInt8),
+            ],
+            Type::Int32,
+        ),
+        _ => return None,
+    })
 }

@@ -37,21 +37,24 @@ A few language choices explain much of the implementation:
   an omitted result type means unit. Their names are available before their
   bodies are checked, allowing mutual recursion. Explicit `_` holes opt into
   inference in local annotations and function results; omission still means unit.
-- Every function is unary. An empty argument list is unit `()`; multiple
-  arguments form a tuple.
+- Function signatures retain separate parameters. An empty argument list supplies
+  no values; a tuple is an explicit single argument.
 - Value binding statements use `var`, including uninitialized locals; nominal
   records use `struct`, and `type` creates transparent aliases. Record fields remain
   `name = value`; parameters remain `name: Type`.
 - `A | B` is a structural union of value types. `Result<T, E>` is first-class;
   `ok` and `err` construct it, `match` handles variants, and postfix `?` propagates errors.
-- `Arc<T>` and `Weak<T>` provide shared ownership. Value reads copy; fresh results
-  transfer into consumers. `impl` defines inherent methods and destruction hooks.
+- `ArcPtr<T>` shares single values, and `ArcSpan<T>` shares fixed-length sequences.
+  `WeakPtr<T>` and `WeakSpan<T>` observe them without keeping their payloads alive.
+  `ArcSpan<T>.alloc(count, initial)?` allocates initialized
+  owned elements; `get()` borrows their span. Value reads copy; fresh results
+  transfer into consumers. Structs declare inherent methods and destruction hooks.
   Initialized owners are released in reverse scope order, including through `?`.
   There is no static move checking. Statement-only chain blocks yield unit.
 - Files have private scopes and explicit exports. Imports expose only exported
   names, and never execute code. There are no runtime global variables.
 - Entry points are ordinary exported functions. `main` is only the default
-  name; host entries take unit or the argc/argv/envp tuple, and return unit, `int`,
+  name; host entries take no arguments or the argc, argv, and envp parameters, and return unit, `int`,
   or a Result with either success type.
 
 [examples/eg009_imports.resin](examples/eg009_imports.resin) and
@@ -182,25 +185,29 @@ module retains its immutable `Source` alongside its syntax.
 [HIR language](crates/resin-hir/src/lib.rs) is a self-contained, typed tree. Start
 at [HIR lowering](crates/resin-hir/src/lower/mod.rs), then follow
 [checking a file](crates/resin-hir/src/lower/check/mod.rs): declare signatures, check
-bodies, solve dependency groups, and replace inference variables with concrete types.
-The [solver](crates/resin-hir/src/lower/infer/mod.rs) handles numeric constraints
+bodies, solve dependency groups, and resolve inference variables while retaining named
+type binders. The [solver](crates/resin-hir/src/lower/infer/mod.rs) handles numeric constraints
 and recursive error sets. It stays private to this crate.
 
 [Elaboration](crates/resin-hir/src/lower/elaborate.rs) resolves lexical bindings,
-method calls, field projections, conversions, and shader references. Short-circuit
-operators become conditionals and layout queries become constants. The public HIR
-contains neither AST nodes nor scope cursors. The temporary checking tree in
-[typed.rs](crates/resin-hir/src/lower/typed.rs) is an internal construction step.
+method calls, field projections, conversions, and shader references. It establishes
+definite initialization in runtime evaluation order, intersecting the states of
+alternative branches, including in unused definitions. Short-circuit operators become
+conditionals; type-dependent layout queries remain explicit until specialization.
+The public HIR contains neither AST nodes nor scope cursors. The temporary checking
+tree in [typed.rs](crates/resin-hir/src/lower/typed.rs) is an internal construction step.
 
 [LIR language](crates/resin-lir/src/lib.rs) defines a typed operand stack machine.
 Functions own locals and a tree of basic blocks. Instructions consume and produce
 stack values; `If` and `Loop` terminators own nested regions and their continuations.
-`Yield` transfers operands to the enclosing region, and `Return` leaves the function.
-Local zero is always the parameter, including unit, tuples, and foreign declarations.
-Block IDs locate nodes in an
-arena; the verifier rejects arbitrary jumps and cycles. [LIR lowering](crates/resin-lir/src/lower/mod.rs)
-consumes only HIR and shared concrete types. It chooses storage, checks definite
-initialization, makes evaluation order explicit, and inserts cleanup.
+Selection arms end with `Merge`, loop conditions with `LoopTest`, and loop bodies
+with `Continue`; `Return` leaves the function. Parameters occupy the first locals in
+declaration order, and zero-argument functions need no parameter local. Block IDs
+identify nodes in the tree; the verifier rejects arbitrary jumps and cycles.
+[LIR lowering](crates/resin-lir/src/lower/mod.rs) consumes HIR, specializes function
+and type applications, and builds the concrete type catalog. Storage lowering then
+chooses locations, makes evaluation order explicit, and inserts cleanup and runtime
+initialization flags for managed locals.
 
 | Question | Start reading here |
 | --- | --- |
@@ -208,7 +215,8 @@ initialization, makes evaluation order explicit, and inserts cleanup.
 | Which names are visible at this source position? | [HIR scopes](crates/resin-hir/src/lower/scope.rs) |
 | How are a function's constraints solved? | [HIR checking](crates/resin-hir/src/lower/check/mod.rs) |
 | How does a method become an ordinary call? | [HIR elaboration](crates/resin-hir/src/lower/elaborate.rs) |
-| Where is a binding stored, and is it initialized? | [LIR bindings](crates/resin-lir/src/lower/bindings.rs) |
+| Is a source binding definitely initialized before a read? | [HIR elaboration](crates/resin-hir/src/lower/elaborate.rs) |
+| Where is a binding stored? | [LIR bindings](crates/resin-lir/src/lower/bindings.rs) |
 | Which storage location does an assignment address? | [LIR places](crates/resin-lir/src/lower/places.rs) |
 | How do branches and loops join? | [LIR control flow](crates/resin-lir/src/lower/flow.rs) |
 | How are Result propagation and cleanup lowered? | [LIR sums](crates/resin-lir/src/lower/sums.rs), [cleanup](crates/resin-lir/src/lower/mod.rs) |
@@ -217,7 +225,7 @@ initialization, makes evaluation order explicit, and inserts cleanup.
 ### Verification certifies the LIR language
 
 LIR's private [verify](crates/resin-lir/src/verify/mod.rs) module checks definitions,
-instruction operands, unique region ownership, branch yields, loop stack invariants,
+instruction operands, unique region ownership, selection merges, loop stack invariants,
 and returns. Its public operations and certificate types live in [lib.rs](crates/resin-lir/src/lib.rs), beside the language
 being checked. `resin_lir::VerifiedModule` owns LIR and its verification analysis behind
 private fields. Native builds borrow an immutable `Verified` view. Consuming
@@ -238,7 +246,7 @@ the verifier applies concrete rules to instructions independently of source chec
 functions, structured statements, and a `main` wrapper. [The printer](crates/resin-codegen/src/c/print.rs)
 formats that tree without accessing LIR or typechecking facts. [function.rs](crates/resin-codegen/src/c/lower/function.rs)
 lowers instructions, nested control flow, and operand transfers; [foreign.rs](crates/resin-codegen/src/c/lower/foreign.rs)
-bridges Resin's unary calls to conventional C argument lists.
+bridges typed Resin parameters and results to native C calls.
 
 [Ninja execution](crates/resin-toolchain/src/ninja.rs) builds the generated dependency
 graph. The toolchain's [public interface](crates/resin-toolchain/src/lib.rs) names
@@ -336,7 +344,7 @@ release cache after the build, using `spirv-dis` to view their assembly.
 `@compute_shader`, `@vertex_shader`, and `@fragment_shader` register and validate
 shader entry declarations. [shader interfaces](crates/resin-types/src/lib.rs) defines their metadata
 and signature contracts. Decorated functions and their unannotated helpers remain
-host-callable. Accessing `function.spirv` requests a static `Span<ubyte>` artifact;
+host-callable. Accessing `function.spirv` requests a static structural byte view;
 [project generation](crates/resin-codegen/src/lib.rs) enumerates those declaration
 requests and writes SPIR-V plus their Ninja dependencies. `spirv-opt -O` optimizes it,
 and `resin --embed` writes the headers included by generated C.
@@ -351,8 +359,10 @@ and assemble the binary. Structured control flow remains explicit, and physical 
 use the shared host/device layout. The shader profile rejects operations such as foreign
 calls and recursion. Optimization is a separate `spirv-opt` process owned by the toolchain.
 
-The remaining GPU operations are ordinary standard-library calls. Follow one
-from [resin/gpu.resin](resin/gpu.resin), through
+GPU allocation and checked access use ordinary generic source methods backed by
+opaque compiler primitives. Pipeline creation, dispatch, and draw use explicitly
+registered compiler bridges to check shader types and project owning views. Follow
+the native resource wrappers from [resin/gpu.resin](resin/gpu.resin), through
 [resin_runtime.h](crates/resin-runtime/include/resin_runtime.h) and its included
 headers, to [the runtime](crates/resin-runtime/src/lib.rs). The same pattern applies
 to images and windows. Wrappers omit the native `resin_` prefix and return
@@ -374,26 +384,29 @@ Inside the runtime, the useful landmarks are:
 - [allocator/range.rs](crates/resin-runtime/src/allocator/range.rs): aligned
   suballocation using a sorted list of free ranges.
 
-Buffers make the host/device boundary concrete. `Span<T>` pairs an address with
-a length; both spans and arrays return a checked element pointer through `buffer(index)`.
-Use `buffer(index).*` to read or write it. Raw pointer arithmetic requires an explicit
-conversion to `ulong` and operates on byte addresses. The host allocates memory,
-writes root data, and passes its `GpuBuffer` handle to `commands.dispatch` or
-`commands.draw`. Recording obtains the device address internally; shader entry
-wrappers receive it as their declared `Ptr<T>` root according to their supported
-interface. [target layout helpers](crates/resin-codegen/src/layout.rs) keeps supported buffer
-layouts consistent between C and SPIR-V; start there when investigating a field
-offset or alignment mismatch.
+Buffers make the host/device boundary concrete. The source `Span<T>` pairs a
+borrowed address with an element count. Arrays and spans return element pointers
+through `.at(index)`; use `.at(index).*` to read or write. Host indexing checks
+bounds, while shader indexing requires callers to stay within valid storage.
+Host `GpuPtr<T>` and `GpuSpan<T>` retain their allocation and expose checked
+`load`, `store`, and `replace` operations. Create them with `gpu.create(value)?`
+and `gpu.alloc::<T>(count)?`.
 
-These APIs expose resource lifetimes explicitly. The C API and its unsafe Rust
-convenience API are not ownership-safe GPU abstractions: resources must remain
-alive while commands use them. Standard-library wrappers retain shared owners and
-propagate failures with `?`. `commands.submit()` and cancellation clear the
-shared native handle; automatic destruction cancels unfinished recordings.
-Recordings retain root buffers through synchronous submission or cancellation.
-Pointers and spans stored inside a root do not retain their backing allocations;
-callers keep those allocations alive until work completes. See
-[GPU buffers](doc/gpu-buffers.md) for command roots and borrowed pointer queries.
+Dispatch and draw accept a typed pipeline and a host argument record. Explicitly
+registered projection contracts map its owning GPU views to shader pointers and
+spans, preserving offsets and retaining the referenced allocations. Shader entry
+wrappers receive the generated root as their declared `Ptr<T>`. The public source
+API exposes neither a raw host pointer into GPU storage nor a reusable projected
+root. The [shared layout contract](crates/resin-types/src/lib.rs) keeps C and SPIR-V
+storage consistent; start there when investigating a field offset or alignment.
+
+The unsafe native C and Rust APIs retain explicit handles and addresses. Source
+resource wrappers retain shared owners and propagate failures with `?`.
+`commands.submit()` and cancellation clear the shared native handle; destruction
+cancels unfinished recordings. Recorded GPU allocations reject host access until
+synchronous submission or cancellation. Shader pointers and spans are nonowning
+views whose allocations remain pinned by the recording. See
+[GPU buffers](doc/gpu-buffers.md) for projection and command lifetimes.
 Shader bodies describe individual invocations;
 the compiler does not synthesize workgroup-local storage or barriers.
 
@@ -407,7 +420,12 @@ write PNGs in cwd.
 
 ## 5. Find the test closest to your change
 
-Tests are executable descriptions of the boundaries above:
+Tests are executable descriptions of the boundaries above.
+
+The [source test helpers](tests/support/pipeline.rs) resolve only explicit imports.
+Use `source_module` for inline source and `file_module` for a file and its imports;
+both lower the HIR retained by compiler analysis. Tests that inspect or edit ASTs use
+`load` and then explicitly regenerate with `generate_program` after edits.
 
 | Change | Useful tests |
 | --- | --- |

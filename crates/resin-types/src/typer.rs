@@ -15,9 +15,8 @@ pub(super) fn lookup(name: &str, arity: usize) -> Result<BuiltinRule, TypeError>
         "==" | "!=" | "<" | "<=" | ">" | ">=" => (BuiltinRule::Comparison, arity == 2),
         "!" => (BuiltinRule::Boolean, arity == 1),
         "&&" | "||" => (BuiltinRule::Boolean, arity == 2),
-        "print" => (BuiltinRule::Print, arity == 1),
-        "fmt" => (BuiltinRule::Format, arity == 2),
-        "string_from_bytes" => (BuiltinRule::StringFromBytes, arity == 1),
+        "format_bytes" => (BuiltinRule::Format, arity == 3),
+        "string_from_bytes" => (BuiltinRule::StringFromBytes, arity == 2),
         _ => {
             return Err(TypeError::new(TypeErrorKind::UnknownBuiltin {
                 name: name.into(),
@@ -107,10 +106,7 @@ pub(super) fn as_record(context: &TyperContext, ty: &Ty) -> Result<Converted, Ty
         steps.push(Conv::Unwrap { definition });
         current = context.definition_body(definition)?.clone();
     }
-    if matches!(
-        current,
-        Ty::Record { .. } | Ty::Span { .. } | Ty::GpuSpan { .. } | Ty::Str
-    ) {
+    if matches!(current, Ty::Record { .. } | Ty::Str) {
         Ok(Converted { ty: current, steps })
     } else {
         Err(TypeError::new(TypeErrorKind::ExpectedRecord {
@@ -121,21 +117,7 @@ pub(super) fn as_record(context: &TyperContext, ty: &Ty) -> Result<Converted, Ty
 
 pub(super) fn from_definitions(definitions: impl Into<TypeTable>) -> TyperContext {
     let definitions = definitions.into();
-    let string_type = definitions
-        .iter()
-        .enumerate()
-        .find_map(|(index, definition)| {
-            (definition
-                .name()
-                .is_some_and(|name| name.as_ref() == "String"))
-            .then_some(Ty::Defined {
-                definition: TypeId::from_index(index),
-            })
-        });
-    TyperContext {
-        definitions,
-        string_type,
-    }
+    TyperContext { definitions }
 }
 
 pub(super) fn into_definitions(context: TyperContext) -> Result<TypeTable, TypeError> {
@@ -209,20 +191,13 @@ pub(super) fn type_builtin_call(
 ) -> Result<BuiltinCall, TypeError> {
     let rule = BuiltinRule::lookup(name, args.len())?;
     let result = match rule {
-        BuiltinRule::Print if context.is_string(&args[0]) => Ty::Unit,
-        BuiltinRule::Print => {
-            return Err(TypeError::new(TypeErrorKind::InvalidPrintArguments {
-                found: args[0].clone(),
-            }));
+        BuiltinRule::Format => {
+            byte_parameters(context, args)?;
+            context.type_format(&args[2])?
         }
-        BuiltinRule::Format => context.type_format(&args[0], &args[1])?,
         BuiltinRule::StringFromBytes => {
-            if args[0] != Ty::Str {
-                context.same(&Ty::byte_span(), &args[0])?;
-            }
-            context.string_type.clone().ok_or_else(|| {
-                TypeError::new(TypeErrorKind::UnknownBuiltin { name: name.into() })
-            })?
+            byte_parameters(context, args)?;
+            Ty::StrongOwner
         }
         BuiltinRule::Boolean => {
             for arg in args {
@@ -232,9 +207,7 @@ pub(super) fn type_builtin_call(
         }
         BuiltinRule::Arithmetic | BuiltinRule::Comparison => {
             if rule == BuiltinRule::Arithmetic
-                && args
-                    .iter()
-                    .any(|ty| matches!(ty, Ty::Pointer { .. } | Ty::GpuPointer { .. }))
+                && args.iter().any(|ty| matches!(ty, Ty::Pointer { .. }))
             {
                 return Err(TypeError::new(TypeErrorKind::PointerArithmetic));
             }
@@ -287,19 +260,12 @@ impl TyperContext {
 }
 
 impl TyperContext {
-    fn is_string(&self, ty: &Ty) -> bool {
-        ty == &Ty::Str || ty == &Ty::byte_span() || self.string_type.as_ref() == Some(ty)
-    }
-
-    fn type_format(&self, format: &Ty, values: &Ty) -> Result<Ty, TypeError> {
+    fn type_format(&self, values: &Ty) -> Result<Ty, TypeError> {
         let invalid = || {
             TypeError::new(TypeErrorKind::InvalidFormatArguments {
                 found: values.clone(),
             })
         };
-        if !self.is_string(format) {
-            return Err(invalid());
-        }
         let fields = match values {
             Ty::Unit => &[][..],
             Ty::Record { fields } => fields,
@@ -312,14 +278,15 @@ impl TyperContext {
             let ty = &field.ty;
             if !(ty.is_numeric()
                 || matches!(ty, Ty::Bool | Ty::Unit | Ty::Pointer { .. })
-                || self.is_string(ty))
+                || *ty == Ty::Str
+                || format_byte_record(ty))
             {
                 return Err(TypeError::new(TypeErrorKind::UnformattableType {
                     found: ty.clone(),
                 }));
             }
         }
-        self.string_type.clone().ok_or_else(invalid)
+        Ok(Ty::StrongOwner)
     }
 }
 
@@ -334,10 +301,6 @@ pub(super) fn ascription(
 ) -> Result<Option<Vec<Conv>>, TypeError> {
     let step = if from == to {
         return Ok(Some(Vec::new()));
-    } else if from == &Ty::Str && to == &Ty::byte_span() {
-        Conv::StrSpan
-    } else if matches!(to, Ty::Span { .. }) && to.view_record().as_ref() == Some(from) {
-        Conv::MakeSpan
     } else if from.view_record().as_ref() == Some(to) {
         Conv::ViewRecord
     } else if let Ty::Defined { definition } = to
@@ -470,13 +433,7 @@ pub(super) fn pipeline_root(
                     .into(),
             ),
         };
-    match root {
-        Some(root) if root.gpu_projection(typer.definitions()).is_none() => {
-            Err("pipeline shader root does not support GPU argument projection".into())
-        }
-        Some(root) => Ok(root),
-        None => Ok(Ty::None),
-    }
+    Ok(root.unwrap_or(Ty::None))
 }
 
 fn shader_root(parameters: &[Ty]) -> Result<Ty, String> {
@@ -537,7 +494,7 @@ pub(super) fn shader_builtin_instance(
     name: &str,
     arguments: &[Ty],
 ) -> Result<BuiltinCall, String> {
-    if matches!(name, "print" | "fmt" | "string_from_bytes") {
+    if matches!(name, "format_bytes" | "string_from_bytes") {
         return Err(format!("{name} is only supported in host programs"));
     }
     let signature =
@@ -572,13 +529,12 @@ pub(super) fn shader_value_type(definitions: &[TypeDef], ty: &Ty) -> Result<(), 
         }
         match ty {
             Ty::Unit | Ty::None | Ty::Bool | Ty::Int32 | Ty::UInt8 | Ty::UInt32
-            | Ty::UInt64 | Ty::Int64 | Ty::Float32 | Ty::Arc { .. } | Ty::Weak { .. } => {},
+            | Ty::UInt64 | Ty::Int64 | Ty::Float32 | Ty::StrongOwner | Ty::WeakOwner => {},
             Ty::Str => return Err("shader string literals need device-backed storage; pass a Span<ubyte> in the shader root".into()),
-            Ty::GpuPointer { .. } | Ty::GpuSpan { .. } | Ty::GpuArguments
-            | Ty::GpuComputePipeline { .. } | Ty::GpuGraphicsPipeline { .. } => {
+            Ty::GpuPipelineContract | Ty::GpuView | Ty::GpuArguments => {
                 return Err("shader cannot consume a managed GPU view or projected arguments".into());
             }
-            Ty::Pointer { pointee: element } | Ty::Span { element } => {
+            Ty::Pointer { pointee: element } => {
                 crate::layout::layout(definitions, element).map_err(|error| error.to_string())?;
                 pending.push(element);
             }
@@ -594,4 +550,24 @@ pub(super) fn shader_value_type(definitions: &[TypeDef], ty: &Ty) -> Result<(), 
         }
     }
     Ok(())
+}
+
+fn byte_parameters(context: &TyperContext, args: &[Ty]) -> Result<(), TypeError> {
+    context.same(
+        &Ty::Pointer {
+            pointee: Box::new(Ty::UInt8),
+        },
+        &args[0],
+    )?;
+    context.same(&Ty::UInt64, &args[1])
+}
+
+// Formatting transports explicit structural byte views, never inferred nominal layouts.
+fn format_byte_record(ty: &Ty) -> bool {
+    let Ty::Record { fields } = ty else {
+        return false;
+    };
+    matches!(fields.as_slice(), [data, length]
+        if data.name.as_ref() == "data" && data.ty == Ty::Pointer { pointee: Box::new(Ty::UInt8) }
+        && length.name.as_ref() == "length" && length.ty == Ty::UInt64)
 }

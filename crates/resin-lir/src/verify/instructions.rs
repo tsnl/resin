@@ -22,16 +22,19 @@ pub(super) fn check_instr(
             super::pipeline::check(module, instr, stack, location)?;
         }
 
-        Instr::GpuNew { .. }
-        | Instr::GpuAllocate { .. }
-        | Instr::GpuAllocateNative
-        | Instr::GpuSlice
-        | Instr::GpuReadOnly
-        | Instr::GpuWriteOnly
-        | Instr::GpuCopyTo
+        Instr::GpuElementLayout { .. }
+        | Instr::GpuViewAllocate
+        | Instr::GpuViewIndex { .. }
+        | Instr::GpuViewRange { .. }
+        | Instr::GpuViewOffset
+        | Instr::GpuViewRestrict
+        | Instr::GpuViewLoad { .. }
+        | Instr::GpuViewStore
+        | Instr::GpuViewReplace
+        | Instr::GpuViewCopyTo
+        | Instr::GpuViewCopyImage
         | Instr::GpuArgumentsDispatch
-        | Instr::GpuArgumentsDraw
-        | Instr::GpuCopyImage => super::gpu::check(module, instr, stack, location)?,
+        | Instr::GpuArgumentsDraw => super::gpu::check(module, instr, stack, location)?,
         Instr::ForgetLocal { local } | Instr::DropLocal { local } | Instr::TakeLocal { local } => {
             let target = function.locals.get(local.index()).ok_or_else(|| {
                 location.error(VerifyErrorKind::InvalidLocal {
@@ -42,44 +45,46 @@ pub(super) fn check_instr(
                 stack.push(target.ty.clone());
             }
         }
-        Instr::WeakEmpty { pointee } => {
+        Instr::WeakEmpty => stack.push(Ty::WeakOwner),
+        Instr::OwnerAllocate { element } => {
+            check_type(&module.types, element, location)?;
+            super::rules::check_value(&module.types, element, location)?;
+            let values = pop(stack, 2, location)?;
+            expect_types(&[Ty::UInt64, element.clone()], &values, location)?;
+            stack.push(Ty::union_of([Ty::StrongOwner, Ty::None]));
+        }
+        Instr::OwnerData { pointee } => {
             check_type(&module.types, pointee, location)?;
-            stack.push(Ty::Weak {
+            expect_type(
+                Ty::Pointer {
+                    pointee: Box::new(Ty::StrongOwner),
+                },
+                pop_one(stack, location)?,
+                location,
+            )?;
+            stack.push(Ty::Pointer {
                 pointee: Box::new(pointee.clone()),
             });
         }
-        Instr::ArcNew => {
-            let ty = pop_one(stack, location)?;
-            super::rules::check_value(&module.types, &ty, location)?;
-            stack.push(Ty::Arc {
-                pointee: Box::new(ty),
-            });
-        }
-        Instr::ArcData | Instr::Downgrade | Instr::Upgrade => {
-            let source = pop_one(stack, location)?;
-            let result = match (instr, &source) {
-                (Instr::ArcData, Ty::Arc { pointee }) => Ty::Pointer {
-                    pointee: pointee.clone(),
-                },
-                (Instr::Downgrade, Ty::Arc { pointee }) => Ty::Weak {
-                    pointee: pointee.clone(),
-                },
-                (Instr::Upgrade, Ty::Weak { pointee }) => Ty::union_of([
-                    Ty::Arc {
-                        pointee: pointee.clone(),
-                    },
-                    Ty::None,
-                ]),
-                _ => {
-                    return Err(location.error(VerifyErrorKind::TypeMismatch {
-                        expected: Ty::Arc {
-                            pointee: Box::new(Ty::Unit),
-                        },
-                        found: source,
-                    }));
-                }
+        Instr::OwnerLength | Instr::OwnerDowngrade | Instr::OwnerUpgrade => {
+            let owner = if matches!(instr, Instr::OwnerUpgrade) {
+                Ty::WeakOwner
+            } else {
+                Ty::StrongOwner
             };
-            stack.push(result);
+            expect_type(
+                Ty::Pointer {
+                    pointee: Box::new(owner),
+                },
+                pop_one(stack, location)?,
+                location,
+            )?;
+            stack.push(match instr {
+                Instr::OwnerLength => Ty::UInt64,
+                Instr::OwnerDowngrade => Ty::WeakOwner,
+                Instr::OwnerUpgrade => Ty::union_of([Ty::StrongOwner, Ty::None]),
+                _ => unreachable!(),
+            });
         }
         Instr::SetLocal { local } => {
             let target = function.locals.get(local.index()).ok_or_else(|| {
@@ -192,6 +197,37 @@ pub(super) fn check_instr(
             let source = pop_one(stack, location)?;
             stack.push(project_static(&module.types, source, *index, location)?);
         }
+        Instr::PointerBytes => {
+            let args = pop(stack, 2, location)?;
+            if !matches!(&args[0], Ty::Pointer { pointee } if pointee.is_numeric()) {
+                return Err(location.error(VerifyErrorKind::TypeMismatch {
+                    expected: Ty::Pointer {
+                        pointee: Box::new(Ty::UInt8),
+                    },
+                    found: args[0].clone(),
+                }));
+            }
+            expect_types(&[Ty::UInt64], &args[1..], location)?;
+            stack.push(Ty::byte_span());
+        }
+        Instr::PointerIndex | Instr::PointerRange => {
+            let count = if matches!(instr, Instr::PointerRange) {
+                4
+            } else {
+                3
+            };
+            let args = pop(stack, count, location)?;
+            let Ty::Pointer { pointee } = &args[0] else {
+                return Err(location.error(VerifyErrorKind::ExpectedPointer {
+                    found: args[0].clone(),
+                }));
+            };
+            // Stepping a typed pointer requires a concrete element representation;
+            // opaque native handles may be passed around only behind pointers.
+            super::rules::check_value(&module.types, pointee, location)?;
+            expect_types(&vec![Ty::UInt64; count - 1], &args[1..], location)?;
+            stack.push(args[0].clone());
+        }
         Instr::AccessDynamic => {
             let index = pop_one(stack, location)?;
             if !is_integer(&module.types, &index, location)? {
@@ -203,7 +239,7 @@ pub(super) fn check_instr(
         Instr::Load | Instr::TransferLoad => {
             let address = pop_one(stack, location)?;
             let shape = shape(&module.types, address.clone(), location)?;
-            let (Ty::Pointer { pointee } | Ty::GpuPointer { pointee }) = shape else {
+            let Ty::Pointer { pointee } = shape else {
                 return Err(location.error(VerifyErrorKind::ExpectedPointer { found: address }));
             };
             stack.push(*pointee);
@@ -212,7 +248,7 @@ pub(super) fn check_instr(
             let value = pop_one(stack, location)?;
             let address = pop_one(stack, location)?;
             let shape = shape(&module.types, address.clone(), location)?;
-            let (Ty::Pointer { pointee } | Ty::GpuPointer { pointee }) = shape else {
+            let Ty::Pointer { pointee } = shape else {
                 return Err(location.error(VerifyErrorKind::ExpectedPointer { found: address }));
             };
             expect_type(*pointee, value.clone(), location)?;
@@ -351,18 +387,13 @@ fn project_static(
     location: Location,
 ) -> Result<Ty, VerifyError> {
     match source {
-        Ty::GpuPointer { pointee } => Ok(Ty::GpuPointer {
-            pointee: Box::new(project_static(table, *pointee, index, location)?),
-        }),
         Ty::Pointer { pointee } => Ok(Ty::Pointer {
             pointee: Box::new(project_static(table, *pointee, index, location)?),
         }),
         Ty::Defined { .. } => {
             project_static(table, shape(table, source, location)?, index, location)
         }
-        view @ (Ty::Str | Ty::Span { .. } | Ty::GpuSpan { .. }) => {
-            project_static(table, view.view_record().unwrap(), index, location)
-        }
+        view @ Ty::Str => project_static(table, view.view_record().unwrap(), index, location),
         Ty::Record { fields } => fields
             .get(index)
             .map(|field| field.ty.clone())
@@ -385,8 +416,6 @@ fn project_static(
 
 fn project_dynamic(table: &[TypeDef], source: Ty, location: Location) -> Result<Ty, VerifyError> {
     match source {
-        Ty::GpuPointer { pointee } => Ok(Ty::GpuPointer { pointee }),
-        Ty::GpuSpan { element } => Ok(Ty::GpuPointer { pointee: element }),
         Ty::Pointer { pointee } => match shape(table, *pointee, location)? {
             Ty::Array { element, .. } => Ok(Ty::Pointer { pointee: element }),
             found => Err(location.error(VerifyErrorKind::ExpectedArray { found })),
@@ -395,7 +424,6 @@ fn project_dynamic(table: &[TypeDef], source: Ty, location: Location) -> Result<
         Ty::Str => Ok(Ty::Pointer {
             pointee: Box::new(Ty::UInt8),
         }),
-        Ty::Span { element } => Ok(Ty::Pointer { pointee: element }),
         Ty::Array { element, .. } => Ok(*element),
         found => Err(location.error(VerifyErrorKind::ExpectedArray { found })),
     }

@@ -6,6 +6,18 @@ use pipeline::generate;
 use resin_lir::verify;
 use resin_lir::{Instr, Terminator, format_module};
 
+const FIBONACCI: &str = r#"
+export { main };
+def fibonacci(n: int) -> int = {
+    if (n <= 1) { n } else {
+        var f0 = fibonacci(n - 1);
+        var f1 = fibonacci(n - 2);
+        f0 + f1
+    }
+};
+def main() = { fibonacci(10); };
+"#;
+
 fn parse(src: &str) -> resin_ast::SourceFile {
     resin_ast::generate(&resin_cst::Document::reparse(src.to_string(), None))
         .unwrap_or_else(|err| panic!("{err}"))
@@ -96,9 +108,8 @@ fn examples_generate_verified_ir() {
             continue;
         }
         found += 1;
-        let ast = pipeline::load(&path).unwrap();
-        let module = pipeline::generate_program(&ast)
-            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+        let module =
+            pipeline::file_module(&path).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
         verify(&module).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
     }
     assert!(
@@ -109,7 +120,7 @@ fn examples_generate_verified_ir() {
 
 #[test]
 fn fibonacci_generates_verified_ir() {
-    let src = include_str!("../examples/eg001.resin");
+    let src = FIBONACCI;
     let module = compile(src);
     verify(&module).unwrap();
 
@@ -121,7 +132,7 @@ fn fibonacci_generates_verified_ir() {
 
 #[test]
 fn ir_dump_is_an_s_expression_with_names() {
-    let dump = format_module(&compile(include_str!("../examples/eg001.resin")));
+    let dump = format_module(&compile(FIBONACCI));
     assert!(dump.starts_with("(module"));
     assert!(dump.contains("main"));
     assert!(dump.contains("fibonacci"));
@@ -137,7 +148,7 @@ fn ir_dump_is_an_s_expression_with_names() {
 
 #[test]
 fn recursive_calls_reference_functions_directly() {
-    let module = compile(include_str!("../examples/eg001.resin"));
+    let module = compile(FIBONACCI);
     let fib = &module.functions[0];
     assert!(fib.blocks.iter().any(|block| {
         block.instrs.iter().any(|instr| {
@@ -182,10 +193,10 @@ fn linked_list_type_is_finite_through_its_pointer() {
     let module = compile("struct List { value: int, next: Ptr<List> };");
     assert_eq!(
         module.types.iter().filter(|d| d.name().is_some()).count(),
-        2
+        1
     );
-    assert_eq!(module.types[1].name().unwrap().as_ref(), "List");
-    let Ty::Record { fields } = module.types[1].body().unwrap() else {
+    let list = pipeline::nominal(&module, "List");
+    let Ty::Record { fields } = module.types[list.index()].body().unwrap() else {
         panic!("expected a record body");
     };
     assert!(matches!(fields[1].ty, Ty::Pointer { .. }));
@@ -261,7 +272,7 @@ def from_meters (m: Meters) -> int = { m.value };
     );
     verify(&module).unwrap();
     let meters = Ty::Defined {
-        definition: TypeId::from_index(1),
+        definition: pipeline::nominal(&module, "Meters"),
     };
     assert_eq!(
         module.functions[0].ty().unwrap(),
@@ -354,7 +365,7 @@ def main() -> () = {
             .unwrap()
             .ty,
         Ty::Defined {
-            definition: TypeId::from_index(2),
+            definition: pipeline::nominal(&module, "Distance"),
         }
     );
     assert_eq!(
@@ -378,7 +389,7 @@ def nil (p: Ptr<List>) -> List = { List { value = 0, next = p } };
     );
     verify(&module).unwrap();
     let list = Ty::Defined {
-        definition: TypeId::from_index(1),
+        definition: pipeline::nominal(&module, "List"),
     };
     assert_eq!(
         module.functions[0].ty().unwrap(),
@@ -422,6 +433,7 @@ fn span_and_literal_locals_are_typed() {
     let module = compile(
         r#"export { main };
 
+struct Span<T> { data: Ptr<T>, length: ulong };
 type Buf = Span<int>;
 
 def main() -> () = {
@@ -430,10 +442,13 @@ def main() -> () = {
 };"#,
     );
     verify(&module).unwrap();
-    assert!(matches!(
-        &module.functions[0].locals[1].ty,
-        Ty::Span { element } if **element == Ty::Int32
-    ));
+    let Ty::Defined { definition } = &module.functions[0].locals[1].ty else {
+        panic!("nominal source span")
+    };
+    assert_eq!(
+        module.types[definition.index()].body(),
+        Some(&Ty::pointer_length(Ty::Int32))
+    );
     assert_eq!(module.functions[0].locals[0].ty, Ty::Int64);
 }
 

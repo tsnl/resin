@@ -2,6 +2,8 @@ export {
 	main,
 };
 
+import { "$/string.resin" };
+
 struct FibonacciMismatch { index: ulong, slow: ulong, fast: ulong };
 
 def fibonacci(n: ulong) -> ulong = {

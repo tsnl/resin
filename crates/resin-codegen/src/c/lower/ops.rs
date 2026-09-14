@@ -12,11 +12,8 @@ pub(super) fn builtin(
     if name == "string_from_bytes" {
         return super::formatting::from_bytes(types, args, result);
     }
-    if name == "fmt" {
+    if name == "format_bytes" {
         return super::formatting::format(types, args, result);
-    }
-    if name == "print" {
-        return super::formatting::emit(types, args, result);
     }
     let unsupported = || {
         Error(format!(

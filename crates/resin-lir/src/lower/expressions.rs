@@ -36,43 +36,14 @@ impl FunctionLowering<'_> {
                 return self.gen_builtin(name, args, expected);
             }
             TermKind::Call { func, args } => return self.gen_call(func, args),
-            TermKind::Intrinsic { op, args } => self.gen_intrinsic(*op, args, expected)?,
+            TermKind::Intrinsic {
+                op,
+                type_args,
+                args,
+            } => self.gen_intrinsic(*op, type_args, args, expected)?,
             TermKind::Adapt { conversion, arg } => self.gen_receiver(arg, *conversion, expected)?,
             TermKind::Convert { conversion, arg } => {
                 return self.gen_conversion(term, arg, conversion);
-            }
-            TermKind::ArcNew { value } => {
-                let Ty::Arc { pointee } = expected else {
-                    unreachable!("checked Arc constructor")
-                };
-                self.gen_term(value, Some(pointee))?;
-                self.emit(Instr::ArcNew);
-            }
-            TermKind::GpuNew { allocator, args } => {
-                let Ty::Result { value, .. } = expected else {
-                    unreachable!("GPU allocation result")
-                };
-                let Ty::GpuPointer { pointee } = &**value else {
-                    unreachable!("GPU allocation pointer")
-                };
-                self.gen_arguments(args)?;
-                self.emit(Instr::GpuNew {
-                    allocator: *allocator,
-                    element: *pointee.clone(),
-                });
-            }
-            TermKind::GpuAllocate { allocator, args } => {
-                let Ty::Result { value, .. } = expected else {
-                    unreachable!("GPU allocation result")
-                };
-                let Ty::GpuSpan { element } = &**value else {
-                    unreachable!("GPU allocation span")
-                };
-                self.gen_arguments(args)?;
-                self.emit(Instr::GpuAllocate {
-                    allocator: *allocator,
-                    element: *element.clone(),
-                });
             }
             TermKind::GpuPipelineCreate {
                 factory,
@@ -80,12 +51,20 @@ impl FunctionLowering<'_> {
                 args,
             } => {
                 self.gen_arguments(args)?;
+                let Ty::Result {
+                    value: pipeline, ..
+                } = expected
+                else {
+                    unreachable!("pipeline creation result")
+                };
                 self.emit(match shaders.as_slice() {
                     [shader] => Instr::GpuComputePipeline {
+                        pipeline: *pipeline.clone(),
                         factory: *factory,
                         shader: *shader,
                     },
                     [vertex, fragment] => Instr::GpuGraphicsPipeline {
+                        pipeline: *pipeline.clone(),
                         factory: *factory,
                         vertex: *vertex,
                         fragment: *fragment,
@@ -94,6 +73,7 @@ impl FunctionLowering<'_> {
                 });
             }
             TermKind::GpuPipelineDispatch {
+                projection,
                 context,
                 allocator,
                 record,
@@ -102,21 +82,20 @@ impl FunctionLowering<'_> {
                 self.gen_arguments(args)?;
                 self.emit(if args.values.len() == 6 {
                     Instr::GpuDispatch {
+                        projection: projection.clone().expect("compute projection"),
                         context: *context,
                         allocator: allocator.expect("compute root"),
                         record: *record,
                     }
                 } else {
                     Instr::GpuDraw {
+                        projection: projection.clone(),
                         context: *context,
                         allocator: *allocator,
                         record: *record,
                     }
                 });
             }
-            TermKind::WeakEmpty { pointee } => self.emit(Instr::WeakEmpty {
-                pointee: pointee.clone(),
-            }),
             TermKind::Result { failure, arg } => {
                 return self.gen_result(span, *failure, arg, expected);
             }
@@ -129,11 +108,7 @@ impl FunctionLowering<'_> {
             TermKind::Assign { place, value } => return self.gen_assign(place, value),
             TermKind::Address { place } => return self.gen_place(place),
             TermKind::Deref { pointer } => {
-                if matches!(pointer.ty, Ty::Arc { .. }) {
-                    self.hold_arc_address(pointer)?;
-                } else {
-                    self.gen_term(pointer, None)?;
-                }
+                self.gen_term(pointer, None)?;
                 self.emit(Instr::Load);
             }
             TermKind::Field { base, access } => return self.gen_field_value(base, access),
@@ -175,33 +150,71 @@ impl FunctionLowering<'_> {
     fn gen_intrinsic(
         &mut self,
         op: Intrinsic,
+        type_args: &[Ty],
         args: &Arguments,
         result: &Ty,
     ) -> Result<(), LowerError> {
         self.gen_arguments(args)?;
         match op {
+            Intrinsic::GpuPointerProjection
+            | Intrinsic::GpuSequenceProjection
+            | Intrinsic::GpuPipelineType => {
+                return Err(LowerError::invalid_hir(
+                    self.source_span,
+                    "GPU projection contract reached storage lowering",
+                ));
+            }
+            Intrinsic::GpuElementLayout => self.emit(Instr::GpuElementLayout {
+                element: type_args[0].clone(),
+            }),
+            Intrinsic::GpuViewLoad => self.emit(Instr::GpuViewLoad {
+                element: result.clone(),
+            }),
+            Intrinsic::GpuViewAllocate => self.emit(Instr::GpuViewAllocate),
+            Intrinsic::GpuViewIndex => self.emit(Instr::GpuViewIndex {
+                element: type_args[0].clone(),
+            }),
+            Intrinsic::GpuViewRange => self.emit(Instr::GpuViewRange {
+                element: type_args[0].clone(),
+            }),
+            Intrinsic::GpuViewOffset => self.emit(Instr::GpuViewOffset),
+            Intrinsic::GpuViewRestrict => self.emit(Instr::GpuViewRestrict),
+            Intrinsic::GpuViewStore => self.emit(Instr::GpuViewStore),
+            Intrinsic::GpuViewReplace => self.emit(Instr::GpuViewReplace),
+            Intrinsic::GpuViewCopyTo => self.emit(Instr::GpuViewCopyTo),
+            Intrinsic::GpuViewCopyImage => self.emit(Instr::GpuViewCopyImage),
+            Intrinsic::FormatBytes => self.emit(Instr::CallBuiltin {
+                name: "format_bytes".into(),
+                params: args.params.clone(),
+                result: result.clone(),
+            }),
             Intrinsic::StringFromBytes => self.emit(Instr::CallBuiltin {
                 name: "string_from_bytes".into(),
                 params: args.params.clone(),
                 result: result.clone(),
             }),
             Intrinsic::Replace => self.emit(Instr::Replace),
+            Intrinsic::PointerIndex => self.emit(Instr::PointerIndex),
+            Intrinsic::PointerRange => self.emit(Instr::PointerRange),
+            Intrinsic::PointerBytes => self.emit(Instr::PointerBytes),
             Intrinsic::Index => self.emit(Instr::AccessDynamic),
-            Intrinsic::GpuIndex => self.emit(Instr::AccessDynamic),
-            Intrinsic::GpuSlice => self.emit(Instr::GpuSlice),
-            Intrinsic::GpuReadOnly => self.emit(Instr::GpuReadOnly),
-            Intrinsic::GpuWriteOnly => self.emit(Instr::GpuWriteOnly),
-            Intrinsic::GpuAllocateNative => self.emit(Instr::GpuAllocateNative),
-            Intrinsic::GpuCopyTo => self.emit(Instr::GpuCopyTo),
             Intrinsic::GpuArgumentsDispatch => self.emit(Instr::GpuArgumentsDispatch),
             Intrinsic::GpuArgumentsDraw => self.emit(Instr::GpuArgumentsDraw),
-            Intrinsic::GpuCopyImage => self.emit(Instr::GpuCopyImage),
-            Intrinsic::ArcGet => {
-                self.emit(Instr::Load);
-                self.emit(Instr::ArcData);
+            Intrinsic::OwnerAllocate => self.emit(Instr::OwnerAllocate {
+                element: args.params[1].clone(),
+            }),
+            Intrinsic::OwnerData => {
+                let Ty::Pointer { pointee } = result else {
+                    unreachable!("owner payload pointer")
+                };
+                self.emit(Instr::OwnerData {
+                    pointee: *pointee.clone(),
+                });
             }
-            Intrinsic::Downgrade => self.emit(Instr::Downgrade),
-            Intrinsic::Upgrade => self.emit(Instr::Upgrade),
+            Intrinsic::OwnerLength => self.emit(Instr::OwnerLength),
+            Intrinsic::OwnerDowngrade => self.emit(Instr::OwnerDowngrade),
+            Intrinsic::OwnerUpgrade => self.emit(Instr::OwnerUpgrade),
+            Intrinsic::WeakEmpty => self.emit(Instr::WeakEmpty),
         }
         Ok(())
     }

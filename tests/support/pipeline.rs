@@ -39,36 +39,49 @@ fn lowering_error(error: resin_lir::Error) -> GenerateError {
         kind,
     }
 }
+
+/// Lower an AST constructed or edited by a test. Unchanged files use `file_module`.
 pub fn generate_program(program: &resin_ast::Program) -> Result<resin_lir::Module, SourceError> {
     let tree = resin_hir::generate_program(program)?;
-    let module = resin_lir::generate(&tree).map_err(|error| {
-        let Some(source) = &error.source else {
-            return SourceError::new(
-                program.modules.last().expect("entry module").source.clone(),
-                None,
-                error.to_string(),
-            );
-        };
-        if let Some(module) = program
-            .modules
-            .iter()
-            .find(|module| module.source == *source)
-        {
-            return module.error(error.span, &error);
-        }
-        SourceError::new(source.clone(), Some(error.span), error.to_string())
+    lower_program(&tree, &program.modules.last().expect("entry module").source)
+}
+
+/// Resolve only the imports explicitly declared by this test's source.
+pub fn source_module(text: &str) -> Result<resin_lir::Module, SourceError> {
+    let source = Source::new("test.resin", text);
+    let mut loader = resin_source::Loader::new(library_root());
+    let compilation = Compiler::new().analyze(source.clone(), &mut loader);
+    lower_program(compilation.hir()?, &source)
+}
+
+/// Load a file and its explicit imports, then lower the HIR already built by analysis.
+pub fn file_module(path: &Path) -> Result<resin_lir::Module, SourceError> {
+    let compilation = analyze_file(path)?;
+    lower_program(compilation.hir()?, compilation.entry())
+}
+
+fn lower_program(
+    tree: &resin_hir::Module,
+    entry: &Source,
+) -> Result<resin_lir::Module, SourceError> {
+    let module = resin_lir::generate(tree).map_err(|error| {
+        SourceError::new(
+            error.source.clone().unwrap_or_else(|| entry.clone()),
+            Some(error.span),
+            error.to_string(),
+        )
     })?;
     resin_lir::VerifiedModule::new(module)
-        .map(|v| v.into_module())
-        .map_err(|error| {
-            SourceError::new(
-                program.modules.last().unwrap().source.clone(),
-                None,
-                error.to_string(),
-            )
-        })
+        .map(|verified| verified.into_module())
+        .map_err(|error| SourceError::new(entry.clone(), None, error.to_string()))
 }
+
+/// Load an AST for inspection or mutation, preserving syntax even if HIR is invalid.
 pub fn load(path: &Path) -> Result<resin_ast::Program, SourceError> {
+    analyze_file(path)?.program().cloned()
+}
+
+fn analyze_file(path: &Path) -> Result<std::sync::Arc<resin_compiler::Compilation>, SourceError> {
     let mut loader = resin_source::Loader::new(library_root());
     let source = loader.load_file(path).map_err(|error| {
         SourceError::new(
@@ -77,10 +90,7 @@ pub fn load(path: &Path) -> Result<resin_ast::Program, SourceError> {
             error.to_string(),
         )
     })?;
-    Compiler::new()
-        .analyze(source, &mut loader)
-        .program()
-        .cloned()
+    Ok(Compiler::new().analyze(source, &mut loader))
 }
 
 pub fn shader_error(source: &str) -> String {
@@ -102,4 +112,14 @@ pub fn shader_error(source: &str) -> String {
                 .to_string()
         }
     }
+}
+
+/// Find a source nominal identity without depending on catalog insertion order.
+pub fn nominal(module: &resin_lir::Module, name: &str) -> resin_types::TypeId {
+    let index = module
+        .types
+        .iter()
+        .position(|ty| ty.name().map(|name| name.as_ref()) == Some(name))
+        .unwrap_or_else(|| panic!("missing nominal type {name}"));
+    resin_types::TypeId::from_index(index)
 }

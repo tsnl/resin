@@ -83,7 +83,9 @@ fn zero_and_multiple_argument_calls_have_distinct_parameter_counts() {
 
 #[test]
 fn function_types_accept_unit_tuples_and_higher_order_calls() {
-    compile("type P = Ptr<()>; type S = Span<(int, int)>; def f (p: P) -> P = { p };");
+    compile(
+        "struct Span<T> { data: Ptr<T>, length: ulong }; type P = Ptr<()>; type S = Span<(int, int)>; def f (p: P) -> P = { p };",
+    );
     compile(
         "export { main }; type F = () -> int; def one () -> int = { 1 }; def main() -> () = { var f = F (one); var x = f(); };",
     );
@@ -118,7 +120,7 @@ fn function_types_accept_unit_tuples_and_higher_order_calls() {
 #[test]
 fn type_formers_take_types_between_angle_brackets() {
     let m = compile(
-        "export { main }; type Pointer = Ptr<Ptr<int>>; type View = Span<{ value: int, next: Pointer }>; type Callback = Ptr<(int) -> int>; type UnitPointer = Ptr<()>; def identity(p: Pointer) -> Pointer = { p }; def main() -> () = { var p = Ptr<int>(ulong(0)); };",
+        "export { main }; struct Span<T> { data: Ptr<T>, length: ulong }; type Pointer = Ptr<Ptr<int>>; type View = Span<{ value: int, next: Pointer }>; type Callback = Ptr<(int) -> int>; type UnitPointer = Ptr<()>; def identity(p: Pointer) -> Pointer = { p }; def main() -> () = { var p = Ptr<int>(ulong(0)); };",
     );
     assert_eq!(
         m.functions[0].result,

@@ -3,3 +3,5 @@
 (foreign_function) @function.around
 (struct_definition "{" (_)* @class.inside "}") @class.around
 (comment)+ @comment.around
+
+(intrinsic_function) @function.around

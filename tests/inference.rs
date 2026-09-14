@@ -38,6 +38,7 @@ fn explicit_holes_are_not_editor_recovery_holes() {
 fn holes_compose_inside_pointers_spans_records_and_functions() {
     let m = module(
         "\
+        struct Span<T> { data: Ptr<T>, length: ulong };\
         def pointer(p: Ptr<Ptr<int>>) -> Ptr<Ptr<_>> = { p };\
         def span(p: Span<Ptr<int>>) -> Span<Ptr<_>> = { p };\
         def plus(n: int) -> int = { n + 1 };\
@@ -109,13 +110,13 @@ fn casts_do_not_choose_an_unrelated_nominal_type_for_a_hole() {
         "struct One { value: int }; struct Two { value: int }; def value() -> _ = { var v: _; v := One { value = 1 }; v := Two { value = 2 }; v };",
         "TypeMismatch",
     );
+    let m = module(
+        "struct One { value: int }; def value() -> _ = { var v = One { value = 1 }; _(v) };",
+    );
     assert_eq!(
-        result(
-            "struct One { value: int }; def value() -> _ = { var v = One { value = 1 }; _(v) };",
-            "value"
-        ),
+        m.functions[0].result,
         Ty::Defined {
-            definition: TypeId::from_index(1)
+            definition: pipeline::nominal(&m, "One")
         }
     );
 }
@@ -175,7 +176,7 @@ fn nominal_identity_and_local_type_definitions_survive_inference() {
     let m = module(
         "def main() -> _ = { struct Meters { value: int }; var distance = Meters { value = 42 }; distance.value };",
     );
-    assert_eq!(m.types.iter().filter(|d| d.name().is_some()).count(), 2);
+    assert_eq!(m.types.iter().filter(|d| d.name().is_some()).count(), 1);
     assert_eq!(m.functions[0].result, Ty::Int32);
 }
 
@@ -207,7 +208,7 @@ fn ambiguous_infinite_and_forbidden_holes_are_diagnostics() {
 fn inference_preserves_unit_defaults_and_initialization_checks() {
     rejects("def main() = { var n: _; n := 1; n };", "TypeMismatch");
     rejects(
-        "def main() -> _ = { var n: _; print(fmt(\"{0}\", (n,))); n := 42; n };",
+        "def consume(n: long) = {}; def main() -> _ = { var n: _; consume(n); n := 42; n };",
         "UninitializedValue",
     );
 }
@@ -234,7 +235,7 @@ fn distinct_nodes_with_identical_spans_do_not_share_inference_variables() {
 fn span_construction_and_indexing_infer_element_and_pointer_types() {
     assert_eq!(
         result(
-            "def get(p: Ptr<int>) -> _ = { var s = Span<_> { data = p, length = ulong(1) }; s(0) };",
+            "import { \"$/span.resin\" }; def get(p: Ptr<int>) -> _ = { var s = Span<_> { data = p, length = ulong(1) }; s.at(0) };",
             "get"
         ),
         Ty::Pointer {
@@ -370,9 +371,9 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
         );
 
         let source = format!(
-            "def main() -> int = {{ {marker} var values = [10, 20]; var data = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }}; data.at(1).* }};"
+            "import {{ \"$/span.resin\" }}; def main() -> int = {{ {marker} var values = [10, 20]; var data = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }}; data.at(1).* }};"
         );
-        pipeline::generate(&parse(&source)).unwrap();
+        pipeline::source_module(&source).unwrap();
     }
 }
 

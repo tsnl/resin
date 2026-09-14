@@ -27,6 +27,7 @@ type Result<T> = std::result::Result<T, GenerateError>;
 type Term = typed::Term;
 type Statement = typed::Statement;
 type MatchArm = typed::MatchArm;
+#[derive(Clone)]
 pub(super) struct Annotation {
     holes: Vec<(Span, VariableId)>,
     pub ty: Type,
@@ -40,6 +41,7 @@ impl Annotation {
         }
     }
 }
+#[derive(Clone)]
 pub(super) struct Signature {
     pub type_params: Vec<crate::TypeParameter>,
     pub declaration: Option<DeclarationId>,
@@ -58,7 +60,6 @@ impl Checker<'_> {
             solver: &mut self.typing.solver,
             holes: Vec::new(),
             scopes: self.scopes.view(),
-            string: self.typing.typer.string_type(),
         }
         .decode(ann, infer);
         if scoped {
@@ -204,6 +205,13 @@ pub(in crate::lower) fn file(
 ) -> CheckedFile {
     let mut checker = Checker::new(&mut generator.typer, scopes);
     let (declarations, mut signatures, sources) = checker.declarations(file, methods);
+    checker.declare_gpu_contracts(
+        &declarations,
+        &signatures,
+        &mut generator.functions,
+        &mut generator.function_bindings,
+        &generator.source,
+    );
     let mut bodies = checker.bodies(&mut signatures, sources);
     checker.solve_functions(&signatures, &mut bodies);
     checker.require_holes();
@@ -264,6 +272,60 @@ pub(in crate::lower) fn file(
 }
 
 impl Checker<'_> {
+    fn declare_gpu_contracts(
+        &mut self,
+        declarations: &[typed::Declaration],
+        signatures: &Signatures,
+        functions: &mut Vec<Option<crate::Function>>,
+        bindings: &mut std::collections::HashMap<DeclarationId, FunctionId>,
+        source: &Source,
+    ) {
+        // Contracts have fully explicit signatures. Install their type relations
+        // before any body can request a factory or recording operation. Sequence
+        // contracts depend on pointer contracts, regardless of source order.
+        for operation in [
+            "gpu_pointer_projection",
+            "gpu_span_projection",
+            "gpu_compute_pipeline_type",
+            "gpu_graphics_pipeline_type",
+        ] {
+            for declaration in declarations {
+                if !matches!(&declaration.kind, typed::DeclarationKind::Intrinsic { operation: name } if name.as_ref() == operation)
+                {
+                    continue;
+                }
+                let result = signatures[&declaration.id]
+                    .clone()
+                    .resolve(&self.typing.solver);
+                let Some(signature) = self.record(result) else {
+                    continue;
+                };
+                if self.record(super::check_parameters(&signature)).is_none() {
+                    continue;
+                }
+                let id = *bindings.entry(declaration.id).or_insert_with(|| {
+                    let id = FunctionId::from_index(functions.len());
+                    functions.push(None);
+                    id
+                });
+                let mut function = crate::Function {
+                    location: Some(SourceLocation {
+                        source: source.clone(),
+                        span: declaration.name.span,
+                    }),
+                    name: declaration.name.val.clone(),
+                    signature: super::elaborate_signature(&signature),
+                    body: None,
+                    foreign_header: None,
+                };
+                let result =
+                    super::gpu_projections::define(self.typing.typer, &mut function, id, operation);
+                self.record(result);
+                functions[id.index()] = Some(function);
+            }
+        }
+    }
+
     fn declarations<'s>(
         &mut self,
         file: &'s SourceFile,
@@ -303,6 +365,12 @@ impl Checker<'_> {
                 params,
                 result,
                 ..
+            }
+            | StmtKind::IntrinsicFunction {
+                name,
+                params,
+                result,
+                ..
             } => (name, params, result, None),
             _ => return None,
         };
@@ -316,10 +384,13 @@ impl Checker<'_> {
             })
             .unwrap_or_default();
         let type_scope = match stmt {
-            StmtKind::Function { type_params, .. } => type_params.first().map(|parameter| Span {
-                start: parameter.span.start,
-                end: body.map_or(result.span.end, |body| body.span.start),
-            }),
+            StmtKind::Function { type_params, .. }
+            | StmtKind::IntrinsicFunction { type_params, .. } => {
+                type_params.first().map(|parameter| Span {
+                    start: parameter.span.start,
+                    end: body.map_or(result.span.end, |body| body.span.start),
+                })
+            }
             _ => None,
         }
         .or_else(|| {
@@ -340,7 +411,9 @@ impl Checker<'_> {
                 },
             );
         }
-        if let StmtKind::Function { type_params, .. } = stmt {
+        if let StmtKind::Function { type_params, .. }
+        | StmtKind::IntrinsicFunction { type_params, .. } = stmt
+        {
             for parameter in type_params {
                 match self.scopes.define_type_parameter(parameter) {
                     Ok(parameter) => binders.push(parameter),
@@ -386,6 +459,9 @@ impl Checker<'_> {
         let kind = match stmt {
             StmtKind::Function { decorators, .. } => typed::DeclarationKind::Function {
                 decorators: decorators.clone(),
+            },
+            StmtKind::IntrinsicFunction { operation, .. } => typed::DeclarationKind::Intrinsic {
+                operation: operation.clone(),
             },
             StmtKind::ForeignFunction { header, .. } => typed::DeclarationKind::Foreign {
                 header: header.clone(),
@@ -1056,7 +1132,6 @@ impl Expression<'_, '_> {
                     args: args.iter().map(|arg| arg.ty.clone()).collect(),
                     out: out.clone(),
                     associated,
-                    origins: receiver.as_ref().map(address_origins).unwrap_or_default(),
                 };
                 self.constrain((span, constraint));
                 TermKind::MethodCall {
@@ -1126,37 +1201,7 @@ impl Expression<'_, '_> {
                         single_argument(args, span)?
                     };
                     let ann = self.annotation(ty, true);
-                    let arg = if let Type::Node(Head::Arc, parts) = &ann.ty {
-                        let context = if matches!(
-                            arg.val,
-                            resin_ast::TermKind::Record { .. } | resin_ast::TermKind::Unit
-                        ) {
-                            let solver = &self.checker.typing.solver;
-                            let body = if let Some(body) =
-                                self.checker.typing.typer.nominal_body(&parts[0], solver)
-                            {
-                                solver.shape_hint(&body)
-                            } else {
-                                let payload = solver.require(&parts[0], span)?;
-                                self.checker
-                                    .typing
-                                    .typer
-                                    .body(&payload)
-                                    .map_err(|e| GenerateError::typing(span, e))?
-                                    .into()
-                            };
-                            if matches!(arg.val, resin_ast::TermKind::Unit)
-                                && matches!(&body, Type::Node(Head::Record(fields), _) if fields.is_empty())
-                            {
-                                Ty::Unit.into()
-                            } else {
-                                body
-                            }
-                        } else {
-                            parts[0].clone()
-                        };
-                        self.child(arg, Some(context))
-                    } else {
+                    let arg = {
                         let literal = matches!(arg.val, resin_ast::TermKind::Num { .. })
                             || matches!(&arg.val, resin_ast::TermKind::Builtin { name, args } if matches!(name.as_ref(), "+" | "-") && matches!(args.as_slice(), [resin_ast::Term { val: resin_ast::TermKind::Num { .. }, .. }]));
                         let arg = self.child(arg, None);
@@ -1170,25 +1215,6 @@ impl Expression<'_, '_> {
                     TermKind::Ascribe {
                         ty: ann.into_tree(),
                         arg: Box::new(arg),
-                    }
-                } else if let resin_ast::TermKind::Var { name } = &func.val
-                    && matches!(name.val.as_ref(), "print" | "fmt")
-                {
-                    let args = args
-                        .iter()
-                        .map(|arg| self.child(arg, None))
-                        .collect::<Vec<_>>();
-                    self.constrain((
-                        span,
-                        Constraint::Builtin(
-                            name.val.clone(),
-                            args.iter().map(|arg| arg.ty.clone()).collect(),
-                            out.clone(),
-                        ),
-                    ));
-                    TermKind::Builtin {
-                        name: name.val.clone(),
-                        args,
                     }
                 } else {
                     let func = self.child(func, None);
@@ -1221,10 +1247,7 @@ impl Expression<'_, '_> {
             }
             resin_ast::TermKind::Address { place } => {
                 let place = self.child(place, None);
-                self.constrain((
-                    span,
-                    Constraint::Address(address_origins(&place), place.ty.clone(), out.clone()),
-                ));
+                self.constrain((span, Constraint::Address(place.ty.clone(), out.clone())));
                 TermKind::Address {
                     place: Box::new(place),
                 }
@@ -1357,9 +1380,7 @@ impl Expression<'_, '_> {
                 init,
                 type_params,
             } => {
-                self.checker
-                    .scopes
-                    .alias(name, type_params, init, self.checker.typing.typer)?;
+                self.checker.scopes.alias(name, type_params, init)?;
                 StatementKind::TypeDefinition
             }
             StmtKind::Expr { term } => {
@@ -1453,24 +1474,6 @@ fn groups(edges: &[Vec<usize>]) -> Vec<Vec<usize>> {
 
 #[cfg(test)]
 mod tests;
-
-/// Implicit field dereferences and explicit dereferences preserve a GPU allocation owner.
-fn address_origins(term: &Term) -> Vec<super::infer::AddressOrigin> {
-    use super::infer::AddressOrigin;
-    match &term.kind {
-        TermKind::Deref { pointer } => vec![AddressOrigin::Deref {
-            pointer: pointer.ty.clone(),
-        }],
-        TermKind::Field { base, .. } => {
-            let mut origins = address_origins(base);
-            origins.push(AddressOrigin::Field {
-                base: base.ty.clone(),
-            });
-            origins
-        }
-        _ => vec![],
-    }
-}
 
 fn single_argument(args: &[resin_ast::Term], span: Span) -> Result<&resin_ast::Term> {
     match args {

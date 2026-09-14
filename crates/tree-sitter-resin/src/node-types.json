@@ -669,6 +669,62 @@
     }
   },
   {
+    "type": "intrinsic_function",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "lid",
+            "named": true
+          }
+        ]
+      },
+      "operation": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "string",
+            "named": true
+          }
+        ]
+      },
+      "params": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "declare",
+            "named": true
+          }
+        ]
+      },
+      "result": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "type",
+            "named": true
+          }
+        ]
+      },
+      "type_params": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_parameters",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "match_arm",
     "named": true,
     "fields": {
@@ -1034,6 +1090,10 @@
           },
           {
             "type": "function_definition",
+            "named": true
+          },
+          {
+            "type": "intrinsic_function",
             "named": true
           },
           {
@@ -1419,59 +1479,11 @@
         "required": false,
         "types": [
           {
-            "type": "Arc",
-            "named": false
-          },
-          {
-            "type": "GpuComputePipeline",
-            "named": false
-          },
-          {
-            "type": "GpuGraphicsPipeline",
-            "named": false
-          },
-          {
-            "type": "GpuPtr",
-            "named": false
-          },
-          {
-            "type": "GpuSpan",
-            "named": false
-          },
-          {
             "type": "Ptr",
             "named": false
           },
           {
-            "type": "Span",
-            "named": false
-          },
-          {
-            "type": "Weak",
-            "named": false
-          },
-          {
             "type": "uid",
-            "named": true
-          }
-        ]
-      },
-      "owner": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "type",
-            "named": true
-          }
-        ]
-      },
-      "root": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "type",
             "named": true
           }
         ]
@@ -1688,27 +1700,15 @@
     "named": false
   },
   {
-    "type": "Arc",
-    "named": false
-  },
-  {
     "type": "GpuArguments",
     "named": false
   },
   {
-    "type": "GpuComputePipeline",
+    "type": "GpuPipelineContract",
     "named": false
   },
   {
-    "type": "GpuGraphicsPipeline",
-    "named": false
-  },
-  {
-    "type": "GpuPtr",
-    "named": false
-  },
-  {
-    "type": "GpuSpan",
+    "type": "GpuView",
     "named": false
   },
   {
@@ -1728,11 +1728,11 @@
     "named": false
   },
   {
-    "type": "Span",
+    "type": "StrongOwner",
     "named": false
   },
   {
-    "type": "Weak",
+    "type": "WeakOwner",
     "named": false
   },
   {
@@ -1798,6 +1798,10 @@
   },
   {
     "type": "int",
+    "named": false
+  },
+  {
+    "type": "intrinsic",
     "named": false
   },
   {

@@ -208,7 +208,10 @@ impl<'a> AstGen<'a> {
                 self.span(node),
             );
         }
-        if matches!(node.kind(), "function_definition" | "foreign_function") {
+        if matches!(
+            node.kind(),
+            "function_definition" | "foreign_function" | "intrinsic_function"
+        ) {
             return self.gen_function(node);
         }
         if node.kind() == "foreign_type" {
@@ -376,7 +379,7 @@ impl<'a> AstGen<'a> {
                 "unwrap_suffix" => {
                     let span = Span {
                         start: base.span.start,
-                        end: child.end_byte(),
+                        end: self.span(child).end,
                     };
                     base = Spanned::new(
                         TermKind::Unwrap {
@@ -388,7 +391,7 @@ impl<'a> AstGen<'a> {
                 "try_suffix" => {
                     let span = Span {
                         start: base.span.start,
-                        end: child.end_byte(),
+                        end: self.span(child).end,
                     };
                     base = Spanned::new(
                         TermKind::Try {
@@ -400,7 +403,7 @@ impl<'a> AstGen<'a> {
                 "type_application" => {
                     let span = Span {
                         start: base.span.start,
-                        end: child.end_byte(),
+                        end: self.span(child).end,
                     };
                     base = Spanned::new(
                         TermKind::TypeApply {
@@ -416,7 +419,7 @@ impl<'a> AstGen<'a> {
                     let args = self.gen_arguments(args);
                     let span = Span {
                         start: base.span.start,
-                        end: child.end_byte(),
+                        end: self.span(child).end,
                     };
                     base = Spanned::new(
                         TermKind::MethodCall {
@@ -466,7 +469,7 @@ impl<'a> AstGen<'a> {
                     if let Some(arguments) = child.child_by_field_name("type_args") {
                         let span = Span {
                             start: base.span.start,
-                            end: child.end_byte(),
+                            end: self.span(child).end,
                         };
                         base = Spanned::new(
                             TermKind::TypeApply {
@@ -490,7 +493,7 @@ impl<'a> AstGen<'a> {
                 "pointer_deref" => {
                     let span = Span {
                         start: base.span.start,
-                        end: child.end_byte(),
+                        end: self.span(child).end,
                     };
                     base = Spanned::new(
                         TermKind::Deref {
@@ -670,6 +673,18 @@ impl<'a> AstGen<'a> {
             let (name, ann) = self.gen_declare(p);
             params.push((name, ann));
         }
+        if let Some(operation) = node.child_by_field_name("operation") {
+            return Spanned::new(
+                StmtKind::IntrinsicFunction {
+                    operation: decode_string(self.text(operation)).into(),
+                    type_params: self.type_parameters(node),
+                    name,
+                    params,
+                    result,
+                },
+                self.span(node),
+            );
+        }
         if let Some(header) = node.child_by_field_name("header") {
             return Spanned::new(
                 StmtKind::ForeignFunction {
@@ -809,8 +824,8 @@ impl<'a> AstGen<'a> {
                 Spanned::new(
                     TermKind::Unit,
                     Span {
-                        start: node.end_byte(),
-                        end: node.end_byte(),
+                        start: self.span(node).end,
+                        end: self.span(node).end,
                     },
                 )
             },
@@ -908,18 +923,6 @@ impl<'a> AstGen<'a> {
         }
         if let Some(former) = node.child_by_field_name("former") {
             let head = self.ident(former);
-            if let Some(root) = node.child_by_field_name("root") {
-                return Spanned::new(
-                    TypeKind::GpuPipeline {
-                        head,
-                        root: Box::new(self.gen_type(root)),
-                        owner: Box::new(
-                            self.gen_type(node.child_by_field_name("owner").unwrap_or(node)),
-                        ),
-                    },
-                    self.span(node),
-                );
-            }
             let args = if let Some(arg) = node.child_by_field_name("arg") {
                 vec![self.gen_type(arg)]
             } else {
@@ -1027,18 +1030,7 @@ impl<'a> AstGen<'a> {
         let text = if node.is_missing()
             || !matches!(
                 node.kind(),
-                "lid"
-                    | "tuple_index"
-                    | "uid"
-                    | "builtin_type"
-                    | "Ptr"
-                    | "Span"
-                    | "GpuPtr"
-                    | "GpuSpan"
-                    | "GpuComputePipeline"
-                    | "GpuGraphicsPipeline"
-                    | "Arc"
-                    | "Weak"
+                "lid" | "tuple_index" | "uid" | "builtin_type" | "Ptr"
             ) {
             ""
         } else {

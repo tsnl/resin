@@ -6,7 +6,8 @@ Transparent aliases inherit the underlying nominal type's namespace and origin;
 they cannot add methods. Local structs currently contain fields only.
 
 All module types and aliases are available when method signatures are resolved,
-including an `Arc<Owner>` alias written after the owner. Methods are declared
+including an alias written after its target struct. An alias of `ArcPtr<Owner>`
+inherits the wrapper namespace; payload methods require `.get()`. Methods are declared
 before bodies, so sibling methods and recursive calls can refer to each other.
 
 Functions accompany the type when it is exported and need no separate exports.
@@ -43,14 +44,14 @@ The distinction also applies when a field and method have the same name. Methods
 can return ordinary pointers, including wrappers around array indexing. Parameter
 and result types are explicit; an omitted result means unit.
 
-Arrays and spans provide the builtin `.at(index)` method for indexing.
+Arrays provide a compiler-defined `.at(index)` method; the source `Span<T>`
+wrapper exposes the same signature through an ordinary method.
 It accepts a `ulong` index and returns `Ptr<T>`, so a field can be indexed as
 `root.particles.at(i).*`. Use `items.at(i).* := value` to update an element.
 The receiver and index are evaluated once; indexing an array place keeps its
-storage address instead of copying the array. The existing `items(i)` spelling
-remains supported. Neither spelling guarantees bounds checking. Host indexing
-diagnoses invalid indices; shader indexing is unchecked, so callers must stay
-within valid storage.
+storage address instead of copying the array. Arrays also support the existing
+`items(i)` spelling. Host indexing checks the declared length and diagnoses invalid
+indices; shader indexing is unchecked, so callers must stay within valid storage.
 
 Source-known method resolution happens during HIR construction. Dependent lookup
 uses the completed HIR nominal declarations during specialization. Both produce
@@ -70,7 +71,7 @@ The concrete application selects the source-declared method and checks its signa
 Field lookup follows the same rule, so method and field accesses can be chained.
 Associated calls and references such as `T.make::<U>()` and `T.make::<U>` also
 retain their lookup until substitution. The receiver and arguments are evaluated
-once, in source order, with the ordinary pointer and shared-owner adaptation rules.
+once, in source order, with the ordinary pointer receiver adaptation rules.
 
 When the receiver's namespace is unknown, extra method parameters must be supplied
 explicitly; omitting `::<...>` supplies zero extra arguments. HIR completes inference
@@ -82,6 +83,6 @@ Methods cannot be shader entry points, but shader helpers can call them.
 Pointer receivers follow the existing GPU address restrictions: a shader-local
 address cannot escape into a callee.
 
-Shared owners also support `self: Arc<T>`, and Arc receivers can call pointee
-methods through their address. The compiler invokes the reserved
+Shared wrappers have their own method namespaces. Use `owner.get().method()`
+to call a payload method through its borrowed address. The compiler invokes the reserved
 `drop(self: Ptr<T>)` hook during cleanup; see [lifetimes](lifetimes.md).

@@ -74,6 +74,29 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
         StmtKind::ForeignType { name } => {
             list_sp("extern-type", stmt.span, vec![symbol(name.val.as_ref())])
         }
+        StmtKind::IntrinsicFunction {
+            operation,
+            type_params,
+            name,
+            params,
+            result,
+        } => list_sp(
+            "intrinsic",
+            stmt.span,
+            vec![
+                string(operation.as_ref()),
+                declaration_name(name, type_params),
+                group(
+                    params
+                        .iter()
+                        .map(|(name, ann)| {
+                            list("param", vec![symbol(name.val.as_ref()), sexp_typespec(ann)])
+                        })
+                        .collect(),
+                ),
+                sexp_typespec(result),
+            ],
+        ),
         StmtKind::ForeignFunction {
             header,
             name,
@@ -272,15 +295,6 @@ fn sexp_typespec(ts: &Type) -> SExp {
             std::iter::once(symbol(head.val.as_ref()))
                 .chain(args.iter().map(sexp_typespec))
                 .collect(),
-        ),
-        TypeKind::GpuPipeline { head, root, owner } => list_sp(
-            "gpu-pipeline-type",
-            ts.span,
-            vec![
-                symbol(head.val.as_ref()),
-                sexp_typespec(root),
-                sexp_typespec(owner),
-            ],
         ),
         TypeKind::Func { params, to } => list_sp(
             "func-type",

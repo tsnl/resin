@@ -5,7 +5,7 @@ struct Pair<T> {
     first: T,
     def map<U>(self: Pair<T>, value: U) -> Pair<U> = { Pair<U> { first = value } };
 };
-type Shared<T> = Arc<Pair<T>>;
+type Shared<T> = ArcPtr<Pair<T>>;
 def identity<T>(value: T) -> _ = { value };
 def example() = {
     var f = identity::<Ptr<int>>;
@@ -102,18 +102,20 @@ def example() = {
         (infix_type
           (union_type
             (unary_type
-              (type
-                (infix_type
-                  (union_type
-                    (unary_type
-                      (uid)
-                      (type_arguments
-                        (type
-                          (infix_type
-                            (union_type
-                              (unary_type
-                                (primary_type
-                                  (uid)))))))))))))))))
+              (uid)
+              (type_arguments
+                (type
+                  (infix_type
+                    (union_type
+                      (unary_type
+                        (uid)
+                        (type_arguments
+                          (type
+                            (infix_type
+                              (union_type
+                                (unary_type
+                                  (primary_type
+                                    (uid))))))))))))))))))
   (function_definition
     (lid)
     (type_parameters

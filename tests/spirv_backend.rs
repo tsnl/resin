@@ -12,24 +12,119 @@ fn example(name: &str) -> resin_lir::Module {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
         .join(name);
-    pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap()
+    pipeline::file_module(&path).unwrap()
 }
 
 #[test]
 fn shader_indexing_emits_no_bounds_checks() {
-    for indexing in ["values(i)", "values.at(i)", "view(i)", "view.at(i)"] {
+    for indexing in ["values(i)", "values.at(i)", "view.at(i)"] {
         let m = module(&format!(
-            "export {{ kernel }}; @compute_shader def kernel(i: ulong, output: Ptr<uint>) = {{ var values = [1_ui, 2_ui]; var view = Span<uint> {{ data = output, length = 2_ul }}; output.* := {indexing}.*; }};"
+            "export {{ kernel }}; import {{ \"$/span.resin\" }}; @compute_shader def kernel(i: ulong, output: Ptr<uint>) = {{ var values = [1_ui, 2_ui]; var view = Span<uint> {{ data = output, length = 2_ul }}; output.* := {indexing}.*; }};"
         ));
         let project = support::project::Project::new(&m, None).unwrap();
         let source = std::fs::read(project.generated.shaders()[0].unoptimized_spirv()).unwrap();
-        assert_eq!(
-            instructions(&source, 250).count(),
-            0,
-            "indexing must not branch"
-        );
+        // Unchecked indexing and its infallible source wrappers need no guards,
+        // even before optimization.
+        for comparison in 172..=179 {
+            assert_eq!(instructions(&source, comparison).count(), 0);
+        }
+        assert_eq!(instructions(&source, 250).count(), 0);
+        assert_eq!(failure_loads(&source), 0);
         if let Some(compiler) = shaders::optimizer() {
-            project.build(&toolchain::spirv(&compiler)).unwrap();
+            let built = project.build(&toolchain::spirv(&compiler)).unwrap();
+            let artifact = &project.generated.shaders()[0];
+            let optimized =
+                std::fs::read(built.path(artifact.spirv().file_name().unwrap())).unwrap();
+            assert_eq!(
+                instructions(&optimized, 250).count(),
+                0,
+                "unchecked indexing needs no branches after optimization"
+            );
+        }
+    }
+}
+
+fn failure_loads(bytes: &[u8]) -> usize {
+    // The invocation failure flag is the module's sole Private variable.
+    let private = instructions(bytes, 59)
+        .filter(|operands| operands[2] == 6)
+        .collect::<Vec<_>>();
+    assert_eq!(private.len(), 1);
+    let flag = private[0][1];
+    instructions(bytes, 61)
+        .filter(|operands| operands[2] == flag)
+        .count()
+}
+
+#[test]
+fn shader_calls_guard_only_helpers_with_emitted_failure_exits() {
+    for (helpers, expression, checks, loads) in [
+        (
+            "def outer(x: ubyte) -> ulong = { inner(x) }; def inner(x: ubyte) -> ulong = { ulong(x) + 1_ul };",
+            "outer(7_ub)",
+            0,
+            0,
+        ),
+        (
+            "def pure(x: ubyte) -> ulong = { ulong(x) + 1_ul }; def outer(x: ulong) -> uint = { inner(x) }; def inner(x: ulong) -> uint = { uint(x) };",
+            "pure(7_ub) + ulong(outer(i))",
+            3,
+            2,
+        ),
+        (
+            "def outer() -> ulong = { inner() }; def inner() -> ulong = { var value: None; value := None; var result: ulong; result := value!; result };",
+            "outer()",
+            3,
+            2,
+        ),
+    ] {
+        let source = format!(
+            "export {{ kernel }}; {helpers} @compute_shader def kernel(i: ulong, output: Ptr<ulong>) = {{ output.* := {expression}; }};"
+        );
+        let module = module(&source);
+        let project = support::project::Project::new(&module, None).unwrap();
+        let shader = &project.generated.shaders()[0];
+        let bytes = std::fs::read(shader.unoptimized_spirv()).unwrap();
+        assert_eq!(instructions(&bytes, 250).count(), checks, "{source}");
+        assert_eq!(failure_loads(&bytes), loads, "{source}");
+        shaders::validate(shader.unoptimized_spirv());
+    }
+}
+
+#[test]
+fn graphics_output_guards_follow_the_emitted_entry_fallibility() {
+    let types = "struct Position { x: float32, y: float32, z: float32, w: float32 }; struct Color { r: float32, g: float32, b: float32, a: float32 }; struct Vertex { position: Position, color: Color };";
+    for checked in [false, true] {
+        for (entry, expression, body) in [
+            (
+                "@vertex_shader def vertex(index: int) -> Vertex",
+                "ubyte(index)",
+                "Vertex { position = Position { x = 0.0_f, y = 0.0_f, z = 0.0_f, w = 1.0_f }, color = Color { r = 1.0_f, g = 0.0_f, b = 0.0_f, a = 1.0_f } }",
+            ),
+            (
+                "@fragment_shader def fragment(color: Color) -> Color",
+                "ubyte(color.r)",
+                "color",
+            ),
+        ] {
+            let name = if entry.starts_with("@vertex") {
+                "vertex"
+            } else {
+                "fragment"
+            };
+            let check = if checked {
+                format!("{expression};")
+            } else {
+                String::new()
+            };
+            let source = format!("export {{ {name} }}; {types} {entry} = {{ {check} {body} }};");
+            let module = module(&source);
+            let project = support::project::Project::new(&module, None).unwrap();
+            let shader = &project.generated.shaders()[0];
+            let bytes = std::fs::read(shader.unoptimized_spirv()).unwrap();
+            assert_eq!(instructions(&bytes, 250).count(), usize::from(checked) * 2);
+            assert_eq!(failure_loads(&bytes), usize::from(checked));
+            shaders::validate(shader.unoptimized_spirv());
         }
     }
 }
@@ -159,7 +254,7 @@ fn device_pointers_and_shared_roots_compile() {
             Stage::Compute,
         ),
         (
-            "export { kernel }; struct Data { wide: ulong, values: Ptr<uint> }; @compute_shader def kernel (invocation: ulong, root: Ptr<Data>) -> () = { var i = uint(invocation); var p = Ptr<uint> (ulong (root.values)); var q = (Span<uint> { data = p, length = ulong(64) })(i); q.* := uint (3); root.wide := ulong (4294967297); };",
+            "export { kernel }; import { \"$/span.resin\" }; struct Data { wide: ulong, values: Ptr<uint> }; @compute_shader def kernel (invocation: ulong, root: Ptr<Data>) -> () = { var i = uint(invocation); var p = Ptr<uint> (ulong (root.values)); var q = Span<uint> { data = p, length = 64_ul }.at(ulong(i)); q.* := uint (3); root.wide := ulong (4294967297); };",
             Stage::Compute,
         ),
         (
@@ -230,8 +325,8 @@ fn unsupported_shader_features_are_diagnosed() {
             "foreign",
         ),
         (
-            "export { kernel }; def helper (i: uint) -> uint = { print(fmt(\"hello\", ())); i }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { helper(i) }; };",
-            "host programs",
+            "export { kernel }; intrinsic \"format_bytes\" def render<A>(data: Ptr<ubyte>, length: ulong, args: A) -> StrongOwner; struct Root { data: Ptr<ubyte>, length: ulong }; @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = { var text = render(root.data, root.length, ()); };",
+            "shader cannot consume managed values",
         ),
         (
             "export { kernel }; def helper (i: uint) -> uint = { i }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { var f = helper; f(i) }; };",
@@ -345,7 +440,7 @@ fn imported_backend_errors_retain_expression_origins() {
 
 #[test]
 fn managed_fields_are_opaque_until_consumed_by_a_shader() {
-    let prefix = "export { kernel }; struct Host { value: float64 }; struct Root { owner: Arc<Host>, weak: Weak<Host>, result: uint };";
+    let prefix = "export { kernel }; import { \"$/shared.resin\" }; struct Host { value: float64 }; struct Root { owner: ArcPtr<Host>, weak: WeakPtr<Host>, result: uint };";
     let m = module(&format!(
         "{prefix} @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = {{ var i = uint(invocation); root.result := i; var address = &root.owner; }};"
     ));
@@ -395,7 +490,7 @@ fn literal_strings_report_the_missing_shader_storage_support() {
 #[test]
 fn compute_index_uses_wide_arithmetic_and_indexes_spans_directly() {
     let m = module(
-        "export { kernel }; @compute_shader def kernel(index: ulong, output: Ptr<Span<ulong>>) = { if (index < output.length) { output.at(index).* := index; }; };",
+        "export { kernel }; import { \"$/span.resin\" }; @compute_shader def kernel(index: ulong, output: Ptr<Span<ulong>>) = { if (index < output.length) { output.at(index).* := index; }; };",
     );
     let project = support::project::Project::new(&m, None).unwrap();
     let source = std::fs::read(project.generated.shaders()[0].unoptimized_spirv()).unwrap();

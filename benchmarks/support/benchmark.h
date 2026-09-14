@@ -33,14 +33,6 @@ static uint64_t benchmark_argument(int32_t argc, uint8_t **argv, uint32_t index)
     return value;
 }
 
-static uint32_t *benchmark_allocate(uint32_t count) {
-    uint32_t *data = malloc((size_t)count * sizeof(uint32_t));
-    if (data == NULL) {
-        benchmark_fail("buffer allocation failed");
-    }
-    return data;
-}
-
 static void benchmark_prepare(uint32_t *input, uint32_t *output, uint32_t count, uint32_t seed) {
     for (uint32_t index = 0; index < count; index++) {
         input[index] = index * UINT32_C(747796405) + seed;
@@ -91,10 +83,6 @@ static void benchmark_report(uint64_t start, uint64_t end, uint32_t *output, uin
     }
     printf("%s,%.17g,%" PRIu64 "\n", measured ? "sample" : "warmup",
         benchmark_seconds(start, end), checksum);
-}
-
-static void benchmark_free(uint32_t *data) {
-    free(data);
 }
 
 #endif

@@ -48,6 +48,8 @@ fn explicit_owner_unwrapping_is_rejected_without_forbidding_field_projection() {
         }],
     };
     let context = TyperContext::from_definitions(vec![TypeDef::Nominal {
+        gpu_projection: None,
+        gpu_pipeline: None,
         name: "Owner".into(),
         body: Some(body.clone()),
         drop: Some(FunctionId::from_index(0)),

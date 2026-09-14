@@ -10,7 +10,8 @@ extern "C" {
 #endif
 
 /* Packed 8-bit channels, top-left origin. 1=Y, 2=YA, 3=RGB, 4=RGBA.
-   `row_stride` is bytes per row; 0 means `width * channels`. */
+   `row_stride` separates row starts; 0 means `width * channels`.
+   The final row needs only its pixel bytes, without trailing padding. */
 ResinStatus resin_image_write_png(
     const char *path,
     uint32_t width,

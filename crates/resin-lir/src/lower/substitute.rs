@@ -261,38 +261,15 @@ impl Substitution {
             resin_hir::Type::Float32 => resin_hir::Type::Float32,
             resin_hir::Type::Float64 => resin_hir::Type::Float64,
             resin_hir::Type::Str => resin_hir::Type::Str,
+            resin_hir::Type::GpuView => resin_hir::Type::GpuView,
+            resin_hir::Type::GpuPipelineContract => resin_hir::Type::GpuPipelineContract,
             resin_hir::Type::GpuArguments => resin_hir::Type::GpuArguments,
             resin_hir::Type::Foreign { name } => resin_hir::Type::Foreign { name: name.clone() },
             resin_hir::Type::Pointer { pointee } => resin_hir::Type::Pointer {
                 pointee: Box::new(self.normalize_at(pointee, depth + 1, state, instances)?),
             },
-            resin_hir::Type::GpuPointer { pointee } => resin_hir::Type::GpuPointer {
-                pointee: Box::new(self.normalize_at(pointee, depth + 1, state, instances)?),
-            },
-            resin_hir::Type::Arc { pointee } => resin_hir::Type::Arc {
-                pointee: Box::new(self.normalize_at(pointee, depth + 1, state, instances)?),
-            },
-            resin_hir::Type::Weak { pointee } => resin_hir::Type::Weak {
-                pointee: Box::new(self.normalize_at(pointee, depth + 1, state, instances)?),
-            },
-            resin_hir::Type::Span { element } => resin_hir::Type::Span {
-                element: Box::new(self.normalize_at(element, depth + 1, state, instances)?),
-            },
-            resin_hir::Type::GpuSpan { element } => resin_hir::Type::GpuSpan {
-                element: Box::new(self.normalize_at(element, depth + 1, state, instances)?),
-            },
-            resin_hir::Type::GpuComputePipeline { root, owner } => {
-                resin_hir::Type::GpuComputePipeline {
-                    root: Box::new(self.normalize_at(root, depth + 1, state, instances)?),
-                    owner: Box::new(self.normalize_at(owner, depth + 1, state, instances)?),
-                }
-            }
-            resin_hir::Type::GpuGraphicsPipeline { root, owner } => {
-                resin_hir::Type::GpuGraphicsPipeline {
-                    root: Box::new(self.normalize_at(root, depth + 1, state, instances)?),
-                    owner: Box::new(self.normalize_at(owner, depth + 1, state, instances)?),
-                }
-            }
+            resin_hir::Type::StrongOwner => resin_hir::Type::StrongOwner,
+            resin_hir::Type::WeakOwner => resin_hir::Type::WeakOwner,
             resin_hir::Type::Function { params, result } => resin_hir::Type::Function {
                 params: params
                     .iter()
@@ -372,34 +349,15 @@ fn materialize(
         resin_hir::Type::Float32 => Ty::Float32,
         resin_hir::Type::Float64 => Ty::Float64,
         resin_hir::Type::Str => Ty::Str,
+        resin_hir::Type::GpuView => Ty::GpuView,
+        resin_hir::Type::GpuPipelineContract => Ty::GpuPipelineContract,
         resin_hir::Type::GpuArguments => Ty::GpuArguments,
         resin_hir::Type::Foreign { name } => Ty::Foreign { name: name.clone() },
         resin_hir::Type::Pointer { pointee } => Ty::Pointer {
             pointee: Box::new(materialize(pointee, instances)?),
         },
-        resin_hir::Type::GpuPointer { pointee } => Ty::GpuPointer {
-            pointee: Box::new(materialize(pointee, instances)?),
-        },
-        resin_hir::Type::Arc { pointee } => Ty::Arc {
-            pointee: Box::new(materialize(pointee, instances)?),
-        },
-        resin_hir::Type::Weak { pointee } => Ty::Weak {
-            pointee: Box::new(materialize(pointee, instances)?),
-        },
-        resin_hir::Type::Span { element } => Ty::Span {
-            element: Box::new(materialize(element, instances)?),
-        },
-        resin_hir::Type::GpuSpan { element } => Ty::GpuSpan {
-            element: Box::new(materialize(element, instances)?),
-        },
-        resin_hir::Type::GpuComputePipeline { root, owner } => Ty::GpuComputePipeline {
-            root: Box::new(materialize(root, instances)?),
-            owner: Box::new(materialize(owner, instances)?),
-        },
-        resin_hir::Type::GpuGraphicsPipeline { root, owner } => Ty::GpuGraphicsPipeline {
-            root: Box::new(materialize(root, instances)?),
-            owner: Box::new(materialize(owner, instances)?),
-        },
+        resin_hir::Type::StrongOwner => Ty::StrongOwner,
+        resin_hir::Type::WeakOwner => Ty::WeakOwner,
         resin_hir::Type::Function { params, result } => Ty::Function {
             params: params
                 .iter()
@@ -466,34 +424,15 @@ fn expression(source: &Ty, instances: &super::instances::Instances<'_>) -> resin
         Ty::Float32 => resin_hir::Type::Float32,
         Ty::Float64 => resin_hir::Type::Float64,
         Ty::Str => resin_hir::Type::Str,
+        Ty::GpuView => resin_hir::Type::GpuView,
+        Ty::GpuPipelineContract => resin_hir::Type::GpuPipelineContract,
         Ty::GpuArguments => resin_hir::Type::GpuArguments,
         Ty::Foreign { name } => resin_hir::Type::Foreign { name: name.clone() },
         Ty::Pointer { pointee } => resin_hir::Type::Pointer {
             pointee: Box::new(expression(pointee, instances)),
         },
-        Ty::GpuPointer { pointee } => resin_hir::Type::GpuPointer {
-            pointee: Box::new(expression(pointee, instances)),
-        },
-        Ty::Arc { pointee } => resin_hir::Type::Arc {
-            pointee: Box::new(expression(pointee, instances)),
-        },
-        Ty::Weak { pointee } => resin_hir::Type::Weak {
-            pointee: Box::new(expression(pointee, instances)),
-        },
-        Ty::Span { element } => resin_hir::Type::Span {
-            element: Box::new(expression(element, instances)),
-        },
-        Ty::GpuSpan { element } => resin_hir::Type::GpuSpan {
-            element: Box::new(expression(element, instances)),
-        },
-        Ty::GpuComputePipeline { root, owner } => resin_hir::Type::GpuComputePipeline {
-            root: Box::new(expression(root, instances)),
-            owner: Box::new(expression(owner, instances)),
-        },
-        Ty::GpuGraphicsPipeline { root, owner } => resin_hir::Type::GpuGraphicsPipeline {
-            root: Box::new(expression(root, instances)),
-            owner: Box::new(expression(owner, instances)),
-        },
+        Ty::StrongOwner => resin_hir::Type::StrongOwner,
+        Ty::WeakOwner => resin_hir::Type::WeakOwner,
         Ty::Function { params, result } => resin_hir::Type::Function {
             params: params.iter().map(|ty| expression(ty, instances)).collect(),
             result: Box::new(expression(result, instances)),
@@ -576,19 +515,6 @@ fn check_size(
             unreachable!("normalized argument")
         }
         resin_hir::Type::Pointer { pointee } => check_size(pointee, depth + 1, remaining)?,
-        resin_hir::Type::GpuPointer { pointee } => check_size(pointee, depth + 1, remaining)?,
-        resin_hir::Type::Arc { pointee } => check_size(pointee, depth + 1, remaining)?,
-        resin_hir::Type::Weak { pointee } => check_size(pointee, depth + 1, remaining)?,
-        resin_hir::Type::Span { element } => check_size(element, depth + 1, remaining)?,
-        resin_hir::Type::GpuSpan { element } => check_size(element, depth + 1, remaining)?,
-        resin_hir::Type::GpuComputePipeline { root, owner } => {
-            check_size(root, depth + 1, remaining)?;
-            check_size(owner, depth + 1, remaining)?;
-        }
-        resin_hir::Type::GpuGraphicsPipeline { root, owner } => {
-            check_size(root, depth + 1, remaining)?;
-            check_size(owner, depth + 1, remaining)?;
-        }
         resin_hir::Type::Function { params, result } => {
             for param in params {
                 check_size(param, depth + 1, remaining)?;
@@ -625,6 +551,10 @@ fn check_size(
         | resin_hir::Type::Float32
         | resin_hir::Type::Float64
         | resin_hir::Type::Str
+        | resin_hir::Type::StrongOwner
+        | resin_hir::Type::WeakOwner
+        | resin_hir::Type::GpuView
+        | resin_hir::Type::GpuPipelineContract
         | resin_hir::Type::GpuArguments
         | resin_hir::Type::Foreign { .. } => {}
     }

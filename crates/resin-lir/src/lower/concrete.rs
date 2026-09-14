@@ -75,7 +75,8 @@ pub(super) enum TermKind {
         tail: Box<Term>,
     },
     Record {
-        fields: Vec<(Ident, Term)>,
+        /// Initializers remain in evaluation order; their indices select the completed layout.
+        fields: Vec<RecordInitializer>,
     },
     Array {
         elems: Vec<Term>,
@@ -90,6 +91,7 @@ pub(super) enum TermKind {
     },
     Intrinsic {
         op: Intrinsic,
+        type_args: Vec<Ty>,
         args: Arguments,
     },
     Adapt {
@@ -100,19 +102,6 @@ pub(super) enum TermKind {
         conversion: resin_types::ExplicitConversion,
         arg: Box<Term>,
     },
-    ArcNew {
-        value: Box<Term>,
-    },
-    /// Allocate and initialize a GPU element through the registered allocator.
-    GpuNew {
-        allocator: FunctionId,
-        args: Arguments,
-    },
-    /// Allocate uninitialized GPU elements through the registered allocator.
-    GpuAllocate {
-        allocator: FunctionId,
-        args: Arguments,
-    },
     /// Create an owning pipeline whose root type comes from its shader declarations.
     GpuPipelineCreate {
         factory: FunctionId,
@@ -121,13 +110,11 @@ pub(super) enum TermKind {
     },
     /// Project the checked host arguments and record a dispatch or draw.
     GpuPipelineDispatch {
+        projection: Option<resin_types::GpuProjectionPlan>,
         context: FunctionId,
         allocator: Option<FunctionId>,
         record: FunctionId,
         args: Arguments,
-    },
-    WeakEmpty {
-        pointee: Ty,
     },
     Result {
         failure: bool,
@@ -151,6 +138,13 @@ pub(super) enum TermKind {
         base: Box<Term>,
         access: FieldAccess,
     },
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct RecordInitializer {
+    /// Specialization assigns every declaration index exactly once.
+    pub(super) index: usize,
+    pub(super) value: Term,
 }
 
 #[derive(Debug, Clone)]
@@ -188,6 +182,4 @@ pub(super) enum ReceiverConversion {
     Value,
     Address,
     Load,
-    ArcAddress,
-    ArcLoad,
 }

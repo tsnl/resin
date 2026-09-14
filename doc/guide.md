@@ -148,13 +148,13 @@ The exported entry may use the conventional three-argument form:
 
 ```resin
 export { main };
-import { "$/process.resin" };
+import { "$/string.resin", "$/process.resin" };
 
 def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> () = {
     var args = arguments(argc, argv);
     var index = 1_ul;
     while (index < args.length) {
-        print(fmt("{0}\n", (argument(args, index),)));
+        print(fmt("{0}\n", (argument(args, index).bytes(),)));
         index := index + 1_ul;
     };
 };
@@ -272,6 +272,7 @@ CI checks the examples with `--format --check` on Linux, macOS, and Windows.
 
 ```resin
 export { main };
+import { "$/string.resin" };
 
 def fibonacci(n: int) -> int = {
     if (n <= 1) { n } else { fibonacci(n - 1) + fibonacci(n - 2) }
@@ -358,6 +359,7 @@ Write `_` to request a concrete type inferred from the surrounding code:
 
 ```resin
 export { main };
+import { "$/string.resin" };
 
 def next(n: int) -> _ = { n + 1 };
 
@@ -472,23 +474,28 @@ copy or destruction simply because they cross an application boundary.
 
 ```resin
 struct Resource { handle: Ptr<ubyte>,
-    def drop(self: Ptr<Resource>) = { release_native_handle(self.handle); };
+    def drop(self: Ptr<Resource>) = {
+        if (ulong(self.handle) != 0_ul) { release_native_handle(self.handle); };
+    };
 };
 
 // Inside a function:
-var shared = Arc<Resource> { handle = acquire_native_handle() };
+var shared = ArcPtr<Resource>.alloc(Resource { handle = Ptr<ubyte>(0_ul) })?;
+shared.get().handle := acquire_native_handle();
 var alias = shared; // Retains the same allocation; does not copy Resource.
 var weak = shared.downgrade();
 ```
 
-The example assumes native acquire/release declarations for the wrapped library.
-`Arc<Resource>(make_resource())` consumes a fresh function result in the same way.
-`Ptr<Arc<T>>` points to the handle; `arc.get()` returns a pointer to the pointee.
-`weak.upgrade()` returns `Arc<T> | None`, matched with `Arc<T>(owner)` and
+Import `$/shared.resin` for the owner types. The example assumes native
+acquire/release declarations for the wrapped library. `alloc` copies its initializer;
+allocate an inert payload before acquiring a native handle to avoid copying live
+resources. Handle native acquisition errors before returning a completed wrapper.
+`Ptr<ArcPtr<T>>` points to the handle; `arc.get()` returns a pointer to the pointee.
+`weak.upgrade()` returns `ArcPtr<T> | None`, matched with `ArcPtr<T>(owner)` and
 `None` arms. See [the shared ownership example](../examples/shared.resin).
 
 A copied struct receives its own `drop()`. Native-library authors must therefore
-make copies safe or expose an Arc-based interface that avoids copying the inner
+make copies safe or expose an ArcPtr-based interface that avoids copying the inner
 owner. There is no static move checking or borrow checking. A wrapper-specific
 transfer function can extract its native handle using `pointer.replace(replacement)`
 and return a fresh owner while leaving the source disarmed. Raw pointers and spans
@@ -502,12 +509,40 @@ current limitations. The [ownership example](../examples/ownership.resin) demons
 cleanup on success and early error returns. Do not manually free resources already
 owned by a standard-library wrapper.
 
+The pointer families distinguish single values from sequences:
+
+| Ownership | One value | Sequence |
+| --- | --- | --- |
+| Borrowed | `Ptr<T>` | `Span<T>` |
+| Shared host | `ArcPtr<T>` | `ArcSpan<T>` |
+| Weak host | `WeakPtr<T>` | `WeakSpan<T>` |
+| GPU | `GpuPtr<T>` | `GpuSpan<T>` |
+
+`Span<T>` is an ordinary address/count descriptor. `ArcSpan<T>` owns the actual
+elements, while `ArcPtr<Span<T>>` owns only a shared descriptor. There are no unsized
+payload types. Import `$/shared.resin` to create an initialized host sequence:
+
+```resin
+var values = ArcSpan<uint>.alloc(64, 0_ui)?; // ArcSpan<uint>
+values.get().at(0).* := 42_ui;
+var view = values.get();          // Span<uint>
+var bytes = view.as_bytes();        // Span<ubyte>
+```
+
+Allocation checks size arithmetic and reports `OutOfMemory`; each element receives
+an ordinary copy of the initial value. The final owner destroys elements in reverse
+order. `get()` returns a borrowed view, so keep an owner alive while using it.
+Numeric spans expose their in-memory bytes through `as_bytes()`. Sequence weak
+references follow the same operations: `downgrade()` returns `WeakSpan<T>`, and
+`upgrade()` returns `ArcSpan<T> | None`.
+
 ## Loops
 
 `while` works on both the host and GPU:
 
 ```resin
 export { main };
+import { "$/string.resin" };
 
 def main() -> () = {
     var n = 1;
@@ -604,13 +639,14 @@ trailing NUL; embedded and explicitly trailing `\0` bytes count toward its lengt
 `\0`, `\"`, and `\\`. Pass `text.data` to C functions that take a NUL-terminated string.
 Literal storage may be shared; treat it as read-only.
 
-Use `Span<ubyte>(text)` to explicitly borrow the bytes of a `str`; this preserves its pointer
+Import `$/span.resin` and use `bytes(text)` to explicitly borrow the bytes of a `str`; this preserves its pointer
 and length without copying. There is no implicit conversion, and arbitrary byte spans cannot
 be converted to `str`. `text.at(index)` returns a byte pointer and uses a `ulong` index.
 
-`fmt(format, arguments)` is a polymorphic host builtin returning `String`, an ordinary nominal
-wrapper with a `bytes: Arc<Span<ubyte>>` field. Its allocation contains both the span and its bytes,
-plus a trailing NUL. Copying a String retains the allocation; the final owner releases it.
+Import `$/string.resin` for `String`, `fmt`, and `print`.
+`fmt(format, arguments)` is an ordinary generic host function returning `String`,
+a source wrapper with a `storage: ArcSpan<ubyte>` field. Its allocation owns the bytes and an additional
+trailing NUL outside their logical length. Copying a String retains the allocation; the final owner releases it.
 Extracting a raw span or pointer does not retain that owner.
 `String.from_str(text)` copies a `str` verbatim into an owned String. For raw bytes, use
 `String.from_bytes(span)`; the span need not be UTF-8 or have a NUL terminator. Both constructors
@@ -618,20 +654,23 @@ preserve embedded NULs and treat braces as ordinary bytes.
 
 ```resin
 export { main };
-import { "$/io.resin" };
+import { "$/io.resin", "$/string.resin" };
 
 def main() -> Result<(), _> = {
     var n = 42;
     var message = fmt("n = {0}\n", (n,));
     Io.stdout().write(message)?;
-    Io.stderr().write(fmt("diagnostic: {0}", (message,)))?;
+    Io.stderr().write(fmt("diagnostic: {0}", (message.bytes(),)))?;
     print("done\n");
     ok(())
 };
 ```
 
-Formats and string arguments accept `str`, `Span<ubyte>`, or `String`. Other supported arguments are
-numbers, booleans, unit, and pointer addresses. The argument tuple is explicit, including the
+The format accepts `str`, `Span<ubyte>`, or `String`. In the argument tuple,
+use `view.bytes()` or `message.bytes()` for span and String values. These methods
+provide an explicit structural byte view to the formatting primitive. Literal
+`str` arguments work directly. Other supported arguments are numbers, booleans,
+unit, and pointer addresses. The argument tuple is explicit, including the
 trailing comma for a single argument. `{0}`, `{1}`, etc. are zero-based and may repeat;
 `{{` and `}}` escape braces. Arguments evaluate once in source order, including unused arguments.
 Malformed formats and invalid indices terminate with a diagnostic before any formatted output
@@ -639,9 +678,9 @@ is written. Formatting itself performs no output.
 
 `Io.stdout()` and `Io.stderr()` return ordinary library `Output` values. Their `write` method
 accepts `str | Span<ubyte> | String`, writes bytes verbatim, flushes, adds no newline, and returns
-`Result<(), WriteError>`. The builtin `print(text)` is a stdout shorthand returning unit;
+`Result<(), WriteError>`. The library function `print(text)` is a stdout shorthand returning unit;
 it terminates on an output error. Neither writer interprets braces. Both `fmt` and `print`
-are reserved builtins and host-only.
+are ordinary source functions and host-only.
 
 Byte arrays and device-backed `Span<ubyte>` values support shader reads and writes using
 8-bit storage and arithmetic extensions. The runtime enables the corresponding Vulkan features when available.
@@ -656,7 +695,7 @@ before reading:
 
 ```resin
 export { main };
-import { "$/console.resin" };
+import { "$/string.resin", "$/console.resin" };
 
 def main() -> Result<(), _> = {
     print("Name: ");
@@ -668,7 +707,7 @@ def main() -> Result<(), _> = {
 };
 ```
 
-The result is a shared `InputLine` owner exposing `data: Ptr<ubyte>` and `length: ulong`.
+The result is a shared `InputLine` owner; `line.get()` borrows its `Span<ubyte>` view.
 Copies retain its allocation; the final owner frees it. `Console.print(line)` prints the bytes without adding a newline. Empty lines succeed, EOF before any
 bytes returns `EndOfInput`, and a final line without a newline succeeds. Read and allocation
 failures are also explicit errors. See [the console API](../resin/README.md#console-input) for
@@ -700,8 +739,10 @@ functions within one file remain supported.
 
 Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `def`, `var`, `if`,
 `else`, `while`, and `match`), primitive type names, `Never`, and
-`Ptr`/`Span`/`Arc`/`Weak`/`Result`/`None` are reserved, including in parameters and field names.
-Names such as `if_value` are ordinary identifiers. `fmt`, `print`, `ok`, `err`,
+`Ptr`, `Result`, `None`, and the opaque compiler handle types are reserved,
+including in parameters and field names. Wrapper names such as `Span`, `ArcPtr`,
+and `GpuSpan` are ordinary source type names.
+Names such as `if_value` are ordinary identifiers. `ok`, `err`,
 `size_of`, `align_of`, and `absurd` are unshadowable compiler builtins, not syntax
 keywords: definitions and parameters cannot use those names, but record fields can.
 
@@ -721,17 +762,20 @@ to those modules. Public operations are static constructors and instance methods
 - `$/status.resin`: `RuntimeStatus` conversion methods and the `RuntimeError` union and its variants.
 - `$/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
 - `$/io.resin`: `Io.stdout().write(text)` and `Io.stderr().write(text)`.
-- `$/host.resin`: `Host.malloc(bytes)?` allocates host memory; `Host.free(memory)` releases it.
+- `$/span.resin`: borrowed `Span<T>` and `bytes(text)` for literal byte views.
+- `$/shared.resin`: `ArcPtr<T>.alloc(initial)?`, `ArcSpan<T>.alloc(count, initial)?`, and weak owners.
+- `$/string.resin`: owned `String`, formatting with `fmt`, and `print`.
 - `$/console.resin`: `Console.read_byte()`, `Console.read_line()`, and shared `InputLine` owners with `Console.print(line)`.
 
-The polymorphic `fmt` operation and string-only `print` are compiler builtins; decorated shaders expose `.spirv`.
+Decorated shader declarations expose `.spirv`; the resulting structural byte view
+can be wrapped explicitly with `Span<ubyte>(shader.spirv)`.
 Runtime flags are static methods, such as `Memory.default()`.
 Run `cargo run -- examples/eg009_imports.resin` for an explicitly owned counter, or append
 `:independent` to run a second entry that uses two independent counters.
 
 ```resin
 export { main };
-import { "$/gpu.resin" };
+import { "$/gpu.resin", "$/string.resin" };
 
 def main() -> Result<(), _> = {
     var gpu = Gpu.new()?;
@@ -747,18 +791,21 @@ check statuses before returning out-parameter values. For example:
 
 ```resin
 export { Gpu };
-import { "$/status.resin" };
+import { "$/status.resin", "$/shared.resin" };
 
 extern type ResinGpu;
 struct GpuOwner { handle: Ptr<ResinGpu>,
-    def new() -> Result<Gpu, RuntimeError> = {
-        var handle = Ptr<ResinGpu>(0_ul);
-        RuntimeStatus.from_code(resin_gpu_create(&handle))?;
-        ok(Gpu { handle = handle })
+    def drop(self: Ptr<GpuOwner>) = {
+        if (ulong(self.handle) != 0_ul) { resin_gpu_destroy(self.handle); };
     };
-    def drop(self: Ptr<GpuOwner>) = { resin_gpu_destroy(self.handle); };
 };
-type Gpu = Arc<GpuOwner>;
+struct Gpu { owner: ArcPtr<GpuOwner>,
+    def new() -> Result<Gpu, RuntimeError> = {
+        var owner = ArcPtr<GpuOwner>.alloc(GpuOwner { handle = Ptr<ResinGpu>(0_ul) })?;
+        RuntimeStatus.from_code(resin_gpu_create(&owner.get().handle))?;
+        ok(Gpu { owner = owner })
+    };
+};
 
 extern "resin_runtime.h" def resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
 extern "resin_runtime.h" def resin_gpu_destroy(gpu: Ptr<ResinGpu>);
@@ -785,15 +832,15 @@ The index parameter is `ulong` (unsigned 64-bit); unsuffixed literals infer this
 other integer values need an explicit conversion, such as `.at(ulong(i))`:
 
 ```resin
-var values = [10, 20, 30];
+var values = [10_i, 20, 30];
 values.at(1).* := 42;
-var view = Span<int> { data = Ptr<int>(&values), length = ulong(3) };
+var view = Span<int> { data = values.at(0), length = 3_ul };
 var element = view.at(1);
 print(fmt("{0}\n", (element.*,)));
 ```
 
-The original `values(index)` spelling also remains available. `Span<T>` has `data: Ptr<T>`
-and `length: ulong` fields. Neither spelling guarantees bounds checking. Host indexing checks
+Arrays retain the original `values(index)` spelling; source spans use `.at(index)`. `Span<T>` has `data: Ptr<T>`
+and `length: ulong` fields. Host indexing checks
 the array or span length and terminates with a diagnostic for negative or out-of-range indices,
 before forming an element address. This failure does not unwind automatic cleanup.
 Shader array and span indexing is unchecked: callers must keep indices within valid storage;
@@ -821,6 +868,7 @@ Shader entry points are ordinary functions with declaration decorators:
 
 ```resin
 export { main };
+import { "$/string.resin" };
 
 @compute_shader
 def kernel(index: ulong, output: Ptr<ulong>) = { output.* := index; };
@@ -836,7 +884,8 @@ no decorators, and decorated functions remain ordinary host-callable functions. 
 currently describe compiler-defined entry points; user-defined compile-time transformers are
 not implemented yet.
 
-`kernel.spirv` requests program-lifetime embedded SPIR-V bytes as `Span<ubyte>`. It must name a
+`kernel.spirv` requests program-lifetime embedded SPIR-V bytes as a structural
+`{ data: Ptr<ubyte>, length: ulong }` view. It must name a
 decorated function declaration directly, including an imported declaration; runtime function
 aliases do not expose `.spirv`. The compiler records artifact requests by declaration identity,
 without following function values or analyzing runtime branches. Merely declaring or calling a
@@ -884,15 +933,15 @@ The entry interfaces are:
   Position has `float32` fields `x, y, z, w`; Color has `r, g, b, a`, in those orders.
 - Fragment takes Color, optionally paired with `Ptr<T>`, and returns Color.
 
-Allocate typed GPU storage with `gpu.new(value)?` (an inferred `GpuPtr<T>`) or
-`GpuSpan<T>.allocate(gpu, count)?`. A host launch record replaces shader `Ptr<T>`
+Allocate typed GPU storage with `gpu.create(value)?` (an inferred `GpuPtr<T>`) or
+`gpu.alloc::<T>(count)?`. A host launch record replaces shader `Ptr<T>`
 and `Span<T>` fields with `GpuPtr<T>` and `GpuSpan<T>` values:
 
 ```resin
-var values = GpuSpan<float32>.allocate(gpu, 1024)?;
+var values = gpu.alloc::<float32>(1024)?;
 var index = 0_ul;
 while (index < values.length) {
-    values.at(index).* := 1.0_f;
+    values.at(index).store(1.0_f);
     index := index + 1_ul;
 };
 var pipeline = gpu.create_compute_pipeline(kernel)?;
@@ -916,7 +965,8 @@ Spans occupy 16 bytes (address and length) with alignment 8; arrays retain their
 Storage containing booleans, unit, or other numeric widths is rejected for now.
 
 Host `GpuPtr` and `GpuSpan` operations retain their allocation, including indexing,
-slicing, and field addresses. `.read_only()` and `.write_only()` narrow per-view
+and slicing. `load`, `store`, and `replace` access elements on the host.
+`.read_only()` and `.write_only()` narrow per-view
 access permissions. Host accesses check bounds, alignment, mapping, permissions,
 and pending recorded GPU use. `.copy_to(Span<T>)` copies into caller-owned host
 memory. GPU views cannot be converted to raw `Ptr` values; the compiler's shader
@@ -1054,7 +1104,7 @@ array element, and empty arrays have no shared host/device layout.
 
 For C calls, explicitly cast byte-array storage to `Ptr<ubyte>` and pass its logical
 length. Raw arrays and spans do not promise NUL termination. Use a `str` literal's `.data`
-or an owned `String`'s `.bytes.data` when a C function requires a terminator. `String.from_bytes(span)`
+or an owned `String`'s `.get().data` when a C function requires a terminator. `String.from_bytes(span)`
 copies raw bytes and appends that terminator outside the logical length.
 
 ### Shared size and alignment
@@ -1068,10 +1118,10 @@ operands are checked but not executed, as with C `sizeof`; side effects do not r
 Holes in an explicit type argument are rejected. Empty arrays/records,
 booleans, function values, and other types outside the shared profile are rejected.
 
-Use `gpu.new(value)?` to allocate and initialize one GPU element, with its type
-inferred from the value or result context. `GpuSpan<T>.allocate(gpu, count)?` allocates
+Use `gpu.create(value)?` to allocate and initialize one GPU element, with its type
+inferred from the value or result context. `gpu.alloc::<T>(count)?` allocates
 uninitialized elements and checks the multiplication of count by element size.
-The byte allocator `gpu.malloc(bytes, alignment, memory)?` returns `GpuPtr<ubyte>`.
+The byte allocator `gpu.alloc_in::<ubyte>(bytes, memory)?` returns `GpuSpan<ubyte>`.
 
 ### Explicit numeric conversions
 

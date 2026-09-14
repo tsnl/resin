@@ -47,11 +47,6 @@ pub enum TypeKind {
         head: Ident,
         args: Vec<Type>,
     },
-    GpuPipeline {
-        head: Ident,
-        root: Box<Type>,
-        owner: Box<Type>,
-    },
     Result {
         value: Box<Type>,
         error: Box<Type>,
@@ -179,6 +174,13 @@ pub enum MatchVariant {
 pub enum StmtKind {
     ForeignType {
         name: Ident,
+    },
+    IntrinsicFunction {
+        operation: Arc<str>,
+        type_params: Vec<Ident>,
+        name: Ident,
+        params: Vec<(Ident, Type)>,
+        result: Type,
     },
     ForeignFunction {
         header: Arc<str>,

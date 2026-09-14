@@ -9,6 +9,13 @@ pub(super) fn collect(module: &Module, analysis: &[FunctionTypes]) -> TypeTable 
     for definition in module.types.iter() {
         let body = definition.body().expect("verified type definition");
         table.intern(body);
+        if let Some(metadata) = definition.gpu_pipeline() {
+            table.intern(&metadata.root);
+            table.intern(&metadata.owner);
+        }
+        if let Some(metadata) = definition.gpu_projection() {
+            table.intern(&metadata.target);
+        }
     }
     for (function, flow) in module.functions.iter().zip(analysis) {
         table.intern(&function.ty().expect("verified parameter"));
@@ -39,6 +46,12 @@ pub(super) fn collect(module: &Module, analysis: &[FunctionTypes]) -> TypeTable 
                         value: Box::new(Ty::GpuArguments),
                         error: error.clone(),
                     });
+                }
+                if let Instr::GpuElementLayout { element }
+                | Instr::GpuViewIndex { element }
+                | Instr::GpuViewRange { element } = instr
+                {
+                    table.intern(element);
                 }
                 if let Instr::Push { value } = instr {
                     collect_value(&mut table, value);

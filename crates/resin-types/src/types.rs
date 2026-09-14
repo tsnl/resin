@@ -65,17 +65,8 @@ pub(super) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), D
                 return Err(DefinitionError::NonRecord(*definition));
             }
         }
-        Ty::Pointer { pointee }
-        | Ty::GpuPointer { pointee }
-        | Ty::Arc { pointee }
-        | Ty::Weak { pointee } => check_references(definitions, pointee)?,
-        Ty::Span { element } | Ty::GpuSpan { element } | Ty::Array { element, .. } => {
-            check_references(definitions, element)?
-        }
-        Ty::GpuComputePipeline { root, owner } | Ty::GpuGraphicsPipeline { root, owner } => {
-            check_references(definitions, root)?;
-            check_references(definitions, owner)?;
-        }
+        Ty::Pointer { pointee } => check_references(definitions, pointee)?,
+        Ty::Array { element, .. } => check_references(definitions, element)?,
         Ty::Record { fields } => {
             for field in fields {
                 check_references(definitions, &field.ty)?;
@@ -145,6 +136,8 @@ mod definition_tests {
         let id = TypeId::from_index(0);
         assert_eq!(body(&[], id), Err(DefinitionError::Invalid(id)));
         let table = [TypeDef::Nominal {
+            gpu_projection: None,
+            gpu_pipeline: None,
             name: "Pending".into(),
             body: None,
             drop: None,
@@ -161,9 +154,7 @@ mod definition_tests {
             Ty::Pointer {
                 pointee: Box::new(named.clone()),
             },
-            Ty::Span {
-                element: Box::new(named.clone()),
-            },
+            Ty::pointer_length(named.clone()),
             Ty::Function {
                 params: vec![named.clone()],
                 result: Box::new(named.clone()),
@@ -197,13 +188,11 @@ mod definition_tests {
 
 pub(super) fn needs_drop(ty: &Ty, definitions: &[TypeDef]) -> bool {
     match ty {
-        Ty::Arc { .. }
-        | Ty::Weak { .. }
-        | Ty::GpuPointer { .. }
-        | Ty::GpuSpan { .. }
-        | Ty::GpuArguments
-        | Ty::GpuComputePipeline { .. }
-        | Ty::GpuGraphicsPipeline { .. } => true,
+        Ty::StrongOwner
+        | Ty::WeakOwner
+        | Ty::GpuView
+        | Ty::GpuPipelineContract
+        | Ty::GpuArguments => true,
         Ty::Defined { definition } => {
             let d = &definitions[definition.index()];
             d.drop_hook().is_some() || d.body().is_some_and(|t| t.needs_drop(definitions))
@@ -234,41 +223,6 @@ pub(super) fn gpu_element(ty: &Ty, definitions: &[TypeDef]) -> bool {
         _ => false,
     };
     plain && storage_layout(definitions, ty).is_ok()
-}
-
-pub(super) fn gpu_projection(ty: &Ty, definitions: &[TypeDef]) -> Option<Ty> {
-    Some(match ty {
-        Ty::Pointer { pointee } if pointee.gpu_element(definitions) => Ty::GpuPointer {
-            pointee: pointee.clone(),
-        },
-        Ty::Span { element } if element.gpu_element(definitions) => Ty::GpuSpan {
-            element: element.clone(),
-        },
-        Ty::Array { element, length } if *length > 0 => Ty::Array {
-            element: Box::new(gpu_projection(element, definitions)?),
-            length: *length,
-        },
-        Ty::Record { fields } if !fields.is_empty() => Ty::Record {
-            fields: fields
-                .iter()
-                .map(|field| {
-                    Some(RecordField {
-                        name: field.name.clone(),
-                        ty: gpu_projection(&field.ty, definitions)?,
-                    })
-                })
-                .collect::<Option<_>>()?,
-        },
-        Ty::Defined { definition } => {
-            let definition = definitions.get(definition.index())?;
-            if definition.drop_hook().is_some() {
-                return None;
-            }
-            gpu_projection(definition.body()?, definitions)?
-        }
-        ty if ty.gpu_element(definitions) => ty.clone(),
-        _ => return None,
-    })
 }
 
 pub(super) fn payloads(ty: &Ty) -> Option<Vec<(Case, Ty)>> {
@@ -327,30 +281,7 @@ pub(super) fn widens_to(ty: &Ty, to: &Ty) -> bool {
 }
 
 pub(super) fn view_record(ty: &Ty) -> Option<Ty> {
-    let pointer = match ty {
-        Ty::Span { element } => Ty::Pointer {
-            pointee: element.clone(),
-        },
-        Ty::GpuSpan { element } => Ty::GpuPointer {
-            pointee: element.clone(),
-        },
-        Ty::Str => Ty::Pointer {
-            pointee: Box::new(Ty::UInt8),
-        },
-        _ => return None,
-    };
-    Some(Ty::Record {
-        fields: vec![
-            RecordField {
-                name: "data".into(),
-                ty: pointer,
-            },
-            RecordField {
-                name: "length".into(),
-                ty: Ty::UInt64,
-            },
-        ],
-    })
+    matches!(ty, Ty::Str).then(Ty::byte_span)
 }
 
 //
@@ -376,6 +307,8 @@ impl TypeTable {
     pub(super) fn reserve(&mut self, name: Arc<str>) -> TypeId {
         let id = TypeId::from_index(self.len());
         self.definitions.push(TypeDef::Nominal {
+            gpu_projection: None,
+            gpu_pipeline: None,
             name,
             body: None,
             drop: None,
@@ -428,23 +361,10 @@ impl TypeTable {
                 self.intern(error);
                 self.intern(&Ty::UInt32);
             }
-            Ty::Pointer { pointee }
-            | Ty::GpuPointer { pointee }
-            | Ty::Arc { pointee }
-            | Ty::Weak { pointee } => {
+            Ty::Pointer { pointee } => {
                 self.intern(pointee);
             }
-            Ty::GpuSpan { element } => {
-                self.intern(&Ty::GpuPointer {
-                    pointee: element.clone(),
-                });
-                self.intern(&Ty::UInt64);
-            }
-            Ty::GpuComputePipeline { root, owner } | Ty::GpuGraphicsPipeline { root, owner } => {
-                self.intern(root);
-                self.intern(owner);
-            }
-            Ty::Span { element } | Ty::Array { element, .. } => {
+            Ty::Array { element, .. } => {
                 self.intern(element);
             }
             Ty::Record { fields } => {
@@ -506,22 +426,11 @@ pub(super) fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
             .map(ToString::to_string)
             .unwrap_or_else(|| "?".into()),
         Ty::Pointer { pointee } => format!("Ptr<{}>", format_type(pointee, definitions)),
-        Ty::GpuPointer { pointee } => format!("GpuPtr<{}>", format_type(pointee, definitions)),
-        Ty::GpuSpan { element } => format!("GpuSpan<{}>", format_type(element, definitions)),
+        Ty::GpuView => "GpuView".into(),
+        Ty::GpuPipelineContract => "GpuPipelineContract".into(),
         Ty::GpuArguments => "GpuArguments".into(),
-        Ty::GpuComputePipeline { root, owner } => format!(
-            "GpuComputePipeline<{}, {}>",
-            format_type(root, definitions),
-            format_type(owner, definitions)
-        ),
-        Ty::GpuGraphicsPipeline { root, owner } => format!(
-            "GpuGraphicsPipeline<{}, {}>",
-            format_type(root, definitions),
-            format_type(owner, definitions)
-        ),
-        Ty::Arc { pointee } => format!("Arc<{}>", format_type(pointee, definitions)),
-        Ty::Weak { pointee } => format!("Weak<{}>", format_type(pointee, definitions)),
-        Ty::Span { element } => format!("Span<{}>", format_type(element, definitions)),
+        Ty::StrongOwner => "StrongOwner".into(),
+        Ty::WeakOwner => "WeakOwner".into(),
         Ty::Array { element, length } => {
             format!("[{}; {length}]", format_type(element, definitions))
         }
@@ -570,7 +479,7 @@ pub(super) fn storage_layout(
     let scalar = match ty {
         Ty::UInt8 => Some(1),
         Ty::Int32 | Ty::UInt32 | Ty::Float32 => Some(4),
-        Ty::Int64 | Ty::UInt64 | Ty::Pointer { .. } | Ty::Arc { .. } | Ty::Weak { .. } => Some(8),
+        Ty::Int64 | Ty::UInt64 | Ty::Pointer { .. } | Ty::StrongOwner | Ty::WeakOwner => Some(8),
         _ => None,
     };
     if let Some(size) = scalar {
@@ -578,13 +487,6 @@ pub(super) fn storage_layout(
             size,
             align: size,
             offsets: Vec::new(),
-        });
-    }
-    if let Ty::Span { .. } = ty {
-        return Ok(layout::Layout {
-            size: 16,
-            align: 8,
-            offsets: vec![0, 8],
         });
     }
     if let Ty::Array { element, length } = ty {
@@ -921,4 +823,165 @@ fn is_hex_literal(value: &str) -> bool {
     value.len() >= 2
         && value.as_bytes()[0] == b'0'
         && (value.as_bytes()[1] == b'x' || value.as_bytes()[1] == b'X')
+}
+
+pub(super) fn gpu_projection_plan(
+    definitions: &[TypeDef],
+    source: &Ty,
+    target: &Ty,
+) -> Result<crate::GpuProjectionPlan, String> {
+    let operation = projection_operation(definitions, source, target)?;
+    Ok(crate::GpuProjectionPlan {
+        source: source.clone(),
+        target: target.clone(),
+        operation,
+    })
+}
+
+fn projection_operation(
+    definitions: &[TypeDef],
+    source: &Ty,
+    target: &Ty,
+) -> Result<crate::GpuProjectionOperation, String> {
+    use crate::{GpuProjectionKind, GpuProjectionOperation};
+    let invalid = || {
+        format!(
+            "cannot project {} into shader {}",
+            format_type(source, definitions),
+            format_type(target, definitions)
+        )
+    };
+    if let Ty::Defined { definition } = source
+        && let Some(projection) = get(definitions, *definition)
+            .map_err(|_| invalid())?
+            .gpu_projection()
+    {
+        if projection.target != *target
+            || get(definitions, *definition)
+                .map_err(|_| invalid())?
+                .drop_hook()
+                .is_some()
+        {
+            return Err(invalid());
+        }
+        return match projection.kind {
+            GpuProjectionKind::Pointer => {
+                let element =
+                    projection_pointer(definitions, source, target).ok_or_else(invalid)?;
+                Ok(GpuProjectionOperation::Pointer {
+                    element: element.clone(),
+                })
+            }
+            GpuProjectionKind::Sequence => {
+                let Ty::Record {
+                    fields: source_fields,
+                } = projection_shape(definitions, source).ok_or_else(invalid)?
+                else {
+                    return Err(invalid());
+                };
+                let Ty::Record {
+                    fields: target_fields,
+                } = projection_shape(definitions, target).ok_or_else(invalid)?
+                else {
+                    return Err(invalid());
+                };
+                if source_fields.len() != 2
+                    || target_fields.len() != 2
+                    || source_fields[1].ty != Ty::UInt64
+                    || target_fields[1].ty != Ty::UInt64
+                {
+                    return Err(invalid());
+                }
+                let element =
+                    projection_pointer(definitions, &source_fields[0].ty, &target_fields[0].ty)
+                        .ok_or_else(invalid)?;
+                Ok(GpuProjectionOperation::Sequence {
+                    element: element.clone(),
+                })
+            }
+        };
+    }
+    if source == target && target.gpu_element(definitions) {
+        return Ok(GpuProjectionOperation::Copy);
+    }
+    if let Ty::Defined { definition } = target
+        && get(definitions, *definition)
+            .map_err(|_| invalid())?
+            .drop_hook()
+            .is_some()
+    {
+        return Err(invalid());
+    }
+    match (
+        projection_shape(definitions, source),
+        projection_shape(definitions, target),
+    ) {
+        (Some(Ty::Record { fields: input }), Some(Ty::Record { fields: output }))
+            if !output.is_empty() && input.len() == output.len() =>
+        {
+            let fields = input
+                .iter()
+                .zip(output)
+                .map(|(input, output)| {
+                    if input.name != output.name {
+                        return Err(invalid());
+                    }
+                    gpu_projection_plan(definitions, &input.ty, &output.ty)
+                })
+                .collect::<Result<_, _>>()?;
+            Ok(GpuProjectionOperation::Record { fields })
+        }
+        (
+            Some(Ty::Array {
+                element: input,
+                length: input_length,
+            }),
+            Some(Ty::Array {
+                element: output,
+                length,
+            }),
+        ) if *length > 0 && input_length == length => Ok(GpuProjectionOperation::Array {
+            element: Box::new(gpu_projection_plan(definitions, input, output)?),
+            length: *length,
+        }),
+        _ => Err(invalid()),
+    }
+}
+
+fn projection_shape<'a>(definitions: &'a [TypeDef], ty: &'a Ty) -> Option<&'a Ty> {
+    match ty {
+        Ty::Defined { definition } => get(definitions, *definition).ok()?.body(),
+        _ => Some(ty),
+    }
+}
+
+fn projection_pointer<'a>(
+    definitions: &'a [TypeDef],
+    source: &'a Ty,
+    target: &'a Ty,
+) -> Option<&'a Ty> {
+    let Ty::Defined { definition } = source else {
+        return None;
+    };
+    let definition = get(definitions, *definition).ok()?;
+    let projection = definition.gpu_projection()?;
+    if projection.kind != crate::GpuProjectionKind::Pointer
+        || projection.target != *target
+        || definition.drop_hook().is_some()
+    {
+        return None;
+    }
+    let Ty::Record { fields } = definition.body()? else {
+        return None;
+    };
+    let [field] = fields.as_slice() else {
+        return None;
+    };
+    if field.ty != Ty::GpuView {
+        return None;
+    }
+    let Ty::Pointer { pointee } = target else {
+        return None;
+    };
+    pointee.gpu_element(definitions).then_some(pointee)
 }

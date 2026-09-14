@@ -25,7 +25,7 @@ impl Program {
         let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
         let path = temp.path().join("main.resin");
         fs::write(&path, source).unwrap();
-        let module = pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap();
+        let module = pipeline::file_module(&path).unwrap();
         let project = project::Project::new(&module, Some("main")).unwrap();
         Self::compile(temp, &project)
     }
@@ -69,7 +69,7 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
     let program = Program::new(
         r#"
         export { main };
-        import { "$/console.resin" };
+        import { "$/console.resin", "$/string.resin" };
         def failed(error: InputError) -> Result<(), InputError> = { err(error) };
         def main() -> Result<(), _> = {
             var reading = 1 == 1;
@@ -77,10 +77,10 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
                 match (Console.read_line()) {
                     ok(line) => {
 
-                        if (Ptr<ubyte>(ulong(line.data) + line.length).* != ubyte(0)) {
+                        if (Ptr<ubyte>(ulong(line.get().data) + line.get().length).* != ubyte(0)) {
                             print("missing terminator");
                         } else {};
-                        print(fmt("[{0}:", (line.length,)));
+                        print(fmt("[{0}:", (line.get().length,)));
                         Console.print(line)?;
                         print("]");
                     },
@@ -137,7 +137,7 @@ fn byte_input_distinguishes_bytes_from_eof() {
     let program = Program::new(
         r#"
         export { main };
-        import { "$/console.resin" };
+        import { "$/console.resin", "$/string.resin" };
         def main() -> Result<int, _> = {
             var zero = Console.read_byte()?;
             var first = Console.read_byte()?;
@@ -197,7 +197,7 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
                     ok(line) => {{
 
                         match (Console.print(line)) {{
-                            ok(unit) => {{ if (mode == 6 && line.length == ulong(300)) {{ 0 }} else {{ 1 }} }},
+                            ok(unit) => {{ if (mode == 6 && line.get().length == ulong(300)) {{ 0 }} else {{ 1 }} }},
                             err(error) => {{ if (mode == 4 || mode == 5) {{ 0 }} else {{ 2 }} }},
                         }}
                     }},
@@ -219,7 +219,7 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
         );
         let path = temp.path().join("main.resin");
         fs::write(&path, source).unwrap();
-        let module = pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap();
+        let module = pipeline::file_module(&path).unwrap();
         // Include before the generated header list so all foreign calls use the test shims.
         let project = project::Project::new(&module, Some("main")).unwrap();
         let path = project.generated.c_source().unwrap();
@@ -243,7 +243,7 @@ fn streams_write_literals_and_owned_strings_verbatim() {
     let program = Program::new(
         r#"
         export { main };
-        import { "$/io.resin" };
+        import { "$/io.resin", "$/string.resin", "$/span.resin" };
         def literal() -> str = { "static\0bytes" };
         def main() -> Result<(), _> = {
             var out = Io.stdout();
@@ -252,8 +252,8 @@ fn streams_write_literals_and_owned_strings_verbatim() {
             var copy = text;
             out.write("raw {0}\0")?;
             out.write(copy)?;
-            out.write(Span<ubyte>(" bytes"))?;
-            error.write(fmt("error: {0}\n", (text,)))?;
+            out.write(bytes(" bytes"))?;
+            error.write(fmt("error: {0}\n", (text.bytes(),)))?;
             error.write(literal())?;
             ok(())
         };
@@ -270,7 +270,7 @@ fn stream_write_failure_propagates_as_a_library_error() {
     let program = Program::new(
         r#"
         export { main };
-        import { "$/io.resin" };
+        import { "$/io.resin", "$/string.resin" };
         def main() -> Result<(), _> = {
             Output { stream = 99_ui }.write("unwritten")?;
             print("not reached");
