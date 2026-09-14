@@ -27,6 +27,7 @@ type Result<T> = std::result::Result<T, GenerateError>;
 type Term = typed::Term;
 type Statement = typed::Statement;
 type MatchArm = typed::MatchArm;
+#[derive(Clone)]
 pub(super) struct Annotation {
     holes: Vec<(Span, VariableId)>,
     pub ty: Type,
@@ -40,6 +41,7 @@ impl Annotation {
         }
     }
 }
+#[derive(Clone)]
 pub(super) struct Signature {
     pub type_params: Vec<crate::TypeParameter>,
     pub declaration: Option<DeclarationId>,
@@ -203,6 +205,13 @@ pub(in crate::lower) fn file(
 ) -> CheckedFile {
     let mut checker = Checker::new(&mut generator.typer, scopes);
     let (declarations, mut signatures, sources) = checker.declarations(file, methods);
+    checker.declare_gpu_contracts(
+        &declarations,
+        &signatures,
+        &mut generator.functions,
+        &mut generator.function_bindings,
+        &generator.source,
+    );
     let mut bodies = checker.bodies(&mut signatures, sources);
     checker.solve_functions(&signatures, &mut bodies);
     checker.require_holes();
@@ -263,6 +272,60 @@ pub(in crate::lower) fn file(
 }
 
 impl Checker<'_> {
+    fn declare_gpu_contracts(
+        &mut self,
+        declarations: &[typed::Declaration],
+        signatures: &Signatures,
+        functions: &mut Vec<Option<crate::Function>>,
+        bindings: &mut std::collections::HashMap<DeclarationId, FunctionId>,
+        source: &Source,
+    ) {
+        // Contracts have fully explicit signatures. Install their type relations
+        // before any body can request a factory or recording operation. Sequence
+        // contracts depend on pointer contracts, regardless of source order.
+        for operation in [
+            "gpu_pointer_projection",
+            "gpu_span_projection",
+            "gpu_compute_pipeline_type",
+            "gpu_graphics_pipeline_type",
+        ] {
+            for declaration in declarations {
+                if !matches!(&declaration.kind, typed::DeclarationKind::Intrinsic { operation: name } if name.as_ref() == operation)
+                {
+                    continue;
+                }
+                let result = signatures[&declaration.id]
+                    .clone()
+                    .resolve(&self.typing.solver);
+                let Some(signature) = self.record(result) else {
+                    continue;
+                };
+                if self.record(super::check_parameters(&signature)).is_none() {
+                    continue;
+                }
+                let id = *bindings.entry(declaration.id).or_insert_with(|| {
+                    let id = FunctionId::from_index(functions.len());
+                    functions.push(None);
+                    id
+                });
+                let mut function = crate::Function {
+                    location: Some(SourceLocation {
+                        source: source.clone(),
+                        span: declaration.name.span,
+                    }),
+                    name: declaration.name.val.clone(),
+                    signature: super::elaborate_signature(&signature),
+                    body: None,
+                    foreign_header: None,
+                };
+                let result =
+                    super::gpu_projections::define(self.typing.typer, &mut function, id, operation);
+                self.record(result);
+                functions[id.index()] = Some(function);
+            }
+        }
+    }
+
     fn declarations<'s>(
         &mut self,
         file: &'s SourceFile,

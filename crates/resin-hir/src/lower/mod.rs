@@ -905,6 +905,9 @@ impl Generator {
             }
             typed::DeclarationKind::Intrinsic { operation } => {
                 let id = self.declare_source_function(name, signature)?;
+                if self.function(id).body.is_some() {
+                    return Ok(());
+                }
                 if !gpu_projections::define(
                     &mut self.typer,
                     self.functions[id.index()].as_mut().unwrap(),
