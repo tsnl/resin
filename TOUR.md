@@ -45,7 +45,7 @@ A few language choices explain much of the implementation:
 - `A | B` is a structural union of value types. `Result<T, E>` is first-class;
   `ok` and `err` construct it, `match` handles variants, and postfix `?` propagates errors.
 - `ArcPtr<T>` / `WeakPtr<T>` share single values, and `ArcSpan<T>` / `WeakSpan<T>`
-  share fixed-length sequences. `Host.alloc(count, initial)?` allocates initialized
+  share fixed-length sequences. `ArcSpan<T>.alloc(count, initial)?` allocates initialized
   owned elements; `get()` borrows their span. Value reads copy; fresh results
   transfer into consumers. Structs declare inherent methods and destruction hooks.
   Initialized owners are released in reverse scope order, including through `?`.
@@ -338,7 +338,7 @@ release cache after the build, using `spirv-dis` to view their assembly.
 `@compute_shader`, `@vertex_shader`, and `@fragment_shader` register and validate
 shader entry declarations. [shader interfaces](crates/resin-types/src/lib.rs) defines their metadata
 and signature contracts. Decorated functions and their unannotated helpers remain
-host-callable. Accessing `function.spirv` requests a static `Span<ubyte>` artifact;
+host-callable. Accessing `function.spirv` requests a static structural byte view;
 [project generation](crates/resin-codegen/src/lib.rs) enumerates those declaration
 requests and writes SPIR-V plus their Ninja dependencies. `spirv-opt -O` optimizes it,
 and `resin --embed` writes the headers included by generated C.

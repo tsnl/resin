@@ -1,28 +1,30 @@
 # GPU pointers, spans, and shader arguments
 
 `GpuPtr<T>` owns a view into a GPU allocation. `GpuSpan<T>` adds an element count.
-Copies, indexed pointers, slices, and addresses of fields retain the allocation and
-its GPU. The compiler controls their representation and construction; neither type
-converts to an ordinary host pointer or exposes a device-address query.
+Copies, indexed pointers, and slices retain the allocation and its GPU. Both are
+ordinary generic source structs over an opaque `GpuView` primitive. Neither
+exposes a raw host pointer or a device-address query.
 
 ```resin
 var gpu = Gpu.new()?;
-var scalar = gpu.new(42)?;                  // GpuPtr<long>, inferred from the value
-var values = GpuSpan<float32>.allocate(gpu, 1024)?;
+var scalar = gpu.create(42)?;                  // GpuPtr<long>, inferred from the value
+var values = gpu.alloc::<float32>(1024)?;
 var index = 0_ul;
 while (index < values.length) {
-    values.at(index).* := 1.0_f;
+    values.at(index).store(1.0_f);
     index := index + 1_ul;
 };
 var first = values.slice(0, 16);            // GpuSpan<float32>, same owner
 var readable = first.read_only();
 ```
 
-`gpu.new(value)` initializes one element and infers its type, including from result
-context. `GpuPtr<T>.new(gpu, value)` provides an explicit element type.
-`GpuSpan<T>.allocate(gpu, count)` allocates uninitialized storage with a checked byte
-count. These constructors use default host-visible memory. The low-level byte
-allocator `gpu.malloc(bytes, alignment, memory)` returns `GpuPtr<ubyte>`.
+`gpu.create(initial)` initializes one element and infers its type from the value
+or result context; `gpu.create::<T>(initial)` supplies it explicitly.
+`gpu.alloc::<T>(count)` allocates uninitialized storage with checked layout and
+size arithmetic. Initialize elements before reading or using them in a shader.
+Both use default host-visible memory. `gpu.alloc_in::<T>(count, memory)` selects
+`Memory.gpu()` or `Memory.readback()` when needed. These are ordinary generic
+source methods; allocation reports a typed `RuntimeError`.
 
 GPU elements have the same host and shader layout and cannot contain pointers,
 spans, managed owners, or custom destruction hooks. Supported scalar storage is
@@ -32,14 +34,16 @@ suffix; the default `float64` has no supported shader storage layout.
 
 ## Checked host access
 
-`pointer.*` loads or stores an element. `pointer.at(index)` and `span.at(index)`
-return owning pointers; `.slice(start, length)` returns an owning span. Indexing and
-slicing check bounds. GPU field addresses preserve their owner: `&pointer.field`
-returns another `GpuPtr`, never an ordinary `Ptr`.
+`pointer.load()`, `pointer.store(value)`, and `pointer.replace(value)` perform
+checked host access; `replace` returns the previous value. `span.at(index)`
+returns an owning pointer, and `.slice(start, length)` returns an owning span.
+Indexing and slicing check bounds. To update a field, load its containing record,
+edit the local value, then store the record back. Host GPU views do not produce
+places or raw field addresses.
 
 Each view carries host read/write permissions. `.read_only()` and `.write_only()`
 remove the other permission and cannot restore previously removed permissions.
-Their checks apply to dereferences, field accesses, and copies. Existing aliases
+Their checks apply to loads, stores, replacements, and copies. Existing aliases
 keep their own permissions. Access also checks the allocation range, alignment,
 host mapping, and whether a recording currently holds the allocation for GPU work.
 An invalid host access traps. These are compiler/runtime checks, not OS page
@@ -79,15 +83,18 @@ its factory takes a vertex and fragment declaration. Both graphics stages must u
 the same root type when both have a root parameter. Rootless graphics pipelines use
 `None` as their root type and accept `commands.draw(pipeline, None, count)`.
 
-Pipeline types retain their shared native owner across copies and ordinary function
-calls. Explicit parameter types can name `GpuPipelineOwner`, exported by the GPU
-module. Their representation is opaque: pipelines expose neither raw handles nor
-construction from an owner. Compute and graphics pipelines cannot be interchanged.
+Pipeline wrappers retain their shared native owner across copies and ordinary
+function calls. Explicit parameter types can name `GpuPipelineOwner`, exported
+by the GPU module. Each wrapper stores an opaque `GpuPipelineContract` containing
+the originating root type, owner type, and shader stage. Dispatch and draw validate
+that contract before projecting arguments. Changing a wrapper annotation cannot
+authorize a different root or stage.
 
 Dispatch and draw derive the host record from the pipeline's declared root type: a
 shader `Ptr<T>` field receives a host `GpuPtr<T>`, and a shader `Span<T>` field
 receives a host `GpuSpan<T>`. Scalars and nested records keep their values. The
-compiler creates a separate shader root, translates GPU views internally, and
+compiler validates explicit projection declarations on the source wrappers,
+creates a separate shader root, translates GPU views internally, and
 retains every referenced allocation. An indexed or sliced view preserves its byte
 offset. Projection occurs inside recording; the public GPU API exposes no untyped
 projected root to construct or reuse.

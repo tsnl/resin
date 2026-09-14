@@ -118,9 +118,9 @@ The extension is an independent Cargo workspace depending only on
 parser in Resin and update that pin. Query tests compile every query and check
 captures against representative syntax, examples, and standard-library files.
 These tests use the local parser, so also verify that the pinned commit contains
-the parser changes required by the queries. The `12f7bb4` pin includes the
-`ArcPtr`/`ArcSpan`/`WeakPtr`/`WeakSpan` type formers, generic type parameters,
-explicit `::<T>` applications, and methods inside structs.
+the parser changes required by the queries. The current grammar supports ordinary generic library structs such as
+`ArcPtr`/`ArcSpan`/`WeakPtr`/`WeakSpan`, generic type parameters, explicit `::<T>`
+applications, methods inside structs, and checked `intrinsic` declarations.
 
 The extension is not published in Zed's registry yet. A future registry entry
 can point to this repository with `path = "editors/zed"`; see the

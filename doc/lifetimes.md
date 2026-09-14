@@ -32,7 +32,9 @@ checking, borrow checker, user-defined `Copy`/`Clone` trait, or move callback.
 | Weak host ownership | `WeakPtr<T>` | `WeakSpan<T>` |
 | GPU ownership | `GpuPtr<T>` | `GpuSpan<T>` |
 
-Every type in this table is an ordinary value type, including `Span<T>`, whose
+`Ptr<T>` is a compiler primitive; the other families are ordinary generic library
+structs. Import `$/span.resin`, `$/shared.resin`, or `$/gpu.resin` to use them.
+Every type in this table is a value type, including `Span<T>`, whose
 value is an address and element count. `ArcPtr<Span<T>>` shares a stored span
 descriptor; `ArcSpan<T>` shares the elements themselves. These are distinct types
 with distinct destruction responsibilities. Resin has no unsized payload types.
@@ -42,7 +44,7 @@ with distinct destruction responsibilities. Resin has no unsized payload types.
 Using a variable, field, or pointee as a value copies its contents. Address formation
 and assignment destinations preserve the place instead. Indexing an array preserves
 its storage address; it does not copy the array. The current indexing API returns
-`Ptr<T>`, so `items(i).*` requests an element value and `items(i).* := x` addresses
+`Ptr<T>`, so `items.at(i).*` requests an element value and `items.at(i).* := x` addresses
 the element for assignment.
 
 `Place<T>` is compiler terminology, not a source-level type. Variables denote places;
@@ -52,7 +54,7 @@ A value consumer requests a compiler-generated copy, while `&` yields the place'
 pointer. Indexing returns a pointer so user-defined wrappers have the same interface:
 
 ```resin
-def at(items: Span<int>, index: ulong) -> Ptr<int> = { items(index) };
+def at(items: Span<int>, index: ulong) -> Ptr<int> = { items.at(index) };
 // Inside a function:
 at(items, 0_ul).* := 42;
 var copied = at(items, 0_ul).*;
@@ -71,8 +73,7 @@ f(make_t());                // Transfer the fresh result into f's parameter.
 f(x);                       // Copy x, then transfer the copy into f's parameter.
 a + b                       // Copy a and b; the operator consumes its operands.
 Pair { a = make_t(), b = x } // Transfer make_t()'s result; copy x into b.
-ArcPtr<T>(make_t())             // Transfer the fresh result into shared storage.
-ArcPtr<T>(x)                   // Copy x, then transfer the copy into shared storage.
+ArcPtr<T>.alloc(x)?         // Copy x into a new shared allocation.
 ```
 
 Function parameters own their argument values and receive ordinary scope cleanup.
@@ -97,25 +98,23 @@ Reference-count operations mean generated copying is not necessarily bitwise cop
 
 ## Owned host sequences
 
-Import `$/host.resin` to allocate initialized, fixed-length shared sequences:
+Import `$/shared.resin` to allocate initialized, fixed-length shared sequences:
 
 ```resin
-var values = Host.alloc(128, 0_ui)?; // ArcSpan<uint>
+var values = ArcSpan<uint>.alloc(128, 0_ui)?; // ArcSpan<uint>
 var alias = values;                 // Retains the complete allocation.
 var view = values.get();            // Borrows a Span<uint>.
 view.at(0).* := 42_ui;
 var bytes = view.as_bytes();        // Span<ubyte>
 ```
 
-`Host.alloc(count, initial)` returns `Result<ArcSpan<T>, OutOfMemory>`. It checks
+`ArcSpan<T>.alloc(count, initial)` returns `Result<ArcSpan<T>, OutOfMemory>`. It checks
 allocation arithmetic and ownership bookkeeping, copies `initial` into each
 element, and returns only after all elements are initialized. Empty allocations
 are valid, and a zero-sized element still contributes to the logical count.
 Allocation failure leaves no partially initialized owner. The final strong release
 destroys the elements in reverse order and then releases their allocation.
-`ArcSpan<T>.try_new(count, initial)` provides the same allocation directly as
-`ArcSpan<T> | None`, without importing the Host module; `Host.alloc` maps allocation
-failure to the named `OutOfMemory` error.
+
 
 `get()` borrows the owning handle just as `ArcPtr.get()` does. The returned span
 does not retain the owner: keep an owning handle alive while using it. Indexing
@@ -135,7 +134,7 @@ width, trapping if the byte count overflows. This is an explicit representation
 conversion; it does not serialize values or change their byte order. Managed values
 and arbitrary records do not support it.
 
-`values.downgrade()` returns `WeakSpan<T>`. `WeakSpan<T>()` creates an empty weak
+`values.downgrade()` returns `WeakSpan<T>`. `WeakSpan<T>.empty()` creates an empty weak
 reference, and `weak.upgrade()` returns `ArcSpan<T> | None`, preserving the complete
 sequence and its count while it remains alive. Weak references do not delay element
 destruction. As with shared pointers, atomic ownership counts do not synchronize
@@ -143,47 +142,48 @@ access to the elements.
 
 ## Construction and methods
 
-Both forms below consume their initializer without separately destroying a temporary
-payload, just as ordinary function calls consume their argument values:
+`ArcPtr<T>.alloc(initial)` returns `Result<ArcPtr<T>, OutOfMemory>`. It is an
+ordinary generic source method and copies its initializer into shared storage.
+Returning its named parameter still performs the language's ordinary copy.
+It does not transfer exclusive ownership of a raw native handle.
+
+Native wrappers should allocate an inert payload first and then initialize its
+handle through `get()`. Their destructor must tolerate that inert state:
 
 ```resin
-var shared = ArcPtr<Resource> { handle = acquire_native_handle() };
-var another = ArcPtr<Resource>(make_resource());
-```
+import { "$/shared.resin" };
 
-A type alias for `ArcPtr<T>` supports the same construction syntax. This is value
-transfer, not a promise that a temporary's machine address is preserved;
-self-referential stack values are not pinned.
-
-Methods and destruction hooks belong inside their owning struct:
-
-```resin
 struct Resource { handle: Ptr<ubyte>,
-    def make() -> ArcPtr<Resource> = {
-        ArcPtr<Resource> { handle = acquire_native_handle() }
+    def make() -> Result<ArcPtr<Resource>, _> = {
+        var owner = ArcPtr<Resource>.alloc(Resource { handle = Ptr<ubyte>(0_ul) })?;
+        owner.get().handle := acquire_native_handle();
+        ok(owner)
     };
     def address(self: Ptr<Resource>) -> Ptr<ubyte> = { self.handle };
-    def drop(self: Ptr<Resource>) = { release_native_handle(self.handle); };
+    def drop(self: Ptr<Resource>) = {
+        if (ulong(self.handle) != 0_ul) { release_native_handle(self.handle); };
+    };
 };
-
 ```
 
-`self` as the first parameter declares an instance method. Its type is `T`, `Ptr<T>`,
-or `ArcPtr<T>`. Value receivers follow the ordinary copy/transfer rule; pointer receivers
-use the receiver's address. Associated functions have no `self`. Method signatures
-currently require explicit types; omitted results mean unit. There are no traits,
-interfaces, inheritance, or dynamically dispatched methods.
+The example assumes native acquire/release declarations. A production factory
+also handles native acquisition failure before exposing the completed wrapper.
+Allocation failure occurs before acquisition, so there is no live handle to leak.
 
-Builtin array/span `at`, `ArcPtr.get`, `ArcPtr.downgrade`, `WeakPtr.upgrade`, and `Ptr.replace` have ordinary
-method signatures and compiler-generated IR bodies. These small bodies expand at
-the call site, allowing shader-local array addresses to stay local. `get` borrows
-`Ptr<ArcPtr<T>>`;
-`downgrade` and `upgrade` consume their argument values like other by-value calls.
-Method syntax supplies the receiver, and associated syntax can supply it explicitly
-(e.g. `ArcPtr<T>.get(&owner)`). A fresh value borrowed by a pointer receiver is saved
-in the caller's scope, including for user-defined methods. `get` borrows the
-existing handle when given a named receiver; the returned raw pointer does not
-retain a separate owner if that handle is subsequently overwritten.
+Method syntax supplies the first argument, whose name is ordinary. Pointer
+receivers use the receiver's address; value receivers copy its value. Associated
+functions supply all arguments explicitly. Signatures require explicit parameter
+types; omitted results mean unit. There are no traits, interfaces, inheritance,
+or dynamically dispatched methods.
+
+`Span.at`, `ArcPtr.get`, `ArcPtr.downgrade`, and `WeakPtr.upgrade` are source
+methods over checked compiler primitives. Array `at` and `Ptr.replace` retain
+compiler-provided method signatures. `get` and `downgrade` borrow their owner
+through a pointer receiver; `upgrade` borrows the weak handle in the same way.
+Associated syntax can supply the receiver explicitly, as in
+`ArcPtr<T>.get(&owner)`. A fresh value borrowed by a pointer receiver is saved
+in the caller's scope, including for user-defined methods. The returned pointer
+does not retain a separate owner if the original handle is overwritten.
 
 `drop(self: Ptr<T>) -> ()` is an ordinary method that IR generation also registers
 as a destruction hook. Direct calls use normal method lookup and receiver conversion.
@@ -197,10 +197,11 @@ value with a destructor into its raw record representation is rejected.
 
 Every actual copied struct receives its own `drop()`. A destructor that frees a raw
 handle can therefore be unsafe to copy. The language does not prove such wrappers
-correct. Native-library authors should construct inner owners as fresh payloads in
-ArcPtr and expose shared handles to ordinary callers. Constructing
-`ArcPtr<Resource>(named_resource)` copies that actual resource value; the named original
-still receives destruction. This differs from copying an `ArcPtr<Resource>` handle.
+correct. Native-library authors should initialize native owners in shared storage and expose
+shared handles to ordinary callers. Passing a live raw owner to
+`ArcPtr<Resource>.alloc(named_resource)` copies that resource value; the named
+original still receives destruction. Copying an `ArcPtr<Resource>` handle instead
+retains the same payload without copying it.
 
 `pointer.replace(replacement)` supports deliberate native ownership transfer: it
 returns the old pointee and installs the replacement without destroying the old
@@ -228,8 +229,8 @@ Compiler temporaries that hold an ArcPtr receiver's address retain its owner unt
 end of the containing scope. A raw
 address returned beyond that scope carries no ownership.
 
-`arc.get()` returns `Ptr<T>`; field and pointer-receiver method access also implicitly
-dereference an ArcPtr. `arc.downgrade()` returns `WeakPtr<T>`. `WeakPtr<T>()` is an empty weak
+`arc.get()` returns `Ptr<T>`. Use `arc.get().field` or `arc.get().method()`
+to access the payload; the wrapper has its own ordinary namespace. `arc.downgrade()` returns `WeakPtr<T>`. `WeakPtr<T>.empty()` is an empty weak
 reference. `weak.upgrade()` returns `ArcPtr<T> | None`:
 
 ```resin
@@ -256,9 +257,9 @@ Traps, aborts, and process termination do not unwind destructors.
 ## Host and GPU boundary
 
 Reference counts and destructors run on the host. GPU code can address records
-containing opaque ArcPtr/ArcSpan/WeakPtr/WeakSpan slots, including ordinary neighboring fields. Loading,
+containing opaque `StrongOwner`/`WeakOwner` slots, including ordinary neighboring fields. Loading,
 storing, copying, upgrading, or otherwise consuming a managed value is rejected
-during shader emission with a source-located diagnostic. This includes whole
+during concrete shader checking with a source-located diagnostic. This includes whole
 aggregates containing managed values. Custom destruction is also host-only in this
 implementation. `T | None` is available in shader-local values when `T` is compatible.
 
@@ -286,8 +287,8 @@ pipeline, project them internally, and retain the root and its referenced
 allocations after successful recording. `commands.draw(pipeline, None, count)`
 supplies no root for a rootless graphics pipeline. Shader entry
 parameters remain raw `Ptr<T>` values. Host `GpuPtr` and `GpuSpan` values are owning
-GPU views, and indexing, slicing, copying, and taking a field address preserve their
-owner. Allocation-wide recording state rejects CPU access until work completes or
+GPU views. Indexing, slicing, and copying preserve their owner. Host access
+uses checked `load`, `store`, and `replace` methods; it cannot obtain a raw host pointer. Allocation-wide recording state rejects CPU access until work completes or
 is canceled; per-view permissions additionally control host reads and writes.
 See [GPU buffers](gpu-buffers.md) for projection and layout requirements.
 

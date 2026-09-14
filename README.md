@@ -40,6 +40,7 @@ Ordinary helpers can run on the CPU or be called from shaders, within the
 
 ```resin
 export { main };
+import { "$/string.resin" };
 
 struct Point { x: float32, y: float32 };
 

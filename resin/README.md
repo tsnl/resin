@@ -15,7 +15,9 @@ import { "$/gpu.resin", "$/status.resin" };
 ```
 
 - `gpu.resin`: devices, allocations, pipelines, GPU images, commands, and window presentation.
-- `host.resin`: checked host memory allocation and explicit deallocation.
+- `span.resin`: borrowed spans and literal byte views.
+- `shared.resin`: shared pointer and sequence allocation, with corresponding weak owners.
+- `string.resin`: owned strings, formatting, and printing.
 - `window.resin`: windows, named controls, button snapshots, cursor capture, and scrolling.
 - `image.resin`: PNG I/O.
 - `status.resin`: native status conversion and named errors.
@@ -31,9 +33,10 @@ Native declarations stay private. The C ABI remains unchecked: callers
 must uphold pointer validity, lifetimes, and buffer sizes. Importing a module does not
 re-export its dependencies. Import `$/status.resin` to name or match errors; inferred
 `Result<(), _>` callers do not need that import.
-`fmt`, `print`, `ok`, and `err` are unshadowable compiler builtins. Shader candidates use
+`ok` and `err` are compiler builtins; `fmt` and `print` are ordinary exports of
+`string.resin`. Shader entries use
 `@compute_shader`, `@vertex_shader`, or `@fragment_shader`; `function.spirv` produces a
-`Span<ubyte>` accepted directly by the compute/graphics pipeline wrappers.
+structural byte view, convertible to the source `Span<ubyte>` type.
 
 Constructors return the new handle, not an integer and an out-parameter:
 
@@ -43,7 +46,7 @@ import { "$/gpu.resin" };
 
 def main() -> Result<(), _> = {
     var gpu = Gpu.new()?;
-    var data = GpuSpan<uint>.allocate(gpu, 64)?;
+    var data = gpu.alloc::<uint>(64)?;
     var commands = gpu.start_command_recording()?;
     commands.submit()?;
     ok(())
@@ -52,8 +55,9 @@ def main() -> Result<(), _> = {
 
 Resources use shared owners. Copying a handle retains its allocation, and initialized
 locals release ownership in reverse scope order, including through `?`. GPU views
-retain their allocation and device through indexing, slicing, and field addresses.
-`gpu.new(value)?` infers `GpuPtr<T>`; `GpuSpan<T>.allocate(gpu, count)?` allocates
+retain their allocation and device through indexing and slicing. Use `load`,
+`store`, and `replace` for checked host access.
+`gpu.create(value)?` infers `GpuPtr<T>`; `gpu.alloc::<T>(count)?` allocates
 uninitialized elements. `.read_only()` and `.write_only()` narrow host access.
 
 Pipeline creation accepts decorated shader declarations and preserves their root
@@ -74,12 +78,11 @@ dropping one already consumed does not cancel it again. Submission waits for GPU
 
 | Type | Constructors and operations |
 | --- | --- |
-| `Host` | `Host.alloc(count, initial)` |
-| `ArcPtr<T>` / `ArcSpan<T>` | `.get()`, `.downgrade()`; `ArcSpan<T>.try_new(count, initial)` |
+| `ArcPtr<T>` / `ArcSpan<T>` | `.alloc(initial)` / `.alloc(count, initial)`, `.get()`, `.downgrade()` |
 | `Span<T>` | `.at(index)`, `.slice(start, length)`, numeric `.as_bytes()` |
-| `WeakPtr<T>` / `WeakSpan<T>` | Empty construction, `.upgrade()` |
-| `Gpu` | `Gpu.new()`, `Gpu.new_at(index)`, `Gpu.new_for_window(window)`, `gpu.malloc(...)`, `gpu.create_compute_pipeline(kernel)`, `gpu.create_image(...)` |
-| `GpuPtr<T>` / `GpuSpan<T>` | `gpu.new(value)`, `GpuSpan<T>.allocate(gpu, count)`, `.at(index)`, `.slice(start, length)`, `.read_only()`, `.write_only()` |
+| `WeakPtr<T>` / `WeakSpan<T>` | `.empty()`, `.upgrade()` |
+| `Gpu` | `Gpu.new()`, `Gpu.new_at(index)`, `Gpu.new_for_window(window)`, `gpu.create_compute_pipeline(kernel)`, `gpu.create_image(...)` |
+| `GpuPtr<T>` / `GpuSpan<T>` | `gpu.create(value)`, `gpu.alloc::<T>(count)`, `.at(index)`, `.slice(start, length)`, `.read_only()`, `.write_only()` |
 | `GpuComputePipeline<Root, Owner>` / `GpuGraphicsPipeline<Root, Owner>` | `gpu.create_compute_pipeline(kernel)`, `gpu.create_graphics_pipeline(vertex, fragment)` |
 | `GpuCommands` | `gpu.start_command_recording()`, `commands.dispatch(pipeline, arguments, x, y, z)`, `commands.draw(pipeline, arguments, count)`, `commands.submit()`, `commands.cancel()` |
 | `Window` | `Window.new(width, height, String.from_str("Resin"))`, `window.poll_events()`, `window.framebuffer_size()`, input and cursor methods |
@@ -95,8 +98,8 @@ rows; a nonzero stride includes padding on every row. Copy GPU output to owned h
 storage with `GpuSpan<T>.copy_to` first, and keep the owner alive through the write.
 The instance method `image.write_png(path)` uses the loaded image's dimensions and pixels.
 
-Import `$/host.resin` for
-`Host.alloc(count, initial) -> Result<ArcSpan<T>, OutOfMemory>`. Each element is
+Import `$/shared.resin` for
+`ArcSpan<T>.alloc(count, initial) -> Result<ArcSpan<T>, OutOfMemory>`. Each element is
 initialized with an ordinary copy of `initial`; the type determines its size.
 Allocation size overflow and allocation failure return `OutOfMemory`. Empty
 sequences are valid. Copies of the returned handle retain its allocation, and the
@@ -104,7 +107,7 @@ last owner destroys the elements in reverse order and frees their storage.
 `owner.get()` borrows a `Span<T>` without retaining the allocation.
 
 ```resin
-var host = Host.alloc(pixels.length, 0_ui)?;
+var host = ArcSpan<uint>.alloc(pixels.length, 0_ui)?;
 pixels.copy_to(host.get());
 ImageData.write_pixels(path.data, width, height, 4, host.get().as_bytes(), 0)?;
 ```
@@ -120,7 +123,7 @@ Some operations return additional information:
 - Pipeline factories return typed shared owners. Dispatch and draw project arguments
   internally, preserving interior byte offsets in GPU views.
 - `ImageData.read_png(path, channels)` returns a shared `ImageData` owner exposing
-  `width`, `height`, `channels`, and `pixels`. The final owner releases the pixels;
+  `width()`, `height()`, `channels()`, and `pixels()` methods. The final owner releases the pixels;
   `channels = 0` requests the file's channel count.
 - `window.framebuffer_size()` returns `(width, height)`.
   `window.should_close()` and `window.key_pressed(key)` return booleans, not status codes.
@@ -146,7 +149,7 @@ Small native helpers expose standard-stream operations and integer-width convers
 
 ```resin
 export { main };
-import { "$/console.resin" };
+import { "$/console.resin", "$/string.resin" };
 
 def main() -> Result<(), _> = {
     print("Name: ");
@@ -164,7 +167,7 @@ other bytes, including whitespace, embedded NULs, and a lone CR, are preserved a
 the C stream. UTF-8 is preserved without decoding or validation. Windows standard streams use
 the CRT's default text mode, including its newline and EOF translations.
 
-`InputLine` is a shared owner exposing `data: Ptr<ubyte>` and `length: ulong`. Its
+`InputLine` is a shared owner whose `get()` method borrows a `Span<ubyte>`. Its
 dynamically grown allocation has an extra trailing NUL outside `length`. Empty lines
 succeed with length zero. EOF before any bytes returns `EndOfInput`; a final nonempty line without a newline succeeds. The other `InputError`
 variants are `InputReadError` and `InputOutOfMemory`. Failure frees any partial buffer; consumed
@@ -172,7 +175,7 @@ stdin bytes are not restored. Errors remain subject to C's stream error state.
 
 Copying a line retains shared ownership; the final owner frees its allocation. Raw pointers
 into that allocation do not retain it. `Console.print(line)` writes all `length` bytes, adds no
-newline, flushes stdout, and returns `Result<(), InputWriteError>`. The builtin `print` does
+newline, flushes stdout, and returns `Result<(), InputWriteError>`. The library function `print` does
 not accept `InputLine` values.
 
 `Console.read_byte() -> Result<ubyte, EndOfInput | InputReadError>` reads a single byte, including
@@ -184,8 +187,8 @@ callers never need to interpret its negative sentinel. These console APIs are fo
 bytes verbatim, flush, and return `Result<(), WriteError>`. Import `$/io.resin` to use them.
 Use `fmt("n = {0}", (n,))` to construct an owned String before writing or storing it.
 Literals have type `str` over static bytes; formatting results own an `ArcSpan<ubyte>` allocation. Use
-`Span<ubyte>(literal)` when a raw byte view is needed. InputLine
-can be passed as an explicit `Span<ubyte> { data = line.data, length = line.length }` while
+`bytes(literal)` from `$/span.resin` when a raw byte view is needed. An InputLine
+can be passed as `line.get()` while
 its owner remains live.
 
 `String.from_str(text)` copies a `str` without formatting. `String.from_bytes(span)` copies
