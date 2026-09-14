@@ -10,6 +10,7 @@ fn run(source: &str) -> std::process::Output {
 fn nested_template_calls_use_context_and_preserve_numeric_widths() {
     let output = run(r#"
         export { main };
+        import { "$/string.resin" };
         def identity<T>(value: T) -> _ = { value };
         def increment<T>(value: T) -> T = { value + 1 };
         def twice<U>(value: U) -> U = { increment(increment(value)) };
@@ -32,6 +33,7 @@ fn nested_template_calls_use_context_and_preserve_numeric_widths() {
 fn template_fields_and_layout_follow_each_nominal_argument() {
     let output = run(r#"
         export { main };
+        import { "$/string.resin" };
         struct Small { value: int };
         struct Large { padding: ulong, value: uint };
         def read<T>(value: Ptr<T>) -> _ = { value.value };
@@ -55,11 +57,14 @@ fn template_fields_and_layout_follow_each_nominal_argument() {
 fn generic_identity_preserves_shared_ownership() {
     let output = run(r#"
         export { main };
+        import { "$/shared.resin" };
         def identity<T>(value: T) -> T = { value };
-        def main() -> int = {
-            var owner = ArcPtr<int>(42);
-            var copy = identity(owner);
-            copy.*
+        def main() -> Result<int, _> = {
+            var copy = {
+                var owner = ArcPtr<int>.alloc(42)?;
+                identity(owner)
+            };
+            ok(copy.get().*)
         };
     "#);
     assert_eq!(

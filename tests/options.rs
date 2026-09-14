@@ -154,6 +154,7 @@ fn unwrapping_none_traps_before_following_side_effects() {
     for value in ["absent", "None"] {
         let output = run(&format!(
             r#"
+            import {{ "$/string.resin" }};
             def main() -> int = {{
                 var absent: int | None; absent := None;
                 var value: int; value := {value}!;

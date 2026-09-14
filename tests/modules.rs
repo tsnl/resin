@@ -184,8 +184,13 @@ fn reexports_keep_binding_identity_through_diamond_imports() {
     assert_eq!(project.run().status.code(), Some(42));
     let module = project.compile().unwrap();
     assert_eq!(
-        module.types.iter().filter(|d| d.name().is_some()).count(),
-        2
+        module
+            .types
+            .iter()
+            .filter_map(|d| d.name())
+            .map(|name| name.as_ref())
+            .collect::<Vec<&str>>(),
+        ["Number"]
     );
     assert_eq!(module.functions.len(), 2);
 }
@@ -333,19 +338,19 @@ fn importing_modules_does_not_execute_their_functions() {
     let project = Project::new(&[
         (
             "base.resin",
-            "def main() -> () = { print(fmt(\"A\", ())); };",
+            "import { \"$/string.resin\" }; def main() -> () = { print(\"A\"); };",
         ),
         (
             "left.resin",
-            "import { \"base.resin\" }; def main() -> () = { print(fmt(\"B\", ())); };",
+            "import { \"base.resin\", \"$/string.resin\" }; def main() -> () = { print(\"B\"); };",
         ),
         (
             "right.resin",
-            "import { \"base.resin\" }; def main() -> () = { print(fmt(\"C\", ())); };",
+            "import { \"base.resin\", \"$/string.resin\" }; def main() -> () = { print(\"C\"); };",
         ),
         (
             "main.resin",
-            "export { main }; import { \"left.resin\", \"right.resin\", \"./base.resin\" }; def main() -> () = { print(fmt(\"D\", ())); };",
+            "export { main }; import { \"left.resin\", \"right.resin\", \"./base.resin\", \"$/string.resin\" }; def main() -> () = { print(\"D\"); };",
         ),
     ]);
     let output = project.run();
@@ -507,7 +512,7 @@ fn library_root_can_be_relocated_and_does_not_capture_relative_imports() {
         ),
         (
             "main.resin",
-            "export { main }; import { \"$/renderer/value.resin\", \"std/library.resin\" }; def main() -> () = { print(fmt(\"{0}\", (rendered() + local(),))); };",
+            "export { main }; import { \"$/renderer/value.resin\", \"std/library.resin\" }; def main() -> int = { rendered() + local() };",
         ),
     ]);
     let output = Command::new(env!("CARGO_BIN_EXE_resin"))
@@ -516,12 +521,13 @@ fn library_root_can_be_relocated_and_does_not_capture_relative_imports() {
         .arg("main.resin")
         .output()
         .unwrap();
-    assert!(
-        output.status.success(),
+    assert_eq!(
+        output.status.code(),
+        Some(43),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(output.stdout, b"43");
+    assert!(output.stdout.is_empty());
 }
 
 #[test]
@@ -543,7 +549,7 @@ fn invalid_import_paths_report_the_importing_file() {
 
 #[test]
 fn compiler_builtins_cannot_be_redefined_in_any_module_or_scope() {
-    for name in ["print"] {
+    for name in ["absurd"] {
         for source in [
             format!("def {name} () -> () = {{}};"),
             format!("extern \"stdlib.h\" def {name} () -> int;"),
@@ -574,7 +580,7 @@ fn compiler_builtins_cannot_be_redefined_in_any_module_or_scope() {
 fn builtin_spellings_are_valid_field_names() {
     let project = Project::new(&[(
         "main.resin",
-        "export { main }; struct Fields { print: int, shader: int }; def main () -> int = { var value = Fields { print = 20, shader = 22 }; value.print + value.shader };",
+        "export { main }; struct Fields { absurd: int, shader: int }; def main () -> int = { var value = Fields { absurd = 20, shader = 22 }; value.absurd + value.shader };",
     )]);
     assert_eq!(project.run().status.code(), Some(42));
 }
@@ -837,7 +843,7 @@ fn struct_methods_resolve_later_aliases_and_recursive_siblings() {
             def even(n: int) -> bool = { if (n == 0) { 1 == 1 } else { Owner.odd(n - 1) } };
             def odd(n: int) -> bool = { if (n == 0) { 1 == 0 } else { Owner.even(n - 1) } };
         };
-        type Shared = ArcPtr<Owner>;
+        type Shared = Owner;
         def main() -> int = {
             var owner = Shared.new(42);
             if (Shared.even(owner.read())) { 0 } else { 1 }
