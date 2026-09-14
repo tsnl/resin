@@ -24,6 +24,8 @@ pub(super) fn check_instr(
 
         Instr::GpuElementLayout { .. }
         | Instr::GpuViewAllocate
+        | Instr::GpuViewIndex { .. }
+        | Instr::GpuViewRange { .. }
         | Instr::GpuViewOffset
         | Instr::GpuViewRestrict
         | Instr::GpuViewLoad { .. }

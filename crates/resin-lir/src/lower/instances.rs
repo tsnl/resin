@@ -454,6 +454,7 @@ impl<'a> Instances<'a> {
         self.type_requests.push(NominalRequest { instance, depth });
         self.definitions.push(TypeDef::Nominal {
             gpu_projection: None,
+            gpu_pipeline: None,
             name: self.nominal_name(&self.type_requests[id.index()].instance),
             body: None,
             drop: None,
@@ -488,6 +489,19 @@ impl<'a> Instances<'a> {
         let source = &self.source.types[instance.definition.index()];
         let body = super::substitute::Substitution::new(&source.type_params, &instance.arguments)?
             .ty(&source.body, self)?;
+        let gpu_pipeline = source
+            .gpu_pipeline
+            .as_ref()
+            .map(|pipeline| {
+                let substitution =
+                    super::substitute::Substitution::new(&source.type_params, &instance.arguments)?;
+                Ok(resin_types::GpuPipeline {
+                    kind: pipeline.kind,
+                    root: substitution.ty(&pipeline.root, self)?,
+                    owner: substitution.ty(&pipeline.owner, self)?,
+                })
+            })
+            .transpose()?;
         let gpu_projection = source
             .gpu_projection
             .as_ref()
@@ -512,6 +526,7 @@ impl<'a> Instances<'a> {
             })?;
         self.definitions[index] = TypeDef::Nominal {
             gpu_projection,
+            gpu_pipeline,
             name: self.nominal_name(&instance),
             body: Some(body),
             drop,

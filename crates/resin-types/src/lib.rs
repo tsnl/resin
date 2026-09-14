@@ -48,6 +48,7 @@ pub enum TypeDef {
         /// Builtin destruction hook; ordinary method namespaces remain in the frontend.
         drop: Option<FunctionId>,
         gpu_projection: Option<GpuProjection>,
+        gpu_pipeline: Option<GpuPipeline>,
     },
     Structural(Ty),
 }
@@ -59,6 +60,7 @@ impl TypeDef {
             body: Some(body),
             drop: None,
             gpu_projection: None,
+            gpu_pipeline: None,
         }
     }
     pub fn name(&self) -> Option<&Arc<str>> {
@@ -70,6 +72,12 @@ impl TypeDef {
     pub fn drop_hook(&self) -> Option<FunctionId> {
         match self {
             Self::Nominal { drop, .. } => *drop,
+            Self::Structural(_) => None,
+        }
+    }
+    pub fn gpu_pipeline(&self) -> Option<&GpuPipeline> {
+        match self {
+            Self::Nominal { gpu_pipeline, .. } => gpu_pipeline.as_ref(),
             Self::Structural(_) => None,
         }
     }
@@ -91,6 +99,20 @@ impl TypeDef {
             Self::Structural(ty) => ty.clone(),
         }
     }
+}
+
+/// The shader interface bound to an ordinary source pipeline wrapper.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GpuPipeline {
+    pub kind: GpuPipelineKind,
+    pub root: Ty,
+    pub owner: Ty,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpuPipelineKind {
+    Compute,
+    Graphics,
 }
 
 /// The explicitly registered conversion from a source GPU wrapper to shader storage.
@@ -187,6 +209,7 @@ pub enum Ty {
     },
     /// Opaque allocation ownership, checked byte offset, and host access permissions.
     GpuView,
+    GpuPipelineContract,
     /// Opaque projected shader arguments, retained by a host ArcPtr handle.
     GpuArguments,
     /// Opaque shared allocation handle; copies retain and destruction releases.
@@ -417,6 +440,8 @@ pub enum Intrinsic {
     GpuElementLayout,
     GpuViewAllocate,
     GpuViewOffset,
+    GpuViewIndex,
+    GpuViewRange,
     GpuViewRestrict,
     GpuViewLoad,
     GpuViewStore,

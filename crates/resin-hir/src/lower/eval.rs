@@ -124,6 +124,7 @@ fn builtin_ty(name: &str) -> Option<Ty> {
         "Never" => Ty::union([]),
         "None" => Ty::None,
         "GpuView" => Ty::GpuView,
+        "GpuPipelineContract" => Ty::GpuPipelineContract,
         "GpuArguments" => Ty::GpuArguments,
         "StrongOwner" => Ty::StrongOwner,
         "WeakOwner" => Ty::WeakOwner,

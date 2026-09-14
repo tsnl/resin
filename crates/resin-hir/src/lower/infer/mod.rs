@@ -123,6 +123,7 @@ impl Type {
             crate::Type::Float64 => Ty::Float64.into(),
             crate::Type::Str => Ty::Str.into(),
             crate::Type::GpuView => Ty::GpuView.into(),
+            crate::Type::GpuPipelineContract => Ty::GpuPipelineContract.into(),
             crate::Type::GpuArguments => Ty::GpuArguments.into(),
             crate::Type::StrongOwner => Ty::StrongOwner.into(),
             crate::Type::WeakOwner => Ty::WeakOwner.into(),
@@ -1103,6 +1104,7 @@ pub(crate) struct AppliedMethod {
 
 #[derive(Clone)]
 pub(crate) enum ResolvedMethod {
+    GpuPipeline { method: super::gpu::PipelineMethod },
     Dependent {
         signature: Type,
     },
@@ -1777,6 +1779,21 @@ impl Inference<'_> {
                     Type::Variable(_) | Type::Apply { .. }
                 ) {
                     return Ok(false);
+                }
+                if let Some(receiver) = self.solver.resolve(receiver_type)
+                    && let Some(method) = self.typer.method(&receiver, name)
+                    && matches!(method.body, FunctionBody::GpuPipelineFactory { .. } | FunctionBody::GpuPipelineRecord { .. })
+                {
+                    argument_count(method.params.len() - usize::from(!associated), args.len(), span)?;
+                    let inputs = &args[usize::from(*associated)..];
+                    let needed = if matches!(method.body, FunctionBody::GpuPipelineFactory { .. }) { inputs.len() } else { 1 };
+                    let Some(inputs) = inputs.iter().take(needed).map(|ty| self.solver.complete(ty)).collect::<Option<Vec<_>>>() else { return Ok(false); };
+                    let method = self.typer.source_pipeline_method(&method, &inputs).map_err(|message| error(span, message))?;
+                    let params = method.params[usize::from(!associated)..].iter().map(Type::from_hir).collect::<Vec<_>>();
+                    let a = self.arguments(args, &params, span)?;
+                    let b = self.solver.coerce(&Type::from_hir(&method.result), out, span)?;
+                    if a && b { self.methods.insert(owner, ResolvedMethod::GpuPipeline { method }); }
+                    return Ok(a && b);
                 }
                 let allocation = !associated
                     && name.as_ref() == "new"

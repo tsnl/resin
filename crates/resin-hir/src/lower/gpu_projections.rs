@@ -12,6 +12,9 @@ pub(super) fn define(
     declaration: FunctionId,
     operation: &str,
 ) -> Result<bool, GenerateError> {
+    if matches!(operation, "gpu_compute_pipeline_type" | "gpu_graphics_pipeline_type") {
+        return pipeline(context, function, declaration, operation);
+    }
     let (kind, op) = match operation {
         "gpu_pointer_projection" => (GpuProjectionKind::Pointer, Intrinsic::GpuPointerProjection),
         "gpu_span_projection" => (
@@ -127,7 +130,7 @@ pub(super) fn define(
     Ok(true)
 }
 
-fn body(context: &Context, ty: &Type) -> Option<Type> {
+pub(super) fn body(context: &Context, ty: &Type) -> Option<Type> {
     let Type::Defined {
         definition,
         arguments,
@@ -139,7 +142,7 @@ fn body(context: &Context, ty: &Type) -> Option<Type> {
     substitute(&scheme.body, &scheme.type_params, arguments.clone())
 }
 
-fn substitute(
+pub(super) fn substitute(
     ty: &Type,
     parameters: &[crate::TypeParameter],
     arguments: Vec<Type>,
@@ -154,4 +157,22 @@ fn substitute(
         )
         .ok()?;
     solver.complete(&applied)
+}
+
+fn pipeline(context: &mut Context, function: &mut Function, declaration: FunctionId, operation: &str) -> Result<bool, GenerateError> {
+    let invalid = || GenerateError::inference(function.signature.result.span, format!("invalid signature or wrapper storage for intrinsic `{operation}`"));
+    let [root, owner] = function.signature.type_params.as_slice() else { return Err(invalid()); };
+    let [input] = function.signature.params.as_slice() else { return Err(invalid()); };
+    let Type::Defined { definition, arguments } = &function.signature.result.ty else { return Err(invalid()); };
+    let source = context.nominal_schemes.get(definition).ok_or_else(invalid)?;
+    let bound = |parameter: &crate::TypeParameter| Type::Parameter { parameter: parameter.id };
+    if input.annotation.ty != Type::GpuPipelineContract || arguments != &[bound(root), bound(owner)] || source.type_params.len() != 2 || source.drop.is_some() || source.gpu_pipeline.is_some() { return Err(invalid()); }
+    let Type::Record { fields } = &source.body else { return Err(invalid()); };
+    if fields.len() != 1 || fields[0].ty != Type::GpuPipelineContract { return Err(invalid()); }
+    let kind = if operation == "gpu_compute_pipeline_type" { resin_types::GpuPipelineKind::Compute } else { resin_types::GpuPipelineKind::Graphics };
+    if context.nominal_schemes.values().any(|source| source.gpu_pipeline.as_ref().is_some_and(|pipeline| pipeline.kind == kind)) { return Err(invalid()); }
+    let contract = crate::GpuPipeline { declaration, kind, root: bound(&source.type_params[0]), owner: bound(&source.type_params[1]) };
+    context.nominal_schemes.get_mut(definition).unwrap().gpu_pipeline = Some(contract);
+    super::primitives::body(function, Intrinsic::GpuPointerProjection);
+    Ok(true)
 }

@@ -184,6 +184,12 @@ impl FunctionLowering<'_> {
                 element: result.clone(),
             }),
             Intrinsic::GpuViewAllocate => self.emit(Instr::GpuViewAllocate),
+            Intrinsic::GpuViewIndex => self.emit(Instr::GpuViewIndex {
+                element: type_args[0].clone(),
+            }),
+            Intrinsic::GpuViewRange => self.emit(Instr::GpuViewRange {
+                element: type_args[0].clone(),
+            }),
             Intrinsic::GpuViewOffset => self.emit(Instr::GpuViewOffset),
             Intrinsic::GpuViewRestrict => self.emit(Instr::GpuViewRestrict),
             Intrinsic::GpuViewStore => self.emit(Instr::GpuViewStore),

@@ -411,6 +411,8 @@ fn instruction(
     let expr = match instr {
         Instr::GpuElementLayout { .. }
         | Instr::GpuViewAllocate
+        | Instr::GpuViewIndex { .. }
+        | Instr::GpuViewRange { .. }
         | Instr::GpuViewOffset
         | Instr::GpuViewRestrict
         | Instr::GpuViewLoad { .. }

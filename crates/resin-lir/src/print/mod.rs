@@ -137,6 +137,8 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
         }
         Instr::GpuViewLoad { element } => list("gpu-view-load", vec![sexp_ty(names, element)]),
         Instr::GpuViewAllocate => symbol("gpu-view-allocate"),
+        Instr::GpuViewIndex { element } => list("gpu-view-index", vec![sexp_ty(names, element)]),
+        Instr::GpuViewRange { element } => list("gpu-view-range", vec![sexp_ty(names, element)]),
         Instr::GpuViewOffset => symbol("gpu-view-offset"),
         Instr::GpuViewRestrict => symbol("gpu-view-restrict"),
         Instr::GpuViewStore => symbol("gpu-view-store"),
@@ -432,6 +434,7 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
         Ty::GpuPointer { pointee } => list("gpu-ptr", vec![sexp_ty(names, pointee)]),
         Ty::GpuSpan { element } => list("gpu-span", vec![sexp_ty(names, element)]),
         Ty::GpuView => symbol("GpuView"),
+        Ty::GpuPipelineContract => symbol("GpuPipelineContract"),
         Ty::GpuArguments => symbol("GpuArguments"),
         Ty::GpuComputePipeline { root, owner } => list(
             "gpu-compute-pipeline",

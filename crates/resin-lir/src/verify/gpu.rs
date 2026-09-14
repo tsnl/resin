@@ -47,6 +47,14 @@ pub(super) fn check(
                 ],
             }
         }
+        Instr::GpuViewIndex { element } | Instr::GpuViewRange { element } => {
+            gpu_element(module, element, location)?;
+            expect_type(Ty::GpuView, args[0].clone(), location)?;
+            for arg in &args[1..] {
+                expect_type(Ty::UInt64, arg.clone(), location)?;
+            }
+            Ty::GpuView
+        }
         Instr::GpuViewOffset => {
             super::rules::expect_types(
                 &[Ty::GpuView, Ty::UInt64, Ty::UInt64, Ty::UInt64],

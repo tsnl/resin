@@ -452,6 +452,7 @@ impl TypeNames {
             Type::GpuPointer { pointee } => format!("GpuPtr<{}>", self.format(pointee)),
             Type::GpuSpan { element } => format!("GpuSpan<{}>", self.format(element)),
             Type::GpuView => "GpuView".into(),
+            Type::GpuPipelineContract => "GpuPipelineContract".into(),
             Type::GpuArguments => "GpuArguments".into(),
             Type::GpuComputePipeline { root, owner } => format!(
                 "GpuComputePipeline<{}, {}>",

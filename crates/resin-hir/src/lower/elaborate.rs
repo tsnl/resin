@@ -186,6 +186,9 @@ impl Completion<'_> {
                             .map(|arg| self.elaborate(arg))
                             .collect::<Result<_>>()?,
                     },
+                    ResolvedMethod::GpuPipeline { method } => {
+                        self.source_pipeline(method, receiver.as_deref(), name, args)?
+                    }
                     ResolvedMethod::Compiler { declaration } => {
                         let result = types::ty(&declaration.result);
                         let kind = self.method(
@@ -210,7 +213,7 @@ impl Completion<'_> {
                     ResolvedMethod::Dependent { signature } => TermKind::DependentMethod {
                         lookup: self.method_lookup(signature, name.span)?,
                     },
-                    ResolvedMethod::Compiler { .. } => {
+                    ResolvedMethod::Compiler { .. } | ResolvedMethod::GpuPipeline { .. } => {
                         unreachable!("source method reference")
                     }
                 }
@@ -490,6 +493,17 @@ impl Completion<'_> {
             )
             .collect();
         Ok(TermKind::Call { func, args })
+    }
+
+    fn source_pipeline(&mut self, method: super::gpu::PipelineMethod, receiver: Option<&typed::Term>, _name: &Ident, arguments: &[typed::Term]) -> Result<TermKind> {
+        if let FunctionBody::GpuPipelineFactory { factory, graphics } = method.body {
+            let receiver_type = self.solver.resolve(&Type::from_hir(&method.params[0])).expect("fixed native GPU receiver");
+            return self.pipeline_create(receiver, arguments, &[receiver_type], factory, graphics);
+        }
+        let values = receiver.into_iter().chain(arguments.iter()).map(|term| self.elaborate(term)).collect::<Result<Vec<_>>>()?;
+        let args = Arguments { values, params: method.params };
+        let FunctionBody::GpuPipelineDispatch { context, allocator, record } = method.body else { unreachable!("completed pipeline bridge") };
+        Ok(TermKind::GpuPipelineDispatch { context, allocator, record, args })
     }
 
     fn method(

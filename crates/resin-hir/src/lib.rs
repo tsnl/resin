@@ -105,6 +105,7 @@ pub enum Type {
     },
     /// An opaque shared allocation view with checked byte offsets and host permissions.
     GpuView,
+    GpuPipelineContract,
     GpuArguments,
     /// Opaque shared allocation handle; copies retain and destruction releases.
     StrongOwner,
@@ -193,6 +194,16 @@ pub struct TypeDefinition {
     /// A hook whose type parameters are supplied by this nominal application.
     pub drop: Option<FunctionId>,
     pub gpu_projection: Option<GpuProjection>,
+    pub gpu_pipeline: Option<GpuPipeline>,
+}
+
+/// A source declaration binds the nominal pipeline's root and owner parameters.
+#[derive(Debug, Clone)]
+pub struct GpuPipeline {
+    pub declaration: FunctionId,
+    pub kind: resin_types::GpuPipelineKind,
+    pub root: Type,
+    pub owner: Type,
 }
 
 /// A source declaration explicitly registers a wrapper's shader projection.
@@ -772,6 +783,7 @@ fn builtin_hover(document: &resin_cst::Document, token: resin_cst::Node<'_>) -> 
                 | "Span"
                 | "GpuPtr"
                 | "GpuSpan"
+                | "GpuPipelineContract"
                 | "GpuView"
                 | "GpuArguments"
                 | "GpuComputePipeline"

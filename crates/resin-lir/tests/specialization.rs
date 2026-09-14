@@ -290,6 +290,7 @@ fn implicit_drop_references_use_concrete_function_identities() {
     let mut hir = program(vec![]);
     hir.types.push(resin_hir::TypeDefinition {
         gpu_projection: None,
+        gpu_pipeline: None,
         type_params: vec![],
         name: "Owner".into(),
         body: Type::Record { fields: vec![] },
@@ -394,6 +395,7 @@ fn requested_roots_exclude_unused_functions_types_and_drop_hooks() {
     ));
     hir.types.push(resin_hir::TypeDefinition {
         gpu_projection: None,
+        gpu_pipeline: None,
         type_params: vec![],
         name: "Unused".into(),
         body: Type::Defined {
@@ -431,6 +433,7 @@ fn explicit_root_arguments_normalize_and_preserve_recursive_nominal_identity() {
     hir.types = (0..3)
         .map(|index| resin_hir::TypeDefinition {
             gpu_projection: None,
+            gpu_pipeline: None,
             type_params: vec![],
             name: format!("Type{index}").into(),
             body: Type::Record { fields: vec![] },
@@ -609,6 +612,7 @@ fn nominal_expansion_is_bounded_across_declaration_boundaries() {
     hir.types = (0..300)
         .map(|index| resin_hir::TypeDefinition {
             gpu_projection: None,
+            gpu_pipeline: None,
             type_params: vec![],
             name: format!("Type{index}").into(),
             methods: Default::default(),
@@ -650,6 +654,7 @@ fn nominal_program(body: Type) -> Module {
     let mut hir = program(vec![]);
     hir.types.push(resin_hir::TypeDefinition {
         gpu_projection: None,
+        gpu_pipeline: None,
         type_params: vec![TypeParameter {
             id: U,
             name: Ident::new("U".into(), SPAN),
@@ -827,6 +832,7 @@ fn member_derived_unions_normalize_independently_of_layout_discovery_order() {
         .into_iter()
         .map(|name| resin_hir::TypeDefinition {
             gpu_projection: None,
+            gpu_pipeline: None,
             type_params: vec![],
             name: name.into(),
             body: Type::Record { fields: vec![] },
@@ -1164,6 +1170,7 @@ fn generic_conversions_cannot_bypass_custom_destruction() {
         functions: vec![unwrap, drop],
         types: vec![resin_hir::TypeDefinition {
             gpu_projection: None,
+            gpu_pipeline: None,
             type_params: vec![],
             name: "Owner".into(),
             body: Type::Record { fields: vec![] },
@@ -1230,6 +1237,7 @@ fn dependent_methods() -> Module {
         ],
         types: vec![resin_hir::TypeDefinition {
             gpu_projection: None,
+            gpu_pipeline: None,
             type_params: vec![],
             name: "Owner".into(),
             body: Type::Record { fields: vec![] },

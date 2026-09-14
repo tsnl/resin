@@ -87,6 +87,10 @@ pub enum Instr {
     GpuViewAllocate,
     /// `[view, byte_offset, bytes, alignment] -> [view]`: validate range/alignment and transfer its owner.
     GpuViewOffset,
+    /// `[view, capacity, index] -> [view]`: check an element index and transfer its owner.
+    GpuViewIndex { element: Ty },
+    /// `[view, capacity, start, length] -> [view]`: check an element range and transfer its owner.
+    GpuViewRange { element: Ty },
     /// `[view, access_mask] -> [view]`: remove permissions and transfer its owner.
     GpuViewRestrict,
     /// `[view] -> [element]`: copy plain storage after checking read access.

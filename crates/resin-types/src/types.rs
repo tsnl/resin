@@ -145,6 +145,7 @@ mod definition_tests {
         assert_eq!(body(&[], id), Err(DefinitionError::Invalid(id)));
         let table = [TypeDef::Nominal {
             gpu_projection: None,
+            gpu_pipeline: None,
             name: "Pending".into(),
             body: None,
             drop: None,
@@ -200,6 +201,7 @@ pub(super) fn needs_drop(ty: &Ty, definitions: &[TypeDef]) -> bool {
         | Ty::GpuPointer { .. }
         | Ty::GpuSpan { .. }
         | Ty::GpuView
+        | Ty::GpuPipelineContract
         | Ty::GpuArguments
         | Ty::GpuComputePipeline { .. }
         | Ty::GpuGraphicsPipeline { .. } => true,
@@ -370,6 +372,7 @@ impl TypeTable {
         let id = TypeId::from_index(self.len());
         self.definitions.push(TypeDef::Nominal {
             gpu_projection: None,
+            gpu_pipeline: None,
             name,
             body: None,
             drop: None,
@@ -500,6 +503,7 @@ pub(super) fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
         Ty::GpuPointer { pointee } => format!("GpuPtr<{}>", format_type(pointee, definitions)),
         Ty::GpuSpan { element } => format!("GpuSpan<{}>", format_type(element, definitions)),
         Ty::GpuView => "GpuView".into(),
+        Ty::GpuPipelineContract => "GpuPipelineContract".into(),
         Ty::GpuArguments => "GpuArguments".into(),
         Ty::GpuComputePipeline { root, owner } => format!(
             "GpuComputePipeline<{}, {}>",

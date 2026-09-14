@@ -20,6 +20,7 @@ pub(super) fn ty(source: &Ty) -> crate::Type {
         Ty::Float64 => crate::Type::Float64,
         Ty::Str => crate::Type::Str,
         Ty::GpuView => crate::Type::GpuView,
+        Ty::GpuPipelineContract => crate::Type::GpuPipelineContract,
         Ty::GpuArguments => crate::Type::GpuArguments,
         Ty::Foreign { name } => crate::Type::Foreign { name: name.clone() },
         Ty::Defined { definition } => crate::Type::Defined {
@@ -87,6 +88,7 @@ pub(super) fn definition(
     };
     crate::TypeDefinition {
         gpu_projection: None,
+        gpu_pipeline: None,
         type_params: vec![],
         name: name.clone(),
         body: ty(body),

@@ -717,6 +717,8 @@ impl Specialization<'_, '_> {
         if matches!(
             op,
             Intrinsic::GpuElementLayout
+                | Intrinsic::GpuViewIndex
+                | Intrinsic::GpuViewRange
                 | Intrinsic::GpuViewLoad
                 | Intrinsic::GpuViewStore
                 | Intrinsic::GpuViewReplace

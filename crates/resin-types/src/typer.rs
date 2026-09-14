@@ -539,7 +539,7 @@ pub(super) fn shader_value_type(definitions: &[TypeDef], ty: &Ty) -> Result<(), 
             Ty::Unit | Ty::None | Ty::Bool | Ty::Int32 | Ty::UInt8 | Ty::UInt32
             | Ty::UInt64 | Ty::Int64 | Ty::Float32 | Ty::StrongOwner | Ty::WeakOwner => {},
             Ty::Str => return Err("shader string literals need device-backed storage; pass a Span<ubyte> in the shader root".into()),
-            Ty::GpuPointer { .. } | Ty::GpuSpan { .. } | Ty::GpuView | Ty::GpuArguments
+            Ty::GpuPointer { .. } | Ty::GpuSpan { .. } | Ty::GpuPipelineContract | Ty::GpuView | Ty::GpuArguments
             | Ty::GpuComputePipeline { .. } | Ty::GpuGraphicsPipeline { .. } => {
                 return Err("shader cannot consume a managed GPU view or projected arguments".into());
             }

@@ -21,6 +21,37 @@ pub(super) fn instruction(
             types.name(element)
         )),
         Instr::GpuViewAllocate => native(types, name, args, result, out),
+        Instr::GpuViewIndex { element } => {
+            let index = format!("resin_index({}, {})", args[2].expr, args[1].expr);
+            let offset = checked_bytes(types, element, &index, name, out);
+            Ok(format!(
+                "resin_gpu_ptr_offset({}, {offset}, sizeof({}), _Alignof({}))",
+                args[0].expr,
+                types.name(element),
+                types.name(element)
+            ))
+        }
+        Instr::GpuViewRange { element } => {
+            writeln!(
+                out,
+                "  if ({} > {} || {} > {} - {}) resin_fail(\"GPU slice out of bounds\");",
+                args[2].expr, args[1].expr, args[3].expr, args[1].expr, args[2].expr
+            )
+            .unwrap();
+            let offset = checked_bytes(
+                types,
+                element,
+                &args[2].expr,
+                &format!("{name}_offset"),
+                out,
+            );
+            let bytes = checked_bytes(types, element, &args[3].expr, name, out);
+            Ok(format!(
+                "resin_gpu_ptr_offset({}, {offset}, {bytes}, _Alignof({}))",
+                args[0].expr,
+                types.name(element)
+            ))
+        }
         Instr::GpuViewOffset => Ok(format!(
             "resin_gpu_ptr_offset({}, {}, {}, {})",
             args[0].expr, args[1].expr, args[2].expr, args[3].expr

@@ -121,6 +121,7 @@ impl Context {
             definition,
             crate::TypeDefinition {
                 gpu_projection: None,
+                gpu_pipeline: None,
                 type_params: parameters,
                 name,
                 body,
@@ -685,6 +686,16 @@ pub(super) fn primitive_signature(
         ),
         ("gpu_view_offset", []) => (
             Intrinsic::GpuViewOffset,
+            vec![Type::GpuView, Type::UInt64, Type::UInt64, Type::UInt64],
+            Type::GpuView,
+        ),
+        ("gpu_view_index", [_]) => (
+            Intrinsic::GpuViewIndex,
+            vec![Type::GpuView, Type::UInt64, Type::UInt64],
+            Type::GpuView,
+        ),
+        ("gpu_view_range", [_]) => (
+            Intrinsic::GpuViewRange,
             vec![Type::GpuView, Type::UInt64, Type::UInt64, Type::UInt64],
             Type::GpuView,
         ),
