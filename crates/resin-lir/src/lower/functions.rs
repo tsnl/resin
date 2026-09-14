@@ -71,7 +71,7 @@ impl<'types> FunctionLowering<'types> {
             typer,
             function,
             bindings: Default::default(),
-            owned: vec![vec![]],
+            owned: vec![super::Scope::default()],
         }
     }
 
@@ -92,7 +92,7 @@ impl<'types> FunctionLowering<'types> {
             let local = self
                 .function
                 .parameter(Some(parameter.name.val.clone()), parameter.ty.clone());
-            self.owned[0].push(local);
+            self.owned[0].locals.push(local);
             if let Some(binding) = parameter.binding {
                 self.bindings.insert(
                     binding,

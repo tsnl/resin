@@ -152,6 +152,68 @@ fn managed_parameters_drop_in_reverse_order_and_failed_arguments_cleanup() {
 }
 
 #[test]
+fn expression_cleanup_preserves_scope_order_on_failure_and_success() {
+    for (call, expected) in [
+        (
+            "consume(make(trace, 1), { var inner = make(trace, 2); fail()? })",
+            21,
+        ),
+        (
+            "[make(trace, 1), { var inner = make(trace, 2); fail()? }]",
+            21,
+        ),
+        ("[make(trace, 1), make(trace, 2).accept(fail()?)]", 21),
+        (
+            "consume(make(trace, 1), { var inner = make(trace, 2); owned_error(trace)? })",
+            215,
+        ),
+        (
+            "last(make(trace, 1), if (make(trace, 3).truth()) { make(trace, 2) } else { make(trace, 4) }, fail()?)",
+            231,
+        ),
+        (
+            "consume(make(trace, 1), last(make(trace, 2), make(trace, 3), { var inner = make(trace, 4); fail()? }))",
+            4321,
+        ),
+        (
+            "consume(make(trace, 1), last(make(trace, 2), make(trace, 3), { var inner = make(trace, 4); succeed(trace)? }))",
+            43251,
+        ),
+        ("mixed(6, make(trace, 1), 7, make(trace, 2), 8)", 21),
+    ] {
+        let declarations = r#"
+            export { main };
+            struct Resource { trace: Ptr<int>, digit: int,
+                def drop(self: Ptr<Resource>) = { self.trace.* := self.trace.* * 10 + self.digit; };
+                def accept(self: Ptr<Resource>, other: Arc<Resource>) -> Arc<Resource> = { other };
+                def truth(self: Ptr<Resource>) -> bool = { 1 == 1 };
+            };
+            struct Failed {};
+            struct OwnedFailed { value: Arc<Resource> };
+            def make(trace: Ptr<int>, digit: int) -> Arc<Resource> = { Arc<Resource> { trace = trace, digit = digit } };
+            def consume(a: Arc<Resource>, b: Arc<Resource>) = {};
+            def last(a: Arc<Resource>, b: Arc<Resource>, c: Arc<Resource>) -> Arc<Resource> = { c };
+            def mixed(before: int, a: Arc<Resource>, between: int, b: Arc<Resource>, after: int) = {
+                if (before != 6 || between != 7 || after != 8) { a.trace.* := 9; };
+            };
+            def fail() -> Result<Arc<Resource>, Failed> = { err(Failed {}) };
+            def succeed(trace: Ptr<int>) -> Result<Arc<Resource>, Failed> = { ok(make(trace, 5)) };
+            def owned_error(trace: Ptr<int>) -> Result<Arc<Resource>, OwnedFailed> = { err(OwnedFailed { value = make(trace, 5) }) };
+        "#;
+        let source = format!(
+            "{declarations}
+            def attempt(trace: Ptr<int>) -> Result<(), _> = {{ {call}; ok(()) }};
+            def main() -> int = {{
+                var trace = 0;
+                attempt(&trace);
+                if (trace == {expected}) {{ 0 }} else {{ 1 }}
+            }};"
+        );
+        assert_eq!(run(&source), 0, "expected drop order {expected}: {call}");
+    }
+}
+
+#[test]
 fn lir_and_native_signatures_do_not_pack_arguments() {
     let module = support::module(
         "export { main }; def add(a: int, b: int) -> int = { a + b }; def main() -> int = { add(20, 22) };",

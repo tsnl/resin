@@ -162,8 +162,11 @@ Simply returning a copy of `source.*` would leave the original destructor armed.
 
 Initialized locals are destroyed in reverse scope order, including loop iterations
 and early returns through `?`. Return values are preserved before cleanup. Discarded
-owned expression results are destroyed. Compiler temporaries that hold an Arc
-receiver's address retain its owner until the end of the containing scope. A raw
+owned expression results are destroyed. When `?` interrupts an expression, cleanup
+interleaves its pending values with local owners in their relative lifetime order.
+This applies equally to arguments, array elements, and other operands.
+Compiler temporaries that hold an Arc receiver's address retain its owner until the
+end of the containing scope. A raw
 address returned beyond that scope carries no ownership.
 
 `arc.get()` returns `Ptr<T>`; field and pointer-receiver method access also implicitly

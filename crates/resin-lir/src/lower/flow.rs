@@ -10,9 +10,9 @@ use super::FunctionLowering;
 impl FunctionLowering<'_> {
     pub(super) fn gen_while(&mut self, cond: &Term, body: &Term) -> Result<Ty, LowerError> {
         let height = self.function.stack_len();
-        let condition = self.new_block("while.cond", height);
-        let body_block = self.new_block("while.body", height);
-        let exit = self.new_block("while.exit", height);
+        let condition = self.new_block("while.cond", height, 0);
+        let body_block = self.new_block("while.body", height, 0);
+        let exit = self.new_block("while.exit", height, 0);
         self.terminate(Terminator::Loop {
             condition,
             body: body_block,
@@ -42,9 +42,9 @@ impl FunctionLowering<'_> {
     ) -> Result<Ty, LowerError> {
         self.gen_term(cond, Some(&Ty::Bool))?;
         let height = self.function.stack_len() - 1;
-        let then_block = self.new_block("then", height);
-        let else_block = self.new_block("else", height);
-        let join_block = self.new_block("join", height + 1);
+        let then_block = self.new_block("then", height, 0);
+        let else_block = self.new_block("else", height, 0);
+        let join_block = self.new_block("join", height, 1);
         self.terminate(Terminator::If {
             then: then_block,
             els: else_block,
@@ -69,7 +69,7 @@ impl FunctionLowering<'_> {
         tail: &Term,
         expected: &Ty,
     ) -> Result<Ty, LowerError> {
-        self.owned.push(vec![]);
+        self.enter_scope();
         for stmt in stmts {
             self.lower_statement(stmt)?;
         }
