@@ -1062,23 +1062,22 @@ impl Analysis {
         if arguments.len() != count {
             return;
         }
-        let Ok(method) = typer.specialize_gpu_method(method, &arguments[usize::from(associated)..])
+        let arguments = arguments[usize::from(associated)..].iter().map(|ty| lower::infer::Solver::default().complete(&ty.clone().into()).expect("concrete bridge argument")).collect::<Vec<_>>();
+        let Ok(method) = typer.source_pipeline_method(&method, &arguments)
         else {
             return;
         };
-        let Some(params) = method.arguments(receiver, associated) else {
-            return;
-        };
-        let signature = Ty::Function {
-            params: params.to_vec(),
+        let signature = Type::Function {
+            params: method.params[usize::from(!associated)..].to_vec(),
             result: Box::new(method.result),
         };
+        let label = self.type_names_with(typer).format(&signature);
         if let Some(member) = self
             .fields
             .get_mut(location)
             .and_then(|members| members.iter_mut().find(|member| member.name == name))
         {
-            member.ty = format_concrete_type(&signature, typer);
+            member.ty = label;
         }
     }
 
