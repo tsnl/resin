@@ -243,7 +243,7 @@ fn streams_write_literals_and_owned_strings_verbatim() {
     let program = Program::new(
         r#"
         export { main };
-        import { "$/io.resin", "$/string.resin" };
+        import { "$/io.resin", "$/string.resin", "$/span.resin" };
         def literal() -> str = { "static\0bytes" };
         def main() -> Result<(), _> = {
             var out = Io.stdout();
@@ -252,7 +252,7 @@ fn streams_write_literals_and_owned_strings_verbatim() {
             var copy = text;
             out.write("raw {0}\0")?;
             out.write(copy)?;
-            out.write(Span<ubyte>(" bytes"))?;
+            out.write(bytes(" bytes"))?;
             error.write(fmt("error: {0}\n", (text.bytes(),)))?;
             error.write(literal())?;
             ok(())
