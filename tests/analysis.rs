@@ -400,10 +400,10 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
             r#"import {{ "$/gpu.resin" }};
             def f() -> Result<(), _> = {{
                 var gpu = Gpu.new()?;
-                var bytes = gpu.malloc(4_ul, 4_ul, Memory.default())?;
+                var bytes = gpu.alloc_in::<ubyte>(4_ul, Memory.default())?;
                 var commands = gpu.start_command_recording()?;
-                var buffer = GpuSpan<int>.allocate(gpu, 4)?;
-                buffer.at(0).* := 42;
+                var buffer = gpu.alloc::<int>(4)?;
+                buffer.at(0).store(42);
                 var readable = buffer.read_only();
                 {tail}"#
         );
@@ -420,10 +420,10 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
             );
         }
         for (method, result) in [
-            ("malloc", "-> Result<GpuPtr<ubyte>,"),
+            ("alloc_in", "-> Result<GpuSpan<ubyte>,"),
             ("start_command_recording", "-> Result<GpuCommands,"),
         ] {
-            let call = source.find(&format!(".{method}(")).unwrap() + 1;
+            let call = source.find(&format!(".{method}")).unwrap() + 1;
             let definition = analysis
                 .definition(&input, call)
                 .unwrap_or_else(|| panic!("tail: {tail}\n{:?}", analysis.diagnostics()));
@@ -434,7 +434,7 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
                     .ends_with("resin/gpu.resin")
             );
             let hover = analysis.hover(&input, call).unwrap().text;
-            assert!(hover.contains(&format!("def {method}(")), "{hover}");
+            assert!(hover.contains(method), "{hover}");
             assert!(hover.contains(result), "{hover}");
         }
         let offset = if tail == "buffer." {
@@ -545,7 +545,7 @@ fn gpu_commands_check_pipeline_stages_and_host_arguments() {
 
 #[test]
 fn typed_pipeline_calls_show_shader_contracts_in_editor_signatures() {
-    let source = r#"import { "$/gpu.resin" };
+    let source = r#"import { "$/gpu.resin", "$/span.resin" };
         struct Root { values: Span<int>, scale: int };
         @compute_shader
         def kernel(index: ulong, root: Ptr<Root>) = {};
@@ -568,7 +568,7 @@ fn typed_pipeline_calls_show_shader_contracts_in_editor_signatures() {
         ("create_compute_pipeline", "GpuComputePipeline<Root,"),
         ("dispatch", "GpuSpan<int>"),
     ] {
-        let call = source.find(&format!(".{method}(")).unwrap() + 1;
+        let call = source.find(&format!(".{method}")).unwrap() + 1;
         let definition = analysis.definition(&input, call).unwrap();
         assert!(
             loader

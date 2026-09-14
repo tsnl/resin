@@ -1,4 +1,3 @@
-use resin_types::prelude::*;
 use tempfile::TempDir;
 #[path = "support/pipeline.rs"]
 mod pipeline;
@@ -14,8 +13,8 @@ fn run(source: &str, native: &str) -> std::process::Output {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let path = temp.path().join("main.resin");
     fs::write(&path, source).unwrap();
-    let program = pipeline::load(&path).unwrap();
-    let module = pipeline::generate_program(&program).unwrap();
+    let program = pipeline::load(&path).unwrap_or_else(|error| panic!("{error}"));
+    let module = pipeline::generate_program(&program).unwrap_or_else(|error| panic!("{error}"));
     let project = project::Project::new(&module, Some("main")).unwrap();
     let path = project.generated.c_source().unwrap();
     let c = format!("{native}\n{}", fs::read_to_string(path).unwrap());
@@ -383,9 +382,9 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
         "import { \"$/gpu.resin\", \"$/window.resin\", \"$/image.resin\", \"$/console.resin\" };",
     )
     .unwrap();
-    let module = pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap();
+    let module = resin_hir::generate_program(&pipeline::load(&path).unwrap()).unwrap();
     for name in ["gpu", "window", "image", "console"] {
-        let public = pipeline::generate_program(
+        let public = resin_hir::generate_program(
             &pipeline::load(&root.join(format!("resin/{name}.resin"))).unwrap(),
         )
         .unwrap();
@@ -404,54 +403,54 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
             };
             let name = declaration.split('(').next().unwrap();
             let (receiver, method) = match name {
-                "gpu_create" => ("GpuOwner", "new"),
-                "gpu_create_at" => ("GpuOwner", "new_at"),
-                "gpu_device_count" => ("GpuOwner", "device_count"),
-                "gpu_enumerate_devices" => ("GpuOwner", "enumerate_devices"),
-                "gpu_create_for_window" => ("GpuOwner", "new_for_window"),
-                "window_create" => ("WindowOwner", "new"),
-                "image_read_png" => ("ImageDataOwner", "read_png"),
-                "image_write_png" => ("ImageDataOwner", "write_pixels"),
+                "gpu_create" => ("Gpu", "new"),
+                "gpu_create_at" => ("Gpu", "new_at"),
+                "gpu_device_count" => ("Gpu", "device_count"),
+                "gpu_enumerate_devices" => ("Gpu", "enumerate_devices"),
+                "gpu_create_for_window" => ("Gpu", "new_for_window"),
+                "window_create" => ("Window", "new"),
+                "image_read_png" => ("ImageData", "read_png"),
+                "image_write_png" => ("ImageData", "write_pixels"),
                 // These raw native operations have been replaced by owning
                 // views and compiler-generated projection in Resin source.
                 "gpu_malloc" | "gpu_dispatch" | "gpu_copy_image_to_buffer" | "gpu_set_pipeline" => {
                     continue;
                 }
-                "gpu_ptr_allocate" => ("GpuOwner", "malloc"),
-                "gpu_create_compute_pipeline" => ("GpuOwner", "create_compute_pipeline"),
-                "gpu_create_graphics_pipeline" => ("GpuOwner", "create_graphics_pipeline"),
-                "gpu_create_image" => ("GpuOwner", "create_image"),
-                "gpu_start_command_recording" => ("GpuOwner", "start_command_recording"),
-                "gpu_projected_dispatch" => ("CommandsOwner", "dispatch"),
-                "gpu_begin_rendering" => ("CommandsOwner", "begin_rendering"),
-                "gpu_end_rendering" => ("CommandsOwner", "end_rendering"),
-                "gpu_draw" | "gpu_projected_draw" => ("CommandsOwner", "draw"),
-                "gpu_copy_image_to_span" => ("CommandsOwner", "copy_image_to_buffer"),
-                "gpu_submit" => ("CommandsOwner", "submit"),
-                "gpu_cancel_command_buffer" => ("CommandsOwner", "cancel"),
-                "window_poll_events" => ("WindowOwner", "poll_events"),
-                "window_should_close" => ("WindowOwner", "should_close"),
-                "window_set_should_close" => ("WindowOwner", "set_should_close"),
-                "window_framebuffer_size" => ("WindowOwner", "framebuffer_size"),
-                "window_set_size" => ("WindowOwner", "set_size"),
-                "window_key_pressed" => ("WindowOwner", "key_pressed"),
-                "window_key_state" => ("WindowOwner", "key_state"),
-                "window_mouse_button_state" => ("WindowOwner", "mouse_button_state"),
-                "window_cursor_position" => ("WindowOwner", "cursor_position"),
-                "window_scroll_delta" => ("WindowOwner", "scroll_delta"),
-                "window_focused" => ("WindowOwner", "focused"),
-                "window_capture_cursor" => ("WindowOwner", "capture_cursor"),
-                "gpu_present" => ("GpuOwner", "present"),
+                "gpu_ptr_allocate" => ("Gpu", "malloc"),
+                "gpu_create_compute_pipeline" => ("Gpu", "create_compute_pipeline"),
+                "gpu_create_graphics_pipeline" => ("Gpu", "create_graphics_pipeline"),
+                "gpu_create_image" => ("Gpu", "create_image"),
+                "gpu_start_command_recording" => ("Gpu", "start_command_recording"),
+                "gpu_projected_dispatch" => ("GpuCommands", "dispatch"),
+                "gpu_begin_rendering" => ("GpuCommands", "begin_rendering"),
+                "gpu_end_rendering" => ("GpuCommands", "end_rendering"),
+                "gpu_draw" | "gpu_projected_draw" => ("GpuCommands", "draw"),
+                "gpu_copy_image_to_span" => ("GpuCommands", "copy_image_to_buffer"),
+                "gpu_submit" => ("GpuCommands", "submit"),
+                "gpu_cancel_command_buffer" => ("GpuCommands", "cancel"),
+                "window_poll_events" => ("Window", "poll_events"),
+                "window_should_close" => ("Window", "should_close"),
+                "window_set_should_close" => ("Window", "set_should_close"),
+                "window_framebuffer_size" => ("Window", "framebuffer_size"),
+                "window_set_size" => ("Window", "set_size"),
+                "window_key_pressed" => ("Window", "key_pressed"),
+                "window_key_state" => ("Window", "key_state"),
+                "window_mouse_button_state" => ("Window", "mouse_button_state"),
+                "window_cursor_position" => ("Window", "cursor_position"),
+                "window_scroll_delta" => ("Window", "scroll_delta"),
+                "window_focused" => ("Window", "focused"),
+                "window_capture_cursor" => ("Window", "capture_cursor"),
+                "gpu_present" => ("Gpu", "present"),
                 _ => panic!("missing method mapping for native operation: {name}"),
             };
             let qualified = format!("{receiver}.{method}");
             let function = module
                 .functions
                 .iter()
-                .find(|function| function.name.as_deref() == Some(qualified.as_str()))
-                .unwrap_or_else(|| panic!("missing lowered function {qualified}"));
-            assert!(function.foreign.is_none(), "{name}");
-            assert!(matches!(function.result, Ty::Result { .. }), "{name}");
+                .find(|function| function.name.as_ref() == qualified.as_str())
+                .unwrap_or_else(|| panic!("missing source function {qualified}"));
+            assert!(function.foreign_header.is_none(), "{name}");
+            assert!(matches!(function.signature.result.ty, resin_hir::Type::Result { .. }), "{name}");
             checked += 1;
         }
         assert!(checked > 0 || name == "console");
@@ -655,7 +654,7 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
             assert(cleanup == cleanups[mode]);
         }
         static ResinStatus mock_create(ResinGpu **out) {
-            *out = (ResinGpu *)(uintptr_t)1;
+            *out = mode == 0 ? NULL : (ResinGpu *)(uintptr_t)1;
             return mode == 0 ? RESIN_STATUS_UNSUPPORTED : RESIN_STATUS_SUCCESS;
         }
         static void mock_destroy(ResinGpu *gpu) {
@@ -678,7 +677,7 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
         }
         static ResinStatus mock_record(ResinGpu *gpu, ResinCommandBuffer **out) {
             assert(gpu == (ResinGpu *)(uintptr_t)1);
-            *out = (ResinCommandBuffer *)(uintptr_t)3;
+            *out = mode == 2 ? NULL : (ResinCommandBuffer *)(uintptr_t)3;
             return mode == 2 ? RESIN_STATUS_VULKAN_ERROR : RESIN_STATUS_SUCCESS;
         }
         static ResinStatus mock_graphics(ResinGpu *gpu, const uint8_t *vertex, size_t vertex_length, const uint8_t *fragment, size_t fragment_length, ResinPipeline **out) {
@@ -727,19 +726,25 @@ fn presentation_distinguishes_skipped_frames_from_errors_without_opening_windows
         r#"
         export { main };
         import { "$/gpu.resin", "$/window.resin", "$/status.resin" };
-        def main() -> int = {
-            var gpu = Gpu { handle = Ptr<ResinGpu>(0_ul), window = None };
-            var image = GpuImage { handle = Ptr<ResinImage>(0_ul), gpu = gpu };
+        def main() -> Result<int, _> = {
+            var gpu = Gpu.new()?;
+            var image = gpu.create_image(1_ui, 1_ui)?;
             var first = match (gpu.present(image)) { ok(shown) => { shown }, err(e) => { 1 == 0 } };
             var second = match (gpu.present(image)) { ok(shown) => { !shown }, err(e) => { 1 == 0 } };
             var third = match (gpu.present(image)) { ok(shown) => { 0 }, err(e) => { RuntimeStatus.code(e) } };
             var fourth = match (gpu.present(image)) { ok(shown) => { 0 }, err(e) => { RuntimeStatus.code(e) } };
-            if (first && second && third == 5 && fourth == 99) { 0 } else { 1 }
+            ok(if (first && second && third == 5 && fourth == 99) { 0 } else { 1 })
         };
         "#,
         r#"
         #include <resin_runtime.h>
         #include <assert.h>
+        static ResinStatus mock_create(ResinGpu **out) { *out = NULL; return RESIN_STATUS_SUCCESS; }
+        #define resin_gpu_create mock_create
+        static ResinStatus mock_image(ResinGpu *gpu, uint32_t width, uint32_t height, ResinImage **out) {
+            assert(gpu == NULL && width == 1 && height == 1); *out = NULL; return RESIN_STATUS_SUCCESS;
+        }
+        #define resin_gpu_create_image mock_image
         static ResinStatus mock_present(ResinGpu *gpu, ResinImage *image) {
             assert(gpu == NULL && image == NULL);
             static int call;
@@ -757,13 +762,12 @@ fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
     let output = run(
         r#"
         export { main };
-        import { "$/gpu.resin", "$/window.resin", "$/status.resin" };
+        import { "$/gpu.resin", "$/window.resin", "$/status.resin", "$/string.resin" };
         def valid_size(width: uint, height: uint) -> bool = {
             width == uint(640) && height == uint(480)
         };
         def main() -> Result<int, _> = {
-            var gpu = Gpu { handle = Ptr<ResinGpu>(0_ul), window = None };
-            var window = Window { handle = Ptr<ResinWindow>(0_ul) };
+            var window = Window.new(1_ui, 1_ui, String.from_str("queries"))?;
             var count = Gpu.device_count()?;
             var size = window.framebuffer_size()?;
             var incomplete = match (Gpu.enumerate_devices(Ptr<ResinGpuDeviceInfo>(ulong(0)), 0)) {
@@ -782,6 +786,10 @@ fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
         r#"
         #include <resin_runtime.h>
         #include <assert.h>
+        static ResinStatus mock_window(uint32_t width, uint32_t height, const char *title, ResinWindow **out) {
+            assert(width == 1 && height == 1 && title); *out = NULL; return RESIN_STATUS_SUCCESS;
+        }
+        #define resin_window_create mock_window
         static int closed;
         static ResinStatus mock_count(uint32_t *out) { *out = 2; return RESIN_STATUS_SUCCESS; }
         static ResinStatus mock_size(const ResinWindow *window, uint32_t *width, uint32_t *height) {
@@ -866,7 +874,7 @@ fn typed_pipeline_factories_embed_shaders_and_keep_shared_ownership() {
         def fragment(color: Color) -> Color = { color };
         def copy_pipeline(value: GpuComputePipeline<int, GpuPipelineOwner>) -> GpuComputePipeline<int, GpuPipelineOwner> = { value };
         def main() -> Result<int, _> = {
-            var gpu = Gpu { handle = Ptr<ResinGpu>(0_ul), window = None };
+            var gpu = Gpu.new()?;
             {
                 var compute = gpu.create_compute_pipeline(kernel)?;
                 var alias = copy_pipeline(compute);
@@ -887,6 +895,8 @@ fn typed_pipeline_factories_embed_shaders_and_keep_shared_ownership() {
         r#"
         #include <resin_runtime.h>
         #include <assert.h>
+        static ResinStatus mock_create(ResinGpu **out) { *out = NULL; return RESIN_STATUS_SUCCESS; }
+        #define resin_gpu_create mock_create
         #include <string.h>
         static unsigned created, freed;
         static int failing;
@@ -1004,7 +1014,7 @@ fn gpu_views_do_not_expose_unowned_address_conversions() {
                 r#"export {{ main }}; import {{ "$/gpu.resin" }};
             def main() -> Result<(), _> = {{
                 var gpu = Gpu.new()?;
-                var value = gpu.new(42_i)?;
+                var value = gpu.create(42_i)?;
                 {expression};
                 ok(())
             }};"#
@@ -1042,7 +1052,7 @@ fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
         @fragment_shader
         def fragment(color: Color) -> Color = { color };
         def main() -> Result<(), _> = {
-            var gpu = Gpu { handle = Ptr<ResinGpu>(0_ul), window = None };
+            var gpu = Gpu.new()?;
             var mode = 0;
             while (mode < 4) {
                 test_mode(mode);
@@ -1050,7 +1060,7 @@ fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
                     var commands = {
                         var original = gpu.start_command_recording()?;
                         var pipeline = gpu.create_graphics_pipeline(vertex, fragment)?;
-                        original.begin_rendering(GpuImage { handle = Ptr<ResinImage>(2_ul), gpu = gpu }, 0_f, 0_f, 0_f, 1_f)?;
+                        original.begin_rendering(gpu.create_image(1_ui, 1_ui)?, 0_f, 0_f, 0_f, 1_f)?;
                         var drawing = original;
                         drawing.draw(pipeline, None, 7)?;
                         original.end_rendering()?;
@@ -1078,6 +1088,12 @@ fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
         r#"
         #include <resin_runtime.h>
         #include <assert.h>
+        static ResinStatus mock_create(ResinGpu **out) { *out = NULL; return RESIN_STATUS_SUCCESS; }
+        #define resin_gpu_create mock_create
+        static ResinStatus mock_image(ResinGpu *gpu, uint32_t width, uint32_t height, ResinImage **out) {
+            assert(gpu == NULL && width == 1 && height == 1); *out = (ResinImage *)(uintptr_t)2; return RESIN_STATUS_SUCCESS;
+        }
+        #define resin_gpu_create_image mock_image
         static int mode, freed, completed, drawn;
         static void test_mode(int value) { mode = value; freed = completed = drawn = 0; }
         static void test_recorded(void) { assert(freed == 0 && completed == 0 && drawn == 1); }
