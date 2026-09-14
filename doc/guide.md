@@ -521,6 +521,37 @@ the trailing semicolon is required unless the loop is the enclosing block's fina
 The body may run zero times, so initializing a variable only in the body does not make it
 definitely initialized afterward. `break` and `continue` are not implemented yet.
 
+## Generic functions and structs
+
+Named type parameters bind one type throughout a definition. Calls infer their
+arguments from values and expected results; explicit function arguments use `::<T>`:
+
+```resin
+struct Pair<T> { left: T, right: T };
+type View<T> = Ptr<Pair<T>>;
+
+def first<T>(pair: Pair<T>) -> T = { pair.left };
+def identity<T>(value: T) -> T = { value };
+
+def example() -> int = {
+    var pair = Pair<int> { left = 40, right = 2 };
+    first(pair) + identity::<int>(2)
+};
+```
+
+Struct constructors take explicit type arguments. Different applications retain
+distinct nominal types, even if their layouts agree; aliases keep their target's
+identity. Pointer fields may recurse through the same generic declaration. Local
+structs remain field-only and can use enclosing function type parameters. Methods
+on generic structs and additional method type parameters are not yet supported.
+
+`_` is a weak inference variable in local annotations, function results, and
+explicit applications. It may resolve to a named parameter but never creates
+another generic parameter. Unsuffixed literals follow expected types before
+falling back to the ordinary integer/float defaults. Template bodies retain their
+type relationships; unsupported concrete operations and layouts fail when an
+application is required. There is no type inference during LIR specialization.
+
 ## Strings, formatting, and output
 
 String literals have primitive type `str`, distinct from raw `Span<ubyte>` views and owned

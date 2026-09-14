@@ -986,19 +986,26 @@ impl Expression<'_, '_> {
                             arg.val,
                             resin_ast::TermKind::Record { .. } | resin_ast::TermKind::Unit
                         ) {
-                            let payload = self.checker.typing.solver.require(&parts[0], span)?;
-                            let body = self
-                                .checker
-                                .typing
-                                .typer
-                                .body(&payload)
-                                .map_err(|e| GenerateError::typing(span, e))?;
+                            let solver = &self.checker.typing.solver;
+                            let body = if let Some(body) =
+                                self.checker.typing.typer.nominal_body(&parts[0], solver)
+                            {
+                                solver.shape_hint(&body)
+                            } else {
+                                let payload = solver.require(&parts[0], span)?;
+                                self.checker
+                                    .typing
+                                    .typer
+                                    .body(&payload)
+                                    .map_err(|e| GenerateError::typing(span, e))?
+                                    .into()
+                            };
                             if matches!(arg.val, resin_ast::TermKind::Unit)
-                                && matches!(&body, Ty::Record { fields } if fields.is_empty())
+                                && matches!(&body, Type::Node(Head::Record(fields), _) if fields.is_empty())
                             {
                                 Ty::Unit.into()
                             } else {
-                                body.into()
+                                body
                             }
                         } else {
                             parts[0].clone()
@@ -1171,28 +1178,15 @@ impl Expression<'_, '_> {
                 methods,
                 type_params,
             } => {
-                crate::lower::require_monomorphic(type_params)?;
                 if let Some(method) = methods.first() {
                     return Err(GenerateError::inference(
                         method.span,
                         "local structs cannot define methods",
                     ));
                 }
-                let definition = self.checker.typing.typer.declare_type(name.val.clone());
                 self.checker
                     .scopes
-                    .define_type(name, definition)
-                    .map_err(|name| GenerateError {
-                        span,
-                        kind: GenerateErrorKind::DuplicateType { name },
-                    })?;
-                let ann = self.annotation(body, false);
-                let ty = self.checker.typing.solver.require(&ann.ty, ann.span)?;
-                self.checker
-                    .typing
-                    .typer
-                    .define_type(definition, ty)
-                    .map_err(|e| GenerateError::typing(ann.span, e))?;
+                    .nominal(name, type_params, body, self.checker.typing.typer)?;
                 StatementKind::TypeDefinition
             }
             StmtKind::DefineType {

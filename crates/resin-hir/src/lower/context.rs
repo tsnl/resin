@@ -13,6 +13,7 @@ use std::{
 pub(crate) struct Context {
     pub(super) typer: TyperContext,
     pub(super) namespaces: BTreeMap<TypeId, BTreeMap<Arc<str>, FunctionId>>,
+    pub(super) nominal_schemes: BTreeMap<TypeId, crate::TypeDefinition>,
     pub(super) functions: BTreeMap<FunctionId, FunctionDecl>,
     pub(super) gpu_allocators: BTreeMap<TypeId, FunctionId>,
     pub(super) gpu_pipeline_contexts: BTreeMap<TypeId, FunctionId>,
@@ -33,8 +34,83 @@ impl Context {
     pub fn new() -> Self {
         Self::default()
     }
-    pub fn into_definitions(self) -> Result<TypeTable, TypeError> {
-        self.typer.into_definitions()
+    pub(super) fn into_definitions(mut self) -> Vec<crate::TypeDefinition> {
+        self.typer
+            .definitions()
+            .iter()
+            .enumerate()
+            .map(|(index, source)| {
+                let id = TypeId::from_index(index);
+                let methods = self.namespaces.remove(&id).unwrap_or_default();
+                if let Some(mut definition) = self.nominal_schemes.remove(&id) {
+                    definition.methods = methods;
+                    if let TypeDef::Nominal { drop, .. } = source {
+                        definition.drop = *drop;
+                    }
+                    definition
+                } else {
+                    super::types::definition(source, methods)
+                }
+            })
+            .collect()
+    }
+
+    pub(crate) fn nominal_body(
+        &self,
+        source: &super::infer::Type,
+        solver: &super::infer::Solver,
+    ) -> Option<super::infer::Type> {
+        use super::infer::{Head, Type};
+        let (definition, arguments) = match solver.shape_hint(source) {
+            Type::Node(Head::Nominal { definition }, arguments) => (definition, arguments),
+            Type::Node(Head::Atom(Ty::Defined { definition }), _) => (definition, vec![]),
+            _ => return None,
+        };
+        let scheme = self.nominal_schemes.get(&definition)?;
+        Some(Type::Apply {
+            body: Box::new(Type::from_hir(&scheme.body)),
+            arguments: scheme
+                .type_params
+                .iter()
+                .zip(arguments)
+                .map(|(parameter, argument)| (parameter.id, argument))
+                .collect(),
+        })
+    }
+
+    pub(super) fn define_nominal(
+        &mut self,
+        definition: TypeId,
+        parameters: Vec<crate::TypeParameter>,
+        body: crate::Type,
+    ) -> Result<(), TypeError> {
+        // Legacy builtin signatures still query concrete source records. Keep that
+        // view only when the completed scheme has a concrete representation.
+        if let Some(concrete) =
+            super::infer::Solver::default().resolve(&super::infer::Type::from_hir(&body))
+        {
+            match self.typer.define_type(definition, concrete) {
+                Err(TypeError {
+                    kind:
+                        TypeErrorKind::IncompleteTypeDefinition {
+                            definition: dependency,
+                        },
+                }) if self.nominal_schemes.contains_key(&dependency) => {}
+                result => result?,
+            }
+        }
+        let name = self.typer.definition(definition)?.name().unwrap().clone();
+        self.nominal_schemes.insert(
+            definition,
+            crate::TypeDefinition {
+                type_params: parameters,
+                name,
+                body,
+                methods: BTreeMap::new(),
+                drop: None,
+            },
+        );
+        Ok(())
     }
 }
 impl Deref for Context {

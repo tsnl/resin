@@ -474,6 +474,7 @@ pub struct Analysis {
     imports: BTreeMap<SourceLocation, Source>,
     contexts: crate::lower::scope::Contexts,
     fields: BTreeMap<SourceLocation, Vec<Member>>,
+    field_origins: BTreeMap<(TypeId, String), SourceLocation>,
     method_origins: BTreeMap<(TypeId, String), lower::scope::DeclarationId>,
     typer: lower::context::Context,
 }
@@ -526,7 +527,7 @@ impl Analysis {
         let document = documents.get(source)?;
         let token = document.token(offset)?;
         let text = builtin_hover(document, token)
-            .or_else(|| self.compiler_member_hover(source, document, token))
+            .or_else(|| self.resolved_member_hover(source, document, token))
             .or_else(|| self.definition_hover(documents, source, offset))
             .or_else(|| self.member_hover(source, document, token))?;
         Some(Hover {
@@ -586,9 +587,9 @@ impl Analysis {
         }
         if let Some(origin) = self
             .member(&location, document.node_text(token))
-            .and_then(|member| member.origin)
+            .and_then(|member| member.origin.clone())
         {
-            return Some(self.contexts.definitions[origin].location.clone());
+            return Some(origin);
         }
         if !document.reference(token) {
             return None;
@@ -639,7 +640,7 @@ impl Analysis {
         Some(format!("{}: {}", member.name, member.ty))
     }
 
-    fn compiler_member_hover(
+    fn resolved_member_hover(
         &self,
         source: &Source,
         document: &resin_cst::Document,
@@ -650,15 +651,17 @@ impl Analysis {
             span: resin_cst::span(token),
         };
         let member = self.member(&location, document.node_text(token))?;
-        member
-            .compiler_signature
+        (member.compiler_signature || member.kind == DefinitionKind::Field)
             .then(|| format!("{}: {}", member.name, member.ty))
     }
 
     fn type_names(&self) -> print::TypeNames {
+        self.type_names_with(&self.typer)
+    }
+
+    fn type_names_with(&self, typer: &lower::context::Context) -> print::TypeNames {
         print::TypeNames {
-            definitions: self
-                .typer
+            definitions: typer
                 .definitions()
                 .iter()
                 .map(|definition| definition.name().cloned().unwrap_or_else(|| "?".into()))
@@ -1054,7 +1057,7 @@ struct Member {
     name: String,
     ty: String,
     kind: DefinitionKind,
-    origin: Option<lower::scope::DeclarationId>,
+    origin: Option<SourceLocation>,
     compiler_signature: bool,
 }
 impl Analysis {
@@ -1125,7 +1128,11 @@ impl Analysis {
                 name: field.name.to_string(),
                 ty: format_concrete_type(&field.ty, typer),
                 kind: DefinitionKind::Field,
-                origin: None,
+                origin: typer.receiver_definition(ty).and_then(|receiver| {
+                    self.field_origins
+                        .get(&(receiver, field.name.to_string()))
+                        .cloned()
+                }),
                 compiler_signature: false,
             }));
         }
@@ -1146,7 +1153,7 @@ impl Analysis {
                 typer.receiver_definition(ty).and_then(|receiver| {
                     self.method_origins
                         .get(&(receiver, name.to_string()))
-                        .copied()
+                        .map(|origin| self.contexts.definitions[*origin].location.clone())
                 })
             } else {
                 None
@@ -1173,6 +1180,58 @@ impl Analysis {
             });
         }
         self.fields.insert(location, members);
+    }
+
+    fn record_symbolic_members(
+        &mut self,
+        location: SourceLocation,
+        ty: &Type,
+        associated: bool,
+        typer: &lower::context::Context,
+        solver: &lower::infer::Solver,
+    ) {
+        if associated {
+            return;
+        }
+        let mut receiver = ty;
+        while let Type::Pointer { pointee } | Type::GpuPointer { pointee } | Type::Arc { pointee } =
+            receiver
+        {
+            receiver = pointee;
+        }
+        let body = match receiver {
+            Type::Defined { .. } => typer
+                .nominal_body(&lower::infer::Type::from_hir(receiver), solver)
+                .and_then(|body| solver.complete(&body)),
+            Type::Record { .. } => Some(receiver.clone()),
+            _ => None,
+        };
+        let Some(Type::Record { fields }) = body else {
+            return;
+        };
+        let names = self.type_names_with(typer);
+        let members = fields
+            .into_iter()
+            .map(|field| Member {
+                name: field.name.to_string(),
+                ty: names.format(&field.ty),
+                kind: DefinitionKind::Field,
+                origin: match receiver {
+                    Type::Defined { definition, .. } => self
+                        .field_origins
+                        .get(&(*definition, field.name.to_string()))
+                        .cloned(),
+                    _ => None,
+                },
+                compiler_signature: false,
+            })
+            .collect::<Vec<_>>();
+        let existing = self.fields.entry(location).or_default();
+        for member in members {
+            if !existing.iter().any(|existing| existing.name == member.name) {
+                existing.push(member);
+            }
+        }
     }
 }
 fn format_concrete_type(ty: &Ty, typer: &lower::context::Context) -> String {

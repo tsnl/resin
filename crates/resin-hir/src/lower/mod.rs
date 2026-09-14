@@ -46,7 +46,7 @@ pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
         return Err(generator.errors.remove(0));
     }
     generator.module.entries = generator.exported_functions(file)?;
-    generator.finish()
+    Ok(generator.finish())
 }
 
 struct Generator {
@@ -78,24 +78,9 @@ impl Generator {
         self.define_functions(checked);
     }
 
-    fn finish(mut self) -> Result<Module, GenerateError> {
-        let mut namespaces = std::mem::take(&mut self.typer.namespaces);
-        self.module.types = self
-            .typer
-            .into_definitions()
-            .map_err(|error| GenerateError::typing(Span { start: 0, end: 0 }, error))?
-            .iter()
-            .enumerate()
-            .map(|(index, definition)| {
-                types::definition(
-                    definition,
-                    namespaces
-                        .remove(&TypeId::from_index(index))
-                        .unwrap_or_default(),
-                )
-            })
-            .collect();
-        Ok(self.module)
+    fn finish(mut self) -> Module {
+        self.module.types = self.typer.into_definitions();
+        self.module
     }
 }
 
@@ -265,14 +250,9 @@ impl<'a> ProgramBuilder<'a> {
         }
     }
 
-    fn finish(mut self) -> CheckedProgram {
+    fn finish(self) -> CheckedProgram {
         let module = if self.diagnostics.is_empty() {
-            self.generator
-                .finish()
-                .map_err(|error| {
-                    self.diagnostics.push(program_error(self.program, error));
-                })
-                .ok()
+            Some(self.generator.finish())
         } else {
             None
         };
@@ -294,18 +274,6 @@ fn declaration_name(stmt: &StmtKind) -> Option<&Ident> {
         | StmtKind::Struct { name, .. }
         | StmtKind::Declare { name, .. } => Some(name),
         _ => None,
-    }
-}
-
-fn program_error(program: &Program, error: GenerateError) -> SourceError {
-    if let Some(source) = program.modules.last() {
-        source.error(error.span, error)
-    } else {
-        SourceError::new(
-            Source::new("<source>", ""),
-            Some(error.span),
-            error.to_string(),
-        )
     }
 }
 
@@ -432,12 +400,6 @@ impl Scopes {
             }
         }
         for stmt in &file.stmts {
-            if let StmtKind::Struct { type_params, .. } = &stmt.val
-                && let Err(error) = require_monomorphic(type_params)
-            {
-                errors.push(error);
-                continue;
-            }
             let result = match &stmt.val {
                 StmtKind::DefineType {
                     name,
@@ -448,21 +410,20 @@ impl Scopes {
                     name,
                     body,
                     methods: owned,
-                    ..
+                    type_params,
                 } => (|| {
-                    let id = typer.declare_type(name.val.clone());
-                    self.define_type(name, id).map_err(|name| GenerateError {
-                        span: stmt.span,
-                        kind: GenerateErrorKind::DuplicateType { name },
-                    })?;
+                    let id = self.nominal(name, type_params, body, typer)?;
+                    if !type_params.is_empty() && !owned.is_empty() {
+                        return Err(GenerateError::inference(
+                            owned[0].span,
+                            "methods on generic structs are not implemented yet",
+                        ));
+                    }
                     methods.extend(owned.iter().map(|statement| Method {
                         owner: id,
                         statement,
                     }));
-                    let ty = self.annotation(body, typer)?;
-                    typer
-                        .define_type(id, ty)
-                        .map_err(|error| GenerateError::typing(body.span, error))
+                    Ok(())
                 })(),
                 _ => Ok(()),
             };
@@ -472,6 +433,49 @@ impl Scopes {
         }
         PreparedTypes { methods, errors }
     }
+    fn nominal(
+        &mut self,
+        name: &Ident,
+        parameters: &[Ident],
+        body: &resin_ast::Type,
+        typer: &mut Context,
+    ) -> Result<TypeId, GenerateError> {
+        let definition = typer.declare_type(name.val.clone());
+        let declaration =
+            self.define_type(name, definition)
+                .map_err(|duplicate| GenerateError {
+                    span: name.span,
+                    kind: GenerateErrorKind::DuplicateType { name: duplicate },
+                })?;
+        let captures = self.type_parameters();
+        self.push_at(Span {
+            start: name.span.end,
+            end: body.span.end,
+        });
+        let result = (|| {
+            let parameters = parameters
+                .iter()
+                .map(|name| self.define_type_parameter(name))
+                .collect::<Result<Vec<_>, _>>()?;
+            self.define_nominal_scheme(declaration, definition, &parameters, &captures);
+            let parameters = captures.into_iter().chain(parameters).collect();
+            if let resin_ast::TypeKind::Record { fields } = &body.val {
+                self.record_field_definitions(definition, fields);
+            }
+            let body = Evaluator {
+                scopes: self.view(),
+                typer,
+            }
+            .scheme(body)?;
+            typer
+                .define_nominal(definition, parameters, body)
+                .map_err(|error| GenerateError::typing(name.span, error))?;
+            Ok(definition)
+        })();
+        self.pop();
+        result
+    }
+
     fn alias(
         &mut self,
         name: &Ident,
@@ -501,17 +505,6 @@ impl Scopes {
         self.pop();
         self.finish_alias(declaration, result.as_ref().ok().cloned());
         result.map(|_| ())
-    }
-
-    fn annotation(&mut self, ann: &resin_ast::Type, typer: &Context) -> Result<Ty, GenerateError> {
-        self.push_at(ann.span);
-        let result = Evaluator {
-            scopes: self.view(),
-            typer,
-        }
-        .ty(ann);
-        self.pop();
-        result
     }
 }
 
@@ -767,12 +760,33 @@ impl Generator {
         signature: &typed::Signature,
     ) -> Result<FunctionId, GenerateError> {
         let id = self.declare_function(name, signature)?;
-        let params = self.typer.declared_function(id).params.clone();
+        let shape = |ty: &crate::Type| {
+            if matches!(ty, crate::Type::Pointer { .. }) {
+                Some(Ty::Pointer {
+                    pointee: Box::new(Ty::Unit),
+                })
+            } else {
+                infer::Solver::default().resolve(&infer::Type::from_hir(ty))
+            }
+        };
+        let invalid = || GenerateError {
+            span: name.span,
+            kind: GenerateErrorKind::InvalidForeignSignature,
+        };
+        // Native ABI classification needs pointer width, not the pointee layout.
+        // Preserve actual source annotations for LIR's concrete foreign signature.
+        let params = signature
+            .params
+            .iter()
+            .map(|(_, annotation)| shape(&annotation.ty))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(invalid)?;
+        let result = shape(&signature.result.ty).ok_or_else(invalid)?;
         let foreign = Foreign {
             header: header.into(),
             params,
         };
-        if !foreign.valid(&self.typer.declared_function(id).result) {
+        if !foreign.valid(&result) {
             return Err(GenerateError {
                 span: name.span,
                 kind: GenerateErrorKind::InvalidForeignSignature,
@@ -867,11 +881,17 @@ impl Generator {
                 "a function can have only one shader decorator",
             ));
         }
-        let signature = self.typer.declared_function(id);
+        let signature = &self.module.functions[id.index()].signature;
+        let parameters = signature
+            .params
+            .iter()
+            .map(|parameter| self.stage_shape(&parameter.annotation.ty, decorator))
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = self.stage_shape(&signature.result.ty, decorator)?;
         resin_types::shader::validate(
             &self.typer,
-            &Ty::parameter(&signature.params),
-            &signature.result,
+            &Ty::parameter(&parameters),
+            &result,
             false,
             stage,
         )
@@ -884,6 +904,96 @@ impl Generator {
             },
         );
         Ok(())
+    }
+
+    fn stage_shape(&self, ty: &crate::Type, decorator: &Ident) -> Result<Ty, GenerateError> {
+        let mut active = std::collections::BTreeSet::new();
+        let mut remaining = 65536;
+        self.stage_shape_inner(
+            &infer::Type::from_hir(ty),
+            decorator,
+            &mut active,
+            0,
+            &mut remaining,
+        )
+    }
+
+    fn stage_shape_inner(
+        &self,
+        ty: &infer::Type,
+        decorator: &Ident,
+        active: &mut std::collections::BTreeSet<crate::Type>,
+        depth: usize,
+        remaining: &mut usize,
+    ) -> Result<Ty, GenerateError> {
+        use infer::{Head, Type};
+        if depth >= 256 {
+            return Err(shader_error(
+                decorator,
+                "shader interface expansion exceeds the HIR depth limit of 256",
+            ));
+        }
+        if *remaining == 0 {
+            return Err(shader_error(
+                decorator,
+                "shader interface expansion exceeds the HIR size limit of 65536",
+            ));
+        }
+        *remaining -= 1;
+        let solver = infer::Solver::default();
+        let ty = solver.shape_hint(ty);
+        match &ty {
+            // Stage signatures constrain the root to be a pointer. Its pointee
+            // layout is checked when LIR materializes the actual signature.
+            Type::Node(Head::Pointer, _) => Ok(Ty::Pointer {
+                pointee: Box::new(Ty::Unit),
+            }),
+            Type::Node(
+                Head::Nominal { definition } | Head::Atom(Ty::Defined { definition }),
+                _,
+            ) => {
+                let application = solver.require_bounded(&ty, decorator.span)?;
+                if !active.insert(application.clone()) {
+                    return Err(shader_error(decorator, "recursive shader interface layout"));
+                }
+                let body = self
+                    .typer
+                    .nominal_body(&ty, &solver)
+                    .or_else(|| {
+                        self.typer
+                            .body(&Ty::Defined {
+                                definition: *definition,
+                            })
+                            .ok()
+                            .map(infer::Type::from)
+                    })
+                    .ok_or_else(|| shader_error(decorator, "incomplete shader interface type"))?;
+                let result = self.stage_shape_inner(&body, decorator, active, depth + 1, remaining);
+                active.remove(&application);
+                result
+            }
+            Type::Node(Head::Record(names), fields) => Ok(Ty::Record {
+                fields: names
+                    .iter()
+                    .zip(fields)
+                    .map(|(name, ty)| {
+                        Ok(RecordField {
+                            name: name.clone(),
+                            ty: self.stage_shape_inner(
+                                ty,
+                                decorator,
+                                active,
+                                depth + 1,
+                                remaining,
+                            )?,
+                        })
+                    })
+                    .collect::<Result<_, GenerateError>>()?,
+            }),
+            _ => solver
+                .resolve(&ty)
+                .ok_or_else(|| shader_error(decorator, "shader entries require a fixed signature")),
+        }
     }
 
     fn define_functions(&mut self, checked: CheckedFile) {

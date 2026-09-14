@@ -6,6 +6,130 @@ use std::{collections::BTreeMap, path::Path, sync::Arc};
 use tempfile::TempDir;
 
 #[test]
+fn generic_nominal_fields_retain_substitution_and_declaration_navigation() {
+    let library = "export { Cell }; struct Cell<T> { value: T };";
+    for (parameters, receiver, result) in [
+        ("", "Cell<int>", "int"),
+        ("", "Ptr<Ptr<Cell<int>>>", "int"),
+        ("<T>", "Ptr<Ptr<Cell<T>>>", "T"),
+    ] {
+        let source = format!(
+            "import {{ \"library.resin\" }}; def read{parameters}(cell: {receiver}) -> {result} = {{ cell.value }};"
+        );
+        let project = Project::new(&[("main.resin", &source), ("library.resin", library)]);
+        let analysis = project.analyze();
+        assert!(
+            analysis.diagnostics().is_empty(),
+            "{:?}",
+            analysis.diagnostics()
+        );
+        let input = project.source("main.resin");
+        let field = source.rfind("value").unwrap();
+        let items = analysis.completions(&input, field);
+        assert_eq!(items.len(), 1, "{source}: {items:?}");
+        assert_eq!(items[0].detail, format!("value: {result}"));
+        assert_eq!(analysis.hover(&input, field).unwrap().text, items[0].detail);
+        let origin = analysis.definition(&input, field).unwrap();
+        assert_eq!(origin.source, project.source("library.resin"));
+        assert_eq!(origin.span.start, library.find("value").unwrap());
+        assert_eq!(&library[origin.span.start..origin.span.end], "value");
+    }
+}
+
+#[test]
+fn nominal_wrappers_of_generic_fields_keep_navigation_and_method_completion() {
+    let library = "export { Outer }; struct Cell<T> { value: T }; struct Wrapped { cell: Cell<int> }; struct Outer { wrapped: Wrapped, read: int, def read(self: Ptr<Outer>) -> int = { self.wrapped.cell.value }; };";
+    let source = "import { \"library.resin\" }; def use(outer: Ptr<Outer>) -> int = { Outer.read(outer); outer.read(); outer.wrapped.cell.value };";
+    let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
+    let analysis = project.analyze();
+    assert!(
+        analysis.diagnostics().is_empty(),
+        "{:?}",
+        analysis.diagnostics()
+    );
+    let input = project.source("main.resin");
+    for (name, expected) in [
+        ("wrapped", "wrapped: Wrapped"),
+        ("cell", "cell: Cell<int>"),
+        ("value", "value: int"),
+    ] {
+        let field = source.rfind(name).unwrap();
+        let items = analysis.completions(&input, field);
+        let item = items.iter().find(|item| item.name == name).unwrap();
+        assert_eq!(item.detail, expected);
+        assert_eq!(analysis.hover(&input, field).unwrap().text, expected);
+        let origin = analysis.definition(&input, field).unwrap();
+        assert_eq!(origin.source, project.source("library.resin"));
+        assert_eq!(
+            origin.span.start,
+            library.find(&format!("{name}:")).unwrap()
+        );
+    }
+    let items = analysis.completions(&input, source.find("outer.wrapped").unwrap() + 6);
+    let method = items.iter().find(|item| item.name == "read").unwrap();
+    assert_eq!(method.kind, resin_hir::DefinitionKind::Function);
+    assert_eq!(items.iter().filter(|item| item.name == "read").count(), 1);
+    let associated = analysis.completions(&input, source.find("Outer.read").unwrap() + 6);
+    assert_eq!(associated.len(), 1, "{associated:?}");
+    assert_eq!(associated[0].name, "read");
+    assert_eq!(associated[0].kind, resin_hir::DefinitionKind::Function);
+}
+
+#[test]
+fn generic_field_completion_survives_an_unfinished_access() {
+    let source = "struct Cell<T> { value: T }; def read(cell: Ptr<Cell<int>>) = { cell.; };";
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.analyze();
+    assert!(!analysis.diagnostics().is_empty());
+    let items = analysis.completions(
+        &project.source("main.resin"),
+        source.find("cell.;").unwrap() + 5,
+    );
+    assert_eq!(items.len(), 1, "{items:?}");
+    assert_eq!(items[0].detail, "value: int");
+}
+
+#[test]
+fn generic_field_editor_snapshots_keep_original_imported_declarations() {
+    let input = Source::new(
+        "main.resin",
+        "import { \"library.resin\" }; def read(cell: Cell<int>) -> _ = { cell.value };",
+    );
+    let original = Source::new(
+        "library.resin",
+        "export { Cell }; struct Cell<T> { value: T };",
+    );
+    let changed =
+        original.with_text("export { Cell }; struct Cell<T> { padding: ubyte, value: long };");
+    let mut loader = resin_source::Loader::new(Default::default());
+    loader
+        .set_import(&input, "library.resin", original.clone())
+        .unwrap();
+    let mut compiler = Compiler::new();
+    let before = compiler.analyze(input.clone(), &mut loader);
+    loader
+        .set_import(&input, "library.resin", changed.clone())
+        .unwrap();
+    let after = compiler.analyze(input.clone(), &mut loader);
+    let field = input.text().rfind("value").unwrap();
+    for (analysis, library, expected) in [
+        (&before, &original, "value: int"),
+        (&after, &changed, "value: long"),
+        (&before, &original, "value: int"),
+    ] {
+        assert!(
+            analysis.diagnostics().is_empty(),
+            "{:?}",
+            analysis.diagnostics()
+        );
+        assert_eq!(analysis.hover(&input, field).unwrap().text, expected);
+        let origin = analysis.definition(&input, field).unwrap();
+        assert_eq!(&origin.source, library);
+        assert_eq!(origin.span.start, library.text().find("value").unwrap());
+    }
+}
+
+#[test]
 fn imported_generic_aliases_keep_binder_navigation_and_concrete_hover() {
     let library = "export { View }; type View<T> = Ptr<T>;";
     let source = "import { \"library.resin\" }; def use_view<T>(view: View<T>) -> T = { view.* }; def main() -> int = { var value = 42; var pointer: View<int>; pointer := &value; use_view(pointer) };";

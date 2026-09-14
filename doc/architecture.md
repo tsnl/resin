@@ -186,8 +186,14 @@ inside the definition; local function values remain monomorphic. A `_` is a weak
 monomorphic variable and can unify with an enclosing named parameter. Applications
 retain substitutions around unresolved definition variables, so recursive dependency
 groups can finish a result from its body without a caller determining it. Unseeded
-cycles and undetermined arguments require annotations. Generic nominal declarations
-and method binders are the next source layers.
+cycles and undetermined arguments require annotations. Source structs also bind
+named parameters. Their completed field schemes feed the same nominal application
+representation used by LIR; constructors constrain field values against the applied
+scheme. Local field-only structs retain enclosing type parameters as implicit
+arguments before their explicitly declared parameters. Imports and aliases keep
+the source nominal identity, and editor facts retain substituted fields without
+materializing their layouts. Methods on generic owners and additional method
+binders are the next source layers.
 
 Transparent aliases use the same lexical type binders, for example
 `type View<T> = Ptr<T>`. Source scopes retain their completed RHS and named parameters;

@@ -285,7 +285,10 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   applications expand structurally without creating nominal types or method namespaces.
   Local aliases may capture enclosing type binders. Aliases resolve in declaration order;
   reject recursive expansion, and bound its depth and size independently of function instances.
-  Generic structs and methods follow in later layers.
+  Structs may bind named type parameters; their fields retain those parameters in
+  HIR and constructors use explicit applications such as `Cell<int> { value = 1 }`.
+  Local field-only structs capture enclosing type binders in their nominal identity.
+  Methods on generic owners and additional method binders follow in later layers.
   Check source expressions into HIR, then lower that tree to LIR in a separate pass.
   Resolve dependency groups and all inference variables before handing the tree to lowering;
   retain named binders and determining member types in HIR. Scopes store these HIR schemes.
