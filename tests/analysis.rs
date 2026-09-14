@@ -359,22 +359,22 @@ fn option_payload_fields_remain_available_in_incomplete_code() {
 }
 
 #[test]
-fn weak_upgrade_recovery_exposes_the_shared_payload_and_handle_operations() {
-    let source = "struct Item { count: int }; def f(weak: WeakPtr<Item>) = { weak.upgrade()!.; };";
-    let project = Project::new(&[("main.resin", source)]);
-    let items = project.analyze().completions(
-        &project.source("main.resin"),
-        source.find("!.").unwrap() + 2,
-    );
-    assert!(
-        items.iter().any(|item| item.detail == "count: int"),
-        "{items:?}"
-    );
-    assert!(items.iter().any(|item| item.name == "get"), "{items:?}");
-    assert!(
-        items.iter().any(|item| item.name == "downgrade"),
-        "{items:?}"
-    );
+fn weak_upgrade_recovery_distinguishes_wrapper_and_payload_members() {
+    for (receiver, expected, absent) in [
+        ("weak.upgrade()!", "get", "count"),
+        ("weak.upgrade()!.get()", "count", "downgrade"),
+    ] {
+        let source = format!(
+            "import {{ \"$/shared.resin\" }}; struct Item {{ count: int }}; def f(weak: WeakPtr<Item>) = {{ {receiver}.; }};"
+        );
+        let project = Project::new(&[("main.resin", &source)]);
+        let items = project.analyze().completions(
+            &project.source("main.resin"),
+            source.rfind(".;").unwrap() + 1,
+        );
+        assert!(items.iter().any(|item| item.name == expected), "{items:?}");
+        assert!(!items.iter().any(|item| item.name == absent), "{items:?}");
+    }
 }
 
 #[test]
@@ -571,7 +571,7 @@ fn typed_pipeline_calls_show_shader_contracts_in_editor_signatures() {
 
 #[test]
 fn pointer_hover_and_completion_use_angle_bracket_types() {
-    let source = "def main (value: Ptr<Span<int>>) -> Ptr<Span<int>> = { value };";
+    let source = "import { \"$/span.resin\" }; def main (value: Ptr<Span<int>>) -> Ptr<Span<int>> = { value };";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.analyze();
     assert!(
@@ -689,7 +689,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
     for receiver in ["values", "holder.values"] {
         for tail in ["", " values.;", " holder.values.;", " holder.values.at(; "] {
             let source = format!(
-                "def main() = {{ var values = [1_i, 2_i]; var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }}; {receiver}.at(0).* := 3;{tail} }};"
+                "import {{ \"$/span.resin\" }}; def main() = {{ var values = [1_i, 2_i]; var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }}; {receiver}.at(0).* := 3;{tail} }};"
             );
             let project = Project::new(&[("main.resin", &source)]);
             let analysis = project.analyze();
@@ -727,14 +727,14 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
 #[test]
 fn shared_receiver_completion_and_navigation_include_ordinary_drop_methods() {
     let library = "export { Counter }; struct Counter { count: int, def drop(self: Ptr<Counter>) = {}; def read(self: Ptr<Counter>) -> int = { self.count }; }; ";
-    for tail in ["", "c.;"] {
+    for tail in ["", "c.get().;"] {
         let source = format!(
-            "import {{ \"lib.resin\" }}; def f(c: ArcPtr<Counter>) = {{ c.read(); {tail} }};"
+            "import {{ \"lib.resin\", \"$/shared.resin\" }}; def f(c: ArcPtr<Counter>) = {{ c.get().read(); {tail} }};"
         );
         let project = Project::new(&[("main.resin", &source), ("lib.resin", library)]);
         let analysis = project.analyze();
         let input = project.source("main.resin");
-        let call = source.find("c.read").unwrap() + 2;
+        let call = source.find(".read").unwrap() + 1;
         assert_eq!(
             analysis
                 .definition(&input, call)
@@ -756,7 +756,7 @@ fn shared_receiver_completion_and_navigation_include_ordinary_drop_methods() {
         let offset = if tail.is_empty() {
             call
         } else {
-            source.rfind("c.;").unwrap() + 2
+            source.rfind(".;").unwrap() + 1
         };
         let items = analysis.completions(&input, offset);
         assert!(items.iter().any(|item| item.name == "read"));
@@ -875,7 +875,7 @@ fn field_completion_before_existing_statements() {
         ] {
             for preceding in ["", "var earlier = root.height;"] {
                 let source = format!(
-                    "// é🌲\nstruct Root {{ width: uint, height: uint, pixels: Span<uint> }};\n\
+                    "// é🌲\nimport {{ \"$/span.resin\" }}; struct Root {{ width: uint, height: uint, pixels: Span<uint> }};\n\
                     @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {{\n\
                     {preceding}\n{receiver}.\n{following}\n}};"
                 );
@@ -1035,7 +1035,7 @@ impl Project {
         Self { sources }
     }
     fn analyze(&self) -> Arc<Compilation> {
-        let mut loader = resin_source::Loader::new(Default::default());
+        let mut loader = resin_source::Loader::new(resin_source::library_root());
         for importer in self.sources.values() {
             for (reference, target) in &self.sources {
                 loader
@@ -1758,7 +1758,7 @@ fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
             .hover(&input, source.rfind("code.length").unwrap())
             .unwrap()
             .text,
-        "code: Span<ubyte>"
+        "code: { data: Ptr<ubyte>, length: ulong }"
     );
     let source = "@compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() = { kernel. };";
     let project = Project::new(&[("main.resin", source)]);
@@ -1769,7 +1769,7 @@ fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
     assert!(
         items
             .iter()
-            .any(|i| i.name == "spirv" && i.detail.contains("Span<ubyte>")),
+            .any(|i| i.name == "spirv" && i.detail.contains("data: Ptr<ubyte>")),
         "{items:?}"
     );
     let source = "@compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() = { var alias = kernel; alias. };";
@@ -2064,11 +2064,11 @@ fn pointer_replace_has_ordinary_method_hover_and_recovery() {
 fn formatted_string_and_literal_string_types_survive_editor_recovery() {
     for (source, members) in [
         (
-            "def main() = { var text = fmt(\"{0}\", (42,)); text.bytes.; };",
+            "import { \"$/string.resin\" }; def main() = { var text = fmt(\"{0}\", (42,)); text.storage.; };",
             ["get", "downgrade"],
         ),
         (
-            "def main() = { var text = fmt(\"{0}\", (42,)); text.bytes.get().; };",
+            "import { \"$/string.resin\" }; def main() = { var text = fmt(\"{0}\", (42,)); text.get().; };",
             ["data", "length"],
         ),
         (
@@ -2123,8 +2123,8 @@ fn invalid_method_arguments_preserve_receiver_facts_and_later_bindings() {
 #[test]
 fn string_constructor_is_an_ordinary_discoverable_static_method() {
     for source in [
-        "def main() = { var text = String.from_str(\"title\"); text.bytes.get().; };",
-        "def main() = { String.; };",
+        "import { \"$/string.resin\" }; def main() = { var text = String.from_str(\"title\"); text.get().; };",
+        "import { \"$/string.resin\" }; def main() = { String.; };",
     ] {
         let project = Project::new(&[("main.resin", source)]);
         let analysis = project.analyze();

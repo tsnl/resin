@@ -1,5 +1,7 @@
 export { arguments, environment, argument, c_string, environment_get, EnvironmentVariableNotFound };
 
+import { "span.resin" };
+
 struct EnvironmentVariableNotFound {};
 
 // Views borrow the startup snapshot until process exit. Do not free their data.
@@ -17,7 +19,7 @@ def c_string(text: Ptr<ubyte>) -> Span<ubyte> = {
 };
 
 def argument(args: Span<Ptr<ubyte>>, index: ulong) -> Span<ubyte> = {
-	c_string(args(index).*)
+	c_string(args.at(index).*)
 };
 
 // Exact case-sensitive name lookup in the frozen snapshot, including on Windows.

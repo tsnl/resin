@@ -435,15 +435,12 @@ fn error_collection_retains_distinct_applications_of_one_nominal() {
     solver.include(&int, &errors, SPAN).unwrap();
     solver.include(&bool, &errors, SPAN).unwrap();
     assert!(solver.finish_errors(std::slice::from_ref(&errors)));
-    assert_eq!(
-        solver.complete(&errors),
-        Some(crate::Type::Union {
-            variants: vec![
-                solver.complete(&int).unwrap(),
-                solver.complete(&bool).unwrap()
-            ],
-        })
-    );
+    let Some(crate::Type::Union { variants }) = solver.complete(&errors) else {
+        panic!("expected both nominal applications");
+    };
+    assert_eq!(variants.len(), 2);
+    assert!(variants.contains(&solver.complete(&int).unwrap()));
+    assert!(variants.contains(&solver.complete(&bool).unwrap()));
 }
 
 #[test]
