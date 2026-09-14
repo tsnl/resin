@@ -214,7 +214,7 @@ fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
 #[test]
 fn array_and_span_indexing_use_element_sizes() {
     runs(
-        "export { main }; def main () -> int = { var values = [10, 20, 30]; var p = Span<int> { data = Ptr<int>(&values), length = ulong(3) }; p(1).* := 7; var end = p(uint(2)); p(1).* + values(0).* + end.* };",
+        "export { main }; import { \"$/span.resin\" }; def main () -> int = { var values = [10, 20, 30]; var p = Span<int> { data = Ptr<int>(&values), length = ulong(3) }; p.at(1).* := 7; var end = p.at(2); p.at(1).* + values(0).* + end.* };",
         47,
     );
     runs(
@@ -681,6 +681,7 @@ fn array_addresses_and_dynamic_bounds_are_executable() {
 fn indexing_returns_pointers_and_evaluates_receiver_and_index_once() {
     runs(
         r#"export { main };
+        import { "$/span.resin" };
         def view(p: Ptr<int>, calls: Ptr<int>) -> Span<int> = {
             calls.* := calls.* + 1;
             Span<int> { data = p, length = ulong(3) }
@@ -688,7 +689,7 @@ fn indexing_returns_pointers_and_evaluates_receiver_and_index_once() {
         def index(calls: Ptr<int>) -> int = { calls.* := calls.* + 1; 1 };
         def main() -> int = {
             var values = [10_i, 20, 30]; var calls = 0;
-            var p: Ptr<int>; p := view(Ptr<int>(&values), &calls)(index(&calls));
+            var p: Ptr<int>; p := view(Ptr<int>(&values), &calls).at(ulong(index(&calls)));
             p.* := 42;
             var copied = values;
             copied(0).* := 9;
@@ -703,6 +704,7 @@ fn indexing_returns_pointers_and_evaluates_receiver_and_index_once() {
 fn at_indexing_borrows_array_places_and_supports_field_receivers() {
     runs(
         r#"export { main };
+        import { "$/span.resin" };
         struct Holder { values: Span<int> };
         def view(p: Ptr<int>, calls: Ptr<int>) -> Holder = {
             calls.* := calls.* + 1;
@@ -730,11 +732,11 @@ fn at_indexing_checks_bounds_before_later_effects() {
     for receiver in ["values", "holder.values"] {
         for index in ["2", "18446744073709551615_ul"] {
             let output = run_module(&module(&format!(
-                r#"export {{ main }}; def main() -> int = {{
+                r#"export {{ main }}; import {{ "$/span.resin" }}; extern "stdio.h" def puts(text: Ptr<ubyte>) -> int; def main() -> int = {{
                     var values = [1, 2];
                     var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }};
                     {receiver}.at({index}).* := 9;
-                    print("after"); 0
+                    puts("after".data); 0
                 }};"#
             )));
             assert!(!output.status.success());
@@ -749,8 +751,8 @@ fn array_and_span_indexing_fail_before_out_of_bounds_access() {
     for source in [
         "export { main }; def main() -> int = { var xs = [1, 2]; xs(-1).* };",
         "export { main }; def main() -> int = { var xs = [1, 2]; xs(2).* := 9; 0 };",
-        "export { main }; def main() -> int = { var xs = [1, 2]; var s = Span<int> { data = Ptr<int>(&xs), length = ulong(2) }; s(ulong(18446744073709551615)).* };",
-        "export { main }; def main() -> int = { var s = Span<int> { data = Ptr<int>(ulong(0)), length = ulong(0) }; s(0).* };",
+        "export { main }; import { \"$/span.resin\" }; def main() -> int = { var xs = [1, 2]; var s = Span<int> { data = Ptr<int>(&xs), length = ulong(2) }; s.at(18446744073709551615_ul).* };",
+        "export { main }; import { \"$/span.resin\" }; def main() -> int = { var s = Span<int> { data = Ptr<int>(ulong(0)), length = ulong(0) }; s.at(0).* };",
     ] {
         let output = run_module(&module(source));
         assert!(!output.status.success());
@@ -1007,6 +1009,7 @@ fn shared_layout_queries_follow_padding_and_do_not_evaluate_operands() {
     runs(
         r#"
         export { main };
+        import { "$/span.resin" };
         struct Inner { x: uint, y: ulong, z: float32 };
         struct Outer { first: uint, inner: Inner, last: float32 };
         def main() -> int = {

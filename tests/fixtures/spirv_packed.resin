@@ -1,4 +1,5 @@
 export { kernel };
+import { "$/span.resin" };
 
 struct Bytes3 { a: ubyte, b: ubyte, c: ubyte };
 struct Rows { first: Bytes3, second: Bytes3 };
