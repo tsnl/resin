@@ -142,9 +142,10 @@ struct Gpu {
 		if (count > 18446744073709551615_ul / layout.size) {
 			err(OutOfMemory {})
 		} else {
-			var view = self.malloc(count * layout.size, layout.alignment, memory)?;
-			ok(GpuSpan<T> { data = GpuPtr<T> { view = gpu_view_range::<T>(view, count, 0_ul, count) }, length = count })
-		}
+			ok(())
+		}?;
+		var view = self.malloc(count * layout.size, layout.alignment, memory)?;
+		ok(GpuSpan<T> { data = GpuPtr<T> { view = gpu_view_range::<T>(view, count, 0_ul, count) }, length = count })
 	};
 	@gpu_allocator
 	def malloc(self: Gpu, bytes: ulong, alignment: ulong, memory: int) -> Result<GpuView, RuntimeError> = {
