@@ -487,20 +487,25 @@ impl Specialization<'_, '_> {
         if fields.len() != expected.len() {
             return Err(self.instance_error("record arguments do not match the parameter fields"));
         }
-        let mut names = std::collections::BTreeSet::new();
+        let mut seen = vec![false; expected.len()];
         let mut completed = Vec::with_capacity(fields.len());
         for (name, source) in fields {
-            let Some(field) = expected.iter().find(|field| field.name == name.val) else {
+            let Some((index, field)) = expected
+                .iter()
+                .enumerate()
+                .find(|(_, field)| field.name == name.val)
+            else {
                 return Err(
                     self.instance_error(format!("record parameter has no field {}", name.val))
                 );
             };
-            if !names.insert(name.val.clone()) {
+            if seen[index] {
                 return Err(self.instance_error(format!("duplicate record argument {}", name.val)));
             }
+            seen[index] = true;
             let value = self.term(source)?;
             self.require_assignable(&value.ty, &field.ty)?;
-            completed.push((name.clone(), value));
+            completed.push(concrete::RecordInitializer { index, value });
         }
         Ok(concrete::TermKind::Record { fields: completed })
     }

@@ -182,6 +182,39 @@ fn all_applications_consume_fresh_arguments_without_an_extra_drop() {
 }
 
 #[test]
+fn generic_record_initializers_preserve_layout_and_cleanup_on_partial_failure() {
+    run(r#"
+    struct Pair<T> { first: T, second: T };
+    struct Failed {};
+    def ready(fail: bool) -> Result<(), Failed> = {
+        if (fail) { err(Failed {}) } else { ok(()) }
+    };
+    def build<T>(create: (Ptr<int>, int) -> T, trace: Ptr<int>, fail: bool) -> Result<Pair<T>, Failed> = {
+        ok(Pair<T> {
+            second = create(trace, 2),
+            first = {
+                ready(fail)?;
+                create(trace, 1)
+            },
+        })
+    };
+    def main() -> int = {
+        var trace = 0;
+        var ordered = match (build(shared_resource, &trace, 1 == 0)) {
+            ok(pair) => { pair.first.get().digit == 1 && pair.second.get().digit == 2 },
+            err(error) => { 1 == 0 },
+        };
+        var destroyed = trace == 21;
+        var failed = match (build(shared_resource, &trace, 1 == 1)) {
+            ok(pair) => { 1 == 0 },
+            err(error) => { 1 == 1 },
+        };
+        if (ordered && destroyed && failed && trace == 212) { 0 } else { 1 }
+    };
+    "#);
+}
+
+#[test]
 fn named_values_are_copied_even_when_the_type_has_a_destructor() {
     run(r#"
     def consume(value: Resource) = {};

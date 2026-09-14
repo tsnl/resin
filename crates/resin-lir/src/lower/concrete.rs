@@ -75,7 +75,8 @@ pub(super) enum TermKind {
         tail: Box<Term>,
     },
     Record {
-        fields: Vec<(Ident, Term)>,
+        /// Initializers remain in evaluation order; their indices select the completed layout.
+        fields: Vec<RecordInitializer>,
     },
     Array {
         elems: Vec<Term>,
@@ -137,6 +138,13 @@ pub(super) enum TermKind {
         base: Box<Term>,
         access: FieldAccess,
     },
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct RecordInitializer {
+    /// Specialization assigns every declaration index exactly once.
+    pub(super) index: usize,
+    pub(super) value: Term,
 }
 
 #[derive(Debug, Clone)]
