@@ -1,6 +1,7 @@
 # Resin design
 
-The [ownership specification](lifetimes.md) describes `Arc<T>`, `Weak<T>`,
+The [ownership specification](lifetimes.md) describes `ArcPtr<T>`, `ArcSpan<T>`,
+`WeakPtr<T>`, `WeakSpan<T>`,
 automatic destruction, and inherent methods through `impl`.
 
 Resin is a deliberately small systems programming language in the spirit of C and Go.

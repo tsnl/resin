@@ -5,7 +5,7 @@ struct Pair<T> {
     first: T,
     def map<U>(self: Pair<T>, value: U) -> Pair<U> = { Pair<U> { first = value } };
 };
-type Shared<T> = Arc<Pair<T>>;
+type Shared<T> = ArcPtr<Pair<T>>;
 def identity<T>(value: T) -> _ = { value };
 def example() = {
     var f = identity::<Ptr<int>>;

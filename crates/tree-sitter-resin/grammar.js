@@ -72,8 +72,10 @@ const TYPE_FORMERS = [
   "GpuSpan",
   "GpuComputePipeline",
   "GpuGraphicsPipeline",
-  "Arc",
-  "Weak",
+  "ArcPtr",
+  "WeakPtr",
+  "ArcSpan",
+  "WeakSpan",
   "Result",
 ];
 
@@ -491,7 +493,16 @@ export default grammar({
         seq(
           field(
             "former",
-            choice("Ptr", "Span", "GpuPtr", "GpuSpan", "Arc", "Weak"),
+            choice(
+              "Ptr",
+              "Span",
+              "GpuPtr",
+              "GpuSpan",
+              "ArcPtr",
+              "WeakPtr",
+              "ArcSpan",
+              "WeakSpan",
+            ),
           ),
           "<",
           field("arg", $.type),

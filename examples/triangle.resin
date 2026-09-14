@@ -75,11 +75,9 @@ def main() -> Result<(), _> = {
 	commands.submit()?;
 
 	var path = "triangle.png";
-	var host = Host.malloc(pixels.length)?;
-	pixels.copy_to(Span<ubyte> { data = host, length = pixels.length });
-	var written = ImageData.write_pixels(path.data, 256, 256, 4, host, 0);
-	Host.free(host);
-	written?;
+	var host = Host.alloc(pixels.length, 0_ub)?;
+	pixels.copy_to(host.get());
+	ImageData.write_pixels(path.data, 256, 256, 4, host.get(), 0)?;
 	print("wrote triangle.png\n");
 	ok(())
 };

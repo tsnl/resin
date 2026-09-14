@@ -7,13 +7,13 @@ struct Item { value: int,
 };
 
 def main() = {
-    var owner = Arc<Item> { value = 42 };
-    var weak: Weak<Item>;
+    var owner = ArcPtr<Item> { value = 42 };
+    var weak: WeakPtr<Item>;
     weak := owner.downgrade();
-    var maybe: Arc<Item> | None;
+    var maybe: ArcPtr<Item> | None;
     maybe := weak.upgrade();
     match (maybe) {
-        Arc<Item>(item) => { item.value; },
+        ArcPtr<Item>(item) => { item.value; },
         None => {},
     };
 };

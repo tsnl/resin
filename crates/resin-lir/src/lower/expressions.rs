@@ -42,11 +42,24 @@ impl FunctionLowering<'_> {
                 return self.gen_conversion(term, arg, conversion);
             }
             TermKind::ArcNew { value } => {
-                let Ty::Arc { pointee } = expected else {
+                let Ty::ArcPtr { pointee } = expected else {
                     unreachable!("checked Arc constructor")
                 };
                 self.gen_term(value, Some(pointee))?;
                 self.emit(Instr::ArcNew);
+            }
+            TermKind::HostAllocate { error, args } => {
+                let Ty::Result { value, .. } = expected else {
+                    unreachable!("host allocation result")
+                };
+                let Ty::ArcSpan { element } = &**value else {
+                    unreachable!("host allocation span")
+                };
+                self.gen_arguments(args)?;
+                self.emit(Instr::HostAllocate {
+                    error: *error,
+                    element: *element.clone(),
+                });
             }
             TermKind::GpuNew { allocator, args } => {
                 let Ty::Result { value, .. } = expected else {
@@ -114,9 +127,7 @@ impl FunctionLowering<'_> {
                     }
                 });
             }
-            TermKind::WeakEmpty { pointee } => self.emit(Instr::WeakEmpty {
-                pointee: pointee.clone(),
-            }),
+            TermKind::WeakEmpty { ty } => self.emit(Instr::WeakEmpty { ty: ty.clone() }),
             TermKind::Result { failure, arg } => {
                 return self.gen_result(span, *failure, arg, expected);
             }
@@ -129,7 +140,7 @@ impl FunctionLowering<'_> {
             TermKind::Assign { place, value } => return self.gen_assign(place, value),
             TermKind::Address { place } => return self.gen_place(place),
             TermKind::Deref { pointer } => {
-                if matches!(pointer.ty, Ty::Arc { .. }) {
+                if matches!(pointer.ty, Ty::ArcPtr { .. }) {
                     self.hold_arc_address(pointer)?;
                 } else {
                     self.gen_term(pointer, None)?;
@@ -200,6 +211,18 @@ impl FunctionLowering<'_> {
                 self.emit(Instr::Load);
                 self.emit(Instr::ArcData);
             }
+            Intrinsic::ArcSpanGet => {
+                self.emit(Instr::Load);
+                self.emit(Instr::ArcSpanData);
+            }
+            Intrinsic::ArcSpanTryNew => {
+                let Some(Ty::ArcSpan { element }) = result.without_none() else {
+                    unreachable!("optional shared span allocation result")
+                };
+                self.emit(Instr::ArcSpanTryNew { element: *element });
+            }
+            Intrinsic::SpanBytes => self.emit(Instr::SpanBytes),
+            Intrinsic::SpanSlice => self.emit(Instr::SpanSlice),
             Intrinsic::Downgrade => self.emit(Instr::Downgrade),
             Intrinsic::Upgrade => self.emit(Instr::Upgrade),
         }

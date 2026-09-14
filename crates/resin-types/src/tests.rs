@@ -367,7 +367,7 @@ fn gpu_element_storage_excludes_references_and_custom_destruction() {
         Ty::GpuSpan {
             element: Box::new(Ty::UInt32),
         },
-        Ty::Arc {
+        Ty::ArcPtr {
             pointee: Box::new(Ty::UInt32),
         },
         Ty::Array {
@@ -439,7 +439,7 @@ fn pipeline_types_preserve_root_identity_and_opaque_shared_ownership() {
     let root = record(Ty::Span {
         element: Box::new(Ty::UInt32),
     });
-    let owner = Ty::Arc {
+    let owner = Ty::ArcPtr {
         pointee: Box::new(Ty::Int32),
     };
     let compute = Ty::GpuComputePipeline {
@@ -478,17 +478,17 @@ fn pipeline_types_preserve_root_identity_and_opaque_shared_ownership() {
     }
     assert_eq!(
         format_type(&compute, &table),
-        "GpuComputePipeline<{ value: Span<uint> }, Arc<int>>"
+        "GpuComputePipeline<{ value: Span<uint> }, ArcPtr<int>>"
     );
     assert_eq!(
         format_type(&graphics, &table),
-        "GpuGraphicsPipeline<{ value: Span<uint> }, Arc<int>>"
+        "GpuGraphicsPipeline<{ value: Span<uint> }, ArcPtr<int>>"
     );
 }
 
 #[test]
 fn pipeline_argument_contract_rejects_invalid_owners_roots_and_rootless_compute() {
-    let owner = Box::new(Ty::Arc {
+    let owner = Box::new(Ty::ArcPtr {
         pointee: Box::new(Ty::Int32),
     });
     let graphics = Ty::GpuGraphicsPipeline {

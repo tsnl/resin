@@ -356,7 +356,7 @@ impl<'a> Instances<'a> {
         let mut owner = receiver;
         while let resin_hir::Type::Pointer { pointee }
         | resin_hir::Type::GpuPointer { pointee }
-        | resin_hir::Type::Arc { pointee } = owner
+        | resin_hir::Type::ArcPtr { pointee } = owner
         {
             owner = pointee;
         }

@@ -65,10 +65,10 @@ fn nested_host_indirection_preserves_gpu_field_addresses_but_host_metadata_stays
         r#"
         struct Item { value: int };
         def raw(p: Ptr<GpuPtr<Item>>) -> GpuPtr<int> = { &p.value };
-        def shared(p: Arc<GpuPtr<Item>>) -> GpuPtr<int> = { &p.value };
-        def mixed(p: Ptr<Arc<GpuPtr<Item>>>) -> GpuPtr<int> = { &p.value };
+        def shared(p: ArcPtr<GpuPtr<Item>>) -> GpuPtr<int> = { &p.value };
+        def mixed(p: Ptr<ArcPtr<GpuPtr<Item>>>) -> GpuPtr<int> = { &p.value };
         def raw_metadata(p: Ptr<GpuPtr<Item>>) -> Ptr<GpuPtr<Item>> = { &p.* };
-        def shared_metadata(p: Arc<GpuPtr<Item>>) -> Ptr<GpuPtr<Item>> = { &p.* };
+        def shared_metadata(p: ArcPtr<GpuPtr<Item>>) -> Ptr<GpuPtr<Item>> = { &p.* };
     "#,
     )
     .unwrap();
@@ -116,7 +116,7 @@ fn gpu_pointer_casts_and_forged_gpu_views_are_rejected() {
 fn allocation_rejects_managed_elements_and_ordinary_new_is_unchanged() {
     assert!(
         generate(&format!(
-            "{ALLOCATOR}\ndef main() -> _ = {{ Device.new().new(Arc<int>(1_i)) }};"
+            "{ALLOCATOR}\ndef main() -> _ = {{ Device.new().new(ArcPtr<int>(1_i)) }};"
         ))
         .is_err()
     );
@@ -125,7 +125,7 @@ fn allocation_rejects_managed_elements_and_ordinary_new_is_unchanged() {
 
 #[test]
 fn native_gpu_allocator_accepts_nominal_arc_owner() {
-    generate("extern type Native; struct Owner { handle: Ptr<Native> }; def allocate(gpu: Arc<Owner>) -> _ = { GpuPtr<ubyte>.allocate_native(gpu.handle, gpu, 8, 4, 0) };").unwrap();
+    generate("extern type Native; struct Owner { handle: Ptr<Native> }; def allocate(gpu: ArcPtr<Owner>) -> _ = { GpuPtr<ubyte>.allocate_native(gpu.handle, gpu, 8, 4, 0) };").unwrap();
 }
 
 #[test]
@@ -155,27 +155,27 @@ const SHADER: &str = "struct Params { scale: float32, values: Span<int> }; @comp
 const PIPELINES: &str = r#"
 struct PipelineOwner { gpu: Device,
     @gpu_pipeline_context
-    def context(self: Arc<PipelineOwner>) -> Device = { self.gpu };
+    def context(self: ArcPtr<PipelineOwner>) -> Device = { self.gpu };
 };
 
 
 struct Commands {
     @gpu_dispatch
-    def dispatch(self: Commands, pipeline: Arc<PipelineOwner>, root: GpuArguments, x: uint, y: uint, z: uint) -> Result<(), Failure> = { ok(()) };
+    def dispatch(self: Commands, pipeline: ArcPtr<PipelineOwner>, root: GpuArguments, x: uint, y: uint, z: uint) -> Result<(), Failure> = { ok(()) };
     @gpu_draw
-    def draw(self: Commands, pipeline: Arc<PipelineOwner>, root: GpuArguments | None, count: uint) -> Result<(), Failure> = { ok(()) };
+    def draw(self: Commands, pipeline: ArcPtr<PipelineOwner>, root: GpuArguments | None, count: uint) -> Result<(), Failure> = { ok(()) };
 };
 
 "#;
 
 const PIPELINE_METHODS: &str = r#"
     @gpu_compute_pipeline
-    def compute(self: Device, code: Span<ubyte>) -> Result<Arc<PipelineOwner>, Failure> = {
-        ok(Arc<PipelineOwner>(PipelineOwner { gpu = self }))
+    def compute(self: Device, code: Span<ubyte>) -> Result<ArcPtr<PipelineOwner>, Failure> = {
+        ok(ArcPtr<PipelineOwner>(PipelineOwner { gpu = self }))
     };
     @gpu_graphics_pipeline
-    def graphics(self: Device, vertex: Span<ubyte>, fragment: Span<ubyte>) -> Result<Arc<PipelineOwner>, Failure> = {
-        ok(Arc<PipelineOwner>(PipelineOwner { gpu = self }))
+    def graphics(self: Device, vertex: Span<ubyte>, fragment: Span<ubyte>) -> Result<ArcPtr<PipelineOwner>, Failure> = {
+        ok(ArcPtr<PipelineOwner>(PipelineOwner { gpu = self }))
     };"#;
 
 fn pipeline_source(source: &str) -> String {
@@ -221,8 +221,8 @@ fn dispatch_infers_host_fields_from_the_pipeline_root() {
 #[test]
 fn pipeline_types_cross_functions_and_dispatch_accepts_precomputed_arguments() {
     pipelines(&format!("{SHADER}
-        def create(gpu: Device) -> Result<GpuComputePipeline<Params, Arc<PipelineOwner>>, Failure> = {{ gpu.compute(kernel) }};
-        def dispatch(pipeline: GpuComputePipeline<Params, Arc<PipelineOwner>>, values: GpuSpan<int>) -> Result<(), Failure> = {{
+        def create(gpu: Device) -> Result<GpuComputePipeline<Params, ArcPtr<PipelineOwner>>, Failure> = {{ gpu.compute(kernel) }};
+        def dispatch(pipeline: GpuComputePipeline<Params, ArcPtr<PipelineOwner>>, values: GpuSpan<int>) -> Result<(), Failure> = {{
             var args = (pipeline, {{ scale = 1.0_f, values = values }}, 1_ui, 1_ui, 1_ui);
             Commands {{}}.dispatch(args.0, args.1, args.2, args.3, args.4)
         }};
@@ -257,14 +257,14 @@ fn dispatch_rejects_raw_pointers_and_incompatible_pipeline_roots() {
     ] {
         assert!(pipelines(&format!("{SHADER} def main(gpu: Device, values: GpuSpan<int>, raw: Span<int>) -> _ = {{ var pipeline = gpu.compute(kernel)?; {tail} }};")).is_err(), "{tail}");
     }
-    assert!(pipelines(&format!("{SHADER} def create(gpu: Device) -> Result<GpuComputePipeline<int, Arc<PipelineOwner>>, Failure> = {{ gpu.compute(kernel) }};")).is_err());
+    assert!(pipelines(&format!("{SHADER} def create(gpu: Device) -> Result<GpuComputePipeline<int, ArcPtr<PipelineOwner>>, Failure> = {{ gpu.compute(kernel) }};")).is_err());
 }
 
 #[test]
 fn standalone_projection_and_untyped_pipeline_owners_cannot_dispatch() {
     assert!(pipelines(&format!("{SHADER} def main(gpu: Device, values: GpuSpan<int>) -> _ = {{ kernel.project(gpu, {{ scale = 2.0_f, values = values }}) }};")).is_err());
-    assert!(pipelines("def main(owner: Arc<PipelineOwner>, arguments: GpuArguments) -> _ = { Commands {}.dispatch(owner, arguments, 1, 1, 1) };").is_err());
-    assert!(pipelines("def forge(owner: Arc<PipelineOwner>) -> GpuComputePipeline<int, Arc<PipelineOwner>> = { GpuComputePipeline<int, Arc<PipelineOwner>>(owner) };").is_err());
+    assert!(pipelines("def main(owner: ArcPtr<PipelineOwner>, arguments: GpuArguments) -> _ = { Commands {}.dispatch(owner, arguments, 1, 1, 1) };").is_err());
+    assert!(pipelines("def forge(owner: ArcPtr<PipelineOwner>) -> GpuComputePipeline<int, ArcPtr<PipelineOwner>> = { GpuComputePipeline<int, ArcPtr<PipelineOwner>>(owner) };").is_err());
 }
 
 #[test]
@@ -276,7 +276,7 @@ fn native_bridge_signatures_cannot_escape_through_method_references() {
         "var record = Commands.dispatch; record(Commands {}, owner, arguments, 1, 1, 1)",
         "(Commands.dispatch)(Commands {}, owner, arguments, 1, 1, 1)",
     ] {
-        assert!(pipelines(&format!("{SHADER} def main(gpu: Device, owner: Arc<PipelineOwner>, arguments: GpuArguments) -> _ = {{ {tail} }};")).is_err(), "{tail}");
+        assert!(pipelines(&format!("{SHADER} def main(gpu: Device, owner: ArcPtr<PipelineOwner>, arguments: GpuArguments) -> _ = {{ {tail} }};")).is_err(), "{tail}");
     }
 }
 
@@ -293,7 +293,7 @@ fn gpu_bridge_decorators_require_one_valid_native_signature() {
     }
     let source = pipeline_source("").replace(
         "struct PipelineOwner { gpu: Device,",
-        "struct PipelineOwner { gpu: Device, @gpu_pipeline_context def again(self: Arc<PipelineOwner>) -> Device = { self.gpu };",
+        "struct PipelineOwner { gpu: Device, @gpu_pipeline_context def again(self: ArcPtr<PipelineOwner>) -> Device = { self.gpu };",
     );
     let error = generate(&source).unwrap_err();
     assert!(error.to_string().contains("only one"), "{error}");

@@ -65,6 +65,27 @@ struct Completion<'a> {
 }
 
 impl Completion<'_> {
+    fn convert_method_result(
+        &self,
+        source: &typed::Term,
+        result: crate::Type,
+        kind: TermKind,
+    ) -> Result<TermKind> {
+        Ok(
+            if result == self.solver.require_complete(&source.ty, source.span)? {
+                kind
+            } else {
+                TermKind::Convert {
+                    arg: Box::new(Term {
+                        span: source.span,
+                        ty: result,
+                        kind,
+                    }),
+                }
+            },
+        )
+    }
+
     fn elaborate(&mut self, source: &typed::Term) -> Result<Term> {
         Ok(Term {
             span: source.span,
@@ -165,13 +186,33 @@ impl Completion<'_> {
                             .map(|arg| self.elaborate(arg))
                             .collect::<Result<_>>()?,
                     },
-                    ResolvedMethod::Compiler { declaration } => self.method(
-                        declaration,
-                        receiver.as_deref(),
-                        &self.annotation(receiver_type)?.ty,
-                        name,
-                        args,
-                    )?,
+                    ResolvedMethod::Compiler { declaration } => {
+                        let result = types::ty(&declaration.result);
+                        let kind = self.method(
+                            declaration,
+                            receiver.as_deref(),
+                            &self.annotation(receiver_type)?.ty,
+                            name,
+                            args,
+                        )?;
+                        self.convert_method_result(source, result, kind)?
+                    }
+                    ResolvedMethod::Symbolic {
+                        signature,
+                        receiver: conversion,
+                    } => {
+                        let result = self
+                            .solver
+                            .require_complete(&signature.result, source.span)?;
+                        let kind = self.symbolic_method(
+                            signature,
+                            conversion,
+                            receiver.as_deref(),
+                            args,
+                            source.span,
+                        )?;
+                        self.convert_method_result(source, result, kind)?
+                    }
                     source => self.source_method_call(&source, receiver.as_deref(), name, args)?,
                 }
             }
@@ -185,7 +226,9 @@ impl Completion<'_> {
                     ResolvedMethod::Dependent { signature } => TermKind::DependentMethod {
                         lookup: self.method_lookup(signature, name.span)?,
                     },
-                    ResolvedMethod::Compiler { .. } => unreachable!("source method reference"),
+                    ResolvedMethod::Compiler { .. } | ResolvedMethod::Symbolic { .. } => {
+                        unreachable!("source method reference")
+                    }
                 }
             }
             typed::TermKind::Call { func, args } => self.call(func, args)?,
@@ -501,6 +544,7 @@ impl Completion<'_> {
         };
         Ok(match declaration.body {
             FunctionBody::Intrinsic(op) => TermKind::Intrinsic { op, args },
+            FunctionBody::HostAllocate { error } => TermKind::HostAllocate { error, args },
             FunctionBody::GpuNew { allocator } => TermKind::GpuNew { allocator, args },
             FunctionBody::GpuAllocate { allocator } => TermKind::GpuAllocate { allocator, args },
             FunctionBody::GpuPipelineDispatch {
@@ -799,7 +843,7 @@ impl Completion<'_> {
 impl Completion<'_> {
     fn symbolic_ascription(&mut self, to: &crate::Type, source: &typed::Term) -> Result<TermKind> {
         match to {
-            crate::Type::Arc { pointee } => {
+            crate::Type::ArcPtr { pointee } => {
                 let mut value = self.nominal_argument(pointee, source)?;
                 if value.ty != **pointee {
                     value = Term {
@@ -814,10 +858,10 @@ impl Completion<'_> {
                     value: Box::new(value),
                 })
             }
-            crate::Type::Weak { pointee } if matches!(source.kind, typed::TermKind::Unit) => {
-                Ok(TermKind::WeakEmpty {
-                    pointee: *pointee.clone(),
-                })
+            crate::Type::WeakPtr { .. } | crate::Type::WeakSpan { .. }
+                if matches!(source.kind, typed::TermKind::Unit) =>
+            {
+                Ok(TermKind::WeakEmpty { ty: to.clone() })
             }
             _ => Ok(TermKind::Convert {
                 arg: Box::new(self.nominal_argument(to, source)?),
@@ -838,7 +882,7 @@ impl Completion<'_> {
     }
 
     fn ascription(&mut self, span: Span, to: &Ty, source: &typed::Term) -> Result<TermKind> {
-        let payload = if let Ty::Arc { pointee } = to {
+        let payload = if let Ty::ArcPtr { pointee } = to {
             pointee.as_ref()
         } else {
             to
@@ -848,17 +892,15 @@ impl Completion<'_> {
             // own argument list is empty. Its representation belongs to LIR.
             return self.symbolic_ascription(&types::ty(to), source);
         }
-        if let Ty::Arc { pointee } = to {
+        if let Ty::ArcPtr { pointee } = to {
             return Ok(TermKind::ArcNew {
                 value: Box::new(self.shared_payload(pointee, source)?),
             });
         }
-        if let Ty::Weak { pointee } = to
+        if matches!(to, Ty::WeakPtr { .. } | Ty::WeakSpan { .. })
             && matches!(source.kind, typed::TermKind::Unit)
         {
-            return Ok(TermKind::WeakEmpty {
-                pointee: types::ty(pointee),
-            });
+            return Ok(TermKind::WeakEmpty { ty: types::ty(to) });
         }
         let value = self.constructor_argument(to, source)?;
         self.conversion(span, value, to)
@@ -909,6 +951,45 @@ impl Completion<'_> {
         }
         Ok(TermKind::Convert {
             arg: Box::new(value),
+        })
+    }
+}
+
+impl Completion<'_> {
+    fn symbolic_method(
+        &mut self,
+        signature: super::context::MethodScheme,
+        conversion: Option<ReceiverConversion>,
+        receiver: Option<&typed::Term>,
+        arguments: &[typed::Term],
+        span: Span,
+    ) -> Result<TermKind> {
+        let params = signature
+            .params
+            .iter()
+            .map(|ty| self.solver.require_complete(ty, span))
+            .collect::<Result<Vec<_>>>()?;
+        let receiver = receiver
+            .map(|source| {
+                Ok(Box::new(Term {
+                    span: source.span,
+                    ty: params[0].clone(),
+                    kind: TermKind::Adapt {
+                        conversion: conversion.expect("checked instance receiver"),
+                        arg: self.boxed(source)?,
+                    },
+                }))
+            })
+            .transpose()?;
+        let mut values = receiver.into_iter().map(|term| *term).collect::<Vec<_>>();
+        for argument in arguments {
+            values.push(self.elaborate(argument)?);
+        }
+        let args = Arguments { values, params };
+        Ok(match signature.body {
+            FunctionBody::Intrinsic(op) => TermKind::Intrinsic { op, args },
+            FunctionBody::HostAllocate { error } => TermKind::HostAllocate { error, args },
+            _ => unreachable!("symbolic builtin method"),
         })
     }
 }

@@ -115,10 +115,16 @@ pub enum Type {
         root: Box<Type>,
         owner: Box<Type>,
     },
-    Arc {
+    ArcPtr {
         pointee: Box<Type>,
     },
-    Weak {
+    ArcSpan {
+        element: Box<Type>,
+    },
+    WeakSpan {
+        element: Box<Type>,
+    },
+    WeakPtr {
         pointee: Box<Type>,
     },
     Array {
@@ -363,8 +369,12 @@ pub enum TermKind {
         record: FunctionId,
         args: Arguments,
     },
+    HostAllocate {
+        error: FunctionId,
+        args: Arguments,
+    },
     WeakEmpty {
-        pointee: Type,
+        ty: Type,
     },
     Result {
         failure: bool,
@@ -777,8 +787,10 @@ fn builtin_hover(document: &resin_cst::Document, token: resin_cst::Node<'_>) -> 
                 | "GpuComputePipeline"
                 | "GpuGraphicsPipeline"
                 | "Result"
-                | "Arc"
-                | "Weak"
+                | "ArcSpan"
+                | "WeakSpan"
+                | "ArcPtr"
+                | "WeakPtr"
                 | "None"
         )
     {
@@ -874,7 +886,7 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ),
     (
         "String",
-        "String\n\nOwned bytes, wrapping Arc<Span<ubyte>>. Copies retain the allocation. String literals have type str.",
+        "String\n\nOwned bytes, wrapping ArcSpan<ubyte>. Copies retain the allocation. String literals have type str.",
         DefinitionKind::Type,
     ),
     (
@@ -958,13 +970,23 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
         DefinitionKind::Type,
     ),
     (
-        "Arc",
-        "Arc<T> — a copyable shared owner; copying retains the allocation.",
+        "ArcPtr",
+        "ArcPtr<T> — a copyable shared owner; copying retains the allocation.",
         DefinitionKind::Type,
     ),
     (
-        "Weak",
-        "Weak<T> — a weak handle; upgrade() returns Arc<T> | None.",
+        "WeakPtr",
+        "WeakPtr<T> — a weak handle; upgrade() returns ArcPtr<T> | None.",
+        DefinitionKind::Type,
+    ),
+    (
+        "ArcSpan",
+        "ArcSpan<T> — shared ownership of an initialized sequence; get() borrows a Span<T>.",
+        DefinitionKind::Type,
+    ),
+    (
+        "WeakSpan",
+        "WeakSpan<T> — a weak sequence handle; upgrade() returns ArcSpan<T> | None.",
         DefinitionKind::Type,
     ),
     ("bool", "bool", DefinitionKind::Type),
@@ -1191,8 +1213,9 @@ impl Analysis {
             return;
         }
         let mut receiver = ty;
-        while let Type::Pointer { pointee } | Type::GpuPointer { pointee } | Type::Arc { pointee } =
-            receiver
+        while let Type::Pointer { pointee }
+        | Type::GpuPointer { pointee }
+        | Type::ArcPtr { pointee } = receiver
         {
             receiver = pointee;
         }
@@ -1245,8 +1268,9 @@ impl Analysis {
         solver: &lower::infer::Solver,
     ) {
         let mut owner = ty;
-        while let Type::Pointer { pointee } | Type::GpuPointer { pointee } | Type::Arc { pointee } =
-            owner
+        while let Type::Pointer { pointee }
+        | Type::GpuPointer { pointee }
+        | Type::ArcPtr { pointee } = owner
         {
             owner = pointee;
         }
@@ -1377,7 +1401,7 @@ fn source_method_receiver(
         Type::Pointer { pointee } | Type::GpuPointer { pointee } => {
             candidates.push(lower::infer::Type::from_hir(pointee));
         }
-        Type::Arc { pointee } => {
+        Type::ArcPtr { pointee } => {
             candidates.push(lower::infer::Type::from_hir(pointee));
             candidates.push(lower::infer::Type::pointer(lower::infer::Type::from_hir(
                 pointee,

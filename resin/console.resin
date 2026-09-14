@@ -16,7 +16,7 @@ struct InputLineOwner {
 		free(self.data);
 	};
 };
-type InputLine = Arc<InputLineOwner>;
+type InputLine = ArcPtr<InputLineOwner>;
 
 struct EndOfInput {};
 struct InputReadError {};

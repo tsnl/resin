@@ -345,7 +345,7 @@ fn imported_backend_errors_retain_expression_origins() {
 
 #[test]
 fn managed_fields_are_opaque_until_consumed_by_a_shader() {
-    let prefix = "export { kernel }; struct Host { value: float64 }; struct Root { owner: Arc<Host>, weak: Weak<Host>, result: uint };";
+    let prefix = "export { kernel }; struct Host { value: float64 }; struct Root { owner: ArcPtr<Host>, weak: WeakPtr<Host>, result: uint };";
     let m = module(&format!(
         "{prefix} @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = {{ var i = uint(invocation); root.result := i; var address = &root.owner; }};"
     ));

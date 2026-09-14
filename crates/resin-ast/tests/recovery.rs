@@ -86,7 +86,7 @@ fn gpu_type_formers_lower_with_their_element_annotations() {
 
 #[test]
 fn gpu_pipeline_annotations_keep_root_and_owner_separate() {
-    let source = "def pipeline(value: GpuComputePipeline<Root, Arc<Owner>>) -> GpuGraphicsPipeline<None, _> = { value };";
+    let source = "def pipeline(value: GpuComputePipeline<Root, ArcPtr<Owner>>) -> GpuGraphicsPipeline<None, _> = { value };";
     let file = resin_ast::generate(&Document::reparse(source.into(), None)).unwrap();
     let StmtKind::Function { params, result, .. } = &file.stmts[0].val else {
         panic!("expected function");
@@ -97,7 +97,7 @@ fn gpu_pipeline_annotations_keep_root_and_owner_separate() {
     assert_eq!(head.val.as_ref(), "GpuComputePipeline");
     assert!(matches!(&root.val, resin_ast::TypeKind::Atom { name } if name.val.as_ref() == "Root"));
     assert!(
-        matches!(&owner.val, resin_ast::TypeKind::App { head, .. } if head.val.as_ref() == "Arc")
+        matches!(&owner.val, resin_ast::TypeKind::App { head, .. } if head.val.as_ref() == "ArcPtr")
     );
     let resin_ast::TypeKind::GpuPipeline { head, root, owner } = &result.val else {
         panic!("expected graphics pipeline annotation");

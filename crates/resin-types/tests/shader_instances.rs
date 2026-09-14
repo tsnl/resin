@@ -42,7 +42,7 @@ fn managed_fields_are_opaque_and_do_not_require_shader_payload_types() {
             fields: vec![
                 RecordField {
                     name: "owner".into(),
-                    ty: Ty::Arc {
+                    ty: Ty::ArcPtr {
                         pointee: Box::new(Ty::Float64),
                     },
                 },

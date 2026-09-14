@@ -256,9 +256,19 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   applications consume their argument results; operators do the same, and aggregate
   constructors consume their field initializers. Structs define inherent methods and
   `drop(self: Ptr<T>)` hooks. There is no static move checking or borrow checker.
-  Native wrappers must make their copying safe or expose Arc-based ownership;
+  Native wrappers must make their copying safe or expose ArcPtr-based ownership;
   `pointer.replace(replacement)` can disarm a native owner during deliberate transfer.
   See `doc/lifetimes.md` for lifecycle rules.
+- Pointer families distinguish one value from a sequence: `Ptr<T>` / `Span<T>` are
+  borrowed, `ArcPtr<T>` / `ArcSpan<T>` retain host ownership, `WeakPtr<T>` /
+  `WeakSpan<T>` observe host ownership, and `GpuPtr<T>` / `GpuSpan<T>` retain GPU
+  ownership. All are ordinary value types; there are no unsized payload types.
+  `ArcPtr<Span<T>>` owns a descriptor, while `ArcSpan<T>` owns its elements.
+  `Host.alloc(count, initial)` returns `Result<ArcSpan<T>, OutOfMemory>`, checks
+  allocation arithmetic, and initializes every element using ordinary copying.
+  Final release destroys elements in reverse order. `get()` borrows a `Span<T>`;
+  borrowed views do not retain the owner. Numeric spans expose exact element bytes
+  through `as_bytes()`. Image pixel writes accept bounded `Span<ubyte>` views.
 - String literals have primitive type `str`, distinct from `Span<ubyte>` and the owned
   nominal `String`. They expose `data` and `length` over static NUL-terminated bytes;
   length excludes the appended terminator. Literal storage may be shared; treat it as read-only.
@@ -266,7 +276,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   to a span or construct a `str` from arbitrary bytes. `String.from_str(text)` copies a
   `str`, and `String.from_bytes(bytes)` copies a raw byte span. Both append a NUL outside
   their logical length. `fmt(format, arguments)` returns `String`, wrapping
-  `Arc<Span<ubyte>>`; formatting and reference counting are host-only.
+  `ArcSpan<ubyte>`; formatting and reference counting are host-only.
   `print(text)` and the ordinary `Io.stdout().write(text)` / `Io.stderr().write(text)` methods
   accept `str`, `Span<ubyte>`, and `String` and write bytes verbatim. Use `.data` when
   passing literal storage to C. Ordinary byte arrays contain exactly their declared

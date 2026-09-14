@@ -30,13 +30,13 @@ fn ownership_example_releases_memory_on_success_and_failure() {
     );
     assert_eq!(
         String::from_utf8_lossy(&success.stdout).replace("\r\n", "\n"),
-        "freed memory\nanswer = 42\n"
+        "releasing allocation\nanswer = 42\n"
     );
     let failure = run_entry(&m, "failure");
     assert_eq!(failure.status.code(), Some(1));
     assert_eq!(
         String::from_utf8_lossy(&failure.stdout).replace("\r\n", "\n"),
-        "freed memory\n"
+        "releasing allocation\n"
     );
     assert_eq!(
         String::from_utf8_lossy(&failure.stderr).replace("\r\n", "\n"),
@@ -65,8 +65,8 @@ fn array_value_projections_copy_the_element_and_destroy_the_container() {
                 };
             };
 
-            def make(trace: Ptr<int>, digit: int) -> Arc<Resource> = {
-                Arc<Resource> { trace = trace, digit = digit }
+            def make(trace: Ptr<int>, digit: int) -> ArcPtr<Resource> = {
+                ArcPtr<Resource> { trace = trace, digit = digit }
             };
             def main() -> int = { 0 };
         "#,

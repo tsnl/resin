@@ -61,7 +61,7 @@ fn bridge_body(
 ) -> Option<FunctionBody> {
     let params = &declaration.params;
     if name == "gpu_pipeline_context" {
-        return matches!(params.as_slice(), [Ty::Arc { .. }])
+        return matches!(params.as_slice(), [Ty::ArcPtr { .. }])
             .then_some(FunctionBody::Defined(function));
     }
     let Ty::Result { value, .. } = &declaration.result else {
@@ -74,7 +74,7 @@ fn bridge_body(
         "gpu_compute_pipeline" | "gpu_graphics_pipeline" => {
             let graphics = name == "gpu_graphics_pipeline";
             let count = if graphics { 2 } else { 1 };
-            (matches!(**value, Ty::Arc { .. })
+            (matches!(**value, Ty::ArcPtr { .. })
                 && params.len() == count + 1
                 && params[1..].iter().all(|ty| *ty == bytes))
             .then_some(FunctionBody::GpuPipelineFactory {
@@ -95,7 +95,7 @@ fn bridge_body(
                 vec![root, Ty::UInt32, Ty::UInt32, Ty::UInt32]
             };
             (**value == Ty::Unit
-                && matches!(params.get(1), Some(Ty::Arc { .. }))
+                && matches!(params.get(1), Some(Ty::ArcPtr { .. }))
                 && params.get(2..) == Some(tail.as_slice()))
             .then_some(FunctionBody::GpuPipelineRecord {
                 record: function,
@@ -269,7 +269,7 @@ impl Context {
         }
         let definition = self
             .receiver_definition(owner)
-            .ok_or("pipeline owner requires a nominal Arc")?;
+            .ok_or("pipeline owner requires a nominal ArcPtr")?;
         let context = *self
             .gpu_pipeline_contexts
             .get(&definition)

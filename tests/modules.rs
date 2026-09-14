@@ -837,7 +837,7 @@ fn struct_methods_resolve_later_aliases_and_recursive_siblings() {
             def even(n: int) -> bool = { if (n == 0) { 1 == 1 } else { Owner.odd(n - 1) } };
             def odd(n: int) -> bool = { if (n == 0) { 1 == 0 } else { Owner.even(n - 1) } };
         };
-        type Shared = Arc<Owner>;
+        type Shared = ArcPtr<Owner>;
         def main() -> int = {
             var owner = Shared.new(42);
             if (Shared.even(owner.read())) { 0 } else { 1 }

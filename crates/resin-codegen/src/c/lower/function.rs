@@ -142,6 +142,9 @@ fn lower_region(
                 Instr::IsVariant { .. }
                     | Instr::CallBuiltin { .. }
                     | Instr::ArcData
+                    | Instr::ArcSpanData
+                    | Instr::ArcSpanTryNew { .. }
+                    | Instr::HostAllocate { .. }
                     | Instr::Downgrade
                     | Instr::Upgrade
                     | Instr::GpuAllocateNative
@@ -450,6 +453,28 @@ fn instruction(
             types.name(result.unwrap()),
             args[0].expr
         ),
+        Instr::ArcSpanTryNew { element } => {
+            let owner = allocate_span(types, temp, element, args, out);
+            let ty = result.unwrap();
+            let present = variant(types, ty, &Case::Type(ty.without_none().unwrap()), &owner);
+            let absent = variant(types, ty, &Case::Type(Ty::None), "0");
+            format!("({owner} ? {present} : {absent})")
+        }
+        Instr::HostAllocate { error, element } => {
+            let owner = allocate_span(types, temp, element, args, out);
+            let ty = result.unwrap();
+            let present = variant(types, ty, &Case::Ok, &owner);
+            let absent = variant(types, ty, &Case::Err, &format!("r_fn{}(0)", error.index()));
+            format!("({owner} ? {present} : {absent})")
+        }
+        Instr::ArcSpanData => format!(
+            "({}){{ resin_arc_data({}), resin_arc_span_length({}) }}",
+            types.name(result.unwrap()),
+            args[0].expr,
+            args[0].expr
+        ),
+        Instr::SpanBytes => span_bytes(types, &args[0], result.unwrap(), out),
+        Instr::SpanSlice => span_slice(types, args, result.unwrap(), out),
         Instr::Downgrade => {
             writeln!(out, "  resin_weak_retain({});", args[0].expr).unwrap();
             args[0].expr.clone()
@@ -804,6 +829,73 @@ fn project(
         _ => return Err(Error(format!("unsupported projection through {ty:?}"))),
     };
     Ok(if pointer { format!("&({expr})") } else { expr })
+}
+
+// The argument remains owned until every element has received an ordinary copy.
+// Copies cannot fail; allocation completes before any element is initialized.
+fn allocate_span(
+    types: &Types<'_>,
+    temp: &str,
+    element: &Ty,
+    args: &[Slot],
+    out: &mut String,
+) -> String {
+    let owner = format!("{temp}_allocated");
+    let element_name = types.name(element);
+    let destroy = if element.needs_drop(&types.module.types) {
+        format!("r_drop{}", types.id(element))
+    } else {
+        "NULL".into()
+    };
+    let count = &args[0].expr;
+    writeln!(out, "  ResinArc *{owner} = resin_arc_span_try_new({count}, sizeof({element_name}), _Alignof({element_name}), {destroy});").unwrap();
+    writeln!(out, "  if ({owner}) {{").unwrap();
+    writeln!(
+        out,
+        "    {element_name} *{temp}_data = resin_arc_data({owner});"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    uint64_t {temp}_length = resin_arc_span_length({owner});"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    for (uint64_t i = 0; i < {temp}_length; ++i) {temp}_data[i] = {};",
+        types.copy(element, &args[1].expr)
+    )
+    .unwrap();
+    out.push_str("  }\n");
+    owner
+}
+
+fn span_bytes(types: &Types<'_>, source: &Slot, result: &Ty, out: &mut String) -> String {
+    let Ty::Span { element } = &source.ty else {
+        unreachable!("verified byte view source")
+    };
+    let value = &source.expr;
+    let stride = format!("sizeof({})", types.name(element));
+    writeln!(
+        out,
+        "  if (({value}).f1 > UINT64_MAX / {stride}) resin_fail(\"span byte length overflow\");"
+    )
+    .unwrap();
+    format!(
+        "({}){{ (uint8_t *)({value}).f0, ({value}).f1 * {stride} }}",
+        types.name(result)
+    )
+}
+
+fn span_slice(types: &Types<'_>, args: &[Slot], result: &Ty, out: &mut String) -> String {
+    let source = &args[0].expr;
+    let start = &args[1].expr;
+    let length = &args[2].expr;
+    writeln!(out, "  if ({start} > ({source}).f1 || {length} > ({source}).f1 - {start}) resin_fail(\"span slice out of bounds\");").unwrap();
+    format!(
+        "({}){{ {start} ? ({source}).f0 + {start} : ({source}).f0, {length} }}",
+        types.name(result)
+    )
 }
 
 fn is_view_conversion(from: &Ty, to: &Ty) -> bool {

@@ -60,8 +60,7 @@ pub unsafe extern "C" fn resin_stream_write(stream: u32, data: *const u8, length
     if result.is_ok() { 0 } else { -1 }
 }
 
-/// Format into an Arc allocation containing a span followed by its byte storage.
-/// The span layout matches Resin's `Span<ubyte>` on the supported 64-bit targets.
+/// Format into an ArcSpan byte allocation, with a NUL beyond its logical length.
 /// # Safety
 /// `format` and `args` must be readable for their given lengths, as must each
 /// byte argument. Union members must match their tags; NULL is allowed for empty buffers.
@@ -84,7 +83,7 @@ pub unsafe extern "C" fn resin_format(
     owned_bytes(&bytes)
 }
 
-/// Copy a byte span verbatim into an owned, NUL-terminated Arc<Span<ubyte>>.
+/// Copy a byte span verbatim into an owned, NUL-terminated ArcSpan<ubyte>.
 /// # Safety
 /// `data` must be readable for `length` bytes; NULL is allowed for an empty span.
 #[unsafe(no_mangle)]
@@ -96,21 +95,11 @@ pub unsafe extern "C" fn resin_string_from_str(
 }
 
 fn owned_bytes(bytes: &[u8]) -> *mut crate::shared::ResinArc {
-    let size = size_of::<ResinPrintBytes>()
-        .checked_add(bytes.len())
-        .and_then(|n| n.checked_add(1))
-        .unwrap_or_else(|| fail("string is too large"));
-    unsafe extern "C" fn destroy(_: *mut std::ffi::c_void) {}
-    let owner = crate::shared::resin_arc_new(size, align_of::<ResinPrintBytes>(), destroy);
+    let owner = crate::shared::new_string(bytes.len());
     unsafe {
-        let payload = crate::shared::resin_arc_data(owner).cast::<ResinPrintBytes>();
-        let data = payload.add(1).cast::<u8>();
+        let data = crate::shared::resin_arc_data(owner).cast::<u8>();
         std::ptr::copy_nonoverlapping(bytes.as_ptr(), data, bytes.len());
         *data.add(bytes.len()) = 0;
-        payload.write(ResinPrintBytes {
-            data,
-            length: bytes.len(),
-        });
     }
     owner
 }
@@ -206,6 +195,20 @@ unsafe fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn owned_bytes_preserve_logical_length_and_trailing_nul() {
+        for bytes in [b"".as_slice(), b"hello", b"a\0b"] {
+            let owner = owned_bytes(bytes);
+            unsafe {
+                assert_eq!(crate::shared::resin_arc_span_length(owner), bytes.len());
+                let data = crate::shared::resin_arc_data(owner).cast::<u8>();
+                assert_eq!(std::slice::from_raw_parts(data, bytes.len()), bytes);
+                assert_eq!(*data.add(bytes.len()), 0);
+                crate::shared::resin_arc_release(owner);
+            }
+        }
+    }
 
     #[test]
     fn positional_fields_and_escaped_braces() {

@@ -70,8 +70,10 @@ impl Decoder<'_> {
                     "Ptr" => Some(Head::Pointer),
                     "GpuPtr" => Some(Head::GpuPointer),
                     "GpuSpan" => Some(Head::GpuSpan),
-                    "Arc" => Some(Head::Arc),
-                    "Weak" => Some(Head::Weak),
+                    "ArcPtr" => Some(Head::ArcPtr),
+                    "WeakPtr" => Some(Head::WeakPtr),
+                    "ArcSpan" => Some(Head::ArcSpan),
+                    "WeakSpan" => Some(Head::WeakSpan),
                     "Span" => Some(Head::Span),
                     _ => None,
                 };

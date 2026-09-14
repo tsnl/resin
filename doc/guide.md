@@ -476,19 +476,19 @@ struct Resource { handle: Ptr<ubyte>,
 };
 
 // Inside a function:
-var shared = Arc<Resource> { handle = acquire_native_handle() };
+var shared = ArcPtr<Resource> { handle = acquire_native_handle() };
 var alias = shared; // Retains the same allocation; does not copy Resource.
 var weak = shared.downgrade();
 ```
 
 The example assumes native acquire/release declarations for the wrapped library.
-`Arc<Resource>(make_resource())` consumes a fresh function result in the same way.
-`Ptr<Arc<T>>` points to the handle; `arc.get()` returns a pointer to the pointee.
-`weak.upgrade()` returns `Arc<T> | None`, matched with `Arc<T>(owner)` and
+`ArcPtr<Resource>(make_resource())` consumes a fresh function result in the same way.
+`Ptr<ArcPtr<T>>` points to the handle; `arc.get()` returns a pointer to the pointee.
+`weak.upgrade()` returns `ArcPtr<T> | None`, matched with `ArcPtr<T>(owner)` and
 `None` arms. See [the shared ownership example](../examples/shared.resin).
 
 A copied struct receives its own `drop()`. Native-library authors must therefore
-make copies safe or expose an Arc-based interface that avoids copying the inner
+make copies safe or expose an ArcPtr-based interface that avoids copying the inner
 owner. There is no static move checking or borrow checking. A wrapper-specific
 transfer function can extract its native handle using `pointer.replace(replacement)`
 and return a fresh owner while leaving the source disarmed. Raw pointers and spans
@@ -501,6 +501,33 @@ See the [ownership specification](lifetimes.md) for exact rules and
 current limitations. The [ownership example](../examples/ownership.resin) demonstrates
 cleanup on success and early error returns. Do not manually free resources already
 owned by a standard-library wrapper.
+
+The pointer families distinguish single values from sequences:
+
+| Ownership | One value | Sequence |
+| --- | --- | --- |
+| Borrowed | `Ptr<T>` | `Span<T>` |
+| Shared host | `ArcPtr<T>` | `ArcSpan<T>` |
+| Weak host | `WeakPtr<T>` | `WeakSpan<T>` |
+| GPU | `GpuPtr<T>` | `GpuSpan<T>` |
+
+`Span<T>` is an ordinary address/count descriptor. `ArcSpan<T>` owns the actual
+elements, while `ArcPtr<Span<T>>` owns only a shared descriptor. There are no unsized
+payload types. Import `$/host.resin` to create an initialized host sequence:
+
+```resin
+var values = Host.alloc(64, 0_ui)?; // ArcSpan<uint>
+values.get().at(0).* := 42_ui;
+var view = values.get();          // Span<uint>
+var bytes = view.as_bytes();        // Span<ubyte>
+```
+
+Allocation checks size arithmetic and reports `OutOfMemory`; each element receives
+an ordinary copy of the initial value. The final owner destroys elements in reverse
+order. `get()` returns a borrowed view, so keep an owner alive while using it.
+Numeric spans expose their in-memory bytes through `as_bytes()`. Sequence weak
+references follow the same operations: `downgrade()` returns `WeakSpan<T>`, and
+`upgrade()` returns `ArcSpan<T> | None`.
 
 ## Loops
 
@@ -609,8 +636,8 @@ and length without copying. There is no implicit conversion, and arbitrary byte 
 be converted to `str`. `text.at(index)` returns a byte pointer and uses a `ulong` index.
 
 `fmt(format, arguments)` is a polymorphic host builtin returning `String`, an ordinary nominal
-wrapper with a `bytes: Arc<Span<ubyte>>` field. Its allocation contains both the span and its bytes,
-plus a trailing NUL. Copying a String retains the allocation; the final owner releases it.
+wrapper with a `bytes: ArcSpan<ubyte>` field. Its allocation owns the bytes and an additional
+trailing NUL outside their logical length. Copying a String retains the allocation; the final owner releases it.
 Extracting a raw span or pointer does not retain that owner.
 `String.from_str(text)` copies a `str` verbatim into an owned String. For raw bytes, use
 `String.from_bytes(span)`; the span need not be UTF-8 or have a NUL terminator. Both constructors
@@ -700,7 +727,8 @@ functions within one file remain supported.
 
 Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `def`, `var`, `if`,
 `else`, `while`, and `match`), primitive type names, `Never`, and
-`Ptr`/`Span`/`Arc`/`Weak`/`Result`/`None` are reserved, including in parameters and field names.
+`Ptr`/`Span`/`ArcPtr`/`ArcSpan`/`WeakPtr`/`WeakSpan`/`GpuPtr`/`GpuSpan`/`Result`/`None`
+are reserved, including in parameters and field names.
 Names such as `if_value` are ordinary identifiers. `fmt`, `print`, `ok`, `err`,
 `size_of`, `align_of`, and `absurd` are unshadowable compiler builtins, not syntax
 keywords: definitions and parameters cannot use those names, but record fields can.
@@ -721,7 +749,7 @@ to those modules. Public operations are static constructors and instance methods
 - `$/status.resin`: `RuntimeStatus` conversion methods and the `RuntimeError` union and its variants.
 - `$/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
 - `$/io.resin`: `Io.stdout().write(text)` and `Io.stderr().write(text)`.
-- `$/host.resin`: `Host.malloc(bytes)?` allocates host memory; `Host.free(memory)` releases it.
+- `$/host.resin`: `Host.alloc(count, initial)?` returns initialized shared `ArcSpan<T>` storage.
 - `$/console.resin`: `Console.read_byte()`, `Console.read_line()`, and shared `InputLine` owners with `Console.print(line)`.
 
 The polymorphic `fmt` operation and string-only `print` are compiler builtins; decorated shaders expose `.spirv`.
@@ -758,7 +786,7 @@ struct GpuOwner { handle: Ptr<ResinGpu>,
     };
     def drop(self: Ptr<GpuOwner>) = { resin_gpu_destroy(self.handle); };
 };
-type Gpu = Arc<GpuOwner>;
+type Gpu = ArcPtr<GpuOwner>;
 
 extern "resin_runtime.h" def resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
 extern "resin_runtime.h" def resin_gpu_destroy(gpu: Ptr<ResinGpu>);
@@ -1054,7 +1082,7 @@ array element, and empty arrays have no shared host/device layout.
 
 For C calls, explicitly cast byte-array storage to `Ptr<ubyte>` and pass its logical
 length. Raw arrays and spans do not promise NUL termination. Use a `str` literal's `.data`
-or an owned `String`'s `.bytes.data` when a C function requires a terminator. `String.from_bytes(span)`
+or an owned `String`'s `.bytes.get().data` when a C function requires a terminator. `String.from_bytes(span)`
 copies raw bytes and appends that terminator outside the logical length.
 
 ### Shared size and alignment

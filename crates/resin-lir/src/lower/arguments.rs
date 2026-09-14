@@ -8,8 +8,8 @@ use resin_types::prelude::*;
 impl FunctionLowering<'_> {
     pub(super) fn hold_arc_address(&mut self, term: &Term) -> Result<Ty, LowerError> {
         let ty = self.gen_term(term, None)?;
-        let Ty::Arc { pointee } = &ty else {
-            return Err(LowerError::invalid_hir(term.span, "expected Arc<T>"));
+        let Ty::ArcPtr { pointee } = &ty else {
+            return Err(LowerError::invalid_hir(term.span, "expected ArcPtr<T>"));
         };
         let pointee = *pointee.clone();
         let owner = self.save_top(&ty);

@@ -55,13 +55,16 @@ impl Types<'_> {
             )
             .unwrap();
             match ty {
-                Ty::Arc { .. }
+                Ty::ArcPtr { .. }
+                | Ty::ArcSpan { .. }
                 | Ty::GpuArguments
                 | Ty::GpuComputePipeline { .. }
                 | Ty::GpuGraphicsPipeline { .. } => out.push_str("  resin_arc_release(*p);\n"),
                 Ty::GpuPointer { .. } => out.push_str("  resin_arc_release(p->owner);\n"),
                 Ty::GpuSpan { .. } => out.push_str("  resin_arc_release(p->data.owner);\n"),
-                Ty::Weak { .. } => out.push_str("  resin_weak_release(*p);\n"),
+                Ty::WeakPtr { .. } | Ty::WeakSpan { .. } => {
+                    out.push_str("  resin_weak_release(*p);\n")
+                }
                 Ty::Defined { definition } => {
                     let def = &self.module.types[definition.index()];
                     if let Some(function) = def.drop_hook() {
@@ -101,7 +104,8 @@ impl Types<'_> {
 
     fn retain_fields(&self, ty: &Ty, value: &str, out: &mut String) {
         match ty {
-            Ty::Arc { .. }
+            Ty::ArcPtr { .. }
+            | Ty::ArcSpan { .. }
             | Ty::GpuArguments
             | Ty::GpuComputePipeline { .. }
             | Ty::GpuGraphicsPipeline { .. } => {
@@ -113,7 +117,7 @@ impl Types<'_> {
             Ty::GpuSpan { .. } => {
                 writeln!(out, "  resin_arc_retain(({value}).data.owner);").unwrap();
             }
-            Ty::Weak { .. } => {
+            Ty::WeakPtr { .. } | Ty::WeakSpan { .. } => {
                 writeln!(out, "  resin_weak_retain({value});").unwrap();
             }
             Ty::Defined { definition } => self.retain_fields(

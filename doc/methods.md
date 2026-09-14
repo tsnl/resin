@@ -6,7 +6,7 @@ Transparent aliases inherit the underlying nominal type's namespace and origin;
 they cannot add methods. Local structs currently contain fields only.
 
 All module types and aliases are available when method signatures are resolved,
-including an `Arc<Owner>` alias written after the owner. Methods are declared
+including an `ArcPtr<Owner>` alias written after the owner. Methods are declared
 before bodies, so sibling methods and recursive calls can refer to each other.
 
 Functions accompany the type when it is exported and need no separate exports.
@@ -82,6 +82,6 @@ Methods cannot be shader entry points, but shader helpers can call them.
 Pointer receivers follow the existing GPU address restrictions: a shader-local
 address cannot escape into a callee.
 
-Shared owners also support `self: Arc<T>`, and Arc receivers can call pointee
+Shared owners also support `self: ArcPtr<T>`, and ArcPtr receivers can call pointee
 methods through their address. The compiler invokes the reserved
 `drop(self: Ptr<T>)` hook during cleanup; see [lifetimes](lifetimes.md).

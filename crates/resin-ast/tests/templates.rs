@@ -7,7 +7,7 @@ fn parse(text: &str) -> SourceFile {
 
 #[test]
 fn type_and_method_binders_remain_separate_from_weak_variables() {
-    let source = "struct Pair<T> { first: T, def map<U>(self: Pair<T>, value: U) -> Pair<_> = { Pair<U> { first = value } }; }; type Shared<T> = Arc<Pair<T>>;";
+    let source = "struct Pair<T> { first: T, def map<U>(self: Pair<T>, value: U) -> Pair<_> = { Pair<U> { first = value } }; }; type Shared<T> = ArcPtr<Pair<T>>;";
     let file = parse(source);
     let StmtKind::Struct {
         type_params,
@@ -56,7 +56,7 @@ fn type_and_method_binders_remain_separate_from_weak_variables() {
         panic!()
     };
     assert_eq!(type_params.len(), 1);
-    assert!(matches!(&init.val, TypeKind::App { head, .. } if head.val.as_ref() == "Arc"));
+    assert!(matches!(&init.val, TypeKind::App { head, .. } if head.val.as_ref() == "ArcPtr"));
     let printed = resin_ast::format_source(&file);
     assert!(printed.contains("(template Pair T)"), "{printed}");
     assert!(printed.contains("(template Pair.map U)"), "{printed}");

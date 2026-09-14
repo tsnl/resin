@@ -57,7 +57,7 @@ fn generic_identity_preserves_shared_ownership() {
         export { main };
         def identity<T>(value: T) -> T = { value };
         def main() -> int = {
-            var owner = Arc<int>(42);
+            var owner = ArcPtr<int>(42);
             var copy = identity(owner);
             copy.*
         };

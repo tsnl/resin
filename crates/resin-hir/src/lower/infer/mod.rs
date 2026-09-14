@@ -1,6 +1,6 @@
 //! Inference variables, unification, and expression constraints.
 //! All handles are resolved before the typed tree reaches LIR lowering.
-use crate::lower::context::{Context, FunctionBody, FunctionDecl};
+use crate::lower::context::{Context, FunctionBody, FunctionDecl, MethodScheme};
 use crate::lower::scope::DeclarationId;
 use crate::{GenerateError, GenerateErrorKind};
 use resin_source::prelude::*;
@@ -28,8 +28,10 @@ pub(crate) enum Head {
     GpuSpan,
     GpuComputePipeline,
     GpuGraphicsPipeline,
-    Arc,
-    Weak,
+    ArcPtr,
+    WeakPtr,
+    ArcSpan,
+    WeakSpan,
     Span,
     Array(usize),
     Record(Vec<Arc<str>>),
@@ -63,7 +65,9 @@ impl Type {
     /// The inference representation of Ty::deref_target; Weak is not dereferenceable.
     pub fn deref_target(&self) -> Option<&Type> {
         match self {
-            Self::Node(Head::Pointer | Head::GpuPointer | Head::Arc, children) => children.first(),
+            Self::Node(Head::Pointer | Head::GpuPointer | Head::ArcPtr, children) => {
+                children.first()
+            }
             _ => None,
         }
     }
@@ -176,8 +180,18 @@ impl Type {
                 Self::Node(Head::GpuSpan, vec![Self::from_hir(element)])
             }
             crate::Type::Span { element } => Self::Node(Head::Span, vec![Self::from_hir(element)]),
-            crate::Type::Arc { pointee } => Self::Node(Head::Arc, vec![Self::from_hir(pointee)]),
-            crate::Type::Weak { pointee } => Self::Node(Head::Weak, vec![Self::from_hir(pointee)]),
+            crate::Type::ArcPtr { pointee } => {
+                Self::Node(Head::ArcPtr, vec![Self::from_hir(pointee)])
+            }
+            crate::Type::ArcSpan { element } => {
+                Self::Node(Head::ArcSpan, vec![Self::from_hir(element)])
+            }
+            crate::Type::WeakSpan { element } => {
+                Self::Node(Head::WeakSpan, vec![Self::from_hir(element)])
+            }
+            crate::Type::WeakPtr { pointee } => {
+                Self::Node(Head::WeakPtr, vec![Self::from_hir(pointee)])
+            }
             crate::Type::GpuComputePipeline { root, owner } => Self::Node(
                 Head::GpuComputePipeline,
                 vec![Self::from_hir(root), Self::from_hir(owner)],
@@ -223,8 +237,10 @@ impl Type {
 impl From<Ty> for Type {
     fn from(ty: Ty) -> Self {
         match ty {
-            Ty::Arc { pointee } => Self::Node(Head::Arc, vec![(*pointee).into()]),
-            Ty::Weak { pointee } => Self::Node(Head::Weak, vec![(*pointee).into()]),
+            Ty::ArcPtr { pointee } => Self::Node(Head::ArcPtr, vec![(*pointee).into()]),
+            Ty::ArcSpan { element } => Self::Node(Head::ArcSpan, vec![(*element).into()]),
+            Ty::WeakSpan { element } => Self::Node(Head::WeakSpan, vec![(*element).into()]),
+            Ty::WeakPtr { pointee } => Self::Node(Head::WeakPtr, vec![(*pointee).into()]),
             Ty::Pointer { pointee } => Self::pointer((*pointee).into()),
             Ty::Span { element } => Self::Node(Head::Span, vec![(*element).into()]),
             Ty::GpuPointer { pointee } => Self::gpu_pointer((*pointee).into()),
@@ -281,10 +297,16 @@ impl Head {
             | Self::Nominal { .. } => return None,
             Self::Atom(ty) => ty.clone(),
             Self::Union => Ty::union_of(children),
-            Self::Arc => Ty::Arc {
+            Self::ArcPtr => Ty::ArcPtr {
                 pointee: Box::new(children.next().unwrap()),
             },
-            Self::Weak => Ty::Weak {
+            Self::ArcSpan => Ty::ArcSpan {
+                element: Box::new(children.next().unwrap()),
+            },
+            Self::WeakSpan => Ty::WeakSpan {
+                element: Box::new(children.next().unwrap()),
+            },
+            Self::WeakPtr => Ty::WeakPtr {
                 pointee: Box::new(children.next().unwrap()),
             },
             Self::Pointer => Ty::Pointer {
@@ -331,14 +353,31 @@ impl Head {
     }
 }
 
+/// Substitution can reveal nested unions and equal members before a match is checked.
+fn completed_union(members: Vec<crate::Type>) -> crate::Type {
+    let mut variants = vec![];
+    let mut pending = members;
+    while let Some(member) = pending.pop() {
+        match member {
+            crate::Type::Union { variants } => pending.extend(variants),
+            member => variants.push(member),
+        }
+    }
+    variants.sort();
+    variants.dedup();
+    if variants.len() == 1 {
+        variants.pop().unwrap()
+    } else {
+        crate::Type::Union { variants }
+    }
+}
+
 impl Head {
     fn completed(&self, children: Vec<crate::Type>) -> crate::Type {
         let mut children = children.into_iter();
         match self {
             Self::Atom(ty) => super::types::ty(ty),
-            Self::Union => crate::Type::Union {
-                variants: children.collect(),
-            },
+            Self::Union => completed_union(children.collect()),
             Self::Parameter { id } => crate::Type::Parameter { parameter: *id },
             Self::Nominal { definition } => crate::Type::Defined {
                 definition: *definition,
@@ -380,10 +419,16 @@ impl Head {
                 root: Box::new(children.next().unwrap()),
                 owner: Box::new(children.next().unwrap()),
             },
-            Self::Arc => crate::Type::Arc {
+            Self::ArcPtr => crate::Type::ArcPtr {
                 pointee: Box::new(children.next().unwrap()),
             },
-            Self::Weak => crate::Type::Weak {
+            Self::ArcSpan => crate::Type::ArcSpan {
+                element: Box::new(children.next().unwrap()),
+            },
+            Self::WeakSpan => crate::Type::WeakSpan {
+                element: Box::new(children.next().unwrap()),
+            },
+            Self::WeakPtr => crate::Type::WeakPtr {
                 pointee: Box::new(children.next().unwrap()),
             },
             Self::Span => crate::Type::Span {
@@ -628,9 +673,12 @@ impl Solver {
             return Ty::union_of(types).into();
         }
         let mut unique = vec![];
-        for member in members {
-            if !unique.contains(&member) {
-                unique.push(member);
+        let mut pending = members;
+        while let Some(member) = pending.pop() {
+            match self.head(&member) {
+                Type::Node(Head::Union, members) => pending.extend(members),
+                member if !unique.contains(&member) => unique.push(member),
+                _ => {}
             }
         }
         match unique.len() {
@@ -1107,6 +1155,10 @@ pub(crate) struct AppliedMethod {
 
 #[derive(Clone)]
 pub(crate) enum ResolvedMethod {
+    Symbolic {
+        signature: MethodScheme,
+        receiver: Option<crate::ReceiverConversion>,
+    },
     Dependent {
         signature: Type,
     },
@@ -1717,14 +1769,14 @@ impl Inference<'_> {
             (Type::Node(a, _), Type::Node(b, _)) if a == b => {
                 (ReceiverConversion::Value, from.clone())
             }
-            (Type::Node(Head::Arc, parts), Type::Node(Head::Pointer, _)) => (
+            (Type::Node(Head::ArcPtr, parts), Type::Node(Head::Pointer, _)) => (
                 ReceiverConversion::ArcAddress,
                 Type::pointer(parts[0].clone()),
             ),
             (Type::Node(Head::Pointer | Head::GpuPointer, parts), _) => {
                 (ReceiverConversion::Load, parts[0].clone())
             }
-            (Type::Node(Head::Arc, parts), _) => (ReceiverConversion::ArcLoad, parts[0].clone()),
+            (Type::Node(Head::ArcPtr, parts), _) => (ReceiverConversion::ArcLoad, parts[0].clone()),
             (_, Type::Node(Head::Pointer | Head::GpuPointer, _)) => {
                 let Some(gpu) = self.gpu_address(origins) else {
                     return Ok(None);
@@ -1814,6 +1866,22 @@ impl Inference<'_> {
                 if type_args.is_some() {
                     return Err(error(span, "compiler methods do not accept type arguments"));
                 }
+                let shape = self.solver.head(receiver_type);
+                let base = match &shape {
+                    Type::Node(Head::Pointer, parts) => self.solver.head(&parts[0]),
+                    _ => shape,
+                };
+                let arguments = args
+                    .iter()
+                    .map(|arg| self.solver.head(arg))
+                    .collect::<Vec<_>>();
+                if let Some(signature) =
+                    self.typer
+                        .method_scheme(&base, name, &arguments, *associated)
+                {
+                    return self.symbolic_method(owner, signature, constraint, span);
+                }
+
                 let Some(receiver_type) = self.solver.resolve(receiver_type) else {
                     if matches!(
                         self.solver.head(receiver_type),
@@ -2205,8 +2273,10 @@ impl Inference<'_> {
                         },
                     ));
                 }
-                if matches!(self.solver.head(to), Type::Node(Head::Weak, _))
-                    && self.solver.resolve(from) == Some(Ty::Unit)
+                if matches!(
+                    self.solver.head(to),
+                    Type::Node(Head::WeakPtr | Head::WeakSpan, _)
+                ) && self.solver.resolve(from) == Some(Ty::Unit)
                 {
                     return Ok(true);
                 }
@@ -2387,6 +2457,90 @@ impl Constraint {
             Self::Record(fields, _) => fields.iter().map(|(_, ty)| ty).collect(),
             Self::Builtin(_, args, _) => args.iter().collect(),
         }
+    }
+}
+
+impl Inference<'_> {
+    fn symbolic_method(
+        &mut self,
+        owner: Rule,
+        signature: MethodScheme,
+        constraint: &Constraint,
+        span: Span,
+    ) -> Result<bool> {
+        let Constraint::Method {
+            receiver,
+            args: arguments,
+            out: result,
+            associated,
+            origins,
+            ..
+        } = constraint
+        else {
+            unreachable!("selected method constraint");
+        };
+        let conversion = if *associated {
+            None
+        } else {
+            let Some(first) = signature.params.first() else {
+                return Err(error(span, "method requires an associated call"));
+            };
+            let conversion = self.symbolic_receiver(receiver, first, span)?;
+            if conversion == crate::ReceiverConversion::Address {
+                let Some(gpu) = self.gpu_address(origins) else {
+                    return Ok(false);
+                };
+                if gpu {
+                    return Err(error(span, "GPU storage cannot be borrowed as a raw Ptr"));
+                }
+            }
+            Some(conversion)
+        };
+        let parameters = &signature.params[usize::from(conversion.is_some())..];
+        let arguments_match = self.arguments(arguments, parameters, span)?;
+        let result_matches = self.solver.coerce(&signature.result, result, span)?;
+        if arguments_match && result_matches {
+            self.methods.insert(
+                owner,
+                ResolvedMethod::Symbolic {
+                    signature,
+                    receiver: conversion,
+                },
+            );
+        }
+        Ok(arguments_match && result_matches)
+    }
+}
+
+impl Inference<'_> {
+    fn symbolic_receiver(
+        &mut self,
+        from: &Type,
+        to: &Type,
+        span: Span,
+    ) -> Result<crate::ReceiverConversion> {
+        use crate::ReceiverConversion;
+        let from = self.solver.head(from);
+        let to = self.solver.head(to);
+        let (conversion, actual, expected) = match (&from, &to) {
+            (Type::Node(left, _), Type::Node(right, _)) if left == right => {
+                (ReceiverConversion::Value, &from, &to)
+            }
+            (_, Type::Node(Head::Pointer, children)) => {
+                (ReceiverConversion::Address, &from, &children[0])
+            }
+            (Type::Node(Head::Pointer, children), _) => {
+                (ReceiverConversion::Load, &children[0], &to)
+            }
+            _ => {
+                return Err(error(
+                    span,
+                    "method receiver does not match the first parameter",
+                ));
+            }
+        };
+        self.solver.unify(actual, expected, span)?;
+        Ok(conversion)
     }
 }
 

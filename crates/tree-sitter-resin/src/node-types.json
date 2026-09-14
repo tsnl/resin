@@ -1419,7 +1419,11 @@
         "required": false,
         "types": [
           {
-            "type": "Arc",
+            "type": "ArcPtr",
+            "named": false
+          },
+          {
+            "type": "ArcSpan",
             "named": false
           },
           {
@@ -1447,7 +1451,11 @@
             "named": false
           },
           {
-            "type": "Weak",
+            "type": "WeakPtr",
+            "named": false
+          },
+          {
+            "type": "WeakSpan",
             "named": false
           },
           {
@@ -1688,7 +1696,11 @@
     "named": false
   },
   {
-    "type": "Arc",
+    "type": "ArcPtr",
+    "named": false
+  },
+  {
+    "type": "ArcSpan",
     "named": false
   },
   {
@@ -1732,7 +1744,11 @@
     "named": false
   },
   {
-    "type": "Weak",
+    "type": "WeakPtr",
+    "named": false
+  },
+  {
+    "type": "WeakSpan",
     "named": false
   },
   {

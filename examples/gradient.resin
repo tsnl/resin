@@ -33,11 +33,9 @@ def main() -> Result<(), _> = {
 	commands.submit()?;
 
 	var path = "gradient.png";
-	var host = Host.malloc(count * size_of(uint))?;
-	pixels.copy_to(Span<uint> { data = Ptr<uint>(host), length = count });
-	var written = ImageData.write_pixels(path.data, width, height, 4, host, 0);
-	Host.free(host);
-	written?;
+	var host = Host.alloc(count, 0_ui)?;
+	pixels.copy_to(host.get());
+	ImageData.write_pixels(path.data, width, height, 4, host.get().as_bytes(), 0)?;
 	print("wrote gradient.png\n");
 	ok(())
 };

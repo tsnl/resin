@@ -59,9 +59,12 @@ impl Context<'_> {
                 self.builder.capability(Capability::StorageBuffer8BitAccess);
                 self.builder.type_int(8, 0)
             }
-            Ty::UInt64 | Ty::Pointer { .. } | Ty::Arc { .. } | Ty::Weak { .. } => {
-                self.builder.type_int(64, 0)
-            }
+            Ty::UInt64
+            | Ty::Pointer { .. }
+            | Ty::ArcPtr { .. }
+            | Ty::WeakPtr { .. }
+            | Ty::ArcSpan { .. }
+            | Ty::WeakSpan { .. } => self.builder.type_int(64, 0),
             Ty::Float32 => self.builder.type_float(32, None),
             Ty::Defined { definition } => {
                 let definition = &self.module.types[definition.index()];

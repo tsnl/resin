@@ -5,16 +5,16 @@ import { "$/host.resin", "$/status.resin" };
 struct Failed {};
 
 struct Allocation {
-	data: Ptr<int>,
+	data: ArcSpan<int>,
 	def drop(self: Ptr<Allocation>) = {
-		Host.free(Ptr<ubyte>(self.data));
-		print("freed memory\n");
+		// The owned elements are released automatically after this hook.
+		print("releasing allocation\n");
 	};
 };
 
-def allocate() -> Result<Arc<Allocation>, OutOfMemory> = {
-	var memory = Host.malloc(size_of(int))?;
-	ok(Arc<Allocation> { data = Ptr<int>(memory) })
+def allocate() -> Result<ArcPtr<Allocation>, OutOfMemory> = {
+	var memory = Host.alloc(1, 0_i)?;
+	ok(ArcPtr<Allocation> { data = memory })
 };
 
 def fail_if(fail: bool) -> Result<(), Failed> = {
@@ -27,9 +27,9 @@ def fail_if(fail: bool) -> Result<(), Failed> = {
 
 def work(fail: bool) -> Result<int, _> = {
 	var value = allocate()?;
-	value.data.* := 42;
+	value.data.get().at(0).* := 42;
 	fail_if(fail)?;
-	ok(value.data.*)
+	ok(value.data.get().at(0).*)
 };
 
 def main() -> Result<(), _> = {

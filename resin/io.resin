@@ -13,7 +13,7 @@ struct Output {
 				resin_stream_write(self.stream, bytes.data, bytes.length)
 			},
 			String(string) => {
-				resin_stream_write(self.stream, string.bytes.data, string.bytes.length)
+				resin_stream_write(self.stream, string.bytes.get().data, string.bytes.get().length)
 			},
 		};
 		if (status == 0) {

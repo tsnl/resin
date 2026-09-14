@@ -566,10 +566,9 @@ impl Generator {
         let definition = method.owner;
         self.typer.method_owners.insert(declaration, definition);
         scopes.record_method_definition(definition, declaration);
-        if decorators
-            .iter()
-            .any(|decorator| !gpu::is_bridge(&decorator.val))
-        {
+        if decorators.iter().any(|decorator| {
+            !gpu::is_bridge(&decorator.val) && decorator.val.as_ref() != "host_allocation_error"
+        }) {
             return Err(GenerateError::inference(
                 name.span,
                 "methods cannot be shader entries",
@@ -608,15 +607,44 @@ impl Generator {
         if decorators.len() > 1 {
             return Err(GenerateError::inference(
                 name.span,
-                "a method can have only one GPU decorator",
+                "a method can have only one bridge decorator",
             ));
         }
         if let Some(decorator) = decorators.first() {
-            if decorator.val.as_ref() == "gpu_allocator" {
+            if decorator.val.as_ref() == "host_allocation_error" {
+                self.register_host_allocation_error(definition, function, decorator)?;
+            } else if decorator.val.as_ref() == "gpu_allocator" {
                 self.register_gpu_allocator(definition, function, name)?;
             } else {
                 self.register_gpu_bridge(definition, function, decorator)?;
             }
+        }
+        Ok(())
+    }
+
+    fn register_host_allocation_error(
+        &mut self,
+        owner: TypeId,
+        function: FunctionId,
+        decorator: &Ident,
+    ) -> Result<(), GenerateError> {
+        let declaration = self.typer.declared_function(function);
+        if !declaration.params.is_empty() || declaration.result.variants().is_none() {
+            return Err(GenerateError::inference(
+                decorator.span,
+                "@host_allocation_error requires () -> E, where E is a struct or union of structs",
+            ));
+        }
+        if self
+            .typer
+            .host_allocation_errors
+            .insert(owner, function)
+            .is_some()
+        {
+            return Err(GenerateError::inference(
+                decorator.span,
+                "a type can declare only one host allocation error factory",
+            ));
         }
         Ok(())
     }
@@ -898,7 +926,10 @@ impl Generator {
             typed::DeclarationKind::Function { decorators } => {
                 let id = self.declare_source_function(name, signature)?;
                 for decorator in decorators {
-                    if !gpu::is_bridge(&decorator.val) || !name.val.contains('.') {
+                    if (!gpu::is_bridge(&decorator.val)
+                        && decorator.val.as_ref() != "host_allocation_error")
+                        || !name.val.contains('.')
+                    {
                         self.declare_shader(id, decorator)?;
                     }
                 }

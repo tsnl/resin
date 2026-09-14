@@ -105,13 +105,15 @@ fn instruction(typer: &TyperContext, op: &Instr) -> Result<(), String> {
         | Instr::NumericCast { .. } | Instr::PointerCast { .. } | Instr::Ascribe { .. }
         | Instr::MakeArray { .. } | Instr::MakeRecord { .. } | Instr::AccessStatic { .. }
         | Instr::AccessDynamic | Instr::Eliminate { .. } => Ok(()),
-        Instr::ArcNew | Instr::ArcData | Instr::Downgrade | Instr::Upgrade
+        Instr::ArcNew | Instr::ArcData | Instr::ArcSpanData | Instr::ArcSpanTryNew { .. }
+        | Instr::HostAllocate { .. } | Instr::Downgrade | Instr::Upgrade
         | Instr::WeakEmpty { .. } | Instr::DropLocal { .. } => Err("shader cannot consume managed values: reference counting and destruction are host-only".into()),
         Instr::GpuNew { .. } | Instr::GpuAllocate { .. } | Instr::GpuAllocateNative
         | Instr::GpuSlice | Instr::GpuReadOnly | Instr::GpuWriteOnly | Instr::GpuCopyTo
         | Instr::GpuComputePipeline { .. } | Instr::GpuGraphicsPipeline { .. }
         | Instr::GpuDispatch { .. } | Instr::GpuDraw { .. } | Instr::GpuArgumentsDispatch
-        | Instr::GpuArgumentsDraw | Instr::GpuCopyImage | Instr::Shader { .. } => {
+        | Instr::GpuArgumentsDraw | Instr::GpuCopyImage | Instr::Shader { .. }
+        | Instr::SpanBytes | Instr::SpanSlice => {
             Err(format!("shader profile does not support {op:?}"))
         }
     }

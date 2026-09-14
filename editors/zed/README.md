@@ -153,12 +153,13 @@ Queries highlight the new syntax and include structs in the outline; semantic te
 cover inferred error sets and match-payload navigation/completion. Rebuild the language
 server and reinstall the dev extension together. No new editor smoke test was run.
 
-The ownership grammar adds inherent `impl` methods, `Arc<T>`, `Weak<T>`, and
-`Option<T>`, and removes the legacy cleanup statement. Parser, compiler, query,
-and recovery tests cover the updated syntax. Reinstall the dev extension after
+The ownership grammar supports methods inside `struct`, single-value
+`ArcPtr<T>`/`WeakPtr<T>` handles, and sequence `ArcSpan<T>`/`WeakSpan<T>` handles.
+Optional values use `T | None`. Parser, compiler, query, and recovery tests cover
+the updated syntax. Reinstall the dev extension after
 updating so the grammar and queries stay in sync.
 
 Current queries highlight all declaration and control keywords, label top-level
 structs and aliases with `struct`/`type` in the outline, and expose struct bodies
 through Zed's class text objects. Query tests cover these captures, including
-`Result`, inference holes, `match`, and `impl`.
+`Result`, inference holes, `match`, and `struct`.

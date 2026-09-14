@@ -74,7 +74,10 @@ dropping one already consumed does not cancel it again. Submission waits for GPU
 
 | Type | Constructors and operations |
 | --- | --- |
-| `Host` | `Host.malloc(bytes)`, `Host.free(memory)` |
+| `Host` | `Host.alloc(count, initial)` |
+| `ArcPtr<T>` / `ArcSpan<T>` | `.get()`, `.downgrade()`; `ArcSpan<T>.try_new(count, initial)` |
+| `Span<T>` | `.at(index)`, `.slice(start, length)`, numeric `.as_bytes()` |
+| `WeakPtr<T>` / `WeakSpan<T>` | Empty construction, `.upgrade()` |
 | `Gpu` | `Gpu.new()`, `Gpu.new_at(index)`, `Gpu.new_for_window(window)`, `gpu.malloc(...)`, `gpu.create_compute_pipeline(kernel)`, `gpu.create_image(...)` |
 | `GpuPtr<T>` / `GpuSpan<T>` | `gpu.new(value)`, `GpuSpan<T>.allocate(gpu, count)`, `.at(index)`, `.slice(start, length)`, `.read_only()`, `.write_only()` |
 | `GpuComputePipeline<Root, Owner>` / `GpuGraphicsPipeline<Root, Owner>` | `gpu.create_compute_pipeline(kernel)`, `gpu.create_graphics_pipeline(vertex, fragment)` |
@@ -85,17 +88,31 @@ dropping one already consumed does not cancel it again. Submission waits for GPU
 | `Memory` | `Memory.default()`, `Memory.gpu()`, `Memory.readback()` |
 | `RuntimeStatus` | `RuntimeStatus.from_code(code)`, `RuntimeStatus.code(error)`, `RuntimeStatus.message(error)` |
 
-`ImageData.write_pixels(path, width, height, channels, pixels, stride)` writes from
-borrowed host memory; copy GPU output there with `GpuSpan<T>.copy_to` first. The
-caller keeps that memory valid.
+`ImageData.write_pixels(path, width, height, channels, pixels, stride)` accepts a
+borrowed `Span<ubyte>`. It checks dimensions, channel count, row stride, and the
+span's capacity before calling the native image writer. A zero stride means packed
+rows; a nonzero stride includes padding on every row. Copy GPU output to owned host
+storage with `GpuSpan<T>.copy_to` first, and keep the owner alive through the write.
 The instance method `image.write_png(path)` uses the loaded image's dimensions and pixels.
 
-Import `$/host.resin` for `Host.malloc(bytes) -> Result<Ptr<ubyte>, OutOfMemory>`
-and `Host.free(memory)`. Allocations contain uninitialized bytes; a zero-byte request
-reserves one backing byte so success always returns a non-null pointer. The caller
-owns the allocation and frees its original pointer exactly once; pointer copies do
-not retain ownership. `Host.free(Ptr<ubyte>(0_ul))` is a no-op. The libc declarations
-stay private, and callers can propagate allocation errors with `?`.
+Import `$/host.resin` for
+`Host.alloc(count, initial) -> Result<ArcSpan<T>, OutOfMemory>`. Each element is
+initialized with an ordinary copy of `initial`; the type determines its size.
+Allocation size overflow and allocation failure return `OutOfMemory`. Empty
+sequences are valid. Copies of the returned handle retain its allocation, and the
+last owner destroys the elements in reverse order and frees their storage.
+`owner.get()` borrows a `Span<T>` without retaining the allocation.
+
+```resin
+var host = Host.alloc(pixels.length, 0_ui)?;
+pixels.copy_to(host.get());
+ImageData.write_pixels(path.data, width, height, 4, host.get().as_bytes(), 0)?;
+```
+
+For numeric elements, `Span<T>.as_bytes()` exposes their in-memory bytes explicitly.
+`ArcPtr<T>` owns one value, while `ArcSpan<T>` owns a sequence; `WeakPtr<T>` and
+`WeakSpan<T>` provide the corresponding weak references. A plain `Span<T>` is still
+a borrowed descriptor. `ArcPtr<Span<T>>` shares that descriptor, not its elements.
 
 Some operations return additional information:
 
@@ -166,7 +183,7 @@ callers never need to interpret its negative sentinel. These console APIs are fo
 `Io.stdout().write(text)` and `Io.stderr().write(text)` accept `str | Span<ubyte> | String`, write
 bytes verbatim, flush, and return `Result<(), WriteError>`. Import `$/io.resin` to use them.
 Use `fmt("n = {0}", (n,))` to construct an owned String before writing or storing it.
-Literals have type `str` over static bytes; formatting results own an Arc allocation. Use
+Literals have type `str` over static bytes; formatting results own an `ArcSpan<ubyte>` allocation. Use
 `Span<ubyte>(literal)` when a raw byte view is needed. InputLine
 can be passed as an explicit `Span<ubyte> { data = line.data, length = line.length }` while
 its owner remains live.

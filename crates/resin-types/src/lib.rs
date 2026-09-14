@@ -131,24 +131,30 @@ pub enum Ty {
     GpuSpan {
         element: Box<Ty>,
     },
-    /// Opaque projected shader arguments, retained by a host Arc handle.
+    /// Opaque projected shader arguments, retained by a host ArcPtr handle.
     GpuArguments,
     /// A compute pipeline whose shader root and shared host owner stay in its type.
-    /// Storage is the owner's Arc handle; neither type parameter is device storage.
+    /// Storage is the owner's ArcPtr handle; neither type parameter is device storage.
     GpuComputePipeline {
         root: Box<Ty>,
         owner: Box<Ty>,
     },
     /// A graphics pipeline with one root shared by its vertex and fragment stages.
-    /// A None root denotes shaders without a root argument. Storage is the owner's Arc.
+    /// A None root denotes shaders without a root argument. Storage is the owner's ArcPtr.
     GpuGraphicsPipeline {
         root: Box<Ty>,
         owner: Box<Ty>,
     },
-    Arc {
+    ArcPtr {
         pointee: Box<Ty>,
     },
-    Weak {
+    ArcSpan {
+        element: Box<Ty>,
+    },
+    WeakSpan {
+        element: Box<Ty>,
+    },
+    WeakPtr {
         pointee: Box<Ty>,
     },
     Array {
@@ -191,11 +197,11 @@ impl Case {
 }
 
 impl Ty {
-    /// Types that permit direct pointee access. Weak handles must first upgrade
+    /// Types that permit direct pointee access. WeakPtr handles must first upgrade
     /// successfully; their payload may already have been destroyed.
     pub fn deref_target(&self) -> Option<&Ty> {
         match self {
-            Self::Pointer { pointee } | Self::GpuPointer { pointee } | Self::Arc { pointee } => {
+            Self::Pointer { pointee } | Self::GpuPointer { pointee } | Self::ArcPtr { pointee } => {
                 Some(pointee)
             }
             _ => None,
@@ -231,7 +237,7 @@ impl Ty {
     /// Invalid pipeline owners and roots have no argument contract.
     pub fn gpu_pipeline_argument(&self, definitions: &[TypeDef]) -> Option<Ty> {
         let (root, owner) = self.gpu_pipeline()?;
-        if !matches!(owner, Self::Arc { .. }) {
+        if !matches!(owner, Self::ArcPtr { .. }) {
             return None;
         }
         if *root == Self::None {
@@ -336,12 +342,10 @@ impl TypeId {
 }
 
 impl Ty {
-    /// An owned span whose byte storage lives in the same Arc allocation.
+    /// An owned sequence whose bytes share one reference-counted allocation.
     pub fn formatted_bytes() -> Self {
-        Self::Arc {
-            pointee: Box::new(Self::Span {
-                element: Box::new(Self::UInt8),
-            }),
+        Self::ArcSpan {
+            element: Box::new(Self::UInt8),
         }
     }
 
@@ -359,6 +363,10 @@ pub enum Intrinsic {
     Replace,
     Index,
     ArcGet,
+    ArcSpanTryNew,
+    ArcSpanGet,
+    SpanBytes,
+    SpanSlice,
     Downgrade,
     Upgrade,
     GpuIndex,

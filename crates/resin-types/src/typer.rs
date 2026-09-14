@@ -572,7 +572,7 @@ pub(super) fn shader_value_type(definitions: &[TypeDef], ty: &Ty) -> Result<(), 
         }
         match ty {
             Ty::Unit | Ty::None | Ty::Bool | Ty::Int32 | Ty::UInt8 | Ty::UInt32
-            | Ty::UInt64 | Ty::Int64 | Ty::Float32 | Ty::Arc { .. } | Ty::Weak { .. } => {},
+            | Ty::UInt64 | Ty::Int64 | Ty::Float32 | Ty::ArcPtr { .. } | Ty::WeakPtr { .. } | Ty::ArcSpan { .. } | Ty::WeakSpan { .. } => {},
             Ty::Str => return Err("shader string literals need device-backed storage; pass a Span<ubyte> in the shader root".into()),
             Ty::GpuPointer { .. } | Ty::GpuSpan { .. } | Ty::GpuArguments
             | Ty::GpuComputePipeline { .. } | Ty::GpuGraphicsPipeline { .. } => {

@@ -67,11 +67,13 @@ pub(super) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), D
         }
         Ty::Pointer { pointee }
         | Ty::GpuPointer { pointee }
-        | Ty::Arc { pointee }
-        | Ty::Weak { pointee } => check_references(definitions, pointee)?,
-        Ty::Span { element } | Ty::GpuSpan { element } | Ty::Array { element, .. } => {
-            check_references(definitions, element)?
-        }
+        | Ty::ArcPtr { pointee }
+        | Ty::WeakPtr { pointee } => check_references(definitions, pointee)?,
+        Ty::Span { element }
+        | Ty::GpuSpan { element }
+        | Ty::ArcSpan { element }
+        | Ty::WeakSpan { element }
+        | Ty::Array { element, .. } => check_references(definitions, element)?,
         Ty::GpuComputePipeline { root, owner } | Ty::GpuGraphicsPipeline { root, owner } => {
             check_references(definitions, root)?;
             check_references(definitions, owner)?;
@@ -197,8 +199,10 @@ mod definition_tests {
 
 pub(super) fn needs_drop(ty: &Ty, definitions: &[TypeDef]) -> bool {
     match ty {
-        Ty::Arc { .. }
-        | Ty::Weak { .. }
+        Ty::ArcPtr { .. }
+        | Ty::ArcSpan { .. }
+        | Ty::WeakSpan { .. }
+        | Ty::WeakPtr { .. }
         | Ty::GpuPointer { .. }
         | Ty::GpuSpan { .. }
         | Ty::GpuArguments
@@ -430,8 +434,8 @@ impl TypeTable {
             }
             Ty::Pointer { pointee }
             | Ty::GpuPointer { pointee }
-            | Ty::Arc { pointee }
-            | Ty::Weak { pointee } => {
+            | Ty::ArcPtr { pointee }
+            | Ty::WeakPtr { pointee } => {
                 self.intern(pointee);
             }
             Ty::GpuSpan { element } => {
@@ -444,7 +448,10 @@ impl TypeTable {
                 self.intern(root);
                 self.intern(owner);
             }
-            Ty::Span { element } | Ty::Array { element, .. } => {
+            Ty::Span { element }
+            | Ty::ArcSpan { element }
+            | Ty::WeakSpan { element }
+            | Ty::Array { element, .. } => {
                 self.intern(element);
             }
             Ty::Record { fields } => {
@@ -519,8 +526,10 @@ pub(super) fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
             format_type(root, definitions),
             format_type(owner, definitions)
         ),
-        Ty::Arc { pointee } => format!("Arc<{}>", format_type(pointee, definitions)),
-        Ty::Weak { pointee } => format!("Weak<{}>", format_type(pointee, definitions)),
+        Ty::ArcPtr { pointee } => format!("ArcPtr<{}>", format_type(pointee, definitions)),
+        Ty::ArcSpan { element } => format!("ArcSpan<{}>", format_type(element, definitions)),
+        Ty::WeakSpan { element } => format!("WeakSpan<{}>", format_type(element, definitions)),
+        Ty::WeakPtr { pointee } => format!("WeakPtr<{}>", format_type(pointee, definitions)),
         Ty::Span { element } => format!("Span<{}>", format_type(element, definitions)),
         Ty::Array { element, length } => {
             format!("[{}; {length}]", format_type(element, definitions))
@@ -570,7 +579,13 @@ pub(super) fn storage_layout(
     let scalar = match ty {
         Ty::UInt8 => Some(1),
         Ty::Int32 | Ty::UInt32 | Ty::Float32 => Some(4),
-        Ty::Int64 | Ty::UInt64 | Ty::Pointer { .. } | Ty::Arc { .. } | Ty::Weak { .. } => Some(8),
+        Ty::Int64
+        | Ty::UInt64
+        | Ty::Pointer { .. }
+        | Ty::ArcPtr { .. }
+        | Ty::WeakPtr { .. }
+        | Ty::ArcSpan { .. }
+        | Ty::WeakSpan { .. } => Some(8),
         _ => None,
     };
     if let Some(size) = scalar {

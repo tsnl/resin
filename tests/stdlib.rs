@@ -41,51 +41,50 @@ fn success(output: &std::process::Output) {
 }
 
 #[test]
-fn host_memory_allocates_writable_bytes_and_reports_allocation_failure() {
-    let native = r#"
-        #include <stdlib.h>
-        static int allocations, releases;
-        static void *host_test_malloc(size_t bytes) {
-            ++allocations;
-            if (bytes == 0) abort();
-            if (bytes == 999) return NULL;
-            return malloc(bytes);
-        }
-        static void host_test_free(void *memory) {
-            ++releases;
-            free(memory);
-        }
-        int host_test_stats(void) {
-            return allocations == 3 && releases == 3;
-        }
-        #define malloc host_test_malloc
-        #define free host_test_free
-    "#;
+fn host_allocates_initialized_typed_storage_and_reports_overflow() {
     let output = run(
         r#"
         export { main };
         import { "$/host.resin", "$/status.resin" };
-        extern "stdlib.h" def host_test_stats() -> int;
+        struct Empty {};
         def main() -> Result<int, _> = {
-            var memory = Host.malloc(4)?;
-            var bytes = Span<ubyte> { data = memory, length = 4_ul };
-            bytes.at(3).* := 42_ub;
-            var written = bytes.at(3).* == 42_ub;
-            Host.free(memory);
-            var empty = Host.malloc(0)?;
-            var nonnull = ulong(empty) != 0_ul;
-            Host.free(empty);
-            Host.free(Ptr<ubyte>(0_ul));
-            var failure: Result<Ptr<ubyte>, OutOfMemory>;
-            failure := Host.malloc(999);
+            var weak = WeakSpan<uint>();
+            var valid = 1 == 1;
+            {
+                var memory: ArcSpan<uint>;
+                memory := Host.alloc(4, 7_ui)?;
+                weak := memory.downgrade();
+                var alias = memory;
+                var values = memory.get();
+                valid := valid && values.length == 4_ul && values.at(3).* == 7_ui;
+                values.at(3).* := 42_ui;
+                valid := valid && alias.get().at(3).* == 42_ui;
+                valid := valid && values.as_bytes().length == 4_ul * size_of(uint);
+                var upgraded = weak.upgrade()!;
+                valid := valid && upgraded.get().at(3).* == 42_ui;
+                var descriptor = ArcPtr<Span<uint>>(values);
+                var previous = descriptor.get().replace(Span<uint> { data = values.data, length = 2_ul });
+                valid := valid && previous.length == 4_ul && descriptor.length == 2_ul;
+                valid := valid && memory.get().length == 4_ul;
+            };
+            var expired = match (weak.upgrade()) {
+                ArcSpan<uint>(owner) => { 1 == 0 },
+                None => { 1 == 1 },
+            };
+            var empty = Host.alloc(0, 0_ui)?;
+            valid := valid && empty.get().length == 0_ul;
+            var empty_elements = Host.alloc(19, Empty {})?;
+            valid := valid && empty_elements.get().length == 19_ul;
+            var failure: Result<ArcSpan<uint>, OutOfMemory>;
+            failure := Host.alloc(0xffffffffffffffff_ul, 0_ui);
             var failed = match (failure) {
-                ok(memory) => { Host.free(memory); 1 == 0 },
+                ok(memory) => { 1 == 0 },
                 err(error) => { 1 == 1 },
             };
-            ok(if (written && nonnull && failed && host_test_stats() == 1) { 0 } else { 1 })
+            ok(if (valid && expired && failed) { 0 } else { 1 })
         };
         "#,
-        native,
+        "",
     );
     success(&output);
 
@@ -95,18 +94,202 @@ fn host_memory_allocates_writable_bytes_and_reports_allocation_failure() {
         export { main };
         import { "$/host.resin" };
         def main() -> Result<(), _> = {
-            var memory = Host.malloc(999)?;
-            Host.free(memory);
+            Host.alloc(0xffffffffffffffff_ul, 0_ui)?;
             ok(())
         };
         "#,
-        native,
+        "",
     );
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(
         String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n"),
         "unhandled error: OutOfMemory\n"
     );
+}
+
+#[test]
+fn owned_spans_release_managed_elements_on_success_and_error() {
+    let output = run(
+        r#"
+        export { main };
+        import { "$/host.resin" };
+        struct Failed {};
+        struct Item {
+            trace: Ptr<int>,
+            digit: int,
+            def drop(self: Ptr<Item>) = { self.trace.* := self.trace.* * 10 + self.digit; };
+        };
+        def work(trace: Ptr<int>, fail: bool) -> Result<(), _> = {
+            var values = Host.alloc(2, ArcPtr<Item> { trace = trace, digit = 1 })?;
+            values.get().at(1).* := ArcPtr<Item> { trace = trace, digit = 2 };
+            var alias = values;
+            if (fail) { err(Failed {}) } else { ok(()) }
+        };
+        def main() -> Result<int, _> = {
+            var trace = 0;
+            work(&trace, 1 == 0)?;
+            var valid = trace == 21;
+            trace := 0;
+            var failed = match (work(&trace, 1 == 1)) {
+                ok(value) => { 1 == 0 },
+                err(error) => { 1 == 1 },
+            };
+            valid := valid && failed && trace == 21;
+            trace := 0;
+            var rejected = match (Host.alloc(0xffffffffffffffff_ul, ArcPtr<Item> { trace = &trace, digit = 3 })) {
+                ok(values) => { 1 == 0 },
+                err(error) => { 1 == 1 },
+            };
+            ok(if (valid && rejected && trace == 3) { 0 } else { 1 })
+        };
+        "#,
+        "",
+    );
+    success(&output);
+}
+
+#[test]
+fn direct_owned_span_construction_returns_optional_initialized_storage() {
+    let output = run(
+        r#"
+        export { main };
+        def main() -> int = {
+            var values = ArcSpan<uint>.try_new(3, 7_ui)!;
+            var view = values.get();
+            var valid = view.length == 3_ul && view.at(0).* == 7_ui && view.at(2).* == 7_ui;
+            var rejected = match (ArcSpan<uint>.try_new(0xffffffffffffffff_ul, 0_ui)) {
+                ArcSpan<uint>(owner) => { 1 == 0 },
+                None => { 1 == 1 },
+            };
+            if (valid && rejected) { 0 } else { 1 }
+        };
+        "#,
+        "",
+    );
+    success(&output);
+}
+
+#[test]
+fn generic_owned_span_methods_preserve_lifetimes_and_widened_results() {
+    let output = run(
+        r#"
+        export { main };
+        import { "$/host.resin", "$/status.resin" };
+        struct Other {};
+        def allocate<T>(count: ulong, initial: T) -> Result<ArcSpan<T>, OutOfMemory | Other> = {
+            Host.alloc(count, initial)
+        };
+        def optional<T>(count: ulong, initial: T) -> ArcSpan<T> | None = {
+            ArcSpan<T>.try_new(count, initial)
+        };
+        def borrowed<T>(owner: Ptr<ArcSpan<T>>) -> Span<T> = { owner.get() };
+        def weaken<T>(owner: ArcSpan<T>) -> WeakSpan<T> = { owner.downgrade() };
+        def upgrade<T>(weak: WeakSpan<T>) -> ArcSpan<T> | None | Other = { weak.upgrade() };
+        def first<T>(initial: T) -> T = {
+            var owner = ArcSpan<T>.try_new(1, initial)!;
+            owner.get().at(0).*
+        };
+        def main() -> Result<int, _> = {
+            var weak = WeakSpan<uint>();
+            var valid = 1 == 1;
+            {
+                var owner = allocate(2, 7_ui)?;
+                weak := weaken(owner);
+                var view = borrowed(&owner);
+                view.at(1).* := 42_ui;
+                valid := valid && view.length == 2_ul && owner.get().at(1).* == 42_ui;
+                valid := valid && match (upgrade(weak)) {
+                    ArcSpan<uint>(live) => { live.get().at(1).* == 42_ui },
+                    None => { 1 == 0 },
+                    Other(other) => { 1 == 0 },
+                };
+                var another = optional(3, 9_ui)!;
+                valid := valid && another.get().length == 3_ul && another.get().at(2).* == 9_ui;
+                valid := valid && first(17_ui) == 17_ui;
+            };
+            valid := valid && match (upgrade(weak)) {
+                ArcSpan<uint>(live) => { 1 == 0 },
+                None => { 1 == 1 },
+                Other(other) => { 1 == 0 },
+            };
+            valid := valid && match (allocate(0xffffffffffffffff_ul, 0_ui)) {
+                ok(owner) => { 1 == 0 },
+                err(error) => {
+                    match (error) {
+                        OutOfMemory(error) => { 1 == 1 },
+                        Other(other) => { 1 == 0 },
+                    }
+                },
+            };
+            ok(if (valid) { 0 } else { 1 })
+        };
+        "#,
+        "",
+    );
+    success(&output);
+}
+
+#[test]
+fn borrowed_span_slices_preserve_aliases_and_accept_empty_null_views() {
+    let output = run(
+        r#"
+        export { main };
+        def main() -> int = {
+            var values = ArcSpan<uint>.try_new(4, 0_ui)!;
+            var view = values.get();
+            var middle = view.slice(1, 2);
+            var alias = middle;
+            alias.at(1).* := 42_ui;
+            var valid = middle.length == 2_ul && view.at(2).* == 42_ui;
+            valid := valid && view.at(0).* == 0_ui && view.at(3).* == 0_ui;
+            var end = view.slice(view.length, 0);
+            valid := valid && end.length == 0_ul;
+            var null_view = Span<uint> { data = Ptr<uint>(0_ul), length = 0_ul };
+            var empty = null_view.slice(0, 0);
+            valid := valid && empty.length == 0_ul && ulong(empty.data) == 0_ul;
+            if (valid) { 0 } else { 1 }
+        };
+        "#,
+        "",
+    );
+    success(&output);
+}
+
+#[test]
+fn borrowed_span_slice_and_byte_length_overflow_trap_before_memory_access() {
+    for (operation, diagnostic) in [
+        ("view.slice(3, 0)", "span slice out of bounds"),
+        ("view.slice(1, 2)", "span slice out of bounds"),
+        (
+            "view.slice(0xffffffffffffffff_ul, 1)",
+            "span slice out of bounds",
+        ),
+        (
+            "Span<uint> { data = Ptr<uint>(0_ul), length = 0xffffffffffffffff_ul }.as_bytes()",
+            "span byte length overflow",
+        ),
+    ] {
+        let output = run(
+            &format!(
+                r#"
+                export {{ main }};
+                def main() = {{
+                    var view = Span<uint> {{ data = Ptr<uint>(0_ul), length = 2_ul }};
+                    {operation};
+                    print("unreachable");
+                }};
+                "#
+            ),
+            "",
+        );
+        assert!(!output.status.success(), "{operation}");
+        assert!(output.stdout.is_empty(), "{operation}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(diagnostic),
+            "{operation}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 #[test]
@@ -255,7 +438,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
         def main() -> Result<int, _> = {
             var path = "pixel.png";
             var pixels = [ubyte(1), ubyte(2), ubyte(3), ubyte(255)];
-            ImageData.write_pixels(path.data, 1, 1, 4, Ptr<ubyte>(&pixels), 0)?;
+            ImageData.write_pixels(path.data, 1, 1, 4, Span<ubyte> { data = pixels.at(0), length = 4_ul }, 0)?;
             var image = ImageData.read_png(path.data, 0)?;
             var alias = image;
             var copy_path = "copy.png";
@@ -271,11 +454,11 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     success(&output);
     for call in [
         "ImageData.read_png(path.data, 4)?",
-        "ImageData.write_pixels(path.data, 1, 1, 4, Ptr<ubyte>(&pixels), 0)?",
+        "ImageData.write_pixels(path.data, 1, 1, 4, Span<ubyte> { data = pixels.at(0), length = 4_ul }, 0)?",
     ] {
         let output = run(
             &format!(
-                "export {{ main }}; import {{ \"$/image.resin\" }}; struct Cleanup {{ def drop(self: Ptr<Cleanup>) = {{ print(fmt(\"cleanup\\n\", ())); }}; }};  def main() -> Result<(), _> = {{ var path = \"missing/pixel.png\"; var pixels = [uint(0)]; var cleanup = Cleanup {{}}; {call}; ok(()) }};"
+                "export {{ main }}; import {{ \"$/image.resin\" }}; struct Cleanup {{ def drop(self: Ptr<Cleanup>) = {{ print(fmt(\"cleanup\\n\", ())); }}; }};  def main() -> Result<(), _> = {{ var path = \"missing/pixel.png\"; var pixels = [0_ub, 0_ub, 0_ub, 0_ub]; var cleanup = Cleanup {{}}; {call}; ok(()) }};"
             ),
             "",
         );
@@ -283,6 +466,56 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
         assert_eq!(output.stdout, b"cleanup\n");
         assert!(String::from_utf8_lossy(&output.stderr).contains("unhandled error: IoError"));
     }
+}
+
+#[test]
+fn png_pixel_views_check_dimensions_padding_and_storage_before_native_access() {
+    for (width, height, channels, length, stride) in [
+        (1, 1, 4, 3, "0_ul"),
+        (1, 2, 4, 8, "5_ul"),
+        (1, 1, 4, 4, "3_ul"),
+        (1, 2, 4, 4, "0xffffffffffffffff_ul"),
+        (0, 1, 4, 4, "0_ul"),
+        (1, 0, 4, 4, "0_ul"),
+        (1, 1, 0, 4, "0_ul"),
+        (1, 1, 5, 4, "0_ul"),
+    ] {
+        let output = run(
+            &format!(
+                r#"
+                export {{ main }};
+                import {{ "$/image.resin", "$/status.resin" }};
+                def main() -> int = {{
+                    var pixels = [0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub];
+                    var bytes = Span<ubyte> {{ data = pixels.at(0), length = {length}_ul }};
+                    match (ImageData.write_pixels("missing/pixel.png".data, {width}, {height}, {channels}, bytes, {stride})) {{
+                        ok(value) => {{ 1 }},
+                        err(error) => {{ if (RuntimeStatus.code(error) == 1) {{ 0 }} else {{ 1 }} }},
+                    }}
+                }};
+                "#
+            ),
+            "",
+        );
+        success(&output);
+    }
+
+    let output = run(
+        r#"
+        export { main };
+        import { "$/image.resin" };
+        def main() -> Result<int, _> = {
+            var pixels = [1_ub, 2_ub, 3_ub, 255_ub, 99_ub, 4_ub, 5_ub, 6_ub, 255_ub, 99_ub];
+            var bytes = Span<ubyte> { data = pixels.at(0), length = 10_ul };
+            ImageData.write_pixels("padded.png".data, 1, 2, 4, bytes, 5)?;
+            var image = ImageData.read_png("padded.png".data, 0)?;
+            var loaded = Span<ubyte> { data = image.pixels, length = 8_ul };
+            ok(if (loaded.at(0).* == 1_ub && loaded.at(4).* == 4_ub) { 0 } else { 1 })
+        };
+        "#,
+        "",
+    );
+    success(&output);
 }
 
 #[test]
@@ -824,7 +1057,7 @@ fn window_constructor_accepts_owned_titles_until_the_native_call_returns() {
         import { "$/window.resin" };
         extern "resin_runtime.h" def window_counts() -> int;
         def main() -> Result<int, _> = {
-            var weak = Weak<Span<ubyte>>();
+            var weak = WeakSpan<ubyte>();
             {
                 var title = String.from_str("named {0}");
                 weak := title.bytes.downgrade();
@@ -834,7 +1067,7 @@ fn window_constructor_accepts_owned_titles_until_the_native_call_returns() {
             };
             var released = match (weak.upgrade()) {
                 None => { 1 == 1 },
-                Arc<Span<ubyte>>(live) => { 1 == 0 },
+                ArcSpan<ubyte>(live) => { 1 == 0 },
             };
             ok(if (released && window_counts() == 22) { 0 } else { 1 })
         };

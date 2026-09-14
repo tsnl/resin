@@ -12,13 +12,13 @@ struct Tracked {
 
 def main() = {
 	var weak = {
-		var shared = Arc<Tracked> { value = 42 };
+		var shared = ArcPtr<Tracked> { value = 42 };
 		var alias = shared;
 		print(fmt("{0}\n", (alias.read(),)));
 		alias.downgrade()
 	};
 	match (weak.upgrade()) {
-		Arc<Tracked>(owner) => {
+		ArcPtr<Tracked>(owner) => {
 			print(fmt("still alive: {0}\n", (owner.read(),)));
 		},
 		None => {

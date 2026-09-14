@@ -44,8 +44,10 @@ A few language choices explain much of the implementation:
   `name = value`; parameters remain `name: Type`.
 - `A | B` is a structural union of value types. `Result<T, E>` is first-class;
   `ok` and `err` construct it, `match` handles variants, and postfix `?` propagates errors.
-- `Arc<T>` and `Weak<T>` provide shared ownership. Value reads copy; fresh results
-  transfer into consumers. `impl` defines inherent methods and destruction hooks.
+- `ArcPtr<T>` / `WeakPtr<T>` share single values, and `ArcSpan<T>` / `WeakSpan<T>`
+  share fixed-length sequences. `Host.alloc(count, initial)?` allocates initialized
+  owned elements; `get()` borrows their span. Value reads copy; fresh results
+  transfer into consumers. Structs declare inherent methods and destruction hooks.
   Initialized owners are released in reverse scope order, including through `?`.
   There is no static move checking. Statement-only chain blocks yield unit.
 - Files have private scopes and explicit exports. Imports expose only exported

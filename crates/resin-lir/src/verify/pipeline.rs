@@ -111,7 +111,7 @@ fn create(
     else {
         return Err(invalid());
     };
-    if !matches!(&**owner, Ty::Arc { .. }) {
+    if !matches!(&**owner, Ty::ArcPtr { .. }) {
         return Err(invalid());
     }
     let value = if shaders.len() == 1 {

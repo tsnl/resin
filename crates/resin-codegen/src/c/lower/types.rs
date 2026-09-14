@@ -214,8 +214,10 @@ impl<'a> Types<'a> {
 
 fn scalar(ty: &Ty) -> Option<&'static str> {
     Some(match ty {
-        Ty::Arc { .. }
-        | Ty::Weak { .. }
+        Ty::ArcPtr { .. }
+        | Ty::ArcSpan { .. }
+        | Ty::WeakPtr { .. }
+        | Ty::WeakSpan { .. }
         | Ty::GpuArguments
         | Ty::GpuComputePipeline { .. }
         | Ty::GpuGraphicsPipeline { .. } => "ResinArc *",

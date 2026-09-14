@@ -360,7 +360,7 @@ fn option_payload_fields_remain_available_in_incomplete_code() {
 
 #[test]
 fn weak_upgrade_recovery_exposes_the_shared_payload_and_handle_operations() {
-    let source = "struct Item { count: int }; def f(weak: Weak<Item>) = { weak.upgrade()!.; };";
+    let source = "struct Item { count: int }; def f(weak: WeakPtr<Item>) = { weak.upgrade()!.; };";
     let project = Project::new(&[("main.resin", source)]);
     let items = project.analyze().completions(
         &project.source("main.resin"),
@@ -728,8 +728,9 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
 fn shared_receiver_completion_and_navigation_include_ordinary_drop_methods() {
     let library = "export { Counter }; struct Counter { count: int, def drop(self: Ptr<Counter>) = {}; def read(self: Ptr<Counter>) -> int = { self.count }; }; ";
     for tail in ["", "c.;"] {
-        let source =
-            format!("import {{ \"lib.resin\" }}; def f(c: Arc<Counter>) = {{ c.read(); {tail} }};");
+        let source = format!(
+            "import {{ \"lib.resin\" }}; def f(c: ArcPtr<Counter>) = {{ c.read(); {tail} }};"
+        );
         let project = Project::new(&[("main.resin", &source), ("lib.resin", library)]);
         let analysis = project.analyze();
         let input = project.source("main.resin");
@@ -1696,7 +1697,7 @@ fn editor_analysis_tolerates_truncation_and_deleted_tokens() {
         "def main(arg: int) -> int = { var pair = { left = arg, right = 1 }; if (arg == 0) (pair.left) else (pair.right) };",
         "def main() = { var values = [1, 2]; while (1 == 1) { var missing: Ptr<int>; }; };",
         "struct Cleanup { value: Ptr<int>, def drop(self: Ptr<Cleanup>) = { self.value.* := 42; }; };  def main() = { var n = 0; var cleanup = Cleanup { value = &n }; };",
-        "struct Item { value: int }; def main() = { var owner = Arc<Item> { value = 42 }; var weak = owner.downgrade(); match (weak.upgrade()) { Arc<Item>(item) => { item.value; }, None => {} }; };",
+        "struct Item { value: int }; def main() = { var owner = ArcPtr<Item> { value = 42 }; var weak = owner.downgrade(); match (weak.upgrade()) { ArcPtr<Item>(item) => { item.value; }, None => {} }; };",
     ] {
         for end in 0..=source.len() {
             let project = Project::new(&[("main.resin", &source[..end])]);
@@ -2061,17 +2062,28 @@ fn pointer_replace_has_ordinary_method_hover_and_recovery() {
 
 #[test]
 fn formatted_string_and_literal_string_types_survive_editor_recovery() {
-    for source in [
-        "def main() = { var text = fmt(\"{0}\", (42,)); text.bytes.; };",
-        "def main() = { var text = \"literal\"; text.; };",
+    for (source, members) in [
+        (
+            "def main() = { var text = fmt(\"{0}\", (42,)); text.bytes.; };",
+            ["get", "downgrade"],
+        ),
+        (
+            "def main() = { var text = fmt(\"{0}\", (42,)); text.bytes.get().; };",
+            ["data", "length"],
+        ),
+        (
+            "def main() = { var text = \"literal\"; text.; };",
+            ["data", "length"],
+        ),
     ] {
         let project = Project::new(&[("main.resin", source)]);
         let offset = source.rfind(".;").unwrap() + 1;
         let items = project
             .analyze()
             .completions(&project.source("main.resin"), offset);
-        assert!(items.iter().any(|item| item.name == "data"), "{items:?}");
-        assert!(items.iter().any(|item| item.name == "length"), "{items:?}");
+        for member in members {
+            assert!(items.iter().any(|item| item.name == member), "{items:?}");
+        }
     }
 }
 
@@ -2111,7 +2123,7 @@ fn invalid_method_arguments_preserve_receiver_facts_and_later_bindings() {
 #[test]
 fn string_constructor_is_an_ordinary_discoverable_static_method() {
     for source in [
-        "def main() = { var text = String.from_str(\"title\"); text.bytes.; };",
+        "def main() = { var text = String.from_str(\"title\"); text.bytes.get().; };",
         "def main() = { String.; };",
     ] {
         let project = Project::new(&[("main.resin", source)]);

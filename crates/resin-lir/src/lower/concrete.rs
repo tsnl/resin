@@ -103,6 +103,11 @@ pub(super) enum TermKind {
     ArcNew {
         value: Box<Term>,
     },
+    /// Allocate fully initialized host elements, using the source error factory on failure.
+    HostAllocate {
+        error: FunctionId,
+        args: Arguments,
+    },
     /// Allocate and initialize a GPU element through the registered allocator.
     GpuNew {
         allocator: FunctionId,
@@ -127,7 +132,7 @@ pub(super) enum TermKind {
         args: Arguments,
     },
     WeakEmpty {
-        pointee: Ty,
+        ty: Ty,
     },
     Result {
         failure: bool,

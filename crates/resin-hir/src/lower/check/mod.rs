@@ -1126,7 +1126,7 @@ impl Expression<'_, '_> {
                         single_argument(args, span)?
                     };
                     let ann = self.annotation(ty, true);
-                    let arg = if let Type::Node(Head::Arc, parts) = &ann.ty {
+                    let arg = if let Type::Node(Head::ArcPtr, parts) = &ann.ty {
                         let context = if matches!(
                             arg.val,
                             resin_ast::TermKind::Record { .. } | resin_ast::TermKind::Unit

@@ -104,7 +104,7 @@ fn nested_host_owners_and_gpu_method_receivers_preserve_allocation_lifetimes() {
         def field() -> Result<GpuPtr<int>, _> = {
             var gpu = Gpu.new()?;
             var pointer = gpu.new(Outer { item = Item { value = 40_i } })?;
-            var owner = Arc<GpuPtr<Outer>>(pointer);
+            var owner = ArcPtr<GpuPtr<Outer>>(pointer);
             var indirect = &owner;
             indirect.item.increment();
             var field = &indirect.item.value;

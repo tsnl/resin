@@ -1037,8 +1037,10 @@ impl<'a> AstGen<'a> {
                     | "GpuSpan"
                     | "GpuComputePipeline"
                     | "GpuGraphicsPipeline"
-                    | "Arc"
-                    | "Weak"
+                    | "ArcPtr"
+                    | "WeakPtr"
+                    | "ArcSpan"
+                    | "WeakSpan"
             ) {
             ""
         } else {

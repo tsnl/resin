@@ -135,7 +135,7 @@ fn failed_functions_keep_their_own_bindings_cleanup_and_error_origins() {
                 name: owner.clone(),
                 init: Term {
                     span: owner.span,
-                    ty: Type::Arc {
+                    ty: Type::ArcPtr {
                         pointee: Box::new(Type::Int32),
                     },
                     kind: TermKind::ArcNew {

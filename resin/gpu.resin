@@ -98,7 +98,7 @@ struct GpuOwner {
 		}
 	};
 };
-type Gpu = Arc<GpuOwner>;
+type Gpu = ArcPtr<GpuOwner>;
 
 struct ImageOwner {
 	handle: Ptr<ResinImage>,
@@ -114,7 +114,7 @@ struct ImageOwner {
 		resin_image_height(self.handle)
 	};
 };
-type GpuImage = Arc<ImageOwner>;
+type GpuImage = ArcPtr<ImageOwner>;
 
 struct PipelineOwner {
 	handle: Ptr<ResinPipeline>,
@@ -128,23 +128,23 @@ struct PipelineOwner {
 		resin_gpu_free_pipeline(self.gpu.handle, self.handle);
 	};
 };
-type GpuPipelineOwner = Arc<PipelineOwner>;
+type GpuPipelineOwner = ArcPtr<PipelineOwner>;
 
 // Retain resources mentioned by recorded commands until synchronous submit or cancellation.
 struct RecordedResources {
 	pipeline: GpuPipelineOwner | None,
 	image: GpuImage | None,
-	previous: Arc<RecordedResources> | None,
+	previous: ArcPtr<RecordedResources> | None,
 };
 struct CommandsOwner {
 	handle: Ptr<ResinCommandBuffer>,
 	gpu: Gpu,
-	retained: Arc<RecordedResources> | None,
+	retained: ArcPtr<RecordedResources> | None,
 	def drop(self: Ptr<CommandsOwner>) = {
 		resin_gpu_cancel_command_buffer(self.gpu.handle, self.handle);
 	};
 	def retain(self: Ptr<CommandsOwner>, pipeline: GpuPipelineOwner | None, image: GpuImage | None) = {
-		self.retained := Arc<RecordedResources> { pipeline = pipeline, image = image, previous = self.retained };
+		self.retained := ArcPtr<RecordedResources> { pipeline = pipeline, image = image, previous = self.retained };
 	};
 
 	@gpu_dispatch
@@ -191,7 +191,7 @@ struct CommandsOwner {
 		self.retained := None;
 	};
 };
-type GpuCommands = Arc<CommandsOwner>;
+type GpuCommands = ArcPtr<CommandsOwner>;
 
 extern "resin_runtime.h" def resin_gpu_device_count(count: Ptr<uint>) -> int;
 extern "resin_runtime.h" def resin_gpu_enumerate_devices(infos: Ptr<ResinGpuDeviceInfo>, count: uint) -> int;

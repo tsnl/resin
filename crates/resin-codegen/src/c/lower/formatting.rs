@@ -85,11 +85,10 @@ fn bytes(types: &Types<'_>, ty: &Ty, expr: &str) -> Result<(String, String), Err
             Ok((format!("({expr}).f0"), format!("({expr}).f1")))
         }
         Ty::Record { fields } if fields.len() == 1 && fields[0].ty == Ty::formatted_bytes() => {
-            let Ty::Arc { pointee } = &fields[0].ty else {
-                unreachable!()
-            };
-            let span = format!("(({} *)resin_arc_data(({expr}).f0))", types.name(pointee));
-            Ok((format!("{span}->f0"), format!("{span}->f1")))
+            Ok((
+                format!("resin_arc_data(({expr}).f0)"),
+                format!("resin_arc_span_length(({expr}).f0)"),
+            ))
         }
         _ => Err(Error("expected str, Span<ubyte>, or String".into())),
     }

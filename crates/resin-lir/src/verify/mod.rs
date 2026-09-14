@@ -60,6 +60,8 @@ pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
         Instr::TransferLoad
         | Instr::ArcNew
         | Instr::ArcData
+        | Instr::ArcSpanData
+        | Instr::SpanBytes
         | Instr::Downgrade
         | Instr::Upgrade
         | Instr::AccessStatic { .. }
@@ -79,10 +81,12 @@ pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
         | Instr::GpuGraphicsPipeline { .. } => StackEffect { pops: 1, pushes: 1 },
         Instr::GpuDispatch { .. } => StackEffect { pops: 6, pushes: 1 },
         Instr::GpuDraw { .. } => StackEffect { pops: 4, pushes: 1 },
-        Instr::GpuNew { .. } | Instr::GpuAllocate { .. } | Instr::GpuCopyTo => {
-            StackEffect { pops: 2, pushes: 1 }
-        }
-        Instr::GpuSlice | Instr::GpuArgumentsDraw | Instr::GpuCopyImage => {
+        Instr::GpuNew { .. }
+        | Instr::GpuAllocate { .. }
+        | Instr::GpuCopyTo
+        | Instr::ArcSpanTryNew { .. }
+        | Instr::HostAllocate { .. } => StackEffect { pops: 2, pushes: 1 },
+        Instr::GpuSlice | Instr::GpuArgumentsDraw | Instr::GpuCopyImage | Instr::SpanSlice => {
             StackEffect { pops: 3, pushes: 1 }
         }
         Instr::GpuAllocateNative | Instr::GpuArgumentsDispatch => {

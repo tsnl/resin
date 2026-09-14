@@ -30,7 +30,7 @@ fn shader(parameter: Ty, instructions: Vec<Instr>) -> Module {
 #[test]
 fn opaque_addresses_do_not_authorize_copying_managed_payloads() {
     let parameter = Ty::Pointer {
-        pointee: Box::new(Ty::Arc {
+        pointee: Box::new(Ty::ArcPtr {
             pointee: Box::new(Ty::UInt32),
         }),
     };

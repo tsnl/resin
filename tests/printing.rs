@@ -312,8 +312,8 @@ fn c_runtime_accepts_empty_buffers_and_pointer_values() {
                 { .kind = RESIN_PRINT_BYTES, .value = { .bytes = { NULL, 0 } } }
             };
             ResinArc *text = resin_format((const uint8_t *)"{0}{1}", 6, args, 2);
-            const ResinPrintBytes *bytes = resin_arc_data(text);
-            resin_print(bytes->data, bytes->length);
+            const uint8_t *bytes = resin_arc_data(text);
+            resin_print(bytes, resin_arc_span_length(text));
             resin_arc_release(text);
             return 0;
         }
@@ -330,7 +330,7 @@ fn formatted_strings_retain_storage_and_release_the_last_owner() {
         export { main };
         def make() -> String = { fmt("{0}\0{1}", ("hi", 42)) };
         def main() -> int = {
-            var weak = Weak<Span<ubyte>>();
+            var weak = WeakSpan<ubyte>();
             {
                 var original = make();
                 weak := original.bytes.downgrade();
@@ -341,7 +341,7 @@ fn formatted_strings_retain_storage_and_release_the_last_owner() {
             };
             match (weak.upgrade()) {
                 None => { 0 },
-                Arc<Span<ubyte>>(live) => { 1 },
+                ArcSpan<ubyte>(live) => { 1 },
             }
         };
     "#,
@@ -380,7 +380,7 @@ fn from_bytes_copies_unterminated_spans_verbatim_and_owns_the_result() {
             result
         };
         def main() -> int = {
-            var weak = Weak<Span<ubyte>>();
+            var weak = WeakSpan<ubyte>();
             {
                 var text = copied();
                 var alias = text;
@@ -388,14 +388,14 @@ fn from_bytes_copies_unterminated_spans_verbatim_and_owns_the_result() {
                 text := String.from_str("{0}} braces");
                 print(alias);
                 print(text);
-                var end = Ptr<ubyte>(ulong(alias.bytes.data) + 3_ul);
-                if (alias.bytes.length != 3_ul || end.* != 0_ub) { print("bad terminator"); };
+                var end = Ptr<ubyte>(ulong(alias.bytes.get().data) + 3_ul);
+                if (alias.bytes.get().length != 3_ul || end.* != 0_ub) { print("bad terminator"); };
                 var empty = String.from_bytes(Span<ubyte> { data = Ptr<ubyte>(0_ul), length = 0_ul });
-                if (empty.bytes.length != 0_ul || empty.bytes.data.* != 0_ub) { print("bad empty string"); };
+                if (empty.bytes.get().length != 0_ul || empty.bytes.get().data.* != 0_ub) { print("bad empty string"); };
             };
             match (weak.upgrade()) {
                 None => { 0 },
-                Arc<Span<ubyte>>(live) => { 1 },
+                ArcSpan<ubyte>(live) => { 1 },
             }
         };
     "#,
@@ -451,9 +451,9 @@ fn literal_byte_views_preserve_storage_while_owned_strings_copy_it() {
             var empty = String.from_str("");
             if (text.length == 4_ul && bytes.length == text.length &&
                 ulong(bytes.data) == ulong(text.data) && text.at(1_ul).* == 195_ub &&
-                ulong(owned.bytes.data) != ulong(text.data) && owned.bytes.length == 4_ul &&
-                Ptr<ubyte>(ulong(owned.bytes.data) + 4_ul).* == 0_ub &&
-                empty.bytes.length == 0_ul && empty.bytes.data.* == 0_ub) {
+                ulong(owned.bytes.get().data) != ulong(text.data) && owned.bytes.get().length == 4_ul &&
+                Ptr<ubyte>(ulong(owned.bytes.get().data) + 4_ul).* == 0_ub &&
+                empty.bytes.get().length == 0_ul && empty.bytes.get().data.* == 0_ub) {
                 print(fmt(Span<ubyte>("{0}{1}{2}"), (text, bytes, owned)));
                 0
             } else { 1 }

@@ -20,7 +20,7 @@ struct WindowOwner {
 	};
 	def new(width: uint, height: uint, title: String) -> Result<Window, RuntimeError> = {
 		var window = Ptr<ResinWindow>(ulong(0));
-		RuntimeStatus.from_code(resin_window_create(width, height, title.bytes.data, &window))?;
+		RuntimeStatus.from_code(resin_window_create(width, height, title.bytes.get().data, &window))?;
 		ok(Window { handle = window })
 	};
 	def poll_events(self: Window) -> Result<(), RuntimeError> = {
@@ -215,7 +215,7 @@ struct WindowOwner {
 		MouseButtons { left = 0, right = 1, middle = 2, button_4 = 3, button_5 = 4, button_6 = 5, button_7 = 6, button_8 = 7 }
 	};
 };
-type Window = Arc<WindowOwner>;
+type Window = ArcPtr<WindowOwner>;
 
 // GLFW physical key codes, independent of typed characters or keyboard layout.
 struct KeyCodes {
