@@ -67,12 +67,24 @@ pub(super) fn project(
 
 fn representation<'a>(types: &'a Types<'_>, ty: &'a Ty, value: &str) -> (&'a Ty, String) {
     match ty {
-        Ty::Defined { definition } => representation(types, types.module.types[definition.index()].body().unwrap(), &format!("({value}).value")),
+        Ty::Defined { definition } => representation(
+            types,
+            types.module.types[definition.index()].body().unwrap(),
+            &format!("({value}).value"),
+        ),
         _ => (ty, value.to_owned()),
     }
 }
 
-fn project_value(types: &Types<'_>, plan: &resin_types::GpuProjectionPlan, source: &str, destination: &str, projection: &str, depth: usize, out: &mut String) -> Result<(), Error> {
+fn project_value(
+    types: &Types<'_>,
+    plan: &resin_types::GpuProjectionPlan,
+    source: &str,
+    destination: &str,
+    projection: &str,
+    depth: usize,
+    out: &mut String,
+) -> Result<(), Error> {
     use resin_types::GpuProjectionOperation;
     if matches!(plan.operation, GpuProjectionOperation::Copy) {
         writeln!(out, "    {destination} = {source};").unwrap();
@@ -87,7 +99,9 @@ fn project_value(types: &Types<'_>, plan: &resin_types::GpuProjectionPlan, sourc
             writeln!(out, "    {destination} = ({}) (uintptr_t) resin_gpu_projection_pointer({projection}, ({source}).f0, sizeof({ty}), _Alignof({ty}));", types.name(&plan.target)).unwrap();
         }
         GpuProjectionOperation::Sequence { element } => {
-            let Ty::Record { fields } = source_type else { unreachable!("sequence source representation") };
+            let Ty::Record { fields } = source_type else {
+                unreachable!("sequence source representation")
+            };
             let (_, pointer) = representation(types, &fields[0].ty, &format!("({source}).f0"));
             let ty = types.name(element);
             writeln!(out, "    if (({source}).f1 > SIZE_MAX / sizeof({ty})) resin_fail(\"GPU projection length overflow\");").unwrap();
@@ -97,13 +111,33 @@ fn project_value(types: &Types<'_>, plan: &resin_types::GpuProjectionPlan, sourc
         }
         GpuProjectionOperation::Record { fields } => {
             for (index, field) in fields.iter().enumerate() {
-                project_value(types, field, &format!("({source}).f{index}"), &format!("({destination}).f{index}"), projection, depth, out)?;
+                project_value(
+                    types,
+                    field,
+                    &format!("({source}).f{index}"),
+                    &format!("({destination}).f{index}"),
+                    projection,
+                    depth,
+                    out,
+                )?;
             }
         }
         GpuProjectionOperation::Array { element, length } => {
             let index = format!("r_projection_i{depth}");
-            writeln!(out, "    for (size_t {index} = 0; {index} < {length}; ++{index}) {{").unwrap();
-            project_value(types, element, &format!("({source}).items[{index}]"), &format!("({destination}).items[{index}]"), projection, depth + 1, out)?;
+            writeln!(
+                out,
+                "    for (size_t {index} = 0; {index} < {length}; ++{index}) {{"
+            )
+            .unwrap();
+            project_value(
+                types,
+                element,
+                &format!("({source}).items[{index}]"),
+                &format!("({destination}).items[{index}]"),
+                projection,
+                depth + 1,
+                out,
+            )?;
             writeln!(out, "    }}").unwrap();
         }
     }

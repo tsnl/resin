@@ -77,7 +77,12 @@ impl FunctionLowering<'_> {
                 args,
             } => {
                 self.gen_arguments(args)?;
-                let Ty::Result { value: pipeline, .. } = expected else { unreachable!("pipeline creation result") };
+                let Ty::Result {
+                    value: pipeline, ..
+                } = expected
+                else {
+                    unreachable!("pipeline creation result")
+                };
                 self.emit(match shaders.as_slice() {
                     [shader] => Instr::GpuComputePipeline {
                         pipeline: *pipeline.clone(),

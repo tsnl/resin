@@ -942,7 +942,12 @@ fn projection_operation(
             .map_err(|_| invalid())?
             .gpu_projection()
     {
-        if projection.target != *target || get(definitions, *definition).map_err(|_| invalid())?.drop_hook().is_some() {
+        if projection.target != *target
+            || get(definitions, *definition)
+                .map_err(|_| invalid())?
+                .drop_hook()
+                .is_some()
+        {
             return Err(invalid());
         }
         return match projection.kind {

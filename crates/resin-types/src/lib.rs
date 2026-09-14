@@ -159,23 +159,47 @@ pub enum GpuProjectionOperation {
 /// Validate a source pipeline wrapper and its native owner facade.
 /// Only a single opaque contract field may be exposed by the wrapper. The
 /// owner facade must contain exactly one strong handle through nominal records.
-pub fn gpu_pipeline_contract<'a>(definitions: &'a [TypeDef], ty: &Ty) -> Result<&'a GpuPipeline, String> {
-    let Ty::Defined { definition } = ty else { return Err("pipeline requires a registered source nominal type".into()); };
-    let source = definitions.get(definition.index()).ok_or("pipeline declaration is missing")?;
-    let metadata = source.gpu_pipeline().ok_or("pipeline requires an explicit type contract")?;
-    let Some(Ty::Record { fields }) = source.body() else { return Err("pipeline wrapper requires one opaque contract field".into()); };
-    if source.drop_hook().is_some() || fields.len() != 1 || fields[0].ty != Ty::GpuPipelineContract || !gpu_owner_storage(definitions, &metadata.owner, 0) {
+pub fn gpu_pipeline_contract<'a>(
+    definitions: &'a [TypeDef],
+    ty: &Ty,
+) -> Result<&'a GpuPipeline, String> {
+    let Ty::Defined { definition } = ty else {
+        return Err("pipeline requires a registered source nominal type".into());
+    };
+    let source = definitions
+        .get(definition.index())
+        .ok_or("pipeline declaration is missing")?;
+    let metadata = source
+        .gpu_pipeline()
+        .ok_or("pipeline requires an explicit type contract")?;
+    let Some(Ty::Record { fields }) = source.body() else {
+        return Err("pipeline wrapper requires one opaque contract field".into());
+    };
+    if source.drop_hook().is_some()
+        || fields.len() != 1
+        || fields[0].ty != Ty::GpuPipelineContract
+        || !gpu_owner_storage(definitions, &metadata.owner, 0)
+    {
         return Err("pipeline wrapper or owner violates the opaque contract representation".into());
     }
     Ok(metadata)
 }
 
 fn gpu_owner_storage(definitions: &[TypeDef], ty: &Ty, depth: usize) -> bool {
-    if depth >= 128 { return false; }
+    if depth >= 128 {
+        return false;
+    }
     match ty {
         Ty::StrongOwner => true,
-        Ty::Defined { definition } => definitions.get(definition.index()).is_some_and(|source| source.drop_hook().is_none() && source.body().is_some_and(|body| gpu_owner_storage(definitions, body, depth + 1))),
-        Ty::Record { fields } if fields.len() == 1 => gpu_owner_storage(definitions, &fields[0].ty, depth + 1),
+        Ty::Defined { definition } => definitions.get(definition.index()).is_some_and(|source| {
+            source.drop_hook().is_none()
+                && source
+                    .body()
+                    .is_some_and(|body| gpu_owner_storage(definitions, body, depth + 1))
+        }),
+        Ty::Record { fields } if fields.len() == 1 => {
+            gpu_owner_storage(definitions, &fields[0].ty, depth + 1)
+        }
         _ => false,
     }
 }

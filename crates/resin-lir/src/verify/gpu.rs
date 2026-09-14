@@ -243,11 +243,7 @@ pub(super) fn allocation_error(
     let Ty::Result { value, error } = &function.result else {
         return Err(invalid());
     };
-    expect_type(
-        Ty::GpuView,
-        *value.clone(),
-        location,
-    )?;
+    expect_type(Ty::GpuView, *value.clone(), location)?;
     Ok(*error.clone())
 }
 

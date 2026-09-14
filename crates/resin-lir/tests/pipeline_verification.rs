@@ -10,18 +10,35 @@ fn result(value: Ty) -> Ty {
         error: Box::new(Ty::union([])),
     }
 }
-fn pipeline() -> Ty { Ty::Defined { definition: TypeId::from_index(0) } }
+fn pipeline() -> Ty {
+    Ty::Defined {
+        definition: TypeId::from_index(0),
+    }
+}
 fn pipeline_definition(kind: resin_types::GpuPipelineKind, root: Ty) -> TypeDef {
     TypeDef::Nominal {
         name: "Pipeline".into(),
-        body: Some(Ty::Record { fields: vec![RecordField { name: "token".into(), ty: Ty::GpuPipelineContract }] }),
+        body: Some(Ty::Record {
+            fields: vec![RecordField {
+                name: "token".into(),
+                ty: Ty::GpuPipelineContract,
+            }],
+        }),
         drop: None,
         gpu_projection: None,
-        gpu_pipeline: Some(resin_types::GpuPipeline { kind, root, owner: owner() }),
+        gpu_pipeline: Some(resin_types::GpuPipeline {
+            kind,
+            root,
+            owner: owner(),
+        }),
     }
 }
 fn projection() -> resin_types::GpuProjectionPlan {
-    resin_types::GpuProjectionPlan { source: Ty::UInt32, target: Ty::UInt32, operation: resin_types::GpuProjectionOperation::Copy }
+    resin_types::GpuProjectionPlan {
+        source: Ty::UInt32,
+        target: Ty::UInt32,
+        operation: resin_types::GpuProjectionOperation::Copy,
+    }
 }
 fn id(index: usize) -> FunctionId {
     FunctionId::from_index(index)
@@ -61,7 +78,11 @@ fn fixture() -> Module {
     let bytes = Ty::byte_span();
     let pointer = Ty::GpuView;
     let mut module = Module {
-        types: vec![pipeline_definition(resin_types::GpuPipelineKind::Compute, Ty::UInt32)].into(),
+        types: vec![pipeline_definition(
+            resin_types::GpuPipelineKind::Compute,
+            Ty::UInt32,
+        )]
+        .into(),
         functions: vec![
             declaration(0, vec![owner()], result(pipeline())),
             declaration(1, vec![owner(), bytes], result(owner())),
@@ -167,7 +188,11 @@ fn creation_derives_root_from_an_embedded_declaration() {
         VerifyErrorKind::InvalidGpuOperation
     );
     let mut wrong_root = module;
-    wrong_root.types = vec![pipeline_definition(resin_types::GpuPipelineKind::Compute, Ty::Int32)].into();
+    wrong_root.types = vec![pipeline_definition(
+        resin_types::GpuPipelineKind::Compute,
+        Ty::Int32,
+    )]
+    .into();
     assert!(resin_lir::verify(&wrong_root).is_err());
 }
 
@@ -203,7 +228,11 @@ fn pipeline_owner_cannot_be_forged_by_ascription_or_reused_for_another_stage() {
     forged.functions[0].blocks[0].instrs[1] = Instr::Ascribe { ty: pipeline() };
     assert!(resin_lir::verify(&forged).is_err());
     let mut graphics_dispatch = recording();
-    graphics_dispatch.types = vec![pipeline_definition(resin_types::GpuPipelineKind::Graphics, Ty::UInt32)].into();
+    graphics_dispatch.types = vec![pipeline_definition(
+        resin_types::GpuPipelineKind::Graphics,
+        Ty::UInt32,
+    )]
+    .into();
     assert_eq!(
         resin_lir::verify(&graphics_dispatch).unwrap_err().kind,
         VerifyErrorKind::InvalidGpuOperation
@@ -232,7 +261,16 @@ fn recording_rejects_forged_projection_plan_and_pipeline_layout() {
     assert!(resin_lir::verify(&module).is_err());
     let mut module = fixture();
     let mut definition = pipeline_definition(resin_types::GpuPipelineKind::Compute, Ty::UInt32);
-    if let TypeDef::Nominal { body: Some(Ty::Record { fields }), .. } = &mut definition { fields.push(RecordField { name: "extra".into(), ty: Ty::UInt32 }); }
+    if let TypeDef::Nominal {
+        body: Some(Ty::Record { fields }),
+        ..
+    } = &mut definition
+    {
+        fields.push(RecordField {
+            name: "extra".into(),
+            ty: Ty::UInt32,
+        });
+    }
     module.types = vec![definition].into();
     assert!(resin_lir::verify(&module).is_err());
 }

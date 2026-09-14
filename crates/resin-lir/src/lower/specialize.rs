@@ -856,11 +856,22 @@ impl Specialization<'_, '_> {
                 args,
             } => {
                 let args = self.arguments(args)?;
-                let pipeline = resin_types::gpu_pipeline_contract(self.instances.typer().definitions(), &args.values[1].ty)
-                    .map_err(|message| self.instance_error(message))?;
-                let projection = if pipeline.root == Ty::None { None } else {
-                    Some(resin_types::gpu_projection_plan(self.instances.typer().definitions(), &args.values[2].ty, &pipeline.root)
-                        .map_err(|message| self.instance_error(message))?)
+                let pipeline = resin_types::gpu_pipeline_contract(
+                    self.instances.typer().definitions(),
+                    &args.values[1].ty,
+                )
+                .map_err(|message| self.instance_error(message))?;
+                let projection = if pipeline.root == Ty::None {
+                    None
+                } else {
+                    Some(
+                        resin_types::gpu_projection_plan(
+                            self.instances.typer().definitions(),
+                            &args.values[2].ty,
+                            &pipeline.root,
+                        )
+                        .map_err(|message| self.instance_error(message))?,
+                    )
                 };
                 concrete::TermKind::GpuPipelineDispatch {
                     projection,
@@ -869,7 +880,7 @@ impl Specialization<'_, '_> {
                     record: self.host_bridge(*record)?,
                     args,
                 }
-            },
+            }
             resin_hir::TermKind::Result { failure, arg } => concrete::TermKind::Result {
                 failure: *failure,
                 arg: self.boxed(arg)?,

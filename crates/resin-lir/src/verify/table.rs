@@ -13,7 +13,9 @@ pub(super) fn collect(module: &Module, analysis: &[FunctionTypes]) -> TypeTable 
             table.intern(&metadata.root);
             table.intern(&metadata.owner);
         }
-        if let Some(metadata) = definition.gpu_projection() { table.intern(&metadata.target); }
+        if let Some(metadata) = definition.gpu_projection() {
+            table.intern(&metadata.target);
+        }
     }
     for (function, flow) in module.functions.iter().zip(analysis) {
         table.intern(&function.ty().expect("verified parameter"));

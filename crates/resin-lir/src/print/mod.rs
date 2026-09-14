@@ -150,7 +150,9 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
         Instr::GpuReadOnly => symbol("gpu-read-only"),
         Instr::GpuWriteOnly => symbol("gpu-write-only"),
         Instr::GpuCopyTo => symbol("gpu-copy-to"),
-        Instr::GpuComputePipeline { factory, shader, .. } => list(
+        Instr::GpuComputePipeline {
+            factory, shader, ..
+        } => list(
             "gpu-compute-pipeline",
             vec![
                 symbol(names.functions[factory.index()].as_ref()),

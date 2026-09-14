@@ -14,9 +14,9 @@ pub(super) fn instruction(
     out: &mut String,
 ) -> Result<String, Error> {
     match instr {
-        Instr::GpuComputePipeline { factory, shader, .. } => {
-            create(types, name, *factory, &[*shader], &args[0], result, out)
-        }
+        Instr::GpuComputePipeline {
+            factory, shader, ..
+        } => create(types, name, *factory, &[*shader], &args[0], result, out),
         Instr::GpuGraphicsPipeline {
             factory,
             vertex,
@@ -91,11 +91,36 @@ fn create(
         call(factory, &args)
     )
     .unwrap();
-    let Ty::Result { value: pipeline, .. } = result else { unreachable!("pipeline result") };
-    let metadata = resin_types::gpu_pipeline_contract(&types.module.types, pipeline).expect("verified source pipeline contract");
-    let token = format!("(ResinGpuPipelineContract){{ .owner = {}, .root_type = {}u, .owner_type = {}u, .kind = {}u }}", owner_handle(types, &metadata.owner, &format!("{name}_factory.payload.v0")), types.id(&metadata.root), types.id(&metadata.owner), pipeline_kind(metadata.kind));
-    writeln!(out, "  {} {name}_result = {{ .tag = {name}_factory.tag }};", types.name(result)).unwrap();
-    writeln!(out, "  if ({name}_factory.tag == 0u) {{ {name}_result.payload.v0.value.f0 = {token}; }}").unwrap();
+    let Ty::Result {
+        value: pipeline, ..
+    } = result
+    else {
+        unreachable!("pipeline result")
+    };
+    let metadata = resin_types::gpu_pipeline_contract(&types.module.types, pipeline)
+        .expect("verified source pipeline contract");
+    let token = format!(
+        "(ResinGpuPipelineContract){{ .owner = {}, .root_type = {}u, .owner_type = {}u, .kind = {}u }}",
+        owner_handle(
+            types,
+            &metadata.owner,
+            &format!("{name}_factory.payload.v0")
+        ),
+        types.id(&metadata.root),
+        types.id(&metadata.owner),
+        pipeline_kind(metadata.kind)
+    );
+    writeln!(
+        out,
+        "  {} {name}_result = {{ .tag = {name}_factory.tag }};",
+        types.name(result)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  if ({name}_factory.tag == 0u) {{ {name}_result.payload.v0.value.f0 = {token}; }}"
+    )
+    .unwrap();
     writeln!(
         out,
         "  else {{ {name}_result.payload.v1 = {name}_factory.payload.v1; }}"
@@ -114,14 +139,23 @@ fn record(
     out: &mut String,
 ) -> Result<String, Error> {
     let (context, allocator, recorder) = functions;
-    let metadata = resin_types::gpu_pipeline_contract(&types.module.types, &args[1].ty).expect("verified source pipeline");
+    let metadata = resin_types::gpu_pipeline_contract(&types.module.types, &args[1].ty)
+        .expect("verified source pipeline");
     let (root, owner) = (&metadata.root, &metadata.owner);
     let draw = metadata.kind == resin_types::GpuPipelineKind::Graphics;
     let token = format!("({}).value.f0", args[1].expr);
     writeln!(out, "  if ({token}.root_type != {}u || {token}.owner_type != {}u || {token}.kind != {}u) resin_fail(\"GPU pipeline contract does not match its source wrapper\");", types.id(root), types.id(owner), pipeline_kind(metadata.kind)).unwrap();
     let native_owner = owner_value(types, owner, &format!("{token}.owner"));
     let Some(allocator) = allocator else {
-        return Ok(record_call(types, recorder, args, owner, &native_owner, None, draw));
+        return Ok(record_call(
+            types,
+            recorder,
+            args,
+            owner,
+            &native_owner,
+            None,
+            draw,
+        ));
     };
     let gpu_type = &types.module.functions[context.index()].result;
     let gpu = Slot {
@@ -216,13 +250,20 @@ fn call(function: FunctionId, args: &[String]) -> String {
 }
 
 fn pipeline_kind(kind: resin_types::GpuPipelineKind) -> u32 {
-    match kind { resin_types::GpuPipelineKind::Compute => 0, resin_types::GpuPipelineKind::Graphics => 1 }
+    match kind {
+        resin_types::GpuPipelineKind::Compute => 0,
+        resin_types::GpuPipelineKind::Graphics => 1,
+    }
 }
 
 fn owner_handle(types: &Types<'_>, ty: &Ty, value: &str) -> String {
     match ty {
         Ty::StrongOwner => value.to_owned(),
-        Ty::Defined { definition } => owner_handle(types, types.module.types[definition.index()].body().unwrap(), &format!("({value}).value")),
+        Ty::Defined { definition } => owner_handle(
+            types,
+            types.module.types[definition.index()].body().unwrap(),
+            &format!("({value}).value"),
+        ),
         Ty::Record { fields } => owner_handle(types, &fields[0].ty, &format!("({value}).f0")),
         _ => unreachable!("verified single shared owner facade"),
     }
@@ -231,7 +272,14 @@ fn owner_handle(types: &Types<'_>, ty: &Ty, value: &str) -> String {
 fn owner_value(types: &Types<'_>, ty: &Ty, handle: &str) -> String {
     let payload = match ty {
         Ty::StrongOwner => return handle.to_owned(),
-        Ty::Defined { definition } => format!(".value = {}", owner_value(types, types.module.types[definition.index()].body().unwrap(), handle)),
+        Ty::Defined { definition } => format!(
+            ".value = {}",
+            owner_value(
+                types,
+                types.module.types[definition.index()].body().unwrap(),
+                handle
+            )
+        ),
         Ty::Record { fields } => format!(".f0 = {}", owner_value(types, &fields[0].ty, handle)),
         _ => unreachable!("verified single shared owner facade"),
     };
