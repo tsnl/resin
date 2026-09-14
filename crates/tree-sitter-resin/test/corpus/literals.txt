@@ -160,12 +160,11 @@ def bytes() -> Span<ubyte> = { Span<ubyte>("hello") };
                           (unary_type
                             (primary_type
                               (builtin_type))))))))
-                (closed_term
-                  (paren_term
-                    (term
-                      (assignment_term
-                        (binary_term
-                          (unary_term
-                            (postfix_term
-                              (primary_term
-                                (string)))))))))))))))))
+                (arguments
+                  (term
+                    (assignment_term
+                      (binary_term
+                        (unary_term
+                          (postfix_term
+                            (primary_term
+                              (string))))))))))))))))

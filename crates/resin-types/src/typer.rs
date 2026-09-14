@@ -16,7 +16,7 @@ pub(super) fn lookup(name: &str, arity: usize) -> Result<BuiltinRule, TypeError>
         "!" => (BuiltinRule::Boolean, arity == 1),
         "&&" | "||" => (BuiltinRule::Boolean, arity == 2),
         "print" => (BuiltinRule::Print, arity == 1),
-        "fmt" => (BuiltinRule::Format, arity == 1),
+        "fmt" => (BuiltinRule::Format, arity == 2),
         "string_from_bytes" => (BuiltinRule::StringFromBytes, arity == 1),
         _ => {
             return Err(TypeError::new(TypeErrorKind::UnknownBuiltin {
@@ -215,7 +215,7 @@ pub(super) fn type_builtin_call(
                 found: args[0].clone(),
             }));
         }
-        BuiltinRule::Format => context.type_format(&args[0])?,
+        BuiltinRule::Format => context.type_format(&args[0], &args[1])?,
         BuiltinRule::StringFromBytes => {
             if args[0] != Ty::Str {
                 context.same(&Ty::byte_span(), &args[0])?;
@@ -291,22 +291,16 @@ impl TyperContext {
         ty == &Ty::Str || ty == &Ty::byte_span() || self.string_type.as_ref() == Some(ty)
     }
 
-    fn type_format(&self, arg: &Ty) -> Result<Ty, TypeError> {
-        let invalid =
-            || TypeError::new(TypeErrorKind::InvalidFormatArguments { found: arg.clone() });
-        let Ty::Record { fields } = arg else {
-            return Err(invalid());
+    fn type_format(&self, format: &Ty, values: &Ty) -> Result<Ty, TypeError> {
+        let invalid = || {
+            TypeError::new(TypeErrorKind::InvalidFormatArguments {
+                found: values.clone(),
+            })
         };
-        let [format, values] = fields.as_slice() else {
-            return Err(invalid());
-        };
-        if format.name.as_ref() != "_0"
-            || values.name.as_ref() != "_1"
-            || !self.is_string(&format.ty)
-        {
+        if !self.is_string(format) {
             return Err(invalid());
         }
-        let fields = match &values.ty {
+        let fields = match values {
             Ty::Unit => &[][..],
             Ty::Record { fields } => fields,
             _ => return Err(invalid()),
@@ -370,7 +364,7 @@ pub(super) fn ascription(
 
 pub(super) fn validate_shader(
     typer: &TyperContext,
-    parameter: &Ty,
+    parameters: &[Ty],
     result: &Ty,
     foreign: bool,
     stage: &str,
@@ -382,17 +376,14 @@ pub(super) fn validate_shader(
     if foreign {
         return Err("foreign functions cannot be shader entries".into());
     }
-    let param = shader_shape(typer, parameter)?;
-    let (input, root) = match &param {
-        Ty::Record { fields }
-            if fields.len() == 2
-                && fields[0].name.as_ref() == "_0"
-                && fields[1].name.as_ref() == "_1"
-                && matches!(fields[1].ty, Ty::Pointer { .. }) =>
-        {
-            (&fields[0].ty, true)
+    let (input, root) = match parameters {
+        [input] => (input, false),
+        [input, Ty::Pointer { .. }] => (input, true),
+        _ => {
+            return Err(format!(
+                "invalid @{stage}_shader signature: expected one input and an optional Ptr<T> root"
+            ));
         }
-        _ => (parameter, false),
     };
     let input_shape = shader_shape(typer, input)?;
     let result = shader_shape(typer, result)?;
@@ -456,13 +447,13 @@ fn shader_shape(typer: &TyperContext, ty: &Ty) -> Result<Ty, String> {
 
 pub(super) fn pipeline_root(
     typer: &TyperContext,
-    stages: &[(&Ty, &Ty, &str)],
+    stages: &[(&[Ty], &Ty, &str)],
 ) -> Result<Ty, String> {
     let root =
         match stages {
             [(parameter, result, "compute")] => {
                 validate_shader(typer, parameter, result, false, "compute")?;
-                Some(shader_root(typer, parameter)?)
+                Some(shader_root(parameter)?)
             }
             [
                 (vertex_parameter, vertex_result, "vertex"),
@@ -488,11 +479,8 @@ pub(super) fn pipeline_root(
     }
 }
 
-fn shader_root(typer: &TyperContext, parameter: &Ty) -> Result<Ty, String> {
-    let Ty::Record { fields } = shader_shape(typer, parameter)? else {
-        return Err("shader root parameter must be a pointer".into());
-    };
-    let Some(Ty::Pointer { pointee }) = fields.get(1).map(|field| &field.ty) else {
+fn shader_root(parameters: &[Ty]) -> Result<Ty, String> {
+    let Some(Ty::Pointer { pointee }) = parameters.get(1) else {
         return Err("shader root parameter must be a pointer".into());
     };
     Ok(*pointee.clone())
@@ -500,9 +488,9 @@ fn shader_root(typer: &TyperContext, parameter: &Ty) -> Result<Ty, String> {
 
 fn graphics_root(
     typer: &TyperContext,
-    vertex_parameter: &Ty,
+    vertex_parameter: &[Ty],
     vertex_result: &Ty,
-    fragment_parameter: &Ty,
+    fragment_parameter: &[Ty],
     fragment_result: &Ty,
 ) -> Result<Option<Ty>, String> {
     let shader::Interface::Vertex {
@@ -530,10 +518,10 @@ fn graphics_root(
         return Err("vertex shader color and fragment shader input must have the same type".into());
     }
     let vertex_root = vertex_root
-        .then(|| shader_root(typer, vertex_parameter))
+        .then(|| shader_root(vertex_parameter))
         .transpose()?;
     let fragment_root = fragment_root
-        .then(|| shader_root(typer, fragment_parameter))
+        .then(|| shader_root(fragment_parameter))
         .transpose()?;
     match (vertex_root, fragment_root) {
         (Some(vertex), Some(fragment)) if vertex != fragment => {

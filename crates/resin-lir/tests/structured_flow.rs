@@ -20,6 +20,7 @@ fn module(blocks: Vec<BasicBlock>) -> Module {
             profile: resin_lir::Profile::Host,
             foreign: None,
             result: Ty::Unit,
+            parameter_count: 1,
             locals: vec![Local {
                 name: None,
                 ty: Ty::Unit,

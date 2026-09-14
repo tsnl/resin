@@ -150,7 +150,7 @@ impl Completion<'_> {
                 receiver,
                 receiver_type,
                 name,
-                arg,
+                args,
             } => {
                 let method = self.methods.get(rule).expect("solved method").clone();
                 match method {
@@ -160,16 +160,19 @@ impl Completion<'_> {
                             .as_deref()
                             .map(|receiver| self.boxed(receiver))
                             .transpose()?,
-                        arg: self.boxed(arg)?,
+                        args: args
+                            .iter()
+                            .map(|arg| self.elaborate(arg))
+                            .collect::<Result<_>>()?,
                     },
                     ResolvedMethod::Compiler { declaration } => self.method(
                         declaration,
                         receiver.as_deref(),
                         &self.annotation(receiver_type)?.ty,
                         name,
-                        arg,
+                        args,
                     )?,
-                    source => self.source_method_call(&source, receiver.as_deref(), name, arg)?,
+                    source => self.source_method_call(&source, receiver.as_deref(), name, args)?,
                 }
             }
             typed::TermKind::MethodReference { rule, name } => {
@@ -185,7 +188,7 @@ impl Completion<'_> {
                     ResolvedMethod::Compiler { .. } => unreachable!("source method reference"),
                 }
             }
-            typed::TermKind::Call { func, arg } => self.call(func, arg)?,
+            typed::TermKind::Call { func, args } => self.call(func, args)?,
             typed::TermKind::Ascribe { ty, arg } => {
                 if let Some(to) = self.solver.resolve(&ty.ty) {
                     self.ascription(source.span, &to, arg)?
@@ -419,7 +422,7 @@ impl Completion<'_> {
         method: &ResolvedMethod,
         receiver: Option<&typed::Term>,
         name: &Ident,
-        argument: &typed::Term,
+        arguments: &[typed::Term],
     ) -> Result<TermKind> {
         let ResolvedMethod::Source {
             declaration,
@@ -431,8 +434,7 @@ impl Completion<'_> {
         else {
             unreachable!("source method completion");
         };
-        let parameter = Type::parameter(params.clone());
-        let function_type = Type::function(parameter.clone(), result.clone());
+        let function_type = Type::function(params.clone(), result.clone());
         let func = Box::new(Term {
             span: name.span,
             ty: self.solver.require_complete(&function_type, name.span)?,
@@ -450,27 +452,17 @@ impl Completion<'_> {
                 }))
             })
             .transpose()?;
-        let argument = self.boxed(argument)?;
-        let arg = if receiver.is_some() {
-            let params = params[1..]
-                .iter()
-                .map(|ty| self.solver.require_complete(ty, name.span))
-                .collect::<Result<_>>()?;
-            Box::new(Term {
-                span: argument.span,
-                ty: self.solver.require_complete(&parameter, name.span)?,
-                kind: TermKind::Pack {
-                    args: Arguments {
-                        receiver,
-                        argument,
-                        params,
-                    },
-                },
-            })
-        } else {
-            argument
-        };
-        Ok(TermKind::Call { func, arg })
+        let args = receiver
+            .into_iter()
+            .map(|term| *term)
+            .chain(
+                arguments
+                    .iter()
+                    .map(|arg| self.elaborate(arg))
+                    .collect::<Result<Vec<_>>>()?,
+            )
+            .collect();
+        Ok(TermKind::Call { func, args })
     }
 
     fn method(
@@ -479,12 +471,12 @@ impl Completion<'_> {
         receiver: Option<&typed::Term>,
         receiver_ty: &Ty,
         name: &Ident,
-        argument: &typed::Term,
+        arguments: &[typed::Term],
     ) -> Result<TermKind> {
         if let FunctionBody::GpuPipelineFactory { factory, graphics } = declaration.body {
             return self.pipeline_create(
                 receiver,
-                argument,
+                arguments,
                 &declaration.params,
                 factory,
                 graphics,
@@ -493,11 +485,19 @@ impl Completion<'_> {
         let receiver = receiver
             .map(|r| self.adapt(r, receiver_ty, &declaration.params[0]))
             .transpose()?;
-        let params = declaration.params[usize::from(receiver.is_some())..].to_vec();
+        let values = receiver
+            .into_iter()
+            .map(|term| *term)
+            .chain(
+                arguments
+                    .iter()
+                    .map(|arg| self.elaborate(arg))
+                    .collect::<Result<Vec<_>>>()?,
+            )
+            .collect();
         let args = Arguments {
-            receiver,
-            argument: self.boxed(argument)?,
-            params: params.iter().map(types::ty).collect(),
+            values,
+            params: declaration.params.iter().map(types::ty).collect(),
         };
         Ok(match declaration.body {
             FunctionBody::Intrinsic(op) => TermKind::Intrinsic { op, args },
@@ -517,9 +517,8 @@ impl Completion<'_> {
                 unreachable!("specialized pipeline bridge")
             }
             FunctionBody::Defined(function) => {
-                let param = Ty::parameter(&declaration.params);
                 let ty = Ty::Function {
-                    param: Box::new(param.clone()),
+                    params: declaration.params.clone(),
                     result: Box::new(declaration.result),
                 };
                 let func = Box::new(Term {
@@ -530,16 +529,10 @@ impl Completion<'_> {
                         type_args: vec![],
                     },
                 });
-                let arg = if args.receiver.is_some() {
-                    Box::new(Term {
-                        span: argument.span,
-                        ty: types::ty(&param),
-                        kind: TermKind::Pack { args },
-                    })
-                } else {
-                    args.argument
-                };
-                TermKind::Call { func, arg }
+                TermKind::Call {
+                    func,
+                    args: args.values,
+                }
             }
         })
     }
@@ -547,23 +540,12 @@ impl Completion<'_> {
     fn pipeline_create(
         &mut self,
         receiver: Option<&typed::Term>,
-        argument: &typed::Term,
+        arguments: &[typed::Term],
         params: &[Ty],
         factory: FunctionId,
         graphics: bool,
     ) -> Result<TermKind> {
-        let count = params.len() - usize::from(receiver.is_some());
-        let terms = if count == 1 {
-            vec![argument]
-        } else {
-            let typed::TermKind::Record { fields } = &argument.kind else {
-                return Err(GenerateError::inference(
-                    argument.span,
-                    "pipeline creation requires shader declarations as direct arguments",
-                ));
-            };
-            fields.iter().map(|(_, term)| term).collect()
-        };
+        let terms = arguments;
         let stages = if graphics {
             &["vertex", "fragment"][..]
         } else {
@@ -593,24 +575,14 @@ impl Completion<'_> {
             self.embedded.insert(function);
             shaders.push(function);
         }
-        let args = if let Some(receiver) = receiver {
-            Arguments {
-                receiver: Some(self.adapt(receiver, &self.ty(receiver)?, &params[0])?),
-                argument: Box::new(Term {
-                    span: argument.span,
-                    ty: crate::Type::Unit,
-                    kind: TermKind::Constant {
-                        value: crate::Constant::Unit,
-                    },
-                }),
-                params: vec![],
-            }
+        let owner = if let Some(receiver) = receiver {
+            *self.adapt(receiver, &self.ty(receiver)?, &params[0])?
         } else {
-            Arguments {
-                receiver: None,
-                argument: self.boxed(terms[0])?,
-                params: vec![types::ty(&params[0])],
-            }
+            self.elaborate(&terms[0])?
+        };
+        let args = Arguments {
+            values: vec![owner],
+            params: vec![types::ty(&params[0])],
         };
         Ok(TermKind::GpuPipelineCreate {
             factory,
@@ -631,14 +603,17 @@ impl Completion<'_> {
         }))
     }
 
-    fn call(&mut self, func: &typed::Term, arg: &typed::Term) -> Result<TermKind> {
+    fn call(&mut self, func: &typed::Term, args: &[typed::Term]) -> Result<TermKind> {
         if matches!(
             self.solver.head(&func.ty),
             Type::Node(super::infer::Head::Function, _)
         ) {
             return Ok(TermKind::Call {
                 func: self.boxed(func)?,
-                arg: self.boxed(arg)?,
+                args: args
+                    .iter()
+                    .map(|arg| self.elaborate(arg))
+                    .collect::<Result<_>>()?,
             });
         }
         let function_type = self.solver.require_complete(&func.ty, func.span)?;
@@ -659,16 +634,21 @@ impl Completion<'_> {
         };
         if let Some((ty, conversion)) = receiver {
             let args = Arguments {
-                receiver: Some(Box::new(Term {
-                    span: func.span,
-                    ty,
-                    kind: TermKind::Adapt {
-                        conversion,
-                        arg: self.boxed(func)?,
+                params: vec![
+                    ty.clone(),
+                    self.solver.require_complete(&args[0].ty, args[0].span)?,
+                ],
+                values: vec![
+                    Term {
+                        span: func.span,
+                        ty,
+                        kind: TermKind::Adapt {
+                            conversion,
+                            arg: self.boxed(func)?,
+                        },
                     },
-                })),
-                argument: self.boxed(arg)?,
-                params: vec![self.solver.require_complete(&arg.ty, arg.span)?],
+                    self.elaborate(&args[0])?,
+                ],
             };
             return Ok(TermKind::Intrinsic {
                 op: if matches!(
@@ -684,7 +664,10 @@ impl Completion<'_> {
         }
         Ok(TermKind::Call {
             func: self.boxed(func)?,
-            arg: self.boxed(arg)?,
+            args: args
+                .iter()
+                .map(|arg| self.elaborate(arg))
+                .collect::<Result<_>>()?,
         })
     }
 
@@ -953,7 +936,7 @@ mod tests {
                         receiver: Ty::Str.into(),
                         name: "at".into(),
                         type_args: None,
-                        arg: Ty::UInt64.into(),
+                        args: vec![Ty::UInt64.into()],
                         out: ty.clone(),
                         associated: false,
                         origins: vec![],
@@ -981,11 +964,11 @@ mod tests {
                 },
                 // Names remain diagnostic metadata; completion must not resolve it again.
                 name: Ident::new("no_such_method".into(), span),
-                arg: Box::new(typed::Term {
+                args: vec![typed::Term {
                     span,
                     ty: Ty::UInt64.into(),
                     kind: typed::TermKind::Num { value: "0".into() },
-                }),
+                }],
             },
         };
         let completed = function(

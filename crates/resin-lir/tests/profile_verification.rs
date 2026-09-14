@@ -11,6 +11,7 @@ fn shader(parameter: Ty, instructions: Vec<Instr>) -> Module {
             profile: Profile::Shader,
             foreign: None,
             result: Ty::Unit,
+            parameter_count: 1,
             locals: vec![Local {
                 name: None,
                 ty: parameter,

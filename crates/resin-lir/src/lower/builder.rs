@@ -7,8 +7,15 @@ pub(super) struct FunctionBuilder {
     function: Function,
     current: BlockId,
     terminated: Vec<bool>,
-    heights: Vec<usize>,
-    height: usize,
+    inputs: Vec<BlockInput>,
+    // Each operand records how many locals existed when it was produced.
+    // Local IDs give registration order; the stack gives operand order.
+    stack_boundaries: Vec<usize>,
+}
+
+struct BlockInput {
+    inherited: Vec<usize>,
+    produced: usize,
 }
 
 impl FunctionBuilder {
@@ -19,10 +26,8 @@ impl FunctionBuilder {
                 profile,
                 foreign: None,
                 result: Ty::Unit,
-                locals: vec![Local {
-                    name: None,
-                    ty: Ty::Unit,
-                }],
+                parameter_count: 0,
+                locals: vec![],
                 entry: BlockId::from_index(0),
                 blocks: vec![BasicBlock {
                     name: Some("entry".into()),
@@ -32,8 +37,11 @@ impl FunctionBuilder {
             },
             current: BlockId::from_index(0),
             terminated: vec![false],
-            heights: vec![0],
-            height: 0,
+            inputs: vec![BlockInput {
+                inherited: vec![],
+                produced: 0,
+            }],
+            stack_boundaries: vec![],
         }
     }
 
@@ -41,8 +49,10 @@ impl FunctionBuilder {
         self.function
     }
 
-    pub(super) fn parameter(&mut self, name: Option<Arc<str>>, ty: Ty) {
-        self.function.locals[0] = Local { name, ty };
+    pub(super) fn parameter(&mut self, name: Option<Arc<str>>, ty: Ty) -> LocalId {
+        assert_eq!(self.function.parameter_count, self.function.locals.len());
+        self.function.parameter_count += 1;
+        self.local(ty, name)
     }
 
     pub(super) fn result(&mut self, ty: Ty) {
@@ -57,7 +67,13 @@ impl FunctionBuilder {
         &self.function.result
     }
     pub(super) fn stack_len(&self) -> usize {
-        self.height
+        self.stack_boundaries.len()
+    }
+
+    pub(super) fn stack_is_newer_than(&self, local: LocalId) -> bool {
+        self.stack_boundaries
+            .last()
+            .is_some_and(|boundary| *boundary > local.index())
     }
 
     pub(super) fn local(&mut self, ty: Ty, name: Option<Arc<str>>) -> LocalId {
@@ -77,11 +93,13 @@ impl FunctionBuilder {
         let current = self.current.index();
         debug_assert!(!self.terminated[current]);
         let effect = crate::verify::stack_effect(&instr);
-        self.height = self
-            .height
+        let remaining = self
+            .stack_boundaries
+            .len()
             .checked_sub(effect.pops)
-            .expect("valid generated stack")
-            + effect.pushes;
+            .expect("valid generated stack");
+        self.stack_boundaries.truncate(remaining);
+        self.push_results(effect.pushes);
         self.function.blocks[current].instrs.push(instr);
     }
 
@@ -94,10 +112,11 @@ impl FunctionBuilder {
 
     pub(super) fn switch(&mut self, block: BlockId) {
         self.current = block;
-        self.height = self.heights[block.index()];
+        self.stack_boundaries = self.inputs[block.index()].inherited.clone();
+        self.push_results(self.inputs[block.index()].produced);
     }
 
-    pub(super) fn new_block(&mut self, hint: &str, height: usize) -> BlockId {
+    pub(super) fn new_block(&mut self, hint: &str, inherited: usize, produced: usize) -> BlockId {
         let id = BlockId::from_index(self.function.blocks.len());
         self.function.blocks.push(BasicBlock {
             name: Some(self.unique_block_name(hint)),
@@ -105,8 +124,18 @@ impl FunctionBuilder {
             terminator: Terminator::Return,
         });
         self.terminated.push(false);
-        self.heights.push(height);
+        self.inputs.push(BlockInput {
+            inherited: self.stack_boundaries[..inherited].to_vec(),
+            produced,
+        });
         id
+    }
+
+    fn push_results(&mut self, count: usize) {
+        // Replacing an operand or merging a region produces a new value. Only
+        // inherited stack prefixes keep their order relative to existing locals.
+        self.stack_boundaries
+            .extend(std::iter::repeat_n(self.function.locals.len(), count));
     }
 
     fn unique_block_name(&self, hint: &str) -> Arc<str> {
@@ -161,7 +190,7 @@ mod tests {
     fn block_names_stay_unique_when_hints_collide() {
         let mut builder = FunctionBuilder::new(None, crate::Profile::Host);
         for hint in ["body", "body", "body.1", "body"] {
-            builder.new_block(hint, 0);
+            builder.new_block(hint, 0, 0);
         }
         let function = builder.finish();
         let names: Vec<_> = function

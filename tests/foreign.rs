@@ -22,7 +22,7 @@ fn error(source: &str) -> String {
 }
 
 #[test]
-fn foreign_functions_are_unary_values_with_c_argument_wrappers() {
+fn foreign_functions_forward_separate_c_arguments() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let header = temp.path().join("foreign.h");
     fs::write(&header, "static inline int answer(void) { return 42; }\nstatic inline void assign(int *out, int value) { *out = value; }\n").unwrap();
@@ -165,7 +165,7 @@ fn spirv_requires_a_decorated_function_declaration() {
         "export { main }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() = { var code = kernel.spirv; };",
     );
     let main = &module.functions[module.entries["main"].index()];
-    assert_eq!(main.locals[1].ty, Ty::shader());
+    assert_eq!(main.locals[0].ty, Ty::shader());
     assert_eq!(module.shaders.len(), 1);
     let project = support::project::Project::new(&module, Some("main")).unwrap();
     assert_eq!(project.generated.shaders().len(), 1);

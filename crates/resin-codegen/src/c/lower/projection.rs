@@ -18,9 +18,14 @@ pub(super) fn project(
     let err = types.tag(&Case::Err);
     let root_name = types.name(root);
     writeln!(out, "  {} {name}_result = {{0}};", types.name(result)).unwrap();
-    writeln!(out, "  {} {name}_allocation = r_fn{}(({}){{ .f0 = {}, .f1 = sizeof({root_name}), .f2 = _Alignof({root_name}), .f3 = 0 }});",
-        types.name(&allocate.result), allocator.index(), types.name(&allocate.locals[0].ty),
-        types.copy(&args[0].ty, &args[0].expr)).unwrap();
+    writeln!(
+        out,
+        "  {} {name}_allocation = r_fn{}({}, sizeof({root_name}), _Alignof({root_name}), 0);",
+        types.name(&allocate.result),
+        allocator.index(),
+        types.copy(&args[0].ty, &args[0].expr)
+    )
+    .unwrap();
     writeln!(out, "  if ({name}_allocation.tag == {ok}u) {{").unwrap();
     // An allocator is source code: validate the returned view against the
     // requested root, even if its body ignored the byte count or alignment.

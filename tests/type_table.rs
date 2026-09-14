@@ -71,6 +71,7 @@ fn both_emitters_use_payload_table_indices_as_union_tags() {
         profile: resin_lir::Profile::Host,
         foreign: None,
         result: Ty::Type,
+        parameter_count: 1,
         locals: vec![resin_lir::Local {
             name: None,
             ty: Ty::Unit,

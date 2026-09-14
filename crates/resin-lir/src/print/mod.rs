@@ -69,7 +69,15 @@ fn sexp_function(names: &Names, index: usize, function: &Function) -> SExp {
     let fn_names = FunctionNames::new(function);
     let mut items = vec![
         symbol(names.functions[index].as_ref()),
-        symbol(fn_names.locals[0].as_ref()),
+        list(
+            "params",
+            fn_names
+                .locals
+                .iter()
+                .take(function.parameter_count)
+                .map(|name| symbol(name.as_ref()))
+                .collect(),
+        ),
         sexp_ty(names, &function.result),
     ];
     items.push(list(
@@ -82,7 +90,7 @@ fn sexp_function(names: &Names, index: usize, function: &Function) -> SExp {
     if let Some(foreign) = &function.foreign {
         items.push(list("extern", vec![symbol(foreign.header.as_ref())]));
     }
-    for (i, local) in function.locals.iter().enumerate().skip(1) {
+    for (i, local) in function.locals.iter().enumerate() {
         items.push(list(
             "local",
             vec![
@@ -241,7 +249,7 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
             "function-ref",
             vec![symbol(names.functions[function.index()].as_ref())],
         ),
-        Instr::Call => symbol("call"),
+        Instr::Call { arguments } => list("call", vec![symbol(arguments.to_string())]),
         Instr::CallBuiltin {
             name,
             params,
@@ -436,9 +444,13 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
                 })
                 .collect(),
         ),
-        Ty::Function { param, result } => {
-            list("func", vec![sexp_ty(names, param), sexp_ty(names, result)])
-        }
+        Ty::Function { params, result } => list(
+            "func",
+            vec![
+                group(params.iter().map(|ty| sexp_ty(names, ty)).collect()),
+                sexp_ty(names, result),
+            ],
+        ),
     }
 }
 

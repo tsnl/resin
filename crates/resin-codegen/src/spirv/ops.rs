@@ -41,11 +41,11 @@ pub(super) fn instruction(
             }));
         }
         Instr::Function { function } => context.functions[function.index()],
-        Instr::Call => {
+        Instr::Call { .. } => {
             let ty = context.ty(result.unwrap())?;
             context
                 .builder
-                .function_call(ty, None, args[0].id, [args[1].id])
+                .function_call(ty, None, args[0].id, args[1..].iter().map(|arg| arg.id))
                 .unwrap()
         }
         Instr::Push { value } => literal(context, result.unwrap(), value)?,

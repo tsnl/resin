@@ -90,10 +90,7 @@ fn array_value_projections_copy_the_element_and_destroy_the_container() {
                 Function { function: make },
                 LocalAddress { local: trace },
                 int(digit),
-                MakeRecord {
-                    fields: vec!["_0".into(), "_1".into()],
-                },
-                Call,
+                Call { arguments: 2 },
             ]);
         }
         instrs.push(MakeArray {
@@ -302,7 +299,7 @@ fn while_nests_with_branches_and_preserves_outer_values() {
 #[test]
 fn ordinary_functions_can_be_passed_and_selected() {
     runs(
-        "export { main }; def add (x: int, y: int) -> int = { x + y }; def apply (f: (int, int) -> int, args: (int, int)) -> int = { f(args) }; def main () -> int = { var a = add; var b = if (1 == 1) { a } else { add }; apply(a, (10, 3)) + b(20, 4) };",
+        "export { main }; def add (x: int, y: int) -> int = { x + y }; def apply (f: (int, int) -> int, args: (int, int)) -> int = { f(args.0, args.1) }; def main () -> int = { var a = add; var b = if (1 == 1) { a } else { add }; apply(a, (10, 3)) + b(20, 4) };",
         37,
     );
 }
@@ -324,10 +321,112 @@ fn mutual_recursion_needs_no_forward_declaration() {
 }
 
 #[test]
-fn calls_are_unary_with_unit_and_tuple_sugar() {
+fn calls_take_lists_and_tuples_are_explicit_values() {
     runs(
-        "export { main }; def zero () -> int = { 2 }; def sum (a: int, b: int) -> int = { a + b }; def apply (f: (int, int) -> int, p: (int, int)) -> int = { f(p) }; def main () -> int = { apply(sum, (zero(), 5)) };",
-        7,
+        r#"
+        export { main };
+        def zero() -> int = { 1 };
+        def unit(value: ()) -> int = { 2 };
+        def tuple(value: (int, int)) -> int = { value.0 + value.1 };
+        def add<T>(a: T, b: T) -> T = { a + b };
+        def apply(f: (int, int) -> int, a: int, b: int) -> int = { f(a, b) };
+        def main() -> int = {
+            var a: () -> int; a := zero;
+            var b: (()) -> int; b := unit;
+            var c: ((int, int)) -> int; c := tuple;
+            a() + b(()) + c((3, 4)) + apply(add::<int>, 5, 6)
+        };
+    "#,
+        21,
+    );
+}
+
+#[test]
+fn arguments_are_evaluated_left_to_right_after_the_callee() {
+    runs(
+        r#"
+        export { main };
+        def mark(trace: Ptr<int>, digit: int) -> int = { trace.* := trace.* * 10 + digit };
+        def consume(a: int, b: int) = {};
+        def callee(trace: Ptr<int>) -> (int, int) -> () = { mark(trace, 1); consume };
+        def main() -> int = {
+            var trace = 0;
+            callee(&trace)(mark(&trace, 2), mark(&trace, 3));
+            trace
+        };
+    "#,
+        123,
+    );
+}
+
+#[test]
+fn expression_cleanup_preserves_scope_order_on_failure_and_success() {
+    for (call, expected) in [
+        (
+            "consume(make(trace, 1), { var inner = make(trace, 2); fail()? })",
+            21,
+        ),
+        (
+            "[make(trace, 1), { var inner = make(trace, 2); fail()? }]",
+            21,
+        ),
+        ("[make(trace, 1), make(trace, 2).accept(fail()?)]", 21),
+        (
+            "consume(make(trace, 1), { var inner = make(trace, 2); owned_error(trace)? })",
+            215,
+        ),
+        (
+            "last(make(trace, 1), if (make(trace, 3).truth()) { make(trace, 2) } else { make(trace, 4) }, fail()?)",
+            231,
+        ),
+        (
+            "consume(make(trace, 1), last(make(trace, 2), make(trace, 3), { var inner = make(trace, 4); succeed(trace)? }))",
+            43251,
+        ),
+    ] {
+        let declarations = r#"
+            export { main };
+            struct Resource { trace: Ptr<int>, digit: int,
+                def drop(self: Ptr<Resource>) = { self.trace.* := self.trace.* * 10 + self.digit; };
+                def accept(self: Ptr<Resource>, other: Arc<Resource>) -> Arc<Resource> = { other };
+                def truth(self: Ptr<Resource>) -> bool = { 1 == 1 };
+            };
+            struct Failed {};
+            struct OwnedFailed { value: Arc<Resource> };
+            def make(trace: Ptr<int>, digit: int) -> Arc<Resource> = { Arc<Resource> { trace = trace, digit = digit } };
+            def consume(a: Arc<Resource>, b: Arc<Resource>) = {};
+            def last(a: Arc<Resource>, b: Arc<Resource>, c: Arc<Resource>) -> Arc<Resource> = { c };
+            def fail() -> Result<Arc<Resource>, Failed> = { err(Failed {}) };
+            def succeed(trace: Ptr<int>) -> Result<Arc<Resource>, Failed> = { ok(make(trace, 5)) };
+            def owned_error(trace: Ptr<int>) -> Result<Arc<Resource>, OwnedFailed> = { err(OwnedFailed { value = make(trace, 5) }) };
+        "#;
+        let source = format!(
+            "{declarations}
+            def attempt(trace: Ptr<int>) -> Result<(), _> = {{ {call}; ok(()) }};
+            def main() -> int = {{
+                var trace = 0;
+                attempt(&trace);
+                if (trace == {expected}) {{ 0 }} else {{ 1 }}
+            }};"
+        );
+        runs(&source, 0);
+    }
+}
+
+#[test]
+fn tuple_projection_preserves_places_and_nested_values() {
+    runs(
+        r#"
+        export { main };
+        def main() -> int = {
+            var pair = ((1, 2), 3);
+            pair.0.1 := 20;
+            var pointer = &pair.1;
+            pointer.* := 21;
+            pair.0.0 + pair.0.1 + pair.1
+        };
+    "#,
+        42,
     );
 }
 

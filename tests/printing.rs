@@ -248,11 +248,11 @@ fn invalid_print_types_are_rejected() {
         ),
         (
             r#"export { main }; def main() -> () = { print(fmt("hello")); };"#,
-            "InvalidFormatArguments",
+            "InvalidBuiltinArgumentCount",
         ),
         (
             r#"export { main }; def main() -> () = { print(fmt("{0}", (1,), (2,))); };"#,
-            "InvalidFormatArguments",
+            "InvalidBuiltinArgumentCount",
         ),
         (
             r#"export { main }; def main() -> () = { print(fmt("{0}", ({ x = 1 },))); };"#,

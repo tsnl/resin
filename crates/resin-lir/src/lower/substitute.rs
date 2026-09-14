@@ -204,14 +204,14 @@ impl Substitution {
             resin_hir::Type::Method { lookup } => {
                 let method = self.method_at(lookup, depth + 1, state, instances)?;
                 resin_hir::Type::Function {
-                    param: Box::new(parameter(&method.params[usize::from(!lookup.associated)..])),
+                    params: method.params[usize::from(!lookup.associated)..].to_vec(),
                     result: Box::new(method.result),
                 }
             }
-            resin_hir::Type::FunctionParameter { function }
+            resin_hir::Type::FunctionParameter { function, .. }
             | resin_hir::Type::FunctionResult { function } => {
                 let function = self.normalize_at(function, depth + 1, state, instances)?;
-                let resin_hir::Type::Function { param, result } = function else {
+                let resin_hir::Type::Function { params, result } = function else {
                     return Err(super::LowerError {
                         span: Span { start: 0, end: 0 },
                         kind: crate::ErrorKind::InvalidInstance {
@@ -219,8 +219,16 @@ impl Substitution {
                         },
                     });
                 };
-                if matches!(source, resin_hir::Type::FunctionParameter { .. }) {
-                    *param
+                if let resin_hir::Type::FunctionParameter { index, .. } = source {
+                    params
+                        .into_iter()
+                        .nth(*index)
+                        .ok_or_else(|| super::LowerError {
+                            span: Span { start: 0, end: 0 },
+                            kind: crate::ErrorKind::InvalidInstance {
+                                message: format!("function has no parameter {index}").into(),
+                            },
+                        })?
                 } else {
                     *result
                 }
@@ -285,8 +293,11 @@ impl Substitution {
                     owner: Box::new(self.normalize_at(owner, depth + 1, state, instances)?),
                 }
             }
-            resin_hir::Type::Function { param, result } => resin_hir::Type::Function {
-                param: Box::new(self.normalize_at(param, depth + 1, state, instances)?),
+            resin_hir::Type::Function { params, result } => resin_hir::Type::Function {
+                params: params
+                    .iter()
+                    .map(|ty| self.normalize_at(ty, depth + 1, state, instances))
+                    .collect::<Result<_, _>>()?,
                 result: Box::new(self.normalize_at(result, depth + 1, state, instances)?),
             },
             resin_hir::Type::Result { value, error } => resin_hir::Type::Result {
@@ -325,23 +336,6 @@ impl Substitution {
                 }
             }
         })
-    }
-}
-
-fn parameter(types: &[resin_hir::Type]) -> resin_hir::Type {
-    match types {
-        [] => resin_hir::Type::Unit,
-        [ty] => ty.clone(),
-        _ => resin_hir::Type::Record {
-            fields: types
-                .iter()
-                .enumerate()
-                .map(|(index, ty)| resin_hir::RecordField {
-                    name: format!("_{index}").into(),
-                    ty: ty.clone(),
-                })
-                .collect(),
-        },
     }
 }
 
@@ -406,8 +400,11 @@ fn materialize(
             root: Box::new(materialize(root, instances)?),
             owner: Box::new(materialize(owner, instances)?),
         },
-        resin_hir::Type::Function { param, result } => Ty::Function {
-            param: Box::new(materialize(param, instances)?),
+        resin_hir::Type::Function { params, result } => Ty::Function {
+            params: params
+                .iter()
+                .map(|ty| materialize(ty, instances))
+                .collect::<Result<_, _>>()?,
             result: Box::new(materialize(result, instances)?),
         },
         resin_hir::Type::Result { value, error } => {
@@ -497,8 +494,8 @@ fn expression(source: &Ty, instances: &super::instances::Instances<'_>) -> resin
             root: Box::new(expression(root, instances)),
             owner: Box::new(expression(owner, instances)),
         },
-        Ty::Function { param, result } => resin_hir::Type::Function {
-            param: Box::new(expression(param, instances)),
+        Ty::Function { params, result } => resin_hir::Type::Function {
+            params: params.iter().map(|ty| expression(ty, instances)).collect(),
             result: Box::new(expression(result, instances)),
         },
         Ty::Result { value, error } => resin_hir::Type::Result {
@@ -592,8 +589,10 @@ fn check_size(
             check_size(root, depth + 1, remaining)?;
             check_size(owner, depth + 1, remaining)?;
         }
-        resin_hir::Type::Function { param, result } => {
-            check_size(param, depth + 1, remaining)?;
+        resin_hir::Type::Function { params, result } => {
+            for param in params {
+                check_size(param, depth + 1, remaining)?;
+            }
             check_size(result, depth + 1, remaining)?;
         }
         resin_hir::Type::Result { value, error } => {

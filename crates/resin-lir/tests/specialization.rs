@@ -59,7 +59,7 @@ fn template(name: &str, body: Term) -> Function {
 fn reference(function: usize, argument: Type) -> Term {
     term(
         Type::Function {
-            param: Box::new(Type::Unit),
+            params: vec![],
             result: Box::new(Type::Unit),
         },
         TermKind::Function {
@@ -214,7 +214,7 @@ fn identity_signatures_and_bodies_are_concrete_without_changing_hir() {
     }];
     let reference = term(
         Type::Function {
-            param: Box::new(Type::Int32),
+            params: vec![Type::Int32],
             result: Box::new(Type::Int32),
         },
         TermKind::Function {
@@ -272,7 +272,7 @@ fn unused_families_do_not_constrain_supported_concrete_operations() {
     assert_eq!(resin_lir::generate(&hir).unwrap().functions.len(), 1);
     hir.functions[1].body = Some(block([term(
         Type::Function {
-            param: Box::new(Type::Bool),
+            params: vec![Type::Bool],
             result: Box::new(Type::Bool),
         },
         TermKind::Function {
@@ -844,7 +844,7 @@ fn shader_dependency_order_is_iterative_and_rejects_cycles_with_bounded_notes() 
     let reference = |index| {
         term(
             Type::Function {
-                param: Box::new(Type::Unit),
+                params: vec![],
                 result: Box::new(Type::Unit),
             },
             TermKind::Function {
@@ -1196,7 +1196,7 @@ fn dependent_methods() -> Module {
                     TermKind::DependentMethodCall {
                         lookup,
                         receiver: None,
-                        arg: Box::new(unit()),
+                        args: vec![],
                     },
                 ),
             ),
@@ -1339,7 +1339,7 @@ fn dependent_method_arguments_are_substituted_without_deduction() {
             TermKind::DependentMethodCall {
                 lookup,
                 receiver: None,
-                arg: Box::new(unit()),
+                args: vec![],
             },
         ),
     );
@@ -1366,12 +1366,12 @@ fn dependent_calls_preserve_argument_and_result_widening() {
             TermKind::DependentMethodCall {
                 lookup: method_lookup(Type::Parameter { parameter: T }),
                 receiver: None,
-                arg: Box::new(term(
+                args: vec![term(
                     Type::Int32,
                     TermKind::Constant {
                         value: Constant::Int32 { value: 7 },
                     },
-                )),
+                )],
             },
         ),
     );

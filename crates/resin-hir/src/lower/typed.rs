@@ -72,7 +72,7 @@ pub(super) enum TermKind {
         receiver: Option<Box<Term>>,
         receiver_type: Annotation<Type>,
         name: Ident,
-        arg: Box<Term>,
+        args: Vec<Term>,
     },
     MethodReference {
         rule: Rule,
@@ -80,7 +80,7 @@ pub(super) enum TermKind {
     },
     Call {
         func: Box<Term>,
-        arg: Box<Term>,
+        args: Vec<Term>,
     },
     Ascribe {
         ty: Annotation<Type>,

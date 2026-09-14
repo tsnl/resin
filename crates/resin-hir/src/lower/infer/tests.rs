@@ -112,13 +112,13 @@ fn convert_does_not_unwrap_function_arguments() {
         definition: typer.create_type("Meters", record(Ty::Int32)).unwrap(),
     };
     let callee = Ty::Function {
-        param: Box::new(Ty::Int32),
+        params: vec![Ty::Int32],
         result: Box::new(Ty::Int32),
     };
     assert!(matches!(
         infer_relation(&mut typer, |out| infer::Constraint::Call(
             callee.into(),
-            meters.into(),
+            vec![meters.into()],
             out
         )),
         Err(GenerateError {
@@ -157,7 +157,7 @@ fn ascription_wraps_records_but_does_not_flatten_nested_fields() {
     assert!(
         infer_relation(&mut typer, |out| infer::Constraint::Call(
             meters.into(),
-            Ty::Unit.into(),
+            vec![Ty::Unit.into()],
             out
         ))
         .is_err()
@@ -172,9 +172,9 @@ fn nested_variables_are_independent() {
     let mut solver = Solver::default();
     let a = solver.fresh();
     let b = solver.fresh();
-    let ty = Type::function(Type::pointer(a.clone()), Type::pointer(b.clone()));
+    let ty = Type::function(vec![Type::pointer(a.clone())], Type::pointer(b.clone()));
     let concrete = Type::function(
-        Type::pointer(Ty::Int32.into()),
+        vec![Type::pointer(Ty::Int32.into())],
         Type::pointer(Ty::Bool.into()),
     );
     solver.unify(&ty, &concrete, SPAN).unwrap();
@@ -214,7 +214,7 @@ fn retries_discard_failed_method_choices_and_preserve_completed_groups() {
         receiver: Ty::Str.into(),
         name: "at".into(),
         type_args: None,
-        arg: Ty::UInt64.into(),
+        args: vec![Ty::UInt64.into()],
         out,
         associated: false,
         origins: vec![],
@@ -351,7 +351,7 @@ fn method_signature_projections_preserve_literal_context_without_inferring_recei
         },
         vec![parameter(0)],
     );
-    let parameter = Type::function_parameter(method.clone());
+    let parameter = Type::function_parameter(method.clone(), 0);
     let literal = solver.number("42");
     assert!(solver.unify(&literal, &parameter, SPAN).unwrap());
     assert!(!solver.default_numbers(std::slice::from_ref(&literal)));

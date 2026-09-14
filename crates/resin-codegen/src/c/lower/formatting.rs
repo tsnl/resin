@@ -16,19 +16,10 @@ pub(super) fn emit(types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<Stri
 
 pub(super) fn format(types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<String, Error> {
     let invalid = || Error("fmt expects a string and a tuple of arguments".into());
-    let [arg] = args else {
+    let [format, arguments] = args else {
         return Err(invalid());
     };
-    let Ty::Record { fields } = &arg.ty else {
-        return Err(invalid());
-    };
-    let [format, arguments] = fields.as_slice() else {
-        return Err(invalid());
-    };
-    if format.name.as_ref() != "_0" || arguments.name.as_ref() != "_1" {
-        return Err(invalid());
-    }
-    let (data, length) = bytes(types, &format.ty, &format!("({}).f0", arg.expr))?;
+    let (data, length) = bytes(types, &format.ty, &format.expr)?;
     let fields = match &arguments.ty {
         Ty::Unit => &[][..],
         Ty::Record { fields } => fields.as_slice(),
@@ -39,7 +30,11 @@ pub(super) fn format(types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<St
         if field.name.as_ref() != format!("_{i}") {
             return Err(invalid());
         }
-        values.push(value(types, &field.ty, format!("({}).f1.f{i}", arg.expr))?);
+        values.push(value(
+            types,
+            &field.ty,
+            format!("({}).f{i}", arguments.expr),
+        )?);
     }
     let count = values.len();
     let values = if count == 0 {

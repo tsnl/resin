@@ -73,26 +73,26 @@ def example() = {
               (unary_term
                 (postfix_term
                   (primary_term
-                    (unary_type
-                      (uid)
-                      (type_arguments
-                        (type
-                          (infix_type
-                            (union_type
-                              (unary_type
-                                (primary_type
-                                  (uid)))))))))
-                  (closed_term
-                    (record_term
-                      (term_define
-                        (lid)
-                        (term
-                          (assignment_term
-                            (binary_term
-                              (unary_term
-                                (postfix_term
-                                  (primary_term
-                                    (lid))))))))))))))))))
+                    (constructor_term
+                      (unary_type
+                        (uid)
+                        (type_arguments
+                          (type
+                            (infix_type
+                              (union_type
+                                (unary_type
+                                  (primary_type
+                                    (uid))))))))
+                      (record_term
+                        (term_define
+                          (lid)
+                          (term
+                            (assignment_term
+                              (binary_term
+                                (unary_term
+                                  (postfix_term
+                                    (primary_term
+                                      (lid)))))))))))))))))))
   (type_definition
     (type_define
       (uid)
@@ -193,7 +193,7 @@ def example() = {
                                             (unary_type
                                               (primary_type
                                                 (builtin_type)))))))))))))
-                        (paren_term
+                        (arguments
                           (term
                             (assignment_term
                               (binary_term
@@ -227,7 +227,7 @@ def example() = {
                               (unary_type
                                 (primary_type
                                   (builtin_type))))))))
-                    (paren_term
+                    (arguments
                       (term
                         (assignment_term
                           (binary_term
@@ -252,15 +252,14 @@ def example() = {
                               (unary_type
                                 (primary_type
                                   (builtin_type))))))))
-                    (closed_term
-                      (paren_term
-                        (term
-                          (assignment_term
-                            (binary_term
-                              (unary_term
-                                (postfix_term
-                                  (primary_term
-                                    (number))))))))))))
+                    (arguments
+                      (term
+                        (assignment_term
+                          (binary_term
+                            (unary_term
+                              (postfix_term
+                                (primary_term
+                                  (number)))))))))))
               (binary_term
                 (unary_term
                   (postfix_term

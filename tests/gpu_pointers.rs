@@ -308,7 +308,7 @@ fn restricted_gpu_pointers_and_spans_trap_on_disallowed_access() {
 }
 
 #[test]
-fn inferred_signed_long_pointers_project_and_tuple_arguments_evaluate_once() {
+fn inferred_signed_long_pointers_project_and_precomputed_inputs_evaluate_once() {
     let Some(output) = run(r#"
         export { main };
         import { "$/gpu.resin" };
@@ -331,11 +331,13 @@ fn inferred_signed_long_pointers_project_and_tuple_arguments_evaluate_once() {
             var gpu = Gpu.new()?;
             var calls = 0_i;
             var value = gpu.new(-42)?;
-            var values = GpuSpan<long>.allocate(allocation(gpu, &calls))?;
+            var allocation_request = allocation(gpu, &calls);
+            var values = GpuSpan<long>.allocate(allocation_request.0, allocation_request.1)?;
             values.at(0_ul).* := 0_l;
             var pipeline = gpu.create_compute_pipeline(kernel)?;
             var commands = gpu.start_command_recording()?;
-            commands.dispatch(launch(pipeline, value, values, &calls))?;
+            var launch_request = launch(pipeline, value, values, &calls);
+            commands.dispatch(launch_request.0, launch_request.1, launch_request.2, launch_request.3, launch_request.4)?;
             commands.submit()?;
             ok(if (calls == 2_i && value.* == 49_l && values.at(0_ul).* == 98_l) { 0 } else { 1 })
         };

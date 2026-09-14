@@ -31,10 +31,9 @@ pub struct Function {
     pub profile: Profile,
     pub foreign: Option<Foreign>,
     pub result: Ty,
-    /// Local zero holds the function's single argument value and starts initialized.
-    /// HIR's zero parameters become unit, one keeps its type, and multiple become
-    /// a positional record (tuple). Body lowering binds or unpacks this slot.
-    /// Foreign declarations also reserve it; the C wrapper unpacks it into C arguments.
+    /// The first `parameter_count` locals are parameters, in declaration order.
+    /// They start initialized; a zero-argument function needs no parameter locals.
+    pub parameter_count: usize,
     pub locals: Vec<Local>,
     /// Root of a structured block tree. Every block is owned exactly once by this
     /// root or by an If/Loop terminator; block IDs identify storage, not jump labels.
@@ -58,7 +57,12 @@ pub struct Local {
 impl Function {
     pub fn ty(&self) -> Option<Ty> {
         Some(Ty::Function {
-            param: Box::new(self.locals.first()?.ty.clone()),
+            params: self
+                .locals
+                .get(..self.parameter_count)?
+                .iter()
+                .map(|local| local.ty.clone())
+                .collect(),
             result: Box::new(self.result.clone()),
         })
     }
@@ -203,11 +207,11 @@ pub enum Instr {
     MakeArray { elements: usize, element: Ty },
     /// `[] -> [function]`: materialize a callable reference to the given function.
     Function { function: FunctionId },
-    /// `[function, argument] -> [result]`: transfer one unit, single, or tuple argument
-    /// into local zero of the callee; transfer its returned value to this stack.
-    Call,
+    /// `[function, argument_0, ..., argument_n] -> [result]`: transfer arguments
+    /// into the callee's parameter locals, then transfer its returned value.
+    Call { arguments: usize },
     /// `[argument_0, ..., argument_n] -> [result]`: invoke the checked builtin signature.
-    /// Unlike `Call`, operands are separate; the builtin borrows them, then they are destroyed.
+    /// The builtin borrows its operands, then they are destroyed.
     CallBuiltin {
         name: Arc<str>,
         params: Vec<Ty>,

@@ -59,24 +59,24 @@ def main() = {
                   (unary_term
                     (postfix_term
                       (primary_term
-                        (unary_type
-                          (type
-                            (infix_type
-                              (union_type
-                                (unary_type
-                                  (primary_type
-                                    (uid))))))))
-                      (closed_term
-                        (record_term
-                          (term_define
-                            (lid)
-                            (term
-                              (assignment_term
-                                (binary_term
-                                  (unary_term
-                                    (postfix_term
-                                      (primary_term
-                                        (number))))))))))))))))))
+                        (constructor_term
+                          (unary_type
+                            (type
+                              (infix_type
+                                (union_type
+                                  (unary_type
+                                    (primary_type
+                                      (uid)))))))
+                          (record_term
+                            (term_define
+                              (lid)
+                              (term
+                                (assignment_term
+                                  (binary_term
+                                    (unary_term
+                                      (postfix_term
+                                        (primary_term
+                                          (number)))))))))))))))))))
       (statement
         (declare
           (lid)
@@ -106,7 +106,7 @@ def main() = {
                       (lid))
                     (method_call
                       (lid)
-                      (unit_term)))))))))
+                      (arguments)))))))))
       (statement
         (declare
           (lid)
@@ -140,7 +140,7 @@ def main() = {
                       (lid))
                     (method_call
                       (lid)
-                      (unit_term)))))))))
+                      (arguments)))))))))
       (statement
         (term
           (assignment_term

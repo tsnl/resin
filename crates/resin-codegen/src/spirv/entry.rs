@@ -11,11 +11,14 @@ pub(super) fn lower(
     stage: Stage,
 ) -> Result<(), Error> {
     let function = &context.module.functions[entry.index()];
-    let param = &function.locals[0].ty;
+    let params = function.locals[..function.parameter_count]
+        .iter()
+        .map(|local| local.ty.clone())
+        .collect::<Vec<_>>();
     let result = &function.result;
     let typer = TyperContext::from_definitions(context.module.types.clone());
-    let interface =
-        resin_types::shader::validate(&typer, param, result, false, stage.name()).map_err(Error)?;
+    let interface = resin_types::shader::validate(&typer, &params, result, false, stage.name())
+        .map_err(Error)?;
     let variables = Variables::declare(context, &interface)?;
     let void = context.builder.type_void();
     let function_type = context.builder.type_function(void, []);
@@ -25,11 +28,11 @@ pub(super) fn lower(
         .map_err(build_error)?;
     context.builder.name(wrapper, "main");
     context.builder.begin_block(None).map_err(build_error)?;
-    let input = variables.argument(context, &interface, param)?;
+    let inputs = variables.arguments(context, &interface)?;
     let result_type = context.ty(result)?;
     let output = context
         .builder
-        .function_call(result_type, None, context.functions[entry.index()], [input])
+        .function_call(result_type, None, context.functions[entry.index()], inputs)
         .map_err(build_error)?;
     variables.finish(context, &interface, result, output)?;
     context.builder.ret().map_err(build_error)?;
@@ -148,12 +151,11 @@ impl Variables {
         Ok(())
     }
 
-    fn argument(
+    fn arguments(
         &self,
         context: &mut Context<'_>,
         interface: &Interface,
-        param: &Ty,
-    ) -> Result<Word, Error> {
+    ) -> Result<Vec<Word>, Error> {
         let input = match interface {
             Interface::Compute { .. } => self.compute_index(context)?,
             Interface::Vertex { index, .. } => {
@@ -172,7 +174,7 @@ impl Variables {
             }
         };
         let Some(root) = self.root else {
-            return Ok(input);
+            return Ok(vec![input]);
         };
         let pointer = context.pointer_type(StorageClass::PushConstant, &Ty::UInt64)?;
         let zero = context.constant_u32(0);
@@ -185,11 +187,7 @@ impl Variables {
             .builder
             .load(word, None, address, None, [])
             .map_err(build_error)?;
-        let ty = context.ty(param)?;
-        context
-            .builder
-            .composite_construct(ty, None, [input, value])
-            .map_err(build_error)
+        Ok(vec![input, value])
     }
 
     fn compute_index(&self, context: &mut Context<'_>) -> Result<Word, Error> {

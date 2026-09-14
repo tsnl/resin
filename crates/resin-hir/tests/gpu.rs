@@ -35,7 +35,7 @@ fn gpu_new_infers_element_from_context_and_keeps_associated_constructor() {
     let TermKind::GpuNew { args, .. } = &tail.kind else {
         panic!()
     };
-    assert_eq!(args.argument.ty, Type::Int32);
+    assert_eq!(args.values[1].ty, Type::Int32);
 }
 
 #[test]
@@ -205,7 +205,7 @@ fn dispatch_infers_host_fields_from_the_pipeline_root() {
         panic!()
     };
     assert!(allocator.is_some());
-    let Type::Record { fields } = &args.params[1] else {
+    let Type::Record { fields } = &args.params[2] else {
         panic!()
     };
     assert_eq!(fields[0].ty, Type::Float32);
@@ -224,7 +224,7 @@ fn pipeline_types_cross_functions_and_dispatch_accepts_precomputed_arguments() {
         def create(gpu: Device) -> Result<GpuComputePipeline<Params, Arc<PipelineOwner>>, Failure> = {{ gpu.compute(kernel) }};
         def dispatch(pipeline: GpuComputePipeline<Params, Arc<PipelineOwner>>, values: GpuSpan<int>) -> Result<(), Failure> = {{
             var args = (pipeline, {{ scale = 1.0_f, values = values }}, 1_ui, 1_ui, 1_ui);
-            Commands {{}}.dispatch(args)
+            Commands {{}}.dispatch(args.0, args.1, args.2, args.3, args.4)
         }};
         def associated(gpu: Device) -> _ = {{ Device.compute(gpu, kernel) }};
     ")).unwrap();
@@ -306,8 +306,8 @@ fn pipeline_creation_rejects_pointer_graph_roots() {
 }
 
 #[test]
-fn gpu_allocation_builtins_accept_precomputed_argument_tuples() {
-    generate(&format!("{ALLOCATOR} def main() -> Result<GpuPtr<int>, Failure> = {{ var gpu = Device.new(); var allocation = (gpu, 4_ul); var values = GpuSpan<int>.allocate(allocation)?; var initialization = (gpu, 42_i); GpuPtr<int>.new(initialization) }};")).unwrap();
+fn gpu_allocation_builtins_accept_explicit_tuple_members() {
+    generate(&format!("{ALLOCATOR} def main() -> Result<GpuPtr<int>, Failure> = {{ var gpu = Device.new(); var allocation = (gpu, 4_ul); var values = GpuSpan<int>.allocate(allocation.0, allocation.1)?; var initialization = (gpu, 42_i); GpuPtr<int>.new(initialization.0, initialization.1) }};")).unwrap();
 }
 
 #[test]

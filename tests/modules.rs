@@ -641,7 +641,7 @@ fn declarations_do_not_create_a_module_initializer() {
     assert_eq!(module.entries.len(), 1);
     let project = support::project::Project::new(&module, Some("answer")).unwrap();
     let source = fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
-    assert!(source.contains("int main(int r_argc, char **r_argv) {\n  (void)r_argc; (void)r_argv;\n  atexit(resin_cleanup);\n  return r_fn0(0);\n}"));
+    assert!(source.contains("int main(int r_argc, char **r_argv) {\n  (void)r_argc; (void)r_argv;\n  atexit(resin_cleanup);\n  return r_fn0();\n}"));
 }
 
 #[test]
@@ -725,7 +725,7 @@ fn methods_validate_declarations_and_call_receivers() {
         ),
         (
             "struct A { def f(self: A) = {}; };  def g() = { A.f(); };",
-            "TypeMismatch",
+            "expected 1 argument",
         ),
         (
             "struct A { def f() = {}; };  def g(a: A) = { a.f(); };",

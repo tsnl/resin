@@ -57,6 +57,7 @@ fn a_linked_list_is_finite_through_its_next_pointer() {
         foreign: None,
         name: None,
         result: Ty::Int32,
+        parameter_count: 1,
         locals: vec![Local {
             name: None,
             ty: list,
@@ -143,6 +144,7 @@ fn nominal_types_do_not_equal_their_representations() {
         foreign: None,
         name: None,
         result: meters,
+        parameter_count: 1,
         locals: vec![Local {
             name: None,
             ty: Ty::Unit,

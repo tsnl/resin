@@ -79,8 +79,10 @@ pub(crate) fn function(
 /// need not be storable; actual signatures and locals use the value/storage rules.
 pub(crate) fn expression_type(typer: &TyperContext, ty: &Ty) -> Result<(), String> {
     match ty {
-        Ty::Function { param, result } => {
-            resin_types::shader::value_type(typer.definitions(), param)?;
+        Ty::Function { params, result } => {
+            for param in params {
+                resin_types::shader::value_type(typer.definitions(), param)?;
+            }
             resin_types::shader::value_type(typer.definitions(), result)
         }
         Ty::Pointer { pointee } => resin_types::shader::value_type(typer.definitions(), pointee),
@@ -97,7 +99,7 @@ fn instruction(typer: &TyperContext, op: &Instr) -> Result<(), String> {
         Instr::Push { value } => literal(value),
         Instr::ForgetLocal { .. } | Instr::Discard | Instr::TakeLocal { .. }
         | Instr::SetLocal { .. } | Instr::LocalAddress { .. } | Instr::Function { .. }
-        | Instr::Call | Instr::TransferLoad | Instr::Load
+        | Instr::Call { .. } | Instr::TransferLoad | Instr::Load
         | Instr::Store | Instr::Replace | Instr::MakeVariant { .. } | Instr::IsVariant { .. }
         | Instr::VariantPayload { .. } | Instr::ExcludeNone | Instr::Widen { .. }
         | Instr::NumericCast { .. } | Instr::PointerCast { .. } | Instr::Ascribe { .. }

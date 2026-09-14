@@ -90,8 +90,10 @@ pub(super) fn check_value(
                     visit(table, &field.ty, location, seen)?;
                 }
             }
-            Ty::Function { param, result } => {
-                visit(table, param, location, seen)?;
+            Ty::Function { params, result } => {
+                for param in params {
+                    visit(table, param, location, seen)?;
+                }
                 visit(table, result, location, seen)?;
             }
             _ => {}

@@ -80,18 +80,15 @@ impl FunctionLowering<'_> {
         self.emit(Instr::LocalAddress { local: saved });
         self.emit(Instr::IsVariant { tag: Case::Ok });
         let height = self.function.stack_len() - 1;
-        let success = self.new_block("try.ok", height);
-        let failure = self.new_block("try.err", height);
-        let next = self.new_block("try.next", height + 1);
+        let success = self.new_block("try.ok", height, 0);
+        let failure = self.new_block("try.err", height, 0);
+        let next = self.new_block("try.next", height, 1);
         self.terminate(Terminator::If {
             then: success,
             els: failure,
             next: Some(next),
         });
         self.switch(failure);
-        for _ in 0..self.function.stack_len() {
-            self.emit(Instr::Discard);
-        }
         self.emit(Instr::TakeLocal { local: saved });
         self.emit(Instr::VariantPayload { tag: Case::Err });
         self.coerce(span, *errors.clone(), target)?;
@@ -119,14 +116,14 @@ impl FunctionLowering<'_> {
         let saved = self.save_top(&ty);
         let mut result = Some(expected.clone());
         let height = self.function.stack_len();
-        let join = (arms.len() > 1).then(|| self.new_block("match.join", height + 1));
+        let join = (arms.len() > 1).then(|| self.new_block("match.join", height, 1));
         for (i, arm) in arms.iter().enumerate() {
             let tag = &arm.tag;
             let next = if i + 1 < arms.len() {
                 self.emit(Instr::LocalAddress { local: saved });
                 self.emit(Instr::IsVariant { tag: tag.clone() });
-                let body = self.new_block("match.arm", height);
-                let next = self.new_block("match.next", height);
+                let body = self.new_block("match.arm", height, 0);
+                let next = self.new_block("match.next", height, 0);
                 self.terminate(Terminator::If {
                     then: body,
                     els: next,
@@ -137,7 +134,7 @@ impl FunctionLowering<'_> {
             } else {
                 None
             };
-            self.owned.push(vec![]);
+            self.enter_scope();
             self.emit(Instr::TakeLocal { local: saved });
             self.emit(Instr::VariantPayload { tag: tag.clone() });
             let payload = ty.payload(tag).unwrap();

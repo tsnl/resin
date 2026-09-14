@@ -51,8 +51,8 @@ pub(super) fn ty(source: &Ty) -> crate::Type {
             root: Box::new(ty(root)),
             owner: Box::new(ty(owner)),
         },
-        Ty::Function { param, result } => crate::Type::Function {
-            param: Box::new(ty(param)),
+        Ty::Function { params, result } => crate::Type::Function {
+            params: params.iter().map(ty).collect(),
             result: Box::new(ty(result)),
         },
         Ty::Result { value, error } => crate::Type::Result {

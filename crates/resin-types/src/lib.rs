@@ -159,7 +159,7 @@ pub enum Ty {
         fields: Vec<RecordField>,
     },
     Function {
-        param: Box<Ty>,
+        params: Vec<Ty>,
         result: Box<Ty>,
     },
     Union {
@@ -312,10 +312,6 @@ impl Ty {
 
     pub const fn is_numeric(&self) -> bool {
         self.is_integer() || matches!(self, Self::Float32 | Self::Float64)
-    }
-
-    pub fn parameter(types: &[Ty]) -> Self {
-        types::parameter(types)
     }
 
     pub const fn is_integer(&self) -> bool {
@@ -899,12 +895,12 @@ pub mod shader {
 
     pub fn validate(
         typer: &TyperContext,
-        parameter: &Ty,
+        parameters: &[Ty],
         result: &Ty,
         foreign: bool,
         stage: &str,
     ) -> Result<Interface, String> {
-        super::typer::validate_shader(typer, parameter, result, foreign, stage)
+        super::typer::validate_shader(typer, parameters, result, foreign, stage)
     }
 
     /// Select a supported concrete shader builtin after ordinary operand typing.
@@ -927,7 +923,10 @@ pub mod shader {
     /// Validate a compute stage or an ordered vertex/fragment pair for pipeline creation.
     /// Graphics stages must agree on their color type and any declared root; every root
     /// must support host GPU-view projection. Rootless graphics returns None.
-    pub fn pipeline_root(typer: &TyperContext, stages: &[(&Ty, &Ty, &str)]) -> Result<Ty, String> {
+    pub fn pipeline_root(
+        typer: &TyperContext,
+        stages: &[(&[Ty], &Ty, &str)],
+    ) -> Result<Ty, String> {
         super::typer::pipeline_root(typer, stages)
     }
 

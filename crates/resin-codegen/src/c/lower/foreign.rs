@@ -10,11 +10,7 @@ pub(super) fn lower(types: &Types<'_>, index: usize, foreign: &Foreign) -> Strin
         .iter()
         .enumerate()
         .map(|(i, ty)| {
-            let value = if foreign.params.len() == 1 {
-                "r_arg".into()
-            } else {
-                format!("r_arg.f{i}")
-            };
+            let value = format!("r_arg{i}");
             if matches!(ty, Ty::Pointer { .. }) {
                 format!("(void *){value}")
             } else {
@@ -23,7 +19,7 @@ pub(super) fn lower(types: &Types<'_>, index: usize, foreign: &Foreign) -> Strin
         })
         .collect::<Vec<_>>()
         .join(", ");
-    let mut out = "  (void)r_arg;\n".to_string();
+    let mut out = String::new();
     let call = format!("{}({args})", function.name.as_deref().unwrap());
     if function.result == Ty::Unit {
         writeln!(out, "  {call};\n  return 0;").unwrap();

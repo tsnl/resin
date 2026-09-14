@@ -266,14 +266,14 @@ def from_meters (m: Meters) -> int = { m.value };
     assert_eq!(
         module.functions[0].ty().unwrap(),
         Ty::Function {
-            param: Box::new(Ty::Int32),
+            params: vec![Ty::Int32],
             result: Box::new(meters.clone()),
         }
     );
     assert_eq!(
         module.functions[1].ty().unwrap(),
         Ty::Function {
-            param: Box::new(meters),
+            params: vec![meters],
             result: Box::new(Ty::Int32),
         }
     );
@@ -347,7 +347,12 @@ def main() -> () = {
     );
     verify(&module).unwrap();
     assert_eq!(
-        module.functions[0].locals[1].ty,
+        module.functions[0]
+            .locals
+            .iter()
+            .find(|local| local.name.as_deref() == Some("x"))
+            .unwrap()
+            .ty,
         Ty::Defined {
             definition: TypeId::from_index(2),
         }
@@ -378,9 +383,9 @@ def nil (p: Ptr<List>) -> List = { List { value = 0, next = p } };
     assert_eq!(
         module.functions[0].ty().unwrap(),
         Ty::Function {
-            param: Box::new(Ty::Pointer {
+            params: vec![Ty::Pointer {
                 pointee: Box::new(list.clone()),
-            }),
+            }],
             result: Box::new(list.clone()),
         }
     );
@@ -426,10 +431,10 @@ def main() -> () = {
     );
     verify(&module).unwrap();
     assert!(matches!(
-        &module.functions[0].locals[2].ty,
+        &module.functions[0].locals[1].ty,
         Ty::Span { element } if **element == Ty::Int32
     ));
-    assert_eq!(module.functions[0].locals[1].ty, Ty::Int64);
+    assert_eq!(module.functions[0].locals[0].ty, Ty::Int64);
 }
 
 #[test]

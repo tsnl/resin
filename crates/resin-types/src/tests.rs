@@ -79,7 +79,7 @@ fn invalid_references_and_layouts_leave_the_reservation_retryable() {
             element: Box::new(invalid.clone()),
         },
         Ty::Function {
-            param: Box::new(Ty::Unit),
+            params: vec![Ty::Unit],
             result: Box::new(invalid),
         },
     ] {
@@ -514,21 +514,13 @@ fn pipeline_argument_contract_rejects_invalid_owners_roots_and_rootless_compute(
     }
 }
 
-fn shader_parameter(input: Ty, root: Ty) -> Ty {
-    Ty::Record {
-        fields: vec![
-            RecordField {
-                name: "_0".into(),
-                ty: input,
-            },
-            RecordField {
-                name: "_1".into(),
-                ty: Ty::Pointer {
-                    pointee: Box::new(root),
-                },
-            },
-        ],
-    }
+fn shader_parameter(input: Ty, root: Ty) -> Vec<Ty> {
+    vec![
+        input,
+        Ty::Pointer {
+            pointee: Box::new(root),
+        },
+    ]
 }
 
 fn shader_graphics_types(context: &mut TyperContext) -> (Ty, Ty, Ty) {
@@ -571,24 +563,24 @@ fn compute_pipeline_root_checks_stage_signature_and_projection_support() {
     let context = TyperContext::new();
     let parameter = shader_parameter(Ty::UInt64, Ty::UInt32);
     assert_eq!(
-        shader::pipeline_root(&context, &[(&parameter, &Ty::Unit, "compute")]).unwrap(),
+        shader::pipeline_root(&context, &[(parameter.as_slice(), &Ty::Unit, "compute")]).unwrap(),
         Ty::UInt32
     );
     for stages in [
         vec![],
-        vec![(&parameter, &Ty::Unit, "vertex")],
+        vec![(parameter.as_slice(), &Ty::Unit, "vertex")],
         vec![
-            (&parameter, &Ty::Unit, "compute"),
-            (&parameter, &Ty::Unit, "compute"),
+            (parameter.as_slice(), &Ty::Unit, "compute"),
+            (parameter.as_slice(), &Ty::Unit, "compute"),
         ],
-        vec![(&Ty::UInt64, &Ty::Unit, "compute")],
-        vec![(&parameter, &Ty::UInt32, "compute")],
+        vec![([Ty::UInt64].as_slice(), &Ty::Unit, "compute")],
+        vec![(parameter.as_slice(), &Ty::UInt32, "compute")],
     ] {
         assert!(shader::pipeline_root(&context, &stages).is_err());
     }
     let parameter = shader_parameter(Ty::UInt64, Ty::Bool);
     assert!(
-        shader::pipeline_root(&context, &[(&parameter, &Ty::Unit, "compute")])
+        shader::pipeline_root(&context, &[(parameter.as_slice(), &Ty::Unit, "compute")])
             .unwrap_err()
             .contains("projection")
     );
@@ -608,7 +600,7 @@ fn graphics_pipeline_roots_and_varyings_keep_nominal_type_identity() {
     };
     let rooted_vertex = shader_parameter(Ty::Int32, root.clone());
     let rooted_fragment = shader_parameter(color.clone(), root.clone());
-    let pipeline = |vertex_parameter: &Ty, fragment_parameter: &Ty| {
+    let pipeline = |vertex_parameter: &[Ty], fragment_parameter: &[Ty]| {
         shader::pipeline_root(
             &context,
             &[
@@ -617,11 +609,14 @@ fn graphics_pipeline_roots_and_varyings_keep_nominal_type_identity() {
             ],
         )
     };
-    assert_eq!(pipeline(&Ty::Int32, &color).unwrap(), Ty::None);
+    assert_eq!(
+        pipeline(&[Ty::Int32], std::slice::from_ref(&color)).unwrap(),
+        Ty::None
+    );
     for (vertex_parameter, fragment_parameter) in [
-        (&rooted_vertex, &color),
-        (&Ty::Int32, &rooted_fragment),
-        (&rooted_vertex, &rooted_fragment),
+        (rooted_vertex.as_slice(), std::slice::from_ref(&color)),
+        ([Ty::Int32].as_slice(), rooted_fragment.as_slice()),
+        (rooted_vertex.as_slice(), rooted_fragment.as_slice()),
     ] {
         assert_eq!(
             pipeline(vertex_parameter, fragment_parameter).unwrap(),
@@ -635,7 +630,7 @@ fn graphics_pipeline_roots_and_varyings_keep_nominal_type_identity() {
             .contains("same root type")
     );
     assert!(
-        pipeline(&Ty::Int32, &other_color)
+        pipeline(&[Ty::Int32], &[other_color])
             .unwrap_err()
             .contains("same type")
     );
@@ -643,8 +638,8 @@ fn graphics_pipeline_roots_and_varyings_keep_nominal_type_identity() {
         shader::pipeline_root(
             &context,
             &[
-                (&color, &color, "fragment"),
-                (&Ty::Int32, &vertex, "vertex")
+                (std::slice::from_ref(&color), &color, "fragment"),
+                ([Ty::Int32].as_slice(), &vertex, "vertex")
             ]
         )
         .is_err()

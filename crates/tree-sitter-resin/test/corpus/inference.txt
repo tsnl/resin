@@ -41,14 +41,13 @@ def choose(p: Ptr<int>) -> (Ptr<_>, (int) -> _) = {
                                     (inferred_type))))))))))
                   (type
                     (infix_type
-                      (closed_type
-                        (paren_type
-                          (type
-                            (infix_type
-                              (union_type
-                                (unary_type
-                                  (primary_type
-                                    (builtin_type))))))))
+                      (parameter_types
+                        (type
+                          (infix_type
+                            (union_type
+                              (unary_type
+                                (primary_type
+                                  (builtin_type)))))))
                       (infix_type
                         (union_type
                           (unary_type

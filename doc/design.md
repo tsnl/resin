@@ -10,9 +10,12 @@ Shared handles make everyday resource copying safe. Raw `Ptr<T>` and `Span<T>` v
 non-owning and there is no borrow checker or tracing collector. Separate value and
 type namespaces keep definitions simple, including recursion through pointers.
 
-Every function takes exactly one argument. `()` supplies unit, and `(a, b)` supplies a tuple;
-`def f(a: A, b: B) -> R = { body };` destructures that tuple into local bindings. Function types
-follow the same rule: `() -> R`, `(A) -> R`, and `(A, B) -> R`. Tuples use positional record fields in IR.
+Functions take a parenthesized sequence of arguments. `def f(a: A, b: B) -> R = { body };`
+has two parameters and is called with `f(a, b)`. Function types list parameters explicitly:
+`() -> R`, `(A) -> R`, and `(A, B) -> R`. A tuple is one value: `f((a, b))` supplies one
+argument, whose function type is `((A, B)) -> R`. Likewise, `f()` supplies no arguments,
+while `f(())` supplies one unit value. Calls evaluate the callee, then each argument in
+source order. Tuples retain positional record fields in IR; argument lists remain separate.
 Calls and assignments preserve nominal identity; explicit `T(value)` ascriptions
 wrap or unwrap one nominal record layer. Union and Result values may widen their variant sets,
 but mutable pointers remain invariant. Record initializers evaluate fields in source order before

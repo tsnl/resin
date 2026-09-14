@@ -99,7 +99,10 @@ pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
             pops: *elements,
             pushes: 1,
         },
-        Instr::Call => StackEffect { pops: 2, pushes: 1 },
+        Instr::Call { arguments } => StackEffect {
+            pops: arguments.saturating_add(1),
+            pushes: 1,
+        },
         Instr::CallBuiltin { params, .. } => StackEffect {
             pops: params.len(),
             pushes: 1,

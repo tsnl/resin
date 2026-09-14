@@ -18,7 +18,7 @@ fn nominal_nonrecords_are_rejected_at_creation_and_verification() {
             pointee: Box::new(Ty::Int32),
         },
         Ty::Function {
-            param: Box::new(Ty::Unit),
+            params: vec![Ty::Unit],
             result: Box::new(Ty::Unit),
         },
         Ty::Span {
@@ -92,7 +92,7 @@ fn recursive_span_and_function_fields_have_finite_layouts() {
             }
         } else {
             Ty::Function {
-                param: Box::new(named.clone()),
+                params: vec![named.clone()],
                 result: Box::new(named),
             }
         };

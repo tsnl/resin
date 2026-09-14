@@ -92,15 +92,14 @@ def read(value: Result<int, NoneInt>) -> Result<int, _> = {
               (postfix_term
                 (primary_term
                   (lid))
-                (closed_term
-                  (paren_term
-                    (term
-                      (assignment_term
-                        (binary_term
-                          (unary_term
-                            (postfix_term
-                              (primary_term
-                                (lid)))))))))))))))))
+                (arguments
+                  (term
+                    (assignment_term
+                      (binary_term
+                        (unary_term
+                          (postfix_term
+                            (primary_term
+                              (lid))))))))))))))))
 
 ==================
 Match arms and chained propagation
@@ -185,16 +184,15 @@ def nested(value: Result<Result<int, Never>, Never>) -> Result<int, Never> = {
                                 (postfix_term
                                   (primary_term
                                     (lid))
-                                  (closed_term
-                                    (paren_term
-                                      (term
-                                        (assignment_term
-                                          (binary_term
-                                            (unary_term
-                                              (postfix_term
-                                                (primary_term
-                                                  (lid))
-                                                (try_suffix)))))))))))))))
+                                  (arguments
+                                    (term
+                                      (assignment_term
+                                        (binary_term
+                                          (unary_term
+                                            (postfix_term
+                                              (primary_term
+                                                (lid))
+                                              (try_suffix))))))))))))))
                     (match_arm
                       (lid)
                       (block_body
@@ -205,12 +203,11 @@ def nested(value: Result<Result<int, Never>, Never>) -> Result<int, Never> = {
                                 (postfix_term
                                   (primary_term
                                     (lid))
-                                  (closed_term
-                                    (paren_term
-                                      (term
-                                        (assignment_term
-                                          (binary_term
-                                            (unary_term
-                                              (postfix_term
-                                                (primary_term
-                                                  (lid))))))))))))))))))))))))))
+                                  (arguments
+                                    (term
+                                      (assignment_term
+                                        (binary_term
+                                          (unary_term
+                                            (postfix_term
+                                              (primary_term
+                                                (lid)))))))))))))))))))))))))

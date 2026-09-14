@@ -291,9 +291,13 @@ so mutual recursion needs no forward declarations. There are no
 lambdas, nested function definitions, or captured environments. Ordinary function values can
 be stored, passed, and returned on the host.
 
-Every function takes one argument. Empty parameter lists mean unit `()`; multiple parameters
-destructure a tuple. Calling `add(1, 2)` is the same as calling `add(pair)` after `var pair = (1, 2);`.
-Function types use the same arrow: `(int, int) -> int`.
+Functions take a sequence of arguments enclosed in parentheses. `add(1, 2)` passes two
+arguments; `add(pair)` passes one value and requires a function with one parameter.
+Function types list their parameters before the arrow: `(int, int) -> int` takes two integers,
+while `((int, int)) -> int` takes one tuple. `f()` has no arguments; `f(())` passes one unit
+value. A trailing comma, as in `f(value,)`, does not create a tuple. Use `f((value,))` to pass
+a singleton tuple. Access tuple members by index: `pair.0`, `pair.1`. Calls evaluate the
+callee first, followed by arguments from left to right.
 
 Files contain only function, foreign, and type declarations, after their export/import clauses.
 There are no global variables or executable top-level statements. Values and mutable state
@@ -305,8 +309,9 @@ a new nominal identity. Construct values with `Point { x = 1, y = 2 }`.
 Record initializers keep bare `name = value`
 fields, and parameters and record type fields keep bare `name: Type` declarations.
 Type formers use angle brackets: `Ptr<int>`, `Span<float32>`, and `Ptr<Ptr<int>>`.
-Parenthesized calls and conversions use `fibonacci(n)` and `int(n)`; brace and bracket
-arguments use `Name {...}` and `Converter [...]`. These spaces are a convention, not required syntax.
+Calls and conversions require parentheses: `fibonacci(n)`, `int(n)`, and `process([1, 2])`.
+`process [1, 2]` and `process { value }` are not calls. Nominal record construction retains
+its dedicated `Name { field = value }` syntax.
 See `examples/` for functions, recursion, records, pointers, and linked lists.
 
 Numeric suffixes are case insensitive and fix the literal's primitive type. Prefix an
@@ -763,7 +768,7 @@ Foreign headers use the C compiler's include search paths (or an absolute path).
 Use forward slashes in header paths, including Windows paths such as `C:/SDK/include/api.h`.
 
 The prototype targets 64-bit hosts. Foreign functions accept scalar/pointer parameters and return a scalar, pointer, or unit.
-The wrapper unpacks Resin's single tuple argument into the C call. Opaque `extern type`
+The wrapper forwards each Resin parameter as a separate C argument. Opaque `extern type`
 declarations name C structs and may only be used behind pointers; aggregates by value,
 variadic calls, and C callbacks are not supported yet.
 

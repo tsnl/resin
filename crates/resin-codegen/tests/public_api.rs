@@ -5,16 +5,17 @@ use resin_types::prelude::*;
 use std::fs;
 use tempfile::TempDir;
 
-fn constant_function(parameter: Ty, result: Ty, value: Value) -> Function {
+fn constant_function(parameters: Vec<Ty>, result: Ty, value: Value) -> Function {
     Function {
         profile: resin_lir::Profile::Host,
         name: None,
         foreign: None,
         result,
-        locals: vec![Local {
-            name: None,
-            ty: parameter,
-        }],
+        parameter_count: parameters.len(),
+        locals: parameters
+            .into_iter()
+            .map(|ty| Local { name: None, ty })
+            .collect(),
         entry: BlockId::from_index(0),
         blocks: vec![BasicBlock {
             name: None,
@@ -30,8 +31,8 @@ fn module() -> Module {
     };
     let mut module = Module {
         functions: vec![
-            constant_function(Ty::Unit, Ty::Int32, Value::Int32 { value: 42 }),
-            constant_function(Ty::parameter(&[Ty::UInt64, pointer]), Ty::Unit, Value::Unit),
+            constant_function(vec![], Ty::Int32, Value::Int32 { value: 42 }),
+            constant_function(vec![Ty::UInt64, pointer], Ty::Unit, Value::Unit),
         ],
         entries: [("main".into(), FunctionId::from_index(0))].into(),
         shaders: [(
@@ -176,10 +177,10 @@ fn lowering_failure_leaves_existing_outputs_untouched() {
         0..0,
         [
             Instr::LocalAddress {
-                local: LocalId::from_index(1),
+                local: LocalId::from_index(2),
             },
             Instr::SetLocal {
-                local: LocalId::from_index(2),
+                local: LocalId::from_index(3),
             },
         ],
     );

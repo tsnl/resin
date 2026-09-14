@@ -236,12 +236,11 @@ impl Specialization<'_, '_> {
 
     fn arguments(&mut self, source: &resin_hir::Arguments) -> Result<concrete::Arguments, Error> {
         Ok(concrete::Arguments {
-            receiver: source
-                .receiver
-                .as_deref()
-                .map(|source| self.boxed(source))
-                .transpose()?,
-            argument: self.boxed(&source.argument)?,
+            values: source
+                .values
+                .iter()
+                .map(|arg| self.term(arg))
+                .collect::<Result<_, _>>()?,
             params: source
                 .params
                 .iter()
@@ -380,7 +379,7 @@ impl Specialization<'_, '_> {
             .map(|ty| self.ty(ty))
             .collect::<Result<Vec<_>, _>>()?;
         let signature = Ty::Function {
-            param: Box::new(Ty::parameter(&params)),
+            params,
             result: Box::new(self.ty(&method.result)?),
         };
         let expected = self.ty(expected)?;
@@ -397,7 +396,7 @@ impl Specialization<'_, '_> {
         &mut self,
         lookup: &resin_hir::MethodLookup,
         receiver: Option<&resin_hir::Term>,
-        argument: &resin_hir::Term,
+        arguments: &[resin_hir::Term],
         expected: &resin_hir::Type,
     ) -> Result<concrete::TermKind, Error> {
         if lookup.associated == receiver.is_some() {
@@ -425,29 +424,13 @@ impl Specialization<'_, '_> {
         let receiver = receiver
             .map(|receiver| self.method_receiver(receiver, &params[0]))
             .transpose()?;
-        let argument = self.boxed(argument)?;
         let offset = usize::from(receiver.is_some());
-        self.require_assignable(&argument.ty, &Ty::parameter(&params[offset..]))?;
-        let parameter = Ty::parameter(&params);
-        let argument = if receiver.is_some() {
-            Box::new(concrete::Term {
-                span: argument.span,
-                ty: parameter.clone(),
-                kind: concrete::TermKind::Pack {
-                    args: concrete::Arguments {
-                        receiver,
-                        argument,
-                        params: params[1..].to_vec(),
-                    },
-                },
-            })
-        } else {
-            argument
-        };
+        let mut args: Vec<_> = receiver.into_iter().map(|receiver| *receiver).collect();
+        args.extend(self.call_arguments(arguments, &params[offset..])?);
         let function = concrete::Term {
             span: self.span,
             ty: Ty::Function {
-                param: Box::new(parameter),
+                params,
                 result: Box::new(result),
             },
             kind: concrete::TermKind::Function {
@@ -456,7 +439,7 @@ impl Specialization<'_, '_> {
         };
         Ok(concrete::TermKind::Call {
             func: Box::new(function),
-            arg: argument,
+            args,
         })
     }
 
@@ -473,21 +456,43 @@ impl Specialization<'_, '_> {
     fn call(
         &mut self,
         function: &resin_hir::Term,
-        argument: &resin_hir::Term,
+        arguments: &[resin_hir::Term],
         expected: &resin_hir::Type,
     ) -> Result<concrete::TermKind, Error> {
         let function = self.boxed(function)?;
-        let Ty::Function { param, result } = &function.ty else {
+        let Ty::Function { params, result } = &function.ty else {
             return Err(self.instance_error("a call requires a function value"));
         };
-        let argument = self.boxed(argument)?;
-        self.require_assignable(&argument.ty, param)?;
+        let args = self.call_arguments(arguments, params)?;
         let expected = self.ty(expected)?;
         self.require_assignable(result, &expected)?;
         Ok(concrete::TermKind::Call {
             func: function,
-            arg: argument,
+            args,
         })
+    }
+
+    fn call_arguments(
+        &mut self,
+        arguments: &[resin_hir::Term],
+        params: &[Ty],
+    ) -> Result<Vec<concrete::Term>, Error> {
+        if arguments.len() != params.len() {
+            return Err(self.instance_error(format!(
+                "expected {} arguments, found {}",
+                params.len(),
+                arguments.len()
+            )));
+        }
+        arguments
+            .iter()
+            .zip(params)
+            .map(|(source, param)| {
+                let value = self.term(source)?;
+                self.require_assignable(&value.ty, param)?;
+                Ok(value)
+            })
+            .collect()
     }
 
     fn record(
@@ -733,8 +738,8 @@ impl Specialization<'_, '_> {
             resin_hir::TermKind::DependentMethodCall {
                 lookup,
                 receiver,
-                arg,
-            } => self.dependent_method_call(lookup, receiver.as_deref(), arg, expected)?,
+                args,
+            } => self.dependent_method_call(lookup, receiver.as_deref(), args, expected)?,
             resin_hir::TermKind::Shader { function, stage } => concrete::TermKind::Shader {
                 function: self.shader(*function)?,
                 stage: stage.clone(),
@@ -765,10 +770,7 @@ impl Specialization<'_, '_> {
             resin_hir::TermKind::Record { fields } => self.record(fields, expected)?,
             resin_hir::TermKind::Array { elems } => self.array(elems, expected)?,
             resin_hir::TermKind::Builtin { name, args } => self.builtin(name, args, expected)?,
-            resin_hir::TermKind::Call { func, arg } => self.call(func, arg, expected)?,
-            resin_hir::TermKind::Pack { args } => concrete::TermKind::Pack {
-                args: self.arguments(args)?,
-            },
+            resin_hir::TermKind::Call { func, args } => self.call(func, args, expected)?,
             resin_hir::TermKind::Intrinsic { op, args } => concrete::TermKind::Intrinsic {
                 op: *op,
                 args: self.arguments(args)?,

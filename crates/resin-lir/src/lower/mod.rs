@@ -69,6 +69,12 @@ struct ValueBinding {
     ty: Ty,
 }
 
+#[derive(Default)]
+struct Scope {
+    locals: Vec<LocalId>,
+    operand_base: usize,
+}
+
 struct FunctionLowering<'types> {
     source: Option<Source>,
     source_span: Span,
@@ -76,7 +82,7 @@ struct FunctionLowering<'types> {
     typer: &'types TyperContext,
     function: FunctionBuilder,
     bindings: HashMap<BindingId, ValueBinding>,
-    owned: Vec<Vec<LocalId>>,
+    owned: Vec<Scope>,
 }
 impl FunctionLowering<'_> {
     fn gen_term(&mut self, term: &Term, to: Option<&Ty>) -> Result<Ty, LowerError> {
@@ -94,7 +100,7 @@ impl FunctionLowering<'_> {
     fn alloc_local(&mut self, ty: Ty, name: Option<Arc<str>>) -> LocalId {
         let local = self.function.local(ty, name);
         if let Some(owned) = self.owned.last_mut() {
-            owned.push(local);
+            owned.locals.push(local);
         }
         local
     }
@@ -134,28 +140,45 @@ impl FunctionLowering<'_> {
         self.function.terminate(terminator);
     }
 
-    fn new_block(&mut self, hint: &str, height: usize) -> BlockId {
-        self.function.new_block(hint, height)
+    fn new_block(&mut self, hint: &str, inherited: usize, produced: usize) -> BlockId {
+        self.function.new_block(hint, inherited, produced)
     }
 
     fn switch(&mut self, block: BlockId) {
         self.function.switch(block);
     }
+
+    fn enter_scope(&mut self) {
+        self.owned.push(Scope {
+            locals: vec![],
+            operand_base: self.function.stack_len(),
+        });
+    }
 }
 
 //
-// Preserve the result while destroying owned locals in reverse scope order
+// Preserve the result while destroying locals and pending operands in lifetime order
 //
 
 impl FunctionLowering<'_> {
     fn cleanup(&mut self, first_scope: usize, result: &Ty) {
+        let base = self.owned[first_scope].operand_base;
         let owned = self.locals_to_drop(first_scope);
-        if owned.is_empty() {
+        if owned.is_empty() && self.function.stack_len() == base + 1 {
             return;
         }
         let saved = self.save_top(result);
+        // Pending expression values and locals share one destruction order.
+        // Preserve operands inherited from an enclosing scope on normal exit;
+        // cleanup from the function scope also abandons unfinished expressions.
         for local in owned {
+            while self.function.stack_len() > base && self.function.stack_is_newer_than(local) {
+                self.emit(Instr::Discard);
+            }
             self.emit(Instr::DropLocal { local });
+        }
+        while self.function.stack_len() > base {
+            self.emit(Instr::Discard);
         }
         if result.needs_drop(self.typer.definitions()) {
             self.emit(Instr::TakeLocal { local: saved });
@@ -169,7 +192,7 @@ impl FunctionLowering<'_> {
         self.owned[first_scope..]
             .iter()
             .rev()
-            .flat_map(|scope| scope.iter().rev().copied())
+            .flat_map(|scope| scope.locals.iter().rev().copied())
             .filter(|id| {
                 function
                     .local_type(*id)

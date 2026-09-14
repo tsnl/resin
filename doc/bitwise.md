@@ -193,8 +193,8 @@ assumptions the implementation relies on. They help a reader connect the compact
 operation to the conditions that make it valid.
 
 Resin's [LIR definition](../crates/resin-lir/src/lib.rs) has a useful comment explaining
-that local zero is always the parameter, including for unit and foreign functions.
-A vector of locals cannot express that convention by itself. Keeping the explanation
+that the first `parameter_count` locals are initialized parameters in declaration order,
+including in foreign declarations. A vector of locals cannot express that convention by itself. Keeping the explanation
 beside the representation and checking it in the verifier is more useful than
 scattering reminders through its callers.
 

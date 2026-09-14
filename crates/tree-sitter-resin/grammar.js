@@ -132,6 +132,7 @@ export default grammar({
   conflicts: ($) => [
     [$.primary_term, $.union_type],
     [$.unit_term, $.unit_type],
+    [$.parameter_types, $.tuple_type],
   ],
 
   rules: {
@@ -311,7 +312,7 @@ export default grammar({
             field(
               "suffix",
               choice(
-                $.closed_term,
+                $.arguments,
                 $.field_access,
                 $.method_call,
                 $.type_application,
@@ -326,9 +327,15 @@ export default grammar({
     field_access: ($) =>
       seq(
         ".",
-        field("name", $.lid),
-        optional(field("type_args", $.type_application)),
+        choice(
+          field("name", $.tuple_index),
+          seq(
+            field("name", $.lid),
+            optional(field("type_args", $.type_application)),
+          ),
+        ),
       ),
+    tuple_index: () => token(/0|[1-9][0-9]*/),
     method_call: ($) =>
       prec(
         1,
@@ -336,14 +343,7 @@ export default grammar({
           ".",
           field("name", $.lid),
           optional(field("type_args", $.type_application)),
-          field(
-            "args",
-            choice(
-              $.paren_term,
-              $.tuple_term,
-              alias($._method_unit, $.unit_term),
-            ),
-          ),
+          field("args", $.arguments),
         ),
       ),
     type_application: ($) => seq("::", field("types", $.type_arguments)),
@@ -351,7 +351,16 @@ export default grammar({
     try_suffix: () => "?",
     unwrap_suffix: () => "!",
 
-    _method_unit: () => seq("(", ")"),
+    arguments: ($) => seq("(", list("args", $.term, ","), ")"),
+    constructor_term: ($) =>
+      seq(
+        field("type", $.unary_type),
+        field(
+          "value",
+          choice($.record_term, alias($._empty_record, $.unit_term)),
+        ),
+      ),
+    _empty_record: () => seq("{", "}"),
 
     closed_term: ($) =>
       choice(
@@ -390,6 +399,7 @@ export default grammar({
 
     primary_term: ($) =>
       choice(
+        $.constructor_term,
         $.closed_term,
         $.lid,
         $.number,
@@ -450,12 +460,14 @@ export default grammar({
     infix_type: ($) =>
       choice(
         seq(
-          field("param_ty", $.closed_type),
+          field("params", $.parameter_types),
           "->",
           field("ret_ty", $.infix_type),
         ),
         $.union_type,
       ),
+
+    parameter_types: ($) => seq("(", list("params", $.type, ","), ")"),
 
     union_type: ($) =>
       choice(

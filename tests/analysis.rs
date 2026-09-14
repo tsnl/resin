@@ -18,7 +18,7 @@ fn generic_method_calls_show_substituted_signatures_and_original_definitions() {
     );
     let input = project.source("main.resin");
     for (name, expected) in [
-        ("read", "read: (()) -> int"),
+        ("read", "read: () -> int"),
         ("choose", "choose: (ulong) -> ulong"),
     ] {
         let offset = source.find(&format!("cell.{name}")).unwrap() + 5;
@@ -54,7 +54,7 @@ fn unfinished_generic_method_access_keeps_owner_substitution_and_method_binders(
         assert!(!choose.detail.contains("Cell<T>"), "{choose:?}");
         let read = items.iter().find(|item| item.name == "read").unwrap();
         if receiver == "cell" {
-            assert_eq!(read.detail, "read: (()) -> int");
+            assert_eq!(read.detail, "read: () -> int");
             assert_eq!(choose.detail, "choose: <U> (U) -> U");
             assert!(!items.iter().any(|item| item.name == "make"), "{items:?}");
         } else {
@@ -78,7 +78,7 @@ fn generic_method_references_show_the_expected_function_instantiation() {
     let offset = source.find("Factory.create").unwrap() + 8;
     assert_eq!(
         analysis.hover(&input, offset).unwrap().text,
-        "create: (()) -> int"
+        "create: () -> int"
     );
     let origin = analysis.definition(&input, offset).unwrap();
     assert_eq!(origin.span.start, source.find("def create").unwrap() + 4);
@@ -107,9 +107,9 @@ fn generic_method_editor_snapshots_keep_completed_imported_schemes() {
     let after = compiler.analyze(input.clone(), &mut loader);
     let offset = input.text().find("cell.read").unwrap() + 5;
     for (analysis, library, expected) in [
-        (&before, &original, "read: (()) -> int"),
-        (&after, &changed, "read: (()) -> long"),
-        (&before, &original, "read: (()) -> int"),
+        (&before, &original, "read: () -> int"),
+        (&after, &changed, "read: () -> long"),
+        (&before, &original, "read: () -> int"),
     ] {
         assert!(
             analysis.diagnostics().is_empty(),
@@ -247,6 +247,43 @@ fn generic_field_editor_snapshots_keep_original_imported_declarations() {
         let origin = analysis.definition(&input, field).unwrap();
         assert_eq!(&origin.source, library);
         assert_eq!(origin.span.start, library.text().find("value").unwrap());
+    }
+}
+
+#[test]
+fn tuple_members_and_function_hovers_use_source_syntax() {
+    let source = "def zero() -> int = { 0 }; def pair(value: (int, bool)) = {}; def add(a: int, b: int) -> int = { a + b }; def main() = { var empty = zero; var tuple = pair; var binary = add; var values = (1_i, 1 == 1); values.0; values.; };";
+    let project = Project::new(&[("main.resin", source)]);
+    let input = project.source("main.resin");
+    let analysis = project.analyze();
+    let members = analysis.completions(&input, source.rfind("values.").unwrap() + 7);
+    assert!(
+        members.iter().any(|member| member.detail == "0: int"),
+        "{members:?}"
+    );
+    assert!(
+        members.iter().any(|member| member.detail == "1: bool"),
+        "{members:?}"
+    );
+    assert_eq!(
+        analysis
+            .hover(&input, source.find("values.0").unwrap() + 7)
+            .unwrap()
+            .text,
+        "0: int"
+    );
+    for (name, expected) in [
+        ("empty", "empty: () -> int"),
+        ("tuple", "tuple: ((int, bool)) -> ()"),
+        ("binary", "binary: (int, int) -> int"),
+    ] {
+        assert_eq!(
+            analysis
+                .hover(&input, source.find(&format!("var {name}")).unwrap() + 4)
+                .unwrap()
+                .text,
+            expected
+        );
     }
 }
 
@@ -1910,7 +1947,7 @@ fn callers_cannot_resurrect_failed_result_inference() {
             "Result<int, Never>",
             "alias: ?",
         ),
-        ("int", "missing", "int", "alias: (()) -> int"),
+        ("int", "missing", "int", "alias: () -> int"),
     ] {
         let source = format!(
             "def broken() -> {result} = {{ var healthy = 1.5f; healthy; {body} }}; def caller() -> {caller_result} = {{ broken() }}; def observer() = {{ var alias = broken; alias; }};"
