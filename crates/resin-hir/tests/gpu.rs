@@ -67,9 +67,14 @@ fn allocator_registration_does_not_synthesize_constructor_methods() {
 
 #[test]
 fn opaque_gpu_views_cannot_be_dereferenced_or_cast_to_raw_addresses() {
-    for body in ["value.*", "Ptr<int>(value)", "ulong(value)", "value.data"] {
+    for (body, expected) in [
+        ("value.*", "dereference requires a pointer"),
+        ("Ptr<int>(value)", "TypeMismatch"),
+        ("ulong(value)", "TypeMismatch"),
+        ("value.data", "field access requires a record"),
+    ] {
         let error = generate(&format!("def invalid(value: GpuView) = {{ {body}; }};")).unwrap_err();
-        assert!(!error.to_string().contains("Unbound"), "{error}");
+        assert!(error.to_string().contains(expected), "{body}: {error}");
     }
 }
 
@@ -124,11 +129,20 @@ fn pipeline_types_cross_functions_and_accept_precomputed_arguments() {
 
 #[test]
 fn creation_requires_direct_decorated_shader_declarations() {
-    for expression in [
-        "gpu.compute(kernel.spirv)",
-        "gpu.compute(alias)",
-        "gpu.compute(ordinary)",
-        "gpu.compute(choose())",
+    for (expression, expected) in [
+        (
+            "gpu.compute(kernel.spirv)",
+            "requires shader declarations, not SPIR-V bytes",
+        ),
+        ("gpu.compute(alias)", "requires direct shader declarations"),
+        (
+            "gpu.compute(ordinary)",
+            "requires a decorated shader declaration",
+        ),
+        (
+            "gpu.compute(choose())",
+            "requires direct shader declarations",
+        ),
     ] {
         let error = pipelines(&format!(
             r#"
@@ -139,7 +153,7 @@ fn creation_requires_direct_decorated_shader_declarations() {
         ))
         .unwrap_err();
         assert!(
-            !error.to_string().contains("Unbound"),
+            error.to_string().contains(expected),
             "{expression}: {error}"
         );
     }
@@ -147,26 +161,48 @@ fn creation_requires_direct_decorated_shader_declarations() {
 
 #[test]
 fn dispatch_rejects_raw_views_wrong_fields_and_incompatible_stages() {
-    for tail in [
-        "Commands {}.dispatch(pipeline, { scale = 1.0_f, values = raw }, 1, 1, 1)",
-        "Commands {}.dispatch(pipeline, { scale = 1.0_f, wrong = values }, 1, 1, 1)",
-        "Commands {}.draw(pipeline, { scale = 1.0_f, values = values }, 3)",
-        "Commands {}.dispatch(pipeline, None, 1, 1, 1)",
+    for (tail, expected) in [
+        (
+            "Commands {}.dispatch(pipeline, { scale = 1.0_f, values = raw }, 1, 1, 1)",
+            "incompatible inferred types",
+        ),
+        (
+            "Commands {}.dispatch(pipeline, { scale = 1.0_f, wrong = values }, 1, 1, 1)",
+            "missing field `values`",
+        ),
+        (
+            "Commands {}.draw(pipeline, { scale = 1.0_f, values = values }, 3)",
+            "draw requires a graphics pipeline",
+        ),
+        (
+            "Commands {}.dispatch(pipeline, None, 1, 1, 1)",
+            "incompatible inferred types",
+        ),
     ] {
         let error = pipelines(&format!("def main(gpu: Device, values: DeviceRange<int>, raw: HostRange<int>) -> _ = {{ var pipeline = gpu.compute(kernel)?; {tail} }};")).unwrap_err();
-        assert!(!error.to_string().contains("Unbound"), "{tail}: {error}");
+        assert!(error.to_string().contains(expected), "{tail}: {error}");
     }
-    assert!(pipelines("def create(gpu: Device) -> Result<ComputeProgram<int, PipelineOwner>, Failure> = { gpu.compute(kernel) };").is_err());
+    let error = pipelines("def create(gpu: Device) -> Result<ComputeProgram<int, PipelineOwner>, Failure> = { gpu.compute(kernel) };").unwrap_err();
+    assert!(error.to_string().contains("TypeMismatch"), "{error}");
 }
 
 #[test]
 fn native_bridges_cannot_escape_through_method_references() {
-    for declaration in [
-        "def escape(gpu: Device) = { var factory = gpu.compute; };",
-        "def escape() = { var factory = Device.compute; };",
-        "def escape(commands: Commands) = { var dispatch = commands.dispatch; };",
+    for (declaration, expected) in [
+        (
+            "def escape(gpu: Device) = { var factory = gpu.compute; };",
+            "unknown field `compute`",
+        ),
+        (
+            "def escape() = { var factory = Device.compute; };",
+            "only source methods can be referenced as function values",
+        ),
+        (
+            "def escape(commands: Commands) = { var dispatch = commands.dispatch; };",
+            "unknown field `dispatch`",
+        ),
     ] {
         let error = pipelines(declaration).unwrap_err();
-        assert!(!error.to_string().contains("Unbound"), "{error}");
+        assert!(error.to_string().contains(expected), "{error}");
     }
 }
