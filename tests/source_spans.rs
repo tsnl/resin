@@ -194,3 +194,37 @@ fn shader_local_addresses_cannot_become_physical_pointer_index_operands() {
         "{error}"
     );
 }
+
+#[test]
+fn pointer_returning_index_wrappers_preserve_nested_places() {
+    let compilation = compile(
+        r#"
+    export { main };
+    import { "$/span.resin" };
+    struct Payload { value: int };
+    struct Entry { nested: Payload };
+    def at(items: Span<Entry>, index: ulong) -> Ptr<Entry> = { items.at(index) };
+    def main() -> int = {
+        var items = [Entry { nested = Payload { value = 1 } }, Entry { nested = Payload { value = 2 } }];
+        var span = Span<Entry> { data = Ptr<Entry>(&items), length = 2_ul };
+        at(span, 1_ul).nested.value := 42;
+        var p = &at(span, 1_ul).*.nested.value;
+        p.* := p.* + 1;
+        var copied = at(span, 1_ul).*.nested;
+        copied.value := 99;
+        if (items(1).nested.value == 43 && copied.value == 99 && items(0).nested.value == 1) { 0 } else { 1 }
+    };
+    "#,
+        Target::Host {
+            entry: "main".into(),
+        },
+    );
+    let output = support::project::Project::new(compilation.module().unwrap(), Some("main"))
+        .unwrap()
+        .run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

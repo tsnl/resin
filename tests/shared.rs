@@ -322,25 +322,6 @@ fn destruction_preserves_results_and_runs_per_scope_and_iteration() {
 }
 
 #[test]
-fn pointer_returning_index_wrappers_preserve_nested_places() {
-    run(r#"
-    struct Payload { value: int };
-    struct Entry { nested: Payload };
-    def at(items: Span<Entry>, index: ulong) -> Ptr<Entry> = { items(index) };
-    def main() -> int = {
-        var items = [Entry { nested = Payload { value = 1 } }, Entry { nested = Payload { value = 2 } }];
-        var span = Span<Entry> { data = Ptr<Entry>(&items), length = 2_ul };
-        at(span, 1_ul).nested.value := 42;
-        var p = &at(span, 1_ul).*.nested.value;
-        p.* := p.* + 1;
-        var copied = at(span, 1_ul).*.nested;
-        copied.value := 99;
-        if (items(1).nested.value == 43 && copied.value == 99 && items(0).nested.value == 1) { 0 } else { 1 }
-    };
-    "#);
-}
-
-#[test]
 fn former_defer_keyword_can_name_an_ordinary_immediate_call() {
     run(r#"
     def defer(trace: Ptr<int>) = { trace.* := trace.* + 1; };

@@ -98,6 +98,7 @@ fn nongeneric_wrapper_layout_queries_wait_for_nominal_specialization() {
 fn array_and_span_index_calls_preserve_generic_field_places() {
     let output = run(r#"
         export { main };
+        import { "$/span.resin" };
         struct Cell<T> { value: T };
         def copy_through_array<T>(value: T) -> T = {
             var cells = [Cell<T> { value = value }];
@@ -108,7 +109,7 @@ fn array_and_span_index_calls_preserve_generic_field_places() {
             var view = Span<Cell<int>> {
                 data = Ptr<Cell<int>>(&cells), length = 2
             };
-            cells(0_ul).value := copy_through_array(cells(0_ul).value) + view(1_ul).value;
+            cells(0_ul).value := copy_through_array(cells(0_ul).value) + view.at(1_ul).value;
             cells(0_ul).value
         };
     "#);
