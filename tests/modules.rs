@@ -24,7 +24,7 @@ impl Project {
     }
 
     fn compile(&self) -> Result<resin_lir::Module, SourceError> {
-        pipeline::generate_program(&pipeline::load(&self.0.path().join("main.resin"))?)
+        pipeline::file_module(&self.0.path().join("main.resin"))
     }
 
     fn run(&self) -> Output {

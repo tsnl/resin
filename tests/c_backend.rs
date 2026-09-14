@@ -21,7 +21,7 @@ fn run_entry(module: &resin_lir::Module, entry: &str) -> std::process::Output {
 #[test]
 fn ownership_example_releases_memory_on_success_and_failure() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/ownership.resin");
-    let m = pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap();
+    let m = pipeline::file_module(&path).unwrap();
     let success = run_entry(&m, "main");
     assert!(
         success.status.success(),
@@ -254,8 +254,7 @@ fn numbered_examples_compile_as_strict_c11() {
                 .to_string_lossy()
                 .starts_with("eg")
         {
-            let program = pipeline::load(&path).unwrap();
-            let module = pipeline::generate_program(&program).unwrap();
+            let module = pipeline::file_module(&path).unwrap();
             let output = run_module(&module);
             assert_eq!(
                 output.status.code(),

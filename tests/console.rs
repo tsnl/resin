@@ -25,7 +25,7 @@ impl Program {
         let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
         let path = temp.path().join("main.resin");
         fs::write(&path, source).unwrap();
-        let module = pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap();
+        let module = pipeline::file_module(&path).unwrap();
         let project = project::Project::new(&module, Some("main")).unwrap();
         Self::compile(temp, &project)
     }
@@ -219,7 +219,7 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
         );
         let path = temp.path().join("main.resin");
         fs::write(&path, source).unwrap();
-        let module = pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap();
+        let module = pipeline::file_module(&path).unwrap();
         // Include before the generated header list so all foreign calls use the test shims.
         let project = project::Project::new(&module, Some("main")).unwrap();
         let path = project.generated.c_source().unwrap();

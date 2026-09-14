@@ -12,7 +12,7 @@ fn example(name: &str) -> resin_lir::Module {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
         .join(name);
-    pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap()
+    pipeline::file_module(&path).unwrap()
 }
 
 #[test]

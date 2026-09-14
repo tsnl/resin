@@ -209,8 +209,7 @@ fn imported_aliases_preserve_nominal_identity_and_instance_reuse() {
     ] {
         std::fs::write(directory.path().join(name), source).unwrap();
     }
-    let program = support::pipeline::load(&directory.path().join("main.resin")).unwrap();
-    let module = support::pipeline::generate_program(&program).unwrap();
+    let module = support::pipeline::file_module(&directory.path().join("main.resin")).unwrap();
     assert_eq!(
         module
             .functions

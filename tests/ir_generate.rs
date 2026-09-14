@@ -108,9 +108,8 @@ fn examples_generate_verified_ir() {
             continue;
         }
         found += 1;
-        let ast = pipeline::load(&path).unwrap();
-        let module = pipeline::generate_program(&ast)
-            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+        let module =
+            pipeline::file_module(&path).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
         verify(&module).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
     }
     assert!(

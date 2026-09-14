@@ -16,9 +16,7 @@ fn error(source: &str) -> String {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let path = temp.path().join("source.resin");
     fs::write(&path, source).unwrap();
-    pipeline::generate_program(&pipeline::load(&path).unwrap())
-        .unwrap_err()
-        .to_string()
+    pipeline::file_module(&path).unwrap_err().to_string()
 }
 
 #[test]
@@ -126,7 +124,7 @@ fn imports_are_relative_deduplicated_and_checked_for_cycles() {
         "export { main }; import { \"nested/library.resin\", \"common.resin\" }; def main () -> int = { helper() };",
     )
     .unwrap();
-    let module = pipeline::generate_program(&pipeline::load(&main).unwrap()).unwrap();
+    let module = pipeline::file_module(&main).unwrap();
     assert_eq!(module.functions.len(), 2);
     fs::write(
         temp.path().join("common.resin"),

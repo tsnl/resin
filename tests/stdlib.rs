@@ -13,8 +13,7 @@ fn run(source: &str, native: &str) -> std::process::Output {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let path = temp.path().join("main.resin");
     fs::write(&path, source).unwrap();
-    let program = pipeline::load(&path).unwrap_or_else(|error| panic!("{error}"));
-    let module = pipeline::generate_program(&program).unwrap_or_else(|error| panic!("{error}"));
+    let module = pipeline::file_module(&path).unwrap_or_else(|error| panic!("{error}"));
     let project = project::Project::new(&module, Some("main")).unwrap();
     let path = project.generated.c_source().unwrap();
     let c = format!("{native}\n{}", fs::read_to_string(path).unwrap());
@@ -1025,9 +1024,7 @@ fn gpu_views_do_not_expose_unowned_address_conversions() {
         )
         .unwrap();
         assert!(
-            pipeline::load(&path)
-                .and_then(|program| pipeline::generate_program(&program))
-                .is_err(),
+            pipeline::file_module(&path).is_err(),
             "accepted unowned GPU address escape: {expression}"
         );
     }

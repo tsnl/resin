@@ -34,8 +34,7 @@ fn run_with_gpu_library(source: &str, library: Option<&str>) -> Option<Output> {
     if let Some(library) = library {
         fs::write(directory.path().join("gpu.resin"), library).unwrap();
     }
-    let module = pipeline::generate_program(&pipeline::load(&path).unwrap())
-        .unwrap_or_else(|error| panic!("{source}\n{error}"));
+    let module = pipeline::file_module(&path).unwrap_or_else(|error| panic!("{source}\n{error}"));
     Some(project::Project::new(&module, Some("main")).unwrap().run())
 }
 
@@ -563,7 +562,7 @@ fn gpu_element_layout_rejects_managed_storage_before_access() {
     "#,
     )
     .unwrap();
-    let error = pipeline::generate_program(&pipeline::load(&path).unwrap()).unwrap_err();
+    let error = pipeline::file_module(&path).unwrap_err();
     assert!(
         error.to_string().contains("plain shared storage"),
         "{error}"

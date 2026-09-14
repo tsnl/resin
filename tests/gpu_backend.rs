@@ -166,7 +166,7 @@ fn particles_compute_then_render_from_the_same_buffer() {
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/particles.resin");
-    let module = pipeline::generate_program(&pipeline::load(&source).unwrap()).unwrap();
+    let module = pipeline::file_module(&source).unwrap();
     let project = support::project::Project::new(&module, None).unwrap();
     let built = project.build(&toolchain::spirv(&compiler)).unwrap();
     let shader_bytes = |stage: Stage| {

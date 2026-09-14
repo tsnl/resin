@@ -39,6 +39,8 @@ fn lowering_error(error: resin_lir::Error) -> GenerateError {
         kind,
     }
 }
+
+/// Lower an AST constructed or edited by a test. Unchanged files use `file_module`.
 pub fn generate_program(program: &resin_ast::Program) -> Result<resin_lir::Module, SourceError> {
     let tree = resin_hir::generate_program(program)?;
     lower_program(&tree, &program.modules.last().expect("entry module").source)
@@ -50,6 +52,12 @@ pub fn source_module(text: &str) -> Result<resin_lir::Module, SourceError> {
     let mut loader = resin_source::Loader::new(library_root());
     let compilation = Compiler::new().analyze(source.clone(), &mut loader);
     lower_program(compilation.hir()?, &source)
+}
+
+/// Load a file and its explicit imports, then lower the HIR already built by analysis.
+pub fn file_module(path: &Path) -> Result<resin_lir::Module, SourceError> {
+    let compilation = analyze_file(path)?;
+    lower_program(compilation.hir()?, compilation.entry())
 }
 
 fn lower_program(
@@ -67,7 +75,13 @@ fn lower_program(
         .map(|verified| verified.into_module())
         .map_err(|error| SourceError::new(entry.clone(), None, error.to_string()))
 }
+
+/// Load an AST for inspection or mutation, preserving syntax even if HIR is invalid.
 pub fn load(path: &Path) -> Result<resin_ast::Program, SourceError> {
+    analyze_file(path)?.program().cloned()
+}
+
+fn analyze_file(path: &Path) -> Result<std::sync::Arc<resin_compiler::Compilation>, SourceError> {
     let mut loader = resin_source::Loader::new(library_root());
     let source = loader.load_file(path).map_err(|error| {
         SourceError::new(
@@ -76,10 +90,7 @@ pub fn load(path: &Path) -> Result<resin_ast::Program, SourceError> {
             error.to_string(),
         )
     })?;
-    Compiler::new()
-        .analyze(source, &mut loader)
-        .program()
-        .cloned()
+    Ok(Compiler::new().analyze(source, &mut loader))
 }
 
 pub fn shader_error(source: &str) -> String {

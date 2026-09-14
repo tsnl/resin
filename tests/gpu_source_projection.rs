@@ -34,8 +34,7 @@ fn run_with_gpu_library(source: &str, library: Option<&str>) -> Option<Output> {
     if let Some(library) = library {
         fs::write(directory.path().join("gpu.resin"), library).unwrap();
     }
-    let module = pipeline::generate_program(&pipeline::load(&path).unwrap())
-        .unwrap_or_else(|error| panic!("{source}\n{error}"));
+    let module = pipeline::file_module(&path).unwrap_or_else(|error| panic!("{source}\n{error}"));
     Some(project::Project::new(&module, Some("main")).unwrap().run())
 }
 

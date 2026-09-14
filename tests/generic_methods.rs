@@ -198,8 +198,7 @@ fn imported_generic_aliases_share_the_owners_method_instances() {
     ] {
         std::fs::write(directory.path().join(name), source).unwrap();
     }
-    let program = support::pipeline::load(&directory.path().join("main.resin")).unwrap();
-    let module = support::pipeline::generate_program(&program).unwrap();
+    let module = support::pipeline::file_module(&directory.path().join("main.resin")).unwrap();
     for name in ["Cell.make", "Cell.read"] {
         assert_eq!(
             module
