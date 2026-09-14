@@ -209,11 +209,15 @@ fn indirect_calls_use_the_callee_on_the_stack() {
         }],
     };
 
-    verify(&Module {
+    let mut module = Module {
         functions: vec![target, caller],
         ..Default::default()
-    })
-    .unwrap();
+    };
+    verify(&module).unwrap();
+    for arguments in [0, 2, usize::MAX] {
+        module.functions[1].blocks[0].instrs[2] = Instr::Call { arguments };
+        assert!(verify(&module).is_err(), "argument count {arguments}");
+    }
 }
 
 #[test]

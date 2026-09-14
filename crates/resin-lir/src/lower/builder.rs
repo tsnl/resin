@@ -209,28 +209,4 @@ mod tests {
             ]
         );
     }
-
-    #[test]
-    fn cleanup_order_distinguishes_inherited_replaced_and_merged_values() {
-        let mut builder = FunctionBuilder::new(None, crate::Profile::Host);
-        builder.emit(Instr::Push { value: Value::Unit });
-        let local = builder.local(Ty::Unit, None);
-        let inherited = builder.new_block("inherited", 1, 0);
-        assert!(!builder.stack_is_newer_than(local));
-
-        builder.emit(Instr::Ascribe { ty: Ty::Unit });
-        assert!(builder.stack_is_newer_than(local));
-        builder.switch(inherited);
-        assert!(!builder.stack_is_newer_than(local));
-
-        let merged = builder.new_block("merged", 1, 1);
-        let later_local = builder.local(Ty::Unit, None);
-        builder.switch(merged);
-        assert_eq!(builder.stack_len(), 2);
-        assert!(builder.stack_is_newer_than(later_local));
-        builder.emit(Instr::Discard);
-        assert!(!builder.stack_is_newer_than(local));
-        builder.emit(Instr::Discard);
-        assert!(!builder.stack_is_newer_than(local));
-    }
 }

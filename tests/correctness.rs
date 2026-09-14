@@ -14,6 +14,35 @@ fn compile(src: &str) -> resin_lir::Module {
 }
 
 #[test]
+fn only_parenthesized_lists_apply_functions() {
+    for call in [
+        "f [1, 2]",
+        "f { value = 1 }",
+        "f { 1 }",
+        "f {}",
+        "f 1",
+        "x.method [1]",
+    ] {
+        let source = format!("def main() = {{ {call}; }};");
+        let document = resin_cst::Document::reparse(source.clone(), None);
+        assert!(resin_ast::generate(&document).is_err(), "{source}");
+        assert!(resin_cst::format_source(&source).is_none(), "{source}");
+    }
+    for call in [
+        "f()",
+        "f(())",
+        "f(1,)",
+        "f((1,))",
+        "f((1, 2))",
+        "f([1, 2])",
+        "f({ 1 })",
+        "f(1)(2)",
+    ] {
+        parse(&format!("def main() = {{ {call}; }};")).unwrap();
+    }
+}
+
+#[test]
 fn zero_and_multiple_argument_calls_have_distinct_parameter_counts() {
     let module = compile(
         "export { main }; def f () -> int = { 1 }; def add (a: int, b: int) -> int = { a + b }; def main() -> () = { var pair = (1, 2); var x = f(); var y = add(pair.0, pair.1); var z = add(3, 4); };",
@@ -70,6 +99,20 @@ fn function_types_accept_unit_tuples_and_higher_order_calls() {
     compile(
         "export { main }; type Unit = (); def f (u: Unit) -> () = { () }; def main() -> () = { var x = Unit (()); var y = f(x); };",
     );
+    for (annotation, declaration) in [
+        ("() -> int", "def f(value: ()) -> int = { 0 };"),
+        (
+            "(int, int) -> int",
+            "def f(value: (int, int)) -> int = { 0 };",
+        ),
+    ] {
+        let source =
+            format!("{declaration} def main() = {{ var value: {annotation}; value := f; }};");
+        assert!(
+            pipeline::generate(&parse(&source).unwrap()).is_err(),
+            "{source}"
+        );
+    }
 }
 
 #[test]
@@ -105,6 +148,10 @@ fn typechecking_rejects_incorrect_argument_counts() {
         "export { main }; def f () -> int = { 1 }; def main() -> () = { var x = f(1); };",
         "export { main }; def f (a: int, b: int) -> int = { a }; def main() -> () = { var x = f(1); };",
         "export { main }; def f (a: int) -> int = { a }; def main() -> () = { var x = f(1, 2); };",
+        "def f() = {}; def main() = { f(()); };",
+        "def f(value: ()) = {}; def main() = { f(); };",
+        "def f(value: (int, int)) = {}; def main() = { f(1, 2); };",
+        "def f(a: int, b: int) = {}; def main() = { f((1, 2)); };",
     ] {
         assert!(
             matches!(
@@ -325,6 +372,7 @@ fn nested_field_access_evaluates_its_base_once() {
 fn uninitialized_reads_are_rejected_on_all_paths() {
     for src in [
         "def f () -> int = { var x: int; x };",
+        "def consume(a: int, b: int) = {}; def main() = { var value: int; consume(value, value := 1); };",
         "def f (c: int) -> int = { var x: int; if (c == 0) { x := 1 } else { 0 }; x };",
         "def f (c: int) -> int = { var x: int; (c == 0) && ((x := 1) == 1); x };",
         "export { main }; def main() -> () = { var x: int; var y = x; };",
@@ -340,6 +388,9 @@ fn uninitialized_reads_are_rejected_on_all_paths() {
         );
     }
     compile("def f () -> int = { var x: int; x := 1; x };");
+    compile(
+        "def consume(a: int, b: int) = {}; def main() = { var value: int; consume(value := 1, value); };",
+    );
     compile("def f (c: int) -> int = { var x: int; if (c == 0) { x := 1 } else { x := 2 }; x };");
     compile(
         "def even (n: int) -> int = { if (n == 0) { 1 } else { odd(n - 1) } }; def odd (n: int) -> int = { if (n == 0) { 0 } else { even(n - 1) } };",
