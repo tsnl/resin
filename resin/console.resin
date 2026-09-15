@@ -10,6 +10,11 @@ export {
 
 import { "span.resin", "shared.resin" };
 
+const initial_input_capacity = 128_ul;
+const max_input_capacity = ~0_ul;
+const line_feed: int = 10;
+const carriage_return: ubyte = 13;
+
 // Owns length bytes followed by a NUL. Copies retain the allocation.
 struct InputLineOwner {
 	data: Ptr<ubyte>,
@@ -93,15 +98,15 @@ struct Console {
 			},
 		}?;
 		var storage = owner.get();
-		storage.data := resize_input(Ptr<ubyte>(0_ul), 128_ul)?;
-		storage.length := 128_ul;
+		storage.data := resize_input(Ptr<ubyte>(0_ul), initial_input_capacity)?;
+		storage.length := initial_input_capacity;
 		var length = 0_ul;
 		var byte = getchar();
-		while (byte >= 0 && byte != 10) {
+		while (byte >= 0 && byte != line_feed) {
 			if (length == storage.length - 1_ul) {
 				// Reserve the terminator and reject growth that would wrap.
 				var grown: Result<ulong, InputOutOfMemory>;
-				grown := if (storage.length > 18446744073709551615_ul / 2_ul) {
+				grown := if (storage.length > max_input_capacity / 2_ul) {
 					err(InputOutOfMemory {})
 				} else {
 					ok(storage.length * 2_ul)
@@ -115,8 +120,8 @@ struct Console {
 			byte := getchar();
 		};
 		check_input_end(byte, length)?;
-		if (byte == 10 && length > 0_ul) {
-			if (Span<ubyte> { data = storage.data, length = storage.length }.at(length - 1_ul) == 13_ub) {
+		if (byte == line_feed && length > 0_ul) {
+			if (Span<ubyte> { data = storage.data, length = storage.length }.at(length - 1_ul) == carriage_return) {
 				length := length - 1_ul;
 			};
 		};

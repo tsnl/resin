@@ -310,9 +310,9 @@ def main() -> Result<(), _> = {
 	var previous_cursor = mouse_position(window.cursor_position()?);
 
 	window.poll_events()?;
-	while (!window.should_close() && !window.key_pressed(Window.key_escape())) {
-		var space = window.key_state(Window.keys().space);
-		var reset = window.key_state(Window.keys().r);
+	while (!window.should_close() && !window.key_pressed(key_escape)) {
+		var space = window.key_state(key_space);
+		var reset = window.key_state(key_r);
 		if (space.pressed) {
 			paused := !paused;
 		};
@@ -321,7 +321,7 @@ def main() -> Result<(), _> = {
 			initialize(particles, seed);
 		};
 		var cursor = mouse_position(window.cursor_position()?);
-		var left = window.mouse_button_state(Window.mouse_buttons().left);
+		var left = window.mouse_button_state(mouse_button_left);
 		var dragging = window.focused() && left.down;
 		var scroll = mouse_position(window.scroll_delta()?);
 		if (automatic && !paused) {
@@ -336,7 +336,7 @@ def main() -> Result<(), _> = {
 				move_camera(&camera, cursor.x - previous_cursor.x, cursor.y - previous_cursor.y, 0.0_d);
 			};
 			move_camera(&camera, 0.0_d, 0.0_d, scroll.y);
-			if (window.key_state(Window.keys().home).pressed) {
+			if (window.key_state(key_home).pressed) {
 				camera := default_camera();
 				automatic := 1 == 1;
 			};

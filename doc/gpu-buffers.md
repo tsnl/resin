@@ -24,9 +24,10 @@ var readable = first.read_only();
 or result context; `gpu.create::<T>(initial)` supplies it explicitly.
 `gpu.alloc::<T>(count)` allocates uninitialized storage with checked layout and
 size arithmetic. Initialize elements before reading or using them in a shader.
-Both use default host-visible memory. `gpu.alloc_in::<T>(count, memory)` selects
-`Memory.gpu()` or `Memory.readback()` when needed. These are ordinary generic
-source methods; allocation reports a typed `RuntimeError`.
+Both use default host-visible memory. Pass the exported `int` constants
+`memory_default`, `memory_gpu`, or `memory_readback` to `gpu.alloc_in::<T>(count, memory)`
+to select a memory mode. Allocation methods are ordinary generic source methods and
+report a typed `RuntimeError`.
 
 GPU elements have the same host and shader layout and cannot contain pointers,
 spans, managed owners, or custom destruction hooks. Supported scalar storage is
