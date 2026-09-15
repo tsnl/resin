@@ -386,6 +386,8 @@ async fn hash_contents(
 }
 
 // Native commands belong to the toolchain; generated projects describe only edges.
+// Captured preprocessor output intentionally retains GNU line markers (including
+// system-header flags). Clang must accept its own markers under -pedantic -Werror.
 const NATIVE_RULES: &str = "\
 rule optimize_shader
   command = $spirv_opt --target-env=vulkan1.3 -O $in -o $out
@@ -397,7 +399,7 @@ rule embed_shader
   restat = 1
 
 rule compile_preprocessed_program
-  command = $cc $captured_cflags -Wno-unused-command-line-argument $in -o $out $ldflags
+  command = $cc $captured_cflags -Wno-unused-command-line-argument -Wno-gnu-line-marker $in -o $out $ldflags
   description = C $in
 
 rule compile_program
