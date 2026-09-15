@@ -172,13 +172,8 @@ pub enum Instr {
     VariantPayload { tag: Case },
     /// `[value] -> [widened value]`: transfer union/Result payloads into the wider type.
     Widen { ty: Ty },
-    /// `[] -> [{data: Ptr<ubyte>, length: ulong}]`: borrow the decorated
-    /// function's embedded SPIR-V bytes as structural byte transport.
-    Shader {
-        function: FunctionId,
-        stage: Arc<str>,
-    },
     /// `[pointer or ulong] -> [cast value]`: reinterpret a pointer or its integer address.
+    /// Host-only: shader pointer representation belongs to the backend.
     PointerCast { ty: Ty },
     /// `[] -> [value]`: materialize an immediate; byte literals borrow static storage.
     Push { value: Value },

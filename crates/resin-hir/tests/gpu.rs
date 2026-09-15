@@ -152,8 +152,8 @@ fn pipeline_types_cross_functions_and_accept_precomputed_arguments() {
 fn creation_requires_direct_decorated_shader_declarations() {
     for (expression, expected) in [
         (
-            "gpu.compute(kernel.spirv)",
-            "requires shader declarations, not SPIR-V bytes",
+            "gpu.compute({ data = Ptr<ubyte>(0_ul), length = 0_ul })",
+            "requires decorated shader declarations",
         ),
         ("gpu.compute(alias)", "requires direct shader declarations"),
         (

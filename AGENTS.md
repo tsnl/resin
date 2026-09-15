@@ -348,9 +348,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Shader entries use `@compute_shader`, `@vertex_shader`, or `@fragment_shader` decorators.
   Compute entries take `(ulong, Ptr<T>)` and return unit; their index is the global X invocation
   index. Their signatures are checked at declaration; helpers need no decoration and remain host-callable.
-  `function.spirv` requests an embedded structural `{ data: Ptr<ubyte>, length: ulong }`
-  view from a decorated declaration, never
-  from a runtime function alias. Keep shader definitions inline in examples.
+  Pipeline creation accepts decorated shader declarations directly and requests their compiled
+  representation internally. Shader functions have no bytecode property. Runtime shader aliases
+  remain unsupported. Keep shader definitions inline in examples.
 - Arrays, `Span<T>`, and `str` provide indexing with `items.at(index)`, returning `Ptr<T>`
   (`Ptr<ubyte>` for `str`);
   its index parameter is `ulong`, with explicit conversions for other integer types.
@@ -360,8 +360,10 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   shader indexing is unchecked, and callers must stay within valid storage.
   `Place<T>` is a compiler expression category, not a source type; pointer-returning user
   functions support the same access rules. Spans have `data` and `length` fields. Pointer arithmetic
-  is forbidden; explicit pointer/`ulong` casts permit low-level byte arithmetic. The C ABI retains
-  pointer/length pairs; language-facing pipeline creation accepts spans.
+  is forbidden; explicit pointer/`ulong` casts permit low-level byte arithmetic on the host.
+  Shader pointer casts (including pointer reinterpretation) are rejected during LIR construction
+  and verification; use typed pointers and indexing. The current Vulkan C ABI retains
+  pointer/length pairs; language-facing pipeline creation accepts shader declarations.
 - Unions contain value types and use module-wide u32 type IDs, not variant positions.
   Type IDs index one canonical table of nominal, primitive, and structural definitions;
   host and shader emission share it. Union tags are the active payload's table index.

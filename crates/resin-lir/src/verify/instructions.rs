@@ -137,22 +137,6 @@ pub(super) fn check_instr(
                 .ok_or_else(|| location.error(VerifyErrorKind::InvalidVariant))?;
             stack.push(payload);
         }
-        Instr::Shader { function, stage } => {
-            let target = module.functions.get(function.index()).ok_or_else(|| {
-                location.error(VerifyErrorKind::InvalidFunction {
-                    function: function.index(),
-                })
-            })?;
-            if target.foreign.is_some()
-                || module
-                    .shaders
-                    .get(function)
-                    .is_none_or(|entry| entry.stage.as_ref() != stage.as_ref() || !entry.embedded)
-            {
-                return Err(location.error(VerifyErrorKind::InvalidShader));
-            }
-            stack.push(Ty::shader());
-        }
         Instr::Eliminate { result } => {
             expect_type(Ty::union([]), pop_one(stack, location)?, location)?;
             check_type(&module.types, result, location)?;

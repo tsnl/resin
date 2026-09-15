@@ -191,9 +191,6 @@ impl Printer {
                 fields.extend(args.iter().map(|arg| self.term(arg)));
                 list("dependent-method-call", fields)
             }
-            TermKind::Shader { function, stage } => {
-                list("spirv", vec![function_id(function.index()), atom(stage)])
-            }
             TermKind::Unwrap { value } => list("unwrap", vec![self.term(value)]),
             TermKind::Try { value } => list("try", vec![self.term(value)]),
             TermKind::Match { value, arms } => list(

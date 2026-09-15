@@ -63,7 +63,6 @@ pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
 
         Instr::WeakEmpty
         | Instr::TakeLocal { .. }
-        | Instr::Shader { .. }
         | Instr::Push { .. }
         | Instr::Function { .. }
         | Instr::LocalAddress { .. } => StackEffect { pops: 0, pushes: 1 },

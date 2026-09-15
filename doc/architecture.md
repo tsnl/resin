@@ -432,7 +432,7 @@ or forwarding object is needed. HIR functions carry optional source locations di
 Source handles retain their text, so later phases need no separate path-to-text table.
 `resin_lir::build_lir` collects errors across functions.
 Codegen accepts only verified LIR. `generate(verified, Some(entry), directory)` writes
-host C, the SPIR-V requested by `.spirv`, and `build.ninja`; `None` generates a shader-only
+host C, the SPIR-V requested by pipeline creation, and `build.ninja`; `None` generates a shader-only
 project containing all declared shaders. It returns paths, never target ASTs or per-target
 emission operations. C and SPIR-V lowering finish before any generated files are written.
 

@@ -73,7 +73,6 @@ pub(super) fn instruction(
             widen(context, &args[0].ty, result.unwrap(), args[0].id)?
         }
         Instr::NumericCast { ty } => numeric_cast(context, &args[0].ty, ty, args[0].id)?,
-        Instr::PointerCast { .. } => args[0].id,
         Instr::Ascribe { ty } => ascribe(context, &args[0].ty, ty, args[0].id)?,
         Instr::MakeArray { .. } | Instr::MakeRecord { .. } => {
             let fields: Vec<_> = args.iter().map(|arg| arg.id).collect();

@@ -16,10 +16,6 @@ impl FunctionLowering<'_> {
             TermKind::Function { function } => self.emit(Instr::Function {
                 function: *function,
             }),
-            TermKind::Shader { function, stage } => self.emit(Instr::Shader {
-                function: *function,
-                stage: stage.clone(),
-            }),
             TermKind::Local { binding, name } => return self.gen_var(*binding, name),
             TermKind::Unwrap { value } => {
                 self.gen_term(value, None)?;

@@ -776,8 +776,8 @@ to those modules. Public operations are static constructors and instance methods
 - `$/string.resin`: owned `String`, formatting with `fmt`, and `print`.
 - `$/console.resin`: `Console.read_byte()`, `Console.read_line()`, and shared `InputLine` owners with `Console.print(line)`.
 
-Decorated shader declarations expose `.spirv`; the resulting structural byte view
-can be wrapped explicitly with `Span<ubyte>(shader.spirv)`.
+Pass decorated shader declarations directly to GPU pipeline creation. Compiled shader
+representations belong to code generation and the runtime; functions expose no bytecode property.
 Runtime flags are static methods, such as `Memory.default()`.
 Run `cargo run -- examples/eg009_imports.resin` for an explicitly owned counter, or append
 `:independent` to run a second entry that uses two independent counters.
@@ -830,11 +830,12 @@ variadic calls, and C callbacks are not supported yet.
 
 This is an unchecked C boundary: declarations must match the header's ABI, and callers own
 pointer validity, lifetimes, buffer lengths, and synchronization. `&place` takes an address;
-`pointer.*` dereferences it. Explicit casts allow pointer-to-pointer and pointer-to-`ulong`
-roundtrips. There is no borrow checker; addresses of locals must not outlive their storage.
+`pointer.*` dereferences it. On the host, explicit casts allow pointer-to-pointer and
+pointer-to-`ulong` roundtrips. There is no borrow checker; addresses of locals must not outlive their storage.
 Pointer arithmetic is forbidden. Use array or span indexing, or explicitly convert a pointer
 into `ulong`, perform **byte** arithmetic, and convert back when low-level address manipulation
-is necessary. Pointer casts and dereferences remain unchecked.
+is necessary on the host. Shaders reject pointer casts; use typed pointers and indexing.
+Host pointer casts and all raw pointer dereferences remain unchecked.
 
 Arrays, spans, and `str` use `.at(index)` for indexing and return `Ptr<T>` (`Ptr<ubyte>` for `str`).
 The index parameter is `ulong` (unsigned 64-bit); unsuffixed literals infer this type, while
@@ -877,13 +878,14 @@ Shader entry points are ordinary functions with declaration decorators:
 
 ```resin
 export { main };
-import { "$/string.resin" };
+import { "$/gpu.resin" };
 
 @compute_shader
 def kernel(index: ulong, output: Ptr<ulong>) = { output.* := index; };
-def main() = {
-    var code = kernel.spirv;
-    print(fmt("shader size: {0} bytes\n", (code.length,)));
+def main() -> Result<(), _> = {
+    var gpu = Gpu.new()?;
+    var pipeline = gpu.create_compute_pipeline(kernel)?;
+    ok(())
 };
 ```
 
@@ -893,19 +895,15 @@ no decorators, and decorated functions remain ordinary host-callable functions. 
 currently describe compiler-defined entry points; user-defined compile-time transformers are
 not implemented yet.
 
-`kernel.spirv` requests program-lifetime embedded SPIR-V bytes as a structural
-`{ data: Ptr<ubyte>, length: ulong }` view. It must name a
-decorated function declaration directly, including an imported declaration; runtime function
-aliases do not expose `.spirv`. The compiler records artifact requests by declaration identity,
-without following function values or analyzing runtime branches. Merely declaring or calling a
-decorated function on the host requires no shader optimizer. Artifact requests anywhere in the
-loaded modules require compilation even when their containing function is not executed.
-
 Create typed pipelines from shader declarations with
 `gpu.create_compute_pipeline(kernel)` and
 `gpu.create_graphics_pipeline(vertex, fragment)`. Creation requests their embedded
-SPIR-V automatically and preserves the shader stage and root type. The private C ABI
-still uses pointer/length pairs.
+shader representation automatically and preserves the shader stage and root type.
+Creation currently requires direct declarations, including imported declarations; runtime
+function aliases are not accepted yet. A reachable pipeline creation site requests its shaders
+even if its branch is not executed. Merely declaring a shader or calling it on the host
+requires no shader optimizer. There is no `.spirv` property; inspect artifacts in the build
+cache instead. The current Vulkan implementation's private C ABI uses pointer/length pairs.
 
 Resin lowers the entry and its reachable named helpers directly to SPIR-V. The toolchain runs
 `spirv-opt -O --target-env=vulkan1.3` and embeds the optimized binary in generated C headers.
@@ -965,8 +963,8 @@ shaders without a root. Successful recording retains arguments and allocations
 through synchronous submission or cancellation. They must belong to the recording's
 GPU. See [GPU buffers](gpu-buffers.md).
 
-Device pointers support loads, stores, record fields, explicit casts, and passing to
-ordinary helpers. Shared storage supports `ubyte`, `int`, `uint`, `long`, `float32`, `ulong`, pointers, nonempty
+Device pointers support loads, stores, record fields, typed indexing, and passing to
+ordinary helpers. Pointer reinterpretation and pointer/integer conversions are host-only. Shared storage supports `ubyte`, `int`, `uint`, `long`, `float32`, `ulong`, pointers, nonempty
 records, arrays, spans, and nominal wrappers. Scalars align to their size; records align to their largest
 member, with member and trailing padding. This matches C and Vulkan's base alignment rules without requiring
 scalar-block-layout support. Generated C asserts sizes, alignments, and member offsets.
@@ -996,8 +994,8 @@ Submission currently waits for completion, making mapped results readable by the
 
 Build a GPU program with `-o` to inspect its unoptimized and optimized SPIR-V without executing GPU work,
 for example `cargo run -- examples/gradient.resin -o dist/`. Only the host entry selected by
-`FILE:ENTRY` needs to be exported; accessing `private_helper.spirv` inside its module does not
-require exporting that helper. `--spirv-opt PATH` selects the shader optimizer.
+`FILE:ENTRY` needs to be exported; passing a private shader declaration to pipeline creation
+inside its module does not require exporting that shader. `--spirv-opt PATH` selects the shader optimizer.
 
 ## GPU requirements
 

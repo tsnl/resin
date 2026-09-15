@@ -259,7 +259,10 @@ impl Completion<'_> {
             typed::TermKind::Deref { pointer } => TermKind::Deref {
                 pointer: self.boxed(pointer)?,
             },
-            typed::TermKind::Field { base, name } => self.field(source.span, base, name)?,
+            typed::TermKind::Field { base, name } => TermKind::Field {
+                base: self.boxed(base)?,
+                name: name.val.clone(),
+            },
         })
     }
 
@@ -429,33 +432,6 @@ impl Completion<'_> {
             (fixed, right)
         };
         Ok(TermKind::If { cond, then, els })
-    }
-
-    fn field(&mut self, span: Span, base: &typed::Term, name: &Ident) -> Result<TermKind> {
-        let base = self.boxed(base)?;
-        if name.val.as_ref() == "spirv"
-            && let TermKind::Function { function, .. } = base.kind
-        {
-            return self.shader(span, function);
-        }
-        Ok(TermKind::Field {
-            base,
-            name: name.val.clone(),
-        })
-    }
-
-    fn shader(&mut self, span: Span, function: FunctionId) -> Result<TermKind> {
-        let entry = self.shaders.get(&function).ok_or_else(|| GenerateError {
-            span,
-            kind: GenerateErrorKind::InvalidShader {
-                message: "`.spirv` requires a function with a shader decorator".into(),
-            },
-        })?;
-        self.embedded.insert(function);
-        Ok(TermKind::Shader {
-            function,
-            stage: entry.stage.clone(),
-        })
     }
 
     fn method_lookup(&self, signature: &Type, span: Span) -> Result<crate::MethodLookup> {

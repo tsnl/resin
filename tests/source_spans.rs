@@ -189,24 +189,6 @@ fn byte_views_reject_nonnumeric_elements_after_specialization() {
 }
 
 #[test]
-fn embedded_shader_bytes_wrap_into_the_library_span_explicitly() {
-    let output = run(r#"
-        export { main };
-        import { "$/span.resin" };
-        @compute_shader def kernel(index: ulong, output: Ptr<uint>) = { output.* := uint(index); };
-        def main() -> int = {
-            var code = Span<ubyte>(kernel.spirv);
-            if (code.length > 0_ul && code.at(0).* == 3_ub) { 0 } else { 1 }
-        };
-    "#);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-#[test]
 fn shader_span_indexing_uses_record_layout_and_device_pointer_stride() {
     let compilation = compile(
         r#"

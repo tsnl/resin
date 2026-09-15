@@ -520,7 +520,7 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
     let input = temp.path().join("stages.resin");
     fs::write(&input, r#"
         export { main };
-        import { "$/graphics.resin" };
+        import { "$/graphics.resin", "$/gpu.resin" };
         @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i + 1_ui }; };
         @vertex_shader def vertex(i: int) -> Vertex = {
             Vertex {
@@ -529,8 +529,13 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
             }
         };
         @fragment_shader def fragment(color: Color) -> Color = { color };
-        def main() -> int = {
-            if (kernel.spirv.length > 0_ul && vertex.spirv.length > 0_ul && fragment.spirv.length > 0_ul) { 0 } else { 1 }
+        def main() -> Result<(), _> = {
+            if (0 == 1) {
+                var gpu = Gpu.new()?;
+                gpu.create_compute_pipeline(kernel)?;
+                gpu.create_graphics_pipeline(vertex, fragment)?;
+            };
+            ok(())
         };
     "#).unwrap();
     let destination = temp

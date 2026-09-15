@@ -804,11 +804,11 @@ fn numeric_conversion_failures_stop_shader_helpers_before_stores() {
 fn byte_spans_read_and_write_device_storage() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: uint, pixels: Ptr<uint> };
+        struct Root { count: uint, pixels: Ptr<ubyte> };
         def read(bytes: Span<ubyte>, index: ulong) -> ubyte = { bytes.at(index).* };
         @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = { var i = uint(invocation);
             if (i < root.count) {
-                var bytes = Span<ubyte> { data = Ptr<ubyte>(root.pixels), length = ulong(root.count) * 4_ul };
+                var bytes = Span<ubyte> { data = root.pixels, length = ulong(root.count) * 4_ul };
                 var offset = ulong(i) * 4_ul;
                 bytes.at(offset).* := 65_ub;
                 bytes.at(offset + 1_ul).* := read(bytes, offset) + 1_ub;

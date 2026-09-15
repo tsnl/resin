@@ -360,10 +360,6 @@ impl Ty {
         types::widens_to(self, to)
     }
 
-    pub fn shader() -> Self {
-        Self::byte_span()
-    }
-
     /// Structural byte fields exposed by a primitive string literal.
     /// Source records already expose their own declared representation.
     pub fn view_record(&self) -> Option<Self> {

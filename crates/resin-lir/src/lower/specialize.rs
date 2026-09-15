@@ -758,10 +758,6 @@ impl Specialization<'_, '_> {
                 receiver,
                 args,
             } => self.dependent_method_call(lookup, receiver.as_deref(), args, expected)?,
-            resin_hir::TermKind::Shader { function, stage } => concrete::TermKind::Shader {
-                function: self.shader(*function)?,
-                stage: stage.clone(),
-            },
             resin_hir::TermKind::Unwrap { value } => concrete::TermKind::Unwrap {
                 value: self.boxed(value)?,
             },

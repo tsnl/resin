@@ -213,9 +213,7 @@ impl Context {
         let mut root = Type::None;
         for shader in shaders {
             let Type::Function { params, .. } = shader else {
-                return Err(
-                    "pipeline creation requires shader declarations, not SPIR-V bytes".into(),
-                );
+                return Err("pipeline creation requires decorated shader declarations".into());
             };
             if let Some(Type::Pointer { pointee }) = params.get(1) {
                 if root != Type::None && root != **pointee {
