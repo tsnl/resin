@@ -944,9 +944,6 @@ pub mod shader {
     use super::{Ty, TyperContext};
     use std::sync::Arc;
 
-    /// X invocations per compute workgroup; the Y and Z dimensions are one.
-    pub const COMPUTE_WORKGROUP_SIZE: u32 = 64;
-
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ShaderEntry {
         pub stage: Arc<str>,

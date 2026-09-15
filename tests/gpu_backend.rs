@@ -135,7 +135,12 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
         let mut commands = gpu.start_command_recording().unwrap();
         commands.set_pipeline(&pipeline).unwrap();
         commands
-            .dispatch(root.device_pointer(), (COUNT as u32).div_ceil(64), 1, 1)
+            .dispatch(
+                root.device_pointer(),
+                (COUNT as u32).div_ceil(gpu.compute_workgroup_size()),
+                1,
+                1,
+            )
             .unwrap();
         gpu.submit(commands).unwrap();
         let values = std::slice::from_raw_parts(values.host_pointer().cast::<Payload>(), COUNT + 1);
@@ -274,7 +279,12 @@ fn particles_compute_then_render_from_the_same_buffer() {
             let mut commands = gpu.start_command_recording().unwrap();
             commands.set_pipeline(&compute).unwrap();
             commands
-                .dispatch(root.device_pointer(), (count as u32).div_ceil(64) + 1, 1, 1)
+                .dispatch(
+                    root.device_pointer(),
+                    (count as u32).div_ceil(gpu.compute_workgroup_size()) + 1,
+                    1,
+                    1,
+                )
                 .unwrap();
             commands
                 .begin_rendering(&mut image, [0.0, 0.0, 0.0, 1.0])
@@ -550,6 +560,10 @@ fn compute_values(source: &str, expected: fn(u32) -> u32) {
     let spv =
         std::fs::read(built.path(project.generated.shaders()[0].spirv().file_name().unwrap()))
             .unwrap();
+    execute_compute_values(&mut gpu, &spv, expected);
+}
+
+fn execute_compute_values(gpu: &mut ResinGpu, spv: &[u8], expected: fn(u32) -> u32) {
     #[repr(C)]
     struct Root {
         count: u32,
@@ -558,7 +572,7 @@ fn compute_values(source: &str, expected: fn(u32) -> u32) {
     const COUNT: u32 = 67;
     // All resources share one GPU and remain live until synchronous submission completes.
     unsafe {
-        let pipeline = gpu.create_compute_pipeline(&spv).unwrap();
+        let pipeline = gpu.create_compute_pipeline(spv).unwrap();
         let pixels = gpu
             .malloc((COUNT as usize + 1) * 4, 4, ResinMemory::Default)
             .unwrap();
@@ -574,7 +588,12 @@ fn compute_values(source: &str, expected: fn(u32) -> u32) {
         let mut commands = gpu.start_command_recording().unwrap();
         commands.set_pipeline(&pipeline).unwrap();
         commands
-            .dispatch(root.device_pointer(), COUNT.div_ceil(64), 1, 1)
+            .dispatch(
+                root.device_pointer(),
+                COUNT.div_ceil(gpu.compute_workgroup_size()),
+                1,
+                1,
+            )
             .unwrap();
         gpu.submit(commands).unwrap();
         let values =
@@ -583,6 +602,51 @@ fn compute_values(source: &str, expected: fn(u32) -> u32) {
             assert_eq!(value, expected(index as u32), "invocation {index}");
         }
         assert_eq!(values[COUNT as usize], u32::MAX);
+    }
+}
+
+#[test]
+fn one_compute_artifact_specializes_for_each_suitable_device() {
+    let Some(compiler) = shaders::optimizer() else {
+        return;
+    };
+    let _lock = lock_gpu();
+    if gpu().is_none() {
+        return;
+    }
+    let module = support::module(
+        r#"
+        export { kernel };
+        import { "$/span.resin" };
+        struct Root { count: uint, pixels: Ptr<uint> };
+        @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {
+            if (index < ulong(root.count)) {
+                var pixels = Span<uint> { data = root.pixels, length = ulong(root.count) };
+                pixels.at(index) := uint(index) + 1_ui;
+            };
+        };
+    "#,
+    );
+    let project = support::project::Project::new(&module, None).unwrap();
+    let built = project.build(&toolchain::spirv(&compiler)).unwrap();
+    let spv =
+        std::fs::read(built.path(project.generated.shaders()[0].spirv().file_name().unwrap()))
+            .unwrap();
+    let count = ResinGpu::device_count().unwrap();
+    // All-zero bytes are valid for the device-info fields, including device kind.
+    let mut devices = vec![unsafe { std::mem::zeroed() }; count as usize];
+    ResinGpu::enumerate_devices(&mut devices).unwrap();
+    for device in devices.iter().filter(|device| device.suitable != 0) {
+        let mut gpu = ResinGpu::create_at(device.index).unwrap();
+        let width = gpu.compute_workgroup_size();
+        assert!(width > 0);
+        assert_eq!(
+            unsafe { resin_runtime::resin_gpu_compute_workgroup_size(&gpu) },
+            width
+        );
+        eprintln!("device {}: {width} invocations per workgroup", device.index);
+        execute_compute_values(&mut gpu, &spv, |index| index + 1);
+        assert_eq!(gpu.compute_workgroup_size(), width);
     }
 }
 

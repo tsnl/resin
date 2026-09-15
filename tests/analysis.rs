@@ -5,21 +5,30 @@ use std::{collections::BTreeMap, path::Path};
 use tempfile::TempDir;
 
 #[test]
-fn compute_workgroup_size_has_builtin_hover_and_completion() {
-    let source = "def size() -> ulong = { compute_workgroup_size };";
+fn gpu_workgroup_size_has_source_method_hover_completion_and_navigation() {
+    let source = r#"import { "$/gpu.resin" }; def size(gpu: Gpu) -> ulong = { gpu.compute_workgroup_size() };"#;
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.checked();
     let input = project.source("main.resin");
     let offset = source.find("compute_workgroup_size").unwrap();
     let hover = analysis.hover(&input, offset).unwrap();
-    assert!(hover.text.starts_with("compute_workgroup_size: ulong"));
+    assert_eq!(
+        hover.text,
+        "def compute_workgroup_size(self: Ptr<Gpu>) -> ulong"
+    );
     let completions = analysis.completions(&input, offset + "compute_".len());
-    let constant = completions
+    let method = completions
         .iter()
         .find(|item| item.name == "compute_workgroup_size")
         .unwrap();
-    assert_eq!(constant.detail, hover.text);
-    assert_eq!(constant.kind, resin_hir::DefinitionKind::Variable);
+    assert_eq!(method.detail, "compute_workgroup_size: () -> ulong");
+    assert_eq!(method.kind, resin_hir::DefinitionKind::Function);
+    let origin = analysis.definition(&input, offset).unwrap();
+    assert!(origin.source.name().ends_with("gpu.resin"));
+    assert_eq!(
+        &origin.source.text()[origin.span.start..origin.span.end],
+        "compute_workgroup_size"
+    );
 }
 
 #[test]

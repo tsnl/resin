@@ -914,14 +914,6 @@ impl Expression<'_, '_> {
                     value: value.clone(),
                 }
             }
-            resin_ast::TermKind::Var { name } if name.val.as_ref() == "compute_workgroup_size" => {
-                equate = Some(Ty::UInt64.into());
-                TermKind::Num {
-                    value: resin_types::shader::COMPUTE_WORKGROUP_SIZE
-                        .to_string()
-                        .into(),
-                }
-            }
             resin_ast::TermKind::Var { name } => {
                 let (declaration, ty, type_args) = self.checker.value(name, None)?;
                 equate = Some(ty);

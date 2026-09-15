@@ -866,11 +866,6 @@ fn matching_completions(mut items: Vec<Completion>, prefix: &str) -> Vec<Complet
 
 const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     (
-        "compute_workgroup_size",
-        "compute_workgroup_size: ulong\n\nThe number of X invocations per compute workgroup. Y and Z sizes are one. Available on host and shader without imports.",
-        DefinitionKind::Variable,
-    ),
-    (
         "Ref",
         "Ref<T>\n\nA fixed, nonowning reference to initialized T storage.",
         DefinitionKind::Type,

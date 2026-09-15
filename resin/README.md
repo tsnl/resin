@@ -81,7 +81,7 @@ dropping one already consumed does not cancel it again. Submission waits for GPU
 | `ArcPtr<T>` / `ArcSpan<T>` | `.alloc(initial)` / `.alloc(count, initial)`, `.get()`, `.downgrade()` |
 | `Span<T>` | `.at(index)`, `.slice(start, length)`, numeric `.as_bytes()` |
 | `WeakPtr<T>` / `WeakSpan<T>` | `.empty()`, `.upgrade()` |
-| `Gpu` | `Gpu.new()`, `Gpu.new_at(index)`, `Gpu.new_for_window(window)`, `gpu.create_compute_pipeline(kernel)`, `gpu.create_image(...)` |
+| `Gpu` | `Gpu.new()`, `Gpu.new_at(index)`, `Gpu.new_for_window(window)`, `gpu.compute_workgroup_size()`, `gpu.create_compute_pipeline(kernel)`, `gpu.create_image(...)` |
 | `GpuPtr<T>` | `gpu.create(value)`, `.load()`, `.store(value)`, `.replace(value)`, `.slice(start, length)`, `.read_only()`, `.write_only()` |
 | `GpuSpan<T>` | `gpu.alloc::<T>(count)`, `gpu.alloc_in::<T>(count, memory)`, `.at(index)`, `.slice(start, length)`, `.copy_to(destination)`, `.read_only()`, `.write_only()` |
 | `GpuComputePipeline<Root, Owner>` / `GpuGraphicsPipeline<Root, Owner>` | `gpu.create_compute_pipeline(kernel)`, `gpu.create_graphics_pipeline(vertex, fragment)` |

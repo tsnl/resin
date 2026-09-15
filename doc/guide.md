@@ -937,10 +937,12 @@ def kernel(index: ulong, root: Ptr<Params>) -> () = {
 
 The entry interfaces are:
 
-- Compute takes `(ulong, Ptr<T>)` and returns `()`. The builtin `ulong` constant
-  `compute_workgroup_size` gives the number of invocations per workgroup (currently 64)
-  on both host and shader, without an import. Compute dispatch groups with
-  `uint((count + compute_workgroup_size - 1_ul) / compute_workgroup_size)`.
+- Compute takes `(ulong, Ptr<T>)` and returns `()`. Call `gpu.compute_workgroup_size()`
+  to get the `ulong` number of invocations per workgroup for that `Gpu`. The runtime
+  selects it from the device's reported default subgroup size, bounded by its workgroup
+  limits, and specializes each compute pipeline to match. The value stays fixed for
+  that GPU's lifetime. With `var workgroup_size = gpu.compute_workgroup_size();`, compute
+  dispatch groups with `uint((count + workgroup_size - 1_ul) / workgroup_size)`.
   The index is the global X invocation index. Dispatch only in X (`y = z = 1`) and guard
   any excess invocations in the function, as above.
 - Vertex takes an `int` vertex index, optionally paired with `Ptr<T>`, and returns
@@ -1036,7 +1038,7 @@ with smooth per-pixel normals, an upper-left light, and specular highlights. Per
 and distance fog distinguish near and far particles. Each sphere uses an eight-triangle octagon
 (24 million vertices per frame); the silhouette is approximate, and overlaps still follow draw
 order because the renderer has no depth buffer. Compute and graphics share a 24 MB particle
-buffer, with constant-time vertex indexing and 15,625 compute workgroups per frame. Pipelines
+buffer, with constant-time vertex indexing and compute dispatch sized for the selected GPU. Pipelines
 and allocations are reused.
 
 The heatmap anchors are **20, 45, 65, 115, and 220 units per simulation second**. These

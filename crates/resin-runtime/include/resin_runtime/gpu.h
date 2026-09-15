@@ -88,6 +88,15 @@ ResinStatus resin_gpu_create(ResinGpu **out_gpu);
 ResinStatus resin_gpu_create_at(uint32_t index, ResinGpu **out_gpu);
 void resin_gpu_destroy(ResinGpu *gpu);
 
+/* X invocations per workgroup for Resin compute pipelines; Y and Z are one.
+   Selected from the device's default subgroup size and workgroup limits.
+   Stable for the GPU lifetime. Returns zero for a null GPU. */
+uint32_t resin_gpu_compute_workgroup_size(const ResinGpu *gpu);
+
+/* Compute pipelines specialize this uint32_t constant to the GPU's workgroup
+   width. Raw shaders with a fixed local size keep their declared dimensions. */
+#define RESIN_COMPUTE_WORKGROUP_SIZE_SPEC_ID 0
+
 /* `alignment` applies to the device address; 0 means 16. */
 ResinStatus resin_gpu_malloc(
     ResinGpu *gpu,

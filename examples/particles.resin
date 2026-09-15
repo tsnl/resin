@@ -280,6 +280,8 @@ def main() -> Result<(), _> = {
 	var window = Window.new(1280, 800, String.from_str(title))?;
 
 	var gpu = Gpu.new_for_window(window)?;
+	var workgroup_size = gpu.compute_workgroup_size();
+	var groups = uint((ulong(count) + workgroup_size - 1_ul) / workgroup_size);
 
 	var compute = gpu.create_compute_pipeline(kernel)?;
 
@@ -358,7 +360,7 @@ def main() -> Result<(), _> = {
 		var commands = gpu.start_command_recording()?;
 
 		if (!paused) {
-			commands.dispatch(compute, root, (count + 63_ui) / 64_ui, 1, 1)?;
+			commands.dispatch(compute, root, groups, 1, 1)?;
 		};
 		commands.begin_rendering(image, 0.004_f, 0.008_f, 0.02_f, 1.0_f)?;
 		commands.draw(graphics, root, count * 24_ui)?;

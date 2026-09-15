@@ -108,5 +108,5 @@ quiet during measurement.
    runtime inputs observable and define exact output semantics; do not use an
    example program as the benchmark implementation.
 3. Run small CPU and GPU correctness checks, including a count that is not a
-   multiple of the 64-invocation workgroup size. Document the workload and timing
+   multiple of the selected GPU's workgroup size. Document the workload and timing
    interpretation here, then collect ordinary-sized measurements separately.
