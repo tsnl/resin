@@ -27,7 +27,7 @@ struct Options {
     library_root: Option<PathBuf>,
 }
 
-pub(crate) fn run(default_library_root: PathBuf) -> Result<i32> {
+pub(crate) fn run(project: PathBuf, default_library_root: PathBuf) -> Result<i32> {
     let (connection, io) = Connection::stdio();
     let (id, params) = connection.initialize_start()?;
     let params: lsp_types::InitializeParams = serde_json::from_value(params)?;
@@ -38,7 +38,11 @@ pub(crate) fn run(default_library_root: PathBuf) -> Result<i32> {
         .map(serde_json::from_value)
         .transpose()?
         .unwrap_or_default();
-    let library_root = options.library_root.unwrap_or(default_library_root);
+    let library_root = match options.library_root {
+        Some(path) if path.is_absolute() => path,
+        Some(path) => project.join(path),
+        None => default_library_root,
+    };
     let capabilities = lsp_types::ServerCapabilities {
         position_encoding: Some(lsp_types::PositionEncodingKind::UTF16),
         text_document_sync: Some(
@@ -272,7 +276,7 @@ impl State {
         else {
             return self.send(Response::new_ok(id, Value::Null));
         };
-        let Some(text) = self.texts.get(analysis.entry()) else {
+        let Some(text) = self.texts.get(analysis.source()) else {
             return self.send(Response::new_ok(id, Value::Null));
         };
         let Some(offset) = text.offset(query.position) else {
@@ -284,7 +288,7 @@ impl State {
         };
         let result = match query.method.as_str() {
             "textDocument/hover" => {
-                serde_json::to_value(analysis.hover(analysis.entry(), offset).map(|hover| {
+                serde_json::to_value(analysis.hover(analysis.source(), offset).map(|hover| {
                     lsp_types::Hover {
                         contents: lsp_types::HoverContents::Markup(lsp_types::MarkupContent {
                             kind: lsp_types::MarkupKind::Markdown,
@@ -296,12 +300,12 @@ impl State {
             }
             "textDocument/definition" => serde_json::to_value(
                 analysis
-                    .definition(analysis.entry(), offset)
+                    .definition(analysis.source(), offset)
                     .and_then(|location| self.location(&location)),
             )?,
             "textDocument/completion" => {
                 let items = analysis
-                    .completions(analysis.entry(), offset)
+                    .completions(analysis.source(), offset)
                     .into_iter()
                     .enumerate()
                     .map(|(index, item)| lsp_types::CompletionItem {

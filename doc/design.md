@@ -118,7 +118,7 @@ one text version; a replacement keeps the logical source ID and leaves the old
 version usable. Names serve diagnostics and need not be paths or unique. Locations
 retain the source alongside a byte span, so their meaning survives later edits.
 
-`resin_compiler::Compiler::compile(entry, loader, targets)` resolves imports and returns an
+`resin_compiler::Compiler::compile(source, loader, targets)` resolves imports and returns an
 `Arc<Compilation>` containing completed phase products and editor facts. The concrete
 `resin_source::Loader` supplies files, registered buffer text, and explicit import
 bindings. It resolves relative and `$/` imports and reuses unchanged source

@@ -57,7 +57,7 @@ pub fn source_module(text: &str) -> Result<resin_lir::Module, SourceError> {
 /// Load a file and its explicit imports, then lower the HIR already built by analysis.
 pub fn file_module(path: &Path) -> Result<resin_lir::Module, SourceError> {
     let compilation = analyze_file(path)?;
-    lower_program(compilation.hir()?, compilation.entry())
+    lower_program(compilation.hir()?, compilation.source())
 }
 
 fn lower_program(

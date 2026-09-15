@@ -105,7 +105,8 @@ parses flags and chooses `Interpreter`, `Formatter`, or `LanguageServer`;
 Interpreter mode builds a host program. Without `--output` it uses the debug cache
 and runs the executable; with `--output` (or `-o`) it builds an optimized executable
 and copies it to the selected destination without running it.
-`resin --lsp DIR` runs the language server in that project directory.
+`resin --lsp DIR` serves the language server for that project directory
+without changing the process working directory.
 
 The platform toolchain's [Environment](crates/resin-toolchain/src/lib.rs)
 captures environment variables, the working directory, and executable/temp paths once.
@@ -120,16 +121,12 @@ use the same captured environment.
 
 The CLI's private [Request](src/cli/request.rs) validates the input/output combination,
 resolves directory destinations, and rejects outputs that would overwrite the source.
-It also owns the library root and the host target selected by `FILE[:ENTRY]`.
-The CLI [compiler](src/cli/compiler.rs) module loads that request, then
-[resin_source::Loader](crates/resin-source/src/lib.rs) reads the entry into an immutable `Source`.
-`Compiler::compile(entry, &mut loader, &request.targets)` resolves imports and returns an
-`Arc<Compilation>` containing analysis and phase products.
-
-The CLI passes `compilation.verified()` to
-[codegen](crates/resin-codegen/src/lib.rs), which writes C, requested SPIR-V, and
-`build.ninja` in one operation. It then asks `Toolchain::build` to execute that
-project. The toolchain supplies native command rules in `toolchain.ninja`. Ninja optimizes
+It also owns the library root. The CLI [Compiler](src/cli/compiler.rs) loads that
+request: [resin_source::Loader](crates/resin-source/src/lib.rs) reads the file into
+an immutable `Source`, `resin_compiler::Compiler::compile(source, loader, targets)`
+resolves imports and returns an `Arc<Compilation>`, codegen writes C/SPIR-V/Ninja
+into a stable folder under `build/`, and the toolchain stages that project.
+If `-o` is set, the cached executable is copied there; otherwise it is run. The toolchain supplies native command rules in `toolchain.ninja`. Ninja optimizes
 SPIR-V, invokes this Resin executable with `--embed` to make
 C headers, and compiles and links the host program. The executable path comes from
 the platform's `current_exe` API, keeping embedding on the same Resin version.
@@ -312,7 +309,7 @@ recovery compiler or fallback declaration index.
 
 The [language server library](crates/resin-lsp/README.md) adapts that compiler state to
 the Language Server Protocol over stdio. `resin --lsp DIR` invokes it inside the same
-executable that builds programs. [server.rs](crates/resin-lsp/src/server.rs)
+executable that builds programs, without changing the process working directory. [server.rs](crates/resin-lsp/src/server.rs)
 handles requests, document versions, and file notifications;
 [text.rs](crates/resin-lsp/src/text.rs) converts byte offsets to UTF-16 positions.
 [worker.rs](crates/resin-lsp/src/worker.rs) retains a compiler and loader in

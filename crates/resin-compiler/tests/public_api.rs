@@ -31,7 +31,7 @@ fn unchanged_graph_reuses_the_completed_result_after_resolving_imports() {
     valid(&first);
     let second = compiler.analyze(entry.clone(), &mut loader);
     assert!(Arc::ptr_eq(&first, &second));
-    assert_eq!(second.entry(), &entry);
+    assert_eq!(second.source(), &entry);
     assert_eq!(sources(&second), [entry, dependency].into());
 }
 
@@ -57,7 +57,7 @@ fn changing_a_transitive_source_invalidates_an_unchanged_entry() {
     let after = compiler.analyze(entry.clone(), &mut loader);
     assert!(!Arc::ptr_eq(&before, &after));
     assert!(after.hir().is_err());
-    assert_eq!(after.entry(), &entry);
+    assert_eq!(after.source(), &entry);
     assert!(sources(&before).contains(&leaf));
     assert!(sources(&after).contains(&changed));
     assert!(!sources(&after).contains(&leaf));

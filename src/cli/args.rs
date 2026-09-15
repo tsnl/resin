@@ -6,9 +6,6 @@ use resin_toolchain::CProfile;
 use std::{ffi::OsString, path::PathBuf};
 
 pub enum Mode {
-    /// Build a host program. `request.destination` is the compile-only flag:
-    /// `None` runs the debug executable with `args`; `Some` copies the release
-    /// executable without running it.
     Interpreter {
         request: Box<Request>,
         args: Vec<OsString>,
@@ -24,6 +21,7 @@ pub enum Mode {
     },
     LanguageServer {
         directory: PathBuf,
+        library_root: PathBuf,
     },
 }
 
@@ -110,7 +108,10 @@ impl Cli {
         if !directory.is_dir() {
             return Err(format!("LSP project is not a directory: {}", directory.display()).into());
         }
-        Ok(Mode::LanguageServer { directory })
+        Ok(Mode::LanguageServer {
+            directory,
+            library_root: environment.path("RESIN_LIBRARY_ROOT", resin_source::library_root()),
+        })
     }
 
     fn formatter(self, environment: &Environment) -> Result<Mode> {
@@ -170,7 +171,6 @@ impl CompileOptions {
                 directory: environment.directory.clone(),
                 profile,
                 tools,
-                temporary: environment.temporary.clone(),
             },
             environment.path("RESIN_LIBRARY_ROOT", resin_source::library_root()),
         )

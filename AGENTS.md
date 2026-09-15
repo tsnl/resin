@@ -217,9 +217,11 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Keep `src/main.rs` as a wrapper around `resin::cli::main`; argument-to-`Mode` dispatch
   lives in `src/cli/`. Capture process settings through the platform toolchain's
   `Environment`, then choose CLI defaults and the build profile explicitly.
-  Validate file selections and output destinations in the CLI. `Compiler::compile`
-  consumes immutable sources, a loader, and explicit targets to produce a `Compilation`. The separate
-  `resin_codegen::generate` operation takes verified LIR and writes C, unoptimized SPIR-V, and a Ninja
+  Validate file selections and output destinations in the CLI. The CLI `Compiler`
+  owns host compilation from source to executable. `resin_compiler::Compiler::compile`
+  consumes an immutable source, a loader, and explicit host/shader targets to produce a
+  `Compilation`. The separate `resin_codegen::generate` operation takes verified LIR and
+  writes C, unoptimized SPIR-V, and a Ninja
   dependency graph to disk in one call. Target representations and individual emitters stay private.
   `resin-toolchain` stages that directory, configures native tools, and invokes Ninja.
   The toolchain owns native command rules. The graph optimizes SPIR-V with `spirv-opt`,

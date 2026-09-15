@@ -241,7 +241,7 @@ Replacing its text creates a new version; existing diagnostics keep the old hand
 and their byte spans still describe the original text. The compiler does not need
 a mutable path-to-text table to recover what those locations mean.
 
-`Compiler::compile(entry, loader, targets)` makes the next boundary explicit: the compiler
+`Compiler::compile(source, loader, targets)` makes the next boundary explicit: the compiler
 uses the concrete `resin_source::Loader` to obtain imports, then sequences the language
 passes. The loader knows file references, supplied buffers, and explicit source
 bindings. Its operations establish source lookup directly. The compiler caches those

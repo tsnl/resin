@@ -26,10 +26,10 @@ pub fn main() -> ! {
 fn try_main() -> Result<i32> {
     let env = Environment::capture()?;
     let args = args::parse(std::env::args_os(), &env)?;
-    dispatch_by_mode(args, env)
+    dispatch_by_mode(args)
 }
 
-fn dispatch_by_mode(mode: Mode, env: Environment) -> Result<i32> {
+fn dispatch_by_mode(mode: Mode) -> Result<i32> {
     match mode {
         Mode::Interpreter { request, args } => compiler::run(&request, &args),
         Mode::Embed {
@@ -38,9 +38,9 @@ fn dispatch_by_mode(mode: Mode, env: Environment) -> Result<i32> {
             symbol,
         } => embed::run(&input, &output, &symbol),
         Mode::Formatter { paths, check } => format::run(&paths, check),
-        Mode::LanguageServer { directory } => {
-            std::env::set_current_dir(directory)?;
-            resin_lsp::serve(env.path("RESIN_LIBRARY_ROOT", resin_source::library_root()))
-        }
+        Mode::LanguageServer {
+            directory,
+            library_root,
+        } => resin_lsp::serve(directory, library_root),
     }
 }

@@ -112,8 +112,8 @@ fn retained_compilations_build_their_own_source_version_after_later_edits() {
             entry: "main".into(),
         }],
     );
-    assert_eq!(first.entry().id(), second.entry().id());
-    assert_ne!(first.entry(), second.entry());
+    assert_eq!(first.source().id(), second.source().id());
+    assert_ne!(first.source(), second.source());
     fs::remove_file(path).unwrap();
     for (compilation, code) in [(second, 42), (first, 41)] {
         let artifact = build(&compilation, &environment, CProfile::Debug);

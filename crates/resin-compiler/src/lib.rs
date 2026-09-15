@@ -1,6 +1,6 @@
 //! Compile immutable named sources, retaining phase products and editor queries.
 //!
-//! Loaders discover imports. The compiler has no filesystem, editor buffers, or
+//! Loaders discover imports. This frontend has no filesystem, editor buffers, or
 //! change notifications. Each call resolves the dependency graph before reusing
 //! work. Codegen and native builds consume its verified output separately.
 //!
@@ -42,7 +42,7 @@ pub enum Target {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Request {
     Declarations,
-    Targets { entries: Vec<Target> },
+    Targets { targets: Vec<Target> },
 }
 
 /// Reusable compilation caches. Sources and compilations are immutable.
@@ -66,52 +66,76 @@ impl Compiler {
     /// Target-specific operation diagnostics require `compile` with explicit targets.
     pub fn analyze(
         &mut self,
-        entry: Source,
+        source: Source,
         loader: &mut resin_source::Loader,
     ) -> Arc<Compilation> {
-        self.construct(entry, loader, Request::Declarations)
+        self.compile_request(source, loader, Request::Declarations)
     }
 
     /// Resolve all imports, then reuse or construct the requested target program.
     /// Source and import errors are retained as diagnostics in the result.
     pub fn compile(
         &mut self,
-        entry: Source,
+        source: Source,
         loader: &mut resin_source::Loader,
         targets: &[Target],
     ) -> Arc<Compilation> {
-        let mut entries = targets.to_vec();
-        entries.sort();
-        entries.dedup();
-        self.construct(entry, loader, Request::Targets { entries })
+        let mut targets = targets.to_vec();
+        targets.sort();
+        targets.dedup();
+        self.compile_request(source, loader, Request::Targets { targets })
     }
 
-    fn construct(
+    fn compile_request(
         &mut self,
-        entry: Source,
+        source: Source,
         loader: &mut resin_source::Loader,
         request: Request,
     ) -> Arc<Compilation> {
-        let loaded = self.load_sources(entry.clone(), loader);
-        self.checked
-            .retain(|id, old| *id == entry.id() || Arc::strong_count(old) > 1);
-        let old = self.checked.get(&entry.id());
+        let loaded = self.load_sources(source.clone(), loader);
+        let mut checked = live_compilations(&self.checked, source.id());
         if loaded.errors.is_empty()
-            && let Some(old) = old.filter(|old| old.matches(&loaded, &request))
+            && let Some(old) = checked
+                .get(&source.id())
+                .filter(|old| old.matches(&loaded, &request))
         {
-            return old.clone();
+            let reused = old.clone();
+            self.checked = checked;
+            self.parsed = live_documents(&self.parsed);
+            return reused;
         }
-        let result = Arc::new(Compilation::new(
-            entry.clone(),
+        let result = Arc::new(Compilation::from_loaded(
+            source.clone(),
             loaded,
             &self.config,
             request,
         ));
-        self.checked.insert(entry.id(), result.clone());
-        self.parsed
-            .retain(|_, document| document.strong_count() > 0);
+        checked.insert(source.id(), result.clone());
+        self.checked = checked;
+        self.parsed = live_documents(&self.parsed);
         result
     }
+}
+
+fn live_compilations(
+    previous: &BTreeMap<SourceId, Arc<Compilation>>,
+    source: SourceId,
+) -> BTreeMap<SourceId, Arc<Compilation>> {
+    previous
+        .iter()
+        .filter(|(id, compilation)| **id == source || Arc::strong_count(compilation) > 1)
+        .map(|(id, compilation)| (*id, compilation.clone()))
+        .collect()
+}
+
+fn live_documents(
+    previous: &BTreeMap<SourceId, Weak<ParsedDocument>>,
+) -> BTreeMap<SourceId, Weak<ParsedDocument>> {
+    previous
+        .iter()
+        .filter(|(_, document)| document.strong_count() > 0)
+        .map(|(id, document)| (*id, document.clone()))
+        .collect()
 }
 
 //
@@ -125,7 +149,7 @@ pub struct Diagnostic {
     pub related: Vec<SourceNote>,
 }
 
-/// Immutable phase products and editor facts for an entry and its imports.
+/// Immutable phase products and editor facts for a source and its imports.
 /// Failed later passes preserve successfully completed earlier products.
 ///
 /// ```compile_fail,E0596
@@ -134,7 +158,7 @@ pub struct Diagnostic {
 /// }
 /// ```
 pub struct Compilation {
-    entry: Source,
+    source: Source,
     documents: BTreeMap<Source, Arc<ParsedDocument>>,
     syntax: BTreeMap<Source, Arc<resin_cst::Document>>,
     diagnostics: Vec<Diagnostic>,
@@ -146,8 +170,8 @@ pub struct Compilation {
     module: Option<Result<resin_lir::VerifiedModule, SourceError>>,
 }
 impl Compilation {
-    pub fn entry(&self) -> &Source {
-        &self.entry
+    pub fn source(&self) -> &Source {
+        &self.source
     }
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
@@ -180,7 +204,7 @@ impl Compilation {
     ) -> Result<&Result<resin_lir::VerifiedModule, SourceError>, SourceError> {
         self.module.as_ref().ok_or_else(|| {
             SourceError::new(
-                self.entry.clone(),
+                self.source.clone(),
                 None,
                 "declaration analysis did not request a LIR artifact".into(),
             )
@@ -205,7 +229,7 @@ impl Compilation {
 //
 
 impl Compiler {
-    fn load_sources(&mut self, entry: Source, loader: &mut resin_source::Loader) -> Loaded {
+    fn load_sources(&mut self, source: Source, loader: &mut resin_source::Loader) -> Loaded {
         let mut traversal = ImportTraversal {
             loader,
             compiler: self,
@@ -221,7 +245,7 @@ impl Compiler {
             versions: BTreeMap::new(),
             resolutions: BTreeMap::new(),
         };
-        if let Err(error) = traversal.visit(entry) {
+        if let Err(error) = traversal.visit(source) {
             traversal.result.errors.push(error);
         }
         traversal.result
@@ -243,50 +267,82 @@ impl Compilation {
         &self.request == request && self.program.is_ok() && self.graph == loaded.graph()
     }
 
-    fn new(entry: Source, loaded: Loaded, config: &CompilerConfig, request: Request) -> Self {
+    fn from_loaded(
+        source: Source,
+        loaded: Loaded,
+        config: &CompilerConfig,
+        request: Request,
+    ) -> Self {
         let graph = loaded.graph();
+        let syntax = loaded
+            .documents
+            .iter()
+            .map(|(source, document)| (source.clone(), document.syntax.clone()))
+            .collect();
         let load_error = loaded.errors.first().cloned();
-        let mut checked = resin_hir::analyze_program(&loaded.program);
-        let hir_error = load_error
-            .clone()
-            .or_else(|| checked.diagnostics.first().cloned());
-        let mut lowered = None;
-        if let Some(hir) = &checked.module
-            && let Request::Targets { entries } = &request
-        {
-            match lower_to_verified_lir(&loaded.program, hir, config, entries) {
-                Ok(module) => lowered = Some(module),
-                Err(errors) => checked.diagnostics.extend(errors),
-            }
-        }
+        let analysis = analyze_loaded(&loaded.program, config, &request);
+        let hir_error = load_error.clone().or(analysis.hir_error);
         let errors = loaded
             .errors
             .into_iter()
-            .chain(checked.diagnostics)
+            .chain(analysis.diagnostics)
             .collect::<Vec<_>>();
         let compile_error = errors.first().cloned();
         Self {
-            entry,
-            syntax: loaded
-                .documents
-                .iter()
-                .map(|(source, document)| (source.clone(), document.syntax.clone()))
-                .collect(),
+            source,
+            syntax,
             documents: loaded.documents,
             graph,
             diagnostics: errors.into_iter().map(diagnostic).collect(),
-            semantics: checked.semantics,
+            semantics: analysis.semantics,
             program: load_error.map_or(Ok(loaded.program), Err),
-            hir: hir_error.map_or_else(|| Ok(checked.module.expect("successful HIR")), Err),
+            hir: hir_error.map_or_else(|| Ok(analysis.hir.expect("successful HIR")), Err),
             module: match &request {
                 Request::Declarations => None,
                 Request::Targets { .. } => Some(compile_error.map_or_else(
-                    || Ok(lowered.expect("successful compilation has verified LIR")),
+                    || {
+                        Ok(analysis
+                            .lir
+                            .expect("successful compilation has verified LIR"))
+                    },
                     Err,
                 )),
             },
             request,
         }
+    }
+}
+
+struct Analyzed {
+    semantics: resin_hir::Analysis,
+    diagnostics: Vec<SourceError>,
+    hir: Option<resin_hir::Module>,
+    hir_error: Option<SourceError>,
+    lir: Option<resin_lir::VerifiedModule>,
+}
+
+fn analyze_loaded(
+    program: &resin_ast::Program,
+    config: &CompilerConfig,
+    request: &Request,
+) -> Analyzed {
+    let mut checked = resin_hir::analyze_program(program);
+    let hir_error = checked.diagnostics.first().cloned();
+    let mut lir = None;
+    if let Some(hir) = &checked.module
+        && let Request::Targets { targets } = request
+    {
+        match lower_to_verified_lir(program, hir, config, targets) {
+            Ok(module) => lir = Some(module),
+            Err(errors) => checked.diagnostics.extend(errors),
+        }
+    }
+    Analyzed {
+        semantics: checked.semantics,
+        diagnostics: checked.diagnostics,
+        hir: checked.module,
+        hir_error,
+        lir,
     }
 }
 
@@ -396,7 +452,7 @@ impl ImportTraversal<'_> {
         );
         self.result.documents.insert(source.clone(), document);
         self.active.push(source.clone());
-        self.imports(&mut module);
+        self.visit_imports(&mut module);
         self.active.pop();
         let id = self.result.program.modules.len();
         self.result.program.modules.push(module);
@@ -415,7 +471,7 @@ impl ImportTraversal<'_> {
             .clone()
     }
 
-    fn imports(&mut self, module: &mut resin_ast::SourceModule) {
+    fn visit_imports(&mut self, module: &mut resin_ast::SourceModule) {
         for import in &module.file.imports {
             let start = self.result.errors.len();
             let imported = self

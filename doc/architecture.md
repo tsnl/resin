@@ -408,7 +408,7 @@ fn main() {
     let mut compiler = resin_compiler::Compiler::new();
     let compilation = compiler.analyze(entry.clone(), &mut loader);
     assert!(compilation.diagnostics().is_empty(), "{:?}", compilation.diagnostics());
-    assert_eq!(compilation.entry(), &entry);
+    assert_eq!(compilation.source(), &entry);
 }
 ```
 
@@ -437,9 +437,10 @@ syntax caching, HIR/LIR generation, verification, and retained query access.
 `Compilation::verified()` supplies the certificate for codegen without reloading sources.
 The CLI's private [Request](../src/cli/request.rs) resolves source and destination choices
 against the captured working directory, including output naming and ancestor validation.
-It owns the library root and host target for that request. Argument parsing passes the
-original paths to this boundary. The CLI [compiler](../src/cli/compiler.rs) module
-loads the request and drives codegen and the native build. Native compiler search paths
+It owns the library root for that request. Argument parsing passes the original paths
+to this boundary. The CLI [Compiler](../src/cli/compiler.rs) lowers the request,
+writes generated sources to a stable `build/` folder, and drives the native build.
+Native compiler search paths
 retain their meaning relative to that captured directory; Ninja resolves discovered header
 dependencies in the directory where it runs the compiler.
 
@@ -466,8 +467,8 @@ with the same logical ID, leaving the original intact. Equality identifies versi
 equal text or equal diagnostic names do not make independently created sources equal.
 Names have no filesystem meaning inside the compiler.
 
-`Compiler::compile(entry, loader, targets)` returns an `Arc<Compilation>` for explicit
-`Target::Host` and `Target::Shader` exported entries. `Compiler::analyze(entry, loader)`
+`Compiler::compile(source, loader, targets)` returns an `Arc<Compilation>` for explicit
+`Target::Host` and `Target::Shader` exported entries. `Compiler::analyze(source, loader)`
 retains HIR and editor facts without a LIR artifact; requesting `module()` or `verified()`
 from that result returns an error without adding a source diagnostic. An empty compile
 target set is an error, not an analysis request. Each operation resolves

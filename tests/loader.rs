@@ -39,7 +39,7 @@ fn unchanged_roots_follow_retargeted_import_symlinks_without_notifications() {
         second.diagnostics()
     );
     assert!(!Arc::ptr_eq(&first, &second));
-    assert_eq!(first.entry(), second.entry());
+    assert_eq!(first.source(), second.source());
     for (compilation, expected) in [(first, Type::Int32), (second, Type::Int64)] {
         let module = compilation.hir().unwrap();
         let function = module
@@ -122,7 +122,7 @@ fn custom_library_root_edits_recompile_an_unchanged_entry() {
     .unwrap();
     let after = compiler.analyze(source, &mut loader);
     assert!(after.diagnostics().is_empty(), "{:?}", after.diagnostics());
-    assert_eq!(before.entry(), after.entry());
+    assert_eq!(before.source(), after.source());
     assert!(!Arc::ptr_eq(&before, &after));
     for (compilation, expected) in [(before, Type::Int32), (after, Type::Int64)] {
         let module = compilation.hir().unwrap();

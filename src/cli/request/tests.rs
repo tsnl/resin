@@ -12,7 +12,6 @@ fn options(environment: &Environment, profile: CProfile) -> Options {
     Options {
         directory: environment.directory.clone(),
         profile,
-        temporary: environment.temporary.clone(),
         tools: environment.toolchain(None, None),
     }
 }
@@ -109,12 +108,6 @@ fn requests_resolve_executable_directories_and_preserve_file_destinations() {
     .unwrap();
     assert_eq!(request.destination.as_deref(), Some(output.as_path()));
     assert_eq!(request.library_root, resin_source::library_root());
-    assert_eq!(
-        request.targets,
-        [resin_compiler::Target::Host {
-            entry: "demo".into()
-        }]
-    );
     assert!(
         !temp.path().join("new").exists(),
         "construction must not build anything"

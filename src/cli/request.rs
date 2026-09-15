@@ -9,7 +9,6 @@ pub struct Options {
     pub directory: PathBuf,
     pub profile: resin_toolchain::CProfile,
     pub tools: resin_toolchain::Toolchain,
-    pub temporary: PathBuf,
 }
 
 /// Paths resolve once against the captured directory before compilation starts.
@@ -18,7 +17,6 @@ pub struct Request {
     pub destination: Option<PathBuf>,
     pub options: Options,
     pub library_root: PathBuf,
-    pub targets: Vec<resin_compiler::Target>,
 }
 
 impl Request {
@@ -32,16 +30,12 @@ impl Request {
         let destination = destination
             .map(|path| validate_destination(&input, &source, &options.directory, &path))
             .transpose()?;
-        let targets = vec![resin_compiler::Target::Host {
-            entry: input.entry.clone().into(),
-        }];
         input.path = source;
         Ok(Self {
             input,
             destination,
             options,
             library_root,
-            targets,
         })
     }
 }
