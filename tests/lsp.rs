@@ -25,6 +25,15 @@ impl Client {
     }
 
     fn start_with_library_root(root: &Path, options: Value, library_root: Option<&Path>) -> Self {
+        Self::start_with_compiler(root, options, library_root, None)
+    }
+
+    fn start_with_compiler(
+        root: &Path,
+        options: Value,
+        library_root: Option<&Path>,
+        compiler: Option<&Path>,
+    ) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_resin"));
         command
             .arg("--lsp")
@@ -35,6 +44,9 @@ impl Client {
             .stderr(Stdio::inherit());
         if let Some(library_root) = library_root {
             command.env("RESIN_LIBRARY_ROOT", library_root);
+        }
+        if let Some(compiler) = compiler {
+            command.env("CC", compiler);
         }
         let mut child = command.spawn().unwrap();
         let input = child.stdin.take().unwrap();
@@ -702,5 +714,208 @@ fn holes_do_not_block_later_features_and_repair_clears_diagnostics() {
         at(&uri, 0, unknown.rfind("count").unwrap() as u32 + 2),
     );
     assert!(completion["items"].as_array().unwrap().is_empty());
+    client.stop();
+}
+
+#[test]
+fn editor_builds_use_disk_and_preserve_dirty_buffers_across_saves() {
+    let temp = TempDir::new().unwrap();
+    let main_path = temp.path().join("main.resin");
+    let helper_path = temp.path().join("helper.resin");
+    let main = "export { main }; import { \"helper.resin\" }; def main() -> int = { value() };";
+    let helper = "export { value }; def value() -> int = { 7 };";
+    std::fs::write(&main_path, main).unwrap();
+    std::fs::write(&helper_path, helper).unwrap();
+    let main_uri = uri(&main_path);
+    let helper_uri = uri(&helper_path);
+    let mut client = Client::start(temp.path(), Value::Null);
+    client.open(&main_uri, main);
+    let dirty = "export { value }; def value() -> bool = { 1 == 1 };";
+    client.open(&helper_uri, dirty);
+    client.diagnostics(&main_uri, Some(1), true);
+    let output = temp
+        .path()
+        .join(format!("program{}", std::env::consts::EXE_SUFFIX));
+    let result = client.request(
+        "workspace/executeCommand",
+        json!({
+            "command": "resin.build", "arguments": [{
+                "uri": main_uri, "destination": output, "profile": "debug"
+            }]
+        }),
+    );
+    assert_eq!(result["outputUri"], uri(&output));
+    assert_eq!(Command::new(&output).status().unwrap().code(), Some(7));
+    assert_eq!(std::fs::read_to_string(&helper_path).unwrap(), helper);
+
+    // Saving the main file must preserve the helper's unsaved bool signature.
+    client.notify(
+        "textDocument/didSave",
+        json!({"textDocument": {"uri": main_uri}}),
+    );
+    let hover = client.request(
+        "textDocument/hover",
+        at(&helper_uri, 0, dirty.find("value()").unwrap() as u32),
+    );
+    assert!(
+        hover["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("bool")
+    );
+    client.notify(
+        "textDocument/didClose",
+        json!({"textDocument": {"uri": helper_uri}}),
+    );
+    client.diagnostics(&main_uri, Some(1), false);
+    client.stop();
+}
+
+#[test]
+fn editor_build_destinations_are_required_and_cannot_replace_inputs() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("main.resin");
+    let source = "export { main }; def main() -> int = { 0 };";
+    std::fs::write(&path, source).unwrap();
+    let source_uri = uri(&path);
+    let mut client = Client::start(temp.path(), Value::Null);
+    let missing = client.response(
+        "workspace/executeCommand",
+        json!({
+            "command": "resin.build", "arguments": [{"uri": source_uri}]
+        }),
+    );
+    assert!(missing.error.is_some());
+    let overwrite = client.response(
+        "workspace/executeCommand",
+        json!({
+            "command": "resin.build", "arguments": [{"uri": source_uri, "destination": path}]
+        }),
+    );
+    assert!(overwrite.error.unwrap().message.contains("overwrite"));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
+    client.stop();
+}
+
+#[cfg(unix)]
+#[test]
+fn editor_queries_and_cancellation_stay_responsive_during_native_work() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("main.resin");
+    let source = "export { main }; def main() -> int = { 7 };";
+    std::fs::write(&path, source).unwrap();
+    let compiler = temp.path().join("compiler");
+    let marker = temp.path().join("compiler-started");
+    let release = temp.path().join("release");
+    let real = std::env::var_os("CC").unwrap_or_else(|| "cc".into());
+    // Positional arguments and single-quoted paths keep the test wrapper literal.
+    fn quote(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+    let script = format!(
+        "#!/bin/sh\nfor argument in \"$@\"; do\n if [ \"$argument\" = -E ]; then exec {} \"$@\"; fi\ndone\nprintf '%s' \"$$\" > {}\nwhile [ ! -e {} ]; do sleep 0.01; done\nexec {} \"$@\"\n",
+        quote(&real.to_string_lossy()),
+        quote(&marker.to_string_lossy()),
+        quote(&release.to_string_lossy()),
+        quote(&real.to_string_lossy())
+    );
+    std::fs::write(&compiler, script).unwrap();
+    std::fs::set_permissions(&compiler, std::fs::Permissions::from_mode(0o755)).unwrap();
+    struct Release(std::path::PathBuf);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            let _ = std::fs::write(&self.0, "");
+        }
+    }
+    let _release = Release(release);
+    let mut client = Client::start_with_compiler(temp.path(), Value::Null, None, Some(&compiler));
+    let source_uri = uri(&path);
+    client.open(&source_uri, source);
+    client.diagnostics(&source_uri, Some(1), false);
+    let output = temp.path().join("program");
+    client.send(Message::Request(Request::new(
+        900.into(),
+        "workspace/executeCommand".into(),
+        json!({
+            "command": "resin.build", "arguments": [{"uri": source_uri, "destination": output}]
+        }),
+    )));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !marker.exists() {
+        assert!(Instant::now() < deadline, "native compiler did not start");
+        thread::sleep(Duration::from_millis(10));
+    }
+    let hover = client.request(
+        "textDocument/hover",
+        at(&source_uri, 0, source.find("main()").unwrap() as u32),
+    );
+    assert!(hover["contents"]["value"].as_str().unwrap().contains("int"));
+    client.notify("$/cancelRequest", json!({"id": 900}));
+    let cancelled = client.wait_for(
+        |message| matches!(message, Message::Response(response) if response.id == 900.into()),
+    );
+    let Message::Response(cancelled) = cancelled else {
+        unreachable!()
+    };
+    assert_eq!(
+        cancelled.error.unwrap().code,
+        lsp_server::ErrorCode::RequestCanceled as i32
+    );
+    assert!(!output.exists());
+    client.stop();
+    let pid = std::fs::read_to_string(marker).unwrap();
+    let alive = Command::new("sh")
+        .args(["-c", "kill -0 \"$1\" 2>/dev/null", "check", &pid])
+        .status()
+        .unwrap()
+        .success();
+    assert!(!alive, "compiler survived LSP shutdown");
+}
+
+#[test]
+fn missing_parent_imports_recover_after_creation_deletion_and_alias_changes() {
+    let temp = TempDir::new().unwrap();
+    let child = temp.path().join("child");
+    std::fs::create_dir(&child).unwrap();
+    let entry = uri(&child.join("main.resin"));
+    let library = temp.path().join("lib.resin");
+    let library_uri = uri(&library);
+    let source = "import { \"../lib.resin\" }; def main() -> int = { answer() };";
+    let mut client = Client::start(&child, Value::Null);
+    client.open(&entry, source);
+    client.diagnostics(&entry, Some(1), true);
+    let library_text = "export { answer }; def answer() -> int = { 7 };";
+    std::fs::write(&library, library_text).unwrap();
+    client.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes": [{"uri": library_uri, "type": 1}]}),
+    );
+    client.diagnostics(&entry, Some(1), false);
+    let changed = source.replace("../lib.resin", "./../lib.resin");
+    client.change(&entry, 2, &changed);
+    client.diagnostics(&entry, Some(2), false);
+    let definition = client.request(
+        "textDocument/definition",
+        at(&entry, 0, changed.find("answer()").unwrap() as u32),
+    );
+    assert_eq!(definition["uri"], library_uri);
+    std::fs::remove_file(&library).unwrap();
+    client.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes": [{"uri": library_uri, "type": 3}]}),
+    );
+    client.diagnostics(&entry, Some(2), true);
+    std::fs::write(&library, library_text).unwrap();
+    client.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes": [{"uri": library_uri, "type": 1}]}),
+    );
+    client.diagnostics(&entry, Some(2), false);
+    let definition = client.request(
+        "textDocument/definition",
+        at(&entry, 0, changed.find("answer()").unwrap() as u32),
+    );
+    assert_eq!(definition["uri"], library_uri);
     client.stop();
 }

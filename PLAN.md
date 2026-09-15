@@ -1,6 +1,6 @@
 # Compiler service plan
 
-Status: **Phases 0–1 implemented and validated; Phases 2–3 remain planned.**
+Status: **Phases 0–2 implemented and validated; Phase 3 remains planned.**
 Implement **Phase 0, Phase 1, Phase 2, and Phase 3** in order.
 Each phase has separate acceptance criteria. Complete and validate a phase before
 starting the next. Record evidence in [the validation log](doc/compiler-service-validation.md).
@@ -412,21 +412,21 @@ native tooling lock-free.
 
 ### Phase 2 acceptance criteria
 
-- [ ] **P2.1** A new compilation reuses per-file outputs from multiple earlier
+- [x] **P2.1** A new compilation reuses per-file outputs from multiple earlier
       requests. Same-path different contents coexist; cache placement does not
       change semantics.
-- [ ] **P2.2** CAS races retain disjoint contributions when capacity permits and
+- [x] **P2.2** CAS races retain disjoint contributions when capacity permits and
       evict according to current recency otherwise. Retries preserve requested keys
       without resurrecting unrelated history or repeating completed/native work.
-- [ ] **P2.3** Eviction during analysis/build/artifact reads preserves held values;
+- [x] **P2.3** Eviction during analysis/build/artifact reads preserves held values;
       final-owner release reclaims them. Reconstructed sources still support queries
       against retained HIR. No cache predecessor chain keeps all generations alive.
-- [ ] **P2.4** LSP tests cover rapid edits, invalid code/repair, dependency changes,
+- [x] **P2.4** LSP tests cover rapid edits, invalid code/repair, dependency changes,
       missing files later created, aliases, parent imports, saves, and concurrent
       queries. Old results cannot replace current diagnostics.
-- [ ] **P2.5** Receive handling stays responsive; bounded jobs/queues, cancellation,
+- [x] **P2.5** Receive handling stays responsive; bounded jobs/queues, cancellation,
       and shutdown release owned work. No periodic eviction task is required.
-- [ ] **P2.6** Measure sustained editing, hit-only updates, map copies, CAS retries,
+- [x] **P2.6** Measure sustained editing, hit-only updates, map copies, CAS retries,
       retained snapshots, and memory reclamation. Record limitations of entry-count
       capacity; do not infer a hard memory bound from atomic publication.
 

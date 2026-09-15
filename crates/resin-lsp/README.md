@@ -1,7 +1,7 @@
 # Resin language server
 
 The `resin --lsp <directory>` mode provides diagnostics, hover, go-to-definition, basic completion, and formatting
-over stdio. Its background worker sequences explicit async CST, AST, and HIR passes.
+over stdio. Concurrent background tasks sequence explicit async CST, AST, and HIR passes.
 Semantic editor requests run parsing, resolution, and typing; they do not
 build C/SPIR-V, initialize a GPU, or run the program. Analysis accepts library
 modules without an exported entry function; runtime bindings belong inside
@@ -108,23 +108,61 @@ close notifications restore disk loading. Saves and file-watch notifications sch
 another analysis. Imports beginning with `$/` select the configured library root;
 other imports resolve relative to their importer.
 
-Every analysis resolves imports again before checking semantic caches, so new files,
-changed dependencies, and retargeted symlinks are observed without invalidation calls.
-The worker shares immutable `Cache<Source, Document>` and
-`Cache<Source, ModuleDocument>` snapshots across all roots, with capacity 4,096 files
-each. Its `Cache<SourceGraph, Hir>` retains up to 64 graph results. Requested values
-survive capacity overflow with a warning; obsolete values can be evicted on later
-updates. Retained editor results preserve their own sources and phase outputs.
-Filesystem acquisition errors are analyzed afresh because their details are request
-state, outside the semantic graph key. The loader still retains cached text and origin
-entries for every path encountered; closing a buffer clears supplied text without
-evicting that entry. Phase-cache capacities do not yet bound total LSP memory.
+Every analysis captures imports again before checking semantic caches. Current open
+registrations seed a request-owned loader; learned disk history is dropped after
+acquisition. Editing preserves the open registration's physical identity, while a
+close/reopen creates a new epoch and resolves its path again. Saves preserve other
+unsaved buffers. Closing a buffer removes its supplied registration.
+Identical open aliases share one physical registration until the last alias closes.
+Different text in two open aliases of the same physical file is rejected with both
+URI names, so import resolution never silently chooses one conflicting buffer.
 
-The worker owns a Tokio runtime and uses bounded `Execution` workers for CPU passes.
-Independent graph analyses share that bound. Superseded revisions and shutdown cancel
-pending work cooperatively; started synchronous parser calls may finish before their
-execution slots are released. Failed or cancelled analyses do not replace the current
-cache snapshots. There is no per-function query engine or compiler daemon.
+All roots and build requests share application-owned cache heads. Sources, CSTs,
+and per-file ASTs each retain up to 4,096 entries; HIR and verified LIR retain 64,
+and generated projects retain 32. Every immutable update retains all requested
+values, warning when those exceed capacity, and fills remaining capacity with
+recent unrequested entries. Publication uses compare-and-swap; a lost race rebases
+requested handles without repeating their builders or resurrecting unrelated history.
+Callers keep selected values through later eviction. Filesystem acquisition errors
+are analyzed afresh because their details are request state outside the graph key.
+
+The coordinator keeps only current root analyses and bounded admitted work. Cache
+capacity counts entries, not bytes: open buffers, retained outputs, dependencies,
+and allocator overhead also consume memory. There is no TTL or periodic sweep.
+
+CPU passes use the shared `Execution` bound, which defaults to available logical
+CPUs. Native builds reserve one slot and invoke Ninja with one job. Formatting,
+line indexing, path normalization, and query/diagnostic preparation run off the
+protocol receiver. Superseded analysis and shutdown cancel owned tasks; a started
+synchronous parser call may need to finish before releasing its execution slot.
+Valid earlier cache layers can remain warm after a later layer is cancelled, while
+obsolete diagnostics and responses are rejected before publication.
+
+## Build from the editor
+
+The server advertises `resin.build` through `workspace/executeCommand`. Supply one
+object argument:
+
+```json
+{
+  "command": "resin.build",
+  "arguments": [{
+    "uri": "file:///path/to/main.resin",
+    "entry": "main",
+    "destination": "/path/to/program",
+    "profile": "release"
+  }]
+}
+```
+
+`entry` defaults to `main`; `profile` accepts `debug` or `release` and defaults to
+`release`. `destination` is required and names a file; a relative destination
+resolves against the entry file's directory. A successful result contains its
+`outputUri`. The build captures disk sources, shares completed phase results with
+editor analysis, runs native tools, and atomically copies the executable. It does
+not save editor buffers or run the output. Source-overwriting destinations are
+rejected, and cancellation propagates to native children. Native tools and temporary
+storage are captured from the language server's launch environment.
 
 ## Protocol behavior and limits
 
@@ -149,10 +187,15 @@ cache snapshots. There is no per-function query engine or compiler daemon.
 - The client is asked to watch `**/*.resin` if it supports dynamic registration.
   Without file notifications, external changes to closed dependencies are
   discovered when a later edit or save schedules analysis.
-- Queued changes are coalesced; obsolete results are discarded. Requests can be
-  cancelled while queued. An edit invalidating a queued request returns
-  `ContentModified`; superseded compiler work receives cancellation before the next
-  analysis starts.
+- Complete accepted editor states are coalesced; each open/reopen has its own
+  epoch. Queries and builds are admitted with a 64-request bound that includes
+  queued, running, and completed-but-unconsumed responses. Overload returns an
+  explicit error. Cancellation applies to each admitted request independently.
+- Formatting responses check the captured document version. Semantic responses
+  also check their dependency state. Obsolete results return `ContentModified` and
+  cannot replace current diagnostics. Shutdown cancels and drains owned work.
+- The stdio transport applies backpressure when its client stops reading; compiler
+  concurrency does not remove that transport constraint.
 
 ## Validation
 

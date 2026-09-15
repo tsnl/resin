@@ -8,6 +8,10 @@ description = "Language server for Resin"
 repository = "https://github.com/tsnl/resin"
 
 [dependencies]
+arc-swap = { workspace = true }
+resin-lir = { workspace = true }
+resin-codegen = { workspace = true }
+resin-toolchain = { workspace = true }
 resin-source = { workspace = true }
 resin-ast = { workspace = true }
 resin-cache = { workspace = true }
@@ -24,3 +28,4 @@ url = "2"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+resin-runtime = { workspace = true }
