@@ -1,14 +1,14 @@
 #[allow(dead_code)]
 mod support;
 
-use resin_compiler::{Compilation, Compiler, Target};
+use resin_frontend::{Compilation, Frontend, Target};
 use resin_source::{Loader, Source};
 use std::{path::PathBuf, sync::Arc};
 
 fn compile(source: &str, target: Target) -> Arc<Compilation> {
     let library = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resin");
     let mut loader = Loader::new(library);
-    Compiler::new().compile(
+    Frontend::new().compile(
         Source::new("span-test.resin", source),
         &mut loader,
         &[target],

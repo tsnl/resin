@@ -241,14 +241,14 @@ Replacing its text creates a new version; existing diagnostics keep the old hand
 and their byte spans still describe the original text. The compiler does not need
 a mutable path-to-text table to recover what those locations mean.
 
-`Compiler::compile(source, loader, targets)` makes the next boundary explicit: the compiler
+`Frontend::compile(source, loader, targets)` makes the next boundary explicit: the frontend
 uses the concrete `resin_source::Loader` to obtain imports, then sequences the language
 passes. The loader knows file references, supplied buffers, and explicit source
 bindings. Its operations establish source lookup directly. The compiler caches those
 immutable inputs. Codegen takes its verified output, and the independent toolchain
 builds the generated directory through Ninja. The CLI connects these completed results.
 
-Keeping this implementation together helps explain ownership. `Compiler` declares
+Keeping this implementation together helps explain ownership. `Frontend` declares
 its private cache fields beside its operations; `Compilation` declares the products
 that its queries inspect. Their `lib.rs` can be long because related state and code
 belong together. The public interface remains small, and the reader can follow a

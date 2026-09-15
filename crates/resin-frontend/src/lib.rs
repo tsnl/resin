@@ -5,7 +5,7 @@
 //! work. Codegen and native builds consume its verified output separately.
 //!
 //! ```compile_fail,E0603
-//! use resin_compiler::{ImportTraversal, ParsedDocument};
+//! use resin_frontend::{ImportTraversal, ParsedDocument};
 //! ```
 use resin_source::prelude::*;
 use std::{
@@ -18,12 +18,12 @@ use std::{
 // Compilation
 //
 
-/// Immutable resource limits for every compilation made by this compiler.
+/// Immutable resource limits for every compilation made by this frontend.
 #[derive(Debug, Clone)]
-pub struct CompilerConfig {
+pub struct FrontendConfig {
     pub max_monomorphs_per_function: NonZeroUsize,
 }
-impl Default for CompilerConfig {
+impl Default for FrontendConfig {
     fn default() -> Self {
         Self {
             max_monomorphs_per_function: NonZeroUsize::new(16 * 1024).unwrap(),
@@ -47,16 +47,16 @@ enum Request {
 
 /// Reusable compilation caches. Sources and compilations are immutable.
 #[derive(Default)]
-pub struct Compiler {
-    config: CompilerConfig,
+pub struct Frontend {
+    config: FrontendConfig,
     parsed: BTreeMap<SourceId, Weak<ParsedDocument>>,
     checked: BTreeMap<SourceId, Arc<Compilation>>,
 }
-impl Compiler {
+impl Frontend {
     pub fn new() -> Self {
         Self::default()
     }
-    pub fn with_config(config: CompilerConfig) -> Self {
+    pub fn with_config(config: FrontendConfig) -> Self {
         Self {
             config,
             ..Default::default()
@@ -153,7 +153,7 @@ pub struct Diagnostic {
 /// Failed later passes preserve successfully completed earlier products.
 ///
 /// ```compile_fail,E0596
-/// fn edit(compilation: &mut resin_compiler::Compilation) {
+/// fn edit(compilation: &mut resin_frontend::Compilation) {
 ///     compilation.module().unwrap().functions.clear();
 /// }
 /// ```
@@ -228,11 +228,11 @@ impl Compilation {
 // Parsing and import traversal
 //
 
-impl Compiler {
+impl Frontend {
     fn load_sources(&mut self, source: Source, loader: &mut resin_source::Loader) -> Loaded {
         let mut traversal = ImportTraversal {
             loader,
-            compiler: self,
+            frontend: self,
             result: Loaded {
                 program: resin_ast::Program {
                     modules: Vec::new(),
@@ -270,7 +270,7 @@ impl Compilation {
     fn from_loaded(
         source: Source,
         loaded: Loaded,
-        config: &CompilerConfig,
+        config: &FrontendConfig,
         request: Request,
     ) -> Self {
         let graph = loaded.graph();
@@ -323,7 +323,7 @@ struct Analyzed {
 
 fn analyze_loaded(
     program: &resin_ast::Program,
-    config: &CompilerConfig,
+    config: &FrontendConfig,
     request: &Request,
 ) -> Analyzed {
     let mut checked = resin_hir::analyze_program(program);
@@ -395,7 +395,7 @@ impl Loaded {
 
 struct ImportTraversal<'a> {
     loader: &'a mut resin_source::Loader,
-    compiler: &'a mut Compiler,
+    frontend: &'a mut Frontend,
     result: Loaded,
     loaded: BTreeMap<SourceId, usize>,
     active: Vec<Source>,
@@ -438,7 +438,7 @@ impl ImportTraversal<'_> {
         if let Some(&id) = self.loaded.get(&source.id()) {
             return Ok(id);
         }
-        let document = self.compiler.parse(&source);
+        let document = self.frontend.parse(&source);
         let mut module = resin_ast::SourceModule {
             source: source.clone(),
             file: document.file.clone(),
@@ -511,7 +511,7 @@ fn imported_at(error: &mut SourceError, importer: &resin_ast::SourceModule, span
 fn lower_to_verified_lir(
     program: &resin_ast::Program,
     hir: &resin_hir::Module,
-    config: &CompilerConfig,
+    config: &FrontendConfig,
     targets: &[Target],
 ) -> Result<resin_lir::VerifiedModule, Vec<SourceError>> {
     let options = resin_lir::LoweringOptions {

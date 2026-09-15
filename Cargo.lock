@@ -613,8 +613,8 @@ dependencies = [
  "lsp-server",
  "resin-ast",
  "resin-codegen",
- "resin-compiler",
  "resin-cst",
+ "resin-frontend",
  "resin-hir",
  "resin-lir",
  "resin-lsp",
@@ -654,17 +654,6 @@ name = "resin-common"
 version = "0.1.0"
 
 [[package]]
-name = "resin-compiler"
-version = "0.1.0"
-dependencies = [
- "resin-ast",
- "resin-cst",
- "resin-hir",
- "resin-lir",
- "resin-source",
-]
-
-[[package]]
 name = "resin-cst"
 version = "0.1.0"
 dependencies = [
@@ -672,6 +661,17 @@ dependencies = [
  "resin-types",
  "tree-sitter",
  "tree-sitter-resin",
+]
+
+[[package]]
+name = "resin-frontend"
+version = "0.1.0"
+dependencies = [
+ "resin-ast",
+ "resin-cst",
+ "resin-hir",
+ "resin-lir",
+ "resin-source",
 ]
 
 [[package]]
@@ -704,8 +704,8 @@ dependencies = [
  "crossbeam-channel",
  "lsp-server",
  "lsp-types",
- "resin-compiler",
  "resin-cst",
+ "resin-frontend",
  "resin-hir",
  "resin-source",
  "serde",

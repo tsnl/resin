@@ -6,7 +6,7 @@ path through its implementation, not a language reference; keep the
 
 The root is both a Cargo workspace and the `resin` CLI package. [src/](src/)
 contains one executable's command dispatch. [crates/](crates/) contains the
-[compiler driver](crates/resin-compiler/), [sources and loading](crates/resin-source/), [concrete types](crates/resin-types/),
+[language frontend](crates/resin-frontend/), [sources and loading](crates/resin-source/), [concrete types](crates/resin-types/),
 [platform toolchain](crates/resin-toolchain/),
 compiler phases, and the supporting [runtime](crates/resin-runtime/),
 [parser](crates/tree-sitter-resin/), and [language server library](crates/resin-lsp/).
@@ -123,7 +123,7 @@ The CLI's private [Request](src/cli/request.rs) validates the input/output combi
 resolves directory destinations, and rejects outputs that would overwrite the source.
 It also owns the library root. The CLI [Compiler](src/cli/compiler.rs) loads that
 request: [resin_source::Loader](crates/resin-source/src/lib.rs) reads the file into
-an immutable `Source`, `resin_compiler::Compiler::compile(source, loader, targets)`
+an immutable `Source`, `resin_frontend::Frontend::compile(source, loader, targets)`
 resolves imports and returns an `Arc<Compilation>`, codegen writes C/SPIR-V/Ninja
 into a stable folder under `build/`, and the toolchain stages that project.
 If `-o` is set, the cached executable is copied there; otherwise it is run. The toolchain supplies native command rules in `toolchain.ninja`. Ninja optimizes
@@ -132,16 +132,16 @@ C headers, and compiles and links the host program. The executable path comes fr
 the platform's `current_exe` API, keeping embedding on the same Resin version.
 The returned build and executable handles retain a cache lock. Generated sources,
 headers, SPIR-V, and the Ninja graph remain available for inspection.
-The [compiler facade](crates/resin-compiler/src/lib.rs) exposes a small contract:
+The [frontend facade](crates/resin-frontend/src/lib.rs) exposes a small contract:
 immutable sources go in, a loader discovers their imports, and immutable compilations
 come out. A result retains successful phase products and editor facts for one entry
 and its imports. Its public accessors expose diagnostics, AST, HIR, LIR, and source
-queries. `Compiler` owns private parsing and analysis caches directly; `Compilation`
+queries. `Frontend` owns private parsing and analysis caches directly; `Compilation`
 owns its retained products. Their definitions and implementations live together in
 `lib.rs`. The concrete `resin_source::Loader` owns import lookup.
 
 Each phase is also a directly usable crate. The root [src/lib.rs](src/lib.rs) exposes
-only the CLI module. Tests call phase APIs directly or use `Compiler::compile`
+only the CLI module. Tests call phase APIs directly or use `Frontend::compile`
 to inspect a program without building an executable.
 
 Formatting takes a separate path from `main` through
@@ -176,7 +176,7 @@ terms, and type syntax with byte spans. [AST lowering](crates/resin-ast/src/lowe
 translates CST nodes, decodes strings, inserts the unit branch of one-armed `if`,
 and represents operators as builtin applications. It also preserves incomplete
 expressions as holes for editor recovery. AST generation performs no filesystem I/O.
-The compiler's [import traversal](crates/resin-compiler/src/lib.rs) calls
+The compiler's [import traversal](crates/resin-frontend/src/lib.rs) calls
 `resin_source::Loader::load_import` and builds an AST `Program` in dependency order.
 The [loader](crates/resin-source/src/lib.rs) accepts explicit source bindings, supplied
 file text, and disk files. It interprets relative and `$/` paths. Each AST source
@@ -283,7 +283,7 @@ disk imports. Closing a buffer calls `remove_source` to restore disk loading;
 file notifications schedule another compile call. Generated sources can instead
 use `set_import` to bind an import directly to a source handle.
 
-The compiler's [lib.rs](crates/resin-compiler/src/lib.rs) keeps this traversal,
+The frontend's [lib.rs](crates/resin-frontend/src/lib.rs) keeps this traversal,
 its private cache fields, and retained compilation products together. Each compile
 call resolves the import graph before deciding whether analysis can be reused.
 An unchanged source version reuses its syntax; a changed version can reuse the
@@ -297,7 +297,7 @@ recovers unfinished scopes without clearing the original syntax diagnostics.
 Invalid declarations still shadow outer names, and healthy siblings retain
 their types. Unknown types display as `?`; errors prevent executable generation.
 
-The `Compilation` query methods in [lib.rs](crates/resin-compiler/src/lib.rs) delegate to
+The `Compilation` query methods in [lib.rs](crates/resin-frontend/src/lib.rs) delegate to
 HIR's opaque `Analysis`, supplying its shared CST map. HIR's
 [lib.rs](crates/resin-hir/src/lib.rs) keeps the private analysis fields and their query
 operations together. They select the source context view and look up declarations
@@ -441,7 +441,7 @@ both lower the HIR retained by compiler analysis. Tests that inspect or edit AST
 | Console input, byte handling, and allocation failures | [console.rs](tests/console.rs), [input example](examples/input.resin) |
 | Compilation and artifact reuse | [build_cache.rs](tests/build_cache.rs), [cli.rs](tests/cli.rs) |
 | Source formatting, file traversal, or format checks | [formatting.rs](tests/formatting.rs), [format_cli.rs](tests/format_cli.rs), [LSP formatting tests](tests/lsp.rs) |
-| Source versions, import caching, editor queries, or recovery | [compiler API tests](crates/resin-compiler/tests/public_api.rs), [loader tests](crates/resin-source/tests/files.rs), [analysis.rs](tests/analysis.rs) |
+| Source versions, import caching, editor queries, or recovery | [frontend API tests](crates/resin-frontend/tests/public_api.rs), [loader tests](crates/resin-source/tests/files.rs), [analysis.rs](tests/analysis.rs) |
 | LSP protocol, buffer versions, or watched files | [lsp.rs](tests/lsp.rs) |
 | Zed syntax features | [zed_queries.rs](tests/zed_queries.rs) |
 | Shader generation or execution | [spirv_backend.rs](tests/spirv_backend.rs), [gpu_backend.rs](tests/gpu_backend.rs), [window_backend.rs](tests/window_backend.rs) |
@@ -461,7 +461,7 @@ For editor work, without launching an editor or opening windows:
 ```sh
 cargo test -p resin --lib --test analysis --test zed_queries
 cargo test -p resin --test formatting --test format_cli
-cargo test -p resin-compiler -p resin-lsp
+cargo test -p resin-frontend -p resin-lsp
 cargo test -p resin --test lsp
 ```
 

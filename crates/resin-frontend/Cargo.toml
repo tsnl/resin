@@ -1,5 +1,5 @@
 [package]
-name = "resin-compiler"
+name = "resin-frontend"
 version.workspace = true
 edition = "2024"
 publish = false

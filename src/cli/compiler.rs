@@ -21,20 +21,20 @@ impl Compiler {
         Self::build(&project, request)
     }
 
-    fn lower(request: &Request) -> Result<std::sync::Arc<resin_compiler::Compilation>> {
+    fn lower(request: &Request) -> Result<std::sync::Arc<resin_frontend::Compilation>> {
         let mut loader = resin_source::Loader::new(request.library_root.clone());
         let source = loader.load_file(&request.input.path)?;
-        Ok(resin_compiler::Compiler::new().compile(
+        Ok(resin_frontend::Frontend::new().compile(
             source,
             &mut loader,
-            &[resin_compiler::Target::Host {
+            &[resin_frontend::Target::Host {
                 entry: request.input.entry.clone().into(),
             }],
         ))
     }
 
     fn generate(
-        compilation: &resin_compiler::Compilation,
+        compilation: &resin_frontend::Compilation,
         request: &Request,
     ) -> Result<resin_codegen::GeneratedProject> {
         let directory = request

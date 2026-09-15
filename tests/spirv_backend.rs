@@ -30,8 +30,8 @@ fn shader_indexing_emits_no_bounds_checks() {
         }
         assert_eq!(instructions(&source, 250).count(), 0);
         assert_eq!(failure_loads(&source), 0);
-        if let Some(compiler) = shaders::optimizer() {
-            let built = project.build(&toolchain::spirv(&compiler)).unwrap();
+        if let Some(frontend) = shaders::optimizer() {
+            let built = project.build(&toolchain::spirv(&frontend)).unwrap();
             let artifact = &project.generated.shaders()[0];
             let optimized =
                 std::fs::read(built.path(artifact.spirv().file_name().unwrap())).unwrap();
@@ -135,9 +135,9 @@ fn shader_helpers_can_propagate_and_handle_results() {
         "export { kernel }; struct Bad { index: uint }; def checked(i: uint) -> Result<uint, Bad> = { if (i == uint(0)) { err(Bad { index = i }) } else { ok(i) } }; def helper(i: uint) -> Result<uint, _> = { var value = checked(i)?; ok(value + uint(1)) }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { match (helper(i)) { ok(value) => { value }, err(error) => { error.index } } }; };",
     );
     let project = support::project::Project::new(&m, None).unwrap();
-    if let Some(compiler) = shaders::optimizer() {
+    if let Some(frontend) = shaders::optimizer() {
         project
-            .build(&toolchain::spirv(&compiler))
+            .build(&toolchain::spirv(&frontend))
             .unwrap_or_else(|error| panic!("{error}"));
     }
 }
@@ -149,8 +149,8 @@ fn inferred_shader_results_lower_without_backend_inference() {
     );
     assert_eq!(m.functions[0].result, Ty::Unit);
     let project = support::project::Project::new(&m, None).unwrap();
-    if let Some(compiler) = shaders::optimizer() {
-        project.build(&toolchain::spirv(&compiler)).unwrap();
+    if let Some(frontend) = shaders::optimizer() {
+        project.build(&toolchain::spirv(&frontend)).unwrap();
     }
 }
 
@@ -191,7 +191,7 @@ fn all_example_stages_emit_deterministically() {
 
 #[test]
 fn examples_helpers_and_control_flow_compile_to_spirv() {
-    let Some(compiler) = shaders::optimizer() else {
+    let Some(frontend) = shaders::optimizer() else {
         return;
     };
     let modules = [
@@ -235,7 +235,7 @@ fn examples_helpers_and_control_flow_compile_to_spirv() {
             .find(|shader| shader.stage() == stage)
             .unwrap();
         let built = project
-            .build(&toolchain::spirv(&compiler))
+            .build(&toolchain::spirv(&frontend))
             .unwrap_or_else(|error| panic!("{error}"));
         let bytes = std::fs::read(built.path(shader.spirv().file_name().unwrap())).unwrap();
         assert_eq!(&bytes[..4], &[3, 2, 35, 7]);
@@ -245,7 +245,7 @@ fn examples_helpers_and_control_flow_compile_to_spirv() {
 
 #[test]
 fn device_pointers_and_shared_roots_compile() {
-    let Some(compiler) = shaders::optimizer() else {
+    let Some(frontend) = shaders::optimizer() else {
         return;
     };
     for (source, stage) in [
@@ -271,7 +271,7 @@ fn device_pointers_and_shared_roots_compile() {
                 .any(|shader| shader.stage() == stage)
         );
         project
-            .build(&toolchain::spirv(&compiler))
+            .build(&toolchain::spirv(&frontend))
             .unwrap_or_else(|error| panic!("{error}"));
     }
 }
@@ -365,22 +365,22 @@ fn entry_interfaces_are_checked_before_codegen() {
 
 #[test]
 fn optimizer_errors_are_reported() {
-    let Some(compiler) = shaders::optimizer() else {
+    let Some(frontend) = shaders::optimizer() else {
         return;
     };
-    let error = toolchain::optimize_spirv(b"not SPIR-V", &compiler).unwrap_err();
+    let error = toolchain::optimize_spirv(b"not SPIR-V", &frontend).unwrap_err();
     assert!(error.to_string().contains("failed"));
 }
 
 #[test]
 fn compound_control_flow_compiles_to_spirv() {
-    let Some(compiler) = shaders::optimizer() else {
+    let Some(frontend) = shaders::optimizer() else {
         return;
     };
     let m = module(include_str!("fixtures/compound_control.resin"));
     let project = support::project::Project::new(&m, None).unwrap();
     project
-        .build(&toolchain::spirv(&compiler))
+        .build(&toolchain::spirv(&frontend))
         .unwrap_or_else(|error| panic!("{error}"));
 }
 
@@ -398,10 +398,10 @@ fn imported_backend_errors_retain_expression_origins() {
     loader
         .set_import(&entry, "helper.resin", helper.clone())
         .unwrap();
-    let compilation = resin_compiler::Compiler::new().compile(
+    let compilation = resin_frontend::Frontend::new().compile(
         entry,
         &mut loader,
-        &[resin_compiler::Target::Shader {
+        &[resin_frontend::Target::Shader {
             entry: "kernel".into(),
         }],
     );
@@ -445,8 +445,8 @@ fn managed_fields_are_opaque_until_consumed_by_a_shader() {
         "{prefix} @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = {{ var i = uint(invocation); root.result := i; var address = &root.owner; }};"
     ));
     let project = support::project::Project::new(&m, None).unwrap();
-    if let Some(compiler) = shaders::optimizer() {
-        project.build(&toolchain::spirv(&compiler)).unwrap();
+    if let Some(frontend) = shaders::optimizer() {
+        project.build(&toolchain::spirv(&frontend)).unwrap();
     }
     for body in [
         "var value = root.owner;",
@@ -469,8 +469,8 @@ fn options_of_plain_values_work_in_shaders() {
         "export { kernel }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); var value: uint | None; value := if (i == 0_ui) { 42_ui } else { None }; output.* := match (value) { uint(n) => { n }, None => { 0_ui } }; };",
     );
     let project = support::project::Project::new(&m, None).unwrap();
-    if let Some(compiler) = shaders::optimizer() {
-        project.build(&toolchain::spirv(&compiler)).unwrap();
+    if let Some(frontend) = shaders::optimizer() {
+        project.build(&toolchain::spirv(&frontend)).unwrap();
     }
 }
 
@@ -511,8 +511,8 @@ fn compute_index_uses_wide_arithmetic_and_indexes_spans_directly() {
         instructions(&source, 132).any(|args| args[0] == wide),
         "wide OpIMul"
     );
-    if let Some(compiler) = shaders::optimizer() {
-        project.build(&toolchain::spirv(&compiler)).unwrap();
+    if let Some(frontend) = shaders::optimizer() {
+        project.build(&toolchain::spirv(&frontend)).unwrap();
     }
 }
 
@@ -524,10 +524,10 @@ fn branch_only_shaders_do_not_acquire_dispatch_loops() {
         let source = std::fs::read(shader.unoptimized_spirv()).unwrap();
         assert_eq!(instructions(&source, 246).count(), 0, "no OpLoopMerge");
     }
-    let Some(compiler) = shaders::optimizer() else {
+    let Some(frontend) = shaders::optimizer() else {
         return;
     };
-    let built = project.build(&toolchain::spirv(&compiler)).unwrap();
+    let built = project.build(&toolchain::spirv(&frontend)).unwrap();
     for shader in project.generated.shaders() {
         let bytes = std::fs::read(built.path(shader.spirv().file_name().unwrap())).unwrap();
         let words: Vec<_> = bytes
@@ -555,9 +555,9 @@ fn structured_loop_conditions_and_early_returns_compile_to_spirv() {
         2,
         "two OpLoopMerge loops"
     );
-    if let Some(compiler) = shaders::optimizer() {
+    if let Some(frontend) = shaders::optimizer() {
         project
-            .build(&toolchain::spirv(&compiler))
+            .build(&toolchain::spirv(&frontend))
             .unwrap_or_else(|error| panic!("{error}"));
     }
 }
@@ -580,7 +580,7 @@ fn sequential_conditionals_and_error_propagation_preserve_structured_control() {
         0,
         "sequential branches need no loops"
     );
-    if let Some(compiler) = shaders::optimizer() {
-        project.build(&toolchain::spirv(&compiler)).unwrap();
+    if let Some(frontend) = shaders::optimizer() {
+        project.build(&toolchain::spirv(&frontend)).unwrap();
     }
 }

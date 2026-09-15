@@ -1,7 +1,7 @@
 # Resin language server
 
 The `resin --lsp <directory>` mode provides diagnostics, hover, go-to-definition, basic completion, and formatting
-over stdio. It reuses `resin_compiler::Compiler` with immutable source versions.
+over stdio. It reuses `resin_frontend::Frontend` with immutable source versions.
 Semantic editor requests run parsing, resolution, typing, and IR verification; they do not
 build C/SPIR-V, initialize a GPU, or run the program. Analysis accepts library
 modules without an exported entry function; runtime bindings belong inside
@@ -94,7 +94,7 @@ implemented.
 `resin_source::Source` is immutable named text with a stable logical
 identity. Cloning shares a version; `with_text` creates a new version of the same
 source. Names are diagnostic labels and need not be filesystem paths or unique.
-`resin_compiler::Compiler` retains syntax and compilation caches. Its `analyze`
+`resin_frontend::Frontend` retains syntax and compilation caches. Its `analyze`
 method receives an entry source and a concrete `resin_source::Loader`, resolves the import
 graph, and returns an immutable `Compilation` with diagnostics and editor queries.
 
@@ -114,8 +114,8 @@ fn main() {
     );
     let mut loader = resin_source::Loader::new(resin_source::library_root());
     loader.set_import(&entry, "library", library.clone()).unwrap();
-    let mut compiler = resin_compiler::Compiler::new();
-    let before = compiler.analyze(entry.clone(), &mut loader);
+    let mut frontend = resin_frontend::Frontend::new();
+    let before = frontend.analyze(entry.clone(), &mut loader);
     assert!(before.hir().is_ok());
 
     loader.set_import(
@@ -123,7 +123,7 @@ fn main() {
         "library",
         library.with_text("export { answer }; def answer() -> int = { missing };"),
     ).unwrap();
-    let after = compiler.analyze(entry, &mut loader);
+    let after = frontend.analyze(entry, &mut loader);
     assert!(!after.diagnostics().is_empty());
     assert!(before.hir().is_ok()); // Retained results keep their original sources.
 }
@@ -185,7 +185,7 @@ compiler in its background worker and discards results from obsolete frontend re
 
 ```sh
 nix-shell --run 'cargo test -p resin-lsp'
-nix-shell --run 'cargo test -p resin-compiler -p resin-source'
+nix-shell --run 'cargo test -p resin-frontend -p resin-source'
 nix-shell --run 'cargo test -p resin --test lsp --test analysis --test zed_queries'
 nix-shell --run 'cargo test -p resin --test formatting'
 ```

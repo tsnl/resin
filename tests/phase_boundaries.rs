@@ -135,10 +135,10 @@ fn a_later_phase_error_preserves_earlier_compilation_products() {
         "export { f }; def f() -> bool = { (1 == 1) + (1 == 1) };",
     );
     let mut loader = resin_source::Loader::new(Default::default());
-    let compilation = resin_compiler::Compiler::new().compile(
+    let compilation = resin_frontend::Frontend::new().compile(
         source,
         &mut loader,
-        &[resin_compiler::Target::Host { entry: "f".into() }],
+        &[resin_frontend::Target::Host { entry: "f".into() }],
     );
     assert!(compilation.program().is_ok());
     assert!(compilation.hir().is_ok());

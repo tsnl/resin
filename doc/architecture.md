@@ -11,7 +11,7 @@ executable, `resin --format DIR` formats source, and `resin --lsp DIR` serves th
 Language Server Protocol. There is one executable to distribute.
 
 Reusable libraries live under `crates/`, with directory names matching their Cargo
-package names. `resin-compiler` sequences passes over immutable sources and retains
+package names. `resin-frontend` sequences passes over immutable sources and retains
 analysis caches. It uses the concrete `resin_source::Loader` to obtain imports from
 files, supplied text, or explicit bindings. `resin-source` owns immutable text and
 standard-library resolution; `resin-types` owns concrete types and representation
@@ -59,8 +59,8 @@ pass consumes. Source and type vocabulary are independent foundations.
 | `resin-lir` | `resin-hir` | Storage and control-flow lowering, verification certificates |
 | `resin-codegen` | `resin-lir` | Generate a complete on-disk C/SPIR-V/Ninja project |
 | `resin-toolchain` | none | Captured process settings, Ninja builds, locked output files |
-| `resin-compiler` | CST, AST, HIR, LIR | Import traversal, pass sequencing, immutable compilations |
-| `resin-lsp` | `resin-compiler`, `resin-hir`, `resin-cst` | Compiler queries and formatting over LSP |
+| `resin-frontend` | CST, AST, HIR, LIR | Import traversal, pass sequencing, immutable compilations |
+| `resin-lsp` | `resin-frontend`, `resin-hir`, `resin-cst` | Frontend queries and formatting over LSP |
 
 The HIR dependency on CST supports editor queries at a syntax position. Its public
 language owns its type expressions and nominal declarations. LIR lowering never
@@ -86,7 +86,7 @@ representation, table, and layout algorithms, while private `typer.rs` implement
 concrete checks and conversions.
 
 Keep related state and operations together. The compiler's `lib.rs` contains
-`Compiler` with its private caches, `Compilation` with its retained products, and
+`Frontend` with its private caches, `Compilation` with its retained products, and
 the operations that use them. A cohesive file can be substantial while exposing
 few public concepts. Fields belong directly to the objects whose invariants they
 serve; private helpers keep individual operations readable. Native building is a separate
@@ -313,7 +313,7 @@ retain their own source locations and a bounded application trace; diagnostics n
 assume HIR and LIR indices agree. Foreign declarations retain one local per parameter and
 no blocks; they do not create function-body lowering state.
 
-`CompilerConfig.max_monomorphs_per_function` defaults to 16,384 and cannot be zero.
+`FrontendConfig.max_monomorphs_per_function` defaults to 16,384 and cannot be zero.
 The compiler retains its configuration immutably; LIR receives the relevant limit
 through `LoweringOptions`. Different semantic profiles count separately toward the
 same source function's allowance. Existing canonical requests cost nothing, including
@@ -388,7 +388,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-For imports, call `Compiler::analyze(entry, &mut loader)` with an immutable `Source`
+For imports, call `Frontend::analyze(source, &mut loader)` with an immutable `Source`
 and a concrete `resin_source::Loader`. Explicit bindings let the same loader work
 with generated or in-memory sources:
 
@@ -405,8 +405,8 @@ fn main() {
     "#);
     let mut loader = resin_source::Loader::new(resin_source::library_root());
     loader.set_import(&entry, "math", math).unwrap();
-    let mut compiler = resin_compiler::Compiler::new();
-    let compilation = compiler.analyze(entry.clone(), &mut loader);
+    let mut frontend = resin_frontend::Frontend::new();
+    let compilation = frontend.analyze(entry.clone(), &mut loader);
     assert!(compilation.diagnostics().is_empty(), "{:?}", compilation.diagnostics());
     assert_eq!(compilation.source(), &entry);
 }
@@ -432,7 +432,7 @@ host C, the SPIR-V requested by `.spirv`, and `build.ninja`; `None` generates a 
 project containing all declared shaders. It returns paths, never target ASTs or per-target
 emission operations. C and SPIR-V lowering finish before any generated files are written.
 
-The compiler's [lib.rs](../crates/resin-compiler/src/lib.rs) contains source traversal,
+The frontend's [lib.rs](../crates/resin-frontend/src/lib.rs) contains source traversal,
 syntax caching, HIR/LIR generation, verification, and retained query access.
 `Compilation::verified()` supplies the certificate for codegen without reloading sources.
 The CLI's private [Request](../src/cli/request.rs) resolves source and destination choices
@@ -467,8 +467,8 @@ with the same logical ID, leaving the original intact. Equality identifies versi
 equal text or equal diagnostic names do not make independently created sources equal.
 Names have no filesystem meaning inside the compiler.
 
-`Compiler::compile(source, loader, targets)` returns an `Arc<Compilation>` for explicit
-`Target::Host` and `Target::Shader` exported entries. `Compiler::analyze(source, loader)`
+`Frontend::compile(source, loader, targets)` returns an `Arc<Compilation>` for explicit
+`Target::Host` and `Target::Shader` exported entries. `Frontend::analyze(source, loader)`
 retains HIR and editor facts without a LIR artifact; requesting `module()` or `verified()`
 from that result returns an error without adding a source diagnostic. An empty compile
 target set is an error, not an analysis request. Each operation resolves

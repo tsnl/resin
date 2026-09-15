@@ -1,5 +1,5 @@
 use crossbeam_channel::{Receiver, Sender};
-use resin_compiler::{Compilation, Compiler};
+use resin_frontend::{Compilation, Frontend};
 use resin_source::prelude::*;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -39,7 +39,7 @@ pub fn spawn(
     stopping: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let mut compiler = Compiler::new();
+        let mut frontend = Frontend::new();
         let mut loader = resin_source::Loader::new(library_root);
         let mut documents = BTreeMap::new();
         while let Ok(first) = updates.recv() {
@@ -49,7 +49,7 @@ pub fn spawn(
             let batch = std::iter::once(first).chain(updates.try_iter());
             let (revision, roots) = apply_updates(&mut loader, &mut documents, batch);
             let result = compile_roots(
-                &mut compiler,
+                &mut frontend,
                 &mut loader,
                 &documents,
                 roots,
@@ -110,7 +110,7 @@ fn superseded(revision: u64, current: &AtomicU64, stopping: &AtomicBool) -> bool
 }
 
 fn compile_roots(
-    compiler: &mut Compiler,
+    frontend: &mut Frontend,
     loader: &mut resin_source::Loader,
     documents: &BTreeMap<PathBuf, Source>,
     roots: BTreeSet<PathBuf>,
@@ -133,7 +133,7 @@ fn compile_roots(
             .map(Ok)
             .unwrap_or_else(|| loader.load_file(&path));
         match source {
-            Ok(source) => retain_entry(&mut result, compiler.analyze(source, loader), loader, path),
+            Ok(source) => retain_entry(&mut result, frontend.analyze(source, loader), loader, path),
             Err(error) => eprintln!("resin-lsp: {}: {error}", path.display()),
         }
     }

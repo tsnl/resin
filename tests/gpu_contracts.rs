@@ -1,6 +1,6 @@
 mod support;
 
-use resin_compiler::Compiler;
+use resin_frontend::Frontend;
 use resin_source::{Loader, Source, library_root};
 use resin_types::{GpuProjectionOperation, Ty};
 
@@ -220,6 +220,6 @@ fn source_gpu_library_resolves_generic_allocation_and_explicit_access() {
     "#,
     );
     let mut loader = Loader::new(library_root());
-    let analysis = Compiler::new().analyze(source, &mut loader);
+    let analysis = Frontend::new().analyze(source, &mut loader);
     analysis.hir().unwrap();
 }

@@ -280,14 +280,14 @@ fn build(
     let mut loader = resin_source::Loader::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("resin"));
     let source = loader.load_file(source)?;
     let target = match entry {
-        Some(entry) => resin_compiler::Target::Host {
+        Some(entry) => resin_frontend::Target::Host {
             entry: entry.into(),
         },
-        None => resin_compiler::Target::Shader {
+        None => resin_frontend::Target::Shader {
             entry: "kernel".into(),
         },
     };
-    let compilation = resin_compiler::Compiler::new().compile(source, &mut loader, &[target]);
+    let compilation = resin_frontend::Frontend::new().compile(source, &mut loader, &[target]);
     let directory = tempfile::TempDir::new()?;
     let generated = resin_codegen::generate(compilation.verified()?, entry, directory.path())?;
     for (name, contents) in extra_files {

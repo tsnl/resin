@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use resin_compiler::Compiler;
+use resin_frontend::Frontend;
 use resin_hir::{GenerateError, GenerateErrorKind};
 use resin_source::library_root;
 use resin_source::prelude::*;
@@ -50,7 +50,7 @@ pub fn generate_program(program: &resin_ast::Program) -> Result<resin_lir::Modul
 pub fn source_module(text: &str) -> Result<resin_lir::Module, SourceError> {
     let source = Source::new("test.resin", text);
     let mut loader = resin_source::Loader::new(library_root());
-    let compilation = Compiler::new().analyze(source.clone(), &mut loader);
+    let compilation = Frontend::new().analyze(source.clone(), &mut loader);
     lower_program(compilation.hir()?, &source)
 }
 
@@ -81,7 +81,7 @@ pub fn load(path: &Path) -> Result<resin_ast::Program, SourceError> {
     analyze_file(path)?.program().cloned()
 }
 
-fn analyze_file(path: &Path) -> Result<std::sync::Arc<resin_compiler::Compilation>, SourceError> {
+fn analyze_file(path: &Path) -> Result<std::sync::Arc<resin_frontend::Compilation>, SourceError> {
     let mut loader = resin_source::Loader::new(library_root());
     let source = loader.load_file(path).map_err(|error| {
         SourceError::new(
@@ -90,16 +90,16 @@ fn analyze_file(path: &Path) -> Result<std::sync::Arc<resin_compiler::Compilatio
             error.to_string(),
         )
     })?;
-    Ok(Compiler::new().analyze(source, &mut loader))
+    Ok(Frontend::new().analyze(source, &mut loader))
 }
 
 pub fn shader_error(source: &str) -> String {
     let source = Source::new("shader-test.resin", source);
     let mut loader = resin_source::Loader::new(library_root());
-    let compilation = Compiler::new().compile(
+    let compilation = Frontend::new().compile(
         source,
         &mut loader,
-        &[resin_compiler::Target::Shader {
+        &[resin_frontend::Target::Shader {
             entry: "kernel".into(),
         }],
     );

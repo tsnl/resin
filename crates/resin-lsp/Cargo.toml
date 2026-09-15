@@ -7,7 +7,7 @@ description = "Language server for Resin"
 repository = "https://github.com/tsnl/resin"
 
 [dependencies]
-resin-compiler = { workspace = true }
+resin-frontend = { workspace = true }
 resin-source = { workspace = true }
 resin-hir = { workspace = true }
 resin-cst = { workspace = true }

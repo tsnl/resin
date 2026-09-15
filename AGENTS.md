@@ -42,13 +42,13 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   translating bodies. Calls, shader references, native bridges, and drop hooks use those IDs.
   Keep substitution and concrete builtin selection in the incoming concrete-body translation;
   storage lowering receives no bound parameters. The default per-function allowance is 16,384,
-  configurable through immutable `CompilerConfig` and LIR `LoweringOptions`. Repeated requests
+  configurable through immutable `FrontendConfig` and LIR `LoweringOptions`. Repeated requests
   cost nothing. Type depth/size guards and bounded application traces are separate from that cap.
 - Compilation requests name exported host/shader entries. Canonicalize target sets for cache
   matching; lower only their transitive function/type dependencies. Shader artifacts and
   pipeline creation add shader roots while retaining host bridge functions. Concrete nominal
   discovery reserves recursive identities privately and installs real drop IDs before storage
-  lowering. `Compiler::analyze` produces HIR/editor facts without a LIR artifact. The whole-module
+  lowering. `Frontend::analyze` produces HIR/editor facts without a LIR artifact. The whole-module
   LIR helpers remain explicit operations for direct language clients and tests.
 - Specialization selects concrete shader operations before storage lowering. Preserve
   place access separately from value reads: an opaque managed field may be addressed,
@@ -65,7 +65,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Each compiler phase is an unpublished workspace crate under `crates/`: `resin-cst`,
   `resin-ast`, `resin-hir`, `resin-lir`, and `resin-codegen`,
   with `resin-source` for immutable sources and loading, and `resin-types` for concrete types. Directory names match Cargo package names;
-  keep compilation orchestration in `resin-compiler`, external processes and build caches in
+  keep compilation orchestration in `resin-frontend`, external processes and build caches in
   `resin-toolchain`, source identities and import discovery in `resin-source`, and the parser in
   `tree-sitter-resin`.
   Use `publish = false` and local path dependencies. Keep dependencies acyclic and explicit;
@@ -131,7 +131,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   source version; a changed version is a new value. Logical identities are independent
   of diagnostic names. Loaders interpret imports and return cached instances when
   unchanged; filesystem paths, standard-library discovery, and editor buffers belong
-  to `resin-source` and applications. `resin-compiler` depends on the concrete
+  to `resin-source` and applications. `resin-frontend` depends on the concrete
   `resin_source::Loader`; do not add loader traits or callback adapters without a
   concrete need. The compiler has no overlays or file notifications.
   Resolve the import graph on every `compile()` before reusing a result, including when
@@ -218,7 +218,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   lives in `src/cli/`. Capture process settings through the platform toolchain's
   `Environment`, then choose CLI defaults and the build profile explicitly.
   Validate file selections and output destinations in the CLI. The CLI `Compiler`
-  owns host compilation from source to executable. `resin_compiler::Compiler::compile`
+  owns host compilation from source to executable. `resin_frontend::Frontend::compile`
   consumes an immutable source, a loader, and explicit host/shader targets to produce a
   `Compilation`. The separate `resin_codegen::generate` operation takes verified LIR and
   writes C, unoptimized SPIR-V, and a Ninja

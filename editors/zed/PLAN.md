@@ -2,7 +2,7 @@
 
 This is the historical implementation plan. The current layout uses the root
 `resin` executable with `--lsp <directory>`, the `resin-lsp` protocol library,
-the `resin-compiler` library, and the filesystem adapter in `resin-source`.
+the `resin-frontend` library, and the filesystem adapter in `resin-source`.
 See [current setup](README.md).
 
 Scope: a Zed extension plus a reusable language server providing diagnostics,
@@ -19,7 +19,7 @@ on the stack above; see the [extension setup](README.md) and
 
 The current compiler API accepts immutable `Source` values from
 `resin_source::prelude::*` and a concrete `resin_source::Loader` that resolves imports.
-A reusable `resin_compiler::Compiler` owns syntax and compilation caches;
+A reusable `resin_frontend::Frontend` owns syntax and compilation caches;
 `compile` returns an immutable `Compilation`. Every call resolves imports before
 reusing a result. Native generation passes verified LIR to codegen; the toolchain builds its Ninja project.
 `resin_source::Loader` owns filesystem identities and standard-library lookup.
@@ -58,7 +58,7 @@ editors/zed/
 crates/resin-lsp/
   Cargo.toml
   src/
-crates/resin-compiler/src/lib.rs
+crates/resin-frontend/src/lib.rs
 crates/resin-source/src/lib.rs
 tests/lsp.rs                     # complete executable protocol tests
 crates/tree-sitter-resin/          # grammar tracked directly in this repository
@@ -70,7 +70,7 @@ workspace: its WebAssembly build should only depend on Zed's extension API.
 No separate extension repository is needed: Zed's registry supports a repository
 subdirectory through `path = "editors/zed"` in its registry entry. See the
 [publishing guide](https://zed.dev/docs/extensions/publishing/publishing-guide).
-Keep `resin-lsp` as a native workspace library depending on `resin-compiler` and
+Keep `resin-lsp` as a native workspace library depending on `resin-frontend` and
 `resin-source`. Compiler caches and phase products contain no Zed or LSP protocol
 types; open buffers and protocol revisions belong to the language server.
 

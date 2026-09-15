@@ -27,12 +27,12 @@ fn unchanged_roots_follow_retargeted_import_symlinks_without_notifications() {
             "import { \"alias.resin\" }; def value() -> _ = { answer() };",
         )
         .unwrap();
-    let mut compiler = resin_compiler::Compiler::new();
-    let first = compiler.analyze(source.clone(), &mut loader);
+    let mut frontend = resin_frontend::Frontend::new();
+    let first = frontend.analyze(source.clone(), &mut loader);
     assert!(first.diagnostics().is_empty(), "{:?}", first.diagnostics());
     fs::remove_file(&alias).unwrap();
     symlink("second.resin", &alias).unwrap();
-    let second = compiler.analyze(source, &mut loader);
+    let second = frontend.analyze(source, &mut loader);
     assert!(
         second.diagnostics().is_empty(),
         "{:?}",
@@ -67,8 +67,8 @@ fn unchanged_roots_retry_missing_transitive_imports_without_notifications() {
             "import { \"middle.resin\" }; def value() -> int = { answer() };",
         )
         .unwrap();
-    let mut compiler = resin_compiler::Compiler::new();
-    let missing = compiler.analyze(source.clone(), &mut loader);
+    let mut frontend = resin_frontend::Frontend::new();
+    let missing = frontend.analyze(source.clone(), &mut loader);
     assert!(missing.hir().is_err());
     assert!(
         missing
@@ -78,7 +78,7 @@ fn unchanged_roots_retry_missing_transitive_imports_without_notifications() {
     );
     let leaf = directory.path().join("leaf.resin");
     fs::write(&leaf, "export { leaf }; def leaf() -> int = { 42 };").unwrap();
-    let repaired = compiler.analyze(source.clone(), &mut loader);
+    let repaired = frontend.analyze(source.clone(), &mut loader);
     assert!(
         repaired.diagnostics().is_empty(),
         "{:?}",
@@ -89,7 +89,7 @@ fn unchanged_roots_retry_missing_transitive_imports_without_notifications() {
     assert!(missing.hir().is_err());
     assert_eq!(repaired.sources().count(), 3);
     fs::remove_file(leaf).unwrap();
-    assert!(compiler.analyze(source, &mut loader).hir().is_err());
+    assert!(frontend.analyze(source, &mut loader).hir().is_err());
     assert!(repaired.hir().is_ok());
 }
 
@@ -108,8 +108,8 @@ fn custom_library_root_edits_recompile_an_unchanged_entry() {
             "import { \"$/math.resin\" }; def value() -> _ = { answer() };",
         )
         .unwrap();
-    let mut compiler = resin_compiler::Compiler::new();
-    let before = compiler.analyze(source.clone(), &mut loader);
+    let mut frontend = resin_frontend::Frontend::new();
+    let before = frontend.analyze(source.clone(), &mut loader);
     assert!(
         before.diagnostics().is_empty(),
         "{:?}",
@@ -120,7 +120,7 @@ fn custom_library_root_edits_recompile_an_unchanged_entry() {
         "export { answer }; def answer() -> long = { 42 };",
     )
     .unwrap();
-    let after = compiler.analyze(source, &mut loader);
+    let after = frontend.analyze(source, &mut loader);
     assert!(after.diagnostics().is_empty(), "{:?}", after.diagnostics());
     assert_eq!(before.source(), after.source());
     assert!(!Arc::ptr_eq(&before, &after));

@@ -1,4 +1,4 @@
-use resin_compiler::{Compilation, Compiler};
+use resin_frontend::{Compilation, Frontend};
 use resin_hir::GenerateErrorKind;
 use resin_source::normalize_path;
 use resin_source::prelude::*;
@@ -86,15 +86,15 @@ fn generic_method_editor_snapshots_keep_completed_imported_schemes() {
     );
     let changed = original.with_text("export { Cell }; struct Cell<T> { padding: ubyte, value: T, def read(self: Ptr<Cell<T>>) -> long = { 42 }; };");
     let mut loader = resin_source::Loader::new(Default::default());
-    let mut compiler = Compiler::new();
+    let mut frontend = Frontend::new();
     loader
         .set_import(&input, "library.resin", original.clone())
         .unwrap();
-    let before = compiler.analyze(input.clone(), &mut loader);
+    let before = frontend.analyze(input.clone(), &mut loader);
     loader
         .set_import(&input, "library.resin", changed.clone())
         .unwrap();
-    let after = compiler.analyze(input.clone(), &mut loader);
+    let after = frontend.analyze(input.clone(), &mut loader);
     let offset = input.text().find("cell.read").unwrap() + 5;
     for (analysis, library, expected) in [
         (&before, &original, "read: () -> int"),
@@ -222,12 +222,12 @@ fn generic_field_editor_snapshots_keep_original_imported_declarations() {
     loader
         .set_import(&input, "library.resin", original.clone())
         .unwrap();
-    let mut compiler = Compiler::new();
-    let before = compiler.analyze(input.clone(), &mut loader);
+    let mut frontend = Frontend::new();
+    let before = frontend.analyze(input.clone(), &mut loader);
     loader
         .set_import(&input, "library.resin", changed.clone())
         .unwrap();
-    let after = compiler.analyze(input.clone(), &mut loader);
+    let after = frontend.analyze(input.clone(), &mut loader);
     let field = input.text().rfind("value").unwrap();
     for (analysis, library, expected) in [
         (&before, &original, "value: int"),
@@ -381,7 +381,7 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
         let input = loader
             .source_from_text(Path::new("main.resin"), source.clone())
             .unwrap();
-        let analysis = Compiler::new().analyze(input.clone(), &mut loader);
+        let analysis = Frontend::new().analyze(input.clone(), &mut loader);
         if tail != "buffer." {
             assert!(
                 analysis.diagnostics().is_empty(),
@@ -495,7 +495,7 @@ fn gpu_commands_check_pipeline_stages_and_host_arguments() {
         let input = loader
             .source_from_text(Path::new("main.resin"), source)
             .unwrap();
-        let analysis = Compiler::new().analyze(input.clone(), &mut loader);
+        let analysis = Frontend::new().analyze(input.clone(), &mut loader);
         assert_eq!(
             analysis.diagnostics().is_empty(),
             valid,
@@ -528,7 +528,7 @@ fn typed_pipeline_calls_show_shader_contracts_in_editor_signatures() {
     let input = loader
         .source_from_text(Path::new("main.resin"), source)
         .unwrap();
-    let analysis = Compiler::new().analyze(input.clone(), &mut loader);
+    let analysis = Frontend::new().analyze(input.clone(), &mut loader);
     assert!(
         analysis.diagnostics().is_empty(),
         "{:?}",
@@ -1009,7 +1009,7 @@ impl Project {
                     .unwrap();
             }
         }
-        Compiler::new().analyze(self.source("main.resin"), &mut loader)
+        Frontend::new().analyze(self.source("main.resin"), &mut loader)
     }
     #[track_caller]
     fn checked(&self) -> Arc<Compilation> {
@@ -1350,7 +1350,7 @@ fn completion_obeys_parameter_shadowing_and_module_type_order() {
     assert_eq!(value.kind, resin_hir::DefinitionKind::Variable);
 
     // Module type definitions run before function signatures, but run in source
-    // order relative to each other. Completion must match those compiler phases.
+    // order relative to each other. Completion must match those frontend phases.
     for (source, expected) in [
         ("def main (value: Num) -> () = {}; type Number = int;", true),
         ("type Earlier = Num; type Number = int;", false),
