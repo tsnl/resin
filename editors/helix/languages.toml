@@ -1,0 +1,19 @@
+[language-server.resin-lsp]
+command = "resin"
+args = ["--lsp", "."]
+
+[[language]]
+name = "resin"
+scope = "source.resin"
+file-types = ["resin"]
+roots = [".git"]
+comment-tokens = "//"
+block-comment-tokens = { start = "/*", end = "*/" }
+indent = { tab-width = 4, unit = "\t" }
+language-servers = ["resin-lsp"]
+
+[[grammar]]
+name = "resin"
+source = { git = "https://github.com/tsnl/resin", rev = "main", subpath = "crates/tree-sitter-resin" }
+# Development: comment out the Git source above and uncomment your checkout path below.
+# source = { path = "/absolute/path/to/checkout/crates/tree-sitter-resin" }

@@ -324,6 +324,10 @@ provide highlighting, outlines, and other syntax features. See the
 [extension README](editors/zed/README.md) for installation and configuration;
 the extension builds separately from the main Cargo workspace.
 
+[editors/helix/](editors/helix/) configures Helix to launch the same server directly
+and supplies its syntax queries. See the [Helix setup](editors/helix/README.md)
+for installation and grammar maintenance.
+
 ## 4. Follow a shader into the runtime
 
 Read [examples/gradient.resin](examples/gradient.resin) for compute, then
@@ -440,7 +444,7 @@ both lower the HIR retained by compiler analysis. Tests that inspect or edit AST
 | Source formatting, file traversal, or format checks | [formatting.rs](tests/formatting.rs), [format_cli.rs](tests/format_cli.rs), [LSP formatting tests](tests/lsp.rs) |
 | Source versions, import caching, editor queries, or recovery | [HIR import tests](crates/resin-hir/tests/imports.rs), [loader tests](crates/resin-source/tests/files.rs), [analysis.rs](tests/analysis.rs) |
 | LSP protocol, buffer versions, or watched files | [lsp.rs](tests/lsp.rs) |
-| Zed syntax features | [zed_queries.rs](tests/zed_queries.rs) |
+| Zed and Helix syntax features | [editor_queries.rs](tests/editor_queries.rs) |
 | Shader generation or execution | [spirv_backend.rs](tests/spirv_backend.rs), [gpu_backend.rs](tests/gpu_backend.rs), [window_backend.rs](tests/window_backend.rs) |
 
 [crates/resin-runtime/tests/](crates/resin-runtime/tests/) also exercises the native runtime
@@ -456,7 +460,7 @@ cargo test -p resin --test modules --test c_backend
 For editor work, without launching an editor or opening windows:
 
 ```sh
-cargo test -p resin --lib --test analysis --test zed_queries
+cargo test -p resin --lib --test analysis --test editor_queries
 cargo test -p resin --test formatting --test format_cli
 cargo test -p resin-hir -p resin-lsp
 cargo test -p resin --test lsp
