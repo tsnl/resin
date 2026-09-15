@@ -145,22 +145,22 @@ const key_apostrophe: int = 39;
 
 const (
 	key_comma: int = 44 + iota;
-	key_minus;
-	key_period;
-	key_slash;
+	key_minus: int = 44 + iota;
+	key_period: int = 44 + iota;
+	key_slash: int = 44 + iota;
 );
 
 const (
 	key_digit_0: int = 48 + iota;
-	key_digit_1;
-	key_digit_2;
-	key_digit_3;
-	key_digit_4;
-	key_digit_5;
-	key_digit_6;
-	key_digit_7;
-	key_digit_8;
-	key_digit_9;
+	key_digit_1: int = 48 + iota;
+	key_digit_2: int = 48 + iota;
+	key_digit_3: int = 48 + iota;
+	key_digit_4: int = 48 + iota;
+	key_digit_5: int = 48 + iota;
+	key_digit_6: int = 48 + iota;
+	key_digit_7: int = 48 + iota;
+	key_digit_8: int = 48 + iota;
+	key_digit_9: int = 48 + iota;
 );
 
 const key_semicolon: int = 59;
@@ -169,147 +169,147 @@ const key_equal: int = 61;
 
 const (
 	key_a: int = 65 + iota;
-	key_b;
-	key_c;
-	key_d;
-	key_e;
-	key_f;
-	key_g;
-	key_h;
-	key_i;
-	key_j;
-	key_k;
-	key_l;
-	key_m;
-	key_n;
-	key_o;
-	key_p;
-	key_q;
-	key_r;
-	key_s;
-	key_t;
-	key_u;
-	key_v;
-	key_w;
-	key_x;
-	key_y;
-	key_z;
+	key_b: int = 65 + iota;
+	key_c: int = 65 + iota;
+	key_d: int = 65 + iota;
+	key_e: int = 65 + iota;
+	key_f: int = 65 + iota;
+	key_g: int = 65 + iota;
+	key_h: int = 65 + iota;
+	key_i: int = 65 + iota;
+	key_j: int = 65 + iota;
+	key_k: int = 65 + iota;
+	key_l: int = 65 + iota;
+	key_m: int = 65 + iota;
+	key_n: int = 65 + iota;
+	key_o: int = 65 + iota;
+	key_p: int = 65 + iota;
+	key_q: int = 65 + iota;
+	key_r: int = 65 + iota;
+	key_s: int = 65 + iota;
+	key_t: int = 65 + iota;
+	key_u: int = 65 + iota;
+	key_v: int = 65 + iota;
+	key_w: int = 65 + iota;
+	key_x: int = 65 + iota;
+	key_y: int = 65 + iota;
+	key_z: int = 65 + iota;
 );
 
 const (
 	key_left_bracket: int = 91 + iota;
-	key_backslash;
-	key_right_bracket;
+	key_backslash: int = 91 + iota;
+	key_right_bracket: int = 91 + iota;
 );
 
 const key_grave_accent: int = 96;
 
 const (
 	key_world_1: int = 161 + iota;
-	key_world_2;
+	key_world_2: int = 161 + iota;
 );
 
 const (
 	key_escape: int = 256 + iota;
-	key_enter;
-	key_tab;
-	key_backspace;
-	key_insert;
-	key_delete;
-	key_right;
-	key_left;
-	key_down;
-	key_up;
-	key_page_up;
-	key_page_down;
-	key_home;
-	key_end;
+	key_enter: int = 256 + iota;
+	key_tab: int = 256 + iota;
+	key_backspace: int = 256 + iota;
+	key_insert: int = 256 + iota;
+	key_delete: int = 256 + iota;
+	key_right: int = 256 + iota;
+	key_left: int = 256 + iota;
+	key_down: int = 256 + iota;
+	key_up: int = 256 + iota;
+	key_page_up: int = 256 + iota;
+	key_page_down: int = 256 + iota;
+	key_home: int = 256 + iota;
+	key_end: int = 256 + iota;
 );
 
 const (
 	key_caps_lock: int = 280 + iota;
-	key_scroll_lock;
-	key_num_lock;
-	key_print_screen;
-	key_pause;
+	key_scroll_lock: int = 280 + iota;
+	key_num_lock: int = 280 + iota;
+	key_print_screen: int = 280 + iota;
+	key_pause: int = 280 + iota;
 );
 
 const (
 	key_f1: int = 290 + iota;
-	key_f2;
-	key_f3;
-	key_f4;
-	key_f5;
-	key_f6;
-	key_f7;
-	key_f8;
-	key_f9;
-	key_f10;
-	key_f11;
-	key_f12;
-	key_f13;
-	key_f14;
-	key_f15;
-	key_f16;
-	key_f17;
-	key_f18;
-	key_f19;
-	key_f20;
-	key_f21;
-	key_f22;
-	key_f23;
-	key_f24;
-	key_f25;
+	key_f2: int = 290 + iota;
+	key_f3: int = 290 + iota;
+	key_f4: int = 290 + iota;
+	key_f5: int = 290 + iota;
+	key_f6: int = 290 + iota;
+	key_f7: int = 290 + iota;
+	key_f8: int = 290 + iota;
+	key_f9: int = 290 + iota;
+	key_f10: int = 290 + iota;
+	key_f11: int = 290 + iota;
+	key_f12: int = 290 + iota;
+	key_f13: int = 290 + iota;
+	key_f14: int = 290 + iota;
+	key_f15: int = 290 + iota;
+	key_f16: int = 290 + iota;
+	key_f17: int = 290 + iota;
+	key_f18: int = 290 + iota;
+	key_f19: int = 290 + iota;
+	key_f20: int = 290 + iota;
+	key_f21: int = 290 + iota;
+	key_f22: int = 290 + iota;
+	key_f23: int = 290 + iota;
+	key_f24: int = 290 + iota;
+	key_f25: int = 290 + iota;
 );
 
 const (
 	key_keypad_0: int = 320 + iota;
-	key_keypad_1;
-	key_keypad_2;
-	key_keypad_3;
-	key_keypad_4;
-	key_keypad_5;
-	key_keypad_6;
-	key_keypad_7;
-	key_keypad_8;
-	key_keypad_9;
-	key_keypad_decimal;
-	key_keypad_divide;
-	key_keypad_multiply;
-	key_keypad_subtract;
-	key_keypad_add;
-	key_keypad_enter;
-	key_keypad_equal;
+	key_keypad_1: int = 320 + iota;
+	key_keypad_2: int = 320 + iota;
+	key_keypad_3: int = 320 + iota;
+	key_keypad_4: int = 320 + iota;
+	key_keypad_5: int = 320 + iota;
+	key_keypad_6: int = 320 + iota;
+	key_keypad_7: int = 320 + iota;
+	key_keypad_8: int = 320 + iota;
+	key_keypad_9: int = 320 + iota;
+	key_keypad_decimal: int = 320 + iota;
+	key_keypad_divide: int = 320 + iota;
+	key_keypad_multiply: int = 320 + iota;
+	key_keypad_subtract: int = 320 + iota;
+	key_keypad_add: int = 320 + iota;
+	key_keypad_enter: int = 320 + iota;
+	key_keypad_equal: int = 320 + iota;
 );
 
 const (
 	key_left_shift: int = 340 + iota;
-	key_left_control;
-	key_left_alt;
-	key_left_super;
-	key_right_shift;
-	key_right_control;
-	key_right_alt;
-	key_right_super;
-	key_menu;
+	key_left_control: int = 340 + iota;
+	key_left_alt: int = 340 + iota;
+	key_left_super: int = 340 + iota;
+	key_right_shift: int = 340 + iota;
+	key_right_control: int = 340 + iota;
+	key_right_alt: int = 340 + iota;
+	key_right_super: int = 340 + iota;
+	key_menu: int = 340 + iota;
 );
 
 const (
 	mouse_button_left: int = iota;
-	mouse_button_right;
-	mouse_button_middle;
-	mouse_button_4;
-	mouse_button_5;
-	mouse_button_6;
-	mouse_button_7;
-	mouse_button_8;
+	mouse_button_right: int = iota;
+	mouse_button_middle: int = iota;
+	mouse_button_4: int = iota;
+	mouse_button_5: int = iota;
+	mouse_button_6: int = iota;
+	mouse_button_7: int = iota;
+	mouse_button_8: int = iota;
 );
 
 // Resin input snapshot bits from resin_runtime/window.h.
 const (
 	input_down: uint = 1 << iota;
-	input_pressed;
-	input_released;
+	input_pressed: uint = 1 << iota;
+	input_released: uint = 1 << iota;
 );
 
 struct ButtonState { down: bool, pressed: bool, released: bool };

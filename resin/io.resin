@@ -5,7 +5,7 @@ import { "span.resin", "string.resin" };
 // Native stream selectors for resin_stream_write.
 const (
 	stream_stdout: uint = iota;
-	stream_stderr;
+	stream_stderr: uint = iota;
 );
 
 struct WriteError {};

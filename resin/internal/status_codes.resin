@@ -13,12 +13,12 @@ export {
 // ResinStatus values from resin_runtime/status.h. Preserve their ABI order.
 const (
 	status_success: int = iota;
-	status_invalid_argument;
-	status_vulkan_unavailable;
-	status_unsupported;
-	status_out_of_memory;
-	status_vulkan_error;
-	status_io_error;
-	status_incomplete;
-	status_window_unavailable;
+	status_invalid_argument: int = iota;
+	status_vulkan_unavailable: int = iota;
+	status_unsupported: int = iota;
+	status_out_of_memory: int = iota;
+	status_vulkan_error: int = iota;
+	status_io_error: int = iota;
+	status_incomplete: int = iota;
+	status_window_unavailable: int = iota;
 );
