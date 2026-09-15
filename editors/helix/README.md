@@ -6,6 +6,7 @@ diagnostics, hover, go-to-definition, completion, and formatting.
 
 ## Install
 
+The development shell includes Helix (`hx`) and the C compiler for grammar builds.
 From the Resin repository root on Linux or macOS:
 
 ```sh
