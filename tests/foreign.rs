@@ -26,17 +26,23 @@ fn foreign_functions_forward_separate_c_arguments() {
     let source = format!(
         r#"export {{ main }};
 
-        extern "{header}" def answer () -> int;
-        extern "{header}" def assign (out: Ptr<int>, value: int);
-        extern "stdlib.h" def abs (n: int) -> int;
+        extern {{
+            "{header}": {{
+                def answer () -> int;
+                def assign (out: Ptr<int>, value: int);
+            }},
+            "stdlib.h": {{
+                def abs (n: int) -> int;
+            }},
+        }};
+
         def call (f: () -> int) -> int = {{ f() }};
         def main () -> int = {{
             var value = 0;
             var set = assign;
             set(&value, call(answer));
             abs(-value)
-        }};
-    "#,
+        }};"#,
         header = header.to_string_lossy().replace('\\', "/")
     );
     let output = run(&source);
@@ -71,17 +77,20 @@ fn pointers_roundtrip_and_address_expressions_evaluate_once() {
 #[test]
 fn foreign_aggregate_values_and_implicit_pointer_casts_are_rejected() {
     for source in [
-        "extern type Native; extern \"native.h\" def consume (value: Native) -> ();",
-        "extern \"native.h\" def consume (value: { x: int }) -> ();",
-        "extern \"native.h\" def produce () -> { x: int };",
-        "extern \"native.h\" def callback (f: () -> int) -> ();",
-        "extern \"bad\\nheader\" def invalid () -> int;",
+        "extern { \"native.h\": { def consume (value: Native) -> (); } }; extern type Native;",
+        "extern { \"native.h\": { def consume (value: { x: int }) -> (); } };",
+        "extern { \"native.h\": { def produce () -> { x: int }; } };",
+        "extern { \"native.h\": { def callback (f: () -> int) -> (); } };",
     ] {
         assert!(
             error(source).contains("InvalidForeignSignature"),
             "{source}"
         );
     }
+    assert!(
+        error("extern { \"bad\\nheader\": { def invalid () -> int; } };")
+            .contains("InvalidForeignHeader")
+    );
     for source in [
         "export { main }; extern type Native; def main() -> () = { var value: Native; };",
         "extern type Native; def identity (n: Native) -> Native = { n };",
@@ -155,7 +164,7 @@ fn shader_declarations_validate_signatures_and_do_not_expose_bytecode() {
         "@compute_shader def kernel(i: int) -> int = { i };",
         "@compute_shader def kernel(i: uint) -> uint = { i };",
         "@compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() = { var alias = kernel; var code = alias.spirv; };",
-        "extern \"stdlib.h\" def abs(i: int) -> int; def main() = { var code = abs.spirv; };",
+        "extern { \"stdlib.h\": { def abs(i: int) -> int; } }; def main() = { var code = abs.spirv; };",
     ] {
         assert!(!error(source).is_empty(), "{source}");
     }

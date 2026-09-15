@@ -363,7 +363,7 @@ fn unsupported_shader_features_are_diagnosed() {
             "unsupported shader builtin",
         ),
         (
-            "export { kernel }; extern \"stdlib.h\" def abs (i: int) -> int; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { abs(1); i }; };",
+            "export { kernel }; extern { \"stdlib.h\": { def abs (i: int) -> int; } }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { abs(1); i }; };",
             "foreign",
         ),
         (

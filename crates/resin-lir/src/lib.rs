@@ -19,7 +19,11 @@ mod print;
 mod profile;
 mod verify;
 
-use std::{collections::BTreeMap, num::NonZeroUsize, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    num::NonZeroUsize,
+    sync::Arc,
+};
 
 define_id! {
     pub struct BlockId(usize);
@@ -275,6 +279,8 @@ pub enum Terminator {
 pub struct Module {
     /// Functions exported by the entry source file.
     pub entries: BTreeMap<Arc<str>, FunctionId>,
+    /// Explicit native dependencies, including header groups with no functions.
+    pub foreign_headers: BTreeSet<Arc<str>>,
     /// Canonical nominal and structural definitions, indexed by [`TypeId`].
     pub types: TypeTable,
     pub functions: Vec<Function>,
@@ -459,6 +465,7 @@ pub struct VerifyError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerifyLocation {
+    Module,
     TypeDefinition {
         definition: TypeId,
     },
@@ -482,6 +489,7 @@ pub enum VerifyErrorKind {
     UnsupportedGpuElement { ty: Ty },
     InvalidVariant,
     InvalidDropHook,
+    InvalidForeignHeader { header: Arc<str> },
     InvalidForeignSignature,
     OpaqueValue { ty: Ty },
     InvalidShader,

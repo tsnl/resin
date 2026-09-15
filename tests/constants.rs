@@ -140,7 +140,7 @@ fn sizeof_matches_native_c_representations() {
         result(&format!(
             r#"
         export {{ main }};
-        extern "{}" def native_size(index: uint) -> ulong;
+        extern {{ "{}": {{ def native_size(index: uint) -> ulong; }} }};
         struct Record {{ a: sbyte, b: float64, c: ushort }};
         struct First {{ value: int }};
         struct Second {{ value: int }};

@@ -12,6 +12,12 @@ export {
 	RuntimeStatus,
 };
 
+extern {
+	"resin_runtime.h": {
+		def resin_status_string(status: int) -> Ptr<ubyte>;
+	},
+};
+
 import { "internal/status_codes.resin" };
 
 struct InvalidArgument {};
@@ -108,5 +114,3 @@ struct RuntimeStatus {
 		resin_status_string(RuntimeStatus.code(error))
 	};
 };
-
-extern "resin_runtime.h" def resin_status_string(status: int) -> Ptr<ubyte>;

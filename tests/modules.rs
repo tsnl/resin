@@ -130,7 +130,7 @@ fn private_names_are_not_visible_to_consumers() {
         ),
         (
             "export {};",
-            "extern \"stdlib.h\" def abs (n: int) -> int;",
+            "extern { \"stdlib.h\": { def abs (n: int) -> int; } };",
             "def main() -> () = { abs(-1); };",
             "UnboundValue",
         ),
@@ -219,7 +219,7 @@ fn dependencies_are_not_implicitly_reexported() {
 fn conflicting_imports_report_both_definition_locations() {
     for definition in [
         "def shared () -> int = { 1 };",
-        "extern \"stdlib.h\" def shared() -> int;",
+        "extern { \"stdlib.h\": { def shared() -> int; } };",
         "type Shared = int;",
         "extern type Shared;",
     ] {
@@ -243,19 +243,16 @@ fn conflicting_imports_report_both_definition_locations() {
 
 #[test]
 fn imports_conflict_with_local_bindings_but_allow_nested_shadowing() {
-    for local in [
-        "def shared () -> int = { 1 };",
-        "extern \"x.h\" def shared () -> int;",
+    for source in [
+        "import { \"library.resin\" }; def shared () -> int = { 1 };",
+        "extern { \"x.h\": { def shared () -> int; } }; import { \"library.resin\" };",
     ] {
         Project::new(&[
             (
                 "library.resin",
                 "export { shared }; def shared() -> int = { 42 };",
             ),
-            (
-                "main.resin",
-                &format!("import {{ \"library.resin\" }}; {local}"),
-            ),
+            ("main.resin", source),
         ])
         .error("conflicting binding");
     }
@@ -553,11 +550,11 @@ fn compiler_builtins_cannot_be_redefined_in_any_module_or_scope() {
     for name in ["absurd"] {
         for source in [
             format!("def {name} () -> () = {{}};"),
-            format!("extern \"stdlib.h\" def {name} () -> int;"),
+            format!("extern {{ \"stdlib.h\": {{ def {name} () -> int; }} }};"),
             format!("def main () -> () = {{ var {name} = 1; }};"),
             format!("def main () -> () = {{ var {name}: int; }};"),
             format!("def f ({name}: int) -> () = {{}};"),
-            format!("extern \"stdlib.h\" def f ({name}: int) -> ();"),
+            format!("extern {{ \"stdlib.h\": {{ def f ({name}: int) -> (); }} }};"),
         ] {
             Project::new(&[("main.resin", &source)]).error("ReservedBuiltin");
             Project::new(&[

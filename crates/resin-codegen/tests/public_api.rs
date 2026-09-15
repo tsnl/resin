@@ -57,6 +57,26 @@ fn embedded_module() -> Module {
 }
 
 #[test]
+fn declared_headers_are_emitted_without_foreign_function_references() {
+    let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
+    let mut module = module();
+    module.foreign_headers.insert("standalone/header.h".into());
+    assert!(
+        module
+            .functions
+            .iter()
+            .all(|function| function.foreign.is_none())
+    );
+    let checked = VerifiedModule::new(module).unwrap();
+    let project = resin_codegen::generate(checked.view(), Some("main"), directory.path()).unwrap();
+    let source = fs::read_to_string(project.c_source().unwrap()).unwrap();
+    assert!(
+        source.contains("#include <standalone/header.h>"),
+        "{source}"
+    );
+}
+
+#[test]
 fn generated_project_outlives_its_verified_input_and_retains_opaque_names() {
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
     let project = {

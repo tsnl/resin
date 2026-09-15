@@ -91,6 +91,7 @@ impl<'a> AstGen<'a> {
 
     pub(crate) fn source_file(&self, node: Node) -> SourceFile {
         let mut stmts = Vec::new();
+        let foreign_headers = self.foreign_declarations(node, &mut stmts);
         let mut cursor = node.walk();
         for child in node.children_by_field_name("stmt", &mut cursor) {
             stmts.push(self.gen_stmt(child));
@@ -136,9 +137,31 @@ impl<'a> AstGen<'a> {
             });
         SourceFile {
             exports,
+            foreign_headers,
             imports,
             stmts,
         }
+    }
+
+    fn foreign_declarations(&self, node: Node, stmts: &mut Vec<Stmt>) -> Vec<Spanned<Arc<str>>> {
+        let Some(clause) = node.child_by_field_name("externs") else {
+            return Vec::new();
+        };
+        let mut headers = Vec::new();
+        for group in clause.children_by_field_name("groups", &mut clause.walk()) {
+            let Some(header) = group
+                .child_by_field_name("header")
+                .filter(|n| !n.has_error())
+            else {
+                continue;
+            };
+            let header = Spanned::new(decode_string(self.text(header)).into(), self.span(header));
+            for function in group.children_by_field_name("functions", &mut group.walk()) {
+                stmts.push(self.gen_function(function, Some(&header.val)));
+            }
+            headers.push(header);
+        }
+        headers
     }
 
     fn parse_error(&self, node: Node) -> AstError {
@@ -231,7 +254,7 @@ impl<'a> AstGen<'a> {
             node.kind(),
             "function_definition" | "foreign_function" | "intrinsic_function"
         ) {
-            return self.gen_function(node);
+            return self.gen_function(node, None);
         }
         if node.kind() == "foreign_type" {
             return Spanned::new(
@@ -269,7 +292,7 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_method(&self, node: Node, owner: &Ident) -> Stmt {
-        let mut method = self.gen_function(node);
+        let mut method = self.gen_function(node, None);
         if let StmtKind::Function { name, .. } = &mut method.val {
             name.val = format!("{}.{}", owner.val, name.val).into();
         }
@@ -681,7 +704,7 @@ impl<'a> AstGen<'a> {
         }
     }
 
-    fn gen_function(&self, node: Node) -> Stmt {
+    fn gen_function(&self, node: Node, header: Option<&Arc<str>>) -> Stmt {
         let mut next = node
             .child_by_field_name("name")
             .and_then(|name| name.next_sibling());
@@ -719,14 +742,10 @@ impl<'a> AstGen<'a> {
                 self.span(node),
             );
         }
-        if let Some(header) = node.child_by_field_name("header") {
+        if let Some(header) = header {
             return Spanned::new(
                 StmtKind::ForeignFunction {
-                    header: if header.has_error() {
-                        "".into()
-                    } else {
-                        decode_string(self.text(header)).into()
-                    },
+                    header: header.clone(),
                     name,
                     params,
                     result,
@@ -1086,24 +1105,7 @@ impl<'a> AstGen<'a> {
 }
 
 fn decode_string(text: &str) -> String {
-    let mut result = String::new();
-    let mut chars = text[1..text.len() - 1].chars();
-    while let Some(ch) = chars.next() {
-        result.push(if ch == '\\' {
-            match chars.next().expect("validated string escape") {
-                'n' => '\n',
-                'r' => '\r',
-                't' => '\t',
-                '0' => '\0',
-                '"' => '"',
-                '\\' => '\\',
-                _ => unreachable!("grammar rejects unknown escapes"),
-            }
-        } else {
-            ch
-        });
-    }
-    result
+    resin_cst::decode_string(text).expect("validated string")
 }
 
 #[cfg(test)]

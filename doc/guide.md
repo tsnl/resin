@@ -854,6 +854,12 @@ check statuses before returning out-parameter values. For example:
 
 ```resin
 export { Gpu };
+extern {
+    "resin_runtime.h": {
+        def resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
+        def resin_gpu_destroy(gpu: Ptr<ResinGpu>);
+    },
+};
 import { "$/status.resin", "$/shared.resin" };
 
 extern type ResinGpu;
@@ -870,9 +876,19 @@ struct Gpu { owner: ArcPtr<GpuOwner>,
     };
 };
 
-extern "resin_runtime.h" def resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
-extern "resin_runtime.h" def resin_gpu_destroy(gpu: Ptr<ResinGpu>);
 ```
+
+Declare foreign functions in a top-level `extern` block after any `export` clause
+and before any `import` clause. Each header names a group of ordinary `def`
+signatures. Groups use comma separators with an optional trailing comma; the block
+ends with `};`. The block and individual groups may be empty. Every declared header
+remains a native dependency even when none of its functions is called, including
+empty groups. The old `extern "header.h" def ...;` spelling
+is no longer accepted.
+
+Header groups do not introduce a scope: their functions have the module's usual
+export rules, and signatures can use types from its imports and declarations.
+Opaque foreign types remain standalone `extern type Name;` declarations.
 
 Foreign headers use the C compiler's include search paths (or an absolute path).
 Use forward slashes in header paths, including Windows paths such as `C:/SDK/include/api.h`.

@@ -430,8 +430,13 @@ fn native_statuses_become_named_errors_and_keep_unknown_codes() {
     let output = run(
         r#"
         export { main };
-        import { "$/status.resin" };
-        extern "string.h" def strcmp(a: Ptr<ubyte>, b: Ptr<ubyte>) -> int;
+
+        extern {
+            "string.h": {
+                def strcmp(a: Ptr<ubyte>, b: Ptr<ubyte>) -> int;
+            },
+        };
+       import { "$/status.resin" };
         def main() -> Result<int, _> = {
             RuntimeStatus.from_code(0)?;
             var code = -1;
@@ -447,8 +452,7 @@ fn native_statuses_become_named_errors_and_keep_unknown_codes() {
             var message = "io error";
             valid := valid && strcmp(RuntimeStatus.message(IoError {}), message.data) == 0;
             ok(if (valid) { 0 } else { 1 })
-        };
-        "#,
+        };"#,
         "",
     );
     success(&output);
@@ -577,9 +581,14 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
     let output = run(
         r#"
         export { main };
-        import { "$/gpu.resin", "$/graphics.resin", "$/status.resin" };
-        extern "resin_runtime.h" def test_mode(mode: int);
-        extern "resin_runtime.h" def test_verify(code: int);
+
+        extern {
+            "resin_runtime.h": {
+                def test_mode(mode: int);
+                def test_verify(code: int);
+            },
+        };
+       import { "$/gpu.resin", "$/graphics.resin", "$/status.resin" };
         @vertex_shader
         def vertex(index: int) -> Vertex = {
             Vertex { position = Position { x = 0_f, y = 0_f, z = 0_f, w = 1_f },
@@ -610,8 +619,7 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
                 test_verify(result);
                 mode := mode + 1;
             };
-        };
-        "#,
+        };"#,
         r#"
         #include <resin_runtime.h>
         #include <assert.h>
@@ -831,9 +839,14 @@ fn typed_pipeline_factories_embed_shaders_and_keep_shared_ownership() {
     let output = run(
         r#"
         export { main };
-        import { "$/gpu.resin", "$/graphics.resin", "$/status.resin" };
-        extern "resin_runtime.h" def test_finished();
-        extern "resin_runtime.h" def test_fail();
+
+        extern {
+            "resin_runtime.h": {
+                def test_finished();
+                def test_fail();
+            },
+        };
+       import { "$/gpu.resin", "$/graphics.resin", "$/status.resin" };
         @compute_shader
         def kernel(index: ulong, root: Ptr<int>) = { root.* := int(index); };
         @vertex_shader
@@ -861,8 +874,7 @@ fn typed_pipeline_factories_embed_shaders_and_keep_shared_ownership() {
             };
             test_finished();
             ok(if (compute_code == 5 && graphics_code == 5) { 0 } else { 1 })
-        };
-    "#,
+        };"#,
         r#"
         #include <resin_runtime.h>
         #include <assert.h>
@@ -1007,12 +1019,17 @@ fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
     let output = run(
         r#"
         export { main };
-        import { "$/gpu.resin", "$/graphics.resin", "$/status.resin" };
-        extern "resin_runtime.h" def test_mode(mode: int);
-        extern "resin_runtime.h" def test_recorded();
-        extern "resin_runtime.h" def test_code(code: int);
-        extern "resin_runtime.h" def test_completed();
-        extern "resin_runtime.h" def test_finished();
+
+        extern {
+            "resin_runtime.h": {
+                def test_mode(mode: int);
+                def test_recorded();
+                def test_code(code: int);
+                def test_completed();
+                def test_finished();
+            },
+        };
+       import { "$/gpu.resin", "$/graphics.resin", "$/status.resin" };
         @vertex_shader
         def vertex(index: int) -> Vertex = {
             Vertex { position = Position { x = 0_f, y = 0_f, z = 0_f, w = 1_f },
@@ -1052,8 +1069,7 @@ fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
                 mode := mode + 1;
             };
             ok(())
-        };
-        "#,
+        };"#,
         r#"
         #include <resin_runtime.h>
         #include <assert.h>
@@ -1126,8 +1142,13 @@ fn window_constructor_accepts_owned_titles_until_the_native_call_returns() {
     let output = run(
         r#"
         export { main };
-        import { "$/window.resin", "$/shared.resin", "$/string.resin" };
-        extern "resin_runtime.h" def window_counts() -> int;
+
+        extern {
+            "resin_runtime.h": {
+                def window_counts() -> int;
+            },
+        };
+       import { "$/window.resin", "$/shared.resin", "$/string.resin" };
         def main() -> Result<int, _> = {
             var weak = WeakSpan<ubyte>.empty();
             {
@@ -1142,8 +1163,7 @@ fn window_constructor_accepts_owned_titles_until_the_native_call_returns() {
                 ArcSpan<ubyte>(live) => { 1 == 0 },
             };
             ok(if (released && window_counts() == 22) { 0 } else { 1 })
-        };
-        "#,
+        };"#,
         r#"
         #include <resin_runtime.h>
         #include <assert.h>

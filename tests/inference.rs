@@ -194,7 +194,7 @@ fn ambiguous_infinite_and_forbidden_holes_are_diagnostics() {
         "def f(x: Ptr<_>) = {};",
         "type Foo = Ptr<_>;",
         "struct Foo { value: _ };",
-        "extern \"api.h\" def f() -> _;",
+        "extern { \"api.h\": { def f() -> _; } };",
         "def main() -> _ = { type Foo = _; () };",
     ] {
         rejects(

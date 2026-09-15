@@ -147,11 +147,13 @@ fn finish_group(
         .is_some_and(|p| p.kind() == "const_declaration")
         || tokens[start].kind() == "{"
             && tokens[start].parent().is_some_and(|p| {
-                matches!(p.kind(), "block_body" | "chain_term" | "match_term")
-                    || (p.kind() == "struct_definition"
-                        && p.children_by_field_name("method", &mut p.walk())
-                            .next()
-                            .is_some())
+                matches!(
+                    p.kind(),
+                    "block_body" | "chain_term" | "match_term" | "extern_clause" | "foreign_group"
+                ) || (p.kind() == "struct_definition"
+                    && p.children_by_field_name("method", &mut p.walk())
+                        .next()
+                        .is_some())
             });
     let singleton_tuple = tokens[start].parent().is_some_and(|parent| {
         matches!(parent.kind(), "tuple_term" | "tuple_type")

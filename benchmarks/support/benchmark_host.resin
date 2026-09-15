@@ -1,11 +1,15 @@
 export { main };
 
-import { "$/shared.resin", "@WORKLOAD@" };
+extern {
+	"benchmark.h": {
+		def benchmark_argument(argc: int, argv: Ptr<Ptr<ubyte>>, index: uint) -> ulong;
+		def benchmark_prepare(input: Ptr<uint>, output: Ptr<uint>, count: uint, seed: uint);
+		def benchmark_clock() -> ulong;
+		def benchmark_report(start: ulong, end: ulong, output: Ptr<uint>, count: uint, measured: int);
+	},
+};
 
-extern "benchmark.h" def benchmark_argument(argc: int, argv: Ptr<Ptr<ubyte>>, index: uint) -> ulong;
-extern "benchmark.h" def benchmark_prepare(input: Ptr<uint>, output: Ptr<uint>, count: uint, seed: uint);
-extern "benchmark.h" def benchmark_clock() -> ulong;
-extern "benchmark.h" def benchmark_report(start: ulong, end: ulong, output: Ptr<uint>, count: uint, measured: int);
+import { "$/shared.resin", "@WORKLOAD@" };
 
 def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> Result<(), _> = {
 	var count = uint(benchmark_argument(argc, argv, 1_ui));
