@@ -851,6 +851,11 @@ fn matching_completions(mut items: Vec<Completion>, prefix: &str) -> Vec<Complet
 
 const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     (
+        "compute_workgroup_size",
+        "compute_workgroup_size: ulong\n\nThe number of X invocations per compute workgroup. Y and Z sizes are one. Available on host and shader without imports.",
+        DefinitionKind::Variable,
+    ),
+    (
         "str",
         "str\n\nA string literal view with data: Ptr<ubyte> and length: ulong. Static storage has a trailing NUL excluded from length. Import $/span.resin and use bytes(text) to borrow its bytes. Host-only.",
         DefinitionKind::Type,

@@ -932,9 +932,12 @@ def kernel(index: ulong, root: Ptr<Params>) -> () = {
 
 The entry interfaces are:
 
-- Compute takes `(ulong, Ptr<T>)` and returns `()`. Workgroups contain 64 invocations; the
-  index is the global X invocation index. Dispatch only in X (`y = z = 1`) and guard any
-  excess invocations in the function, as above.
+- Compute takes `(ulong, Ptr<T>)` and returns `()`. The builtin `ulong` constant
+  `compute_workgroup_size` gives the number of invocations per workgroup (currently 64)
+  on both host and shader, without an import. Compute dispatch groups with
+  `uint((count + compute_workgroup_size - 1_ul) / compute_workgroup_size)`.
+  The index is the global X invocation index. Dispatch only in X (`y = z = 1`) and guard
+  any excess invocations in the function, as above.
 - Vertex takes an `int` vertex index, optionally paired with `Ptr<T>`, and returns
   `{ position: Position, color: Color }`.
   Position has `float32` fields `x, y, z, w`; Color has `r, g, b, a`, in those orders.

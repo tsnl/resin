@@ -213,7 +213,7 @@ impl Variables {
             );
         }
         // Widen before multiplication: the full global index need not fit u32.
-        let width = context.constant_u64(64);
+        let width = context.constant_u64(u64::from(resin_types::shader::COMPUTE_WORKGROUP_SIZE));
         let base = context
             .builder
             .i_mul(word, None, coordinates[0], width)
@@ -348,11 +348,11 @@ fn declare_entry(context: &mut Context<'_>, entry: Word, stage: Stage, interface
         .builder
         .entry_point(model, entry, "main", interfaces);
     match stage {
-        Stage::Compute => {
-            context
-                .builder
-                .execution_mode(entry, ExecutionMode::LocalSize, [64, 1, 1])
-        }
+        Stage::Compute => context.builder.execution_mode(
+            entry,
+            ExecutionMode::LocalSize,
+            [resin_types::shader::COMPUTE_WORKGROUP_SIZE, 1, 1],
+        ),
         Stage::Fragment => {
             context
                 .builder

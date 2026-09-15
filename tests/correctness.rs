@@ -16,6 +16,13 @@ fn compile(src: &str) -> resin_lir::Module {
 }
 
 #[test]
+fn compute_workgroup_size_cannot_be_assigned() {
+    let error = pipeline::generate(&parse("def main() = { compute_workgroup_size := 1_ul; };"))
+        .unwrap_err();
+    assert_eq!(error.kind, GenerateErrorKind::NotAPlace);
+}
+
+#[test]
 fn only_parenthesized_lists_apply_functions() {
     for call in [
         "f [1, 2]",

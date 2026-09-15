@@ -5,6 +5,24 @@ use std::{collections::BTreeMap, path::Path};
 use tempfile::TempDir;
 
 #[test]
+fn compute_workgroup_size_has_builtin_hover_and_completion() {
+    let source = "def size() -> ulong = { compute_workgroup_size };";
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.checked();
+    let input = project.source("main.resin");
+    let offset = source.find("compute_workgroup_size").unwrap();
+    let hover = analysis.hover(&input, offset).unwrap();
+    assert!(hover.text.starts_with("compute_workgroup_size: ulong"));
+    let completions = analysis.completions(&input, offset + "compute_".len());
+    let constant = completions
+        .iter()
+        .find(|item| item.name == "compute_workgroup_size")
+        .unwrap();
+    assert_eq!(constant.detail, hover.text);
+    assert_eq!(constant.kind, resin_hir::DefinitionKind::Variable);
+}
+
+#[test]
 fn generic_method_calls_show_substituted_signatures_and_original_definitions() {
     let library = "export { Cell }; struct Cell<T> { value: T, def read(self: Ptr<Cell<T>>) -> T = { self.value }; def choose<U>(self: Ptr<Cell<T>>, value: U) -> U = { value }; };";
     let source = "import { \"library.resin\" }; type IntCell = Cell<int>; def use(cell: Ptr<IntCell>) -> ulong = { cell.read(); cell.choose::<ulong>(42) };";
