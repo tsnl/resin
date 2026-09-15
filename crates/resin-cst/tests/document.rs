@@ -1,4 +1,6 @@
 use resin_cst::Node;
+mod common;
+use common::parse;
 
 fn nodes(node: Node<'_>) -> Vec<(String, usize, usize)> {
     let mut result = vec![(node.kind().into(), node.start_byte(), node.end_byte())];
@@ -8,8 +10,8 @@ fn nodes(node: Node<'_>) -> Vec<(String, usize, usize)> {
     result
 }
 
-#[test]
-fn incremental_edits_match_fresh_parsing_including_utf8_boundaries() {
+#[tokio::test]
+async fn incremental_edits_match_fresh_parsing_including_utf8_boundaries() {
     let texts = [
         "",
         "// é",
@@ -23,10 +25,10 @@ fn incremental_edits_match_fresh_parsing_including_utf8_boundaries() {
         "def main() = { var value: int = 4; value };",
     ];
     for before in texts {
-        let original = resin_cst::build_cst(before, None);
+        let original = parse(before, None).await;
         for after in texts {
-            let incremental = resin_cst::build_cst(after, Some(&original));
-            let fresh = resin_cst::build_cst(after, None);
+            let incremental = parse(after, Some(&original)).await;
+            let fresh = parse(after, None).await;
             assert_eq!(
                 nodes(incremental.tree().root_node()),
                 nodes(fresh.tree().root_node())
@@ -36,10 +38,10 @@ fn incremental_edits_match_fresh_parsing_including_utf8_boundaries() {
     }
 }
 
-#[test]
-fn queries_reject_invalid_utf8_and_out_of_range_offsets() {
+#[tokio::test]
+async fn queries_reject_invalid_utf8_and_out_of_range_offsets() {
     let source = "// é🌲\ndef main() = {};";
-    let document = resin_cst::build_cst(source, None);
+    let document = parse(source, None).await;
     for offset in 0..=source.len() + 1 {
         let token = document.token(offset);
         let types = document.type_context(offset);
@@ -52,10 +54,10 @@ fn queries_reject_invalid_utf8_and_out_of_range_offsets() {
     assert!(!document.type_context(usize::MAX));
 }
 
-#[test]
-fn delimiter_recovery_preserves_source_and_ignores_string_contents() {
+#[tokio::test]
+async fn delimiter_recovery_preserves_source_and_ignores_string_contents() {
     let source = "def main() = { print(\"[({é\")";
-    let document = resin_cst::build_cst(source, None);
+    let document = parse(source, None).await;
     let recovered = document
         .recovery()
         .expect("the block needs a closing brace");
@@ -74,10 +76,10 @@ fn formatting_needs_no_semantic_context() {
     assert!(resin_cst::format_source("def broken( = {").is_none());
 }
 
-#[test]
-fn source_wrapper_names_preserve_token_queries_and_formatting() {
+#[tokio::test]
+async fn source_wrapper_names_preserve_token_queries_and_formatting() {
     let source = "def first(values: GpuSpan<uint>) -> GpuPtr<uint> = { values.at(0_ul) };";
-    let document = resin_cst::build_cst(source, None);
+    let document = parse(source, None).await;
     assert!(!document.tree().root_node().has_error());
     for former in ["GpuSpan", "GpuPtr"] {
         let offset = source.find(former).unwrap() + 2;
@@ -90,10 +92,10 @@ fn source_wrapper_names_preserve_token_queries_and_formatting() {
     assert!(formatted.contains("GpuPtr<uint>"));
 }
 
-#[test]
-fn gpu_pipeline_annotations_preserve_type_queries_and_formatting() {
+#[tokio::test]
+async fn gpu_pipeline_annotations_preserve_type_queries_and_formatting() {
     let source = "def pipeline(value:GpuComputePipeline<Root,ArcPtr<Owner>>)->GpuGraphicsPipeline<None,_> = {value};";
-    let document = resin_cst::build_cst(source, None);
+    let document = parse(source, None).await;
     assert!(!document.tree().root_node().has_error());
     for former in ["GpuComputePipeline", "GpuGraphicsPipeline"] {
         let offset = source.find(former).unwrap() + 2;
@@ -106,10 +108,10 @@ fn gpu_pipeline_annotations_preserve_type_queries_and_formatting() {
     assert!(formatted.contains("GpuGraphicsPipeline<None, _>"));
 }
 
-#[test]
-fn associated_method_references_format_and_preserve_type_queries() {
+#[tokio::test]
+async fn associated_method_references_format_and_preserve_type_queries() {
     let source = "def main()={var f=Cell<int>.select :: <ulong>;var g=Factory.create :: <Ptr<int>>;Cell<int>.select :: <ulong>(7,42);};";
-    let document = resin_cst::build_cst(source, None);
+    let document = parse(source, None).await;
     assert!(!document.tree().root_node().has_error());
     assert!(document.type_context(source.find("ulong").unwrap()));
     assert_eq!(
@@ -129,16 +131,11 @@ fn associated_method_references_format_and_preserve_type_queries() {
         "{formatted}"
     );
     assert_eq!(resin_cst::format_source(&formatted).unwrap(), formatted);
-    assert!(
-        !resin_cst::build_cst(formatted, None)
-            .tree()
-            .root_node()
-            .has_error()
-    );
+    assert!(!parse(formatted, None).await.tree().root_node().has_error());
 }
 
-#[test]
-fn editing_method_reference_arguments_matches_fresh_parsing() {
+#[tokio::test]
+async fn editing_method_reference_arguments_matches_fresh_parsing() {
     let sources = [
         "def main() = { var f = Cell<int>.",
         "def main() = { var f = Cell<int>.select::",
@@ -148,10 +145,10 @@ fn editing_method_reference_arguments_matches_fresh_parsing() {
         "def main() = { var f = Cell<int>.select::<ulong>(7, 42); };",
     ];
     for before in sources {
-        let original = resin_cst::build_cst(before, None);
+        let original = parse(before, None).await;
         for after in sources {
-            let incremental = resin_cst::build_cst(after, Some(&original));
-            let fresh = resin_cst::build_cst(after, None);
+            let incremental = parse(after, Some(&original)).await;
+            let fresh = parse(after, None).await;
             assert_eq!(
                 nodes(incremental.tree().root_node()),
                 nodes(fresh.tree().root_node())
@@ -159,4 +156,74 @@ fn editing_method_reference_arguments_matches_fresh_parsing() {
             assert_eq!(original.source(), before);
         }
     }
+}
+
+#[tokio::test]
+async fn parallel_successors_preserve_the_shared_predecessor() {
+    fn shareable<T: Send + Sync>() {}
+    fn sendable<T: Send>(value: T) -> T {
+        value
+    }
+    shareable::<resin_cst::Document>();
+
+    let execution = resin_executor::Execution::new(std::num::NonZeroUsize::new(2).unwrap());
+    let cancellation = resin_executor::Cancellation::new();
+    let original =
+        resin_cst::build_cst("def value() = { \"🌲\" };", None, &execution, &cancellation)
+            .await
+            .unwrap();
+    let clone = original.clone();
+    let original_nodes = nodes(original.tree().root_node());
+    assert_eq!(original.source().as_ptr(), clone.source().as_ptr());
+    let left_text = "def value() = { \"é🌳\" };";
+    let right_text = "def value() = { \"🍂\" };";
+    let (left, right) = tokio::join!(
+        sendable(resin_cst::build_cst(
+            left_text,
+            Some(&original),
+            &execution,
+            &cancellation
+        )),
+        sendable(resin_cst::build_cst(
+            right_text,
+            Some(&clone),
+            &execution,
+            &cancellation
+        )),
+    );
+    let (left, right) = (left.unwrap(), right.unwrap());
+    assert_eq!(left.source(), left_text);
+    assert_eq!(right.source(), right_text);
+    assert_eq!(
+        nodes(left.tree().root_node()),
+        nodes(parse(left_text, None).await.tree().root_node())
+    );
+    assert_eq!(
+        nodes(right.tree().root_node()),
+        nodes(parse(right_text, None).await.tree().root_node())
+    );
+    assert_eq!(original.source(), "def value() = { \"🌲\" };");
+    assert_eq!(nodes(original.tree().root_node()), original_nodes);
+    assert_eq!(nodes(clone.tree().root_node()), original_nodes);
+}
+
+#[tokio::test]
+async fn queued_parsing_can_be_cancelled_without_an_execution_slot() {
+    let execution = resin_executor::Execution::new(std::num::NonZeroUsize::MIN);
+    let cancellation = resin_executor::Cancellation::new();
+    let permit = execution.acquire(&cancellation).await.unwrap();
+    let pending = resin_cst::build_cst("def value() = {};", None, &execution, &cancellation);
+    tokio::pin!(pending);
+    tokio::select! {
+        biased;
+        _ = &mut pending => panic!("parsing must wait for its execution slot"),
+        _ = tokio::task::yield_now() => {},
+    }
+    cancellation.cancel();
+    assert!(matches!(
+        pending.await,
+        Err(resin_executor::Error::Cancelled)
+    ));
+    drop(permit);
+    execution.wait_idle().await;
 }

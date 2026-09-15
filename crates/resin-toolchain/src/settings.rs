@@ -1,16 +1,16 @@
 //! Explicit host settings supplied by the compiler's caller.
-use crate::{CProfile, Error, files, platform};
+use crate::{CProfile, Error, NativeInputs, files, platform};
+use resin_executor::Cancellation;
 use std::{
-    collections::{BTreeMap, HashSet, hash_map::DefaultHasher},
+    collections::{BTreeMap, HashSet},
     ffi::{OsStr, OsString},
-    fs,
-    hash::{Hash, Hasher},
     path::{Path, PathBuf},
-    process::Command,
 };
+use tokio::{fs, io::AsyncWriteExt, process::Command};
 
 /// Environment and paths resolved before compilation. Discovery failures are retained
 /// so unused tools (in particular spirv-opt for host-only code) remain optional.
+#[derive(Clone)]
 pub(super) struct Settings {
     pub(super) cc: PathBuf,
     pub(super) spirv_opt: PathBuf,
@@ -40,10 +40,16 @@ impl Settings {
         // Ninja runs inside its cache; relative search entries still name the
         // caller's directory, including empty entries which mean that directory.
         std::env::join_paths(std::env::split_paths(value).map(|path| self.directory.join(path)))
-            .map_err(|error| Error(format!("invalid {}: {error}", name.to_string_lossy())))
+            .map_err(|error| Error::new(format!("invalid {}: {error}", name.to_string_lossy())))
     }
 
-    pub(super) fn configure(&self, profile: CProfile, directory: &Path) -> Result<(), Error> {
+    pub(super) async fn configure(
+        &self,
+        profile: CProfile,
+        directory: &Path,
+        inputs: &NativeInputs,
+        cancellation: &Cancellation,
+    ) -> Result<(), Error> {
         for path in [
             &self.cc,
             &self.spirv_opt,
@@ -57,7 +63,9 @@ impl Settings {
                 .iter()
                 .any(|byte| matches!(byte, b'\n' | b'\r'))
             {
-                return Err(Error("Ninja tool paths cannot contain newlines".into()));
+                return Err(Error::new(
+                    "Ninja tool paths cannot contain newlines".into(),
+                ));
             }
         }
         let mut text = Vec::new();
@@ -67,7 +75,14 @@ impl Settings {
         command_variable(
             &mut text,
             "cflags",
-            self.cflags(profile).iter().map(OsString::as_os_str),
+            self.cflags(profile, inputs).iter().map(OsString::as_os_str),
+        );
+        command_variable(
+            &mut text,
+            "captured_cflags",
+            self.compilation_flags(profile, inputs)
+                .iter()
+                .map(OsString::as_os_str),
         );
         command_variable(
             &mut text,
@@ -82,14 +97,83 @@ impl Settings {
         );
         text.push(b'\n');
         text.extend_from_slice(NATIVE_RULES.as_bytes());
-        files::write_changed(&text, &directory.join("toolchain.ninja"))?;
+        files::write_changed(&text, &directory.join("toolchain.ninja")).await?;
         files::write_changed(
-            self.fingerprint().as_bytes(),
+            self.fingerprint(cancellation).await?.as_bytes(),
             &directory.join("toolchain.state"),
         )
+        .await
     }
 
-    fn cflags(&self, profile: CProfile) -> Vec<OsString> {
+    pub(super) async fn preprocess(
+        &self,
+        profile: CProfile,
+        directory: &Path,
+        inputs: &NativeInputs,
+        cancellation: &Cancellation,
+    ) -> Result<(), Error> {
+        if inputs.translation_units.is_empty() {
+            return Ok(());
+        }
+        let temporary = files::temporary(directory).await?;
+        let path = temporary.path().join("native-inputs.state");
+        let mut output = fs::File::create(&path).await?;
+        output.write_all(b"resin-native-inputs-v2\0").await?;
+        output
+            .write_u64_le(inputs.translation_units.len() as u64)
+            .await?;
+        for unit in &inputs.translation_units {
+            cancellation.check()?;
+            let mut command = self.command(&self.cc)?;
+            command
+                .current_dir(directory)
+                .args(self.cflags(profile, inputs));
+            // Keep line markers: they preserve system-header diagnostic classification
+            // when the compiler subsequently reads this already-preprocessed unit.
+            command.args(["-E", "-x", "c"]);
+            let source = if unit.source.as_os_str().as_encoded_bytes().starts_with(b"-") {
+                Path::new(".").join(&unit.source)
+            } else {
+                unit.source.clone()
+            };
+            command.arg(source);
+            let captured = temporary.path().join(&unit.preprocessed);
+            fs::create_dir_all(captured.parent().expect("captured file parent")).await?;
+            let mut captured_file = fs::File::create(&captured).await?;
+            let length =
+                crate::process::preprocess(command, &mut captured_file, cancellation).await?;
+            captured_file.flush().await?;
+            drop(captured_file);
+            for path in [&unit.source, &unit.preprocessed] {
+                let name = path.to_str().expect("JSON paths are UTF-8").as_bytes();
+                output.write_u64_le(name.len() as u64).await?;
+                output.write_all(name).await?;
+            }
+            output.write_u64_le(length).await?;
+            tokio::io::copy(&mut fs::File::open(&captured).await?, &mut output).await?;
+        }
+        output.flush().await?;
+        drop(output);
+        for unit in &inputs.translation_units {
+            cancellation.check()?;
+            files::install_changed(
+                &temporary.path().join(&unit.preprocessed),
+                &directory.join(&unit.preprocessed),
+            )
+            .await?;
+        }
+        cancellation.check()?;
+        files::install_changed(&path, &directory.join("native-inputs.state")).await
+    }
+
+    fn cflags(&self, profile: CProfile, inputs: &NativeInputs) -> Vec<OsString> {
+        self.compilation_flags(profile, inputs)
+            .into_iter()
+            .chain(self.preprocessing_flags(inputs))
+            .collect()
+    }
+
+    fn compilation_flags(&self, profile: CProfile, inputs: &NativeInputs) -> Vec<OsString> {
         [
             "-std=c11",
             "-fno-strict-aliasing",
@@ -100,28 +184,52 @@ impl Settings {
         ]
         .into_iter()
         .chain(platform::C_FLAGS.iter().copied())
-        .chain([profile.optimization(), "-I"])
+        .chain([profile.optimization()])
         .map(OsString::from)
-        .chain([self.runtime_include.clone().into_os_string()])
+        .chain(inputs.c_flags.iter().map(OsString::from))
+        .collect()
+    }
+
+    fn preprocessing_flags(&self, inputs: &NativeInputs) -> Vec<OsString> {
+        [
+            OsString::from("-I"),
+            self.runtime_include.clone().into_os_string(),
+        ]
+        .into_iter()
+        .chain(platform::PREPROCESSING_FLAGS.iter().map(OsString::from))
+        .chain(inputs.preprocessing_flags.iter().map(OsString::from))
         .collect()
     }
 
     fn ldflags(&self) -> Vec<OsString> {
         std::iter::once(self.runtime_library.clone().into_os_string())
+            .chain(platform::LINK_FLAGS.iter().map(OsString::from))
             .chain(platform::LIBRARIES.iter().map(OsString::from))
             .collect()
     }
 
-    fn fingerprint(&self) -> String {
-        let mut hash = DefaultHasher::new();
-        self.environment.hash(&mut hash);
-        self.directory.hash(&mut hash);
-        for path in [&self.executable, &self.cc, &self.spirv_opt, &self.ninja] {
-            hash_metadata(path, &mut hash);
+    async fn fingerprint(&self, cancellation: &Cancellation) -> Result<String, Error> {
+        let mut hash = blake3::Hasher::new();
+        state_bytes(&mut hash, b"resin-toolchain-v1");
+        state_bytes(&mut hash, std::env::consts::OS.as_bytes());
+        state_bytes(&mut hash, std::env::consts::ARCH.as_bytes());
+        hash.update(&(self.environment.len() as u64).to_le_bytes());
+        for (name, value) in &self.environment {
+            state_string(&mut hash, name);
+            state_string(&mut hash, value);
         }
-        hash_contents(&self.runtime_library, &mut hash, &mut HashSet::new());
-        hash_contents(&self.runtime_include, &mut hash, &mut HashSet::new());
-        format!("{:016x}\n", hash.finish())
+        state_string(&mut hash, self.directory.as_os_str());
+        for path in [
+            &self.executable,
+            &self.cc,
+            &self.spirv_opt,
+            &self.ninja,
+            &self.runtime_library,
+            &self.runtime_include,
+        ] {
+            hash_contents(path, &mut hash, cancellation).await?;
+        }
+        Ok(format!("{}\n", hash.finalize().to_hex()))
     }
 }
 
@@ -208,41 +316,78 @@ fn quote(bytes: &[u8]) -> Vec<u8> {
     out
 }
 
-fn hash_metadata(path: &Path, hash: &mut DefaultHasher) {
-    path.hash(hash);
-    fs::canonicalize(path).ok().hash(hash);
-    match fs::metadata(path) {
-        Ok(metadata) => {
-            metadata.len().hash(hash);
-            metadata.modified().ok().hash(hash);
-        }
-        Err(error) => error.to_string().hash(hash),
-    }
+// Persisted fingerprints use BLAKE3 and explicit u64 little-endian length framing,
+// never Rust's unspecified Hash/DefaultHasher encodings. OS strings use native bytes
+// on Unix and UTF-16LE on Windows; the state includes its target OS/architecture.
+fn state_bytes(hash: &mut blake3::Hasher, bytes: &[u8]) {
+    hash.update(&(bytes.len() as u64).to_le_bytes());
+    hash.update(bytes);
 }
 
-fn hash_contents(path: &Path, hash: &mut DefaultHasher, seen: &mut HashSet<PathBuf>) {
-    hash_metadata(path, hash);
-    if !seen.insert(fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())) {
-        return;
-    }
-    if let Ok(entries) = fs::read_dir(path) {
-        let mut entries: Vec<_> = entries
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .collect();
-        entries.sort();
-        for entry in entries {
-            hash_contents(&entry, hash, seen);
+#[cfg(unix)]
+fn state_string(hash: &mut blake3::Hasher, value: &OsStr) {
+    use std::os::unix::ffi::OsStrExt;
+    state_bytes(hash, value.as_bytes());
+}
+
+#[cfg(windows)]
+fn state_string(hash: &mut blake3::Hasher, value: &OsStr) {
+    use std::os::windows::ffi::OsStrExt;
+    let bytes: Vec<_> = value.encode_wide().flat_map(u16::to_le_bytes).collect();
+    state_bytes(hash, &bytes);
+}
+
+async fn hash_contents(
+    path: &Path,
+    hash: &mut blake3::Hasher,
+    cancellation: &Cancellation,
+) -> Result<(), Error> {
+    let mut pending = vec![path.to_path_buf()];
+    let mut seen = HashSet::new();
+    while let Some(path) = pending.pop() {
+        cancellation.check()?;
+        state_string(hash, path.as_os_str());
+        let canonical = fs::canonicalize(&path)
+            .await
+            .unwrap_or_else(|_| path.clone());
+        state_string(hash, canonical.as_os_str());
+        if !seen.insert(canonical) {
+            state_bytes(hash, b"seen");
+            continue;
         }
-    } else {
-        match fs::read(path) {
-            Ok(bytes) => bytes.hash(hash),
-            Err(error) => error.to_string().hash(hash),
+        if let Ok(mut entries) = fs::read_dir(&path).await {
+            state_bytes(hash, b"directory");
+            let mut paths = Vec::new();
+            while let Some(entry) = entries.next_entry().await? {
+                paths.push(entry.path());
+            }
+            paths.sort();
+            hash.update(&(paths.len() as u64).to_le_bytes());
+            pending.extend(paths.into_iter().rev());
+        } else {
+            match fs::read(&path).await {
+                Ok(bytes) => {
+                    state_bytes(hash, b"file");
+                    hash.update(&(bytes.len() as u64).to_le_bytes());
+                    for chunk in bytes.chunks(64 * 1024) {
+                        cancellation.check()?;
+                        hash.update(chunk);
+                        tokio::task::yield_now().await;
+                    }
+                }
+                Err(error) => {
+                    state_bytes(hash, b"unavailable");
+                    hash.update(&error.raw_os_error().unwrap_or_default().to_le_bytes());
+                }
+            }
         }
     }
+    Ok(())
 }
 
 // Native commands belong to the toolchain; generated projects describe only edges.
+// Captured preprocessor output intentionally retains GNU line markers (including
+// system-header flags). Clang must accept its own markers under -pedantic -Werror.
 const NATIVE_RULES: &str = "\
 rule optimize_shader
   command = $spirv_opt --target-env=vulkan1.3 -O $in -o $out
@@ -252,6 +397,10 @@ rule embed_shader
   command = $resin --embed $in --symbol $symbol --output $out
   description = EMBED $in
   restat = 1
+
+rule compile_preprocessed_program
+  command = $cc $captured_cflags -Wno-unused-command-line-argument -Wno-gnu-line-marker $in -o $out $ldflags
+  description = C $in
 
 rule compile_program
   command = $cc $cflags -MMD -MF $out.d -MT $out $in -o $out $ldflags

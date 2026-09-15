@@ -70,7 +70,8 @@ fn dependent_static_calls_and_references_apply_owner_and_method_arguments() {
         };
     "#;
     let module =
-        resin_lir::build_lir(&hir(source), &[], &resin_lir::LoweringOptions::default()).unwrap();
+        support::frontend::lower(&hir(source), &[], &resin_lir::LoweringOptions::default())
+            .unwrap();
     assert_eq!(
         module
             .functions
@@ -230,7 +231,7 @@ fn dependent_failures_report_the_demanded_application() {
             "{declaration} def relay<T>(value: T) -> int = {{ {body} }}; def main() = {{ relay(Owner {{}}); }};"
         );
         let error =
-            resin_lir::build_lir(&hir(&source), &[], &resin_lir::LoweringOptions::default())
+            support::frontend::lower(&hir(&source), &[], &resin_lir::LoweringOptions::default())
                 .unwrap_err()
                 .remove(0);
         assert!(error.to_string().contains(needle), "{source}: {error}");
@@ -244,7 +245,7 @@ fn dependent_failures_report_the_demanded_application() {
         assert!(error.span.end > error.span.start, "{error:?}");
     }
     let source = "def relay<T>(value: T) -> int = { (value.callback)() }; def main() -> int = { relay({ callback = 42 }) };";
-    let error = resin_lir::build_lir(&hir(source), &[], &resin_lir::LoweringOptions::default())
+    let error = support::frontend::lower(&hir(source), &[], &resin_lir::LoweringOptions::default())
         .unwrap_err()
         .remove(0);
     assert!(error.to_string().contains("function"), "{error}");
@@ -262,7 +263,8 @@ fn unused_dependent_bodies_do_not_select_methods() {
     let tree = hir(
         "export { main }; def unused<T>(value: T) -> _ = { value.missing().field }; def main() -> int = { 42 };",
     );
-    let module = resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
+    let module =
+        support::frontend::lower(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
     assert_eq!(module.functions.len(), 1);
 }
 
@@ -300,7 +302,7 @@ fn growing_dependent_method_applications_obey_the_function_limit() {
     let options = resin_lir::LoweringOptions {
         max_monomorphs_per_function: std::num::NonZeroUsize::new(3).unwrap(),
     };
-    let errors = resin_lir::build_lir(&tree, &[], &options).unwrap_err();
+    let errors = support::frontend::lower(&tree, &[], &options).unwrap_err();
     assert!(
         errors
             .iter()

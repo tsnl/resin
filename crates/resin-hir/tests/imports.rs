@@ -1,8 +1,14 @@
 //! Immutable frontend behavior with an importer-scoped, entirely in-memory loader.
+mod common;
+
+use common::application::{acquire, request};
+use resin_cache::Cache;
 use resin_hir::Hir;
+use resin_source::GraphError;
 use resin_source::Loader;
 use resin_source::prelude::*;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 fn sources(compilation: &Hir) -> BTreeSet<Source> {
     compilation.sources().cloned().collect()
@@ -12,8 +18,8 @@ fn valid(compilation: &Hir) {
     assert!(compilation.hir().is_ok(), "{:?}", compilation.diagnostics());
 }
 
-#[test]
-fn unchanged_graph_reuses_the_completed_result_after_resolving_imports() {
+#[tokio::test]
+async fn unchanged_graph_reuses_the_completed_result_after_resolving_imports() {
     let entry = Source::new(
         "entry",
         "import { \"dependency\" }; def main() -> int = { value() };",
@@ -23,19 +29,29 @@ fn unchanged_graph_reuses_the_completed_result_after_resolving_imports() {
         "export { value }; def value() -> int = { 1 };",
     );
     let mut loader = Loader::new(resin_source::library_root());
+    let cache = Cache::new(16);
     loader
         .set_import(&entry, "dependency", dependency.clone())
         .unwrap();
-    let first = Hir::build(entry.clone(), &mut loader, None);
+    let (cache, first) = request(&cache, entry.clone(), &mut loader).await.unwrap();
     valid(&first);
-    let second = Hir::build(entry.clone(), &mut loader, Some(&first));
-    assert!(first.same(&second));
+    // A new caller reconstructs equal source values without sharing their allocations.
+    let reconstructed = Source::new(entry.name(), entry.text());
+    loader
+        .set_import(
+            &reconstructed,
+            "dependency",
+            Source::new(dependency.name(), dependency.text()),
+        )
+        .unwrap();
+    let (_, second) = request(&cache, reconstructed, &mut loader).await.unwrap();
+    assert!(Arc::ptr_eq(&first, &second));
     assert_eq!(second.source(), &entry);
     assert_eq!(sources(&second), [entry, dependency].into());
 }
 
-#[test]
-fn changing_a_transitive_source_invalidates_an_unchanged_entry() {
+#[tokio::test]
+async fn changing_a_transitive_source_invalidates_an_unchanged_entry() {
     let entry = Source::new(
         "entry",
         "import { \"middle\" }; def main() -> int = { value() };",
@@ -46,14 +62,15 @@ fn changing_a_transitive_source_invalidates_an_unchanged_entry() {
     );
     let leaf = Source::new("leaf", "export { leaf }; def leaf() -> int = { 1 };");
     let mut loader = Loader::new(resin_source::library_root());
+    let cache = Cache::new(16);
     loader.set_import(&entry, "middle", middle.clone()).unwrap();
     loader.set_import(&middle, "leaf", leaf.clone()).unwrap();
-    let before = Hir::build(entry.clone(), &mut loader, None);
+    let (cache, before) = request(&cache, entry.clone(), &mut loader).await.unwrap();
     valid(&before);
     let changed = leaf.with_text("export { leaf }; def leaf() -> bool = { 1 == 1 };");
     loader.set_import(&middle, "leaf", changed.clone()).unwrap();
-    let after = Hir::build(entry.clone(), &mut loader, None);
-    assert!(!before.same(&after));
+    let (_, after) = request(&cache, entry.clone(), &mut loader).await.unwrap();
+    assert!(!Arc::ptr_eq(&before, &after));
     assert!(after.hir().is_err());
     assert_eq!(after.source(), &entry);
     assert!(sources(&before).contains(&leaf));
@@ -62,29 +79,30 @@ fn changing_a_transitive_source_invalidates_an_unchanged_entry() {
     valid(&before);
 }
 
-#[test]
-fn a_missing_transitive_import_recovers_without_notifications() {
+#[tokio::test]
+async fn a_missing_transitive_import_recovers_without_notifications() {
     let entry = Source::new("entry", "import { \"middle\" };");
     let middle = Source::new("middle", "import { \"leaf\" };");
     let leaf = Source::new("leaf", "def leaf() = {};");
     let mut loader = Loader::new(resin_source::library_root());
+    let cache = Cache::new(16);
     loader.set_import(&entry, "middle", middle.clone()).unwrap();
-    let before = Hir::build(entry.clone(), &mut loader, None);
+    let (cache, before) = request(&cache, entry.clone(), &mut loader).await.unwrap();
     assert!(before.hir().is_err());
     assert!(before.diagnostics().iter().any(|diagnostic| {
         diagnostic.location.source == middle
             && diagnostic.location.span.end > diagnostic.location.span.start
     }));
     loader.set_import(&middle, "leaf", leaf.clone()).unwrap();
-    let after = Hir::build(entry, &mut loader, None);
+    let (_, after) = request(&cache, entry, &mut loader).await.unwrap();
     valid(&after);
-    assert!(!before.same(&after));
+    assert!(!Arc::ptr_eq(&before, &after));
     assert!(before.hir().is_err(), "retained failure remains immutable");
     assert!(sources(&after).contains(&leaf));
 }
 
-#[test]
-fn changed_import_edges_invalidate_cache_even_with_the_same_source_set() {
+#[tokio::test]
+async fn changed_import_edges_invalidate_cache_even_with_the_same_source_set() {
     let entry = Source::new(
         "entry",
         "import { \"first\", \"second\" }; def main() -> int = { first() };",
@@ -103,54 +121,51 @@ fn changed_import_edges_invalidate_cache_even_with_the_same_source_set() {
         "export { value }; def value() -> bool = { 1 == 1 };",
     );
     let mut loader = Loader::new(resin_source::library_root());
+    let cache = Cache::new(16);
     loader.set_import(&entry, "first", first.clone()).unwrap();
     loader.set_import(&entry, "second", second.clone()).unwrap();
     loader.set_import(&first, "value", integer.clone()).unwrap();
     loader
         .set_import(&second, "value", boolean.clone())
         .unwrap();
-    let before = Hir::build(entry.clone(), &mut loader, None);
+    let (cache, before) = request(&cache, entry.clone(), &mut loader).await.unwrap();
     valid(&before);
     loader.set_import(&first, "value", boolean.clone()).unwrap();
     loader
         .set_import(&second, "value", integer.clone())
         .unwrap();
-    let after = Hir::build(entry, &mut loader, None);
+    let (_, after) = request(&cache, entry, &mut loader).await.unwrap();
     assert_eq!(sources(&before), sources(&after));
-    assert!(!before.same(&after));
+    assert!(!Arc::ptr_eq(&before, &after));
     assert!(after.hir().is_err());
     valid(&before);
 }
 
-#[test]
-fn inconsistent_versions_of_one_logical_source_are_diagnosed() {
+#[tokio::test]
+async fn inconsistent_versions_of_one_logical_source_are_diagnosed() {
     let entry = Source::new("entry", "import { \"first\", \"second\" };");
     let first = Source::new("module", "def value() -> int = { 1 };");
     let second = first.with_text("def value() -> int = { 2 };");
     assert_eq!(first.id(), second.id());
     assert_ne!(first, second);
     let mut loader = Loader::new(resin_source::library_root());
+    let cache = Cache::<resin_source::SourceGraph, Hir>::new(16);
     loader.set_import(&entry, "first", first.clone()).unwrap();
     loader.set_import(&entry, "second", second.clone()).unwrap();
-    let result = Hir::build(entry.clone(), &mut loader, None);
-    assert!(result.hir().is_err());
-    assert!(
-        result
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("version"))
-    );
-    assert!(result.recovered_file(&entry).is_some());
+    assert!(matches!(acquire(entry, &mut loader).await.err().unwrap(),
+        GraphError::ConflictingSource { source } if source == first.id()));
+    assert!(cache.is_empty());
 }
 
-#[test]
-fn import_cycles_are_diagnosed_with_source_ranges() {
+#[tokio::test]
+async fn import_cycles_are_diagnosed_with_source_ranges() {
     let entry = Source::new("entry", "import { \"next\" };");
     let next = Source::new("next", "import { \"entry\" };");
     let mut loader = Loader::new(resin_source::library_root());
+    let cache = Cache::new(16);
     loader.set_import(&entry, "next", next.clone()).unwrap();
     loader.set_import(&next, "entry", entry.clone()).unwrap();
-    let result = Hir::build(entry.clone(), &mut loader, None);
+    let (_, result) = request(&cache, entry.clone(), &mut loader).await.unwrap();
     assert!(result.hir().is_err());
     assert!(result.diagnostics().iter().any(|diagnostic| {
         diagnostic.message.contains("cyclic")
@@ -160,15 +175,24 @@ fn import_cycles_are_diagnosed_with_source_ranges() {
     assert!(result.recovered_file(&next).is_some());
 }
 
-#[test]
-fn identical_diagnostic_names_do_not_merge_distinct_sources() {
+#[tokio::test]
+async fn identical_diagnostic_names_do_not_merge_distinct_sources() {
     let entry = Source::new("entry", "import { \"first\", \"second\" };");
-    let first = Source::new("generated", "def first() -> int = { 1 == 1 };");
-    let second = Source::new("generated", "def second() -> bool = { 1 };");
+    let first = Source::with_identity(
+        SourceId::new("first"),
+        "generated",
+        "def first() -> int = { 1 == 1 };",
+    );
+    let second = Source::with_identity(
+        SourceId::new("second"),
+        "generated",
+        "def second() -> bool = { 1 };",
+    );
     let mut loader = Loader::new(resin_source::library_root());
+    let cache = Cache::new(16);
     loader.set_import(&entry, "first", first.clone()).unwrap();
     loader.set_import(&entry, "second", second.clone()).unwrap();
-    let result = Hir::build(entry.clone(), &mut loader, None);
+    let (_, result) = request(&cache, entry.clone(), &mut loader).await.unwrap();
     assert!(result.hir().is_err());
     assert_eq!(
         sources(&result),
@@ -182,21 +206,22 @@ fn identical_diagnostic_names_do_not_merge_distinct_sources() {
     assert_eq!(origins, [first, second].into());
 }
 
-#[test]
-fn retained_compilations_keep_their_own_source_versions_and_editor_queries() {
+#[tokio::test]
+async fn retained_compilations_keep_their_own_source_versions_and_editor_queries() {
     let before = Source::new(
         "editor",
         "def value() -> int = { 1 }; def main() -> int = { value() };",
     );
     let mut loader = Loader::new(resin_source::library_root());
-    let old = Hir::build(before.clone(), &mut loader, None);
+    let cache = Cache::new(16);
+    let (cache, old) = request(&cache, before.clone(), &mut loader).await.unwrap();
     let after =
         before.with_text("def value() -> bool = { 1 == 1 }; def main() -> bool = { value() };");
-    let new = Hir::build(after.clone(), &mut loader, None);
+    let (_, new) = request(&cache, after.clone(), &mut loader).await.unwrap();
     valid(&old);
     valid(&new);
     assert_eq!(before.id(), after.id());
-    assert!(!old.same(&new));
+    assert!(!Arc::ptr_eq(&old, &new));
     for (result, source, ty) in [(&old, &before, "int"), (&new, &after, "bool")] {
         let offset = source.text().rfind("value").unwrap();
         assert_eq!(result.definition(source, offset).unwrap().source, *source);
@@ -214,28 +239,31 @@ fn retained_compilations_keep_their_own_source_versions_and_editor_queries() {
     assert!(new.recovered_file(&before).is_none());
 }
 
-#[test]
-fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
+#[tokio::test]
+async fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
     let source = Source::new(
         "entry",
         "export { first, second }; def first() -> bool = { (1 == 1) + (1 == 1) }; def second() -> int = { var r = { n = 1 }; r + r; 0 };",
     );
     let mut loader = Loader::new(resin_source::library_root());
-    let lowered = Hir::build(source.clone(), &mut loader, None);
+    let cache = Cache::new(16);
+    let (cache, lowered) = request(&cache, source.clone(), &mut loader).await.unwrap();
     assert!(lowered.program().is_ok());
     assert!(lowered.hir().is_ok());
     let typed_source = source.with_text("def main() -> int = { 1 == 2 };");
-    let typed = Hir::build(typed_source, &mut loader, Some(&lowered));
+    let (cache, typed) = request(&cache, typed_source, &mut loader).await.unwrap();
     assert!(typed.program().is_ok());
     assert!(typed.hir().is_err());
     let parsed_source = source.with_text("def main( = { 1 == 2 };");
-    let parsed = Hir::build(parsed_source.clone(), &mut loader, Some(&typed));
+    let (_, parsed) = request(&cache, parsed_source.clone(), &mut loader)
+        .await
+        .unwrap();
     assert!(parsed.program().is_err());
     assert!(parsed.recovered_file(&parsed_source).is_some());
 }
 
-#[test]
-fn imported_initialization_errors_keep_the_dependency_source_version() {
+#[tokio::test]
+async fn imported_initialization_errors_keep_the_dependency_source_version() {
     let entry = Source::new(
         "entry",
         "import { \"dependency\" }; def main() -> int = { value() };",
@@ -246,10 +274,11 @@ fn imported_initialization_errors_keep_the_dependency_source_version() {
     );
     let read = dependency.text().rfind("n }").unwrap();
     let mut loader = Loader::new(resin_source::library_root());
+    let cache = Cache::new(16);
     loader
         .set_import(&entry, "dependency", dependency.clone())
         .unwrap();
-    let failed = Hir::build(entry.clone(), &mut loader, None);
+    let (cache, failed) = request(&cache, entry.clone(), &mut loader).await.unwrap();
     assert!(failed.hir().is_err());
     assert!(failed.hir().is_err());
     assert_eq!(failed.diagnostics().len(), 1);
@@ -268,7 +297,8 @@ fn imported_initialization_errors_keep_the_dependency_source_version() {
 
     let repaired = dependency.with_text("export { value }; def value() -> int = { 7 };");
     loader.set_import(&entry, "dependency", repaired).unwrap();
-    valid(&Hir::build(entry, &mut loader, None));
+    let (_, repaired) = request(&cache, entry, &mut loader).await.unwrap();
+    valid(&repaired);
     drop(loader);
     let diagnostic = &failed.diagnostics()[0];
     assert_eq!(diagnostic.location.source, dependency);
@@ -279,12 +309,13 @@ fn imported_initialization_errors_keep_the_dependency_source_version() {
     );
 }
 
-#[test]
-fn conflicting_versions_do_not_displace_the_first_accepted_version() {
+#[tokio::test]
+async fn conflicting_versions_cannot_publish_a_partial_cache_generation() {
     let entry = Source::new("entry", "import { \"first\", \"conflict\", \"original\" };");
     let original = Source::new("module", "def value() -> int = { 1 };");
     let conflict = original.with_text("def value() -> int = { 2 };");
     let mut loader = Loader::new(resin_source::library_root());
+    let cache = Cache::new(16);
     loader
         .set_import(&entry, "first", original.clone())
         .unwrap();
@@ -294,14 +325,19 @@ fn conflicting_versions_do_not_displace_the_first_accepted_version() {
     loader
         .set_import(&entry, "original", original.clone())
         .unwrap();
-    let result = Hir::build(entry.clone(), &mut loader, None);
-    assert!(result.hir().is_err());
-    assert_eq!(result.diagnostics().len(), 1, "{:?}", result.diagnostics());
-    let diagnostic = &result.diagnostics()[0];
-    assert!(diagnostic.message.contains("different versions"));
-    assert_eq!(diagnostic.location.source, entry);
-    let span = diagnostic.location.span;
-    assert_eq!(&entry.text()[span.start..span.end], "\"conflict\"");
+    assert!(
+        matches!(request(&cache, entry.clone(), &mut loader).await.err().unwrap(),
+        GraphError::ConflictingSource { source } if source == original.id())
+    );
+    assert!(
+        cache.is_empty(),
+        "a rejected input cannot publish a cache generation"
+    );
+    loader
+        .set_import(&entry, "conflict", original.clone())
+        .unwrap();
+    let (_, result) = request(&cache, entry.clone(), &mut loader).await.unwrap();
+    valid(&result);
     let offset = entry.text().find("original").unwrap();
     assert_eq!(result.definition(&entry, offset).unwrap().source, original);
 }

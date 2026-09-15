@@ -140,21 +140,27 @@ struct Export {
 type Exports = BTreeMap<Arc<str>, Export>;
 
 /// Check modules in import order while retaining independent editor facts after errors.
-pub fn analyze_program(program: &Program) -> CheckedProgram {
+pub fn analyze_program(
+    program: &Program,
+    cancellation: &resin_executor::Cancellation,
+) -> Result<CheckedProgram, resin_executor::Error> {
+    cancellation.check()?;
     let diagnostics = invalid_dependencies(program);
     if !diagnostics.is_empty() {
-        return CheckedProgram {
+        return Ok(CheckedProgram {
             module: None,
             diagnostics,
             semantics: Default::default(),
-        };
+        });
     }
     let mut builder = ProgramBuilder::new(program);
     for index in 0..program.modules.len() {
+        cancellation.check()?;
         builder.module(index);
     }
     builder.entries();
-    builder.finish()
+    cancellation.check()?;
+    Ok(builder.finish())
 }
 
 fn invalid_dependencies(program: &Program) -> Vec<SourceError> {
@@ -1126,11 +1132,29 @@ fn require_fixed_bridge_signature(params: &[Ident]) -> Result<(), GenerateError>
 }
 
 #[cfg(test)]
+fn test_source(source: &str) -> resin_ast::Parsed {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let execution = resin_executor::Execution::default();
+            let cancellation = resin_executor::Cancellation::new();
+            let syntax = resin_cst::build_cst(source, None, &execution, &cancellation)
+                .await
+                .unwrap();
+            resin_ast::build_ast(std::sync::Arc::new(syntax), &execution, &cancellation)
+                .await
+                .unwrap()
+        })
+}
+
+#[cfg(test)]
 mod extern_tests {
     use super::*;
 
     fn parse(source: &str) -> SourceFile {
-        let parsed = resin_ast::build_ast(&resin_cst::build_cst(source, None));
+        let parsed = super::test_source(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
         parsed.file
     }

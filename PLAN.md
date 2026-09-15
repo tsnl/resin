@@ -1,6 +1,6 @@
 # Compiler service plan
 
-Status: **Phase 0 implemented and validated; Phases 1–3 remain planned.**
+Status: **Phases 0–1 implemented and validated; Phases 2–3 remain planned.**
 Implement **Phase 0, Phase 1, Phase 2, and Phase 3** in order.
 Each phase has separate acceptance criteria. Complete and validate a phase before
 starting the next. Record evidence in [the validation log](doc/compiler-service-validation.md).
@@ -313,25 +313,25 @@ old snapshots, dependency handles, and live consumers can keep evicted values al
 
 ### Phase 1 acceptance criteria
 
-- [ ] **P1.1** Direct library tests execute explicit async passes with no HTTP or
+- [x] **P1.1** Direct library tests execute explicit async passes with no HTTP or
       orchestration wrapper. Existing local build/run behavior still works.
-- [ ] **P1.2** Full text and equivalent predecessor edits converge on source/parse
+- [x] **P1.2** Full text and equivalent predecessor edits converge on source/parse
       keys. Cold and incremental results agree, including invalid input and repairs.
-- [ ] **P1.3** Completed inputs/results satisfy `Send + Sync`; concurrent successor
+- [x] **P1.3** Completed inputs/results satisfy `Send + Sync`; concurrent successor
       computations preserve their predecessor and each other's results.
-- [ ] **P1.4** Equivalent independently acquired/reconstructed graphs reuse compatible
+- [x] **P1.4** Equivalent independently acquired/reconstructed graphs reuse compatible
       results and editor identities. Changed imports/options miss affected caches;
       distinct equal-text modules remain distinct. Test digest collision handling.
-- [ ] **P1.5** Cache tests cover hits/misses, deduplication, refreshed recency,
+- [x] **P1.5** Cache tests cover hits/misses, deduplication, refreshed recency,
       deterministic eviction, empty/zero/exact capacities, and overflowing requests.
       All requested values survive overflow and a warning is emitted; old snapshots
       remain unchanged. Later updates can shrink an oversized cache.
-- [ ] **P1.6** Independent builders overlap within configured bounds; async I/O stays
+- [x] **P1.6** Independent builders overlap within configured bounds; async I/O stays
       responsive during CPU work. Cancellation/failure cannot publish partial success,
       and shutdown reaps child processes.
-- [ ] **P1.7** Artifact A remains readable while B builds; publication/final-owner
+- [x] **P1.7** Artifact A remains readable while B builds; publication/final-owner
       cleanup cannot overwrite or remove another live artifact generation.
-- [ ] **P1.8** Record cold/unchanged/small-edit timings, concurrency, retained memory,
+- [x] **P1.8** Record cold/unchanged/small-edit timings, concurrency, retained memory,
       map-copy costs, and cancellation latency. Document execution/capacity defaults.
 
 ## Phase 2: Exercise the caches and concurrency through local LSP

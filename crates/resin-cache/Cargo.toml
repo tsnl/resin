@@ -1,0 +1,12 @@
+[package]
+name = "resin-cache"
+version.workspace = true
+edition = "2024"
+publish = false
+license.workspace = true
+
+[dependencies]
+futures = { workspace = true }
+log = { workspace = true }
+resin-executor = { workspace = true }
+tokio = { workspace = true }

@@ -10,4 +10,8 @@ resin-common = { workspace = true }
 resin-types = { workspace = true }
 resin-source = { workspace = true }
 resin-hir = { workspace = true }
+resin-executor = { workspace = true }
 sexpfmt = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

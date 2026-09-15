@@ -1,6 +1,5 @@
 mod support;
 
-use resin_hir::Hir;
 use resin_source::{Loader, Source, library_root};
 use resin_types::{GpuProjectionOperation, Ty};
 
@@ -71,7 +70,7 @@ fn projection_registration_rejects_invalid_representations_and_retagged_elements
         r#"struct View<T> { allocation: GpuView }; intrinsic "gpu_pointer_projection" def register<T>(value: View<T>) -> Ptr<ulong>;"#,
         r#"struct View<T> { allocation: GpuView }; intrinsic "gpu_pointer_projection" def register<T>(value: View<T>) -> Ptr<T>; intrinsic "gpu_pointer_projection" def duplicate<T>(value: View<T>) -> Ptr<T>;"#,
     ] {
-        let error = resin_hir::build_hir(&support::program(source))
+        let error = support::frontend::check_hir(&support::program(source))
             .into_module()
             .unwrap_err();
         assert!(
@@ -92,7 +91,7 @@ fn source_cannot_call_a_projection_contract_to_escape_a_device_address() {
     "#
     );
     let hir = support::hir(&source);
-    let error = resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
+    let error = support::frontend::lower(&hir, &[], &resin_lir::LoweringOptions::default())
         .unwrap_err()
         .remove(0);
     assert!(
@@ -135,7 +134,7 @@ fn pipeline_type_contracts_reject_invalid_storage_and_direct_calls() {
         r#"struct Compute<R, O> { token: GpuPipelineContract, extra: uint }; intrinsic "gpu_compute_pipeline_type" def register<R, O>(token: GpuPipelineContract) -> Compute<R, O>;"#,
     ] {
         assert!(
-            resin_hir::build_hir(&support::program(source))
+            support::frontend::check_hir(&support::program(source))
                 .into_module()
                 .is_err()
         );
@@ -147,7 +146,7 @@ fn pipeline_type_contracts_reject_invalid_storage_and_direct_calls() {
     "#;
     let hir = support::hir(source);
     assert!(
-        resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
+        support::frontend::lower(&hir, &[], &resin_lir::LoweringOptions::default())
             .unwrap_err()
             .remove(0)
             .to_string()
@@ -229,6 +228,6 @@ fn source_gpu_library_resolves_generic_allocation_and_explicit_access() {
     "#,
     );
     let mut loader = Loader::new(library_root());
-    let analysis = Hir::build(source, &mut loader, None);
+    let analysis = support::frontend::analyze(source, &mut loader, None);
     analysis.hir().unwrap();
 }

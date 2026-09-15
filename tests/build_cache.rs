@@ -1,5 +1,8 @@
 #![cfg(unix)]
 
+#[allow(dead_code)]
+mod support;
+
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
@@ -8,10 +11,9 @@ use std::{
 };
 use tempfile::TempDir;
 
-#[path = "support/shaders.rs"]
-mod shaders;
+use support::shaders;
 
-const WRAPPER: &str = "#!/bin/sh\nprintf 'compile\\n' >> \"$RESIN_TEST_COUNT\"\nprintf '%s\\n' \"$*\" >> \"$RESIN_TEST_FLAGS\"\nexec \"$RESIN_TEST_COMPILER\" \"$@\"\n";
+const WRAPPER: &str = "#!/bin/sh\nfor arg in \"$@\"; do if [ \"$arg\" = -E ]; then exec \"$RESIN_TEST_COMPILER\" \"$@\"; fi; done\nprintf 'compile\\n' >> \"$RESIN_TEST_COUNT\"\nprintf '%s\\n' \"$*\" >> \"$RESIN_TEST_FLAGS\"\nexec \"$RESIN_TEST_COMPILER\" \"$@\"\n";
 
 #[test]
 fn foreign_header_changes_rebuild_including_nested_dependencies() {
@@ -42,7 +44,8 @@ fn foreign_header_changes_rebuild_including_nested_dependencies() {
     let output = project.run();
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
-    assert_eq!(project.calls(), 3);
+    // Preprocessing detects the missing header before another compilation.
+    assert_eq!(project.calls(), 2);
     fs::write(
         &project.input,
         "export { main }; import { \"$/string.resin\" }; def main() -> () = { print(\"no header\"); };",
@@ -50,7 +53,7 @@ fn foreign_header_changes_rebuild_including_nested_dependencies() {
     .unwrap();
     printed(&project.run(), b"no header");
     printed(&project.run(), b"no header");
-    assert_eq!(project.calls(), 4);
+    assert_eq!(project.calls(), 3);
 }
 
 #[test]
@@ -190,6 +193,7 @@ impl Project {
         let directories: Vec<_> = fs::read_dir(self.temp.path().join("build"))
             .unwrap()
             .map(|entry| entry.unwrap().path())
+            .filter(|path| path.file_name().unwrap() != ".artifacts")
             .collect();
         assert_eq!(directories.len(), 1);
         directories[0].join(profile).join("program")
@@ -254,6 +258,7 @@ fn entry_points_have_separate_reusable_artifacts() {
     assert_eq!(
         fs::read_dir(project.temp.path().join("build"))
             .unwrap()
+            .filter(|entry| entry.as_ref().unwrap().file_name() != ".artifacts")
             .count(),
         2
     );
@@ -612,17 +617,22 @@ fn embedded_builds_resolve_header_dependencies_from_the_compiler_directory() {
         "#include \"foreign.h\"\nint main(void) { return VALUE; }\n",
     )
     .unwrap();
-    fs::write(generated.join("build.ninja"), "include toolchain.ninja\nrule c\n  command = $cc $cflags -MMD -MF $out.d -MT $out $in -o $out $ldflags\n  depfile = $out.d\n  deps = gcc\nbuild program: c main.c | toolchain.state $runtime_library\n").unwrap();
+    fs::write(generated.join("build.ninja"), "include toolchain.ninja\nbuild program: compile_preprocessed_program main.i | toolchain.state native-inputs.state $runtime_library\n").unwrap();
+    fs::write(
+        generated.join("native-inputs.json"),
+        r#"{"translation_units":[{"source":"main.c","preprocessed":"main.i"}]}"#,
+    )
+    .unwrap();
     let run = || {
-        let build = settings
-            .build(
-                &generated,
-                &project.input.to_string_lossy(),
-                "main",
-                CProfile::Debug,
-            )
-            .unwrap();
-        Some(build.executable("program").unwrap().run().unwrap())
+        let build = support::frontend::build(
+            &settings,
+            &generated,
+            &project.input.to_string_lossy(),
+            "main",
+            CProfile::Debug,
+        )
+        .unwrap();
+        Some(support::frontend::run(&build.executable("program").unwrap()).unwrap())
     };
     assert_eq!(run(), Some(41));
     assert_eq!(run(), Some(41));
