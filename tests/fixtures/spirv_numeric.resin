@@ -60,9 +60,9 @@ def kernel(index: ulong, root: Ptr<Root>) = {
 	if (index < root.count) {
 		var inputs = Span<Input> { data = root.inputs, length = root.count };
 		var outputs = Span<Output> { data = root.outputs, length = root.count };
-		var output = outputs.at(index);
+		var output: Ref<Output> = outputs.at(index);
 		output.progress := 1_ui;
-		var value = in_loop(inputs.at(index).*, &output.progress);
+		var value = in_loop(inputs.at(index), &output.progress);
 		output.value := value;
 		output.progress := 4_ui;
 	};

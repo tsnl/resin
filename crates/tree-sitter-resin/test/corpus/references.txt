@@ -1,0 +1,123 @@
+==================
+References and initialized binding annotations
+==================
+def identity<T>(value: Ref<T>) -> Ref<T> = { value };
+def example() -> int = {
+    var value: int = 1;
+    var alias: Ref<_> = identity(value);
+    alias := 42;
+    value
+};
+---
+
+(source_file
+  (function_definition
+    (lid)
+    (type_parameters
+      (uid))
+    (declare
+      (lid)
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (type
+                (infix_type
+                  (union_type
+                    (unary_type
+                      (primary_type
+                        (uid)))))))))))
+    (type
+      (infix_type
+        (union_type
+          (unary_type
+            (type
+              (infix_type
+                (union_type
+                  (unary_type
+                    (primary_type
+                      (uid))))))))))
+    (block_body
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (lid)))))))))
+  (function_definition
+    (lid)
+    (type
+      (infix_type
+        (union_type
+          (unary_type
+            (primary_type
+              (builtin_type))))))
+    (block_body
+      (statement
+        (define
+          (local_define
+            (lid)
+            (type
+              (infix_type
+                (union_type
+                  (unary_type
+                    (primary_type
+                      (builtin_type))))))
+            (term
+              (assignment_term
+                (binary_term
+                  (unary_term
+                    (postfix_term
+                      (primary_term
+                        (number))))))))))
+      (statement
+        (define
+          (local_define
+            (lid)
+            (type
+              (infix_type
+                (union_type
+                  (unary_type
+                    (type
+                      (infix_type
+                        (union_type
+                          (unary_type
+                            (primary_type
+                              (inferred_type))))))))))
+            (term
+              (assignment_term
+                (binary_term
+                  (unary_term
+                    (postfix_term
+                      (primary_term
+                        (lid))
+                      (arguments
+                        (term
+                          (assignment_term
+                            (binary_term
+                              (unary_term
+                                (postfix_term
+                                  (primary_term
+                                    (lid))))))))))))))))
+      (statement
+        (term
+          (assignment_term
+            (binary_term
+              (unary_term
+                (postfix_term
+                  (primary_term
+                    (lid)))))
+            (assignment_term
+              (binary_term
+                (unary_term
+                  (postfix_term
+                    (primary_term
+                      (number)))))))))
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (lid))))))))))

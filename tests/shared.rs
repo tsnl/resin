@@ -54,8 +54,8 @@ fn at_indexing_preserves_shared_array_owners_and_overwrite_cleanup() {
         {
             var holder = { values = [shared_resource(&trace, 1)] };
             weak := holder.values.at(0).downgrade();
-            var saved = holder.values.at(0).*;
-            holder.values.at(0).* := shared_resource(&trace, 2);
+            var saved = holder.values.at(0);
+            holder.values.at(0) := shared_resource(&trace, 2);
             if (saved.get().read() != 1 || holder.values.at(0).get().read() != 2 || trace != 0) { trace := 9; };
         };
         var expired = match (weak.upgrade()) { ArcPtr<Resource>(owner) => { 1 == 0 }, None => { 1 == 1 } };
@@ -325,9 +325,9 @@ fn indexing_preserves_array_storage_and_only_value_reads_copy_elements() {
         var trace = 0;
         {
             var array = [Resource.make(&trace, 1), Resource.make(&trace, 2)];
-            var element = array(0);
+            var element: Ref<Resource> = array(0);
             if (element.digit != 1 || array(1).digit != 2 || trace != 0) { trace := 9; };
-            { var copied = array(1).*; };
+            { var copied = array(1); };
             if (trace != 2 || array(1).digit != 2) { trace := 9; };
         };
         if (trace == 221) { 0 } else { 1 }

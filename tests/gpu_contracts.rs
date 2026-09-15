@@ -222,7 +222,7 @@ fn source_gpu_library_resolves_generic_allocation_and_explicit_access() {
             var tail = values.slice(1_ul, 2_ul);
             var alias = tail.data.slice(1_ul, 1_ul);
             var output = [0_i, 0_i];
-            tail.read_only().copy_to(Span<int> { data = output.at(0_ul), length = 2_ul });
+            tail.read_only().copy_to(Span<int> { data = &output.at(0_ul), length = 2_ul });
             var readback = gpu.alloc_in::<ubyte>(64_ul, Memory.readback())?;
             ok(())
         };

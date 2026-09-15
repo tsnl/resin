@@ -11,7 +11,10 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub(super) struct Term {
     pub span: Span,
+    /// Type requested by this expression's consumer.
     pub ty: Type,
+    /// Expression result before reference binding, reading, or value widening.
+    pub actual: Type,
     pub kind: TermKind,
 }
 

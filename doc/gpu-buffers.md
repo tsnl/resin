@@ -68,8 +68,8 @@ struct Params { values: Span<float32>, scale: float32 };
 @compute_shader
 def kernel(index: ulong, root: Ptr<Params>) = {
     if (index < root.values.length) {
-        var value = root.values.at(index);
-        value.* := value.* * root.scale;
+        var value: Ref<float32> = root.values.at(index);
+        value := value * root.scale;
     };
 };
 

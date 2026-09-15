@@ -75,7 +75,7 @@ def read(value: Result<int, NoneInt>) -> Result<int, _> = {
     (block_body
       (statement
         (define
-          (term_define
+          (local_define
             (lid)
             (term
               (assignment_term

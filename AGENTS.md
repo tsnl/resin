@@ -351,15 +351,22 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Pipeline creation accepts decorated shader declarations directly and requests their compiled
   representation internally. Shader functions have no bytecode property. Runtime shader aliases
   remain unsupported. Keep shader definitions inline in examples.
-- Arrays, `Span<T>`, and `str` provide indexing with `items.at(index)`, returning `Ptr<T>`
-  (`Ptr<ubyte>` for `str`);
+- Arrays, `Span<T>`, and `str` provide indexing with `items.at(index)`, returning `Ref<T>`
+  (`Ref<ubyte>` for `str`);
   its index parameter is `ulong`, with explicit conversions for other integer types.
-  Use `items.at(index).*` to read or write. Arrays retain the earlier `items(index)` spelling;
+  Use `items.at(index)` to read or write, and `&items.at(index)` for a pointer.
+  Arrays retain the earlier `items(index)` spelling;
   source spans use `.at(index)`.
   Bounds checking is not part of the indexing contract. Host indexing diagnoses invalid indices;
   shader indexing is unchecked, and callers must stay within valid storage.
-  `Place<T>` is a compiler expression category, not a source type; pointer-returning user
-  functions support the same access rules. Spans have `data` and `length` fields. Pointer arithmetic
+  Places remain a compiler expression category. Source `Ref<T>` bindings and function
+  results expose a fixed, nonowning alias to initialized storage. Unannotated locals and
+  plain result holes infer value types; `var alias: Ref<T> = place;` retains the alias.
+  Assignment writes its referent and `&alias` yields `Ptr<T>`. HIR retains reference use;
+  specialization translates it to address/read operations and the existing pointer ABI.
+  Reject direct reference aggregate payloads, nested references, and reference-valued
+  generic arguments. Shader-local addresses retain their existing escape restrictions.
+  Spans have `data` and `length` fields. Pointer arithmetic
   is forbidden; explicit pointer/`ulong` casts permit low-level byte arithmetic on the host.
   Shader pointer casts (including pointer reinterpretation) are rejected during LIR construction
   and verification; use typed pointers and indexing. The current Vulkan C ABI retains

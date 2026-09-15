@@ -10,7 +10,7 @@ def kernel(index: ulong, root: Ptr<Root>) = {
 	if (index < ulong(root.count)) {
 		var input = Span<uint> { data = root.input, length = ulong(root.count) };
 		var output = Span<uint> { data = root.output, length = ulong(root.count) };
-		output.at(index).* := input.at(index).* * 1664525_ui + uint(index);
+		output.at(index) := input.at(index) * 1664525_ui + uint(index);
 	};
 };
 

@@ -41,13 +41,13 @@ counter.read(args)    // invoke the function in the receiver type's namespace
 ```
 
 The distinction also applies when a field and method have the same name. Methods
-can return ordinary pointers, including wrappers around array indexing. Parameter
+can return `Ref<T>` to expose a place, including wrappers around array indexing. Parameter
 and result types are explicit; an omitted result means unit.
 
 Arrays provide a compiler-defined `.at(index)` method; the source `Span<T>`
 wrapper exposes the same signature through an ordinary method.
-It accepts a `ulong` index and returns `Ptr<T>`, so a field can be indexed as
-`root.particles.at(i).*`. Use `items.at(i).* := value` to update an element.
+It accepts a `ulong` index and returns `Ref<T>`, so a field can be indexed as
+`root.particles.at(i)`. Use `items.at(i) := value` to update an element.
 The receiver and index are evaluated once; indexing an array place keeps its
 storage address instead of copying the array. Arrays also support the existing
 `items(i)` spelling. Host indexing checks the declared length and diagnoses invalid

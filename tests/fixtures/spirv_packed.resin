@@ -28,8 +28,8 @@ def kernel(index: ulong, root: Ptr<Root>) = {
 	if (index < root.count) {
 		var inputs = Span<Sample> { data = root.inputs, length = root.count };
 		var outputs = Span<Sample> { data = root.outputs, length = root.count };
-		var output = outputs.at(index);
-		output.* := inputs.at(index).*;
-		update(output, index);
+		var output: Ref<_> = outputs.at(index);
+		output := inputs.at(index);
+		update(&output, index);
 	};
 };

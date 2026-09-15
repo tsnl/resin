@@ -24,6 +24,8 @@ pub(crate) enum Head {
     FunctionResult,
     Nominal { definition: TypeId },
     Pointer,
+    Reference,
+    Value,
     Array(usize),
     Record(Vec<Arc<str>>),
     // Result first, followed by the parameter types in declaration order.
@@ -77,6 +79,12 @@ impl Type {
 
     pub fn result(value: Type, error: Type) -> Self {
         Self::Node(Head::Result, vec![value, error])
+    }
+    pub fn reference(referent: Type) -> Self {
+        Self::Node(Head::Reference, vec![referent])
+    }
+    pub fn value(of: Type) -> Self {
+        Self::Node(Head::Value, vec![of])
     }
     pub fn pointer(pointee: Type) -> Self {
         Self::Node(Head::Pointer, vec![pointee])
@@ -158,6 +166,8 @@ impl Type {
             crate::Type::FunctionResult { function } => {
                 Self::function_result(Self::from_hir(function))
             }
+            crate::Type::Reference { referent } => Self::reference(Self::from_hir(referent)),
+            crate::Type::Value { of } => Self::value(Self::from_hir(of)),
             crate::Type::Pointer { pointee } => {
                 Self::Node(Head::Pointer, vec![Self::from_hir(pointee)])
             }
@@ -229,6 +239,7 @@ impl Head {
                 | Self::Method { .. }
                 | Self::FunctionParameter { .. }
                 | Self::FunctionResult
+                | Self::Value
         )
     }
 
@@ -240,7 +251,9 @@ impl Head {
             | Self::Method { .. }
             | Self::FunctionParameter { .. }
             | Self::FunctionResult
-            | Self::Nominal { .. } => return None,
+            | Self::Nominal { .. }
+            | Self::Reference
+            | Self::Value => return None,
             Self::Atom(ty) => ty.clone(),
             Self::Union => Ty::union_of(children),
             Self::Pointer => Ty::Pointer {
@@ -319,6 +332,12 @@ impl Head {
             Self::FunctionResult => crate::Type::FunctionResult {
                 function: Box::new(children.next().unwrap()),
             },
+            Self::Reference => crate::Type::Reference {
+                referent: Box::new(children.next().unwrap()),
+            },
+            Self::Value => crate::Type::Value {
+                of: Box::new(children.next().unwrap()),
+            },
             Self::Pointer => crate::Type::Pointer {
                 pointee: Box::new(children.next().unwrap()),
             },
@@ -352,6 +371,9 @@ impl Head {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Class {
+    // Only an expression result may still turn out to be a reference. Ordinary
+    // inference holes and generic value arguments always describe value types.
+    Expression,
     Any,
     Number,
     Float,
@@ -450,7 +472,10 @@ impl Solver {
     pub fn errors(&mut self, ty: &Type, span: Span) -> Result<()> {
         match self.head(ty) {
             Type::Variable(id)
-                if matches!(self.variables[id].class, Class::Any | Class::Errors) =>
+                if matches!(
+                    self.variables[id].class,
+                    Class::Any | Class::Expression | Class::Errors
+                ) =>
             {
                 self.variables[id].class = Class::Errors;
                 Ok(())
@@ -594,6 +619,13 @@ impl Solver {
     }
 
     pub fn coerce(&mut self, from: &Type, to: &Type, span: Span) -> Result<bool> {
+        // Reference use is invariant. Every other consumer reads a value, even
+        // when a dependent call's result will only be known at specialization.
+        let value = Type::value(from.clone());
+        if let Type::Node(Head::Reference, parts) = self.head(to) {
+            return self.unify(&value, &parts[0], span);
+        }
+        let from = &value;
         if matches!(self.head(to), Type::Node(Head::Union, _)) {
             if let Some(target) = self.resolve(to) {
                 return self.coerce(from, &target.into(), span);
@@ -708,6 +740,22 @@ impl Solver {
                 None => break,
             }
         }
+        if let Type::Node(Head::Value, parts) = ty {
+            return match self.head(&parts[0]) {
+                Type::Node(Head::Reference, parts) => self.head(&parts[0]),
+                Type::Node(head, parts)
+                    if !head.projection()
+                        || matches!(head, Head::Member { .. } | Head::Method { .. }) =>
+                {
+                    Type::Node(head, parts)
+                }
+                Type::Variable(id) if self.variables[id].class != Class::Expression => {
+                    Type::Variable(id)
+                }
+                Type::Invalid => Type::Invalid,
+                _ => ty.clone(),
+            };
+        }
         let Type::Apply { body, arguments } = ty else {
             return ty.clone();
         };
@@ -734,6 +782,15 @@ impl Solver {
 
     pub fn shape_hint(&self, ty: &Type) -> Type {
         let head = self.head(ty);
+        if let Type::Node(Head::Value, parts) = &head {
+            // Shape queries may inspect an unfinished error set or expression,
+            // without equating the expression's eventual reference and value types.
+            let shape = self.shape_hint(&parts[0]);
+            return match shape {
+                Type::Variable(_) | Type::Apply { .. } => shape,
+                _ => self.head(&Type::value(shape)),
+            };
+        }
         if let Type::Apply { body, arguments } = &head {
             let hint = self.shape_hint(body);
             if &hint != body.as_ref() {
@@ -908,7 +965,9 @@ impl Solver {
 
     fn bind(&mut self, id: usize, ty: Type, span: Span) -> Result<bool> {
         if self.occurs(id, &ty) {
-            if matches!(ty, Type::Apply { .. }) {
+            if matches!(ty, Type::Apply { .. } | Type::Node(Head::Value, _)) {
+                // T = Value<T> does not determine T. Recursive result holes
+                // must wait for evidence from their own definition's body.
                 return Ok(false);
             }
             return Err(error(span, "inference would create an infinite type"));
@@ -916,8 +975,10 @@ impl Solver {
         let class = self.variables[id].class;
         if let Type::Variable(other) = ty {
             let other_class = self.variables[other].class;
-            if (class == Class::Errors && !matches!(other_class, Class::Any | Class::Errors))
-                || (other_class == Class::Errors && !matches!(class, Class::Any | Class::Errors))
+            if (class == Class::Errors
+                && !matches!(other_class, Class::Any | Class::Expression | Class::Errors))
+                || (other_class == Class::Errors
+                    && !matches!(class, Class::Any | Class::Expression | Class::Errors))
             {
                 return Err(error(span, "an error set cannot be a numeric type"));
             }
@@ -925,6 +986,7 @@ impl Solver {
                 (Class::Errors, _) | (_, Class::Errors) => Class::Errors,
                 (Class::Float, _) | (_, Class::Float) => Class::Float,
                 (Class::Number, _) | (_, Class::Number) => Class::Number,
+                (Class::Expression, Class::Expression) => Class::Expression,
                 _ => Class::Any,
             };
             let variants = self.variables[id].variants.clone();
@@ -938,7 +1000,7 @@ impl Solver {
             for variant in self.variables[id].variants.clone() {
                 self.include(&variant, &ty, span)?;
             }
-        } else if class != Class::Any && !self.dependent(&ty) {
+        } else if matches!(class, Class::Number | Class::Float) && !self.dependent(&ty) {
             let numeric = matches!(&ty, Type::Node(Head::Atom(t), _) if t.is_numeric());
             let float = matches!(&ty, Type::Node(Head::Atom(Ty::Float32 | Ty::Float64), _));
             if !numeric || (class == Class::Float && !float) {
@@ -989,7 +1051,7 @@ impl Solver {
         let variable = &mut self.variables[id];
         if variable.value.is_none() {
             let ty = match variable.class {
-                Class::Any | Class::Errors => return,
+                Class::Any | Class::Expression | Class::Errors => return,
                 Class::Number => Ty::Int64,
                 Class::Float => Ty::Float64,
             };
@@ -1104,7 +1166,13 @@ impl<'a> Inference<'a> {
         rule
     }
     pub fn expression(&mut self) -> (Rule, Type) {
-        let variable = self.solver.fresh_variable();
+        self.expression_with_class(Class::Any)
+    }
+    pub fn reference_expression(&mut self) -> (Rule, Type) {
+        self.expression_with_class(Class::Expression)
+    }
+    fn expression_with_class(&mut self, class: Class) -> (Rule, Type) {
+        let variable = self.solver.variable(class);
         (self.rule(vec![variable]), variable.ty())
     }
     pub fn constrain(&mut self, owner: Rule, (span, relation): (Span, Constraint)) {
@@ -1129,7 +1197,7 @@ impl<'a> Inference<'a> {
     pub fn result_parts(&mut self, owner: Rule, ty: &Type, span: Span) -> Result<(Type, Type)> {
         match self.solver.head(ty) {
             Type::Node(Head::Result, parts) => Ok((parts[0].clone(), parts[1].clone())),
-            Type::Variable(_) => {
+            Type::Variable(_) | Type::Node(Head::Value, _) => {
                 let value = self.solver.fresh();
                 let errors = self.solver.fresh();
                 self.solver.errors(&errors, span)?;
@@ -1420,7 +1488,7 @@ impl Inference<'_> {
         let Type::Node(head, _) = self.method_receiver(receiver) else {
             return None;
         };
-        head.determining().then(|| {
+        (head.determining() && self.solver.complete(receiver).is_some()).then(|| {
             Type::Node(
                 Head::Method {
                     name: name.clone(),
@@ -1450,7 +1518,7 @@ impl Inference<'_> {
         }
         let result = self
             .solver
-            .coerce(&Type::function_result(function.clone()), result, span)?;
+            .unify(&Type::function_result(function.clone()), result, span)?;
         Ok(arguments && result)
     }
 
@@ -1541,7 +1609,7 @@ impl Inference<'_> {
             )
         })?;
         let arguments = self.arguments(args, arguments, span)?;
-        let result = self.solver.coerce(result, out, span)?;
+        let result = self.solver.unify(result, out, span)?;
         let conversion = if *associated {
             None
         } else {
@@ -1568,6 +1636,9 @@ impl Inference<'_> {
             return Ok(None);
         }
         let (conversion, adapted) = match (&source, &target) {
+            (_, Type::Node(Head::Reference, _)) => {
+                (ReceiverConversion::Address, Type::reference(from.clone()))
+            }
             (_, Type::Variable(_)) => (ReceiverConversion::Value, from.clone()),
             (Type::Node(a, _), Type::Node(b, _)) if a == b => {
                 (ReceiverConversion::Value, from.clone())
@@ -1907,8 +1978,8 @@ impl Inference<'_> {
             Constraint::Call(func, args, out) => {
                 let shape = self.shape(func, false, span)?;
                 if let Some(element) = shape.index_element() {
-                    let pointer = Type::pointer(element);
-                    if !self.solver.unify(out, &pointer, span)? {
+                    let reference = Type::reference(element);
+                    if !self.solver.unify(out, &reference, span)? {
                         return Ok(false);
                     }
                     argument_count(1, args.len(), span)?;
@@ -1928,7 +1999,7 @@ impl Inference<'_> {
                     }
                     Type::Node(Head::Function, children) => {
                         let a = self.arguments(args, &children[1..], span)?;
-                        let b = self.solver.coerce(&children[0], out, span)?;
+                        let b = self.solver.unify(&children[0], out, span)?;
                         return Ok(a && b);
                     }
                     _ => return Err(error(span, "call requires a function")),

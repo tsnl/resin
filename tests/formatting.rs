@@ -295,3 +295,11 @@ fn intrinsic_declarations_format_without_semantic_lookup() {
         "intrinsic \"pointer_index\" def at<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;\n",
     );
 }
+
+#[test]
+fn reference_types_and_initialized_binding_annotations() {
+    check(
+        "def identity<T>(value:Ref<T>)->Ref<T>={value};def main()={var value:int=1;var alias:Ref<_>=identity(value);alias:=2;};",
+        "def identity<T>(value: Ref<T>) -> Ref<T> = {\n\tvalue\n};\ndef main() = {\n\tvar value: int = 1;\n\tvar alias: Ref<_> = identity(value);\n\talias := 2;\n};\n",
+    );
+}

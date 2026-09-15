@@ -1,7 +1,7 @@
 # Resin design
 
-The [source reference proposal](proposals/references.md) describes a proposed
-`Ref<T>` type and reference-returning indexing. It is not implemented.
+The [reference specification](references.md) describes `Ref<T>`, fixed reference
+bindings, and reference-returning indexing.
 
 The [ownership specification](lifetimes.md) describes `ArcPtr<T>`, `ArcSpan<T>`,
 `WeakPtr<T>`, `WeakSpan<T>`,
@@ -28,7 +28,7 @@ assembling them in the type's layout order.
 Functions are top-level, immutable definitions without captured environments. Signatures are
 available before bodies are checked, so mutually recursive functions need no forward declarations.
 An omitted result annotation means unit; explicit `_` holes enable inference in locals and function
-results, including nested positions. Value bindings use `var name = value;`, nominal records use
+results, including nested positions. Value bindings use `var name = value;` or `var name: Type = value;`, nominal records use
 `struct Name { field: Type };`, and `type Name = Type;` creates transparent aliases. Declarations
 such as `var name: Type;` reserve uninitialized local storage: reads require prior initialization
 on every control-flow path. An aggregate must be initialized as a whole before its fields can be

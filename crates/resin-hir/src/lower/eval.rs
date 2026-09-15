@@ -23,6 +23,7 @@ pub(super) struct Decoder<'a> {
 impl Decoder<'_> {
     pub fn decode(mut self, ann: &resin_ast::Type, infer: bool) -> Result<Decoded, GenerateError> {
         let ty = self.ty(ann, infer)?;
+        reference_type(self.solver, &ty, true, ann.span)?;
         Ok(Decoded {
             ty,
             holes: self.holes,
@@ -63,6 +64,7 @@ impl Decoder<'_> {
                     .collect::<Result<Vec<_>, _>>()?;
                 let builtin = match head.val.as_ref() {
                     "Ptr" => Some(Head::Pointer),
+                    "Ref" => Some(Head::Reference),
                     _ => None,
                 };
                 if let Some(builtin) = builtin {
@@ -115,6 +117,28 @@ impl Decoder<'_> {
             }
         })
     }
+}
+
+// References describe bindings and signatures. They are not stored inside value
+// aggregates, even when a transparent alias hides the reference spelling.
+pub(super) fn reference_type(
+    solver: &Solver,
+    ty: &Type,
+    binding: bool,
+    span: Span,
+) -> Result<(), GenerateError> {
+    if let Type::Node(head, children) = solver.head(ty) {
+        if head == Head::Reference && !binding {
+            return Err(GenerateError::inference(
+                span,
+                "Ref<T> is allowed only in bindings, parameters, and function results",
+            ));
+        }
+        for child in children {
+            reference_type(solver, &child, head == Head::Function, span)?;
+        }
+    }
+    Ok(())
 }
 
 fn builtin_ty(name: &str) -> Option<Ty> {

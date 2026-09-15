@@ -19,7 +19,7 @@ def c_string(text: Ptr<ubyte>) -> Span<ubyte> = {
 };
 
 def argument(args: Span<Ptr<ubyte>>, index: ulong) -> Span<ubyte> = {
-	c_string(args.at(index).*)
+	c_string(args.at(index))
 };
 
 // Exact case-sensitive name lookup in the frozen snapshot, including on Windows.

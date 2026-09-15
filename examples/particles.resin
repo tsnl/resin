@@ -60,8 +60,8 @@ def advance(p: Particle, dt: float32) -> Particle = {
 @compute_shader
 def kernel(index: ulong, root: Ptr<Params>) -> () = {
 	if (index < root.particles.length) {
-		var p = root.particles.at(index);
-		p.* := advance(advance(p.*, root.dt), root.dt);
+		var p: Ref<Particle> = root.particles.at(index);
+		p := advance(advance(p, root.dt), root.dt);
 	}
 };
 
@@ -122,8 +122,8 @@ def heat_color(heat: float32) -> Color = {
 		3
 	};
 	var blend = scaled - float32(segment);
-	var low = colors(segment).*;
-	var high = colors(segment + 1).*;
+	var low = colors(segment);
+	var high = colors(segment + 1);
 	Color {
 		r = low.r + (high.r - low.r) * blend,
 		g = low.g + (high.g - low.g) * blend,
@@ -138,7 +138,7 @@ def vertex(index: int, root: Ptr<Params>) -> Vertex = {
 	var local = index - particle * 24;
 	var sector = int(float32(local) / 3.0_f);
 	var corner = local - sector * 3;
-	var p = root.particles.at(ulong(particle)).*;
+	var p = root.particles.at(ulong(particle));
 	var horizontal_depth = -p.x * root.yaw_sin + p.y * root.yaw_cos;
 	var height = (p.z - 25.0_f) * 0.9_f;
 	var depth = horizontal_depth * root.pitch_cos - height * root.pitch_sin;
@@ -154,8 +154,8 @@ def vertex(index: int, root: Ptr<Params>) -> Vertex = {
 		var rim = (sector + corner - 1) & 7;
 		var xs = [1.0_f, 0.707107_f, 0.0_f, -0.707107_f, -1.0_f, -0.707107_f, 0.0_f, 0.707107_f];
 		var ys = [0.0_f, 0.707107_f, 1.0_f, 0.707107_f, 0.0_f, -0.707107_f, -1.0_f, -0.707107_f];
-		nx := xs(rim).*;
-		ny := ys(rim).*;
+		nx := xs(rim);
+		ny := ys(rim);
 	};
 	var squared_speed = p.vx * p.vx + p.vy * p.vy + p.vz * p.vz;
 	var heat = speed_heat(squared_speed);

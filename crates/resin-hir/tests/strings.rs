@@ -54,13 +54,14 @@ fn string_views_support_fields_and_indexing() {
     )
     .unwrap();
     assert_eq!(result(&module, "length"), Type::UInt64);
-    for name in ["data", "byte", "legacy"] {
-        assert_eq!(
-            result(&module, name),
-            Type::Pointer {
-                pointee: Box::new(Type::UInt8)
-            }
-        );
+    assert_eq!(
+        result(&module, "data"),
+        Type::Pointer {
+            pointee: Box::new(Type::UInt8)
+        }
+    );
+    for name in ["byte", "legacy"] {
+        assert_eq!(result(&module, name), Type::UInt8);
     }
 }
 

@@ -147,7 +147,7 @@ def example() = {
     (block_body
       (statement
         (define
-          (term_define
+          (local_define
             (lid)
             (term
               (assignment_term
@@ -170,7 +170,7 @@ def example() = {
                                             (builtin_type))))))))))))))))))))
       (statement
         (define
-          (term_define
+          (local_define
             (lid)
             (term
               (assignment_term

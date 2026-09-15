@@ -265,6 +265,15 @@ impl Substitution {
             resin_hir::Type::GpuPipelineContract => resin_hir::Type::GpuPipelineContract,
             resin_hir::Type::GpuArguments => resin_hir::Type::GpuArguments,
             resin_hir::Type::Foreign { name } => resin_hir::Type::Foreign { name: name.clone() },
+            resin_hir::Type::Reference { referent } => resin_hir::Type::Reference {
+                referent: Box::new(self.normalize_at(referent, depth + 1, state, instances)?),
+            },
+            resin_hir::Type::Value { of } => {
+                match self.normalize_at(of, depth + 1, state, instances)? {
+                    resin_hir::Type::Reference { referent } => *referent,
+                    value => value,
+                }
+            }
             resin_hir::Type::Pointer { pointee } => resin_hir::Type::Pointer {
                 pointee: Box::new(self.normalize_at(pointee, depth + 1, state, instances)?),
             },
@@ -325,7 +334,8 @@ fn materialize(
         | resin_hir::Type::Member { .. }
         | resin_hir::Type::Method { .. }
         | resin_hir::Type::FunctionParameter { .. }
-        | resin_hir::Type::FunctionResult { .. } => {
+        | resin_hir::Type::FunctionResult { .. }
+        | resin_hir::Type::Value { .. } => {
             unreachable!("normalized type")
         }
         resin_hir::Type::Defined {
@@ -353,9 +363,11 @@ fn materialize(
         resin_hir::Type::GpuPipelineContract => Ty::GpuPipelineContract,
         resin_hir::Type::GpuArguments => Ty::GpuArguments,
         resin_hir::Type::Foreign { name } => Ty::Foreign { name: name.clone() },
-        resin_hir::Type::Pointer { pointee } => Ty::Pointer {
-            pointee: Box::new(materialize(pointee, instances)?),
-        },
+        resin_hir::Type::Reference { referent: pointee } | resin_hir::Type::Pointer { pointee } => {
+            Ty::Pointer {
+                pointee: Box::new(materialize(pointee, instances)?),
+            }
+        }
         resin_hir::Type::StrongOwner => Ty::StrongOwner,
         resin_hir::Type::WeakOwner => Ty::WeakOwner,
         resin_hir::Type::Function { params, result } => Ty::Function {
@@ -511,10 +523,13 @@ fn check_size(
         | resin_hir::Type::Member { .. }
         | resin_hir::Type::Method { .. }
         | resin_hir::Type::FunctionParameter { .. }
-        | resin_hir::Type::FunctionResult { .. } => {
+        | resin_hir::Type::FunctionResult { .. }
+        | resin_hir::Type::Value { .. } => {
             unreachable!("normalized argument")
         }
-        resin_hir::Type::Pointer { pointee } => check_size(pointee, depth + 1, remaining)?,
+        resin_hir::Type::Reference { referent: pointee } | resin_hir::Type::Pointer { pointee } => {
+            check_size(pointee, depth + 1, remaining)?
+        }
         resin_hir::Type::Function { params, result } => {
             for param in params {
                 check_size(param, depth + 1, remaining)?;

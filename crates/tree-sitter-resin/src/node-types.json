@@ -381,7 +381,7 @@
         "required": false,
         "types": [
           {
-            "type": "term_define",
+            "type": "local_define",
             "named": true
           }
         ]
@@ -718,6 +718,42 @@
         "types": [
           {
             "type": "type_parameters",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "local_define",
+    "named": true,
+    "fields": {
+      "ann": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type",
+            "named": true
+          }
+        ]
+      },
+      "init": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "term",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "lid",
             "named": true
           }
         ]
@@ -1483,6 +1519,10 @@
             "named": false
           },
           {
+            "type": "Ref",
+            "named": false
+          },
+          {
             "type": "uid",
             "named": true
           }
@@ -1721,6 +1761,10 @@
   },
   {
     "type": "Ptr",
+    "named": false
+  },
+  {
+    "type": "Ref",
     "named": false
   },
   {

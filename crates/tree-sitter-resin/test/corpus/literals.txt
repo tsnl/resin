@@ -10,7 +10,7 @@ def main() = { var a = 42_ul; var b = -42_l; var c = 1.5_f; var d = 0xff_ui; if 
     (block_body
       (statement
         (define
-          (term_define
+          (local_define
             (lid)
             (term
               (assignment_term
@@ -21,7 +21,7 @@ def main() = { var a = 42_ul; var b = -42_l; var c = 1.5_f; var d = 0xff_ui; if 
                         (number))))))))))
       (statement
         (define
-          (term_define
+          (local_define
             (lid)
             (term
               (assignment_term
@@ -33,7 +33,7 @@ def main() = { var a = 42_ul; var b = -42_l; var c = 1.5_f; var d = 0xff_ui; if 
                           (number)))))))))))
       (statement
         (define
-          (term_define
+          (local_define
             (lid)
             (term
               (assignment_term
@@ -44,7 +44,7 @@ def main() = { var a = 42_ul; var b = -42_l; var c = 1.5_f; var d = 0xff_ui; if 
                         (number))))))))))
       (statement
         (define
-          (term_define
+          (local_define
             (lid)
             (term
               (assignment_term

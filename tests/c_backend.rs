@@ -234,7 +234,7 @@ fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
 #[test]
 fn array_and_span_indexing_use_element_sizes() {
     runs(
-        "export { main }; import { \"$/span.resin\" }; def main () -> int = { var values = [10, 20, 30]; var p = Span<int> { data = Ptr<int>(&values), length = ulong(3) }; p.at(1).* := 7; var end = p.at(2); p.at(1).* + values(0).* + end.* };",
+        "export { main }; import { \"$/span.resin\" }; def main () -> int = { var values = [10, 20, 30]; var p = Span<int> { data = Ptr<int>(&values), length = ulong(3) }; p.at(1) := 7; var end = p.at(2); p.at(1) + values(0) + end };",
         47,
     );
     runs(
@@ -706,7 +706,7 @@ fn array_addresses_and_dynamic_bounds_are_executable() {
 }
 
 #[test]
-fn indexing_returns_pointers_and_evaluates_receiver_and_index_once() {
+fn indexing_addresses_evaluate_receiver_and_index_once() {
     runs(
         r#"export { main };
         import { "$/span.resin" };
@@ -717,12 +717,12 @@ fn indexing_returns_pointers_and_evaluates_receiver_and_index_once() {
         def index(calls: Ptr<int>) -> int = { calls.* := calls.* + 1; 1 };
         def main() -> int = {
             var values = [10_i, 20, 30]; var calls = 0;
-            var p: Ptr<int>; p := view(Ptr<int>(&values), &calls).at(ulong(index(&calls)));
+            var p: Ptr<int>; p := &view(Ptr<int>(&values), &calls).at(ulong(index(&calls)));
             p.* := 42;
             var copied = values;
-            copied(0).* := 9;
-            var temporary = ([7, 8])(1).*;
-            if (calls == 2 && values(1).* == 42 && values(0).* == 10 && copied(0).* == 9 && temporary == 8) { 0 } else { 1 }
+            copied(0) := 9;
+            var temporary = ([7, 8])(1);
+            if (calls == 2 && values(1) == 42 && values(0) == 10 && copied(0) == 9 && temporary == 8) { 0 } else { 1 }
         };"#,
         0,
     );
@@ -739,17 +739,17 @@ fn at_indexing_borrows_array_places_and_supports_field_receivers() {
             Holder { values = Span<int> { data = p, length = 3_ul } }
         };
         def index(calls: Ptr<int>) -> int = { calls.* := calls.* + 1; 1 };
-        def element(s: Span<int>, i: ulong) -> Ptr<int> = { s.at(i) };
+        def element(s: Span<int>, i: ulong) -> Ref<int> = { s.at(i) };
         def main() -> int = {
             var values = [10_i, 20, 30]; var calls = 0;
-            var p = view(Ptr<int>(&values), &calls).values.at(ulong(index(&calls)));
-            p.* := 42;
+            var p: Ref<int> = view(Ptr<int>(&values), &calls).values.at(ulong(index(&calls)));
+            p := 42;
             var record = { values = [3, 4] };
-            record.values.at(0).* := 8;
+            record.values.at(0) := 8;
             var holder = view(Ptr<int>(&values), &calls);
-            element(holder.values, 0).* := 11;
-            var temporary = [7, 8].at(1).*;
-            if (calls == 3 && values.at(1).* == 42 && values.at(0).* == 11 && record.values.at(0).* == 8 && temporary == 8) { 0 } else { 1 }
+            element(holder.values, 0) := 11;
+            var temporary = [7, 8].at(1);
+            if (calls == 3 && values.at(1) == 42 && values.at(0) == 11 && record.values.at(0) == 8 && temporary == 8) { 0 } else { 1 }
         };"#,
         0,
     );
@@ -763,7 +763,7 @@ fn at_indexing_checks_bounds_before_later_effects() {
                 r#"export {{ main }}; import {{ "$/span.resin" }}; extern "stdio.h" def puts(text: Ptr<ubyte>) -> int; def main() -> int = {{
                     var values = [1, 2];
                     var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }};
-                    {receiver}.at({index}).* := 9;
+                    {receiver}.at({index}) := 9;
                     puts("after".data); 0
                 }};"#
             )));
@@ -777,10 +777,10 @@ fn at_indexing_checks_bounds_before_later_effects() {
 #[test]
 fn array_and_span_indexing_fail_before_out_of_bounds_access() {
     for source in [
-        "export { main }; def main() -> int = { var xs = [1, 2]; xs(-1).* };",
-        "export { main }; def main() -> int = { var xs = [1, 2]; xs(2).* := 9; 0 };",
-        "export { main }; import { \"$/span.resin\" }; def main() -> int = { var xs = [1, 2]; var s = Span<int> { data = Ptr<int>(&xs), length = ulong(2) }; s.at(18446744073709551615_ul).* };",
-        "export { main }; import { \"$/span.resin\" }; def main() -> int = { var s = Span<int> { data = Ptr<int>(ulong(0)), length = ulong(0) }; s.at(0).* };",
+        "export { main }; def main() -> int = { var xs = [1, 2]; xs(-1) };",
+        "export { main }; def main() -> int = { var xs = [1, 2]; xs(2) := 9; 0 };",
+        "export { main }; import { \"$/span.resin\" }; def main() -> int = { var xs = [1, 2]; var s = Span<int> { data = Ptr<int>(&xs), length = ulong(2) }; s.at(18446744073709551615_ul) };",
+        "export { main }; import { \"$/span.resin\" }; def main() -> int = { var s = Span<int> { data = Ptr<int>(ulong(0)), length = ulong(0) }; s.at(0) };",
     ] {
         let output = run_module(&module(source));
         assert!(!output.status.success());
@@ -1010,13 +1010,13 @@ fn byte_arrays_have_packed_storage_and_nested_stride() {
             var nested = [[1_ub, 2_ub], [3_ub, 4_ub]];
             var embedded = [65_ub, 0_ub, 66_ub];
             var record = { bytes = copied, tail = 255_ub };
-            binary.at(0).* := 90_ub;
+            binary.at(0) := 90_ub;
             if (size_of(binary) == 2_ul && align_of(binary) == 1_ul &&
                 size_of(nested) == 4_ul && size_of(embedded) == 3_ul &&
-                ulong(nested.at(1)) - ulong(nested.at(0)) == 2_ul &&
+                ulong(&nested.at(1)) - ulong(&nested.at(0)) == 2_ul &&
                 size_of(record) == 3_ul && ulong(&record.tail) - ulong(&record.bytes) == 2_ul &&
-                copied.at(0).* == 65_ub && copied.at(1).* == 66_ub &&
-                record.tail == 255_ub && embedded.at(1).* == 0_ub) { 0 } else { 1 }
+                copied.at(0) == 65_ub && copied.at(1) == 66_ub &&
+                record.tail == 255_ub && embedded.at(1) == 0_ub) { 0 } else { 1 }
         };
     "#,
         0,

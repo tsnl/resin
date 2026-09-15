@@ -47,7 +47,7 @@ fn pointer_and_array_methods_keep_generic_nominal_payloads_symbolic() {
         };
         def first<T>(value: T) -> T = {
             var cells = [Cell<T> { value = value }];
-            cells.at(0).*.value
+            cells.at(0).value
         };
     "#;
     generate(source).unwrap();

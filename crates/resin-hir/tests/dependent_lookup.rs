@@ -18,7 +18,10 @@ fn tail(function: &resin_hir::Function) -> &Term {
 fn dependent_methods_retain_the_receiver_and_determining_result() {
     let module = compile("def read<T>(value: T) -> _ = { value.read() };").unwrap();
     let read = &module.functions[0];
-    let Type::FunctionResult { function } = &read.signature.result.ty else {
+    let Type::Value { of } = &read.signature.result.ty else {
+        panic!("read dependent result as a value")
+    };
+    let Type::FunctionResult { function } = of.as_ref() else {
         panic!("method result relation")
     };
     let Type::Method { lookup } = function.as_ref() else {
@@ -33,10 +36,10 @@ fn dependent_methods_retain_the_receiver_and_determining_result() {
     );
     assert!(!lookup.associated);
     assert!(lookup.type_args.is_empty());
-    assert!(matches!(
-        tail(read).kind,
-        TermKind::DependentMethodCall { .. }
-    ));
+    let TermKind::Use { arg } = &tail(read).kind else {
+        panic!("read reference result")
+    };
+    assert!(matches!(arg.kind, TermKind::DependentMethodCall { .. }));
     assert_eq!(module.functions.len(), 1);
 }
 
@@ -50,7 +53,7 @@ fn dependent_field_and_method_results_compose_without_concrete_declarations() {
     .unwrap();
     assert!(matches!(
         module.functions[0].signature.result.ty,
-        Type::FunctionResult { .. }
+        Type::Value { .. }
     ));
     assert!(matches!(
         module.functions[1].signature.result.ty,
@@ -58,7 +61,7 @@ fn dependent_field_and_method_results_compose_without_concrete_declarations() {
     ));
     assert!(matches!(
         module.functions[2].signature.result.ty,
-        Type::FunctionResult { .. }
+        Type::Value { .. }
     ));
 }
 
@@ -86,13 +89,16 @@ fn dependent_associated_references_retain_explicit_method_arguments() {
 #[test]
 fn dependent_callable_fields_remain_ordinary_calls() {
     let module = compile("def call<T>(value: T) -> _ = { (value.callback)(41) };").unwrap();
-    let TermKind::Call { func, .. } = &tail(&module.functions[0]).kind else {
+    let TermKind::Use { arg } = &tail(&module.functions[0]).kind else {
+        panic!("read callable field result")
+    };
+    let TermKind::Call { func, .. } = &arg.kind else {
         panic!("function-valued field call")
     };
     assert!(matches!(func.kind, TermKind::Field { .. }));
     assert!(matches!(
         module.functions[0].signature.result.ty,
-        Type::FunctionResult { .. }
+        Type::Value { .. }
     ));
 }
 

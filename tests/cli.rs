@@ -634,7 +634,7 @@ fn process_entries_receive_literal_arguments_in_run_and_compiled_modes() {
                 print(fmt("[{0}]\n", (argument(args, index).bytes(),)));
                 index := index + 1_ul;
             };
-            if (argc == 6 && ulong(with_sentinel.at(ulong(argc)).*) == 0_ul && argument(args, 0_ul).length > 0_ul) { 0 } else { 1 }
+            if (argc == 6 && ulong(with_sentinel.at(ulong(argc))) == 0_ul && argument(args, 0_ul).length > 0_ul) { 0 } else { 1 }
         };
     "#).unwrap();
     let args = ["hello world", "", "--flag", "semi;$(literal)", "λ"];
@@ -714,7 +714,7 @@ fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
             var with_sentinel = Span<Ptr<ubyte>> {{ data = envp, length = env.length + 1_ul }};
             print(fmt("{{0}}/{{1}}/{{2}}\n", (before.bytes(), after.bytes(), live.bytes())));
             ok(if (status == 0 && absent && environment_get(envp, empty.data)?.length == 0_ul
-                && env.length >= 2_ul && ulong(with_sentinel.at(env.length).*) == 0_ul) {{ 0 }} else {{ 1 }})
+                && env.length >= 2_ul && ulong(with_sentinel.at(env.length)) == 0_ul) {{ 0 }} else {{ 1 }})
         }};
     "#)).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_resin"))

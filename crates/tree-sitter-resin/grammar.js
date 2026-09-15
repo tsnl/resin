@@ -69,7 +69,7 @@ const BUILTIN_TYPES = [
   "GpuPipelineContract",
 ];
 
-const TYPE_FORMERS = ["Ptr", "Result"];
+const TYPE_FORMERS = ["Ptr", "Ref", "Result"];
 
 /**
  * Tree-sitter reserves words for only one token; uppercase names need an exclusion too.
@@ -239,8 +239,15 @@ export default grammar({
 
     define: ($) =>
       choice(
-        seq("var", field("term", $.term_define)),
+        seq("var", field("term", $.local_define)),
         seq("type", field("type", $.type_define)),
+      ),
+    local_define: ($) =>
+      seq(
+        field("name", $.lid),
+        optional(seq(":", field("ann", $.type))),
+        "=",
+        field("init", $.term),
       ),
     term_define: ($) => seq(field("name", $.lid), "=", field("init", $.term)),
     type_define: ($) =>
@@ -490,7 +497,12 @@ export default grammar({
     unary_type: ($) =>
       choice(
         prec(1, seq(field("former", $.uid), field("args", $.type_arguments))),
-        seq(field("former", "Ptr"), "<", field("arg", $.type), ">"),
+        seq(
+          field("former", choice("Ptr", "Ref")),
+          "<",
+          field("arg", $.type),
+          ">",
+        ),
         seq(
           "Result",
           "<",

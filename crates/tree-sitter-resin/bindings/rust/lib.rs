@@ -230,6 +230,7 @@ mod tests {
         }
         for name in [
             "Ptr",
+            "Ref",
             "Result",
             "GpuArguments",
             "StrongOwner",

@@ -247,6 +247,7 @@ impl Printer {
                 "adapt",
                 vec![quoted(format!("{conversion:?}")), self.term(arg)],
             ),
+            TermKind::Use { arg } => list("use", vec![self.term(arg)]),
             TermKind::Convert { arg } => list("convert", vec![self.term(arg)]),
             TermKind::GpuPipelineCreate {
                 factory,
@@ -437,6 +438,8 @@ impl TypeNames {
                     )
                 }
             }
+            Type::Reference { referent } => format!("Ref<{}>", self.format(referent)),
+            Type::Value { of } => format!("Value<{}>", self.format(of)),
             Type::Pointer { pointee } => format!("Ptr<{}>", self.format(pointee)),
             Type::GpuView => "GpuView".into(),
             Type::GpuPipelineContract => "GpuPipelineContract".into(),

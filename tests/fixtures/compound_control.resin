@@ -11,10 +11,10 @@ def identity(n: uint) -> uint = { n };
         var flag = 1_i == 2;
         flag := i == 0_ul && touch(root) == 0_ui;
         var values = [0_ui, 0_ui];
-        values(touch(root) - 1_ui).* := if (flag) { touch(root) + 9_ui } else { 12_ui };
+        values(touch(root) - 1_ui) := if (flag) { touch(root) + 9_ui } else { 12_ui };
         var pair = Pair { b = if (flag) { touch(root) } else { 99_ui }, a = touch(root) };
         choose(root).* := identity(if (flag) { touch(root) + 14_ui } else { 99_ui });
-        root.result := if (x == 7_ui && flag && values(0_ul).* == 11_ui && pair.a == 4_ui && pair.b == 3_ui && root.counter == 7_ui && root.result == 20_ui) { 42_ui } else { 99_ui };
+        root.result := if (x == 7_ui && flag && values(0_ul) == 11_ui && pair.a == 4_ui && pair.b == 3_ui && root.counter == 7_ui && root.result == 20_ui) { 42_ui } else { 99_ui };
     };
 };
 def main() -> int = {
