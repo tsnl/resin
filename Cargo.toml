@@ -3,6 +3,7 @@ name = "resin"
 version.workspace = true
 edition = "2024"
 publish = false
+license.workspace = true
 
 [features]
 gpu = []
@@ -53,6 +54,7 @@ resolver = "3"
 opt-level = 1
 
 [workspace.package]
+license = "Apache-2.0"
 version = "0.1.0"
 
 [workspace.dependencies]

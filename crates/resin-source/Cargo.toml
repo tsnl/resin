@@ -3,6 +3,7 @@ name = "resin-source"
 version.workspace = true
 edition = "2024"
 publish = false
+license.workspace = true
 
 [dev-dependencies]
 tempfile = { workspace = true }

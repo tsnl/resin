@@ -45,3 +45,10 @@ and a pinned Resin commit containing the parser.
 
 The initial contents were imported from `tsnl/tree-sitter-resin` at commit
 `8f167ef57f5c894aba3f05f1bfae1d856d95ad6b`.
+
+## License
+
+The Resin grammar and bindings are licensed under
+[Apache-2.0](LICENSE). See [NOTICE](NOTICE) for attribution. The bundled
+Tree-sitter headers in `src/tree_sitter/` retain their
+[MIT license](src/tree_sitter/LICENSE).

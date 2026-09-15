@@ -84,3 +84,18 @@ includes diagnostics, completion, navigation, and formatting.
 
 To explore the implementation, start with the [repository tour](TOUR.md) and
 [compiler architecture](doc/architecture.md).
+
+## License
+
+Resin's compiler, runtime, standard library, editor integrations, and examples are
+licensed under the [Apache License, Version 2.0](LICENSE), except for third-party
+material with its own license notices. See [NOTICE](NOTICE) for attribution.
+
+Using Resin to compile your own code does not change that code's license. You can
+develop open-source or proprietary programs. When distributing Resin code,
+including runtime, standard-library, or compiler support code incorporated into
+your program, comply with Apache-2.0 and the applicable third-party licenses.
+
+The bundled [Tree-sitter headers](crates/tree-sitter-resin/src/tree_sitter/) retain
+their [MIT license](crates/tree-sitter-resin/src/tree_sitter/LICENSE). Dependencies
+retain their respective licenses.
