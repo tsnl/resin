@@ -25,6 +25,9 @@ struct Args {
     cc: Option<OsString>,
     #[arg(long)]
     spirv_opt: Option<OsString>,
+    /// Host code generator; Cranelift currently supports scalar-only, headerless programs.
+    #[arg(long, value_enum, default_value = "c")]
+    host_backend: resin_server::HostBackend,
     /// Entry capacity applied to each cache (requested overflow is retained with a warning).
     #[arg(long)]
     cache_capacity: Option<usize>,
@@ -115,6 +118,7 @@ async fn serve(args: Args) -> Result<()> {
         temporary,
         tools: environment.toolchain(args.cc.as_deref(), args.spirv_opt.as_deref()),
         target: resin_server::host_target(),
+        host_backend: args.host_backend,
         capacities,
     };
     let server = Arc::new(

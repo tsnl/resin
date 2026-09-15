@@ -1,6 +1,8 @@
-//! Generate C, SPIR-V, and a Ninja dependency graph from verified LIR in one pass.
-//! The returned project describes inputs for native tools; it owns no compiler state.
-//! Target languages and lowering are private. Generation runs no external tools.
+//! Generate completed target artifacts from verified LIR without running external tools.
+//! [`generate`] produces C, SPIR-V, and a Ninja dependency graph in an owned project.
+//! The experimental [`generate_native`] produces immutable host object bytes directly.
+//! Both return inputs for native tools and retain no mutable compiler state.
+//! Target languages and lowering are private.
 //!
 //! ```compile_fail,E0603
 //! use resin_codegen::c;
@@ -8,6 +10,10 @@
 //!
 //! ```compile_fail,E0603
 //! use resin_codegen::spirv;
+//! ```
+//!
+//! ```compile_fail,E0603
+//! use resin_codegen::cranelift;
 //! ```
 //!
 //! ```compile_fail,E0432
@@ -25,10 +31,63 @@ use std::{
 use tempfile::TempDir;
 
 mod c;
+mod cranelift;
 mod error;
 mod layout;
 mod numeric;
 mod spirv;
+
+//
+// Experimental native object generation
+//
+
+/// Optimization performed during the experimental Cranelift translation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum NativeOptimization {
+    None,
+    Speed,
+}
+
+/// Completed host object code. Clones share immutable bytes; linking is separate.
+#[derive(Debug, Clone)]
+pub struct NativeObject {
+    bytes: Arc<[u8]>,
+}
+
+impl NativeObject {
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// Retain the completed object without copying its bytes.
+    pub fn shared_bytes(&self) -> Arc<[u8]> {
+        self.bytes.clone()
+    }
+}
+
+/// Emit a native object on a bounded worker without running external tools.
+/// This prototype accepts scalar host code with a zero-argument entry returning
+/// `int` or unit: booleans, fixed-width numbers, unit/None, scalar pointers, and
+/// function values. It supports structured control flow, ordinary calls, plain
+/// local storage, checked numeric conversions, and wrapping integer arithmetic.
+/// Aggregates, managed values, native headers/externs, and GPU operations return
+/// errors; this operation never falls back to C. Runtime checks use native traps.
+/// The object's C-ABI `main` calls the requested entry. CPU features use the host
+/// architecture's baseline and current platform's object format. Linking remains
+/// an application operation and may need the platform math library for libcalls.
+pub async fn generate_native(
+    checked: Arc<resin_lir::VerifiedModule>,
+    entry: String,
+    optimization: NativeOptimization,
+    execution: &Execution,
+    cancellation: &Cancellation,
+) -> Result<NativeObject, GenerationError> {
+    execution
+        .run(cancellation, move |cancellation| {
+            cranelift::generate(checked.view(), &entry, optimization, cancellation)
+        })
+        .await?
+}
 
 //
 // Generated source files and the binary headers they will need

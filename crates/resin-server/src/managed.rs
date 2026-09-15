@@ -358,6 +358,7 @@ mod tests {
             temporary: root.into(),
             tools: environment.toolchain(None, None),
             target: crate::host_target(),
+            host_backend: crate::HostBackend::C,
             capacities: Capacities::default(),
         }
     }

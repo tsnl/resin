@@ -51,6 +51,7 @@ impl Service {
             temporary: directory.path().into(),
             tools: environment.toolchain(None, None),
             target: resin_server::host_target(),
+            host_backend: resin_server::HostBackend::C,
             capacities: resin_server::Capacities::default(),
         };
         configure(&mut config, &mut environment);

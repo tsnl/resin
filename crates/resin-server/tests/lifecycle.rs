@@ -31,6 +31,7 @@ impl Service {
                 temporary: root.into(),
                 tools: environment.toolchain(compiler.map(Path::as_os_str), None),
                 target: resin_server::host_target(),
+                host_backend: resin_server::HostBackend::C,
                 capacities: Capacities {
                     generated: 1,
                     ..Default::default()

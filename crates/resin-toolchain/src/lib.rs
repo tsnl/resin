@@ -1,4 +1,5 @@
-//! Build an on-disk Ninja project asynchronously with captured tools and bounded execution.
+//! Build native executables with captured tools and bounded asynchronous execution.
+//! Completed host objects link directly; on-disk C/SPIR-V projects build through Ninja.
 //! The included `toolchain.ninja` supplies `optimize_shader`, `embed_shader`, and
 //! `compile_program` rules; generated `build.ninja` files describe their dependencies.
 //! Ninja owns the graph and incremental work. Successful outputs remain available
@@ -16,6 +17,7 @@ mod environment;
 mod files;
 mod headers;
 mod ninja;
+mod object;
 mod platform;
 mod process;
 mod settings;
@@ -121,6 +123,29 @@ pub struct Toolchain {
 }
 
 impl Toolchain {
+    /// Link a self-contained host object with the configured C compiler's linker driver.
+    /// The object supplies `main` and may reference the host C/math libraries. This
+    /// operation does not compile C, run Ninja, or link Resin's runtime archive.
+    /// Each call reserves one execution slot and returns a separately owned temporary
+    /// executable generation; callers decide whether to retain and reuse the result.
+    /// Cancelling or dropping the future terminates its process tree.
+    pub async fn link_object(
+        &self,
+        object: Arc<[u8]>,
+        temporary: &Path,
+        execution: &Execution,
+        cancellation: &Cancellation,
+    ) -> Result<Executable, Error> {
+        let temporary = temporary.to_path_buf();
+        let settings = self.settings.clone();
+        let execution = execution.clone();
+        process::supervise(cancellation, move |cancellation| async move {
+            let _permit = execution.acquire(&cancellation).await?;
+            object::link(object, &temporary, &settings, &cancellation).await
+        })
+        .await
+    }
+
     /// Stage a complete project, run Ninja, and retain an immutable output generation.
     /// `name` and `entry` select incremental work independently of temporary inputs.
     /// Each build reserves one execution slot and runs Ninja with one native job.

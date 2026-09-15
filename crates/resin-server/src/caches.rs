@@ -13,12 +13,14 @@ pub(crate) struct Caches {
     pub hir: ArcSwap<Cache<resin_source::SourceGraph, resin_hir::Hir>>,
     pub verified: ArcSwap<Cache<resin_lir::LirKey, resin_lir::VerifiedModule>>,
     pub generated: ArcSwap<Cache<GenerationKey, resin_codegen::GeneratedProject>>,
+    pub native: ArcSwap<Cache<NativeKey, resin_codegen::NativeObject>>,
     pub source_builds: AtomicU64,
     pub syntax_builds: AtomicU64,
     pub ast_builds: AtomicU64,
     pub hir_builds: AtomicU64,
     pub verified_builds: AtomicU64,
     pub generated_builds: AtomicU64,
+    pub native_object_builds: AtomicU64,
 }
 
 impl Caches {
@@ -31,12 +33,14 @@ impl Caches {
             hir: ArcSwap::from_pointee(Cache::new(capacity.hir)),
             verified: ArcSwap::from_pointee(Cache::new(capacity.verified)),
             generated: ArcSwap::from_pointee(Cache::new(capacity.generated)),
+            native: ArcSwap::from_pointee(Cache::new(capacity.generated)),
             source_builds: AtomicU64::new(0),
             syntax_builds: AtomicU64::new(0),
             ast_builds: AtomicU64::new(0),
             hir_builds: AtomicU64::new(0),
             verified_builds: AtomicU64::new(0),
             generated_builds: AtomicU64::new(0),
+            native_object_builds: AtomicU64::new(0),
         }
     }
     pub fn counters(&self) -> crate::Counters {
@@ -47,6 +51,7 @@ impl Caches {
             hir_builds: self.hir_builds.load(Ordering::Relaxed),
             verified_builds: self.verified_builds.load(Ordering::Relaxed),
             generated_builds: self.generated_builds.load(Ordering::Relaxed),
+            native_object_builds: self.native_object_builds.load(Ordering::Relaxed),
         }
     }
 }
@@ -58,4 +63,12 @@ pub(crate) struct GenerationKey {
     pub headers: Arc<resin_codegen::NativeHeaders>,
     pub target: resin_protocol::Target,
     pub managed_snapshot: String,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct NativeKey {
+    pub lir: resin_lir::LirKey,
+    pub entry: String,
+    pub optimization: resin_codegen::NativeOptimization,
+    pub target: resin_protocol::Target,
 }

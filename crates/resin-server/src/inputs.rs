@@ -455,6 +455,7 @@ mod tests {
             temporary: directory.path().into(),
             tools: environment.toolchain(None, None),
             target: crate::host_target(),
+            host_backend: crate::HostBackend::C,
             capacities: crate::Capacities {
                 inputs: input_capacity,
                 ..Default::default()

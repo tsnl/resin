@@ -64,7 +64,16 @@ pub struct Config {
     pub temporary: PathBuf,
     pub tools: resin_toolchain::Toolchain,
     pub target: Target,
+    pub host_backend: HostBackend,
     pub capacities: Capacities,
+}
+
+/// Host emission selected for this server instance. Cranelift is a scalar-only prototype.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum HostBackend {
+    #[default]
+    C,
+    Cranelift,
 }
 
 /// Observation counters for embedding applications and tests, not an HTTP administration API.
@@ -76,6 +85,7 @@ pub struct Counters {
     pub hir_builds: u64,
     pub verified_builds: u64,
     pub generated_builds: u64,
+    pub native_object_builds: u64,
 }
 
 /// Independent server state. Its immutable cache heads are shared by analysis and builds.

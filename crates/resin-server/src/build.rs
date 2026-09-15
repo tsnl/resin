@@ -1,7 +1,7 @@
 //! Build requests explicitly select each immutable pass and then run native tools.
 use crate::{
-    OwnedArtifact, Server,
-    caches::GenerationKey,
+    HostBackend, OwnedArtifact, Server,
+    caches::{GenerationKey, NativeKey},
     http::failure,
     inputs::{self, internal},
     publication,
@@ -156,68 +156,22 @@ pub(crate) async fn run(
     .map_err(internal)?
     .remove(&key)
     .expect("selected verified LIR");
-    let generation_key = GenerationKey {
-        lir: key,
-        host_entry: Some(request.contract.entry.export.clone()),
-        headers: frozen.headers,
-        target: server.config.target.clone(),
-        managed_snapshot: server.managed.snapshot().into(),
+    let executable = match server.config.host_backend {
+        HostBackend::C => {
+            build_c(
+                server,
+                verified,
+                key,
+                frozen.headers,
+                &request.contract,
+                cancellation,
+            )
+            .await?
+        }
+        HostBackend::Cranelift => {
+            build_native(server, verified, key, &request.contract, cancellation).await?
+        }
     };
-    let generated = publication::select(
-        &server.caches.generated,
-        vec![generation_key.clone()],
-        |key| {
-            let verified = verified.clone();
-            async move {
-                server
-                    .caches
-                    .generated_builds
-                    .fetch_add(1, Ordering::Relaxed);
-                resin_codegen::generate(
-                    verified,
-                    key.host_entry,
-                    key.headers,
-                    &server.config.temporary,
-                    &server.execution,
-                    cancellation,
-                )
-                .await
-                .map(Arc::new)
-            }
-        },
-        &server.execution,
-        cancellation,
-    )
-    .await
-    .map_err(internal)?
-    .remove(&generation_key)
-    .expect("selected generated project");
-    let profile = match request.contract.profile {
-        BuildProfile::Debug => resin_toolchain::CProfile::Debug,
-        BuildProfile::Release => resin_toolchain::CProfile::Release,
-    };
-    let built = server
-        .config
-        .tools
-        .build(
-            generated.directory(),
-            generated.name(),
-            &request.contract.entry.export,
-            profile,
-            &server.execution,
-            cancellation,
-        )
-        .await
-        .map_err(|error| failure(ErrorCode::CompilationFailed, error.to_string()))?;
-    let executable = built
-        .executable(
-            generated
-                .program()
-                .expect("host output")
-                .file_name()
-                .expect("program filename"),
-        )
-        .map_err(internal)?;
     let path = executable.path().to_owned();
     let (length, digest) = server
         .execution
@@ -256,4 +210,134 @@ pub(crate) async fn run(
         },
         executable,
     })
+}
+
+async fn build_c(
+    server: &Server,
+    verified: Arc<resin_lir::VerifiedModule>,
+    key: resin_lir::LirKey,
+    headers: Arc<resin_codegen::NativeHeaders>,
+    contract: &BuildContract,
+    cancellation: &Cancellation,
+) -> Result<resin_toolchain::Executable, Failure> {
+    let generation_key = GenerationKey {
+        lir: key,
+        host_entry: Some(contract.entry.export.clone()),
+        headers,
+        target: server.config.target.clone(),
+        managed_snapshot: server.managed.snapshot().into(),
+    };
+    let generated = publication::select(
+        &server.caches.generated,
+        vec![generation_key.clone()],
+        |key| {
+            let verified = verified.clone();
+            async move {
+                server
+                    .caches
+                    .generated_builds
+                    .fetch_add(1, Ordering::Relaxed);
+                resin_codegen::generate(
+                    verified,
+                    key.host_entry,
+                    key.headers,
+                    &server.config.temporary,
+                    &server.execution,
+                    cancellation,
+                )
+                .await
+                .map(Arc::new)
+            }
+        },
+        &server.execution,
+        cancellation,
+    )
+    .await
+    .map_err(internal)?
+    .remove(&generation_key)
+    .expect("selected generated project");
+    let profile = match contract.profile {
+        BuildProfile::Debug => resin_toolchain::CProfile::Debug,
+        BuildProfile::Release => resin_toolchain::CProfile::Release,
+    };
+    let built = server
+        .config
+        .tools
+        .build(
+            generated.directory(),
+            generated.name(),
+            &contract.entry.export,
+            profile,
+            &server.execution,
+            cancellation,
+        )
+        .await
+        .map_err(|error| failure(ErrorCode::CompilationFailed, error.to_string()))?;
+    built
+        .executable(
+            generated
+                .program()
+                .expect("host output")
+                .file_name()
+                .expect("program filename"),
+        )
+        .map_err(internal)
+}
+
+async fn build_native(
+    server: &Server,
+    verified: Arc<resin_lir::VerifiedModule>,
+    lir: resin_lir::LirKey,
+    contract: &BuildContract,
+    cancellation: &Cancellation,
+) -> Result<resin_toolchain::Executable, Failure> {
+    let key = NativeKey {
+        lir,
+        entry: contract.entry.export.clone(),
+        optimization: match contract.profile {
+            BuildProfile::Debug => resin_codegen::NativeOptimization::None,
+            BuildProfile::Release => resin_codegen::NativeOptimization::Speed,
+        },
+        target: contract.target.clone(),
+    };
+    let object = publication::select(
+        &server.caches.native,
+        vec![key.clone()],
+        |key| {
+            let verified = verified.clone();
+            async move {
+                server
+                    .caches
+                    .native_object_builds
+                    .fetch_add(1, Ordering::Relaxed);
+                resin_codegen::generate_native(
+                    verified,
+                    key.entry,
+                    key.optimization,
+                    &server.execution,
+                    cancellation,
+                )
+                .await
+                .map(Arc::new)
+            }
+        },
+        &server.execution,
+        cancellation,
+    )
+    .await
+    .map_err(|error| failure(ErrorCode::CompilationFailed, error.to_string()))?
+    .remove(&key)
+    .expect("selected native object");
+    // Only pure object generation is cached. Each request owns its linked output.
+    server
+        .config
+        .tools
+        .link_object(
+            object.shared_bytes(),
+            &server.config.temporary,
+            &server.execution,
+            cancellation,
+        )
+        .await
+        .map_err(|error| failure(ErrorCode::CompilationFailed, error.to_string()))
 }

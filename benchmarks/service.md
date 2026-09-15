@@ -24,6 +24,8 @@ The default binary directory is `$CARGO_TARGET_DIR/release`, or `target/release`
 Use `--bin-dir PATH` to select another build. `--suite http`, `--suite lsp`, and
 `--suite build` run individual groups; the default runs all three. `--label TEXT`
 records a label alongside the machine, revision, fixture, and sample metadata.
+Use `--host-backend cranelift` for the opt-in
+[scalar host backend prototype](../doc/cranelift-prototype.md); the default is `c`.
 
 Results contain every sample, sample counts, median, and nearest-rank p95. A p95
 computed from three cold trials is just the largest sample; increase `--trials`
