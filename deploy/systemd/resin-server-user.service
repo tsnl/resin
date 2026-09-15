@@ -1,0 +1,17 @@
+[Unit]
+Description=Resin compiler service for this user
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/state/resin
+Environment=RESIN_LIBRARY_ROOT=%h/.local/share/resin
+Environment=RESIN_RUNTIME_INCLUDE=%h/.local/include/resin
+Environment=RESIN_RUNTIME_LIB=%h/.local/lib/resin/libresin_runtime.a
+ExecStart=%h/.local/bin/resin-server --listen 127.0.0.1:7412 --storage %h/.local/state/resin/dependencies --temporary %h/.cache/resin
+Restart=on-failure
+KillMode=control-group
+TimeoutStopSec=30
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

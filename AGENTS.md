@@ -60,7 +60,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Keep resolved types and layout rules in `crates/resin-types`; they must not depend on a
   frontend, backend, or verifier. Keep the public contract in `lib.rs`, with substantial
   representation algorithms in private `types.rs` and concrete checking/conversion rules
-  in private `typer.rs`. The compiler driver sequences passes and the toolchain
+  in private `typer.rs`. Server build/analyze handlers explicitly sequence passes and the toolchain
   owns external processes. Printers consume their own language, without reaching upstream.
 - Each compiler phase is an unpublished workspace crate under `crates/`: `resin-cst`,
   `resin-ast`, `resin-hir`, `resin-lir`, and `resin-codegen`,
@@ -73,11 +73,15 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   do not work around a boundary with public implementation modules or reverse dev-dependencies.
   Language nodes are public data. Solvers, scopes, builders, and traversal state stay private;
   expose a small set of lowering, printing, and query operations instead.
-- The root manifest is both the `resin` package and the workspace. Root `src/` contains
-  only the CLI; library crates live under `crates/`. One `resin` executable builds/runs
-  programs, formats source, and serves LSP with `--lsp DIR`. `resin-lsp` is a library,
-  so editor and compilation services ship in the same binary. Do not re-export compiler
-  implementation modules through the CLI crate.
+- The root manifest is both the `resin` package and workspace; root `src/main.rs`
+  calls `resin_client::main()` and has no library/compiler implementation. All other
+  crates live under `crates/`. `resin-client` merges CLI, local execution, syntax
+  acquisition, formatting, and LSP revision handling. It depends only on syntax/source/
+  executor/protocol libraries, never AST/HIR/LIR/codegen/toolchain/runtime.
+  `resin-server` owns HTTP handlers, compiler pass order, shared cache heads, dependencies,
+  and native tools. `resin-protocol` contains only strict wire data and constants.
+  Compiler/cache/toolchain crates never depend on client/server/protocol. Do not add
+  reusable orchestration wrappers or a separate LSP crate.
 - Keep the complete Tree-sitter package together. Editor integrations live under
   `editors/`; the Zed WASI extension has its own Cargo workspace in `editors/zed`.
   Crates own their isolated tests; root `tests/` exercises the complete executable and
@@ -232,19 +236,26 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `--` separates run arguments from compiler options; execution arguments stay out of build requests.
 - Source files contain declarations only; keep runtime state inside functions and pass it
   explicitly. `FILE:ENTRY` selects an exported entry (default `main`); imports never run code.
-- Keep `src/main.rs` as a wrapper around `resin::cli::main`; argument-to-`Mode` dispatch
-  lives in `src/cli/`. Capture process settings through the platform toolchain's
-  `Environment`, then choose CLI defaults and the build profile explicitly.
-  Validate file selections and output destinations in the CLI. Interpreter mode
-  owns host compilation from source to executable. `resin_hir::Hir::build`
-  consumes an immutable assembled `BuiltProgram` to produce HIR and editor facts. Host and shader
-  entries are selected by `resin_lir::build_lir` when generating LIR. The separate
-  `resin_codegen::generate` operation takes verified LIR and
-  writes C, unoptimized SPIR-V, and a Ninja dependency graph into a unique owned
-  child of the supplied temporary parent directory in one call. Target representations and individual emitters stay private.
+- Build/run/LSP require explicit `RESIN_SERVER` and negotiate HTTP capabilities before
+  source acquisition or successful LSP initialization; no autostart, discovery files,
+  project manifest, or local compiler fallback. Local formatting/embedding need no server.
+  The client fully parses CSTs for source/import/header acquisition and uploads immutable
+  user snapshots with entry-relative logical names. `$/` libraries and pinned Git
+  dependencies are frozen by the server. User source names are never opened as server paths.
+  Delta handles are optional bounded transport state; cache identity excludes handles,
+  revisions, local paths, and caller identity. An unavailable base retries complete inputs.
+  LSP owns unsaved buffers without saving them; build requests capture disk independently.
+  Managed definitions use immutable local mirror files and keep server source identities.
+- Server handlers call `resin_hir::Hir::build` on assembled immutable `BuiltProgram`
+  values, then select explicit host/shader entries for `resin_lir::build_lir`.
+  `resin_codegen::generate` accepts verified LIR and immutable `NativeHeaders`, writes
+  supplied header bundles, C, SPIR-V and Ninja edges into a unique owned temporary child.
+  HIR and LIR retain source-scoped `ForeignHeader` values even for empty extern groups.
+  Never bind includes by basename alone. Preserve ordered include roots and whole-bundle
+  contents in native keys, and protect the compiler-injected runtime ABI include.
   `resin-toolchain` stages that directory, configures native tools, and invokes Ninja.
   The toolchain owns native command rules. The graph optimizes SPIR-V with `spirv-opt`,
-  runs the same Resin binary with `--embed` to write
+  runs the configured service executable with `--embed` to write
   aligned byte-array headers, then compiles C. Ninja owns ordering and incremental builds.
   Inspect cached intermediates or immutable `Hir` results; do not add CLI inspection modes.
   Toolchain APIs consume explicit settings. Only staging/building holds the cache lock;
@@ -254,10 +265,12 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Capture the Resin executable with `std::env::current_exe()` rather than resolving it on
   PATH. Do not run a blanket native-tool preflight: report failures when a build needs the
   tool. Document Ninja, a C compiler (`CC`/`--cc`), and `spirv-opt` (`SPIRV_OPT`/`--spirv-opt`) as installation
-  requirements; `NINJA` selects the build runner. Embedding preserves arbitrary bytes and
+  requirements on the server; `NINJA` selects the build runner. Client `-I`/`--include-root`
+  uploads complete header directory bundles. Server tool paths never come from build requests. Embedding preserves arbitrary bytes and
   their exact logical length, including empty inputs, without appending a NUL.
-- Without `-o`, host compilation uses the debug cache and runs the program. With `-o`,
-  build and copy the optimized executable without running it.
+- Without `-o`, request a debug build, download to owned temporary storage, and run
+  locally with local argv/env/cwd. With `-o`, request release and atomically publish the
+  verified download without running it. Failed/cancelled downloads preserve prior output.
 - Functions take a parenthesized sequence of arguments. Calls preserve callee-first,
   left-to-right evaluation; tuples are ordinary single values, never argument packs.
   Tuple members use decimal field indices (`pair.0`, `pair.1`).

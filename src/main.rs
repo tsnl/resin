@@ -1,3 +1,3 @@
 fn main() {
-    resin::cli::main()
+    resin_client::main();
 }

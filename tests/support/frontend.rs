@@ -83,6 +83,7 @@ pub fn generate(
     block_on(resin_codegen::generate(
         Arc::new(module),
         entry.map(str::to_owned),
+        std::sync::Arc::new(resin_codegen::NativeHeaders::default()),
         parent,
         execution(),
         &Cancellation::new(),

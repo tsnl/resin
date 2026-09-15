@@ -12,7 +12,7 @@ resin-source = { workspace = true }
 resin-lir = { workspace = true }
 rspirv = "0.13"
 tempfile = { workspace = true }
+serde_json = "1"
 
 [dev-dependencies]
-serde_json = "1"
 tokio = { workspace = true }

@@ -274,8 +274,11 @@ fn loop_body_preserves_the_condition_stack() {
 fn parameter_counts_must_fit_the_declared_locals() {
     for foreign in [
         None,
-        Some(Foreign {
-            header: "test.h".into(),
+        Some(crate::Foreign {
+            header: crate::ForeignHeader {
+                source: resin_source::SourceId::new("native.resin"),
+                spelling: "test.h".into(),
+            },
             params: vec![],
         }),
     ] {

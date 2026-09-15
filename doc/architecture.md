@@ -5,10 +5,11 @@ unpublished Cargo workspace crate. Public data describes its output; a small set
 of public operations constructs, prints, or queries that data. Each crate lists
 its full public interface in `lib.rs`; implementation modules stay private.
 
-The root manifest is both a package and a workspace. Root `src/` contains the
-`resin` CLI: `resin FILE` builds and runs, `resin FILE --output PATH` builds an
-executable, `resin --format DIR` formats source, and `resin --lsp DIR` serves the
-Language Server Protocol. There is one executable to distribute.
+The root manifest is both a package and a workspace. Root `src/main.rs` forwards
+to `resin_client::main()`. The client supplies build/run commands, local formatting,
+and stdio LSP. `resin-server` is a separate HTTP application. Builds and LSP require
+an explicit `RESIN_SERVER` URL and capability negotiation; the client has no local
+semantic compilation or native-tool dependency.
 
 Reusable libraries live under `crates/`, with directory names matching their Cargo
 package names. Each language crate owns its representation and the translation that
@@ -17,14 +18,15 @@ and pass immutable `SourceGraph` values to `resin_ast::build_program`. `resin-so
 immutable text and standard-library resolution; `resin-types` owns concrete types and
 representation rules. Neither depends on a compiler phase. `resin-toolchain` runs
 generated Ninja projects and retains native artifacts without depending on compiler
-or type crates. The CLI connects compilation, code generation, and native building.
-`resin-lsp` adapts compiler queries to the protocol; the native C ABI lives in
-`resin-runtime`.
+or type crates. Server analysis/build handlers each sequence their compiler passes
+explicitly and share immutable cache heads. `resin-protocol` contains only wire data;
+`resin-client` acquires local sources/header bundles and renders remote diagnostics
+and editor queries. The native C ABI lives in `resin-runtime`.
 
 Crates own their isolated tests; root `tests/` exercises the complete executable and
 cross-crate behavior. Examples and documentation stay at the repository root;
 Resin libraries live under `resin/`. The root package is the default member, so
-`cargo run -- examples/eg001.resin` works there. Use `--workspace` to build or test
+`cargo run -- examples/eg001.resin` selects that client after `RESIN_SERVER` is set. Use `--workspace` to build or test
 all native packages.
 
 `crates/tree-sitter-resin` keeps the grammar, generated parser, queries, JavaScript
@@ -42,7 +44,7 @@ flowchart LR
     verified --> project[Codegen: C + SPIR-V + build.ninja]
     project --> ninja[Ninja]
     ninja --> spirv[spirv-opt: optimized SPIR-V]
-    spirv --> headers[resin --embed: C headers]
+    spirv --> headers[resin-server --embed: C headers]
     headers --> executable[C compiler: executable]
 ```
 
@@ -62,7 +64,9 @@ pass consumes. Source and type vocabulary are independent foundations.
 | `resin-lir` | `resin-hir` | Storage and control-flow lowering, `build_lir`, verification |
 | `resin-codegen` | `resin-lir` | Generate a complete on-disk C/SPIR-V/Ninja project |
 | `resin-toolchain` | none | Async native builds and independently owned output generations |
-| `resin-lsp` | Individual compiler crates, `resin-cache`, `resin-toolchain` | Explicit cached analysis/build passes and editor protocol handling |
+| `resin-protocol` | none | Strict versioned request, diagnostic, query, and artifact data |
+| `resin-server` | Compiler crates, `resin-cache`, `resin-toolchain` | HTTP admission, explicit cached passes, managed inputs, native output streaming |
+| `resin-client` | `resin-source`, `resin-cst`, `resin-executor` | Local capture/formatting, HTTP client, CLI, stdio editor rendering and downloaded execution |
 
 The HIR dependency on CST supports editor queries at a syntax position. Its public
 language owns its type expressions and nominal declarations. LIR lowering never
@@ -91,7 +95,7 @@ Keep related state and operations together. `Hir` keeps retained products and
 editor queries beside HIR construction. A cohesive file can be substantial while
 exposing few public concepts. Fields belong directly to the objects whose invariants
 they serve; private helpers keep individual operations readable. Native building is
-a separate operation connected by the [CLI](../src/cli/mod.rs).
+a separate operation connected by the [server build handler](../crates/resin-server/src/build.rs).
 
 Use canonical crate and language names instead of renaming imports. Shared vocabulary
 comes from private `use resin_source::prelude::*;` and
@@ -400,7 +404,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let checked = resin_lir::VerifiedModule::build(lir, &execution, &cancellation).await?;
     let temporary_parent = tempfile::TempDir::new()?;
     let project = resin_codegen::generate(
-        Arc::new(checked), Some("main".into()), temporary_parent.path(),
+        Arc::new(checked), Some("main".into()),
+        Arc::new(resin_codegen::NativeHeaders::default()), temporary_parent.path(),
         &execution, &cancellation,
     ).await?;
     let text = tokio::fs::read_to_string(project.c_source().unwrap()).await?;
@@ -414,8 +419,9 @@ For imports, applications obtain sources from async `Loader::load_file_async` an
 `Document::preamble()` and freeze one version per identity into a `SourceGraph` with
 `ImportBinding` edges. A graph validates its identities and bindings; AST assembly
 reports missing imports, cycles, and syntax errors while preserving recovered files.
-The [CLI acquisition pass](../src/cli/inputs.rs) shows filesystem traversal; the
-[LSP worker](../crates/resin-lsp/src/worker.rs) shows explicit cached phase sequencing.
+The [client acquisition pass](../crates/resin-client/src/inputs.rs) shows filesystem
+traversal; the [server analysis handler](../crates/resin-server/src/analyze.rs) shows
+explicit cached phase sequencing over uploaded and frozen managed inputs.
 Neither operation belongs to a reusable compiler orchestration library.
 
 For file-backed inputs, applications call `Loader::logical_sources` before looking
@@ -439,12 +445,22 @@ program and syntax documents for queries. LIR construction selects host/shader r
 and their dependencies; an empty entry list requests every ordinary root. Verification
 is a separate async `VerifiedModule::build` operation.
 
-Codegen receives `Arc<VerifiedModule>`, an optional host entry, and an existing temporary
-parent directory. `generate` creates a unique child directory and returns a
+Codegen receives `Arc<VerifiedModule>`, an optional host entry, immutable
+`Arc<NativeHeaders>`, and an existing temporary parent directory. `generate` creates a unique child directory and returns a
 `GeneratedProject` that owns it. C/SPIR-V lowering completes before files are written.
 `None` selects a shader-only project. Optimized binaries, embedded headers, and native
 executables remain planned outputs for Ninja. Retained generated inputs stay immutable;
 native tools stage their own copies. The final project owner removes its directory.
+
+`NativeHeaders` owns canonical staged file bytes, ordered include roots, and bindings
+from each LIR `ForeignHeader { source, spelling }` to a staged or target-system include.
+HIR and LIR preserve the declaring source separately from spelling, including empty
+extern groups. Different modules can therefore bind equal basenames to different
+headers. An explicit runtime include prevents user roots from replacing the compiler
+ABI. Codegen validates and writes these supplied bytes without loading any source or
+header path. The server validates complete bindings and keys generation by every
+bundle byte and ordered root, including currently unused files. Direct compiler callers
+may supply default empty bindings to keep their literal native includes.
 
 The toolchain takes any compatible on-disk Ninja project and captured `Environment`
 settings. Async `Toolchain::build(project, name, entry, profile, execution, cancellation)`
@@ -462,6 +478,7 @@ C projects declare `native-inputs.json`, described by `resin_toolchain::NativeIn
 ```json
 {
   "translation_units": [{ "source": "main.c", "preprocessed": "main.i" }],
+  "restrict_header_paths": false,
   "c_flags": [],
   "preprocessing_flags": ["-I", "."],
   "generated_prerequisites": ["shader_1.h"]
@@ -486,14 +503,23 @@ files. Shader-only graphs need no manifest or C preprocessing. Handwritten C pro
 use this same captured-input contract; `compile_program` remains available for raw C
 graphs that do not declare input capture.
 
+Server-generated projects enable `restrict_header_paths`. The same preprocessing
+invocation writes a compiler dependency report; validation permits canonical staged
+paths, the configured runtime, and compiler-discovered system include roots before
+publishing captured C. Discovery excludes ambient CPATH-style overlays from that allow
+list. Dependency reports are independent of C `#line` display names. This enforces
+native input ownership, not an operating-system sandbox; native tools run under the
+service account and operators control isolation. Arbitrary direct native graphs may
+leave this opt-in restriction disabled.
+
 Persistent tool/runtime settings use BLAKE3 with explicitly framed input bytes,
 including executable contents. They do not use Rust's unspecified `DefaultHasher`
 encoding. Native cache directory labels also use a specified BLAKE3 encoding.
 
-Ninja orders unoptimized SPIR-V → `spirv-opt -O` → `resin --embed` headers → C linking.
+Ninja orders unoptimized SPIR-V → `spirv-opt -O` → the configured executable's `--embed` headers → C linking.
 The embed command uses the Resin executable captured with `current_exe`, never a PATH
-lookup. Install Ninja, a C compiler (`CC`/`--cc`), and SPIR-V Tools
-(`SPIRV_OPT`/`--spirv-opt`); a tool is checked when its graph command runs. Host-only
+lookup. The server needs Ninja, a C compiler (`CC`/server `--cc`), and SPIR-V Tools
+(`SPIRV_OPT`/server `--spirv-opt`); a tool is checked when its graph command runs. Host-only
 projects never invoke the shader optimizer. Native settings use per-command cwd and
 environment rather than process-wide mutations.
 
@@ -529,9 +555,9 @@ request exceeds capacity, all its values survive with a warning; a later request
 shrink the snapshot. Failure or cancellation produces no successor cache. Retained
 values survive cache eviction and keep earlier compilations usable.
 
-The local LSP owns one `ArcSwap` head per cache layer: sources, CST, and per-file AST
+The HTTP server owns one `ArcSwap` head per cache layer: sources, CST, and per-file AST
 have capacities of 4,096 entries each, HIR and verified LIR have 64, and generated
-projects have 32. Its private publication operation computes requested values, then
+projects have 32; complete input handles have 64. Its private publication operation computes requested values, then
 compares and swaps the head. A lost race rebases all requested handles, including
 hits, against the latest cache and reapplies its recency and capacity policy. Only
 requested entries are replayed, so old unrelated history cannot return. Completed
@@ -580,8 +606,12 @@ the protocol checks their captured document epochs, versions, and dependency sta
 Diagnostics are aggregated from current roots; the protocol tracks actually published
 URIs so coalescing cannot lose a required diagnostic clear.
 
-`workspace/executeCommand` with `resin.build` captures disk contents and explicitly
-sequences AST/HIR, LIR, verification, code generation, native compilation, and output
-copying. It shares the analysis caches with editor work and leaves dirty buffers
-under editor control. Native preprocessing still validates native inputs on every
-build. The HTTP compiler service follows in Phase 3.
+`workspace/executeCommand` with `resin.build` captures disk contents and uploads
+complete inputs. Server build handlers sequence AST/HIR, LIR, verification, codegen,
+and native compilation, sharing heads with remote editor analysis. The client validates
+and atomically publishes the download; dirty buffers remain under editor control.
+HTTP admission follows both successful and failed bodies through consumption. Request
+and stream guards cancel on disconnect; service shutdown stops admission and drains
+owned work. The client retains its POST while retrying a cancellation DELETE that
+arrived before admission. [The service guide](compiler-service.md) defines wire,
+deployment, target negotiation, and trust boundaries.

@@ -86,7 +86,7 @@ impl Printer {
         let headers = module
             .foreign_headers
             .iter()
-            .map(|header| list("header", vec![quoted(header)]));
+            .map(|header| list("header", vec![quoted(&header.spelling)]));
         list(
             "hir",
             types
@@ -136,7 +136,7 @@ impl Printer {
         }));
         fields.extend(function.signature.params.iter().map(|p| self.parameter(p)));
         if let Some(foreign) = &function.foreign_header {
-            fields.push(list("extern", vec![quoted(foreign)]));
+            fields.push(list("extern", vec![quoted(&foreign.spelling)]));
         }
         if let Some(body) = &function.body {
             fields.push(self.term(body));

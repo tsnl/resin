@@ -22,7 +22,10 @@ fn sexp_module(module: &Module) -> SExp {
     let names = Names::new(module);
     let mut items = Vec::new();
     for header in &module.foreign_headers {
-        items.push(list("header", vec![symbol(format!("{header:?}"))]));
+        items.push(list(
+            "header",
+            vec![symbol(format!("{:?}", header.spelling))],
+        ));
     }
     for (name, entry) in &module.entries {
         let target = names.functions.get(entry.index());
@@ -91,7 +94,10 @@ fn sexp_function(names: &Names, index: usize, function: &Function) -> SExp {
         })],
     ));
     if let Some(foreign) = &function.foreign {
-        items.push(list("extern", vec![symbol(foreign.header.as_ref())]));
+        items.push(list(
+            "extern",
+            vec![symbol(foreign.header.spelling.as_ref())],
+        ));
     }
     for (i, local) in function.locals.iter().enumerate() {
         items.push(list(

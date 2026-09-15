@@ -17,6 +17,7 @@
 use resin_executor::{Cancellation, Execution};
 use resin_types::prelude::*;
 use std::{
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
     sync::Arc,
@@ -32,6 +33,25 @@ mod spirv;
 //
 // Generated source files and the binary headers they will need
 //
+
+/// Complete native inputs supplied by the application. Files live under `native/`.
+/// Missing bindings preserve literal includes for direct compiler clients; services
+/// must validate complete bindings before generation. No header is read here.
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct NativeHeaders {
+    pub files: BTreeMap<Arc<str>, Arc<[u8]>>,
+    pub bindings: BTreeMap<resin_lir::ForeignHeader, NativeInclude>,
+    pub include_directories: Vec<Arc<str>>,
+    /// An explicit runtime binding prevents user include roots replacing the compiler ABI.
+    /// It also enables native dependency validation against staged and toolchain include roots.
+    pub runtime: Option<NativeInclude>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum NativeInclude {
+    Staged { path: Arc<str> },
+    System { spelling: Arc<str> },
+}
 
 /// Immutable source files ready for native staging. Clones retain the same owned directory.
 /// Files outlive the verified input and are removed when the final project owner drops.
@@ -144,6 +164,7 @@ impl GeneratedShader {
 pub async fn generate(
     checked: Arc<resin_lir::VerifiedModule>,
     host_entry: Option<String>,
+    headers: Arc<NativeHeaders>,
     temporary_parent: &Path,
     execution: &Execution,
     cancellation: &Cancellation,
@@ -160,6 +181,7 @@ pub async fn generate(
             generate_project(
                 checked.view(),
                 host_entry.as_deref(),
+                &headers,
                 directory,
                 cancellation,
             )
@@ -170,13 +192,15 @@ pub async fn generate(
 fn generate_project(
     checked: resin_lir::Verified<'_>,
     host_entry: Option<&str>,
+    headers: &NativeHeaders,
     directory: Arc<TempDir>,
     cancellation: &Cancellation,
 ) -> Result<GeneratedProject, GenerationError> {
+    validate_headers(headers)?;
     let project = describe_project(checked.module(), host_entry, directory)?;
     cancellation.check()?;
     let c = host_entry
-        .map(|entry| generate_host(checked, entry))
+        .map(|entry| generate_host(checked, entry, headers))
         .transpose()?;
     let mut shaders = Vec::with_capacity(project.shaders.len());
     for shader in project.shaders.iter() {
@@ -185,7 +209,14 @@ fn generate_project(
     }
     cancellation.check()?;
     let build = build_graph(&project);
-    write_sources(&project, c.as_deref(), &shaders, &build, cancellation)?;
+    write_sources(
+        &project,
+        c.as_deref(),
+        &shaders,
+        &build,
+        headers,
+        cancellation,
+    )?;
     Ok(project)
 }
 
@@ -321,8 +352,12 @@ fn shader_symbol(function: FunctionId) -> String {
 // Lower every target before publishing any source files
 //
 
-fn generate_host(checked: resin_lir::Verified<'_>, entry: &str) -> Result<String, Error> {
-    c::lower::generate(checked, entry).map(|module| c::print::module(&module))
+fn generate_host(
+    checked: resin_lir::Verified<'_>,
+    entry: &str,
+    headers: &NativeHeaders,
+) -> Result<String, Error> {
+    c::lower::generate(checked, entry, headers).map(|module| c::print::module(&module))
 }
 
 fn generate_shader(
@@ -337,6 +372,7 @@ fn write_sources(
     c: Option<&str>,
     shaders: &[Vec<u8>],
     build: &str,
+    headers: &NativeHeaders,
     cancellation: &Cancellation,
 ) -> Result<(), GenerationError> {
     cancellation.check()?;
@@ -344,8 +380,21 @@ fn write_sources(
         write_source(path, source.as_bytes())?;
         write_source(
             &project.directory().join("native-inputs.json"),
-            native_inputs(project).as_bytes(),
+            native_inputs(project, headers).as_bytes(),
         )?;
+    }
+    let mut directories = BTreeSet::new();
+    for path in &headers.include_directories {
+        stage_directory(project.directory(), path, &mut directories)?;
+    }
+    for (path, bytes) in &headers.files {
+        cancellation.check()?;
+        stage_directory(
+            project.directory(),
+            path.rsplit_once('/').expect("native parent").0,
+            &mut directories,
+        )?;
+        write_source(&project.directory().join(path.as_ref()), bytes)?;
     }
     for (shader, source) in project.shaders.iter().zip(shaders) {
         cancellation.check()?;
@@ -357,7 +406,30 @@ fn write_sources(
 }
 
 fn write_source(path: &Path, source: &[u8]) -> Result<(), Error> {
-    fs::write(path, source).map_err(|error| Error(format!("{}: {error}", path.display())))
+    use std::io::Write;
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .and_then(|mut file| file.write_all(source))
+        .map_err(|error| Error(format!("{}: {error}", path.display())))
+}
+
+fn stage_directory(root: &Path, path: &str, created: &mut BTreeSet<String>) -> Result<(), Error> {
+    for end in path
+        .match_indices('/')
+        .map(|(index, _)| index)
+        .chain(std::iter::once(path.len()))
+    {
+        let prefix = &path[..end];
+        if created.insert(prefix.to_owned()) {
+            // A pre-existing differently-spelled directory is an actual filesystem
+            // alias (including Unicode case folding); reject it rather than merge.
+            fs::create_dir(root.join(prefix))
+                .map_err(|error| Error(format!("native directory {prefix}: {error}")))?;
+        }
+    }
+    Ok(())
 }
 
 //
@@ -368,17 +440,104 @@ fn program_filename() -> String {
     format!("program{}", std::env::consts::EXE_SUFFIX)
 }
 
-fn native_inputs(project: &GeneratedProject) -> String {
-    // Every filename is generated from a numeric function identity, requiring no JSON escaping.
-    let prerequisites = project
-        .shaders
-        .iter()
-        .map(|shader| format!("\"{}\"", shader_header(shader.function)))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!(
-        "{{\n  \"translation_units\": [{{\"source\": \"main.c\", \"preprocessed\": \"main.i\"}}],\n  \"c_flags\": [],\n  \"preprocessing_flags\": [],\n  \"generated_prerequisites\": [{prerequisites}]\n}}\n"
-    )
+fn native_inputs(project: &GeneratedProject, headers: &NativeHeaders) -> String {
+    let mut preprocessing_flags = Vec::new();
+    if let Some(NativeInclude::Staged { path }) = &headers.runtime {
+        // Runtime headers include one another with quoted root-relative names.
+        // Keep their pragma-once identities in the same frozen snapshot, before
+        // the toolchain's ordinary runtime -I fallback or user include roots.
+        let parent = path
+            .rsplit_once('/')
+            .expect("validated staged runtime path")
+            .0;
+        preprocessing_flags.extend(["-iquote".to_owned(), parent.to_owned()]);
+    }
+    preprocessing_flags.extend(
+        headers
+            .include_directories
+            .iter()
+            .map(|path| format!("-I{path}")),
+    );
+    serde_json::json!({
+        "translation_units": [{"source": "main.c", "preprocessed": "main.i"}],
+        "c_flags": [],
+        "restrict_header_paths": headers.runtime.is_some(),
+        "preprocessing_flags": preprocessing_flags,
+        "generated_prerequisites": project.shaders.iter().map(|shader| shader_header(shader.function)).collect::<Vec<_>>(),
+    }).to_string()
+}
+
+fn validate_headers(headers: &NativeHeaders) -> Result<(), Error> {
+    fn staged(path: &str) -> Result<(), Error> {
+        if !path.starts_with("native/")
+            || path.split('/').any(|part| {
+                part.is_empty()
+                    || part == "."
+                    || part == ".."
+                    || part.ends_with([' ', '.'])
+                    || device_name(part)
+            })
+            || path
+                .chars()
+                .any(|ch| ch.is_control() || "\\:\"<>|?*".contains(ch))
+        {
+            return Err(Error(format!("invalid staged native path: {path}")));
+        }
+        Ok(())
+    }
+    for path in headers
+        .files
+        .keys()
+        .chain(headers.include_directories.iter())
+    {
+        staged(path)?;
+    }
+    let mut aliases = BTreeMap::new();
+    for path in headers
+        .files
+        .keys()
+        .chain(headers.include_directories.iter())
+    {
+        for end in path
+            .match_indices('/')
+            .map(|(index, _)| index)
+            .chain(std::iter::once(path.len()))
+        {
+            let prefix = &path[..end];
+            if aliases
+                .insert(prefix.to_ascii_lowercase(), prefix.to_owned())
+                .is_some_and(|old| old != prefix)
+            {
+                return Err(Error(
+                    "native paths collide under ASCII case folding".into(),
+                ));
+            }
+        }
+    }
+    for include in headers.bindings.values().chain(headers.runtime.iter()) {
+        match include {
+            NativeInclude::Staged { path } => {
+                staged(path)?;
+                if !headers.files.contains_key(path) {
+                    return Err(Error(format!("missing staged native header: {path}")));
+                }
+            }
+            NativeInclude::System { spelling } if !resin_types::Foreign::valid_header(spelling) => {
+                return Err(Error(format!("invalid system header: {spelling}")));
+            }
+            NativeInclude::System { .. } => {}
+        }
+    }
+    for path in headers.files.keys() {
+        let mut prefix = path.as_ref();
+        while let Some((parent, _)) = prefix.rsplit_once('/') {
+            if headers.files.contains_key(parent) {
+                return Err(Error(format!("native file/directory conflict: {parent}")));
+            }
+            prefix = parent;
+        }
+    }
+    Ok(())
 }
 
 fn build_graph(project: &GeneratedProject) -> String {
@@ -436,4 +595,24 @@ fn default_target(out: &mut String, project: &GeneratedProject) {
         }
     }
     out.push_str("\ndefault all\n");
+}
+
+fn device_name(part: &str) -> bool {
+    let base = part
+        .split('.')
+        .next()
+        .unwrap_or(part)
+        .trim_end_matches(' ')
+        .to_ascii_uppercase();
+    matches!(
+        base.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || ["COM", "LPT"].iter().any(|prefix| {
+        base.strip_prefix(prefix).is_some_and(|number| {
+            matches!(
+                number,
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        })
+    })
 }

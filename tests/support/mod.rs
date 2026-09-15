@@ -1,6 +1,7 @@
 pub mod frontend;
 pub mod pipeline;
 pub mod project;
+pub mod service;
 pub mod shaders;
 pub mod toolchain;
 

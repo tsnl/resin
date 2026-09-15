@@ -311,6 +311,7 @@ fn build(
             let generated = resin_codegen::generate(
                 Arc::new(lir),
                 entry.map(str::to_owned),
+                std::sync::Arc::new(resin_codegen::NativeHeaders::default()),
                 &std::env::temp_dir(),
                 &execution,
                 &cancellation,
