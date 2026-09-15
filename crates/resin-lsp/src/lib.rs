@@ -1,5 +1,10 @@
 //! Resin's Language Server Protocol adapter. The `resin` executable owns command-line parsing.
+mod analysis;
+mod build;
+mod caches;
 mod inputs;
+mod publication;
+mod query;
 mod server;
 mod text;
 mod worker;

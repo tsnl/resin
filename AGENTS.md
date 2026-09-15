@@ -145,6 +145,14 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Execution defaults to available logical CPUs, with a fallback of one. Each native
   build reserves one slot and invokes Ninja with `-j 1`. Started synchronous foreign
   calls retain their slot until they finish; queued work observes cancellation.
+- Applications publish immutable cache generations through safe shared-pointer CAS.
+  On a lost race, rebase every requested hit/miss handle on the current head with the
+  same update/eviction operation; never repeat compiler work or replay unrelated old
+  entries. Keep selected handles for downstream work and release whole cache snapshots.
+  LSP acquisition uses request-owned loaders seeded with current supplied registrations.
+  Preserve an open document's physical identity through edits and renew it on reopen.
+  Bound admitted requests through response consumption, coalesce complete editor states,
+  and gate result publication against accepted document/dependency revisions.
   Cancel and drain work on shutdown before releasing its ownership.
 - Prefer small functions with descriptive names, ideally fewer than ten lines of logic.
   Split by a meaningful operation, not an arbitrary line count. Exhaustive language

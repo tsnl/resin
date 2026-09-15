@@ -63,6 +63,7 @@ license = "Apache-2.0"
 version = "0.1.0"
 
 [workspace.dependencies]
+arc-swap = "1"
 resin-cache = { path = "crates/resin-cache" }
 resin-executor = { path = "crates/resin-executor" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "io-std", "process", "fs", "net"] }
