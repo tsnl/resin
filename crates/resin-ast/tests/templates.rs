@@ -104,7 +104,7 @@ fn template_lists_require_named_parameters_and_nonempty_arguments() {
         "def f<_>(x: int) -> int = { x };",
         "def f<>() = {};",
         "def f() = { identity::<>(1); };",
-        "extern \"test.h\" def native<T>(x: T) -> T;",
+        "extern { \"test.h\": { def native<T>(x: T) -> T; } };",
         "type Empty<> = int;",
     ] {
         assert!(

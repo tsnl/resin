@@ -1,5 +1,11 @@
 export { String, fmt, print };
 
+extern {
+	"resin_runtime/print.h": {
+		def resin_print(data: Ptr<ubyte>, length: ulong);
+	},
+};
+
 import { "span.resin", "shared.resin" };
 
 // Logical bytes exclude the trailing NUL reserved for native string APIs.
@@ -55,4 +61,3 @@ def print(text: str | Span<ubyte> | String) = {
 
 intrinsic "string_from_bytes" def string_from_bytes(data: Ptr<ubyte>, length: ulong) -> StrongOwner;
 intrinsic "format_bytes" def format_bytes<A>(data: Ptr<ubyte>, length: ulong, arguments: A) -> StrongOwner;
-extern "resin_runtime/print.h" def resin_print(data: Ptr<ubyte>, length: ulong);

@@ -349,10 +349,14 @@ fn nongeneric_wrappers_copy_shared_generic_storage_and_destroy_it_once() {
 fn foreign_pointer_signatures_keep_generic_pointees() {
     let output = run(r#"
         export { main };
+
+        extern {
+            "stdlib.h": {
+                def free(value: Ptr<Cell<int>>);
+            },
+        };
         struct Cell<T> { value: T };
-        extern "stdlib.h" def free(value: Ptr<Cell<int>>);
-        def main() -> int = { free(Ptr<Cell<int>>(0_ul)); 42 };
-    "#);
+        def main() -> int = { free(Ptr<Cell<int>>(0_ul)); 42 };"#);
     assert_eq!(
         output.status.code(),
         Some(42),

@@ -1,5 +1,15 @@
 export { arguments, environment, argument, c_string, environment_get, EnvironmentVariableNotFound };
 
+extern {
+	"string.h": {
+		def strlen(text: Ptr<ubyte>) -> ulong;
+	},
+	"resin_runtime.h": {
+		def resin_string_array_length(values: Ptr<Ptr<ubyte>>) -> ulong;
+		def resin_environment_get(envp: Ptr<Ptr<ubyte>>, name: Ptr<ubyte>) -> Ptr<ubyte>;
+	},
+};
+
 import { "span.resin" };
 
 struct EnvironmentVariableNotFound {};
@@ -32,7 +42,3 @@ def environment_get(envp: Ptr<Ptr<ubyte>>, name: Ptr<ubyte>) -> Result<Span<ubyt
 		ok(c_string(value))
 	}
 };
-
-extern "string.h" def strlen(text: Ptr<ubyte>) -> ulong;
-extern "resin_runtime.h" def resin_string_array_length(values: Ptr<Ptr<ubyte>>) -> ulong;
-extern "resin_runtime.h" def resin_environment_get(envp: Ptr<Ptr<ubyte>>, name: Ptr<ubyte>) -> Ptr<ubyte>;

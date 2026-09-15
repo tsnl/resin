@@ -1,0 +1,61 @@
+==================
+Grouped foreign functions and empty header dependencies
+==================
+export { call };
+extern {
+  "runtime.h": {
+    def call();
+    def other();
+  },
+  "empty.h": {},
+};
+import { "types.resin" };
+extern type Handle;
+
+---
+
+(source_file
+  (export_clause (lid))
+  (extern_clause
+    (foreign_group
+      (string)
+      (foreign_function (lid))
+      (foreign_function (lid)))
+    (foreign_group (string)))
+  (import_clause (string))
+  (foreign_type (uid)))
+
+==================
+Empty preamble clauses
+==================
+export {};
+extern {};
+import {};
+
+---
+
+(source_file
+  (export_clause)
+  (extern_clause)
+  (import_clause))
+
+==================
+Comments and escaped header strings
+==================
+extern /* groups */ {
+  "local/quoted\"name.h" /* header */ : {
+    def /* name */ call();
+  }
+};
+
+---
+
+(source_file
+  (extern_clause
+    (comment)
+    (foreign_group
+      (string)
+      (comment)
+      (foreign_function
+        (comment)
+        (lid)))))

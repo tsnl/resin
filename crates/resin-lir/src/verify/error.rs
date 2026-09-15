@@ -9,6 +9,7 @@ impl fmt::Display for VerifyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "invalid IR in ")?;
         match self.location {
+            VerifyLocation::Module => write!(f, "module")?,
             VerifyLocation::TypeDefinition { definition } => {
                 write!(f, "type definition {}", definition.index())?;
             }

@@ -8,12 +8,27 @@ use crate::{VerifyError, VerifyErrorKind};
 use resin_types::prelude::*;
 
 pub(super) fn check(module: &Module) -> Result<(), VerifyError> {
+    check_headers(module)?;
     check_entries(module)?;
     check_definitions(&module.types)?;
     check_shaders(module)?;
     check_bodies(module)?;
     check_profiles(module)?;
     check_drop_hooks(module)
+}
+
+fn check_headers(module: &Module) -> Result<(), VerifyError> {
+    for header in &module.foreign_headers {
+        if !Foreign::valid_header(header) {
+            return Err(VerifyError {
+                location: crate::VerifyLocation::Module,
+                kind: VerifyErrorKind::InvalidForeignHeader {
+                    header: header.clone(),
+                },
+            });
+        }
+    }
+    Ok(())
 }
 
 fn check_entries(module: &Module) -> Result<(), VerifyError> {

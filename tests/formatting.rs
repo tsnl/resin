@@ -47,8 +47,8 @@ fn trailing_commas_and_nested_lists() {
         "export {\n\tmain,\n};\nimport {\n\t\"$/test.resin\",\n};\ndef main(\n\ta: int,\n\tb: float32,\n) = {\n\tvar xs = [\n\t\t1,\n\t\t2,\n\t\t3,\n\t];\n\tcall(\n\t\ta,\n\t\tb,\n\t);\n\tvar r = {\n\t\tx = 1,\n\t\ty = 2,\n\t};\n\t();\n};\n",
     );
     check(
-        "type Pair={x:int,y:float32,}; extern \"x.h\" def call(x:(int,),); def main()={f([1,2,],3);};",
-        "type Pair = {\n\tx: int,\n\ty: float32,\n};\nextern \"x.h\" def call(\n\tx: (int,),\n);\ndef main() = {\n\tf(\n\t\t[\n\t\t\t1,\n\t\t\t2,\n\t\t],\n\t\t3\n\t);\n};\n",
+        "extern {\"x.h\":{def call(x:(int,),);}}; type Pair={x:int,y:float32,}; def main()={f([1,2,],3);};",
+        "extern {\n\t\"x.h\": {\n\t\tdef call(\n\t\t\tx: (int,),\n\t\t);\n\t}\n};\ntype Pair = {\n\tx: int,\n\ty: float32,\n};\ndef main() = {\n\tf(\n\t\t[\n\t\t\t1,\n\t\t\t2,\n\t\t],\n\t\t3\n\t);\n};\n",
     );
 }
 
@@ -123,7 +123,7 @@ fn comments_at_every_token_boundary_preserve_syntax() {
             }
         }
     }
-    let source = "export {main}; import {\"missing.resin\"}; struct T {x: Ptr<int>, y: (int,)}; extern \"x.h\" def ext(x: int); def main(a: int) -> Result<_, Never> = { f(); var p = & &a; var x = f([1, 2,], {x = 3})?; while (x < 3) { x := x + 1; }; match (x) { ok(v) => { if (v == 3) { v } else { -v } }, err(e) => { 0 } } };";
+    let source = "export {main}; extern {\"x.h\": {def ext(x: int);}}; import {\"missing.resin\"}; struct T {x: Ptr<int>, y: (int,)}; def main(a: int) -> Result<_, Never> = { f(); var p = & &a; var x = f([1, 2,], {x = 3})?; while (x < 3) { x := x + 1; }; match (x) { ok(v) => { if (v == 3) { v } else { -v } }, err(e) => { 0 } } };";
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_resin::LANGUAGE.into())

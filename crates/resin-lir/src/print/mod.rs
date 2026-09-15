@@ -21,6 +21,9 @@ pub fn format_module(module: &Module) -> String {
 fn sexp_module(module: &Module) -> SExp {
     let names = Names::new(module);
     let mut items = Vec::new();
+    for header in &module.foreign_headers {
+        items.push(list("header", vec![symbol(format!("{header:?}"))]));
+    }
     for (name, entry) in &module.entries {
         let target = names.functions.get(entry.index());
         items.push(list(

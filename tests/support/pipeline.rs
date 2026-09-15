@@ -48,6 +48,9 @@ fn kind_from_diagnostic(diagnostic: &str) -> GenerateErrorKind {
     if rest == "InvalidForeignSignature" {
         return GenerateErrorKind::InvalidForeignSignature;
     }
+    if let Some(header) = quoted(rest, "InvalidForeignHeader", "header") {
+        return GenerateErrorKind::InvalidForeignHeader { header };
+    }
     if rest == "NotAPlace" {
         return GenerateErrorKind::NotAPlace;
     }

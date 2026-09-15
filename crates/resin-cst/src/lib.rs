@@ -9,7 +9,9 @@
 //! ```
 
 use resin_source::prelude::*;
+use std::sync::Arc;
 mod lower;
+mod preamble;
 mod print;
 mod query;
 
@@ -19,6 +21,15 @@ pub use tree_sitter::{Node, Tree};
 pub struct Document {
     text: String,
     tree: Tree,
+}
+
+/// Syntax-only dependencies, including valid entries recovered from incomplete input.
+/// Nonempty diagnostics mean the preamble cannot describe a complete input graph.
+#[derive(Debug, Clone, Default)]
+pub struct Preamble {
+    pub imports: Vec<Spanned<Arc<str>>>,
+    pub headers: Vec<Spanned<Arc<str>>>,
+    pub diagnostics: Vec<Spanned<String>>,
 }
 
 /// Build a CST document, reusing an earlier tree when supplied.
@@ -33,6 +44,11 @@ impl Document {
 
     pub fn tree(&self) -> &Tree {
         &self.tree
+    }
+
+    /// Read imports and foreign headers without requiring valid function bodies.
+    pub fn preamble(&self) -> Preamble {
+        preamble::read(self)
     }
 
     /// Append missing delimiters for editor recovery; original offsets stay valid.
@@ -85,4 +101,27 @@ pub fn contains(span: Span, offset: usize) -> bool {
 /// Format complete syntax, preserving comments; return `None` for malformed input.
 pub fn format_source(source: &str) -> Option<String> {
     print::format_source(source)
+}
+
+/// Decode a complete quoted Resin string, rejecting malformed or incomplete text.
+pub fn decode_string(text: &str) -> Option<String> {
+    let text = text.strip_prefix('"')?.strip_suffix('"')?;
+    let mut chars = text.chars();
+    let mut result = String::new();
+    while let Some(ch) = chars.next() {
+        result.push(match ch {
+            '\\' => match chars.next()? {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                '0' => '\0',
+                '"' => '"',
+                '\\' => '\\',
+                _ => return None,
+            },
+            '"' | '\r' | '\n' => return None,
+            _ => ch,
+        });
+    }
+    Some(result)
 }

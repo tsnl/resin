@@ -43,6 +43,15 @@ fn sexp_source(file: &SourceFile) -> SExp {
                 .collect(),
         ));
     }
+    if !file.foreign_headers.is_empty() {
+        items.push(list(
+            "headers",
+            file.foreign_headers
+                .iter()
+                .map(|header| list_sp("header", header.span, vec![string(header.val.as_ref())]))
+                .collect(),
+        ));
+    }
     if !file.imports.is_empty() {
         items.push(list(
             "import",

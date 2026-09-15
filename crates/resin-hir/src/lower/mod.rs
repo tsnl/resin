@@ -74,6 +74,7 @@ impl Generator {
         }
     }
     fn generate_file(&mut self, file: &SourceFile, mut scopes: Scopes) {
+        self.declare_headers(file);
         let prepared = scopes.prepare(file, &mut self.typer);
         self.errors.extend(prepared.errors);
         let methods = self.declare_methods(prepared.methods, &mut scopes);
@@ -81,6 +82,21 @@ impl Generator {
         self.errors.extend(checked.errors.iter().cloned());
         self.scopes = checked.context.clone();
         self.define_functions(checked);
+    }
+
+    fn declare_headers(&mut self, file: &SourceFile) {
+        for header in &file.foreign_headers {
+            if Foreign::valid_header(&header.val) {
+                self.module.foreign_headers.insert(header.val.clone());
+            } else {
+                self.errors.push(GenerateError {
+                    span: header.span,
+                    kind: GenerateErrorKind::InvalidForeignHeader {
+                        header: header.val.clone(),
+                    },
+                });
+            }
+        }
     }
 
     fn finish(mut self) -> Module {
@@ -1106,5 +1122,56 @@ fn require_fixed_bridge_signature(params: &[Ident]) -> Result<(), GenerateError>
             parameter.span,
             "GPU bridge declarations require a fixed signature without template parameters",
         )),
+    }
+}
+
+#[cfg(test)]
+mod extern_tests {
+    use super::*;
+
+    fn parse(source: &str) -> SourceFile {
+        let parsed = resin_ast::build_ast(&resin_cst::build_cst(source, None));
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        parsed.file
+    }
+
+    #[test]
+    fn preamble_signatures_resolve_types_declared_in_the_body() {
+        let file = parse(
+            r#"
+            extern { "native.h": {
+                def handle(value: Ptr<Handle>) -> Ptr<Handle>;
+                def scalar(value: Scalar) -> Scalar;
+                def cell(value: Ptr<Cell<int>>) -> Ptr<Cell<int>>;
+            } };
+            extern type Handle;
+            type Scalar = int;
+            struct Cell<T> { value: T };
+        "#,
+        );
+        let module = generate(&file).unwrap();
+        assert_eq!(module.functions.len(), 3);
+        assert!(
+            module
+                .functions
+                .iter()
+                .all(|function| function.foreign_header.as_deref() == Some("native.h"))
+        );
+    }
+
+    #[test]
+    fn empty_groups_preserve_headers_and_validate_the_header_span() {
+        let valid = generate(&parse(r#"extern { "empty.h": {} };"#)).unwrap();
+        assert!(valid.functions.is_empty());
+        assert!(valid.foreign_headers.contains("empty.h"));
+        for header in ["\"\"", r#""bad\nheader.h""#, r#""bad>header.h""#] {
+            let file = parse(&format!("extern {{ {header}: {{}} }};"));
+            let error = generate(&file).unwrap_err();
+            assert_eq!(error.span, file.foreign_headers[0].span);
+            assert!(matches!(
+                error.kind,
+                GenerateErrorKind::InvalidForeignHeader { .. }
+            ));
+        }
     }
 }
