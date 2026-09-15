@@ -347,8 +347,6 @@ and their Ninja dependencies for the current Vulkan backend. `spirv-opt -O` opti
 and `resin --embed` writes the headers included by generated C.
 No runtime function-value analysis is involved. The runtime receives bytes, not a
 host function pointer or source-file path. Shader functions expose no bytecode property.
-The [Vulkan/Metal scope](doc/gpu-portability.md) describes first-class shader references
-and the native Metal backend.
 
 [SPIR-V lowering](crates/resin-codegen/src/spirv/mod.rs) collects reachable shader
 functions. [entry.rs](crates/resin-codegen/src/spirv/entry.rs) adapts regular Resin function

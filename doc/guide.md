@@ -904,8 +904,6 @@ function aliases are not accepted yet. A reachable pipeline creation site reques
 even if its branch is not executed. Merely declaring a shader or calling it on the host
 requires no shader optimizer. There is no `.spirv` property; inspect artifacts in the build
 cache instead. The current Vulkan implementation's private C ABI uses pointer/length pairs.
-See the [Vulkan/Metal scope](gpu-portability.md) for the planned backend boundary and
-first-class shader references.
 
 Resin lowers the entry and its reachable named helpers directly to SPIR-V. The toolchain runs
 `spirv-opt -O --target-env=vulkan1.3` and embeds the optimized binary in generated C headers.
@@ -1001,8 +999,7 @@ inside its module does not require exporting that shader. `--spirv-opt PATH` sel
 
 ## GPU requirements
 
-The implemented backend is Vulkan. Native Metal and hardware ray queries are scoped in
-[GPU portability](gpu-portability.md). The runtime uses conventional Vulkan compute and graphics pipelines, with dynamic rendering
+The runtime uses conventional Vulkan compute and graphics pipelines, with dynamic rendering
 and a dynamic viewport/scissor. Graphics currently target one RGBA8 UNORM color attachment,
 triangle lists, one sample, and no blending or depth/stencil testing.
 

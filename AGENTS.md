@@ -350,7 +350,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   index. Their signatures are checked at declaration; helpers need no decoration and remain host-callable.
   Pipeline creation accepts decorated shader declarations directly and requests their compiled
   representation internally. Shader functions have no bytecode property. Runtime shader aliases
-  remain future work; see `doc/gpu-portability.md`. Keep shader definitions inline in examples.
+  remain unsupported. Keep shader definitions inline in examples.
 - Arrays, `Span<T>`, and `str` provide indexing with `items.at(index)`, returning `Ptr<T>`
   (`Ptr<ubyte>` for `str`);
   its index parameter is `ulong`, with explicit conversions for other integer types.

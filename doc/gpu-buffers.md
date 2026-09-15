@@ -108,8 +108,7 @@ projection handles the launch record, not recursively mapped pointer graphs. Raw
 host pointers cannot substitute for GPU views. Current shader pointers allow both
 reads and writes, so projection requires views with both permissions. Shader pointer
 casts are rejected, including pointer/integer conversions and reinterpretation of a
-pointer's element type. Use typed indexing for buffer access. See the
-[Vulkan/Metal scope](gpu-portability.md) for the next backend and shader-reference changes.
+pointer's element type. Use typed indexing for buffer access.
 
 ## Recording and lifetime
 
