@@ -607,7 +607,7 @@ exec "$RESIN_TEST_REAL_CC" "$@""#,
         let tools = native_environment(&temp).toolchain(Some(OsStr::new("clang")), None);
         let project = c_project(
             &temp,
-            "#include <stdio.h>\n#include <string.h>\n#include <local.h>\nint main(void) { return strcmp(VALUE, \"captured\") + EXTRA; }",
+            "#include <stdio.h>\n#include <string.h>\n#include <local.h>\nint main(void) { return strcmp(VALUE, \"captured\") + EXTRA; }\n",
         );
         fs::write(project.join("local.h"), "#define VALUE \"captured\"\n").unwrap();
         fs::write(project.join("native-inputs.json"), br#"{"translation_units":[{"source":"main.c","preprocessed":"main.i"}],"preprocessing_flags":["-I",".","-DEXTRA=6"]}"#).unwrap();
