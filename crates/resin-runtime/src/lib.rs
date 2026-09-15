@@ -36,7 +36,18 @@ pub use gpu::{
 };
 pub use shared::ResinArc;
 
+/// The compute shader ABI reserves this specialization ID for the GPU's X
+/// workgroup size. Shaders with a fixed local size do not use this constant.
+pub const RESIN_COMPUTE_WORKGROUP_SIZE_SPEC_ID: u32 = 0;
+
 impl ResinGpu {
+    /// X invocations per workgroup for Resin compute pipelines on this GPU.
+    /// Selected from the device's default subgroup size and workgroup limits;
+    /// stable for this GPU's lifetime. The Y and Z dimensions are one.
+    pub fn compute_workgroup_size(&self) -> u32 {
+        self.compute_workgroup_size
+    }
+
     /// Start a recording whose complete GPU execution will be measured with timestamps.
     /// Returns [`ResinStatus::Unsupported`] if the selected queue has no timestamp support.
     /// Ordinary recordings allocate no timestamp queries.
@@ -410,6 +421,15 @@ pub unsafe extern "C" fn resin_gpu_destroy(gpu: *mut ResinGpu) {
     if !gpu.is_null() {
         drop(unsafe { Box::from_raw(gpu) });
     }
+}
+
+/// Returns this GPU's compute workgroup width, or zero for a null pointer.
+///
+/// # Safety
+/// A non-null `gpu` must point to a live GPU.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_compute_workgroup_size(gpu: *const ResinGpu) -> u32 {
+    unsafe { gpu.as_ref() }.map_or(0, ResinGpu::compute_workgroup_size)
 }
 
 /// # Safety
@@ -1043,9 +1063,12 @@ mod tests {
 
     #[test]
     fn compute_dispatch_writes_through_root_pointer() {
+        assert_eq!(unsafe { resin_gpu_compute_workgroup_size(ptr::null()) }, 0);
         let Some(gpu) = require_gpu() else {
             return;
         };
+        let workgroup_size = unsafe { resin_gpu_compute_workgroup_size(gpu.ptr) };
+        assert!(workgroup_size > 0);
 
         let Some(spv) = compile_compute(
             r#"
@@ -1053,7 +1076,7 @@ mod tests {
 #extension GL_EXT_buffer_reference : require
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
-layout(local_size_x = 64) in;
+layout(local_size_x_id = 0) in;
 
 layout(buffer_reference, std430, buffer_reference_align = 8) buffer Root {
     uint count;
@@ -1073,6 +1096,7 @@ void main() {
     Root r = Root(root);
     uint i = gl_GlobalInvocationID.x;
     if (i >= r.count) return;
+    if (i == 0) r._pad = gl_WorkGroupSize.x;
     U32Array dst = U32Array(r.dst);
     dst.values[i] = i + 1u;
 }
@@ -1092,7 +1116,7 @@ void main() {
         };
         assert_eq!(status, ResinStatus::Success);
 
-        const COUNT: u32 = 256;
+        const COUNT: u32 = 259;
         let mut values = ptr::null_mut();
         let status = unsafe {
             resin_gpu_malloc(
@@ -1142,7 +1166,15 @@ void main() {
             ResinStatus::Success
         );
         assert_eq!(
-            unsafe { resin_gpu_dispatch(command_buffer, root_device, COUNT.div_ceil(64), 1, 1) },
+            unsafe {
+                resin_gpu_dispatch(
+                    command_buffer,
+                    root_device,
+                    COUNT.div_ceil(workgroup_size),
+                    1,
+                    1,
+                )
+            },
             ResinStatus::Success
         );
         assert_eq!(
@@ -1150,6 +1182,7 @@ void main() {
             ResinStatus::Success
         );
 
+        assert_eq!(unsafe { (*root_host).pad }, workgroup_size);
         for i in 0..COUNT {
             assert_eq!(unsafe { *values_host.add(i as usize) }, i + 1, "index {i}");
         }

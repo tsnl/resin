@@ -70,7 +70,7 @@ fn execute<I: Copy, O: Copy>(source: &str, inputs: &[I], sentinel: O) -> Option<
         commands
             .dispatch(
                 root.device_pointer(),
-                (inputs.len() as u32).div_ceil(64),
+                (inputs.len() as u32).div_ceil(gpu.compute_workgroup_size()),
                 1,
                 1,
             )

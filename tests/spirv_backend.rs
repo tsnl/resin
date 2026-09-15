@@ -9,43 +9,44 @@ mod support;
 use support::module;
 
 #[test]
-fn compute_workgroup_size_matches_host_shader_and_execution_mode() {
+fn compute_workgroup_size_specializes_execution_mode_and_wide_index_arithmetic() {
     let m = module(
-        r#"
-        export { kernel, main };
-        def size() -> ulong = { compute_workgroup_size };
-        @compute_shader def kernel(index: ulong, output: Ptr<ulong>) = { output.* := size(); };
-        def main() -> int = { int(size()) };
-        "#,
+        "export { kernel }; @compute_shader def kernel(index: ulong, output: Ptr<ulong>) = { output.* := index; };",
     );
     let project = support::project::Project::new(&m, None).unwrap();
     let source = std::fs::read(project.generated.shaders()[0].unoptimized_spirv()).unwrap();
-    // OpExecutionMode LocalSize supplies the actual shader dimensions.
-    let dimensions = instructions(&source, 16)
-        .find(|args| args[1] == 17)
+    // OpExecutionModeId LocalSizeId must use the runtime ABI's specialization ID.
+    let dimensions = instructions(&source, 331)
+        .find(|args| args[1] == 38)
         .unwrap();
     let width = dimensions[2];
-    assert_eq!(&dimensions[3..], &[1, 1]);
-    assert_eq!(width, resin_types::shader::COMPUTE_WORKGROUP_SIZE);
+    assert!(instructions(&source, 71).any(|args| args
+        == [
+            width,
+            1,
+            resin_runtime::RESIN_COMPUTE_WORKGROUP_SIZE_SPEC_ID
+        ]));
+    assert!(instructions(&source, 50).any(|args| args[1..] == [width, 1]));
+    for id in &dimensions[3..] {
+        assert!(instructions(&source, 43).any(|args| args[1..] == [*id, 1]));
+    }
+    assert!(!instructions(&source, 16).any(|args| args[1] == 17));
     let wide = instructions(&source, 21)
         .find(|args| args[1..] == [64, 0])
         .unwrap()[0];
-    let constants = instructions(&source, 43)
-        .filter(|args| args[0] == wide && args[2..] == [width, 0])
-        .map(|args| args[1])
-        .collect::<Vec<_>>();
-    assert!(
-        instructions(&source, 254).any(|args| constants.contains(&args[0])),
-        "the shader helper returns the workgroup size"
-    );
-    assert!(
-        instructions(&source, 132).any(|args| args[0] == wide && constants.contains(&args[3])),
-        "the entry wrapper multiplies the group index by the workgroup size"
-    );
-    let host = support::project::Project::new(&m, Some("main")).unwrap();
-    assert_eq!(host.run().status.code(), Some(width as i32));
+    let widened_width = instructions(&source, 113)
+        .find(|args| args[0] == wide && args[2] == width)
+        .unwrap()[1];
+    assert!(instructions(&source, 132).any(|args| args[0] == wide && args[3] == widened_width));
     if let Some(frontend) = shaders::optimizer() {
-        project.build(&toolchain::spirv(&frontend)).unwrap();
+        let built = project.build(&toolchain::spirv(&frontend)).unwrap();
+        let optimized =
+            std::fs::read(built.path(project.generated.shaders()[0].spirv().file_name().unwrap()))
+                .unwrap();
+        assert!(
+            instructions(&optimized, 71)
+                .any(|args| args[1..] == [1, resin_runtime::RESIN_COMPUTE_WORKGROUP_SIZE_SPEC_ID])
+        );
     }
 }
 

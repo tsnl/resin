@@ -38,7 +38,7 @@ pub(super) fn lower(
     variables.finish(context, &interface, result, output, may_fail)?;
     context.builder.ret().map_err(build_error)?;
     context.builder.end_function().map_err(build_error)?;
-    declare_entry(context, wrapper, stage, &variables.interfaces);
+    declare_entry(context, wrapper, stage, &variables);
     Ok(())
 }
 
@@ -48,6 +48,7 @@ struct Variables {
     inputs: Vec<Word>,
     outputs: Vec<Word>,
     vector: Word,
+    workgroup_size: Option<Word>,
 }
 
 impl Variables {
@@ -59,10 +60,19 @@ impl Variables {
             inputs: Vec::new(),
             outputs: Vec::new(),
             vector: context.builder.type_vector(float, 4),
+            workgroup_size: None,
         };
         match interface {
             Interface::Compute { .. } => {
                 let uint = context.ty(&Ty::UInt32)?;
+                // The runtime's compute ABI specializes ID 0 for the selected GPU.
+                // One invocation is a valid default for standalone SPIR-V tools.
+                let width = context.builder.spec_constant_bit32(uint, 1);
+                context
+                    .builder
+                    .decorate(width, Decoration::SpecId, [Operand::LiteralBit32(0)]);
+                context.builder.name(width, "compute_workgroup_size");
+                variables.workgroup_size = Some(width);
                 let vector = context.builder.type_vector(uint, 3);
                 variables.input_builtin(context, vector, BuiltIn::WorkgroupId, "workgroup_id");
                 variables.input_builtin(
@@ -213,7 +223,14 @@ impl Variables {
             );
         }
         // Widen before multiplication: the full global index need not fit u32.
-        let width = context.constant_u64(u64::from(resin_types::shader::COMPUTE_WORKGROUP_SIZE));
+        let width = context
+            .builder
+            .u_convert(
+                word,
+                None,
+                self.workgroup_size.expect("compute stage workgroup size"),
+            )
+            .map_err(build_error)?;
         let base = context
             .builder
             .i_mul(word, None, coordinates[0], width)
@@ -338,7 +355,7 @@ impl Variables {
     }
 }
 
-fn declare_entry(context: &mut Context<'_>, entry: Word, stage: Stage, interfaces: &[Word]) {
+fn declare_entry(context: &mut Context<'_>, entry: Word, stage: Stage, variables: &Variables) {
     let model = match stage {
         Stage::Compute => ExecutionModel::GLCompute,
         Stage::Vertex => ExecutionModel::Vertex,
@@ -346,13 +363,17 @@ fn declare_entry(context: &mut Context<'_>, entry: Word, stage: Stage, interface
     };
     context
         .builder
-        .entry_point(model, entry, "main", interfaces);
+        .entry_point(model, entry, "main", &variables.interfaces);
     match stage {
-        Stage::Compute => context.builder.execution_mode(
-            entry,
-            ExecutionMode::LocalSize,
-            [resin_types::shader::COMPUTE_WORKGROUP_SIZE, 1, 1],
-        ),
+        Stage::Compute => {
+            let width = variables
+                .workgroup_size
+                .expect("compute stage workgroup size");
+            let one = context.constant_u32(1);
+            context
+                .builder
+                .execution_mode_id(entry, ExecutionMode::LocalSizeId, [width, one, one]);
+        }
         Stage::Fragment => {
             context
                 .builder

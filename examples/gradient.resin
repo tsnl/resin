@@ -27,7 +27,8 @@ def main() -> Result<(), _> = {
 	var root = { width = width, height = height, pixels = pixels };
 	var commands = gpu.start_command_recording()?;
 
-	var groups = uint((pixels.length + compute_workgroup_size - 1_ul) / compute_workgroup_size);
+	var workgroup_size = gpu.compute_workgroup_size();
+	var groups = uint((pixels.length + workgroup_size - 1_ul) / workgroup_size);
 	commands.dispatch(pipeline, root, groups, 1, 1)?;
 	commands.submit()?;
 

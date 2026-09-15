@@ -11,12 +11,27 @@ pub struct ResinPipeline {
 }
 
 impl ResinGpu {
+    /// Specialize [`crate::RESIN_COMPUTE_WORKGROUP_SIZE_SPEC_ID`] to this GPU's
+    /// workgroup width. Raw shaders without that constant retain their local size.
+    ///
     /// # Safety
     /// The SPIR-V must be valid for this device and the runtime's entry point and push-constant interface. The GPU must outlive the pipeline.
     pub unsafe fn create_compute_pipeline(&self, spv: &[u8]) -> Result<ResinPipeline, ResinStatus> {
         let shader = ShaderModule::create(&self.device, spv)?;
+        let width = self.compute_workgroup_size().to_ne_bytes();
+        let entry = vk::SpecializationMapEntry::default()
+            .constant_id(crate::RESIN_COMPUTE_WORKGROUP_SIZE_SPEC_ID)
+            .offset(0)
+            .size(width.len());
+        let specialization = vk::SpecializationInfo::default()
+            .map_entries(slice::from_ref(&entry))
+            .data(&width);
         let info = vk::ComputePipelineCreateInfo::default()
-            .stage(shader.stage(vk::ShaderStageFlags::COMPUTE))
+            .stage(
+                shader
+                    .stage(vk::ShaderStageFlags::COMPUTE)
+                    .specialization_info(&specialization),
+            )
             .layout(self.push_layout);
         let result = unsafe {
             self.device.create_compute_pipelines(

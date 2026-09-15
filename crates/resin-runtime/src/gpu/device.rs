@@ -19,6 +19,7 @@ pub struct DeviceContext {
     pub surface: Option<Surface>,
     pub memory_properties: vk::PhysicalDeviceMemoryProperties,
     pub max_buffer_size: vk::DeviceSize,
+    pub compute_workgroup_size: u32,
     pub memory_priority: bool,
 }
 
@@ -180,6 +181,7 @@ fn finish_device(
         surface,
         memory_properties: selected.memory_properties,
         max_buffer_size: selected.max_buffer_size,
+        compute_workgroup_size: selected.compute_workgroup_size,
         memory_priority: selected.memory_priority_enabled,
     })
 }
@@ -189,6 +191,7 @@ struct SelectedDevice {
     queue_family: u32,
     memory_properties: vk::PhysicalDeviceMemoryProperties,
     max_buffer_size: vk::DeviceSize,
+    compute_workgroup_size: u32,
     features10: vk::PhysicalDeviceFeatures,
     vulkan12: vk::PhysicalDeviceVulkan12Features<'static>,
     vulkan13: vk::PhysicalDeviceVulkan13Features<'static>,
@@ -339,7 +342,10 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
     }
 
     let mut maint4 = vk::PhysicalDeviceMaintenance4Properties::default();
-    let mut props2 = vk::PhysicalDeviceProperties2::default().push_next(&mut maint4);
+    let mut subgroup = vk::PhysicalDeviceSubgroupProperties::default();
+    let mut props2 = vk::PhysicalDeviceProperties2::default()
+        .push_next(&mut maint4)
+        .push_next(&mut subgroup);
     unsafe { instance.get_physical_device_properties2(physical, &mut props2) };
 
     let mut optional_extensions = Vec::new();
@@ -363,6 +369,7 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
         queue_family,
         memory_properties: unsafe { instance.get_physical_device_memory_properties(physical) },
         max_buffer_size: maint4.max_buffer_size,
+        compute_workgroup_size: compute_workgroup_size(&properties.limits, subgroup.subgroup_size),
         // Enable the shader profile Resin emits, rather than every supported capability.
         features10: vk::PhysicalDeviceFeatures::default().shader_int64(true),
         vulkan12: vk::PhysicalDeviceVulkan12Features::default()
@@ -382,6 +389,14 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
         pageable_enabled,
         optional_extensions,
     })
+}
+
+fn compute_workgroup_size(limits: &vk::PhysicalDeviceLimits, subgroup_size: u32) -> u32 {
+    // Use the default subgroup width as the initial launch policy, bounded by
+    // both the total invocation limit and the X dimension limit.
+    subgroup_size
+        .min(limits.max_compute_work_group_invocations)
+        .min(limits.max_compute_work_group_size[0])
 }
 
 fn graphics_compute_queue_family(instance: &Instance, physical: vk::PhysicalDevice) -> Option<u32> {
@@ -437,4 +452,27 @@ fn has_extension(extensions: &[vk::ExtensionProperties], name: &CStr) -> bool {
     extensions
         .iter()
         .any(|extension| extension.extension_name_as_c_str() == Ok(name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workgroup_selection_uses_subgroup_width_within_both_compute_limits() {
+        for (subgroup, invocations, x, expected) in [
+            (32, 1024, 1024, 32),
+            (64, 1024, 1024, 64),
+            (8, 1024, 1024, 8),
+            (64, 32, 1024, 32),
+            (64, 1024, 16, 16),
+        ] {
+            let limits = vk::PhysicalDeviceLimits {
+                max_compute_work_group_invocations: invocations,
+                max_compute_work_group_size: [x, 1, 1],
+                ..Default::default()
+            };
+            assert_eq!(compute_workgroup_size(&limits, subgroup), expected);
+        }
+    }
 }

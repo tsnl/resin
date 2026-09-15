@@ -106,6 +106,9 @@ struct Gpu {
 	def native(self: Ptr<Gpu>) -> Ptr<ResinGpu> = {
 		self.owner.get().handle
 	};
+	def compute_workgroup_size(self: Ptr<Gpu>) -> ulong = {
+		ulong(resin_gpu_compute_workgroup_size(self.native()))
+	};
 	def device_count() -> Result<uint, RuntimeError> = {
 		var count = 0_ui;
 		RuntimeStatus.from_code(resin_gpu_device_count(&count))?;
@@ -313,6 +316,7 @@ extern "resin_runtime.h" def resin_gpu_enumerate_devices(infos: Ptr<ResinGpuDevi
 extern "resin_runtime.h" def resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
 extern "resin_runtime.h" def resin_gpu_create_at(index: uint, gpu: Ptr<Ptr<ResinGpu>>) -> int;
 extern "resin_runtime.h" def resin_gpu_destroy(gpu: Ptr<ResinGpu>) -> ();
+extern "resin_runtime.h" def resin_gpu_compute_workgroup_size(gpu: Ptr<ResinGpu>) -> uint;
 extern "resin_runtime.h" def resin_gpu_create_compute_pipeline(gpu: Ptr<ResinGpu>, code: Ptr<ubyte>, length: ulong, pipeline: Ptr<Ptr<ResinPipeline>>) -> int;
 extern "resin_runtime.h" def resin_gpu_create_graphics_pipeline(gpu: Ptr<ResinGpu>, vertex: Ptr<ubyte>, vertex_length: ulong, fragment: Ptr<ubyte>, fragment_length: ulong, pipeline: Ptr<Ptr<ResinPipeline>>) -> int;
 extern "resin_runtime.h" def resin_gpu_free_pipeline(gpu: Ptr<ResinGpu>, pipeline: Ptr<ResinPipeline>) -> ();
