@@ -254,7 +254,7 @@ fn device_pointers_and_shared_roots_compile() {
             Stage::Compute,
         ),
         (
-            "export { kernel }; import { \"$/span.resin\" }; struct Data { wide: ulong, values: Ptr<uint> }; @compute_shader def kernel (invocation: ulong, root: Ptr<Data>) -> () = { var i = uint(invocation); var p = Ptr<uint> (ulong (root.values)); var q = Span<uint> { data = p, length = 64_ul }.at(ulong(i)); q.* := uint (3); root.wide := ulong (4294967297); };",
+            "export { kernel }; import { \"$/span.resin\" }; struct Data { wide: ulong, values: Ptr<uint> }; @compute_shader def kernel (invocation: ulong, root: Ptr<Data>) -> () = { var i = uint(invocation); var p = root.values; var q = Span<uint> { data = p, length = 64_ul }.at(ulong(i)); q.* := uint (3); root.wide := ulong (4294967297); };",
             Stage::Compute,
         ),
         (
@@ -297,7 +297,7 @@ fn shader_addresses_cannot_hide_unsupported_layouts_or_escape_locals() {
         ),
         (
             "export { kernel }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { var x = i; ulong (&x); i }; };",
-            "shader-local addresses cannot escape",
+            "shader pointer casts are unsupported",
         ),
         (
             "export { kernel }; def helper (i: uint) -> Ptr<uint> = { var x = i; &x }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { helper(i).* }; };",

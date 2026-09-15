@@ -101,12 +101,15 @@ retains every referenced allocation. An indexed or sliced view preserves its byt
 offset. Projection occurs inside recording; the public GPU API exposes no untyped
 projected root to construct or reuse.
 
-Pipeline creation requires decorated declarations directly, rather than runtime
-function aliases or arbitrary SPIR-V bytes. `.spirv` remains available for obtaining
-a shader's embedded bytecode. Pointers inside GPU buffer elements are rejected:
+Pipeline creation requires decorated declarations directly. Runtime function aliases
+and arbitrary shader bytes are not accepted. Compiled representations are private to
+code generation and the runtime; shader functions have no `.spirv` property. Pointers inside GPU buffer elements are rejected:
 projection handles the launch record, not recursively mapped pointer graphs. Raw
 host pointers cannot substitute for GPU views. Current shader pointers allow both
-reads and writes, so projection requires views with both permissions.
+reads and writes, so projection requires views with both permissions. Shader pointer
+casts are rejected, including pointer/integer conversions and reinterpretation of a
+pointer's element type. Use typed indexing for buffer access. See the
+[Vulkan/Metal scope](gpu-portability.md) for the next backend and shader-reference changes.
 
 ## Recording and lifetime
 

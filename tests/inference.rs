@@ -248,10 +248,18 @@ fn span_construction_and_indexing_infer_element_and_pointer_types() {
     );
     assert_eq!(
         result(
-            "@compute_shader def kernel(invocation: ulong, output: Ptr<uint>) -> _ = { var i = uint(invocation); output.* := { i }; }; def artifact() -> _ = { kernel.spirv };",
-            "artifact"
+            "@compute_shader def kernel(invocation: ulong, output: Ptr<uint>) -> _ = { var i = uint(invocation); output.* := { i }; }; def reference() -> _ = { kernel };",
+            "reference"
         ),
-        Ty::shader()
+        Ty::Function {
+            params: vec![
+                Ty::UInt64,
+                Ty::Pointer {
+                    pointee: Box::new(Ty::UInt32)
+                }
+            ],
+            result: Box::new(Ty::Unit)
+        }
     );
 }
 

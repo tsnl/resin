@@ -210,13 +210,6 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
         Instr::IsVariant { tag } => list("is-variant", vec![sexp_case(names, tag)]),
         Instr::VariantPayload { tag } => list("variant-payload", vec![sexp_case(names, tag)]),
         Instr::Widen { ty } => list("widen", vec![sexp_ty(names, ty)]),
-        Instr::Shader { function, stage } => list(
-            "shader",
-            vec![
-                symbol(names.functions[function.index()].as_ref()),
-                symbol(stage.as_ref()),
-            ],
-        ),
         Instr::Eliminate { result } => list("eliminate-never", vec![sexp_ty(names, result)]),
         Instr::NumericCast { ty } => list("numeric-cast", vec![sexp_ty(names, ty)]),
         Instr::PointerCast { ty } => list("pointer-cast", vec![sexp_ty(names, ty)]),

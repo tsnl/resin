@@ -286,15 +286,6 @@ impl ReceiverConversion {
     }
 }
 
-pub(super) fn shader_properties() -> Ty {
-    Ty::Record {
-        fields: vec![RecordField {
-            name: "spirv".into(),
-            ty: Ty::shader(),
-        }],
-    }
-}
-
 // Primitive method signatures keep element types symbolic. Materialization belongs to LIR.
 #[derive(Clone)]
 pub(crate) struct IntrinsicMethod {

@@ -1,4 +1,3 @@
-use resin_types::prelude::*;
 use std::fs;
 use support::pipeline;
 use tempfile::TempDir;
@@ -147,8 +146,9 @@ fn imports_are_relative_deduplicated_and_checked_for_cycles() {
 }
 
 #[test]
-fn spirv_requires_a_decorated_function_declaration() {
+fn shader_declarations_validate_signatures_and_do_not_expose_bytecode() {
     for source in [
+        "@compute_shader def kernel(index: ulong, output: Ptr<uint>) = {}; def main() = { kernel.spirv; };",
         "def kernel(i: uint) -> uint = { i }; def main() = { var code = kernel.spirv; };",
         "@geometry_shader def kernel(i: uint) -> uint = { i };",
         "@compute_shader @vertex_shader def kernel(i: uint) -> uint = { i };",
@@ -159,22 +159,6 @@ fn spirv_requires_a_decorated_function_declaration() {
     ] {
         assert!(!error(source).is_empty(), "{source}");
     }
-    let module = module(
-        "export { main }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() = { var code = kernel.spirv; };",
-    );
-    let main = &module.functions[module.entries["main"].index()];
-    assert_eq!(main.locals[0].ty, Ty::shader());
-    assert_eq!(module.shaders.len(), 1);
-    let project = support::project::Project::new(&module, Some("main")).unwrap();
-    assert_eq!(project.generated.shaders().len(), 1);
-    let shader = &project.generated.shaders()[0];
-    assert!(shader.unoptimized_spirv().is_file());
-    assert!(
-        !shader.header().exists(),
-        "the toolchain supplies compiled bytes"
-    );
-    let source = fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
-    assert!(source.contains(shader.symbol()));
 }
 
 #[test]

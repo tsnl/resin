@@ -156,7 +156,58 @@ fn dynamic_numeric_limits_and_failures_in_loop_conditions() {
 }
 
 #[test]
-fn physical_byte_record_strides_and_mixed_record_copies() {
+fn physical_byte_record_strides_preserve_neighboring_elements() {
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct Bytes3 {
+        a: u8,
+        b: u8,
+        c: u8,
+    }
+    assert_eq!((size_of::<Bytes3>(), align_of::<Bytes3>()), (3, 1));
+    let inputs: Vec<_> = (0..67).map(|a| Bytes3 { a, b: 100, c: 212 }).collect();
+    let sentinel = Bytes3 {
+        a: 255,
+        b: 255,
+        c: 255,
+    };
+    let Some(actual) = execute(
+        r#"
+        export { kernel };
+        import { "$/span.resin" };
+        struct Bytes3 { a: ubyte, b: ubyte, c: ubyte };
+        struct Root { count: ulong, inputs: Ptr<Bytes3>, outputs: Ptr<Bytes3> };
+        @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {
+            if (index < root.count) {
+                var inputs = Span<Bytes3> { data = root.inputs, length = root.count };
+                var outputs = Span<Bytes3> { data = root.outputs, length = root.count };
+                var output = outputs.at(index);
+                output.* := inputs.at(index).*;
+                output.b := output.b + 1_ub;
+            };
+        };
+    "#,
+        &inputs,
+        sentinel,
+    ) else {
+        return;
+    };
+    for (index, input) in inputs.iter().enumerate() {
+        assert_eq!(
+            actual[index],
+            Bytes3 { b: 101, ..*input },
+            "element {index}"
+        );
+    }
+    assert_eq!(
+        actual[inputs.len()],
+        sentinel,
+        "excess invocation must preserve canary"
+    );
+}
+
+#[test]
+fn mixed_record_copies_preserve_nested_byte_fields() {
     #[repr(C)]
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Bytes3 {

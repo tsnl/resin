@@ -97,12 +97,13 @@ fn instruction(typer: &TyperContext, op: &Instr) -> Result<(), String> {
             typer.same(&signature.result, result).map_err(|error| error.to_string())
         }
         Instr::Push { value } => literal(value),
+        Instr::PointerCast { .. } => Err("shader pointer casts are unsupported; use typed pointers and indexing instead".into()),
         Instr::ForgetLocal { .. } | Instr::Discard | Instr::TakeLocal { .. }
         | Instr::SetLocal { .. } | Instr::LocalAddress { .. } | Instr::Function { .. }
         | Instr::Call { .. } | Instr::TransferLoad | Instr::Load
         | Instr::Store | Instr::Replace | Instr::MakeVariant { .. } | Instr::IsVariant { .. }
         | Instr::VariantPayload { .. } | Instr::ExcludeNone | Instr::Widen { .. }
-        | Instr::NumericCast { .. } | Instr::PointerCast { .. } | Instr::Ascribe { .. }
+        | Instr::NumericCast { .. } | Instr::Ascribe { .. }
         | Instr::MakeArray { .. } | Instr::MakeRecord { .. } | Instr::AccessStatic { .. }
         | Instr::AccessDynamic | Instr::PointerIndex | Instr::Eliminate { .. } => Ok(()),
         Instr::OwnerData { .. } | Instr::OwnerLength | Instr::OwnerAllocate { .. } | Instr::OwnerDowngrade | Instr::OwnerUpgrade
@@ -110,7 +111,7 @@ fn instruction(typer: &TyperContext, op: &Instr) -> Result<(), String> {
         Instr::GpuViewAllocate | Instr::GpuViewRange { .. } | Instr::GpuViewOffset | Instr::GpuViewRestrict | Instr::GpuViewLoad { .. } | Instr::GpuViewStore | Instr::GpuViewReplace | Instr::GpuViewCopyTo | Instr::GpuViewCopyImage
         | Instr::GpuComputePipeline { .. } | Instr::GpuGraphicsPipeline { .. }
         | Instr::GpuDispatch { .. } | Instr::GpuDraw { .. } | Instr::GpuArgumentsDispatch
-        | Instr::GpuArgumentsDraw | Instr::Shader { .. }
+        | Instr::GpuArgumentsDraw
         | Instr::PointerBytes | Instr::PointerRange => {
             Err(format!("shader profile does not support {op:?}"))
         }

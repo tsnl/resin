@@ -35,8 +35,8 @@ re-export its dependencies. Import `$/status.resin` to name or match errors; inf
 `Result<(), _>` callers do not need that import.
 `ok` and `err` are compiler builtins; `fmt` and `print` are ordinary exports of
 `string.resin`. Shader entries use
-`@compute_shader`, `@vertex_shader`, or `@fragment_shader`; `function.spirv` produces a
-structural byte view, convertible to the source `Span<ubyte>` type.
+`@compute_shader`, `@vertex_shader`, or `@fragment_shader`. Pass these declarations
+directly to GPU pipeline creation; compiled representations are handled internally.
 
 Constructors return the new handle, not an integer and an out-parameter:
 

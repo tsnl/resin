@@ -73,12 +73,16 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
         &project.input,
         r#"
         export { main };
-        import { "helper.resin", "$/string.resin" };
+        import { "helper.resin", "$/string.resin", "$/gpu.resin" };
         @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { pixel(i) }; };
-        def main() -> () = {
-            var a = kernel.spirv;
-            var b = kernel.spirv;
-            print(fmt("{0}", (a.length > ulong (0) && ulong (a.data) == ulong (b.data),)));
+        def main() -> Result<(), _> = {
+            if (0 == 1) {
+                var gpu = Gpu.new()?;
+                gpu.create_compute_pipeline(kernel)?;
+                gpu.create_compute_pipeline(kernel)?;
+            };
+            print("true");
+            ok(())
         };
         "#,
     )
@@ -337,10 +341,14 @@ fn removed_shaders_disappear_from_the_cached_project() {
         &project.input,
         r#"
         export { main };
+        import { "$/gpu.resin" };
         @compute_shader def kernel(index: ulong, output: Ptr<uint>) = {
             output.* := uint(index);
         };
-        def main() = { var bytes = kernel.spirv; };
+        def main() -> Result<(), _> = {
+            if (0 == 1) { Gpu.new()?.create_compute_pipeline(kernel)?; };
+            ok(())
+        };
         "#,
     )
     .unwrap();
@@ -544,9 +552,17 @@ fn all_spirv_is_generated_before_shader_or_c_compilers_run() {
         &project.input,
         r#"
         export { main };
+        import { "$/gpu.resin" };
         @compute_shader def good(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i + 1_ui }; };
         @compute_shader def bad(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i / 2_ui }; };
-        def main() = { var first = good.spirv; var second = bad.spirv; };
+        def main() -> Result<(), _> = {
+            if (0 == 1) {
+                var gpu = Gpu.new()?;
+                gpu.create_compute_pipeline(good)?;
+                gpu.create_compute_pipeline(bad)?;
+            };
+            ok(())
+        };
     "#,
     )
     .unwrap();

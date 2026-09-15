@@ -40,7 +40,6 @@ struct LexicalScope {
 pub(crate) struct Contexts {
     scopes: Vec<LexicalScope>,
     pub definitions: Vec<Definition>,
-    shaders: HashSet<DeclarationId>,
     parameters: BTreeMap<DeclarationId, Vec<crate::TypeParameter>>,
     pending_aliases: HashSet<DeclarationId>,
 }
@@ -367,12 +366,6 @@ impl Scopes {
             .get(&id)
             .cloned()
             .unwrap_or_default()
-    }
-    pub(crate) fn mark_shader(&self, id: DeclarationId) {
-        self.view.data.borrow_mut().contexts.shaders.insert(id);
-    }
-    pub(crate) fn is_shader(&self, id: DeclarationId) -> bool {
-        self.view.data.borrow().contexts.shaders.contains(&id)
     }
     pub(crate) fn record_inferred(&mut self, span: Span, ty: Type) {
         self.record_members(span, ty, false);

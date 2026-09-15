@@ -274,3 +274,36 @@ fn shader_calls_cannot_enter_foreign_functions_or_store_function_values() {
         );
     }
 }
+
+#[test]
+fn shader_pointer_casts_fail_before_codegen_including_generic_helpers() {
+    for (helper, body, cast) in [
+        ("", "ulong(out);", "ulong(out)"),
+        ("", "Ptr<uint>(i);", "Ptr<uint>(i)"),
+        ("", "Ptr<ubyte>(out);", "Ptr<ubyte>(out)"),
+        (
+            "def address<T>(p: Ptr<T>) -> ulong = { ulong(p) };",
+            "address(out);",
+            "ulong(p)",
+        ),
+    ] {
+        let source = Source::new(
+            "pointer.resin",
+            format!(
+                "export {{ kernel }}; {helper} @compute_shader def kernel(i: ulong, out: Ptr<uint>) = {{ {body} }};"
+            ),
+        );
+        let output = Hir::build(source.clone(), &mut loader(), None);
+        assert!(lower(&output, &[host("kernel")], &LoweringOptions::default()).is_ok());
+        let errors = failed(&output, &[shader("kernel")]);
+        let error = &errors[0];
+        assert!(
+            error
+                .diagnostic
+                .contains("shader pointer casts are unsupported"),
+            "{error}"
+        );
+        let span = error.span.expect("cast has a source span");
+        assert_eq!(&source.text()[span.start..span.end], cast);
+    }
+}

@@ -1,10 +1,10 @@
 ==================
-Shader decorator and static artifact
+Shader decorator and function reference
 ==================
 
 @compute_shader
 def kernel(i: uint) -> uint = { i };
-def main() = { var code = kernel.spirv; };
+def main() = { var entry = kernel; };
 
 ---
 
@@ -48,6 +48,4 @@ def main() = { var code = kernel.spirv; };
                   (unary_term
                     (postfix_term
                       (primary_term
-                        (lid))
-                      (field_access
                         (lid)))))))))))))

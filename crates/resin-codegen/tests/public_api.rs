@@ -53,16 +53,6 @@ fn embedded_module() -> Module {
     let mut module = module();
     let shader = FunctionId::from_index(1);
     module.shaders.get_mut(&shader).unwrap().embedded = true;
-    module.functions[0].blocks[0].instrs.splice(
-        0..0,
-        [
-            Instr::Shader {
-                function: shader,
-                stage: "compute".into(),
-            },
-            Instr::Discard,
-        ],
-    );
     module
 }
 
@@ -93,7 +83,6 @@ fn generated_project_outlives_its_verified_input_and_retains_opaque_names() {
         "#include \"{}\"",
         shader.header().file_name().unwrap().to_str().unwrap()
     )));
-    assert!(source.contains(&format!("{}_length", shader.symbol())));
     assert_eq!(
         &fs::read(shader.unoptimized_spirv()).unwrap()[..4],
         &[3, 2, 35, 7]

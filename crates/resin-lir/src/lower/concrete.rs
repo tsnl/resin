@@ -47,10 +47,6 @@ pub(super) enum TermKind {
     Function {
         function: FunctionId,
     },
-    Shader {
-        function: FunctionId,
-        stage: Arc<str>,
-    },
     Unwrap {
         value: Box<Term>,
     },

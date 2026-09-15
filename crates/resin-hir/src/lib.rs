@@ -294,10 +294,6 @@ pub enum TermKind {
         receiver: Option<Box<Term>>,
         args: Vec<Term>,
     },
-    Shader {
-        function: FunctionId,
-        stage: Arc<str>,
-    },
     Unwrap {
         value: Box<Term>,
     },

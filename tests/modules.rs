@@ -436,7 +436,7 @@ fn shader_declarations_preserve_the_entry_files_export_scope() {
         ),
         (
             "main.resin",
-            "export { kernel, main }; import { \"left.resin\", \"right.resin\" }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); left(i, output); right(i, output); }; def main() -> () = { var code = kernel.spirv; };",
+            "export { kernel, main }; import { \"left.resin\", \"right.resin\", \"$/gpu.resin\" }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); left(i, output); right(i, output); }; def main() -> Result<(), _> = { if (0 == 1) { Gpu.new()?.create_compute_pipeline(kernel)?; }; ok(()) };",
         ),
     ]);
     let module = project.compile().unwrap();
@@ -663,7 +663,7 @@ fn functions_cannot_capture_another_functions_locals() {
 #[test]
 fn shader_objects_can_reference_private_helpers() {
     let module = support::module(
-        "export { main }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() -> () = { var code = kernel.spirv; };",
+        "export { main }; import { \"$/gpu.resin\" }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() -> Result<(), _> = { if (0 == 1) { Gpu.new()?.create_compute_pipeline(kernel)?; }; ok(()) };",
     );
     assert!(!module.entries.contains_key("kernel"));
     assert!(
@@ -672,7 +672,7 @@ fn shader_objects_can_reference_private_helpers() {
             .iter()
             .flat_map(|f| &f.blocks)
             .flat_map(|b| &b.instrs)
-            .any(|i| matches!(i, resin_lir::Instr::Shader { .. }))
+            .any(|i| matches!(i, resin_lir::Instr::GpuComputePipeline { .. }))
     );
 }
 

@@ -453,9 +453,6 @@ impl Checker<'_> {
                 },
             );
         }
-        if is_shader(stmt) {
-            self.scopes.mark_shader(id);
-        }
         let kind = match stmt {
             StmtKind::Function { decorators, .. } => typed::DeclarationKind::Function {
                 decorators: decorators.clone(),
@@ -726,11 +723,6 @@ fn dependencies(bodies: &[Body]) -> Vec<Vec<usize>> {
         .collect()
 }
 
-fn is_shader(stmt: &StmtKind) -> bool {
-    matches!(stmt, StmtKind::Function { decorators, .. } if decorators.len() == 1
-        && matches!(decorators[0].val.as_ref(), "compute_shader" | "vertex_shader" | "fragment_shader"))
-}
-
 //
 // Expression constraints and typed tree construction
 //
@@ -860,11 +852,6 @@ impl Expression<'_, '_> {
                 let base = self.child(base, None);
                 let (ty, associated) = match &base.kind {
                     TermKind::Type { ty } => (ty.ty.clone(), true),
-                    TermKind::Var { declaration, .. }
-                        if self.checker.scopes.is_shader(*declaration) =>
-                    {
-                        (crate::lower::context::shader_properties().into(), false)
-                    }
                     _ => (base.ty.clone(), false),
                 };
                 self.checker.scopes.record_members(
@@ -1264,18 +1251,9 @@ impl Expression<'_, '_> {
                 if let TermKind::Type { ty } = &base.kind {
                     self.method_reference(ty.clone(), name, None, out.clone())
                 } else {
-                    let (receiver, associated) = match &base.kind {
-                        TermKind::Type { ty } => (ty.ty.clone(), true),
-                        TermKind::Var { declaration, .. }
-                            if self.checker.scopes.is_shader(*declaration) =>
-                        {
-                            (crate::lower::context::shader_properties().into(), false)
-                        }
-                        _ => (base.ty.clone(), false),
-                    };
                     self.checker
                         .scopes
-                        .record_members(name.span, receiver, associated);
+                        .record_members(name.span, base.ty.clone(), false);
                     self.constrain((
                         span,
                         Constraint::Field(base.ty.clone(), name.val.clone(), out.clone()),

@@ -567,14 +567,6 @@ fn instruction(
             }
         }
         Instr::PointerCast { ty } => format!("({})(uintptr_t)({})", types.name(ty), args[0].expr),
-        Instr::Shader { function, .. } => {
-            // Verification tied this instruction to the declared shader and stage.
-            let symbol = crate::shader_symbol(*function);
-            format!(
-                "({}){{ (uint8_t *){symbol}, {symbol}_length }}",
-                types.name(result.unwrap())
-            )
-        }
         Instr::Push { value } => literal(types, result.unwrap(), value),
         Instr::LocalAddress { local } => format!("&r_l{}", local.index()),
         Instr::Load | Instr::TransferLoad => {

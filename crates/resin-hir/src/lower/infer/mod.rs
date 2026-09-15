@@ -1873,14 +1873,6 @@ impl Inference<'_> {
             }
             Constraint::Field(input, name, out) => {
                 let shape = self.shape(input, true, span)?;
-                if let Type::Node(Head::Function, _) = &shape
-                    && name.as_ref() == "spirv"
-                {
-                    if !self.solver.unify(out, &Ty::shader().into(), span)? {
-                        return Ok(false);
-                    }
-                    return Ok(true);
-                }
                 if let Some(element) = shape.view_element() {
                     let ty = match name.as_ref() {
                         "data" => Type::pointer(element),

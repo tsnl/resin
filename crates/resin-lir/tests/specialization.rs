@@ -527,33 +527,13 @@ fn add_shader(hir: &mut Module, body: Term) -> usize {
 }
 
 #[test]
-fn shader_artifacts_request_a_separate_profile_and_both_count_toward_the_limit() {
+fn host_and_shader_requests_have_separate_profiles_and_both_count_toward_the_limit() {
     let mut hir = program(vec![Type::Int32]);
     let shader = add_shader(&mut hir, block([reference(0, Type::Int32)]));
-    hir.functions[1].body = Some(block([
-        reference(0, Type::Int32),
-        term(
-            Type::Record {
-                fields: vec![
-                    resin_hir::RecordField {
-                        name: "data".into(),
-                        ty: Type::Pointer {
-                            pointee: Box::new(Type::UInt8),
-                        },
-                    },
-                    resin_hir::RecordField {
-                        name: "length".into(),
-                        ty: Type::UInt64,
-                    },
-                ],
-            },
-            TermKind::Shader {
-                function: FunctionId::from_index(shader),
-                stage: "compute".into(),
-            },
-        ),
-    ]));
-    let roots = [entry("main", 1, resin_lir::Profile::Host)];
+    let roots = [
+        entry("main", 1, resin_lir::Profile::Host),
+        entry("kernel", shader, resin_lir::Profile::Shader),
+    ];
     let lir = resin_lir::build_lir(&hir, &roots, &options(2)).unwrap();
     resin_lir::verify(&lir).unwrap();
     let profiles: Vec<_> = lir
@@ -564,21 +544,21 @@ fn shader_artifacts_request_a_separate_profile_and_both_count_toward_the_limit()
         .collect();
     assert_eq!(
         profiles,
-        [resin_lir::Profile::Host, resin_lir::Profile::Shader]
+        [resin_lir::Profile::Shader, resin_lir::Profile::Host]
     );
     assert_eq!(lir.shaders.len(), 1);
-    assert!(lir.shaders.values().all(|shader| shader.embedded));
+    assert!(lir.shaders.values().all(|shader| !shader.embedded));
     let error = resin_lir::build_lir(&hir, &roots, &options(1))
         .unwrap_err()
         .remove(0);
     assert!(matches!(
         error.kind,
         ErrorKind::MonomorphLimit {
-            profile: resin_lir::Profile::Shader,
+            profile: resin_lir::Profile::Host,
             ..
         }
     ));
-    assert_eq!(error.applications[0].profile, resin_lir::Profile::Shader);
+    assert_eq!(error.applications[0].profile, resin_lir::Profile::Host);
 }
 
 #[test]

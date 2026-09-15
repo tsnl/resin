@@ -341,12 +341,14 @@ release cache after the build, using `spirv-dis` to view their assembly.
 `@compute_shader`, `@vertex_shader`, and `@fragment_shader` register and validate
 shader entry declarations. [shader interfaces](crates/resin-types/src/lib.rs) defines their metadata
 and signature contracts. Decorated functions and their unannotated helpers remain
-host-callable. Accessing `function.spirv` requests a static structural byte view;
-[project generation](crates/resin-codegen/src/lib.rs) enumerates those declaration
-requests and writes SPIR-V plus their Ninja dependencies. `spirv-opt -O` optimizes it,
+host-callable. Passing shader declarations to pipeline creation requests their compiled
+representations; [project generation](crates/resin-codegen/src/lib.rs) writes SPIR-V
+and their Ninja dependencies for the current Vulkan backend. `spirv-opt -O` optimizes it,
 and `resin --embed` writes the headers included by generated C.
 No runtime function-value analysis is involved. The runtime receives bytes, not a
-host function pointer or source-file path.
+host function pointer or source-file path. Shader functions expose no bytecode property.
+The [Vulkan/Metal scope](doc/gpu-portability.md) describes first-class shader references
+and the native Metal backend.
 
 [SPIR-V lowering](crates/resin-codegen/src/spirv/mod.rs) collects reachable shader
 functions. [entry.rs](crates/resin-codegen/src/spirv/entry.rs) adapts regular Resin function

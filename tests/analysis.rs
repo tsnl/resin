@@ -1692,8 +1692,8 @@ fn checking_rejects_holes_even_when_given_a_recovered_ast() {
 }
 
 #[test]
-fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
-    let source = "@compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() = { var xs = [1, 2]; var p = xs(0); var code = kernel.spirv; code.length; };";
+fn indexing_keeps_editor_types_and_shader_functions_have_no_bytecode_property() {
+    let source = "def main() = { var xs = [1, 2]; var p = xs(0); };";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.checked();
     let input = project.source("main.resin");
@@ -1704,32 +1704,17 @@ fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
             .text,
         "p: Ptr<long>"
     );
-    assert_eq!(
-        analysis
-            .hover(&input, source.rfind("code.length").unwrap())
-            .unwrap()
-            .text,
-        "code: { data: Ptr<ubyte>, length: ulong }"
-    );
-    let source = "@compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() = { kernel. };";
-    let project = Project::new(&[("main.resin", source)]);
-    let items = project.build_hir().completions(
-        &project.source("main.resin"),
-        source.find("kernel. }").unwrap() + 7,
-    );
-    assert!(
-        items
-            .iter()
-            .any(|i| i.name == "spirv" && i.detail.contains("data: Ptr<ubyte>")),
-        "{items:?}"
-    );
-    let source = "@compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() = { var alias = kernel; alias. };";
-    let project = Project::new(&[("main.resin", source)]);
-    let items = project.build_hir().completions(
-        &project.source("main.resin"),
-        source.find("alias. }").unwrap() + 6,
-    );
-    assert!(items.iter().all(|i| i.name != "spirv"));
+    for body in ["kernel.", "var alias = kernel; alias."] {
+        let source = format!(
+            "@compute_shader def kernel(index: ulong, output: Ptr<uint>) = {{}}; def main() = {{ {body} }};"
+        );
+        let project = Project::new(&[("main.resin", &source)]);
+        let items = project.build_hir().completions(
+            &project.source("main.resin"),
+            source.rfind('.').unwrap() + 1,
+        );
+        assert!(items.iter().all(|item| item.name != "spirv"), "{items:?}");
+    }
 }
 
 #[test]
