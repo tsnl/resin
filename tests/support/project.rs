@@ -24,6 +24,12 @@ impl Project {
     }
 
     pub fn run(&self) -> Output {
+        let executable = self.build_executable();
+        Command::new(executable.path()).output().unwrap()
+    }
+
+    /// Build in this fixture's private cache. Keep the fixture alive while executing.
+    pub fn build_executable(&self) -> resin_toolchain::Executable {
         let mut environment = resin_toolchain::Environment::capture().unwrap();
         environment.directory = self.directory.path().into();
         environment.executable = env!("CARGO_BIN_EXE_resin").into();
@@ -34,8 +40,7 @@ impl Project {
             .unwrap()
             .strip_prefix(self.generated.directory())
             .unwrap();
-        let executable = artifacts.executable(program).unwrap();
-        Command::new(executable.path()).output().unwrap()
+        artifacts.executable(program).unwrap()
     }
 
     pub fn build(

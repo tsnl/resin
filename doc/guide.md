@@ -66,6 +66,11 @@ also checks Windows and macOS. CI caches Rust dependencies and checks Clippy bef
 executables. Example formatting, `cargo test --doc`, and a host smoke check then run before
 `cargo nextest` executes integration and GPU tests across suites concurrently. A failed check
 skips the remaining steps in its job; grammar checks run in parallel with the native job.
+Nextest schedules every suite that takes the GPU test lock in a group with at most two
+tests in flight. GPU pointer fixtures build only their requested host entry and prepare
+their private native projects before taking that lock, so compilation can overlap device
+execution. The lock still serializes GPU access. `cargo test` uses the same fixture
+separation; Nextest also overlaps work across test binaries.
 CI omits Rust debug symbols to reduce compile and native-link work while retaining debug
 assertions and overflow checks. Local Cargo profile defaults are unchanged.
 CI sets `RESIN_TEST_PARTICLE_COUNT=10000` for the particle compute/render test.
