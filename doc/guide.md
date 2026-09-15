@@ -227,7 +227,8 @@ dynamic array indexes fail with a diagnostic. There is no optimizer or stable ge
 
 ## Editor support
 
-The [Zed extension](../editors/zed/README.md) provides Resin syntax support and launches
+The [Zed extension](../editors/zed/README.md) and
+[Helix configuration](../editors/helix/README.md) provide Resin syntax support and launch
 `resin --lsp DIR` for diagnostics, hover, go-to-definition, completion, and formatting.
 Build the unified executable with `nix-shell --run 'cargo build -p resin'`.
 The [language server library](../crates/resin-lsp/README.md) ships inside that executable,

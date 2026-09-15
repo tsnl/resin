@@ -23,6 +23,7 @@ pkgs.mkShell (
       with pkgs;
       [
         rustup
+        helix
         shaderc # Handwritten GLSL fixtures in the runtime tests.
         spirv-tools
         nodejs_26
