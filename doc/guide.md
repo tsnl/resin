@@ -335,20 +335,20 @@ Local constants become visible after their specification, and can shadow outer n
 ```resin
 const answer: int = 40 + 2;
 const (
-    read: uint = 1 << iota; // 1
-    write;                 // 2
-    _;                     // Skip 4.
-    execute;               // 8
+    read: uint = 1 << iota;    // 1
+    write: uint = 1 << iota;   // 2
+    _ = iota;                 // Skip index 2.
+    execute: uint = 1 << iota; // 8
 );
 const reset = iota;         // 0, with type long.
 ```
 
-Like Go, `iota` starts at zero in each `const` declaration and increments once per
-specification, including discarded `_` specifications. An omitted initializer repeats the
-previous expression list and type annotation, evaluated with the new `iota`. A specification
-can bind multiple names, such as `a, b: uint = iota, iota + 10;`; their counts must match.
-The first specification needs an initializer. Resin requires semicolons and uses `: Type`
-annotations and lowercase value names.
+`iota` starts at zero in each `const` declaration and increments once per specification,
+including discarded `_` specifications. Every specification requires an explicit
+`= expression`, including later rows in a group and discarded names. Each row supplies
+its own expression list and optional type annotation. A specification can bind multiple
+names, such as `a, b: uint = iota, iota + 10;`; their counts must match. Resin requires
+semicolons and uses `: Type` annotations and lowercase value names.
 
 Constants use Resin's fixed-width types. An annotation or numeric suffix selects a type;
 otherwise numeric inference finishes at the declaration, defaulting to `long` or `float64`.

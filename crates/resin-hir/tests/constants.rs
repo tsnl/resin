@@ -23,14 +23,14 @@ fn module_constants_resolve_dependencies_and_default_before_use() {
 }
 
 #[test]
-fn groups_repeat_types_and_expressions_and_reset_iota() {
+fn groups_use_explicit_initializers_and_reset_iota() {
     accepts(
-        "const ( a, b: uint = 1 << iota, 8 << iota; _, _; c, d; ); const reset = iota; def use() -> uint = { a + b + c + d + uint(reset) };",
+        "const ( a, b: uint = 1 << iota, 8 << iota; _, _ = iota, iota; c, d: uint = 1 << iota, 8 << iota; ); const reset = iota; def use() -> uint = { a + b + c + d + uint(reset) };",
     );
     accepts("const (); const _ = 12;");
-    rejects("const ( first; second; );", "requires an initializer");
+    accepts("const ( first: uint = iota; second = iota; ); def use() -> long = { second };");
     rejects("const ( a, b = 1; );", "equal counts");
-    rejects("const ( a = 1; b, c; );", "equal counts");
+    rejects("const ( a = 1; b, c = 2; );", "equal counts");
 }
 
 #[test]

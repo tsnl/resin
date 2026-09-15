@@ -3,9 +3,9 @@ import { "$/string.resin" };
 
 const (
 	read: uint = 1 << iota;
-	write;
-	_;
-	execute;
+	write: uint = 1 << iota;
+	_ = iota;
+	execute: uint = 1 << iota;
 );
 
 struct Pair<T> { first: T, second: T };

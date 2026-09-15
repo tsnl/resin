@@ -12,34 +12,28 @@ struct Initializer<'a> {
 }
 
 fn initializers(specs: &[ConstSpec]) -> Result<Vec<Initializer<'_>>> {
-    let mut previous = None;
     let mut result = Vec::new();
     for (iota, spec) in specs.iter().enumerate() {
-        let source = if spec.init.is_empty() {
-            previous.ok_or_else(|| {
-                GenerateError::inference(
-                    spec.span,
-                    "the first const specification requires an initializer",
-                )
-            })?
-        } else {
-            spec
-        };
-        if spec.names.len() != source.init.len() {
+        if spec.init.is_empty() {
+            return Err(GenerateError::inference(
+                spec.span,
+                "each const specification requires an explicit initializer",
+            ));
+        }
+        if spec.names.len() != spec.init.len() {
             return Err(GenerateError::inference(
                 spec.span,
                 "const names and initializers must have equal counts",
             ));
         }
-        for (name, expression) in spec.names.iter().zip(&source.init) {
+        for (name, expression) in spec.names.iter().zip(&spec.init) {
             result.push(Initializer {
                 name,
-                ann: source.ann.as_ref(),
+                ann: spec.ann.as_ref(),
                 expression,
                 iota,
             });
         }
-        previous = Some(source);
     }
     Ok(result)
 }
