@@ -5,11 +5,12 @@ path through its implementation, not a language reference; keep the
 [guide](doc/guide.md) nearby for syntax and command-line options.
 
 The root is both a Cargo workspace and the `resin` CLI package. [src/](src/)
-contains one executable's command dispatch. [crates/](crates/) contains the
+contains only the wrapper calling `resin_client::main()`. [crates/](crates/) contains the
 [sources and loading](crates/resin-source/), [concrete types](crates/resin-types/),
 [platform toolchain](crates/resin-toolchain/),
 compiler phases, and the supporting [runtime](crates/resin-runtime/),
-[parser](crates/tree-sitter-resin/), and [language server library](crates/resin-lsp/).
+[parser](crates/tree-sitter-resin/), [HTTP compiler server](crates/resin-server/),
+[wire protocol](crates/resin-protocol/), and [CLI/editor client](crates/resin-client/).
 All are unpublished. The
 [Zed extension](editors/zed/) has a separate Cargo workspace under `editors/`.
 The [standard library](resin/) is written in Resin and wraps the runtime's C API.
@@ -20,7 +21,8 @@ Read [examples/eg001.resin](examples/eg001.resin). On Linux/macOS, enter
 `nix-shell` from the repository root first; [.envrc](.envrc) also loads that
 environment if you use direnv. On Windows, use the Visual Studio developer
 PowerShell and LLVM Clang setup in [Development](doc/guide.md#development).
-Then run these commands from the repository root:
+Start a [compiler service](doc/compiler-service.md#local-development), set
+`RESIN_SERVER` to its URL, then run these commands from the repository root:
 
 ```sh
 cargo run -- examples/eg001.resin
@@ -29,7 +31,8 @@ cargo run -- examples/eg001.resin -o dist/
 
 The first command builds and runs the Fibonacci program; the second builds an optimized
 executable without running it. Inspect the generated `main.c` beside each cached executable
-under `build/`. There is no bytecode interpreter behind the CLI.
+under the service working directory's `build/`. Downloads execute locally; there
+is no bytecode interpreter behind the CLI.
 
 A few language choices explain much of the implementation:
 
@@ -96,68 +99,60 @@ The checked IR supplies both the shader functions and the host code. Generated S
 embedded in C before building the executable, which uses the runtime to create Vulkan
 pipelines and run them. Host-only programs follow the same recipe with an empty shader list.
 
-### The CLI connects the stages
+### Client capture and explicit server passes
 
-[src/main.rs](src/main.rs) only calls `resin::cli::main`, the root package's CLI entry.
-[cli/mod.rs](src/cli/mod.rs) dispatches modes, and [args.rs](src/cli/args.rs)
-parses flags and chooses `Interpreter`, `Formatter`, or `LanguageServer`;
-[source.rs](src/cli/source.rs) parses the `FILE[:ENTRY]` selector.
-Interpreter mode builds a host program. Without `--output` it uses the debug cache
-and runs the executable; with `--output` (or `-o`) it builds an optimized executable
-and copies it to the selected destination without running it.
-`resin --lsp DIR` serves the language server for that project directory
-without changing the process working directory.
+[src/main.rs](src/main.rs) calls `resin_client::main`. The client's
+[mode dispatch](crates/resin-client/src/cli/mod.rs),
+[arguments](crates/resin-client/src/cli/args.rs), and
+[source selector](crates/resin-client/src/cli/source.rs) turn CLI inputs into local
+requests. [interp.rs](crates/resin-client/src/interp.rs) requires an explicit service
+URL, negotiates capabilities, captures inputs, and downloads verified executables.
+Without `-o` it requests Debug and executes a temporary download locally; with `-o`
+it requests Release and atomically publishes the chosen destination. Arguments,
+working directory, and environment remain on the client.
 
-The platform toolchain's [Environment](crates/resin-toolchain/src/lib.rs)
-captures environment variables, the working directory, and executable/temp paths once.
-Its private [resolution](crates/resin-toolchain/src/environment.rs) applies CLI
-compiler choices before `CC`/`SPIRV_OPT` and platform defaults. It finds runtime headers,
-the archive, and cache settings, returning an opaque `Toolchain`. The CLI resolves
-relative `RESIN_LIBRARY_ROOT` overrides against the captured working directory,
-defaults to the bundled library root, and chooses `CProfile`.
-Tools are invoked when required, without preflight checks, so host-only
-programs remain independent of `spirv-opt`. Compiler subprocesses and cache fingerprints
-use the same captured environment.
+The client [input pass](crates/resin-client/src/inputs.rs) parses full CST documents,
+queries preambles, and follows local imports through an async `Loader`. It freezes
+one version per physical identity and uploads entry-parent-relative names plus
+explicit edges. [Header capture](crates/resin-client/src/headers.rs) snapshots complete
+selected directories and source-scoped extern bindings. `$/` libraries and pinned
+packages belong to the server's startup snapshot; clients do not upload replacements.
 
-The CLI's private [Request](src/cli/request.rs) validates the input/output combination,
-resolves directory destinations, and rejects outputs that would overwrite the source.
-It also owns the library root. The CLI [interpreter](src/cli/interpreter.rs) loads that
-request: [resin_source::Loader](crates/resin-source/src/lib.rs) reads the file into
-an immutable `Source`, `resin_hir::Hir::build(source, loader, previous)`
-resolves imports and returns HIR and editor facts. Lowering builds LIR
-for the host entry, then codegen writes C/SPIR-V/Ninja
-into a temporary directory owned by that invocation. The toolchain stages that project
-under `build/` while holding the cache lock.
-If `-o` is set, the cached executable is copied there; otherwise it is run. The toolchain supplies native command rules in `toolchain.ninja`. Ninja optimizes
-SPIR-V, invokes this Resin executable with `--embed` to make
-C headers, and compiles and links the host program. The executable path comes from
-the platform's `current_exe` API, keeping embedding on the same Resin version.
-The returned build and executable handles retain a cache lock. Generated sources,
-headers, SPIR-V, and the Ninja graph remain available for inspection.
-`resin_ast::build_program` walks imports into an AST `Program`. `Hir::build`
-checks that program and retains editor facts for one entry and its imports.
-Its public accessors expose diagnostics, AST, HIR, and source queries. Callers
-pass a previous `Hir` to reuse unchanged CST documents. The concrete
-`resin_source::Loader` owns import lookup.
+The server's [public state](crates/resin-server/src/lib.rs) directly owns its configuration,
+managed inputs, execution bound, and cache heads. [HTTP](crates/resin-server/src/http.rs)
+handles admission, cancellation, and response ownership. The private
+[analysis](crates/resin-server/src/analyze.rs) and [build](crates/resin-server/src/build.rs)
+handlers each sequence compiler passes explicitly. They convert strict
+[wire data](crates/resin-protocol/src/lib.rs) to `SourceGraph` and completed AST inputs,
+then call `Hir::build(BuiltProgram, execution, cancellation)`. No phase loads files or
+accepts a previous HIR. Shared immutable heads reuse equal source versions and graphs
+across independent editor and CLI requests.
 
-Each phase is also a directly usable crate. The root [src/lib.rs](src/lib.rs) exposes
-only the CLI module. Tests call phase APIs directly or use `Hir::build`
-to inspect a program without building an executable.
+Build handlers additionally select entries, lower and verify LIR, generate an owned
+C/SPIR-V/Ninja project with complete native header bindings, and invoke the toolchain.
+Its [Environment](crates/resin-toolchain/src/lib.rs) captures native settings once;
+[resolution](crates/resin-toolchain/src/environment.rs) applies server flags before
+`CC`/`SPIRV_OPT` and platform defaults. Ninja optimizes and embeds shaders using the
+captured service executable, then compiles preprocessed `.i` bytes. A staging lock
+ends at build completion. Immutable artifacts retain independent generation directories
+through downloads, even while later builds update caches. The final owner cleans up.
 
-Formatting takes a separate path from `main` through
-[format.rs](src/cli/format.rs) to the shared
-[CST formatter](crates/resin-cst/src/print.rs) library module. `--format` (or `-f`) formats
-files in place and searches directories recursively for `.resin` files;
-`--format --check` reports differences without writing and exits with status 1
-on differences or file/syntax errors. In the development environment, try:
+Each phase remains directly usable without HTTP; see
+[Calling the passes](doc/architecture.md#calling-the-passes) for a complete example.
+The client depends on source/CST/executor libraries, with no AST/HIR/backend/native
+compiler dependency. Tests can exercise phases directly or the full client/service pair.
+
+Formatting follows [format.rs](crates/resin-client/src/cli/format.rs) to the shared
+[CST formatter](crates/resin-cst/src/print.rs). `--format` edits files in place;
+`--format --check` reports differences and exits with status 1 on differences or
+errors. It needs no `RESIN_SERVER`, imports, semantic analysis, or entry point:
 
 ```sh
 cargo run -- --format --check examples
 ```
 
-The formatter uses Tree-sitter syntax, normalizes whitespace and numeric suffix
-spelling, preserves comments and string contents, and indents with hard tabs. It rejects invalid syntax without
-modifying the file and needs no semantic analysis or entry point.
+The formatter preserves comments and strings, normalizes numeric suffixes and
+whitespace, indents with hard tabs, and refuses to modify invalid syntax.
 
 ### Read each language, then its incoming pass
 
@@ -176,10 +171,10 @@ terms, and type syntax with byte spans. [AST lowering](crates/resin-ast/src/lowe
 translates CST nodes, decodes strings, inserts the unit branch of one-armed `if`,
 and represents operators as builtin applications. It also preserves incomplete
 expressions as holes for editor recovery. AST generation performs no filesystem I/O.
-[Import traversal](crates/resin-ast/src/load.rs) calls
-`resin_source::Loader::load_import` and builds an AST `Program` in dependency order.
-The [loader](crates/resin-source/src/lib.rs) accepts explicit source bindings, supplied
-file text, and disk files. It interprets relative and `$/` paths. Each AST source
+[Program assembly](crates/resin-ast/src/load.rs) consumes the application's frozen
+`SourceGraph` and parsed documents, orders dependencies, and diagnoses missing imports
+and cycles. The separate [loader](crates/resin-source/src/lib.rs) accepts explicit
+bindings, supplied text, and disk files for application acquisition. Each AST source
 module retains its immutable `Source` alongside its syntax.
 
 [HIR language](crates/resin-hir/src/lib.rs) is a self-contained, typed tree. Start
@@ -273,21 +268,23 @@ and copies the output without running it. This does not change Cargo's Rust prof
 Start with [Source](crates/resin-source/src/lib.rs): immutable text with a diagnostic
 name and a stable logical `SourceId`. Cloning shares the same version. `with_text`
 creates a new version with the same logical identity; both versions remain usable.
-Names are labels, so two sources with the same name are still distinct.
+Logical identity, diagnostic name, and exact text determine equality. Independent
+reconstruction of the same named text can reuse results; distinct modules require
+distinct logical identities even when their displayed names and contents match.
 `SourceLocation` retains a source handle and byte span, keeping diagnostics tied to
 exactly the text that produced them.
 
-The editor's [worker](crates/resin-lsp/src/worker.rs) registers open document text
-with `resin_source::Loader::source_from_text`. Those sources take precedence over
-disk imports. Closing a buffer calls `remove_source` to restore disk loading;
-file notifications schedule another compile call. Generated sources can instead
-use `set_import` to bind an import directly to a source handle.
+The editor's [worker](crates/resin-client/src/lsp/worker.rs) registers authoritative
+open text with `Loader::source_from_text`, preserving physical identity through edits.
+Current supplied registrations seed each request-owned capture; closing the last
+alias restores disk loading, and close/reopen starts a new normalization epoch.
+Captured text and local presentation paths stay immutable for each admitted request.
 
-`Hir::build` resolves the import graph before deciding whether analysis can be
-reused. An unchanged source version reuses its syntax; a changed version can reuse
-the previous Tree-sitter tree for incremental parsing. Semantic checking reruns when
-the entry's resolved import graph changes. Previously returned results own
-their original sources and remain usable after subsequent calls.
+Each analysis resolves imports before remote semantic lookup. Uploaded names and
+edges become a frozen graph; the server selects Source/CST/AST/HIR caches shared with
+build requests. Equal text in another logical module never borrows its nominal IDs or
+origins. An edited dependency changes the HIR key while unchanged per-file layers
+remain reusable. Earlier consumers keep their original handles after cache eviction.
 
 Incomplete code goes through the same compiler traversal. Expression, type,
 and missing-field holes preserve useful children; bounded delimiter repair
@@ -304,19 +301,18 @@ Hover and member completion use these facts and
 [shared type formatting](crates/resin-types/src/lib.rs). There is no separate
 recovery compiler or fallback declaration index.
 
-The [language server library](crates/resin-lsp/README.md) adapts that compiler state to
-the Language Server Protocol over stdio. `resin --lsp DIR` invokes it inside the same
-executable that builds programs, without changing the process working directory. [server.rs](crates/resin-lsp/src/server.rs)
-handles requests, document versions, and file notifications;
-[text.rs](crates/resin-lsp/src/text.rs) converts byte offsets to UTF-16 positions.
-[worker.rs](crates/resin-lsp/src/worker.rs) retains a compiler and loader in
-the background, coalesces edits, and discards obsolete results. Editor analysis
-never builds C/SPIR-V, initializes a GPU, or executes Resin programs.
+The [client LSP](crates/resin-client/README.md) adapts remote facts to stdio editor
+messages. [server.rs](crates/resin-client/src/lsp/server.rs) accepts notifications and
+checks response freshness; [worker.rs](crates/resin-client/src/lsp/worker.rs) coalesces
+editor snapshots and schedules bounded capture/HTTP tasks.
+[text.rs](crates/resin-client/src/lsp/text.rs) converts byte offsets to UTF-16 positions.
+[mirrors.rs](crates/resin-client/src/lsp/mirrors.rs) materializes managed definitions as
+immutable local files for navigation. Old versions and dependency states cannot
+replace current diagnostics. Editor analysis never builds or executes a program.
 
-`textDocument/formatting` uses the same [formatter](crates/resin-cst/src/print.rs) as the
-CLI. The server formats the open document's current text and returns a text edit
-for the changed region. See the [formatting rules](crates/resin-lsp/README.md#formatting)
-for layout conventions.
+`textDocument/formatting` stays local and uses the same
+[formatter](crates/resin-cst/src/print.rs) as the CLI. It returns an edit for the
+current open buffer; see [formatting rules](crates/resin-client/README.md#formatting).
 
 Finally, [editors/zed/src/lib.rs](editors/zed/src/lib.rs) locates and launches the
 `resin --lsp` from Zed's WASI extension. Its [language queries](editors/zed/languages/resin/)
@@ -462,7 +458,7 @@ For editor work, without launching an editor or opening windows:
 ```sh
 cargo test -p resin --lib --test analysis --test editor_queries
 cargo test -p resin --test formatting --test format_cli
-cargo test -p resin-hir -p resin-lsp
+cargo test -p resin-hir -p resin-client -p resin-server
 cargo test -p resin --test lsp
 ```
 

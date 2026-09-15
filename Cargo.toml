@@ -19,7 +19,10 @@ path = "benchmarks/gpu_main.rs"
 harness = false
 
 [dependencies]
-log = { workspace = true }
+resin-client = { workspace = true }
+
+[dev-dependencies]
+resin-server = { workspace = true }
 resin-cache = { workspace = true }
 resin-executor = { workspace = true }
 resin-ast = { workspace = true }
@@ -32,15 +35,9 @@ resin-lir = { workspace = true }
 resin-codegen = { workspace = true }
 resin-source = { workspace = true }
 resin-toolchain = { workspace = true }
-resin-lsp = { workspace = true }
-resin-runtime = { workspace = true }
-resin-cst = { workspace = true }
-
-[dev-dependencies]
-resin-types = { workspace = true }
 resin-runtime = { workspace = true, features = ["test-support"] }
-resin-hir = { workspace = true }
-resin-lir = { workspace = true }
+resin-cst = { workspace = true }
+resin-types = { workspace = true }
 tree-sitter = { workspace = true }
 tree-sitter-resin = { workspace = true }
 lsp-server = "0.7.9"
@@ -63,10 +60,13 @@ license = "Apache-2.0"
 version = "0.1.0"
 
 [workspace.dependencies]
+resin-client = { path = "crates/resin-client" }
+resin-server = { path = "crates/resin-server" }
+resin-protocol = { path = "crates/resin-protocol" }
 arc-swap = "1"
 resin-cache = { path = "crates/resin-cache" }
 resin-executor = { path = "crates/resin-executor" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "io-std", "process", "fs", "net"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "io-std", "process", "fs", "net", "signal"] }
 futures = "0.3"
 log = "0.4"
 blake3 = "1"
@@ -78,7 +78,6 @@ tree-sitter = "0.27"
 tree-sitter-resin = { path = "crates/tree-sitter-resin" }
 resin-source = { path = "crates/resin-source" }
 resin-toolchain = { path = "crates/resin-toolchain" }
-resin-lsp = { path = "crates/resin-lsp" }
 resin-runtime = { path = "crates/resin-runtime" }
 resin-cst = { path = "crates/resin-cst" }
 resin-ast = { path = "crates/resin-ast" }

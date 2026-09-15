@@ -1,6 +1,6 @@
 # Compiler service plan
 
-Status: **Phases 0–2 implemented and validated; Phase 3 remains planned.**
+Status: **Phases 0–3 implemented and validated.**
 Implement **Phase 0, Phase 1, Phase 2, and Phase 3** in order.
 Each phase has separate acceptance criteria. Complete and validate a phase before
 starting the next. Record evidence in [the validation log](doc/compiler-service-validation.md).
@@ -525,33 +525,33 @@ and run the C preprocessor on the server.
 
 ### Phase 3 acceptance criteria
 
-- [ ] **P3.1** Root `resin` is a thin wrapper. All other main workspace crates live
+- [x] **P3.1** Root `resin` is a thin wrapper. All other main workspace crates live
       under `crates/`. Client has syntax dependencies only; semantic/native work
       runs on the server. Compiler/cache/toolchain crates have no application/protocol
       dependencies, and handlers explicitly sequence passes.
-- [ ] **P3.2** Build/run/LSP fail early without usable `RESIN_SERVER`, negotiate
+- [x] **P3.2** Build/run/LSP fail early without usable `RESIN_SERVER`, negotiate
       compatibility, and reject unsupported targets before native compilation.
-- [ ] **P3.3** Entry, nested/parent imports, cycles, aliases, missing imports, and
+- [x] **P3.3** Entry, nested/parent imports, cycles, aliases, missing imports, and
       invalid editor bodies are handled through CST-based acquisition without a
       manifest or second parser. Server tests prove user files come from uploads.
-- [ ] **P3.4** Two clients at different checkout roots share equivalent results;
+- [x] **P3.4** Two clients at different checkout roots share equivalent results;
       branches and dirty buffers remain distinct without leaking paths/identities.
       Dependencies changed during upload cannot mix editor revisions.
-- [ ] **P3.5** Analyze an LSP edit, save it, then build from an independent CLI client:
+- [x] **P3.5** Analyze an LSP edit, save it, then build from an independent CLI client:
       identical captured sources/import bindings hit the server's Source/CST/AST/HIR
       caches. Assert pass invocation counts or hit counters, not merely equal output.
       Native passes may run if LSP did not request them. Unsaved/disk differences
       and changed imported files miss only affected results.
-- [ ] **P3.6** Native builds use uploaded directory bundles with nested/non-`.h`
+- [x] **P3.6** Native builds use uploaded directory bundles with nested/non-`.h`
       includes, duplicate basenames, explicit roots, and runtime/system headers.
       Test bundle edits/additions/deletions, relocation, missing transitive headers,
       precedence, and isolation from coincidentally existing server files.
-- [ ] **P3.7** Phase 2 concurrency/eviction/ownership cases pass through HTTP.
+- [x] **P3.7** Phase 2 concurrency/eviction/ownership cases pass through HTTP.
       Eviction/restart recovers by resubmission; cancellation/disconnection releases
       owned request/native work, and eviction cannot invalidate active downloads.
-- [ ] **P3.8** Artifacts are placed/run locally with existing defaults and arguments.
+- [x] **P3.8** Artifacts are placed/run locally with existing defaults and arguments.
       Failed downloads preserve prior outputs; the server embedding helper works.
-- [ ] **P3.9** Document wire/configuration contracts, capacities and overflow warnings,
+- [x] **P3.9** Document wire/configuration contracts, capacities and overflow warnings,
       target support, dependency/header acquisition, required native tools, and
       manual local/Docker/systemd startup.
 

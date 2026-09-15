@@ -570,7 +570,15 @@ impl<'a> Instances<'a> {
     ) -> Result<crate::Module, crate::BuildError> {
         let mut module = crate::Module {
             entries: std::mem::take(&mut self.entries),
-            foreign_headers: self.source.foreign_headers.clone(),
+            foreign_headers: self
+                .source
+                .foreign_headers
+                .iter()
+                .map(|header| crate::ForeignHeader {
+                    source: header.source.clone(),
+                    spelling: header.spelling.clone(),
+                })
+                .collect(),
             shaders: std::mem::take(&mut self.shaders),
             types: TypeTable::from(std::mem::take(&mut self.definitions)),
             ..Default::default()

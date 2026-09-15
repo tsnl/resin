@@ -48,21 +48,25 @@ an absolute path in Zed settings:
   "lsp": {
     "resin-lsp": {
       "binary": {
-        "path": "/absolute/path/to/resin/target/debug/resin"
+        "path": "/absolute/path/to/resin/target/debug/resin",
+        "env": { "RESIN_SERVER": "http://127.0.0.1:7412" }
       },
       "initialization_options": {
-        "libraryRoot": "/absolute/path/to/checkout/resin"
+        "includeRoots": ["include"]
       }
     }
   }
 }
 ```
 
-The library-root override is useful when switching worktrees or using an
-installed server built in another checkout. Alternatively, set `RESIN_LIBRARY_ROOT` in
-the environment. Configured `binary.env` entries override the inherited worktree
-environment. Restart the language server after changing its configuration or
-rebuilding the native executable.
+Start a [compiler service](../../doc/compiler-service.md) at the configured URL.
+`RESIN_SERVER` is mandatory; LSP initialization negotiates capabilities before
+reporting success. Configured `binary.env` entries override the inherited worktree
+environment. Standard-library selection belongs to the service's `--library-root`
+/ `RESIN_LIBRARY_ROOT`; editor `libraryRoot` is no longer accepted. Optional
+`includeRoots` selects client header directories relative to the editor project.
+Restart the language server after changing configuration or rebuilding the client.
+See [Zed language-server configuration](https://zed.dev/docs/configuring-languages#language-servers).
 
 For syntax support alone, Zed's language setting
 `"languages": { "Resin": { "enable_language_server": false } }` disables the LSP.
@@ -89,7 +93,7 @@ The formatter always indents with hard tabs; `hard_tabs` also makes ordinary edi
 indentation use tabs. `tab_size` controls their display width. A trailing comma
 forces a list onto multiple lines and is preserved, except for singleton tuples such as
 `(x,)` and `(int,)`. Comments and nested multiline content can still force breaks. Comments stay intact, and
-multiple blank lines collapse to one. See the [formatting rules](../../crates/resin-lsp/README.md#formatting)
+multiple blank lines collapse to one. See the [formatting rules](../../crates/resin-client/README.md#formatting)
 for details. Incomplete syntax is left unchanged until repaired.
 
 ## Check the workflow
@@ -126,7 +130,7 @@ The extension is not published in Zed's registry yet. A future registry entry
 can point to this repository with `path = "editors/zed"`; see the
 [publishing guide](https://zed.dev/docs/extensions/publishing/publishing-guide).
 Current limitations and compiler architecture are documented in
-[crates/resin-lsp/README.md](../../crates/resin-lsp/README.md).
+[crates/resin-client/README.md](../../crates/resin-client/README.md).
 
 Validated with Zed 1.17.2 on Linux under Xvfb: Zed's own builder compiled and
 loaded the extension and pinned grammar; highlighting, imported/standard-library

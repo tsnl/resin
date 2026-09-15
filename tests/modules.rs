@@ -1,10 +1,7 @@
 use resin_hir::GenerateErrorKind;
 use resin_source::prelude::*;
 use resin_types::prelude::*;
-use std::{
-    fs,
-    process::{Command, Output},
-};
+use std::{fs, process::Output};
 use support::pipeline;
 use tempfile::TempDir;
 
@@ -513,9 +510,12 @@ fn library_root_can_be_relocated_and_does_not_capture_relative_imports() {
             "export { main }; import { \"$/renderer/value.resin\", \"std/library.resin\" }; def main() -> int = { rendered() + local() };",
         ),
     ]);
-    let output = Command::new(env!("CARGO_BIN_EXE_resin"))
+    let server = support::service::Service::configured(|config, _| {
+        config.library_root = project.0.path().join("custom")
+    });
+    let output = server
+        .command()
         .current_dir(project.0.path())
-        .env("RESIN_LIBRARY_ROOT", "custom")
         .arg("main.resin")
         .output()
         .unwrap();

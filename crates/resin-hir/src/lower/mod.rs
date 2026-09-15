@@ -87,7 +87,10 @@ impl Generator {
     fn declare_headers(&mut self, file: &SourceFile) {
         for header in &file.foreign_headers {
             if Foreign::valid_header(&header.val) {
-                self.module.foreign_headers.insert(header.val.clone());
+                self.module.foreign_headers.insert(crate::ForeignHeader {
+                    source: self.source.id(),
+                    spelling: header.val.clone(),
+                });
             } else {
                 self.errors.push(GenerateError {
                     span: header.span,
@@ -884,7 +887,10 @@ impl Generator {
                 kind: GenerateErrorKind::InvalidForeignSignature,
             });
         }
-        self.function_mut(id).foreign_header = Some(foreign.header);
+        self.function_mut(id).foreign_header = Some(crate::ForeignHeader {
+            source: self.source.id(),
+            spelling: foreign.header,
+        });
         Ok(id)
     }
 }
@@ -1192,19 +1198,25 @@ mod extern_tests {
         );
         let module = generate(&file).unwrap();
         assert_eq!(module.functions.len(), 3);
-        assert!(
-            module
-                .functions
-                .iter()
-                .all(|function| function.foreign_header.as_deref() == Some("native.h"))
-        );
+        assert!(module.functions.iter().all(|function| {
+            function
+                .foreign_header
+                .as_ref()
+                .map(|header| header.spelling.as_ref())
+                == Some("native.h")
+        }));
     }
 
     #[test]
     fn empty_groups_preserve_headers_and_validate_the_header_span() {
         let valid = generate(&parse(r#"extern { "empty.h": {} };"#)).unwrap();
         assert!(valid.functions.is_empty());
-        assert!(valid.foreign_headers.contains("empty.h"));
+        assert!(
+            valid
+                .foreign_headers
+                .iter()
+                .any(|header| header.spelling.as_ref() == "empty.h")
+        );
         for header in ["\"\"", r#""bad\nheader.h""#, r#""bad>header.h""#] {
             let file = parse(&format!("extern {{ {header}: {{}} }};"));
             let error = generate(&file).unwrap_err();

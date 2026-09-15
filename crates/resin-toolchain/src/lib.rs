@@ -14,6 +14,7 @@ use std::{
 
 mod environment;
 mod files;
+mod headers;
 mod ninja;
 mod platform;
 mod process;
@@ -90,6 +91,10 @@ impl Environment {
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct NativeInputs {
+    /// Check compiler-reported dependencies before compiling captured C. Allowed files
+    /// must belong to this staged project, the configured runtime, or compiler-discovered
+    /// system include roots. This validates input ownership; it is not a process sandbox.
+    pub restrict_header_paths: bool,
     /// Original C files and the captured `.i` files consumed by their Ninja edges.
     pub translation_units: Vec<CTranslationUnit>,
     /// Literal language/code-generation arguments used for scanning and compilation.

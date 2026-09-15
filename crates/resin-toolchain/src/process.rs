@@ -50,10 +50,18 @@ impl Drop for CancelOnDrop {
 }
 
 pub(super) async fn run(
-    mut command: Command,
+    command: Command,
     kind: &str,
     cancellation: &Cancellation,
 ) -> Result<(), Error> {
+    capture(command, kind, cancellation).await.map(|_| ())
+}
+
+pub(super) async fn capture(
+    mut command: Command,
+    kind: &str,
+    cancellation: &Cancellation,
+) -> Result<(Vec<u8>, Vec<u8>), Error> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -66,7 +74,7 @@ pub(super) async fn run(
     let status = status?;
     let (stdout, stderr) = (stdout?, stderr?);
     if status.success() {
-        return Ok(());
+        return Ok((stdout, stderr));
     }
     Err(Error::new(format!(
         "{kind} failed ({status}):\n{}{}",

@@ -680,11 +680,15 @@ fn ordinary_resin_programs_render_and_write_pngs() {
         let executable = temp
             .path()
             .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
-        let output = Command::new(env!("CARGO_BIN_EXE_resin"))
+        let service = support::service::Service::configured(|_, environment| {
+            environment
+                .variables
+                .insert("SPIRV_OPT".into(), compiler.as_os_str().to_owned());
+        });
+        let output = service
+            .command()
             .current_dir(temp.path())
             .arg(source)
-            .arg("--spirv-opt")
-            .arg(&compiler)
             .arg("-o")
             .arg(&executable)
             .output()

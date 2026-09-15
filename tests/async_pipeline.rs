@@ -157,6 +157,7 @@ async fn explicit_snapshot_pipeline_retains_editor_facts_and_owned_codegen() {
     let generated = send_future(resin_codegen::generate(
         verified.clone(),
         Some("main".into()),
+        std::sync::Arc::new(resin_codegen::NativeHeaders::default()),
         parent.path(),
         &execution,
         &cancellation,

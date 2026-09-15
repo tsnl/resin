@@ -19,11 +19,11 @@ pub(super) fn check(module: &Module) -> Result<(), VerifyError> {
 
 fn check_headers(module: &Module) -> Result<(), VerifyError> {
     for header in &module.foreign_headers {
-        if !Foreign::valid_header(header) {
+        if !resin_types::Foreign::valid_header(&header.spelling) {
             return Err(VerifyError {
                 location: crate::VerifyLocation::Module,
                 kind: VerifyErrorKind::InvalidForeignHeader {
-                    header: header.clone(),
+                    header: header.spelling.clone(),
                 },
             });
         }

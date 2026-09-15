@@ -26,8 +26,10 @@ New to the implementation? Start with the [guided repository tour](../TOUR.md) a
 The root is both the `resin` CLI package and a Cargo workspace. Reusable libraries
 live under `crates/`; the Zed extension has its own workspace under `editors/zed/`.
 Root Cargo commands select `resin`, and `--workspace` builds or tests all native
-packages. One executable runs programs, builds executables, formats source, and
-serves LSP.
+packages. The `resin` client runs downloaded programs, requests builds, formats source,
+and serves stdio LSP. The separate `resin-server` application owns semantic compilation
+and native tools. Build/run and LSP require an explicit `RESIN_SERVER` HTTP(S) URL;
+formatting works locally without a service.
 
 On Linux or macOS, enter `nix-shell` for Rustup (using `rust-toolchain.toml`), a C compiler,
 CMake, Ninja, GLFW's native build dependencies, SPIR-V Tools, and `glslc` for handwritten
@@ -45,15 +47,28 @@ Rust toolchain. Outside Nix:
   loader and a Vulkan driver.
 - macOS: install Xcode Command Line Tools (`xcode-select --install`), Rustup, CMake, Ninja, and SPIR-V Tools
   (`brew install cmake ninja spirv-tools shaderc`; Shaderc supplies `glslc` for tests).
-  `cargo run -- examples/eg001.resin` then builds and runs a host program.
+  Start the compiler service below before requesting a host program.
   For GPU programs, install the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#mac), which supplies
   `spirv-opt`, the Vulkan loader, and MoltenVK; use its `setup-env.sh` before running Resin. If Cargo
   strips the loader's search path, run `target/debug/resin` directly from that configured shell.
 - Windows: install Rustup's **x86_64-pc-windows-msvc** toolchain, Visual Studio's **Desktop
   development with C++** workload (including a Windows SDK), LLVM Clang, CMake, Ninja, and SPIR-V Tools. Open a
   **Developer PowerShell for VS** targeting x64 and put `clang.exe`, `cmake.exe`, `ninja.exe`, and `spirv-opt.exe` on PATH.
-  Run `cargo run -- examples/eg001.resin`. For GPU programs, install the
+  Start the compiler service below. For GPU programs, install the
   [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) for SPIR-V Tools and a Vulkan-capable GPU driver.
+
+Start a service in one development shell:
+
+```sh
+cargo build -p resin -p resin-server -p resin-runtime
+cargo run -p resin-server -- --listen 127.0.0.1:7412
+```
+
+In another shell, set `RESIN_SERVER=http://127.0.0.1:7412` before running `resin`
+or your editor. On Windows PowerShell, use `$env:RESIN_SERVER = "http://127.0.0.1:7412"`.
+The [compiler service guide](compiler-service.md) covers remote deployment, native
+installation paths, cache settings, header bundles, and pinned dependencies.
+The service never starts automatically and the client has no local compiler fallback.
 
 Windows emitted C uses the GNU-style `clang` driver with the MSVC ABI, not `cl` or `clang-cl`.
 MinGW and cross-compiling Resin programs are not tested. macOS enables Vulkan portability
@@ -87,12 +102,12 @@ After changing `crates/tree-sitter-resin/grammar.js`, regenerate from that direc
 `tree-sitter generate --js-runtime native`.
 Commit grammar changes and generated files together in this repository.
 
-Native builds require Ninja and a C compiler, selected with `CC` or `--cc` (default `cc`
+The service's native builds require Ninja and a C compiler, selected with `CC` or server `--cc` (default `cc`
 on Unix, `clang` on Windows MSVC). Shader builds use the `spirv-opt` binary from
 [SPIR-V Tools](https://github.com/KhronosGroup/SPIRV-Tools),
-selected with `SPIRV_OPT` or `--spirv-opt`; `NINJA` selects the build runner. Resin performs
+selected with `SPIRV_OPT` or server `--spirv-opt`; `NINJA` selects the build runner. Resin performs
 no tool preflight; required commands report errors when executed. Host-only builds never
-invoke `spirv-opt`. SPIR-V embedding invokes the running Resin executable through the platform
+invoke `spirv-opt`. SPIR-V embedding invokes the running service executable through the platform
 `current_exe` API, so it neither searches PATH for Resin nor mixes compiler versions.
 Backend tests build generated projects through the same Ninja toolchain.
 Generated shaders are validated with `spirv-val` and optimized with `spirv-opt`. Set
@@ -135,11 +150,12 @@ cargo run -- examples/eg001.resin -o dist/
 cargo run -- examples/eg001.resin -o fibonacci
 ```
 
-Without `-o`, Resin uses `build/<source-name>-<name-and-entry-hash>/debug/` under cwd
-for incremental work, then runs an independently owned executable generation.
-Ordinary runs compile generated C with `-O0` for fast iteration. Requesting an executable with
-`-o` uses `-O3` and the sibling `release/` cache. Both variants are retained, so switching between
-them does not force a rebuild. This does not change Cargo's Rust build profile or shader optimization.
+Without `-o`, the client requests the service's Debug native profile (`-O0`),
+downloads a verified executable into an owned local temporary directory, and runs it.
+With `-o`, it requests Release (`-O3`) and atomically publishes the verified download
+at the selected local destination. Debug and Release native caches live on the service;
+local paths and execution arguments do not enter build requests. These profiles do
+not change Cargo's Rust profile or shader optimization.
 Runs inherit cwd and standard streams; Resin returns the program's exit status.
 Use `FILE:ENTRY` to select an exported function; omitting `:ENTRY` selects `main`.
 A file can export several entry points. Host entries take either `()` or
@@ -192,50 +208,29 @@ An existing directory or trailing separator receives the source name (or `source
 non-main entry), with `.exe` on Windows; otherwise PATH names the file exactly. Use an `.exe`
 extension for Windows executable filenames.
 
-Compilation follows one pipeline: generate C, requested SPIR-V binaries, and `build.ninja`;
-Ninja optimizes shaders with `spirv-opt`, embeds them in C headers, then compiles and links
-the executable. The toolchain owns the native command rules and flags; codegen supplies
-the project dependency edges. Shader stages come from decorators. To inspect intermediates without
-running the program, build with `-o PATH` and inspect
-`build/<source-name>-<name-and-entry-hash>/release/`: `main.c`, `build.ninja`, and
-`shader_<function-id>.unoptimized.spv` / `.spv` / `.h`. Use `spirv-dis` to inspect a shader
-as SPIR-V assembly. Compiler inspection is available through
-`resin_hir::Hir::build` and the retained result's AST, HIR,
-and editor queries.
+Compilation happens on the selected service: explicit CST → AST → HIR → LIR →
+verified LIR → C/SPIR-V passes produce a Ninja project. Ninja prepares embedded
+shaders and compiles captured preprocessed C. Compiler libraries remain independently
+usable; see the [architecture](architecture.md#calling-the-passes) for their async APIs.
+The client checks the returned target, revision, filename, length, and BLAKE3 digest
+before replacing any output. Failed or cancelled downloads preserve an existing file.
 
-Each source name and entry has a stable directory with separate debug and release
-outputs. Ninja reuses unchanged work. Generated inputs,
-tool settings, runtime files, and captured environment changes invalidate the appropriate
-steps. Successful output files are retained together; failed rebuilds never run the old
-executable. A cache lock protects staging and building. Retained executables live in
-owned generations under `build/.artifacts`; running or copying one does not hold that
-lock or stop a later build. The final handle removes its generation, leaving the debug
-and release cache available for reuse. This native build cache is separate from
-compiler analysis. After builds and executions finish, delete `build/` to clean it,
-including after linked system library changes or changes hidden behind a compiler wrapper.
+Native caches and intermediates live under the service working directory's `build/`.
+Completed artifact generations retain independent lifetimes during downloads. CPU
+cache heads are shared across callers; equivalent logical sources and import graphs
+can reuse editor analysis when a separate CLI later builds the same saved bytes.
+Header directory contents and native settings participate in native invalidation.
+C compilation consumes captured `.i` bytes, so later header changes affect the next
+build. The configured compiler installation and linked libraries must stay stable
+during a build. See [service ownership and configuration](compiler-service.md).
 
-C builds capture preprocessed `.i` files before Ninja decides whether compilation is
-needed. Generated projects explicitly list original and captured C paths, preprocessing
-flags, and generated-header prerequisites in `native-inputs.json`. Capture uses the
-configured compiler options and include environment, so header content changes, newly
-shadowing headers, and optional includes are detected even when timestamps are unchanged.
-Ninja compiles those captured bytes: editing a header after capture affects the next
-build. Unchanged preprocessing does not recompile C. Shader-only graphs do not invoke
-a C compiler. Tool executable contents also contribute to native invalidation; the
-configured compiler installation and linked libraries must stay stable during a build.
+Host executables statically link `resin-runtime`; host-only programs do not initialize
+Vulkan. The service requires a matching runtime archive and header hierarchy. For
+relocated service installations, set `RESIN_RUNTIME_INCLUDE` and `RESIN_RUNTIME_LIB`
+(`libresin_runtime.a` on Unix, `resin_runtime.lib` on Windows MSVC) in the service
+environment. Native tool flags `--cc` and `--spirv-opt` belong to `resin-server`.
+Client `-I DIR` / `--include-root DIR` selects local header directories to upload.
 
-Host executables statically link `resin-runtime`; host-only programs do not initialize Vulkan.
-Generated C includes `resin_runtime.h` and its hierarchy from `crates/resin-runtime/include`.
-Cargo builds the runtime archive alongside the compiler. For relocated installations, set
-`RESIN_RUNTIME_INCLUDE` and `RESIN_RUNTIME_LIB` (`libresin_runtime.a` on Unix,
-`resin_runtime.lib` on Windows MSVC). To compile emitted C manually on Linux:
-
-```sh
-cc -std=c11 -fno-strict-aliasing -I crates/resin-runtime/include fibonacci.c \
-  target/debug/deps/libresin_runtime.a -ldl -lpthread -lm -lrt -lutil -o fibonacci
-```
-
-`--cc PATH` selects the C compiler without shell parsing.
 Integer arithmetic wraps to its declared width; on the host, invalid division, shifts, and
 dynamic array indexes fail with a diagnostic. There is no optimizer or stable generated ABI yet.
 
@@ -244,28 +239,26 @@ dynamic array indexes fail with a diagnostic. There is no optimizer or stable ge
 The [Zed extension](../editors/zed/README.md) and
 [Helix configuration](../editors/helix/README.md) provide Resin syntax support and launch
 `resin --lsp DIR` for diagnostics, hover, go-to-definition, completion, and formatting.
-Build the unified executable with `nix-shell --run 'cargo build -p resin'`.
-The [language server library](../crates/resin-lsp/README.md) ships inside that executable,
-so editor services and program compilation use the same compiler version.
+Build the client with `nix-shell --run 'cargo build -p resin'`. Launch the editor
+with `RESIN_SERVER` set to a running compatible service. The [client/editor guide](../crates/resin-client/README.md)
+describes local formatting, buffer ownership, navigation, and `resin.build`.
+Initialization negotiates service capabilities before reporting success.
 
-The CLI and LSP acquire immutable sources and resolve imports before checking caches.
-They explicitly run async CST parsing, AST construction/assembly, and `Hir::build`,
-which consumes the completed `BuiltProgram` and returns HIR/editor facts. Compiler
-passes receive no loader. `resin-source` supplies async filesystem/library acquisition;
-the LSP also registers its current editor buffers. Native generation/building follows
-separate LIR and verification passes. Reusable libraries live under `crates/`; see the
-[architecture](architecture.md#calling-the-passes) for a complete async example.
+The client captures exact local files and unsaved buffers, parses preambles for
+imports/header dependencies, and sends immutable logical inputs. The service owns
+semantic passes and shared caches; compiler phases never read user filesystem paths.
+Returned managed definitions become client-owned read-only mirror files. Standard
+library selection belongs to the service's `--library-root` / `RESIN_LIBRARY_ROOT`,
+not an editor `libraryRoot` option. Editor initialization may set `includeRoots`
+for local native header directories.
 
-The local LSP shares CST/AST caches of 4,096 files each and a HIR cache of 64 graphs.
-All requested values survive capacity overflow with a warning. Retained editor results
-keep their own source versions. The loader currently keeps entries and cached text for
-every path encountered, so those capacities do not bound total LSP memory.
-
-`Execution` defaults to the available logical CPU count (one if unavailable). Each
-native build holds one slot and runs Ninja with `-j 1`. Superseded editor analysis and
-shutdown request cancellation. Queued work stops; already running synchronous parser
-calls may finish before their slots are released. Native cancellation terminates owned
-process trees. Concurrent cache publication and an HTTP server remain future work.
+The coordinator bounds requests, coalesces accepted editor states, and rejects
+stale results by document epoch/version and dependencies. Superseded analysis and
+shutdown cancel owned HTTP work. The service bounds compiler work with `Execution`
+(default: available logical CPUs), shares immutable cache heads through compare-and-swap,
+and reserves one slot per native build with Ninja `-j 1`. Started synchronous parser
+calls may finish before releasing a slot; native cancellation terminates and reaps
+owned process trees. Entry-count capacities are not byte limits.
 
 ## Formatting
 
@@ -287,21 +280,21 @@ file arguments are treated as Resin source regardless of extension. Use `--`
 before paths beginning with a dash.
 
 `--check` requires `--format`. Formatting cannot be combined with
-`-o`/`--out` or compiler/shader options. Running or compiling accepts exactly one
+`-o`/`--out` or native include-root options. Running or compiling accepts exactly one
 `FILE[:ENTRY]`; formatter paths are literal filenames, including any colons.
 
 Normal mode writes changed files and prints their paths. Check mode prints paths
 that would change, returning 0 when all selected files are formatted and 1 on
 formatting differences or file/syntax errors. Invalid syntax is reported and left
 unchanged; other selected files are still processed. Formatting needs no imports,
-entry point, type checking, shader compiler, or GPU execution.
+entry point, type checking, service connection, shader compiler, or GPU execution.
 
 Indentation uses hard tabs. Trailing commas are preserved and, except in singleton tuples
 such as `(x,)` and `(int,)`, force multiline
 lists; add one to keep long calls or records readable. Comments and literal
 contents are preserved, and repeated blank lines collapse to one. Keep one blank
 line between example functions and between logical sections inside a function.
-The [full formatting rules](../crates/resin-lsp/README.md#formatting) also apply to the CLI.
+The [full formatting rules](../crates/resin-client/README.md#formatting) also apply to the CLI.
 CI checks the examples with `--format --check` on Linux, macOS, and Windows.
 
 ## Functions and values
@@ -803,8 +796,8 @@ ownership and byte semantics, or run `cargo run -- examples/input.resin`.
 
 ## Files and the standard library
 
-Each file has its own scope. An optional `export` clause comes first, followed by an optional
-`import` clause, then declarations. Each clause may appear only once:
+Each file has its own scope. Optional `export`, grouped `extern`, and `import`
+clauses appear in that order before declarations. Each clause may appear only once:
 
 ```resin
 export { answer };
@@ -834,10 +827,11 @@ Names such as `if_value` are ordinary identifiers. `ok`, `err`,
 `size_of`, `align_of`, `iota`, and `absurd` are unshadowable compiler builtins, not syntax
 keywords: definitions and parameters cannot use those names, but record fields can.
 
-Imports beginning with `$/` resolve from the repository's [`resin/`](../resin/) library root,
+Imports beginning with `$/` resolve from the service's frozen [`resin/`](../resin/) library root,
 independent of the source file or working directory. For example, `$/gpu.resin`
 loads `resin/gpu.resin`; a future `$/math/matrix.resin` would load `resin/math/matrix.resin`.
-Set `RESIN_LIBRARY_ROOT` to override the library root when distributing the compiler.
+Set `RESIN_LIBRARY_ROOT` or `--library-root` on the service to choose that snapshot.
+Pinned packages are also service-owned; see [managed dependencies](compiler-service.md#pinned-dependencies).
 Other imports resolve relative to the importing file. Files have explicit imports and exports;
 directories need no manifest or special entry file.
 The native Rust crate lives separately at `crates/resin-runtime/`; it has no dependency on the standard
@@ -916,7 +910,11 @@ Header groups do not introduce a scope: their functions have the module's usual
 export rules, and signatures can use types from its imports and declarations.
 Opaque foreign types remain standalone `extern type Name;` declarations.
 
-Foreign headers use the C compiler's include search paths (or an absolute path).
+Foreign headers resolve through ordered client `-I` / `--include-root` directories,
+the declaring file's directory, advertised managed header roots, then target system
+headers. Local absolute spellings must resolve on the client. Selected directories are
+uploaded as immutable bundles; their transitive includes must remain within those
+bundles or configured service toolchain roots. See [C header directories](compiler-service.md#c-header-directories).
 Use forward slashes in header paths, including Windows paths such as `C:/SDK/include/api.h`.
 
 The prototype targets 64-bit hosts. Foreign functions accept scalar/pointer parameters and return a scalar, pointer, or unit.
@@ -1100,7 +1098,7 @@ Submission currently waits for completion, making mapped results readable by the
 Build a GPU program with `-o` to inspect its unoptimized and optimized SPIR-V without executing GPU work,
 for example `cargo run -- examples/gradient.resin -o dist/`. Only the host entry selected by
 `FILE:ENTRY` needs to be exported; passing a private shader declaration to pipeline creation
-inside its module does not require exporting that shader. `--spirv-opt PATH` selects the shader optimizer.
+inside its module does not require exporting that shader. `resin-server --spirv-opt PATH` selects the service shader optimizer.
 
 ## GPU requirements
 

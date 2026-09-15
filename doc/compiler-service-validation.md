@@ -269,3 +269,73 @@ counts establish ownership and reclamation, not process RSS or exact retained by
 
 These execution results are Linux-only. Windows/macOS hosted runtime checks remain
 manual under the repository's CI policy.
+
+## Phase 3: HTTP service and merged client
+
+The root executable now delegates to `resin-client`. Its normal dependency graph
+contains source/CST/execution/transport libraries only; semantic compiler libraries,
+native tools, and shared cache heads belong to `resin-server`. `resin-protocol` is
+strict wire data. Build and analyze handlers visibly sequence their compiler passes.
+
+### Acceptance evidence
+
+- **Connection and snapshots:** CLI tests cover build/run/LSP with absent, invalid,
+  and unreachable `RESIN_SERVER`; formatting/embedding remain local. Acquisition
+  tests cover parent/nested imports, cycles, aliases, missing-file repair, malformed
+  bodies, percent-encoded local names, and immutable supplied dependency versions.
+  Server tests prove omitted user uploads are never repaired from its filesystem.
+- **Cross-client reuse:** the executable LSP regression
+  `saved_editor_revision_is_a_cache_hit_for_an_independent_relocated_cli` analyzes
+  an unsaved helper, saves those bytes, then runs a separate CLI against a relocated
+  checkout. Source/CST/AST/HIR builder counts do not increase. Changing the imported
+  file adds exactly one Source, CST, AST, and HIR computation. Native work remains
+  independently selected by the explicit build contract.
+- **Restart and editor correctness:** full/delta clients recover when a service
+  restarts, including unchanged managed snapshots. The no-edit LSP restart test
+  changes a managed function from `int` to `bool`; the unchanged user buffer gets
+  fresh hover, diagnostics, and a new definition mirror. Older mirror bytes remain
+  unchanged. Response validation rejects mismatched query kinds, invalid spans,
+  and completion edits targeting a different document.
+- **Native headers:** complete binary directory bundles retain nested/non-`.h`
+  inputs, ordered include roots, source-scoped duplicate basenames, empty groups,
+  and whole-bundle additions/changes/deletions. Runtime includes have explicit
+  protected bindings. Contained symlinks flatten; escaping directory symlinks need
+  a selected enclosing root. Portable device names and case aliases reject; exclusive
+  staging also detects platform-specific filesystem aliases.
+- **Preprocessing:** GCC and Clang tests validate actual compiler depfiles before
+  compiling captured C. Ambient include-directory/absolute-file escapes reject even
+  with spoofed `#line` text, and prior executable generations remain usable. This
+  validation occurs after preprocessing; it is not an operating-system sandbox.
+- **Ownership and concurrency:** HTTP admission includes response/error bodies.
+  Tests cover DELETE before POST admission, malformed/incomplete bodies, shutdown,
+  and connection loss. A real compiler PID is reaped after TCP disconnect without
+  an explicit cancellation request and produces no artifact. An unread 32 MiB
+  executable stream retains its complete length/hash while another build evicts its
+  generated-cache entry. Phase 2's protocol freshness, independent request handling,
+  cache publication, native cancellation, and source alias cases remain exercised.
+- **Local outputs:** downloaded length/hash/revision/target/kind checks precede
+  atomic destination replacement; failure preserves existing files. CLI tests cover
+  local argv/env/cwd, existing run/build defaults, and service-owned tool overrides.
+  Both executables' byte-embedding helpers preserve exact bytes and logical lengths.
+- **Deployment:** the supplied Dockerfile built successfully with a rootless
+  container engine. Its UID-10001 service compiled a host example without mounting
+  a client workspace; the local client printed `fibonacci(10) = 55`. Both systemd
+  templates passed `systemd-analyze verify` with their installation-specific
+  executable path replaced by the built local binary; no unit was installed/started.
+  The CI host smoke script starts an explicit service and runs the same example.
+
+### Final validation
+
+- `cargo nextest run --workspace --all-features --test-threads 24 --no-fail-fast`:
+  **1,149 passed, 0 skipped**, in **53.019 seconds** after compilation. GPU/window
+  tests used all required-tool flags, X11, and the full default particle workload.
+- `cargo test --workspace --all-features --doc`: **20 passed**.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`: passed.
+- `cargo fmt --all -- --check` and `git diff --check`: passed.
+- Explicit-service CI host smoke and Docker-hosted compilation/execution: passed.
+- systemd unit syntax/dependencies: passed with the local executable path substituted.
+
+The broad run includes the final restart, managed navigation, portable-path, native
+lifecycle, download-integrity, and header-dependency regressions. Linux execution is
+verified here; Windows/macOS hosted execution remains manual under the CI policy.
+The Docker/systemd examples are manual deployment pathways, with no installer.
