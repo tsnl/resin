@@ -79,8 +79,9 @@ cargo run -- examples/particles.resin
 ```
 
 See the [guide](doc/guide.md) for setup, Windows instructions, language features,
-building executables, and GPU programming. [Zed support](editors/zed/README.md)
-includes diagnostics, completion, navigation, and formatting.
+building executables, and GPU programming. [Zed](editors/zed/README.md) and
+[Helix](editors/helix/README.md) support includes diagnostics, completion,
+navigation, and formatting.
 
 To explore the implementation, start with the [repository tour](TOUR.md) and
 [compiler architecture](doc/architecture.md).

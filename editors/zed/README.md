@@ -109,7 +109,7 @@ load a native library, restart Zed from the repository's `nix-shell`.
 
 ```sh
 nix-shell --run 'cargo build --manifest-path editors/zed/Cargo.toml --release --target wasm32-wasip2'
-nix-shell --run 'cargo test -p resin --test zed_queries'
+nix-shell --run 'cargo test -p resin --test editor_queries'
 ```
 
 The extension is an independent Cargo workspace depending only on

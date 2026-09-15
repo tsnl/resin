@@ -27,7 +27,8 @@ nix-shell --run 'cargo install --path . --locked'
 Configure your editor to launch `resin --lsp /path/to/project`. The root `resin`
 package supplies the sole executable; `resin-lsp` is its protocol library. The server
 uses stdout exclusively for the protocol and stderr for logs. See
-[the Zed extension](../../editors/zed/README.md) for a complete editor setup.
+[the Zed extension](../../editors/zed/README.md) or
+[the Helix configuration](../../editors/helix/README.md) for a complete editor setup.
 
 Library-root lookup for `$/` imports, in descending precedence:
 
@@ -38,7 +39,7 @@ Library-root lookup for `$/` imports, in descending precedence:
 Relative initialization overrides resolve against the selected project directory.
 `RESIN_LIBRARY_ROOT` resolves against the invoking process's working directory. An
 absolute override is useful when using the server in another checkout. Keep the
-Nix shell environment when launching Zed/the server; it supplies native libraries.
+Nix shell environment when launching the editor/server; it supplies native libraries.
 
 ## Formatting
 
@@ -47,7 +48,8 @@ The server advertises `documentFormattingProvider` and handles
 format-on-save. The editor synchronizes the buffer, requests formatting, and
 applies the returned text edit through its normal undo/save workflow. The server
 does not write the file. Rebuild/reinstall the server and restart it in your editor
-to pick up formatting support; see the [Zed setup](../../editors/zed/README.md#formatting).
+to pick up formatting support; see the [Zed setup](../../editors/zed/README.md#formatting)
+or [Helix setup](../../editors/helix/README.md#library-imports-and-formatting).
 
 Formatting uses `resin_cst::format_source` on the latest accepted open
 buffer, independently of background semantic analysis. Unresolved names, imports,
@@ -185,7 +187,7 @@ compiler in its background worker and discards results from obsolete frontend re
 ```sh
 nix-shell --run 'cargo test -p resin-lsp'
 nix-shell --run 'cargo test -p resin-hir -p resin-source'
-nix-shell --run 'cargo test -p resin --test lsp --test analysis --test zed_queries'
+nix-shell --run 'cargo test -p resin --test lsp --test analysis --test editor_queries'
 nix-shell --run 'cargo test -p resin --test formatting'
 ```
 

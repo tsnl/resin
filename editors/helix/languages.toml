@@ -1,0 +1,17 @@
+[language-server.resin-lsp]
+command = "resin"
+args = ["--lsp", "."]
+
+[[language]]
+name = "resin"
+scope = "source.resin"
+file-types = ["resin"]
+roots = [".git"]
+comment-tokens = "//"
+block-comment-tokens = { start = "/*", end = "*/" }
+indent = { tab-width = 4, unit = "\t" }
+language-servers = ["resin-lsp"]
+
+[[grammar]]
+name = "resin"
+source = { git = "https://github.com/tsnl/resin", rev = "9db7beafdce29b32ea56b6245b5c122cec2395a1", subpath = "crates/tree-sitter-resin" }

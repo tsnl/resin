@@ -1,0 +1,47 @@
+(lid) @variable
+(uid) @type
+(builtin_type) @type.builtin
+(inferred_type) @type.builtin
+["Ptr" "Result" "None"] @type.builtin
+
+; Keep declaration and control keywords in sync with the grammar's reserved words.
+["export" "import" "extern" "intrinsic" "type" "struct" "def" "var"] @keyword
+["if" "else" "while" "match"] @keyword
+
+(function_definition name: (lid) @function)
+(foreign_function name: (lid) @function)
+(intrinsic_function name: (lid) @function)
+(function_definition params: (declare name: (lid) @variable.parameter))
+(foreign_function params: (declare name: (lid) @variable.parameter))
+(intrinsic_function params: (declare name: (lid) @variable.parameter))
+(postfix_term prefix: (primary_term (lid) @function) . suffix: (arguments))
+((primary_term (lid) @function.builtin)
+  (#any-of? @function.builtin "ok" "err"))
+
+(field_access name: (lid) @variable.other.member)
+(field_access name: (tuple_index) @variable.other.member)
+(method_call name: (lid) @function)
+(record_term fields: (term_define name: (lid) @variable.other.member))
+(record_type field: (declare name: (lid) @variable.other.member))
+(struct_definition fields: (declare name: (lid) @variable.other.member))
+(match_arm name: (lid) @variable.parameter)
+["ok" "err"] @function.builtin
+
+(pointer_deref) @operator
+(try_suffix) @operator
+(number) @constant.numeric
+(string) @string
+(comment) @comment
+
+["=" ":=" "->" "=>" "||" "&&" "|" "^" "&" "==" "!=" "<" "<=" ">" ">="
+ "<<" ">>" "+" "-" "*" "/" "%" "!" "~"] @operator
+["(" ")" "[" "]" "{" "}"] @punctuation.bracket
+[";" "," ":" "." "::"] @punctuation.delimiter
+(unary_type "<" @punctuation.bracket ">" @punctuation.bracket)
+
+
+(decorator "@" @attribute name: (lid) @attribute)
+
+(type_parameters "<" @punctuation.bracket ">" @punctuation.bracket)
+(type_arguments "<" @punctuation.bracket ">" @punctuation.bracket)
+(postfix_term prefix: (primary_term (lid) @function) . suffix: (type_application))
