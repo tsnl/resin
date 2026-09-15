@@ -12,11 +12,14 @@ use std::{
 pub(super) fn sources(
     sources: Vec<(Source, Option<PathBuf>)>,
     root: &Path,
-    library: &Path,
+    library: Option<&Path>,
     cancellation: &Cancellation,
 ) -> Result<BTreeMap<SourceId, Source>, LoadError> {
     let roots = if sources.iter().any(|(_, path)| path.is_some()) {
-        Some((paths::normalize(root)?, paths::normalize(library)?))
+        Some((
+            paths::normalize(root)?,
+            library.map(paths::normalize).transpose()?,
+        ))
     } else {
         None
     };
@@ -25,7 +28,9 @@ pub(super) fn sources(
         cancellation.check()?;
         let id = source.id();
         let source = match (path, &roots) {
-            (Some(path), Some((root, library))) => renamed(&source, name(&path, root, library)?),
+            (Some(path), Some((root, library))) => {
+                renamed(&source, name(&path, root, library.as_deref())?)
+            }
             _ => source,
         };
         if let Some(previous) = mapped.insert(id, source.clone())
@@ -51,8 +56,10 @@ fn renamed(source: &Source, name: String) -> Source {
     }))
 }
 
-fn name(path: &Path, root: &Path, library: &Path) -> io::Result<String> {
-    if let Ok(relative) = path.strip_prefix(library) {
+fn name(path: &Path, root: &Path, library: Option<&Path>) -> io::Result<String> {
+    if let Some(library) = library
+        && let Ok(relative) = path.strip_prefix(library)
+    {
         return Ok(format!("$/{}", encode(relative)));
     }
     Ok(encode(&relative(path, root)?))

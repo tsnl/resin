@@ -1,9 +1,12 @@
 # Resin editor support plan
 
-This is the historical implementation plan. The current layout uses the root
-`resin` executable with `--lsp <directory>`, the `resin-lsp` protocol library,
-the language crates, and the filesystem adapter in `resin-source`.
-See [current setup](README.md).
+This is a historical implementation plan. Its proposed compiler-session and
+`resin-lsp` topology has been superseded: `resin-client` now owns stdio LSP and local
+capture, while `resin-server` provides semantic analysis and builds over HTTP.
+`RESIN_SERVER` is mandatory for editor startup. See [current setup](README.md),
+[client behavior](../../crates/resin-client/README.md), and the
+[service architecture](../../doc/architecture.md). The remaining text records the
+original implementation design and is not a current API or deployment guide.
 
 Scope: a Zed extension plus a reusable language server providing diagnostics,
 hover, go-to-definition, and basic completion. Development targets 64-bit Linux.
@@ -15,7 +18,7 @@ Tracking issue: [tsnl/resin#75](https://github.com/tsnl/resin/issues/75).
 
 The grammar migration is complete in commit `2a39afd`. Editor implementation is
 on the stack above; see the [extension setup](README.md) and
-[compiler/server architecture](../../crates/resin-lsp/README.md).
+[current compiler/server architecture](../../doc/architecture.md).
 
 The current compiler API accepts immutable `Source` values from
 `resin_source::prelude::*` and a concrete `resin_source::Loader` that resolves imports.

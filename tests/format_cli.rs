@@ -1,3 +1,6 @@
+#[allow(dead_code)]
+mod support;
+
 use std::{
     fs,
     path::Path,
@@ -123,7 +126,9 @@ fn help_paths_and_fmt_filename() {
             .status
             .success()
     );
-    let legacy = Command::new(env!("CARGO_BIN_EXE_resin"))
+    let service = support::service::Service::new();
+    let legacy = service
+        .command()
         .current_dir(root)
         .arg("fmt")
         .output()

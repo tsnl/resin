@@ -612,7 +612,37 @@ impl Loader {
         let library = self.library_root.clone();
         execution
             .run(cancellation, move |cancellation| {
-                logical::sources(sources, &root, &library, cancellation)
+                logical::sources(sources, &root, Some(&library), cancellation)
+            })
+            .await?
+    }
+
+    /// Name uploaded user sources relative to `root`, without a managed-library namespace.
+    ///
+    /// This uses the same lossless path encoding as `logical_sources`, but does not
+    /// inspect the configured library root or assign `$/` names. A client can upload
+    /// an explicitly selected file even when it lives inside a local library directory;
+    /// server-owned imports remain a separate acquisition decision. Sources without
+    /// registered origins retain their explicit identity and name.
+    pub async fn logical_user_sources(
+        &self,
+        sources: impl IntoIterator<Item = Source>,
+        root: &Path,
+        execution: &Execution,
+        cancellation: &Cancellation,
+    ) -> Result<BTreeMap<SourceId, Source>, LoadError> {
+        cancellation.check()?;
+        let sources = sources
+            .into_iter()
+            .map(|source| {
+                let path = self.path(&source).map(Path::to_path_buf);
+                (source, path)
+            })
+            .collect();
+        let root = root.to_path_buf();
+        execution
+            .run(cancellation, move |cancellation| {
+                logical::sources(sources, &root, None, cancellation)
             })
             .await?
     }

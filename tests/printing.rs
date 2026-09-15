@@ -279,7 +279,13 @@ fn generated_c_uses_the_shared_runtime_header() {
     )
     .unwrap();
     let source = std::fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
-    assert!(source.starts_with("#include <resin_runtime.h>\n"));
+    assert_eq!(
+        source
+            .lines()
+            .filter(|line| *line == "#include <resin_runtime.h>")
+            .count(),
+        1
+    );
     assert!(source.contains("resin_print("));
     assert!(!source.contains("static void r_cleanup"));
 }

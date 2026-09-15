@@ -25,8 +25,9 @@ The server configuration launches `resin --lsp .`. Helix starts the server in
 the detected project directory; `.git` is the root marker. For a debug build,
 set `command` to the absolute path of `target/debug/resin`.
 
-LSP features work with just this configuration and the executable. To also
-install syntax support:
+Start a [compiler service](../../doc/compiler-service.md) and export
+`RESIN_SERVER=http://127.0.0.1:7412` before launching Helix. LSP initialization
+requires successful capability negotiation. To also install syntax support:
 
 1. Copy the three files in [runtime/queries/resin](runtime/queries/resin) into
    `<helix-config>/runtime/queries/resin/`.
@@ -75,7 +76,7 @@ Replace `/absolute/path/to/checkout` with the checkout you are developing:
 [language-server.resin-lsp]
 command = "/absolute/path/to/checkout/target/debug/resin"
 args = ["--lsp", "."]
-config = { libraryRoot = "/absolute/path/to/checkout/resin" }
+environment = { RESIN_SERVER = "http://127.0.0.1:7412" }
 
 [[grammar]]
 name = "resin"
@@ -137,21 +138,26 @@ the native library paths:
 nix-shell --run 'hx examples/eg009_imports.resin'
 ```
 
-If the server was built in another checkout, add this table to `languages.toml`:
+Standard-library and pinned-package selection belongs to the HTTP service.
+Configure its `--library-root` / `RESIN_LIBRARY_ROOT`, then restart the service to
+freeze that snapshot. The editor no longer accepts `libraryRoot`.
+
+For local foreign header directories, optionally add:
 
 ```toml
 [language-server.resin-lsp.config]
-libraryRoot = "/absolute/path/to/checkout/resin"
+includeRoots = ["include", "vendor/include"]
 ```
 
-This selects the checkout's language library directory for `$/` imports.
-Alternatively, set `RESIN_LIBRARY_ROOT` before launching Helix. Restart Helix
-after changing its configuration or environment. Use `:lsp-restart` after
-rebuilding the server.
+Helix passes `config` as initialization options; `environment` sets the launched
+process environment. See [Helix language-server configuration](https://docs.helix-editor.com/languages.html#language-server-configuration).
+Relative roots resolve against the selected editor project directory. Restart Helix
+after changing its configuration or environment. Use `:lsp-restart` after rebuilding
+the local client. `RESIN_SERVER` must remain explicitly configured.
 
 Use `:format` for LSP formatting. To format on save, add `auto-format = true`
 to the `[[language]]` entry for Resin. The formatter uses hard tabs; the supplied
-indentation settings match it. See the [formatting rules](../../crates/resin-lsp/README.md#formatting).
+indentation settings match it. See the [formatting rules](../../crates/resin-client/README.md#formatting).
 
 ## Check the workflow
 
@@ -184,7 +190,7 @@ During development, use the
 [local checkout workflow](#develop-from-a-checkout) above.
 
 The integration is installed through user configuration; it is not bundled with
-Helix. See the [language server documentation](../../crates/resin-lsp/README.md)
+Helix. See the [language server documentation](../../crates/resin-client/README.md)
 for shared features and limitations.
 
 Validated with Helix 25.07.1 on Linux using an isolated configuration: fetched and

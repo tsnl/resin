@@ -116,8 +116,11 @@ impl Specialization<'_, '_> {
         Ok(concrete::Function {
             location: source.location.clone(),
             name: source.name.clone(),
-            foreign: source.foreign_header.as_ref().map(|header| Foreign {
-                header: header.clone(),
+            foreign: source.foreign_header.as_ref().map(|header| crate::Foreign {
+                header: crate::ForeignHeader {
+                    source: header.source.clone(),
+                    spelling: header.spelling.clone(),
+                },
                 params: params
                     .iter()
                     .map(|parameter| parameter.ty.clone())

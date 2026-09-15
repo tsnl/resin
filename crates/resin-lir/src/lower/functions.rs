@@ -29,7 +29,11 @@ pub(super) fn lower(
     })
 }
 
-fn lower_foreign(source: &Function, foreign: &Foreign, profile: crate::Profile) -> LoweredFunction {
+fn lower_foreign(
+    source: &Function,
+    foreign: &crate::Foreign,
+    profile: crate::Profile,
+) -> LoweredFunction {
     LoweredFunction {
         function: crate::Function {
             name: Some(source.name.clone()),

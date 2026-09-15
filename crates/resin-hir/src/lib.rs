@@ -227,11 +227,18 @@ pub enum Case {
 /// A lexical declaration's identity. Names survive only for diagnostics.
 pub type BindingId = usize;
 
+/// A native header dependency identified by its declaring logical source.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ForeignHeader {
+    pub source: SourceId,
+    pub spelling: Arc<str>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Module {
     pub entries: BTreeMap<Arc<str>, FunctionId>,
     /// Explicit native dependencies, including header groups with no functions.
-    pub foreign_headers: BTreeSet<Arc<str>>,
+    pub foreign_headers: BTreeSet<ForeignHeader>,
     pub types: Vec<TypeDefinition>,
     pub functions: Vec<Function>,
     pub shaders: BTreeMap<FunctionId, ShaderEntry>,
@@ -243,7 +250,7 @@ pub struct Function {
     pub name: Arc<str>,
     pub signature: Signature,
     /// External declarations have no function body.
-    pub foreign_header: Option<Arc<str>>,
+    pub foreign_header: Option<ForeignHeader>,
     pub body: Option<Term>,
 }
 

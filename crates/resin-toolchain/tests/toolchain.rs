@@ -535,6 +535,159 @@ exec "$RESIN_TEST_REAL_CC" "$@""#,
         compiler
     }
 
+    fn restrict_headers(project: &Path) {
+        let manifest = project.join("native-inputs.json");
+        let mut inputs: resin_toolchain::NativeInputs =
+            serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        inputs.restrict_header_paths = true;
+        fs::write(manifest, serde_json::to_vec(&inputs).unwrap()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn restricted_headers_accept_staged_and_system_inputs_and_preserve_warm_reuse() {
+        let temp = TempDir::new().unwrap();
+        let mut environment = native_environment(&temp);
+        let compiler = counted_compiler(&temp, &mut environment);
+        let project = c_project(
+            &temp,
+            "#include <stdio.h>\n#include \"nested/header with space.h\"\nint main(void) { return VALUE; }\n",
+        );
+        fs::create_dir(project.join("nested")).unwrap();
+        fs::write(
+            project.join("nested/header with space.h"),
+            "#define VALUE 4\n",
+        )
+        .unwrap();
+        restrict_headers(&project);
+        let tools = environment.toolchain(Some(compiler.as_os_str()), None);
+        let first = build(&tools, &project).await;
+        let second = build(&tools, &project).await;
+        assert_eq!(
+            second
+                .executable(program())
+                .unwrap()
+                .run(&Execution::default(), &Cancellation::new())
+                .await
+                .unwrap(),
+            4
+        );
+        assert_eq!(
+            fs::read_to_string(temp.path().join("calls"))
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
+        assert!(first.executable(program()).unwrap().path().exists());
+    }
+
+    #[tokio::test]
+    async fn restricted_headers_reject_ambient_and_absolute_files_before_compilation() {
+        let temp = TempDir::new().unwrap();
+        let mut environment = native_environment(&temp);
+        let compiler = counted_compiler(&temp, &mut environment);
+        environment
+            .variables
+            .insert("CPATH".into(), temp.path().as_os_str().into());
+        let foreign = temp.path().join("ambient.h");
+        fs::write(&foreign, "#line 1 \"pretend-staged.h\"\n#define VALUE 7\n").unwrap();
+        let project = c_project(&temp, "int main(void) { return 4; }\n");
+        restrict_headers(&project);
+        let tools = environment.toolchain(Some(compiler.as_os_str()), None);
+        let first = build(&tools, &project).await;
+        let foreign = foreign.to_str().unwrap();
+        for include in ["ambient.h".to_owned(), foreign.to_owned()] {
+            fs::write(
+                project.join("main.c"),
+                format!("#include \"{include}\"\nint main(void) {{ return VALUE; }}\n"),
+            )
+            .unwrap();
+            let error = tools
+                .build(
+                    &project,
+                    "generated/module",
+                    "main",
+                    CProfile::Debug,
+                    &Execution::default(),
+                    &Cancellation::new(),
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("outside staged inputs"),
+                "{error}"
+            );
+            assert_eq!(
+                fs::read_to_string(temp.path().join("calls"))
+                    .unwrap()
+                    .lines()
+                    .count(),
+                1
+            );
+        }
+        assert_eq!(
+            first
+                .executable(program())
+                .unwrap()
+                .run(&Execution::default(), &Cancellation::new())
+                .await
+                .unwrap(),
+            4
+        );
+    }
+
+    #[tokio::test]
+    async fn clang_restricted_headers_use_its_actual_dependency_and_search_reports() {
+        if !Command::new("clang")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success())
+        {
+            eprintln!("skipping Clang-specific native header validation: clang unavailable");
+            return;
+        }
+        let temp = TempDir::new().unwrap();
+        let environment = native_environment(&temp);
+        let project = c_project(&temp, "#include <stdio.h>\nint main(void) { return 4; }\n");
+        restrict_headers(&project);
+        let tools = environment.toolchain(Some(OsStr::new("clang")), None);
+        let first = build(&tools, &project).await;
+        assert_eq!(
+            first
+                .executable(program())
+                .unwrap()
+                .run(&Execution::default(), &Cancellation::new())
+                .await
+                .unwrap(),
+            4
+        );
+        let foreign = temp.path().join("outside.h");
+        fs::write(&foreign, "#define VALUE 7\n").unwrap();
+        fs::write(
+            project.join("main.c"),
+            format!(
+                "#include \"{}\"\nint main(void) {{ return VALUE; }}\n",
+                foreign.display()
+            ),
+        )
+        .unwrap();
+        let error = tools
+            .build(
+                &project,
+                "generated/module",
+                "main",
+                CProfile::Debug,
+                &Execution::default(),
+                &Cancellation::new(),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("outside staged inputs"),
+            "{error}"
+        );
+    }
+
     #[tokio::test]
     async fn compilation_consumes_the_header_version_captured_before_the_compiler_starts() {
         let temp = TempDir::new().unwrap();

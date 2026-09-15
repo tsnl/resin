@@ -3,7 +3,7 @@ use std::fmt::Write;
 
 use super::types::Types;
 
-pub(super) fn lower(types: &Types<'_>, index: usize, foreign: &Foreign) -> String {
+pub(super) fn lower(types: &Types<'_>, index: usize, foreign: &resin_lir::Foreign) -> String {
     let function = &types.module.functions[index];
     let args = foreign
         .params

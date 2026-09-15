@@ -8,7 +8,7 @@ use std::{
 };
 use tempfile::TempDir;
 
-use support::shaders;
+use support::{service::Service, shaders};
 
 fn cli(source: &str, args: &[&str]) -> Output {
     selected(source, None, args)
@@ -31,7 +31,12 @@ fn selector(path: &Path, entry: Option<&str>) -> PathBuf {
 }
 
 fn invoke(cwd: &Path, input: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_resin"))
+    invoke_with(&Service::new(), cwd, input, args)
+}
+
+fn invoke_with(service: &Service, cwd: &Path, input: &Path, args: &[&str]) -> Output {
+    service
+        .command()
         .current_dir(cwd)
         .arg(input)
         .args(args)
@@ -47,8 +52,8 @@ fn success(output: &Output) {
     );
 }
 
-fn artifact(cwd: &Path, profile: &str) -> PathBuf {
-    let files: Vec<_> = fs::read_dir(cwd.join("build"))
+fn server_artifact(service: &Service, profile: &str) -> PathBuf {
+    let files: Vec<_> = fs::read_dir(service.directory.path().join("build"))
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .filter(|path| {
@@ -61,6 +66,57 @@ fn artifact(cwd: &Path, profile: &str) -> PathBuf {
         .join(format!("program{}", std::env::consts::EXE_SUFFIX));
     assert!(executable.is_file());
     executable
+}
+
+#[test]
+fn build_run_and_lsp_require_an_explicit_reachable_server() {
+    let directory = TempDir::new().unwrap();
+    let source = directory.path().join("main.resin");
+    let destination = directory.path().join("program");
+    let text = "export { main }; def main() -> int = { 37 };";
+    fs::write(&source, text).unwrap();
+    fs::write(&destination, "previous output").unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let unreachable = format!("http://{}", listener.local_addr().unwrap());
+    drop(listener);
+    for setting in [None, Some("not a URL"), Some(unreachable.as_str())] {
+        for mode in ["run", "build", "lsp"] {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_resin"));
+            command
+                .current_dir(directory.path())
+                .env_remove("RESIN_SERVER");
+            if let Some(setting) = setting {
+                command.env("RESIN_SERVER", setting);
+            }
+            match mode {
+                "run" => {
+                    command.arg(&source);
+                }
+                "build" => {
+                    command.arg(&source).arg("-o").arg(&destination);
+                }
+                "lsp" => {
+                    command.arg("--lsp").arg(directory.path());
+                }
+                _ => unreachable!(),
+            }
+            let output = command.stdin(std::process::Stdio::null()).output().unwrap();
+            assert!(!output.status.success(), "{setting:?}: {mode}");
+            assert!(output.stdout.is_empty(), "{setting:?}: {mode}");
+            let error = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                error.contains(if setting == Some(unreachable.as_str()) {
+                    "error sending request"
+                } else {
+                    "RESIN_SERVER"
+                }),
+                "{setting:?}: {mode}: {error}"
+            );
+            assert_eq!(fs::read_to_string(&source).unwrap(), text);
+            assert_eq!(fs::read_to_string(&destination).unwrap(), "previous output");
+        }
+    }
+    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
 }
 
 #[test]
@@ -93,7 +149,7 @@ fn destruction_runs_when_native_status_propagates_to_the_entry() {
 }
 
 #[test]
-fn default_output_builds_in_cwd_and_runs() {
+fn default_output_downloads_and_runs_without_a_client_build_directory() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let sources = temp.path().join("sources");
     fs::create_dir(&sources).unwrap();
@@ -108,26 +164,13 @@ fn default_output_builds_in_cwd_and_runs() {
     assert_eq!(output.stdout, b"hello\n");
     assert!(output.stderr.is_empty());
     assert!(!sources.join("build").exists());
-    let executable = artifact(temp.path(), "debug");
-    assert!(
-        executable
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .starts_with("hello world-")
-    );
-    assert_eq!(
-        Command::new(executable).output().unwrap().stdout,
-        b"hello\n"
-    );
+    assert!(!temp.path().join("build").exists());
+    assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 1);
 }
 
 #[test]
 fn cached_programs_track_foreign_headers() {
+    let service = Service::new();
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
     let header = temp.path().join("value header.h");
@@ -136,24 +179,31 @@ fn cached_programs_track_foreign_headers() {
         "export {{ main }}; extern {{ \"{}\": {{ def value() -> int; }} }}; def main() -> int = {{ value() }};",
         header.to_string_lossy().replace('\\', "/")
     )).unwrap();
-    assert_eq!(invoke(temp.path(), &input, &[]).status.code(), Some(41));
-    let executable = artifact(temp.path(), "debug");
-    let modified = fs::metadata(&executable).unwrap().modified().unwrap();
-    assert!(
-        executable
-            .parent()
-            .unwrap()
-            .join(".ninja-work/.ninja_log")
-            .is_file()
-    );
-    assert_eq!(invoke(temp.path(), &input, &[]).status.code(), Some(41));
     assert_eq!(
-        fs::metadata(&executable).unwrap().modified().unwrap(),
-        modified
+        invoke_with(&service, temp.path(), &input, &[])
+            .status
+            .code(),
+        Some(41)
     );
+    let cold = service.server.counters();
+    assert_eq!(
+        invoke_with(&service, temp.path(), &input, &[])
+            .status
+            .code(),
+        Some(41)
+    );
+    assert_eq!(service.server.counters(), cold);
 
     fs::write(header, "static inline int value(void) { return 42; }\n").unwrap();
-    assert_eq!(invoke(temp.path(), &input, &[]).status.code(), Some(42));
+    assert_eq!(
+        invoke_with(&service, temp.path(), &input, &[])
+            .status
+            .code(),
+        Some(42)
+    );
+    let edited = service.server.counters();
+    assert_eq!(edited.hir_builds, cold.hir_builds);
+    assert_eq!(edited.generated_builds, cold.generated_builds + 1);
 }
 
 #[test]
@@ -206,10 +256,8 @@ fn executable_destination_builds_without_running() {
     success(&output);
     assert!(output.stdout.is_empty());
     let executable = temp.path().join(destination);
-    assert_eq!(
-        fs::read(&executable).unwrap(),
-        fs::read(artifact(temp.path(), "release")).unwrap()
-    );
+    assert!(executable.is_file());
+    assert!(!temp.path().join("build").exists());
     let run = Command::new(executable).output().unwrap();
     assert_eq!(run.status.code(), Some(7));
     assert_eq!(run.stdout, b"ran\n");
@@ -233,10 +281,8 @@ fn output_directories_receive_the_source_name() {
             .path()
             .join(destination)
             .join(format!("hello{}", std::env::consts::EXE_SUFFIX));
-        assert_eq!(
-            fs::read(&executable).unwrap(),
-            fs::read(artifact(temp.path(), "release")).unwrap()
-        );
+        assert!(executable.is_file());
+        assert!(!temp.path().join("build").exists());
         let run = Command::new(executable).output().unwrap();
         success(&run);
         assert_eq!(run.stdout, b"hello\n");
@@ -244,7 +290,8 @@ fn output_directories_receive_the_source_name() {
 }
 
 #[test]
-fn sources_with_the_same_name_have_separate_caches() {
+fn sources_with_the_same_name_keep_distinct_cached_results() {
+    let service = Service::new();
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     for folder in ["first", "second"] {
         let directory = temp.path().join(folder);
@@ -255,17 +302,13 @@ fn sources_with_the_same_name_have_separate_caches() {
             format!(r#"export {{ main }}; import {{ "$/string.resin" }}; def main() -> () = {{ print(fmt("{folder}", ())); }};"#),
         )
         .unwrap();
-        let output = invoke(temp.path(), &input, &[]);
+        let output = invoke_with(&service, temp.path(), &input, &[]);
         success(&output);
         assert_eq!(output.stdout, folder.as_bytes());
     }
-    assert_eq!(
-        fs::read_dir(temp.path().join("build"))
-            .unwrap()
-            .filter(|entry| entry.as_ref().unwrap().file_name() != ".artifacts")
-            .count(),
-        2
-    );
+    assert_eq!(service.server.counters().hir_builds, 2);
+    assert_eq!(service.server.counters().generated_builds, 2);
+    assert!(!temp.path().join("build").exists());
 }
 
 #[test]
@@ -439,12 +482,18 @@ fn missing_runtime_preserves_existing_output() {
     let output = temp.path().join("program");
     fs::write(&input, "export { main }; def main () -> int = { 0 };").unwrap();
     fs::write(&output, "keep me").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_resin"))
+    let service = Service::configured(|_, environment| {
+        environment.variables.insert(
+            "RESIN_RUNTIME_LIB".into(),
+            temp.path().join("missing.a").into(),
+        );
+    });
+    let result = service
+        .command()
         .current_dir(temp.path())
         .arg(&input)
         .arg("-o")
         .arg(&output)
-        .env("RESIN_RUNTIME_LIB", temp.path().join("missing.a"))
         .output()
         .unwrap();
     assert!(!result.status.success());
@@ -472,7 +521,9 @@ fn bad_destinations_and_missing_compilers_preserve_files() {
     let input = temp.path().join("input.resin");
     let source = "export { main }; def main () -> int = { 0 };";
     fs::write(&input, source).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_resin"))
+    let service = Service::new();
+    let output = service
+        .command()
         .current_dir(temp.path())
         .arg(&input)
         .args(["-o"])
@@ -486,14 +537,16 @@ fn bad_destinations_and_missing_compilers_preserve_files() {
     let destination = temp.path().join("existing");
     let missing = temp.path().join("missing compiler");
     fs::write(&destination, b"keep me").unwrap();
-    let output = cli(
-        source,
-        &[
-            "-o",
-            destination.to_str().unwrap(),
-            "--cc",
-            missing.to_str().unwrap(),
-        ],
+    let service = Service::configured(|_, environment| {
+        environment
+            .variables
+            .insert("CC".into(), missing.clone().into());
+    });
+    let output = invoke_with(
+        &service,
+        temp.path(),
+        &input,
+        &["-o", destination.to_str().unwrap()],
     );
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("missing compiler"));
@@ -520,10 +573,15 @@ fn invalid_options_and_source_report_errors() {
 
 #[test]
 fn decorated_host_calls_need_no_spirv_opt() {
-    success(&cli(
-        "export { main }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() -> int = { var output = 0_ui; kernel(7_ul, &output); if (output == 7_ui) { 0 } else { 1 } };",
-        &["--spirv-opt", "/does/not/exist/spirv-opt"],
-    ));
+    let service = Service::configured(|_, environment| {
+        environment
+            .variables
+            .insert("SPIRV_OPT".into(), "/does/not/exist/spirv-opt".into());
+    });
+    let temp = TempDir::new().unwrap();
+    let input = temp.path().join("host.resin");
+    fs::write(&input, "export { main }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() -> int = { var output = 0_ui; kernel(7_ul, &output); if (output == 7_ui) { 0 } else { 1 } };").unwrap();
+    success(&invoke_with(&service, temp.path(), &input, &[]));
 }
 
 #[test]
@@ -556,19 +614,23 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
     let destination = temp
         .path()
         .join(format!("program{}", std::env::consts::EXE_SUFFIX));
-    let output = Command::new(env!("CARGO_BIN_EXE_resin"))
+    let service = Service::configured(|_, environment| {
+        environment.variables.insert("SPIRV_OPT".into(), spirv_opt);
+        environment
+            .variables
+            .insert("GLSLC".into(), "/missing/glslc".into());
+    });
+    let output = service
+        .command()
         .current_dir(temp.path())
         .arg(&input)
         .arg("-o")
         .arg(&destination)
-        .arg("--spirv-opt")
-        .arg(spirv_opt)
-        .env("GLSLC", "/missing/glslc")
         .output()
         .unwrap();
     success(&output);
     assert!(output.stdout.is_empty());
-    let executable = artifact(temp.path(), "release");
+    let executable = server_artifact(&service, "release");
     assert_eq!(
         fs::read(&executable).unwrap(),
         fs::read(&destination).unwrap()
@@ -618,25 +680,30 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
 
 #[test]
 fn removed_artifact_switches_and_duplicate_destinations_are_rejected_before_building() {
+    let service = Service::new();
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
     fs::write(&input, "export { main }; def main() = {};").unwrap();
     for args in [
         vec!["--target", "c"],
         vec!["--stage", "compute"],
+        vec!["--cc", "cc"],
+        vec!["--spirv-opt", "spirv-opt"],
         vec!["--output", "first", "-o", "second"],
     ] {
-        let output = invoke(temp.path(), &input, &args);
+        let output = invoke_with(&service, temp.path(), &input, &args);
         assert_eq!(output.status.code(), Some(2));
         assert!(!output.stderr.is_empty());
     }
     assert!(!temp.path().join("first").exists());
     assert!(!temp.path().join("second").exists());
     assert!(!temp.path().join("build").exists());
+    assert_eq!(service.server.counters(), resin_server::Counters::default());
 }
 
 #[test]
 fn process_entries_receive_literal_arguments_in_run_and_compiled_modes() {
+    let service = Service::new();
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("args.resin");
     fs::write(&input, r#"
@@ -654,7 +721,8 @@ fn process_entries_receive_literal_arguments_in_run_and_compiled_modes() {
     "#).unwrap();
     let args = ["hello world", "", "--flag", "semi;$(literal)", "λ"];
     let expected = "[hello world]\n[]\n[--flag]\n[semi;$(literal)]\n[λ]\n";
-    let output = Command::new(env!("CARGO_BIN_EXE_resin"))
+    let output = service
+        .command()
         .current_dir(temp.path())
         .arg(&input)
         .arg("--")
@@ -691,6 +759,7 @@ fn process_entries_receive_literal_arguments_in_run_and_compiled_modes() {
 
 #[test]
 fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
+    let service = Service::new();
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let header = temp.path().join("mutate_environment.h");
     fs::write(
@@ -739,7 +808,8 @@ fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
             ok(if (status == 0 && absent && environment_get(envp, empty.data)?.length == 0_ul
                 && env.length >= 2_ul && ulong(with_sentinel.at(env.length)) == 0_ul) {{ 0 }} else {{ 1 }})
         }};"#)).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_resin"))
+    let output = service
+        .command()
         .current_dir(temp.path())
         .arg(&input)
         .env("RESIN_SNAPSHOT_TEST", "before")
@@ -755,7 +825,10 @@ fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
         "before/before/after\n"
     );
     // Reusing the executable captures this invocation's environment, not build-time values.
-    let output = Command::new(artifact(temp.path(), "debug"))
+    let output = service
+        .command()
+        .current_dir(temp.path())
+        .arg(&input)
         .env("RESIN_SNAPSHOT_TEST", "fresh")
         .env("RESIN_SNAPSHOT_EMPTY", "")
         .env_remove("RESIN_SNAPSHOT_MISSING")
@@ -806,10 +879,12 @@ fn process_entry_signatures_results_and_argument_bounds_are_checked() {
 #[cfg(unix)]
 fn process_arguments_preserve_non_utf8_bytes() {
     use std::os::unix::ffi::OsStringExt;
+    let service = Service::new();
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("bytes.resin");
     fs::write(&input, r#"export { main }; import { "$/string.resin", "$/process.resin" }; def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) = { print(fmt("{0}", (argument(arguments(argc, argv), 1_ul).bytes(),))); };"#).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_resin"))
+    let output = service
+        .command()
         .current_dir(temp.path())
         .arg(input)
         .arg("--")

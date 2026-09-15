@@ -67,9 +67,25 @@ fn resolved_tree_is_sufficient_to_lower_control_flow() {
 #[test]
 fn explicit_header_dependencies_survive_without_foreign_functions() {
     let mut tree = conditional();
-    tree.foreign_headers.insert("empty.h".into());
+    tree.foreign_headers.insert(resin_hir::ForeignHeader {
+        source: resin_source::SourceId::new("native.resin"),
+        spelling: "empty.h".into(),
+    });
     let module = support::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
-    assert_eq!(module.foreign_headers, tree.foreign_headers);
+    assert_eq!(
+        module.foreign_headers.iter().next().unwrap().source,
+        tree.foreign_headers.iter().next().unwrap().source
+    );
+    assert_eq!(
+        module
+            .foreign_headers
+            .iter()
+            .next()
+            .unwrap()
+            .spelling
+            .as_ref(),
+        "empty.h"
+    );
     assert!(
         module
             .functions
@@ -84,7 +100,11 @@ fn explicit_header_dependencies_survive_without_foreign_functions() {
 fn invalid_standalone_header_dependencies_fail_verification() {
     for header in ["", "bad\nheader.h", "bad>header.h", "bad\"header.h"] {
         let module = resin_lir::Module {
-            foreign_headers: [header.into()].into(),
+            foreign_headers: [resin_lir::ForeignHeader {
+                source: resin_source::SourceId::new("native.resin"),
+                spelling: header.into(),
+            }]
+            .into(),
             ..Default::default()
         };
         let error = resin_lir::verify(&module).unwrap_err();
@@ -292,7 +312,10 @@ fn parameter_function(types: &[Type], foreign: bool) -> Function {
                 span,
             },
         },
-        foreign_header: foreign.then(|| "callee.h".into()),
+        foreign_header: foreign.then(|| resin_hir::ForeignHeader {
+            source: resin_source::SourceId::new("native.resin"),
+            spelling: "callee.h".into(),
+        }),
         body: (!foreign).then_some(body),
     }
 }

@@ -29,6 +29,29 @@ define_id! {
     pub struct BlockId(usize);
 }
 
+/// A native header dependency identified by its declaring logical source.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ForeignHeader {
+    pub source: SourceId,
+    pub spelling: Arc<str>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Foreign {
+    pub header: ForeignHeader,
+    pub params: Vec<Ty>,
+}
+
+impl Foreign {
+    pub fn valid(&self, result: &Ty) -> bool {
+        resin_types::Foreign {
+            header: self.header.spelling.clone(),
+            params: self.params.clone(),
+        }
+        .valid(result)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: Option<Arc<str>>,
@@ -280,7 +303,7 @@ pub struct Module {
     /// Functions exported by the entry source file.
     pub entries: BTreeMap<Arc<str>, FunctionId>,
     /// Explicit native dependencies, including header groups with no functions.
-    pub foreign_headers: BTreeSet<Arc<str>>,
+    pub foreign_headers: BTreeSet<ForeignHeader>,
     /// Canonical nominal and structural definitions, indexed by [`TypeId`].
     pub types: TypeTable,
     pub functions: Vec<Function>,
