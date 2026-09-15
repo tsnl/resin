@@ -24,6 +24,21 @@ fn disk_reads_reuse_versions_and_preserve_old_contents_after_edits() {
 }
 
 #[test]
+fn independent_loaders_reconstruct_the_same_file_identity() {
+    let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
+    let path = directory.path().join("main.resin");
+    fs::write(&path, "shared content").unwrap();
+    let first = Loader::new(directory.path().into())
+        .load_file(&path)
+        .unwrap();
+    let second = Loader::new(directory.path().into())
+        .load_file(&path)
+        .unwrap();
+    assert_eq!(first, second);
+    assert_eq!(first.id(), second.id());
+}
+
+#[test]
 fn unsaved_buffers_share_their_identity_with_later_disk_contents() {
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
     let path = directory.path().join("unsaved.resin");
@@ -207,8 +222,16 @@ fn closing_an_unsaved_source_preserves_its_identity_without_serving_cached_text(
 fn named_source_bindings_are_explicit_and_survive_unrelated_disk_reads() {
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut loader = Loader::new(directory.path().into());
-    let first = Source::new("same label", "first root");
-    let second = Source::new("same label", "second root");
+    let first = Source::with_identity(
+        resin_source::SourceId::new("left root"),
+        "same label",
+        "first root",
+    );
+    let second = Source::with_identity(
+        resin_source::SourceId::new("right root"),
+        "same label",
+        "second root",
+    );
     let left = Source::new("module", "left");
     let right = Source::new("module", "right");
     loader.set_import(&first, "module", left.clone()).unwrap();

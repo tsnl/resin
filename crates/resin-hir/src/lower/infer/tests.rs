@@ -32,9 +32,7 @@ fn record(ty: Ty) -> Ty {
 
 #[test]
 fn empty_arrays_need_an_injected_element_type() {
-    let compile = |source: &str| {
-        crate::lower::generate(&resin_ast::build_ast(&resin_cst::build_cst(source, None)).file)
-    };
+    let compile = |source: &str| crate::lower::generate(&crate::lower::test_source(source).file);
     assert_eq!(
         compile("def main() = { []; };").unwrap_err().kind,
         GenerateErrorKind::Type {

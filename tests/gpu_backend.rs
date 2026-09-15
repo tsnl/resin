@@ -1,9 +1,8 @@
 #![cfg(feature = "gpu")]
 use resin_types::prelude::*;
-use tempfile::TempDir;
-#[path = "support/toolchain.rs"]
-mod toolchain;
 use support::pipeline;
+use support::toolchain;
+use tempfile::TempDir;
 
 use resin_runtime::{
     ResinGpu, ResinMemory, ResinStatus, image_read_png, image_write_png, testing::lock_gpu,
@@ -365,7 +364,7 @@ fn fragment_shaders_read_typed_root_parameters() {
     let Some(mut gpu) = gpu() else { return };
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/triangle.resin");
     let mut ast = pipeline::load(&source).unwrap();
-    let file = &mut ast.modules.last_mut().unwrap().file;
+    let file = std::sync::Arc::make_mut(&mut ast.modules.last_mut().unwrap().file);
     // This fixture drives rendering through the native API. Replacing the shader
     // signature also removes the example's now-incompatible rootless host call.
     file.stmts.retain(|stmt| !matches!(&stmt.val, resin_ast::StmtKind::Function { name, .. } if matches!(name.val.as_ref(), "fragment" | "main")));

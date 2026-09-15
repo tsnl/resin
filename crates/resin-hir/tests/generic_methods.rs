@@ -152,13 +152,7 @@ fn undetermined_method_arguments_require_annotations() {
 }
 
 fn source_module(name: &str, text: &str) -> resin_ast::SourceModule {
-    let source = resin_source::Source::new(name, text);
-    let document = resin_cst::build_cst(text, None);
-    resin_ast::SourceModule {
-        source,
-        file: resin_ast::build_ast(&document).file,
-        imports: vec![],
-    }
+    common::source_module(resin_source::Source::new(name, text))
 }
 
 fn rejects_local_and_imported_owner(declaration: &str, use_site: &str, expected: &str) {
@@ -172,7 +166,7 @@ fn rejects_local_and_imported_owner(declaration: &str, use_site: &str, expected:
     entry
         .imports
         .push((resin_source::Span { start: 0, end: 0 }, 0));
-    let analysis = resin_hir::build_hir(&resin_ast::Program {
+    let analysis = common::check(resin_ast::Program {
         modules: vec![library, entry],
     });
     assert!(analysis.module.is_none());

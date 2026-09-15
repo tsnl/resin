@@ -6,10 +6,13 @@ publish = false
 license.workspace = true
 
 [dependencies]
+resin-executor = { workspace = true }
 resin-types = { workspace = true }
 resin-source = { workspace = true }
 resin-lir = { workspace = true }
 rspirv = "0.13"
+tempfile = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3"
+serde_json = "1"
+tokio = { workspace = true }

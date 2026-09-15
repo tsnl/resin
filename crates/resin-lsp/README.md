@@ -1,8 +1,8 @@
 # Resin language server
 
 The `resin --lsp <directory>` mode provides diagnostics, hover, go-to-definition, basic completion, and formatting
-over stdio. It calls `Hir::build` with immutable source versions.
-Semantic editor requests run parsing, resolution, typing, and IR verification; they do not
+over stdio. Its background worker sequences explicit async CST, AST, and HIR passes.
+Semantic editor requests run parsing, resolution, and typing; they do not
 build C/SPIR-V, initialize a GPU, or run the program. Analysis accepts library
 modules without an exported entry function; runtime bindings belong inside
 functions, following the compiler's declarations-only module rules. Functions use
@@ -96,64 +96,35 @@ implemented.
 `resin_source::Source` is immutable named text with a stable logical
 identity. Cloning shares a version; `with_text` creates a new version of the same
 source. Names are diagnostic labels and need not be filesystem paths or unique.
-`Hir::build` receives an entry source, a concrete `resin_source::Loader`, and an
-optional previous result. It resolves the import graph and returns HIR with
-diagnostics and editor queries.
-
-Explicit import bindings also support sources held entirely in memory. This complete
-example changes an imported module while keeping its entry unchanged:
-
-```rust
-use resin_source::prelude::*;
-fn main() {
-    let library = Source::new(
-        "library",
-        "export { answer }; def answer() -> int = { 42 };",
-    );
-    let entry = Source::new(
-        "example",
-        r#"import { "library" }; def main() -> int = { answer() };"#,
-    );
-    let mut loader = resin_source::Loader::new(resin_source::library_root());
-    loader.set_import(&entry, "library", library.clone()).unwrap();
-    let before = resin_hir::Hir::build(entry.clone(), &mut loader, None);
-    assert!(before.hir().is_ok());
-
-    loader.set_import(
-        &entry,
-        "library",
-        library.with_text("export { answer }; def answer() -> int = { missing };"),
-    ).unwrap();
-    let after = resin_hir::Hir::build(entry, &mut loader, Some(&before));
-    assert!(!after.diagnostics().is_empty());
-    assert!(before.hir().is_ok()); // Retained results keep their original sources.
-}
-```
-
-`resin_source::Loader` supplies filesystem loading, canonical path identities,
-relative imports, and `$/` resolution. `load_file` reads disk contents;
-`source_from_text` registers authoritative supplied text for a file's imports, and
-`remove_source` restores disk loading when a buffer closes. Unchanged text reuses its
-source version. The CLI loads its entry through this loader. Codegen and the native
-toolchain use `compilation.verified()` to build an executable from the retained
-result, without reading the source again. Imports starting with `$/` select
-the configured library root: `$/gpu.resin` loads `resin/gpu.resin` by default, and
-libraries in subdirectories use paths such as `$/math/`. A plain `std/` is an ordinary relative
-directory. Other references beginning with `$` report an unknown namespace.
+The worker captures the current import graph with the asynchronous filesystem loader,
+maps files to entry-parent-relative names and `$/` library roles, then supplies an
+immutable `SourceGraph` and parsed files to AST assembly. Per-root maps retain the
+client's actual paths independently of cached compiler origins. `Hir::build`
+consumes that completed `BuiltProgram`; compiler passes never load files.
 
 The language server owns open buffers, document versions, URI/path mappings, and
 frontend revisions. Open/change notifications register supplied text with the loader;
-close notifications remove it. Saves and file-watch notifications schedule another
-analysis. The compiler receives immutable sources and the concrete loader, while
-protocol changes and scheduling remain server operations.
+close notifications restore disk loading. Saves and file-watch notifications schedule
+another analysis. Imports beginning with `$/` select the configured library root;
+other imports resolve relative to their importer.
 
-Each compile call resolves imports before checking its caches. An unchanged graph
-reuses its compilation. Missing files that appear, changed file contents, and
-retargeted import symlinks are observed on the next call without invalidation calls.
-Tree-sitter reparsing is incremental per source; semantic checking reruns the
-changed entry's complete import closure. There is no per-function query engine or
-shared compiler daemon. The CLI builds, runs, and exits once; the server retains a
-compiler in its background worker and discards results from obsolete frontend revisions.
+Every analysis resolves imports again before checking semantic caches, so new files,
+changed dependencies, and retargeted symlinks are observed without invalidation calls.
+The worker shares immutable `Cache<Source, Document>` and
+`Cache<Source, ModuleDocument>` snapshots across all roots, with capacity 4,096 files
+each. Its `Cache<SourceGraph, Hir>` retains up to 64 graph results. Requested values
+survive capacity overflow with a warning; obsolete values can be evicted on later
+updates. Retained editor results preserve their own sources and phase outputs.
+Filesystem acquisition errors are analyzed afresh because their details are request
+state, outside the semantic graph key. The loader still retains cached text and origin
+entries for every path encountered; closing a buffer clears supplied text without
+evicting that entry. Phase-cache capacities do not yet bound total LSP memory.
+
+The worker owns a Tokio runtime and uses bounded `Execution` workers for CPU passes.
+Independent graph analyses share that bound. Superseded revisions and shutdown cancel
+pending work cooperatively; started synchronous parser calls may finish before their
+execution slots are released. Failed or cancelled analyses do not replace the current
+cache snapshots. There is no per-function query engine or compiler daemon.
 
 ## Protocol behavior and limits
 
@@ -180,7 +151,8 @@ compiler in its background worker and discards results from obsolete frontend re
   discovered when a later edit or save schedules analysis.
 - Queued changes are coalesced; obsolete results are discarded. Requests can be
   cancelled while queued. An edit invalidating a queued request returns
-  `ContentModified`; a running compiler pass finishes before the next pass.
+  `ContentModified`; superseded compiler work receives cancellation before the next
+  analysis starts.
 
 ## Validation
 

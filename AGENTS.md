@@ -66,7 +66,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `resin-ast`, `resin-hir`, `resin-lir`, and `resin-codegen`,
   with `resin-source` for immutable sources and loading, and `resin-types` for concrete types. Directory names match Cargo package names;
   keep external processes and build caches in
-  `resin-toolchain`, source identities and import discovery in `resin-source`, and the parser in
+  `resin-toolchain`, source identities and file acquisition in `resin-source`, syntax-only
+  preamble discovery in `resin-cst`, and the parser in
   `tree-sitter-resin`.
   Use `publish = false` and local path dependencies. Keep dependencies acyclic and explicit;
   do not work around a boundary with public implementation modules or reverse dev-dependencies.
@@ -128,14 +129,23 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Code generation consumes verified LIR; the toolchain consumes an on-disk Ninja project
   and explicit build settings. Neither requires mutable compiler caches or rereads Resin sources.
 - Treat `Source` as immutable named text, never implicitly as a file. Clones share a
-  source version; a changed version is a new value. Logical identities are independent
-  of diagnostic names. Loaders interpret imports and return cached instances when
-  unchanged; filesystem paths, standard-library discovery, and editor buffers belong
-  to `resin-source` and applications. `resin_ast::build_program` depends on the concrete
-  `resin_source::Loader`; do not add loader traits or callback adapters without a
-  concrete need. The compiler has no overlays or file notifications.
-  Resolve the import graph on every `compile()` before reusing a result, including when
-  the entry is unchanged. Preserve old sources and compilations for their consumers.
+  source version; changed text is a new value. `SourceId` is reconstructible logical
+  identity. `Source::new` uses its name as identity; use `with_identity` when diagnostic
+  names differ or repeat. Equality checks identity, display name, and exact text after
+  digest comparison; never collapse equal text belonging to distinct modules.
+  Applications acquire sources and resolve imports before every semantic cache lookup,
+  then freeze versions and bindings in a `SourceGraph`. `resin_ast::build_program`
+  receives that graph and completed file ASTs, never a loader. Keep filesystem/library
+  lookup in `resin-source` and application acquisition; compiler passes have no overlays
+  or notifications. Preserve earlier sources and results for their consumers.
+- Primary compiler and native operations are async and take explicit `Execution` and
+  `Cancellation`. Keep `resin-executor` limited to bounded work/cancellation and
+  `resin-cache` to immutable capacity-bounded completed-value snapshots. Applications
+  sequence passes directly; do not add a reusable compiler orchestration wrapper.
+  Execution defaults to available logical CPUs, with a fallback of one. Each native
+  build reserves one slot and invokes Ninja with `-j 1`. Started synchronous foreign
+  calls retain their slot until they finish; queued work observes cancellation.
+  Cancel and drain work on shutdown before releasing its ownership.
 - Prefer small functions with descriptive names, ideally fewer than ten lines of logic.
   Split by a meaningful operation, not an arbitrary line count. Exhaustive language
   dispatch and simple data definitions may be longer when that keeps the cases together.
@@ -219,17 +229,20 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `Environment`, then choose CLI defaults and the build profile explicitly.
   Validate file selections and output destinations in the CLI. Interpreter mode
   owns host compilation from source to executable. `resin_hir::Hir::build`
-  consumes an immutable source and a loader to produce HIR and editor facts. Host and shader
+  consumes an immutable assembled `BuiltProgram` to produce HIR and editor facts. Host and shader
   entries are selected by `resin_lir::build_lir` when generating LIR. The separate
   `resin_codegen::generate` operation takes verified LIR and
-  writes C, unoptimized SPIR-V, and a Ninja
-  dependency graph to disk in one call. Target representations and individual emitters stay private.
+  writes C, unoptimized SPIR-V, and a Ninja dependency graph into a unique owned
+  child of the supplied temporary parent directory in one call. Target representations and individual emitters stay private.
   `resin-toolchain` stages that directory, configures native tools, and invokes Ninja.
   The toolchain owns native command rules. The graph optimizes SPIR-V with `spirv-opt`,
   runs the same Resin binary with `--embed` to write
   aligned byte-array headers, then compiles C. Ninja owns ordering and incremental builds.
   Inspect cached intermediates or immutable `Hir` results; do not add CLI inspection modes.
-  Toolchain APIs consume explicit settings; execution is separate and retains the build-cache lock.
+  Toolchain APIs consume explicit settings. Only staging/building holds the cache lock;
+  retained `BuiltProject` and `Executable` handles share an immutable artifact generation
+  that survives later builds and is removed when its final owner drops. Cancelled native
+  work terminates its process tree before releasing staging ownership.
   Capture the Resin executable with `std::env::current_exe()` rather than resolving it on
   PATH. Do not run a blanket native-tool preflight: report failures when a build needs the
   tool. Document Ninja, a C compiler (`CC`/`--cc`), and `spirv-opt` (`SPIRV_OPT`/`--spirv-opt`) as installation

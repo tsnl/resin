@@ -61,7 +61,7 @@ fn hir_resolves_calls_and_preserves_type_dependent_operations_for_lir() {
     let printed = resin_hir::format_module(&module);
     assert!(printed.contains("Item.read") && printed.contains("(if") && printed.contains("(call"));
     resin_lir::verify(
-        &resin_lir::build_lir(&module, &[], &resin_lir::LoweringOptions::default()).unwrap(),
+        &support::frontend::lower(&module, &[], &resin_lir::LoweringOptions::default()).unwrap(),
     )
     .unwrap();
 }
@@ -86,14 +86,15 @@ fn lir_lowering_needs_only_the_resolved_tree() {
     for function in &mut module.functions {
         function.location = None;
     }
-    let first = resin_lir::build_lir(&module, &[], &resin_lir::LoweringOptions::default()).unwrap();
+    let first =
+        support::frontend::lower(&module, &[], &resin_lir::LoweringOptions::default()).unwrap();
     let second =
-        resin_lir::build_lir(&module, &[], &resin_lir::LoweringOptions::default()).unwrap();
+        support::frontend::lower(&module, &[], &resin_lir::LoweringOptions::default()).unwrap();
     assert_eq!(first, second);
     drop(module);
     let checked = resin_lir::VerifiedModule::new(first).unwrap();
     let directory = tempfile::TempDir::new().unwrap();
-    assert!(resin_codegen::generate(checked.view(), Some("main"), directory.path()).is_ok());
+    assert!(support::frontend::generate(checked.view(), Some("main"), directory.path()).is_ok());
 }
 
 #[test]
@@ -104,14 +105,15 @@ fn generated_files_outlive_lir_and_its_verification_certificate() {
         def main() -> int = { 42 };
     "#);
     let checked = resin_lir::VerifiedModule::new(
-        resin_lir::build_lir(&module, &[], &resin_lir::LoweringOptions::default()).unwrap(),
+        support::frontend::lower(&module, &[], &resin_lir::LoweringOptions::default()).unwrap(),
     )
     .unwrap();
     let host_directory = tempfile::TempDir::new().unwrap();
     let shader_directory = tempfile::TempDir::new().unwrap();
     let host =
-        resin_codegen::generate(checked.view(), Some("main"), host_directory.path()).unwrap();
-    let shaders = resin_codegen::generate(checked.view(), None, shader_directory.path()).unwrap();
+        support::frontend::generate(checked.view(), Some("main"), host_directory.path()).unwrap();
+    let shaders =
+        support::frontend::generate(checked.view(), None, shader_directory.path()).unwrap();
     drop(checked);
     drop(module);
     assert!(
@@ -129,7 +131,7 @@ fn generated_files_outlive_lir_and_its_verification_certificate() {
 #[test]
 fn mutating_lir_discards_the_certificate_and_requires_reverification() {
     let checked = resin_lir::VerifiedModule::new(
-        resin_lir::build_lir(
+        support::frontend::lower(
             &hir("def f() = {}; "),
             &[],
             &resin_lir::LoweringOptions::default(),
@@ -149,7 +151,7 @@ fn a_later_phase_error_preserves_earlier_compilation_products() {
         "export { f }; def f() -> bool = { (1 == 1) + (1 == 1) };",
     );
     let mut loader = resin_source::Loader::new(Default::default());
-    let output = resin_hir::Hir::build(source, &mut loader, None);
+    let output = support::frontend::analyze(source, &mut loader, None);
     assert!(output.program().is_ok());
     assert!(output.hir().is_ok());
     let errors = match support::pipeline::verified_lir(&output, "f", resin_lir::Profile::Host) {
@@ -167,7 +169,7 @@ fn a_later_phase_error_preserves_earlier_compilation_products() {
 fn unsupported_concrete_operations_fail_during_lir_construction() {
     let source = "export { main }; def main() -> int = { var r = { x = 1 }; r + r; 0 };";
     let hir = hir(source);
-    let error = resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
+    let error = support::frontend::lower(&hir, &[], &resin_lir::LoweringOptions::default())
         .unwrap_err()
         .remove(0);
     assert!(matches!(

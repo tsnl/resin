@@ -83,8 +83,11 @@ building executables, and GPU programming. [Zed](editors/zed/README.md) and
 [Helix](editors/helix/README.md) support includes diagnostics, completion,
 navigation, and formatting.
 
-To explore the implementation, start with the [repository tour](TOUR.md) and
-[compiler architecture](doc/architecture.md).
+The compiler phases are reusable async Rust libraries with immutable source graphs,
+completed-result caches, and bounded execution. The CLI and stdio LSP call the phases
+explicitly. Native build outputs retain independent lifetimes across later builds.
+See the [compiler architecture](doc/architecture.md) for APIs and ownership guarantees,
+and the [repository tour](TOUR.md) for the code layout.
 
 ## License
 

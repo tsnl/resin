@@ -21,7 +21,9 @@ impl Environment {
             directory: self.directory.clone(),
             executable: self.executable.clone(),
         };
-        Toolchain { settings }
+        Toolchain {
+            settings: std::sync::Arc::new(settings),
+        }
     }
 
     fn compiler<'a>(

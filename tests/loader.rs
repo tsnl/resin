@@ -1,4 +1,7 @@
-use resin_hir::{Hir, Type};
+#[allow(dead_code)]
+mod support;
+
+use resin_hir::Type;
 use resin_source::Loader;
 use std::fs;
 use tempfile::TempDir;
@@ -27,11 +30,11 @@ fn unchanged_roots_follow_retargeted_import_symlinks_without_notifications() {
             "import { \"alias.resin\" }; def value() -> _ = { answer() };",
         )
         .unwrap();
-    let first = Hir::build(source.clone(), &mut loader, None);
+    let first = support::frontend::analyze(source.clone(), &mut loader, None);
     assert!(first.diagnostics().is_empty(), "{:?}", first.diagnostics());
     fs::remove_file(&alias).unwrap();
     symlink("second.resin", &alias).unwrap();
-    let second = Hir::build(source, &mut loader, Some(&first));
+    let second = support::frontend::analyze(source, &mut loader, Some(&first));
     assert!(
         second.diagnostics().is_empty(),
         "{:?}",
@@ -65,7 +68,7 @@ fn unchanged_roots_retry_missing_transitive_imports_without_notifications() {
             "import { \"middle.resin\" }; def value() -> int = { answer() };",
         )
         .unwrap();
-    let missing = Hir::build(source.clone(), &mut loader, None);
+    let missing = support::frontend::analyze(source.clone(), &mut loader, None);
     assert!(missing.hir().is_err());
     assert!(
         missing
@@ -75,7 +78,7 @@ fn unchanged_roots_retry_missing_transitive_imports_without_notifications() {
     );
     let leaf = directory.path().join("leaf.resin");
     fs::write(&leaf, "export { leaf }; def leaf() -> int = { 42 };").unwrap();
-    let repaired = Hir::build(source.clone(), &mut loader, Some(&missing));
+    let repaired = support::frontend::analyze(source.clone(), &mut loader, Some(&missing));
     assert!(
         repaired.diagnostics().is_empty(),
         "{:?}",
@@ -87,7 +90,7 @@ fn unchanged_roots_retry_missing_transitive_imports_without_notifications() {
     assert_eq!(repaired.sources().count(), 3);
     fs::remove_file(leaf).unwrap();
     assert!(
-        Hir::build(source, &mut loader, Some(&repaired))
+        support::frontend::analyze(source, &mut loader, Some(&repaired))
             .hir()
             .is_err()
     );
@@ -108,7 +111,7 @@ fn custom_library_root_edits_recompile_an_unchanged_entry() {
             "import { \"$/math.resin\" }; def value() -> _ = { answer() };",
         )
         .unwrap();
-    let before = Hir::build(source.clone(), &mut loader, None);
+    let before = support::frontend::analyze(source.clone(), &mut loader, None);
     assert!(
         before.diagnostics().is_empty(),
         "{:?}",
@@ -119,7 +122,7 @@ fn custom_library_root_edits_recompile_an_unchanged_entry() {
         "export { answer }; def answer() -> long = { 42 };",
     )
     .unwrap();
-    let after = Hir::build(source, &mut loader, Some(&before));
+    let after = support::frontend::analyze(source, &mut loader, Some(&before));
     assert!(after.diagnostics().is_empty(), "{:?}", after.diagnostics());
     assert_eq!(before.source(), after.source());
     assert!(!before.same(&after));

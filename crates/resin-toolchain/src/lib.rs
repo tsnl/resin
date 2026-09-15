@@ -1,15 +1,14 @@
-//! Build an on-disk Ninja project with captured tools and a locked native cache.
+//! Build an on-disk Ninja project asynchronously with captured tools and bounded execution.
 //! The included `toolchain.ninja` supplies `optimize_shader`, `embed_shader`, and
 //! `compile_program` rules; generated `build.ninja` files describe their dependencies.
 //! Ninja owns the graph and incremental work. Successful outputs remain available
-//! through `BuiltProject`; executable handles retain its lock during copying or use.
+//! through immutable `BuiltProject` generations, independently of later cache builds.
 
 use std::{
     collections::BTreeMap,
     ffi::{OsStr, OsString},
-    fs, io,
+    io,
     path::{Path, PathBuf},
-    process::Command,
     sync::Arc,
 };
 
@@ -20,9 +19,11 @@ mod platform;
 mod process;
 mod settings;
 
-use files::copy_output;
 use platform::RUNTIME_ARCHIVE;
+use resin_executor::{Cancellation, Execution};
 use settings::Settings;
+use tempfile::TempDir;
+use tokio::process::Command;
 
 #[cfg(not(windows))]
 pub const DEFAULT_C_COMPILER: &str = "cc";
@@ -79,22 +80,64 @@ impl Environment {
     }
 }
 
+/// Optional `native-inputs.json` in a generated Ninja project. Every field defaults
+/// to empty. Declared C projects compile captured `.i` files with the
+/// `compile_preprocessed_program` rule and depend on `native-inputs.state`. Other native graphs can omit it.
+/// The toolchain preprocesses these units with the exact configured C flags and
+/// captured environment, covering transitive/default headers and conditional includes.
+/// Compilation consumes those captured bytes; later header edits affect the next build.
+/// The configured tool installation and linked libraries must stay stable during a build.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NativeInputs {
+    /// Original C files and the captured `.i` files consumed by their Ninja edges.
+    pub translation_units: Vec<CTranslationUnit>,
+    /// Literal language/code-generation arguments used for scanning and compilation.
+    pub c_flags: Vec<String>,
+    /// Include/define arguments used only while capturing preprocessed C.
+    pub preprocessing_flags: Vec<String>,
+    /// Project-relative Ninja targets needed before preprocessing, such as shader headers.
+    pub generated_prerequisites: Vec<PathBuf>,
+}
+
+/// One C input and its project-relative captured output. The paths must differ,
+/// and `preprocessed` must end in `.i` so native compilers consume preprocessed C.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CTranslationUnit {
+    pub source: PathBuf,
+    pub preprocessed: PathBuf,
+}
+
 /// Resolved tools and their immutable execution environment.
+#[derive(Clone)]
 pub struct Toolchain {
-    settings: Settings,
+    settings: Arc<Settings>,
 }
 
 impl Toolchain {
-    /// Stage a complete source directory, build its `build.ninja`, and retain outputs.
-    /// `name` and `entry` identify a stable cache independently of temporary inputs.
-    pub fn build(
+    /// Stage a complete project, run Ninja, and retain an immutable output generation.
+    /// `name` and `entry` select incremental work independently of temporary inputs.
+    /// Each build reserves one execution slot and runs Ninja with one native job.
+    /// Cancelling or dropping the future terminates its process tree; awaited cancellation
+    /// finishes cleanup before returning. Retained artifacts never hold the staging lock.
+    pub async fn build(
         &self,
         project: &Path,
         name: &str,
         entry: &str,
         profile: CProfile,
+        execution: &Execution,
+        cancellation: &Cancellation,
     ) -> Result<BuiltProject, Error> {
-        ninja::build(project, name, entry, profile, &self.settings)
+        let (project, name, entry) = (project.to_path_buf(), name.to_owned(), entry.to_owned());
+        let settings = self.settings.clone();
+        let execution = execution.clone();
+        process::supervise(cancellation, move |cancellation| async move {
+            let _permit = execution.acquire(&cancellation).await?;
+            ninja::build(&project, &name, &entry, profile, &settings, &cancellation).await
+        })
+        .await
     }
 }
 
@@ -104,42 +147,41 @@ pub enum CProfile {
     Release,
 }
 
-/// Successful project files, protected from another build until all handles drop.
-#[derive(Debug)]
+/// Immutable project files. The final project or executable owner removes its generation.
+#[derive(Clone, Debug)]
 pub struct BuiltProject {
-    directory: PathBuf,
-    lock: Arc<fs::File>,
+    directory: Arc<TempDir>,
+    files: Arc<std::collections::BTreeSet<PathBuf>>,
 }
 
 impl BuiltProject {
     pub fn directory(&self) -> &Path {
-        &self.directory
+        self.directory.path()
     }
 
     pub fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
-        self.directory.join(relative)
+        self.directory.path().join(relative)
     }
 
     pub fn executable(&self, relative: impl AsRef<Path>) -> Result<Executable, Error> {
-        let executable = self.path(relative);
-        if !executable.is_file() {
-            return Err(Error(format!(
+        if !self.files.contains(relative.as_ref()) {
+            return Err(Error::new(format!(
                 "built executable not found: {}",
-                executable.display()
+                self.path(relative).display()
             )));
         }
         Ok(Executable {
-            executable,
-            _lock: self.lock.clone(),
+            executable: self.path(relative),
+            _directory: self.directory.clone(),
         })
     }
 }
 
-/// A native executable whose cache lock is retained during copying and execution.
-#[derive(Debug)]
+/// A native executable retaining its immutable artifact generation during use.
+#[derive(Clone, Debug)]
 pub struct Executable {
     executable: PathBuf,
-    _lock: Arc<fs::File>,
+    _directory: Arc<TempDir>,
 }
 
 impl Executable {
@@ -147,30 +189,82 @@ impl Executable {
         &self.executable
     }
 
-    pub fn copy_to(&self, output: &Path) -> Result<(), Error> {
-        copy_output(self.path(), output)
+    /// Copy atomically. Cancellation never leaves a partially copied destination.
+    pub async fn copy_to(
+        &self,
+        output: &Path,
+        execution: &Execution,
+        cancellation: &Cancellation,
+    ) -> Result<(), Error> {
+        let artifact = self.clone();
+        let output = output.to_path_buf();
+        let execution = execution.clone();
+        process::supervise(cancellation, move |cancellation| async move {
+            let _permit = execution.acquire(&cancellation).await?;
+            files::copy_artifact(artifact.path(), &output, &cancellation).await
+        })
+        .await
     }
 
-    pub fn run(&self) -> Result<i32, Error> {
-        self.run_with_args(&[])
+    pub async fn run(
+        &self,
+        execution: &Execution,
+        cancellation: &Cancellation,
+    ) -> Result<i32, Error> {
+        self.run_with_args(&[], execution, cancellation).await
     }
 
     /// Pass literal OS arguments; inherit the caller's execution environment.
-    pub fn run_with_args(&self, args: &[OsString]) -> Result<i32, Error> {
-        Ok(Command::new(self.path())
-            .args(args)
-            .status()?
-            .code()
-            .unwrap_or(1))
+    pub async fn run_with_args(
+        &self,
+        args: &[OsString],
+        execution: &Execution,
+        cancellation: &Cancellation,
+    ) -> Result<i32, Error> {
+        let artifact = self.clone();
+        let args = args.to_vec();
+        let execution = execution.clone();
+        process::supervise(cancellation, move |cancellation| async move {
+            let _permit = execution.acquire(&cancellation).await?;
+            let mut command = Command::new(artifact.path());
+            command.args(args);
+            let status = process::status(command, &cancellation).await?;
+            Ok(status.code().unwrap_or(1))
+        })
+        .await
     }
 }
 
+/// A native operation failed or was cancelled. Cancellation is distinguishable from diagnostics.
 #[derive(Debug)]
-pub struct Error(String);
+pub struct Error {
+    message: String,
+    cancelled: bool,
+}
+
+impl Error {
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+
+    fn new(message: String) -> Self {
+        Self {
+            message,
+            cancelled: false,
+        }
+    }
+
+    fn cancelled() -> Self {
+        Self {
+            message: "native operation cancelled".into(),
+            cancelled: true,
+        }
+    }
+}
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.message)
     }
 }
 
@@ -178,6 +272,16 @@ impl std::error::Error for Error {}
 
 impl From<io::Error> for Error {
     fn from(error: io::Error) -> Self {
-        Self(error.to_string())
+        Self::new(error.to_string())
+    }
+}
+
+impl From<resin_executor::Error> for Error {
+    fn from(error: resin_executor::Error) -> Self {
+        if matches!(error, resin_executor::Error::Cancelled) {
+            Self::cancelled()
+        } else {
+            Self::new(error.to_string())
+        }
     }
 }

@@ -223,13 +223,16 @@ The [verification certificate](../crates/resin-lir/src/lib.rs) is a concrete
 example of an abstraction earning its place:
 
 ```rust
-let checked = resin_lir::VerifiedModule::new(module)?;
-let project = resin_codegen::generate(checked.view(), Some("main"), directory)?;
-let text = std::fs::read_to_string(project.c_source().unwrap())?;
+let checked = resin_lir::VerifiedModule::build(module, &execution, &cancellation).await?;
+let project = resin_codegen::generate(
+    std::sync::Arc::new(checked), Some("main".into()), directory,
+    &execution, &cancellation,
+).await?;
+let text = tokio::fs::read_to_string(project.c_source().unwrap()).await?;
 ```
 
 The wrapper keeps a module with the analysis that certifies it. The caller can
-borrow the certificate for generation; obtaining editable LIR consumes the wrapper
+share the certificate with generation; obtaining editable LIR consumes the wrapper
 and discards the certificate. This prevents a verified flag from surviving an edit
 to the data it describes. Codegen completes its private target trees and writes a
 source project. Callers receive file paths and a Ninja graph; the target trees never
@@ -241,13 +244,14 @@ Replacing its text creates a new version; existing diagnostics keep the old hand
 and their byte spans still describe the original text. The compiler does not need
 a mutable path-to-text table to recover what those locations mean.
 
-`Hir::build(source, loader, previous)` makes the next boundary explicit: AST
-construction uses the concrete `resin_source::Loader` to obtain imports, then HIR
-checking produces editor facts. The loader knows file references, supplied buffers,
-and explicit source bindings. Its operations establish source lookup directly.
-Callers pass a previous `Hir` to reuse unchanged inputs. Codegen takes verified LIR,
-and the independent toolchain builds the generated directory through Ninja. The CLI
-connects these completed results.
+`Hir::build(inputs, execution, cancellation)` accepts a completed AST graph and
+produces HIR and editor facts. Applications use the concrete `resin_source::Loader`
+to obtain imports and assign logical source names before parsing and AST assembly.
+The loader knows file references, supplied buffers, and explicit source bindings;
+compiler passes receive only frozen inputs. Applications reuse results through
+immutable caches keyed by those complete inputs. Codegen takes verified LIR, and the
+independent toolchain builds the generated directory through Ninja. The CLI connects
+these completed results.
 
 Keeping related state together helps explain ownership. `Hir` declares retained
 products beside its queries. A `lib.rs` can be long because related state and code

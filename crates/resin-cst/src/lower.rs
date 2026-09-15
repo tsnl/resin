@@ -6,7 +6,10 @@ pub(super) fn reparse(text: String, previous: Option<&Document>) -> Document {
     let tree = crate::parser()
         .parse(&text, previous_tree.as_ref())
         .expect("parser language is set");
-    Document { text, tree }
+    Document {
+        text: text.into(),
+        tree,
+    }
 }
 
 pub(super) fn recovery(document: &Document) -> Option<Document> {
@@ -18,7 +21,7 @@ pub(super) fn recovery(document: &Document) -> Option<Document> {
     if closers.is_empty() || closers.len() > 64 {
         return None;
     }
-    let mut text = document.text.clone();
+    let mut text = document.text.to_string();
     text.extend(closers.into_iter().rev());
     text.push(';');
     Some(reparse(text, None))

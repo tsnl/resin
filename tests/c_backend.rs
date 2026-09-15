@@ -1,9 +1,8 @@
 use resin_types::prelude::*;
-use tempfile::TempDir;
-#[path = "support/toolchain.rs"]
-mod toolchain;
 use std::fs;
 use support::pipeline;
+use support::toolchain;
+use tempfile::TempDir;
 
 mod support;
 use support::module;
@@ -816,7 +815,7 @@ fn decorated_functions_and_their_helpers_remain_host_callable() {
 fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/particles.resin");
     let mut program = pipeline::load(&path).unwrap();
-    let file = &mut program.modules.last_mut().unwrap().file;
+    let file = std::sync::Arc::make_mut(&mut program.modules.last_mut().unwrap().file);
     file.stmts.retain(|s| !matches!(&s.val, resin_ast::StmtKind::Function { name, .. } if name.val.as_ref() == "main"));
     // Exercise random particle generation, camera math, and the shader bodies on
     // stack-backed storage. GPU initialization stores these same generated values.

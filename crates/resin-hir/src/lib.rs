@@ -19,8 +19,6 @@ mod lower;
 mod print;
 mod snapshot;
 
-pub use snapshot::{Diagnostic, Hir};
-
 use resin_common::define_id;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -449,8 +447,16 @@ pub enum ReceiverConversion {
 
 /// Build HIR from declarations in import order.
 /// Editor facts remain even when a complete tree cannot be produced.
-pub fn build_hir(program: &resin_ast::Program) -> CheckedProgram {
-    lower::analyze_program(program)
+pub async fn build_hir(
+    program: Arc<resin_ast::Program>,
+    execution: &resin_executor::Execution,
+    cancellation: &resin_executor::Cancellation,
+) -> Result<CheckedProgram, resin_executor::Error> {
+    execution
+        .run(cancellation, move |cancellation| {
+            lower::analyze_program(&program, cancellation)
+        })
+        .await?
 }
 
 pub fn format_module(module: &Module) -> String {
@@ -465,6 +471,86 @@ pub fn format_type(ty: &Type, definitions: &[TypeDefinition]) -> String {
 //
 // Editor analysis
 //
+
+#[derive(Debug, Clone)]
+pub struct Diagnostic {
+    pub location: SourceLocation,
+    pub message: String,
+    pub related: Vec<SourceNote>,
+}
+
+/// Completed HIR and editor facts for exact, already-parsed source inputs.
+/// Clones share the inputs and completed semantic data; construction loads no files.
+///
+/// ```compile_fail,E0596
+/// fn edit_completed(hir: &resin_hir::Hir) {
+///     hir.hir().unwrap().functions.clear();
+/// }
+/// ```
+#[derive(Clone)]
+pub struct Hir {
+    inputs: Arc<resin_ast::BuiltProgram>,
+    syntax: Arc<BTreeMap<Source, Arc<resin_cst::Document>>>,
+    diagnostics: Arc<[Diagnostic]>,
+    semantics: Arc<Analysis>,
+    module: Result<Arc<Module>, SourceError>,
+}
+
+impl Hir {
+    /// Analyze a completed AST graph, preserving editor facts even after source errors.
+    pub async fn build(
+        inputs: Arc<resin_ast::BuiltProgram>,
+        execution: &resin_executor::Execution,
+        cancellation: &resin_executor::Cancellation,
+    ) -> Result<Self, resin_executor::Error> {
+        execution
+            .run(cancellation, move |cancellation| {
+                let checked = lower::analyze_program(&inputs.program, cancellation)?;
+                Ok(snapshot::complete(inputs, checked))
+            })
+            .await?
+    }
+
+    pub fn inputs(&self) -> &Arc<resin_ast::BuiltProgram> {
+        &self.inputs
+    }
+    pub fn source(&self) -> &Source {
+        &self.inputs.source
+    }
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+    pub fn sources(&self) -> impl Iterator<Item = &Source> {
+        self.inputs.documents.keys()
+    }
+    pub fn program(&self) -> Result<&resin_ast::Program, SourceError> {
+        match self.inputs.diagnostics.first() {
+            Some(error) => Err(error.clone()),
+            None => Ok(&self.inputs.program),
+        }
+    }
+    pub fn hir(&self) -> Result<&Arc<Module>, SourceError> {
+        self.module.as_ref().map_err(Clone::clone)
+    }
+    pub fn recovered_file(&self, source: &Source) -> Option<&resin_ast::SourceFile> {
+        self.inputs
+            .documents
+            .get(source)
+            .map(|document| document.file.as_ref())
+    }
+    pub fn definition(&self, source: &Source, offset: usize) -> Option<SourceLocation> {
+        self.semantics.definition(&self.syntax, source, offset)
+    }
+    pub fn hover(&self, source: &Source, offset: usize) -> Option<Hover> {
+        self.semantics.hover(&self.syntax, source, offset)
+    }
+    pub fn completions(&self, source: &Source, offset: usize) -> Vec<Completion> {
+        self.semantics.completions(&self.syntax, source, offset)
+    }
+    pub fn same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.semantics, &other.semantics)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DefinitionKind {

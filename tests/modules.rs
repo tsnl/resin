@@ -621,7 +621,7 @@ fn lowering_rejects_runtime_module_items_even_in_constructed_asts() {
         );
         let project = Project::new(&[("main.resin", "")]);
         let mut program = pipeline::load(&project.0.path().join("main.resin")).unwrap();
-        program.modules[0].file = file;
+        program.modules[0].file = std::sync::Arc::new(file);
         assert!(
             pipeline::generate_program(&program)
                 .unwrap_err()
@@ -823,8 +823,8 @@ fn aliases_share_the_nominal_namespace_and_origin() {
         "struct Item {}; type Alias = Item; impl Alias { def f() = {}; }",
         "type Number = int; impl Number { def f() = {}; }",
     ] {
-        let document = resin_cst::build_cst(source, None);
-        assert!(!resin_ast::build_ast(&document).errors.is_empty());
+        let document = support::frontend::cst(source, None);
+        assert!(!support::frontend::ast(&document).errors.is_empty());
     }
 }
 

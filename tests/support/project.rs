@@ -16,7 +16,8 @@ impl Project {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let directory = TempDir::new_in(std::env::temp_dir())?;
         let checked = resin_lir::VerifiedModule::new(module.clone())?;
-        let generated = resin_codegen::generate(checked.view(), entry, directory.path())?;
+        let generated =
+            crate::support::frontend::generate(checked.view(), entry, directory.path())?;
         Ok(Self {
             generated,
             directory,
@@ -50,7 +51,8 @@ impl Project {
         for shader in self.generated.shaders() {
             shaders::validate(shader.unoptimized_spirv());
         }
-        let built = tools.build(
+        let built = crate::support::frontend::build(
+            tools,
             self.generated.directory(),
             self.generated.name(),
             self.generated.entry().unwrap_or("shaders"),

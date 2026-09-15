@@ -9,6 +9,10 @@ repository = "https://github.com/tsnl/resin"
 
 [dependencies]
 resin-source = { workspace = true }
+resin-ast = { workspace = true }
+resin-cache = { workspace = true }
+resin-executor = { workspace = true }
+tokio = { workspace = true }
 resin-hir = { workspace = true }
 resin-cst = { workspace = true }
 lsp-server = "0.7.9"

@@ -1,8 +1,7 @@
 use resin_source::prelude::*;
 use resin_types::prelude::*;
-#[path = "support/toolchain.rs"]
-mod toolchain;
 use support::pipeline;
+use support::toolchain;
 
 use support::shaders::{self, instructions};
 mod support;
@@ -440,7 +439,7 @@ fn imported_backend_errors_retain_expression_origins() {
     loader
         .set_import(&entry, "helper.resin", helper.clone())
         .unwrap();
-    let output = resin_hir::Hir::build(entry, &mut loader, None);
+    let output = support::frontend::analyze(entry, &mut loader, None);
     let m = support::pipeline::verified_lir(&output, "kernel", resin_lir::Profile::Shader)
         .unwrap()
         .into_module();

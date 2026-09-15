@@ -4,8 +4,7 @@ use std::fs;
 
 use support::shaders;
 mod support;
-#[path = "support/toolchain.rs"]
-mod toolchain;
+use support::toolchain;
 
 #[repr(C)]
 struct Root {

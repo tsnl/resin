@@ -2,8 +2,23 @@
 use resin_lir::{BasicBlock, BlockId, Function, Instr, Local, Module, Terminator, VerifiedModule};
 use resin_source::prelude::*;
 use resin_types::prelude::*;
-use std::fs;
+use std::{fs, path::Path, sync::Arc};
 use tempfile::TempDir;
+
+async fn generate(
+    checked: &Arc<VerifiedModule>,
+    entry: Option<&str>,
+    parent: &Path,
+) -> Result<resin_codegen::GeneratedProject, resin_codegen::GenerationError> {
+    resin_codegen::generate(
+        checked.clone(),
+        entry.map(str::to_owned),
+        parent,
+        &resin_executor::Execution::default(),
+        &resin_executor::Cancellation::new(),
+    )
+    .await
+}
 
 fn constant_function(parameters: Vec<Ty>, result: Ty, value: Value) -> Function {
     Function {
@@ -56,8 +71,8 @@ fn embedded_module() -> Module {
     module
 }
 
-#[test]
-fn declared_headers_are_emitted_without_foreign_function_references() {
+#[tokio::test]
+async fn declared_headers_are_emitted_without_foreign_function_references() {
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut module = module();
     module.foreign_headers.insert("standalone/header.h".into());
@@ -67,8 +82,10 @@ fn declared_headers_are_emitted_without_foreign_function_references() {
             .iter()
             .all(|function| function.foreign.is_none())
     );
-    let checked = VerifiedModule::new(module).unwrap();
-    let project = resin_codegen::generate(checked.view(), Some("main"), directory.path()).unwrap();
+    let checked = Arc::new(VerifiedModule::new(module).unwrap());
+    let project = generate(&checked, Some("main"), directory.path())
+        .await
+        .unwrap();
     let source = fs::read_to_string(project.c_source().unwrap()).unwrap();
     assert!(
         source.contains("#include <standalone/header.h>"),
@@ -76,8 +93,8 @@ fn declared_headers_are_emitted_without_foreign_function_references() {
     );
 }
 
-#[test]
-fn generated_project_outlives_its_verified_input_and_retains_opaque_names() {
+#[tokio::test]
+async fn generated_project_outlives_its_verified_input_and_retains_opaque_names() {
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
     let project = {
         let mut module = embedded_module();
@@ -88,10 +105,12 @@ fn generated_project_outlives_its_verified_input_and_retains_opaque_names() {
                 span: Span { start: 0, end: 4 },
             },
         );
-        let checked = VerifiedModule::new(module).unwrap();
-        resin_codegen::generate(checked.view(), Some("main"), directory.path()).unwrap()
+        let checked = Arc::new(VerifiedModule::new(module).unwrap());
+        generate(&checked, Some("main"), directory.path())
+            .await
+            .unwrap()
     };
-    assert_eq!(project.directory(), directory.path());
+    assert_eq!(project.directory().parent(), Some(directory.path()));
     assert_eq!(project.name(), "editor://buffer/λ");
     assert_eq!(project.entry(), Some("main"));
     let source = fs::read_to_string(project.c_source().unwrap()).unwrap();
@@ -108,13 +127,14 @@ fn generated_project_outlives_its_verified_input_and_retains_opaque_names() {
         &[3, 2, 35, 7]
     );
     assert!(project.build_file().is_file());
+    assert!(!project.directory().join("main.i").exists());
     for output in [shader.spirv(), shader.header(), project.program().unwrap()] {
         assert!(!output.exists(), "generation must not invoke native tools");
     }
 }
 
-#[test]
-fn shader_only_generation_batches_declared_functions_without_a_host_entry() {
+#[tokio::test]
+async fn shader_only_generation_batches_declared_functions_without_a_host_entry() {
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut module = module();
     module.entries.clear();
@@ -123,12 +143,18 @@ fn shader_only_generation_batches_declared_functions_without_a_host_entry() {
         FunctionId::from_index(2),
         module.shaders[&FunctionId::from_index(1)].clone(),
     );
-    let checked = VerifiedModule::new(module).unwrap();
-    let project = resin_codegen::generate(checked.view(), None, directory.path()).unwrap();
+    let checked = Arc::new(VerifiedModule::new(module).unwrap());
+    let project = generate(&checked, None, directory.path()).await.unwrap();
     assert!(project.c_source().is_none());
     assert!(project.program().is_none());
     assert!(project.entry().is_none());
     assert_eq!(project.name(), "shaders");
+    assert!(!project.directory().join("native-inputs.json").exists());
+    assert!(
+        !fs::read_to_string(project.build_file())
+            .unwrap()
+            .contains("native-inputs.state")
+    );
     assert_eq!(project.shaders().len(), 2);
     let first = &project.shaders()[0];
     let second = &project.shaders()[1];
@@ -142,30 +168,35 @@ fn shader_only_generation_batches_declared_functions_without_a_host_entry() {
     }
 }
 
-#[test]
-fn host_generation_does_not_emit_shader_instances() {
+#[tokio::test]
+async fn host_generation_does_not_emit_shader_instances() {
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
-    let checked = VerifiedModule::new(module()).unwrap();
-    let project = resin_codegen::generate(checked.view(), Some("main"), directory.path()).unwrap();
+    let checked = Arc::new(VerifiedModule::new(module()).unwrap());
+    let project = generate(&checked, Some("main"), directory.path())
+        .await
+        .unwrap();
     assert!(project.shaders().is_empty());
     assert!(
         !fs::read_to_string(project.c_source().unwrap())
             .unwrap()
             .contains("r_fn1(")
     );
-    let shader_directory = directory.path().join("shaders");
-    assert!(resin_codegen::generate(checked.view(), None, &shader_directory).is_ok());
+    let shaders = generate(&checked, None, directory.path()).await.unwrap();
+    assert_ne!(shaders.directory(), project.directory());
 }
 
-#[test]
-fn lowering_failure_leaves_existing_outputs_untouched() {
+#[tokio::test]
+async fn lowering_failure_leaves_existing_outputs_untouched() {
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
-    let checked = VerifiedModule::new(embedded_module()).unwrap();
-    let project = resin_codegen::generate(checked.view(), Some("main"), directory.path()).unwrap();
+    let checked = Arc::new(VerifiedModule::new(embedded_module()).unwrap());
+    let project = generate(&checked, Some("main"), directory.path())
+        .await
+        .unwrap();
     let before_c = fs::read(project.c_source().unwrap()).unwrap();
     let before_spirv = fs::read(project.shaders()[0].unoptimized_spirv()).unwrap();
-    let error =
-        resin_codegen::generate(checked.view(), Some("missing"), directory.path()).unwrap_err();
+    let error = generate(&checked, Some("missing"), directory.path())
+        .await
+        .unwrap_err();
     assert!(error.to_string().contains("not exported"));
     let mut bad = embedded_module();
     // The language permits pointers, but this backend representation cannot store a
@@ -193,45 +224,138 @@ fn lowering_failure_leaves_existing_outputs_untouched() {
             },
         ],
     );
-    let checked = VerifiedModule::new(bad).unwrap();
-    let error =
-        resin_codegen::generate(checked.view(), Some("main"), directory.path()).unwrap_err();
+    let checked = Arc::new(VerifiedModule::new(bad).unwrap());
+    let error = generate(&checked, Some("main"), directory.path())
+        .await
+        .unwrap_err();
     assert!(error.to_string().contains("shader-local addresses"));
     assert_eq!(fs::read(project.c_source().unwrap()).unwrap(), before_c);
     assert_eq!(
         fs::read(project.shaders()[0].unoptimized_spirv()).unwrap(),
         before_spirv
     );
+    assert_eq!(
+        fs::read_dir(directory.path()).unwrap().count(),
+        1,
+        "failed generations must leave no child directory"
+    );
 }
 
-#[test]
-fn build_graph_orders_shader_optimization_embedding_and_c_compilation() {
+#[tokio::test]
+async fn build_graph_orders_shader_optimization_embedding_and_c_compilation() {
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
-    let checked = VerifiedModule::new(embedded_module()).unwrap();
-    let project = resin_codegen::generate(checked.view(), Some("main"), directory.path()).unwrap();
+    let checked = Arc::new(VerifiedModule::new(embedded_module()).unwrap());
+    let project = generate(&checked, Some("main"), directory.path())
+        .await
+        .unwrap();
     let graph = fs::read_to_string(project.build_file()).unwrap();
     assert!(graph.contains("include toolchain.ninja"));
     assert!(
         graph.contains("shader_1.spv: optimize_shader shader_1.unoptimized.spv | toolchain.state")
     );
     assert!(graph.contains("shader_1.h: embed_shader shader_1.spv | toolchain.state"));
-    assert!(graph.contains("compile_program main.c | toolchain.state $runtime_library shader_1.h"));
+    assert!(graph.contains(
+        "compile_preprocessed_program main.i | toolchain.state $runtime_library native-inputs.state shader_1.h"
+    ));
+    let inputs: serde_json::Value =
+        serde_json::from_slice(&fs::read(project.directory().join("native-inputs.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        inputs,
+        serde_json::json!({
+            "translation_units": [{ "source": "main.c", "preprocessed": "main.i" }],
+            "c_flags": [],
+            "preprocessing_flags": [],
+            "generated_prerequisites": ["shader_1.h"],
+        })
+    );
     assert!(
         !graph.contains("command ="),
         "native commands belong to the toolchain"
     );
 }
 
-#[test]
-fn code_generation_cannot_select_an_absent_entry_or_profile() {
+#[tokio::test]
+async fn code_generation_cannot_select_an_absent_entry_or_profile() {
     let mut module = module();
     module.shaders.clear();
     module.functions.truncate(1);
-    let checked = VerifiedModule::new(module).unwrap();
+    let checked = Arc::new(VerifiedModule::new(module).unwrap());
     let parent = TempDir::new().unwrap();
     for entry in [None, Some("missing")] {
-        let directory = parent.path().join("unrequested");
-        assert!(resin_codegen::generate(checked.view(), entry, &directory).is_err());
-        assert!(!directory.exists());
+        assert!(generate(&checked, entry, parent.path()).await.is_err());
+        assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0);
     }
+}
+
+#[tokio::test]
+async fn parallel_generations_and_retained_clones_own_independent_files() {
+    fn send_and_sync<T: Send + Sync>() {}
+    send_and_sync::<VerifiedModule>();
+    send_and_sync::<resin_codegen::GeneratedProject>();
+
+    let parent = TempDir::new().unwrap();
+    let checked = Arc::new(VerifiedModule::new(embedded_module()).unwrap());
+    let execution = resin_executor::Execution::new(2.try_into().unwrap());
+    let cancellation = resin_executor::Cancellation::new();
+    let build = || {
+        resin_codegen::generate(
+            checked.clone(),
+            Some("main".into()),
+            parent.path(),
+            &execution,
+            &cancellation,
+        )
+    };
+    let (first, second) = tokio::join!(build(), build());
+    let first = first.unwrap();
+    let second = second.unwrap();
+    let first_directory = first.directory().to_path_buf();
+    let second_directory = second.directory().to_path_buf();
+    assert_ne!(first_directory, second_directory);
+    let original_c = fs::read(first.c_source().unwrap()).unwrap();
+    assert_eq!(original_c, fs::read(second.c_source().unwrap()).unwrap());
+    assert_eq!(
+        fs::read(first.build_file()).unwrap(),
+        fs::read(second.build_file()).unwrap()
+    );
+
+    let retained = first.clone();
+    drop(first);
+    drop(second);
+    assert!(!second_directory.exists());
+    let next = build().await.unwrap();
+    assert_eq!(fs::read(retained.c_source().unwrap()).unwrap(), original_c);
+    assert!(retained.shaders()[0].unoptimized_spirv().is_file());
+    drop(retained);
+    assert!(!first_directory.exists());
+    assert!(next.build_file().is_file());
+}
+
+#[tokio::test]
+async fn cancellation_while_queued_creates_no_generation_directory() {
+    use std::{future::Future, task::Poll};
+    let parent = TempDir::new().unwrap();
+    let execution = resin_executor::Execution::new(1.try_into().unwrap());
+    let cancellation = resin_executor::Cancellation::new();
+    let permit = execution.acquire(&cancellation).await.unwrap();
+    let mut future = Box::pin(resin_codegen::generate(
+        Arc::new(VerifiedModule::new(module()).unwrap()),
+        Some("main".into()),
+        parent.path(),
+        &execution,
+        &cancellation,
+    ));
+    let pending = std::future::poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx))).await;
+    assert!(pending.is_pending());
+    cancellation.cancel();
+    assert!(matches!(
+        future.await,
+        Err(resin_codegen::GenerationError::Execution {
+            error: resin_executor::Error::Cancelled
+        })
+    ));
+    drop(permit);
+    execution.wait_idle().await;
+    assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0);
 }
