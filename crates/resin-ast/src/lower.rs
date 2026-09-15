@@ -21,11 +21,6 @@ pub fn document(source: &resin_cst::Document) -> Parsed {
     Parsed { file, errors }
 }
 
-/// Lower a complete concrete syntax document, rejecting missing or malformed syntax.
-pub fn generate(source: &resin_cst::Document) -> Result<SourceFile, AstError> {
-    AstGen::new(source.source()).gen_source_file(source.tree().root_node())
-}
-
 pub(crate) struct AstGen<'a> {
     src: &'a str,
     source_len: usize,
@@ -86,6 +81,7 @@ impl<'a> AstGen<'a> {
     }
 
     /// Strict callers validate the same AST construction used by the compiler.
+    #[cfg(test)]
     pub fn gen_source_file(&self, node: Node) -> Result<SourceFile, AstError> {
         if let Some(error) = self.errors(node).into_iter().next() {
             return Err(error);

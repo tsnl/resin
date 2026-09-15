@@ -189,8 +189,8 @@ the project dependency edges. Shader stages come from decorators. To inspect int
 running the program, build with `-o PATH` and inspect
 `build/<source-name>-<name-and-entry-hash>/release/`: `main.c`, `build.ninja`, and
 `shader_<function-id>.unoptimized.spv` / `.spv` / `.h`. Use `spirv-dis` to inspect a shader
-as SPIR-V assembly. Frontend inspection is available through
-`resin_frontend::Frontend::build_hir` and the retained `FrontendOutput` result's AST, HIR,
+as SPIR-V assembly. Compiler inspection is available through
+`resin_hir::Hir::build` and the retained result's AST, HIR,
 and editor queries.
 
 Each source name and entry has a stable directory with separate debug and release
@@ -224,12 +224,12 @@ Build the unified executable with `nix-shell --run 'cargo build -p resin'`.
 The [language server library](../crates/resin-lsp/README.md) ships inside that executable,
 so editor services and program compilation use the same compiler version.
 
-Both the CLI and LSP use `resin_frontend::Frontend`. It analyzes immutable named
-`Source` values supplied by a loader and returns retained `FrontendOutput` results.
-`resin-source` handles filesystem and standard-library imports; the LSP supplies
-its current editor buffers through its own loader. Each compile resolves imports
-before reusing cached work. Executable building is a separate operation. The root Cargo manifest is both the `resin` CLI package and
-the workspace; reusable libraries live under `crates/`.
+Both the CLI and LSP use `Hir::build`. It consumes immutable named `Source` values
+supplied by a loader and returns HIR and editor facts. `resin-source` handles
+filesystem and standard-library imports; the LSP supplies its current editor buffers
+through its own loader. Each build resolves imports before reusing previous work.
+Executable building is a separate operation. The root Cargo manifest is both the
+`resin` CLI package and the workspace; reusable libraries live under `crates/`.
 
 ## Formatting
 

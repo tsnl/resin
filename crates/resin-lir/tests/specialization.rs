@@ -102,7 +102,7 @@ fn options(limit: usize) -> LoweringOptions {
 #[test]
 fn instances_are_memoized_and_the_exact_allowance_is_admitted() {
     let hir = program(vec![Type::Int32, Type::Bool, Type::Int32, Type::Bool]);
-    let lir = resin_lir::build_lir_all_with_options(&hir, &options(2)).unwrap();
+    let lir = resin_lir::build_lir(&hir, &[], &options(2)).unwrap();
     resin_lir::verify(&lir).unwrap();
     assert_eq!(hir.functions.len(), 2);
     assert_eq!(lir.functions.len(), 3);
@@ -117,7 +117,7 @@ fn instances_are_memoized_and_the_exact_allowance_is_admitted() {
         })
         .collect();
     assert_eq!(calls, [1, 2, 1, 2]);
-    let error = resin_lir::build_lir_all_with_options(&hir, &options(1))
+    let error = resin_lir::build_lir(&hir, &[], &options(1))
         .unwrap_err()
         .remove(0);
     assert_eq!(
@@ -141,7 +141,7 @@ fn substitution_normalizes_unions_before_memoization() {
         },
         Type::Int32,
     ]);
-    let lir = resin_lir::build_lir_all_with_options(&hir, &options(1)).unwrap();
+    let lir = resin_lir::build_lir(&hir, &[], &options(1)).unwrap();
     assert_eq!(lir.functions.len(), 2);
 }
 
@@ -154,7 +154,7 @@ fn growing_recursive_requests_fail_with_a_bounded_application_trace() {
             pointee: Box::new(Type::Parameter { parameter: T }),
         },
     )]));
-    let errors = resin_lir::build_lir_all_with_options(&hir, &options(40)).unwrap_err();
+    let errors = resin_lir::build_lir(&hir, &[], &options(40)).unwrap_err();
     assert_eq!(errors.len(), 1);
     let error = &errors[0];
     assert!(matches!(
@@ -175,7 +175,7 @@ fn growing_recursive_requests_fail_with_a_bounded_application_trace() {
 fn recursive_requests_reuse_pending_identities() {
     let mut hir = program(vec![Type::Int32]);
     hir.functions[0].body = Some(block([reference(0, Type::Parameter { parameter: T })]));
-    let lir = resin_lir::build_lir_all_with_options(&hir, &options(1)).unwrap();
+    let lir = resin_lir::build_lir(&hir, &[], &options(1)).unwrap();
     resin_lir::verify(&lir).unwrap();
     assert_eq!(lir.functions.len(), 2);
     assert!(
@@ -226,7 +226,7 @@ fn identity_signatures_and_bodies_are_concrete_without_changing_hir() {
         functions: vec![identity, function("main", block([reference]))],
         ..Default::default()
     };
-    let lir = resin_lir::build_lir_all(&hir).unwrap();
+    let lir = resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default()).unwrap();
     resin_lir::verify(&lir).unwrap();
     assert_eq!(lir.functions[1].locals[0].ty, Ty::Int32);
     assert_eq!(lir.functions[1].result, Ty::Int32);
@@ -269,7 +269,13 @@ fn unused_families_do_not_constrain_supported_concrete_operations() {
         functions: vec![add, function("main", unit())],
         ..Default::default()
     };
-    assert_eq!(resin_lir::build_lir_all(&hir).unwrap().functions.len(), 1);
+    assert_eq!(
+        resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
+            .unwrap()
+            .functions
+            .len(),
+        1
+    );
     hir.functions[1].body = Some(block([term(
         Type::Function {
             params: vec![Type::Bool],
@@ -280,7 +286,9 @@ fn unused_families_do_not_constrain_supported_concrete_operations() {
             type_args: vec![Type::Bool],
         },
     )]));
-    let error = resin_lir::build_lir_all(&hir).unwrap_err();
+    let error = resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
+        .unwrap_err()
+        .remove(0);
     assert!(matches!(error.kind, ErrorKind::Type { .. }));
     assert_eq!(error.applications[0].function.as_ref(), "add");
 }
@@ -312,7 +320,7 @@ fn implicit_drop_references_use_concrete_function_identities() {
         }),
     });
     hir.functions.push(drop);
-    let lir = resin_lir::build_lir_all(&hir).unwrap();
+    let lir = resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default()).unwrap();
     resin_lir::verify(&lir).unwrap();
     assert_eq!(lir.types[0].drop_hook(), Some(FunctionId::from_index(1)));
 }
@@ -326,7 +334,9 @@ fn type_expansion_has_a_separate_guard_from_the_function_allowance() {
             pointee: Box::new(Type::Parameter { parameter: T }),
         },
     )]));
-    let error = resin_lir::build_lir_all(&hir).unwrap_err();
+    let error = resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
+        .unwrap_err()
+        .remove(0);
     assert!(matches!(error.kind, ErrorKind::TypeExpansionLimit { .. }));
 }
 
@@ -343,7 +353,9 @@ fn exponentially_growing_arguments_hit_the_type_size_guard() {
             fields: vec![field("left"), field("right")],
         },
     )]));
-    let error = resin_lir::build_lir_all(&hir).unwrap_err();
+    let error = resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
+        .unwrap_err()
+        .remove(0);
     assert!(matches!(error.kind, ErrorKind::TypeSizeLimit { .. }));
 }
 
@@ -358,7 +370,7 @@ fn failed_requests_are_memoized_without_publishing_an_incomplete_module() {
             value: Constant::Unit,
         },
     ));
-    let errors = resin_lir::build_lir_all_with_options(&hir, &options(1)).unwrap_err();
+    let errors = resin_lir::build_lir(&hir, &[], &options(1)).unwrap_err();
     assert_eq!(errors.len(), 1);
     assert!(matches!(errors[0].kind, ErrorKind::InvalidHir { .. }));
 }
@@ -415,7 +427,7 @@ fn requested_roots_exclude_unused_functions_types_and_drop_hooks() {
     assert_eq!(lir.functions.len(), 2);
     assert!(lir.types.is_empty());
     assert!(
-        resin_lir::build_lir_all(&hir).is_err(),
+        resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default()).is_err(),
         "whole-module construction still requests all declarations"
     );
 }
@@ -1126,7 +1138,7 @@ fn determining_member_types_normalize_before_instance_memoization() {
         name: "value".into(),
     };
     let hir = program(vec![member, Type::Int32]);
-    let lir = resin_lir::build_lir_all_with_options(&hir, &options(1)).unwrap();
+    let lir = resin_lir::build_lir(&hir, &[], &options(1)).unwrap();
     assert_eq!(lir.functions.len(), 2);
 }
 

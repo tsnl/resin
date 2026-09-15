@@ -1,6 +1,6 @@
 //! Host program compilation for interpreter mode.
 use super::{Result, request::Request};
-use resin_frontend::{FrontendOutput, Target};
+use resin_hir::Hir;
 use std::ffi::OsString;
 
 pub(super) fn run(request: &Request, args: &[OsString]) -> Result<i32> {
@@ -22,25 +22,37 @@ impl Interpreter {
         Self::build(&project, request)
     }
 
-    fn lower(request: &Request) -> Result<std::sync::Arc<FrontendOutput>> {
+    fn lower(request: &Request) -> Result<Hir> {
         let mut loader = resin_source::Loader::new(request.library_root.clone());
         let source = loader.load_file(&request.input.path)?;
-        Ok(resin_frontend::Frontend::new().build_hir(source, &mut loader))
+        Ok(Hir::build(source, &mut loader, None))
     }
 
-    fn generate(
-        output: &FrontendOutput,
-        request: &Request,
-    ) -> Result<resin_codegen::GeneratedProject> {
+    fn generate(output: &Hir, request: &Request) -> Result<resin_codegen::GeneratedProject> {
         let directory = request
             .options
             .tools
             .generated(output.source().name(), &request.input.entry);
-        let lir = output
-            .build_lir(&[Target::Host {
-                entry: request.input.entry.clone().into(),
-            }])
-            .map_err(build_lir_error)?;
+        let hir = output.hir().map_err(|error| build_lir_error(vec![error]))?;
+        let entry =
+            resin_lir::Entry::exported(hir, request.input.entry.clone(), resin_lir::Profile::Host)
+                .map_err(|error| build_lir_error(vec![source_error(output, error)]))?;
+        let lir = resin_lir::build_lir(hir, &[entry], &resin_lir::LoweringOptions::default())
+            .map_err(|errors| {
+                build_lir_error(
+                    errors
+                        .into_iter()
+                        .map(|error| source_error(output, error))
+                        .collect(),
+                )
+            })?;
+        let lir = resin_lir::VerifiedModule::new(lir).map_err(|error| {
+            build_lir_error(vec![resin_source::SourceError::new(
+                output.source().clone(),
+                None,
+                format!("invalid LIR: {error}"),
+            )])
+        })?;
         Ok(resin_codegen::generate(
             lir.view(),
             Some(&request.input.entry),
@@ -77,4 +89,12 @@ fn build_lir_error(
         .collect::<Vec<_>>()
         .join("\n")
         .into()
+}
+
+fn source_error(output: &Hir, error: resin_lir::Error) -> resin_source::SourceError {
+    let source = error
+        .source
+        .clone()
+        .unwrap_or_else(|| output.source().clone());
+    resin_source::SourceError::new(source, Some(error.span), error.to_string())
 }

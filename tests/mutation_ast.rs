@@ -2,8 +2,9 @@ use resin_ast::{SourceFile, StmtKind, Term, TermKind, format_source};
 use resin_source::prelude::*;
 
 fn parse(src: &str) -> SourceFile {
-    resin_ast::build_ast(&resin_cst::Document::build(src.to_string(), None))
-        .unwrap_or_else(|err| panic!("{err}"))
+    let parsed = resin_ast::build_ast(&resin_cst::build_cst(src, None));
+    assert!(parsed.errors.is_empty(), "{src}\n{:?}", parsed.errors);
+    parsed.file
 }
 
 fn expect_var(term: &Term, expected: &str) {

@@ -10,7 +10,7 @@ fn module(name: &str, text: &str) -> SourceModule {
 }
 
 fn source_module(source: Source) -> SourceModule {
-    let file = resin_ast::build_ast(&Document::build(source.text().into(), None)).unwrap();
+    let file = resin_ast::build_ast(&resin_cst::build_cst(source.text(), None)).file;
     SourceModule {
         source,
         file,
@@ -26,10 +26,10 @@ fn malformed_dependency_order_returns_diagnostics() {
         let program = Program {
             modules: vec![entry],
         };
-        let analysis = resin_hir::build_hir_program_checked(&program);
+        let analysis = resin_hir::build_hir(&program);
         assert!(analysis.module.is_none());
         assert_eq!(analysis.diagnostics.len(), 1);
-        assert!(resin_hir::build_hir_program(&program).is_err());
+        assert!(resin_hir::build_hir(&program).into_module().is_err());
     }
 }
 
@@ -39,7 +39,7 @@ fn checking_a_standalone_file_rejects_unresolved_imports() {
         "entry.resin",
         r#"import { "library.resin" }; def main() = {};"#,
     );
-    assert!(resin_hir::build_hir(&entry.file).is_err());
+    assert!(resin_hir::generate(&entry.file).is_err());
 }
 
 #[test]
@@ -53,9 +53,10 @@ fn resolved_program_infers_through_an_import_and_exposes_only_root_exports() {
         "export { main }; def main() -> _ = { narrow(42) };",
     );
     entry.imports.push((Span { start: 0, end: 0 }, 0));
-    let module = resin_hir::build_hir_program(&Program {
+    let module = resin_hir::build_hir(&Program {
         modules: vec![library, entry],
     })
+    .into_module()
     .unwrap();
     let main = &module.functions[module.entries["main"].index()];
     assert_eq!(main.signature.result.ty, Type::Int32);
@@ -67,7 +68,7 @@ fn syntax(sources: &[Source]) -> BTreeMap<Source, Arc<Document>> {
     sources
         .iter()
         .map(|source| {
-            let document = Document::build(source.text().into(), None);
+            let document = resin_cst::build_cst(source.text(), None);
             (source.clone(), Arc::new(document))
         })
         .collect()
@@ -83,7 +84,7 @@ fn analysis_keeps_editor_queries_after_an_unrelated_type_error() {
     let program = Program {
         modules: vec![entry],
     };
-    let analysis = resin_hir::build_hir_program_checked(&program);
+    let analysis = resin_hir::build_hir(&program);
     assert!(analysis.module.is_none());
     assert!(!analysis.diagnostics.is_empty());
     let offset = source.rfind("value").unwrap();
@@ -128,7 +129,7 @@ fn sources_with_equal_names_have_distinct_editor_facts() {
             source_module(boolean.clone()),
         ],
     };
-    let analysis = resin_hir::build_hir_program_checked(&program);
+    let analysis = resin_hir::build_hir(&program);
     assert!(analysis.module.is_some(), "{:?}", analysis.diagnostics);
     for (source, expected) in [(integer, "value: int"), (boolean, "value: bool")] {
         let offset = source.text().rfind("value").unwrap();
@@ -154,7 +155,7 @@ fn revised_source_cannot_borrow_editor_facts_from_its_previous_version() {
     let original = Source::new("memory", "def local(value: int) -> int = { value };");
     let revised = original.with_text("def local(value: bool) -> bool = { value };");
     let syntax = syntax(&[original.clone(), revised.clone()]);
-    let analysis = resin_hir::build_hir_program_checked(&Program {
+    let analysis = resin_hir::build_hir(&Program {
         modules: vec![source_module(original.clone())],
     });
     let offset = revised.text().rfind("value").unwrap();
@@ -188,7 +189,7 @@ fn nominal_declarations_retain_method_identities_with_their_type_expressions() {
         "owner.resin",
         "struct Owner { value: int, def read(self: Owner) -> int = { self.value }; def drop(self: Ptr<Owner>) = {}; }; type Alias = Owner;",
     );
-    let hir = resin_hir::build_hir(&source.file).unwrap();
+    let hir = resin_hir::generate(&source.file).unwrap();
     let owner = hir
         .types
         .iter()

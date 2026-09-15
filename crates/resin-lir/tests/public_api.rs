@@ -43,8 +43,11 @@ fn conditional() -> Module {
 #[test]
 fn resolved_tree_is_sufficient_to_lower_control_flow() {
     let tree = conditional();
-    let module = resin_lir::build_lir_all(&tree).unwrap();
-    assert_eq!(module, resin_lir::build_lir_all(&tree).unwrap());
+    let module = resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
+    assert_eq!(
+        module,
+        resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap()
+    );
     drop(tree);
     let function = &module.functions[0];
     assert_eq!(function.parameter_count, 0);
@@ -75,7 +78,7 @@ fn lowering_preserves_source_handles_without_inventing_missing_origins() {
         source: other.clone(),
         span: Span { start: 0, end: 6 },
     });
-    let module = resin_lir::build_lir_all(&tree).unwrap();
+    let module = resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
     drop(tree);
     assert_eq!(module.origins.functions.len(), 2);
     assert_eq!(
@@ -189,8 +192,7 @@ fn failed_functions_keep_their_own_bindings_cleanup_and_error_origins() {
         ..Default::default()
     };
     let errors =
-        resin_lir::build_lir_all_with_options(&tree, &resin_lir::LoweringOptions::default())
-            .unwrap_err();
+        resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap_err();
     drop(tree);
     drop(source);
 
@@ -280,8 +282,10 @@ fn ordinary_and_foreign_parameters_have_separate_locals() {
                 functions: vec![declaration],
                 ..Default::default()
             };
-            let checked =
-                resin_lir::VerifiedModule::new(resin_lir::build_lir_all(&tree).unwrap()).unwrap();
+            let checked = resin_lir::VerifiedModule::new(
+                resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap(),
+            )
+            .unwrap();
             let function = &checked.view().module().functions[0];
             assert_eq!(function.foreign.is_some(), foreign);
             assert_eq!(
@@ -351,7 +355,9 @@ fn invalid_nominal_type_expressions_report_errors_before_storage_lowering() {
             methods: Default::default(),
             drop: None,
         });
-        let error = resin_lir::build_lir_all(&tree).unwrap_err();
+        let error = resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default())
+            .unwrap_err()
+            .remove(0);
         assert!(
             matches!(error.kind, resin_lir::ErrorKind::Type { .. }),
             "{error}"

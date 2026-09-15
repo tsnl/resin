@@ -1,4 +1,4 @@
-use resin_hir::Type;
+use resin_hir::{Hir, Type};
 use resin_source::Loader;
 use std::fs;
 use tempfile::TempDir;
@@ -27,18 +27,17 @@ fn unchanged_roots_follow_retargeted_import_symlinks_without_notifications() {
             "import { \"alias.resin\" }; def value() -> _ = { answer() };",
         )
         .unwrap();
-    let mut frontend = resin_frontend::Frontend::new();
-    let first = frontend.build_hir(source.clone(), &mut loader);
+    let first = Hir::build(source.clone(), &mut loader, None);
     assert!(first.diagnostics().is_empty(), "{:?}", first.diagnostics());
     fs::remove_file(&alias).unwrap();
     symlink("second.resin", &alias).unwrap();
-    let second = frontend.build_hir(source, &mut loader);
+    let second = Hir::build(source, &mut loader, Some(&first));
     assert!(
         second.diagnostics().is_empty(),
         "{:?}",
         second.diagnostics()
     );
-    assert!(!Arc::ptr_eq(&first, &second));
+    assert!(!first.same(&second));
     assert_eq!(first.source(), second.source());
     for (compilation, expected) in [(first, Type::Int32), (second, Type::Int64)] {
         let module = compilation.hir().unwrap();
@@ -67,8 +66,7 @@ fn unchanged_roots_retry_missing_transitive_imports_without_notifications() {
             "import { \"middle.resin\" }; def value() -> int = { answer() };",
         )
         .unwrap();
-    let mut frontend = resin_frontend::Frontend::new();
-    let missing = frontend.build_hir(source.clone(), &mut loader);
+    let missing = Hir::build(source.clone(), &mut loader, None);
     assert!(missing.hir().is_err());
     assert!(
         missing
@@ -78,18 +76,22 @@ fn unchanged_roots_retry_missing_transitive_imports_without_notifications() {
     );
     let leaf = directory.path().join("leaf.resin");
     fs::write(&leaf, "export { leaf }; def leaf() -> int = { 42 };").unwrap();
-    let repaired = frontend.build_hir(source.clone(), &mut loader);
+    let repaired = Hir::build(source.clone(), &mut loader, Some(&missing));
     assert!(
         repaired.diagnostics().is_empty(),
         "{:?}",
         repaired.diagnostics()
     );
     assert!(repaired.hir().is_ok());
-    assert!(!Arc::ptr_eq(&missing, &repaired));
+    assert!(!missing.same(&repaired));
     assert!(missing.hir().is_err());
     assert_eq!(repaired.sources().count(), 3);
     fs::remove_file(leaf).unwrap();
-    assert!(frontend.build_hir(source, &mut loader).hir().is_err());
+    assert!(
+        Hir::build(source, &mut loader, Some(&repaired))
+            .hir()
+            .is_err()
+    );
     assert!(repaired.hir().is_ok());
 }
 
@@ -108,8 +110,7 @@ fn custom_library_root_edits_recompile_an_unchanged_entry() {
             "import { \"$/math.resin\" }; def value() -> _ = { answer() };",
         )
         .unwrap();
-    let mut frontend = resin_frontend::Frontend::new();
-    let before = frontend.build_hir(source.clone(), &mut loader);
+    let before = Hir::build(source.clone(), &mut loader, None);
     assert!(
         before.diagnostics().is_empty(),
         "{:?}",
@@ -120,10 +121,10 @@ fn custom_library_root_edits_recompile_an_unchanged_entry() {
         "export { answer }; def answer() -> long = { 42 };",
     )
     .unwrap();
-    let after = frontend.build_hir(source, &mut loader);
+    let after = Hir::build(source, &mut loader, Some(&before));
     assert!(after.diagnostics().is_empty(), "{:?}", after.diagnostics());
     assert_eq!(before.source(), after.source());
-    assert!(!Arc::ptr_eq(&before, &after));
+    assert!(!before.same(&after));
     for (compilation, expected) in [(before, Type::Int32), (after, Type::Int64)] {
         let module = compilation.hir().unwrap();
         let function = module

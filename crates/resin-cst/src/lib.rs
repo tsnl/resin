@@ -23,15 +23,10 @@ pub struct Document {
 
 /// Build a CST document, reusing an earlier tree when supplied.
 pub fn build_cst(text: impl Into<String>, previous: Option<&Document>) -> Document {
-    Document::build(text.into(), previous)
+    lower::reparse(text.into(), previous)
 }
 
 impl Document {
-    /// Build a CST document, reusing an earlier tree when supplied.
-    pub fn build(text: String, previous: Option<&Self>) -> Self {
-        lower::reparse(text, previous)
-    }
-
     pub fn source(&self) -> &str {
         &self.text
     }

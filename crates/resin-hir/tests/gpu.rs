@@ -1,9 +1,9 @@
 use resin_hir::{Module, TermKind, Type};
 
 fn generate(source: &str) -> Result<Module, resin_hir::GenerateError> {
-    let document = resin_cst::Document::build(source.into(), None);
-    let ast = resin_ast::build_ast(&document).expect("valid GPU test syntax");
-    resin_hir::build_hir(&ast)
+    let document = resin_cst::build_cst(source, None);
+    let ast = resin_ast::build_ast(&document).file;
+    resin_hir::generate(&ast)
 }
 
 // These names deliberately differ from the library. Contracts are explicit

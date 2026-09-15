@@ -1,20 +1,20 @@
-use resin_frontend::{Frontend, FrontendOutput, Target};
+#[allow(dead_code)]
+mod support;
+
+use resin_hir::Hir;
 use resin_source::Loader;
 use resin_toolchain::{CProfile, Environment};
 use std::{fs, sync::Arc};
 use tempfile::TempDir;
 
 fn build(
-    compilation: &FrontendOutput,
+    compilation: &Hir,
     environment: &Environment,
     profile: CProfile,
 ) -> resin_toolchain::Executable {
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
-    let lir = compilation
-        .build_lir(&[Target::Host {
-            entry: "main".into(),
-        }])
-        .unwrap();
+    let lir =
+        support::pipeline::verified_lir(compilation, "main", resin_lir::Profile::Host).unwrap();
     let project = resin_codegen::generate(lir.view(), Some("main"), directory.path()).unwrap();
     let built = environment
         .toolchain(None, None)
@@ -38,7 +38,7 @@ fn compilation_uses_supplied_source_versions_and_explicit_profiles() {
     fs::write(&path, "export { main }; def main() -> int = { 1 };").unwrap();
     let mut loader =
         Loader::new(environment.path("RESIN_LIBRARY_ROOT", resin_source::library_root()));
-    let mut frontend = Frontend::new();
+    let mut previous = None;
     for (profile, destination, code, directory) in [
         (
             CProfile::Debug,
@@ -49,7 +49,7 @@ fn compilation_uses_supplied_source_versions_and_explicit_profiles() {
         (CProfile::Release, None, 43, "release"),
     ] {
         let source = loader.source_from_text(&path, format!("export {{ main }}; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = {{ var i = uint(invocation); output.* := i; }}; def main() -> int = {{ var output = 0_ui; kernel({code}_ul, &output); if (output == {code}_ui) {{ {code} }} else {{ 0 }} }};")).unwrap();
-        let compilation = frontend.build_hir(source.clone(), &mut loader);
+        let compilation = Hir::build(source.clone(), &mut loader, previous.as_ref());
         let artifact = build(&compilation, &environment, profile);
         assert_eq!(
             artifact.path().parent().unwrap().file_name().unwrap(),
@@ -57,9 +57,10 @@ fn compilation_uses_supplied_source_versions_and_explicit_profiles() {
         );
         assert_eq!(artifact.run().unwrap(), code);
         assert!(
-            Arc::ptr_eq(&compilation, &frontend.build_hir(source, &mut loader)),
+            compilation.same(&Hir::build(source, &mut loader, Some(&compilation))),
             "unchanged sources should reuse the completed compilation"
         );
+        previous = Some(compilation);
         if let Some(path) = destination {
             artifact.copy_to(&path).unwrap();
             assert!(path.is_file());
@@ -79,12 +80,11 @@ fn retained_compilations_build_their_own_source_version_after_later_edits() {
     let mut environment = Environment::capture().unwrap();
     environment.directory = temp.path().into();
     let mut loader = Loader::new(resin_source::library_root());
-    let mut frontend = Frontend::new();
     let path = temp.path().join("main.resin");
     fs::write(&path, "export { main }; def main() -> int = { 41 };").unwrap();
-    let first = frontend.build_hir(loader.load_file(&path).unwrap(), &mut loader);
+    let first = Hir::build(loader.load_file(&path).unwrap(), &mut loader, None);
     fs::write(&path, "export { main }; def main() -> int = { 42 };").unwrap();
-    let second = frontend.build_hir(loader.load_file(&path).unwrap(), &mut loader);
+    let second = Hir::build(loader.load_file(&path).unwrap(), &mut loader, Some(&first));
     assert_eq!(first.source().id(), second.source().id());
     assert_ne!(first.source(), second.source());
     fs::remove_file(path).unwrap();

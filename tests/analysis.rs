@@ -1,5 +1,5 @@
-use resin_frontend::{Frontend, FrontendOutput};
 use resin_hir::GenerateErrorKind;
+use resin_hir::Hir;
 use resin_source::normalize_path;
 use resin_source::prelude::*;
 use std::{collections::BTreeMap, path::Path, sync::Arc};
@@ -86,15 +86,14 @@ fn generic_method_editor_snapshots_keep_completed_imported_schemes() {
     );
     let changed = original.with_text("export { Cell }; struct Cell<T> { padding: ubyte, value: T, def read(self: Ptr<Cell<T>>) -> long = { 42 }; };");
     let mut loader = resin_source::Loader::new(Default::default());
-    let mut frontend = Frontend::new();
     loader
         .set_import(&input, "library.resin", original.clone())
         .unwrap();
-    let before = frontend.build_hir(input.clone(), &mut loader);
+    let before = Hir::build(input.clone(), &mut loader, None);
     loader
         .set_import(&input, "library.resin", changed.clone())
         .unwrap();
-    let after = frontend.build_hir(input.clone(), &mut loader);
+    let after = Hir::build(input.clone(), &mut loader, Some(&before));
     let offset = input.text().find("cell.read").unwrap() + 5;
     for (analysis, library, expected) in [
         (&before, &original, "read: () -> int"),
@@ -222,12 +221,11 @@ fn generic_field_editor_snapshots_keep_original_imported_declarations() {
     loader
         .set_import(&input, "library.resin", original.clone())
         .unwrap();
-    let mut frontend = Frontend::new();
-    let before = frontend.build_hir(input.clone(), &mut loader);
+    let before = Hir::build(input.clone(), &mut loader, None);
     loader
         .set_import(&input, "library.resin", changed.clone())
         .unwrap();
-    let after = frontend.build_hir(input.clone(), &mut loader);
+    let after = Hir::build(input.clone(), &mut loader, Some(&before));
     let field = input.text().rfind("value").unwrap();
     for (analysis, library, expected) in [
         (&before, &original, "value: int"),
@@ -381,7 +379,7 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
         let input = loader
             .source_from_text(Path::new("main.resin"), source.clone())
             .unwrap();
-        let analysis = Frontend::new().build_hir(input.clone(), &mut loader);
+        let analysis = Hir::build(input.clone(), &mut loader, None);
         if tail != "buffer." {
             assert!(
                 analysis.diagnostics().is_empty(),
@@ -495,7 +493,7 @@ fn gpu_commands_check_pipeline_stages_and_host_arguments() {
         let input = loader
             .source_from_text(Path::new("main.resin"), source)
             .unwrap();
-        let analysis = Frontend::new().build_hir(input.clone(), &mut loader);
+        let analysis = Hir::build(input.clone(), &mut loader, None);
         assert_eq!(
             analysis.diagnostics().is_empty(),
             valid,
@@ -528,7 +526,7 @@ fn typed_pipeline_calls_show_shader_contracts_in_editor_signatures() {
     let input = loader
         .source_from_text(Path::new("main.resin"), source)
         .unwrap();
-    let analysis = Frontend::new().build_hir(input.clone(), &mut loader);
+    let analysis = Hir::build(input.clone(), &mut loader, None);
     assert!(
         analysis.diagnostics().is_empty(),
         "{:?}",
@@ -1000,7 +998,7 @@ impl Project {
             .collect();
         Self { sources }
     }
-    fn build_hir(&self) -> Arc<FrontendOutput> {
+    fn build_hir(&self) -> Hir {
         let mut loader = resin_source::Loader::new(resin_source::library_root());
         for importer in self.sources.values() {
             for (reference, target) in &self.sources {
@@ -1009,10 +1007,10 @@ impl Project {
                     .unwrap();
             }
         }
-        Frontend::new().build_hir(self.source("main.resin"), &mut loader)
+        Hir::build(self.source("main.resin"), &mut loader, None)
     }
     #[track_caller]
-    fn checked(&self) -> Arc<FrontendOutput> {
+    fn checked(&self) -> Hir {
         let analysis = self.build_hir();
         assert!(
             analysis.diagnostics().is_empty(),
@@ -1676,7 +1674,7 @@ fn checking_rejects_holes_even_when_given_a_recovered_ast() {
         let file = analysis
             .recovered_file(&project.source("main.resin"))
             .unwrap();
-        let error = resin_hir::build_hir(file).unwrap_err();
+        let error = resin_hir::generate(file).unwrap_err();
         assert_eq!(
             error.kind,
             GenerateErrorKind::IncompleteSyntax,

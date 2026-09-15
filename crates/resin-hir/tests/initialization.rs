@@ -2,9 +2,9 @@
 use resin_hir::{GenerateErrorKind, Module};
 
 fn lower(source: &str) -> Result<Module, resin_hir::GenerateError> {
-    let syntax = resin_cst::Document::build(source.into(), None);
-    let file = resin_ast::build_ast(&syntax).unwrap();
-    resin_hir::build_hir(&file)
+    let syntax = resin_cst::build_cst(source, None);
+    let file = resin_ast::build_ast(&syntax).file;
+    resin_hir::generate(&file)
 }
 fn valid(source: &str) {
     lower(source).unwrap_or_else(|error| panic!("{source}\n{error}"));

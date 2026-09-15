@@ -6,8 +6,9 @@ use resin_lir::{BasicBlock, BlockId, Function, Instr, Local, Module, Terminator,
 use resin_types::prelude::*;
 
 fn parse(src: &str) -> resin_ast::SourceFile {
-    resin_ast::build_ast(&resin_cst::Document::build(src.to_string(), None))
-        .unwrap_or_else(|err| panic!("{err}"))
+    let parsed = resin_ast::build_ast(&resin_cst::build_cst(src, None));
+    assert!(parsed.errors.is_empty(), "{src}\n{:?}", parsed.errors);
+    parsed.file
 }
 
 fn linked_list_type() -> TypeDef {

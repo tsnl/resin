@@ -1,4 +1,4 @@
-use resin_cst::{Document, Node};
+use resin_cst::Node;
 
 fn nodes(node: Node<'_>) -> Vec<(String, usize, usize)> {
     let mut result = vec![(node.kind().into(), node.start_byte(), node.end_byte())];
@@ -23,10 +23,10 @@ fn incremental_edits_match_fresh_parsing_including_utf8_boundaries() {
         "def main() = { var value: int = 4; value };",
     ];
     for before in texts {
-        let original = Document::build(before.into(), None);
+        let original = resin_cst::build_cst(before, None);
         for after in texts {
-            let incremental = Document::build(after.into(), Some(&original));
-            let fresh = Document::build(after.into(), None);
+            let incremental = resin_cst::build_cst(after, Some(&original));
+            let fresh = resin_cst::build_cst(after, None);
             assert_eq!(
                 nodes(incremental.tree().root_node()),
                 nodes(fresh.tree().root_node())
@@ -39,7 +39,7 @@ fn incremental_edits_match_fresh_parsing_including_utf8_boundaries() {
 #[test]
 fn queries_reject_invalid_utf8_and_out_of_range_offsets() {
     let source = "// é🌲\ndef main() = {};";
-    let document = Document::build(source.into(), None);
+    let document = resin_cst::build_cst(source, None);
     for offset in 0..=source.len() + 1 {
         let token = document.token(offset);
         let types = document.type_context(offset);
@@ -55,7 +55,7 @@ fn queries_reject_invalid_utf8_and_out_of_range_offsets() {
 #[test]
 fn delimiter_recovery_preserves_source_and_ignores_string_contents() {
     let source = "def main() = { print(\"[({é\")";
-    let document = Document::build(source.into(), None);
+    let document = resin_cst::build_cst(source, None);
     let recovered = document
         .recovery()
         .expect("the block needs a closing brace");
@@ -77,7 +77,7 @@ fn formatting_needs_no_semantic_context() {
 #[test]
 fn source_wrapper_names_preserve_token_queries_and_formatting() {
     let source = "def first(values: GpuSpan<uint>) -> GpuPtr<uint> = { values.at(0_ul) };";
-    let document = Document::build(source.into(), None);
+    let document = resin_cst::build_cst(source, None);
     assert!(!document.tree().root_node().has_error());
     for former in ["GpuSpan", "GpuPtr"] {
         let offset = source.find(former).unwrap() + 2;
@@ -93,7 +93,7 @@ fn source_wrapper_names_preserve_token_queries_and_formatting() {
 #[test]
 fn gpu_pipeline_annotations_preserve_type_queries_and_formatting() {
     let source = "def pipeline(value:GpuComputePipeline<Root,ArcPtr<Owner>>)->GpuGraphicsPipeline<None,_> = {value};";
-    let document = Document::build(source.into(), None);
+    let document = resin_cst::build_cst(source, None);
     assert!(!document.tree().root_node().has_error());
     for former in ["GpuComputePipeline", "GpuGraphicsPipeline"] {
         let offset = source.find(former).unwrap() + 2;
@@ -109,7 +109,7 @@ fn gpu_pipeline_annotations_preserve_type_queries_and_formatting() {
 #[test]
 fn associated_method_references_format_and_preserve_type_queries() {
     let source = "def main()={var f=Cell<int>.select :: <ulong>;var g=Factory.create :: <Ptr<int>>;Cell<int>.select :: <ulong>(7,42);};";
-    let document = Document::build(source.into(), None);
+    let document = resin_cst::build_cst(source, None);
     assert!(!document.tree().root_node().has_error());
     assert!(document.type_context(source.find("ulong").unwrap()));
     assert_eq!(
@@ -130,7 +130,7 @@ fn associated_method_references_format_and_preserve_type_queries() {
     );
     assert_eq!(resin_cst::format_source(&formatted).unwrap(), formatted);
     assert!(
-        !Document::build(formatted, None)
+        !resin_cst::build_cst(formatted, None)
             .tree()
             .root_node()
             .has_error()
@@ -148,10 +148,10 @@ fn editing_method_reference_arguments_matches_fresh_parsing() {
         "def main() = { var f = Cell<int>.select::<ulong>(7, 42); };",
     ];
     for before in sources {
-        let original = Document::build(before.into(), None);
+        let original = resin_cst::build_cst(before, None);
         for after in sources {
-            let incremental = Document::build(after.into(), Some(&original));
-            let fresh = Document::build(after.into(), None);
+            let incremental = resin_cst::build_cst(after, Some(&original));
+            let fresh = resin_cst::build_cst(after, None);
             assert_eq!(
                 nodes(incremental.tree().root_node()),
                 nodes(fresh.tree().root_node())

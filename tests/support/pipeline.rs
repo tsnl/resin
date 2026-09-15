@@ -1,13 +1,13 @@
 #![allow(dead_code)]
-use resin_frontend::Frontend;
-use resin_hir::{GenerateError, GenerateErrorKind};
+use resin_hir::{GenerateError, GenerateErrorKind, Hir};
 use resin_source::library_root;
 use resin_source::prelude::*;
 use std::path::Path;
 
 pub fn generate(file: &resin_ast::SourceFile) -> Result<resin_lir::Module, GenerateError> {
-    let tree = resin_hir::build_hir(file)?;
-    let module = resin_lir::build_lir_all(&tree).map_err(lowering_error)?;
+    let tree = resin_hir::generate(file)?;
+    let module = resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default())
+        .map_err(|mut errors| lowering_error(errors.remove(0)))?;
     Ok(resin_lir::VerifiedModule::new(module)
         .expect("lowering produces valid LIR")
         .into_module())
@@ -42,7 +42,7 @@ fn lowering_error(error: resin_lir::Error) -> GenerateError {
 
 /// Lower an AST constructed or edited by a test. Unchanged files use `file_module`.
 pub fn generate_program(program: &resin_ast::Program) -> Result<resin_lir::Module, SourceError> {
-    let tree = resin_hir::build_hir_program(program)?;
+    let tree = resin_hir::build_hir(program).into_module()?;
     lower_program(&tree, &program.modules.last().expect("entry module").source)
 }
 
@@ -50,7 +50,7 @@ pub fn generate_program(program: &resin_ast::Program) -> Result<resin_lir::Modul
 pub fn source_module(text: &str) -> Result<resin_lir::Module, SourceError> {
     let source = Source::new("test.resin", text);
     let mut loader = resin_source::Loader::new(library_root());
-    let compilation = Frontend::new().build_hir(source.clone(), &mut loader);
+    let compilation = Hir::build(source.clone(), &mut loader, None);
     lower_program(compilation.hir()?, &source)
 }
 
@@ -64,13 +64,16 @@ fn lower_program(
     tree: &resin_hir::Module,
     entry: &Source,
 ) -> Result<resin_lir::Module, SourceError> {
-    let module = resin_lir::build_lir_all(tree).map_err(|error| {
-        SourceError::new(
-            error.source.clone().unwrap_or_else(|| entry.clone()),
-            Some(error.span),
-            error.to_string(),
-        )
-    })?;
+    let module = resin_lir::build_lir(tree, &[], &resin_lir::LoweringOptions::default()).map_err(
+        |mut errors| {
+            let error = errors.remove(0);
+            SourceError::new(
+                error.source.clone().unwrap_or_else(|| entry.clone()),
+                Some(error.span),
+                error.to_string(),
+            )
+        },
+    )?;
     resin_lir::VerifiedModule::new(module)
         .map(|verified| verified.into_module())
         .map_err(|error| SourceError::new(entry.clone(), None, error.to_string()))
@@ -81,9 +84,7 @@ pub fn load(path: &Path) -> Result<resin_ast::Program, SourceError> {
     build_hir_file(path)?.program().cloned()
 }
 
-fn build_hir_file(
-    path: &Path,
-) -> Result<std::sync::Arc<resin_frontend::FrontendOutput>, SourceError> {
+fn build_hir_file(path: &Path) -> Result<Hir, SourceError> {
     let mut loader = resin_source::Loader::new(library_root());
     let source = loader.load_file(path).map_err(|error| {
         SourceError::new(
@@ -92,16 +93,14 @@ fn build_hir_file(
             error.to_string(),
         )
     })?;
-    Ok(Frontend::new().build_hir(source, &mut loader))
+    Ok(Hir::build(source, &mut loader, None))
 }
 
 pub fn shader_error(source: &str) -> String {
     let source = Source::new("shader-test.resin", source);
     let mut loader = resin_source::Loader::new(library_root());
-    let output = Frontend::new().build_hir(source, &mut loader);
-    match output.build_lir(&[resin_frontend::Target::Shader {
-        entry: "kernel".into(),
-    }]) {
+    let output = Hir::build(source, &mut loader, None);
+    match verified_lir(&output, "kernel", resin_lir::Profile::Shader) {
         Err(errors) => errors
             .into_iter()
             .map(|error| error.to_string())
@@ -114,6 +113,75 @@ pub fn shader_error(source: &str) -> String {
                 .to_string()
         }
     }
+}
+
+pub fn verified_lir(
+    output: &Hir,
+    entry: &str,
+    profile: resin_lir::Profile,
+) -> Result<resin_lir::VerifiedModule, Vec<SourceError>> {
+    verified_lir_with_options(
+        output,
+        entry,
+        profile,
+        &resin_lir::LoweringOptions::default(),
+    )
+}
+
+pub fn verified_lir_with_options(
+    output: &Hir,
+    entry: &str,
+    profile: resin_lir::Profile,
+    options: &resin_lir::LoweringOptions,
+) -> Result<resin_lir::VerifiedModule, Vec<SourceError>> {
+    let hir = output.hir().map_err(|error| vec![error])?;
+    let request = resin_lir::Entry::exported(hir, entry, profile)
+        .map_err(|error| vec![lir_source_error(output, error)])?;
+    verified_entries(output, hir, &[request], options)
+}
+
+pub fn verified_entries(
+    output: &Hir,
+    hir: &resin_hir::Module,
+    entries: &[resin_lir::Entry],
+    options: &resin_lir::LoweringOptions,
+) -> Result<resin_lir::VerifiedModule, Vec<SourceError>> {
+    let lir = resin_lir::build_lir(hir, entries, options).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|error| lir_source_error(output, error))
+            .collect::<Vec<_>>()
+    })?;
+    resin_lir::VerifiedModule::new(lir).map_err(|error| {
+        vec![SourceError::new(
+            output.source().clone(),
+            None,
+            format!("invalid LIR: {error}"),
+        )]
+    })
+}
+
+fn lir_source_error(output: &Hir, error: resin_lir::Error) -> SourceError {
+    let mut diagnostic = SourceError::new(
+        error
+            .source
+            .clone()
+            .unwrap_or_else(|| output.source().clone()),
+        Some(error.span),
+        error.to_string(),
+    );
+    diagnostic
+        .related
+        .extend(error.applications.into_iter().filter_map(|application| {
+            application.location.map(|location| SourceNote {
+                location,
+                message: format!(
+                    "while instantiating {} with {:?} for {:?}",
+                    application.function, application.arguments, application.profile
+                ),
+            })
+        }));
+    diagnostic
 }
 
 /// Find a source nominal identity without depending on catalog insertion order.

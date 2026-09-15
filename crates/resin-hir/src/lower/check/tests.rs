@@ -3,7 +3,7 @@ use crate::lower::Generator;
 use crate::{Statement, TermKind};
 
 fn check(source: &str, generator: &mut Generator) -> CheckedFile {
-    let file = resin_ast::build_ast(&resin_cst::Document::build(source.into(), None)).unwrap();
+    let file = resin_ast::build_ast(&resin_cst::build_cst(source, None)).file;
     let mut scopes = Scopes::new();
     assert!(
         scopes
@@ -134,13 +134,12 @@ fn completed_bodies_keep_shadowed_references_after_discarding_construction_state
 #[test]
 fn declaration_identities_do_not_depend_on_unique_source_spans() {
     use resin_source::prelude::*;
-    let mut file = resin_ast::build_ast(&resin_cst::Document::build(
+    let mut file = resin_ast::build_ast(&resin_cst::build_cst(
         "def integer(value: int) -> _ = { value };\n\
-         def boolean(value: bool) -> _ = { value };"
-            .into(),
+         def boolean(value: bool) -> _ = { value };",
         None,
     ))
-    .unwrap();
+    .file;
     for stmt in &mut file.stmts {
         let resin_ast::StmtKind::Function {
             name, params, body, ..

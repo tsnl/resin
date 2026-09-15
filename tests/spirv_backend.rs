@@ -398,11 +398,8 @@ fn imported_backend_errors_retain_expression_origins() {
     loader
         .set_import(&entry, "helper.resin", helper.clone())
         .unwrap();
-    let output = resin_frontend::Frontend::new().build_hir(entry, &mut loader);
-    let m = output
-        .build_lir(&[resin_frontend::Target::Shader {
-            entry: "kernel".into(),
-        }])
+    let output = resin_hir::Hir::build(entry, &mut loader, None);
+    let m = support::pipeline::verified_lir(&output, "kernel", resin_lir::Profile::Shader)
         .unwrap()
         .into_module();
     let origins: Vec<_> = m

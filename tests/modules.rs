@@ -825,8 +825,8 @@ fn aliases_share_the_nominal_namespace_and_origin() {
         "struct Item {}; type Alias = Item; impl Alias { def f() = {}; }",
         "type Number = int; impl Number { def f() = {}; }",
     ] {
-        let document = resin_cst::Document::build(source.into(), None);
-        assert!(resin_ast::build_ast(&document).is_err());
+        let document = resin_cst::build_cst(source, None);
+        assert!(!resin_ast::build_ast(&document).errors.is_empty());
     }
 }
 

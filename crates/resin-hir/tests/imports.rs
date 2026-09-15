@@ -1,14 +1,14 @@
 //! Immutable frontend behavior with an importer-scoped, entirely in-memory loader.
-use resin_frontend::{Frontend, FrontendOutput};
+use resin_hir::Hir;
 use resin_source::Loader;
 use resin_source::prelude::*;
-use std::{collections::BTreeSet, sync::Arc};
+use std::collections::BTreeSet;
 
-fn sources(compilation: &FrontendOutput) -> BTreeSet<Source> {
+fn sources(compilation: &Hir) -> BTreeSet<Source> {
     compilation.sources().cloned().collect()
 }
 
-fn valid(compilation: &FrontendOutput) {
+fn valid(compilation: &Hir) {
     assert!(compilation.hir().is_ok(), "{:?}", compilation.diagnostics());
 }
 
@@ -26,11 +26,10 @@ fn unchanged_graph_reuses_the_completed_result_after_resolving_imports() {
     loader
         .set_import(&entry, "dependency", dependency.clone())
         .unwrap();
-    let mut frontend = Frontend::new();
-    let first = frontend.build_hir(entry.clone(), &mut loader);
+    let first = Hir::build(entry.clone(), &mut loader, None);
     valid(&first);
-    let second = frontend.build_hir(entry.clone(), &mut loader);
-    assert!(Arc::ptr_eq(&first, &second));
+    let second = Hir::build(entry.clone(), &mut loader, Some(&first));
+    assert!(first.same(&second));
     assert_eq!(second.source(), &entry);
     assert_eq!(sources(&second), [entry, dependency].into());
 }
@@ -49,13 +48,12 @@ fn changing_a_transitive_source_invalidates_an_unchanged_entry() {
     let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "middle", middle.clone()).unwrap();
     loader.set_import(&middle, "leaf", leaf.clone()).unwrap();
-    let mut frontend = Frontend::default();
-    let before = frontend.build_hir(entry.clone(), &mut loader);
+    let before = Hir::build(entry.clone(), &mut loader, None);
     valid(&before);
     let changed = leaf.with_text("export { leaf }; def leaf() -> bool = { 1 == 1 };");
     loader.set_import(&middle, "leaf", changed.clone()).unwrap();
-    let after = frontend.build_hir(entry.clone(), &mut loader);
-    assert!(!Arc::ptr_eq(&before, &after));
+    let after = Hir::build(entry.clone(), &mut loader, None);
+    assert!(!before.same(&after));
     assert!(after.hir().is_err());
     assert_eq!(after.source(), &entry);
     assert!(sources(&before).contains(&leaf));
@@ -71,17 +69,16 @@ fn a_missing_transitive_import_recovers_without_notifications() {
     let leaf = Source::new("leaf", "def leaf() = {};");
     let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "middle", middle.clone()).unwrap();
-    let mut frontend = Frontend::default();
-    let before = frontend.build_hir(entry.clone(), &mut loader);
+    let before = Hir::build(entry.clone(), &mut loader, None);
     assert!(before.hir().is_err());
     assert!(before.diagnostics().iter().any(|diagnostic| {
         diagnostic.location.source == middle
             && diagnostic.location.span.end > diagnostic.location.span.start
     }));
     loader.set_import(&middle, "leaf", leaf.clone()).unwrap();
-    let after = frontend.build_hir(entry, &mut loader);
+    let after = Hir::build(entry, &mut loader, None);
     valid(&after);
-    assert!(!Arc::ptr_eq(&before, &after));
+    assert!(!before.same(&after));
     assert!(before.hir().is_err(), "retained failure remains immutable");
     assert!(sources(&after).contains(&leaf));
 }
@@ -112,16 +109,15 @@ fn changed_import_edges_invalidate_cache_even_with_the_same_source_set() {
     loader
         .set_import(&second, "value", boolean.clone())
         .unwrap();
-    let mut frontend = Frontend::default();
-    let before = frontend.build_hir(entry.clone(), &mut loader);
+    let before = Hir::build(entry.clone(), &mut loader, None);
     valid(&before);
     loader.set_import(&first, "value", boolean.clone()).unwrap();
     loader
         .set_import(&second, "value", integer.clone())
         .unwrap();
-    let after = frontend.build_hir(entry, &mut loader);
+    let after = Hir::build(entry, &mut loader, None);
     assert_eq!(sources(&before), sources(&after));
-    assert!(!Arc::ptr_eq(&before, &after));
+    assert!(!before.same(&after));
     assert!(after.hir().is_err());
     valid(&before);
 }
@@ -136,7 +132,7 @@ fn inconsistent_versions_of_one_logical_source_are_diagnosed() {
     let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "first", first.clone()).unwrap();
     loader.set_import(&entry, "second", second.clone()).unwrap();
-    let result = Frontend::default().build_hir(entry.clone(), &mut loader);
+    let result = Hir::build(entry.clone(), &mut loader, None);
     assert!(result.hir().is_err());
     assert!(
         result
@@ -154,7 +150,7 @@ fn import_cycles_are_diagnosed_with_source_ranges() {
     let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "next", next.clone()).unwrap();
     loader.set_import(&next, "entry", entry.clone()).unwrap();
-    let result = Frontend::default().build_hir(entry.clone(), &mut loader);
+    let result = Hir::build(entry.clone(), &mut loader, None);
     assert!(result.hir().is_err());
     assert!(result.diagnostics().iter().any(|diagnostic| {
         diagnostic.message.contains("cyclic")
@@ -172,7 +168,7 @@ fn identical_diagnostic_names_do_not_merge_distinct_sources() {
     let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "first", first.clone()).unwrap();
     loader.set_import(&entry, "second", second.clone()).unwrap();
-    let result = Frontend::default().build_hir(entry.clone(), &mut loader);
+    let result = Hir::build(entry.clone(), &mut loader, None);
     assert!(result.hir().is_err());
     assert_eq!(
         sources(&result),
@@ -193,15 +189,14 @@ fn retained_compilations_keep_their_own_source_versions_and_editor_queries() {
         "def value() -> int = { 1 }; def main() -> int = { value() };",
     );
     let mut loader = Loader::new(resin_source::library_root());
-    let mut frontend = Frontend::default();
-    let old = frontend.build_hir(before.clone(), &mut loader);
+    let old = Hir::build(before.clone(), &mut loader, None);
     let after =
         before.with_text("def value() -> bool = { 1 == 1 }; def main() -> bool = { value() };");
-    let new = frontend.build_hir(after.clone(), &mut loader);
+    let new = Hir::build(after.clone(), &mut loader, None);
     valid(&old);
     valid(&new);
     assert_eq!(before.id(), after.id());
-    assert!(!Arc::ptr_eq(&old, &new));
+    assert!(!old.same(&new));
     for (result, source, ty) in [(&old, &before, "int"), (&new, &after, "bool")] {
         let offset = source.text().rfind("value").unwrap();
         assert_eq!(result.definition(source, offset).unwrap().source, *source);
@@ -226,32 +221,17 @@ fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
         "export { first, second }; def first() -> bool = { (1 == 1) + (1 == 1) }; def second() -> int = { var r = { n = 1 }; r + r; 0 };",
     );
     let mut loader = Loader::new(resin_source::library_root());
-    let mut frontend = Frontend::default();
-    let lowered = frontend.build_hir(source.clone(), &mut loader);
+    let lowered = Hir::build(source.clone(), &mut loader, None);
     assert!(lowered.program().is_ok());
     assert!(lowered.hir().is_ok());
-    let errors = match lowered.build_lir(&[
-        resin_frontend::Target::Host {
-            entry: "first".into(),
-        },
-        resin_frontend::Target::Host {
-            entry: "second".into(),
-        },
-    ]) {
-        Ok(_) => panic!("expected LIR instantiation to fail"),
-        Err(errors) => errors,
-    };
-    assert_eq!(errors.len(), 2);
-    assert!(errors.iter().all(|error| error.source == source));
     let typed_source = source.with_text("def main() -> int = { 1 == 2 };");
-    let typed = frontend.build_hir(typed_source, &mut loader);
+    let typed = Hir::build(typed_source, &mut loader, Some(&lowered));
     assert!(typed.program().is_ok());
     assert!(typed.hir().is_err());
     let parsed_source = source.with_text("def main( = { 1 == 2 };");
-    let parsed = frontend.build_hir(parsed_source.clone(), &mut loader);
+    let parsed = Hir::build(parsed_source.clone(), &mut loader, Some(&typed));
     assert!(parsed.program().is_err());
     assert!(parsed.recovered_file(&parsed_source).is_some());
-    assert_eq!(errors.len(), 2);
 }
 
 #[test]
@@ -269,8 +249,7 @@ fn imported_initialization_errors_keep_the_dependency_source_version() {
     loader
         .set_import(&entry, "dependency", dependency.clone())
         .unwrap();
-    let mut frontend = Frontend::default();
-    let failed = frontend.build_hir(entry.clone(), &mut loader);
+    let failed = Hir::build(entry.clone(), &mut loader, None);
     assert!(failed.hir().is_err());
     assert!(failed.hir().is_err());
     assert_eq!(failed.diagnostics().len(), 1);
@@ -289,8 +268,7 @@ fn imported_initialization_errors_keep_the_dependency_source_version() {
 
     let repaired = dependency.with_text("export { value }; def value() -> int = { 7 };");
     loader.set_import(&entry, "dependency", repaired).unwrap();
-    valid(&frontend.build_hir(entry, &mut loader));
-    drop(frontend);
+    valid(&Hir::build(entry, &mut loader, None));
     drop(loader);
     let diagnostic = &failed.diagnostics()[0];
     assert_eq!(diagnostic.location.source, dependency);
@@ -316,7 +294,7 @@ fn conflicting_versions_do_not_displace_the_first_accepted_version() {
     loader
         .set_import(&entry, "original", original.clone())
         .unwrap();
-    let result = Frontend::default().build_hir(entry.clone(), &mut loader);
+    let result = Hir::build(entry.clone(), &mut loader, None);
     assert!(result.hir().is_err());
     assert_eq!(result.diagnostics().len(), 1, "{:?}", result.diagnostics());
     let diagnostic = &result.diagnostics()[0];

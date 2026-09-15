@@ -1,5 +1,5 @@
 use crossbeam_channel::{Receiver, Sender};
-use resin_frontend::{Frontend, FrontendOutput};
+use resin_hir::Hir;
 use resin_source::prelude::*;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -27,7 +27,7 @@ pub struct Update {
 
 pub struct AnalysisUpdate {
     pub revision: u64,
-    pub entries: BTreeMap<PathBuf, Arc<FrontendOutput>>,
+    pub entries: BTreeMap<PathBuf, Hir>,
     pub paths: BTreeMap<SourceId, PathBuf>,
 }
 
@@ -39,9 +39,9 @@ pub fn spawn(
     stopping: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let mut frontend = Frontend::new();
         let mut loader = resin_source::Loader::new(library_root);
         let mut documents = BTreeMap::new();
+        let mut previous = BTreeMap::new();
         while let Ok(first) = updates.recv() {
             if stopping.load(Ordering::Relaxed) {
                 break;
@@ -49,7 +49,7 @@ pub fn spawn(
             let batch = std::iter::once(first).chain(updates.try_iter());
             let (revision, roots) = apply_updates(&mut loader, &mut documents, batch);
             let result = compile_roots(
-                &mut frontend,
+                &previous,
                 &mut loader,
                 &documents,
                 roots,
@@ -57,7 +57,11 @@ pub fn spawn(
                 &current,
                 &stopping,
             );
-            if !superseded(revision, &current, &stopping) && results.send(result).is_err() {
+            if superseded(revision, &current, &stopping) {
+                continue;
+            }
+            previous.clone_from(&result.entries);
+            if results.send(result).is_err() {
                 break;
             }
         }
@@ -110,7 +114,7 @@ fn superseded(revision: u64, current: &AtomicU64, stopping: &AtomicBool) -> bool
 }
 
 fn compile_roots(
-    frontend: &mut Frontend,
+    previous: &BTreeMap<PathBuf, Hir>,
     loader: &mut resin_source::Loader,
     documents: &BTreeMap<PathBuf, Source>,
     roots: BTreeSet<PathBuf>,
@@ -135,7 +139,7 @@ fn compile_roots(
         match source {
             Ok(source) => retain_entry(
                 &mut result,
-                frontend.build_hir(source, loader),
+                Hir::build(source, loader, previous.get(&path)),
                 loader,
                 path,
             ),
@@ -147,7 +151,7 @@ fn compile_roots(
 
 fn retain_entry(
     result: &mut AnalysisUpdate,
-    compilation: Arc<FrontendOutput>,
+    compilation: Hir,
     files: &resin_source::Loader,
     path: PathBuf,
 ) {

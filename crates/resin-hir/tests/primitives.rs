@@ -1,8 +1,8 @@
 use resin_hir::{TermKind, Type};
 
 fn generate(source: &str) -> Result<resin_hir::Module, resin_hir::GenerateError> {
-    let document = resin_cst::Document::build(source.into(), None);
-    resin_hir::build_hir(&resin_ast::build_ast(&document).unwrap())
+    let document = resin_cst::build_cst(source, None);
+    resin_hir::generate(&resin_ast::build_ast(&document).file)
 }
 
 #[test]

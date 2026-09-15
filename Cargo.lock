@@ -614,7 +614,6 @@ dependencies = [
  "resin-ast",
  "resin-codegen",
  "resin-cst",
- "resin-frontend",
  "resin-hir",
  "resin-lir",
  "resin-lsp",
@@ -664,17 +663,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "resin-frontend"
-version = "0.1.0"
-dependencies = [
- "resin-ast",
- "resin-cst",
- "resin-hir",
- "resin-lir",
- "resin-source",
-]
-
-[[package]]
 name = "resin-hir"
 version = "0.1.0"
 dependencies = [
@@ -705,7 +693,6 @@ dependencies = [
  "lsp-server",
  "lsp-types",
  "resin-cst",
- "resin-frontend",
  "resin-hir",
  "resin-source",
  "serde",

@@ -1,7 +1,7 @@
 # Resin language server
 
 The `resin --lsp <directory>` mode provides diagnostics, hover, go-to-definition, basic completion, and formatting
-over stdio. It reuses `resin_frontend::Frontend` with immutable source versions.
+over stdio. It calls `Hir::build` with immutable source versions.
 Semantic editor requests run parsing, resolution, typing, and IR verification; they do not
 build C/SPIR-V, initialize a GPU, or run the program. Analysis accepts library
 modules without an exported entry function; runtime bindings belong inside
@@ -94,9 +94,9 @@ implemented.
 `resin_source::Source` is immutable named text with a stable logical
 identity. Cloning shares a version; `with_text` creates a new version of the same
 source. Names are diagnostic labels and need not be filesystem paths or unique.
-`resin_frontend::Frontend` retains syntax and compilation caches. Its `build_hir`
-method receives an entry source and a concrete `resin_source::Loader`, resolves the import
-graph, and returns an immutable `FrontendOutput` with diagnostics and editor queries.
+`Hir::build` receives an entry source, a concrete `resin_source::Loader`, and an
+optional previous result. It resolves the import graph and returns HIR with
+diagnostics and editor queries.
 
 Explicit import bindings also support sources held entirely in memory. This complete
 example changes an imported module while keeping its entry unchanged:
@@ -114,8 +114,7 @@ fn main() {
     );
     let mut loader = resin_source::Loader::new(resin_source::library_root());
     loader.set_import(&entry, "library", library.clone()).unwrap();
-    let mut frontend = resin_frontend::Frontend::new();
-    let before = frontend.build_hir(entry.clone(), &mut loader);
+    let before = resin_hir::Hir::build(entry.clone(), &mut loader, None);
     assert!(before.hir().is_ok());
 
     loader.set_import(
@@ -123,7 +122,7 @@ fn main() {
         "library",
         library.with_text("export { answer }; def answer() -> int = { missing };"),
     ).unwrap();
-    let after = frontend.build_hir(entry, &mut loader);
+    let after = resin_hir::Hir::build(entry, &mut loader, Some(&before));
     assert!(!after.diagnostics().is_empty());
     assert!(before.hir().is_ok()); // Retained results keep their original sources.
 }
@@ -185,7 +184,7 @@ compiler in its background worker and discards results from obsolete frontend re
 
 ```sh
 nix-shell --run 'cargo test -p resin-lsp'
-nix-shell --run 'cargo test -p resin-frontend -p resin-source'
+nix-shell --run 'cargo test -p resin-hir -p resin-source'
 nix-shell --run 'cargo test -p resin --test lsp --test analysis --test zed_queries'
 nix-shell --run 'cargo test -p resin --test formatting'
 ```
