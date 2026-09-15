@@ -443,7 +443,8 @@ The CLI's private [Request](../src/cli/request.rs) resolves source and destinati
 against the captured working directory, including output naming and ancestor validation.
 It owns the library root for that request. Argument parsing passes the original paths
 to this boundary. The CLI [interpreter](../src/cli/interpreter.rs) lowers the request,
-writes generated sources to a stable `build/` folder, and drives the native build.
+writes generated sources to a temporary directory owned by that invocation, and drives
+the native build. The toolchain retains successful sources and outputs under `build/`.
 Native compiler search paths
 retain their meaning relative to that captured directory; Ninja resolves discovered header
 dependencies in the directory where it runs the compiler.

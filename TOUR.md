@@ -124,9 +124,10 @@ resolves directory destinations, and rejects outputs that would overwrite the so
 It also owns the library root. The CLI [interpreter](src/cli/interpreter.rs) loads that
 request: [resin_source::Loader](crates/resin-source/src/lib.rs) reads the file into
 an immutable `Source`, `resin_hir::Hir::build(source, loader, previous)`
-resolves imports and returns HIR and editor facts. Generate builds LIR
+resolves imports and returns HIR and editor facts. Lowering builds LIR
 for the host entry, then codegen writes C/SPIR-V/Ninja
-into a stable folder under `build/`, and the toolchain stages that project.
+into a temporary directory owned by that invocation. The toolchain stages that project
+under `build/` while holding the cache lock.
 If `-o` is set, the cached executable is copied there; otherwise it is run. The toolchain supplies native command rules in `toolchain.ninja`. Ninja optimizes
 SPIR-V, invokes this Resin executable with `--embed` to make
 C headers, and compiles and links the host program. The executable path comes from

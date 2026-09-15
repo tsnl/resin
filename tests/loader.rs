@@ -6,7 +6,7 @@ use tempfile::TempDir;
 #[test]
 #[cfg(unix)]
 fn unchanged_roots_follow_retargeted_import_symlinks_without_notifications() {
-    use std::{os::unix::fs::symlink, sync::Arc};
+    use std::os::unix::fs::symlink;
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
     fs::write(
         directory.path().join("first.resin"),
@@ -52,7 +52,6 @@ fn unchanged_roots_follow_retargeted_import_symlinks_without_notifications() {
 
 #[test]
 fn unchanged_roots_retry_missing_transitive_imports_without_notifications() {
-    use std::sync::Arc;
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
     fs::write(
         directory.path().join("middle.resin"),
@@ -97,7 +96,6 @@ fn unchanged_roots_retry_missing_transitive_imports_without_notifications() {
 
 #[test]
 fn custom_library_root_edits_recompile_an_unchanged_entry() {
-    use std::sync::Arc;
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
     let library_root = directory.path().join("custom-library");
     fs::create_dir(&library_root).unwrap();

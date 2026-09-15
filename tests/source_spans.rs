@@ -4,7 +4,7 @@ mod support;
 use resin_hir::Hir;
 use resin_lir::Profile;
 use resin_source::{Loader, Source};
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
 fn build_hir(source: &str) -> Hir {
     let library = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resin");

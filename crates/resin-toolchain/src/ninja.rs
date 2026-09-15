@@ -48,10 +48,6 @@ impl CProfile {
     }
 }
 
-pub(super) fn generated(settings: &Settings, name: &str, entry: &str) -> PathBuf {
-    cache_directory(settings, name, entry).join("generated")
-}
-
 fn cache_directory(settings: &Settings, name: &str, entry: &str) -> PathBuf {
     let mut hash = DefaultHasher::new();
     name.hash(&mut hash);

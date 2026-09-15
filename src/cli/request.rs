@@ -9,6 +9,7 @@ pub struct Options {
     pub directory: PathBuf,
     pub profile: resin_toolchain::CProfile,
     pub tools: resin_toolchain::Toolchain,
+    pub temporary: PathBuf,
 }
 
 /// Paths resolve once against the captured directory before compilation starts.

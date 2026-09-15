@@ -13,6 +13,7 @@ fn options(environment: &Environment, profile: CProfile) -> Options {
         directory: environment.directory.clone(),
         profile,
         tools: environment.toolchain(None, None),
+        temporary: environment.temporary.clone(),
     }
 }
 

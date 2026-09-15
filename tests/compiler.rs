@@ -4,7 +4,7 @@ mod support;
 use resin_hir::Hir;
 use resin_source::Loader;
 use resin_toolchain::{CProfile, Environment};
-use std::{fs, sync::Arc};
+use std::fs;
 use tempfile::TempDir;
 
 fn build(

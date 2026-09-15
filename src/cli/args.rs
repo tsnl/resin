@@ -171,6 +171,7 @@ impl CompileOptions {
                 directory: environment.directory.clone(),
                 profile,
                 tools,
+                temporary: environment.temporary.clone(),
             },
             environment.path("RESIN_LIBRARY_ROOT", resin_source::library_root()),
         )

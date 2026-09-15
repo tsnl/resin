@@ -1,7 +1,7 @@
 //! Host program compilation for interpreter mode.
 use super::{Result, request::Request};
 use resin_hir::Hir;
-use std::ffi::OsString;
+use std::{ffi::OsString, path::Path};
 
 pub(super) fn run(request: &Request, args: &[OsString]) -> Result<i32> {
     let executable = Interpreter::compile(request)?;
@@ -19,7 +19,9 @@ impl Interpreter {
     fn compile(request: &Request) -> Result<resin_toolchain::Executable> {
         let hir = Self::hir(request)?;
         let lir = Self::lower(&hir, request)?;
-        let project = Self::generate(&lir, hir.source().name(), request)?;
+        // Generation precedes the cache lock, so each invocation owns its inputs.
+        let directory = tempfile::TempDir::new_in(&request.options.temporary)?;
+        let project = Self::generate(&lir, directory.path(), request)?;
         Self::build(&project, request)
     }
 
@@ -54,17 +56,13 @@ impl Interpreter {
 
     fn generate(
         lir: &resin_lir::VerifiedModule,
-        source_name: &str,
+        directory: &Path,
         request: &Request,
     ) -> Result<resin_codegen::GeneratedProject> {
-        let directory = request
-            .options
-            .tools
-            .generated(source_name, &request.input.entry);
         Ok(resin_codegen::generate(
             lir.view(),
             Some(&request.input.entry),
-            &directory,
+            directory,
         )?)
     }
 

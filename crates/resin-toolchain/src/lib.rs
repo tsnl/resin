@@ -85,11 +85,6 @@ pub struct Toolchain {
 }
 
 impl Toolchain {
-    /// Stable folder for generated C/SPIR-V of this program, before Ninja staging.
-    pub fn generated(&self, name: &str, entry: &str) -> PathBuf {
-        ninja::generated(&self.settings, name, entry)
-    }
-
     /// Stage a complete source directory, build its `build.ninja`, and retain outputs.
     /// `name` and `entry` identify a stable cache independently of temporary inputs.
     pub fn build(

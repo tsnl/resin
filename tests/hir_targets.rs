@@ -2,7 +2,7 @@
 use resin_hir::Hir;
 use resin_lir::{LoweringOptions, Profile};
 use resin_source::{Loader, Source, SourceError, SourceNote};
-use std::{num::NonZeroUsize, sync::Arc};
+use std::num::NonZeroUsize;
 
 fn host(entry: &str) -> (&str, Profile) {
     (entry, Profile::Host)
