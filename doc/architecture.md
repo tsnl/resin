@@ -62,7 +62,7 @@ pass consumes. Source and type vocabulary are independent foundations.
 | `resin-lir` | `resin-hir` | Storage and control-flow lowering, `build_lir`, verification |
 | `resin-codegen` | `resin-lir` | Generate a complete on-disk C/SPIR-V/Ninja project |
 | `resin-toolchain` | none | Async native builds and independently owned output generations |
-| `resin-lsp` | `resin-hir`, `resin-ast`, `resin-cst` | Explicit cached frontend passes and editor queries over LSP |
+| `resin-lsp` | Individual compiler crates, `resin-cache`, `resin-toolchain` | Explicit cached analysis/build passes and editor protocol handling |
 
 The HIR dependency on CST supports editor queries at a syntax position. Its public
 language owns its type expressions and nominal declarations. LIR lowering never
@@ -529,12 +529,26 @@ request exceeds capacity, all its values survive with a warning; a later request
 shrink the snapshot. Failure or cancellation produces no successor cache. Retained
 values survive cache eviction and keep earlier compilations usable.
 
-The local LSP shares source-keyed CST and AST caches with capacities 4,096 files each,
-and a `Cache<SourceGraph, Hir>` with capacity 64. HIR reuse applies to complete graphs;
-there is no per-function incremental solver. The loader still retains file/origin
-entries and cached text for every path seen during its lifetime. Closing a buffer
-clears supplied text but does not evict that entry. These phase-cache capacities do
-not yet bound the LSP's total retained memory.
+The local LSP owns one `ArcSwap` head per cache layer: sources, CST, and per-file AST
+have capacities of 4,096 entries each, HIR and verified LIR have 64, and generated
+projects have 32. Its private publication operation computes requested values, then
+compares and swaps the head. A lost race rebases all requested handles, including
+hits, against the latest cache and reapplies its recency and capacity policy. Only
+requested entries are replayed, so old unrelated history cannot return. Completed
+compiler/native work never repeats merely because publication lost a race.
+
+Each request keeps its selected handles after publication. Subsequent updates may
+evict those keys while the request remains valid. Published generations have no
+parent links. HIR reuse applies to complete source graphs; an edited dependency
+rebuilds HIR while unchanged per-file results remain reusable.
+
+Acquisition loaders belong to requests. The editor coordinator retains only current
+supplied registrations; `Loader::supplied_snapshot()` copies their physical identities
+and configured bindings without keeping learned disk history. Close/reopen epochs
+prevent coalesced editor updates from confusing old and new registrations. Completed
+analysis retains source handles and presentation maps for active roots. Old outputs,
+open buffers, and allocator overhead can outlive current cache membership, so entry
+capacities are not a hard byte or process-memory bound.
 
 ## Execution and cancellation
 
@@ -558,6 +572,16 @@ before resuming them. Runtime shutdown also terminates owned trees and reaps the
 direct children before releasing native ownership. A cancelled build returns no
 partial artifact handle. Atomic executable copying leaves no partially copied target.
 
-The CLI and existing stdio LSP use these libraries. The LSP coalesces editor changes
-and cancels superseded analysis; concurrent cache publication and an HTTP compiler
-server are later work.
+The stdio LSP receiver accepts complete editor snapshots and uses a replaceable
+mailbox to coalesce edits. A bounded request permit follows a query/build through
+execution and response consumption. Path normalization, line indexing, formatting,
+semantic queries, and diagnostic preparation use workers. Before sending results,
+the protocol checks their captured document epochs, versions, and dependency state.
+Diagnostics are aggregated from current roots; the protocol tracks actually published
+URIs so coalescing cannot lose a required diagnostic clear.
+
+`workspace/executeCommand` with `resin.build` captures disk contents and explicitly
+sequences AST/HIR, LIR, verification, code generation, native compilation, and output
+copying. It shares the analysis caches with editor work and leaves dirty buffers
+under editor control. Native preprocessing still validates native inputs on every
+build. The HTTP compiler service follows in Phase 3.

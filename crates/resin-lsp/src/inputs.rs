@@ -1,21 +1,22 @@
 //! Capture source inputs before entering the filesystem-independent compiler.
-use resin_cache::Cache;
+use crate::{caches::Caches, publication};
 use resin_executor::{Cancellation, Execution};
 use resin_source::{ImportBinding, Loader, Source, SourceError, SourceGraph, SourceId};
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 pub(super) struct Inputs {
     pub graph: SourceGraph,
-    pub syntax: Cache<Source, resin_cst::Document>,
+    pub syntax: BTreeMap<Source, Arc<resin_cst::Document>>,
     pub diagnostics: Vec<SourceError>,
     /// Client presentation is deliberately outside the reusable compiler graph.
     pub origins: BTreeMap<SourceId, Source>,
+    pub paths: BTreeMap<SourceId, std::path::PathBuf>,
 }
 
 pub(super) async fn capture(
     entry: Source,
     loader: &mut Loader,
-    previous: &Cache<Source, resin_cst::Document>,
+    caches: &Caches,
     execution: &Execution,
     cancellation: &Cancellation,
 ) -> crate::Result<Inputs> {
@@ -30,7 +31,7 @@ pub(super) async fn capture(
     let mut origins = BTreeMap::new();
     let mut bindings = Vec::new();
     let mut diagnostics = Vec::new();
-    let mut syntax = previous.clone();
+    let mut syntax: BTreeMap<Source, Arc<resin_cst::Document>> = BTreeMap::new();
     while !pending.is_empty() {
         logical.extend(
             loader
@@ -40,18 +41,41 @@ pub(super) async fn capture(
         for source in &pending {
             origins.insert(logical[&source.id()].id(), source.clone());
         }
-        syntax = syntax
-            .update(
-                logical.values().cloned(),
-                |source| async move {
-                    resin_cst::build_cst(source.text().to_owned(), None, execution, cancellation)
+        let sources = publication::select(
+            &caches.sources,
+            logical.values().cloned().collect(),
+            |source| async move { Ok::<_, resin_executor::Error>(Arc::new(source)) },
+            execution,
+            cancellation,
+        )
+        .await?;
+        for source in logical.values_mut() {
+            *source = sources[source].as_ref().clone();
+        }
+        drop(sources);
+        syntax = publication::select(
+            &caches.syntax,
+            logical.values().cloned().collect(),
+            |source| {
+                let previous = syntax.get(&source).cloned();
+                async move {
+                    match previous {
+                        Some(document) => Ok(document),
+                        None => resin_cst::build_cst(
+                            source.text().to_owned(),
+                            None,
+                            execution,
+                            cancellation,
+                        )
                         .await
-                        .map(Arc::new)
-                },
-                execution,
-                cancellation,
-            )
-            .await?;
+                        .map(Arc::new),
+                    }
+                }
+            },
+            execution,
+            cancellation,
+        )
+        .await?;
         let documents: Vec<_> = pending
             .into_iter()
             .map(|source| {
@@ -111,6 +135,14 @@ pub(super) async fn capture(
         graph,
         syntax,
         diagnostics,
+        paths: origins
+            .iter()
+            .filter_map(|(logical, original)| {
+                loader
+                    .path(original)
+                    .map(|path| (logical.clone(), path.to_owned()))
+            })
+            .collect(),
         origins,
     })
 }

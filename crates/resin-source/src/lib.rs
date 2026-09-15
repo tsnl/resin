@@ -539,6 +539,50 @@ impl Loader {
         }
     }
 
+    /// Copy current supplied registrations and explicit import bindings for a new request.
+    ///
+    /// Disk-only and closed file records are discarded. Supplied files keep their
+    /// registered physical identities without normalizing paths again, even when
+    /// the filesystem has changed since they opened. Each retained file caches only
+    /// its current supplied source, not an older disk or editor version.
+    ///
+    /// Explicit bindings are caller-owned configuration and remain available with
+    /// their registered origins. This performs no I/O and changes neither loader;
+    /// applications can replace a registration loader with its filtered snapshot
+    /// after closing buffers, then give independent snapshots to concurrent requests.
+    pub fn supplied_snapshot(&self) -> Self {
+        let files: BTreeMap<_, _> = self
+            .files
+            .iter()
+            .filter_map(|(path, file)| {
+                let source = file.supplied.as_ref()?;
+                Some((
+                    path.clone(),
+                    File {
+                        cached: source.clone(),
+                        supplied: Some(source.clone()),
+                    },
+                ))
+            })
+            .collect();
+        let mut retained: BTreeSet<_> = files.values().map(|file| file.cached.id()).collect();
+        for ((source, _), target) in &self.imports {
+            retained.insert(source.clone());
+            retained.insert(target.id());
+        }
+        Self {
+            library_root: self.library_root.clone(),
+            files,
+            origins: self
+                .origins
+                .iter()
+                .filter(|(source, _)| retained.contains(*source))
+                .map(|(source, path)| (source.clone(), path.clone()))
+                .collect(),
+            imports: self.imports.clone(),
+        }
+    }
+
     /// Assign checkout-independent names before selecting compiler cache entries.
     /// The returned map associates each original identity with its logical source;
     /// callers retain the originals separately for local paths and diagnostics.

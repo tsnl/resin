@@ -156,3 +156,116 @@ Toolchain Rust API cross-checks passed for Windows GNU and macOS ARM64. The macO
 cross-check used `blake3/pure` because the Linux shell's C compiler cannot build
 Darwin NEON objects. These are compile checks, not platform execution. Windows and
 macOS runtime checks remain manual under the repository's CI policy.
+
+## Phase 2 — shared local LSP caches and concurrent requests
+
+Validated on Linux in the same `shell.nix`, Rust 1.96.0, 24-thread, RTX 5090, and
+Xvfb environment as Phase 1. Cargo and native temporary files used the same memory
+filesystem locations and debug-information settings. Compiler passes and native
+builds run locally; separate CLI and LSP processes begin sharing a service in
+Phase 3.
+
+### Acceptance evidence
+
+| Criterion | Evidence |
+| --- | --- |
+| P2.1 | Worker tests show one root reusing per-file results from two earlier callers and equivalent checkout graphs sharing HIR with separate navigation destinations. Build tests retain different contents for the same logical `main.resin` name and verify repeated builds reuse HIR, verified LIR, and generated-project handles. |
+| P2.2 | Nine publication tests cover barrier-controlled disjoint/equal misses, a 16-task race across two runtime threads, a hit evicted before retry, current recency, and rejected stale history. Completed builders are not repeated; equal-key competitors return the published handle. The large-map race requires exactly one rebase. Native building occurs after cache selection, outside the retry loop. |
+| P2.3 | Source snapshot tests verify release of old/closed text while preserving open physical identities. Worker tests query retained HIR after eviction and with reconstructed source identities. Build tests retain generated files through all-head eviction, then verify final-owner cleanup removes only the corresponding directory; copied executables remain runnable. The sustained-edit test releases every observed HIR after eviction and final-consumer release. |
+| P2.4 | Protocol and executable tests cover coalesced rapid edits, close/reopen epochs, invalid code and repair, dependency edits, dirty buffers across saves, parent imports, missing-file creation/deletion, and alias changes. Prepared replies are rechecked against current revisions; reused wire IDs cannot receive cancelled requests' late replies, and diagnostic clearing tracks what the client actually received. |
+| P2.5 | Protocol tests exercise admission saturation and cancellation without prematurely freeing queued capacity. Formatting completes while registration is blocked. A real LSP test holds native compilation while editor queries, independent cancellation, and shutdown remain responsive. Worker tests bound root/registration/diagnostic tasks and release accepted text after outstanding snapshots drop. |
+| P2.6 | The publication and sustained-edit measurements below record map-copy/publication costs, a controlled CAS retry, active-task peaks, retained HIR handles, and reclamation after close, capacity eviction, and final release. |
+
+### Publication measurements
+
+The integrated `resin-lsp` publication tests used 10,000-entry maps. Ten hit-only
+selections, including immutable cache construction, requested-handle selection,
+and publication, averaged **9.499 ms** each; no miss builder ran.
+
+A barrier-controlled race started two requests from the same 10,000-entry head.
+Each requested the original keys and one different new key. Both completed in
+**24.203 ms** combined, with **two original miss-builder calls**, **one rebase**,
+and **10,002 retained entries**. The barrier and absence of further writers establish
+the single retry. These are unoptimized local test timings, including ordinary-map
+copy costs, rather than a bound on all requests or contention patterns.
+
+### Sustained editing and retained results
+
+The scheduler measurement opened four roots sharing one disk dependency, with
+64 helper declarations per root. It then completed 100 edits in turn across those
+roots, settling analysis after each revision. This measures completed successive
+revisions; separate protocol tests exercise coalescing a rapid edit stream.
+
+| Work | Elapsed |
+| --- | ---: |
+| Initial analysis of four roots | 6.694 ms |
+| Unchanged disk refresh | 1.126 ms |
+| 100 successive edits | 742.570 ms |
+
+The unchanged refresh reused the original HIR handles. Observed peaks were **four
+root tasks**, **one registration task**, and **one diagnostic task**. For this test,
+source/CST/AST/HIR capacities were reduced to **16 / 16 / 16 / 8**; those were also
+their final membership counts after editing.
+
+Weak references tracked 104 distinct HIR results. Three selected old results were
+deliberately retained by consumers throughout the eviction portion:
+
+| Observation point | Tracked HIR values still alive |
+| --- | ---: |
+| After 100 edits | 11 |
+| After closing all documents | 11 |
+| After subsequent compilations caused capacity eviction | 3 |
+| After releasing the final three consumers | 0 |
+
+Closing documents removes active roots and supplied registrations; it does not
+evict warm cache entries by itself. Subsequent cache updates evicted those entries,
+and the retained consumers stayed usable until explicitly released. Weak-reference
+counts establish ownership and reclamation, not process RSS or exact retained bytes.
+
+### Defaults and current limits
+
+- Application-owned atomic heads retain source, CST, and AST caches of 4,096 entries
+  each, HIR and verified-LIR caches of 64 each, and a generated-project cache of 32.
+  Publication uses safe `ArcSwap` CAS; published maps and values remain immutable.
+- At most four root analyses run concurrently, with one registration task and one
+  diagnostic preparation task. Request/reply channels and request admission have
+  capacity 64. Accepted editor snapshots and prepared diagnostics use replaceable
+  latest-value mailboxes. Execution retains Phase 1's CPU/native-job bounds.
+- Each capture receives an independent loader containing current supplied sources
+  and explicit bindings. Registration snapshots discard disk-only and closed history
+  and retain no ancient cached text. Open epochs preserve physical identities through
+  symlink changes; reopening acquires a new registration.
+- Identical open aliases share their physical registration until the final alias
+  closes. Conflicting text for the same physical source is rejected with both URI
+  names. Reopening a retargeted path resolves it again while older aliases retain
+  their captured identity.
+- An initial in-flight root whose dependencies are not known yet may restart after
+  an unrelated edit. Ready roots preserve their results across unrelated buffer
+  edits. Disk/save/watch events conservatively invalidate all roots.
+- A client that stops reading replies can apply transport backpressure. Responsive
+  receive handling does not promise progress against a blocked output transport.
+- Capacity counts entries, not bytes. Old consumers, dependency graphs, open buffers,
+  and admitted work can retain additional memory. Oversized requested sets still
+  survive with a warning. Atomic publication establishes neither a hard RSS bound
+  nor a lock-free compiler. There is no periodic eviction task.
+
+### Completed checks
+
+- `cargo nextest run --workspace --all-features --test-threads 24 --no-fail-fast`:
+  **1,091 passed, 0 skipped**, in **52.418 seconds** after compilation. GPU and window
+  checks used the required-tool flags and X11 settings recorded for Phase 0.
+- Final alias-ownership review added three worker regressions and corrected
+  closing one of several open aliases. After that correction, the complete source
+  and LSP suites passed together: **85 passed, 0 skipped**, in **2.274 seconds**.
+  This includes the additional parent-import creation/deletion/alias test.
+- Those final 85 tests comprise **41 source tests**, **9 publication tests**,
+  **2 real build-handler tests**, **11 worker tests**, **6 protocol-state tests**,
+  **1 text-position test**, and **15 executable LSP tests**. The executable tests
+  include queries during blocked native work and cancellation that reaps children.
+- `cargo test --workspace --all-features --doc`: **20 passed**.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`: passed.
+- `cargo fmt --all -- --check`: passed.
+- `git diff --check`: passed.
+
+These execution results are Linux-only. Windows/macOS hosted runtime checks remain
+manual under the repository's CI policy.
