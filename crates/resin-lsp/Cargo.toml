@@ -3,6 +3,7 @@ name = "resin-lsp"
 version.workspace = true
 edition = "2024"
 publish = false
+license.workspace = true
 description = "Language server for Resin"
 repository = "https://github.com/tsnl/resin"
 

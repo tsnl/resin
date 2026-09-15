@@ -3,3 +3,4 @@ name = "resin-common"
 version.workspace = true
 edition = "2024"
 publish = false
+license.workspace = true

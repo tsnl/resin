@@ -3,6 +3,7 @@ name = "resin-cst"
 version.workspace = true
 edition = "2024"
 publish = false
+license.workspace = true
 
 [dependencies]
 resin-types = { workspace = true }
