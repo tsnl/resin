@@ -1,6 +1,6 @@
 //! Command-line argument parsing and mode dispatch.
 mod args;
-mod compiler;
+mod interpreter;
 mod embed;
 mod format;
 mod request;
@@ -31,7 +31,7 @@ fn try_main() -> Result<i32> {
 
 fn dispatch_by_mode(mode: Mode) -> Result<i32> {
     match mode {
-        Mode::Compiler { request, args } => compiler::run(&request, &args),
+        Mode::Interpreter { request, args } => interpreter::run(&request, &args),
         Mode::Embed {
             input,
             output,

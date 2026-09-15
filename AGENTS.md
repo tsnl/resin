@@ -217,7 +217,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Keep `src/main.rs` as a wrapper around `resin::cli::main`; argument-to-`Mode` dispatch
   lives in `src/cli/`. Capture process settings through the platform toolchain's
   `Environment`, then choose CLI defaults and the build profile explicitly.
-  Validate file selections and output destinations in the CLI. The CLI `Compiler`
+  Validate file selections and output destinations in the CLI. Interpreter mode
   owns host compilation from source to executable. `resin_frontend::Frontend::compile`
   consumes an immutable source, a loader, and explicit host/shader targets to produce a
   `Compilation`. The separate `resin_codegen::generate` operation takes verified LIR and

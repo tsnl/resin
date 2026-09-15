@@ -6,7 +6,7 @@ use resin_toolchain::CProfile;
 use std::{ffi::OsString, path::PathBuf};
 
 pub enum Mode {
-    Compiler {
+    Interpreter {
         request: Box<Request>,
         args: Vec<OsString>,
     },
@@ -135,7 +135,7 @@ impl Cli {
 
     fn build(self, environment: &Environment) -> Result<Mode> {
         let input = self.input()?;
-        Ok(Mode::Compiler {
+        Ok(Mode::Interpreter {
             request: Box::new(self.compile.request(input, environment)?),
             args: self.program_args,
         })

@@ -1,9 +1,9 @@
-//! Host program compilation for compiler mode.
+//! Host program compilation for interpreter mode.
 use super::{Result, request::Request};
 use std::ffi::OsString;
 
 pub(super) fn run(request: &Request, args: &[OsString]) -> Result<i32> {
-    let executable = Compiler::compile(request)?;
+    let executable = Interpreter::compile(request)?;
     if let Some(output) = &request.destination {
         executable.copy_to(output)?;
         Ok(0)
@@ -12,9 +12,9 @@ pub(super) fn run(request: &Request, args: &[OsString]) -> Result<i32> {
     }
 }
 
-struct Compiler;
+struct Interpreter;
 
-impl Compiler {
+impl Interpreter {
     fn compile(request: &Request) -> Result<resin_toolchain::Executable> {
         let compilation = Self::lower(request)?;
         let project = Self::generate(&compilation, request)?;

@@ -438,7 +438,7 @@ syntax caching, HIR/LIR generation, verification, and retained query access.
 The CLI's private [Request](../src/cli/request.rs) resolves source and destination choices
 against the captured working directory, including output naming and ancestor validation.
 It owns the library root for that request. Argument parsing passes the original paths
-to this boundary. The CLI [Compiler](../src/cli/compiler.rs) lowers the request,
+to this boundary. The CLI [interpreter](../src/cli/interpreter.rs) lowers the request,
 writes generated sources to a stable `build/` folder, and drives the native build.
 Native compiler search paths
 retain their meaning relative to that captured directory; Ninja resolves discovered header

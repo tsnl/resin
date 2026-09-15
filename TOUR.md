@@ -100,9 +100,9 @@ pipelines and run them. Host-only programs follow the same recipe with an empty 
 
 [src/main.rs](src/main.rs) only calls `resin::cli::main`, the root package's CLI entry.
 [cli/mod.rs](src/cli/mod.rs) dispatches modes, and [args.rs](src/cli/args.rs)
-parses flags and chooses `Compiler`, `Formatter`, or `LanguageServer`;
+parses flags and chooses `Interpreter`, `Formatter`, or `LanguageServer`;
 [source.rs](src/cli/source.rs) parses the `FILE[:ENTRY]` selector.
-Compiler mode builds a host program. Without `--output` it uses the debug cache
+Interpreter mode builds a host program. Without `--output` it uses the debug cache
 and runs the executable; with `--output` (or `-o`) it builds an optimized executable
 and copies it to the selected destination without running it.
 `resin --lsp DIR` serves the language server for that project directory
@@ -121,7 +121,7 @@ use the same captured environment.
 
 The CLI's private [Request](src/cli/request.rs) validates the input/output combination,
 resolves directory destinations, and rejects outputs that would overwrite the source.
-It also owns the library root. The CLI [Compiler](src/cli/compiler.rs) loads that
+It also owns the library root. The CLI [interpreter](src/cli/interpreter.rs) loads that
 request: [resin_source::Loader](crates/resin-source/src/lib.rs) reads the file into
 an immutable `Source`, `resin_frontend::Frontend::compile(source, loader, targets)`
 resolves imports and returns an `Arc<Compilation>`, codegen writes C/SPIR-V/Ninja
