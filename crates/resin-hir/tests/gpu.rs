@@ -7,6 +7,33 @@ fn generate(source: &str) -> Result<Module, resin_source::SourceError> {
     hir_module(source)
 }
 
+#[test]
+fn compute_workgroup_size_is_a_typed_constant() {
+    let module = generate("def size() -> _ = { compute_workgroup_size };").unwrap();
+    assert_eq!(module.functions[0].signature.result.ty, Type::UInt64);
+    for (source, expected) in [
+        (
+            "def size() -> uint = { compute_workgroup_size };",
+            "TypeMismatch",
+        ),
+        (
+            "def size() = { var compute_workgroup_size = 1_ul; };",
+            "ReservedBuiltin",
+        ),
+        (
+            "def size(compute_workgroup_size: ulong) = {};",
+            "ReservedBuiltin",
+        ),
+        (
+            "def compute_workgroup_size() -> ulong = { 1_ul };",
+            "ReservedBuiltin",
+        ),
+    ] {
+        let error = generate(source).unwrap_err();
+        assert!(error.to_string().contains(expected), "{source}: {error}");
+    }
+}
+
 // These names deliberately differ from the library. Contracts are explicit
 // declarations; no compiler type or method is selected from a public spelling.
 const PIPELINES: &str = r#"

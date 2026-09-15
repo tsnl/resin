@@ -27,8 +27,7 @@ def main() -> Result<(), _> = {
 	var root = { width = width, height = height, pixels = pixels };
 	var commands = gpu.start_command_recording()?;
 
-	// Compute shaders use 64 invocations per workgroup.
-	var groups = uint((pixels.length + 63_ul) / 64_ul);
+	var groups = uint((pixels.length + compute_workgroup_size - 1_ul) / compute_workgroup_size);
 	commands.dispatch(pipeline, root, groups, 1, 1)?;
 	commands.submit()?;
 

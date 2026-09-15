@@ -1010,7 +1010,7 @@ fn error(span: Span, message: impl Into<Arc<str>>) -> GenerateError {
 pub(crate) fn check_binding_name(name: &Ident) -> Result<()> {
     if matches!(
         name.val.as_ref(),
-        "ok" | "err" | "size_of" | "align_of" | "absurd"
+        "ok" | "err" | "size_of" | "align_of" | "absurd" | "compute_workgroup_size"
     ) {
         return Err(GenerateError {
             span: name.span,
