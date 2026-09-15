@@ -1,7 +1,7 @@
 # Lifetimes, places, and shared ownership
 
-`Place<T>` denotes addressable storage inside the compiler. It is not a user-visible
-type. Reading a place for a value consumer performs a compiler-generated copy;
+A place denotes addressable storage inside the compiler. The source type
+[`Ref<T>`](references.md) exposes a fixed, nonowning reference to that storage. Reading a place for a value consumer performs a compiler-generated copy;
 assignment stores a value in a place, and address formation preserves its location.
 
 ```mermaid
@@ -13,8 +13,8 @@ flowchart LR
 ```
 
 Variables, pointer dereferences, and fields projected from places follow this
-model. Array and span indexing returns `Ptr<T>`, so user-defined indexing wrappers
-can expose the same interface. `items.at(i).*` is the element's place. The `.at()`
+model. Array and span indexing returns `Ref<T>`, so user-defined indexing wrappers
+can expose the same interface. `items.at(i)` is the element's place. The `.at()`
 index parameter is `ulong`; other integer values require an explicit conversion.
 Shared ownership builds on these rules by retaining on copy and releasing on drop.
 
@@ -43,22 +43,22 @@ with distinct destruction responsibilities. Resin has no unsized payload types.
 
 Using a variable, field, or pointee as a value copies its contents. Address formation
 and assignment destinations preserve the place instead. Indexing an array preserves
-its storage address; it does not copy the array. The current indexing API returns
-`Ptr<T>`, so `items.at(i).*` requests an element value and `items.at(i).* := x` addresses
+its storage address; it does not copy the array. Indexing returns
+`Ref<T>`, so `items.at(i)` requests an element value and `items.at(i) := x` addresses
 the element for assignment.
 
 `Place<T>` is compiler terminology, not a source-level type. Variables denote places;
 `p.*` produces the place addressed by `Ptr<T>`. Field projection from a place preserves
 its address through nested access, including implicit dereferencing in `p.field`.
 A value consumer requests a compiler-generated copy, while `&` yields the place's
-pointer. Indexing returns a pointer so user-defined wrappers have the same interface:
+pointer. User-defined wrappers return references with the same interface:
 
 ```resin
-def at(items: Span<int>, index: ulong) -> Ptr<int> = { items.at(index) };
+def at(items: Span<int>, index: ulong) -> Ref<int> = { items.at(index) };
 // Inside a function:
-at(items, 0_ul).* := 42;
-var copied = at(items, 0_ul).*;
-var address = &at(items, 0_ul).*;
+at(items, 0_ul) := 42;
+var copied = at(items, 0_ul);
+var address = &at(items, 0_ul);
 ```
 
 A function or type application consumes the resulting argument value. Infix operators are builtin function
@@ -76,7 +76,8 @@ Pair { a = make_t(), b = x } // Transfer make_t()'s result; copy x into b.
 ArcPtr<T>.alloc(x)?         // Copy x into a new shared allocation.
 ```
 
-Function parameters own their argument values and receive ordinary scope cleanup.
+Value parameters own their arguments and receive ordinary scope cleanup.
+Reference parameters borrow their referents without retaining or destroying them.
 Returning a fresh expression transfers its result to the caller. Returning a named
 parameter or local reads and therefore copies that value; the original still receives
 cleanup. Names remain usable after reads. Assignment expressions preserve their
@@ -104,7 +105,7 @@ Import `$/shared.resin` to allocate initialized, fixed-length shared sequences:
 var values = ArcSpan<uint>.alloc(128, 0_ui)?; // ArcSpan<uint>
 var alias = values;                 // Retains the complete allocation.
 var view = values.get();            // Borrows a Span<uint>.
-view.at(0).* := 42_ui;
+view.at(0) := 42_ui;
 var bytes = view.as_bytes();        // Span<ubyte>
 ```
 
@@ -118,7 +119,7 @@ destroys the elements in reverse order and then releases their allocation.
 
 `get()` borrows the owning handle just as `ArcPtr.get()` does. The returned span
 does not retain the owner: keep an owning handle alive while using it. Indexing
-through `values.get().at(index)` returns a borrowed `Ptr<T>`. An owned span always
+through `values.get().at(index)` returns a borrowed `Ref<T>`. An owned span always
 owns its complete allocation; it has no owning interior views. Its element count
 cannot change, and changing a borrowed descriptor cannot change the allocation's
 destruction extent.

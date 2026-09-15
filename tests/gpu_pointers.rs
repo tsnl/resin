@@ -100,9 +100,9 @@ fn inferred_values_and_slices_keep_their_allocation_and_gpu_alive() {
             member.store(member.load() + 2_i);
             tail.at(0_ul).store(24_i);
             var copied = [0_i, 0_i, 0_i];
-            values.read_only().copy_to(Span<int> { data = copied.at(0_ul), length = 3_ul });
-            ok(if (number.load() == 43_i && member.load() == 7_i && copied.at(0_ul).* == 11_i
-                && copied.at(1_ul).* == 24_i && copied.at(2_ul).* == 13_i && tail.length == 2_ul) { 0 } else { 1 })
+            values.read_only().copy_to(Span<int> { data = &copied.at(0_ul), length = 3_ul });
+            ok(if (number.load() == 43_i && member.load() == 7_i && copied.at(0_ul) == 11_i
+                && copied.at(1_ul) == 24_i && copied.at(2_ul) == 13_i && tail.length == 2_ul) { 0 } else { 1 })
         };
     "#) else {
         return;
@@ -208,8 +208,8 @@ const COMPUTE: &str = r#"
     struct Parameters { increment: uint, values: Span<uint> };
     @compute_shader def kernel(index: ulong, root: Ptr<Parameters>) = {
         if (index < root.values.length) {
-            var item = root.values.at(index);
-            item.* := item.* + root.increment;
+            var item: Ref<uint> = root.values.at(index);
+            item := item + root.increment;
         };
     };
     def main() -> Result<int, _> = {
@@ -235,9 +235,9 @@ fn projected_scalar_and_span_arguments_dispatch_and_allow_readback_after_submit(
         again.dispatch(pipeline, arguments, 1_ui, 1_ui, 1_ui)?;
         again.submit()?;
         var result = [0_ui, 0_ui, 0_ui, 0_ui];
-        values.copy_to(Span<uint> { data = result.at(0_ul), length = 4_ul });
-        ok(if (result.at(0_ul).* == 0_ui && result.at(1_ul).* == 11_ui
-            && result.at(2_ul).* == 12_ui && result.at(3_ul).* == 3_ui) { 0 } else { 1 })
+        values.copy_to(Span<uint> { data = &result.at(0_ul), length = 4_ul });
+        ok(if (result.at(0_ul) == 0_ui && result.at(1_ul) == 11_ui
+            && result.at(2_ul) == 12_ui && result.at(3_ul) == 3_ui) { 0 } else { 1 })
     "#,
     );
     let Some(output) = run(&source) else { return };
@@ -251,7 +251,7 @@ fn source_sequences_project_offsets_and_retain_resources_through_submit() {
         import { "$/gpu.resin", "$/span.resin" };
         struct Root { values: Span<uint>, scalar: Ptr<uint> };
         @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {
-            if (index < root.values.length) { root.values.at(index).* := root.values.at(index).* + 10_ui; };
+            if (index < root.values.length) { root.values.at(index) := root.values.at(index) + 10_ui; };
             if (index == 0_ul) { root.scalar.* := 42_ui; };
         };
         def main() -> Result<int, _> = {
@@ -395,7 +395,7 @@ fn inferred_signed_long_pointers_project_and_precomputed_inputs_evaluate_once() 
         @compute_shader def kernel(index: ulong, root: Ptr<Parameters>) = {
             if (index == 0_ul && root.value.* < 0_l) {
                 root.value.* := -root.value.* + root.increment;
-                root.values.at(0_ul).* := root.value.* * 2_l;
+                root.values.at(0_ul) := root.value.* * 2_l;
             };
         };
         def allocation(gpu: Gpu, calls: Ptr<int>) -> (Gpu, ulong) = {
@@ -433,7 +433,7 @@ fn returned_typed_pipelines_and_recordings_keep_scoped_resources_alive() {
         import { "$/gpu.resin", "$/span.resin", "$/shared.resin" };
         struct Parameters { values: Span<uint> };
         @compute_shader def kernel(index: ulong, root: Ptr<Parameters>) = {
-            if (index < root.values.length) { root.values.at(index).* := 42_ui; };
+            if (index < root.values.length) { root.values.at(index) := 42_ui; };
         };
         def make_pipeline(gpu: Gpu) -> Result<GpuComputePipeline<Parameters, GpuPipelineOwner>, _> = {
             gpu.create_compute_pipeline(kernel)
@@ -572,8 +572,8 @@ fn gpu_view_primitives_keep_owners_offsets_and_typed_source_methods() {
             var previous = replace(offset(original, 4, 4, 4), 42_i);
             store(offset(original, 8, 4, 4), 19_i);
             var copied = [0_i, 0_i, 0_i];
-            copy_to(restrict(original, 1), 3, copied.at(0), 3);
-            ok(if (first.read() == 7 && second.read() == 42 && previous == 11 && copied.at(2).* == 19) {{ 0 }} else {{ 1 }})
+            copy_to(restrict(original, 1), 3, &copied.at(0), 3);
+            ok(if (first.read() == 7 && second.read() == 42 && previous == 11 && copied.at(2) == 19) {{ 0 }} else {{ 1 }})
         }};
     "#
     );
@@ -591,7 +591,7 @@ fn gpu_view_primitives_preserve_access_bounds_and_alignment_checks() {
         ("var value = replace(restrict(view, 1), 8_i);", "permission"),
         ("var value = offset(view, 1, 4, 4);", "misaligned"),
         ("var value = offset(view, 8, 4, 4);", "out of bounds"),
-        ("copy_to(view, 2, result.at(0), 1);", "too short"),
+        ("copy_to(view, 2, &result.at(0), 1);", "too short"),
     ] {
         let source = format!(
             r#"

@@ -238,17 +238,20 @@ fn retries_discard_failed_method_choices_and_preserve_completed_groups() {
     assert_eq!(inference.methods.len(), 2);
     assert!(!inference.methods.contains_key(&failed));
     for (rule, ty) in [(earlier, first), (healthy, good)] {
-        let pointer = Ty::Pointer {
-            pointee: Box::new(Ty::UInt8),
+        let reference = crate::Type::Reference {
+            referent: Box::new(crate::Type::UInt8),
         };
         let infer::ResolvedMethod::Intrinsic { signature, .. } = &inference.methods[&rule] else {
             panic!("compiler method");
         };
         assert_eq!(
-            inference.solver.resolve(&signature.result),
-            Some(pointer.clone())
+            inference.solver.complete(&signature.result),
+            Some(reference.clone())
         );
-        assert_eq!(inference.solver.require(&ty, span).unwrap(), pointer);
+        assert_eq!(
+            inference.solver.require_complete(&ty, span).unwrap(),
+            reference
+        );
     }
 }
 

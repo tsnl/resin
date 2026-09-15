@@ -181,8 +181,8 @@ fn physical_byte_record_strides_preserve_neighboring_elements() {
             if (index < root.count) {
                 var inputs = Span<Bytes3> { data = root.inputs, length = root.count };
                 var outputs = Span<Bytes3> { data = root.outputs, length = root.count };
-                var output = outputs.at(index);
-                output.* := inputs.at(index).*;
+                var output: Ref<_> = outputs.at(index);
+                output := inputs.at(index);
                 output.b := output.b + 1_ub;
             };
         };
@@ -299,11 +299,11 @@ fn an_unconditionally_failing_nested_loop_condition_stops_before_caller_stores()
                 var output = Span<uint> { data = root.outputs, length = root.count };
                 var step = 0_ui;
                 while (step < 1_ui) {
-                    while (condition()) { output.at(index).* := 1_ui; };
-                    output.at(index).* := 2_ui;
+                    while (condition()) { output.at(index) := 1_ui; };
+                    output.at(index) := 2_ui;
                     step := step + 1_ui;
                 };
-                output.at(index).* := 3_ui;
+                output.at(index) := 3_ui;
             };
         };"#;
     let sentinel = 0xabcd1234_u32;

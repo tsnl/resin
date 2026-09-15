@@ -151,11 +151,12 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
                 ),
             ],
         ),
-        StmtKind::Define { name, init } => list_sp(
-            "define",
-            stmt.span,
-            vec![symbol(name.val.as_ref()), sexp_term(init)],
-        ),
+        StmtKind::Define { name, ann, init } => {
+            let mut items = vec![symbol(name.val.as_ref())];
+            items.extend(ann.iter().map(sexp_typespec));
+            items.push(sexp_term(init));
+            list_sp("define", stmt.span, items)
+        }
         StmtKind::DefineType {
             type_params,
             name,

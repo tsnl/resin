@@ -154,6 +154,9 @@ impl Checker<'_> {
         name: &Ident,
         explicit: Option<Vec<Type>>,
     ) -> Result<(DeclarationId, Type, Vec<Type>)> {
+        for argument in explicit.iter().flatten() {
+            super::eval::reference_type(&self.typing.solver, argument, false, name.span)?;
+        }
         let (declaration, ty, function) =
             self.scopes
                 .lookup_inferred(&name.val)
@@ -242,7 +245,7 @@ pub(in crate::lower) fn file(
     let errors = generator.declare_checked_functions(&checked);
     checked.errors.extend(errors);
     for body in bodies {
-        if solver.invalid(&body.term.ty) {
+        if solver.invalid(&body.term.actual) {
             continue;
         }
         let Some(signature) = checked.signatures.get(&body.declaration) else {
@@ -568,7 +571,7 @@ impl Checker<'_> {
         self.typing.infer_from(
             &signature.result.holes,
             signature.result.span,
-            term.ty.clone(),
+            term.actual.clone(),
         );
         term
     }
@@ -729,13 +732,29 @@ fn dependencies(bodies: &[Body]) -> Vec<Vec<usize>> {
 
 impl Checker<'_> {
     pub fn term(&mut self, term: &resin_ast::Term, expected: Option<Type>) -> (Rule, Term) {
-        let (rule, out) = self.typing.expression();
-        let term = Expression {
+        let reference_result = matches!(
+            term.val,
+            resin_ast::TermKind::Var { .. } | resin_ast::TermKind::MethodCall { .. }
+        ) || matches!(&term.val, resin_ast::TermKind::Call { func, .. } if !matches!(func.val, resin_ast::TermKind::Type { .. }));
+        let (rule, out) = if reference_result {
+            self.typing.reference_expression()
+        } else {
+            self.typing.expression()
+        };
+        let mut checked = Expression {
             checker: self,
             rule,
         }
-        .check(term, expected, out);
-        (rule, term)
+        .check(term, expected.clone(), out.clone());
+        let consumed = expected.unwrap_or_else(|| {
+            if reference_result {
+                Type::value(out)
+            } else {
+                out
+            }
+        });
+        checked.ty = consumed;
+        (rule, checked)
     }
 }
 
@@ -779,7 +798,7 @@ impl Expression<'_, '_> {
         let (_, child) = self.checker.term(term, expected);
         self.checker
             .typing
-            .depends(self.rule, term.span, child.ty.clone());
+            .depends(self.rule, term.span, child.actual.clone());
         child
     }
 
@@ -811,6 +830,7 @@ impl Expression<'_, '_> {
                 Term {
                     span: term.span,
                     ty: out.clone(),
+                    actual: out.clone(),
                     kind: TermKind::Error(error),
                 }
             }
@@ -915,10 +935,18 @@ impl Expression<'_, '_> {
                 function: func,
                 args: type_args,
             } => {
-                let arguments = type_args
+                let arguments: Vec<_> = type_args
                     .iter()
                     .map(|ann| self.annotation(ann, true).ty)
                     .collect();
+                for argument in &arguments {
+                    super::eval::reference_type(
+                        &self.checker.typing.solver,
+                        argument,
+                        false,
+                        span,
+                    )?;
+                }
                 match &func.val {
                     resin_ast::TermKind::Var { name } => {
                         let (declaration, ty, type_args) =
@@ -1089,12 +1117,19 @@ impl Expression<'_, '_> {
                 type_args,
                 args,
             } => {
-                let type_args = (!type_args.is_empty()).then(|| {
-                    type_args
-                        .iter()
-                        .map(|ann| self.annotation(ann, true).ty)
-                        .collect()
-                });
+                let arguments: Vec<_> = type_args
+                    .iter()
+                    .map(|ann| self.annotation(ann, true).ty)
+                    .collect();
+                for argument in &arguments {
+                    super::eval::reference_type(
+                        &self.checker.typing.solver,
+                        argument,
+                        false,
+                        span,
+                    )?;
+                }
+                let type_args = (!arguments.is_empty()).then_some(arguments);
                 self.checker.method_dependencies(&name.val);
                 let (receiver, annotation, receiver_type, associated) =
                     if let resin_ast::TermKind::Type { ty } = &receiver.val {
@@ -1196,6 +1231,7 @@ impl Expression<'_, '_> {
                         single_argument(args, span)?
                     };
                     let ann = self.annotation(ty, true);
+                    super::eval::reference_type(&self.checker.typing.solver, &ann.ty, false, span)?;
                     let arg = {
                         let literal = matches!(arg.val, resin_ast::TermKind::Num { .. })
                             || matches!(&arg.val, resin_ast::TermKind::Builtin { name, args } if matches!(name.as_ref(), "+" | "-") && matches!(args.as_slice(), [resin_ast::Term { val: resin_ast::TermKind::Num { .. }, .. }]));
@@ -1285,6 +1321,7 @@ impl Expression<'_, '_> {
         }
         Ok(Term {
             span,
+            actual: out.clone(),
             ty: out,
             kind,
         })
@@ -1316,8 +1353,12 @@ impl Expression<'_, '_> {
     fn statement_inner(&mut self, stmt: &resin_ast::Stmt) -> Result<StatementKind> {
         let span = stmt.span;
         Ok(match &stmt.val {
-            StmtKind::Define { name, init } => {
-                let ty = self.checker.typing.solver.fresh();
+            StmtKind::Define { name, ann, init } => {
+                let ty = if let Some(ann) = ann {
+                    self.annotation(ann, true).ty
+                } else {
+                    self.checker.typing.solver.fresh()
+                };
                 let binding = self
                     .checker
                     .bind(name, ty.clone(), DefinitionKind::Variable)
@@ -1325,7 +1366,12 @@ impl Expression<'_, '_> {
                     .ok();
                 let init = self.child(init, Some(ty));
                 if let Some(binding) = binding {
-                    self.checker.scopes.set_inferred(binding, init.ty.clone());
+                    let binding_type = if ann.is_some() {
+                        init.ty.clone()
+                    } else {
+                        Type::value(init.actual.clone())
+                    };
+                    self.checker.scopes.set_inferred(binding, binding_type);
                 }
                 StatementKind::Define {
                     binding,

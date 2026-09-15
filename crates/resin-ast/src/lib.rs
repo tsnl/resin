@@ -202,9 +202,10 @@ pub enum StmtKind {
         result: Type,
         body: Term,
     },
-    /// `var name = init;` The name is in scope, but eager recursive reads are invalid.
+    /// `var name[: Type] = init;` The name is in scope; eager recursive reads are invalid.
     Define {
         name: Ident,
+        ann: Option<Type>,
         init: Term,
     },
     /// `type Name = init;` A transparent alias.

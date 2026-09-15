@@ -22,7 +22,7 @@ def kernel(index: ulong, root: Ptr<Root>) = {
 			n := n + 1_ui;
 		};
 		var output = Span<uint> { data = root.output, length = ulong(root.count) };
-		output.at(index).* := x;
+		output.at(index) := x;
 	};
 };
 

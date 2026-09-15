@@ -685,7 +685,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
     for receiver in ["values", "holder.values"] {
         for tail in ["", " values.;", " holder.values.;", " holder.values.at(; "] {
             let source = format!(
-                "import {{ \"$/span.resin\" }}; def main() = {{ var values = [1_i, 2_i]; var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }}; {receiver}.at(0).* := 3;{tail} }};"
+                "import {{ \"$/span.resin\" }}; def main() = {{ var values = [1_i, 2_i]; var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }}; {receiver}.at(0) := 3;{tail} }};"
             );
             let project = Project::new(&[("main.resin", &source)]);
             let analysis = project.build_hir();
@@ -699,7 +699,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
             let offset = source.find(".at(0)").unwrap() + 1;
             assert_eq!(
                 analysis.hover(&input, offset).unwrap().text,
-                "at: (ulong) -> Ptr<int>"
+                "at: (ulong) -> Ref<int>"
             );
             let items = analysis.completions(&input, offset);
             assert!(
@@ -848,7 +848,7 @@ fn field_completion_before_existing_statements() {
         ("root.pixels", vec!["data", "length"]),
     ] {
         for following in [
-            "if (index < ulong(root.width)) { root.pixels.at(index).* := 0_ui; };",
+            "if (index < ulong(root.width)) { root.pixels.at(index) := 0_ui; };",
             "var later = root.width; later;",
             "while (false) { root.width; };",
             "root.width;",
@@ -1720,7 +1720,7 @@ fn indexing_keeps_editor_types_and_shader_functions_have_no_bytecode_property() 
             .hover(&input, source.find("p =").unwrap())
             .unwrap()
             .text,
-        "p: Ptr<long>"
+        "p: long"
     );
     for body in ["kernel.", "var alias = kernel; alias."] {
         let source = format!(

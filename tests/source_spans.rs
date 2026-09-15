@@ -42,8 +42,8 @@ fn generic_pointer_index_preserves_stride_mutation_and_host_bounds_diagnostics()
             {INDEX}
             def main() -> int = {{
                 var values = [3_ul, 7_ul, 11_ul];
-                index(values.at(0), 3, {position}).* := 42_ul;
-                if (values.at(1).* == 42_ul) {{ 0 }} else {{ 1 }}
+                index(&values.at(0), 3, {position}).* := 42_ul;
+                if (values.at(1) == 42_ul) {{ 0 }} else {{ 1 }}
             }};
         "#
         );
@@ -69,13 +69,13 @@ fn source_methods_preserve_element_stride_aliasing_and_explicit_literal_borrows(
         import { "$/span.resin" };
         def main() -> int = {
             var values = [3_ul, 7_ul, 11_ul];
-            var view = Span<ulong> { data = values.at(0), length = 3_ul };
+            var view = Span<ulong> { data = &values.at(0), length = 3_ul };
             var alias = view.slice(1, 2);
-            alias.at(0).* := 42_ul;
+            alias.at(0) := 42_ul;
             var raw = alias.as_bytes();
             var literal = bytes("A\0B");
-            if (values.at(1).* == 42_ul && raw.length == 16_ul
-                && literal.length == 3_ul && literal.at(1).* == 0_ub) { 0 } else { 1 }
+            if (values.at(1) == 42_ul && raw.length == 16_ul
+                && literal.length == 3_ul && literal.at(1) == 0_ub) { 0 } else { 1 }
         };
     "#);
     assert!(
@@ -92,7 +92,7 @@ fn empty_slices_allow_one_past_the_end_without_advancing_null() {
         import { "$/span.resin" };
         def main() -> int = {
             var values = [1_ui, 2_ui];
-            var view = Span<uint> { data = values.at(0), length = 2_ul };
+            var view = Span<uint> { data = &values.at(0), length = 2_ul };
             var end = view.slice(2, 0);
             var empty = Span<uint> { data = Ptr<uint>(0_ul), length = 0_ul }.slice(0, 0);
             if (end.length == 0_ul && ulong(end.data) == ulong(view.data) + 2_ul * size_of(uint)
@@ -110,7 +110,7 @@ fn empty_slices_allow_one_past_the_end_without_advancing_null() {
 fn primitive_boundaries_report_invalid_ranges_indices_and_byte_counts() {
     for (storage, cases) in [
         (
-            "var values = [1_ul, 2_ul, 3_ul]; var view = Span<ulong> { data = values.at(0), length = 3_ul };",
+            "var values = [1_ul, 2_ul, 3_ul]; var view = Span<ulong> { data = &values.at(0), length = 3_ul };",
             [
                 ("view.at(3)", "index"),
                 ("view.slice(2, 2)", "slice out of bounds"),
@@ -196,7 +196,7 @@ fn shader_span_indexing_uses_record_layout_and_device_pointer_stride() {
         import { "$/span.resin" };
         struct Root { values: Span<uint> };
         @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {
-            root.values.at(index).* := 42_ui;
+            root.values.at(index) := 42_ui;
         };
     "#,
         "kernel",
@@ -217,7 +217,7 @@ fn shader_local_addresses_cannot_become_physical_pointer_index_operands() {
         intrinsic "pointer_index" def index<T>(data: Ptr<T>, length: ulong, position: ulong) -> Ptr<T>;
         @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = {
             var values = [1_ui, 2_ui];
-            output.* := index(values.at(0), 2, 0).*;
+            output.* := index(&values.at(0), 2, 0).*;
         };
     "#,
         "kernel",
@@ -234,20 +234,20 @@ fn shader_local_addresses_cannot_become_physical_pointer_index_operands() {
 }
 
 #[test]
-fn pointer_returning_index_wrappers_preserve_nested_places() {
+fn reference_returning_index_wrappers_preserve_nested_places() {
     let output = run(r#"
     export { main };
     import { "$/span.resin" };
     struct Payload { value: int };
     struct Entry { nested: Payload };
-    def at(items: Span<Entry>, index: ulong) -> Ptr<Entry> = { items.at(index) };
+    def at(items: Span<Entry>, index: ulong) -> Ref<Entry> = { items.at(index) };
     def main() -> int = {
         var items = [Entry { nested = Payload { value = 1 } }, Entry { nested = Payload { value = 2 } }];
         var span = Span<Entry> { data = Ptr<Entry>(&items), length = 2_ul };
         at(span, 1_ul).nested.value := 42;
-        var p = &at(span, 1_ul).*.nested.value;
+        var p = &at(span, 1_ul).nested.value;
         p.* := p.* + 1;
-        var copied = at(span, 1_ul).*.nested;
+        var copied = at(span, 1_ul).nested;
         copied.value := 99;
         if (items(1).nested.value == 43 && copied.value == 99 && items(0).nested.value == 1) { 0 } else { 1 }
     };

@@ -103,6 +103,15 @@ pub enum Type {
     Pointer {
         pointee: Box<Type>,
     },
+    /// A fixed, nonowning binding to a place containing the referent.
+    Reference {
+        referent: Box<Type>,
+    },
+    /// The value type of an expression: unwrap a reference, otherwise preserve its type.
+    /// Retained for dependent function results until specialization selects their signature.
+    Value {
+        of: Box<Type>,
+    },
     /// An opaque shared allocation view with checked byte offsets and host permissions.
     GpuView,
     GpuPipelineContract,
@@ -338,6 +347,11 @@ pub enum TermKind {
     },
     Adapt {
         conversion: ReceiverConversion,
+        arg: Box<Term>,
+    },
+    /// Use an expression in the term's declared type: bind a reference or read its
+    /// referent, then apply ordinary value widening. Binding requires a place.
+    Use {
         arg: Box<Term>,
     },
     Convert {
@@ -763,6 +777,7 @@ fn builtin_hover(document: &resin_cst::Document, token: resin_cst::Node<'_>) -> 
             token.kind(),
             "builtin_type"
                 | "Ptr"
+                | "Ref"
                 | "GpuPipelineContract"
                 | "GpuView"
                 | "GpuArguments"
@@ -854,6 +869,11 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
         "compute_workgroup_size",
         "compute_workgroup_size: ulong\n\nThe number of X invocations per compute workgroup. Y and Z sizes are one. Available on host and shader without imports.",
         DefinitionKind::Variable,
+    ),
+    (
+        "Ref",
+        "Ref<T>\n\nA fixed, nonowning reference to initialized T storage.",
+        DefinitionKind::Type,
     ),
     (
         "str",

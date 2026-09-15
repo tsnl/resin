@@ -232,18 +232,16 @@ fn distinct_nodes_with_identical_spans_do_not_share_inference_variables() {
 }
 
 #[test]
-fn span_construction_and_indexing_infer_element_and_pointer_types() {
+fn span_construction_and_indexing_infer_element_value_types() {
     assert_eq!(
         result(
             "import { \"$/span.resin\" }; def get(p: Ptr<int>) -> _ = { var s = Span<_> { data = p, length = ulong(1) }; s.at(0) };",
             "get"
         ),
-        Ty::Pointer {
-            pointee: Box::new(Ty::Int32)
-        }
+        Ty::Int32
     );
     assert_eq!(
-        result("def get() -> _ = { var xs = [1, 2]; xs(1).* };", "get"),
+        result("def get() -> _ = { var xs = [1, 2]; xs(1) };", "get"),
         Ty::Int64
     );
     assert_eq!(
@@ -379,7 +377,7 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
         );
 
         let source = format!(
-            "import {{ \"$/span.resin\" }}; def main() -> int = {{ {marker} var values = [10, 20]; var data = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }}; data.at(1).* }};"
+            "import {{ \"$/span.resin\" }}; def main() -> int = {{ {marker} var values = [10, 20]; var data = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }}; data.at(1) }};"
         );
         pipeline::source_module(&source).unwrap();
     }

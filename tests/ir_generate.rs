@@ -466,7 +466,7 @@ fn pointers_cannot_be_used_in_arithmetic_and_indexing_is_explicit() {
         let source = format!("def bad(p: Ptr<int>) -> Ptr<int> = {{ {body} }};");
         assert!(generate(&parse(&source)).is_err(), "{source}");
     }
-    for body in ["xs(0) := 3", "xs(1.5).*", "xs(0, 1).*"] {
+    for body in ["xs(0).* := 3", "xs(1.5)", "xs(0, 1)"] {
         let source = format!("def bad() -> int = {{ var xs = [1, 2]; {body} }};");
         assert!(generate(&parse(&source)).is_err(), "{source}");
     }

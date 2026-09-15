@@ -335,7 +335,7 @@ fn literal_strings_survive_returns_and_keep_explicit_nuls() {
             var text = literal();
             var copy = text;
             print(copy);
-            if (text.length == 3_ul && strlen(text.data) == 1_ul && text.at(2_ul).* == 98_ub) { 0 } else { 1 }
+            if (text.length == 3_ul && strlen(text.data) == 1_ul && text.at(2_ul) == 98_ub) { 0 } else { 1 }
         };
     "#,
         b"a\0b",
@@ -351,7 +351,7 @@ fn from_bytes_copies_unterminated_spans_verbatim_and_owns_the_result() {
         def copied() -> String = {
             var source = [65_ub, 0_ub, 66_ub];
             var result = Caption.from_bytes(Span<ubyte> { data = Ptr<ubyte>(&source), length = 3_ul });
-            source.at(0_ul).* := 90_ub;
+            source.at(0_ul) := 90_ub;
             result
         };
         def main() -> int = {
@@ -383,7 +383,7 @@ fn byte_spans_print_their_length_including_nuls_and_empty_views() {
     prints(
         r#"export { main }; import { "$/string.resin", "$/span.resin" }; def main() = {
             var bytes = [65_ub, 0_ub, 66_ub, 67_ub];
-            var view = Span<ubyte> { data = bytes.at(0), length = 3_ul };
+            var view = Span<ubyte> { data = &bytes.at(0), length = 3_ul };
             var empty = Span<ubyte> { data = Ptr<ubyte>(0_ul), length = 0_ul };
             print(fmt("[{0}][{1}]", (view.bytes(), empty.bytes())));
         };"#,
@@ -432,7 +432,7 @@ fn literal_byte_views_preserve_storage_while_owned_strings_copy_it() {
             var owned = String.from_str(text);
             var empty = String.from_str("");
             if (text.length == 4_ul && bytes.length == text.length &&
-                ulong(bytes.data) == ulong(text.data) && text.at(1_ul).* == 195_ub &&
+                ulong(bytes.data) == ulong(text.data) && text.at(1_ul) == 195_ub &&
                 ulong(owned.get().data) != ulong(text.data) && owned.get().length == 4_ul &&
                 Ptr<ubyte>(ulong(owned.get().data) + 4_ul).* == 0_ub &&
                 empty.get().length == 0_ul && empty.get().data.* == 0_ub) {
@@ -449,9 +449,9 @@ fn raw_byte_views_and_owned_strings_preserve_non_utf8() {
     prints(
         r#"export { main }; import { "$/string.resin", "$/span.resin" }; def main() = {
             var data = [255_ub, 0_ub, 254_ub];
-            var bytes = Span<ubyte> { data = data.at(0_ul), length = 3_ul };
+            var bytes = Span<ubyte> { data = &data.at(0_ul), length = 3_ul };
             var owned = String.from_bytes(bytes);
-            data.at(0_ul).* := 65_ub;
+            data.at(0_ul) := 65_ub;
             print(bytes);
             print(fmt("{0}", (owned.bytes(),)));
         };"#,

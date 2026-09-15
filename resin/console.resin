@@ -66,7 +66,7 @@ struct Console {
 		var index = 0_ul;
 		var written = 0;
 		while (index < bytes.length && written >= 0) {
-			written := resin_console_putchar(bytes.at(index).*);
+			written := resin_console_putchar(bytes.at(index));
 			index := index + 1_ul;
 		};
 		var flushed = resin_stdout_flush();
@@ -110,17 +110,17 @@ struct Console {
 				storage.data := resize_input(storage.data, capacity)?;
 				storage.length := capacity;
 			};
-			Span<ubyte> { data = storage.data, length = storage.length }.at(length).* := resin_console_byte(byte);
+			Span<ubyte> { data = storage.data, length = storage.length }.at(length) := resin_console_byte(byte);
 			length := length + 1_ul;
 			byte := getchar();
 		};
 		check_input_end(byte, length)?;
 		if (byte == 10 && length > 0_ul) {
-			if (Span<ubyte> { data = storage.data, length = storage.length }.at(length - 1_ul).* == 13_ub) {
+			if (Span<ubyte> { data = storage.data, length = storage.length }.at(length - 1_ul) == 13_ub) {
 				length := length - 1_ul;
 			};
 		};
-		Span<ubyte> { data = storage.data, length = storage.length }.at(length).* := 0_ub;
+		Span<ubyte> { data = storage.data, length = storage.length }.at(length) := 0_ub;
 		storage.length := length;
 		ok(InputLine { owner = owner })
 	};

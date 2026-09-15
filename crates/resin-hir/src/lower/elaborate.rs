@@ -72,7 +72,7 @@ impl Completion<'_> {
         kind: TermKind,
     ) -> Result<TermKind> {
         Ok(
-            if result == self.solver.require_complete(&source.ty, source.span)? {
+            if result == self.solver.require_complete(&source.actual, source.span)? {
                 kind
             } else {
                 TermKind::Convert {
@@ -87,11 +87,37 @@ impl Completion<'_> {
     }
 
     fn elaborate(&mut self, source: &typed::Term) -> Result<Term> {
-        Ok(Term {
+        let term = Term {
             span: source.span,
-            ty: self.solver.require_complete(&source.ty, source.span)?,
+            ty: self.solver.require_complete(&source.actual, source.span)?,
             kind: self.elaborate_kind(source)?,
+        };
+        let target = self.solver.require_complete(&source.ty, source.span)?;
+        self.consume(term, target)
+    }
+
+    fn consume(&self, term: Term, target: crate::Type) -> Result<Term> {
+        if term.ty == target {
+            return Ok(term);
+        }
+        if matches!(target, crate::Type::Reference { .. }) && !reference_place(&term) {
+            return Err(GenerateError::inference(
+                term.span,
+                "reference binding requires an initialized place, not a temporary value",
+            ));
+        }
+        Ok(Term {
+            span: term.span,
+            ty: target,
+            kind: TermKind::Use {
+                arg: Box::new(term),
+            },
         })
+    }
+
+    fn argument(&mut self, source: &typed::Term, target: &Type) -> Result<Term> {
+        let value = self.elaborate(source)?;
+        self.consume(value, self.solver.require_complete(target, source.span)?)
     }
 
     fn ty(&self, source: &typed::Term) -> Result<Ty> {
@@ -183,7 +209,16 @@ impl Completion<'_> {
                             .transpose()?,
                         args: args
                             .iter()
-                            .map(|arg| self.elaborate(arg))
+                            .enumerate()
+                            .map(|(index, arg)| {
+                                self.argument(
+                                    arg,
+                                    &Type::Node(
+                                        super::infer::Head::FunctionParameter { index },
+                                        vec![signature.clone()],
+                                    ),
+                                )
+                            })
                             .collect::<Result<_>>()?,
                     },
                     ResolvedMethod::GpuPipeline { method } => {
@@ -314,6 +349,10 @@ impl Completion<'_> {
             name,
             type_args,
         } = &source.kind
+            && !matches!(
+                self.solver.head(&source.actual),
+                Type::Node(super::infer::Head::Reference, _)
+            )
         {
             return Ok(Box::new(Term {
                 span: source.span,
@@ -368,7 +407,7 @@ impl Completion<'_> {
     }
 
     fn number(&self, source: &typed::Term, text: &str) -> Result<TermKind> {
-        if let Some(ty) = self.solver.resolve(&source.ty) {
+        if let Some(ty) = self.solver.resolve(&source.actual) {
             super::eval::number(self.typer, source.span, text, Some(&ty))?;
         }
         Ok(TermKind::Numeric { text: text.into() })
@@ -466,23 +505,32 @@ impl Completion<'_> {
         });
         let receiver = receiver
             .map(|receiver| {
-                Ok::<_, GenerateError>(Box::new(Term {
-                    span: receiver.span,
-                    ty: self.solver.require_complete(&params[0], receiver.span)?,
-                    kind: TermKind::Adapt {
-                        conversion: receiver_conversion.expect("checked source receiver"),
-                        arg: self.boxed(receiver)?,
-                    },
-                }))
+                if matches!(
+                    self.solver.head(&params[0]),
+                    Type::Node(super::infer::Head::Reference, _)
+                ) {
+                    self.argument(receiver, &params[0]).map(Box::new)
+                } else {
+                    Ok(Box::new(Term {
+                        span: receiver.span,
+                        ty: self.solver.require_complete(&params[0], receiver.span)?,
+                        kind: TermKind::Adapt {
+                            conversion: receiver_conversion.expect("checked source receiver"),
+                            arg: self.boxed(receiver)?,
+                        },
+                    }))
+                }
             })
             .transpose()?;
+        let offset = usize::from(receiver.is_some());
         let args = receiver
             .into_iter()
             .map(|term| *term)
             .chain(
                 arguments
                     .iter()
-                    .map(|arg| self.elaborate(arg))
+                    .zip(&params[offset..])
+                    .map(|(arg, param)| self.argument(arg, param))
                     .collect::<Result<Vec<_>>>()?,
             )
             .collect();
@@ -511,12 +559,14 @@ impl Completion<'_> {
                 })
             })
             .transpose()?;
+        let offset = usize::from(receiver.is_some());
         let values = receiver
             .into_iter()
             .chain(
                 arguments
                     .iter()
-                    .map(|arg| self.elaborate(arg))
+                    .zip(&signature.params[offset..])
+                    .map(|(arg, param)| self.argument(arg, param))
                     .collect::<Result<Vec<_>>>()?,
             )
             .collect();
@@ -603,13 +653,15 @@ impl Completion<'_> {
         let receiver = receiver
             .map(|r| self.adapt(r, receiver_ty, &declaration.params[0]))
             .transpose()?;
+        let offset = usize::from(receiver.is_some());
         let values = receiver
             .into_iter()
             .map(|term| *term)
             .chain(
                 arguments
                     .iter()
-                    .map(|arg| self.elaborate(arg))
+                    .zip(&declaration.params[offset..])
+                    .map(|(arg, param)| self.argument(arg, &param.clone().into()))
                     .collect::<Result<Vec<_>>>()?,
             )
             .collect();
@@ -723,11 +775,15 @@ impl Completion<'_> {
             self.solver.head(&func.ty),
             Type::Node(super::infer::Head::Function, _)
         ) {
+            let Type::Node(_, signature) = self.solver.head(&func.ty) else {
+                unreachable!()
+            };
             return Ok(TermKind::Call {
                 func: self.boxed(func)?,
                 args: args
                     .iter()
-                    .map(|arg| self.elaborate(arg))
+                    .zip(&signature[1..])
+                    .map(|(arg, param)| self.argument(arg, param))
                     .collect::<Result<_>>()?,
             });
         }
@@ -770,7 +826,16 @@ impl Completion<'_> {
             func: self.boxed(func)?,
             args: args
                 .iter()
-                .map(|arg| self.elaborate(arg))
+                .enumerate()
+                .map(|(index, arg)| {
+                    self.argument(
+                        arg,
+                        &Type::Node(
+                            super::infer::Head::FunctionParameter { index },
+                            vec![func.ty.clone()],
+                        ),
+                    )
+                })
                 .collect::<Result<_>>()?,
         })
     }
@@ -797,6 +862,15 @@ impl Completion<'_> {
                 }
             }
             typed::StatementKind::Declare { binding, name, ty } => {
+                if matches!(
+                    self.solver.head(&ty.ty),
+                    Type::Node(super::infer::Head::Reference, _)
+                ) {
+                    return Err(GenerateError::inference(
+                        name.span,
+                        "reference locals require an initializer",
+                    ));
+                }
                 self.initialization
                     .insert(*binding, Initialization::Uninitialized);
                 Statement::Declare {
@@ -957,6 +1031,27 @@ impl Completion<'_> {
     }
 }
 
+// A reference value already carries a location. Reading its referent preserves
+// a place until storage lowering reaches an actual value consumer.
+fn reference_place(term: &Term) -> bool {
+    if matches!(
+        term.ty,
+        crate::Type::Reference { .. }
+            | crate::Type::Value { .. }
+            | crate::Type::FunctionResult { .. }
+    ) {
+        return true;
+    }
+    match &term.kind {
+        TermKind::Local { .. } | TermKind::Deref { .. } => true,
+        TermKind::Use { arg } => reference_place(arg),
+        TermKind::Field { base, .. } => {
+            reference_place(base) || matches!(base.ty, crate::Type::Pointer { .. })
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -991,12 +1086,14 @@ mod tests {
         };
         let source = typed::Term {
             span,
+            actual: ty.clone(),
             ty,
             kind: typed::TermKind::MethodCall {
                 rule,
                 receiver: Some(Box::new(typed::Term {
                     span,
                     ty: Ty::Str.into(),
+                    actual: Ty::Str.into(),
                     kind: typed::TermKind::String {
                         value: "bytes".into(),
                     },
@@ -1010,6 +1107,7 @@ mod tests {
                 args: vec![typed::Term {
                     span,
                     ty: Ty::UInt64.into(),
+                    actual: Ty::UInt64.into(),
                     kind: typed::TermKind::Num { value: "0".into() },
                 }],
             },
@@ -1033,8 +1131,8 @@ mod tests {
         ));
         assert_eq!(
             completed.body.ty,
-            crate::Type::Pointer {
-                pointee: Box::new(crate::Type::UInt8)
+            crate::Type::Reference {
+                referent: Box::new(crate::Type::UInt8)
             }
         );
         assert!(completed.shaders.is_empty());

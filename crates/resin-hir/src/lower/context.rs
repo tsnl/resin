@@ -359,7 +359,7 @@ pub(crate) fn intrinsic_methods(
             IntrinsicMethod {
                 op: Intrinsic::Index,
                 params: vec![receiver, Ty::UInt64.into()],
-                result: Type::pointer(element),
+                result: Type::reference(element),
             },
         ));
     }

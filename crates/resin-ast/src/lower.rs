@@ -264,7 +264,16 @@ impl<'a> AstGen<'a> {
     fn gen_term_define(&self, node: Node, span: Span) -> Stmt {
         let name = self.ident(node.child_by_field_name("name").unwrap_or(node));
         let init = self.gen_term(node.child_by_field_name("init").unwrap_or(node));
-        Spanned::new(StmtKind::Define { name, init }, span)
+        Spanned::new(
+            StmtKind::Define {
+                name,
+                ann: node
+                    .child_by_field_name("ann")
+                    .map(|ann| self.gen_type(ann)),
+                init,
+            },
+            span,
+        )
     }
 
     fn gen_type_define(&self, node: Node, span: Span) -> Stmt {
@@ -1026,7 +1035,7 @@ impl<'a> AstGen<'a> {
         let text = if node.is_missing()
             || !matches!(
                 node.kind(),
-                "lid" | "tuple_index" | "uid" | "builtin_type" | "Ptr"
+                "lid" | "tuple_index" | "uid" | "builtin_type" | "Ptr" | "Ref"
             ) {
             ""
         } else {

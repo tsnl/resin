@@ -533,7 +533,7 @@ payload types. Import `$/shared.resin` to create an initialized host sequence:
 
 ```resin
 var values = ArcSpan<uint>.alloc(64, 0_ui)?; // ArcSpan<uint>
-values.get().at(0).* := 42_ui;
+values.get().at(0) := 42_ui;
 var view = values.get();          // Span<uint>
 var bytes = view.as_bytes();        // Span<ubyte>
 ```
@@ -650,7 +650,7 @@ Literal storage may be shared; treat it as read-only.
 
 Import `$/span.resin` and use `bytes(text)` to explicitly borrow the bytes of a `str`; this preserves its pointer
 and length without copying. There is no implicit conversion, and arbitrary byte spans cannot
-be converted to `str`. `text.at(index)` returns a byte pointer and uses a `ulong` index.
+be converted to `str`. `text.at(index)` returns a byte reference (`Ref<ubyte>`) and uses a `ulong` index.
 
 Import `$/string.resin` for `String`, `fmt`, and `print`.
 `fmt(format, arguments)` is an ordinary generic host function returning `String`,
@@ -837,17 +837,21 @@ into `ulong`, perform **byte** arithmetic, and convert back when low-level addre
 is necessary on the host. Shaders reject pointer casts; use typed pointers and indexing.
 Host pointer casts and all raw pointer dereferences remain unchecked.
 
-Arrays, spans, and `str` use `.at(index)` for indexing and return `Ptr<T>` (`Ptr<ubyte>` for `str`).
+Arrays, spans, and `str` use `.at(index)` for indexing and return `Ref<T>` (`Ref<ubyte>` for `str`).
 The index parameter is `ulong` (unsigned 64-bit); unsuffixed literals infer this type, while
 other integer values need an explicit conversion, such as `.at(ulong(i))`:
 
 ```resin
 var values = [10_i, 20, 30];
-values.at(1).* := 42;
-var view = Span<int> { data = values.at(0), length = 3_ul };
+values.at(1) := 42;
+var view = Span<int> { data = &values.at(0), length = 3_ul };
 var element = view.at(1);
-print(fmt("{0}\n", (element.*,)));
+print(fmt("{0}\n", (element,)));
 ```
+
+Use `var element: Ref<int> = view.at(1);` to retain an alias instead of copying the
+value. Reference parameters and results expose the same place semantics in user
+functions; see [references](references.md) for binding, lifetime, and migration rules.
 
 Arrays retain the original `values(index)` spelling; source spans use `.at(index)`. `Span<T>` has `data: Ptr<T>`
 and `length: ulong` fields. Host indexing checks
@@ -923,8 +927,8 @@ struct Params { values: Span<float32>, scale: float32 };
 @compute_shader
 def kernel(index: ulong, root: Ptr<Params>) -> () = {
     if (index < root.values.length) {
-        var p = root.values.at(index);
-        p.* := p.* * root.scale;
+        var p: Ref<float32> = root.values.at(index);
+        p := p * root.scale;
         ()
     } else { () }
 };

@@ -5,8 +5,8 @@ struct Span<T> {
 	data: Ptr<T>,
 	length: ulong,
 
-	def at(self: Span<T>, index: ulong) -> Ptr<T> = {
-		pointer_index(self.data, self.length, index)
+	def at(self: Span<T>, index: ulong) -> Ref<T> = {
+		pointer_index(self.data, self.length, index).*
 	};
 
 	def slice(self: Span<T>, start: ulong, length: ulong) -> Span<T> = {

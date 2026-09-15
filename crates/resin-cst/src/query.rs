@@ -13,7 +13,14 @@ pub(super) fn token(document: &Document, offset: usize) -> Option<Node<'_>> {
         if contains(span(node), offset)
             && matches!(
                 node.kind(),
-                "lid" | "tuple_index" | "uid" | "builtin_type" | "string" | "comment" | "Ptr"
+                "lid"
+                    | "tuple_index"
+                    | "uid"
+                    | "builtin_type"
+                    | "string"
+                    | "comment"
+                    | "Ptr"
+                    | "Ref"
             )
         {
             return Some(node);

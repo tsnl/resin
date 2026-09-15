@@ -62,7 +62,7 @@ def kernel(invocation: ulong, root: Ptr<Root>) = {
 	var index = uint(invocation);
 	if (index < root.count) {
 		var output = Span<uint> { data = root.pixels, length = ulong(root.count) };
-		output.at(invocation).* := match (evaluate(index)) {
+		output.at(invocation) := match (evaluate(index)) {
 			ok(value) => {
 				value
 			},
@@ -74,13 +74,13 @@ def kernel(invocation: ulong, root: Ptr<Root>) = {
 };
 def main() -> int = {
 	var values = [0_ui, 0_ui, 0_ui, 0_ui];
-	var root = Root { count = 4_ui, pixels = values.at(0_ul) };
+	var root = Root { count = 4_ui, pixels = &values.at(0_ul) };
 	var index = 0_ul;
 	while (index < 4_ul) {
 		kernel(index, &root);
 		index := index + 1_ul;
 	};
-	if (values.at(0_ul).* == 0_ui && values.at(1_ul).* == 11_ui && values.at(2_ul).* == 22_ui && values.at(3_ul).* == 13_ui) {
+	if (values.at(0_ul) == 0_ui && values.at(1_ul) == 11_ui && values.at(2_ul) == 22_ui && values.at(3_ul) == 13_ui) {
 		0
 	} else {
 		1

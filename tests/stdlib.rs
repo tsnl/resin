@@ -46,13 +46,13 @@ fn source_strings_format_explicit_byte_views_and_keep_the_terminator_outside_len
         import { "$/span.resin", "$/shared.resin", "$/string.resin" };
         def main() -> int = {
             var bytes = [65_ub, 0_ub, 66_ub];
-            var text = String.from_bytes(Span<ubyte> { data = bytes.at(0), length = 3_ul });
+            var text = String.from_bytes(Span<ubyte> { data = &bytes.at(0), length = 3_ul });
             var weak = text.storage.downgrade();
             var formatted = fmt("{0}:{1}:{2}", (42, text.bytes(), "end"));
             var raw = formatted.get();
             var terminated = Span<ubyte> { data = raw.data, length = raw.length + 1_ul };
             print(formatted);
-            if (raw.length == 10_ul && terminated.at(raw.length).* == 0_ub && weak.upgrade()!.get().length == 3_ul) { 0 } else { 1 }
+            if (raw.length == 10_ul && terminated.at(raw.length) == 0_ub && weak.upgrade()!.get().length == 3_ul) { 0 } else { 1 }
         };
     "#,
         "",
@@ -116,10 +116,10 @@ fn source_owned_wrappers_retain_payloads_and_borrow_temporary_receivers() {
                 var copy = owner;
                 valid := valid && copy.get().digit == 7 && weak.upgrade()!.get().digit == 7;
                 var values = ArcSpan<uint>.alloc(3, 42_ui)?;
-                values.get().at(2).* := 9_ui;
-                valid := valid && values.get().at(0).* == 42_ui && values.get().at(2).* == 9_ui;
+                values.get().at(2) := 9_ui;
+                valid := valid && values.get().at(0) == 42_ui && values.get().at(2) == 9_ui;
                 var borrowed = ArcSpan<uint>.alloc(1, 13_ui)?.get();
-                valid := valid && borrowed.at(0).* == 13_ui;
+                valid := valid && borrowed.at(0) == 13_ui;
                 var empty = ArcSpan<uint>.alloc(0, 0_ui)?;
                 valid := valid && empty.get().length == 0_ul;
             };
@@ -151,12 +151,12 @@ fn source_owners_allocate_initialized_typed_storage_and_reports_overflow() {
                 weak := memory.downgrade();
                 var alias = memory;
                 var values = memory.get();
-                valid := valid && values.length == 4_ul && values.at(3).* == 7_ui;
-                values.at(3).* := 42_ui;
-                valid := valid && alias.get().at(3).* == 42_ui;
+                valid := valid && values.length == 4_ul && values.at(3) == 7_ui;
+                values.at(3) := 42_ui;
+                valid := valid && alias.get().at(3) == 42_ui;
                 valid := valid && values.as_bytes().length == 4_ul * size_of(uint);
                 var upgraded = weak.upgrade()!;
-                valid := valid && upgraded.get().at(3).* == 42_ui;
+                valid := valid && upgraded.get().at(3) == 42_ui;
                 var descriptor = ArcPtr<Span<uint>>.alloc(values)?;
                 var previous = descriptor.get().replace(Span<uint> { data = values.data, length = 2_ul });
                 valid := valid && previous.length == 4_ul && descriptor.get().length == 2_ul;
@@ -221,7 +221,7 @@ fn owned_spans_release_managed_elements_on_success_and_error() {
         };
         def work(trace: Ptr<int>, fail: bool) -> Result<(), _> = {
             var values = ArcSpan<ArcPtr<Item>>.alloc(2, item(trace, 1)?)?;
-            values.get().at(1).* := item(trace, 2)?;
+            values.get().at(1) := item(trace, 2)?;
             var alias = values;
             if (fail) { err(Failed {}) } else { ok(()) }
         };
@@ -266,7 +266,7 @@ fn generic_owned_span_methods_preserve_lifetimes_and_widened_results() {
         def upgrade<T>(weak: WeakSpan<T>) -> ArcSpan<T> | None | Other = { weak.upgrade() };
         def first<T>(initial: T) -> T = {
             var owner = optional(1, initial)!;
-            owner.get().at(0).*
+            owner.get().at(0)
         };
         def main() -> Result<int, _> = {
             var weak = WeakSpan<uint>.empty();
@@ -275,15 +275,15 @@ fn generic_owned_span_methods_preserve_lifetimes_and_widened_results() {
                 var owner = allocate(2, 7_ui)?;
                 weak := weaken(owner);
                 var view = borrowed(&owner);
-                view.at(1).* := 42_ui;
-                valid := valid && view.length == 2_ul && owner.get().at(1).* == 42_ui;
+                view.at(1) := 42_ui;
+                valid := valid && view.length == 2_ul && owner.get().at(1) == 42_ui;
                 valid := valid && match (upgrade(weak)) {
-                    ArcSpan<uint>(live) => { live.get().at(1).* == 42_ui },
+                    ArcSpan<uint>(live) => { live.get().at(1) == 42_ui },
                     None => { 1 == 0 },
                     Other(other) => { 1 == 0 },
                 };
                 var another = optional(3, 9_ui)!;
-                valid := valid && another.get().length == 3_ul && another.get().at(2).* == 9_ui;
+                valid := valid && another.get().length == 3_ul && another.get().at(2) == 9_ui;
                 valid := valid && first(17_ui) == 17_ui;
             };
             valid := valid && match (upgrade(weak)) {
@@ -318,9 +318,9 @@ fn borrowed_span_slices_preserve_aliases_and_accept_empty_null_views() {
             var view = values.get();
             var middle = view.slice(1, 2);
             var alias = middle;
-            alias.at(1).* := 42_ui;
-            var valid = middle.length == 2_ul && view.at(2).* == 42_ui;
-            valid := valid && view.at(0).* == 0_ui && view.at(3).* == 0_ui;
+            alias.at(1) := 42_ui;
+            var valid = middle.length == 2_ul && view.at(2) == 42_ui;
+            valid := valid && view.at(0) == 0_ui && view.at(3) == 0_ui;
             var end = view.slice(view.length, 0);
             valid := valid && end.length == 0_ul;
             var null_view = Span<uint> { data = Ptr<uint>(0_ul), length = 0_ul };
@@ -486,7 +486,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
         def main() -> Result<int, _> = {
             var path = "pixel.png";
             var pixels = [ubyte(1), ubyte(2), ubyte(3), ubyte(255)];
-            ImageData.write_pixels(path.data, 1, 1, 4, Span<ubyte> { data = pixels.at(0), length = 4_ul }, 0)?;
+            ImageData.write_pixels(path.data, 1, 1, 4, Span<ubyte> { data = &pixels.at(0), length = 4_ul }, 0)?;
             var image = ImageData.read_png(path.data, 0)?;
             var alias = image;
             var copy_path = "copy.png";
@@ -502,7 +502,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     success(&output);
     for call in [
         "ImageData.read_png(path.data, 4)?",
-        "ImageData.write_pixels(path.data, 1, 1, 4, Span<ubyte> { data = pixels.at(0), length = 4_ul }, 0)?",
+        "ImageData.write_pixels(path.data, 1, 1, 4, Span<ubyte> { data = &pixels.at(0), length = 4_ul }, 0)?",
     ] {
         let output = run(
             &format!(
@@ -535,7 +535,7 @@ fn png_pixel_views_check_dimensions_padding_and_storage_before_native_access() {
                 import {{ "$/image.resin", "$/span.resin", "$/status.resin" }};
                 def main() -> int = {{
                     var pixels = [0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub];
-                    var bytes = Span<ubyte> {{ data = pixels.at(0), length = {length}_ul }};
+                    var bytes = Span<ubyte> {{ data = &pixels.at(0), length = {length}_ul }};
                     match (ImageData.write_pixels("missing/pixel.png".data, {width}, {height}, {channels}, bytes, {stride})) {{
                         ok(value) => {{ 1 }},
                         err(error) => {{ if (RuntimeStatus.code(error) == 1) {{ 0 }} else {{ 1 }} }},
@@ -554,14 +554,14 @@ fn png_pixel_views_check_dimensions_padding_and_storage_before_native_access() {
         import { "$/image.resin", "$/span.resin" };
         def main() -> Result<int, _> = {
             var pixels = [1_ub, 2_ub, 3_ub, 255_ub, 99_ub, 4_ub, 5_ub, 6_ub, 255_ub];
-            var bytes = Span<ubyte> { data = pixels.at(0), length = 9_ul };
+            var bytes = Span<ubyte> { data = &pixels.at(0), length = 9_ul };
             ImageData.write_pixels("padded.png".data, 1, 2, 4, bytes, 5)?;
             var image = ImageData.read_png("padded.png".data, 0)?;
             var loaded = image.pixels();
             ImageData.write_pixels("single.png".data, 1, 1, 4, bytes.slice(0, 4), 0xffffffffffffffff_ul)?;
             var single = ImageData.read_png("single.png".data, 0)?;
-            ok(if (loaded.at(0).* == 1_ub && loaded.at(4).* == 4_ub
-                && single.height() == 1_ui && single.pixels().at(3).* == 255_ub) { 0 } else { 1 })
+            ok(if (loaded.at(0) == 1_ub && loaded.at(4) == 4_ub
+                && single.height() == 1_ui && single.pixels().at(3) == 255_ub) { 0 } else { 1 })
         };
         "#,
         "",

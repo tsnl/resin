@@ -30,9 +30,9 @@ def fail_if(fail: bool) -> Result<(), Failed> = {
 def work(fail: bool) -> Result<int, _> = {
 	var value = allocate()?;
 	var data = value.get();
-	data.at(0).* := 42;
+	data.at(0) := 42;
 	fail_if(fail)?;
-	ok(data.at(0).*)
+	ok(data.at(0))
 };
 
 def main() -> Result<(), _> = {

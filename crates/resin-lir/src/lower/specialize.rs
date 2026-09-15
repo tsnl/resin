@@ -167,7 +167,8 @@ impl Specialization<'_, '_> {
         let access = match source.kind {
             resin_hir::TermKind::Local { .. }
             | resin_hir::TermKind::Field { .. }
-            | resin_hir::TermKind::Deref { .. } => Access::Place,
+            | resin_hir::TermKind::Deref { .. }
+            | resin_hir::TermKind::Use { .. } => Access::Place,
             _ => Access::Value,
         };
         self.complete_term(source, access).map(Box::new)
@@ -402,7 +403,20 @@ impl Specialization<'_, '_> {
         let expected = self.ty(expected)?;
         self.require_assignable(&result, &expected)?;
         let receiver = receiver
-            .map(|receiver| self.method_receiver(receiver, &params[0]))
+            .map(|receiver| {
+                if matches!(
+                    self.argument(&method.params[0])?,
+                    resin_hir::Type::Reference { .. }
+                ) {
+                    Ok(Box::new(concrete::Term {
+                        span: receiver.span,
+                        ty: params[0].clone(),
+                        kind: self.reference_use(receiver, &method.params[0])?,
+                    }))
+                } else {
+                    self.method_receiver(receiver, &params[0])
+                }
+            })
             .transpose()?;
         let offset = usize::from(receiver.is_some());
         let mut args: Vec<_> = receiver.into_iter().map(|receiver| *receiver).collect();
@@ -608,6 +622,62 @@ impl Specialization<'_, '_> {
         })
     }
 
+    fn reference_use(
+        &mut self,
+        source: &resin_hir::Term,
+        expected: &resin_hir::Type,
+    ) -> Result<concrete::TermKind, Error> {
+        let from = self.argument(&source.ty)?;
+        let target = self.argument(expected)?;
+        if let resin_hir::Type::Reference { referent } = &target {
+            if let resin_hir::Type::Reference {
+                referent: source_type,
+            } = &from
+            {
+                if source_type != referent {
+                    return Err(self.instance_error("reference referent types must match exactly"));
+                }
+                return Ok(self.term(source)?.kind);
+            }
+            if &from != referent.as_ref() {
+                return Err(self.instance_error("reference referent types must match exactly"));
+            }
+            let place = self.place(source)?;
+            if !reference_place(&place) {
+                return Err(self.instance_error(
+                    "reference binding requires an initialized place, not a temporary value",
+                ));
+            }
+            return Ok(concrete::TermKind::Address { place });
+        }
+        let value = if let resin_hir::Type::Reference { referent } = from {
+            concrete::Term {
+                span: source.span,
+                ty: self.ty(&referent)?,
+                kind: concrete::TermKind::Deref {
+                    pointer: self.boxed(source)?,
+                },
+            }
+        } else {
+            // Identity uses preserve place access, including opaque managed fields
+            // addressed from a shader. Do not introduce a value read here.
+            if from == target {
+                return self.kind(&source.kind, &source.ty);
+            }
+            self.term(source)?
+        };
+        let target = self.ty(&target)?;
+        self.require_assignable(&value.ty, &target)?;
+        if value.ty == target {
+            Ok(value.kind)
+        } else {
+            Ok(concrete::TermKind::Convert {
+                conversion: ExplicitConversion::Widen,
+                arg: Box::new(value),
+            })
+        }
+    }
+
     fn field(
         &mut self,
         base: &resin_hir::Term,
@@ -798,6 +868,7 @@ impl Specialization<'_, '_> {
                     self.boxed(arg)?
                 },
             },
+            resin_hir::TermKind::Use { arg } => return self.reference_use(arg, expected),
             resin_hir::TermKind::Convert { arg } => self.conversion(arg, expected)?,
             resin_hir::TermKind::GpuPipelineCreate {
                 factory,
@@ -862,5 +933,17 @@ impl Specialization<'_, '_> {
             },
             resin_hir::TermKind::Field { base, name } => self.field(base, name, expected)?,
         })
+    }
+}
+
+// Dependent calls learn whether an argument is a reference during specialization.
+// Check the completed expression before storage lowering can spill a temporary.
+fn reference_place(term: &concrete::Term) -> bool {
+    match &term.kind {
+        concrete::TermKind::Local { .. } | concrete::TermKind::Deref { .. } => true,
+        concrete::TermKind::Field { base, .. } => {
+            matches!(base.ty, Ty::Pointer { .. }) || reference_place(base)
+        }
+        _ => false,
     }
 }
