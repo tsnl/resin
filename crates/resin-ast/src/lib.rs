@@ -74,6 +74,9 @@ pub type Term = Spanned<TermKind>;
 
 #[derive(Debug, Clone)]
 pub enum TermKind {
+    SizeOf {
+        ty: Type,
+    },
     /// Unknown expression, retaining recognizable children for editor analysis.
     Hole {
         children: Vec<Term>,
@@ -178,6 +181,11 @@ pub enum MatchVariant {
 
 #[derive(Debug, Clone)]
 pub enum StmtKind {
+    /// A single declaration or a parenthesized group. Omitted initializers repeat
+    /// the previous specification, with a new `iota` value for each specification.
+    Const {
+        specs: Vec<ConstSpec>,
+    },
     ForeignType {
         name: Ident,
     },
@@ -229,6 +237,14 @@ pub enum StmtKind {
     Expr {
         term: Term,
     },
+}
+
+#[derive(Debug, Clone)]
+pub struct ConstSpec {
+    pub names: Vec<Ident>,
+    pub ann: Option<Type>,
+    pub init: Vec<Term>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]

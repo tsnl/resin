@@ -41,6 +41,18 @@ fn check(source: &str, expected: &str) {
 }
 
 #[test]
+fn constant_groups_keep_specifications_and_comments_together() {
+    check(
+        "const answer:int=42;const(a,b:uint=1<<iota,8<<iota;_,_;c,d;);def f()={const(local=sizeof(int);next;);local};",
+        "const answer: int = 42;\nconst (\n\ta, b: uint = 1 << iota, 8 << iota;\n\t_, _;\n\tc, d;\n);\ndef f() = {\n\tconst (\n\t\tlocal = sizeof(int);\n\t\tnext;\n\t);\n\tlocal\n};\n",
+    );
+    check(
+        "const(a=iota; // zero\nb;);",
+        "const (\n\ta = iota; // zero\n\tb;\n);\n",
+    );
+}
+
+#[test]
 fn trailing_commas_and_nested_lists() {
     check(
         "export {main,}; import {\"$/test.resin\",}; def main(a:int,b:float32,)={var xs=[1,2,3,]; call(a,b,); var r={x=1,y=2,}; ();};",

@@ -529,6 +529,130 @@ pub(super) fn storage_layout(
     )))
 }
 
+/// Native value representations on all supported (64-bit) targets. Shared GPU
+/// storage has a narrower contract and continues to use `storage_layout`.
+pub(super) fn value_layout(
+    definitions: &[TypeDef],
+    ty: &Ty,
+    depth: usize,
+) -> Result<layout::Layout, layout::Error> {
+    if depth > 128 {
+        return Err(layout::Error(
+            "value layout is recursive or too deep".into(),
+        ));
+    }
+    let scalar = match ty {
+        Ty::Unit | Ty::None | Ty::Bool | Ty::Int8 | Ty::UInt8 => Some(1),
+        Ty::Int16 | Ty::UInt16 => Some(2),
+        Ty::Type | Ty::Int32 | Ty::UInt32 | Ty::Float32 => Some(4),
+        Ty::Int64
+        | Ty::UInt64
+        | Ty::Float64
+        | Ty::Pointer { .. }
+        | Ty::Function { .. }
+        | Ty::StrongOwner
+        | Ty::WeakOwner
+        | Ty::GpuArguments => Some(8),
+        _ => None,
+    };
+    if let Some(size) = scalar {
+        return Ok(layout::Layout {
+            size,
+            align: size,
+            offsets: vec![],
+        });
+    }
+    let child = |ty| value_layout(definitions, ty, depth + 1);
+    match ty {
+        Ty::Defined { definition } => child(
+            definitions
+                .get(definition.index())
+                .and_then(TypeDef::body)
+                .ok_or_else(|| {
+                    layout::Error("value layout requires a completed type definition".into())
+                })?,
+        ),
+        Ty::Record { fields } => value_record(
+            fields
+                .iter()
+                .map(|field| child(&field.ty))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Ty::Str => value_record(vec![child(&Ty::UInt64)?, child(&Ty::UInt64)?]),
+        Ty::GpuView => value_record(vec![
+            child(&Ty::UInt64)?,
+            child(&Ty::UInt64)?,
+            child(&Ty::UInt32)?,
+        ]),
+        Ty::GpuPipelineContract => value_record(vec![
+            child(&Ty::UInt64)?,
+            child(&Ty::UInt32)?,
+            child(&Ty::UInt32)?,
+            child(&Ty::UInt32)?,
+        ]),
+        Ty::Array { element, length } => {
+            let element = child(element)?;
+            Ok(layout::Layout {
+                size: element
+                    .size
+                    .checked_mul((*length).max(1))
+                    .ok_or_else(value_overflow)?,
+                align: element.align,
+                offsets: vec![],
+            })
+        }
+        Ty::Union { variants } => {
+            value_tagged(variants.iter().map(child).collect::<Result<Vec<_>, _>>()?)
+        }
+        Ty::Result { value, error } => value_tagged(vec![child(value)?, child(error)?]),
+        _ => Err(layout::Error(format!(
+            "type {ty:?} has no known value layout"
+        ))),
+    }
+}
+
+fn value_record(fields: Vec<layout::Layout>) -> Result<layout::Layout, layout::Error> {
+    let mut size = 0_usize;
+    let mut align = 1;
+    let mut offsets = Vec::new();
+    for field in fields {
+        size = round_up(size, field.align)?;
+        offsets.push(size);
+        size = size.checked_add(field.size).ok_or_else(value_overflow)?;
+        align = align.max(field.align);
+    }
+    Ok(layout::Layout {
+        size: round_up(size.max(1), align)?,
+        align,
+        offsets,
+    })
+}
+
+fn value_tagged(payloads: Vec<layout::Layout>) -> Result<layout::Layout, layout::Error> {
+    let tag = layout::Layout {
+        size: 4,
+        align: 4,
+        offsets: vec![],
+    };
+    if payloads.is_empty() {
+        return Ok(tag);
+    }
+    let align = payloads.iter().map(|payload| payload.align).max().unwrap();
+    let size = payloads.iter().map(|payload| payload.size).max().unwrap();
+    value_record(vec![
+        tag,
+        layout::Layout {
+            size: round_up(size, align)?,
+            align,
+            offsets: vec![],
+        },
+    ])
+}
+
+fn value_overflow() -> layout::Error {
+    layout::Error("value layout is too large".into())
+}
+
 fn round_up(size: usize, align: usize) -> Result<usize, layout::Error> {
     size.checked_add(align - 1)
         .map(|n| n & !(align - 1))

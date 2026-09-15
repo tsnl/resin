@@ -1,4 +1,110 @@
 use super::*;
+
+#[test]
+fn constant_integer_operations_check_every_width() {
+    for (ty, max, min) in [
+        (Ty::Int8, "127", "-128"),
+        (Ty::UInt8, "255", "0"),
+        (Ty::Int16, "32767", "-32768"),
+        (Ty::UInt16, "65535", "0"),
+        (Ty::Int32, "2147483647", "-2147483648"),
+        (Ty::UInt32, "4294967295", "0"),
+        (Ty::Int64, "9223372036854775807", "-9223372036854775808"),
+        (Ty::UInt64, "18446744073709551615", "0"),
+    ] {
+        let max = literal::parse(max, &ty).unwrap();
+        let min = literal::parse(min, &ty).unwrap();
+        let one = literal::parse("1", &ty).unwrap();
+        let zero = literal::parse("0", &ty).unwrap();
+        assert!(
+            constant_operation("+", &[max.clone(), one.clone()]).is_err(),
+            "{ty:?}"
+        );
+        assert!(
+            constant_operation("-", &[min, one.clone()]).is_err(),
+            "{ty:?}"
+        );
+        assert!(
+            constant_operation("/", &[one, zero.clone()]).is_err(),
+            "{ty:?}"
+        );
+        assert_eq!(constant_operation("^", &[max.clone(), max]).unwrap(), zero);
+    }
+}
+
+#[test]
+fn constant_conversions_preserve_integer_float_rounding_and_check_ranges() {
+    let value = Value::UInt64 {
+        value: (1_u64 << 63) + (1_u64 << 39) + 1,
+    };
+    assert_eq!(
+        convert_constant(&value, &Ty::Float32).unwrap(),
+        Value::Float32 {
+            value: ((1_u64 << 63) + (1_u64 << 39) + 1) as f32
+        }
+    );
+    assert!(
+        convert_constant(
+            &Value::Float64 {
+                value: 2_f64.powi(64)
+            },
+            &Ty::UInt64
+        )
+        .is_err()
+    );
+    assert!(convert_constant(&Value::Int32 { value: -1 }, &Ty::UInt8).is_err());
+    assert_eq!(
+        convert_constant(&Value::Float64 { value: -1.9 }, &Ty::Int8).unwrap(),
+        Value::Int8 { value: -1 }
+    );
+}
+
+#[test]
+fn value_layout_preserves_placeholders_and_checks_invalid_types() {
+    for ty in [Ty::Unit, Ty::None, Ty::Bool, Ty::Record { fields: vec![] }] {
+        let layout = layout::value(&[], &ty).unwrap();
+        assert_eq!((layout.size, layout.align), (1, 1));
+    }
+    assert_eq!(
+        layout::value(
+            &[],
+            &Ty::Array {
+                element: Box::new(Ty::UInt32),
+                length: 0
+            }
+        )
+        .unwrap()
+        .size,
+        4
+    );
+    assert!(
+        layout::value(
+            &[],
+            &Ty::Array {
+                element: Box::new(Ty::UInt64),
+                length: usize::MAX
+            }
+        )
+        .is_err()
+    );
+    assert!(
+        layout::value(
+            &[],
+            &Ty::Foreign {
+                name: "Opaque".into()
+            }
+        )
+        .is_err()
+    );
+    let recursive = Ty::Defined {
+        definition: TypeId::from_index(0),
+    };
+    assert!(layout::value(&[TypeDef::new("Loop", recursive.clone())], &recursive).is_err());
+    assert!(
+        layout::layout(&[], &Ty::Float64).is_err(),
+        "shared GPU layout stays restricted"
+    );
+}
 fn record(ty: Ty) -> Ty {
     Ty::Record {
         fields: vec![RecordField {
