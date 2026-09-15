@@ -58,6 +58,23 @@ fn sexp_source(file: &SourceFile) -> SExp {
 
 fn sexp_stmt(stmt: &Stmt) -> SExp {
     match &stmt.val {
+        StmtKind::Const { specs } => list_sp(
+            "const",
+            stmt.span,
+            specs
+                .iter()
+                .map(|spec| {
+                    let mut items = spec
+                        .names
+                        .iter()
+                        .map(|name| symbol(name.val.as_ref()))
+                        .collect::<Vec<_>>();
+                    items.extend(spec.ann.iter().map(sexp_typespec));
+                    items.extend(spec.init.iter().map(sexp_term));
+                    list_sp("spec", spec.span, items)
+                })
+                .collect(),
+        ),
         StmtKind::Struct {
             type_params,
             name,
@@ -177,6 +194,7 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
 
 fn sexp_term(term: &Term) -> SExp {
     match &term.val {
+        TermKind::SizeOf { ty } => list_sp("sizeof", term.span, vec![sexp_typespec(ty)]),
         TermKind::Unwrap { value } => list_sp("unwrap", term.span, vec![sexp_term(value)]),
         TermKind::Try { value } => list_sp("try", term.span, vec![sexp_term(value)]),
         TermKind::Match { value, arms } => {

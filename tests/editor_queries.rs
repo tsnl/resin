@@ -64,6 +64,27 @@ fn captures(query: &str, source: &str) -> BTreeSet<(String, String)> {
 }
 
 #[test]
+fn constants_and_sizeof_are_highlighted_and_outlined() {
+    let source = "const ( size = sizeof(int); next = iota; );";
+    for queries in [ZED_QUERIES, HELIX_QUERIES] {
+        let highlighted = captures(queries[0].1, source);
+        for (kind, text) in [
+            ("keyword", "const"),
+            ("constant", "size"),
+            ("constant.builtin", "iota"),
+            ("function.builtin", "sizeof"),
+        ] {
+            assert!(
+                highlighted.contains(&(kind.into(), text.into())),
+                "{kind}: {text}"
+            );
+        }
+    }
+    let outline = captures(ZED_QUERIES[3].1, source);
+    assert!(outline.contains(&("name".into(), "size".into())));
+}
+
+#[test]
 fn declaration_keywords_are_visible_in_outlines_and_struct_textobjects() {
     let source = "struct Point { x: float32, y: float32, }; type Position = Point;";
     let outline = captures(ZED_QUERIES[3].1, source);

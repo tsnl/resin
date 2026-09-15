@@ -137,6 +137,10 @@ impl Completion<'_> {
 
     fn elaborate_kind(&mut self, source: &typed::Term) -> Result<TermKind> {
         Ok(match &source.kind {
+            typed::TermKind::SizeOf { ty } => TermKind::SizeOf {
+                of: self.solver.require_complete(&ty.ty, ty.span)?,
+            },
+            typed::TermKind::Constant { value } => value.kind.clone(),
             typed::TermKind::Error(error) => return Err(error.clone()),
             typed::TermKind::Unit => TermKind::Constant {
                 value: crate::Constant::Unit,
@@ -344,6 +348,12 @@ impl Completion<'_> {
     }
 
     fn place(&mut self, source: &typed::Term) -> Result<Box<Term>> {
+        if constant_place(source) {
+            return Err(GenerateError::inference(
+                source.span,
+                "a constant has no mutable storage or address",
+            ));
+        }
         if let typed::TermKind::Var {
             declaration,
             name,
@@ -843,7 +853,7 @@ impl Completion<'_> {
     fn statement(&mut self, stmt: &typed::Statement) -> Result<Option<Statement>> {
         Ok(Some(match &stmt.kind {
             typed::StatementKind::Error(error) => return Err(error.clone()),
-            typed::StatementKind::TypeDefinition => return Ok(None),
+            typed::StatementKind::CompileTimeDefinition => return Ok(None),
             typed::StatementKind::Define {
                 binding,
                 name,
@@ -1028,6 +1038,14 @@ impl Completion<'_> {
         Ok(TermKind::Convert {
             arg: Box::new(value),
         })
+    }
+}
+
+fn constant_place(term: &typed::Term) -> bool {
+    match &term.kind {
+        typed::TermKind::Constant { .. } => true,
+        typed::TermKind::Field { base, .. } => constant_place(base),
+        _ => false,
     }
 }
 

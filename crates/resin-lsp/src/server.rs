@@ -315,6 +315,7 @@ impl State {
                         detail: Some(item.detail),
                         kind: Some(match item.kind {
                             DefinitionKind::Function => lsp_types::CompletionItemKind::FUNCTION,
+                            DefinitionKind::Constant => lsp_types::CompletionItemKind::CONSTANT,
                             DefinitionKind::Type => lsp_types::CompletionItemKind::CLASS,
                             DefinitionKind::Keyword => lsp_types::CompletionItemKind::KEYWORD,
                             DefinitionKind::Field => lsp_types::CompletionItemKind::FIELD,

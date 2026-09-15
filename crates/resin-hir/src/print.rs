@@ -163,6 +163,7 @@ impl Printer {
         match kind {
             TermKind::Constant { value } => list("constant", vec![quoted(format!("{value:?}"))]),
             TermKind::Numeric { text } => list("numeric", vec![quoted(text)]),
+            TermKind::SizeOf { of } => list("value-sizeof", vec![self.ty(of)]),
             TermKind::Layout { of, size } => {
                 list(if *size { "sizeof" } else { "alignof" }, vec![self.ty(of)])
             }

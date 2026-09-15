@@ -92,7 +92,12 @@ pub fn format_source(source: &str) -> Option<String> {
                     })
             }
             ";" => true,
-            "," => active.last().is_some_and(|g| g.multiline),
+            "," => {
+                active.last().is_some_and(|g| g.multiline)
+                    && node
+                        .parent()
+                        .is_none_or(|parent| parent.kind() != "const_spec")
+            }
             _ => false,
         };
         pending_break |= break_after;
@@ -137,14 +142,17 @@ fn finish_group(
 ) {
     let start = stack.pop().expect("balanced syntax");
     let body = &tokens[start + 1..end];
-    let block = tokens[start].kind() == "{"
-        && tokens[start].parent().is_some_and(|p| {
-            matches!(p.kind(), "block_body" | "chain_term" | "match_term")
-                || (p.kind() == "struct_definition"
-                    && p.children_by_field_name("method", &mut p.walk())
-                        .next()
-                        .is_some())
-        });
+    let block = tokens[start]
+        .parent()
+        .is_some_and(|p| p.kind() == "const_declaration")
+        || tokens[start].kind() == "{"
+            && tokens[start].parent().is_some_and(|p| {
+                matches!(p.kind(), "block_body" | "chain_term" | "match_term")
+                    || (p.kind() == "struct_definition"
+                        && p.children_by_field_name("method", &mut p.walk())
+                            .next()
+                            .is_some())
+            });
     let singleton_tuple = tokens[start].parent().is_some_and(|parent| {
         matches!(parent.kind(), "tuple_term" | "tuple_type")
             && parent
@@ -218,7 +226,7 @@ fn space_between(left: Node<'_>, right: Node<'_>) -> bool {
     if b == "(" || b == "[" {
         return matches!(
             a,
-            "if" | "while" | "match" | "else" | "=" | ":=" | "->" | "," | ":"
+            "const" | "if" | "while" | "match" | "else" | "=" | ":=" | "->" | "," | ":"
         ) || (a == ")" && left.parent().is_some_and(|p| p.kind() == "if_term"))
             || (is_operator(left) && !(a == ">" && generic_left));
     }

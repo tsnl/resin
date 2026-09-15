@@ -5,6 +5,47 @@ use std::{collections::BTreeMap, path::Path};
 use tempfile::TempDir;
 
 #[test]
+fn exported_constants_have_hover_completion_and_definition() {
+    let library = "export { answer }; const ( answer: int = 42; );";
+    let source = "import { \"library.resin\" }; def main() -> int = { answer };";
+    let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
+    let analysis = project.checked();
+    let input = project.source("main.resin");
+    let offset = source.rfind("answer").unwrap();
+    assert_eq!(
+        analysis.hover(&input, offset).unwrap().text,
+        "const answer: int"
+    );
+    let definition = analysis.definition(&input, offset).unwrap();
+    assert_eq!(definition.source, project.source("library.resin"));
+    assert_eq!(definition.span.start, library.rfind("answer").unwrap());
+    let completion = analysis
+        .completions(&input, offset)
+        .into_iter()
+        .find(|item| item.name == "answer")
+        .unwrap();
+    assert_eq!(completion.kind, resin_hir::DefinitionKind::Constant);
+    assert_eq!(completion.detail, "const answer: int");
+}
+
+#[test]
+fn sizeof_and_iota_have_builtin_help() {
+    let source = "const index = iota; def size() -> ulong = { sizeof(int) };";
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.checked();
+    let input = project.source("main.resin");
+    for name in ["sizeof", "iota"] {
+        assert!(
+            analysis
+                .hover(&input, source.find(name).unwrap())
+                .unwrap()
+                .text
+                .starts_with(name)
+        );
+    }
+}
+
+#[test]
 fn compute_workgroup_size_has_builtin_hover_and_completion() {
     let source = "def size() -> ulong = { compute_workgroup_size };";
     let project = Project::new(&[("main.resin", source)]);
