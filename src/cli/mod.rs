@@ -31,7 +31,7 @@ fn try_main() -> Result<i32> {
 
 fn dispatch_by_mode(mode: Mode) -> Result<i32> {
     match mode {
-        Mode::Interpreter { request, args } => compiler::run(&request, &args),
+        Mode::Compiler { request, args } => compiler::run(&request, &args),
         Mode::Embed {
             input,
             output,

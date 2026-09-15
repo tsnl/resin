@@ -1,4 +1,4 @@
-//! Host program compilation for interpreter mode.
+//! Host program compilation for compiler mode.
 use super::{Result, request::Request};
 use std::ffi::OsString;
 

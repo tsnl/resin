@@ -100,9 +100,9 @@ pipelines and run them. Host-only programs follow the same recipe with an empty 
 
 [src/main.rs](src/main.rs) only calls `resin::cli::main`, the root package's CLI entry.
 [cli/mod.rs](src/cli/mod.rs) dispatches modes, and [args.rs](src/cli/args.rs)
-parses flags and chooses `Interpreter`, `Formatter`, or `LanguageServer`;
+parses flags and chooses `Compiler`, `Formatter`, or `LanguageServer`;
 [source.rs](src/cli/source.rs) parses the `FILE[:ENTRY]` selector.
-Interpreter mode builds a host program. Without `--output` it uses the debug cache
+Compiler mode builds a host program. Without `--output` it uses the debug cache
 and runs the executable; with `--output` (or `-o`) it builds an optimized executable
 and copies it to the selected destination without running it.
 `resin --lsp DIR` serves the language server for that project directory
