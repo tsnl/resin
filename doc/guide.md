@@ -68,10 +68,11 @@ executables. Example formatting, `cargo test --doc`, and a host smoke check then
 skips the remaining steps in its job; grammar checks run in parallel with the native job.
 Nextest uses the available CPU count for its total worker limit; `--test-threads N`
 overrides it. Every suite that takes the GPU test lock belongs to a group with at most
-eight tests in flight, also bounded by that total worker limit. GPU pointer fixtures
-build only their requested host entry and prepare their private native projects before
-taking that lock, so compilation can overlap device
-execution. The lock still serializes GPU access. `cargo test` uses the same fixture
+eight tests in flight, also bounded by that total worker limit. CI selects `--profile ci`,
+which keeps the GPU limit at two for the hosted runners and their software Vulkan driver.
+GPU pointer fixtures build only their requested host entry and prepare their private
+native projects before taking that lock, so compilation can overlap device execution.
+The lock still serializes GPU access. `cargo test` uses the same fixture
 separation; Nextest also overlaps work across test binaries. Each GPU pointer test thread
 retains a lazily initialized GPU singleton to establish device availability.
 CI omits Rust debug symbols to reduce compile and native-link work while retaining debug
