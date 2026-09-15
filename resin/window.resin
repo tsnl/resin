@@ -1,11 +1,321 @@
-export { Window, ResinWindow, ButtonState, KeyCodes, MouseButtons };
+export {
+	Window,
+	ResinWindow,
+	ButtonState,
+	key_unknown,
+	key_space,
+	key_apostrophe,
+	key_comma,
+	key_minus,
+	key_period,
+	key_slash,
+	key_digit_0,
+	key_digit_1,
+	key_digit_2,
+	key_digit_3,
+	key_digit_4,
+	key_digit_5,
+	key_digit_6,
+	key_digit_7,
+	key_digit_8,
+	key_digit_9,
+	key_semicolon,
+	key_equal,
+	key_a,
+	key_b,
+	key_c,
+	key_d,
+	key_e,
+	key_f,
+	key_g,
+	key_h,
+	key_i,
+	key_j,
+	key_k,
+	key_l,
+	key_m,
+	key_n,
+	key_o,
+	key_p,
+	key_q,
+	key_r,
+	key_s,
+	key_t,
+	key_u,
+	key_v,
+	key_w,
+	key_x,
+	key_y,
+	key_z,
+	key_left_bracket,
+	key_backslash,
+	key_right_bracket,
+	key_grave_accent,
+	key_world_1,
+	key_world_2,
+	key_escape,
+	key_enter,
+	key_tab,
+	key_backspace,
+	key_insert,
+	key_delete,
+	key_right,
+	key_left,
+	key_down,
+	key_up,
+	key_page_up,
+	key_page_down,
+	key_home,
+	key_end,
+	key_caps_lock,
+	key_scroll_lock,
+	key_num_lock,
+	key_print_screen,
+	key_pause,
+	key_f1,
+	key_f2,
+	key_f3,
+	key_f4,
+	key_f5,
+	key_f6,
+	key_f7,
+	key_f8,
+	key_f9,
+	key_f10,
+	key_f11,
+	key_f12,
+	key_f13,
+	key_f14,
+	key_f15,
+	key_f16,
+	key_f17,
+	key_f18,
+	key_f19,
+	key_f20,
+	key_f21,
+	key_f22,
+	key_f23,
+	key_f24,
+	key_f25,
+	key_keypad_0,
+	key_keypad_1,
+	key_keypad_2,
+	key_keypad_3,
+	key_keypad_4,
+	key_keypad_5,
+	key_keypad_6,
+	key_keypad_7,
+	key_keypad_8,
+	key_keypad_9,
+	key_keypad_decimal,
+	key_keypad_divide,
+	key_keypad_multiply,
+	key_keypad_subtract,
+	key_keypad_add,
+	key_keypad_enter,
+	key_keypad_equal,
+	key_left_shift,
+	key_left_control,
+	key_left_alt,
+	key_left_super,
+	key_right_shift,
+	key_right_control,
+	key_right_alt,
+	key_right_super,
+	key_menu,
+	mouse_button_left,
+	mouse_button_right,
+	mouse_button_middle,
+	mouse_button_4,
+	mouse_button_5,
+	mouse_button_6,
+	mouse_button_7,
+	mouse_button_8,
+};
 
 import { "status.resin", "shared.resin", "string.resin" };
+
+// GLFW physical key codes, independent of typed characters or keyboard layout.
+// Each range starts at its GLFW value; gaps are intentional.
+const key_unknown: int = -1;
+
+const key_space: int = 32;
+
+const key_apostrophe: int = 39;
+
+const (
+	key_comma: int = 44 + iota;
+	key_minus;
+	key_period;
+	key_slash;
+);
+
+const (
+	key_digit_0: int = 48 + iota;
+	key_digit_1;
+	key_digit_2;
+	key_digit_3;
+	key_digit_4;
+	key_digit_5;
+	key_digit_6;
+	key_digit_7;
+	key_digit_8;
+	key_digit_9;
+);
+
+const key_semicolon: int = 59;
+
+const key_equal: int = 61;
+
+const (
+	key_a: int = 65 + iota;
+	key_b;
+	key_c;
+	key_d;
+	key_e;
+	key_f;
+	key_g;
+	key_h;
+	key_i;
+	key_j;
+	key_k;
+	key_l;
+	key_m;
+	key_n;
+	key_o;
+	key_p;
+	key_q;
+	key_r;
+	key_s;
+	key_t;
+	key_u;
+	key_v;
+	key_w;
+	key_x;
+	key_y;
+	key_z;
+);
+
+const (
+	key_left_bracket: int = 91 + iota;
+	key_backslash;
+	key_right_bracket;
+);
+
+const key_grave_accent: int = 96;
+
+const (
+	key_world_1: int = 161 + iota;
+	key_world_2;
+);
+
+const (
+	key_escape: int = 256 + iota;
+	key_enter;
+	key_tab;
+	key_backspace;
+	key_insert;
+	key_delete;
+	key_right;
+	key_left;
+	key_down;
+	key_up;
+	key_page_up;
+	key_page_down;
+	key_home;
+	key_end;
+);
+
+const (
+	key_caps_lock: int = 280 + iota;
+	key_scroll_lock;
+	key_num_lock;
+	key_print_screen;
+	key_pause;
+);
+
+const (
+	key_f1: int = 290 + iota;
+	key_f2;
+	key_f3;
+	key_f4;
+	key_f5;
+	key_f6;
+	key_f7;
+	key_f8;
+	key_f9;
+	key_f10;
+	key_f11;
+	key_f12;
+	key_f13;
+	key_f14;
+	key_f15;
+	key_f16;
+	key_f17;
+	key_f18;
+	key_f19;
+	key_f20;
+	key_f21;
+	key_f22;
+	key_f23;
+	key_f24;
+	key_f25;
+);
+
+const (
+	key_keypad_0: int = 320 + iota;
+	key_keypad_1;
+	key_keypad_2;
+	key_keypad_3;
+	key_keypad_4;
+	key_keypad_5;
+	key_keypad_6;
+	key_keypad_7;
+	key_keypad_8;
+	key_keypad_9;
+	key_keypad_decimal;
+	key_keypad_divide;
+	key_keypad_multiply;
+	key_keypad_subtract;
+	key_keypad_add;
+	key_keypad_enter;
+	key_keypad_equal;
+);
+
+const (
+	key_left_shift: int = 340 + iota;
+	key_left_control;
+	key_left_alt;
+	key_left_super;
+	key_right_shift;
+	key_right_control;
+	key_right_alt;
+	key_right_super;
+	key_menu;
+);
+
+const (
+	mouse_button_left: int = iota;
+	mouse_button_right;
+	mouse_button_middle;
+	mouse_button_4;
+	mouse_button_5;
+	mouse_button_6;
+	mouse_button_7;
+	mouse_button_8;
+);
+
+// Resin input snapshot bits from resin_runtime/window.h.
+const (
+	input_down: uint = 1 << iota;
+	input_pressed;
+	input_released;
+);
 
 struct ButtonState { down: bool, pressed: bool, released: bool };
 
 def button_state(bits: uint) -> ButtonState = {
-	ButtonState { down = (bits & 1_ui) != 0_ui, pressed = (bits & 2_ui) != 0_ui, released = (bits & 4_ui) != 0_ui }
+	ButtonState { down = (bits & input_down) != 0_ui, pressed = (bits & input_pressed) != 0_ui, released = (bits & input_released) != 0_ui }
 };
 
 extern type ResinWindow;
@@ -24,9 +334,6 @@ struct Window {
 		self.owner.get().handle
 	};
 
-	def key_escape() -> int = {
-		256
-	};
 	def new(width: uint, height: uint, title: String) -> Result<Window, RuntimeError> = {
 		var owner = ArcPtr<WindowOwner>.alloc(WindowOwner { handle = Ptr<ResinWindow>(0_ul) })?;
 		RuntimeStatus.from_code(resin_window_create(width, height, title.get().data, &owner.get().handle))?;
@@ -95,270 +402,6 @@ struct Window {
 			)
 		)
 	};
-	def keys() -> KeyCodes = {
-		KeyCodes {
-			unknown = -1,
-			space = 32,
-			apostrophe = 39,
-			comma = 44,
-			minus = 45,
-			period = 46,
-			slash = 47,
-			digit_0 = 48,
-			digit_1 = 49,
-			digit_2 = 50,
-			digit_3 = 51,
-			digit_4 = 52,
-			digit_5 = 53,
-			digit_6 = 54,
-			digit_7 = 55,
-			digit_8 = 56,
-			digit_9 = 57,
-			semicolon = 59,
-			equal = 61,
-			a = 65,
-			b = 66,
-			c = 67,
-			d = 68,
-			e = 69,
-			f = 70,
-			g = 71,
-			h = 72,
-			i = 73,
-			j = 74,
-			k = 75,
-			l = 76,
-			m = 77,
-			n = 78,
-			o = 79,
-			p = 80,
-			q = 81,
-			r = 82,
-			s = 83,
-			t = 84,
-			u = 85,
-			v = 86,
-			w = 87,
-			x = 88,
-			y = 89,
-			z = 90,
-			left_bracket = 91,
-			backslash = 92,
-			right_bracket = 93,
-			grave_accent = 96,
-			world_1 = 161,
-			world_2 = 162,
-			escape = 256,
-			enter = 257,
-			tab = 258,
-			backspace = 259,
-			insert = 260,
-			delete = 261,
-			right = 262,
-			left = 263,
-			down = 264,
-			up = 265,
-			page_up = 266,
-			page_down = 267,
-			home = 268,
-			end = 269,
-			caps_lock = 280,
-			scroll_lock = 281,
-			num_lock = 282,
-			print_screen = 283,
-			pause = 284,
-			f1 = 290,
-			f2 = 291,
-			f3 = 292,
-			f4 = 293,
-			f5 = 294,
-			f6 = 295,
-			f7 = 296,
-			f8 = 297,
-			f9 = 298,
-			f10 = 299,
-			f11 = 300,
-			f12 = 301,
-			f13 = 302,
-			f14 = 303,
-			f15 = 304,
-			f16 = 305,
-			f17 = 306,
-			f18 = 307,
-			f19 = 308,
-			f20 = 309,
-			f21 = 310,
-			f22 = 311,
-			f23 = 312,
-			f24 = 313,
-			f25 = 314,
-			keypad_0 = 320,
-			keypad_1 = 321,
-			keypad_2 = 322,
-			keypad_3 = 323,
-			keypad_4 = 324,
-			keypad_5 = 325,
-			keypad_6 = 326,
-			keypad_7 = 327,
-			keypad_8 = 328,
-			keypad_9 = 329,
-			keypad_decimal = 330,
-			keypad_divide = 331,
-			keypad_multiply = 332,
-			keypad_subtract = 333,
-			keypad_add = 334,
-			keypad_enter = 335,
-			keypad_equal = 336,
-			left_shift = 340,
-			left_control = 341,
-			left_alt = 342,
-			left_super = 343,
-			right_shift = 344,
-			right_control = 345,
-			right_alt = 346,
-			right_super = 347,
-			menu = 348,
-		}
-	};
-	def mouse_buttons() -> MouseButtons = {
-		MouseButtons { left = 0, right = 1, middle = 2, button_4 = 3, button_5 = 4, button_6 = 5, button_7 = 6, button_8 = 7 }
-	};
-};
-
-// GLFW physical key codes, independent of typed characters or keyboard layout.
-struct KeyCodes {
-	unknown: int,
-	space: int,
-	apostrophe: int,
-	comma: int,
-	minus: int,
-	period: int,
-	slash: int,
-	digit_0: int,
-	digit_1: int,
-	digit_2: int,
-	digit_3: int,
-	digit_4: int,
-	digit_5: int,
-	digit_6: int,
-	digit_7: int,
-	digit_8: int,
-	digit_9: int,
-	semicolon: int,
-	equal: int,
-	a: int,
-	b: int,
-	c: int,
-	d: int,
-	e: int,
-	f: int,
-	g: int,
-	h: int,
-	i: int,
-	j: int,
-	k: int,
-	l: int,
-	m: int,
-	n: int,
-	o: int,
-	p: int,
-	q: int,
-	r: int,
-	s: int,
-	t: int,
-	u: int,
-	v: int,
-	w: int,
-	x: int,
-	y: int,
-	z: int,
-	left_bracket: int,
-	backslash: int,
-	right_bracket: int,
-	grave_accent: int,
-	world_1: int,
-	world_2: int,
-	escape: int,
-	enter: int,
-	tab: int,
-	backspace: int,
-	insert: int,
-	delete: int,
-	right: int,
-	left: int,
-	down: int,
-	up: int,
-	page_up: int,
-	page_down: int,
-	home: int,
-	end: int,
-	caps_lock: int,
-	scroll_lock: int,
-	num_lock: int,
-	print_screen: int,
-	pause: int,
-	f1: int,
-	f2: int,
-	f3: int,
-	f4: int,
-	f5: int,
-	f6: int,
-	f7: int,
-	f8: int,
-	f9: int,
-	f10: int,
-	f11: int,
-	f12: int,
-	f13: int,
-	f14: int,
-	f15: int,
-	f16: int,
-	f17: int,
-	f18: int,
-	f19: int,
-	f20: int,
-	f21: int,
-	f22: int,
-	f23: int,
-	f24: int,
-	f25: int,
-	keypad_0: int,
-	keypad_1: int,
-	keypad_2: int,
-	keypad_3: int,
-	keypad_4: int,
-	keypad_5: int,
-	keypad_6: int,
-	keypad_7: int,
-	keypad_8: int,
-	keypad_9: int,
-	keypad_decimal: int,
-	keypad_divide: int,
-	keypad_multiply: int,
-	keypad_subtract: int,
-	keypad_add: int,
-	keypad_enter: int,
-	keypad_equal: int,
-	left_shift: int,
-	left_control: int,
-	left_alt: int,
-	left_super: int,
-	right_shift: int,
-	right_control: int,
-	right_alt: int,
-	right_super: int,
-	menu: int,
-};
-
-struct MouseButtons {
-	left: int,
-	right: int,
-	middle: int,
-	button_4: int,
-	button_5: int,
-	button_6: int,
-	button_7: int,
-	button_8: int,
 };
 
 extern "resin_runtime.h" def resin_window_create(width: uint, height: uint, title: Ptr<ubyte>, window: Ptr<Ptr<ResinWindow>>) -> int;

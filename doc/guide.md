@@ -831,7 +831,8 @@ to those modules. Public operations are static constructors and instance methods
 
 Pass decorated shader declarations directly to GPU pipeline creation. Compiled shader
 representations belong to code generation and the runtime; functions expose no bytecode property.
-Runtime flags are static methods, such as `Memory.default()`.
+GPU memory modes are exported `int` constants: `memory_default`, `memory_gpu`, and
+`memory_readback`. Pass them directly, for example `gpu.alloc_in::<uint>(count, memory_readback)`.
 Run `cargo run -- examples/eg009_imports.resin` for an explicitly owned counter, or append
 `:independent` to run a second entry that uses two independent counters.
 
@@ -1107,10 +1108,11 @@ speed depends on rendering throughput. Its decorated shader functions, ordinary 
 shared data definitions live alongside the host code in the same file. Initialization accepts
 a host `Span<Particle>`; the shaders use the same allocation's device address.
 
-Input is available through `$/window.resin`. `Window.keys()` names GLFW key codes (`Window.keys().w`,
-`Window.keys().space`, `Window.keys().left_shift`); `Window.mouse_buttons()` names the eight mouse buttons.
-After polling, `window.key_state(Window.keys().w)` and
-`window.mouse_button_state(Window.mouse_buttons().left)` return `ButtonState` records
+Input is available through `$/window.resin`. Exported `int` constants name GLFW key codes
+(`key_w`, `key_space`, `key_left_shift`, `key_escape`) and the eight mouse buttons
+(`mouse_button_left`, `mouse_button_right`, `mouse_button_middle`, `mouse_button_4` through `mouse_button_8`).
+After polling, `window.key_state(key_w)` and
+`window.mouse_button_state(mouse_button_left)` return `ButtonState` records
 with `down`, `pressed`, and `released` booleans. A quick tap can set both edge flags;
 key repeat does not create another press. `window.key_pressed(key)` queries `down`.
 
