@@ -8,16 +8,21 @@ acceptance criteria; finish those criteria before moving to the next phase.
 - Keep compiler inputs and completed outputs immutable and independently reusable.
 - Let applications explicitly invoke each compiler pass and retain its outputs.
   Build handlers and LSP query handlers may duplicate straightforward sequencing.
-  Do not introduce `resin-build`, a generic compilation driver, or a reusable
-  orchestration/cache framework that hides those operations.
-- Use one shared set of caches per process, keyed by the actual inputs to each pass.
-  Results from any caller can contribute to another caller's compilation.
+  Do not introduce `resin-build` or a generic compilation driver that hides passes.
+- Represent each layer's retained outputs with an immutable `Cache<K, V>`.
+  `update()` returns a new set containing reused/new results; `prune()` returns a
+  new set with old entries removed. Published sets, entries, and values stay immutable.
+- Start with one shared cache per output kind, keyed by complete inputs.
+  Results from any caller can contribute to another caller's compilation. The same
+  value operations must also work with separate folder/package sets; their placement
+  is an application choice, independent of compiler pass contracts.
 - Start each build or analysis from one source entry point and its resolved imports.
-  There are no persistent compiler workspaces, workspace cache partitions, workspace
-  leases, or `resin.toml`. A build also selects its exported function/target entries;
+  There are no persistent compiler workspaces, required workspace cache partitions,
+  workspace leases, or `resin.toml`. A build also selects its exported function/target entries;
   analyzing a source for LSP does not require it to define a runnable `main`.
-- Retain cache entries for a configurable **24 hours since last use**, sweeping
-  expired entries periodically. Start with a configurable **one-minute sweep**.
+- Retain entries for a configurable **24 hours since last use**. Prune as part of
+  updating the active set. A timer may invoke the same operation for idle cleanup;
+  background work is optional. Also support an explicit generation-based cutoff.
 - First establish the library contracts, then exercise them locally through LSP,
   then introduce the HTTP boundary. MCP and REPL support follow later.
 
@@ -35,9 +40,10 @@ crates/
     lib.rs
     lsp/                         # private editor client code
     interp/                      # private run/interactive client code
-  resin-server/src/               # HTTP handlers, explicit passes and cache tables
+  resin-server/src/               # HTTP handlers, passes and active set pointers
   resin-protocol/src/             # versioned wire data
   resin-source/src/               # immutable sources and import data
+  resin-cache/src/                # pure keyed update/prune collection
   resin-cst/src/
   resin-ast/src/
   resin-hir/src/
@@ -75,7 +81,8 @@ syntax -> AST -> HIR -> LIR -> verified LIR -> C/SPIR-V -> native tools
 Compiler passes accept complete immutable inputs and return completed results that
 can be retained, reused, and shared across threads. The current local applications
 invoke these passes explicitly. This phase includes async I/O and parallel execution
-support; no HTTP service is required yet.
+support; no HTTP service is required yet. Establish the small cache collection
+here so local LSP and the later server use the same immutable data operations.
 
 ### 1.1 Explicit pass contracts
 
@@ -99,7 +106,8 @@ support; no HTTP service is required yet.
   choosing a different predecessor must not change meaning or diagnostics.
 - A returned result contains only data needed for its current inputs. It does not
   accumulate unused historical entries or retain a chain of previous results.
-  Ordinary maps and shared immutable values suffice; a HAMT is unnecessary.
+  This restriction applies to a compilation's output, not the cache retaining
+  many outputs. Only explicit pruning discards unrelated cache entries.
 
 ### 1.2 Keys and source identity
 
@@ -110,19 +118,31 @@ cache keys. Each phase needs only inputs that can affect that phase:
 
 | Cached value | Relevant key inputs |
 | --- | --- |
-| Source version | Explicit logical module identity/role and exact contents, including library/dependency namespace and any diagnostic name retained in the value. |
-| CST / per-file AST | Source version and relevant parser/lowering configuration. |
+| Source | Explicit logical module identity/role plus a hash of the complete file contents, including namespace and any diagnostic name retained in the value. |
+| CST / per-file AST | Immutable Source content identity and relevant parser/lowering configuration. |
 | HIR and editor facts | Complete resolved source graph, import bindings, entry source, library/dependency versions, and semantic options. |
 | LIR / verified LIR | HIR identity, canonical selected entry set, target profile, lowering limits/options, and verification contract. |
 | Generated files / native artifact | Verified LIR, code generation options, target/ABI, compiler/runtime/library inputs, native toolchain inputs, and build settings. |
 
-Use canonical, content-based identities for reuse across equivalent requests.
-Persisted keys additionally include the relevant compiler/toolchain version. Check
-the actual key data when interning; a digest must not silently equate different
-inputs. Runtime arguments and runtime environment are not build inputs.
+Use a stable hash of the entire file's exact contents as its content identity; no
+source revision counter is needed. Keep the contents themselves in the immutable
+source. Check underlying identity/content when interning equal hashes so a collision
+cannot silently equate different sources. Text storage may be shared by content
+alone; a named module still carries its logical identity and source origins.
+
+A global `path -> Source` table can select only one version at a path. Retaining
+multiple edits/projects requires `(logical module identity, content hash) -> Source`
+or an equivalent map of versions under each path. A request separately selects
+`path -> Source` for its own input graph. Equal-content edits naturally reuse the
+same content identity; unrelated callers never overwrite each other's selections.
+
+A key identifies every input that can affect its value. A mapper must not secretly
+read current files, environment, or changing dependencies absent from its key.
+Persisted keys additionally include the relevant compiler/toolchain version.
+Runtime arguments and runtime environment are not build inputs.
 
 The current `Source` uses allocation-based version equality and process-local IDs.
-Establish value-based source/version identity that remains correct after eviction
+Establish value-based source identity that remains correct after eviction
 and reconstruction. Reusing a cached HIR with newly acquired equivalent sources must
 preserve query lookup, spans, and declaration identity. Two distinct logical modules
 with equal text must remain distinct within a program. A display name alone does
@@ -137,7 +157,48 @@ Start with per-file CST/AST reuse and whole resolved-graph HIR reuse. An unchang
 entry file with changed imports is a different HIR input. Arbitrary sharing of
 sub-HIR fragments or incremental inference is not required in this plan.
 
-### 1.3 Async work and native artifacts
+### 1.3 The cache collection
+
+`Cache<K, V>` is an immutable collection of reusable results indexed by complete
+input keys, with explicit retention metadata. Every update and prune returns a new
+cache; existing instances remain valid snapshots. The API makes this value flow
+visible. [Clojure's core.cache](https://clojure.github.io/core.cache/#clojure.core.cache.wrapped)
+provides a precedent for immutable cache values with separate atomic publication.
+
+Add a small `resin-cache` crate for this type. It owns only the keyed
+collection and immutable retention metadata. It knows no compiler phases, dependency
+scheduler, executor, clock-reading operation, filesystem, or global active pointer.
+Keep `resin-common` minimal. Server and LSP code still choose and invoke passes.
+
+The operations have these value semantics, using illustrative signatures:
+
+```text
+Cache<K,V>::update(&self, keys, used_at, fresh: K -> V) -> Self
+Cache<K,V>::prune(&self, cutoff) -> Self
+```
+
+- An empty cache is the cold starting point. `update` deduplicates requested keys,
+  reuses existing values, computes misses, and renews requested entries' metadata.
+  It preserves unrequested entries. Only `prune` removes historical entries.
+- Every timestamp is supplied by the application. Neither operation reads a clock
+  or modifies old entries. Reading a snapshot alone does not secretly renew it;
+  request code explicitly updates the keys it uses.
+- The mapper computes one completed value from one complete key. It may capture
+  already-resolved immutable inputs and an optional incremental predecessor. Those
+  captures must not change the result for an otherwise equal key.
+- Applications can evaluate independent ready keys in parallel with bounded jobs.
+  Async/native work can be prepared before applying the collection update. Keep
+  failures and cancellation explicit; never publish placeholder or partial values.
+- Share values through `Arc` or their existing immutable handles. Keep collection
+  representation private. Ordinary maps are a correct starting point, but cloning
+  them copies their index. Measure large hit-only updates and rebasing costs; use
+  an existing persistent map if needed to share map structure. Do not build a HAMT
+  or make an unmeasured claim that map updates have constant cost.
+
+This is a reusable collection operation, not a pass orchestration framework.
+Compiler outputs never retain entire prior caches as their hidden cache.
+
+### 1.4 Async work and native artifacts
 
 - Keep CPU passes synchronous internally where ordinary control flow is clearest.
   Existing application code schedules independent work on bounded workers and uses
@@ -154,7 +215,7 @@ sub-HIR fragments or incremental inference is not required in this plan.
   sequencing compiler passes.
 - Publish completed artifacts immutably. Retaining/downloading A must not hold an
   exclusive mutable staging-directory lock needed to build B. Artifact ownership
-  must keep its files alive until all consumers finish, independently of cache rows.
+  must keep its files alive until all consumers finish, independently of cache membership.
 
 ### Phase 1 acceptance criteria
 
@@ -173,89 +234,136 @@ sub-HIR fragments or incremental inference is not required in this plan.
       final-owner cleanup cannot overwrite/delete another live artifact generation.
 - [ ] **P1.7** Record cold/unchanged/small-edit timing, concurrency, retained memory,
       and cancellation latency as a baseline, without imposing invented speed targets.
+- [ ] **P1.8** Cache tests show that updating `{a,b}` with requested `{b,c}`
+      returns `{a,b,c}`, shares `b`, computes only `c`, and renews only requested
+      metadata. Update/prune leave old sets unchanged. Content hashes distinguish
+      changed text and reuse identical text without source revision counters.
 
-## Phase 2: Shared caches and retention exercised through LSP
+## Phase 2: Immutable caches exercised through LSP
 
 ### Deliverable
 
 Use the existing LSP mode to exercise repeated and overlapping computations locally.
-Implement explicit shared pass tables and time-based retention in application code.
-There is no new watch-mode executable or reusable cache/orchestration crate.
-Local application tests schedule analysis and builds against those tables. Separate
-CLI and LSP processes begin sharing a running service only in Phase 3.
+Applications explicitly maintain active pointers to immutable per-layer caches. Use the Phase 1 collection for updates and retention, with no new watch-mode
+executable or orchestration library. Local tests schedule analysis and builds
+against these sets. Separate CLI and LSP processes share a service only in Phase 3.
 
 ### 2.1 Shared completed outputs
 
-Keep ordinary typed application tables for sources, parsed files, ASTs, HIR/editor
-facts, and any later pass outputs the application requests. A row contains its full
-key, an immutable shared value, and `last_used`. The process has one table per kind
-of result, shared by all entries and callers. Paths never partition these tables.
+Start with one active `Cache<K,V>` per output kind: sources, CSTs, per-file ASTs,
+HIR/editor facts, and any later pass outputs requested. A set retains entries from
+multiple callers, input graphs, and generations. Each entry shares its completed
+value and records immutable last-use time and generation metadata.
 
-For each pass, application code explicitly:
+For example, a new entry importing `a` and `b` can reuse per-file results produced
+by separate earlier requests. The application explicitly assembles each pass's
+current inputs from those values; it is not restricted to one predecessor graph.
+Folder/package partitioning may be explored by placing the same kinds of sets in
+separate application-owned scopes. Scope changes must not change compilation meaning;
+complete keys allow selected results to be reused across those scopes.
 
-1. Forms the complete key from the current inputs.
-2. Looks up a live cached output and takes a shared handle on a hit.
-3. On a miss, invokes that pass outside the table lock, optionally supplying a
-   compatible prior result, then publishes the completed output.
+Cache updates retain unrequested entries until pruning. Each individual compiler
+result still refers only to its required data. The shared mutable state is the
+active pointer, not the published map or its timestamps.
 
-Different input files can hit results produced by different earlier requests. The
-application assembles the current pass's inputs from those values. For example, a
-third entry importing `a` and `b` can reuse their per-file results even when earlier
-requests parsed them separately. Exact output hits do not need a single predecessor.
+Completed diagnostics may be retained for their exact inputs. Cancellation, pending
+uploads, and transient acquisition/tool failures remain retryable. Missing-file
+outcomes cannot bypass source acquisition on a later request that may repair them.
+Concurrent misses may compute twice initially; sharing identical completed values
+is an optimization, while equal-key semantic correctness is mandatory.
 
-This updates the earlier predecessor-only cache plan: compiler results remain
-immutable, while **application lookup tables and retention timestamps are mutable**.
-Per-call results still retain only their required data; the application's tables
-retain other completed results until TTL expiry. No mutable cache object enters a
-compiler pass. A small amount of repeated lookup/sequencing code is acceptable.
+### 2.2 Retention as a value operation
 
-Concurrent misses may compute twice initially. Recheck the table at publication:
-select a compatible live winner or replace an expired row, and refresh the selected
-row's `last_used`. Completed diagnostics may be cached for their exact inputs.
-Cancellation, pending uploads, and transient acquisition/tool failures remain
-retryable. Do not cache missing-file outcomes as complete source graphs that bypass
-acquisition on later requests.
+The normal application sequence is:
 
-### 2.2 Time-based retention
+```text
+updated = update(previous, requested_keys, use_stamp, fresh)
+next    = prune(updated, retention_cutoff)
+```
 
-Apply the same policy to cached sources and every kind of completed output:
+Requested entries are renewed before pruning. An old entry still present is valid
+for its complete key and may be reused; reaching its age alone does not invalidate
+its contents or force recomputation. `prune` establishes the retained membership.
 
-1. Initialize `last_used` when a completed value is inserted. Refresh it when a
-   request acquires that row. Use monotonic elapsed time, not wall-clock dates.
-2. Default to **24 hours since last use**, configurable. A lookup at or beyond its
-   expiry treats the row as a miss even if a sweep has not run yet.
-3. Run a configurable periodic sweep, initially **every minute**, removing rows
-   whose idle duration meets or exceeds the TTL. Sweeping does not renew entries.
-4. Synchronize lookup, timestamp refresh, handle acquisition, and removal with
-   short table locks. Compile and perform I/O outside those locks; release removed
-   values outside the lock so destruction cannot stall unrelated lookups.
-5. A sweep drops the table's ownership. Requests and downstream outputs retain
-   their own shared handles; expiry never invalidates a source, diagnostic, or
-   artifact they are already using.
+Support two explicit alternative cutoff modes:
 
-Place timestamps beside values in application tables, not inside `Source` or compiler
-IR. Ownership links between completed outputs must be acyclic; represent recursive
-language relationships with IDs. Ordinary shared ownership releases an object when
-its final owner drops, so no tracing garbage collector or allocator pools are needed.
+- **Time (default):** retain for 24 hours since last use, configurable. Applications
+  pass monotonic timestamps and remove entries whose last use is at or before the
+  computed cutoff. Timestamp renewal creates new metadata while sharing the value.
+- **Generation:** remove entries at or before a supplied last-use generation cutoff.
+  Generations count successfully published updates of that cache. An update
+  candidate advances its predecessor's generation once and stamps requested keys;
+  pruning alone preserves the generation. CAS retries do not count as extra updates.
+
+Generations belong to one set's lineage; they are not comparable across phase or
+package sets. Other callers' updates age an entry under a shared generation policy.
+Time remains the service default. A policy selects one mode, avoiding ambiguous
+combinations of time and generation conditions.
+
+Invoke pruning when publishing updates, optionally batching/throttling it if measured
+cost warrants that. A background sweep is not required for correctness. Opportunistic
+pruning performs no cleanup while the server is idle; when idle reclamation is wanted,
+a configurable timer can publish the same pure `prune` operation. Use one minute as
+the initial optional timer interval. Neither pruning nor timer activity renews use.
+
+Pruning a new set does not revoke older snapshots or handles. A retained HIR can
+keep its sources alive after the source set prunes them. Ordinary shared ownership
+reclaims values after their final owner drops; ownership links must be acyclic.
 See Rust's [Arc ownership contract](https://doc.rust-lang.org/std/sync/struct.Arc.html).
 
-For example, a HIR may keep a source alive after its source-table row expires. A HIR
-cache hit does not have to traverse and retimestamp every upstream row. Those owned
-inputs remain usable; a later direct lookup of an expired row may reconstruct it
-with the same value identity. Eviction affects reuse, not program semantics.
+Acquire needed result handles and release old whole-set snapshots promptly. A long
+request retaining a whole snapshot also retains its unrelated entries. Do not add
+parent links retaining every generation. A later request can reconstruct an evicted
+source and still use retained HIR thanks to its content-based source identity.
+Artifact ownership similarly protects live readers; cleanup removes only the files
+belonging to that artifact generation after its final owner releases it.
 
-Apply the policy to retained input-graph handles and managed artifact handles too.
-Artifact cleanup waits for downloads/build consumers to release ownership and must
-only remove files belonging to that artifact generation. No ownership chain should
-retain every old edit. Background maintenance must not repeatedly touch entries
-and keep them warm without requests.
+TTL limits idle retention in the current set, not total process memory. Old snapshots,
+live consumers, and many distinct results inside the retention window can retain
+substantial data. Measure set sizes, sharing, hits/misses, and memory. Fixed-size
+allocator pools, tracing GC, and a hard cache memory ceiling are outside this plan.
 
-TTL bounds idle cache retention, not total memory: a high rate of distinct requests
-within 24 hours or live consumers can retain substantial data. Measure table counts,
-hits/misses, and retained memory so the TTL can be tuned. Fixed-size pools, LRU limits,
-and a hard cache memory ceiling are outside this plan. Concurrency remains bounded.
+### 2.3 Publishing concurrent updates
 
-### 2.3 Entry-driven editor inputs
+Keep publication in application code, separate from the pure cache operations.
+Use safe atomic shared-pointer publication, such as `ArcSwap`, for each active set.
+Holding an owned snapshot protects it while the active pointer changes. Avoid a
+hand-written raw-pointer reclamation scheme. Atomic publication does not make native
+processes, allocations, and the rest of the compiler lock-free.
+
+A plain load/compute/store can lose concurrent additions. A successful CAS publishes
+one candidate atomically; a failed CAS requires rebasing against the current head:
+
+1. Load a snapshot and capture needed hits and missing keys. Release the whole-table
+   snapshot before running bounded jobs where possible. Keep a prepared change set
+   of **all requested keys**, completed values, and use timestamps, including hits.
+   Stamp newly computed values at completion. Keep this data across retries.
+2. Load the current head and apply only those requested entries to it. Preserve its
+   unrelated entries and prefer already-present compatible values. Renew timestamps
+   with `max(current, requested)` so a slow request cannot move last use backward.
+3. Form the candidate's next generation from that head. Retain the request's result
+   handles, then prune using current metadata and an explicit cutoff. A long request
+   remains valid even if its selected entries have aged out before publication.
+4. Compare-and-swap the active pointer from that head to the candidate. If it loses,
+   reload and repeat the merge/prune; retain completed computation results.
+
+Do not replay a stale whole snapshot or a stale list of deletions. A prune racing
+with a touch must re-evaluate age against the newer metadata. Reintroducing a pruned
+key actually requested again is valid; reintroducing unrelated history is not.
+Prune-only publication uses the same CAS/re-evaluation rule without advancing the
+update generation.
+
+Compiler/native work must remain outside the CAS retry operation. The atomic-Arc
+API may retry its update closure; see the [ArcSwap update documentation](https://docs.rs/arc-swap/latest/arc_swap/struct.ArcSwapAny.html#method.rcu).
+A repeated merge may copy map structure, but must not rerun an expensive completed
+pass or repeat native side effects. Prefer a concurrent winner's compatible handle
+when selecting downstream inputs; temporary duplicate computations are acceptable.
+
+Each layer may publish independently: a pass consumes explicit immutable dependency
+handles, never an accidental mixture of whatever several active pointers contain.
+No multi-layer transaction is needed for correctness when keys cover those inputs.
+
+### 2.4 Entry-driven editor inputs
 
 Each analysis request selects an entry source and an immutable graph of exact source
 versions and resolved import bindings. This graph is ordinary input data; it is not
@@ -289,33 +397,38 @@ outputs while allowing straightforward orchestration to be duplicated.
 
 ### Phase 2 acceptance criteria
 
-- [ ] **P2.1** Different callers/entries reuse the same shared output handles for
-      identical inputs. A new compilation reuses per-file outputs originating in
-      multiple earlier requests. Different contents/bindings never mix.
-- [ ] **P2.2** A controllable clock verifies refresh past the original insertion
-      deadline, the exact expiry boundary, lazy expiry, periodic sweep, and cold
-      recomputation after eviction; tests do not wait real hours/minutes.
-- [ ] **P2.3** Sweep during analysis, local builds, and artifact reads leaves retained
-      results valid. After table eviction and final-consumer release, ownership is reclaimed.
-      Upstream-row expiry while a downstream result lives preserves source identity.
-- [ ] **P2.4** Lookup/publication/sweep races and concurrent misses preserve correct
-      outputs and timestamps without holding locks through computation or I/O.
+- [ ] **P2.1** Different callers reuse matching completed values. A new compilation
+      uses per-file outputs from multiple earlier requests; separately organized
+      sets produce the same semantics. Same-path different contents coexist.
+- [ ] **P2.2** With an explicit test clock, updates renew requested metadata without
+      changing old sets. Time and generation pruning remove exact-cutoff entries;
+      successful updates advance generations once, retries/pruning do not.
+- [ ] **P2.3** Pruning during analysis, local builds, and artifact reads leaves held
+      values valid. Releasing final roots/consumers reclaims them. Upstream pruning
+      and source reconstruction preserve queries against retained HIR.
+- [ ] **P2.4** Concurrent disjoint updates both survive. Update/prune races preserve
+      renewed entries without restoring unrelated history; slow publication cannot
+      regress timestamps. CAS contention never repeats completed compiler/native work.
 - [ ] **P2.5** LSP handles rapid edits, invalid code then repair, additions/deletions,
-      changed dependencies, parent-directory imports, saves, and simultaneous queries.
-      Alias imports select one module; discovery order does not change graph identity.
-      Old revisions remain readable and stale results cannot replace current ones.
-- [ ] **P2.6** Receive handling remains responsive during computation and sweeps;
-      cancellation and shutdown drain/reap owned work with bounded queues/jobs.
-- [ ] **P2.7** Sustained-edit measurements report latency, sharing, and retained memory;
-      advancing beyond TTL releases idle history without workspace/session leases.
+      changed dependencies, parent imports, saves, and simultaneous queries. Aliases
+      select one module; discovery order preserves identity; stale results cannot
+      replace the current revision.
+- [ ] **P2.6** Receive handling remains responsive through computation/publication;
+      bounded queues/jobs and cancellation/shutdown release owned tasks/processes.
+- [ ] **P2.7** Tests distinguish update-triggered pruning from optional idle cleanup.
+      An old still-present exact-key result can be renewed before pruning; after
+      removal it can be recomputed correctly.
+- [ ] **P2.8** Measure sustained editing, hit-only updates, map copying/structural
+      sharing, CAS retries, retained snapshots, and reclamation. Do not claim a
+      constant-cost update or hard memory bound from pointer swapping alone.
 
 ## Phase 3: HTTP server and thin client
 
 ### Deliverable
 
 Introduce `resin-client`, `resin-server`, and `resin-protocol` under `crates/`, with the
-root `resin` executable delegating to the merged client. The server owns explicit
-per-pass tables and calls the passes directly for builds and analysis queries.
+root `resin` executable delegating to the merged client. The server owns active
+per-pass cache pointers and calls passes directly for builds and analysis queries.
 Move the local LSP compilation responsibilities to those server handlers.
 
 ### 3.1 Connection and requests
@@ -329,9 +442,10 @@ Move the local LSP compilation responsibilities to those server handlers.
 - Each request names one entry source and its immutable inputs. There is no
   create-workspace API, workspace TTL, or mandatory long-lived compiler session.
   Optional cached graph/revision handles follow the same entry TTL as other values.
-- Build and query handlers explicitly look up and invoke the required passes.
-  They use the same process-wide tables; the wire request path does not partition
-  reuse. Preserve Phase 2's TTL and ownership behavior for every retained output.
+- Build and query handlers explicitly select inputs, invoke passes, and publish
+  immutable caches. They use the same process-wide sets initially; request
+  origin does not partition reuse. Preserve Phase 2's update/prune, CAS, and ownership
+  behavior for every retained output.
 
 ### 3.2 Acquire a source graph without a project manifest
 
@@ -349,7 +463,7 @@ guess a directory tree to upload:
    and supplies standard/builtin libraries itself, with pinned versions/content.
 5. Freeze the complete input graph before semantic compilation. On an edit, derive
    a new graph from explicit prior inputs and replacements/deletions, and resolve
-   its imports again. Reuse all matching sources and outputs through the same tables.
+   its imports again. Reuse matching sources and outputs through the same caches.
 
 Correlate every exchange/upload with its request revision. Capture the editor buffer
 versions for that revision and select each disk file's contents once per exchange.
@@ -383,7 +497,7 @@ submits different contents.
   server. Resolve the native `--embed` helper explicitly for the server executable.
 - Return structured diagnostics and artifact metadata, with one output file over
   HTTP initially. Complete downloads before publishing them at the client destination.
-  Keep active downloads safe from TTL cleanup.
+  Keep active downloads safe from pruning and old-set reclamation.
 - Run downloaded executables locally, with local arguments, runtime environment,
   working directory, and standard streams. Preserve debug build-and-run without
   `-o` and optimized output without execution with `-o`.
@@ -411,11 +525,11 @@ submits different contents.
       declaration-identity leakage; combined inputs reuse multiple callers' results.
       Dependency edits during upload cannot mix revisions or publish stale results.
 - [ ] **P3.5** Build and LSP query handlers explicitly invoke their needed passes
-      while sharing the same tables. Phase 2 edit/concurrency/TTL tests also pass
+      while sharing immutable caches. Phase 2 update/prune/concurrency tests pass
       through the HTTP boundary.
 - [ ] **P3.6** Expired/restarted-server references recover through re-upload; canceled
       or disconnected requests release acquisition state and owned native processes.
-      A sweep cannot interrupt an active artifact download.
+      Pruning cannot interrupt an active artifact download.
 - [ ] **P3.7** Returned executables are placed/run locally with preserved build/run
       defaults and runtime arguments; native helper invocation works in the server.
 - [ ] **P3.8** Document protocol/configuration defaults, dependency acquisition, target
@@ -437,5 +551,6 @@ above rather than becoming prerequisites left to a future plan.
 Later work: MCP queries for documentation/diagnostics/symbols, REPL/shell runtime
 sessions, additional watching clients, tar/tgz or multiple-file artifacts, transport
 deduplication/batching optimizations, finer-grained semantic reuse, broader deployment
-support, and installers. Cross-caller reuse and time-based retention are required by
-this plan; they are not deferred to a later shared-cluster project.
+support, and installers. Cross-caller reuse and immutable cache retention are
+required by this plan. Broader folder/package partitioning can reuse these collection
+operations without changing compiler contracts or requiring a workspace protocol.
