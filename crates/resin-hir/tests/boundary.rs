@@ -34,12 +34,14 @@ fn malformed_dependency_order_returns_diagnostics() {
 }
 
 #[test]
-fn checking_a_standalone_file_rejects_unresolved_imports() {
-    let entry = module(
+fn checking_rejects_unresolved_imports() {
+    let source = Source::new(
         "entry.resin",
         r#"import { "library.resin" }; def main() = {};"#,
     );
-    assert!(resin_hir::generate(&entry.file).is_err());
+    let mut loader = resin_source::Loader::new(std::path::PathBuf::from("."));
+    let analysis = resin_hir::Hir::build(source, &mut loader, None);
+    assert!(analysis.hir().is_err());
 }
 
 #[test]
@@ -189,7 +191,11 @@ fn nominal_declarations_retain_method_identities_with_their_type_expressions() {
         "owner.resin",
         "struct Owner { value: int, def read(self: Owner) -> int = { self.value }; def drop(self: Ptr<Owner>) = {}; }; type Alias = Owner;",
     );
-    let hir = resin_hir::generate(&source.file).unwrap();
+    let hir = resin_hir::build_hir(&Program {
+        modules: vec![source],
+    })
+    .into_module()
+    .unwrap();
     let owner = hir
         .types
         .iter()

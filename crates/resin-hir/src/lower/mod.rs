@@ -32,7 +32,8 @@ pub(crate) mod scope;
 mod typed;
 mod types;
 
-/// Check a standalone source file. Imports require `generate_program`.
+/// Check a standalone source file. Imports require `build_hir`.
+#[cfg(test)]
 pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
     if let Some(import) = file.imports.first() {
         return Err(GenerateError {

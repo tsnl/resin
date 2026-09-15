@@ -1,7 +1,7 @@
 mod support;
 
 fn hir(source: &str) -> resin_hir::Module {
-    resin_hir::generate(&support::parse(source)).unwrap()
+    support::hir(source)
 }
 
 fn run(source: &str) -> std::process::Output {

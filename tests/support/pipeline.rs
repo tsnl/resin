@@ -2,15 +2,168 @@
 use resin_hir::{GenerateError, GenerateErrorKind, Hir};
 use resin_source::library_root;
 use resin_source::prelude::*;
+use resin_types::prelude::*;
 use std::path::Path;
+use std::sync::Arc;
+
+fn standalone(file: &resin_ast::SourceFile) -> resin_ast::Program {
+    resin_ast::Program {
+        modules: vec![resin_ast::SourceModule {
+            source: Source::new("test.resin", ""),
+            file: file.clone(),
+            imports: vec![],
+        }],
+    }
+}
 
 pub fn generate(file: &resin_ast::SourceFile) -> Result<resin_lir::Module, GenerateError> {
-    let tree = resin_hir::generate(file)?;
+    let tree = resin_hir::build_hir(&standalone(file))
+        .into_module()
+        .map_err(source_to_generate)?;
     let module = resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default())
         .map_err(|mut errors| lowering_error(errors.remove(0)))?;
     Ok(resin_lir::VerifiedModule::new(module)
         .expect("lowering produces valid LIR")
         .into_module())
+}
+
+fn source_to_generate(error: SourceError) -> GenerateError {
+    GenerateError {
+        span: error.span.unwrap_or(Span { start: 0, end: 0 }),
+        kind: kind_from_diagnostic(&error.diagnostic),
+    }
+}
+
+fn kind_from_diagnostic(diagnostic: &str) -> GenerateErrorKind {
+    let rest = diagnostic
+        .strip_prefix("compile error at ")
+        .and_then(|rest| rest.split_once(": ").map(|(_, rest)| rest))
+        .unwrap_or(diagnostic);
+    if rest == "IncompleteSyntax" {
+        return GenerateErrorKind::IncompleteSyntax;
+    }
+    if rest == "InvalidModuleItem" {
+        return GenerateErrorKind::InvalidModuleItem;
+    }
+    if rest == "InvalidForeignSignature" {
+        return GenerateErrorKind::InvalidForeignSignature;
+    }
+    if rest == "NotAPlace" {
+        return GenerateErrorKind::NotAPlace;
+    }
+    if rest.starts_with("pointer arithmetic is not allowed") {
+        return GenerateErrorKind::Type {
+            kind: TypeErrorKind::PointerArithmetic,
+        };
+    }
+    if let Some(path) = quoted(rest, "UnresolvedImport", "path") {
+        return GenerateErrorKind::UnresolvedImport { path };
+    }
+    if let Some(name) = quoted(rest, "UnknownExport", "name") {
+        return GenerateErrorKind::UnknownExport { name };
+    }
+    if let Some(name) = quoted(rest, "DuplicateExport", "name") {
+        return GenerateErrorKind::DuplicateExport { name };
+    }
+    if let Some(name) = quoted(rest, "ReservedBuiltin", "name") {
+        return GenerateErrorKind::ReservedBuiltin { name };
+    }
+    if let Some(name) = quoted(rest, "UnboundValue", "name") {
+        return GenerateErrorKind::UnboundValue { name };
+    }
+    if let Some(name) = quoted(rest, "UnboundType", "name") {
+        return GenerateErrorKind::UnboundType { name };
+    }
+    if let Some(name) = quoted(rest, "UnknownTypeFormer", "name") {
+        return GenerateErrorKind::UnknownTypeFormer { name };
+    }
+    if let Some(name) = quoted(rest, "EagerRecursion", "name") {
+        return GenerateErrorKind::EagerRecursion { name };
+    }
+    if let Some(name) = quoted(rest, "UninitializedValue", "name") {
+        return GenerateErrorKind::UninitializedValue { name };
+    }
+    if let Some(name) = quoted(rest, "DuplicateValue", "name") {
+        return GenerateErrorKind::DuplicateValue { name };
+    }
+    if let Some(name) = quoted(rest, "DuplicateType", "name") {
+        return GenerateErrorKind::DuplicateType { name };
+    }
+    if let Some(name) = quoted(rest, "NeedsTypeAnnotation", "name") {
+        return GenerateErrorKind::NeedsTypeAnnotation { name };
+    }
+    if let Some(name) = quoted(rest, "MissingField", "name") {
+        return GenerateErrorKind::MissingField { name };
+    }
+    if let Some(name) = quoted(rest, "ExtraField", "name") {
+        return GenerateErrorKind::ExtraField { name };
+    }
+    if let Some(message) = quoted(rest, "InvalidShader", "message") {
+        return GenerateErrorKind::InvalidShader { message };
+    }
+    if let Some(message) = quoted(rest, "InvalidLiteral", "message") {
+        return GenerateErrorKind::InvalidLiteral { message };
+    }
+    if let Some(kind) = rest.strip_prefix("Type { kind: ") {
+        return GenerateErrorKind::Type {
+            kind: type_kind(kind),
+        };
+    }
+    GenerateErrorKind::Inference {
+        message: rest.into(),
+    }
+}
+
+fn quoted(rest: &str, variant: &str, field: &str) -> Option<Arc<str>> {
+    rest.strip_prefix(&format!("{variant} {{ {field}: \""))?
+        .split('"')
+        .next()
+        .map(Arc::from)
+}
+
+fn type_kind(rest: &str) -> TypeErrorKind {
+    if rest.starts_with("EmptyArrayNeedsElementType") {
+        return TypeErrorKind::EmptyArrayNeedsElementType;
+    }
+    if rest.starts_with("PointerArithmetic") {
+        return TypeErrorKind::PointerArithmetic;
+    }
+    if rest.starts_with("InvalidUnion") {
+        return TypeErrorKind::InvalidUnion;
+    }
+    if rest.starts_with("TypeMismatch") {
+        return TypeErrorKind::TypeMismatch {
+            expected: Ty::Unit,
+            found: Ty::Unit,
+        };
+    }
+    if rest.starts_with("ExpectedInteger") {
+        return TypeErrorKind::ExpectedInteger { found: Ty::Unit };
+    }
+    if rest.starts_with("ExpectedBoolean") {
+        return TypeErrorKind::ExpectedBoolean { found: Ty::Unit };
+    }
+    if rest.starts_with("ExpectedPointer") {
+        return TypeErrorKind::ExpectedPointer { found: Ty::Unit };
+    }
+    if rest.starts_with("ExpectedRecord") {
+        return TypeErrorKind::ExpectedRecord { found: Ty::Unit };
+    }
+    if rest.starts_with("ExpectedFunction") {
+        return TypeErrorKind::ExpectedFunction { found: Ty::Unit };
+    }
+    if rest.starts_with("UnknownField") {
+        return TypeErrorKind::UnknownField { name: "".into() };
+    }
+    if rest.starts_with("DuplicateField") {
+        return TypeErrorKind::DuplicateField { name: "".into() };
+    }
+    if rest.starts_with("RecursiveTypeWithoutIndirection") {
+        return TypeErrorKind::RecursiveTypeWithoutIndirection {
+            definition: TypeId::from_index(0),
+        };
+    }
+    TypeErrorKind::InvalidUnion
 }
 
 // Source-level tests share diagnostic assertions across the two frontend passes.

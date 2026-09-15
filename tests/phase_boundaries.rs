@@ -5,9 +5,7 @@ mod support;
 
 use resin_source::prelude::*;
 fn hir(source: &str) -> resin_hir::Module {
-    let syntax = resin_cst::build_cst(source, None);
-    let file = resin_ast::build_ast(&syntax).file;
-    resin_hir::generate(&file).unwrap()
+    support::hir(source)
 }
 
 fn function<'a>(module: &'a resin_hir::Module, name: &str) -> &'a resin_hir::Function {

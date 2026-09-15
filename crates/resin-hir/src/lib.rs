@@ -433,12 +433,6 @@ pub fn build_hir(program: &resin_ast::Program) -> CheckedProgram {
     lower::analyze_program(program)
 }
 
-/// Build HIR from a standalone file with no imports.
-#[doc(hidden)]
-pub fn generate(file: &resin_ast::SourceFile) -> Result<Module, GenerateError> {
-    lower::generate(file)
-}
-
 pub fn format_module(module: &Module) -> String {
     print::format_module(module)
 }

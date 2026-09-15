@@ -123,7 +123,7 @@ fn expected_results_select_arguments_and_concrete_casts_run_after_substitution()
 }
 
 fn hir(source: &str) -> resin_hir::Module {
-    resin_hir::generate(&support::parse(source)).unwrap()
+    support::hir(source)
 }
 
 #[test]

@@ -17,22 +17,19 @@ struct Interpreter;
 
 impl Interpreter {
     fn compile(request: &Request) -> Result<resin_toolchain::Executable> {
-        let output = Self::lower(request)?;
-        let project = Self::generate(&output, request)?;
+        let hir = Self::hir(request)?;
+        let lir = Self::lower(&hir, request)?;
+        let project = Self::generate(&lir, hir.source().name(), request)?;
         Self::build(&project, request)
     }
 
-    fn lower(request: &Request) -> Result<Hir> {
+    fn hir(request: &Request) -> Result<Hir> {
         let mut loader = resin_source::Loader::new(request.library_root.clone());
         let source = loader.load_file(&request.input.path)?;
         Ok(Hir::build(source, &mut loader, None))
     }
 
-    fn generate(output: &Hir, request: &Request) -> Result<resin_codegen::GeneratedProject> {
-        let directory = request
-            .options
-            .tools
-            .generated(output.source().name(), &request.input.entry);
+    fn lower(output: &Hir, request: &Request) -> Result<resin_lir::VerifiedModule> {
         let hir = output.hir().map_err(|error| build_lir_error(vec![error]))?;
         let entry =
             resin_lir::Entry::exported(hir, request.input.entry.clone(), resin_lir::Profile::Host)
@@ -46,13 +43,24 @@ impl Interpreter {
                         .collect(),
                 )
             })?;
-        let lir = resin_lir::VerifiedModule::new(lir).map_err(|error| {
+        resin_lir::VerifiedModule::new(lir).map_err(|error| {
             build_lir_error(vec![resin_source::SourceError::new(
                 output.source().clone(),
                 None,
                 format!("invalid LIR: {error}"),
             )])
-        })?;
+        })
+    }
+
+    fn generate(
+        lir: &resin_lir::VerifiedModule,
+        source_name: &str,
+        request: &Request,
+    ) -> Result<resin_codegen::GeneratedProject> {
+        let directory = request
+            .options
+            .tools
+            .generated(source_name, &request.input.entry);
         Ok(resin_codegen::generate(
             lir.view(),
             Some(&request.input.entry),

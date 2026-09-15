@@ -1,9 +1,10 @@
 use resin_hir::{Module, TermKind, Type};
 
-fn generate(source: &str) -> Result<Module, resin_hir::GenerateError> {
-    let document = resin_cst::build_cst(source, None);
-    let ast = resin_ast::build_ast(&document).file;
-    resin_hir::generate(&ast)
+mod common;
+use common::hir_module;
+
+fn generate(source: &str) -> Result<Module, resin_source::SourceError> {
+    hir_module(source)
 }
 
 // These names deliberately differ from the library. Contracts are explicit
@@ -41,7 +42,7 @@ struct Params { scale: float32, values: HostRange<int> };
 @compute_shader def kernel(index: ulong, root: Ptr<Params>) = {};
 "#;
 
-fn pipelines(source: &str) -> Result<Module, resin_hir::GenerateError> {
+fn pipelines(source: &str) -> Result<Module, resin_source::SourceError> {
     generate(&format!("{PIPELINES}\n{source}"))
 }
 

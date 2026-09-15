@@ -243,7 +243,7 @@ fn unused_generic_arguments_do_not_demand_recursive_layouts() {
 #[test]
 fn demanding_an_infinite_generic_layout_reports_the_application() {
     let source = "struct Recursive<T> { next: Recursive<T> }; def measure<T>() -> ulong = { size_of(T) }; def main() -> ulong = { measure::<Recursive<int>>() };";
-    let hir = resin_hir::generate(&support::parse(source)).unwrap();
+    let hir = support::hir(source);
     let error = resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
         .unwrap_err()
         .remove(0);
@@ -260,7 +260,7 @@ fn demanding_an_infinite_generic_layout_reports_the_application() {
 #[test]
 fn generic_constructor_literals_are_range_checked_after_substitution() {
     let source = "struct Cell<T> { value: T }; def make<T>() -> Cell<T> = { Cell<T> { value = 256 } }; def main() -> Cell<ubyte> = { make() };";
-    let hir = resin_hir::generate(&support::parse(source)).unwrap();
+    let hir = support::hir(source);
     let error = resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
         .unwrap_err()
         .remove(0);

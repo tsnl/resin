@@ -1,8 +1,7 @@
-use resin_hir::GenerateErrorKind;
 use resin_hir::Hir;
 use resin_source::normalize_path;
 use resin_source::prelude::*;
-use std::{collections::BTreeMap, path::Path, sync::Arc};
+use std::{collections::BTreeMap, path::Path};
 use tempfile::TempDir;
 
 #[test]
@@ -1674,13 +1673,21 @@ fn checking_rejects_holes_even_when_given_a_recovered_ast() {
         let file = analysis
             .recovered_file(&project.source("main.resin"))
             .unwrap();
-        let error = resin_hir::generate(file).unwrap_err();
-        assert_eq!(
-            error.kind,
-            GenerateErrorKind::IncompleteSyntax,
+        let error = resin_hir::build_hir(&resin_ast::Program {
+            modules: vec![resin_ast::SourceModule {
+                source: project.source("main.resin"),
+                file: file.clone(),
+                imports: vec![],
+            }],
+        })
+        .into_module()
+        .unwrap_err();
+        assert!(
+            error.diagnostic.contains("IncompleteSyntax"),
             "{source}: {error}"
         );
-        assert!(error.span.start <= error.span.end && error.span.end <= source.len());
+        let span = error.span.expect("hole has a span");
+        assert!(span.start <= span.end && span.end <= source.len());
     }
 }
 

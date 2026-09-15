@@ -1,8 +1,10 @@
 use resin_hir::{TermKind, Type};
 
-fn generate(source: &str) -> Result<resin_hir::Module, resin_hir::GenerateError> {
-    let document = resin_cst::build_cst(source, None);
-    resin_hir::generate(&resin_ast::build_ast(&document).file)
+mod common;
+use common::hir_module;
+
+fn generate(source: &str) -> Result<resin_hir::Module, resin_source::SourceError> {
+    hir_module(source)
 }
 
 #[test]
