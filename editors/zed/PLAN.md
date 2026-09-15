@@ -20,7 +20,7 @@ on the stack above; see the [extension setup](README.md) and
 The current compiler API accepts immutable `Source` values from
 `resin_source::prelude::*` and a concrete `resin_source::Loader` that resolves imports.
 A reusable `resin_frontend::Frontend` owns syntax and compilation caches;
-`compile` returns an immutable `Compilation`. Every call resolves imports before
+`analyze` returns an immutable `FrontendOutput`. Every call resolves imports before
 reusing a result. Native generation passes verified LIR to codegen; the toolchain builds its Ninja project.
 `resin_source::Loader` owns filesystem identities and standard-library lookup.
 The language server owns open buffers, URI/version bookkeeping, frontend revisions,
@@ -96,7 +96,7 @@ or a document contains incomplete code.
 
 The AST retains byte spans, and source locations retain immutable `Source`
 handles. Source scopes and definition origins belong to HIR construction; the
-compiler's `Compilation` exposes diagnostics and queries over those phase products.
+compiler's `FrontendOutput` exposes diagnostics and queries over those phase products.
 
 Use `resin_source::Loader` to resolve references from their importing source.
 The CLI loads files; the server registers authoritative buffer text through

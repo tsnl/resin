@@ -287,9 +287,16 @@ fn build(
             entry: "kernel".into(),
         },
     };
-    let compilation = resin_frontend::Frontend::new().compile(source, &mut loader, &[target]);
+    let output = resin_frontend::Frontend::new().analyze(source, &mut loader);
+    let lir = output.instantiate(&[target]).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
     let directory = tempfile::TempDir::new()?;
-    let generated = resin_codegen::generate(compilation.verified()?, entry, directory.path())?;
+    let generated = resin_codegen::generate(lir.view(), entry, directory.path())?;
     for (name, contents) in extra_files {
         fs::write(directory.path().join(name), contents)?;
     }

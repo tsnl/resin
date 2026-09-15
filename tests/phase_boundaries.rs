@@ -135,19 +135,17 @@ fn a_later_phase_error_preserves_earlier_compilation_products() {
         "export { f }; def f() -> bool = { (1 == 1) + (1 == 1) };",
     );
     let mut loader = resin_source::Loader::new(Default::default());
-    let compilation = resin_frontend::Frontend::new().compile(
-        source,
-        &mut loader,
-        &[resin_frontend::Target::Host { entry: "f".into() }],
-    );
-    assert!(compilation.program().is_ok());
-    assert!(compilation.hir().is_ok());
-    assert!(compilation.module().is_err());
+    let output = resin_frontend::Frontend::new().analyze(source, &mut loader);
+    assert!(output.program().is_ok());
+    assert!(output.hir().is_ok());
+    let errors = match output.instantiate(&[resin_frontend::Target::Host { entry: "f".into() }]) {
+        Ok(_) => panic!("expected unsupported builtin"),
+        Err(errors) => errors,
+    };
     assert!(
-        compilation
-            .diagnostics()
+        errors
             .iter()
-            .any(|d| d.message.contains("UnsupportedBuiltin"))
+            .any(|error| error.diagnostic.contains("UnsupportedBuiltin"))
     );
 }
 

@@ -1,5 +1,6 @@
 //! Host program compilation for interpreter mode.
 use super::{Result, request::Request};
+use resin_frontend::{FrontendOutput, Target};
 use std::ffi::OsString;
 
 pub(super) fn run(request: &Request, args: &[OsString]) -> Result<i32> {
@@ -16,33 +17,32 @@ struct Interpreter;
 
 impl Interpreter {
     fn compile(request: &Request) -> Result<resin_toolchain::Executable> {
-        let compilation = Self::lower(request)?;
-        let project = Self::generate(&compilation, request)?;
+        let output = Self::lower(request)?;
+        let project = Self::generate(&output, request)?;
         Self::build(&project, request)
     }
 
-    fn lower(request: &Request) -> Result<std::sync::Arc<resin_frontend::Compilation>> {
+    fn lower(request: &Request) -> Result<std::sync::Arc<FrontendOutput>> {
         let mut loader = resin_source::Loader::new(request.library_root.clone());
         let source = loader.load_file(&request.input.path)?;
-        Ok(resin_frontend::Frontend::new().compile(
-            source,
-            &mut loader,
-            &[resin_frontend::Target::Host {
-                entry: request.input.entry.clone().into(),
-            }],
-        ))
+        Ok(resin_frontend::Frontend::new().analyze(source, &mut loader))
     }
 
     fn generate(
-        compilation: &resin_frontend::Compilation,
+        output: &FrontendOutput,
         request: &Request,
     ) -> Result<resin_codegen::GeneratedProject> {
         let directory = request
             .options
             .tools
-            .generated(compilation.source().name(), &request.input.entry);
+            .generated(output.source().name(), &request.input.entry);
+        let lir = output
+            .instantiate(&[Target::Host {
+                entry: request.input.entry.clone().into(),
+            }])
+            .map_err(instantiate_error)?;
         Ok(resin_codegen::generate(
-            compilation.verified()?,
+            lir.view(),
             Some(&request.input.entry),
             &directory,
         )?)
@@ -66,4 +66,15 @@ impl Interpreter {
                 .expect("program filename"),
         )?)
     }
+}
+
+fn instantiate_error(
+    errors: Vec<resin_source::SourceError>,
+) -> Box<dyn std::error::Error + Send + Sync> {
+    errors
+        .into_iter()
+        .map(|error| error.to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .into()
 }

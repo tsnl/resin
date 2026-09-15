@@ -123,8 +123,9 @@ The CLI's private [Request](src/cli/request.rs) validates the input/output combi
 resolves directory destinations, and rejects outputs that would overwrite the source.
 It also owns the library root. The CLI [interpreter](src/cli/interpreter.rs) loads that
 request: [resin_source::Loader](crates/resin-source/src/lib.rs) reads the file into
-an immutable `Source`, `resin_frontend::Frontend::compile(source, loader, targets)`
-resolves imports and returns an `Arc<Compilation>`, codegen writes C/SPIR-V/Ninja
+an immutable `Source`, `resin_frontend::Frontend::analyze(source, loader)`
+resolves imports and returns an `Arc<FrontendOutput>`. Generate instantiates LIR
+for the host entry, then codegen writes C/SPIR-V/Ninja
 into a stable folder under `build/`, and the toolchain stages that project.
 If `-o` is set, the cached executable is copied there; otherwise it is run. The toolchain supplies native command rules in `toolchain.ninja`. Ninja optimizes
 SPIR-V, invokes this Resin executable with `--embed` to make
@@ -136,12 +137,12 @@ The [frontend facade](crates/resin-frontend/src/lib.rs) exposes a small contract
 immutable sources go in, a loader discovers their imports, and immutable compilations
 come out. A result retains successful phase products and editor facts for one entry
 and its imports. Its public accessors expose diagnostics, AST, HIR, LIR, and source
-queries. `Frontend` owns private parsing and analysis caches directly; `Compilation`
+queries. `Frontend` owns private parsing and analysis caches directly; `FrontendOutput`
 owns its retained products. Their definitions and implementations live together in
 `lib.rs`. The concrete `resin_source::Loader` owns import lookup.
 
 Each phase is also a directly usable crate. The root [src/lib.rs](src/lib.rs) exposes
-only the CLI module. Tests call phase APIs directly or use `Frontend::compile`
+only the CLI module. Tests call phase APIs directly or use `Frontend::analyze`
 to inspect a program without building an executable.
 
 Formatting takes a separate path from `main` through
@@ -297,7 +298,7 @@ recovers unfinished scopes without clearing the original syntax diagnostics.
 Invalid declarations still shadow outer names, and healthy siblings retain
 their types. Unknown types display as `?`; errors prevent executable generation.
 
-The `Compilation` query methods in [lib.rs](crates/resin-frontend/src/lib.rs) delegate to
+The `FrontendOutput` query methods in [lib.rs](crates/resin-frontend/src/lib.rs) delegate to
 HIR's opaque `Analysis`, supplying its shared CST map. HIR's
 [lib.rs](crates/resin-hir/src/lib.rs) keeps the private analysis fields and their query
 operations together. They select the source context view and look up declarations

@@ -1,8 +1,8 @@
 //! Command-line argument parsing and mode dispatch.
 mod args;
-mod interpreter;
 mod embed;
 mod format;
+mod interpreter;
 mod request;
 mod source;
 

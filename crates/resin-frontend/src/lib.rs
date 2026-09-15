@@ -15,7 +15,7 @@ use std::{
 };
 
 //
-// Compilation
+// Frontend output
 //
 
 /// Immutable resource limits for every compilation made by this frontend.
@@ -31,26 +31,20 @@ impl Default for FrontendConfig {
     }
 }
 
-/// Exported entry and semantic target to construct. A decorated function can be
-/// requested on the host as well as for its shader artifact.
+/// Exported entry and Host/Shader profile to instantiate as LIR.
+/// Selected during generate, not while analyzing source.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Target {
     Host { entry: Arc<str> },
     Shader { entry: Arc<str> },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Request {
-    Declarations,
-    Targets { targets: Vec<Target> },
-}
-
-/// Reusable compilation caches. Sources and compilations are immutable.
+/// Reusable analysis caches. Sources and outputs are immutable.
 #[derive(Default)]
 pub struct Frontend {
     config: FrontendConfig,
     parsed: BTreeMap<SourceId, Weak<ParsedDocument>>,
-    checked: BTreeMap<SourceId, Arc<Compilation>>,
+    outputs: BTreeMap<SourceId, Arc<FrontendOutput>>,
 }
 impl Frontend {
     pub fn new() -> Self {
@@ -63,68 +57,41 @@ impl Frontend {
         }
     }
     /// Construct HIR and retained editor facts for every declaration, without LIR.
-    /// Target-specific operation diagnostics require `compile` with explicit targets.
     pub fn analyze(
         &mut self,
         source: Source,
         loader: &mut resin_source::Loader,
-    ) -> Arc<Compilation> {
-        self.compile_request(source, loader, Request::Declarations)
-    }
-
-    /// Resolve all imports, then reuse or construct the requested target program.
-    /// Source and import errors are retained as diagnostics in the result.
-    pub fn compile(
-        &mut self,
-        source: Source,
-        loader: &mut resin_source::Loader,
-        targets: &[Target],
-    ) -> Arc<Compilation> {
-        let mut targets = targets.to_vec();
-        targets.sort();
-        targets.dedup();
-        self.compile_request(source, loader, Request::Targets { targets })
-    }
-
-    fn compile_request(
-        &mut self,
-        source: Source,
-        loader: &mut resin_source::Loader,
-        request: Request,
-    ) -> Arc<Compilation> {
+    ) -> Arc<FrontendOutput> {
         let loaded = self.load_sources(source.clone(), loader);
-        let mut checked = live_compilations(&self.checked, source.id());
+        let mut outputs = live_outputs(&self.outputs, source.id());
         if loaded.errors.is_empty()
-            && let Some(old) = checked
-                .get(&source.id())
-                .filter(|old| old.matches(&loaded, &request))
+            && let Some(old) = outputs.get(&source.id()).filter(|old| old.matches(&loaded))
         {
             let reused = old.clone();
-            self.checked = checked;
+            self.outputs = outputs;
             self.parsed = live_documents(&self.parsed);
             return reused;
         }
-        let result = Arc::new(Compilation::from_loaded(
+        let result = Arc::new(FrontendOutput::from_loaded(
             source.clone(),
             loaded,
-            &self.config,
-            request,
+            self.config.clone(),
         ));
-        checked.insert(source.id(), result.clone());
-        self.checked = checked;
+        outputs.insert(source.id(), result.clone());
+        self.outputs = outputs;
         self.parsed = live_documents(&self.parsed);
         result
     }
 }
 
-fn live_compilations(
-    previous: &BTreeMap<SourceId, Arc<Compilation>>,
+fn live_outputs(
+    previous: &BTreeMap<SourceId, Arc<FrontendOutput>>,
     source: SourceId,
-) -> BTreeMap<SourceId, Arc<Compilation>> {
+) -> BTreeMap<SourceId, Arc<FrontendOutput>> {
     previous
         .iter()
-        .filter(|(id, compilation)| **id == source || Arc::strong_count(compilation) > 1)
-        .map(|(id, compilation)| (*id, compilation.clone()))
+        .filter(|(id, output)| **id == source || Arc::strong_count(output) > 1)
+        .map(|(id, output)| (*id, output.clone()))
         .collect()
 }
 
@@ -149,15 +116,15 @@ pub struct Diagnostic {
     pub related: Vec<SourceNote>,
 }
 
-/// Immutable phase products and editor facts for a source and its imports.
+/// Immutable HIR and editor facts for a source and its imports.
 /// Failed later passes preserve successfully completed earlier products.
 ///
 /// ```compile_fail,E0596
-/// fn edit(compilation: &mut resin_frontend::Compilation) {
-///     compilation.module().unwrap().functions.clear();
+/// fn edit(output: &mut resin_frontend::FrontendOutput) {
+///     output.hir().unwrap().functions.clear();
 /// }
 /// ```
-pub struct Compilation {
+pub struct FrontendOutput {
     source: Source,
     documents: BTreeMap<Source, Arc<ParsedDocument>>,
     syntax: BTreeMap<Source, Arc<resin_cst::Document>>,
@@ -166,10 +133,9 @@ pub struct Compilation {
     graph: Vec<(Source, Vec<(Span, usize)>)>,
     program: Result<resin_ast::Program, SourceError>,
     hir: Result<resin_hir::Module, SourceError>,
-    request: Request,
-    module: Option<Result<resin_lir::VerifiedModule, SourceError>>,
+    config: FrontendConfig,
 }
-impl Compilation {
+impl FrontendOutput {
     pub fn source(&self) -> &Source {
         &self.source
     }
@@ -185,30 +151,14 @@ impl Compilation {
     pub fn hir(&self) -> Result<&resin_hir::Module, SourceError> {
         self.hir.as_ref().map_err(Clone::clone)
     }
-    /// Borrow requested LIR. Declaration-only analysis has no LIR artifact.
-    pub fn module(&self) -> Result<&resin_lir::Module, SourceError> {
-        self.target_module()?
-            .as_ref()
-            .map(|checked| checked.view().module())
-            .map_err(Clone::clone)
-    }
-    /// Borrow the verified LIR certificate required by code generation.
-    pub fn verified(&self) -> Result<resin_lir::Verified<'_>, SourceError> {
-        self.target_module()?
-            .as_ref()
-            .map(|module| module.view())
-            .map_err(Clone::clone)
-    }
-    fn target_module(
+    /// Instantiate verified LIR for the requested host and shader entries.
+    pub fn instantiate(
         &self,
-    ) -> Result<&Result<resin_lir::VerifiedModule, SourceError>, SourceError> {
-        self.module.as_ref().ok_or_else(|| {
-            SourceError::new(
-                self.source.clone(),
-                None,
-                "declaration analysis did not request a LIR artifact".into(),
-            )
-        })
+        targets: &[Target],
+    ) -> Result<resin_lir::VerifiedModule, Vec<SourceError>> {
+        let program = self.program.as_ref().map_err(|error| vec![error.clone()])?;
+        let hir = self.hir.as_ref().map_err(|error| vec![error.clone()])?;
+        lower_to_verified_lir(program, hir, &self.config, targets)
     }
     pub fn recovered_file(&self, source: &Source) -> Option<&resin_ast::SourceFile> {
         self.documents.get(source).map(|document| &document.file)
@@ -262,17 +212,12 @@ impl Frontend {
     }
 }
 
-impl Compilation {
-    fn matches(&self, loaded: &Loaded, request: &Request) -> bool {
-        &self.request == request && self.program.is_ok() && self.graph == loaded.graph()
+impl FrontendOutput {
+    fn matches(&self, loaded: &Loaded) -> bool {
+        self.program.is_ok() && self.graph == loaded.graph()
     }
 
-    fn from_loaded(
-        source: Source,
-        loaded: Loaded,
-        config: &FrontendConfig,
-        request: Request,
-    ) -> Self {
+    fn from_loaded(source: Source, loaded: Loaded, config: FrontendConfig) -> Self {
         let graph = loaded.graph();
         let syntax = loaded
             .documents
@@ -280,14 +225,13 @@ impl Compilation {
             .map(|(source, document)| (source.clone(), document.syntax.clone()))
             .collect();
         let load_error = loaded.errors.first().cloned();
-        let analysis = analyze_loaded(&loaded.program, config, &request);
+        let analysis = analyze_loaded(&loaded.program);
         let hir_error = load_error.clone().or(analysis.hir_error);
         let errors = loaded
             .errors
             .into_iter()
             .chain(analysis.diagnostics)
             .collect::<Vec<_>>();
-        let compile_error = errors.first().cloned();
         Self {
             source,
             syntax,
@@ -297,18 +241,7 @@ impl Compilation {
             semantics: analysis.semantics,
             program: load_error.map_or(Ok(loaded.program), Err),
             hir: hir_error.map_or_else(|| Ok(analysis.hir.expect("successful HIR")), Err),
-            module: match &request {
-                Request::Declarations => None,
-                Request::Targets { .. } => Some(compile_error.map_or_else(
-                    || {
-                        Ok(analysis
-                            .lir
-                            .expect("successful compilation has verified LIR"))
-                    },
-                    Err,
-                )),
-            },
-            request,
+            config,
         }
     }
 }
@@ -318,31 +251,15 @@ struct Analyzed {
     diagnostics: Vec<SourceError>,
     hir: Option<resin_hir::Module>,
     hir_error: Option<SourceError>,
-    lir: Option<resin_lir::VerifiedModule>,
 }
 
-fn analyze_loaded(
-    program: &resin_ast::Program,
-    config: &FrontendConfig,
-    request: &Request,
-) -> Analyzed {
-    let mut checked = resin_hir::analyze_program(program);
-    let hir_error = checked.diagnostics.first().cloned();
-    let mut lir = None;
-    if let Some(hir) = &checked.module
-        && let Request::Targets { targets } = request
-    {
-        match lower_to_verified_lir(program, hir, config, targets) {
-            Ok(module) => lir = Some(module),
-            Err(errors) => checked.diagnostics.extend(errors),
-        }
-    }
+fn analyze_loaded(program: &resin_ast::Program) -> Analyzed {
+    let checked = resin_hir::analyze_program(program);
     Analyzed {
+        hir_error: checked.diagnostics.first().cloned(),
         semantics: checked.semantics,
         diagnostics: checked.diagnostics,
         hir: checked.module,
-        hir_error,
-        lir,
     }
 }
 

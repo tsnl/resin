@@ -1,4 +1,4 @@
-use resin_frontend::{Compilation, Frontend};
+use resin_frontend::{Frontend, FrontendOutput};
 use resin_hir::GenerateErrorKind;
 use resin_source::normalize_path;
 use resin_source::prelude::*;
@@ -1000,7 +1000,7 @@ impl Project {
             .collect();
         Self { sources }
     }
-    fn analyze(&self) -> Arc<Compilation> {
+    fn analyze(&self) -> Arc<FrontendOutput> {
         let mut loader = resin_source::Loader::new(resin_source::library_root());
         for importer in self.sources.values() {
             for (reference, target) in &self.sources {
@@ -1012,7 +1012,7 @@ impl Project {
         Frontend::new().analyze(self.source("main.resin"), &mut loader)
     }
     #[track_caller]
-    fn checked(&self) -> Arc<Compilation> {
+    fn checked(&self) -> Arc<FrontendOutput> {
         let analysis = self.analyze();
         assert!(
             analysis.diagnostics().is_empty(),

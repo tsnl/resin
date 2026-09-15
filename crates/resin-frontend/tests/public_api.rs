@@ -1,14 +1,14 @@
 //! Immutable frontend behavior with an importer-scoped, entirely in-memory loader.
-use resin_frontend::{Compilation, Frontend};
+use resin_frontend::{Frontend, FrontendOutput};
 use resin_source::Loader;
 use resin_source::prelude::*;
 use std::{collections::BTreeSet, sync::Arc};
 
-fn sources(compilation: &Compilation) -> BTreeSet<Source> {
+fn sources(compilation: &FrontendOutput) -> BTreeSet<Source> {
     compilation.sources().cloned().collect()
 }
 
-fn valid(compilation: &Compilation) {
+fn valid(compilation: &FrontendOutput) {
     assert!(compilation.hir().is_ok(), "{:?}", compilation.diagnostics());
 }
 
@@ -227,28 +227,22 @@ fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
     );
     let mut loader = Loader::new(resin_source::library_root());
     let mut frontend = Frontend::default();
-    let lowered = frontend.compile(
-        source.clone(),
-        &mut loader,
-        &[
-            resin_frontend::Target::Host {
-                entry: "first".into(),
-            },
-            resin_frontend::Target::Host {
-                entry: "second".into(),
-            },
-        ],
-    );
+    let lowered = frontend.analyze(source.clone(), &mut loader);
     assert!(lowered.program().is_ok());
     assert!(lowered.hir().is_ok());
-    assert!(lowered.module().is_err());
-    assert_eq!(lowered.diagnostics().len(), 2);
-    assert!(
-        lowered
-            .diagnostics()
-            .iter()
-            .all(|diagnostic| diagnostic.location.source == source)
-    );
+    let errors = match lowered.instantiate(&[
+        resin_frontend::Target::Host {
+            entry: "first".into(),
+        },
+        resin_frontend::Target::Host {
+            entry: "second".into(),
+        },
+    ]) {
+        Ok(_) => panic!("expected LIR instantiation to fail"),
+        Err(errors) => errors,
+    };
+    assert_eq!(errors.len(), 2);
+    assert!(errors.iter().all(|error| error.source == source));
     let typed_source = source.with_text("def main() -> int = { 1 == 2 };");
     let typed = frontend.analyze(typed_source, &mut loader);
     assert!(typed.program().is_ok());
@@ -257,7 +251,7 @@ fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
     let parsed = frontend.analyze(parsed_source.clone(), &mut loader);
     assert!(parsed.program().is_err());
     assert!(parsed.recovered_file(&parsed_source).is_some());
-    assert_eq!(lowered.diagnostics().len(), 2);
+    assert_eq!(errors.len(), 2);
 }
 
 #[test]

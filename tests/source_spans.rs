@@ -1,31 +1,33 @@
 #[allow(dead_code)]
 mod support;
 
-use resin_frontend::{Compilation, Frontend, Target};
+use resin_frontend::{Frontend, FrontendOutput, Target};
 use resin_source::{Loader, Source};
 use std::{path::PathBuf, sync::Arc};
 
-fn compile(source: &str, target: Target) -> Arc<Compilation> {
+fn analyze(source: &str) -> Arc<FrontendOutput> {
     let library = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resin");
     let mut loader = Loader::new(library);
-    Frontend::new().compile(
-        Source::new("span-test.resin", source),
-        &mut loader,
-        &[target],
-    )
+    Frontend::new().analyze(Source::new("span-test.resin", source), &mut loader)
+}
+
+fn compile(
+    source: &str,
+    target: Target,
+) -> Result<resin_lir::VerifiedModule, Vec<resin_source::SourceError>> {
+    analyze(source).instantiate(&[target])
 }
 
 fn run(source: &str) -> std::process::Output {
-    let compilation = compile(
+    let module = compile(
         source,
         Target::Host {
             entry: "main".into(),
         },
-    );
-    let module = compilation
-        .module()
-        .unwrap_or_else(|error| panic!("{error}"));
-    support::project::Project::new(module, Some("main"))
+    )
+    .unwrap_or_else(|errors| panic!("{errors:?}"))
+    .into_module();
+    support::project::Project::new(&module, Some("main"))
         .unwrap()
         .run()
 }
@@ -178,8 +180,16 @@ fn byte_views_reject_nonnumeric_elements_after_specialization() {
             entry: "main".into(),
         },
     );
-    let error = compilation.module().unwrap_err();
-    assert!(error.to_string().contains("numeric elements"), "{error}");
+    let error = match compilation {
+        Ok(_) => panic!("expected LIR instantiation to fail"),
+        Err(errors) => errors,
+    };
+    assert!(
+        error
+            .iter()
+            .any(|error| error.to_string().contains("numeric elements")),
+        "{error:?}"
+    );
 }
 
 #[test]
@@ -215,7 +225,8 @@ fn shader_span_indexing_uses_record_layout_and_device_pointer_stride() {
             entry: "kernel".into(),
         },
     );
-    let project = support::project::Project::new(compilation.module().unwrap(), None).unwrap();
+    let project =
+        support::project::Project::new(&compilation.unwrap().into_module(), None).unwrap();
     for shader in project.generated.shaders() {
         support::shaders::validate(shader.unoptimized_spirv());
     }
@@ -236,8 +247,8 @@ fn shader_local_addresses_cannot_become_physical_pointer_index_operands() {
             entry: "kernel".into(),
         },
     );
-    let module = compilation.module().unwrap();
-    let error = support::project::Project::new(module, None).unwrap_err();
+    let module = compilation.unwrap().into_module();
+    let error = support::project::Project::new(&module, None).unwrap_err();
     assert!(
         error
             .to_string()
@@ -292,7 +303,15 @@ fn opaque_native_elements_cannot_be_indexed_or_sliced() {
                 entry: "main".into(),
             },
         );
-        let error = compilation.module().unwrap_err();
-        assert!(error.to_string().contains("OpaqueValue"), "{error}");
+        let error = match compilation {
+            Ok(_) => panic!("expected LIR instantiation to fail"),
+            Err(errors) => errors,
+        };
+        assert!(
+            error
+                .iter()
+                .any(|error| error.to_string().contains("OpaqueValue")),
+            "{error:?}"
+        );
     }
 }

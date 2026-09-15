@@ -86,7 +86,7 @@ representation, table, and layout algorithms, while private `typer.rs` implement
 concrete checks and conversions.
 
 Keep related state and operations together. The compiler's `lib.rs` contains
-`Frontend` with its private caches, `Compilation` with its retained products, and
+`Frontend` with its private caches, `FrontendOutput` with its retained products, and
 the operations that use them. A cohesive file can be substantial while exposing
 few public concepts. Fields belong directly to the objects whose invariants they
 serve; private helpers keep individual operations readable. Native building is a separate
@@ -203,7 +203,7 @@ HIR signatures can bind named type parameters, and function references carry
 completed type arguments. LIR construction owns a memoized worklist of concrete
 applications, keyed by definition, normalized arguments, and semantic Host/Shader
 profile. It reserves each ID before translating its body, so recursion reuses pending
-requests. Compilation supplies exported target roots; only their transitive function
+requests. Generate supplies exported target roots; only their transitive function
 and type dependencies enter the worklist. Decorated functions remain host-callable;
 shader artifacts and pipeline creation request separate shader instances. C emits
 host instances, while SPIR-V follows the requested shader graph.
@@ -433,8 +433,8 @@ project containing all declared shaders. It returns paths, never target ASTs or 
 emission operations. C and SPIR-V lowering finish before any generated files are written.
 
 The frontend's [lib.rs](../crates/resin-frontend/src/lib.rs) contains source traversal,
-syntax caching, HIR/LIR generation, verification, and retained query access.
-`Compilation::verified()` supplies the certificate for codegen without reloading sources.
+syntax caching, HIR generation, and retained query access.
+`FrontendOutput::instantiate(targets)` produces verified LIR for generate.
 The CLI's private [Request](../src/cli/request.rs) resolves source and destination choices
 against the captured working directory, including output naming and ancestor validation.
 It owns the library root for that request. Argument parsing passes the original paths
@@ -467,28 +467,26 @@ with the same logical ID, leaving the original intact. Equality identifies versi
 equal text or equal diagnostic names do not make independently created sources equal.
 Names have no filesystem meaning inside the compiler.
 
-`Frontend::compile(source, loader, targets)` returns an `Arc<Compilation>` for explicit
-`Target::Host` and `Target::Shader` exported entries. `Frontend::analyze(source, loader)`
-retains HIR and editor facts without a LIR artifact; requesting `module()` or `verified()`
-from that result returns an error without adding a source diagnostic. An empty compile
-target set is an error, not an analysis request. Each operation resolves
-the complete import graph before considering cached analysis, so changed resolutions
-and newly available dependencies are observed. The loader reuses unchanged source
-handles; supplied text and explicit bindings determine the versions returned for imports.
-The compiler diagnoses cycles and inconsistent versions instead of mixing their facts.
+`Frontend::analyze(source, loader)` returns an `Arc<FrontendOutput>` with HIR and
+editor facts. Host and shader entries are selected later by
+`FrontendOutput::instantiate(targets)` when generating LIR. An empty target set is
+an error. Each analyze call resolves the complete import graph before considering
+cached analysis, so changed resolutions and newly available dependencies are observed.
+The loader reuses unchanged source handles; supplied text and explicit bindings
+determine the versions returned for imports. The frontend diagnoses cycles and
+inconsistent versions instead of mixing their facts.
 
-The compiler caches CST/AST documents by logical source ID. An unchanged version
+The frontend caches CST/AST documents by logical source ID. An unchanged version
 reuses its document; a changed version can reuse the previous tree for incremental
-CST parsing. A matching successfully loaded graph and canonical target set can reuse
-its compilation. Target order and duplicates do not affect matching. When the graph
-or request changes, semantic checking reruns the entry's import closure. Native
-artifact caching is separate. This is not a per-function incremental solver or backend.
+CST parsing. A matching successfully loaded graph can reuse its analysis. When the
+graph changes, semantic checking reruns the entry's import closure. Native artifact
+caching is separate. This is not a per-function incremental solver or backend.
 
-A `Compilation` retains diagnostics, recovered AST, completed phase products, and
-opaque editor facts for one entry and its imports. A failed later pass preserves
-earlier products. `definition`, `hover`, and `completions` accept a retained source
-handle and byte offset; their results refer to that exact source version. Old
-compilations remain usable while the caller creates new sources and compiles again.
+A `FrontendOutput` retains diagnostics, recovered AST, completed HIR, and opaque
+editor facts for one source and its imports. A failed later pass preserves earlier
+products. `definition`, `hover`, and `completions` accept a retained source handle
+and byte offset; their results refer to that exact source version. Old outputs remain
+usable while the caller creates new sources and analyzes again.
 
 The name distinguishes retained work across phases from a HIR or LIR `Module`.
 The CLI uses a compiler and filesystem loader for one invocation. The LSP library

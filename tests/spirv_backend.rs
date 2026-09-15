@@ -398,14 +398,13 @@ fn imported_backend_errors_retain_expression_origins() {
     loader
         .set_import(&entry, "helper.resin", helper.clone())
         .unwrap();
-    let compilation = resin_frontend::Frontend::new().compile(
-        entry,
-        &mut loader,
-        &[resin_frontend::Target::Shader {
+    let output = resin_frontend::Frontend::new().analyze(entry, &mut loader);
+    let m = output
+        .instantiate(&[resin_frontend::Target::Shader {
             entry: "kernel".into(),
-        }],
-    );
-    let m = compilation.module().unwrap();
+        }])
+        .unwrap()
+        .into_module();
     let origins: Vec<_> = m
         .origins
         .instructions
@@ -418,7 +417,7 @@ fn imported_backend_errors_retain_expression_origins() {
         !origins.is_empty(),
         "the operation retains its original expression"
     );
-    let error = support::project::Project::new(m, None)
+    let error = support::project::Project::new(&m, None)
         .unwrap_err()
         .to_string();
     assert!(error.contains(&format!("{}:1:", helper.name())), "{error}");

@@ -169,17 +169,20 @@ fn source_recursion_memoizes_instances_and_respects_the_configured_limit() {
         "export { main }; def grow<T>(value: T) = { grow(&value) }; def main() = { grow(1); };",
     );
     let mut loader = resin_source::Loader::new(resin_source::library_root());
-    let compilation = resin_frontend::Frontend::with_config(resin_frontend::FrontendConfig {
+    let output = resin_frontend::Frontend::with_config(resin_frontend::FrontendConfig {
         max_monomorphs_per_function: std::num::NonZeroUsize::new(3).unwrap(),
     })
-    .compile(
-        source,
-        &mut loader,
-        &[resin_frontend::Target::Host {
-            entry: "main".into(),
-        }],
-    );
-    let message = compilation.module().unwrap_err().to_string();
+    .analyze(source, &mut loader);
+    let message = match output.instantiate(&[resin_frontend::Target::Host {
+        entry: "main".into(),
+    }]) {
+        Ok(_) => panic!("expected monomorph limit"),
+        Err(errors) => errors
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
     assert!(message.contains("limit of 3 monomorphs"), "{message}");
     assert!(message.contains("grow"), "{message}");
 }

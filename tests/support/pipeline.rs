@@ -81,7 +81,9 @@ pub fn load(path: &Path) -> Result<resin_ast::Program, SourceError> {
     analyze_file(path)?.program().cloned()
 }
 
-fn analyze_file(path: &Path) -> Result<std::sync::Arc<resin_frontend::Compilation>, SourceError> {
+fn analyze_file(
+    path: &Path,
+) -> Result<std::sync::Arc<resin_frontend::FrontendOutput>, SourceError> {
     let mut loader = resin_source::Loader::new(library_root());
     let source = loader.load_file(path).map_err(|error| {
         SourceError::new(
@@ -96,18 +98,18 @@ fn analyze_file(path: &Path) -> Result<std::sync::Arc<resin_frontend::Compilatio
 pub fn shader_error(source: &str) -> String {
     let source = Source::new("shader-test.resin", source);
     let mut loader = resin_source::Loader::new(library_root());
-    let compilation = Frontend::new().compile(
-        source,
-        &mut loader,
-        &[resin_frontend::Target::Shader {
-            entry: "kernel".into(),
-        }],
-    );
-    match compilation.module() {
-        Err(error) => error.to_string(),
-        Ok(_) => {
+    let output = Frontend::new().analyze(source, &mut loader);
+    match output.instantiate(&[resin_frontend::Target::Shader {
+        entry: "kernel".into(),
+    }]) {
+        Err(errors) => errors
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Ok(lir) => {
             let directory = tempfile::TempDir::new().unwrap();
-            resin_codegen::generate(compilation.verified().unwrap(), None, directory.path())
+            resin_codegen::generate(lir.view(), None, directory.path())
                 .unwrap_err()
                 .to_string()
         }

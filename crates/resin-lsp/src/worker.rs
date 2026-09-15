@@ -1,5 +1,5 @@
 use crossbeam_channel::{Receiver, Sender};
-use resin_frontend::{Compilation, Frontend};
+use resin_frontend::{Frontend, FrontendOutput};
 use resin_source::prelude::*;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -27,7 +27,7 @@ pub struct Update {
 
 pub struct AnalysisUpdate {
     pub revision: u64,
-    pub entries: BTreeMap<PathBuf, Arc<Compilation>>,
+    pub entries: BTreeMap<PathBuf, Arc<FrontendOutput>>,
     pub paths: BTreeMap<SourceId, PathBuf>,
 }
 
@@ -142,7 +142,7 @@ fn compile_roots(
 
 fn retain_entry(
     result: &mut AnalysisUpdate,
-    compilation: Arc<Compilation>,
+    compilation: Arc<FrontendOutput>,
     files: &resin_source::Loader,
     path: PathBuf,
 ) {

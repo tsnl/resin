@@ -96,7 +96,7 @@ identity. Cloning shares a version; `with_text` creates a new version of the sam
 source. Names are diagnostic labels and need not be filesystem paths or unique.
 `resin_frontend::Frontend` retains syntax and compilation caches. Its `analyze`
 method receives an entry source and a concrete `resin_source::Loader`, resolves the import
-graph, and returns an immutable `Compilation` with diagnostics and editor queries.
+graph, and returns an immutable `FrontendOutput` with diagnostics and editor queries.
 
 Explicit import bindings also support sources held entirely in memory. This complete
 example changes an imported module while keeping its entry unchanged:

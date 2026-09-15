@@ -44,7 +44,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   storage lowering receives no bound parameters. The default per-function allowance is 16,384,
   configurable through immutable `FrontendConfig` and LIR `LoweringOptions`. Repeated requests
   cost nothing. Type depth/size guards and bounded application traces are separate from that cap.
-- Compilation requests name exported host/shader entries. Canonicalize target sets for cache
+- Generate selects exported host/shader entries. Canonicalize target sets for cache
   matching; lower only their transitive function/type dependencies. Shader artifacts and
   pipeline creation add shader roots while retaining host bridge functions. Concrete nominal
   discovery reserves recursive identities privately and installs real drop IDs before storage
@@ -218,16 +218,17 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   lives in `src/cli/`. Capture process settings through the platform toolchain's
   `Environment`, then choose CLI defaults and the build profile explicitly.
   Validate file selections and output destinations in the CLI. Interpreter mode
-  owns host compilation from source to executable. `resin_frontend::Frontend::compile`
-  consumes an immutable source, a loader, and explicit host/shader targets to produce a
-  `Compilation`. The separate `resin_codegen::generate` operation takes verified LIR and
+  owns host compilation from source to executable. `resin_frontend::Frontend::analyze`
+  consumes an immutable source and a loader to produce a `FrontendOutput`. Host and shader
+  entries are selected when that output instantiates LIR for generate. The separate
+  `resin_codegen::generate` operation takes verified LIR and
   writes C, unoptimized SPIR-V, and a Ninja
   dependency graph to disk in one call. Target representations and individual emitters stay private.
   `resin-toolchain` stages that directory, configures native tools, and invokes Ninja.
   The toolchain owns native command rules. The graph optimizes SPIR-V with `spirv-opt`,
   runs the same Resin binary with `--embed` to write
   aligned byte-array headers, then compiles C. Ninja owns ordering and incremental builds.
-  Inspect cached intermediates or immutable `Compilation` results; do not add CLI inspection modes.
+  Inspect cached intermediates or immutable `FrontendOutput` results; do not add CLI inspection modes.
   Toolchain APIs consume explicit settings; execution is separate and retains the build-cache lock.
   Capture the Resin executable with `std::env::current_exe()` rather than resolving it on
   PATH. Do not run a blanket native-tool preflight: report failures when a build needs the
