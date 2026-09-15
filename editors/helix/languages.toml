@@ -14,4 +14,6 @@ language-servers = ["resin-lsp"]
 
 [[grammar]]
 name = "resin"
-source = { git = "https://github.com/tsnl/resin", rev = "9db7beafdce29b32ea56b6245b5c122cec2395a1", subpath = "crates/tree-sitter-resin" }
+source = { git = "https://github.com/tsnl/resin", rev = "main", subpath = "crates/tree-sitter-resin" }
+# Development: comment out the Git source above and uncomment your checkout path below.
+# source = { path = "/absolute/path/to/checkout/crates/tree-sitter-resin" }

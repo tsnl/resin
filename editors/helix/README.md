@@ -32,7 +32,7 @@ install syntax support:
    `<helix-config>/runtime/queries/resin/`.
 2. Run `hx --grammar fetch`, then `hx --grammar build`, with a C compiler on PATH.
    On Linux/macOS, run these commands inside the repository's `nix-shell`.
-   The grammar comes from a pinned commit in this repository.
+   The grammar comes from this repository's `main` branch.
 3. Restart Helix and run `hx --health resin` to check the server, grammar,
    highlighting, text objects, and indentation.
 
@@ -42,6 +42,20 @@ temporarily add `use-grammars = { only = ["resin"] }` at the top of
 usual grammar selection. Compiled grammars are written to
 `<helix-config>/runtime/grammars/`.
 
+Helix requires `rev` for a Git grammar source; `rev = "main"` selects the branch
+without pinning a commit. Run `hx --grammar fetch` and `hx --grammar build` to
+update the installed parser, then restart Helix. Starting the editor does not
+fetch updates. Update the copied queries from `main` at the same time.
+
+Helix 25.07.1 can fetch a new `main` commit while leaving its cached checkout on
+the previous one. With that version, run this after fetching and before building
+to select the commit just downloaded (replace `<helix-config>` with your actual
+configuration directory):
+
+```sh
+git -C "<helix-config>/runtime/grammars/sources/resin" checkout --detach FETCH_HEAD
+```
+
 See Helix's [language configuration](https://docs.helix-editor.com/languages.html)
 and [adding languages](https://docs.helix-editor.com/guides/adding_languages.html)
 guides for configuration and runtime details.
@@ -50,8 +64,8 @@ guides for configuration and runtime details.
 
 Helix supports a [local grammar source](https://docs.helix-editor.com/guides/adding_languages.html#grammar-configuration).
 Use it while developing Resin so uncommitted parser changes are available to the
-editor. The checked-in `rev` is an installation snapshot of the parser; it does
-not pin the language server and does not need updating for compiler/LSP changes.
+editor. In [languages.toml](languages.toml), comment out the Git `source` line and
+uncomment the local `source = { path = ... }` line immediately below it.
 
 In your Helix `languages.toml`, keep Resin's `[[language]]` entry and replace the
 existing `resin-lsp` server and `resin` grammar entries with these local settings.
@@ -69,9 +83,9 @@ source = { path = "/absolute/path/to/checkout/crates/tree-sitter-resin" }
 ```
 
 Replace the entire grammar `source` value, including its `git`, `rev`, and
-`subpath` fields. These settings belong in your local configuration; keep the
-installable snapshot in this repository's `languages.toml`. If you use
-`CARGO_TARGET_DIR`, point `command` at that directory's debug executable.
+`subpath` fields. These settings belong in your local configuration; the shared
+configuration follows `main`. If you use `CARGO_TARGET_DIR`, point `command` at
+that directory's debug executable.
 On Windows, use `resin.exe` and forward slashes in the TOML paths.
 
 For query edits, replace your installed `<helix-config>/runtime/queries/resin`
@@ -97,8 +111,8 @@ hx --health resin
 hx examples/eg009_imports.resin
 ```
 
-The grammar build reads the local generated parser; no grammar fetch, commit, or
-pin update is needed. The `use-grammars` filter described above can restrict the
+The grammar build reads the local generated parser; no grammar fetch or commit
+is needed. The `use-grammars` filter described above can restrict the
 build to Resin. On Windows, run the Cargo and Helix commands in the developer
 PowerShell described in the [guide](../../doc/guide.md).
 
@@ -162,10 +176,10 @@ code, examples, and standard-library sources.
 
 The language server and parser are shared with Zed. The Helix queries use its
 own highlight names (`variable.other.member`, `constant.numeric`) and indentation
-captures (`indent`, `outdent`). When publishing updated syntax support, point both
-editors' grammar pins at a commit containing the parser required by their queries.
-For installations using the pinned parser, fetch/build the grammar and recopy the
-queries together. Compiler/LSP-only changes do not require a grammar pin update.
+captures (`indent`, `outdent`). Helix's Git source follows `main`; update its
+parser and queries together when installing syntax changes. Zed retains its own
+grammar pin, which must contain the parser required by its queries.
+Compiler/LSP-only changes do not require a grammar update.
 During development, use the
 [local checkout workflow](#develop-from-a-checkout) above.
 
@@ -177,5 +191,6 @@ Validated with Helix 25.07.1 on Linux using an isolated configuration: fetched a
 built the pinned grammar, checked all query files with `hx --health resin`, and
 verified hover, local/standard-library navigation, completion, unsaved diagnostic
 recovery, formatting, function text objects, and tab indentation in the editor.
-The local development configuration also builds without fetching a grammar and
-loads queries through a symlink to the checkout.
+Both the `main` source and the commented local-path alternative build and pass
+`hx --health resin`. The local configuration builds without fetching a grammar
+and loads queries through a symlink to the checkout.
