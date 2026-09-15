@@ -18,6 +18,11 @@ name = "gpu"
 path = "benchmarks/gpu_main.rs"
 harness = false
 
+[[bench]]
+name = "service-parse"
+path = "benchmarks/service_parse.rs"
+harness = false
+
 [dependencies]
 resin-client = { workspace = true }
 
