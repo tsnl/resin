@@ -273,6 +273,10 @@ pub struct Term {
 
 #[derive(Debug, Clone)]
 pub enum TermKind {
+    /// The native value size of a type; no value operand is permitted.
+    SizeOf {
+        of: Type,
+    },
     Constant {
         value: Constant,
     },
@@ -459,6 +463,7 @@ pub fn format_type(ty: &Type, definitions: &[TypeDefinition]) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DefinitionKind {
     Function,
+    Constant,
     Variable,
     Parameter,
     Type,
@@ -692,6 +697,14 @@ impl Analysis {
         documents: &BTreeMap<Source, Arc<resin_cst::Document>>,
         definition: &Definition,
     ) -> String {
+        if definition.kind == DefinitionKind::Constant {
+            let ty = definition
+                .ty
+                .as_ref()
+                .map(|ty| self.type_names().format(ty))
+                .unwrap_or_else(|| "?".into());
+            return format!("const {}: {ty}", definition.name);
+        }
         if matches!(
             definition.kind,
             DefinitionKind::Variable | DefinitionKind::Parameter
@@ -783,6 +796,7 @@ fn builtin_hover(document: &resin_cst::Document, token: resin_cst::Node<'_>) -> 
                 | "GpuArguments"
                 | "Result"
                 | "None"
+                | "sizeof"
         )
     {
         return None;
@@ -865,6 +879,21 @@ fn matching_completions(mut items: Vec<Completion>, prefix: &str) -> Vec<Complet
 }
 
 const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
+    (
+        "const",
+        "const name[: Type] = expression;",
+        DefinitionKind::Keyword,
+    ),
+    (
+        "iota",
+        "iota\n\nZero-based const specification index. Its numeric type is inferred from the initializer, defaulting to long.",
+        DefinitionKind::Constant,
+    ),
+    (
+        "sizeof",
+        "sizeof(Type) -> ulong\n\nThe size in bytes of a type; accepts only a type operand.",
+        DefinitionKind::Function,
+    ),
     (
         "compute_workgroup_size",
         "compute_workgroup_size: ulong\n\nThe number of X invocations per compute workgroup. Y and Z sizes are one. Available on host and shader without imports.",

@@ -232,6 +232,23 @@ impl<'a> ProgramBuilder<'a> {
 
     fn declarations(&mut self, index: usize, names: &mut BTreeMap<Arc<str>, SourceOrigin>) {
         for stmt in self.program.modules[index].file.declarations() {
+            if let StmtKind::Const { specs } = &stmt.val {
+                for name in specs
+                    .iter()
+                    .flat_map(|spec| &spec.names)
+                    .filter(|name| name.val.as_ref() != "_")
+                {
+                    let origin = SourceOrigin {
+                        module: SourceModuleId::from_index(index),
+                        span: name.span,
+                    };
+                    if let Err(error) =
+                        bind(self.program, index, names, &name.val, origin, name.span)
+                    {
+                        self.diagnostics.push(error);
+                    }
+                }
+            }
             let Some(name) = declaration_name(&stmt.val) else {
                 continue;
             };

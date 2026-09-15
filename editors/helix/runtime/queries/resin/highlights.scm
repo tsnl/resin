@@ -5,12 +5,15 @@
 ["Ptr" "Result" "None"] @type.builtin
 
 ; Keep declaration and control keywords in sync with the grammar's reserved words.
-["export" "import" "extern" "intrinsic" "type" "struct" "def" "var"] @keyword
+["export" "import" "extern" "intrinsic" "type" "struct" "def" "var" "const"] @keyword
 ["if" "else" "while" "match"] @keyword
 
 (function_definition name: (lid) @function)
 (foreign_function name: (lid) @function)
 (intrinsic_function name: (lid) @function)
+(const_spec name: (lid) @constant)
+"sizeof" @function.builtin
+((primary_term (lid) @constant.builtin) (#eq? @constant.builtin "iota"))
 (function_definition params: (declare name: (lid) @variable.parameter))
 (foreign_function params: (declare name: (lid) @variable.parameter))
 (intrinsic_function params: (declare name: (lid) @variable.parameter))

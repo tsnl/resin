@@ -175,6 +175,29 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_stmt(&self, node: Node) -> Stmt {
+        if let Some(declaration) = node.child_by_field_name("constant") {
+            return self.gen_stmt(declaration);
+        }
+        if node.kind() == "const_declaration" {
+            let specs = node
+                .children_by_field_name("spec", &mut node.walk())
+                .map(|spec| ConstSpec {
+                    names: spec
+                        .children_by_field_name("name", &mut spec.walk())
+                        .map(|name| Ident::new(self.text(name).into(), self.span(name)))
+                        .collect(),
+                    ann: spec
+                        .child_by_field_name("ann")
+                        .map(|ann| self.gen_type(ann)),
+                    init: spec
+                        .children_by_field_name("init", &mut spec.walk())
+                        .map(|init| self.gen_term(init))
+                        .collect(),
+                    span: self.span(spec),
+                })
+                .collect();
+            return Spanned::new(StmtKind::Const { specs }, self.span(node));
+        }
         if node.kind() == "struct_definition" {
             let name = self.ident(node.child_by_field_name("name").unwrap_or(node));
             let methods = node
@@ -546,6 +569,12 @@ impl<'a> AstGen<'a> {
         }
         let span = self.span(node);
         match child.kind() {
+            "sizeof_term" => Spanned::new(
+                TermKind::SizeOf {
+                    ty: self.gen_type(child.child_by_field_name("type").unwrap_or(child)),
+                },
+                span,
+            ),
             "constructor_term" => {
                 let ty = self.gen_unary_type(child.child_by_field_name("type").unwrap_or(child));
                 let type_span = ty.span;

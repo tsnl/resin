@@ -15,6 +15,7 @@
 use resin_common::define_id;
 use std::{collections::HashMap, fmt, ops::Deref, sync::Arc};
 
+mod constant;
 mod typer;
 mod types;
 use types::DefinitionError;
@@ -898,6 +899,13 @@ pub mod layout {
     pub fn layout(definitions: &[TypeDef], ty: &Ty) -> Result<Layout, Error> {
         super::types::storage_layout(definitions, ty)
     }
+
+    /// The native value layout on Resin's 64-bit targets, including host-only
+    /// scalars, descriptors, empty-value placeholders, and tagged unions.
+    /// Opaque foreign types have no known layout. This does not certify GPU storage.
+    pub fn value(definitions: &[TypeDef], ty: &Ty) -> Result<Layout, Error> {
+        super::types::value_layout(definitions, ty, 0)
+    }
 }
 
 //
@@ -934,6 +942,21 @@ pub mod literal {
         }
         super::types::parse_number(digits, ty)
     }
+}
+
+//
+// Constant evaluation
+//
+
+/// Evaluate checked scalar constant operations with fixed-width arithmetic.
+/// Integer overflow, invalid shifts, zero divisors, and non-finite results are errors.
+pub fn constant_operation(name: &str, operands: &[Value]) -> Result<Value, String> {
+    constant::operation(name, operands)
+}
+
+/// Convert a scalar constant to a numeric type, rejecting values outside its range.
+pub fn convert_constant(value: &Value, to: &Ty) -> Result<Value, String> {
+    constant::convert(value, to)
 }
 
 //

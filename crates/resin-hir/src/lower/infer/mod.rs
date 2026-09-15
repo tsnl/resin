@@ -1072,7 +1072,13 @@ fn error(span: Span, message: impl Into<Arc<str>>) -> GenerateError {
 pub(crate) fn check_binding_name(name: &Ident) -> Result<()> {
     if matches!(
         name.val.as_ref(),
-        "ok" | "err" | "size_of" | "align_of" | "absurd" | "compute_workgroup_size"
+        "ok" | "err"
+            | "size_of"
+            | "sizeof"
+            | "align_of"
+            | "absurd"
+            | "compute_workgroup_size"
+            | "iota"
     ) {
         return Err(GenerateError {
             span: name.span,
@@ -1229,6 +1235,7 @@ pub(crate) enum Constraint {
     Coerce(Type, Type),
     ExcludeNone(Type, Type),
     Layout(Type),
+    SizeOf(Type),
     Errors(Type, Type),
     Variant(Type, Pattern, Type),
     Boolean(Type),
@@ -1866,15 +1873,19 @@ impl Inference<'_> {
                     return self.solver.unify(from, to, span);
                 }
             }
-            Constraint::Layout(ty) => {
+            Constraint::Layout(ty) | Constraint::SizeOf(ty) => {
                 let Some(ty) = self.solver.resolve(ty) else {
                     return Ok(self.solver.complete(ty).is_some());
                 };
                 if !self.has_layout_bodies(&ty) {
                     return Ok(true);
                 }
-                resin_types::layout::layout(self.typer.definitions(), &ty)
-                    .map_err(|e| error(span, e.to_string()))?;
+                let layout = if matches!(constraint, Constraint::SizeOf(_)) {
+                    resin_types::layout::value(self.typer.definitions(), &ty)
+                } else {
+                    resin_types::layout::layout(self.typer.definitions(), &ty)
+                };
+                layout.map_err(|e| error(span, e.to_string()))?;
             }
             Constraint::ExcludeNone(input, out) => {
                 let Some(members) = self.solver.known_union_members(input) else {
@@ -2168,6 +2179,7 @@ impl Constraint {
             | Self::Coerce(from, _)
             | Self::Errors(from, _)
             | Self::Layout(from)
+            | Self::SizeOf(from)
             | Self::Boolean(from)
             | Self::Deref(from, _)
             | Self::Field(from, _, _)

@@ -19,6 +19,8 @@ use std::{
     sync::Arc,
 };
 
+mod constants;
+
 //
 // Checking state and signatures
 //
@@ -119,6 +121,7 @@ struct Checker<'a> {
     holes: Vec<(Span, VariableId)>,
     expressions: Vec<(Span, Type)>,
     result: Type,
+    iota: Option<usize>,
 }
 impl<'a> Checker<'a> {
     fn new(typer: &'a mut Context, scopes: Scopes) -> Self {
@@ -130,6 +133,7 @@ impl<'a> Checker<'a> {
             holes: vec![],
             expressions: vec![],
             result: Ty::Unit.into(),
+            iota: None,
         }
     }
 }
@@ -207,6 +211,7 @@ pub(in crate::lower) fn file(
     methods: BTreeMap<Arc<str>, DeclarationId>,
 ) -> CheckedFile {
     let mut checker = Checker::new(&mut generator.typer, scopes);
+    checker.module_constants(file);
     let (declarations, mut signatures, sources) = checker.declarations(file, methods);
     checker.declare_gpu_contracts(
         &declarations,
@@ -859,6 +864,15 @@ impl Expression<'_, '_> {
         let span = term.span;
         let mut equate = None;
         let kind = match &term.val {
+            resin_ast::TermKind::SizeOf { ty } => {
+                let ann = self.annotation(ty, false);
+                super::eval::reference_type(&self.checker.typing.solver, &ann.ty, false, span)?;
+                self.constrain((span, Constraint::SizeOf(ann.ty.clone())));
+                equate = Some(Ty::UInt64.into());
+                TermKind::SizeOf {
+                    ty: ann.into_tree(),
+                }
+            }
             resin_ast::TermKind::Hole { children } => {
                 for child in children {
                     self.child(child, None);
@@ -923,12 +937,28 @@ impl Expression<'_, '_> {
                 }
             }
             resin_ast::TermKind::Var { name } => {
-                let (declaration, ty, type_args) = self.checker.value(name, None)?;
-                equate = Some(ty);
-                TermKind::Var {
-                    declaration,
-                    name: name.clone(),
-                    type_args,
+                if name.val.as_ref() == "iota" {
+                    let index = self.checker.iota.ok_or_else(|| {
+                        GenerateError::inference(
+                            span,
+                            "iota is only available in a const initializer",
+                        )
+                    })?;
+                    equate = Some(self.checker.typing.solver.number(&index.to_string()));
+                    TermKind::Num {
+                        value: index.to_string().into(),
+                    }
+                } else if let Some(value) = self.checker.scopes.constant(&name.val) {
+                    equate = Some(Type::from_hir(&value.ty));
+                    TermKind::Constant { value }
+                } else {
+                    let (declaration, ty, type_args) = self.checker.value(name, None)?;
+                    equate = Some(ty);
+                    TermKind::Var {
+                        declaration,
+                        name: name.clone(),
+                        type_args,
+                    }
                 }
             }
             resin_ast::TermKind::TypeApply {
@@ -1199,12 +1229,11 @@ impl Expression<'_, '_> {
                             span: term.span,
                         }
                     };
-                    self.constrain((span, Constraint::Layout(ann.ty.clone())));
                     equate = Some(Ty::UInt64.into());
-                    let size = name.val.as_ref() == "size_of";
+                    self.constrain((span, Constraint::Layout(ann.ty.clone())));
                     TermKind::Layout {
                         ty: ann.into_tree(),
-                        size,
+                        size: name.val.as_ref() == "size_of",
                     }
                 } else if let resin_ast::TermKind::Var { name } = &func.val
                     && matches!(name.val.as_ref(), "ok" | "err")
@@ -1353,6 +1382,10 @@ impl Expression<'_, '_> {
     fn statement_inner(&mut self, stmt: &resin_ast::Stmt) -> Result<StatementKind> {
         let span = stmt.span;
         Ok(match &stmt.val {
+            StmtKind::Const { specs } => {
+                self.checker.local_constants(specs)?;
+                StatementKind::CompileTimeDefinition
+            }
             StmtKind::Define { name, ann, init } => {
                 let ty = if let Some(ann) = ann {
                     self.annotation(ann, true).ty
@@ -1405,7 +1438,7 @@ impl Expression<'_, '_> {
                 self.checker
                     .scopes
                     .nominal(name, type_params, body, self.checker.typing.typer)?;
-                StatementKind::TypeDefinition
+                StatementKind::CompileTimeDefinition
             }
             StmtKind::DefineType {
                 name,
@@ -1413,7 +1446,7 @@ impl Expression<'_, '_> {
                 type_params,
             } => {
                 self.checker.scopes.alias(name, type_params, init)?;
-                StatementKind::TypeDefinition
+                StatementKind::CompileTimeDefinition
             }
             StmtKind::Expr { term } => {
                 let term = self.child(term, None);
