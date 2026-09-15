@@ -181,8 +181,8 @@ pub enum MatchVariant {
 
 #[derive(Debug, Clone)]
 pub enum StmtKind {
-    /// A single declaration or a parenthesized group. Omitted initializers repeat
-    /// the previous specification, with a new `iota` value for each specification.
+    /// A single declaration or a parenthesized group. Each specification has
+    /// explicit initializers and its own zero-based `iota` value.
     Const {
         specs: Vec<ConstSpec>,
     },

@@ -16,20 +16,20 @@ fn result(source: &str) -> i32 {
 }
 
 #[test]
-fn constants_and_iota_execute_with_group_repetition_and_fixed_types() {
+fn constants_and_iota_execute_with_explicit_initializers_and_fixed_types() {
     assert_eq!(
         result(
             r#"
         export { main };
         const (
             first, second: uint = 1 << iota, 2 << iota;
-            _, _;
-            third, fourth;
+            _, _ = iota, iota;
+            third, fourth: uint = 1 << iota, 2 << iota;
         );
         const reset = iota;
         const answer: int = int(first + second + third + fourth) + 27;
         def main() -> int = {
-            const ( a = iota + 1; b; );
+            const ( a = iota + 1; b = iota + 1; );
             const half: float32 = 1.0 / 2.0;
             const text = "ok";
             const yes = answer == 42 && half == 0.5_f;
@@ -159,7 +159,7 @@ fn constants_lower_to_shader_literals_without_runtime_arithmetic() {
     let module = support::module(
         r#"
         export { kernel };
-        const ( first: uint = 1 << iota; second; );
+        const ( first: uint = 1 << iota; second: uint = 1 << iota; );
         const answer: uint = (first + second) * 14;
         @compute_shader def kernel(index: ulong, output: Ptr<uint>) = {
             const bytes = sizeof(float64);

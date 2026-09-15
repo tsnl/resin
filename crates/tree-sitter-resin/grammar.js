@@ -253,13 +253,9 @@ export default grammar({
     const_spec: ($) =>
       seq(
         list1("name", choice($.lid, $.discard), ","),
-        optional(
-          seq(
-            optional(seq(":", field("ann", $.type))),
-            "=",
-            list1("init", $.term, ","),
-          ),
-        ),
+        optional(seq(":", field("ann", $.type))),
+        "=",
+        list1("init", $.term, ","),
       ),
     discard: () => "_",
 
