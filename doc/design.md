@@ -1,5 +1,8 @@
 # Resin design
 
+The [source reference proposal](proposals/references.md) describes a proposed
+`Ref<T>` type and reference-returning indexing. It is not implemented.
+
 The [ownership specification](lifetimes.md) describes `ArcPtr<T>`, `ArcSpan<T>`,
 `WeakPtr<T>`, `WeakSpan<T>`,
 automatic destruction, and inherent methods through `impl`.
