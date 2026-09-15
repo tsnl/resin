@@ -26,13 +26,15 @@ import { "$/gpu.resin", "$/status.resin" };
 - `console.resin`: byte and line input, and shared input-line ownership and printing.
 - `process.resin`: checked argument views and lookups in the frozen startup environment.
 
-Public operations use static and instance methods on the corresponding types. Fallible runtime operations return
+Public operations use static and instance methods on the corresponding types; scalar
+options and control codes are exported constants. Fallible runtime operations return
 `Result<T, RuntimeError>`; console operations use their own error sets. Infallible queries
 return values. Resource owners release their native handles automatically.
 Native declarations stay private. The C ABI remains unchecked: callers
 must uphold pointer validity, lifetimes, and buffer sizes. Importing a module does not
 re-export its dependencies. Import `$/status.resin` to name or match errors; inferred
 `Result<(), _>` callers do not need that import.
+Modules under `internal/` support these wrappers and are not part of the public library API.
 `ok` and `err` are compiler builtins; `fmt` and `print` are ordinary exports of
 `string.resin`. Shader entries use
 `@compute_shader`, `@vertex_shader`, or `@fragment_shader`. Pass these declarations
@@ -89,8 +91,16 @@ dropping one already consumed does not cancel it again. Submission waits for GPU
 | `Window` | `Window.new(width, height, String.from_str("Resin"))`, `window.poll_events()`, `window.framebuffer_size()`, input and cursor methods |
 | `ImageData` | `ImageData.read_png(path, channels)`, `image.write_png(path)` |
 | `Console` / `InputLine` | `Console.read_byte()`, `Console.read_line()`, `Console.print(line)` |
-| `Memory` | `Memory.default()`, `Memory.gpu()`, `Memory.readback()` |
 | `RuntimeStatus` | `RuntimeStatus.from_code(code)`, `RuntimeStatus.code(error)`, `RuntimeStatus.message(error)` |
+
+Import `$/gpu.resin` for the `int` constants `memory_default`, `memory_gpu`, and
+`memory_readback`, used as `gpu.alloc_in::<uint>(count, memory_readback)`.
+Import `$/window.resin` for `key_escape`, `key_w`, `key_space`, and the other GLFW
+key codes, plus `mouse_button_left`, `mouse_button_right`, `mouse_button_middle`,
+and `mouse_button_4` through `mouse_button_8`. Pass these constants directly to
+`window.key_state(key_w)` and `window.mouse_button_state(mouse_button_left)`.
+These replace the former `Memory` methods, `Window.key_escape()`, `Window.keys()`,
+and `Window.mouse_buttons()`; the `KeyCodes` and `MouseButtons` records are removed.
 
 `ImageData.write_pixels(path, width, height, channels, pixels, stride)` accepts a
 borrowed `Span<ubyte>`. It checks dimensions, channel count, row stride, and the

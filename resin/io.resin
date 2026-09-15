@@ -2,6 +2,12 @@ export { Io, Output, WriteError };
 
 import { "span.resin", "string.resin" };
 
+// Native stream selectors for resin_stream_write.
+const (
+	stream_stdout: uint = iota;
+	stream_stderr;
+);
+
 struct WriteError {};
 struct Output {
 	stream: uint,
@@ -27,10 +33,10 @@ struct Output {
 };
 struct Io {
 	def stdout() -> Output = {
-		Output { stream = 0_ui }
+		Output { stream = stream_stdout }
 	};
 	def stderr() -> Output = {
-		Output { stream = 1_ui }
+		Output { stream = stream_stderr }
 	};
 };
 
