@@ -95,6 +95,7 @@ pub(crate) fn run(project: PathBuf, default_library_root: PathBuf) -> Result<i32
         connection,
         updates,
         revision,
+        stopping: stopping.clone(),
         documents: BTreeMap::new(),
         snapshot: None,
         texts: BTreeMap::new(),
@@ -127,6 +128,7 @@ struct State {
     connection: Connection,
     updates: Sender<Update>,
     revision: Arc<AtomicU64>,
+    stopping: Arc<AtomicBool>,
     documents: BTreeMap<String, OpenDocument>,
     snapshot: Option<AnalysisUpdate>,
     texts: BTreeMap<Source, Text>,
@@ -186,6 +188,7 @@ impl State {
         }
         if request.method == "shutdown" {
             self.shutdown = true;
+            self.stopping.store(true, Ordering::Release);
             for (id, _) in self.pending.drain().collect::<Vec<_>>() {
                 self.error(
                     id,
@@ -301,7 +304,7 @@ impl State {
             "textDocument/definition" => serde_json::to_value(
                 analysis
                     .definition(analysis.source(), offset)
-                    .and_then(|location| self.location(&location)),
+                    .and_then(|location| self.location(&document.path, &location)),
             )?,
             "textDocument/completion" => {
                 let items = analysis
@@ -451,9 +454,15 @@ impl State {
             .map(|d| d.uri.clone())
             .or_else(|| url::Url::from_file_path(path).ok()?.as_str().parse().ok())
     }
-    fn location(&self, location: &SourceLocation) -> Option<lsp_types::Location> {
+    fn location(&self, root: &Path, location: &SourceLocation) -> Option<lsp_types::Location> {
         Some(lsp_types::Location {
-            uri: self.uri(self.snapshot.as_ref()?.paths.get(&location.source.id())?)?,
+            uri: self.uri(
+                self.snapshot
+                    .as_ref()?
+                    .paths
+                    .get(root)?
+                    .get(&location.source.id())?,
+            )?,
             range: self
                 .texts
                 .get(&location.source)
@@ -465,9 +474,9 @@ impl State {
     fn publish(&mut self) -> Result<()> {
         let mut diagnostics = BTreeMap::<String, Vec<lsp_types::Diagnostic>>::new();
         if let Some(snapshot) = &self.snapshot {
-            for analysis in snapshot.entries.values() {
+            for (root, analysis) in &snapshot.entries {
                 for diagnostic in analysis.diagnostics() {
-                    let Some(location) = self.location(&diagnostic.location) else {
+                    let Some(location) = self.location(root, &diagnostic.location) else {
                         continue;
                     };
                     let related = diagnostic
@@ -475,7 +484,7 @@ impl State {
                         .iter()
                         .filter_map(|note| {
                             Some(lsp_types::DiagnosticRelatedInformation {
-                                location: self.location(&note.location)?,
+                                location: self.location(root, &note.location)?,
                                 message: note.message.clone(),
                             })
                         })

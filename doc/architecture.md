@@ -12,8 +12,8 @@ Language Server Protocol. There is one executable to distribute.
 
 Reusable libraries live under `crates/`, with directory names matching their Cargo
 package names. Each language crate owns its representation and the translation that
-produces it. `resin_ast::build_program` uses the concrete `resin_source::Loader` to
-obtain imports from files, supplied text, or explicit bindings. `resin-source` owns
+produces it. Applications acquire imports through the concrete `resin_source::Loader`
+and pass immutable `SourceGraph` values to `resin_ast::build_program`. `resin-source` owns
 immutable text and standard-library resolution; `resin-types` owns concrete types and
 representation rules. Neither depends on a compiler phase. `resin-toolchain` runs
 generated Ninja projects and retains native artifacts without depending on compiler
@@ -52,15 +52,17 @@ pass consumes. Source and type vocabulary are independent foundations.
 | Crate | Direct phase dependencies | Public purpose |
 | --- | --- | --- |
 | `resin-common` | none | Shared `define_id!` index-type macro |
-| `resin-source` | none | Immutable sources, locations, import loading and standard-library resolution |
+| `resin-source` | none | Reconstructible sources, frozen import graphs, async file loading and library resolution |
+| `resin-executor` | none | Bounded CPU/native work and cancellation |
+| `resin-cache` | none | Immutable capacity-bounded snapshots of completed values |
 | `resin-types` | none | Concrete types, values, conversions, layout and shader interfaces |
 | `resin-cst` | generated `tree-sitter-resin` grammar | Syntax documents, `build_cst`, queries, formatting |
 | `resin-ast` | `resin-cst` | Source AST, `build_ast` / `build_program`, parse diagnostics |
 | `resin-hir` | `resin-ast`, `resin-cst` | Resolved tree, `build_hir` / `Hir::build`, editor analysis |
 | `resin-lir` | `resin-hir` | Storage and control-flow lowering, `build_lir`, verification |
 | `resin-codegen` | `resin-lir` | Generate a complete on-disk C/SPIR-V/Ninja project |
-| `resin-toolchain` | none | Captured process settings, Ninja builds, locked output files |
-| `resin-lsp` | `resin-hir`, `resin-cst` | HIR queries and formatting over LSP |
+| `resin-toolchain` | none | Async native builds and independently owned output generations |
+| `resin-lsp` | `resin-hir`, `resin-ast`, `resin-cst` | Explicit cached frontend passes and editor queries over LSP |
 
 The HIR dependency on CST supports editor queries at a syntax position. Its public
 language owns its type expressions and nominal declarations. LIR lowering never
@@ -140,9 +142,9 @@ previous document, and syntax-only queries and formatting need no semantic state
 AST lowering converts that syntax into source constructs. `build_ast` always
 returns a file, inserting holes and retaining diagnostics for incomplete syntax.
 Each AST `SourceModule` carries an immutable `Source`, its syntax, and resolved import
-indices. The compiler traverses imports through `resin_source::Loader::load_import`,
-then orders the modules into a `Program`. The loader resolves explicit bindings or
-file references; AST generation performs no source I/O and imports never execute code.
+indices. Applications acquire imports before supplying a frozen `SourceGraph` and
+completed `ModuleDocument` values to `build_program`. Assembly orders the modules
+without source I/O; imports never execute code.
 
 HIR construction has three internal steps:
 
@@ -366,132 +368,196 @@ The optimizer runs separately in the toolchain; codegen invokes no external proc
 
 ## Calling the passes
 
-The smallest host pipeline uses just the public phase APIs:
+The application resolves its source inputs and calls each async translation explicitly.
+This complete one-file example creates a generated project without running native tools:
 
 ```rust
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let syntax = resin_cst::build_cst(
-        "export { main }; def main() -> int = { 42 };", None,
-    );
-    let ast = resin_ast::build_ast(&syntax);
-    assert!(ast.errors.is_empty());
-    let hir = resin_hir::build_hir(&resin_ast::Program {
-        modules: vec![resin_ast::SourceModule {
-            source: resin_source::Source::new("example.resin", syntax.source()),
-            file: ast.file,
-            imports: vec![],
-        }],
-    }).into_module()?;
-    let lir = resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
-        .map_err(|errors| errors.into_iter().next().unwrap())?;
-    let checked = resin_lir::VerifiedModule::new(lir)?;
-    let directory = tempfile::TempDir::new()?;
-    let project = resin_codegen::generate(checked.view(), Some("main"), directory.path())?;
-    let source = std::fs::read_to_string(project.c_source().unwrap())?;
-    assert!(source.contains("main") && project.build_file().is_file());
+use resin_executor::{Cancellation, Execution};
+use resin_source::{Source, SourceGraph};
+use std::{collections::BTreeMap, sync::Arc};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let execution = Execution::default();
+    let cancellation = Cancellation::new();
+    let source = Source::new("example.resin", "export { main }; def main() -> int = { 42 };");
+    let syntax = Arc::new(resin_cst::build_cst(
+        source.text().to_owned(), None, &execution, &cancellation,
+    ).await?);
+    let parsed = resin_ast::build_ast(syntax.clone(), &execution, &cancellation).await?;
+    let document = Arc::new(resin_ast::ModuleDocument {
+        source: source.clone(), syntax, file: Arc::new(parsed.file), errors: parsed.errors,
+    });
+    let graph = SourceGraph::new(source.clone(), [source.clone()], [])?;
+    let program = resin_ast::build_program(
+        graph, BTreeMap::from([(source, document)]), &execution, &cancellation,
+    ).await?;
+    let hir = resin_hir::Hir::build(Arc::new(program), &execution, &cancellation).await?;
+    let lir = resin_lir::build_lir(
+        hir.hir()?.clone(), vec![], resin_lir::LoweringOptions::default(),
+        &execution, &cancellation,
+    ).await?;
+    let checked = resin_lir::VerifiedModule::build(lir, &execution, &cancellation).await?;
+    let temporary_parent = tempfile::TempDir::new()?;
+    let project = resin_codegen::generate(
+        Arc::new(checked), Some("main".into()), temporary_parent.path(),
+        &execution, &cancellation,
+    ).await?;
+    let text = tokio::fs::read_to_string(project.c_source().unwrap()).await?;
+    assert!(text.contains("main") && project.build_file().is_file());
     Ok(())
 }
 ```
 
-For imports, call `Hir::build(source, &mut loader, previous)` with an immutable `Source`
-and a concrete `resin_source::Loader`. Explicit bindings let the same loader work
-with generated or in-memory sources:
+For imports, applications obtain sources from async `Loader::load_file_async` and
+`load_import_async`, supplied editor text, or explicit logical bindings. They read
+`Document::preamble()` and freeze one version per identity into a `SourceGraph` with
+`ImportBinding` edges. A graph validates its identities and bindings; AST assembly
+reports missing imports, cycles, and syntax errors while preserving recovered files.
+The [CLI acquisition pass](../src/cli/inputs.rs) shows filesystem traversal; the
+[LSP worker](../crates/resin-lsp/src/worker.rs) shows explicit cached phase sequencing.
+Neither operation belongs to a reusable compiler orchestration library.
 
-```rust
-use resin_source::prelude::*;
+For file-backed inputs, applications call `Loader::logical_sources` before looking
+up CST or AST caches. With the entry's parent as the explicit root, this maps files
+to root-relative names and library files to `$/` names; reserved characters and
+non-UTF-8 path bytes are escaped without losing identity. The loader retains physical
+sources for import acquisition. Each request separately records logical IDs to local
+sources or paths for diagnostics and editor navigation. Equivalent checkout graphs
+can therefore share compiler results while each editor keeps its own locations.
 
-fn main() {
-    let math = Source::new(
-        "generated math", "export { answer }; def answer() -> int = { 42 };",
-    );
-    let entry = Source::new("editor buffer", r#"
-        export { main }; import { "math" };
-        def main() -> int = { answer() };
-    "#);
-    let mut loader = resin_source::Loader::new(resin_source::library_root());
-    loader.set_import(&entry, "math", math).unwrap();
-    let compilation = resin_hir::Hir::build(entry.clone(), &mut loader, None);
-    assert!(compilation.diagnostics().is_empty(), "{:?}", compilation.diagnostics());
-    assert_eq!(compilation.source(), &entry);
+`Loader::source_from_text(path, text)` registers authoritative editor text, and
+`remove_source(path)` restores disk loading on close. `set_import(importer, reference,
+source)` binds logical references explicitly. Filesystem imports resolve relative to
+their importer; `$/` selects the configured library root. Compiler passes receive no
+loader, path policy, overlays, or file notifications.
+
+Direct clients can construct an AST `Program` in dependency order and call async
+`build_hir(Arc<Program>, execution, cancellation)`. Its `CheckedProgram` preserves
+editor analysis on source failures. `Hir::build` additionally retains the assembled
+program and syntax documents for queries. LIR construction selects host/shader roots
+and their dependencies; an empty entry list requests every ordinary root. Verification
+is a separate async `VerifiedModule::build` operation.
+
+Codegen receives `Arc<VerifiedModule>`, an optional host entry, and an existing temporary
+parent directory. `generate` creates a unique child directory and returns a
+`GeneratedProject` that owns it. C/SPIR-V lowering completes before files are written.
+`None` selects a shader-only project. Optimized binaries, embedded headers, and native
+executables remain planned outputs for Ninja. Retained generated inputs stay immutable;
+native tools stage their own copies. The final project owner removes its directory.
+
+The toolchain takes any compatible on-disk Ninja project and captured `Environment`
+settings. Async `Toolchain::build(project, name, entry, profile, execution, cancellation)`
+stages inputs, supplies rules/settings, runs Ninja, and publishes an owned output
+generation. `BuiltProject` and `Executable` clones share that generation. The staging
+lock ends with the build; retaining, copying, or running A does not lock out build B.
+Generations live under `build/.artifacts`, separately from incremental cache slots.
+Unix retains immutable published file inodes through hard links; Windows copies files
+so executing an image cannot block replacing the cache file. Final-owner cleanup
+removes only that generation. The inspectable debug/release cache remains available
+for Ninja reuse after artifact handles are released.
+
+C projects declare `native-inputs.json`, described by `resin_toolchain::NativeInputs`:
+
+```json
+{
+  "translation_units": [{ "source": "main.c", "preprocessed": "main.i" }],
+  "c_flags": [],
+  "preprocessing_flags": ["-I", "."],
+  "generated_prerequisites": ["shader_1.h"]
 }
 ```
 
-`load_file(path)` reads a file; `source_from_text(path, text)` registers supplied text
-as authoritative for that path's imports. `remove_source(path)` restores disk loading
-for a closed buffer. `set_import(importer, reference, source)` binds a reference
-explicitly, allowing names that have no filesystem origin. Otherwise imports resolve
-relative to their importing file, with `$/` selecting the configured library root.
-Unchanged text reuses its source version. The compiler needs no buffer or path policy.
+The toolchain first configures stable `toolchain.state`, builds declared prerequisite
+Ninja targets, then preprocesses each original C unit into its declared `.i` file.
+It preserves line markers, including system-header provenance needed by compiler
+diagnostics. Exact captured bytes are recorded in `native-inputs.state` with explicit
+length framing; unchanged content preserves its timestamp. The
+`compile_preprocessed_program` Ninja rule compiles `main.i`, so headers changed after
+capture cannot alter that build. Generated `main.c` remains available for inspection.
 
-A caller may also construct a `resin_ast::Program` in dependency order and call
-`resin_hir::build_hir`, which returns a `CheckedProgram` with
-diagnostics and opaque editor analysis even on failure. `Analysis` owns its private
-query state directly. Its queries take a source handle, byte offset, and shared CST
-documents in a `BTreeMap<Source, Arc<resin_cst::Document>>`; no document-provider trait
-or forwarding object is needed. HIR functions carry optional source locations directly.
-Source handles retain their text, so later phases need no separate path-to-text table.
-`resin_lir::build_lir` collects errors across functions.
-Codegen accepts only verified LIR. `generate(verified, Some(entry), directory)` writes
-host C, the SPIR-V requested by pipeline creation, and `build.ninja`; `None` generates a shader-only
-project containing all declared shaders. It returns paths, never target ASTs or per-target
-emission operations. C and SPIR-V lowering finish before any generated files are written.
+Common compiler options belong in `c_flags`; include roots and macro definitions
+belong in `preprocessing_flags`. Both stages use the configured compiler, target
+options, and captured environment, while only preprocessing applies include/define
+arguments. C edges depend on `native-inputs.state`; shader/embedding edges depend
+only on `toolchain.state`. This detects changed header contents with preserved mtimes,
+new shadowing headers, and conditional includes without hashing unrelated workspace
+files. Shader-only graphs need no manifest or C preprocessing. Handwritten C projects
+use this same captured-input contract; `compile_program` remains available for raw C
+graphs that do not declare input capture.
 
-`resin_ast::build_program` walks imports and recovers AST. `Hir::build` checks that
-program and retains editor queries. `resin_lir::build_lir` produces LIR from HIR;
-verification is a separate pass.
-The CLI's private [Request](../src/cli/request.rs) resolves source and destination choices
-against the captured working directory, including output naming and ancestor validation.
-It owns the library root for that request. Argument parsing passes the original paths
-to this boundary. The CLI [interpreter](../src/cli/interpreter.rs) lowers the request,
-writes generated sources to a temporary directory owned by that invocation, and drives
-the native build. The toolchain retains successful sources and outputs under `build/`.
-Native compiler search paths
-retain their meaning relative to that captured directory; Ninja resolves discovered header
-dependencies in the directory where it runs the compiler.
+Persistent tool/runtime settings use BLAKE3 with explicitly framed input bytes,
+including executable contents. They do not use Rust's unspecified `DefaultHasher`
+encoding. Native cache directory labels also use a specified BLAKE3 encoding.
 
-The [toolchain](../crates/resin-toolchain/src/lib.rs) captures explicit `Environment`
-inputs and builds any compatible Ninja source directory. `Toolchain::build` stages the
-project, supplies the native command rules and settings in `toolchain.ninja`, and lets
-Ninja execute the generated dependency edges: unoptimized SPIR-V → `spirv-opt -O` →
-C headers, followed by C compilation and linking. `BuiltProject` exposes
-retained output paths; an `Executable` keeps the cache lock through copying and execution.
-The embedding command uses the running Resin executable obtained through `current_exe`,
-so it uses the same version without looking up `resin` on PATH.
+Ninja orders unoptimized SPIR-V → `spirv-opt -O` → `resin --embed` headers → C linking.
+The embed command uses the Resin executable captured with `current_exe`, never a PATH
+lookup. Install Ninja, a C compiler (`CC`/`--cc`), and SPIR-V Tools
+(`SPIRV_OPT`/`--spirv-opt`); a tool is checked when its graph command runs. Host-only
+projects never invoke the shader optimizer. Native settings use per-command cwd and
+environment rather than process-wide mutations.
 
-Install Ninja, SPIR-V Tools (`spirv-opt`), and a C compiler (`CC` or `--cc` overrides
-the default). `SPIRV_OPT` or `--spirv-opt` selects the optimizer. No tool
-preflight is performed: a required command reports failure when executed. A host project
-without embedded shaders never invokes `spirv-opt`. No language crate invokes native tools;
-`resin-toolchain` has no dependency on compiler internals or concrete Resin types.
+## Source identity and reuse
 
-## Source identity and incrementality
+`SourceId::new(logical_name)` identifies the same module across acquisitions.
+`Source::new(name, text)` uses its name as that identity; `Source::with_identity`
+separates logical identity from diagnostic display name. Callers must give distinct
+logical modules distinct IDs even when their text or displayed names match. Loader
+acquisition handles use canonical paths in a separate identity namespace.
+`Loader::logical_sources` maps those handles to entry-parent-relative module names
+and `$/` library roles before compiler cache lookup. Applications retain original
+sources/paths separately for client presentation. Equivalent checkouts therefore
+share compiler facts without leaking one checkout's paths into another's diagnostics.
 
-`Source::new(name, text)` creates immutable text with a fresh logical `SourceId`.
-Cloning shares that exact source version. `with_text(text)` creates a new version
-with the same logical ID, leaving the original intact. Equality identifies versions;
-equal text or equal diagnostic names do not make independently created sources equal.
-Names have no filesystem meaning inside the compiler.
+Source equality uses logical identity, display name, and exact text. A BLAKE3 digest
+speeds comparisons but never replaces the exact-text check. Full-text reconstruction
+and equivalent `Source::from_edits` requests therefore address the same keys. Cloning
+shares a version, and `with_text` leaves the previous version intact. Names and paths
+have no implicit filesystem meaning inside compiler passes.
 
-`Hir::build(source, loader, previous)` returns HIR and editor facts. Host and shader
-entries are selected later by `resin_lir::build_lir` when generating LIR. An empty
-LIR entry list requests every ordinary root. Each build resolves the complete import
-graph before considering reuse, so changed resolutions and newly available dependencies
-are observed. The loader reuses unchanged source handles; supplied text and explicit
-bindings determine the versions returned for imports. Cycles and inconsistent versions
-are diagnosed instead of mixing their facts.
+Applications resolve imports on every request before attempting semantic reuse,
+including requests whose entry text is unchanged. Immutable `SourceGraph` keys include
+the selected versions and actual resolved import edges. Equal text from a distinct
+logical module never reuses another module's origins or nominal identities.
+`Hir::build` accepts a completed `BuiltProgram`; it has no previous-HIR or loader input.
+Its retained diagnostics and editor queries refer to the exact source versions used.
 
-Callers pass a previous `Hir` to reuse unchanged CST documents and, when the import
-graph matches, the HIR itself. A changed source version can reuse the previous
-Tree-sitter tree for incremental parsing. Native artifact caching is separate. This
-is not a per-function incremental solver or backend.
+`resin-cache` provides immutable `Cache<K, V>` snapshots of shared completed values.
+Async `update` deduplicates requested keys, builds misses within the execution bound,
+refreshes requested recency, and evicts unrequested entries deterministically. If a
+request exceeds capacity, all its values survive with a warning; a later request can
+shrink the snapshot. Failure or cancellation produces no successor cache. Retained
+values survive cache eviction and keep earlier compilations usable.
 
-`Hir` retains diagnostics, recovered AST, completed HIR, and opaque editor facts for
-one source and its imports. A failed later pass preserves earlier products.
-`definition`, `hover`, and `completions` accept a retained source handle and byte
-offset; their results refer to that exact source version. Old results remain usable
-while the caller creates new sources and builds again.
+The local LSP shares source-keyed CST and AST caches with capacities 4,096 files each,
+and a `Cache<SourceGraph, Hir>` with capacity 64. HIR reuse applies to complete graphs;
+there is no per-function incremental solver. The loader still retains file/origin
+entries and cached text for every path seen during its lifetime. Closing a buffer
+clears supplied text but does not evict that entry. These phase-cache capacities do
+not yet bound the LSP's total retained memory.
 
-The CLI uses a loader for one invocation. The LSP library keeps a loader across edits,
-registering changed buffers and removing closed ones. It schedules analysis in
-response to document and file notifications. The loader owns source lookup, while
-protocol versions and scheduling remain in the LSP library.
+## Execution and cancellation
+
+`resin-executor::Execution` defaults to `available_parallelism()` logical CPUs,
+falling back to one; callers can supply an explicit nonzero job count. CPU passes run
+on bounded workers, including synchronous Tree-sitter calls. Async orchestration does
+not consume a worker slot. One native build reserves one slot and invokes Ninja with
+`-j 1`, coordinating compiler and native concurrency through the same bound.
+
+A shared `Cancellation` stops queued work and is checked during longer passes. A
+started synchronous foreign call may have to finish; its permit remains occupied
+until it does, even if the waiting future is dropped. Shutdown stops submissions,
+cancels requests, and waits for occupied execution slots to drain. Context and
+cancellation do not enter semantic cache keys.
+
+Native operations retain a supervisor task on caller-future abandonment, cancel its
+process tree, and keep staging ownership through cleanup. Awaited cancellation waits
+for that cleanup. Unix commands run in private sessions containing Ninja's separate
+compiler process groups; Windows assigns suspended children to kill-on-close jobs
+before resuming them. Runtime shutdown also terminates owned trees and reaps the
+direct children before releasing native ownership. A cancelled build returns no
+partial artifact handle. Atomic executable copying leaves no partially copied target.
+
+The CLI and existing stdio LSP use these libraries. The LSP coalesces editor changes
+and cancels superseded analysis; concurrent cache publication and an HTTP compiler
+server are later work.

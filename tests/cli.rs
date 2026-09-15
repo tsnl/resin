@@ -1,3 +1,6 @@
+#[allow(dead_code)]
+mod support;
+
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -5,8 +8,7 @@ use std::{
 };
 use tempfile::TempDir;
 
-#[path = "support/shaders.rs"]
-mod shaders;
+use support::shaders;
 
 fn cli(source: &str, args: &[&str]) -> Output {
     selected(source, None, args)
@@ -49,7 +51,9 @@ fn artifact(cwd: &Path, profile: &str) -> PathBuf {
     let files: Vec<_> = fs::read_dir(cwd.join("build"))
         .unwrap()
         .map(|entry| entry.unwrap().path())
-        .filter(|path| path.file_name().unwrap() != "shaders")
+        .filter(|path| {
+            path.file_name().unwrap() != "shaders" && path.file_name().unwrap() != ".artifacts"
+        })
         .collect();
     assert_eq!(files.len(), 1, "{files:?}");
     let executable = files[0]
@@ -255,7 +259,13 @@ fn sources_with_the_same_name_have_separate_caches() {
         success(&output);
         assert_eq!(output.stdout, folder.as_bytes());
     }
-    assert_eq!(fs::read_dir(temp.path().join("build")).unwrap().count(), 2);
+    assert_eq!(
+        fs::read_dir(temp.path().join("build"))
+            .unwrap()
+            .filter(|entry| entry.as_ref().unwrap().file_name() != ".artifacts")
+            .count(),
+        2
+    );
 }
 
 #[test]

@@ -1,4 +1,5 @@
 //! Lower a resolved tree without a parser, source provider, or compiler session.
+mod support;
 use resin_hir::{Annotation, Constant, Function, Module, Signature, Term, TermKind, Type};
 use resin_lir::Instr;
 use resin_source::prelude::*;
@@ -43,10 +44,10 @@ fn conditional() -> Module {
 #[test]
 fn resolved_tree_is_sufficient_to_lower_control_flow() {
     let tree = conditional();
-    let module = resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
+    let module = support::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
     assert_eq!(
         module,
-        resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap()
+        support::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap()
     );
     drop(tree);
     let function = &module.functions[0];
@@ -67,7 +68,7 @@ fn resolved_tree_is_sufficient_to_lower_control_flow() {
 fn explicit_header_dependencies_survive_without_foreign_functions() {
     let mut tree = conditional();
     tree.foreign_headers.insert("empty.h".into());
-    let module = resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
+    let module = support::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
     assert_eq!(module.foreign_headers, tree.foreign_headers);
     assert!(
         module
@@ -110,7 +111,7 @@ fn lowering_preserves_source_handles_without_inventing_missing_origins() {
         source: other.clone(),
         span: Span { start: 0, end: 6 },
     });
-    let module = resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
+    let module = support::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
     drop(tree);
     assert_eq!(module.origins.functions.len(), 2);
     assert_eq!(
@@ -224,7 +225,7 @@ fn failed_functions_keep_their_own_bindings_cleanup_and_error_origins() {
         ..Default::default()
     };
     let errors =
-        resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap_err();
+        support::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap_err();
     drop(tree);
     drop(source);
 
@@ -315,7 +316,7 @@ fn ordinary_and_foreign_parameters_have_separate_locals() {
                 ..Default::default()
             };
             let checked = resin_lir::VerifiedModule::new(
-                resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap(),
+                support::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap(),
             )
             .unwrap();
             let function = &checked.view().module().functions[0];
@@ -387,7 +388,7 @@ fn invalid_nominal_type_expressions_report_errors_before_storage_lowering() {
             methods: Default::default(),
             drop: None,
         });
-        let error = resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default())
+        let error = support::build_lir(&tree, &[], &resin_lir::LoweringOptions::default())
             .unwrap_err()
             .remove(0);
         assert!(

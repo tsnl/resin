@@ -1,9 +1,11 @@
+pub mod frontend;
 pub mod pipeline;
 pub mod project;
 pub mod shaders;
+pub mod toolchain;
 
 pub fn parse(source: &str) -> resin_ast::SourceFile {
-    let parsed = resin_ast::build_ast(&resin_cst::build_cst(source, None));
+    let parsed = frontend::ast(&frontend::cst(source, None));
     assert!(parsed.errors.is_empty(), "{source}\n{:?}", parsed.errors);
     parsed.file
 }
@@ -13,7 +15,7 @@ pub fn program(source: &str) -> resin_ast::Program {
     let src = resin_source::Source::new("test.resin", source);
     resin_ast::Program {
         modules: vec![resin_ast::SourceModule {
-            file: parse(source),
+            file: std::sync::Arc::new(parse(source)),
             source: src,
             imports: vec![],
         }],
@@ -22,7 +24,7 @@ pub fn program(source: &str) -> resin_ast::Program {
 
 #[allow(dead_code)]
 pub fn hir(source: &str) -> resin_hir::Module {
-    resin_hir::build_hir(&program(source))
+    frontend::check_hir(&program(source))
         .into_module()
         .unwrap_or_else(|error| panic!("{source}\n{error}"))
 }

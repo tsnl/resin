@@ -13,8 +13,6 @@ mod load;
 mod lower;
 mod print;
 
-pub use load::{BuiltProgram, ModuleDocument, build_program};
-
 use std::{fmt, sync::Arc};
 
 #[derive(Debug, Clone)]
@@ -242,8 +240,57 @@ pub struct Program {
 #[derive(Debug, Clone)]
 pub struct SourceModule {
     pub source: Source,
-    pub file: SourceFile,
+    pub file: Arc<SourceFile>,
     pub imports: Vec<(Span, usize)>,
+}
+
+/// One completed file translation, shared by every graph selecting this source.
+pub struct ModuleDocument {
+    pub source: Source,
+    pub syntax: Arc<resin_cst::Document>,
+    pub file: Arc<SourceFile>,
+    pub errors: Vec<(Span, String)>,
+}
+
+/// A resolved AST graph and its exact per-file inputs, including recovery diagnostics.
+pub struct BuiltProgram {
+    pub source: Source,
+    pub inputs: resin_source::SourceGraph,
+    pub program: Program,
+    pub documents: std::collections::BTreeMap<Source, Arc<ModuleDocument>>,
+    pub diagnostics: Vec<SourceError>,
+}
+
+impl BuiltProgram {
+    pub fn graph(&self) -> Vec<(Source, Vec<(Span, usize)>)> {
+        self.program
+            .modules
+            .iter()
+            .map(|module| (module.source.clone(), module.imports.clone()))
+            .collect()
+    }
+
+    pub fn syntax(&self) -> std::collections::BTreeMap<Source, Arc<resin_cst::Document>> {
+        self.documents
+            .iter()
+            .map(|(source, document)| (source.clone(), document.syntax.clone()))
+            .collect()
+    }
+}
+
+/// Assemble already-parsed files using explicit immutable import bindings.
+/// Missing inputs and cycles become source diagnostics; this operation reads no files.
+pub async fn build_program(
+    inputs: resin_source::SourceGraph,
+    documents: std::collections::BTreeMap<Source, Arc<ModuleDocument>>,
+    execution: &resin_executor::Execution,
+    cancellation: &resin_executor::Cancellation,
+) -> Result<BuiltProgram, resin_executor::Error> {
+    execution
+        .run(cancellation, move |cancellation| {
+            load::assemble(inputs, documents, cancellation)
+        })
+        .await
 }
 
 /// An AST and diagnostics recovered from one concrete syntax document.
@@ -277,8 +324,14 @@ impl fmt::Display for AstError {
 impl std::error::Error for AstError {}
 
 /// Build an AST, inserting holes for incomplete syntax and retaining every diagnostic.
-pub fn build_ast(source: &resin_cst::Document) -> Parsed {
-    lower::document(source)
+pub async fn build_ast(
+    source: Arc<resin_cst::Document>,
+    execution: &resin_executor::Execution,
+    cancellation: &resin_executor::Cancellation,
+) -> Result<Parsed, resin_executor::Error> {
+    execution
+        .run(cancellation, move |_| lower::document(&source))
+        .await
 }
 
 /// Render the AST for inspection.

@@ -8,6 +8,7 @@
 //! use resin_cst::lower;
 //! ```
 
+use resin_executor::{Cancellation, Execution};
 use resin_source::prelude::*;
 use std::sync::Arc;
 mod lower;
@@ -18,8 +19,10 @@ mod query;
 pub use tree_sitter::{Node, Tree};
 
 /// One source revision and the concrete syntax tree parsed from it.
+/// Clones share immutable text and Tree-sitter storage; reparsing edits a private tree copy.
+#[derive(Clone)]
 pub struct Document {
-    text: String,
+    text: Arc<str>,
     tree: Tree,
 }
 
@@ -32,9 +35,22 @@ pub struct Preamble {
     pub diagnostics: Vec<Spanned<String>>,
 }
 
-/// Build a CST document, reusing an earlier tree when supplied.
-pub fn build_cst(text: impl Into<String>, previous: Option<&Document>) -> Document {
-    lower::reparse(text.into(), previous)
+/// Parse on a bounded worker, reusing an earlier tree without changing its document.
+/// Cancellation discards the result; an already running Tree-sitter call may finish first.
+pub async fn build_cst(
+    text: impl Into<String> + Send,
+    previous: Option<&Document>,
+    execution: &Execution,
+    cancellation: &Cancellation,
+) -> Result<Document, resin_executor::Error> {
+    cancellation.check()?;
+    let text = text.into();
+    let previous = previous.cloned();
+    execution
+        .run(cancellation, move |_| {
+            lower::reparse(text, previous.as_ref())
+        })
+        .await
 }
 
 impl Document {

@@ -121,12 +121,14 @@ one text version; a replacement keeps the logical source ID and leaves the old
 version usable. Names serve diagnostics and need not be paths or unique. Locations
 retain the source alongside a byte span, so their meaning survives later edits.
 
-`resin_hir::Hir::build(source, loader, previous)` resolves imports and returns
-completed HIR and editor facts. The concrete `resin_source::Loader` supplies files,
-registered buffer text, and explicit import bindings. It resolves relative and `$/`
-imports and reuses unchanged source instances. Source loading has no dependency on
-compiler phases or concrete types. Editors register changes and remove closed buffers
-through the loader.
+Applications acquire files, registered buffer text, and explicit import bindings
+through the concrete `resin_source::Loader`. Before cache lookup they map filesystem
+sources to canonical logical names, keeping local presentation separately. They
+assemble parsed files into an immutable `SourceGraph` and `BuiltProgram`, then await
+`resin_hir::Hir::build(inputs, execution, cancellation)` for completed HIR and editor
+facts. Caches retain those completed results under their full input keys. Source
+loading has no dependency on compiler phases or concrete types. Editors register
+changes and remove closed buffers through the loader.
 
 `Hir` owns its retained products and queries. A small public interface can have a
 substantial, cohesive implementation. The compiler has no native-build,

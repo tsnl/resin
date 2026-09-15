@@ -6,10 +6,12 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::Arc,
 };
 
 mod cpu;
 mod gpu;
+mod inputs;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -277,64 +279,78 @@ fn build(
     entry: Option<&str>,
     extra_files: &[(&str, &str)],
 ) -> Result<Built> {
-    let mut loader = resin_source::Loader::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("resin"));
-    let source = loader.load_file(source)?;
-    let output = resin_hir::Hir::build(source, &mut loader, None);
-    let (name, profile) = match entry {
-        Some(entry) => (entry, resin_lir::Profile::Host),
-        None => ("kernel", resin_lir::Profile::Shader),
-    };
-    let hir = output.hir().map_err(|error| error.to_string())?;
-    let request =
-        resin_lir::Entry::exported(hir, name, profile).map_err(|error| error.to_string())?;
-    let lir = resin_lir::build_lir(hir, &[request], &resin_lir::LoweringOptions::default())
-        .map_err(|errors| {
-            errors
-                .into_iter()
-                .map(|error| error.to_string())
-                .collect::<Vec<_>>()
-                .join("\n")
-        })?;
-    let lir = resin_lir::VerifiedModule::new(lir).map_err(|error| error.to_string())?;
-    let directory = tempfile::TempDir::new()?;
-    let generated = resin_codegen::generate(lir.view(), entry, directory.path())?;
-    for (name, contents) in extra_files {
-        fs::write(directory.path().join(name), contents)?;
-    }
-    if extra_files.iter().any(|(name, _)| *name == "benchmark.h") {
-        let path = generated
-            .c_source()
-            .ok_or("CPU benchmark needs generated C")?;
-        let text = fs::read_to_string(path)?;
-        fs::write(
-            path,
-            format!("#ifndef _POSIX_C_SOURCE\n#define _POSIX_C_SOURCE 200809L\n#endif\n{text}"),
-        )?;
-    }
-    if !extra_files.is_empty() {
-        let graph = fs::read_to_string(generated.build_file())?;
-        fs::write(
-            generated.build_file(),
-            graph.replace(
-                "include toolchain.ninja\n",
-                "include toolchain.ninja\ncflags = $cflags -I .\n",
-            ),
-        )?;
-    }
-    let mut environment = resin_toolchain::Environment::capture()?;
-    // Cargo builds the matching Resin executable, used by Ninja's embedding step.
-    environment.executable = env!("CARGO_BIN_EXE_resin").into();
-    environment.directory = Path::new(env!("CARGO_MANIFEST_DIR")).into();
-    let artifacts = environment.toolchain(None, None).build(
-        directory.path(),
-        &format!("benchmark-{}", workload.name),
-        entry.unwrap_or("benchmark-shader"),
-        resin_toolchain::CProfile::Release,
-    )?;
-    Ok(Built {
-        generated,
-        artifacts,
-    })
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(async {
+            let execution = resin_executor::Execution::default();
+            let cancellation = resin_executor::Cancellation::new();
+            let mut loader =
+                resin_source::Loader::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("resin"));
+            let source = loader
+                .load_file_async(source, &execution, &cancellation)
+                .await?;
+            let inputs = inputs::capture(source, &mut loader, &execution, &cancellation).await?;
+            let output = resin_hir::Hir::build(Arc::new(inputs), &execution, &cancellation).await?;
+            let (name, profile) = match entry {
+                Some(entry) => (entry, resin_lir::Profile::Host),
+                None => ("kernel", resin_lir::Profile::Shader),
+            };
+            let hir = output.hir().map_err(|error| error.to_string())?;
+            let request = resin_lir::Entry::exported(hir, name, profile)
+                .map_err(|error| error.to_string())?;
+            let lir = resin_lir::build_lir(
+                hir.clone(),
+                vec![request],
+                resin_lir::LoweringOptions::default(),
+                &execution,
+                &cancellation,
+            )
+            .await?;
+            let lir = resin_lir::VerifiedModule::build(lir, &execution, &cancellation).await?;
+            let generated = resin_codegen::generate(
+                Arc::new(lir),
+                entry.map(str::to_owned),
+                &std::env::temp_dir(),
+                &execution,
+                &cancellation,
+            )
+            .await?;
+            for (name, contents) in extra_files {
+                tokio::fs::write(generated.directory().join(name), contents).await?;
+            }
+            if generated.c_source().is_some() && !extra_files.is_empty() {
+                let path = generated.directory().join("native-inputs.json");
+                let mut inputs: resin_toolchain::NativeInputs =
+                    serde_json::from_slice(&tokio::fs::read(&path).await?)?;
+                inputs.preprocessing_flags.extend(["-I".into(), ".".into()]);
+                if extra_files.iter().any(|(name, _)| *name == "benchmark.h") {
+                    inputs
+                        .preprocessing_flags
+                        .push("-D_POSIX_C_SOURCE=200809L".into());
+                }
+                tokio::fs::write(path, serde_json::to_vec(&inputs)?).await?;
+            }
+            let mut environment = resin_toolchain::Environment::capture()?;
+            // Cargo builds the matching Resin executable, used by Ninja's embedding step.
+            environment.executable = env!("CARGO_BIN_EXE_resin").into();
+            environment.directory = Path::new(env!("CARGO_MANIFEST_DIR")).into();
+            let artifacts = environment
+                .toolchain(None, None)
+                .build(
+                    generated.directory(),
+                    &format!("benchmark-{}", workload.name),
+                    entry.unwrap_or("benchmark-shader"),
+                    resin_toolchain::CProfile::Release,
+                    &execution,
+                    &cancellation,
+                )
+                .await?;
+            Ok(Built {
+                generated,
+                artifacts,
+            })
+        })
 }
 
 fn workload_path(workload: &Workload) -> PathBuf {

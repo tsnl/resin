@@ -6,6 +6,10 @@ publish = false
 license.workspace = true
 
 [dependencies]
+resin-executor = { workspace = true }
 resin-source = { workspace = true }
 resin-cst = { workspace = true }
 sexpfmt = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

@@ -27,16 +27,21 @@ pub fn compile_c(
     let directory = TempDir::new()?;
     fs::write(directory.path().join("main.c"), source)?;
     fs::write(
-        directory.path().join("build.ninja"),
-        "include toolchain.ninja\nrule c\n  command = $cc $cflags $in $ldflags -o $out\nbuild program: c main.c | toolchain.state\ndefault program\n",
+        directory.path().join("native-inputs.json"),
+        r#"{"translation_units":[{"source":"main.c","preprocessed":"main.i"}]}"#,
     )?;
-    let built = c(compiler).build(
+    fs::write(
+        directory.path().join("build.ninja"),
+        "include toolchain.ninja\nbuild program: compile_preprocessed_program main.i | toolchain.state native-inputs.state\ndefault program\n",
+    )?;
+    let built = crate::support::frontend::build(
+        &c(compiler),
         directory.path(),
         "native-test",
         "main",
         resin_toolchain::CProfile::Release,
     )?;
-    built.executable("program")?.copy_to(output)?;
+    crate::support::frontend::copy(&built.executable("program")?, output)?;
     Ok(())
 }
 
@@ -51,7 +56,8 @@ pub fn optimize_spirv(
         directory.path().join("build.ninja"),
         "include toolchain.ninja\nrule optimize\n  command = $spirv_opt --target-env=vulkan1.3 -O $in -o $out\nbuild shader.spv: optimize shader.unoptimized.spv | toolchain.state\ndefault shader.spv\n",
     )?;
-    let built = spirv(compiler).build(
+    let built = crate::support::frontend::build(
+        &spirv(compiler),
         directory.path(),
         "shader-test",
         "shader",

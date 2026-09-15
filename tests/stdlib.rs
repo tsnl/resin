@@ -1,13 +1,12 @@
-use tempfile::TempDir;
-#[path = "support/pipeline.rs"]
-mod pipeline;
-#[path = "support/project.rs"]
-mod project;
-#[path = "support/shaders.rs"]
-mod shaders;
-#[path = "support/toolchain.rs"]
-mod toolchain;
+#[allow(dead_code)]
+mod support;
+
 use std::{fs, path::Path, process::Command};
+use support::pipeline;
+use support::project;
+use support::shaders;
+use support::toolchain;
+use tempfile::TempDir;
 
 fn run(source: &str, native: &str) -> std::process::Output {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
@@ -344,11 +343,11 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
         "import { \"$/gpu.resin\", \"$/window.resin\", \"$/image.resin\", \"$/console.resin\" };",
     )
     .unwrap();
-    let module = resin_hir::build_hir(&pipeline::load(&path).unwrap())
+    let module = support::frontend::check_hir(&pipeline::load(&path).unwrap())
         .into_module()
         .unwrap();
     for name in ["gpu", "window", "image", "console"] {
-        let public = resin_hir::build_hir(
+        let public = support::frontend::check_hir(
             &pipeline::load(&root.join(format!("resin/{name}.resin"))).unwrap(),
         )
         .into_module()

@@ -1,3 +1,6 @@
+#[allow(dead_code)]
+mod support;
+
 use resin_ast::{StmtKind, TypeKind, format_source};
 use resin_lir::VerifyErrorKind;
 use resin_lir::VerifyLocation;
@@ -6,7 +9,7 @@ use resin_lir::{BasicBlock, BlockId, Function, Instr, Local, Module, Terminator,
 use resin_types::prelude::*;
 
 fn parse(src: &str) -> resin_ast::SourceFile {
-    let parsed = resin_ast::build_ast(&resin_cst::build_cst(src, None));
+    let parsed = support::frontend::ast(&support::frontend::cst(src, None));
     assert!(parsed.errors.is_empty(), "{src}\n{:?}", parsed.errors);
     parsed.file
 }

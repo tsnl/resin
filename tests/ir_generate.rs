@@ -1,10 +1,12 @@
-use resin_hir::GenerateErrorKind;
-use resin_types::prelude::*;
-#[path = "support/pipeline.rs"]
-mod pipeline;
+#[allow(dead_code)]
+mod support;
+
 use pipeline::generate;
+use resin_hir::GenerateErrorKind;
 use resin_lir::verify;
 use resin_lir::{Instr, Terminator, format_module};
+use resin_types::prelude::*;
+use support::pipeline;
 
 const FIBONACCI: &str = r#"
 export { main };
@@ -19,7 +21,7 @@ def main() = { fibonacci(10); };
 "#;
 
 fn parse(src: &str) -> resin_ast::SourceFile {
-    let parsed = resin_ast::build_ast(&resin_cst::build_cst(src, None));
+    let parsed = support::frontend::ast(&support::frontend::cst(src, None));
     assert!(parsed.errors.is_empty(), "{src}\n{:?}", parsed.errors);
     parsed.file
 }

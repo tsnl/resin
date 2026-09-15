@@ -19,6 +19,12 @@ path = "benchmarks/gpu_main.rs"
 harness = false
 
 [dependencies]
+log = { workspace = true }
+resin-cache = { workspace = true }
+resin-executor = { workspace = true }
+resin-ast = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
 tempfile = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 resin-hir = { workspace = true }
@@ -33,7 +39,6 @@ resin-cst = { workspace = true }
 [dev-dependencies]
 resin-types = { workspace = true }
 resin-runtime = { workspace = true, features = ["test-support"] }
-resin-ast = { workspace = true }
 resin-hir = { workspace = true }
 resin-lir = { workspace = true }
 tree-sitter = { workspace = true }
@@ -58,6 +63,12 @@ license = "Apache-2.0"
 version = "0.1.0"
 
 [workspace.dependencies]
+resin-cache = { path = "crates/resin-cache" }
+resin-executor = { path = "crates/resin-executor" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "io-std", "process", "fs", "net"] }
+futures = "0.3"
+log = "0.4"
+blake3 = "1"
 resin-common = { path = "crates/resin-common" }
 resin-types = { path = "crates/resin-types" }
 tempfile = "3"

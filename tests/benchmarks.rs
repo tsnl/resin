@@ -1,4 +1,7 @@
-//! Small correctness runs of the real benchmark harness; no performance thresholds.
+#[allow(dead_code)]
+mod support;
+
+// Small correctness runs of the real benchmark harness; no performance thresholds.
 use clap::Parser;
 
 #[allow(dead_code)]
@@ -9,8 +12,7 @@ mod benchmarks {
 use benchmarks::suite;
 
 #[cfg(feature = "gpu")]
-#[path = "support/shaders.rs"]
-mod shaders;
+use support::shaders;
 
 #[cfg(feature = "gpu")]
 fn config() -> suite::Config {

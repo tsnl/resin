@@ -1,37 +1,70 @@
 //! Immutable named sources, source locations, and import loading.
 //! A source owns one version of its text; loaders preserve unchanged versions.
 
+use resin_executor::{Cancellation, Execution};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fmt, io,
     path::{Component, Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
+    sync::Arc,
 };
 
+mod logical;
 mod paths;
 
 //
 // Immutable sources and locations
 //
 
-/// Stable logical module identity, independent of its name and text version.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SourceId(usize);
+/// Reconstructible logical module identity, independent of display name and text.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SourceId(Arc<Identity>);
 
-/// Immutable named text. Clones share a version; names need not be paths or unique.
-/// Equality and ordering identify versions, rather than comparing their contents.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum Identity {
+    Logical { name: Arc<str> },
+    File { path: PathBuf },
+}
+
+impl SourceId {
+    /// Identify the same logical module across independent acquisitions.
+    pub fn new(name: impl Into<Arc<str>>) -> Self {
+        Self(Arc::new(Identity::Logical { name: name.into() }))
+    }
+
+    fn file(path: PathBuf) -> Self {
+        Self(Arc::new(Identity::File { path }))
+    }
+}
+
+/// Immutable named text. Equality uses logical identity, retained name, and exact text.
+/// Independently reconstructed equal sources can address the same retained compiler facts.
 #[derive(Debug, Clone)]
 pub struct Source(Arc<Text>);
 
 impl Source {
-    pub fn new(name: impl Into<std::sync::Arc<str>>, text: impl Into<std::sync::Arc<str>>) -> Self {
-        create(name.into(), text.into())
+    /// Use the name as this source's logical module identity.
+    pub fn new(name: impl Into<Arc<str>>, text: impl Into<Arc<str>>) -> Self {
+        let name = name.into();
+        Self::with_identity(SourceId::new(name.clone()), name, text)
+    }
+
+    /// Give a module an identity independent of its diagnostic display name.
+    pub fn with_identity(
+        id: SourceId,
+        name: impl Into<Arc<str>>,
+        text: impl Into<Arc<str>>,
+    ) -> Self {
+        let text = text.into();
+        Self(Arc::new(Text {
+            id,
+            name: name.into(),
+            digest: *blake3::hash(text.as_bytes()).as_bytes(),
+            text,
+        }))
     }
     pub fn id(&self) -> SourceId {
-        self.0.id
+        self.0.id.clone()
     }
     pub fn name(&self) -> &str {
         &self.0.name
@@ -39,10 +72,117 @@ impl Source {
     pub fn text(&self) -> &str {
         &self.0.text
     }
+    /// BLAKE3 over the exact UTF-8 text bytes; equality additionally checks the text.
+    pub fn content_hash(&self) -> &[u8; 32] {
+        &self.0.digest
+    }
     /// Create a new immutable version of this module. The original remains valid.
     pub fn with_text(&self, text: impl Into<std::sync::Arc<str>>) -> Self {
-        replace(self, text.into())
+        let text = text.into();
+        if self.text() == text.as_ref() {
+            return self.clone();
+        }
+        Self::with_identity(self.id(), self.0.name.clone(), text)
     }
+
+    /// Apply UTF-8 byte edits in order, each relative to the text after earlier edits.
+    /// `None` starts with empty text, so a full upload is one insertion at `0..0`.
+    pub fn from_edits(
+        id: SourceId,
+        name: impl Into<Arc<str>>,
+        previous: Option<&Source>,
+        edits: &[SourceEdit],
+    ) -> Result<Self, EditError> {
+        if let Some(previous) = previous
+            && previous.id() != id
+        {
+            return Err(EditError::WrongPredecessor {
+                expected: id,
+                actual: previous.id(),
+            });
+        }
+        let mut text = previous.map_or("", Source::text).to_owned();
+        for (index, edit) in edits.iter().enumerate() {
+            validate_edit(&text, edit.range, index)?;
+            text.replace_range(edit.range.start..edit.range.end, &edit.text);
+        }
+        Ok(Self::with_identity(id, name, text))
+    }
+}
+
+/// One replacement in the current text, using UTF-8 byte offsets.
+#[derive(Debug, Clone)]
+pub struct SourceEdit {
+    pub range: Span,
+    pub text: Arc<str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditError {
+    WrongPredecessor {
+        expected: SourceId,
+        actual: SourceId,
+    },
+    InvalidRange {
+        edit: usize,
+        range: Span,
+        length: usize,
+    },
+    InvalidUtf8Boundary {
+        edit: usize,
+        offset: usize,
+    },
+}
+
+impl fmt::Display for EditError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::WrongPredecessor { expected, actual } => {
+                write!(
+                    f,
+                    "source predecessor has identity {actual:?}, expected {expected:?}"
+                )
+            }
+            Self::InvalidRange {
+                edit,
+                range,
+                length,
+            } => {
+                write!(
+                    f,
+                    "edit {edit} range {}..{} is invalid for {length} bytes",
+                    range.start, range.end
+                )
+            }
+            Self::InvalidUtf8Boundary { edit, offset } => {
+                write!(
+                    f,
+                    "edit {edit} offset {offset} is not a UTF-8 character boundary"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for EditError {}
+
+fn validate_edit(text: &str, range: Span, index: usize) -> Result<(), EditError> {
+    if range.start > range.end || range.end > text.len() {
+        return Err(EditError::InvalidRange {
+            edit: index,
+            range,
+            length: text.len(),
+        });
+    }
+    for offset in [range.start, range.end] {
+        if !text.is_char_boundary(offset) {
+            return Err(EditError::InvalidUtf8Boundary {
+                edit: index,
+                offset,
+            });
+        }
+    }
+    Ok(())
 }
 
 pub type Ident = Spanned<Arc<str>>;
@@ -114,40 +254,19 @@ impl std::error::Error for SourceError {}
 
 #[derive(Debug)]
 struct Text {
-    pub version: usize,
     pub id: SourceId,
     pub name: Arc<str>,
+    pub digest: [u8; 32],
     pub text: Arc<str>,
-}
-
-fn next_version() -> usize {
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
-        .expect("source identities exhausted")
-}
-
-fn create(name: Arc<str>, text: Arc<str>) -> Source {
-    let version = next_version();
-    Source(Arc::new(Text {
-        version,
-        id: SourceId(version),
-        name,
-        text,
-    }))
-}
-
-fn replace(source: &Source, text: Arc<str>) -> Source {
-    Source(Arc::new(Text {
-        version: next_version(),
-        id: source.id(),
-        name: source.0.name.clone(),
-        text,
-    }))
 }
 
 impl PartialEq for Source {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
+            || (self.0.id == other.0.id
+                && self.0.name == other.0.name
+                && self.0.digest == other.0.digest
+                && self.0.text == other.0.text)
     }
 }
 impl Eq for Source {}
@@ -158,14 +277,201 @@ impl PartialOrd for Source {
 }
 impl Ord for Source {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.version.cmp(&other.0.version)
+        if Arc::ptr_eq(&self.0, &other.0) {
+            return std::cmp::Ordering::Equal;
+        }
+        self.0
+            .id
+            .cmp(&other.0.id)
+            .then_with(|| self.0.name.cmp(&other.0.name))
+            .then_with(|| self.0.digest.cmp(&other.0.digest))
+            .then_with(|| self.0.text.cmp(&other.0.text))
     }
 }
 impl std::hash::Hash for Source {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.version.hash(state);
+        self.0.id.hash(state);
+        self.0.name.hash(state);
+        self.0.digest.hash(state);
     }
 }
+
+//
+// Immutable source graphs
+//
+
+/// An explicit import edge; resolving it never consults a filesystem or another graph.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ImportBinding {
+    pub source: SourceId,
+    pub reference: Arc<str>,
+    pub target: SourceId,
+}
+
+/// One entry and its immutable, explicitly bound source closure.
+/// Construction canonicalizes order and drops sources/edges unreachable from the entry.
+/// Cycles remain representable so syntax-aware callers can diagnose them with source spans.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SourceGraph {
+    entry: SourceId,
+    sources: BTreeMap<SourceId, Source>,
+    bindings: BTreeMap<(SourceId, Arc<str>), ImportBinding>,
+}
+
+impl SourceGraph {
+    /// Validate all supplied endpoints, then retain only the entry's reachable closure.
+    /// Callers must also check parsed import declarations against these explicit bindings.
+    pub fn new(
+        entry: Source,
+        sources: impl IntoIterator<Item = Source>,
+        bindings: impl IntoIterator<Item = ImportBinding>,
+    ) -> Result<Self, GraphError> {
+        let mut graph = Self {
+            entry: entry.id(),
+            sources: BTreeMap::new(),
+            bindings: BTreeMap::new(),
+        };
+        for source in std::iter::once(entry).chain(sources) {
+            graph.insert_source(source)?;
+        }
+        for binding in bindings {
+            graph.insert_binding(binding)?;
+        }
+        graph.retain_reachable();
+        Ok(graph)
+    }
+
+    pub fn entry(&self) -> &Source {
+        &self.sources[&self.entry]
+    }
+
+    pub fn source(&self, id: &SourceId) -> Option<&Source> {
+        self.sources.get(id)
+    }
+
+    /// Iterate in canonical logical-identity order, independently of discovery order.
+    pub fn sources(&self) -> impl Iterator<Item = &Source> {
+        self.sources.values()
+    }
+
+    pub fn bindings(&self) -> impl Iterator<Item = &ImportBinding> {
+        self.bindings.values()
+    }
+
+    /// Resolve only this graph's captured binding. An absent binding stays absent.
+    pub fn resolve(&self, source: &SourceId, reference: &str) -> Option<&Source> {
+        let binding = self.bindings.get(&(source.clone(), reference.into()))?;
+        self.sources.get(&binding.target)
+    }
+
+    fn insert_source(&mut self, source: Source) -> Result<(), GraphError> {
+        if let Some(previous) = self.sources.get(&source.id())
+            && previous != &source
+        {
+            return Err(GraphError::ConflictingSource {
+                source: source.id(),
+            });
+        }
+        self.sources.insert(source.id(), source);
+        Ok(())
+    }
+
+    fn insert_binding(&mut self, binding: ImportBinding) -> Result<(), GraphError> {
+        for id in [&binding.source, &binding.target] {
+            if !self.sources.contains_key(id) {
+                return Err(GraphError::MissingSource { source: id.clone() });
+            }
+        }
+        validate_reference(&binding.reference).map_err(|error| GraphError::InvalidReference {
+            source: binding.source.clone(),
+            reference: binding.reference.clone(),
+            message: error.to_string(),
+        })?;
+        let key = (binding.source.clone(), binding.reference.clone());
+        if let Some(previous) = self.bindings.get(&key)
+            && previous != &binding
+        {
+            return Err(GraphError::ConflictingImport {
+                source: binding.source,
+                reference: binding.reference,
+            });
+        }
+        self.bindings.insert(key, binding);
+        Ok(())
+    }
+
+    fn retain_reachable(&mut self) {
+        let mut children: BTreeMap<SourceId, Vec<SourceId>> = BTreeMap::new();
+        for binding in self.bindings.values() {
+            children
+                .entry(binding.source.clone())
+                .or_default()
+                .push(binding.target.clone());
+        }
+        let mut reachable = BTreeSet::new();
+        let mut pending = vec![self.entry.clone()];
+        while let Some(source) = pending.pop() {
+            if reachable.insert(source.clone())
+                && let Some(targets) = children.get(&source)
+            {
+                pending.extend(targets.iter().cloned());
+            }
+        }
+        self.sources.retain(|source, _| reachable.contains(source));
+        self.bindings
+            .retain(|(source, _), _| reachable.contains(source));
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GraphError {
+    ConflictingSource {
+        source: SourceId,
+    },
+    MissingSource {
+        source: SourceId,
+    },
+    ConflictingImport {
+        source: SourceId,
+        reference: Arc<str>,
+    },
+    InvalidReference {
+        source: SourceId,
+        reference: Arc<str>,
+        message: String,
+    },
+}
+
+impl fmt::Display for GraphError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ConflictingSource { source } => {
+                write!(f, "conflicting versions of source {source:?}")
+            }
+            Self::MissingSource { source } => {
+                write!(f, "import refers to uncaptured source {source:?}")
+            }
+            Self::ConflictingImport { source, reference } => {
+                write!(
+                    f,
+                    "conflicting targets for import {reference:?} in source {source:?}"
+                )
+            }
+            Self::InvalidReference {
+                source,
+                reference,
+                message,
+            } => {
+                write!(
+                    f,
+                    "invalid import {reference:?} in source {source:?}: {message}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for GraphError {}
 
 /// Source vocabulary shared by compiler phases. Import privately.
 pub mod prelude {
@@ -186,6 +492,43 @@ pub struct Loader {
     imports: BTreeMap<(SourceId, String), Source>,
 }
 
+/// File acquisition failures distinguish source I/O from cancellation or worker failure.
+#[derive(Debug)]
+pub enum LoadError {
+    Io { error: io::Error },
+    Execution { error: resin_executor::Error },
+}
+
+impl fmt::Display for LoadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io { error } => error.fmt(f),
+            Self::Execution { error } => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for LoadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io { error } => Some(error),
+            Self::Execution { error } => Some(error),
+        }
+    }
+}
+
+impl From<io::Error> for LoadError {
+    fn from(error: io::Error) -> Self {
+        Self::Io { error }
+    }
+}
+
+impl From<resin_executor::Error> for LoadError {
+    fn from(error: resin_executor::Error) -> Self {
+        Self::Execution { error }
+    }
+}
+
 impl Loader {
     pub fn new(library_root: PathBuf) -> Self {
         Self {
@@ -196,6 +539,40 @@ impl Loader {
         }
     }
 
+    /// Assign checkout-independent names before selecting compiler cache entries.
+    /// The returned map associates each original identity with its logical source;
+    /// callers retain the originals separately for local paths and diagnostics.
+    ///
+    /// Files under the configured library root use `$/relative/path`; other files
+    /// use paths relative to `root`, including `../` for sources outside it. Names
+    /// use `/` separators and reversible percent escapes for reserved characters
+    /// and invalid UTF-8 bytes. Sources without a loader origin remain unchanged.
+    /// User files and `root` must have a common filesystem prefix (drive on Windows).
+    /// This operation changes neither the loader nor any supplied source.
+    pub async fn logical_sources(
+        &self,
+        sources: impl IntoIterator<Item = Source>,
+        root: &Path,
+        execution: &Execution,
+        cancellation: &Cancellation,
+    ) -> Result<BTreeMap<SourceId, Source>, LoadError> {
+        cancellation.check()?;
+        let sources = sources
+            .into_iter()
+            .map(|source| {
+                let path = self.path(&source).map(Path::to_path_buf);
+                (source, path)
+            })
+            .collect();
+        let root = root.to_path_buf();
+        let library = self.library_root.clone();
+        execution
+            .run(cancellation, move |cancellation| {
+                logical::sources(sources, &root, &library, cancellation)
+            })
+            .await?
+    }
+
     /// Read current disk contents without replacing authoritative supplied text.
     pub fn load_file(&mut self, path: &Path) -> io::Result<Source> {
         let path = normalize_path(path)?;
@@ -204,6 +581,18 @@ impl Loader {
         let source = file.version(text);
         file.cached = source.clone();
         Ok(source)
+    }
+
+    /// Read current disk text asynchronously without replacing authoritative editor text.
+    /// Path normalization runs on a worker; cancelled reads publish no new cached source.
+    pub async fn load_file_async(
+        &mut self,
+        path: &Path,
+        execution: &Execution,
+        cancellation: &Cancellation,
+    ) -> Result<Source, LoadError> {
+        let path = normalize_path_async(path, execution, cancellation).await?;
+        self.read_path_async(path, execution, cancellation).await
     }
 
     /// Supply text for a file's imports until `remove_source` restores disk loading.
@@ -268,6 +657,27 @@ impl Loader {
         self.load_file(&path)
     }
 
+    /// Resolve an explicit binding or supplied text before asynchronously reading disk.
+    pub async fn load_import_async(
+        &mut self,
+        source: &Source,
+        reference: &str,
+        execution: &Execution,
+        cancellation: &Cancellation,
+    ) -> Result<Source, LoadError> {
+        cancellation.check()?;
+        validate_reference(reference)?;
+        if let Some(target) = self.imports.get(&(source.id(), reference.into())) {
+            return Ok(target.clone());
+        }
+        let unresolved = self.import_path(source, reference)?;
+        let path = normalize_path_async(&unresolved, execution, cancellation).await?;
+        if let Some(source) = self.files.get(&path).and_then(|file| file.supplied.clone()) {
+            return Ok(source);
+        }
+        self.read_path_async(path, execution, cancellation).await
+    }
+
     /// Recover an exact OS path from a source produced by this loader.
     pub fn path(&self, source: &Source) -> Option<&Path> {
         self.origins.get(&source.id()).map(PathBuf::as_path)
@@ -275,17 +685,60 @@ impl Loader {
 
     /// Resolve a filesystem reference; `$/` also works for named in-memory sources.
     pub fn resolve_import(&self, source: &Source, reference: &str) -> io::Result<PathBuf> {
+        normalize_path(&self.import_path(source, reference)?)
+    }
+
+    fn import_path(&self, source: &Source, reference: &str) -> io::Result<PathBuf> {
         validate_reference(reference)?;
         if let Some(relative) = reference.strip_prefix("$/") {
-            return normalize_path(&self.library_root.join(relative));
+            return Ok(self.library_root.join(relative));
         }
         let origin = self.path(source).ok_or_else(unknown_source)?;
-        normalize_path(&origin.parent().unwrap_or(Path::new(".")).join(reference))
+        Ok(origin.parent().unwrap_or(Path::new(".")).join(reference))
+    }
+
+    async fn read_path_async(
+        &mut self,
+        path: PathBuf,
+        execution: &Execution,
+        cancellation: &Cancellation,
+    ) -> Result<Source, LoadError> {
+        let text = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(resin_executor::Error::Cancelled.into()),
+            text = tokio::fs::read_to_string(&path) => text.map_err(|error| file_error(&path, error))?,
+        };
+        let previous = self.files.get(&path).cloned();
+        let source_path = path.clone();
+        let source = execution
+            .run(cancellation, move |_| {
+                let text: Arc<str> = text.into();
+                match previous {
+                    Some(file) => file.version(text),
+                    None => Source::with_identity(
+                        SourceId::file(source_path.clone()),
+                        source_path.to_string_lossy().into_owned(),
+                        text,
+                    ),
+                }
+            })
+            .await?;
+        let file = self.files.entry(path.clone()).or_insert_with(|| File {
+            cached: source.clone(),
+            supplied: None,
+        });
+        file.cached = source.clone();
+        self.origins.insert(source.id(), path);
+        Ok(source)
     }
 
     fn file(&mut self, path: PathBuf, text: Arc<str>) -> &mut File {
         let file = self.files.entry(path.clone()).or_insert_with(|| File {
-            cached: Source::new(path.to_string_lossy().into_owned(), text),
+            cached: Source::with_identity(
+                SourceId::file(path.clone()),
+                path.to_string_lossy().into_owned(),
+                text,
+            ),
             supplied: None,
         });
         self.origins.insert(file.cached.id(), path);
@@ -303,6 +756,7 @@ pub fn library_root() -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resin"))
 }
 
+#[derive(Clone)]
 struct File {
     cached: Source,
     supplied: Option<Source>,
@@ -323,8 +777,22 @@ impl File {
 }
 
 fn read_file(path: &Path) -> io::Result<String> {
-    std::fs::read_to_string(path)
-        .map_err(|error| io::Error::new(error.kind(), format!("{}: {error}", path.display())))
+    std::fs::read_to_string(path).map_err(|error| file_error(path, error))
+}
+
+fn file_error(path: &Path, error: io::Error) -> io::Error {
+    io::Error::new(error.kind(), format!("{}: {error}", path.display()))
+}
+
+async fn normalize_path_async(
+    path: &Path,
+    execution: &Execution,
+    cancellation: &Cancellation,
+) -> Result<PathBuf, LoadError> {
+    let path = path.to_path_buf();
+    Ok(execution
+        .run(cancellation, move |_| normalize_path(&path))
+        .await??)
 }
 
 fn validate_reference(reference: &str) -> io::Result<()> {
@@ -353,4 +821,27 @@ fn unknown_source() -> io::Error {
         io::ErrorKind::InvalidInput,
         "relative imports require a registered file source or an explicit import binding",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn equal_digests_still_compare_the_exact_content() {
+        let first = Source::new("same", "first");
+        // Force a collision privately; callers can construct only computed digests.
+        let second = Source(Arc::new(Text {
+            id: first.id(),
+            name: first.0.name.clone(),
+            digest: *first.content_hash(),
+            text: "second".into(),
+        }));
+        assert_ne!(first, second);
+        assert_ne!(first.cmp(&second), std::cmp::Ordering::Equal);
+        let hashed: std::collections::HashSet<_> = [first.clone(), second.clone()].into();
+        let ordered: BTreeSet<_> = [first, second].into();
+        assert_eq!(hashed.len(), 2);
+        assert_eq!(ordered.len(), 2);
+    }
 }

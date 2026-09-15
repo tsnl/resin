@@ -1,11 +1,10 @@
 #![cfg(feature = "gpu")]
 
-#[path = "support/pipeline.rs"]
-mod pipeline;
-#[path = "support/project.rs"]
-mod project;
-#[path = "support/shaders.rs"]
-mod shaders;
+#[allow(dead_code)]
+mod support;
+
+use support::pipeline;
+use support::project;
 
 use resin_runtime::{ResinGpu, ResinStatus, testing::lock_gpu};
 use std::{

@@ -386,7 +386,7 @@ impl std::error::Error for Error {}
 
 /// Semantic target of a concrete function instance. Shader stages share helper rules;
 /// their entry conventions are retained separately in `Module::shaders`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Profile {
     Host,
     Shader,
@@ -394,7 +394,7 @@ pub enum Profile {
 
 /// One externally requested application. Arguments are closed HIR type expressions;
 /// nominal origins become concrete identities only when an operation demands their types.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Entry {
     pub name: Arc<str>,
     pub function: FunctionId,
@@ -431,16 +431,23 @@ impl Entry {
 
 /// Build LIR for requested entries and their transitive function/type dependencies.
 /// An empty entry list requests every ordinary root. Verification is a separate pass.
-pub fn build_lir(
-    source: &resin_hir::Module,
-    entries: &[Entry],
-    options: &LoweringOptions,
-) -> Result<Module, Vec<Error>> {
-    lower::instantiate(source, entries, options)
+pub async fn build_lir(
+    source: Arc<resin_hir::Module>,
+    entries: Vec<Entry>,
+    options: LoweringOptions,
+    execution: &resin_executor::Execution,
+    cancellation: &resin_executor::Cancellation,
+) -> Result<Module, BuildError> {
+    execution
+        .run(cancellation, move |cancellation| {
+            lower::instantiate(&source, &entries, &options, cancellation)
+        })
+        .await
+        .map_err(|error| BuildError::Execution { error })?
 }
 
 /// Resource limits for one HIR-to-LIR construction run.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LoweringOptions {
     pub max_monomorphs_per_function: NonZeroUsize,
 }
@@ -449,6 +456,98 @@ impl Default for LoweringOptions {
     fn default() -> Self {
         Self {
             max_monomorphs_per_function: NonZeroUsize::new(16 * 1024).unwrap(),
+        }
+    }
+}
+
+/// Complete source-backed lowering inputs, with a canonical requested entry set.
+/// HIR currently has no configurable semantic options beyond its captured graph.
+/// Direct clients constructing HIR themselves need not construct a source cache key.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LirKey {
+    inputs: Arc<resin_source::SourceGraph>,
+    entries: Vec<Entry>,
+    options: LoweringOptions,
+}
+
+impl LirKey {
+    pub fn new(
+        inputs: Arc<resin_source::SourceGraph>,
+        entries: impl IntoIterator<Item = Entry>,
+        options: LoweringOptions,
+    ) -> Self {
+        let mut entries: Vec<_> = entries.into_iter().collect();
+        entries.sort();
+        entries.dedup();
+        Self {
+            inputs,
+            entries,
+            options,
+        }
+    }
+
+    pub fn inputs(&self) -> &Arc<resin_source::SourceGraph> {
+        &self.inputs
+    }
+
+    pub fn entries(&self) -> &[Entry] {
+        &self.entries
+    }
+
+    pub fn options(&self) -> &LoweringOptions {
+        &self.options
+    }
+}
+
+/// Execution failures are separate from completed source diagnostics.
+#[derive(Debug)]
+pub enum BuildError {
+    Execution { error: resin_executor::Error },
+    Diagnostics { errors: Vec<Error> },
+}
+
+impl From<resin_executor::Error> for BuildError {
+    fn from(error: resin_executor::Error) -> Self {
+        Self::Execution { error }
+    }
+}
+
+impl From<Vec<Error>> for BuildError {
+    fn from(errors: Vec<Error>) -> Self {
+        Self::Diagnostics { errors }
+    }
+}
+
+impl From<Error> for BuildError {
+    fn from(error: Error) -> Self {
+        Self::Diagnostics {
+            errors: vec![error],
+        }
+    }
+}
+
+impl std::fmt::Display for BuildError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Execution { error } => error.fmt(formatter),
+            Self::Diagnostics { errors } => {
+                for (index, error) in errors.iter().enumerate() {
+                    if index != 0 {
+                        formatter.write_str("\n")?;
+                    }
+                    error.fmt(formatter)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for BuildError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Execution { error } => Some(error),
+            Self::Diagnostics { errors } => errors.first().map(|error| error as _),
         }
     }
 }
@@ -582,6 +681,23 @@ pub struct VerifiedModule {
 }
 
 impl VerifiedModule {
+    /// Verify an owned module on bounded workers, observing cancellation between functions.
+    pub async fn build(
+        mut module: Module,
+        execution: &resin_executor::Execution,
+        cancellation: &resin_executor::Cancellation,
+    ) -> Result<Self, VerificationError> {
+        execution
+            .run(cancellation, move |cancellation| {
+                let analysis = verify::analyze_cancellable(&module, cancellation)?;
+                module.types = analysis.types.clone();
+                Ok(Self { module, analysis })
+            })
+            .await
+            .map_err(|error| VerificationError::Execution { error })?
+    }
+
+    /// Certify a direct IR value synchronously. Application pipelines use `build()`.
     pub fn new(mut module: Module) -> Result<Self, VerifyError> {
         let analysis = verify::analyze(&module)?;
         module.types = analysis.types.clone();
@@ -598,6 +714,42 @@ impl VerifiedModule {
     /// Discard the certificate and recover editable LIR.
     pub fn into_module(self) -> Module {
         self.module
+    }
+}
+
+#[derive(Debug)]
+pub enum VerificationError {
+    Execution { error: resin_executor::Error },
+    Invalid { error: VerifyError },
+}
+
+impl From<resin_executor::Error> for VerificationError {
+    fn from(error: resin_executor::Error) -> Self {
+        Self::Execution { error }
+    }
+}
+
+impl From<VerifyError> for VerificationError {
+    fn from(error: VerifyError) -> Self {
+        Self::Invalid { error }
+    }
+}
+
+impl std::fmt::Display for VerificationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Execution { error } => error.fmt(formatter),
+            Self::Invalid { error } => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for VerificationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Execution { error } => Some(error),
+            Self::Invalid { error } => Some(error),
+        }
     }
 }
 

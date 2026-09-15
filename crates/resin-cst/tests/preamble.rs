@@ -1,7 +1,8 @@
-use resin_cst::build_cst;
+mod common;
+use common::parse;
 
-#[test]
-fn preamble_queries_decode_paths_and_preserve_empty_header_groups() {
+#[tokio::test]
+async fn preamble_queries_decode_paths_and_preserve_empty_header_groups() {
     let source = r#"// import { "comment.resin" };
 export { call };
 extern {
@@ -11,7 +12,7 @@ extern {
 import { "../types.resin", "back\\slash.resin" };
 def body() = { "import { \"body.resin\" };" };
 "#;
-    let document = build_cst(source, None);
+    let document = parse(source, None).await;
     let preamble = document.preamble();
     assert!(preamble.diagnostics.is_empty(), "{preamble:?}");
     assert_eq!(preamble.headers.len(), 2);
@@ -28,8 +29,8 @@ def body() = { "import { \"body.resin\" };" };
     }
 }
 
-#[test]
-fn unrelated_body_errors_do_not_invalidate_dependency_declarations() {
+#[tokio::test]
+async fn unrelated_body_errors_do_not_invalidate_dependency_declarations() {
     let prefix = "extern { \"local.h\": {} }; import { \"types.resin\" };";
     for body in [
         "def main() = { var x = ; };",
@@ -38,7 +39,7 @@ fn unrelated_body_errors_do_not_invalidate_dependency_declarations() {
         "struct Broken { value:",
         "extern type Handle; def main() = { missing( };",
     ] {
-        let document = build_cst(format!("{prefix}{body}"), None);
+        let document = parse(format!("{prefix}{body}"), None).await;
         assert!(document.tree().root_node().has_error(), "{body}");
         let preamble = document.preamble();
         assert!(preamble.diagnostics.is_empty(), "{body}: {preamble:?}");
@@ -47,15 +48,15 @@ fn unrelated_body_errors_do_not_invalidate_dependency_declarations() {
     }
 }
 
-#[test]
-fn incomplete_preambles_retain_complete_paths_and_report_incompleteness() {
+#[tokio::test]
+async fn incomplete_preambles_retain_complete_paths_and_report_incompleteness() {
     for source in [
         "import { \"one.resin\", \"two.resin\"",
         "import { \"one.resin\", \"unfinished",
         "extern { \"local.h\": { def call();",
         "extern { \"local.h\":",
     ] {
-        let document = build_cst(source, None);
+        let document = parse(source, None).await;
         let preamble = document.preamble();
         assert!(!preamble.diagnostics.is_empty(), "{source}: {preamble:?}");
         let dependencies = if source.starts_with("import") {
@@ -71,8 +72,8 @@ fn incomplete_preambles_retain_complete_paths_and_report_incompleteness() {
     }
 }
 
-#[test]
-fn malformed_preambles_never_claim_to_be_complete() {
+#[tokio::test]
+async fn malformed_preambles_never_claim_to_be_complete() {
     for source in [
         "import",
         "extern {",
@@ -83,30 +84,36 @@ fn malformed_preambles_never_claim_to_be_complete() {
         "def first() = {}; import { \"late.resin\" };",
         "extern type Native; extern { \"late.h\": {} };",
     ] {
-        let preamble = build_cst(source, None).preamble();
+        let preamble = parse(source, None).await.preamble();
         assert!(!preamble.diagnostics.is_empty(), "{source}: {preamble:?}");
     }
 }
 
-#[test]
-fn misplaced_clauses_report_errors_without_collecting_body_dependencies() {
+#[tokio::test]
+async fn misplaced_clauses_report_errors_without_collecting_body_dependencies() {
     let source = r#"import { "valid.resin" };
         def broken() = { import { "body.resin" }; };
         import { "late.resin" };
     "#;
-    let preamble = build_cst(source, None).preamble();
+    let preamble = parse(source, None).await.preamble();
     assert!(!preamble.diagnostics.is_empty());
     assert_eq!(preamble.imports.len(), 1);
     assert_eq!(&*preamble.imports[0].val, "valid.resin");
     let body_only = source
         .strip_suffix("import { \"late.resin\" };\n    ")
         .unwrap();
-    assert!(build_cst(body_only, None).preamble().diagnostics.is_empty());
+    assert!(
+        parse(body_only, None)
+            .await
+            .preamble()
+            .diagnostics
+            .is_empty()
+    );
 }
 
-#[test]
-fn opaque_foreign_types_are_body_declarations() {
-    let preamble = build_cst("extern type Handle;", None).preamble();
+#[tokio::test]
+async fn opaque_foreign_types_are_body_declarations() {
+    let preamble = parse("extern type Handle;", None).await.preamble();
     assert!(preamble.headers.is_empty());
     assert!(preamble.diagnostics.is_empty());
 }

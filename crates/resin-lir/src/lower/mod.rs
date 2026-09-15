@@ -24,26 +24,26 @@ mod substitute;
 mod sums;
 mod terms;
 
-use crate::{Error, ErrorKind};
+use crate::ErrorKind;
 
 pub fn instantiate(
     source: &resin_hir::Module,
     entries: &[crate::Entry],
     options: &crate::LoweringOptions,
-) -> Result<Module, Vec<Error>> {
+    cancellation: &resin_executor::Cancellation,
+) -> Result<Module, crate::BuildError> {
+    cancellation.check()?;
     let mut instances = instances::Instances::new(source, options);
     if entries.is_empty() {
-        instances.reserve_roots().map_err(|error| vec![error])?;
-        instances
-            .reserve_types()
-            .map_err(|error| vec![instances.lower_error(error, None, None)])?;
+        instances.reserve_roots(cancellation)?;
+        instances.reserve_types(cancellation)?;
     } else {
-        instances
-            .reserve_entries(entries)
-            .map_err(|error| vec![error])?;
+        instances.reserve_entries(entries, cancellation)?;
     }
-    let functions = instances.lower()?;
-    instances.assemble(functions)
+    cancellation.check()?;
+    let functions = instances.lower(cancellation)?;
+    cancellation.check()?;
+    instances.assemble(functions, cancellation)
 }
 
 /// A completed function uses local instruction positions; assembly supplies its ID.

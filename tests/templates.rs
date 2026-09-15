@@ -137,7 +137,7 @@ fn concrete_template_errors_report_the_application_chain() {
         "def failure<E>(value: E) -> Result<int, E> = { err(value) }; def main() = { failure(1); };",
     ] {
         let tree = hir(source);
-        let error = resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default())
+        let error = support::frontend::lower(&tree, &[], &resin_lir::LoweringOptions::default())
             .unwrap_err()
             .remove(0);
         assert!(!error.applications.is_empty(), "{error:?}");
@@ -164,14 +164,15 @@ fn generic_union_matches_use_concrete_tags_after_substitution() {
 #[test]
 fn source_recursion_memoizes_instances_and_respects_the_configured_limit() {
     let tree = hir("def recur<T>(value: T) = { recur(value) }; def main() = { recur(1); };");
-    let module = resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
+    let module =
+        support::frontend::lower(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
     assert_eq!(module.functions.len(), 2);
     let source = resin_source::Source::new(
         "growing.resin",
         "export { main }; def grow<T>(value: T) = { grow(&value) }; def main() = { grow(1); };",
     );
     let mut loader = resin_source::Loader::new(resin_source::library_root());
-    let output = resin_hir::Hir::build(source, &mut loader, None);
+    let output = support::frontend::analyze(source, &mut loader, None);
     let options = resin_lir::LoweringOptions {
         max_monomorphs_per_function: std::num::NonZeroUsize::new(3).unwrap(),
     };
