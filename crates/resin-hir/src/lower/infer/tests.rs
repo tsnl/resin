@@ -33,8 +33,8 @@ fn record(ty: Ty) -> Ty {
 #[test]
 fn empty_arrays_need_an_injected_element_type() {
     let compile = |source: &str| {
-        crate::generate(
-            &resin_ast::generate(&resin_cst::Document::reparse(source.into(), None)).unwrap(),
+        crate::build_hir(
+            &resin_ast::build_ast(&resin_cst::Document::build(source.into(), None)).unwrap(),
         )
     };
     assert_eq!(

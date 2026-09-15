@@ -133,7 +133,12 @@ fn compile_roots(
             .map(Ok)
             .unwrap_or_else(|| loader.load_file(&path));
         match source {
-            Ok(source) => retain_entry(&mut result, frontend.analyze(source, loader), loader, path),
+            Ok(source) => retain_entry(
+                &mut result,
+                frontend.build_hir(source, loader),
+                loader,
+                path,
+            ),
             Err(error) => eprintln!("resin-lsp: {}: {error}", path.display()),
         }
     }

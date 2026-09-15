@@ -31,8 +31,8 @@ impl Default for FrontendConfig {
     }
 }
 
-/// Exported entry and Host/Shader profile to instantiate as LIR.
-/// Selected during generate, not while analyzing source.
+/// Exported entry and Host/Shader profile to build as LIR.
+/// Selected when building LIR, not while building HIR.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Target {
     Host { entry: Arc<str> },
@@ -56,8 +56,8 @@ impl Frontend {
             ..Default::default()
         }
     }
-    /// Construct HIR and retained editor facts for every declaration, without LIR.
-    pub fn analyze(
+    /// Build HIR and retained editor facts for every declaration, without LIR.
+    pub fn build_hir(
         &mut self,
         source: Source,
         loader: &mut resin_source::Loader,
@@ -151,14 +151,14 @@ impl FrontendOutput {
     pub fn hir(&self) -> Result<&resin_hir::Module, SourceError> {
         self.hir.as_ref().map_err(Clone::clone)
     }
-    /// Instantiate verified LIR for the requested host and shader entries.
-    pub fn instantiate(
+    /// Build verified LIR for the requested host and shader entries.
+    pub fn build_lir(
         &self,
         targets: &[Target],
     ) -> Result<resin_lir::VerifiedModule, Vec<SourceError>> {
         let program = self.program.as_ref().map_err(|error| vec![error.clone()])?;
         let hir = self.hir.as_ref().map_err(|error| vec![error.clone()])?;
-        lower_to_verified_lir(program, hir, &self.config, targets)
+        build_verified_lir(program, hir, &self.config, targets)
     }
     pub fn recovered_file(&self, source: &Source) -> Option<&resin_ast::SourceFile> {
         self.documents.get(source).map(|document| &document.file)
@@ -206,7 +206,7 @@ impl Frontend {
         if let Some(old) = old.as_ref().filter(|old| old.source == *source) {
             return old.clone();
         }
-        let document = Arc::new(ParsedDocument::reparse(source.clone(), old.as_deref()));
+        let document = Arc::new(ParsedDocument::build(source.clone(), old.as_deref()));
         self.parsed.insert(source.id(), Arc::downgrade(&document));
         document
     }
@@ -225,7 +225,7 @@ impl FrontendOutput {
             .map(|(source, document)| (source.clone(), document.syntax.clone()))
             .collect();
         let load_error = loaded.errors.first().cloned();
-        let analysis = analyze_loaded(&loaded.program);
+        let analysis = build_checked_hir(&loaded.program);
         let hir_error = load_error.clone().or(analysis.hir_error);
         let errors = loaded
             .errors
@@ -253,8 +253,8 @@ struct Analyzed {
     hir_error: Option<SourceError>,
 }
 
-fn analyze_loaded(program: &resin_ast::Program) -> Analyzed {
-    let checked = resin_hir::analyze_program(program);
+fn build_checked_hir(program: &resin_ast::Program) -> Analyzed {
+    let checked = resin_hir::build_hir_program_checked(program);
     Analyzed {
         hir_error: checked.diagnostics.first().cloned(),
         semantics: checked.semantics,
@@ -281,9 +281,8 @@ struct ParsedDocument {
     errors: Vec<(Span, String)>,
 }
 impl ParsedDocument {
-    fn reparse(source: Source, previous: Option<&Self>) -> Self {
-        let syntax =
-            resin_cst::Document::reparse(source.text().into(), previous.map(|d| d.syntax.as_ref()));
+    fn build(source: Source, previous: Option<&Self>) -> Self {
+        let syntax = resin_cst::build_cst(source.text(), previous.map(|d| d.syntax.as_ref()));
         let resin_ast::Parsed { file, errors } = resin_ast::recover(&syntax);
         Self {
             source,
@@ -425,7 +424,7 @@ fn imported_at(error: &mut SourceError, importer: &resin_ast::SourceModule, span
 // Lowering and diagnostics
 //
 
-fn lower_to_verified_lir(
+fn build_verified_lir(
     program: &resin_ast::Program,
     hir: &resin_hir::Module,
     config: &FrontendConfig,
@@ -435,7 +434,7 @@ fn lower_to_verified_lir(
         max_monomorphs_per_function: config.max_monomorphs_per_function,
     };
     let entries = entry_requests(program, hir, targets).map_err(|error| vec![error])?;
-    let lir = resin_lir::instantiate(hir, &entries, &options).map_err(|errors| {
+    let lir = resin_lir::build_lir(hir, &entries, &options).map_err(|errors| {
         errors
             .into_iter()
             .map(|error| lowering_error(program, error))
@@ -460,7 +459,8 @@ fn entry_requests(
         return Err(SourceError::new(
             source.clone(),
             None,
-            "compilation requires at least one target; use analyze for declaration analysis".into(),
+            "compilation requires at least one target; use build_hir for declaration analysis"
+                .into(),
         ));
     }
     targets

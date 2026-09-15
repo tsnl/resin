@@ -267,12 +267,12 @@ impl fmt::Display for AstError {
 
 impl std::error::Error for AstError {}
 
-/// Generate a complete AST from a concrete syntax document.
-pub fn generate(source: &resin_cst::Document) -> Result<SourceFile, AstError> {
+/// Build a complete AST from a concrete syntax document.
+pub fn build_ast(source: &resin_cst::Document) -> Result<SourceFile, AstError> {
     lower::generate(source)
 }
 
-/// Recover a tree with explicit holes and retain every syntax diagnostic.
+/// Build an AST with explicit holes and retain every syntax diagnostic.
 pub fn recover(source: &resin_cst::Document) -> Parsed {
     lower::document(source)
 }

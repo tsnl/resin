@@ -5,17 +5,17 @@ use resin_frontend::{Frontend, FrontendOutput, Target};
 use resin_source::{Loader, Source};
 use std::{path::PathBuf, sync::Arc};
 
-fn analyze(source: &str) -> Arc<FrontendOutput> {
+fn build_hir(source: &str) -> Arc<FrontendOutput> {
     let library = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resin");
     let mut loader = Loader::new(library);
-    Frontend::new().analyze(Source::new("span-test.resin", source), &mut loader)
+    Frontend::new().build_hir(Source::new("span-test.resin", source), &mut loader)
 }
 
 fn compile(
     source: &str,
     target: Target,
 ) -> Result<resin_lir::VerifiedModule, Vec<resin_source::SourceError>> {
-    analyze(source).instantiate(&[target])
+    build_hir(source).build_lir(&[target])
 }
 
 fn run(source: &str) -> std::process::Output {

@@ -68,7 +68,7 @@ fn ambiguous_projection_diagnostics_are_independent_of_declaration_and_import_or
                 );
                 loader.set_import(&source, &file, target).unwrap();
             }
-            let analysis = Frontend::new().analyze(source, &mut loader);
+            let analysis = Frontend::new().build_hir(source, &mut loader);
             let errors = analysis.diagnostics();
             assert_eq!(errors.len(), 1, "{errors:?}");
             // Importing moves the call's source span; the diagnostic itself is stable.
@@ -94,7 +94,7 @@ fn unfinished_bridge_completions_use_registered_source_pipeline_names() {
             ),
         );
         let analysis =
-            Frontend::new().analyze(source.clone(), &mut Loader::new(Default::default()));
+            Frontend::new().build_hir(source.clone(), &mut Loader::new(Default::default()));
         let offset = source.text().rfind(".;").unwrap() + 1;
         let completions = analysis.completions(&source, offset);
         let methods = if receiver.eq_ignore_ascii_case("device") {

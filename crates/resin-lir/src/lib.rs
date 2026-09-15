@@ -401,9 +401,9 @@ pub struct Entry {
     pub profile: Profile,
 }
 
-/// Construct only requested entries and their transitive function/type dependencies.
+/// Build LIR for only requested entries and their transitive function/type dependencies.
 /// The input still contains all structurally completed source declarations.
-pub fn instantiate(
+pub fn build_lir(
     source: &resin_hir::Module,
     entries: &[Entry],
     options: &LoweringOptions,
@@ -425,19 +425,14 @@ impl Default for LoweringOptions {
     }
 }
 
-/// Lower a typed tree into storage and control flow; verification is a separate pass.
-pub fn generate(source: &resin_hir::Module) -> Result<Module, Error> {
-    analyze(source).map_err(|mut errors| errors.remove(0))
+/// Build LIR for every concrete body; verification is a separate pass.
+pub fn build_lir_all(source: &resin_hir::Module) -> Result<Module, Error> {
+    build_lir_all_with_options(source, &LoweringOptions::default())
+        .map_err(|mut errors| errors.remove(0))
 }
 
-/// Collect independent lowering errors across functions with default limits.
-pub fn analyze(source: &resin_hir::Module) -> Result<Module, Vec<Error>> {
-    analyze_with_options(source, &LoweringOptions::default())
-}
-
-/// Instantiate completed schemes, then lower each concrete body into storage.
-/// The source retains one body per definition; only the result contains instances.
-pub fn analyze_with_options(
+/// Build LIR for every concrete body, collecting independent errors.
+pub fn build_lir_all_with_options(
     source: &resin_hir::Module,
     options: &LoweringOptions,
 ) -> Result<Module, Vec<Error>> {

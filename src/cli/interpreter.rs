@@ -25,7 +25,7 @@ impl Interpreter {
     fn lower(request: &Request) -> Result<std::sync::Arc<FrontendOutput>> {
         let mut loader = resin_source::Loader::new(request.library_root.clone());
         let source = loader.load_file(&request.input.path)?;
-        Ok(resin_frontend::Frontend::new().analyze(source, &mut loader))
+        Ok(resin_frontend::Frontend::new().build_hir(source, &mut loader))
     }
 
     fn generate(
@@ -37,10 +37,10 @@ impl Interpreter {
             .tools
             .generated(output.source().name(), &request.input.entry);
         let lir = output
-            .instantiate(&[Target::Host {
+            .build_lir(&[Target::Host {
                 entry: request.input.entry.clone().into(),
             }])
-            .map_err(instantiate_error)?;
+            .map_err(build_lir_error)?;
         Ok(resin_codegen::generate(
             lir.view(),
             Some(&request.input.entry),
@@ -68,7 +68,7 @@ impl Interpreter {
     }
 }
 
-fn instantiate_error(
+fn build_lir_error(
     errors: Vec<resin_source::SourceError>,
 ) -> Box<dyn std::error::Error + Send + Sync> {
     errors

@@ -287,8 +287,8 @@ fn build(
             entry: "kernel".into(),
         },
     };
-    let output = resin_frontend::Frontend::new().analyze(source, &mut loader);
-    let lir = output.instantiate(&[target]).map_err(|errors| {
+    let output = resin_frontend::Frontend::new().build_hir(source, &mut loader);
+    let lir = output.build_lir(&[target]).map_err(|errors| {
         errors
             .into_iter()
             .map(|error| error.to_string())

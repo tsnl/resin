@@ -3,9 +3,9 @@ use resin_source::prelude::*;
 
 fn generate(text: &str) -> Result<resin_hir::Module, SourceError> {
     let source = Source::new("strings", text);
-    let document = resin_cst::Document::reparse(source.text().into(), None);
-    let file = resin_ast::generate(&document).unwrap();
-    resin_hir::generate_program(&resin_ast::Program {
+    let document = resin_cst::Document::build(source.text().into(), None);
+    let file = resin_ast::build_ast(&document).unwrap();
+    resin_hir::build_hir_program(&resin_ast::Program {
         modules: vec![resin_ast::SourceModule {
             source,
             file,

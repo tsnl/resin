@@ -123,7 +123,7 @@ fn expected_results_select_arguments_and_concrete_casts_run_after_substitution()
 }
 
 fn hir(source: &str) -> resin_hir::Module {
-    resin_hir::generate(&support::parse(source)).unwrap()
+    resin_hir::build_hir(&support::parse(source)).unwrap()
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn concrete_template_errors_report_the_application_chain() {
         "def failure<E>(value: E) -> Result<int, E> = { err(value) }; def main() = { failure(1); };",
     ] {
         let tree = hir(source);
-        let error = resin_lir::generate(&tree).unwrap_err();
+        let error = resin_lir::build_lir_all(&tree).unwrap_err();
         assert!(!error.applications.is_empty(), "{error:?}");
     }
 }
@@ -162,7 +162,7 @@ fn generic_union_matches_use_concrete_tags_after_substitution() {
 #[test]
 fn source_recursion_memoizes_instances_and_respects_the_configured_limit() {
     let tree = hir("def recur<T>(value: T) = { recur(value) }; def main() = { recur(1); };");
-    let module = resin_lir::generate(&tree).unwrap();
+    let module = resin_lir::build_lir_all(&tree).unwrap();
     assert_eq!(module.functions.len(), 2);
     let source = resin_source::Source::new(
         "growing.resin",
@@ -172,8 +172,8 @@ fn source_recursion_memoizes_instances_and_respects_the_configured_limit() {
     let output = resin_frontend::Frontend::with_config(resin_frontend::FrontendConfig {
         max_monomorphs_per_function: std::num::NonZeroUsize::new(3).unwrap(),
     })
-    .analyze(source, &mut loader);
-    let message = match output.instantiate(&[resin_frontend::Target::Host {
+    .build_hir(source, &mut loader);
+    let message = match output.build_lir(&[resin_frontend::Target::Host {
         entry: "main".into(),
     }]) {
         Ok(_) => panic!("expected monomorph limit"),

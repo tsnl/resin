@@ -421,13 +421,13 @@ pub enum ReceiverConversion {
 // HIR construction and printing
 //
 
-/// Check a standalone source file; imports require a resolved Program.
-pub fn generate(file: &resin_ast::SourceFile) -> Result<Module, GenerateError> {
+/// Build HIR from a standalone source file; imports require a resolved Program.
+pub fn build_hir(file: &resin_ast::SourceFile) -> Result<Module, GenerateError> {
     lower::generate(file)
 }
 
-/// Check declarations in import order, requiring a completely typed tree.
-pub fn generate_program(program: &resin_ast::Program) -> Result<Module, SourceError> {
+/// Build HIR from declarations in import order, requiring a completely typed tree.
+pub fn build_hir_program(program: &resin_ast::Program) -> Result<Module, SourceError> {
     lower::generate_program(program)
 }
 
@@ -484,8 +484,8 @@ pub struct Completion {
     pub replace: Span,
 }
 
-/// Retain diagnostics and editor facts even when a complete tree cannot be produced.
-pub fn analyze_program(program: &resin_ast::Program) -> CheckedProgram {
+/// Build HIR and editor facts even when a complete tree cannot be produced.
+pub fn build_hir_program_checked(program: &resin_ast::Program) -> CheckedProgram {
     lower::analyze_program(program)
 }
 

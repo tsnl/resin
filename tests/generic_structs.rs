@@ -243,8 +243,8 @@ fn unused_generic_arguments_do_not_demand_recursive_layouts() {
 #[test]
 fn demanding_an_infinite_generic_layout_reports_the_application() {
     let source = "struct Recursive<T> { next: Recursive<T> }; def measure<T>() -> ulong = { size_of(T) }; def main() -> ulong = { measure::<Recursive<int>>() };";
-    let hir = resin_hir::generate(&support::parse(source)).unwrap();
-    let error = resin_lir::generate(&hir).unwrap_err();
+    let hir = resin_hir::build_hir(&support::parse(source)).unwrap();
+    let error = resin_lir::build_lir_all(&hir).unwrap_err();
     assert!(!error.applications.is_empty(), "{error}");
     assert!(
         error.applications.iter().any(|application| application
@@ -258,8 +258,8 @@ fn demanding_an_infinite_generic_layout_reports_the_application() {
 #[test]
 fn generic_constructor_literals_are_range_checked_after_substitution() {
     let source = "struct Cell<T> { value: T }; def make<T>() -> Cell<T> = { Cell<T> { value = 256 } }; def main() -> Cell<ubyte> = { make() };";
-    let hir = resin_hir::generate(&support::parse(source)).unwrap();
-    let error = resin_lir::generate(&hir).unwrap_err();
+    let hir = resin_hir::build_hir(&support::parse(source)).unwrap();
+    let error = resin_lir::build_lir_all(&hir).unwrap_err();
     assert!(!error.applications.is_empty(), "{error}");
     assert!(error.to_string().contains("out of range"), "{error}");
 }

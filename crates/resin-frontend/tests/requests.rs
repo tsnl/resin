@@ -19,13 +19,13 @@ fn loader() -> Loader {
 
 fn module(output: &FrontendOutput, targets: &[Target]) -> resin_lir::Module {
     output
-        .instantiate(targets)
+        .build_lir(targets)
         .unwrap_or_else(|errors| panic!("{errors:?}"))
         .into_module()
 }
 
 fn failed(output: &FrontendOutput, targets: &[Target]) -> Vec<resin_source::SourceError> {
-    match output.instantiate(targets) {
+    match output.build_lir(targets) {
         Ok(_) => panic!("expected LIR instantiation to fail"),
         Err(errors) => errors,
     }
@@ -39,10 +39,10 @@ fn declarations_do_not_instantiate_unused_concrete_operations() {
     );
     let mut frontend = Frontend::new();
     let mut loader = loader();
-    let declarations = frontend.analyze(source.clone(), &mut loader);
+    let declarations = frontend.build_hir(source.clone(), &mut loader);
     assert!(declarations.diagnostics().is_empty());
     assert!(declarations.hir().is_ok());
-    let compiled = frontend.analyze(source.clone(), &mut loader);
+    let compiled = frontend.build_hir(source.clone(), &mut loader);
     assert!(Arc::ptr_eq(&declarations, &compiled));
     assert_eq!(module(&compiled, &[host("main")]).functions.len(), 1);
     let errors = failed(&compiled, &[host("invalid")]);
@@ -57,7 +57,7 @@ fn target_sets_are_canonicalized_for_scheduling() {
     );
     let mut frontend = Frontend::new();
     let mut loader = loader();
-    let output = frontend.analyze(source, &mut loader);
+    let output = frontend.build_hir(source, &mut loader);
     let both = module(&output, &[host("second"), host("first")]);
     let repeated = module(&output, &[host("first"), host("second"), host("first")]);
     assert_eq!(both.entries.len(), 2);
@@ -73,7 +73,7 @@ fn the_same_declaration_can_be_requested_on_host_and_shader() {
     );
     let mut frontend = Frontend::new();
     let mut loader = loader();
-    let output = frontend.analyze(source.clone(), &mut loader);
+    let output = frontend.build_hir(source.clone(), &mut loader);
     let host_only = module(&output, &[host("kernel")]);
     assert!(host_only.shaders.is_empty());
     let shader_only = module(&output, &[shader("kernel")]);
@@ -84,7 +84,7 @@ fn the_same_declaration_can_be_requested_on_host_and_shader() {
     let limited = Frontend::with_config(FrontendConfig {
         max_monomorphs_per_function: NonZeroUsize::new(1).unwrap(),
     })
-    .analyze(source, &mut loader);
+    .build_hir(source, &mut loader);
     assert!(
         failed(&limited, &[shader("kernel"), host("kernel")])[0]
             .to_string()
@@ -100,7 +100,7 @@ fn invalid_requests_fail_without_discarding_source_analysis() {
     );
     let mut frontend = Frontend::new();
     let mut loader = loader();
-    let output = frontend.analyze(source, &mut loader);
+    let output = frontend.build_hir(source, &mut loader);
     assert!(output.hir().is_ok());
     for targets in [
         vec![],
@@ -119,7 +119,7 @@ fn unused_source_initialization_errors_still_prevent_compilation() {
         "entry",
         "export { main }; def main() = {}; def unused() -> int = { var x: int; x };",
     );
-    let output = Frontend::new().analyze(source, &mut loader());
+    let output = Frontend::new().build_hir(source, &mut loader());
     assert!(output.hir().is_err());
     assert!(
         output.diagnostics()[0]
@@ -134,7 +134,7 @@ fn demanded_nominals_retain_field_conversions_and_real_drop_identities() {
         "entry",
         "export { main }; struct Unused {}; struct Owner { n: int, def drop(self: Ptr<Owner>) = {}; }; def main() -> int = { var owner = Owner { n = 42 }; owner.n };",
     );
-    let output = Frontend::new().analyze(source, &mut loader());
+    let output = Frontend::new().build_hir(source, &mut loader());
     let module = module(&output, &[host("main")]);
     assert_eq!(
         module.types.iter().filter(|ty| ty.name().is_some()).count(),
@@ -160,9 +160,9 @@ fn unsupported_shader_operations_fail_during_compilation_with_application_notes(
     );
     let mut frontend = Frontend::new();
     let mut loader = loader();
-    let output = frontend.analyze(source.clone(), &mut loader);
-    assert!(output.instantiate(&[host("main")]).is_ok());
-    assert!(output.instantiate(&[host("kernel")]).is_ok());
+    let output = frontend.build_hir(source.clone(), &mut loader);
+    assert!(output.build_lir(&[host("main")]).is_ok());
+    assert!(output.build_lir(&[host("kernel")]).is_ok());
     let errors = failed(&output, &[shader("kernel")]);
     assert!(output.hir().is_ok());
     let error = &errors[0];
@@ -185,8 +185,8 @@ fn shader_recursion_is_rejected_before_publishing_lir() {
     );
     let mut frontend = Frontend::new();
     let mut loader = loader();
-    let output = frontend.analyze(source, &mut loader);
-    assert!(output.instantiate(&[host("kernel")]).is_ok());
+    let output = frontend.build_hir(source, &mut loader);
+    assert!(output.build_lir(&[host("kernel")]).is_ok());
     assert!(output.hir().is_ok());
     let errors = failed(&output, &[shader("kernel")]);
     assert!(
@@ -222,7 +222,7 @@ fn shader_calls_cannot_enter_foreign_functions_or_store_function_values() {
                 "export {{ kernel }}; {helper} @compute_shader def kernel(i: ulong, out: Ptr<uint>) = {{ {body} }};"
             ),
         );
-        let output = Frontend::new().analyze(source, &mut loader());
+        let output = Frontend::new().build_hir(source, &mut loader());
         assert!(output.hir().is_ok());
         let errors = failed(&output, &[shader("kernel")]);
         assert!(

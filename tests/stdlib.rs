@@ -344,9 +344,9 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
         "import { \"$/gpu.resin\", \"$/window.resin\", \"$/image.resin\", \"$/console.resin\" };",
     )
     .unwrap();
-    let module = resin_hir::generate_program(&pipeline::load(&path).unwrap()).unwrap();
+    let module = resin_hir::build_hir_program(&pipeline::load(&path).unwrap()).unwrap();
     for name in ["gpu", "window", "image", "console"] {
-        let public = resin_hir::generate_program(
+        let public = resin_hir::build_hir_program(
             &pipeline::load(&root.join(format!("resin/{name}.resin"))).unwrap(),
         )
         .unwrap();

@@ -3,7 +3,7 @@ pub mod project;
 pub mod shaders;
 
 pub fn parse(source: &str) -> resin_ast::SourceFile {
-    resin_ast::generate(&resin_cst::Document::reparse(source.to_string(), None)).unwrap()
+    resin_ast::build_ast(&resin_cst::Document::build(source.to_string(), None)).unwrap()
 }
 
 pub fn module(source: &str) -> resin_lir::Module {

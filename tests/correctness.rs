@@ -6,7 +6,7 @@ use resin_ast::SourceFile;
 use resin_lir::Instr;
 
 fn parse(src: &str) -> Result<SourceFile, resin_ast::AstError> {
-    resin_ast::generate(&resin_cst::Document::reparse(src.to_string(), None))
+    resin_ast::build_ast(&resin_cst::Document::build(src.to_string(), None))
 }
 
 fn compile(src: &str) -> resin_lir::Module {
@@ -24,8 +24,8 @@ fn only_parenthesized_lists_apply_functions() {
         "x.method [1]",
     ] {
         let source = format!("def main() = {{ {call}; }};");
-        let document = resin_cst::Document::reparse(source.clone(), None);
-        assert!(resin_ast::generate(&document).is_err(), "{source}");
+        let document = resin_cst::Document::build(source.clone(), None);
+        assert!(resin_ast::build_ast(&document).is_err(), "{source}");
         assert!(resin_cst::format_source(&source).is_none(), "{source}");
     }
     for call in [

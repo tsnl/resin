@@ -20,7 +20,7 @@ fn source_gpu_contracts_retain_nominal_identity_and_produce_concrete_plans() {
         def materialize(value: DeviceRange<uint>, output: Ptr<HostRange<uint>>) = {{}};
     "#
     );
-    let hir = resin_hir::generate(&support::parse(&source)).unwrap();
+    let hir = resin_hir::build_hir(&support::parse(&source)).unwrap();
     let definitions = hir
         .types
         .iter()
@@ -71,7 +71,7 @@ fn projection_registration_rejects_invalid_representations_and_retagged_elements
         r#"struct View<T> { allocation: GpuView }; intrinsic "gpu_pointer_projection" def register<T>(value: View<T>) -> Ptr<ulong>;"#,
         r#"struct View<T> { allocation: GpuView }; intrinsic "gpu_pointer_projection" def register<T>(value: View<T>) -> Ptr<T>; intrinsic "gpu_pointer_projection" def duplicate<T>(value: View<T>) -> Ptr<T>;"#,
     ] {
-        let error = resin_hir::generate(&support::parse(source)).unwrap_err();
+        let error = resin_hir::build_hir(&support::parse(source)).unwrap_err();
         assert!(
             error
                 .to_string()
@@ -89,8 +89,8 @@ fn source_cannot_call_a_projection_contract_to_escape_a_device_address() {
         def escape(value: DeviceReference<uint>) -> Ptr<uint> = {{ project_pointer(value) }};
     "#
     );
-    let hir = resin_hir::generate(&support::parse(&source)).unwrap();
-    let error = resin_lir::generate(&hir).unwrap_err();
+    let hir = resin_hir::build_hir(&support::parse(&source)).unwrap();
+    let error = resin_lir::build_lir_all(&hir).unwrap_err();
     assert!(
         error.to_string().contains("cannot be called directly"),
         "{error}"
@@ -104,7 +104,7 @@ fn pipeline_contracts_are_explicit_and_preserve_source_parameter_identity() {
         intrinsic "gpu_compute_pipeline_type" def register<R, O>(token: GpuPipelineContract) -> Compute<R, O>;
         def materialize(value: Compute<uint, StrongOwner>) = {};
     "#;
-    let hir = resin_hir::generate(&support::parse(source)).unwrap();
+    let hir = resin_hir::build_hir(&support::parse(source)).unwrap();
     let declaration = hir
         .types
         .iter()
@@ -130,16 +130,16 @@ fn pipeline_type_contracts_reject_invalid_storage_and_direct_calls() {
         r#"struct Compute<R, O> { token: GpuPipelineContract }; intrinsic "gpu_compute_pipeline_type" def register<R, O>(token: GpuPipelineContract) -> Compute<O, R>;"#,
         r#"struct Compute<R, O> { token: GpuPipelineContract, extra: uint }; intrinsic "gpu_compute_pipeline_type" def register<R, O>(token: GpuPipelineContract) -> Compute<R, O>;"#,
     ] {
-        assert!(resin_hir::generate(&support::parse(source)).is_err());
+        assert!(resin_hir::build_hir(&support::parse(source)).is_err());
     }
     let source = r#"
         struct Compute<R, O> { token: GpuPipelineContract };
         intrinsic "gpu_compute_pipeline_type" def register<R, O>(token: GpuPipelineContract) -> Compute<R, O>;
         def forge(token: GpuPipelineContract) -> Compute<uint, StrongOwner> = { register(token) };
     "#;
-    let hir = resin_hir::generate(&support::parse(source)).unwrap();
+    let hir = resin_hir::build_hir(&support::parse(source)).unwrap();
     assert!(
-        resin_lir::generate(&hir)
+        resin_lir::build_lir_all(&hir)
             .unwrap_err()
             .to_string()
             .contains("cannot be called directly")
@@ -220,6 +220,6 @@ fn source_gpu_library_resolves_generic_allocation_and_explicit_access() {
     "#,
     );
     let mut loader = Loader::new(library_root());
-    let analysis = Frontend::new().analyze(source, &mut loader);
+    let analysis = Frontend::new().build_hir(source, &mut loader);
     analysis.hir().unwrap();
 }

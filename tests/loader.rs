@@ -28,11 +28,11 @@ fn unchanged_roots_follow_retargeted_import_symlinks_without_notifications() {
         )
         .unwrap();
     let mut frontend = resin_frontend::Frontend::new();
-    let first = frontend.analyze(source.clone(), &mut loader);
+    let first = frontend.build_hir(source.clone(), &mut loader);
     assert!(first.diagnostics().is_empty(), "{:?}", first.diagnostics());
     fs::remove_file(&alias).unwrap();
     symlink("second.resin", &alias).unwrap();
-    let second = frontend.analyze(source, &mut loader);
+    let second = frontend.build_hir(source, &mut loader);
     assert!(
         second.diagnostics().is_empty(),
         "{:?}",
@@ -68,7 +68,7 @@ fn unchanged_roots_retry_missing_transitive_imports_without_notifications() {
         )
         .unwrap();
     let mut frontend = resin_frontend::Frontend::new();
-    let missing = frontend.analyze(source.clone(), &mut loader);
+    let missing = frontend.build_hir(source.clone(), &mut loader);
     assert!(missing.hir().is_err());
     assert!(
         missing
@@ -78,7 +78,7 @@ fn unchanged_roots_retry_missing_transitive_imports_without_notifications() {
     );
     let leaf = directory.path().join("leaf.resin");
     fs::write(&leaf, "export { leaf }; def leaf() -> int = { 42 };").unwrap();
-    let repaired = frontend.analyze(source.clone(), &mut loader);
+    let repaired = frontend.build_hir(source.clone(), &mut loader);
     assert!(
         repaired.diagnostics().is_empty(),
         "{:?}",
@@ -89,7 +89,7 @@ fn unchanged_roots_retry_missing_transitive_imports_without_notifications() {
     assert!(missing.hir().is_err());
     assert_eq!(repaired.sources().count(), 3);
     fs::remove_file(leaf).unwrap();
-    assert!(frontend.analyze(source, &mut loader).hir().is_err());
+    assert!(frontend.build_hir(source, &mut loader).hir().is_err());
     assert!(repaired.hir().is_ok());
 }
 
@@ -109,7 +109,7 @@ fn custom_library_root_edits_recompile_an_unchanged_entry() {
         )
         .unwrap();
     let mut frontend = resin_frontend::Frontend::new();
-    let before = frontend.analyze(source.clone(), &mut loader);
+    let before = frontend.build_hir(source.clone(), &mut loader);
     assert!(
         before.diagnostics().is_empty(),
         "{:?}",
@@ -120,7 +120,7 @@ fn custom_library_root_edits_recompile_an_unchanged_entry() {
         "export { answer }; def answer() -> long = { 42 };",
     )
     .unwrap();
-    let after = frontend.analyze(source, &mut loader);
+    let after = frontend.build_hir(source, &mut loader);
     assert!(after.diagnostics().is_empty(), "{:?}", after.diagnostics());
     assert_eq!(before.source(), after.source());
     assert!(!Arc::ptr_eq(&before, &after));

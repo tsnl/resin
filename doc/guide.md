@@ -190,8 +190,8 @@ running the program, build with `-o PATH` and inspect
 `build/<source-name>-<name-and-entry-hash>/release/`: `main.c`, `build.ninja`, and
 `shader_<function-id>.unoptimized.spv` / `.spv` / `.h`. Use `spirv-dis` to inspect a shader
 as SPIR-V assembly. Frontend inspection is available through
-`resin_frontend::Frontend::analyze` and the retained `FrontendOutput` result's AST, HIR,
-and LIR accessors.
+`resin_frontend::Frontend::build_hir` and the retained `FrontendOutput` result's AST, HIR,
+and editor queries.
 
 Each source name and entry has a stable directory with separate debug and release
 outputs. Ninja reuses unchanged work and tracks C header dependencies. Generated inputs,

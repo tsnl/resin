@@ -6,7 +6,7 @@ use resin_lir::{BasicBlock, BlockId, Function, Instr, Local, Module, Terminator,
 use resin_types::prelude::*;
 
 fn parse(src: &str) -> resin_ast::SourceFile {
-    resin_ast::generate(&resin_cst::Document::reparse(src.to_string(), None))
+    resin_ast::build_ast(&resin_cst::Document::build(src.to_string(), None))
         .unwrap_or_else(|err| panic!("{err}"))
 }
 

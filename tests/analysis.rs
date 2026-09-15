@@ -40,7 +40,7 @@ fn unfinished_generic_method_access_keeps_owner_substitution_and_method_binders(
             "import {{ \"library.resin\" }}; def use(cell: Ptr<Cell<int>>) = {{ {receiver}.; }};"
         );
         let project = Project::new(&[("main.resin", &source), ("library.resin", library)]);
-        let analysis = project.analyze();
+        let analysis = project.build_hir();
         assert!(!analysis.diagnostics().is_empty());
         let input = project.source("main.resin");
         let items = analysis.completions(&input, source.find(".;").unwrap() + 1);
@@ -90,11 +90,11 @@ fn generic_method_editor_snapshots_keep_completed_imported_schemes() {
     loader
         .set_import(&input, "library.resin", original.clone())
         .unwrap();
-    let before = frontend.analyze(input.clone(), &mut loader);
+    let before = frontend.build_hir(input.clone(), &mut loader);
     loader
         .set_import(&input, "library.resin", changed.clone())
         .unwrap();
-    let after = frontend.analyze(input.clone(), &mut loader);
+    let after = frontend.build_hir(input.clone(), &mut loader);
     let offset = input.text().find("cell.read").unwrap() + 5;
     for (analysis, library, expected) in [
         (&before, &original, "read: () -> int"),
@@ -187,7 +187,7 @@ fn nominal_wrappers_of_generic_fields_keep_navigation_and_method_completion() {
 fn generic_field_completion_survives_an_unfinished_access() {
     let source = "struct Cell<T> { value: T }; def read(cell: Ptr<Cell<int>>) = { cell.; };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
+    let analysis = project.build_hir();
     assert!(!analysis.diagnostics().is_empty());
     let items = analysis.completions(
         &project.source("main.resin"),
@@ -223,11 +223,11 @@ fn generic_field_editor_snapshots_keep_original_imported_declarations() {
         .set_import(&input, "library.resin", original.clone())
         .unwrap();
     let mut frontend = Frontend::new();
-    let before = frontend.analyze(input.clone(), &mut loader);
+    let before = frontend.build_hir(input.clone(), &mut loader);
     loader
         .set_import(&input, "library.resin", changed.clone())
         .unwrap();
-    let after = frontend.analyze(input.clone(), &mut loader);
+    let after = frontend.build_hir(input.clone(), &mut loader);
     let field = input.text().rfind("value").unwrap();
     for (analysis, library, expected) in [
         (&before, &original, "value: int"),
@@ -251,7 +251,7 @@ fn tuple_members_and_function_hovers_use_source_syntax() {
     let source = "def zero() -> int = { 0 }; def pair(value: (int, bool)) = {}; def add(a: int, b: int) -> int = { a + b }; def main() = { var empty = zero; var tuple = pair; var binary = add; var values = (1_i, 1 == 1); values.0; values.; };";
     let project = Project::new(&[("main.resin", source)]);
     let input = project.source("main.resin");
-    let analysis = project.analyze();
+    let analysis = project.build_hir();
     let members = analysis.completions(&input, source.rfind("values.").unwrap() + 7);
     assert!(
         members.iter().any(|member| member.detail == "0: int"),
@@ -336,7 +336,7 @@ fn template_scopes_retain_named_types_and_imported_schemes() {
 fn option_payload_fields_remain_available_in_incomplete_code() {
     let source = "struct Item { count: int }; def f(value: Item | None) = { value!.; };";
     let project = Project::new(&[("main.resin", source)]);
-    let items = project.analyze().completions(
+    let items = project.build_hir().completions(
         &project.source("main.resin"),
         source.find("value!.").unwrap() + 7,
     );
@@ -354,7 +354,7 @@ fn weak_upgrade_recovery_distinguishes_wrapper_and_payload_members() {
             "import {{ \"$/shared.resin\" }}; struct Item {{ count: int }}; def f(weak: WeakPtr<Item>) = {{ {receiver}.; }};"
         );
         let project = Project::new(&[("main.resin", &source)]);
-        let items = project.analyze().completions(
+        let items = project.build_hir().completions(
             &project.source("main.resin"),
             source.rfind(".;").unwrap() + 1,
         );
@@ -381,7 +381,7 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
         let input = loader
             .source_from_text(Path::new("main.resin"), source.clone())
             .unwrap();
-        let analysis = Frontend::new().analyze(input.clone(), &mut loader);
+        let analysis = Frontend::new().build_hir(input.clone(), &mut loader);
         if tail != "buffer." {
             assert!(
                 analysis.diagnostics().is_empty(),
@@ -495,7 +495,7 @@ fn gpu_commands_check_pipeline_stages_and_host_arguments() {
         let input = loader
             .source_from_text(Path::new("main.resin"), source)
             .unwrap();
-        let analysis = Frontend::new().analyze(input.clone(), &mut loader);
+        let analysis = Frontend::new().build_hir(input.clone(), &mut loader);
         assert_eq!(
             analysis.diagnostics().is_empty(),
             valid,
@@ -528,7 +528,7 @@ fn typed_pipeline_calls_show_shader_contracts_in_editor_signatures() {
     let input = loader
         .source_from_text(Path::new("main.resin"), source)
         .unwrap();
-    let analysis = Frontend::new().analyze(input.clone(), &mut loader);
+    let analysis = Frontend::new().build_hir(input.clone(), &mut loader);
     assert!(
         analysis.diagnostics().is_empty(),
         "{:?}",
@@ -573,7 +573,7 @@ fn pointer_hover_and_completion_use_angle_bracket_types() {
 
     let source = "type Number = int; def main () -> () = { var value: Ptr<Num>; };";
     let project = Project::new(&[("main.resin", source)]);
-    let items = project.analyze().completions(
+    let items = project.build_hir().completions(
         &project.source("main.resin"),
         source.rfind("Num").unwrap() + 3,
     );
@@ -601,7 +601,7 @@ fn inherent_methods_have_navigation_hover_and_member_completion() {
             "import {{ \"lib.resin\" }}; def main() = {{ var c = Counter.new(); c.read(); {tail} }};"
         );
         let project = Project::new(&[("main.resin", &source), ("lib.resin", library)]);
-        let analysis = project.analyze();
+        let analysis = project.build_hir();
         let input = project.source("main.resin");
         assert_eq!(
             analysis.diagnostics().is_empty(),
@@ -654,7 +654,7 @@ fn inherent_methods_have_navigation_hover_and_member_completion() {
         }
     }
     let project = Project::new(&[("main.resin", library)]);
-    let items = project.analyze().completions(
+    let items = project.build_hir().completions(
         &project.source("main.resin"),
         library.find("self.count").unwrap(),
     );
@@ -673,7 +673,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
                 "import {{ \"$/span.resin\" }}; def main() = {{ var values = [1_i, 2_i]; var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }}; {receiver}.at(0).* := 3;{tail} }};"
             );
             let project = Project::new(&[("main.resin", &source)]);
-            let analysis = project.analyze();
+            let analysis = project.build_hir();
             let input = project.source("main.resin");
             assert_eq!(
                 analysis.diagnostics().is_empty(),
@@ -713,7 +713,7 @@ fn shared_receiver_completion_and_navigation_include_ordinary_drop_methods() {
             "import {{ \"lib.resin\", \"$/shared.resin\" }}; def f(c: ArcPtr<Counter>) = {{ c.get().read(); {tail} }};"
         );
         let project = Project::new(&[("main.resin", &source), ("lib.resin", library)]);
-        let analysis = project.analyze();
+        let analysis = project.build_hir();
         let input = project.source("main.resin");
         let call = source.find(".read").unwrap() + 1;
         assert_eq!(
@@ -846,7 +846,7 @@ fn field_completion_before_existing_statements() {
                     {preceding}\n{receiver}.\n{following}\n}};"
                 );
                 let project = Project::new(&[("main.resin", &source)]);
-                let analysis = project.analyze();
+                let analysis = project.build_hir();
                 let input = project.source("main.resin");
                 let offset = source.find(&format!("{receiver}.\n")).unwrap() + receiver.len() + 1;
                 let items = analysis.completions(&input, offset);
@@ -905,7 +905,7 @@ fn field_completion_uses_receiver_types_and_replaces_only_the_field() {
             let start = source.rfind('.').unwrap() + 1;
             let offset = start + field.len().min(2);
             let items = project
-                .analyze()
+                .build_hir()
                 .completions(&project.source("main.resin"), offset);
             let names = items
                 .iter()
@@ -939,7 +939,7 @@ fn field_completion_resolves_imported_nominal_function_results() {
             "export { make }; struct Counter { count: int }; def make () -> Counter = { Counter { count = 0 } };",
         ),
     ]);
-    let items = project.analyze().completions(
+    let items = project.build_hir().completions(
         &project.source("main.resin"),
         source.rfind('.').unwrap() + 1,
     );
@@ -959,7 +959,7 @@ fn field_completion_does_not_offer_unrelated_names() {
         let project = Project::new(&[("main.resin", &source)]);
         assert!(
             project
-                .analyze()
+                .build_hir()
                 .completions(
                     &project.source("main.resin"),
                     source.rfind('.').unwrap() + 1
@@ -978,7 +978,7 @@ fn field_completion_recovers_unfinished_functions_and_uninitialized_locals() {
         "def main () = { var point = { x = 1, y = 2 }; point.",
     ] {
         let project = Project::new(&[("main.resin", source)]);
-        let items = project.analyze().completions(
+        let items = project.build_hir().completions(
             &project.source("main.resin"),
             source.rfind('.').unwrap() + 1,
         );
@@ -1000,7 +1000,7 @@ impl Project {
             .collect();
         Self { sources }
     }
-    fn analyze(&self) -> Arc<FrontendOutput> {
+    fn build_hir(&self) -> Arc<FrontendOutput> {
         let mut loader = resin_source::Loader::new(resin_source::library_root());
         for importer in self.sources.values() {
             for (reference, target) in &self.sources {
@@ -1009,11 +1009,11 @@ impl Project {
                     .unwrap();
             }
         }
-        Frontend::new().analyze(self.source("main.resin"), &mut loader)
+        Frontend::new().build_hir(self.source("main.resin"), &mut loader)
     }
     #[track_caller]
     fn checked(&self) -> Arc<FrontendOutput> {
-        let analysis = self.analyze();
+        let analysis = self.build_hir();
         assert!(
             analysis.diagnostics().is_empty(),
             "{:?}",
@@ -1118,7 +1118,7 @@ fn incomplete_code_keeps_parameters_and_prior_locals_available() {
         "def main (argument: int) -> int = { var local = 1; print(arg };",
     ] {
         let project = Project::new(&[("main.resin", source)]);
-        let analysis = project.analyze();
+        let analysis = project.build_hir();
         let at = source.rfind("arg").unwrap() + 3;
         let completions = analysis.completions(&project.source("main.resin"), at);
         assert!(
@@ -1147,7 +1147,7 @@ fn conflicting_imports_are_ambiguous_and_report_related_locations() {
             "export { answer }; def answer () -> int = { 2 };",
         ),
     ]);
-    let analysis = project.analyze();
+    let analysis = project.build_hir();
     assert!(analysis.diagnostics().iter().any(|d| d.related.len() == 2));
     assert!(
         analysis
@@ -1178,7 +1178,7 @@ fn missing_imports_and_cycles_have_source_ranges() {
             "export { make }; struct Point { x: int }; def make() -> Point = { Point { x = 1 } };",
         ),
     ]);
-    let analysis = project.analyze();
+    let analysis = project.build_hir();
     assert_eq!(analysis.diagnostics().len(), 1);
     let error = &analysis.diagnostics()[0];
     assert_eq!(error.location.source, project.source("main.resin"));
@@ -1200,7 +1200,7 @@ fn missing_imports_and_cycles_have_source_ranges() {
     ]);
     assert!(
         project
-            .analyze()
+            .build_hir()
             .diagnostics()
             .iter()
             .any(|d| d.message.contains("cyclic"))
@@ -1213,7 +1213,7 @@ fn imported_syntax_errors_stay_at_the_dependency() {
         ("main.resin", "import { \"a.resin\" };"),
         ("a.resin", "export { value }; def value () -> int = { + };"),
     ]);
-    let analysis = project.analyze();
+    let analysis = project.build_hir();
     let error = analysis.program().unwrap_err();
     assert_eq!(error.source, project.source("a.resin"));
     assert!(error.span.is_some());
@@ -1223,7 +1223,7 @@ fn imported_syntax_errors_stay_at_the_dependency() {
     );
     assert!(
         project
-            .analyze()
+            .build_hir()
             .diagnostics()
             .iter()
             .any(|d| d.location.source == project.source("a.resin"))
@@ -1239,7 +1239,7 @@ fn malformed_foreign_headers_are_diagnostics_not_panics() {
     ] {
         let project = Project::new(&[("main.resin", source)]);
         let input = project.source("main.resin");
-        let analysis = project.analyze();
+        let analysis = project.build_hir();
         let error = analysis.program().unwrap_err();
         assert_eq!(error.source, input);
         assert!(error.span.is_some(), "{source}: {error}");
@@ -1252,7 +1252,7 @@ fn malformed_foreign_headers_are_diagnostics_not_panics() {
 fn malformed_function_names_do_not_create_editor_definitions() {
     let source = "extern \"native.h\" def releasex: int); def main() = {};";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
+    let analysis = project.build_hir();
     let input = project.source("main.resin");
     assert!(analysis.hir().is_err());
     assert!(
@@ -1308,7 +1308,7 @@ fn normalized_paths_are_stable_for_existing_and_unsaved_files() {
 fn completion_respects_type_context_and_ignores_strings_and_comments() {
     let source = "type Number = int; def main () -> () = { var value = 1; var other: Num; };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
+    let analysis = project.build_hir();
     let suggestions = analysis.completions(
         &project.source("main.resin"),
         source.rfind("Num").unwrap() + 3,
@@ -1329,7 +1329,7 @@ fn completion_respects_type_context_and_ignores_strings_and_comments() {
         };
         assert!(
             project
-                .analyze()
+                .build_hir()
                 .completions(&project.source("main.resin"), at)
                 .is_empty(),
             "{source}"
@@ -1341,7 +1341,7 @@ fn completion_respects_type_context_and_ignores_strings_and_comments() {
 fn completion_obeys_parameter_shadowing_and_module_type_order() {
     let source = "def main (value: int) -> int = { var value = 2; val };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
+    let analysis = project.build_hir();
     let items = analysis.completions(
         &project.source("main.resin"),
         source.rfind("val").unwrap() + 3,
@@ -1356,7 +1356,7 @@ fn completion_obeys_parameter_shadowing_and_module_type_order() {
         ("type Earlier = Num; type Number = int;", false),
     ] {
         let project = Project::new(&[("main.resin", source)]);
-        let analysis = project.analyze();
+        let analysis = project.build_hir();
         let items = analysis.completions(
             &project.source("main.resin"),
             source.find("Num").unwrap() + 2,
@@ -1370,7 +1370,7 @@ fn completion_obeys_parameter_shadowing_and_module_type_order() {
     let project = Project::new(&[("main.resin", "// comment")]);
     assert!(
         project
-            .analyze()
+            .build_hir()
             .completions(&project.source("main.resin"), 10)
             .is_empty()
     );
@@ -1400,14 +1400,14 @@ fn module_analysis_needs_no_entry_and_rejects_runtime_globals() {
         source.find("run ()").unwrap()
     );
     let project = Project::new(&[("main.resin", "export {}; def helper () -> int = { 1 };")]);
-    assert!(project.analyze().hir().unwrap().entries.is_empty());
+    assert!(project.build_hir().hir().unwrap().entries.is_empty());
 
     for source in [
         "var global = 1; def main () -> int = { glo };",
         "var global: int; def main () -> int = { glo };",
     ] {
         let project = Project::new(&[("main.resin", source)]);
-        let analysis = project.analyze();
+        let analysis = project.build_hir();
         assert!(!analysis.diagnostics().is_empty(), "{source}");
         let at = source.rfind("glo").unwrap();
         assert!(
@@ -1451,14 +1451,14 @@ fn implicit_unit_signatures_and_declaration_keywords_support_editor_features() {
     }
     let project = Project::new(&[("main.resin", "def run() = { var value = 1; ")]);
     let items = project
-        .analyze()
+        .build_hir()
         .completions(&project.source("main.resin"), 28);
     for keyword in ["def", "var", "type"] {
         assert!(items.iter().any(|item| item.name == keyword), "{items:?}");
     }
     let project = Project::new(&[("main.resin", "def run() = { 1 };")]);
     assert!(
-        !project.analyze().diagnostics().is_empty(),
+        !project.build_hir().diagnostics().is_empty(),
         "unit returns are not inferred from bodies"
     );
 }
@@ -1476,7 +1476,7 @@ fn holes_preserve_later_locals_and_functions_without_producing_ir() {
             "def first() = {{ {broken} var point = {{ x = 1, y = 2 }}; point.; }}; def later(arg: int) -> int = {{ var result = arg; result }};"
         );
         let project = Project::new(&[("main.resin", &source)]);
-        let analysis = project.analyze();
+        let analysis = project.build_hir();
         let input = project.source("main.resin");
         assert!(analysis.hir().is_err(), "{source}");
         assert!(!analysis.diagnostics().is_empty(), "{source}");
@@ -1500,7 +1500,7 @@ fn unknown_bindings_shadow_outer_values_without_fabricating_types() {
             "def main(point: {{ x: int }}) = {{ var point = {initializer}; var alias = point; alias.; var healthy = {{ count = 42 }}; healthy.count; }};"
         );
         let project = Project::new(&[("main.resin", &source)]);
-        let analysis = project.analyze();
+        let analysis = project.build_hir();
         let input = project.source("main.resin");
         assert_eq!(
             analysis
@@ -1552,7 +1552,7 @@ fn unrelated_errors_preserve_expression_types_and_field_completion() {
                 "{broken} def main() = {{ {setup} value; var record = {{ payload = value }}; record.payload; }};"
             );
             let project = Project::new(&[("main.resin", &source)]);
-            let analysis = project.analyze();
+            let analysis = project.build_hir();
             let input = project.source("main.resin");
             assert_eq!(
                 analysis.diagnostics().is_empty(),
@@ -1583,7 +1583,7 @@ fn unrelated_errors_preserve_expression_types_and_field_completion() {
 fn failed_compound_constraints_do_not_poison_independent_inference() {
     let source = "def main() = { var value: _; var broken: { first: int, second: bool }; broken := { first = value, second = 0 }; value := 1.5f; value; };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
+    let analysis = project.build_hir();
     assert!(!analysis.diagnostics().is_empty());
     assert!(analysis.hir().is_err());
     let input = project.source("main.resin");
@@ -1615,7 +1615,7 @@ fn recovery_uses_unsaved_imports_and_keeps_nominal_field_types() {
             "export { make }; struct Point { x: float32 }; def broken() = { var hole = ; }; def make() -> Point = { Point { x = 1 } };",
         ),
     ]);
-    let analysis = project.analyze();
+    let analysis = project.build_hir();
     let items = analysis.completions(
         &project.source("main.resin"),
         source.find("point.").unwrap() + 6,
@@ -1629,7 +1629,7 @@ fn recovery_uses_unsaved_imports_and_keeps_nominal_field_types() {
 fn recovered_ast_contains_expression_type_and_field_holes() {
     let source = "def main() = { var value = ; var typed: ; var point = { x = 1 }; point.; };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
+    let analysis = project.build_hir();
     let ast = resin_ast::format_source(
         analysis
             .recovered_file(&project.source("main.resin"))
@@ -1652,14 +1652,14 @@ fn editor_analysis_tolerates_truncation_and_deleted_tokens() {
     ] {
         for end in 0..=source.len() {
             let project = Project::new(&[("main.resin", &source[..end])]);
-            let analysis = project.analyze();
+            let analysis = project.build_hir();
             analysis.completions(&project.source("main.resin"), end);
         }
         for index in 0..source.len() {
             let mut edited = source.to_owned();
             edited.remove(index);
             let project = Project::new(&[("main.resin", &edited)]);
-            project.analyze();
+            project.build_hir();
         }
     }
 }
@@ -1672,11 +1672,11 @@ fn checking_rejects_holes_even_when_given_a_recovered_ast() {
         "def main(point: { x: int }) = { point.; };",
     ] {
         let project = Project::new(&[("main.resin", source)]);
-        let analysis = project.analyze();
+        let analysis = project.build_hir();
         let file = analysis
             .recovered_file(&project.source("main.resin"))
             .unwrap();
-        let error = resin_hir::generate(file).unwrap_err();
+        let error = resin_hir::build_hir(file).unwrap_err();
         assert_eq!(
             error.kind,
             GenerateErrorKind::IncompleteSyntax,
@@ -1708,7 +1708,7 @@ fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
     );
     let source = "@compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() = { kernel. };";
     let project = Project::new(&[("main.resin", source)]);
-    let items = project.analyze().completions(
+    let items = project.build_hir().completions(
         &project.source("main.resin"),
         source.find("kernel. }").unwrap() + 7,
     );
@@ -1720,7 +1720,7 @@ fn indexing_and_shader_artifacts_keep_editor_types_and_completions() {
     );
     let source = "@compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() = { var alias = kernel; alias. };";
     let project = Project::new(&[("main.resin", source)]);
-    let items = project.analyze().completions(
+    let items = project.build_hir().completions(
         &project.source("main.resin"),
         source.find("alias. }").unwrap() + 6,
     );
@@ -1761,7 +1761,7 @@ fn failed_children_invalidate_composites_without_hiding_later_bindings() {
             "def f() = {{ var place = 1; var bad = {expression}; var alias = bad; var healthy = 1.5f; alias; healthy; }};"
         );
         let project = Project::new(&[("main.resin", &source)]);
-        let analysis = project.analyze();
+        let analysis = project.build_hir();
         let input = project.source("main.resin");
         assert!(!analysis.diagnostics().is_empty(), "{source}");
         assert!(analysis.hir().is_err());
@@ -1802,7 +1802,7 @@ fn broken_annotations_and_duplicate_declarations_retain_recognizable_children() 
         ),
     ] {
         let project = Project::new(&[("main.resin", source)]);
-        let analysis = project.analyze();
+        let analysis = project.build_hir();
         assert!(!analysis.diagnostics().is_empty());
         assert!(analysis.hir().is_err());
         assert_eq!(
@@ -1833,7 +1833,7 @@ fn unknown_exports_retain_identity_and_poison_consumers_through_reexports() {
             "export { Broken, broken }; import { \"base.resin\" };",
         ),
     ]);
-    let analysis = project.analyze();
+    let analysis = project.build_hir();
     assert!(analysis.hir().is_err());
     let input = project.source("main.resin");
     for name in ["Broken", "broken"] {
@@ -1895,7 +1895,7 @@ fn callers_cannot_resurrect_failed_result_inference() {
             "def broken() -> {result} = {{ var healthy = 1.5f; healthy; {body} }}; def caller() -> {caller_result} = {{ broken() }}; def observer() = {{ var alias = broken; alias; }};"
         );
         let project = Project::new(&[("main.resin", &source)]);
-        let analysis = project.analyze();
+        let analysis = project.build_hir();
         let input = project.source("main.resin");
         assert!(analysis.program().is_ok(), "{source}");
         assert!(!analysis.diagnostics().is_empty());
@@ -1922,7 +1922,7 @@ fn callers_cannot_resurrect_failed_result_inference() {
 fn recursive_failure_discards_copied_caller_result_facts() {
     let source = "def broken() -> _ = { if (1 == 0) { caller() } else { 1 + () } }; def caller() -> _ = { broken() }; def observer() = { var forced = int(caller()); var alias = caller; var failed = broken; alias; failed; };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
+    let analysis = project.build_hir();
     assert!(analysis.program().is_ok());
     assert!(!analysis.diagnostics().is_empty());
     assert!(analysis.hir().is_err());
@@ -1952,11 +1952,11 @@ fn incomplete_impls_and_method_arguments_keep_editor_recovery() {
         .chain([source.len()])
     {
         let project = Project::new(&[("main.resin", &source[..end])]);
-        project.analyze();
+        project.build_hir();
     }
     let source = "struct Counter { count: int, def read(counter: Counter) -> int = { counter.count }; };  def f(c: Counter) = { c.read(; };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
+    let analysis = project.build_hir();
     let offset = source.rfind("read").unwrap();
     assert!(
         analysis
@@ -1970,7 +1970,7 @@ fn pointer_replace_has_ordinary_method_hover_and_recovery() {
     for tail in ["", "p.;"] {
         let source = format!("def f(p: Ptr<int>) = {{ p.replace(3); {tail} }};");
         let project = Project::new(&[("main.resin", &source)]);
-        let analysis = project.analyze();
+        let analysis = project.build_hir();
         let input = project.source("main.resin");
         assert_eq!(
             analysis.diagnostics().is_empty(),
@@ -2020,7 +2020,7 @@ fn formatted_string_and_literal_string_types_survive_editor_recovery() {
         let project = Project::new(&[("main.resin", source)]);
         let offset = source.rfind(".;").unwrap() + 1;
         let items = project
-            .analyze()
+            .build_hir()
             .completions(&project.source("main.resin"), offset);
         for member in members {
             assert!(items.iter().any(|item| item.name == member), "{items:?}");
@@ -2035,7 +2035,7 @@ fn invalid_method_arguments_preserve_receiver_facts_and_later_bindings() {
             "struct Item {{ count: int, def read(self: Ptr<Item>) -> int = {{ self.count }}; {duplicate} }};  def f(c: Item) = {{ var bad = c.read(missing); var alias = bad; var healthy = 1.5f; alias; healthy; c.; }};"
         );
         let project = Project::new(&[("main.resin", &source)]);
-        let analysis = project.analyze();
+        let analysis = project.build_hir();
         let input = project.source("main.resin");
         assert!(analysis.hir().is_err());
         for (name, expected) in [("alias", "alias: ?"), ("healthy", "healthy: float32")] {
@@ -2068,7 +2068,7 @@ fn string_constructor_is_an_ordinary_discoverable_static_method() {
         "import { \"$/string.resin\" }; def main() = { String.; };",
     ] {
         let project = Project::new(&[("main.resin", source)]);
-        let analysis = project.analyze();
+        let analysis = project.build_hir();
         let offset = source.rfind(".;").unwrap() + 1;
         let items = analysis.completions(&project.source("main.resin"), offset);
         let member = if source.contains("from_str") {
@@ -2090,7 +2090,7 @@ fn string_constructor_is_an_ordinary_discoverable_static_method() {
 fn literal_string_hover_preserves_its_distinct_primitive_type() {
     let source = "def main() = { var text = \"literal\"; text; };";
     let project = Project::new(&[("main.resin", source)]);
-    let analysis = project.analyze();
+    let analysis = project.build_hir();
     let hover = analysis
         .hover(&project.source("main.resin"), source.rfind("text").unwrap())
         .unwrap();

@@ -241,7 +241,7 @@ Replacing its text creates a new version; existing diagnostics keep the old hand
 and their byte spans still describe the original text. The compiler does not need
 a mutable path-to-text table to recover what those locations mean.
 
-`Frontend::analyze(source, loader)` makes the next boundary explicit: the frontend
+`Frontend::build_hir(source, loader)` makes the next boundary explicit: the frontend
 uses the concrete `resin_source::Loader` to obtain imports, then sequences the language
 passes. The loader knows file references, supplied buffers, and explicit source
 bindings. Its operations establish source lookup directly. The compiler caches those

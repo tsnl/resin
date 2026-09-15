@@ -27,9 +27,9 @@ fn unchanged_graph_reuses_the_completed_result_after_resolving_imports() {
         .set_import(&entry, "dependency", dependency.clone())
         .unwrap();
     let mut frontend = Frontend::new();
-    let first = frontend.analyze(entry.clone(), &mut loader);
+    let first = frontend.build_hir(entry.clone(), &mut loader);
     valid(&first);
-    let second = frontend.analyze(entry.clone(), &mut loader);
+    let second = frontend.build_hir(entry.clone(), &mut loader);
     assert!(Arc::ptr_eq(&first, &second));
     assert_eq!(second.source(), &entry);
     assert_eq!(sources(&second), [entry, dependency].into());
@@ -50,11 +50,11 @@ fn changing_a_transitive_source_invalidates_an_unchanged_entry() {
     loader.set_import(&entry, "middle", middle.clone()).unwrap();
     loader.set_import(&middle, "leaf", leaf.clone()).unwrap();
     let mut frontend = Frontend::default();
-    let before = frontend.analyze(entry.clone(), &mut loader);
+    let before = frontend.build_hir(entry.clone(), &mut loader);
     valid(&before);
     let changed = leaf.with_text("export { leaf }; def leaf() -> bool = { 1 == 1 };");
     loader.set_import(&middle, "leaf", changed.clone()).unwrap();
-    let after = frontend.analyze(entry.clone(), &mut loader);
+    let after = frontend.build_hir(entry.clone(), &mut loader);
     assert!(!Arc::ptr_eq(&before, &after));
     assert!(after.hir().is_err());
     assert_eq!(after.source(), &entry);
@@ -72,14 +72,14 @@ fn a_missing_transitive_import_recovers_without_notifications() {
     let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "middle", middle.clone()).unwrap();
     let mut frontend = Frontend::default();
-    let before = frontend.analyze(entry.clone(), &mut loader);
+    let before = frontend.build_hir(entry.clone(), &mut loader);
     assert!(before.hir().is_err());
     assert!(before.diagnostics().iter().any(|diagnostic| {
         diagnostic.location.source == middle
             && diagnostic.location.span.end > diagnostic.location.span.start
     }));
     loader.set_import(&middle, "leaf", leaf.clone()).unwrap();
-    let after = frontend.analyze(entry, &mut loader);
+    let after = frontend.build_hir(entry, &mut loader);
     valid(&after);
     assert!(!Arc::ptr_eq(&before, &after));
     assert!(before.hir().is_err(), "retained failure remains immutable");
@@ -113,13 +113,13 @@ fn changed_import_edges_invalidate_cache_even_with_the_same_source_set() {
         .set_import(&second, "value", boolean.clone())
         .unwrap();
     let mut frontend = Frontend::default();
-    let before = frontend.analyze(entry.clone(), &mut loader);
+    let before = frontend.build_hir(entry.clone(), &mut loader);
     valid(&before);
     loader.set_import(&first, "value", boolean.clone()).unwrap();
     loader
         .set_import(&second, "value", integer.clone())
         .unwrap();
-    let after = frontend.analyze(entry, &mut loader);
+    let after = frontend.build_hir(entry, &mut loader);
     assert_eq!(sources(&before), sources(&after));
     assert!(!Arc::ptr_eq(&before, &after));
     assert!(after.hir().is_err());
@@ -136,7 +136,7 @@ fn inconsistent_versions_of_one_logical_source_are_diagnosed() {
     let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "first", first.clone()).unwrap();
     loader.set_import(&entry, "second", second.clone()).unwrap();
-    let result = Frontend::default().analyze(entry.clone(), &mut loader);
+    let result = Frontend::default().build_hir(entry.clone(), &mut loader);
     assert!(result.hir().is_err());
     assert!(
         result
@@ -154,7 +154,7 @@ fn import_cycles_are_diagnosed_with_source_ranges() {
     let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "next", next.clone()).unwrap();
     loader.set_import(&next, "entry", entry.clone()).unwrap();
-    let result = Frontend::default().analyze(entry.clone(), &mut loader);
+    let result = Frontend::default().build_hir(entry.clone(), &mut loader);
     assert!(result.hir().is_err());
     assert!(result.diagnostics().iter().any(|diagnostic| {
         diagnostic.message.contains("cyclic")
@@ -172,7 +172,7 @@ fn identical_diagnostic_names_do_not_merge_distinct_sources() {
     let mut loader = Loader::new(resin_source::library_root());
     loader.set_import(&entry, "first", first.clone()).unwrap();
     loader.set_import(&entry, "second", second.clone()).unwrap();
-    let result = Frontend::default().analyze(entry.clone(), &mut loader);
+    let result = Frontend::default().build_hir(entry.clone(), &mut loader);
     assert!(result.hir().is_err());
     assert_eq!(
         sources(&result),
@@ -194,10 +194,10 @@ fn retained_compilations_keep_their_own_source_versions_and_editor_queries() {
     );
     let mut loader = Loader::new(resin_source::library_root());
     let mut frontend = Frontend::default();
-    let old = frontend.analyze(before.clone(), &mut loader);
+    let old = frontend.build_hir(before.clone(), &mut loader);
     let after =
         before.with_text("def value() -> bool = { 1 == 1 }; def main() -> bool = { value() };");
-    let new = frontend.analyze(after.clone(), &mut loader);
+    let new = frontend.build_hir(after.clone(), &mut loader);
     valid(&old);
     valid(&new);
     assert_eq!(before.id(), after.id());
@@ -227,10 +227,10 @@ fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
     );
     let mut loader = Loader::new(resin_source::library_root());
     let mut frontend = Frontend::default();
-    let lowered = frontend.analyze(source.clone(), &mut loader);
+    let lowered = frontend.build_hir(source.clone(), &mut loader);
     assert!(lowered.program().is_ok());
     assert!(lowered.hir().is_ok());
-    let errors = match lowered.instantiate(&[
+    let errors = match lowered.build_lir(&[
         resin_frontend::Target::Host {
             entry: "first".into(),
         },
@@ -244,11 +244,11 @@ fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
     assert_eq!(errors.len(), 2);
     assert!(errors.iter().all(|error| error.source == source));
     let typed_source = source.with_text("def main() -> int = { 1 == 2 };");
-    let typed = frontend.analyze(typed_source, &mut loader);
+    let typed = frontend.build_hir(typed_source, &mut loader);
     assert!(typed.program().is_ok());
     assert!(typed.hir().is_err());
     let parsed_source = source.with_text("def main( = { 1 == 2 };");
-    let parsed = frontend.analyze(parsed_source.clone(), &mut loader);
+    let parsed = frontend.build_hir(parsed_source.clone(), &mut loader);
     assert!(parsed.program().is_err());
     assert!(parsed.recovered_file(&parsed_source).is_some());
     assert_eq!(errors.len(), 2);
@@ -270,7 +270,7 @@ fn imported_initialization_errors_keep_the_dependency_source_version() {
         .set_import(&entry, "dependency", dependency.clone())
         .unwrap();
     let mut frontend = Frontend::default();
-    let failed = frontend.analyze(entry.clone(), &mut loader);
+    let failed = frontend.build_hir(entry.clone(), &mut loader);
     assert!(failed.hir().is_err());
     assert!(failed.hir().is_err());
     assert_eq!(failed.diagnostics().len(), 1);
@@ -289,7 +289,7 @@ fn imported_initialization_errors_keep_the_dependency_source_version() {
 
     let repaired = dependency.with_text("export { value }; def value() -> int = { 7 };");
     loader.set_import(&entry, "dependency", repaired).unwrap();
-    valid(&frontend.analyze(entry, &mut loader));
+    valid(&frontend.build_hir(entry, &mut loader));
     drop(frontend);
     drop(loader);
     let diagnostic = &failed.diagnostics()[0];
@@ -316,7 +316,7 @@ fn conflicting_versions_do_not_displace_the_first_accepted_version() {
     loader
         .set_import(&entry, "original", original.clone())
         .unwrap();
-    let result = Frontend::default().analyze(entry.clone(), &mut loader);
+    let result = Frontend::default().build_hir(entry.clone(), &mut loader);
     assert!(result.hir().is_err());
     assert_eq!(result.diagnostics().len(), 1, "{:?}", result.diagnostics());
     let diagnostic = &result.diagnostics()[0];

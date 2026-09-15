@@ -398,9 +398,9 @@ fn imported_backend_errors_retain_expression_origins() {
     loader
         .set_import(&entry, "helper.resin", helper.clone())
         .unwrap();
-    let output = resin_frontend::Frontend::new().analyze(entry, &mut loader);
+    let output = resin_frontend::Frontend::new().build_hir(entry, &mut loader);
     let m = output
-        .instantiate(&[resin_frontend::Target::Shader {
+        .build_lir(&[resin_frontend::Target::Shader {
             entry: "kernel".into(),
         }])
         .unwrap()

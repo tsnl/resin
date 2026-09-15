@@ -1,7 +1,7 @@
 mod support;
 
 fn hir(source: &str) -> resin_hir::Module {
-    resin_hir::generate(&support::parse(source)).unwrap()
+    resin_hir::build_hir(&support::parse(source)).unwrap()
 }
 
 fn run(source: &str) -> std::process::Output {
@@ -69,7 +69,7 @@ fn dependent_static_calls_and_references_apply_owner_and_method_arguments() {
                 receiver(Factory<ulong> {}, 2_i).value
         };
     "#;
-    let module = resin_lir::generate(&hir(source)).unwrap();
+    let module = resin_lir::build_lir_all(&hir(source)).unwrap();
     assert_eq!(
         module
             .functions
@@ -228,7 +228,7 @@ fn dependent_failures_report_the_demanded_application() {
         let source = format!(
             "{declaration} def relay<T>(value: T) -> int = {{ {body} }}; def main() = {{ relay(Owner {{}}); }};"
         );
-        let error = resin_lir::generate(&hir(&source)).unwrap_err();
+        let error = resin_lir::build_lir_all(&hir(&source)).unwrap_err();
         assert!(error.to_string().contains(needle), "{source}: {error}");
         assert!(
             error
@@ -240,7 +240,7 @@ fn dependent_failures_report_the_demanded_application() {
         assert!(error.span.end > error.span.start, "{error:?}");
     }
     let source = "def relay<T>(value: T) -> int = { (value.callback)() }; def main() -> int = { relay({ callback = 42 }) };";
-    let error = resin_lir::generate(&hir(source)).unwrap_err();
+    let error = resin_lir::build_lir_all(&hir(source)).unwrap_err();
     assert!(error.to_string().contains("function"), "{error}");
     assert!(
         error
@@ -256,7 +256,7 @@ fn unused_dependent_bodies_do_not_select_methods() {
     let tree = hir(
         "export { main }; def unused<T>(value: T) -> _ = { value.missing().field }; def main() -> int = { 42 };",
     );
-    let module = resin_lir::generate(&tree).unwrap();
+    let module = resin_lir::build_lir_all(&tree).unwrap();
     assert_eq!(module.functions.len(), 1);
 }
 
@@ -290,7 +290,7 @@ fn growing_dependent_method_applications_obey_the_function_limit() {
     let options = resin_lir::LoweringOptions {
         max_monomorphs_per_function: std::num::NonZeroUsize::new(3).unwrap(),
     };
-    let errors = resin_lir::analyze_with_options(&tree, &options).unwrap_err();
+    let errors = resin_lir::build_lir_all_with_options(&tree, &options).unwrap_err();
     assert!(
         errors
             .iter()

@@ -6,8 +6,8 @@ use resin_source::prelude::*;
 use std::path::Path;
 
 pub fn generate(file: &resin_ast::SourceFile) -> Result<resin_lir::Module, GenerateError> {
-    let tree = resin_hir::generate(file)?;
-    let module = resin_lir::generate(&tree).map_err(lowering_error)?;
+    let tree = resin_hir::build_hir(file)?;
+    let module = resin_lir::build_lir_all(&tree).map_err(lowering_error)?;
     Ok(resin_lir::VerifiedModule::new(module)
         .expect("lowering produces valid LIR")
         .into_module())
@@ -42,7 +42,7 @@ fn lowering_error(error: resin_lir::Error) -> GenerateError {
 
 /// Lower an AST constructed or edited by a test. Unchanged files use `file_module`.
 pub fn generate_program(program: &resin_ast::Program) -> Result<resin_lir::Module, SourceError> {
-    let tree = resin_hir::generate_program(program)?;
+    let tree = resin_hir::build_hir_program(program)?;
     lower_program(&tree, &program.modules.last().expect("entry module").source)
 }
 
@@ -50,13 +50,13 @@ pub fn generate_program(program: &resin_ast::Program) -> Result<resin_lir::Modul
 pub fn source_module(text: &str) -> Result<resin_lir::Module, SourceError> {
     let source = Source::new("test.resin", text);
     let mut loader = resin_source::Loader::new(library_root());
-    let compilation = Frontend::new().analyze(source.clone(), &mut loader);
+    let compilation = Frontend::new().build_hir(source.clone(), &mut loader);
     lower_program(compilation.hir()?, &source)
 }
 
-/// Load a file and its explicit imports, then lower the HIR already built by analysis.
+/// Load a file and its explicit imports, then lower the HIR already built by `build_hir`.
 pub fn file_module(path: &Path) -> Result<resin_lir::Module, SourceError> {
-    let compilation = analyze_file(path)?;
+    let compilation = build_hir_file(path)?;
     lower_program(compilation.hir()?, compilation.source())
 }
 
@@ -64,7 +64,7 @@ fn lower_program(
     tree: &resin_hir::Module,
     entry: &Source,
 ) -> Result<resin_lir::Module, SourceError> {
-    let module = resin_lir::generate(tree).map_err(|error| {
+    let module = resin_lir::build_lir_all(tree).map_err(|error| {
         SourceError::new(
             error.source.clone().unwrap_or_else(|| entry.clone()),
             Some(error.span),
@@ -78,10 +78,10 @@ fn lower_program(
 
 /// Load an AST for inspection or mutation, preserving syntax even if HIR is invalid.
 pub fn load(path: &Path) -> Result<resin_ast::Program, SourceError> {
-    analyze_file(path)?.program().cloned()
+    build_hir_file(path)?.program().cloned()
 }
 
-fn analyze_file(
+fn build_hir_file(
     path: &Path,
 ) -> Result<std::sync::Arc<resin_frontend::FrontendOutput>, SourceError> {
     let mut loader = resin_source::Loader::new(library_root());
@@ -92,14 +92,14 @@ fn analyze_file(
             error.to_string(),
         )
     })?;
-    Ok(Frontend::new().analyze(source, &mut loader))
+    Ok(Frontend::new().build_hir(source, &mut loader))
 }
 
 pub fn shader_error(source: &str) -> String {
     let source = Source::new("shader-test.resin", source);
     let mut loader = resin_source::Loader::new(library_root());
-    let output = Frontend::new().analyze(source, &mut loader);
-    match output.instantiate(&[resin_frontend::Target::Shader {
+    let output = Frontend::new().build_hir(source, &mut loader);
+    match output.build_lir(&[resin_frontend::Target::Shader {
         entry: "kernel".into(),
     }]) {
         Err(errors) => errors

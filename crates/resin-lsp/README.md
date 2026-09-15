@@ -94,7 +94,7 @@ implemented.
 `resin_source::Source` is immutable named text with a stable logical
 identity. Cloning shares a version; `with_text` creates a new version of the same
 source. Names are diagnostic labels and need not be filesystem paths or unique.
-`resin_frontend::Frontend` retains syntax and compilation caches. Its `analyze`
+`resin_frontend::Frontend` retains syntax and compilation caches. Its `build_hir`
 method receives an entry source and a concrete `resin_source::Loader`, resolves the import
 graph, and returns an immutable `FrontendOutput` with diagnostics and editor queries.
 
@@ -115,7 +115,7 @@ fn main() {
     let mut loader = resin_source::Loader::new(resin_source::library_root());
     loader.set_import(&entry, "library", library.clone()).unwrap();
     let mut frontend = resin_frontend::Frontend::new();
-    let before = frontend.analyze(entry.clone(), &mut loader);
+    let before = frontend.build_hir(entry.clone(), &mut loader);
     assert!(before.hir().is_ok());
 
     loader.set_import(
@@ -123,7 +123,7 @@ fn main() {
         "library",
         library.with_text("export { answer }; def answer() -> int = { missing };"),
     ).unwrap();
-    let after = frontend.analyze(entry, &mut loader);
+    let after = frontend.build_hir(entry, &mut loader);
     assert!(!after.diagnostics().is_empty());
     assert!(before.hir().is_ok()); // Retained results keep their original sources.
 }

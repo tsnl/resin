@@ -48,8 +48,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   matching; lower only their transitive function/type dependencies. Shader artifacts and
   pipeline creation add shader roots while retaining host bridge functions. Concrete nominal
   discovery reserves recursive identities privately and installs real drop IDs before storage
-  lowering. `Frontend::analyze` produces HIR/editor facts without a LIR artifact. The whole-module
-  LIR helpers remain explicit operations for direct language clients and tests.
+  lowering. `Frontend::build_hir` produces HIR/editor facts without a LIR artifact. The whole-module
+  `build_lir_all` helpers remain explicit operations for direct language clients and tests.
 - Specialization selects concrete shader operations before storage lowering. Preserve
   place access separately from value reads: an opaque managed field may be addressed,
   while reading, copying, replacing, or destroying its value is host-only. LIR construction
@@ -218,9 +218,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   lives in `src/cli/`. Capture process settings through the platform toolchain's
   `Environment`, then choose CLI defaults and the build profile explicitly.
   Validate file selections and output destinations in the CLI. Interpreter mode
-  owns host compilation from source to executable. `resin_frontend::Frontend::analyze`
+  owns host compilation from source to executable. `resin_frontend::Frontend::build_hir`
   consumes an immutable source and a loader to produce a `FrontendOutput`. Host and shader
-  entries are selected when that output instantiates LIR for generate. The separate
+  entries are selected when that output builds LIR for generate. The separate
   `resin_codegen::generate` operation takes verified LIR and
   writes C, unoptimized SPIR-V, and a Ninja
   dependency graph to disk in one call. Target representations and individual emitters stay private.

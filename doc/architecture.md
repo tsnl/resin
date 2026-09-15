@@ -136,7 +136,7 @@ modules by scanning type names.
 
 ## What each boundary guarantees
 
-CST pairs source text with a Tree-sitter tree. `Document::reparse` may reuse a
+CST pairs source text with a Tree-sitter tree. `build_cst` / `Document::build` may reuse a
 previous document, and syntax-only queries and formatting need no semantic state.
 AST lowering converts that syntax into source constructs. The recovering API keeps
 holes and diagnostics; the strict API returns a file only when syntax is valid.
@@ -275,10 +275,10 @@ not request its fields or drop hook. Member-derived arguments restore source
 origins and canonical union order before memoization. Concrete names and diagnostic
 arguments retain names such as `Node<int>` instead of private catalog indices.
 
-`resin_lir::instantiate` accepts closed HIR applications and constructs their target
-program. The whole-module `generate`/`analyze` helpers explicitly request all ordinary
-functions and nongeneric nominal declarations through the same machinery, for direct language
-clients. Requested programs discover nominal types lazily and translate every embedded
+`resin_lir::build_lir` accepts closed HIR applications and constructs their target
+program. The whole-module `build_lir_all` / `build_lir_all_with_options` helpers
+explicitly request all ordinary functions and nongeneric nominal declarations through
+the same machinery, for direct language clients. Requested programs discover nominal types lazily and translate every embedded
 nominal application. Field and cast representation steps are selected against that concrete catalog.
 Each requested nominal instance substitutes its owner arguments into fields and
 drop hooks. Recursive identities remain private until their bodies and real hook
@@ -373,12 +373,12 @@ The smallest host pipeline uses just the public phase APIs:
 
 ```rust
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let syntax = resin_cst::Document::reparse(
-        "export { main }; def main() -> int = { 42 };".into(), None,
+    let syntax = resin_cst::build_cst(
+        "export { main }; def main() -> int = { 42 };", None,
     );
-    let ast = resin_ast::generate(&syntax)?;
-    let hir = resin_hir::generate(&ast)?;
-    let lir = resin_lir::generate(&hir)?;
+    let ast = resin_ast::build_ast(&syntax)?;
+    let hir = resin_hir::build_hir(&ast)?;
+    let lir = resin_lir::build_lir_all(&hir)?;
     let checked = resin_lir::VerifiedModule::new(lir)?;
     let directory = tempfile::TempDir::new()?;
     let project = resin_codegen::generate(checked.view(), Some("main"), directory.path())?;
@@ -388,7 +388,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-For imports, call `Frontend::analyze(source, &mut loader)` with an immutable `Source`
+For imports, call `Frontend::build_hir(source, &mut loader)` with an immutable `Source`
 and a concrete `resin_source::Loader`. Explicit bindings let the same loader work
 with generated or in-memory sources:
 
@@ -406,7 +406,7 @@ fn main() {
     let mut loader = resin_source::Loader::new(resin_source::library_root());
     loader.set_import(&entry, "math", math).unwrap();
     let mut frontend = resin_frontend::Frontend::new();
-    let compilation = frontend.analyze(entry.clone(), &mut loader);
+    let compilation = frontend.build_hir(entry.clone(), &mut loader);
     assert!(compilation.diagnostics().is_empty(), "{:?}", compilation.diagnostics());
     assert_eq!(compilation.source(), &entry);
 }
@@ -420,13 +420,13 @@ relative to their importing file, with `$/` selecting the configured library roo
 Unchanged text reuses its source version. The compiler needs no buffer or path policy.
 
 A caller may also construct a `resin_ast::Program` in dependency order and call
-`resin_hir::generate_program`. `resin_hir::analyze_program` returns a `CheckedProgram` with
+`resin_hir::build_hir_program`. `resin_hir::build_hir_program_checked` returns a `CheckedProgram` with
 diagnostics and opaque editor analysis even on failure. `Analysis` owns its private
 query state directly. Its queries take a source handle, byte offset, and shared CST
 documents in a `BTreeMap<Source, Arc<resin_cst::Document>>`; no document-provider trait
 or forwarding object is needed. HIR functions carry optional source locations directly.
 Source handles retain their text, so later phases need no separate path-to-text table.
-`resin_lir::analyze` collects errors across functions; `resin_lir::generate` returns the first.
+`resin_lir::build_lir_all_with_options` collects errors across functions; `resin_lir::build_lir_all` returns the first.
 Codegen accepts only verified LIR. `generate(verified, Some(entry), directory)` writes
 host C, the SPIR-V requested by `.spirv`, and `build.ninja`; `None` generates a shader-only
 project containing all declared shaders. It returns paths, never target ASTs or per-target
@@ -434,7 +434,7 @@ emission operations. C and SPIR-V lowering finish before any generated files are
 
 The frontend's [lib.rs](../crates/resin-frontend/src/lib.rs) contains source traversal,
 syntax caching, HIR generation, and retained query access.
-`FrontendOutput::instantiate(targets)` produces verified LIR for generate.
+`FrontendOutput::build_lir(targets)` produces verified LIR for generate.
 The CLI's private [Request](../src/cli/request.rs) resolves source and destination choices
 against the captured working directory, including output naming and ancestor validation.
 It owns the library root for that request. Argument parsing passes the original paths
@@ -467,10 +467,10 @@ with the same logical ID, leaving the original intact. Equality identifies versi
 equal text or equal diagnostic names do not make independently created sources equal.
 Names have no filesystem meaning inside the compiler.
 
-`Frontend::analyze(source, loader)` returns an `Arc<FrontendOutput>` with HIR and
+`Frontend::build_hir(source, loader)` returns an `Arc<FrontendOutput>` with HIR and
 editor facts. Host and shader entries are selected later by
-`FrontendOutput::instantiate(targets)` when generating LIR. An empty target set is
-an error. Each analyze call resolves the complete import graph before considering
+`FrontendOutput::build_lir(targets)` when generating LIR. An empty target set is
+an error. Each `build_hir` call resolves the complete import graph before considering
 cached analysis, so changed resolutions and newly available dependencies are observed.
 The loader reuses unchanged source handles; supplied text and explicit bindings
 determine the versions returned for imports. The frontend diagnoses cycles and
