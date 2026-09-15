@@ -22,14 +22,14 @@ import { "status.resin", "internal/status_codes.resin", "window.resin", "shared.
 // ResinMemory values from resin_runtime/gpu.h.
 const (
 	memory_default: int = iota;
-	memory_gpu;
-	memory_readback;
+	memory_gpu: int = iota;
+	memory_readback: int = iota;
 );
 
 // Resin GPU view permissions from resin_runtime/gpu.h.
 const (
 	access_read: uint = 1 << iota;
-	access_write;
+	access_write: uint = 1 << iota;
 );
 const max_allocation_bytes = ~0_ul;
 // A pointer view derives its available capacity from the retained allocation.
