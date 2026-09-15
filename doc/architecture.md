@@ -11,14 +11,15 @@ executable, `resin --format DIR` formats source, and `resin --lsp DIR` serves th
 Language Server Protocol. There is one executable to distribute.
 
 Reusable libraries live under `crates/`, with directory names matching their Cargo
-package names. `resin-compiler` sequences passes over immutable sources and retains
-analysis caches. It uses the concrete `resin_source::Loader` to obtain imports from
-files, supplied text, or explicit bindings. `resin-source` owns immutable text and
-standard-library resolution; `resin-types` owns concrete types and representation
-rules. Neither depends on a compiler phase. `resin-toolchain` runs generated Ninja
-projects and retains native artifacts without depending on compiler or type crates.
-The CLI connects compilation, code generation, and native building. `resin-lsp`
-adapts compiler queries to the protocol; the native C ABI lives in `resin-runtime`.
+package names. Each language crate owns its representation and the translation that
+produces it. `resin_ast::build_program` uses the concrete `resin_source::Loader` to
+obtain imports from files, supplied text, or explicit bindings. `resin-source` owns
+immutable text and standard-library resolution; `resin-types` owns concrete types and
+representation rules. Neither depends on a compiler phase. `resin-toolchain` runs
+generated Ninja projects and retains native artifacts without depending on compiler
+or type crates. The CLI connects compilation, code generation, and native building.
+`resin-lsp` adapts compiler queries to the protocol; the native C ABI lives in
+`resin-runtime`.
 
 Crates own their isolated tests; root `tests/` exercises the complete executable and
 cross-crate behavior. Examples and documentation stay at the repository root;
@@ -53,14 +54,13 @@ pass consumes. Source and type vocabulary are independent foundations.
 | `resin-common` | none | Shared `define_id!` index-type macro |
 | `resin-source` | none | Immutable sources, locations, import loading and standard-library resolution |
 | `resin-types` | none | Concrete types, values, conversions, layout and shader interfaces |
-| `resin-cst` | generated `tree-sitter-resin` grammar | Syntax documents, reparsing, queries, formatting |
-| `resin-ast` | `resin-cst` | Source AST, recovery, parsing diagnostics |
-| `resin-hir` | `resin-ast`, `resin-cst` | Resolved tree, checking and elaboration, editor analysis |
-| `resin-lir` | `resin-hir` | Storage and control-flow lowering, verification certificates |
+| `resin-cst` | generated `tree-sitter-resin` grammar | Syntax documents, `build_cst`, queries, formatting |
+| `resin-ast` | `resin-cst` | Source AST, `build_ast` / `build_program`, parse diagnostics |
+| `resin-hir` | `resin-ast`, `resin-cst` | Resolved tree, `build_hir` / `Hir::build`, editor analysis |
+| `resin-lir` | `resin-hir` | Storage and control-flow lowering, `build_lir`, verification |
 | `resin-codegen` | `resin-lir` | Generate a complete on-disk C/SPIR-V/Ninja project |
 | `resin-toolchain` | none | Captured process settings, Ninja builds, locked output files |
-| `resin-compiler` | CST, AST, HIR, LIR | Import traversal, pass sequencing, immutable compilations |
-| `resin-lsp` | `resin-compiler`, `resin-hir`, `resin-cst` | Compiler queries and formatting over LSP |
+| `resin-lsp` | `resin-hir`, `resin-cst` | HIR queries and formatting over LSP |
 
 The HIR dependency on CST supports editor queries at a syntax position. Its public
 language owns its type expressions and nominal declarations. LIR lowering never
@@ -85,12 +85,11 @@ public type model and operations remain in `lib.rs`; private `types.rs` implemen
 representation, table, and layout algorithms, while private `typer.rs` implements
 concrete checks and conversions.
 
-Keep related state and operations together. The compiler's `lib.rs` contains
-`Compiler` with its private caches, `Compilation` with its retained products, and
-the operations that use them. A cohesive file can be substantial while exposing
-few public concepts. Fields belong directly to the objects whose invariants they
-serve; private helpers keep individual operations readable. Native building is a separate
-operation connected by the [CLI](../src/cli/mod.rs).
+Keep related state and operations together. `Hir` keeps retained products and
+editor queries beside HIR construction. A cohesive file can be substantial while
+exposing few public concepts. Fields belong directly to the objects whose invariants
+they serve; private helpers keep individual operations readable. Native building is
+a separate operation connected by the [CLI](../src/cli/mod.rs).
 
 Use canonical crate and language names instead of renaming imports. Shared vocabulary
 comes from private `use resin_source::prelude::*;` and
@@ -136,10 +135,10 @@ modules by scanning type names.
 
 ## What each boundary guarantees
 
-CST pairs source text with a Tree-sitter tree. `Document::reparse` may reuse a
+CST pairs source text with a Tree-sitter tree. `build_cst` may reuse a
 previous document, and syntax-only queries and formatting need no semantic state.
-AST lowering converts that syntax into source constructs. The recovering API keeps
-holes and diagnostics; the strict API returns a file only when syntax is valid.
+AST lowering converts that syntax into source constructs. `build_ast` always
+returns a file, inserting holes and retaining diagnostics for incomplete syntax.
 Each AST `SourceModule` carries an immutable `Source`, its syntax, and resolved import
 indices. The compiler traverses imports through `resin_source::Loader::load_import`,
 then orders the modules into a `Program`. The loader resolves explicit bindings or
@@ -203,7 +202,7 @@ HIR signatures can bind named type parameters, and function references carry
 completed type arguments. LIR construction owns a memoized worklist of concrete
 applications, keyed by definition, normalized arguments, and semantic Host/Shader
 profile. It reserves each ID before translating its body, so recursion reuses pending
-requests. Compilation supplies exported target roots; only their transitive function
+requests. Generate supplies exported target roots; only their transitive function
 and type dependencies enter the worklist. Decorated functions remain host-callable;
 shader artifacts and pipeline creation request separate shader instances. C emits
 host instances, while SPIR-V follows the requested shader graph.
@@ -275,10 +274,9 @@ not request its fields or drop hook. Member-derived arguments restore source
 origins and canonical union order before memoization. Concrete names and diagnostic
 arguments retain names such as `Node<int>` instead of private catalog indices.
 
-`resin_lir::instantiate` accepts closed HIR applications and constructs their target
-program. The whole-module `generate`/`analyze` helpers explicitly request all ordinary
-functions and nongeneric nominal declarations through the same machinery, for direct language
-clients. Requested programs discover nominal types lazily and translate every embedded
+`resin_lir::build_lir` accepts closed HIR applications and constructs their target
+program. An empty entry list requests all ordinary functions and nongeneric nominal
+declarations through the same machinery, for direct language clients. Requested programs discover nominal types lazily and translate every embedded
 nominal application. Field and cast representation steps are selected against that concrete catalog.
 Each requested nominal instance substitutes its owner arguments into fields and
 drop hooks. Recursive identities remain private until their bodies and real hook
@@ -313,9 +311,8 @@ retain their own source locations and a bounded application trace; diagnostics n
 assume HIR and LIR indices agree. Foreign declarations retain one local per parameter and
 no blocks; they do not create function-body lowering state.
 
-`CompilerConfig.max_monomorphs_per_function` defaults to 16,384 and cannot be zero.
-The compiler retains its configuration immutably; LIR receives the relevant limit
-through `LoweringOptions`. Different semantic profiles count separately toward the
+`LoweringOptions.max_monomorphs_per_function` defaults to 16,384 and cannot be zero.
+LIR receives that limit for one construction run. Different semantic profiles count separately toward the
 same source function's allowance. Existing canonical requests cost nothing, including
 pending and failed requests. A new request consumes its allowance before body
 translation. Independent type-depth and type-size guards bound structural expansion
@@ -373,12 +370,20 @@ The smallest host pipeline uses just the public phase APIs:
 
 ```rust
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let syntax = resin_cst::Document::reparse(
-        "export { main }; def main() -> int = { 42 };".into(), None,
+    let syntax = resin_cst::build_cst(
+        "export { main }; def main() -> int = { 42 };", None,
     );
-    let ast = resin_ast::generate(&syntax)?;
-    let hir = resin_hir::generate(&ast)?;
-    let lir = resin_lir::generate(&hir)?;
+    let ast = resin_ast::build_ast(&syntax);
+    assert!(ast.errors.is_empty());
+    let hir = resin_hir::build_hir(&resin_ast::Program {
+        modules: vec![resin_ast::SourceModule {
+            source: resin_source::Source::new("example.resin", syntax.source()),
+            file: ast.file,
+            imports: vec![],
+        }],
+    }).into_module()?;
+    let lir = resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
+        .map_err(|errors| errors.into_iter().next().unwrap())?;
     let checked = resin_lir::VerifiedModule::new(lir)?;
     let directory = tempfile::TempDir::new()?;
     let project = resin_codegen::generate(checked.view(), Some("main"), directory.path())?;
@@ -388,7 +393,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-For imports, call `Compiler::analyze(entry, &mut loader)` with an immutable `Source`
+For imports, call `Hir::build(source, &mut loader, previous)` with an immutable `Source`
 and a concrete `resin_source::Loader`. Explicit bindings let the same loader work
 with generated or in-memory sources:
 
@@ -405,10 +410,9 @@ fn main() {
     "#);
     let mut loader = resin_source::Loader::new(resin_source::library_root());
     loader.set_import(&entry, "math", math).unwrap();
-    let mut compiler = resin_compiler::Compiler::new();
-    let compilation = compiler.analyze(entry.clone(), &mut loader);
+    let compilation = resin_hir::Hir::build(entry.clone(), &mut loader, None);
     assert!(compilation.diagnostics().is_empty(), "{:?}", compilation.diagnostics());
-    assert_eq!(compilation.entry(), &entry);
+    assert_eq!(compilation.source(), &entry);
 }
 ```
 
@@ -420,24 +424,28 @@ relative to their importing file, with `$/` selecting the configured library roo
 Unchanged text reuses its source version. The compiler needs no buffer or path policy.
 
 A caller may also construct a `resin_ast::Program` in dependency order and call
-`resin_hir::generate_program`. `resin_hir::analyze_program` returns a `CheckedProgram` with
+`resin_hir::build_hir`, which returns a `CheckedProgram` with
 diagnostics and opaque editor analysis even on failure. `Analysis` owns its private
 query state directly. Its queries take a source handle, byte offset, and shared CST
 documents in a `BTreeMap<Source, Arc<resin_cst::Document>>`; no document-provider trait
 or forwarding object is needed. HIR functions carry optional source locations directly.
 Source handles retain their text, so later phases need no separate path-to-text table.
-`resin_lir::analyze` collects errors across functions; `resin_lir::generate` returns the first.
+`resin_lir::build_lir` collects errors across functions.
 Codegen accepts only verified LIR. `generate(verified, Some(entry), directory)` writes
 host C, the SPIR-V requested by `.spirv`, and `build.ninja`; `None` generates a shader-only
 project containing all declared shaders. It returns paths, never target ASTs or per-target
 emission operations. C and SPIR-V lowering finish before any generated files are written.
 
-The compiler's [lib.rs](../crates/resin-compiler/src/lib.rs) contains source traversal,
-syntax caching, HIR/LIR generation, verification, and retained query access.
-`Compilation::verified()` supplies the certificate for codegen without reloading sources.
+`resin_ast::build_program` walks imports and recovers AST. `Hir::build` checks that
+program and retains editor queries. `resin_lir::build_lir` produces LIR from HIR;
+verification is a separate pass.
 The CLI's private [Request](../src/cli/request.rs) resolves source and destination choices
 against the captured working directory, including output naming and ancestor validation.
-Argument parsing passes the original paths to this boundary. Native compiler search paths
+It owns the library root for that request. Argument parsing passes the original paths
+to this boundary. The CLI [interpreter](../src/cli/interpreter.rs) lowers the request,
+writes generated sources to a temporary directory owned by that invocation, and drives
+the native build. The toolchain retains successful sources and outputs under `build/`.
+Native compiler search paths
 retain their meaning relative to that captured directory; Ninja resolves discovered header
 dependencies in the directory where it runs the compiler.
 
@@ -464,31 +472,26 @@ with the same logical ID, leaving the original intact. Equality identifies versi
 equal text or equal diagnostic names do not make independently created sources equal.
 Names have no filesystem meaning inside the compiler.
 
-`Compiler::compile(entry, loader, targets)` returns an `Arc<Compilation>` for explicit
-`Target::Host` and `Target::Shader` exported entries. `Compiler::analyze(entry, loader)`
-retains HIR and editor facts without a LIR artifact; requesting `module()` or `verified()`
-from that result returns an error without adding a source diagnostic. An empty compile
-target set is an error, not an analysis request. Each operation resolves
-the complete import graph before considering cached analysis, so changed resolutions
-and newly available dependencies are observed. The loader reuses unchanged source
-handles; supplied text and explicit bindings determine the versions returned for imports.
-The compiler diagnoses cycles and inconsistent versions instead of mixing their facts.
+`Hir::build(source, loader, previous)` returns HIR and editor facts. Host and shader
+entries are selected later by `resin_lir::build_lir` when generating LIR. An empty
+LIR entry list requests every ordinary root. Each build resolves the complete import
+graph before considering reuse, so changed resolutions and newly available dependencies
+are observed. The loader reuses unchanged source handles; supplied text and explicit
+bindings determine the versions returned for imports. Cycles and inconsistent versions
+are diagnosed instead of mixing their facts.
 
-The compiler caches CST/AST documents by logical source ID. An unchanged version
-reuses its document; a changed version can reuse the previous tree for incremental
-CST parsing. A matching successfully loaded graph and canonical target set can reuse
-its compilation. Target order and duplicates do not affect matching. When the graph
-or request changes, semantic checking reruns the entry's import closure. Native
-artifact caching is separate. This is not a per-function incremental solver or backend.
+Callers pass a previous `Hir` to reuse unchanged CST documents and, when the import
+graph matches, the HIR itself. A changed source version can reuse the previous
+Tree-sitter tree for incremental parsing. Native artifact caching is separate. This
+is not a per-function incremental solver or backend.
 
-A `Compilation` retains diagnostics, recovered AST, completed phase products, and
-opaque editor facts for one entry and its imports. A failed later pass preserves
-earlier products. `definition`, `hover`, and `completions` accept a retained source
-handle and byte offset; their results refer to that exact source version. Old
-compilations remain usable while the caller creates new sources and compiles again.
+`Hir` retains diagnostics, recovered AST, completed HIR, and opaque editor facts for
+one source and its imports. A failed later pass preserves earlier products.
+`definition`, `hover`, and `completions` accept a retained source handle and byte
+offset; their results refer to that exact source version. Old results remain usable
+while the caller creates new sources and builds again.
 
-The name distinguishes retained work across phases from a HIR or LIR `Module`.
-The CLI uses a compiler and filesystem loader for one invocation. The LSP library
-keeps a compiler and loader across edits, registering changed buffers and removing
-closed ones. It schedules analysis in response to document and file notifications.
-The loader owns source lookup, while protocol versions and scheduling remain in the LSP library.
+The CLI uses a loader for one invocation. The LSP library keeps a loader across edits,
+registering changed buffers and removing closed ones. It schedules analysis in
+response to document and file notifications. The loader owns source lookup, while
+protocol versions and scheduling remain in the LSP library.

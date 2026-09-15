@@ -1,5 +1,5 @@
 //! Low-level language: typed stack instructions and structured control flow.
-//! [`generate`] translates HIR into this representation.
+//! [`build_lir`] translates HIR into this representation.
 //! [`verify`] checks storage and control flow before target lowering.
 //! Construction, verification, and printing internals are private.
 //!
@@ -401,9 +401,36 @@ pub struct Entry {
     pub profile: Profile,
 }
 
-/// Construct only requested entries and their transitive function/type dependencies.
-/// The input still contains all structurally completed source declarations.
-pub fn instantiate(
+impl Entry {
+    /// Look up an exported HIR function and request it at this profile.
+    pub fn exported(
+        hir: &resin_hir::Module,
+        name: impl Into<Arc<str>>,
+        profile: Profile,
+    ) -> Result<Self, Error> {
+        let name = name.into();
+        let Some(&function) = hir.entries.get(&name) else {
+            return Err(Error {
+                source: None,
+                span: Span { start: 0, end: 0 },
+                kind: ErrorKind::InvalidInstance {
+                    message: format!("entry {name} is not exported as a function").into(),
+                },
+                applications: Vec::new(),
+            });
+        };
+        Ok(Self {
+            name,
+            function,
+            arguments: Vec::new(),
+            profile,
+        })
+    }
+}
+
+/// Build LIR for requested entries and their transitive function/type dependencies.
+/// An empty entry list requests every ordinary root. Verification is a separate pass.
+pub fn build_lir(
     source: &resin_hir::Module,
     entries: &[Entry],
     options: &LoweringOptions,
@@ -423,25 +450,6 @@ impl Default for LoweringOptions {
             max_monomorphs_per_function: NonZeroUsize::new(16 * 1024).unwrap(),
         }
     }
-}
-
-/// Lower a typed tree into storage and control flow; verification is a separate pass.
-pub fn generate(source: &resin_hir::Module) -> Result<Module, Error> {
-    analyze(source).map_err(|mut errors| errors.remove(0))
-}
-
-/// Collect independent lowering errors across functions with default limits.
-pub fn analyze(source: &resin_hir::Module) -> Result<Module, Vec<Error>> {
-    analyze_with_options(source, &LoweringOptions::default())
-}
-
-/// Instantiate completed schemes, then lower each concrete body into storage.
-/// The source retains one body per definition; only the result contains instances.
-pub fn analyze_with_options(
-    source: &resin_hir::Module,
-    options: &LoweringOptions,
-) -> Result<Module, Vec<Error>> {
-    lower::analyze(source, options)
 }
 
 pub fn format_module(module: &Module) -> String {

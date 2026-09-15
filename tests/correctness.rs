@@ -5,12 +5,14 @@ mod pipeline;
 use resin_ast::SourceFile;
 use resin_lir::Instr;
 
-fn parse(src: &str) -> Result<SourceFile, resin_ast::AstError> {
-    resin_ast::generate(&resin_cst::Document::reparse(src.to_string(), None))
+fn parse(src: &str) -> SourceFile {
+    let parsed = resin_ast::build_ast(&resin_cst::build_cst(src, None));
+    assert!(parsed.errors.is_empty(), "{src}\n{:?}", parsed.errors);
+    parsed.file
 }
 
 fn compile(src: &str) -> resin_lir::Module {
-    pipeline::generate(&parse(src).unwrap()).unwrap_or_else(|err| panic!("{src}\n{err}"))
+    pipeline::generate(&parse(src)).unwrap_or_else(|err| panic!("{src}\n{err}"))
 }
 
 #[test]
@@ -24,8 +26,11 @@ fn only_parenthesized_lists_apply_functions() {
         "x.method [1]",
     ] {
         let source = format!("def main() = {{ {call}; }};");
-        let document = resin_cst::Document::reparse(source.clone(), None);
-        assert!(resin_ast::generate(&document).is_err(), "{source}");
+        let document = resin_cst::build_cst(source.clone(), None);
+        assert!(
+            !resin_ast::build_ast(&document).errors.is_empty(),
+            "{source}"
+        );
         assert!(resin_cst::format_source(&source).is_none(), "{source}");
     }
     for call in [
@@ -38,7 +43,7 @@ fn only_parenthesized_lists_apply_functions() {
         "f({ 1 })",
         "f(1)(2)",
     ] {
-        parse(&format!("def main() = {{ {call}; }};")).unwrap();
+        parse(&format!("def main() = {{ {call}; }};"));
     }
 }
 
@@ -110,10 +115,7 @@ fn function_types_accept_unit_tuples_and_higher_order_calls() {
     ] {
         let source =
             format!("{declaration} def main() = {{ var value: {annotation}; value := f; }};");
-        assert!(
-            pipeline::generate(&parse(&source).unwrap()).is_err(),
-            "{source}"
-        );
+        assert!(pipeline::generate(&parse(&source)).is_err(), "{source}");
     }
 }
 
@@ -140,7 +142,12 @@ fn type_formers_take_types_between_angle_brackets() {
         "type P = Ptr<>;",
         "type P = Ptr<int, int>;",
     ] {
-        assert!(parse(source).is_err(), "{source}");
+        assert!(
+            !resin_ast::build_ast(&resin_cst::build_cst(source, None))
+                .errors
+                .is_empty(),
+            "{source}"
+        );
     }
 }
 
@@ -157,7 +164,7 @@ fn typechecking_rejects_incorrect_argument_counts() {
     ] {
         assert!(
             matches!(
-                pipeline::generate(&parse(src).unwrap()).unwrap_err().kind,
+                pipeline::generate(&parse(src)).unwrap_err().kind,
                 GenerateErrorKind::Inference { .. }
             ),
             "{src}"
@@ -178,7 +185,7 @@ fn nominal_conversion_requires_an_explicit_ascription() {
     ] {
         assert!(
             matches!(
-                pipeline::generate(&parse(src).unwrap()).unwrap_err().kind,
+                pipeline::generate(&parse(src)).unwrap_err().kind,
                 GenerateErrorKind::Type {
                     kind: TypeErrorKind::TypeMismatch { .. }
                 }
@@ -244,10 +251,9 @@ fn recursion_uses_immutable_function_references() {
                 .any(|i| matches!(i, Instr::Function { .. }))
         );
     }
-    let error = pipeline::generate(
-        &parse("export { main }; def f () -> int = { 1 }; def main() -> () = { f := f; };")
-            .unwrap(),
-    )
+    let error = pipeline::generate(&parse(
+        "export { main }; def f () -> int = { 1 }; def main() -> () = { f := f; };",
+    ))
     .unwrap_err();
     assert_eq!(error.kind, GenerateErrorKind::NotAPlace);
 }
@@ -259,14 +265,33 @@ fn lambdas_and_nested_definitions_are_parse_errors() {
         "def outer () -> int = { def inner () -> int = { 1 }; inner() };",
         "def missing (n) = { n };",
     ] {
-        assert!(parse(source).is_err(), "{source}");
+        assert!(
+            !resin_ast::build_ast(&resin_cst::build_cst(source, None))
+                .errors
+                .is_empty(),
+            "{source}"
+        );
     }
 }
 
 #[test]
 fn record_type_members_are_parse_errors_instead_of_panics() {
-    assert!(parse("def main() -> () = { var x = { T = int }; };").is_err());
-    assert!(parse("def main() -> () = { var x = { a = 1, T = int }; };").is_err());
+    assert!(
+        !resin_ast::build_ast(&resin_cst::build_cst(
+            "def main() -> () = { var x = { T = int }; };",
+            None
+        ))
+        .errors
+        .is_empty()
+    );
+    assert!(
+        !resin_ast::build_ast(&resin_cst::build_cst(
+            "def main() -> () = { var x = { a = 1, T = int }; };",
+            None
+        ))
+        .errors
+        .is_empty()
+    );
     compile("export { main }; def main() -> () = { var x = { type T = int; T (1) }; };");
 }
 
@@ -291,7 +316,7 @@ fn omitted_function_results_are_unit_not_inferred() {
         "def answer() = { if (1 == 1) { 42 } else { 0 } };",
         "struct Unit {}; def nominal() = { Unit {} };",
     ] {
-        let error = pipeline::generate(&parse(source).unwrap()).unwrap_err();
+        let error = pipeline::generate(&parse(source)).unwrap_err();
         assert!(
             matches!(
                 error.kind,
@@ -341,7 +366,7 @@ fn returned_pointers_support_field_assignment() {
     );
     let src = "def id (r: { x: int }) -> { x: int } = { r }; def f (r: { x: int }) -> int = { id(r).x := 1 };";
     assert!(matches!(
-        pipeline::generate(&parse(src).unwrap()).unwrap_err().kind,
+        pipeline::generate(&parse(src)).unwrap_err().kind,
         GenerateErrorKind::NotAPlace
     ));
 }
@@ -383,7 +408,7 @@ fn uninitialized_reads_are_rejected_on_all_paths() {
     ] {
         assert!(
             matches!(
-                pipeline::generate(&parse(src).unwrap()).unwrap_err().kind,
+                pipeline::generate(&parse(src)).unwrap_err().kind,
                 GenerateErrorKind::UninitializedValue { .. }
             ),
             "{src}"

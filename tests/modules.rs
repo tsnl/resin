@@ -66,10 +66,11 @@ fn ast_preserves_exports_imports_and_their_spans() {
     assert_eq!(file.stmts.len(), 1);
     assert!(resin_ast::format_source(&file).contains("(export answer Box)"));
     assert!(
-        pipeline::generate(&file)
+        Project::new(&[("main.resin", source)])
+            .compile()
             .unwrap_err()
             .to_string()
-            .contains("UnresolvedImport")
+            .contains("a.resin")
     );
     let project = Project::new(&[(
         "main.resin",
@@ -727,7 +728,7 @@ fn methods_validate_declarations_and_call_receivers() {
         ),
         (
             "struct A { def f() = {}; def f() = {}; }; ",
-            "DuplicateValue",
+            "conflicting binding",
         ),
         (
             "struct A { def f(self: A) = {}; };  def g() = { A.f(); };",
@@ -825,8 +826,8 @@ fn aliases_share_the_nominal_namespace_and_origin() {
         "struct Item {}; type Alias = Item; impl Alias { def f() = {}; }",
         "type Number = int; impl Number { def f() = {}; }",
     ] {
-        let document = resin_cst::Document::reparse(source.into(), None);
-        assert!(resin_ast::generate(&document).is_err());
+        let document = resin_cst::build_cst(source, None);
+        assert!(!resin_ast::build_ast(&document).errors.is_empty());
     }
 }
 

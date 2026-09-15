@@ -1,8 +1,10 @@
 use resin_hir::{TermKind, Type};
 
-fn compile(source: &str) -> Result<resin_hir::Module, resin_hir::GenerateError> {
-    let document = resin_cst::Document::reparse(source.into(), None);
-    resin_hir::generate(&resin_ast::generate(&document).unwrap())
+mod common;
+use common::hir_module;
+
+fn compile(source: &str) -> Result<resin_hir::Module, resin_source::SourceError> {
+    hir_module(source)
 }
 
 #[test]
@@ -151,10 +153,10 @@ fn undetermined_method_arguments_require_annotations() {
 
 fn source_module(name: &str, text: &str) -> resin_ast::SourceModule {
     let source = resin_source::Source::new(name, text);
-    let document = resin_cst::Document::reparse(text.into(), None);
+    let document = resin_cst::build_cst(text, None);
     resin_ast::SourceModule {
         source,
-        file: resin_ast::generate(&document).unwrap(),
+        file: resin_ast::build_ast(&document).file,
         imports: vec![],
     }
 }
@@ -170,7 +172,7 @@ fn rejects_local_and_imported_owner(declaration: &str, use_site: &str, expected:
     entry
         .imports
         .push((resin_source::Span { start: 0, end: 0 }, 0));
-    let analysis = resin_hir::analyze_program(&resin_ast::Program {
+    let analysis = resin_hir::build_hir(&resin_ast::Program {
         modules: vec![library, entry],
     });
     assert!(analysis.module.is_none());

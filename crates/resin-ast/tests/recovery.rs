@@ -1,13 +1,13 @@
 use resin_ast::{SourceModule, StmtKind, TermKind};
-use resin_cst::Document;
+
 use resin_source::prelude::*;
 
 #[test]
 fn recovery_keeps_original_byte_spans_and_incomplete_function_bodies() {
     let source = "// é🌲\ndef main() = { print(\"hello\")";
-    let document = Document::reparse(source.into(), None);
-    assert!(resin_ast::generate(&document).is_err());
-    let recovered = resin_ast::recover(&document);
+    let document = resin_cst::build_cst(source, None);
+    assert!(!resin_ast::build_ast(&document).errors.is_empty());
+    let recovered = resin_ast::build_ast(&document);
     assert!(!recovered.errors.is_empty());
     let function = &recovered.file.stmts[0];
     let StmtKind::Function { body, .. } = &function.val else {
@@ -26,9 +26,9 @@ fn recovery_keeps_original_byte_spans_and_incomplete_function_bodies() {
 #[test]
 fn recovering_valid_syntax_matches_strict_generation() {
     let source = "struct Point { x: int, def get(self: Point) -> int = { self.x }; }; ";
-    let document = Document::reparse(source.into(), None);
-    let recovered = resin_ast::recover(&document);
-    let strict = resin_ast::generate(&document).unwrap();
+    let document = resin_cst::build_cst(source, None);
+    let recovered = resin_ast::build_ast(&document);
+    let strict = resin_ast::build_ast(&document).file;
     assert!(recovered.errors.is_empty());
     assert_eq!(
         resin_ast::format_source(&strict),
@@ -42,7 +42,7 @@ fn source_locations_tolerate_editor_offsets_inside_utf8() {
     let source = "// é🌲\ndef main() = {};";
     let module = SourceModule {
         source: Source::new("memory.resin", source),
-        file: resin_ast::generate(&Document::reparse(source.into(), None)).unwrap(),
+        file: resin_ast::build_ast(&resin_cst::build_cst(source, None)).file,
         imports: vec![],
     };
     assert_eq!(
@@ -66,7 +66,7 @@ fn source_locations_tolerate_editor_offsets_inside_utf8() {
 #[test]
 fn generic_wrapper_types_lower_with_their_element_annotations() {
     let source = "def first(values: GpuSpan<uint>) -> GpuPtr<_> = { values.at(0_ul) };";
-    let file = resin_ast::generate(&Document::reparse(source.into(), None)).unwrap();
+    let file = resin_ast::build_ast(&resin_cst::build_cst(source, None)).file;
     let StmtKind::Function { params, result, .. } = &file.stmts[0].val else {
         panic!("expected function");
     };
@@ -87,7 +87,7 @@ fn generic_wrapper_types_lower_with_their_element_annotations() {
 #[test]
 fn generic_pipeline_annotations_keep_both_arguments() {
     let source = "def pipeline(value: GpuComputePipeline<Root, ArcPtr<Owner>>) -> GpuGraphicsPipeline<None, _> = { value };";
-    let file = resin_ast::generate(&Document::reparse(source.into(), None)).unwrap();
+    let file = resin_ast::build_ast(&resin_cst::build_cst(source, None)).file;
     let StmtKind::Function { params, result, .. } = &file.stmts[0].val else {
         panic!("expected function");
     };
@@ -114,8 +114,8 @@ fn generic_pipeline_annotations_keep_both_arguments() {
 #[test]
 fn struct_recovery_retains_fields_methods_and_later_declarations() {
     let source = "struct Item { value: int, def read(self: Item) -> int = { self. }; }; def later() -> int = { 42 };";
-    let document = Document::reparse(source.into(), None);
-    let file = resin_ast::recover(&document).file;
+    let document = resin_cst::build_cst(source, None);
+    let file = resin_ast::build_ast(&document).file;
     let StmtKind::Struct { body, methods, .. } = &file.stmts[0].val else {
         panic!("expected the method's owning struct");
     };
@@ -136,6 +136,6 @@ fn struct_recovery_retains_fields_methods_and_later_declarations() {
 #[test]
 fn fields_must_precede_struct_methods() {
     let source = "struct Item { def read() -> int = { 42 }; value: int };";
-    let document = Document::reparse(source.into(), None);
-    assert!(resin_ast::generate(&document).is_err());
+    let document = resin_cst::build_cst(source, None);
+    assert!(!resin_ast::build_ast(&document).errors.is_empty());
 }

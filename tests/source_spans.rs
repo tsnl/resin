@@ -1,31 +1,30 @@
 #[allow(dead_code)]
 mod support;
 
-use resin_compiler::{Compilation, Compiler, Target};
+use resin_hir::Hir;
+use resin_lir::Profile;
 use resin_source::{Loader, Source};
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
-fn compile(source: &str, target: Target) -> Arc<Compilation> {
+fn build_hir(source: &str) -> Hir {
     let library = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resin");
     let mut loader = Loader::new(library);
-    Compiler::new().compile(
-        Source::new("span-test.resin", source),
-        &mut loader,
-        &[target],
-    )
+    Hir::build(Source::new("span-test.resin", source), &mut loader, None)
+}
+
+fn compile(
+    source: &str,
+    entry: &str,
+    profile: Profile,
+) -> Result<resin_lir::VerifiedModule, Vec<resin_source::SourceError>> {
+    support::pipeline::verified_lir(&build_hir(source), entry, profile)
 }
 
 fn run(source: &str) -> std::process::Output {
-    let compilation = compile(
-        source,
-        Target::Host {
-            entry: "main".into(),
-        },
-    );
-    let module = compilation
-        .module()
-        .unwrap_or_else(|error| panic!("{error}"));
-    support::project::Project::new(module, Some("main"))
+    let module = compile(source, "main", Profile::Host)
+        .unwrap_or_else(|errors| panic!("{errors:?}"))
+        .into_module();
+    support::project::Project::new(&module, Some("main"))
         .unwrap()
         .run()
 }
@@ -174,12 +173,19 @@ fn byte_views_reject_nonnumeric_elements_after_specialization() {
             Span<Entry> { data = &entry, length = 1_ul }.as_bytes();
         };
     "#,
-        Target::Host {
-            entry: "main".into(),
-        },
+        "main",
+        Profile::Host,
     );
-    let error = compilation.module().unwrap_err();
-    assert!(error.to_string().contains("numeric elements"), "{error}");
+    let error = match compilation {
+        Ok(_) => panic!("expected LIR instantiation to fail"),
+        Err(errors) => errors,
+    };
+    assert!(
+        error
+            .iter()
+            .any(|error| error.to_string().contains("numeric elements")),
+        "{error:?}"
+    );
 }
 
 #[test]
@@ -211,11 +217,11 @@ fn shader_span_indexing_uses_record_layout_and_device_pointer_stride() {
             root.values.at(index).* := 42_ui;
         };
     "#,
-        Target::Shader {
-            entry: "kernel".into(),
-        },
+        "kernel",
+        Profile::Shader,
     );
-    let project = support::project::Project::new(compilation.module().unwrap(), None).unwrap();
+    let project =
+        support::project::Project::new(&compilation.unwrap().into_module(), None).unwrap();
     for shader in project.generated.shaders() {
         support::shaders::validate(shader.unoptimized_spirv());
     }
@@ -232,12 +238,11 @@ fn shader_local_addresses_cannot_become_physical_pointer_index_operands() {
             output.* := index(values.at(0), 2, 0).*;
         };
     "#,
-        Target::Shader {
-            entry: "kernel".into(),
-        },
+        "kernel",
+        Profile::Shader,
     );
-    let module = compilation.module().unwrap();
-    let error = support::project::Project::new(module, None).unwrap_err();
+    let module = compilation.unwrap().into_module();
+    let error = support::project::Project::new(&module, None).unwrap_err();
     assert!(
         error
             .to_string()
@@ -286,13 +291,16 @@ fn opaque_native_elements_cannot_be_indexed_or_sliced() {
             }};
         "#
         );
-        let compilation = compile(
-            &source,
-            Target::Host {
-                entry: "main".into(),
-            },
+        let compilation = compile(&source, "main", Profile::Host);
+        let error = match compilation {
+            Ok(_) => panic!("expected LIR instantiation to fail"),
+            Err(errors) => errors,
+        };
+        assert!(
+            error
+                .iter()
+                .any(|error| error.to_string().contains("OpaqueValue")),
+            "{error:?}"
         );
-        let error = compilation.module().unwrap_err();
-        assert!(error.to_string().contains("OpaqueValue"), "{error}");
     }
 }

@@ -3,7 +3,28 @@ pub mod project;
 pub mod shaders;
 
 pub fn parse(source: &str) -> resin_ast::SourceFile {
-    resin_ast::generate(&resin_cst::Document::reparse(source.to_string(), None)).unwrap()
+    let parsed = resin_ast::build_ast(&resin_cst::build_cst(source, None));
+    assert!(parsed.errors.is_empty(), "{source}\n{:?}", parsed.errors);
+    parsed.file
+}
+
+#[allow(dead_code)]
+pub fn program(source: &str) -> resin_ast::Program {
+    let src = resin_source::Source::new("test.resin", source);
+    resin_ast::Program {
+        modules: vec![resin_ast::SourceModule {
+            file: parse(source),
+            source: src,
+            imports: vec![],
+        }],
+    }
+}
+
+#[allow(dead_code)]
+pub fn hir(source: &str) -> resin_hir::Module {
+    resin_hir::build_hir(&program(source))
+        .into_module()
+        .unwrap_or_else(|error| panic!("{source}\n{error}"))
 }
 
 pub fn module(source: &str) -> resin_lir::Module {

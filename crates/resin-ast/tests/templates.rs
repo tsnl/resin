@@ -1,8 +1,7 @@
 use resin_ast::{SourceFile, StmtKind, TermKind, TypeKind};
-use resin_cst::Document;
 
 fn parse(text: &str) -> SourceFile {
-    resin_ast::generate(&Document::reparse(text.into(), None)).unwrap()
+    resin_ast::build_ast(&resin_cst::build_cst(text, None)).file
 }
 
 #[test]
@@ -109,7 +108,9 @@ fn template_lists_require_named_parameters_and_nonempty_arguments() {
         "type Empty<> = int;",
     ] {
         assert!(
-            resin_ast::generate(&Document::reparse(source.into(), None)).is_err(),
+            !resin_ast::build_ast(&resin_cst::build_cst(source, None))
+                .errors
+                .is_empty(),
             "{source}"
         );
     }

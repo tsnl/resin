@@ -327,6 +327,44 @@ fn generated_c_is_retained_alongside_the_executable() {
 }
 
 #[test]
+fn removed_shaders_disappear_from_the_cached_project() {
+    if shaders::optimizer().is_none() {
+        return;
+    }
+    let project = Project::new();
+    let host = fs::read_to_string(&project.input).unwrap();
+    fs::write(
+        &project.input,
+        r#"
+        export { main };
+        @compute_shader def kernel(index: ulong, output: Ptr<uint>) = {
+            output.* := uint(index);
+        };
+        def main() = { var bytes = kernel.spirv; };
+        "#,
+    )
+    .unwrap();
+    printed(&project.run(), b"");
+    let directory = project.executable().parent().unwrap().to_path_buf();
+    assert!(fs::read_dir(&directory).unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".unoptimized.spv")
+    }));
+    fs::write(&project.input, host).unwrap();
+    printed(&project.run(), b"first");
+    for entry in fs::read_dir(&directory).unwrap() {
+        let name = entry.unwrap().file_name();
+        assert!(
+            !name.to_string_lossy().starts_with("shader_"),
+            "obsolete shader input or output retained: {name:?}"
+        );
+    }
+}
+
+#[test]
 fn changed_source_rebuilds_in_the_same_directory() {
     let project = Project::new();
     printed(&project.run(), b"first");

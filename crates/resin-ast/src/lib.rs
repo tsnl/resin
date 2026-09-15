@@ -4,10 +4,16 @@
 //! ```compile_fail
 //! use resin_ast::lower;
 //! ```
+//! ```compile_fail
+//! use resin_ast::load;
+//! ```
 
 use resin_source::prelude::*;
+mod load;
 mod lower;
 mod print;
+
+pub use load::{BuiltProgram, ModuleDocument, build_program};
 
 use std::{fmt, sync::Arc};
 
@@ -267,13 +273,8 @@ impl fmt::Display for AstError {
 
 impl std::error::Error for AstError {}
 
-/// Generate a complete AST from a concrete syntax document.
-pub fn generate(source: &resin_cst::Document) -> Result<SourceFile, AstError> {
-    lower::generate(source)
-}
-
-/// Recover a tree with explicit holes and retain every syntax diagnostic.
-pub fn recover(source: &resin_cst::Document) -> Parsed {
+/// Build an AST, inserting holes for incomplete syntax and retaining every diagnostic.
+pub fn build_ast(source: &resin_cst::Document) -> Parsed {
     lower::document(source)
 }
 

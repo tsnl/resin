@@ -26,28 +26,22 @@ mod terms;
 
 use crate::{Error, ErrorKind};
 
-pub fn analyze(
-    source: &resin_hir::Module,
-    options: &crate::LoweringOptions,
-) -> Result<Module, Vec<Error>> {
-    let mut instances = instances::Instances::new(source, options);
-    instances.reserve_roots().map_err(|error| vec![error])?;
-    instances
-        .reserve_types()
-        .map_err(|error| vec![instances.lower_error(error, None, None)])?;
-    let functions = instances.lower()?;
-    instances.assemble(functions)
-}
-
 pub fn instantiate(
     source: &resin_hir::Module,
     entries: &[crate::Entry],
     options: &crate::LoweringOptions,
 ) -> Result<Module, Vec<Error>> {
     let mut instances = instances::Instances::new(source, options);
-    instances
-        .reserve_entries(entries)
-        .map_err(|error| vec![error])?;
+    if entries.is_empty() {
+        instances.reserve_roots().map_err(|error| vec![error])?;
+        instances
+            .reserve_types()
+            .map_err(|error| vec![instances.lower_error(error, None, None)])?;
+    } else {
+        instances
+            .reserve_entries(entries)
+            .map_err(|error| vec![error])?;
+    }
     let functions = instances.lower()?;
     instances.assemble(functions)
 }

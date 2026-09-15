@@ -19,8 +19,9 @@ def main() = { fibonacci(10); };
 "#;
 
 fn parse(src: &str) -> resin_ast::SourceFile {
-    resin_ast::generate(&resin_cst::Document::reparse(src.to_string(), None))
-        .unwrap_or_else(|err| panic!("{err}"))
+    let parsed = resin_ast::build_ast(&resin_cst::build_cst(src, None));
+    assert!(parsed.errors.is_empty(), "{src}\n{:?}", parsed.errors);
+    parsed.file
 }
 
 fn compile(src: &str) -> resin_lir::Module {

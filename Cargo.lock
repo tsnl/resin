@@ -613,7 +613,6 @@ dependencies = [
  "lsp-server",
  "resin-ast",
  "resin-codegen",
- "resin-compiler",
  "resin-cst",
  "resin-hir",
  "resin-lir",
@@ -652,17 +651,6 @@ dependencies = [
 [[package]]
 name = "resin-common"
 version = "0.1.0"
-
-[[package]]
-name = "resin-compiler"
-version = "0.1.0"
-dependencies = [
- "resin-ast",
- "resin-cst",
- "resin-hir",
- "resin-lir",
- "resin-source",
-]
 
 [[package]]
 name = "resin-cst"
@@ -704,7 +692,6 @@ dependencies = [
  "crossbeam-channel",
  "lsp-server",
  "lsp-types",
- "resin-compiler",
  "resin-cst",
  "resin-hir",
  "resin-source",

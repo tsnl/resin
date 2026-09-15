@@ -1,8 +1,10 @@
 use resin_hir::{TermKind, Type};
 
-fn compile(source: &str) -> Result<resin_hir::Module, resin_hir::GenerateError> {
-    let syntax = resin_cst::Document::reparse(source.into(), None);
-    resin_hir::generate(&resin_ast::generate(&syntax).unwrap())
+mod common;
+use common::hir_module;
+
+fn compile(source: &str) -> Result<resin_hir::Module, resin_source::SourceError> {
+    hir_module(source)
 }
 
 #[test]

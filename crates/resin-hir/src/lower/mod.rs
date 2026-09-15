@@ -32,7 +32,8 @@ pub(crate) mod scope;
 mod typed;
 mod types;
 
-/// Check a standalone source file. Imports require `generate_program`.
+/// Check a standalone source file. Imports require `build_hir`.
+#[cfg(test)]
 pub fn generate(file: &SourceFile) -> Result<Module, GenerateError> {
     if let Some(import) = file.imports.first() {
         return Err(GenerateError {
@@ -121,15 +122,6 @@ struct Export {
 }
 
 type Exports = BTreeMap<Arc<str>, Export>;
-
-pub fn generate_program(program: &Program) -> Result<crate::Module, SourceError> {
-    let mut compilation = analyze_program(program);
-    if !compilation.diagnostics.is_empty() {
-        Err(compilation.diagnostics.remove(0))
-    } else {
-        Ok(compilation.module.expect("successful compilation"))
-    }
-}
 
 /// Check modules in import order while retaining independent editor facts after errors.
 pub fn analyze_program(program: &Program) -> CheckedProgram {

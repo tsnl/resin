@@ -2,16 +2,27 @@ use super::Options;
 use super::{Input, Request};
 use resin_toolchain::CProfile;
 use resin_toolchain::Environment;
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 use tempfile::TempDir;
 
 fn options(environment: &Environment, profile: CProfile) -> Options {
     Options {
         directory: environment.directory.clone(),
         profile,
-        temporary: environment.temporary.clone(),
         tools: environment.toolchain(None, None),
+        temporary: environment.temporary.clone(),
     }
+}
+
+fn request(
+    input: Input,
+    destination: Option<PathBuf>,
+    options: Options,
+) -> super::super::Result<Request> {
+    Request::new(input, destination, options, resin_source::library_root())
 }
 
 fn input(path: &Path) -> Input {
@@ -31,7 +42,7 @@ fn requests_reject_source_overwrites_before_compilation() {
     fs::write(&source, "this need not parse").unwrap();
     let alias = temp.path().join(".").join(source.file_name().unwrap());
     for destination in [&source, &alias] {
-        let result = Request::new(
+        let result = request(
             input(&source),
             Some(destination.into()),
             options(&environment, CProfile::Debug),
@@ -44,7 +55,7 @@ fn requests_reject_source_overwrites_before_compilation() {
             "{error}"
         );
     }
-    let result = Request::new(
+    let result = request(
         input(&source),
         Some(temp.path().into()),
         options(&environment, CProfile::Debug),
@@ -55,7 +66,7 @@ fn requests_reject_source_overwrites_before_compilation() {
     );
     let unsaved = temp.path().join("unsaved.resin");
     assert!(
-        Request::new(
+        request(
             input(&unsaved),
             Some(unsaved.clone()),
             options(&environment, CProfile::Debug)
@@ -74,7 +85,7 @@ fn requests_resolve_executable_directories_and_preserve_file_destinations() {
         entry: "demo".into(),
     };
     for directory in [temp.path().to_path_buf(), temp.path().join("new/")] {
-        let request = Request::new(
+        let request = request(
             input.clone(),
             Some(directory.clone()),
             options(&environment, CProfile::Release),
@@ -90,13 +101,14 @@ fn requests_resolve_executable_directories_and_preserve_file_destinations() {
         );
     }
     let output = temp.path().join("custom-program");
-    let request = Request::new(
+    let request = request(
         input,
         Some(output.clone()),
         options(&environment, CProfile::Release),
     )
     .unwrap();
     assert_eq!(request.destination.as_deref(), Some(output.as_path()));
+    assert_eq!(request.library_root, resin_source::library_root());
     assert!(
         !temp.path().join("new").exists(),
         "construction must not build anything"
@@ -111,7 +123,7 @@ fn requests_validate_existing_output_ancestors() {
     fs::write(&file, "preserve").unwrap();
     for suffix in ["program", "missing/program", "../program"] {
         assert!(
-            Request::new(
+            request(
                 input(&temp.path().join("source.resin")),
                 Some(file.join(suffix)),
                 options(&environment, CProfile::Debug)
@@ -121,7 +133,7 @@ fn requests_validate_existing_output_ancestors() {
     }
     assert_eq!(fs::read_to_string(file).unwrap(), "preserve");
     assert!(
-        Request::new(
+        request(
             input(&temp.path().join("source.resin")),
             Some(temp.path().join("missing/nested/program")),
             options(&environment, CProfile::Debug)
@@ -138,7 +150,7 @@ fn requests_check_relative_ancestors_before_resolving_paths() {
     environment.directory = fs::canonicalize(temp.path()).unwrap();
     fs::write(environment.directory.join("file"), "preserve").unwrap();
     for destination in ["file/../program", "file/missing/program", "file/"] {
-        let error = Request::new(
+        let error = request(
             input(Path::new("source.resin")),
             Some(destination.into()),
             options(&environment, CProfile::Debug),
@@ -164,7 +176,7 @@ fn output_ancestor_validation_follows_symlinks() {
     symlink("file", temp.path().join("file-link")).unwrap();
     symlink("missing", temp.path().join("dangling-link")).unwrap();
     assert!(
-        Request::new(
+        request(
             input(&temp.path().join("source.resin")),
             Some(temp.path().join("dangling-link/program")),
             options(&environment, CProfile::Debug)
@@ -173,7 +185,7 @@ fn output_ancestor_validation_follows_symlinks() {
     );
     symlink(".", temp.path().join("directory-link")).unwrap();
     assert!(
-        Request::new(
+        request(
             input(&temp.path().join("source.resin")),
             Some(temp.path().join("file-link/program")),
             options(&environment, CProfile::Debug)
@@ -181,7 +193,7 @@ fn output_ancestor_validation_follows_symlinks() {
         .is_err()
     );
     assert!(
-        Request::new(
+        request(
             input(&temp.path().join("source.resin")),
             Some(temp.path().join("directory-link/missing/program")),
             options(&environment, CProfile::Debug)
@@ -204,7 +216,7 @@ fn requests_resolve_relative_paths_from_the_supplied_directory() {
     fs::write(&source, "export { main }; def main() = {};").unwrap();
     fs::create_dir(environment.directory.join("dist")).unwrap();
     for destination in ["dist", "new/", "output"] {
-        let request = Request::new(
+        let request = request(
             input(Path::new("program.resin")),
             Some(destination.into()),
             options(&environment, CProfile::Release),
@@ -221,7 +233,7 @@ fn requests_resolve_relative_paths_from_the_supplied_directory() {
         };
         assert_eq!(request.destination.as_deref(), Some(expected.as_path()));
     }
-    let request = Request::new(
+    let request = request(
         input(Path::new("program.resin")),
         Some(source),
         options(&environment, CProfile::Debug),

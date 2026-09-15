@@ -9,11 +9,17 @@
 //! ```compile_fail
 //! use resin_hir::lower;
 //! ```
+//! ```compile_fail
+//! use resin_hir::snapshot;
+//! ```
 
 use resin_source::prelude::*;
 use resin_types::prelude::*;
 mod lower;
 mod print;
+mod snapshot;
+
+pub use snapshot::{Diagnostic, Hir};
 
 use resin_common::define_id;
 use std::{collections::BTreeMap, fmt, sync::Arc};
@@ -421,14 +427,10 @@ pub enum ReceiverConversion {
 // HIR construction and printing
 //
 
-/// Check a standalone source file; imports require a resolved Program.
-pub fn generate(file: &resin_ast::SourceFile) -> Result<Module, GenerateError> {
-    lower::generate(file)
-}
-
-/// Check declarations in import order, requiring a completely typed tree.
-pub fn generate_program(program: &resin_ast::Program) -> Result<Module, SourceError> {
-    lower::generate_program(program)
+/// Build HIR from declarations in import order.
+/// Editor facts remain even when a complete tree cannot be produced.
+pub fn build_hir(program: &resin_ast::Program) -> CheckedProgram {
+    lower::analyze_program(program)
 }
 
 pub fn format_module(module: &Module) -> String {
@@ -470,6 +472,20 @@ pub struct CheckedProgram {
     pub semantics: Analysis,
 }
 
+impl CheckedProgram {
+    /// Take the completed module, or the first diagnostic.
+    pub fn into_module(self) -> Result<Module, SourceError> {
+        match self.module {
+            Some(module) if self.diagnostics.is_empty() => Ok(module),
+            _ => Err(self
+                .diagnostics
+                .into_iter()
+                .next()
+                .expect("failed HIR has a diagnostic")),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Hover {
     pub span: Span,
@@ -482,11 +498,6 @@ pub struct Completion {
     pub detail: String,
     pub kind: DefinitionKind,
     pub replace: Span,
-}
-
-/// Retain diagnostics and editor facts even when a complete tree cannot be produced.
-pub fn analyze_program(program: &resin_ast::Program) -> CheckedProgram {
-    lower::analyze_program(program)
 }
 
 impl Analysis {

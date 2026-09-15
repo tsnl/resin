@@ -21,12 +21,12 @@ pub struct Document {
     tree: Tree,
 }
 
-impl Document {
-    /// Parse text, reusing an earlier revision's tree when supplied.
-    pub fn reparse(text: String, previous: Option<&Self>) -> Self {
-        lower::reparse(text, previous)
-    }
+/// Build a CST document, reusing an earlier tree when supplied.
+pub fn build_cst(text: impl Into<String>, previous: Option<&Document>) -> Document {
+    lower::reparse(text.into(), previous)
+}
 
+impl Document {
     pub fn source(&self) -> &str {
         &self.text
     }

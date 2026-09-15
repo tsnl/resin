@@ -123,7 +123,7 @@ fn expected_results_select_arguments_and_concrete_casts_run_after_substitution()
 }
 
 fn hir(source: &str) -> resin_hir::Module {
-    resin_hir::generate(&support::parse(source)).unwrap()
+    support::hir(source)
 }
 
 #[test]
@@ -137,7 +137,9 @@ fn concrete_template_errors_report_the_application_chain() {
         "def failure<E>(value: E) -> Result<int, E> = { err(value) }; def main() = { failure(1); };",
     ] {
         let tree = hir(source);
-        let error = resin_lir::generate(&tree).unwrap_err();
+        let error = resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default())
+            .unwrap_err()
+            .remove(0);
         assert!(!error.applications.is_empty(), "{error:?}");
     }
 }
@@ -162,24 +164,30 @@ fn generic_union_matches_use_concrete_tags_after_substitution() {
 #[test]
 fn source_recursion_memoizes_instances_and_respects_the_configured_limit() {
     let tree = hir("def recur<T>(value: T) = { recur(value) }; def main() = { recur(1); };");
-    let module = resin_lir::generate(&tree).unwrap();
+    let module = resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
     assert_eq!(module.functions.len(), 2);
     let source = resin_source::Source::new(
         "growing.resin",
         "export { main }; def grow<T>(value: T) = { grow(&value) }; def main() = { grow(1); };",
     );
     let mut loader = resin_source::Loader::new(resin_source::library_root());
-    let compilation = resin_compiler::Compiler::with_config(resin_compiler::CompilerConfig {
+    let output = resin_hir::Hir::build(source, &mut loader, None);
+    let options = resin_lir::LoweringOptions {
         max_monomorphs_per_function: std::num::NonZeroUsize::new(3).unwrap(),
-    })
-    .compile(
-        source,
-        &mut loader,
-        &[resin_compiler::Target::Host {
-            entry: "main".into(),
-        }],
-    );
-    let message = compilation.module().unwrap_err().to_string();
+    };
+    let message = match support::pipeline::verified_lir_with_options(
+        &output,
+        "main",
+        resin_lir::Profile::Host,
+        &options,
+    ) {
+        Ok(_) => panic!("expected monomorph limit"),
+        Err(errors) => errors
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
     assert!(message.contains("limit of 3 monomorphs"), "{message}");
     assert!(message.contains("grow"), "{message}");
 }

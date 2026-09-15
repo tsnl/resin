@@ -3,15 +3,16 @@ use resin_source::prelude::*;
 
 fn generate(text: &str) -> Result<resin_hir::Module, SourceError> {
     let source = Source::new("strings", text);
-    let document = resin_cst::Document::reparse(source.text().into(), None);
-    let file = resin_ast::generate(&document).unwrap();
-    resin_hir::generate_program(&resin_ast::Program {
+    let document = resin_cst::build_cst(source.text(), None);
+    let file = resin_ast::build_ast(&document).file;
+    resin_hir::build_hir(&resin_ast::Program {
         modules: vec![resin_ast::SourceModule {
             source,
             file,
             imports: vec![],
         }],
     })
+    .into_module()
 }
 
 fn result(module: &resin_hir::Module, name: &str) -> Type {

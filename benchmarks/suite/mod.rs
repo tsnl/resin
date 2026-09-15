@@ -279,17 +279,25 @@ fn build(
 ) -> Result<Built> {
     let mut loader = resin_source::Loader::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("resin"));
     let source = loader.load_file(source)?;
-    let target = match entry {
-        Some(entry) => resin_compiler::Target::Host {
-            entry: entry.into(),
-        },
-        None => resin_compiler::Target::Shader {
-            entry: "kernel".into(),
-        },
+    let output = resin_hir::Hir::build(source, &mut loader, None);
+    let (name, profile) = match entry {
+        Some(entry) => (entry, resin_lir::Profile::Host),
+        None => ("kernel", resin_lir::Profile::Shader),
     };
-    let compilation = resin_compiler::Compiler::new().compile(source, &mut loader, &[target]);
+    let hir = output.hir().map_err(|error| error.to_string())?;
+    let request =
+        resin_lir::Entry::exported(hir, name, profile).map_err(|error| error.to_string())?;
+    let lir = resin_lir::build_lir(hir, &[request], &resin_lir::LoweringOptions::default())
+        .map_err(|errors| {
+            errors
+                .into_iter()
+                .map(|error| error.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        })?;
+    let lir = resin_lir::VerifiedModule::new(lir).map_err(|error| error.to_string())?;
     let directory = tempfile::TempDir::new()?;
-    let generated = resin_codegen::generate(compilation.verified()?, entry, directory.path())?;
+    let generated = resin_codegen::generate(lir.view(), entry, directory.path())?;
     for (name, contents) in extra_files {
         fs::write(directory.path().join(name), contents)?;
     }

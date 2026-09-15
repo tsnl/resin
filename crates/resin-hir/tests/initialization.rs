@@ -1,10 +1,11 @@
 //! Initialization is a source guarantee, including definitions with no LIR request.
-use resin_hir::{GenerateErrorKind, Module};
+use resin_hir::Module;
 
-fn lower(source: &str) -> Result<Module, resin_hir::GenerateError> {
-    let syntax = resin_cst::Document::reparse(source.into(), None);
-    let file = resin_ast::generate(&syntax).unwrap();
-    resin_hir::generate(&file)
+mod common;
+use common::hir_module;
+
+fn lower(source: &str) -> Result<Module, resin_source::SourceError> {
+    hir_module(source)
 }
 fn valid(source: &str) {
     lower(source).unwrap_or_else(|error| panic!("{source}\n{error}"));
@@ -12,7 +13,7 @@ fn valid(source: &str) {
 fn uninitialized(source: &str) {
     let error = lower(source).unwrap_err();
     assert!(
-        matches!(error.kind, GenerateErrorKind::UninitializedValue { .. }),
+        error.diagnostic.contains("UninitializedValue"),
         "{source}\n{error}"
     );
 }
@@ -24,10 +25,13 @@ fn unused_definitions_still_require_initialized_reads() {
     );
     for expression in ["value + 1", "{ var pointer = &value; 1 }"] {
         let source = format!("def unused() -> int = {{ var value = {expression}; value }};");
-        assert!(matches!(
-            lower(&source).unwrap_err().kind,
-            GenerateErrorKind::EagerRecursion { .. }
-        ));
+        assert!(
+            lower(&source)
+                .unwrap_err()
+                .diagnostic
+                .contains("EagerRecursion"),
+            "{source}"
+        );
     }
 }
 

@@ -5,7 +5,8 @@ mod worker;
 
 /// Serve editor requests over stdin/stdout until the client shuts down.
 pub fn serve(
+    project: std::path::PathBuf,
     default_library_root: std::path::PathBuf,
 ) -> Result<i32, Box<dyn std::error::Error + Send + Sync>> {
-    server::run(default_library_root)
+    server::run(project, default_library_root)
 }

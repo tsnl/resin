@@ -1,10 +1,11 @@
 //! Exercise public phase APIs without retaining construction state between them.
 
+#[allow(dead_code)]
+mod support;
+
 use resin_source::prelude::*;
 fn hir(source: &str) -> resin_hir::Module {
-    let syntax = resin_cst::Document::reparse(source.to_owned(), None);
-    let file = resin_ast::generate(&syntax).unwrap();
-    resin_hir::generate(&file).unwrap()
+    support::hir(source)
 }
 
 fn function<'a>(module: &'a resin_hir::Module, name: &str) -> &'a resin_hir::Function {
@@ -59,7 +60,10 @@ fn hir_resolves_calls_and_preserves_type_dependent_operations_for_lir() {
     ));
     let printed = resin_hir::format_module(&module);
     assert!(printed.contains("Item.read") && printed.contains("(if") && printed.contains("(call"));
-    resin_lir::verify(&resin_lir::generate(&module).unwrap()).unwrap();
+    resin_lir::verify(
+        &resin_lir::build_lir(&module, &[], &resin_lir::LoweringOptions::default()).unwrap(),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -82,8 +86,9 @@ fn lir_lowering_needs_only_the_resolved_tree() {
     for function in &mut module.functions {
         function.location = None;
     }
-    let first = resin_lir::generate(&module).unwrap();
-    let second = resin_lir::generate(&module).unwrap();
+    let first = resin_lir::build_lir(&module, &[], &resin_lir::LoweringOptions::default()).unwrap();
+    let second =
+        resin_lir::build_lir(&module, &[], &resin_lir::LoweringOptions::default()).unwrap();
     assert_eq!(first, second);
     drop(module);
     let checked = resin_lir::VerifiedModule::new(first).unwrap();
@@ -98,7 +103,10 @@ fn generated_files_outlive_lir_and_its_verification_certificate() {
         @compute_shader def kernel(i: ulong, output: Ptr<ulong>) = { output.* := i; };
         def main() -> int = { 42 };
     "#);
-    let checked = resin_lir::VerifiedModule::new(resin_lir::generate(&module).unwrap()).unwrap();
+    let checked = resin_lir::VerifiedModule::new(
+        resin_lir::build_lir(&module, &[], &resin_lir::LoweringOptions::default()).unwrap(),
+    )
+    .unwrap();
     let host_directory = tempfile::TempDir::new().unwrap();
     let shader_directory = tempfile::TempDir::new().unwrap();
     let host =
@@ -120,9 +128,15 @@ fn generated_files_outlive_lir_and_its_verification_certificate() {
 
 #[test]
 fn mutating_lir_discards_the_certificate_and_requires_reverification() {
-    let checked =
-        resin_lir::VerifiedModule::new(resin_lir::generate(&hir("def f() = {}; ")).unwrap())
-            .unwrap();
+    let checked = resin_lir::VerifiedModule::new(
+        resin_lir::build_lir(
+            &hir("def f() = {}; "),
+            &[],
+            &resin_lir::LoweringOptions::default(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let mut module = checked.into_module();
     module.functions[0].parameter_count = module.functions[0].locals.len() + 1;
     assert!(resin_lir::VerifiedModule::new(module).is_err());
@@ -135,19 +149,17 @@ fn a_later_phase_error_preserves_earlier_compilation_products() {
         "export { f }; def f() -> bool = { (1 == 1) + (1 == 1) };",
     );
     let mut loader = resin_source::Loader::new(Default::default());
-    let compilation = resin_compiler::Compiler::new().compile(
-        source,
-        &mut loader,
-        &[resin_compiler::Target::Host { entry: "f".into() }],
-    );
-    assert!(compilation.program().is_ok());
-    assert!(compilation.hir().is_ok());
-    assert!(compilation.module().is_err());
+    let output = resin_hir::Hir::build(source, &mut loader, None);
+    assert!(output.program().is_ok());
+    assert!(output.hir().is_ok());
+    let errors = match support::pipeline::verified_lir(&output, "f", resin_lir::Profile::Host) {
+        Ok(_) => panic!("expected unsupported builtin"),
+        Err(errors) => errors,
+    };
     assert!(
-        compilation
-            .diagnostics()
+        errors
             .iter()
-            .any(|d| d.message.contains("UnsupportedBuiltin"))
+            .any(|error| error.diagnostic.contains("UnsupportedBuiltin"))
     );
 }
 
@@ -155,7 +167,9 @@ fn a_later_phase_error_preserves_earlier_compilation_products() {
 fn unsupported_concrete_operations_fail_during_lir_construction() {
     let source = "export { main }; def main() -> int = { var r = { x = 1 }; r + r; 0 };";
     let hir = hir(source);
-    let error = resin_lir::generate(&hir).unwrap_err();
+    let error = resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
+        .unwrap_err()
+        .remove(0);
     assert!(matches!(
         error.kind,
         resin_lir::ErrorKind::Type {

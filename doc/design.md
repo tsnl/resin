@@ -118,17 +118,16 @@ one text version; a replacement keeps the logical source ID and leaves the old
 version usable. Names serve diagnostics and need not be paths or unique. Locations
 retain the source alongside a byte span, so their meaning survives later edits.
 
-`resin_compiler::Compiler::compile(entry, loader, targets)` resolves imports and returns an
-`Arc<Compilation>` containing completed phase products and editor facts. The concrete
-`resin_source::Loader` supplies files, registered buffer text, and explicit import
-bindings. It resolves relative and `$/` imports and reuses unchanged source
-instances. Source loading has no dependency on compiler phases or concrete types.
-Editors register changes and remove closed buffers through the loader.
+`resin_hir::Hir::build(source, loader, previous)` resolves imports and returns
+completed HIR and editor facts. The concrete `resin_source::Loader` supplies files,
+registered buffer text, and explicit import bindings. It resolves relative and `$/`
+imports and reuses unchanged source instances. Source loading has no dependency on
+compiler phases or concrete types. Editors register changes and remove closed buffers
+through the loader.
 
-`Compiler` owns its cache fields directly; `Compilation` owns its retained products.
-Their definitions, queries, and private implementation stay together in `lib.rs`.
-A small public interface can have a substantial, cohesive implementation. The
-compiler has no native-build, file-notification, or protocol-version API.
+`Hir` owns its retained products and queries. A small public interface can have a
+substantial, cohesive implementation. The compiler has no native-build,
+file-notification, or protocol-version API.
 
 Codegen consumes a compilation's verified LIR and writes a complete C/SPIR-V/Ninja
 project. Its target ASTs stay private. `resin-toolchain` builds the directory through
