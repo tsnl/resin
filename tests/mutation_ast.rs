@@ -33,10 +33,9 @@ fn first_statement(file: &SourceFile) -> &resin_ast::Stmt {
 
 #[test]
 fn omitted_function_results_lower_to_unit() {
-    let source =
-        "def implicit() = {}; def explicit() -> () = {}; extern \"header.h\" def foreign();";
+    let source = "extern { \"header.h\": { def foreign(); } }; def implicit() = {}; def explicit() -> () = {};";
     let file = parse(source);
-    for (index, statement) in file.stmts.iter().enumerate() {
+    for statement in &file.stmts {
         let (name, result) = match &statement.val {
             StmtKind::Function { name, result, .. }
             | StmtKind::ForeignFunction { name, result, .. } => (name, result),
@@ -45,7 +44,11 @@ fn omitted_function_results_lower_to_unit() {
         assert!(matches!(result.val, resin_ast::TypeKind::Unit));
         assert_eq!(
             &source[result.span.start..result.span.end],
-            if index == 1 { "()" } else { name.val.as_ref() }
+            if name.val.as_ref() == "explicit" {
+                "()"
+            } else {
+                name.val.as_ref()
+            }
         );
     }
 }

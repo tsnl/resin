@@ -153,8 +153,8 @@ fn local_nominal_results_carry_captures_as_well_as_explicit_arguments() {
 #[test]
 fn generic_foreign_values_fail_without_panicking() {
     for source in [
-        "struct Cell<T> { value: T }; extern \"native.h\" def native(value: Cell<int>);",
-        "struct Cell<T> { value: T }; extern \"native.h\" def native() -> Cell<int>;",
+        "extern { \"native.h\": { def native(value: Cell<int>); } }; struct Cell<T> { value: T };",
+        "extern { \"native.h\": { def native() -> Cell<int>; } }; struct Cell<T> { value: T };",
     ] {
         let error = compile(source).unwrap_err();
         assert!(error.to_string().contains("Foreign"), "{error}");

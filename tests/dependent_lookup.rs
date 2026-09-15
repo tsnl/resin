@@ -271,15 +271,19 @@ fn dependent_method_calls_obey_shader_profile_rules() {
     let message = support::pipeline::shader_error(
         r#"
         export { kernel };
-        extern "stdlib.h" def abs(value: int) -> int;
+
+        extern {
+            "stdlib.h": {
+                def abs(value: int) -> int;
+            },
+        };
         struct Owner { value: int,
             def read(self: Owner) -> int = { abs(self.value) };
         };
         def read<T>(value: T) -> _ = { value.read() };
         @compute_shader def kernel(index: ulong, root: Ptr<Owner>) = {
             root.value := read(root);
-        };
-    "#,
+        };"#,
     );
     assert!(message.contains("foreign"), "{message}");
 }

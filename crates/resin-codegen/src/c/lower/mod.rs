@@ -69,10 +69,16 @@ fn includes(module: &Module) -> Vec<String> {
     .map(String::from)
     .collect();
     let foreign: std::collections::BTreeSet<_> = module
-        .functions
+        .foreign_headers
         .iter()
-        .filter(|f| f.profile == resin_lir::Profile::Host)
-        .filter_map(|f| f.foreign.as_ref().map(|f| f.header.to_string()))
+        .map(ToString::to_string)
+        .chain(
+            module
+                .functions
+                .iter()
+                .filter(|f| f.profile == resin_lir::Profile::Host)
+                .filter_map(|f| f.foreign.as_ref().map(|f| f.header.to_string())),
+        )
         .collect();
     headers.extend(foreign);
     headers

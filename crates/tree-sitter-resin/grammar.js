@@ -138,13 +138,13 @@ export default grammar({
     source_file: ($) =>
       seq(
         optional(field("exports", $.export_clause)),
+        optional(field("externs", $.extern_clause)),
         optional(field("imports", $.import_clause)),
         repeat(
           field(
             "stmt",
             choice(
               $.function_definition,
-              $.foreign_function,
               $.intrinsic_function,
               $.foreign_type,
               $.type_definition,
@@ -158,11 +158,19 @@ export default grammar({
       seq("export", "{", list("name", choice($.lid, $.uid), ","), "}", ";"),
     import_clause: ($) =>
       seq("import", "{", list("path", $.string, ","), "}", ";"),
+    extern_clause: ($) =>
+      seq("extern", "{", list("groups", $.foreign_group, ","), "}", ";"),
+    foreign_group: ($) =>
+      seq(
+        field("header", $.string),
+        ":",
+        "{",
+        repeat(field("functions", $.foreign_function)),
+        "}",
+      ),
 
     foreign_function: ($) =>
       seq(
-        "extern",
-        field("header", $.string),
         "def",
         field("name", $.lid),
         "(",

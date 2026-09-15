@@ -52,8 +52,8 @@ fn references_cannot_be_hidden_in_value_storage_or_generic_arguments() {
         "def identity<T>(value: T) -> T = { value }; def invalid() = { var x = 1_i; identity::<Ref<int>>(x); };",
         "struct Cell { def accept<T>(value: T) = {}; }; def invalid() = { var x = 1_i; Cell.accept::<Ref<int>>(x); };",
         "def invalid() = { var value: Ref<int> = Ref<int>(1_i); };",
-        "extern \"test.h\" def invalid(value: Ref<int>);",
-        "extern \"test.h\" def invalid() -> Ref<int>;",
+        "extern { \"test.h\": { def invalid(value: Ref<int>); } };",
+        "extern { \"test.h\": { def invalid() -> Ref<int>; } };",
     ] {
         assert!(
             hir_module(source).is_err(),

@@ -145,14 +145,23 @@ fn inference_holes_are_highlighted_as_types() {
 
 #[test]
 fn queries_capture_resin_constructs() {
-    let source = "export { main, Number }; import { \"$/core.resin\" };\n\
-        extern type Handle; extern \"lib.h\" def native (arg: int) -> int;\n\
-        struct Number {field: int};\n\
-        // a function\n\
-        def main (parameter: int) -> int = {\n\
-            var local = {field = 2}; var pointer: Ptr<int>; var values = [1, 2];\n\
-            native(parameter) + local.field + pointer.*\n\
-        }; def reset() = {}; extern \"lib.h\" def finish();";
+    let source = r#"export { main, Number };
+        extern {
+            "lib.h": {
+                def native (arg: int) -> int;
+                def finish();
+            },
+        };
+        import { "$/core.resin" };
+        extern type Handle;
+        struct Number {field: int};
+        // a function
+        def main (parameter: int) -> int = {
+            var local = {field = 2}; var pointer: Ptr<int>; var values = [1, 2];
+            native(parameter) + local.field + pointer.*
+        };
+        def reset() = {};
+    "#;
     let mut parser = tree_sitter::Parser::new();
     parser
         .set_language(&tree_sitter_resin::LANGUAGE.into())

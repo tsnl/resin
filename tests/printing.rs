@@ -74,9 +74,15 @@ fn string_storage_is_terminated_without_changing_its_logical_length() {
     let c = std::fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
     assert!(c.contains("static uint8_t r_literal_"), "{c}");
     prints(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main };
 
-        extern "string.h" def strlen(text: Ptr<ubyte>) -> ulong;
+        extern {
+            "string.h": {
+                def strlen(text: Ptr<ubyte>) -> ulong;
+            },
+        };
+        import { "$/string.resin" };
+
         def main() -> int = {
             var text = "héllo";
             var empty = "";
@@ -88,8 +94,7 @@ fn string_storage_is_terminated_without_changing_its_logical_length() {
                 print(fmt("{0}{1}", (text, empty)));
                 0
             } else { 1 }
-        };
-    "#,
+        };"#,
         "héllo".as_bytes(),
     );
 }
@@ -97,9 +102,15 @@ fn string_storage_is_terminated_without_changing_its_logical_length() {
 #[test]
 fn embedded_and_explicit_trailing_nuls_are_not_truncated() {
     prints(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main };
 
-        extern "string.h" def strlen(text: Ptr<ubyte>) -> ulong;
+        extern {
+            "string.h": {
+                def strlen(text: Ptr<ubyte>) -> ulong;
+            },
+        };
+        import { "$/string.resin" };
+
         def main() -> int = {
             var text = "a\0b\0";
             var pointer = text.data;
@@ -108,8 +119,7 @@ fn embedded_and_explicit_trailing_nuls_are_not_truncated() {
                 print(fmt("before\0{0}after", (text,)));
                 0
             } else { 1 }
-        };
-    "#,
+        };"#,
         b"before\0a\0b\0after",
     );
     prints(
@@ -328,16 +338,21 @@ fn formatted_strings_retain_storage_and_release_the_last_owner() {
 fn literal_strings_survive_returns_and_keep_explicit_nuls() {
     prints(
         r#"
-        export { main }; import { "$/string.resin" };
-        extern "string.h" def strlen(p: Ptr<ubyte>) -> ulong;
+        export { main };
+
+        extern {
+            "string.h": {
+                def strlen(p: Ptr<ubyte>) -> ulong;
+            },
+        };
+        import { "$/string.resin" };
         def literal() -> str = { "a\0b" };
         def main() -> int = {
             var text = literal();
             var copy = text;
             print(copy);
             if (text.length == 3_ul && strlen(text.data) == 1_ul && text.at(2_ul) == 98_ub) { 0 } else { 1 }
-        };
-    "#,
+        };"#,
         b"a\0b",
     );
 }

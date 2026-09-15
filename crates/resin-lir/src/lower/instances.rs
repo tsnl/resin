@@ -541,6 +541,7 @@ impl<'a> Instances<'a> {
     ) -> Result<crate::Module, Vec<Error>> {
         let mut module = crate::Module {
             entries: std::mem::take(&mut self.entries),
+            foreign_headers: self.source.foreign_headers.clone(),
             shaders: std::mem::take(&mut self.shaders),
             types: TypeTable::from(std::mem::take(&mut self.definitions)),
             ..Default::default()

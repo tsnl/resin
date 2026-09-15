@@ -129,7 +129,7 @@ fn cached_programs_track_foreign_headers() {
     let header = temp.path().join("value header.h");
     fs::write(&header, "static inline int value(void) { return 41; }\n").unwrap();
     fs::write(&input, format!(
-        "export {{ main }}; extern \"{}\" def value() -> int; def main() -> int = {{ value() }};",
+        "export {{ main }}; extern {{ \"{}\": {{ def value() -> int; }} }}; def main() -> int = {{ value() }};",
         header.to_string_lossy().replace('\\', "/")
     )).unwrap();
     assert_eq!(invoke(temp.path(), &input, &[]).status.code(), Some(41));
@@ -155,8 +155,14 @@ fn cached_programs_track_foreign_headers() {
 #[test]
 fn strings_are_c_compatible_in_both_profiles() {
     let source = r#"
-        export { main }; import { "$/string.resin" };
-        extern "string.h" def strlen(text: Ptr<ubyte>) -> ulong;
+        export { main };
+
+        extern {
+            "string.h": {
+                def strlen(text: Ptr<ubyte>) -> ulong;
+            },
+        };
+        import { "$/string.resin" };
         def main() -> int = {
             var path = "triangle.png";
             var text = "a\0b";
@@ -165,8 +171,7 @@ fn strings_are_c_compatible_in_both_profiles() {
                 print(fmt("{0}:{1}", (path, text)));
                 0
             } else { 1 }
-        };
-    "#;
+        };"#;
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
     fs::write(&input, source).unwrap();
@@ -366,7 +371,7 @@ fn selected_entries_must_be_exported_resin_functions_with_the_right_signature() 
             "take () or (int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>)",
         ),
         (
-            "export { rand }; extern \"stdlib.h\" def rand() -> int;",
+            "export { rand }; extern { \"stdlib.h\": { def rand() -> int; } };",
             Some("rand"),
             "Resin function",
         ),
@@ -698,9 +703,17 @@ fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
     let input = temp.path().join("environment.resin");
     let header_path = header.to_string_lossy().replace('\\', "/");
     fs::write(&input, format!(r#"
-        export {{ main }}; import {{ "$/string.resin", "$/process.resin", "$/span.resin" }};
-        extern "{header_path}" def mutate_environment() -> int;
-        extern "stdlib.h" def getenv(name: Ptr<ubyte>) -> Ptr<ubyte>;
+        export {{ main }};
+
+        extern {{
+            "{header_path}": {{
+                def mutate_environment() -> int;
+            }},
+            "stdlib.h": {{
+                def getenv(name: Ptr<ubyte>) -> Ptr<ubyte>;
+            }},
+        }};
+        import {{ "$/string.resin", "$/process.resin", "$/span.resin" }};
         def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> Result<int, _> = {{
             var name = "RESIN_SNAPSHOT_TEST";
             var empty = "RESIN_SNAPSHOT_EMPTY";
@@ -715,8 +728,7 @@ fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
             print(fmt("{{0}}/{{1}}/{{2}}\n", (before.bytes(), after.bytes(), live.bytes())));
             ok(if (status == 0 && absent && environment_get(envp, empty.data)?.length == 0_ul
                 && env.length >= 2_ul && ulong(with_sentinel.at(env.length)) == 0_ul) {{ 0 }} else {{ 1 }})
-        }};
-    "#)).unwrap();
+        }};"#)).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_resin"))
         .current_dir(temp.path())
         .arg(&input)

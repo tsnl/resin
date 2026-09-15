@@ -8,6 +8,22 @@ export {
 	InputWriteError,
 };
 
+extern {
+	"stdio.h": {
+		def getchar() -> int;
+	},
+	"resin_runtime/console.h": {
+		def resin_console_byte(byte: int) -> ubyte;
+		def resin_console_putchar(byte: ubyte) -> int;
+		def resin_stdin_error() -> int;
+		def resin_stdout_flush() -> int;
+	},
+	"stdlib.h": {
+		def realloc(memory: Ptr<ubyte>, bytes: ulong) -> Ptr<ubyte>;
+		def free(memory: Ptr<ubyte>);
+	},
+};
+
 import { "span.resin", "shared.resin" };
 
 // Owns length bytes followed by a NUL. Copies retain the allocation.
@@ -125,11 +141,3 @@ struct Console {
 		ok(InputLine { owner = owner })
 	};
 };
-
-extern "stdio.h" def getchar() -> int;
-extern "resin_runtime/console.h" def resin_console_byte(byte: int) -> ubyte;
-extern "resin_runtime/console.h" def resin_console_putchar(byte: ubyte) -> int;
-extern "resin_runtime/console.h" def resin_stdin_error() -> int;
-extern "resin_runtime/console.h" def resin_stdout_flush() -> int;
-extern "stdlib.h" def realloc(memory: Ptr<ubyte>, bytes: ulong) -> Ptr<ubyte>;
-extern "stdlib.h" def free(memory: Ptr<ubyte>);

@@ -83,10 +83,15 @@ impl Printer {
             .iter()
             .enumerate()
             .map(|(i, f)| self.function(i, f));
+        let headers = module
+            .foreign_headers
+            .iter()
+            .map(|header| list("header", vec![quoted(header)]));
         list(
             "hir",
             types
                 .chain(entries)
+                .chain(headers)
                 .chain(shaders)
                 .chain(functions)
                 .collect(),

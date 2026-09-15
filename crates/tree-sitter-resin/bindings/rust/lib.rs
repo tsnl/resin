@@ -135,7 +135,7 @@ mod tests {
     #[test]
     fn parses_module_items_and_address_of() {
         for source in [
-            "export { Gpu, create }; import { \"runtime.resin\" }; extern type Gpu; extern \"runtime.h\" def create (gpu: Ptr<Ptr<Gpu>>) -> int;",
+            "export { Gpu, create }; extern { \"runtime.h\": { def create (gpu: Ptr<Ptr<Gpu>>) -> int; } }; import { \"runtime.resin\" }; extern type Gpu;",
             "def empty () -> () = {}; def identity (n: int) -> int = { n };",
             "def main () -> () = { var n = 0; var p = &n; p.* := 1; };",
         ] {
@@ -295,7 +295,7 @@ mod tests {
             "type Point = { x: int, y: int }; def make(x: int) -> Point = { var y: int; y := x + 1; Point { x = x, y = y } };",
             "def main() -> () = { var record = { a = { var x = 1; x }, b = { c = 2 } }; };",
             "def main() -> () = { type T = int; var x = T(1); var callback = main; };",
-            "extern \"stdlib.h\" def abs(n: int) -> int;",
+            "extern { \"stdlib.h\": { def abs(n: int) -> int; } };",
             "def/* comment */main() -> () = { var/* comment */n = 1; };",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
@@ -319,7 +319,7 @@ mod tests {
             "type R = { var x: int };",
             "def main() -> () = { var r = { var x = 1 }; };",
             "def main() -> () = { var r = { x = 1, var y = 2 }; };",
-            "extern \"stdlib.h\" abs(n: int) -> int;",
+            "extern { \"stdlib.h\": { abs(n: int) -> int; } };",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
         }
@@ -331,17 +331,43 @@ mod tests {
             "def empty() = {}; def explicit() -> () = { () };",
             "def greet(n: int) = { print(\"{0}\", (n,)); };",
             "def f(n: int) = { n };",
-            "extern \"stdlib.h\" def free(p: Ptr<ubyte>);",
+            "extern { \"stdlib.h\": { def free(p: Ptr<ubyte>); } };",
             "def apply(f: () -> ()) = { f() };",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
         for source in [
             "def empty() -> = {};",
-            "extern \"stdlib.h\" def free(p: Ptr<ubyte>) ->;",
+            "extern { \"stdlib.h\": { def free(p: Ptr<ubyte>) ->; } };",
             "def empty() {};",
             "def empty() = {}",
             "type Callback = (int) ->;",
+        ] {
+            assert!(parse(source).root_node().has_error(), "{source}");
+        }
+    }
+
+    #[test]
+    fn foreign_groups_belong_to_the_optional_source_preamble() {
+        for source in [
+            "",
+            "extern {};",
+            "extern { \"empty.h\": {} };",
+            "extern { \"first.h\": { def first(); def second(); }, \"empty.h\": {}, };",
+            "export { call }; extern { \"native.h\": { def call(value: Ptr<Handle>); } }; import { \"types.resin\" }; extern type Handle;",
+        ] {
+            assert!(!parse(source).root_node().has_error(), "{source}");
+        }
+        for source in [
+            "extern \"native.h\" def call();",
+            "import {}; extern {};",
+            "extern {}; export {};",
+            "extern {}; extern {};",
+            "def main() = {}; extern {};",
+            "extern { \"native.h\" { def call(); } };",
+            "extern { \"native.h\": { def call() = {}; } };",
+            "extern { \"native.h\": { def call(); } \"next.h\": {} };",
+            "extern { \"native.h\": {} }",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
         }

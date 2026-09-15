@@ -1,5 +1,13 @@
 export { main, kernel, vertex, fragment };
 
+extern {
+	"math.h": {
+		def sinf(angle: float32) -> float32;
+		def cosf(angle: float32) -> float32;
+		def expf(value: float32) -> float32;
+	},
+};
+
 import {
 	"$/span.resin",
 	"$/string.resin",
@@ -236,9 +244,6 @@ def initialize(particles: GpuSpan<Particle>, seed: uint) = {
 };
 
 // Camera math runs on the host; shaders receive only the resulting basis and zoom.
-extern "math.h" def sinf(angle: float32) -> float32;
-extern "math.h" def cosf(angle: float32) -> float32;
-extern "math.h" def expf(value: float32) -> float32;
 
 struct Camera { yaw: float32, pitch: float32, zoom: float32 };
 struct MousePosition { x: float64, y: float64 };

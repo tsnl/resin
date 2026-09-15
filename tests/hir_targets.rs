@@ -247,7 +247,7 @@ fn shader_recursion_is_rejected_before_publishing_lir() {
 fn shader_calls_cannot_enter_foreign_functions_or_store_function_values() {
     for (helper, body, message) in [
         (
-            "extern \"stdlib.h\" def abs(i: int) -> int;",
+            "extern { \"stdlib.h\": { def abs(i: int) -> int; } };",
             "out.* := uint(abs(int(i)));",
             "foreign",
         ),
