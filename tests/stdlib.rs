@@ -590,7 +590,7 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
         def work() -> Result<(), _> = {
             var gpu = Gpu.new()?;
 
-            var allocation = gpu.malloc(16, 8, Memory.default())?;
+            var allocation = gpu.malloc(16, 8, memory_default)?;
 
             var commands = gpu.start_command_recording()?;
 
@@ -745,7 +745,7 @@ fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
                 ok(value) => { 0 },
                 err(error) => { RuntimeStatus.code(error) },
             };
-            var valid = !window.should_close() && window.key_pressed(Window.key_escape());
+            var valid = !window.should_close() && window.key_pressed(key_escape);
             window.set_should_close(1 == 1)?;
             valid := valid && window.should_close();
             window.set_should_close(1 == 0)?;
@@ -920,12 +920,12 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
         def coordinates(point: (float64, float64)) -> bool = { point.0 == 12.5_d && point.1 == -3.25_d };
         def main() -> Result<int, _> = {
             var window = Window.new(16_ui, 16_ui, String.from_str("input snapshot"))?;
-            var key = window.key_state(Window.keys().w);
-            var mouse = window.mouse_button_state(Window.mouse_buttons().left);
+            var key = window.key_state(key_w);
+            var mouse = window.mouse_button_state(mouse_button_left);
             var valid = !key.down && key.pressed && key.released && mouse.down && mouse.pressed && !mouse.released;
             valid := valid && coordinates(window.cursor_position()?);
             valid := valid && coordinates(window.scroll_delta()?);
-            valid := valid && window.focused() && Window.keys().escape == Window.key_escape() && Window.keys().f25 == 314;
+            valid := valid && window.focused() && key_escape == 256 && key_f25 == 314;
             window.capture_cursor(1 == 1)?;
             window.capture_cursor(1 == 0)?;
             ok(if (valid) { 0 } else { 1 })

@@ -7,7 +7,9 @@ export {
 	GpuImage,
 	GpuPipelineOwner,
 	GpuCommands,
-	Memory,
+	memory_default,
+	memory_gpu,
+	memory_readback,
 	ResinGpu,
 	ResinGpuDeviceInfo,
 	ResinImage,
@@ -15,7 +17,23 @@ export {
 	ResinCommandBuffer,
 };
 
-import { "status.resin", "window.resin", "shared.resin", "span.resin" };
+import { "status.resin", "internal/status_codes.resin", "window.resin", "shared.resin", "span.resin" };
+
+// ResinMemory values from resin_runtime/gpu.h.
+const (
+	memory_default: int = iota;
+	memory_gpu;
+	memory_readback;
+);
+
+// Resin GPU view permissions from resin_runtime/gpu.h.
+const (
+	access_read: uint = 1 << iota;
+	access_write;
+);
+const max_allocation_bytes = ~0_ul;
+// A pointer view derives its available capacity from the retained allocation.
+const allocation_capacity = ~0_ul;
 
 extern type ResinGpu;
 extern type ResinGpuDeviceInfo;
@@ -37,15 +55,15 @@ struct GpuPtr<T> {
 	};
 	def slice(self: GpuPtr<T>, start: ulong, length: ulong) -> GpuSpan<T> = {
 		GpuSpan<T> {
-			data = GpuPtr<T> { view = gpu_view_range::<T>(self.view, 18446744073709551615_ul, start, length) },
+			data = GpuPtr<T> { view = gpu_view_range::<T>(self.view, allocation_capacity, start, length) },
 			length = length,
 		}
 	};
 	def read_only(self: GpuPtr<T>) -> GpuPtr<T> = {
-		GpuPtr<T> { view = gpu_view_restrict(self.view, 1_ui) }
+		GpuPtr<T> { view = gpu_view_restrict(self.view, access_read) }
 	};
 	def write_only(self: GpuPtr<T>) -> GpuPtr<T> = {
-		GpuPtr<T> { view = gpu_view_restrict(self.view, 2_ui) }
+		GpuPtr<T> { view = gpu_view_restrict(self.view, access_write) }
 	};
 };
 
@@ -79,18 +97,6 @@ struct GpuComputePipeline<Root, Owner> { contract: GpuPipelineContract };
 struct GpuGraphicsPipeline<Root, Owner> { contract: GpuPipelineContract };
 intrinsic "gpu_compute_pipeline_type" def compute_type<Root, Owner>(contract: GpuPipelineContract) -> GpuComputePipeline<Root, Owner>;
 intrinsic "gpu_graphics_pipeline_type" def graphics_type<Root, Owner>(contract: GpuPipelineContract) -> GpuGraphicsPipeline<Root, Owner>;
-
-struct Memory {
-	def default() -> int = {
-		0
-	};
-	def gpu() -> int = {
-		1
-	};
-	def readback() -> int = {
-		2
-	};
-};
 
 struct GpuOwner {
 	handle: Ptr<ResinGpu>,
@@ -138,11 +144,11 @@ struct Gpu {
 		ok(allocated.data)
 	};
 	def alloc<T>(self: Gpu, count: ulong) -> Result<GpuSpan<T>, RuntimeError> = {
-		self.alloc_in::<T>(count, Memory.default())
+		self.alloc_in::<T>(count, memory_default)
 	};
 	def alloc_in<T>(self: Gpu, count: ulong, memory: int) -> Result<GpuSpan<T>, RuntimeError> = {
 		var size = size_of(T);
-		if (count > 18446744073709551615_ul / size) {
+		if (count > max_allocation_bytes / size) {
 			err(OutOfMemory {})
 		} else {
 			ok(())
@@ -180,7 +186,7 @@ struct Gpu {
 	};
 	def present(self: Gpu, image: GpuImage) -> Result<bool, RuntimeError> = {
 		var code = resin_gpu_present(self.native(), image.native());
-		if (code == 7) {
+		if (code == status_incomplete) {
 			ok(1 == 0)
 		} else {
 			RuntimeStatus.from_code(code)?;

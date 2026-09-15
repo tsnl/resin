@@ -185,6 +185,10 @@ fn custom_allocators_must_return_the_requested_size_and_alignment() {
 fn allocator_library(bytes: &str, value: &str) -> String {
     let mut library = include_str!("../resin/gpu.resin")
         .replace("\"status.resin\"", "\"$/status.resin\"")
+        .replace(
+            "\"internal/status_codes.resin\"",
+            "\"$/internal/status_codes.resin\"",
+        )
         .replace("\"window.resin\"", "\"$/window.resin\"")
         .replace("\"shared.resin\"", "\"$/shared.resin\"")
         .replace("\"span.resin\"", "\"$/span.resin\"");
