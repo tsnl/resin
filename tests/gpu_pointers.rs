@@ -11,7 +11,7 @@ use resin_runtime::{ResinGpu, ResinStatus, testing::lock_gpu};
 use std::{
     fs,
     process::{Command, Output},
-    sync::OnceLock,
+    rc::Rc,
 };
 use tempfile::TempDir;
 
@@ -20,9 +20,7 @@ fn run(source: &str) -> Option<Output> {
 }
 
 fn run_with_gpu_library(source: &str, library: Option<&str>) -> Option<Output> {
-    if !gpu_available() {
-        return None;
-    }
+    let _gpu = gpu_singleton()?;
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("main.resin");
     fs::write(&path, source).unwrap();
@@ -38,25 +36,25 @@ fn run_with_gpu_library(source: &str, library: Option<&str>) -> Option<Output> {
     Some(Command::new(executable.path()).output().unwrap())
 }
 
-fn gpu_available() -> bool {
-    static AVAILABLE: OnceLock<bool> = OnceLock::new();
-    *AVAILABLE.get_or_init(|| {
-        let _lock = lock_gpu();
-        match ResinGpu::create() {
-            Ok(gpu) => {
-                drop(gpu);
-                true
+fn gpu_singleton() -> Option<Rc<ResinGpu>> {
+    // ResinGpu is not Send or Sync, so each test thread owns its lazy singleton.
+    thread_local! {
+        static GPU: Option<Rc<ResinGpu>> = {
+            let _lock = lock_gpu();
+            match ResinGpu::create() {
+                Ok(gpu) => Some(Rc::new(gpu)),
+                Err(ResinStatus::Unsupported | ResinStatus::VulkanUnavailable) => {
+                    assert!(
+                        std::env::var("RESIN_REQUIRE_GPU").as_deref() != Ok("1"),
+                        "a suitable Vulkan device is required"
+                    );
+                    None
+                }
+                Err(error) => panic!("GPU initialization failed: {error:?}"),
             }
-            Err(ResinStatus::Unsupported | ResinStatus::VulkanUnavailable) => {
-                assert!(
-                    std::env::var("RESIN_REQUIRE_GPU").as_deref() != Ok("1"),
-                    "a suitable Vulkan device is required"
-                );
-                false
-            }
-            Err(error) => panic!("GPU initialization failed: {error:?}"),
-        }
-    })
+        };
+    }
+    GPU.with(Clone::clone)
 }
 
 fn success(output: &Output) {

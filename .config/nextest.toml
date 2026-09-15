@@ -1,10 +1,9 @@
 [test-groups]
-gpu = { max-threads = 2 }
+gpu = { max-threads = 8 }
 
 [[profile.default.overrides]]
-# Keep two GPU tests in flight so private fixture compilation can overlap device
-# execution. testing::lock_gpu() still serializes actual device access; grouping
-# every caller bounds the number of workers waiting on that lock.
+# Keep GPU fixture compilation in flight while testing::lock_gpu() serializes
+# device access. The global worker limit also applies to this group.
 filter = 'binary(gpu_backend) | binary(gpu_pointers) | binary(spirv_execution) | binary(window_backend) | package(resin-runtime) | (binary(benchmarks) & test(gpu_workloads))'
 test-group = 'gpu'
 # Start GPU work early and overlap it with the independent host tests.
