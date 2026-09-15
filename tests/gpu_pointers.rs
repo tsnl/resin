@@ -8,7 +8,11 @@ mod project;
 mod shaders;
 
 use resin_runtime::{ResinGpu, ResinStatus, testing::lock_gpu};
-use std::{fs, process::Output};
+use std::{
+    fs,
+    process::{Command, Output},
+    rc::Rc,
+};
 use tempfile::TempDir;
 
 fn run(source: &str) -> Option<Output> {
@@ -16,26 +20,41 @@ fn run(source: &str) -> Option<Output> {
 }
 
 fn run_with_gpu_library(source: &str, library: Option<&str>) -> Option<Output> {
-    let _lock = lock_gpu();
-    match ResinGpu::create() {
-        Ok(gpu) => drop(gpu),
-        Err(ResinStatus::Unsupported | ResinStatus::VulkanUnavailable) => {
-            assert!(
-                std::env::var("RESIN_REQUIRE_GPU").as_deref() != Ok("1"),
-                "a suitable Vulkan device is required"
-            );
-            return None;
-        }
-        Err(error) => panic!("GPU initialization failed: {error:?}"),
-    }
+    let _gpu = gpu_singleton()?;
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("main.resin");
     fs::write(&path, source).unwrap();
     if let Some(library) = library {
         fs::write(directory.path().join("gpu.resin"), library).unwrap();
     }
-    let module = pipeline::file_module(&path).unwrap_or_else(|error| panic!("{source}\n{error}"));
-    Some(project::Project::new(&module, Some("main")).unwrap().run())
+    let module =
+        pipeline::host_entry(&path, "main").unwrap_or_else(|error| panic!("{source}\n{error}"));
+    let project = project::Project::new(&module, Some("main")).unwrap();
+    // This fixture owns its native cache; compilation can overlap other GPU tests.
+    let executable = project.build_executable();
+    let _lock = lock_gpu();
+    Some(Command::new(executable.path()).output().unwrap())
+}
+
+fn gpu_singleton() -> Option<Rc<ResinGpu>> {
+    // ResinGpu is not Send or Sync, so each test thread owns its lazy singleton.
+    thread_local! {
+        static GPU: Option<Rc<ResinGpu>> = {
+            let _lock = lock_gpu();
+            match ResinGpu::create() {
+                Ok(gpu) => Some(Rc::new(gpu)),
+                Err(ResinStatus::Unsupported | ResinStatus::VulkanUnavailable) => {
+                    assert!(
+                        std::env::var("RESIN_REQUIRE_GPU").as_deref() != Ok("1"),
+                        "a suitable Vulkan device is required"
+                    );
+                    None
+                }
+                Err(error) => panic!("GPU initialization failed: {error:?}"),
+            }
+        };
+    }
+    GPU.with(Clone::clone)
 }
 
 fn success(output: &Output) {

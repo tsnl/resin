@@ -213,6 +213,14 @@ pub fn file_module(path: &Path) -> Result<resin_lir::Module, SourceError> {
     lower_program(compilation.hir()?, compilation.source())
 }
 
+/// Build only an exported host entry and its transitive dependencies.
+pub fn host_entry(path: &Path, entry: &str) -> Result<resin_lir::Module, SourceError> {
+    let output = build_hir_file(path)?;
+    verified_lir(&output, entry, resin_lir::Profile::Host)
+        .map(resin_lir::VerifiedModule::into_module)
+        .map_err(|mut errors| errors.remove(0))
+}
+
 fn lower_program(
     tree: &resin_hir::Module,
     entry: &Source,
