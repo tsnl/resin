@@ -26,6 +26,7 @@ Use `--bin-dir PATH` to select another build. `--suite http`, `--suite lsp`, and
 records a label alongside the machine, revision, fixture, and sample metadata.
 Use `--host-backend cranelift` for the opt-in
 [scalar host backend prototype](../doc/cranelift-prototype.md); the default is `c`.
+The prototype document includes a [measured C/Cranelift comparison](../doc/cranelift-prototype.md#recorded-comparison--2026-09-15).
 
 Results contain every sample, sample counts, median, and nearest-rank p95. A p95
 computed from three cold trials is just the largest sample; increase `--trials`

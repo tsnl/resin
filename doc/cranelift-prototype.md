@@ -72,3 +72,49 @@ The harness validates downloaded executables and records all samples. See
 The fixtures exercise scalar compilation, not generated-program throughput or
 full-language support. The C path links the runtime archive; this headerless
 prototype does not, so artifact size and transfer work also differ.
+
+### Recorded comparison — 2026-09-15
+
+Both runs used optimized binaries from `3cfe98f4`, a clean checkout, the same
+`shell.nix` toolchain, and an Intel Core Ultra 7 270K Plus on x86-64 Linux. Each
+fixture has three cold samples, 24 warm samples, and 15 edited samples. C was
+measured first, then Cranelift; these are local observations rather than a general
+speedup guarantee. Raw samples: [C](../benchmarks/results/service-cranelift-c-linux-2026-09-15.json),
+[Cranelift](../benchmarks/results/service-cranelift-native-linux-2026-09-15.json).
+
+| Fixture / request | C median | Cranelift median |
+| --- | ---: | ---: |
+| One file, cold | 333.1 ms | 144.2 ms |
+| One file, warm | 241.7 ms | 141.4 ms |
+| One file, edited | 375.5 ms | 142.2 ms |
+| 17 files, cold | 498.1 ms | 173.9 ms |
+| 17 files, warm | 311.0 ms | 149.4 ms |
+| 17 files, dependency edited | 532.4 ms | 181.5 ms |
+
+For the 17-file fixture, warm p95 was 623.2 ms for C and 155.9 ms for Cranelift;
+edited p95 was 740.6 ms and 187.6 ms respectively. Three cold trials are too few
+to characterize tail latency. The executable was 6,360,776 bytes with C and
+16,416 bytes with Cranelift. Runtime archive omission contributes to this
+difference; it is not an executable-size comparison at feature parity.
+
+These measurements establish end-to-end build latency for this subset. They do
+not isolate object generation or attribute all saved time to external tools.
+Warm Cranelift requests still include client acquisition, HTTP, cache selection,
+the external linker, output hashing, and download.
+
+## Validation
+
+- Workspace formatting and Clippy (`--all-targets --all-features`, warnings denied).
+- 1,166 unit/integration tests and 21 documentation tests across the workspace.
+- Seventeen new tests cover C/Cranelift agreement in both optimization modes,
+  unsupported constructs, traps, cancellation, object/executable ownership, and
+  service cache reuse across edits, profiles, and client roots.
+- Both benchmark runs validated every downloaded executable's result.
+
+The initial concurrent test run and its retry hit `ETXTBSY` ("Text file busy") in
+the existing `printing::c_runtime_accepts_empty_buffers_and_pointer_values` test.
+All 21 printing tests then passed both serially and under concurrent syscall
+tracing. The unchanged file-copy code already documents a related process-fork
+descriptor-inheritance race; tracing did not capture a failing instance, so that
+cause remains an inference. No copy/process refactor is included here. GPU/window
+availability was not required for this prototype's validation.
