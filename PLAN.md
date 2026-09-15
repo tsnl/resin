@@ -1,556 +1,575 @@
 # Compiler service plan
 
-Status: planned. Implement the three phases below in order. Each phase has its own
-acceptance criteria; finish those criteria before moving to the next phase.
+Status: planned. Implement **Phase 0, Phase 1, Phase 2, and Phase 3** in order.
+Each phase has separate acceptance criteria. Complete and validate a phase before
+starting the next; this document does not mark implementation work complete.
 
-## Agreed direction
+## Agreed architecture
 
-- Keep compiler inputs and completed outputs immutable and independently reusable.
-- Let applications explicitly invoke each compiler pass and retain its outputs.
-  Build handlers and LSP query handlers may duplicate straightforward sequencing.
-  Do not introduce `resin-build` or a generic compilation driver that hides passes.
-- Represent each layer's retained outputs with an immutable `Cache<K, V>`.
-  `update()` returns a new set containing reused/new results; `prune()` returns a
-  new set with old entries removed. Published sets, entries, and values stay immutable.
-- Start with one shared cache per output kind, keyed by complete inputs.
-  Results from any caller can contribute to another caller's compilation. The same
-  value operations must also work with separate folder/package sets; their placement
-  is an application choice, independent of compiler pass contracts.
-- Start each build or analysis from one source entry point and its resolved imports.
-  There are no persistent compiler workspaces, required workspace cache partitions,
-  workspace leases, or `resin.toml`. A build also selects its exported function/target entries;
-  analyzing a source for LSP does not require it to define a runnable `main`.
-- Retain entries for a configurable **24 hours since last use**. Prune as part of
-  updating the active set. A timer may invoke the same operation for idle cleanup;
-  background work is optional. Also support an explicit generation-based cutoff.
-- First establish the library contracts, then exercise them locally through LSP,
-  then introduce the HTTP boundary. MCP and REPL support follow later.
+- Compiler inputs and completed outputs are immutable, shareable, and independent
+  of the application hosting them. Applications explicitly invoke each pass and
+  retain its results. Build and LSP handlers may duplicate straightforward sequencing;
+  do not add a build orchestration library or a generic compiler driver.
+- Each output layer uses an immutable `Cache<K, V>`. Async `update()` reuses hits,
+  builds misses concurrently, and evicts older unrequested entries while constructing
+  the next cache. Capacity counts **entries**. Retain all requested results, even
+  above capacity, and warn on overflow. There is no `prune()`, TTL, or periodic GC.
+- Start with shared caches across callers, projects, and generations: a
+  **mega-workspace**. Every request selects its own exact sources and import bindings.
+  There is no mutable global path-to-latest-source table, persistent compiler
+  workspace, workspace lease, or `resin.toml`.
+- Compilation starts from a source entry point and its imports; builds additionally
+  select exported function/target entries. Editor analysis needs no runnable `main`.
+  Content and complete pass inputs determine reuse, independently of who requests it.
+- Build async/await and bounded parallelism into the libraries in Phase 1, exercise
+  them through local LSP in Phase 2, then move compilation behind HTTP in Phase 3.
+- The client uses the existing full CST parser to discover imports and foreign
+  headers. The server parses uploaded sources through its own caches. Use one grammar;
+  do not introduce a scanner, regex import parser, or second header-only parser.
+- The server supplies standard/builtin libraries, fetches configured dependencies,
+  and runs native tools. Clients upload user sources and local header directory
+  bundles, receive artifacts, and execute programs locally.
 
 ### Final repository layout
 
-The `resin` package stays in the repository root. All other members of Resin's Cargo
-workspace live under `crates/`; the root remains the default member. The independent
+Keep the `resin` package and workspace manifest at the repository root, with the
+root as the default Cargo member. Other members live under `crates/`; the independent
 editor extension workspace keeps its existing layout.
 
 ```text
 Cargo.toml                       # root resin package and Cargo workspace
 src/main.rs                      # thin wrapper around resin-client
 crates/
-  resin-client/src/               # CLI, HTTP, local files and execution
-    lib.rs
-    lsp/                         # private editor client code
-    interp/                      # private run/interactive client code
-  resin-server/src/               # HTTP handlers, passes and active set pointers
+  resin-client/src/
+    lib.rs                       # CLI, connection, source acquisition
+    lsp/                         # private editor client implementation
+    interp/                      # private run/interactive client implementation
+  resin-server/src/              # service, explicit passes, active cache pointers
   resin-protocol/src/             # versioned wire data
-  resin-source/src/               # immutable sources and import data
-  resin-cache/src/                # pure keyed update/prune collection
-  resin-cst/src/
+  resin-cache/src/                # immutable cache, async update and eviction
+  resin-source/src/               # immutable named sources and import graph data
+  resin-cst/src/                  # parsing, formatting, preamble queries
   resin-ast/src/
   resin-hir/src/
   resin-lir/src/
   resin-codegen/src/
-  resin-toolchain/src/            # native tools and artifact ownership
-  ...                            # other existing compiler/support crates
+  resin-toolchain/src/            # native processes and artifact ownership
+  ...                            # existing compiler/support crates
 ```
 
 Final dependencies:
 
 ```text
 root resin -> resin-client -> resin-protocol
-resin-server -> resin-protocol
-resin-server -> individual compiler crates and resin-toolchain
-```
+                          -> resin-source / resin-cst (syntax and local inputs)
+resin-server -> resin-protocol / resin-cache
+             -> individual compiler crates / resin-toolchain
 
-Compiler and toolchain crates depend on none of the client, server, or protocol
-crates. `resin-protocol` contains wire data, without compiler IR or HTTP framework
-dependencies. Keep one merged `resin-client`; its LSP adapter forwards analysis
-requests to server handlers that know the compiler passes explicitly.
-
-Preserve the existing compiler phase crates for this plan. Consolidating them is
-separate follow-up work. Keep public contracts in `lib.rs`, substantial implementation
-private, and dependencies in the existing direction:
-
-```text
 syntax -> AST -> HIR -> LIR -> verified LIR -> C/SPIR-V -> native tools
 ```
 
-## Phase 1: Immutable, shareable compiler passes
+Keep one merged `resin-client`; migrate the existing `resin-lsp` implementation
+into its private LSP module when introducing the server. Client-side parsing and
+formatting are syntax operations; semantic compilation belongs to server handlers.
+Compiler/toolchain/cache crates depend on none of the application or protocol crates.
+`resin-protocol` contains wire data without compiler IR or HTTP framework types.
+`resin-cache` knows no compiler phases. Keep public contracts in each crate's
+`lib.rs`, implementation private, and `resin-common` minimal.
+
+## Phase 0: Group foreign declarations in the source preamble
 
 ### Deliverable
 
-Compiler passes accept complete immutable inputs and return completed results that
-can be retained, reused, and shared across threads. The current local applications
-invoke these passes explicitly. This phase includes async I/O and parallel execution
-support; no HTTP service is required yet. Establish the small cache collection
-here so local LSP and the later server use the same immutable data operations.
+Make the breaking foreign-function syntax change before changing compiler ownership.
+The optional preamble is ordered `export`, `extern`, `import`, followed by declarations:
 
-### 1.1 Explicit pass contracts
+```resin
+export { main };
+extern {
+  "resin_runtime.h": {
+    def resin_image_write_png(path: Ptr<ubyte>, width: uint, height: uint, channels: uint, pixels: Ptr<ubyte>, stride: ulong) -> int;
+  },
+  "local/header.h": {
+    def local_value() -> int;
+  },
+};
+import { "$/span.resin" };
 
-- Expose the inputs, outputs, and diagnostics of each phase. An application must be
-  able to reuse parsing without asking a HIR convenience method to parse again.
-  Split any existing API that conceals sequencing needed by the application.
-- Pass a completed source/import graph into semantic compilation. Source acquisition
-  and dependency fetching happen outside CPU translations. Compiler passes never
-  fall back to opening user source paths on the host filesystem.
-- Keep private builders, inference solvers, and traversal state mutable only for
-  the duration of their work. Published language data and retained results are
-  immutable and `Send + Sync`; old versions remain usable during new computations.
-- Preserve optional incremental predecessors where useful. The prior value has
-  the same type as the return value, for example, with illustrative names:
-
-  ```rust
-  fn parse(source: &Source, previous: Option<&ParsedFile>) -> ParsedFile;
-  ```
-
-  `None` performs a cold computation. The predecessor is an optimization hint;
-  choosing a different predecessor must not change meaning or diagnostics.
-- A returned result contains only data needed for its current inputs. It does not
-  accumulate unused historical entries or retain a chain of previous results.
-  This restriction applies to a compilation's output, not the cache retaining
-  many outputs. Only explicit pruning discards unrelated cache entries.
-
-### 1.2 Keys and source identity
-
-Make reuse depend on complete inputs, independently of who requested them. Define
-explicit key data beside each relevant phase's public input contract. Do not use
-session IDs, absolute checkout roots, timestamps, or allocation addresses as semantic
-cache keys. Each phase needs only inputs that can affect that phase:
-
-| Cached value | Relevant key inputs |
-| --- | --- |
-| Source | Explicit logical module identity/role plus a hash of the complete file contents, including namespace and any diagnostic name retained in the value. |
-| CST / per-file AST | Immutable Source content identity and relevant parser/lowering configuration. |
-| HIR and editor facts | Complete resolved source graph, import bindings, entry source, library/dependency versions, and semantic options. |
-| LIR / verified LIR | HIR identity, canonical selected entry set, target profile, lowering limits/options, and verification contract. |
-| Generated files / native artifact | Verified LIR, code generation options, target/ABI, compiler/runtime/library inputs, native toolchain inputs, and build settings. |
-
-Use a stable hash of the entire file's exact contents as its content identity; no
-source revision counter is needed. Keep the contents themselves in the immutable
-source. Check underlying identity/content when interning equal hashes so a collision
-cannot silently equate different sources. Text storage may be shared by content
-alone; a named module still carries its logical identity and source origins.
-
-A global `path -> Source` table can select only one version at a path. Retaining
-multiple edits/projects requires `(logical module identity, content hash) -> Source`
-or an equivalent map of versions under each path. A request separately selects
-`path -> Source` for its own input graph. Equal-content edits naturally reuse the
-same content identity; unrelated callers never overwrite each other's selections.
-
-A key identifies every input that can affect its value. A mapper must not secretly
-read current files, environment, or changing dependencies absent from its key.
-Persisted keys additionally include the relevant compiler/toolchain version.
-Runtime arguments and runtime environment are not build inputs.
-
-The current `Source` uses allocation-based version equality and process-local IDs.
-Establish value-based source identity that remains correct after eviction
-and reconstruction. Reusing a cached HIR with newly acquired equivalent sources must
-preserve query lookup, spans, and declaration identity. Two distinct logical modules
-with equal text must remain distinct within a program. A display name alone does
-not define module identity; distinct modules may have identical diagnostic names.
-
-Use logical source names in retained results. Applications map those names back to
-their own local paths/URIs. Equivalent relative source graphs in different checkout
-directories must be able to share the same completed result without leaking one
-client's absolute paths into another client's diagnostics.
-
-Start with per-file CST/AST reuse and whole resolved-graph HIR reuse. An unchanged
-entry file with changed imports is a different HIR input. Arbitrary sharing of
-sub-HIR fragments or incremental inference is not required in this plan.
-
-### 1.3 The cache collection
-
-`Cache<K, V>` is an immutable collection of reusable results indexed by complete
-input keys, with explicit retention metadata. Every update and prune returns a new
-cache; existing instances remain valid snapshots. The API makes this value flow
-visible. [Clojure's core.cache](https://clojure.github.io/core.cache/#clojure.core.cache.wrapped)
-provides a precedent for immutable cache values with separate atomic publication.
-
-Add a small `resin-cache` crate for this type. It owns only the keyed
-collection and immutable retention metadata. It knows no compiler phases, dependency
-scheduler, executor, clock-reading operation, filesystem, or global active pointer.
-Keep `resin-common` minimal. Server and LSP code still choose and invoke passes.
-
-The operations have these value semantics, using illustrative signatures:
-
-```text
-Cache<K,V>::update(&self, keys, used_at, fresh: K -> V) -> Self
-Cache<K,V>::prune(&self, cutoff) -> Self
+def main() -> int = { local_value() };
 ```
 
-- An empty cache is the cold starting point. `update` deduplicates requested keys,
-  reuses existing values, computes misses, and renews requested entries' metadata.
-  It preserves unrequested entries. Only `prune` removes historical entries.
-- Every timestamp is supplied by the application. Neither operation reads a clock
-  or modifies old entries. Reading a snapshot alone does not secretly renew it;
-  request code explicitly updates the keys it uses.
-- The mapper computes one completed value from one complete key. It may capture
-  already-resolved immutable inputs and an optional incremental predecessor. Those
-  captures must not change the result for an otherwise equal key.
-- Applications can evaluate independent ready keys in parallel with bounded jobs.
-  Async/native work can be prepared before applying the collection update. Keep
-  failures and cancellation explicit; never publish placeholder or partial values.
-- Share values through `Arc` or their existing immutable handles. Keep collection
-  representation private. Ordinary maps are a correct starting point, but cloning
-  them copies their index. Measure large hit-only updates and rebasing costs; use
-  an existing persistent map if needed to share map structure. Do not build a HAMT
-  or make an unmeasured claim that map updates have constant cost.
+### 0.1 Language and migration
 
-This is a reusable collection operation, not a pass orchestration framework.
-Compiler outputs never retain entire prior caches as their hidden cache.
+- Permit an omitted or empty top-level `extern` block. Header groups are separated
+  by commas, with an optional trailing comma; definitions end with semicolons and
+  the outer block ends with `};`. Allow empty header groups.
+- Replace `extern "header.h" def ...;` with `def ...;` inside the corresponding
+  header group. Preserve standalone `extern type Name;` for opaque foreign types.
+- Grouping associates declarations with a header; it introduces no new namespace.
+  Foreign functions remain module declarations with existing explicit export rules,
+  duplicate-name checks, signature validation, and native ABI behavior.
+- Imports remain available to resolve foreign signatures even though the import
+  clause follows the extern block. Preserve source spans and useful recovery.
+- Update the Tree-sitter grammar, generated parser/node types, corpus, CST consumers,
+  AST lowering/printing, formatter, HIR diagnostics/completion, editor queries,
+  standard libraries, examples, tests, and language documentation/AGENTS snippets.
+  Keep the existing per-function header representation downstream if sufficient.
+- Preserve declarations of header dependencies even for empty groups; do not lose
+  a declared header merely because AST lowering flattens its functions.
 
-### 1.4 Async work and native artifacts
+### 0.2 Discover dependencies with the existing CST
 
-- Keep CPU passes synchronous internally where ordinary control flow is clearest.
-  Existing application code schedules independent work on bounded workers and uses
-  async I/O/process operations. Do not create a shared orchestration library.
-- Bound queues and CPU jobs, coordinate with Ninja/native-tool parallelism, and
-  preserve true data dependencies. Do not put the whole compiler behind one lock.
-- Add cooperative cancellation at useful pass boundaries/checkpoints and explicit
-  native-child cancellation/reaping. Moving work to a blocking thread alone does
-  not make it cancellable. Completed source errors and cancellation are distinct.
-- Pass process settings explicitly; concurrent jobs never configure a build by
-  changing process-wide environment or the application's working directory.
-- Give `resin-toolchain` explicit async native-process and artifact operations.
-  It continues to consume generated native projects and build settings, without
-  sequencing compiler passes.
-- Publish completed artifacts immutably. Retaining/downloading A must not hold an
-  exclusive mutable staging-directory lock needed to build B. Artifact ownership
-  must keep its files alive until all consumers finish, independently of cache membership.
+Expose a small syntax-only query in `resin-cst` for imports and extern header groups,
+including decoded strings, source locations, and preamble diagnostics. Reuse the
+existing full parser and string handling; do not duplicate the grammar in a scanner.
+
+Extract valid preamble information even when unrelated function bodies contain
+syntax errors. Incomplete import/extern clauses produce recovery information or
+diagnostics, rather than silently reporting a complete graph with no dependencies.
+The client will run this query recursively in Phase 3. Parsing again on the server
+is the accepted initial design; measure its cost without assuming it is negligible.
+
+### Phase 0 acceptance criteria
+
+- [ ] **P0.1** Parser tests cover omitted/empty blocks, multiple and empty header
+      groups, trailing commas, comments/escapes, preamble order, and malformed input.
+      Old foreign-function syntax is rejected; standalone foreign types still work.
+- [ ] **P0.2** Grouped declarations retain module scope, exports, duplicate-name
+      diagnostics, imported signature types, parameter/result ABI checks, and spans.
+- [ ] **P0.3** Formatting is stable; grammar-generated files, editor queries,
+      standard libraries, examples, fixtures, and documentation use the new syntax.
+- [ ] **P0.4** The CST query finds imports and headers despite unrelated body errors,
+      handles incomplete preambles, and preserves empty groups. There is one parser.
+- [ ] **P0.5** Native runtime/system/local-header examples build. Existing nested
+      header change/deletion regression tests pass with the migrated syntax.
+
+## Phase 1: Immutable caches and asynchronous compiler passes
+
+### Deliverable
+
+Compiler libraries expose complete immutable inputs and completed results that can
+be shared across threads. Establish `resin-cache`, async pass interfaces, bounded
+parallel computation, and explicit native artifact ownership. Current local
+applications sequence these operations directly; HTTP is not required yet.
+
+### 1.1 Pass contracts and immutable inputs
+
+- Expose parsing, per-file AST construction, HIR/editor analysis, LIR construction,
+  verification, generation, and native building separately. Split APIs that conceal
+  earlier passes so applications can reuse each completed output explicitly.
+- Source acquisition resolves an immutable graph before semantic compilation.
+  Passes receive exact sources, import bindings, options, and dependency identities;
+  they never open user source paths or consult mutable editor state.
+- Completed inputs/results are immutable and `Send + Sync`. Private parsers,
+  builders, inference solvers, and traversal state may mutate while doing their
+  own work; that state is not shared as a completed result.
+- Each result contains only the data required by its inputs. It does not retain a
+  chain of predecessors or whole old caches. A cache may retain many independent
+  results according to its capacity.
+- Preserve optional incremental predecessors when useful. A predecessor has the
+  same type as the output, and `None` means cold computation. For example:
+
+  ```text
+  async parse(source, previous: Option<&ParsedFile>, execution) -> ParsedFile
+  ```
+
+  A predecessor is an optimization hint. Cold and incremental computation must
+  agree on meaning and diagnostics. Incremental semantic inference is not required.
+
+### 1.2 Complete keys and source identity
+
+Use explicit input/key types with **`Eq + Hash`** for hash maps, or **`Ord`** for
+ordered maps; `PartialOrd` alone is insufficient. Do not require every IR node to be
+hashable. Stable content digests use a specified encoding/hash, independently of
+Rust's map hashing, whose encoding is not a portable persistence contract.
+
+| Cached value | Key inputs |
+| --- | --- |
+| Source | Canonical logical module identity/role and exact complete text content identity. |
+| CST / per-file AST | Source identity and relevant parser/lowering options; content alone is sufficient only for payloads independent of source origins. |
+| HIR / editor facts | Entry source, complete resolved source graph and import edges, library/dependency identities, semantic options. |
+| LIR / verified LIR | HIR identity, canonical selected entry set, Host/Shader profile, lowering limits/options, verification contract. |
+| Generated files | Verified LIR, generation options, target/ABI, declared native header bindings. |
+| Native artifact | Generated inputs, complete header bundle contents and include-search bindings/order, runtime/dependency/toolchain identities, target and build settings. |
+
+Keys include every input affecting that value, including compiler version where
+results survive a compiler change. Builders must not read changing files, environment,
+or dependencies absent from their key. Runtime arguments/environment stay out of
+build keys. Native settings that affect generated output belong in that earlier key.
+
+Separate exact text identity, logical module identity, and client presentation.
+Retain source text alongside its digest; check actual content when interning equal
+digests so collisions cannot silently equate different inputs. Equal text can share
+storage, but two distinct modules in one graph remain distinct declarations/origins.
+Do not key semantic results by session, edit counter, absolute checkout root, or
+allocation address. Canonical graph ordering must not depend on discovery order.
+
+Each request selects `logical path -> Source`; shared source caches retain multiple
+content identities at the same logical path. Logical names and import bindings
+disambiguate modules; applications separately map those names to local URIs.
+Equivalent relative graphs at different checkout roots can share results without
+leaking one client's paths into another client's diagnostics.
+
+Replace the current allocation-based Source version equality with compatible
+content-based identities, including the module context that the value retains.
+Source reconstruction after eviction must still support lookups into a retained
+HIR's editor facts and origins. Begin with per-file CST/AST and whole-graph HIR reuse;
+an unchanged entry with a changed imported file or binding is a different HIR key.
+
+### 1.3 Full uploads and optional edits converge
+
+Source construction accepts complete text or an optional predecessor plus edits:
+
+```text
+make_source(logical_identity, previous: Option<&Source>, edits) -> Source
+```
+
+`None` starts from empty text; a full upload is one insertion of all text. Validate
+ranges/encodings and the predecessor identity before applying edits. Normalize to
+the final text and its content digest **before** selecting the source/cache key.
+A predecessor/edit recipe must not become semantic identity: different edit histories
+and clean uploads producing identical named text must reuse the same entry.
+
+On a parse miss, the builder may capture the corresponding prior CST and validated
+edits to incrementally parse. Clone/edit private parser state, preserving the old
+result. If the predecessor is absent, incompatible, or evicted, parse the complete
+text. No wire-level edit protocol is required initially; LSP may upload full text.
+
+### 1.4 `Cache<K, V>` and capacity
+
+Add `resin-cache` with an immutable completed cache value and its configuration.
+Keep the builder generic on **`update()`**, rather than storing `F` on `Cache`.
+This allows per-request immutable inputs and optional predecessors without retaining
+the closure, executor, or its captured history in every cache generation.
+
+The conceptual contract is:
+
+```text
+Cache<K, V>::new(capacity: usize) -> Cache<K, V>
+async Cache<K, V>::update(&self, requested_keys, build: F, execution) -> Result<Self, E>
+    where F maps K to a future producing Result<V, E>
+```
+
+Exact ownership/future bounds belong to implementation; cheap owned keys/handles
+are acceptable. The previous cache and successful return are the same type.
+Independent builders run concurrently within explicit limits, optionally in groups.
+The generic cache schedules item construction; applications still choose compiler
+passes and their dependencies.
+
+Every successful update:
+
+1. Deduplicates requested keys and reuses matching values.
+2. Computes missing values, at most once per distinct key within this update.
+3. Marks every requested key as recently used in the **new** cache.
+4. Retains all requested results; fills remaining capacity with the most recently
+   used old, unrequested entries. Evicts least-recently-used unrequested entries.
+5. Returns the new cache, sharing completed values while preserving the old cache.
+   If requested distinct keys exceed capacity, retains them all, removes unrequested
+   entries, and automatically logs a warning with capacity/requested/retained counts.
+
+Capacity is an entry count: one large value counts as one entry. The returned size
+is at most `max(capacity, distinct_requested_count)`. Zero capacity still permits
+requested results with an overflow warning. An empty request retains only as many
+old entries as fit. An oversized generation can shrink on a later update.
+
+Recency is immutable bookkeeping, ordered by updates to that cache. Hits refresh
+recency; reading a handle alone does not. Define deterministic tie handling independent
+of task completion order. Update sequence numbers are not source identities or
+age-expiration policies. There is no timer, TTL, separate `prune()`, or byte weigher.
+A future byte-based configuration may estimate a per-layer element capacity outside
+this type; it cannot claim precise byte accounting.
+
+Completed source diagnostics may be cached as values for their complete inputs.
+Cancellation/infrastructure failure returns an explicit failure, without publishing
+partial successful entries. Do not retain retryable missing-file or native-process
+failures as successful cache values.
+
+Use ordinary maps and shared values initially; a HAMT is not required. Keep index
+representation private and measure cloning/rebasing costs before adopting persistent
+map storage. Capacity bounds new-cache membership, not total process memory:
+old snapshots, dependency handles, and live consumers can keep evicted values alive.
+
+### 1.5 Async execution and native artifacts
+
+- Establish async pass interfaces and async `Cache::update()` in this phase.
+  Permit bounded parallel per-file/per-key jobs and independent work within passes;
+  keep dependent groups explicit and preserve deterministic completed output.
+- Provide actual CPU scheduling, not just async syntax around blocking loops.
+  Use bounded workers, cooperative yield/cancellation checkpoints, and async I/O.
+  Isolate unavoidable synchronous foreign calls, including Tree-sitter parsing,
+  on workers so protocol/I/O tasks remain responsive.
+- Bound queues and coordinate compiler jobs with Ninja/native-tool concurrency.
+  Cancellation must stop queued work and reap owned native children; a started
+  blocking call may need to finish before cancellation completes.
+- Keep execution/request context separate from semantic keys and completed caches.
+  Pass process settings explicitly; do not change process-wide environment or
+  working directory to configure concurrent builds.
+- `resin-toolchain` supplies async native-process/artifact operations, consumes
+  generated projects and explicit settings, and does not sequence compiler passes.
+- Publish artifacts into immutable owned locations. Retaining/downloading artifact A
+  must not hold an exclusive staging lock needed to build B. Files remain alive
+  until their final consumer releases them, independently of cache membership.
 
 ### Phase 1 acceptance criteria
 
-- [ ] **P1.1** Direct library tests run the explicit phase sequence without HTTP or
-      an orchestration wrapper; CLI build/run behavior still works.
-- [ ] **P1.2** Cold and incremental results agree for unchanged input, edits,
-      deletions, changed imports, library changes, and relevant option changes.
-- [ ] **P1.3** Completed inputs/results satisfy `Send + Sync`; concurrent work from
-      the same predecessor preserves that predecessor and both successors.
-- [ ] **P1.4** Independently constructed equivalent source graphs have compatible
-      keys and query identities; changed import bindings and distinct equal-text
-      modules cannot collide. Reconstructed sources work with retained HIR results.
-- [ ] **P1.5** Tests exercise bounded parallel jobs, responsive async I/O, cancellation,
-      and child cleanup. Cancellation cannot publish an incomplete successful result.
-- [ ] **P1.6** Artifact A remains readable while B builds; concurrent publication and
-      final-owner cleanup cannot overwrite/delete another live artifact generation.
-- [ ] **P1.7** Record cold/unchanged/small-edit timing, concurrency, retained memory,
-      and cancellation latency as a baseline, without imposing invented speed targets.
-- [ ] **P1.8** Cache tests show that updating `{a,b}` with requested `{b,c}`
-      returns `{a,b,c}`, shares `b`, computes only `c`, and renews only requested
-      metadata. Update/prune leave old sets unchanged. Content hashes distinguish
-      changed text and reuse identical text without source revision counters.
+- [ ] **P1.1** Direct library tests execute explicit async passes with no HTTP or
+      orchestration wrapper. Existing local build/run behavior still works.
+- [ ] **P1.2** Full text and equivalent predecessor edits converge on source/parse
+      keys. Cold and incremental results agree, including invalid input and repairs.
+- [ ] **P1.3** Completed inputs/results satisfy `Send + Sync`; concurrent successor
+      computations preserve their predecessor and each other's results.
+- [ ] **P1.4** Equivalent independently acquired/reconstructed graphs reuse compatible
+      results and editor identities. Changed imports/options miss affected caches;
+      distinct equal-text modules remain distinct. Test digest collision handling.
+- [ ] **P1.5** Cache tests cover hits/misses, deduplication, refreshed recency,
+      deterministic eviction, empty/zero/exact capacities, and overflowing requests.
+      All requested values survive overflow and a warning is emitted; old snapshots
+      remain unchanged. Later updates can shrink an oversized cache.
+- [ ] **P1.6** Independent builders overlap within configured bounds; async I/O stays
+      responsive during CPU work. Cancellation/failure cannot publish partial success,
+      and shutdown reaps child processes.
+- [ ] **P1.7** Artifact A remains readable while B builds; publication/final-owner
+      cleanup cannot overwrite or remove another live artifact generation.
+- [ ] **P1.8** Record cold/unchanged/small-edit timings, concurrency, retained memory,
+      map-copy costs, and cancellation latency. Document execution/capacity defaults.
 
-## Phase 2: Immutable caches exercised through LSP
+## Phase 2: Exercise the caches and concurrency through local LSP
 
 ### Deliverable
 
-Use the existing LSP mode to exercise repeated and overlapping computations locally.
-Applications explicitly maintain active pointers to immutable per-layer caches. Use the Phase 1 collection for updates and retention, with no new watch-mode
-executable or orchestration library. Local tests schedule analysis and builds
-against these sets. Separate CLI and LSP processes share a service only in Phase 3.
+Use existing LSP mode to exercise repeated, overlapping analysis and local build
+requests against application-owned active cache pointers. No separate watch-mode
+entry point or server is needed. Separate CLI/LSP processes share results in Phase 3.
 
-### 2.1 Shared completed outputs
+### 2.1 Share completed results
 
-Start with one active `Cache<K,V>` per output kind: sources, CSTs, per-file ASTs,
-HIR/editor facts, and any later pass outputs requested. A set retains entries from
-multiple callers, input graphs, and generations. Each entry shares its completed
-value and records immutable last-use time and generation metadata.
+Start with one active cache per output kind: sources, CSTs, per-file ASTs,
+HIR/editor facts, and later outputs when requested. One compilation may reuse
+per-file results produced by several earlier callers. The application assembles
+explicit immutable pass inputs; it is not limited to one predecessor compilation.
 
-For example, a new entry importing `a` and `b` can reuse per-file results produced
-by separate earlier requests. The application explicitly assembles each pass's
-current inputs from those values; it is not restricted to one predecessor graph.
-Folder/package partitioning may be explored by placing the same kinds of sets in
-separate application-owned scopes. Scope changes must not change compilation meaning;
-complete keys allow selected results to be reused across those scopes.
+The only shared mutable cache state is the application's active pointer. Published
+maps, recency metadata, and values stay immutable. A later update can evict entries
+used by an earlier request; that request retains its own result handles. There is
+no global union of pinned request keys that grows the current cache indefinitely.
 
-Cache updates retain unrequested entries until pruning. Each individual compiler
-result still refers only to its required data. The shared mutable state is the
-active pointer, not the published map or its timestamps.
+An in-flight update/CAS attempt may retain its base snapshot. After selecting and
+publishing results, hold needed values rather than entire old maps during downstream
+work. Avoid parent links and ownership cycles. Evicted values and artifacts are
+released after their final owners, including downstream results, release them. An
+idle cache needs no sweep: its membership changes on its next update.
 
-Completed diagnostics may be retained for their exact inputs. Cancellation, pending
-uploads, and transient acquisition/tool failures remain retryable. Missing-file
-outcomes cannot bypass source acquisition on a later request that may repair them.
-Concurrent misses may compute twice initially; sharing identical completed values
-is an optimization, while equal-key semantic correctness is mandatory.
+### 2.2 Publish concurrent updates without losing contributions
 
-### 2.2 Retention as a value operation
+Use safe atomic shared-pointer publication, such as `ArcSwap`, in application code.
+Do not write raw-pointer reclamation. A plain load/compute/store can overwrite
+concurrent additions, so use compare-and-swap (CAS) and rebase on failure:
 
-The normal application sequence is:
+1. Load an owned cache snapshot and run `update()` for this request's keys.
+2. Retain **all requested** completed values, including hits, separately from the
+   candidate cache so they survive eviction or a publication retry.
+3. CAS the head from the loaded snapshot to the candidate.
+4. On failure, load the latest head and call the same `update()` with the same keys
+   and a cheap builder returning the already-computed values. Reuse compatible
+   current-head values, renew recency against that head, and reapply eviction.
+5. Retry publication without rerunning completed compiler/native work. Use handles
+   from the successfully published candidate; do not reread a possibly newer head
+   to discover this request's results.
 
-```text
-updated = update(previous, requested_keys, use_stamp, fresh)
-next    = prune(updated, retention_cutoff)
-```
+Rebase only requested entries, never stale unrelated history or deletion lists.
+Disjoint contributions survive when capacity permits; normal eviction may remove
+older ones when it does not. Requested-key protection applies to each update,
+not permanently to every overlapping request. Recency follows publication order;
+CAS retries do not create extra published generations.
 
-Requested entries are renewed before pruning. An old entry still present is valid
-for its complete key and may be reused; reaching its age alone does not invalidate
-its contents or force recomputation. `prune` establishes the retained membership.
+Each layer publishes independently. Downstream passes consume the selected immutable
+dependency handles with complete keys, rather than mixing current global heads.
+Concurrent identical misses may compute twice initially; retaining a compatible
+winner is sufficient. Atomic cache publication does not make the whole compiler or
+native tooling lock-free.
 
-Support two explicit alternative cutoff modes:
+### 2.3 Editor revision handling
 
-- **Time (default):** retain for 24 hours since last use, configurable. Applications
-  pass monotonic timestamps and remove entries whose last use is at or before the
-  computed cutoff. Timestamp renewal creates new metadata while sharing the value.
-- **Generation:** remove entries at or before a supplied last-use generation cutoff.
-  Generations count successfully published updates of that cache. An update
-  candidate advances its predecessor's generation once and stamps requested keys;
-  pruning alone preserves the generation. CAS retries do not count as extra updates.
-
-Generations belong to one set's lineage; they are not comparable across phase or
-package sets. Other callers' updates age an entry under a shared generation policy.
-Time remains the service default. A policy selects one mode, avoiding ambiguous
-combinations of time and generation conditions.
-
-Invoke pruning when publishing updates, optionally batching/throttling it if measured
-cost warrants that. A background sweep is not required for correctness. Opportunistic
-pruning performs no cleanup while the server is idle; when idle reclamation is wanted,
-a configurable timer can publish the same pure `prune` operation. Use one minute as
-the initial optional timer interval. Neither pruning nor timer activity renews use.
-
-Pruning a new set does not revoke older snapshots or handles. A retained HIR can
-keep its sources alive after the source set prunes them. Ordinary shared ownership
-reclaims values after their final owner drops; ownership links must be acyclic.
-See Rust's [Arc ownership contract](https://doc.rust-lang.org/std/sync/struct.Arc.html).
-
-Acquire needed result handles and release old whole-set snapshots promptly. A long
-request retaining a whole snapshot also retains its unrelated entries. Do not add
-parent links retaining every generation. A later request can reconstruct an evicted
-source and still use retained HIR thanks to its content-based source identity.
-Artifact ownership similarly protects live readers; cleanup removes only the files
-belonging to that artifact generation after its final owner releases it.
-
-TTL limits idle retention in the current set, not total process memory. Old snapshots,
-live consumers, and many distinct results inside the retention window can retain
-substantial data. Measure set sizes, sharing, hits/misses, and memory. Fixed-size
-allocator pools, tracing GC, and a hard cache memory ceiling are outside this plan.
-
-### 2.3 Publishing concurrent updates
-
-Keep publication in application code, separate from the pure cache operations.
-Use safe atomic shared-pointer publication, such as `ArcSwap`, for each active set.
-Holding an owned snapshot protects it while the active pointer changes. Avoid a
-hand-written raw-pointer reclamation scheme. Atomic publication does not make native
-processes, allocations, and the rest of the compiler lock-free.
-
-A plain load/compute/store can lose concurrent additions. A successful CAS publishes
-one candidate atomically; a failed CAS requires rebasing against the current head:
-
-1. Load a snapshot and capture needed hits and missing keys. Release the whole-table
-   snapshot before running bounded jobs where possible. Keep a prepared change set
-   of **all requested keys**, completed values, and use timestamps, including hits.
-   Stamp newly computed values at completion. Keep this data across retries.
-2. Load the current head and apply only those requested entries to it. Preserve its
-   unrelated entries and prefer already-present compatible values. Renew timestamps
-   with `max(current, requested)` so a slow request cannot move last use backward.
-3. Form the candidate's next generation from that head. Retain the request's result
-   handles, then prune using current metadata and an explicit cutoff. A long request
-   remains valid even if its selected entries have aged out before publication.
-4. Compare-and-swap the active pointer from that head to the candidate. If it loses,
-   reload and repeat the merge/prune; retain completed computation results.
-
-Do not replay a stale whole snapshot or a stale list of deletions. A prune racing
-with a touch must re-evaluate age against the newer metadata. Reintroducing a pruned
-key actually requested again is valid; reintroducing unrelated history is not.
-Prune-only publication uses the same CAS/re-evaluation rule without advancing the
-update generation.
-
-Compiler/native work must remain outside the CAS retry operation. The atomic-Arc
-API may retry its update closure; see the [ArcSwap update documentation](https://docs.rs/arc-swap/latest/arc_swap/struct.ArcSwapAny.html#method.rcu).
-A repeated merge may copy map structure, but must not rerun an expensive completed
-pass or repeat native side effects. Prefer a concurrent winner's compatible handle
-when selecting downstream inputs; temporary duplicate computations are acceptable.
-
-Each layer may publish independently: a pass consumes explicit immutable dependency
-handles, never an accidental mixture of whatever several active pointers contain.
-No multi-layer transaction is needed for correctness when keys cover those inputs.
-
-### 2.4 Entry-driven editor inputs
-
-Each analysis request selects an entry source and an immutable graph of exact source
-versions and resolved import bindings. This graph is ordinary input data; it is not
-a persistent workspace with its own cache or mutable head. Never use one global
-`path -> latest contents` mapping, which would mix branches and unsaved revisions.
-
-Remove manifest/root discovery from the plan. Resolve user imports relative to the
-importer, including existing `../` imports. Use names relative to the entry file's
-directory for transport/presentation; leading `../` components are valid logical
-locators, never paths for the server to open. Library/dependency namespaces remain
-distinct. The current LSP directory argument may guide editor file discovery, but
-it does not establish a server workspace or cache identity.
-
-The LSP application reads disk sources with open buffers taking precedence. It
-tracks document versions and the exact input graph used by each request. An edit
-creates a new graph sharing unchanged values; changed imports trigger discovery
-again. Track import dependents so changing a helper also invalidates its unchanged
-entry's analysis. A changed-file list first produces a complete new input selection.
-Preserve existing client path normalization for aliases, symlinked ancestors, and
-unsaved files; resolve aliases to one deterministic logical module before keying
-the graph. Different import-discovery orders must produce compatible identities.
-
-Editors own disk saves. A save changes that file's disk view and preserves other
-dirty buffers. Ordinary CLI builds use disk contents. Analyze eagerly, allow
-speculative compilation of known targets when resources permit, coalesce rapid
-edits, and suppress stale diagnostics. Publish only results for the applicable
-revision; requests already using older graphs may finish against those graphs.
-
-Spell out the passes required by each query/build path. Share the completed phase
-outputs while allowing straightforward orchestration to be duplicated.
+- Track LSP document versions and capture exact source selections per request.
+  Open buffers take precedence over disk. Edits create new sources/graphs sharing
+  unchanged values; older requests keep their own valid inputs.
+- Discover imports with the CST query. Re-resolve the graph on requests, including
+  when an entry is unchanged. Track dependents so helper edits refresh their callers.
+  Handle additions, deletions, invalid code, aliases, and changed import bindings.
+- Resolve user imports relative to the importer, including `../`. Normalize aliases
+  to one logical module within a graph. Use entry-directory-relative logical names;
+  parent components are logical locators, never server filesystem access.
+- Keep absolute path/URI mappings in the application. The LSP directory argument
+  can guide discovery but creates no compiler workspace or cache partition.
+- Editors own saves; submitting an edit does not write it to disk. Saving one file
+  preserves other dirty buffers. Ordinary build requests use the disk selection.
+- Analyze eagerly, coalesce rapid changes, cancel superseded work where useful,
+  and publish diagnostics only for the applicable revision. Allow resource-bounded
+  speculative compilation of known targets without making it a prerequisite for queries.
+- Query/build handlers explicitly invoke needed passes and share the same caches.
+  An incomplete acquisition cannot masquerade as a complete semantic input graph.
 
 ### Phase 2 acceptance criteria
 
-- [ ] **P2.1** Different callers reuse matching completed values. A new compilation
-      uses per-file outputs from multiple earlier requests; separately organized
-      sets produce the same semantics. Same-path different contents coexist.
-- [ ] **P2.2** With an explicit test clock, updates renew requested metadata without
-      changing old sets. Time and generation pruning remove exact-cutoff entries;
-      successful updates advance generations once, retries/pruning do not.
-- [ ] **P2.3** Pruning during analysis, local builds, and artifact reads leaves held
-      values valid. Releasing final roots/consumers reclaims them. Upstream pruning
-      and source reconstruction preserve queries against retained HIR.
-- [ ] **P2.4** Concurrent disjoint updates both survive. Update/prune races preserve
-      renewed entries without restoring unrelated history; slow publication cannot
-      regress timestamps. CAS contention never repeats completed compiler/native work.
-- [ ] **P2.5** LSP handles rapid edits, invalid code then repair, additions/deletions,
-      changed dependencies, parent imports, saves, and simultaneous queries. Aliases
-      select one module; discovery order preserves identity; stale results cannot
-      replace the current revision.
-- [ ] **P2.6** Receive handling remains responsive through computation/publication;
-      bounded queues/jobs and cancellation/shutdown release owned tasks/processes.
-- [ ] **P2.7** Tests distinguish update-triggered pruning from optional idle cleanup.
-      An old still-present exact-key result can be renewed before pruning; after
-      removal it can be recomputed correctly.
-- [ ] **P2.8** Measure sustained editing, hit-only updates, map copying/structural
-      sharing, CAS retries, retained snapshots, and reclamation. Do not claim a
-      constant-cost update or hard memory bound from pointer swapping alone.
+- [ ] **P2.1** A new compilation reuses per-file outputs from multiple earlier
+      requests. Same-path different contents coexist; cache placement does not
+      change semantics.
+- [ ] **P2.2** CAS races retain disjoint contributions when capacity permits and
+      evict according to current recency otherwise. Retries preserve requested keys
+      without resurrecting unrelated history or repeating completed/native work.
+- [ ] **P2.3** Eviction during analysis/build/artifact reads preserves held values;
+      final-owner release reclaims them. Reconstructed sources still support queries
+      against retained HIR. No cache predecessor chain keeps all generations alive.
+- [ ] **P2.4** LSP tests cover rapid edits, invalid code/repair, dependency changes,
+      missing files later created, aliases, parent imports, saves, and concurrent
+      queries. Old results cannot replace current diagnostics.
+- [ ] **P2.5** Receive handling stays responsive; bounded jobs/queues, cancellation,
+      and shutdown release owned work. No periodic eviction task is required.
+- [ ] **P2.6** Measure sustained editing, hit-only updates, map copies, CAS retries,
+      retained snapshots, and memory reclamation. Record limitations of entry-count
+      capacity; do not infer a hard memory bound from atomic publication.
 
 ## Phase 3: HTTP server and thin client
 
 ### Deliverable
 
-Introduce `resin-client`, `resin-server`, and `resin-protocol` under `crates/`, with the
-root `resin` executable delegating to the merged client. The server owns active
-per-pass cache pointers and calls passes directly for builds and analysis queries.
-Move the local LSP compilation responsibilities to those server handlers.
+Introduce `resin-client`, `resin-server`, and `resin-protocol` under `crates/`.
+The root executable delegates to the merged client. Move compilation and active
+per-pass caches from local LSP/application code into explicit server handlers.
 
-### 3.1 Connection and requests
+### 3.1 Connection and source submission
 
 - Require a server URL in `RESIN_SERVER` for build, run, and LSP. Missing/invalid
   configuration, connection failure, or incompatible protocol produces an early
   actionable error. No discovery files, automatic spawning, or local build fallback.
-- Use versioned wire types for source submissions, complete input references,
-  diagnostics, query positions/revisions, targets, and artifact responses. Do not
-  expose compiler implementation types on the wire.
-- Each request names one entry source and its immutable inputs. There is no
-  create-workspace API, workspace TTL, or mandatory long-lived compiler session.
-  Optional cached graph/revision handles follow the same entry TTL as other values.
-- Build and query handlers explicitly select inputs, invoke passes, and publish
-  immutable caches. They use the same process-wide sets initially; request
-  origin does not partition reuse. Preserve Phase 2's update/prune, CAS, and ownership
-  behavior for every retained output.
+- Define versioned wire types for sources/import bindings, query positions/revisions,
+  diagnostics, targets, header bundles, and artifact responses. Share no compiler
+  IR types across this boundary.
+- Each request selects one entry source and exact immutable inputs. Keep shared
+  caches across callers; no create-workspace API or mandatory long-lived session.
+  Revision tokens identify editor requests, not semantic cache entries.
+- Client acquisition uses the full CST parser:
+  1. Read the entry, with open-buffer precedence for LSP.
+  2. Query imports/extern headers and recursively read/parse reachable user sources.
+     Deduplicate aliases and terminate cycles; skip server-owned library/dependency roots.
+  3. Capture source text once per request and retain its local-to-logical mapping.
+     Observed relevant edits during acquisition trigger a successor request, rather
+     than combining buffer generations. Do not claim an atomic filesystem snapshot.
+  4. POST the complete captured user graph and required header bundles. The server
+     parses/validates it, resolves pinned dependencies and standard/builtin libraries,
+     and freezes the full graph before semantic passes.
+- Client and server use the same grammar/query contract. Do not require a sequence
+  of server round trips asking the client for each newly discovered import.
+  Missing/unreadable imports yield diagnostics and can be repaired on a later request;
+  malformed editor code may still return partial analysis.
+- Server source loading is snapshot-only. Supplied client names are never opened on
+  the server, even when a matching local path happens to exist. Application acquisition
+  may fetch server-managed libraries/dependencies and represent them as Sources.
+- Support deriving an input selection from explicit prior inputs plus changed or
+  deleted files. Re-resolve imports and canonicalize complete inputs before lookup.
+  Full-file replacement is sufficient initially. Missing references after eviction
+  or restart request a complete resubmission, not loss of editor state.
 
-### 3.2 Acquire a source graph without a project manifest
+### 3.2 Upload local C header directory bundles
 
-Use an entry-driven upload exchange so the thin client need not parse imports or
-guess a directory tree to upload:
+An extern block names direct native headers; it need not enumerate their transitive
+includes. Use complete user header directories/include roots as snapshot bundles,
+and run the C preprocessor on the server.
 
-1. The client reads/posts the selected entry file's logical name and contents.
-2. The server parses available files and reports unresolved user imports with their
-   importer and relative reference. Batch independent missing imports.
-3. The client resolves those references locally, uses LSP buffers where present,
-   and posts the corresponding names and contents, or reports a missing/unreadable
-   file. Repeated references to the same local file select the same logical module
-   within that request, using the alias normalization established in Phase 2.
-4. Repeat until the user-source closure is complete. The server fetches dependencies
-   and supplies standard/builtin libraries itself, with pinned versions/content.
-5. Freeze the complete input graph before semantic compilation. On an edit, derive
-   a new graph from explicit prior inputs and replacements/deletions, and resolve
-   its imports again. Reuse matching sources and outputs through the same caches.
+- Resolve user headers relative to their declaring Resin source and explicit client
+  include roots. Default to bundling a direct local header's containing directory;
+  include all files and nested directories needed for preprocessing, including
+  non-`.h` files. Do not attempt a regex `#include` closure.
+- Allow explicit include roots in client/build settings, with no project manifest.
+  Preserve their relative layout and ordered search bindings; coalesce overlapping
+  directory uploads. Include layouts reaching outside the default directory require
+  explicit wider/additional roots, rather than guessing an arbitrary ancestor tree.
+- Distinguish uploaded user-header bindings from server-provided runtime, target
+  system, and configured dependency headers. Prefer explicitly supplied local roots/
+  local header matches, then configured server headers; report unresolved headers.
+  Document the order, and test name collisions. Never resolve a client absolute path
+  against the server filesystem; map supported local absolute paths into bundles.
+- Preserve the declaring module's header binding even when two directories contain
+  the same basename. Stage bundles into owned locations with validated relative paths,
+  rewrite native include bindings as needed, and preserve nested C include semantics.
+- Server-side preprocessing uses the selected target toolchain. Missing transitive
+  includes outside the supplied bundles/server roots produce a useful diagnostic.
+  The client needs neither a C compiler nor a preprocessor.
+- Key native artifacts by all bundle file names/contents, declared header bindings,
+  ordered include roots, runtime/dependency identities, and toolchain/build settings.
+  Conservative whole-bundle invalidation is acceptable. Additions, changes, and
+  deletions must invalidate affected artifacts even when Resin text is unchanged.
 
-Correlate every exchange/upload with its request revision. Capture the editor buffer
-versions for that revision and select each disk file's contents once per exchange.
-Observed relevant edits/deletions during discovery cancel or start a successor;
-never merge uploads from different revisions. This defines an exact captured input
-selection without claiming an atomic snapshot of the client's entire filesystem.
+### 3.3 Build contract, output, and deployment
 
-These are bounded acquisition exchanges, not workspace lifetimes. Abandoned exchanges
-release request state. A missing/unreadable local source terminates acquisition with
-an import diagnostic instead of repeated upload requests; partial editor facts may
-still be returned. The server never opens the supplied client path as a fallback.
-Missing cached upload references after eviction/restart prompt re-upload. Pending
-exchanges do not produce completed semantic cache entries. Source-only parsing can
-still be reused; future requests reacquire unavailable imports so creating a missing
-file can repair the program.
-
-Absolute paths remain client-side. Request-local logical names and import edges
-disambiguate source roles; full semantic keys cover their contents and bindings.
-Two clients using the same logical name can submit different versions concurrently.
-Identical graphs can share outputs. Keep each client's local URI mapping outside
-those shared outputs. No change is written to disk merely because an LSP request
-submits different contents.
-
-### 3.3 Native output and deployment
-
-- Define an explicit supported target contract: OS, architecture, ABI/runtime needs,
-  selected entries, profile, and relevant native build settings. Advertise support
-  and reject unsupported requests; a Linux server does not implicitly cross-build
-  for every client platform.
-- Run code generation, Ninja, compilers, and other required native tools on the
-  server. Resolve the native `--embed` helper explicitly for the server executable.
-- Return structured diagnostics and artifact metadata, with one output file over
-  HTTP initially. Complete downloads before publishing them at the client destination.
-  Keep active downloads safe from pruning and old-set reclamation.
-- Run downloaded executables locally, with local arguments, runtime environment,
-  working directory, and standard streams. Preserve debug build-and-run without
-  `-o` and optimized output without execution with `-o`.
-- Use the same explicitly launched server for development and deployment. Document
-  local startup and manual Docker/systemd supervision, including user/service-account
-  operation. Initial installation and service setup are manual; no installer is needed.
-- Pick and document an HTTP framework during this phase; Rocket is a candidate.
-  Native toolchain and dependency settings are explicit server configuration.
-  Define authentication/access and execution isolation before offering the service
-  to mutually untrusted users; content keys alone do not grant access to an artifact.
+- Requests explicitly select OS, architecture, ABI/runtime needs, entry targets,
+  profile, and relevant build settings. Advertise server capabilities and reject
+  unsupported targets; remote compilation alone does not provide cross-compilation.
+- Server handlers call compiler passes, publish caches, and invoke code generation,
+  Ninja, C compilers, and SPIR-V tools. Keep pass order visible in build/query handlers.
+  Preserve the existing toolchain library for native operations, without adding
+  a reusable compiler orchestration wrapper.
+- Resolve the native embedding helper explicitly when running as `resin-server`;
+  do not assume its executable supports the root CLI's existing `--embed` mode.
+- Return diagnostics, artifact metadata, and one output file over HTTP initially.
+  Downloads retain artifact ownership and publish locally only after completion;
+  failed downloads cannot replace a valid output.
+- Run downloaded executables locally with local arguments, environment, working
+  directory, and streams. Preserve debug build-and-run without `-o`, and optimized
+  output without execution with `-o`. Execution arguments never enter build keys.
+- Use the same explicitly launched service for development/deployment. Choose and
+  document the HTTP framework in this phase; Rocket is a candidate. Document local
+  startup, manual Docker/systemd setup, user/service-account operation, and explicit
+  native/dependency settings. No installer is required.
 
 ### Phase 3 acceptance criteria
 
-- [ ] **P3.1** Root `resin` is a thin wrapper; the three application crates live under
-      `crates/`. Compiler/toolchain crates have no client/server/protocol dependencies,
-      and no build orchestration library has been introduced.
-- [ ] **P3.2** Build/run/LSP fail clearly without a usable `RESIN_SERVER`, negotiate
+- [ ] **P3.1** Root `resin` is a thin wrapper. All other main workspace crates live
+      under `crates/`. Client has syntax dependencies only; semantic/native work
+      runs on the server. Compiler/cache/toolchain crates have no application/protocol
+      dependencies, and handlers explicitly sequence passes.
+- [ ] **P3.2** Build/run/LSP fail early without usable `RESIN_SERVER`, negotiate
       compatibility, and reject unsupported targets before native compilation.
-- [ ] **P3.3** An entry and nested/parent imports compile with no `resin.toml`, upload
-      directory, or client semantic parser. Tests prove user sources are supplied
-      over HTTP and cannot be loaded from coincidentally existing server paths.
-      Missing imports terminate promptly and can be repaired by a later request.
-- [ ] **P3.4** Two clients at different absolute roots share identical source/phase
-      outputs. Different branches and unsaved edits coexist without diagnostic or
-      declaration-identity leakage; combined inputs reuse multiple callers' results.
-      Dependency edits during upload cannot mix revisions or publish stale results.
-- [ ] **P3.5** Build and LSP query handlers explicitly invoke their needed passes
-      while sharing immutable caches. Phase 2 update/prune/concurrency tests pass
-      through the HTTP boundary.
-- [ ] **P3.6** Expired/restarted-server references recover through re-upload; canceled
-      or disconnected requests release acquisition state and owned native processes.
-      Pruning cannot interrupt an active artifact download.
-- [ ] **P3.7** Returned executables are placed/run locally with preserved build/run
-      defaults and runtime arguments; native helper invocation works in the server.
-- [ ] **P3.8** Document protocol/configuration defaults, dependency acquisition, target
-      support, retention semantics, native tool requirements, and manual startup.
+- [ ] **P3.3** Entry, nested/parent imports, cycles, aliases, missing imports, and
+      invalid editor bodies are handled through CST-based acquisition without a
+      manifest or second parser. Server tests prove user files come from uploads.
+- [ ] **P3.4** Two clients at different checkout roots share equivalent results;
+      branches and dirty buffers remain distinct without leaking paths/identities.
+      Dependencies changed during upload cannot mix editor revisions.
+- [ ] **P3.5** Analyze an LSP edit, save it, then build from an independent CLI client:
+      identical captured sources/import bindings hit the server's Source/CST/AST/HIR
+      caches. Assert pass invocation counts or hit counters, not merely equal output.
+      Native passes may run if LSP did not request them. Unsaved/disk differences
+      and changed imported files miss only affected results.
+- [ ] **P3.6** Native builds use uploaded directory bundles with nested/non-`.h`
+      includes, duplicate basenames, explicit roots, and runtime/system headers.
+      Test bundle edits/additions/deletions, relocation, missing transitive headers,
+      precedence, and isolation from coincidentally existing server files.
+- [ ] **P3.7** Phase 2 concurrency/eviction/ownership cases pass through HTTP.
+      Eviction/restart recovers by resubmission; cancellation/disconnection releases
+      owned request/native work, and eviction cannot invalidate active downloads.
+- [ ] **P3.8** Artifacts are placed/run locally with existing defaults and arguments.
+      Failed downloads preserve prior outputs; the server embedding helper works.
+- [ ] **P3.9** Document wire/configuration contracts, capacities and overflow warnings,
+      target support, dependency/header acquisition, required native tools, and
+      manual local/Docker/systemd startup.
 
 ## Execution and follow-up scope
 
-For each phase, implement the numbered work in order, add tests for its acceptance
-criteria, and record validation before marking those criteria complete. Use the
-repository's development environment and appropriate compiler/LSP/native integration
-checks. Follow repository worktree and pull-request instructions; keep each change
-reviewable. Passing a documentation check does not complete an implementation phase.
+Implement each phase in reviewable changes, add meaningful tests for its acceptance
+criteria, and record validation before checking a box. Use the repository development
+environment and required parser/compiler/LSP/native checks. Update affected architecture
+instructions alongside each implementation phase. Follow worktree/PR requirements.
+Documentation validation alone completes none of the implementation phases.
 
-Phase-specific implementation details such as exact wire field names, executor,
-framework, and dependency configuration should be selected and documented in the
-phase that introduces them. They must preserve the contracts and acceptance cases
-above rather than becoming prerequisites left to a future plan.
+Exact API field names, executor/framework choices, concurrency limits, per-layer
+capacity defaults, and dependency configuration are implementation decisions in their
+own phase. Select and document them there while preserving these contracts; do not
+leave required behavior for an unspecified later phase.
 
-Later work: MCP queries for documentation/diagnostics/symbols, REPL/shell runtime
-sessions, additional watching clients, tar/tgz or multiple-file artifacts, transport
-deduplication/batching optimizations, finer-grained semantic reuse, broader deployment
-support, and installers. Cross-caller reuse and immutable cache retention are
-required by this plan. Broader folder/package partitioning can reuse these collection
-operations without changing compiler contracts or requiring a workspace protocol.
+Later work includes MCP documentation/diagnostic/symbol queries, REPL/shell sessions,
+additional watching clients, archive/multiple-file artifacts, transport deduplication,
+finer semantic reuse, and installers. Folder/package cache partitioning may reuse the
+same immutable Cache operations without changing compiler contracts or introducing
+a workspace protocol. Before exposing a service to mutually untrusted users, define
+its authentication, artifact access, and native execution isolation.
