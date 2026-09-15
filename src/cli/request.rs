@@ -17,19 +17,31 @@ pub struct Request {
     pub input: Input,
     pub destination: Option<PathBuf>,
     pub options: Options,
+    pub library_root: PathBuf,
+    pub targets: Vec<resin_compiler::Target>,
 }
 
 impl Request {
-    pub fn new(mut input: Input, destination: Option<PathBuf>, options: Options) -> Result<Self> {
+    pub fn new(
+        mut input: Input,
+        destination: Option<PathBuf>,
+        options: Options,
+        library_root: PathBuf,
+    ) -> Result<Self> {
         let source = normalize_path(&options.directory.join(&input.path))?;
         let destination = destination
             .map(|path| validate_destination(&input, &source, &options.directory, &path))
             .transpose()?;
+        let targets = vec![resin_compiler::Target::Host {
+            entry: input.entry.clone().into(),
+        }];
         input.path = source;
         Ok(Self {
             input,
             destination,
             options,
+            library_root,
+            targets,
         })
     }
 }

@@ -100,11 +100,12 @@ pipelines and run them. Host-only programs follow the same recipe with an empty 
 
 [src/main.rs](src/main.rs) only calls `resin::cli::main`, the root package's CLI entry.
 [cli/mod.rs](src/cli/mod.rs) dispatches modes, and [args.rs](src/cli/args.rs)
-parses flags and chooses `Interpreter`, `Compiler`, `Formatter`, or `LanguageServer`;
+parses flags and chooses `Interpreter`, `Formatter`, or `LanguageServer`;
 [source.rs](src/cli/source.rs) parses the `FILE[:ENTRY]` selector.
-Interpreter mode builds a debug native executable and runs it. Compiler mode builds
-an optimized executable and copies it to the destination selected with `--output`
-(or `-o`). `resin --lsp DIR` runs the language server in that project directory.
+Interpreter mode builds a host program. Without `--output` it uses the debug cache
+and runs the executable; with `--output` (or `-o`) it builds an optimized executable
+and copies it to the selected destination without running it.
+`resin --lsp DIR` runs the language server in that project directory.
 
 The platform toolchain's [Environment](crates/resin-toolchain/src/lib.rs)
 captures environment variables, the working directory, and executable/temp paths once.
@@ -119,8 +120,10 @@ use the same captured environment.
 
 The CLI's private [Request](src/cli/request.rs) validates the input/output combination,
 resolves directory destinations, and rejects outputs that would overwrite the source.
-A [resin_source::Loader](crates/resin-source/src/lib.rs) reads the entry into an immutable `Source`.
-`Compiler::compile(entry, &mut loader, targets)` resolves imports and returns an
+It also owns the library root and the host target selected by `FILE[:ENTRY]`.
+The CLI [compiler](src/cli/compiler.rs) module loads that request, then
+[resin_source::Loader](crates/resin-source/src/lib.rs) reads the entry into an immutable `Source`.
+`Compiler::compile(entry, &mut loader, &request.targets)` resolves imports and returns an
 `Arc<Compilation>` containing analysis and phase products.
 
 The CLI passes `compilation.verified()` to

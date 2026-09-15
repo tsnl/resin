@@ -5,17 +5,14 @@ use clap::CommandFactory;
 use resin_toolchain::CProfile;
 use std::{ffi::OsString, path::PathBuf};
 
-pub struct Invocation {
-    pub mode: Mode,
-    pub library_root: PathBuf,
-}
-
 pub enum Mode {
+    /// Build a host program. `request.destination` is the compile-only flag:
+    /// `None` runs the debug executable with `args`; `Some` copies the release
+    /// executable without running it.
     Interpreter {
         request: Box<Request>,
         args: Vec<OsString>,
     },
-    Compiler(Box<Request>),
     Embed {
         input: PathBuf,
         output: PathBuf,
@@ -30,15 +27,8 @@ pub enum Mode {
     },
 }
 
-pub fn parse(
-    args: impl IntoIterator<Item = OsString>,
-    environment: &Environment,
-) -> Result<Invocation> {
-    let mode = <Cli as clap::Parser>::parse_from(args).mode(environment)?;
-    Ok(Invocation {
-        mode,
-        library_root: environment.path("RESIN_LIBRARY_ROOT", resin_source::library_root()),
-    })
+pub fn parse(args: impl IntoIterator<Item = OsString>, environment: &Environment) -> Result<Mode> {
+    <Cli as clap::Parser>::parse_from(args).mode(environment)
 }
 
 #[derive(clap::Parser)]
@@ -144,14 +134,9 @@ impl Cli {
 
     fn build(self, environment: &Environment) -> Result<Mode> {
         let input = self.input()?;
-        let request = Box::new(self.compile.request(input, environment)?);
-        Ok(if request.destination.as_deref().is_none() {
-            Mode::Interpreter {
-                request,
-                args: self.program_args,
-            }
-        } else {
-            Mode::Compiler(request)
+        Ok(Mode::Interpreter {
+            request: Box::new(self.compile.request(input, environment)?),
+            args: self.program_args,
         })
     }
 
@@ -187,6 +172,7 @@ impl CompileOptions {
                 tools,
                 temporary: environment.temporary.clone(),
             },
+            environment.path("RESIN_LIBRARY_ROOT", resin_source::library_root()),
         )
     }
 }
