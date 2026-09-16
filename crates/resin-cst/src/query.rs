@@ -73,25 +73,27 @@ pub(super) fn type_context(document: &Document, offset: usize) -> bool {
     if !document.text.is_char_boundary(offset) {
         return false;
     }
-    let Some(mut node) = document.tree.root_node().descendant_for_byte_range(
-        offset.min(document.text.len()),
-        offset.min(document.text.len()),
-    ) else {
-        return false;
-    };
-    loop {
-        if matches!(
-            node.kind(),
-            "type" | "unary_type" | "primary_type" | "infix_type"
-        ) {
-            return true;
-        }
-        match node.parent() {
-            Some(parent) => node = parent,
-            None => break,
+    let left = document.text[..offset].trim_end().len().saturating_sub(1);
+    for at in [offset, left] {
+        let Some(mut node) = document.tree.root_node().descendant_for_byte_range(at, at) else {
+            continue;
+        };
+        loop {
+            if matches!(
+                node.kind(),
+                "type" | "unary_type" | "primary_type" | "infix_type"
+            ) || (node.kind() == ":"
+                && node.parent().is_some_and(|parent| {
+                    matches!(parent.kind(), "declare" | "parameter" | "local_define")
+                }))
+            {
+                return true;
+            }
+            match node.parent() {
+                Some(parent) => node = parent,
+                None => break,
+            }
         }
     }
-    document.text[..offset.min(document.text.len())]
-        .trim_end()
-        .ends_with(':')
+    false
 }

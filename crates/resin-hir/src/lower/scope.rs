@@ -112,15 +112,29 @@ impl Contexts {
                 }
                 names
                     .entry((entry.name.clone(), entry.is_type))
-                    .or_insert_with(|| self.lookup(cursor, &entry.name, entry.is_type));
+                    .or_insert_with(|| self.lookup_all(cursor, &entry.name, entry.is_type));
             }
             at = scope.parent;
         }
         names
             .into_values()
+            .filter(|ids| {
+                ids.len() == 1
+                    || ids
+                        .iter()
+                        .all(|id| self.definitions[*id].kind == DefinitionKind::Function)
+            })
             .flatten()
             .map(|id| self.definitions[id].clone())
             .collect()
+    }
+
+    pub(crate) fn type_parameters(&self, definition: &Definition) -> &[crate::TypeParameter] {
+        self.definitions
+            .iter()
+            .position(|candidate| candidate.location == definition.location)
+            .and_then(|id| self.parameters.get(&id))
+            .map_or(&[], Vec::as_slice)
     }
 }
 
@@ -470,6 +484,10 @@ impl Scopes {
             data.record_intrinsic_methods(location.clone(), &ty, associated, typer, solver);
             // A nominal identity can resolve even when its fields have no legacy concrete view.
             if let Some(completed) = solver.complete(&ty) {
+                if !associated {
+                    data.expression_types
+                        .insert(location.clone(), completed.clone());
+                }
                 data.record_symbolic_members(
                     location.clone(),
                     &completed,

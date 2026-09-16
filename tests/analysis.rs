@@ -8,6 +8,48 @@ use std::{collections::BTreeMap, path::Path};
 use tempfile::TempDir;
 
 #[test]
+fn colon_completion_uses_visible_free_signatures_and_dot_completion_uses_fields() {
+    let library = "export { Item, read, unrelated }; struct Item { value: int } fn read(value: Ref<Item>) -> int { value.value } fn unrelated(value: bool) -> bool { value } fn hidden(value: Ref<Item>) {}";
+    for suffix in [":", ":re", ":read()", "."] {
+        let source = format!(
+            "import {{ \"library.resin\" }}; fn main() -> _ {{ let item = Item {{ value = 42 }}; item{suffix} }}"
+        );
+        let project = Project::new(&[("main.resin", &source), ("library.resin", library)]);
+        let analysis = project.build_hir();
+        let input = project.source("main.resin");
+        let start = source.rfind("item").unwrap() + 4;
+        let offset = start + suffix.find('(').unwrap_or(suffix.len());
+        let items = analysis.completions(&input, offset);
+        if suffix == "." {
+            assert_eq!(
+                items
+                    .iter()
+                    .map(|item| item.name.as_str())
+                    .collect::<Vec<_>>(),
+                ["value"],
+                "{source}\n{items:?}"
+            );
+        } else {
+            assert!(
+                items.iter().any(|item| item.name == "read"),
+                "{source}\n{items:?}"
+            );
+            assert!(
+                !items
+                    .iter()
+                    .any(|item| matches!(item.name.as_str(), "value" | "unrelated" | "hidden")),
+                "{items:?}"
+            );
+        }
+        if suffix == ":read()" {
+            let definition = analysis.definition(&input, start + 1).unwrap();
+            assert_eq!(definition.source, project.source("library.resin"));
+            assert_eq!(definition.span.start, library.find("fn read").unwrap() + 3);
+        }
+    }
+}
+
+#[test]
 fn operator_symbols_navigate_to_the_selected_overload() {
     let library = "export { Number , __add__ }; struct Number<T> { value: T,  }\nfn __add__<T>(a: Number<T>, b: T) -> T  { a.value + b }\n";
     let source = "import { \"library.resin\" }; fn main() -> int  { Number<int> { value = 40 } + 2 } fn named(value: Number<int>) -> int  { value:__add__(2) }";
@@ -17,7 +59,7 @@ fn operator_symbols_navigate_to_the_selected_overload() {
     let offset = source.rfind('+').unwrap();
     let definition = analysis.definition(&input, offset).unwrap();
     assert_eq!(definition.source, project.source("library.resin"));
-    assert_eq!(definition.span.start, library.find("__add__").unwrap());
+    assert_eq!(definition.span.start, library.rfind("__add__").unwrap());
     assert!(
         analysis
             .hover(&input, offset)
@@ -87,14 +129,14 @@ fn gpu_workgroup_size_has_source_method_hover_completion_and_navigation() {
     let hover = analysis.hover(&input, offset).unwrap();
     assert_eq!(
         hover.text,
-        "fn compute_workgroup_size(self: Ptr<Gpu>) -> ulong"
+        "fn compute_workgroup_size(self: Ref<Gpu>) -> ulong"
     );
     let completions = analysis.completions(&input, offset + "compute_".len());
     let method = completions
         .iter()
         .find(|item| item.name == "compute_workgroup_size")
         .unwrap();
-    assert_eq!(method.detail, "compute_workgroup_size: () -> ulong");
+    assert_eq!(method.detail, "compute_workgroup_size: (Ref<Gpu>) -> ulong");
     assert_eq!(method.kind, resin_hir::DefinitionKind::Function);
     let origin = analysis.definition(&input, offset).unwrap();
     assert!(origin.source.name().ends_with("gpu.resin"));
@@ -107,15 +149,15 @@ fn gpu_workgroup_size_has_source_method_hover_completion_and_navigation() {
 #[test]
 fn generic_method_calls_show_substituted_signatures_and_original_definitions() {
     let library = "export { Cell , read, choose }; struct Cell<T> { value: T,   }\nfn read<T>(self: Ptr<Cell<T>>) -> T  { self.value }\n\nfn choose<T, U>(self: Ptr<Cell<T>>, value: U) -> U  { value }\n";
-    let source = "import { \"library.resin\" }; type IntCell = Cell<int>; fn use(cell: Ptr<IntCell>) -> ulong  { cell:read(); cell:choose::<ulong>(42) }";
+    let source = "import { \"library.resin\" }; type IntCell = Cell<int>; fn use(cell: Ptr<IntCell>) -> ulong  { cell:read(); cell:choose::<_, ulong>(42) }";
     let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
     let analysis = project.checked();
     let input = project.source("main.resin");
     for (name, expected) in [
-        ("read", "read: () -> int"),
-        ("choose", "choose: (ulong) -> ulong"),
+        ("read", "read: (Ptr<Cell<int>>) -> int"),
+        ("choose", "choose: (Ptr<Cell<int>>, ulong) -> ulong"),
     ] {
-        let offset = source.find(&format!("cell.{name}")).unwrap() + 5;
+        let offset = source.find(&format!("cell:{name}")).unwrap() + 5;
         assert_eq!(analysis.hover(&input, offset).unwrap().text, expected);
         let items = analysis.completions(&input, offset);
         assert_eq!(
@@ -126,51 +168,44 @@ fn generic_method_calls_show_substituted_signatures_and_original_definitions() {
         assert_eq!(origin.source, project.source("library.resin"));
         assert_eq!(
             origin.span.start,
-            library.find(&format!("fn {name}")).unwrap() + 4
+            library.find(&format!("fn {name}")).unwrap() + 3
         );
     }
 }
 
 #[test]
-fn unfinished_generic_method_access_keeps_owner_substitution_and_method_binders() {
-    let library = "export { Cell , read, choose, cell_make }; struct Cell<T> { value: T,    }\nfn read<T>(self: Ptr<Cell<T>>) -> T  { self.value }\n\nfn choose<T, U>(self: Ptr<Cell<T>>, value: U) -> U  { value }\n\nfn cell_make<T>(value: T) -> Cell<T>  { Cell<T> { value = value } }\n";
-    for receiver in ["cell", "Cell<int>"] {
-        let source = format!(
-            "import {{ \"library.resin\" }}; fn use(cell: Ptr<Cell<int>>)  {{ {receiver}.; }}"
-        );
-        let project = Project::new(&[("main.resin", &source), ("library.resin", library)]);
-        let analysis = project.build_hir();
-        assert!(!analysis.diagnostics().is_empty());
-        let input = project.source("main.resin");
-        let items = analysis.completions(&input, source.find(".;").unwrap() + 1);
-        let choose = items.iter().find(|item| item.name == "choose").unwrap();
-        assert!(choose.detail.contains("<U>"), "{choose:?}");
-        assert!(!choose.detail.contains("Cell<T>"), "{choose:?}");
-        let read = items.iter().find(|item| item.name == "read").unwrap();
-        if receiver == "cell" {
-            assert_eq!(read.detail, "read: () -> int");
-            assert_eq!(choose.detail, "choose: <U> (U) -> U");
-            assert!(!items.iter().any(|item| item.name == "make"), "{items:?}");
-        } else {
-            assert!(read.detail.contains("Ptr<Cell<int>>"), "{read:?}");
-            assert!(items.iter().any(|item| item.name == "make"), "{items:?}");
-        }
-    }
+fn unfinished_generic_operation_access_keeps_receiver_substitution_and_other_binders() {
+    let library = "export { Cell, read, choose, cell_make }; struct Cell<T> { value: T } fn read<T>(self: Ptr<Cell<T>>) -> T { self.value } fn choose<T, U>(self: Ptr<Cell<T>>, value: U) -> U { value } fn cell_make<T>(value: T) -> Cell<T> { Cell<T> { value = value } }";
+    let source = "import { \"library.resin\" }; fn use(cell: Ptr<Cell<int>>) { cell:; }";
+    let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
+    let analysis = project.build_hir();
+    assert!(!analysis.diagnostics().is_empty());
+    let items = analysis.completions(
+        &project.source("main.resin"),
+        source.find(":;").unwrap() + 1,
+    );
+    let choose = items.iter().find(|item| item.name == "choose").unwrap();
+    assert_eq!(choose.detail, "choose: (Ptr<Cell<int>>, U) -> U");
+    let read = items.iter().find(|item| item.name == "read").unwrap();
+    assert_eq!(read.detail, "read: (Ptr<Cell<int>>) -> int");
 }
 
 #[test]
-fn generic_method_references_show_the_expected_function_instantiation() {
-    let source = "struct Factory {  }\nfn factory_create<T>() -> T  { 42 }\n fn main() -> int  { let mut create: () -> int; create = factory_create; create() }";
+fn generic_function_references_keep_their_original_declaration() {
+    let source = "fn create<T>() -> T { 42 } fn main() -> int { let create_int: () -> int = create; create_int() }";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.checked();
     let input = project.source("main.resin");
-    let offset = source.find("Factory.create").unwrap() + 8;
-    assert_eq!(
-        analysis.hover(&input, offset).unwrap().text,
-        "create: () -> int"
+    let offset = source.find("= create").unwrap() + 2;
+    assert!(
+        analysis
+            .hover(&input, offset)
+            .unwrap()
+            .text
+            .contains("fn create<T>")
     );
     let origin = analysis.definition(&input, offset).unwrap();
-    assert_eq!(origin.span.start, source.find("fn create").unwrap() + 4);
+    assert_eq!(origin.span.start, source.find("fn create").unwrap() + 3);
 }
 
 #[test]
@@ -193,11 +228,11 @@ fn generic_method_editor_snapshots_keep_completed_imported_schemes() {
         .set_import(&input, "library.resin", changed.clone())
         .unwrap();
     let after = support::frontend::analyze(input.clone(), &mut loader, Some(&before));
-    let offset = input.text().find("cell.read").unwrap() + 5;
+    let offset = input.text().find("cell:read").unwrap() + 5;
     for (analysis, library, expected) in [
-        (&before, &original, "read: () -> int"),
-        (&after, &changed, "read: () -> long"),
-        (&before, &original, "read: () -> int"),
+        (&before, &original, "read: (Ptr<Cell<int>>) -> int"),
+        (&after, &changed, "read: (Ptr<Cell<int>>) -> long"),
+        (&before, &original, "read: (Ptr<Cell<int>>) -> int"),
     ] {
         assert!(
             analysis.diagnostics().is_empty(),
@@ -209,7 +244,7 @@ fn generic_method_editor_snapshots_keep_completed_imported_schemes() {
         assert_eq!(&origin.source, library);
         assert_eq!(
             origin.span.start,
-            library.text().find("fn read").unwrap() + 4
+            library.text().find("fn read").unwrap() + 3
         );
     }
 }
@@ -223,7 +258,7 @@ fn generic_nominal_fields_retain_substitution_and_declaration_navigation() {
         ("<T>", "Ptr<Ptr<Cell<T>>>", "T"),
     ] {
         let source = format!(
-            "import {{ \"library.resin\" }}; fn read{parameters}(cell: {receiver}) -> {result} = {{ cell.value }};"
+            "import {{ \"library.resin\" }}; fn read{parameters}(cell: {receiver}) -> {result} {{ cell.value }}"
         );
         let project = Project::new(&[("main.resin", &source), ("library.resin", library)]);
         let analysis = project.checked();
@@ -271,14 +306,20 @@ fn nominal_wrappers_of_generic_fields_keep_navigation_and_method_completion() {
             library.find(&format!("{name}:")).unwrap()
         );
     }
-    let items = analysis.completions(&input, source.find("outer.wrapped").unwrap() + 6);
-    let method = items.iter().find(|item| item.name == "read").unwrap();
-    assert_eq!(method.kind, resin_hir::DefinitionKind::Function);
-    assert_eq!(items.iter().filter(|item| item.name == "read").count(), 1);
-    let associated = analysis.completions(&input, source.find("Outer.read").unwrap() + 6);
-    assert_eq!(associated.len(), 1, "{associated:?}");
-    assert_eq!(associated[0].name, "read");
-    assert_eq!(associated[0].kind, resin_hir::DefinitionKind::Function);
+    let fields = analysis.completions(&input, source.find("outer.wrapped").unwrap() + 6);
+    assert_eq!(
+        fields.iter().find(|item| item.name == "read").unwrap().kind,
+        resin_hir::DefinitionKind::Field
+    );
+    let operations = analysis.completions(&input, source.find("outer:read").unwrap() + 6);
+    assert_eq!(
+        operations
+            .iter()
+            .find(|item| item.name == "read")
+            .unwrap()
+            .kind,
+        resin_hir::DefinitionKind::Function
+    );
 }
 
 #[test]
@@ -300,7 +341,7 @@ fn generic_field_completion_survives_an_unfinished_access() {
     assert!(
         items
             .iter()
-            .any(|item| item.detail == "replace: (Cell<int>) -> Cell<int>")
+            .all(|item| item.kind == resin_hir::DefinitionKind::Field)
     );
 }
 
@@ -372,7 +413,7 @@ fn tuple_members_and_function_hovers_use_source_syntax() {
     ] {
         assert_eq!(
             analysis
-                .hover(&input, source.find(&format!("var {name}")).unwrap() + 4)
+                .hover(&input, source.find(&format!("let mut {name}")).unwrap() + 8)
                 .unwrap()
                 .text,
             expected
@@ -443,17 +484,17 @@ fn option_payload_fields_remain_available_in_incomplete_code() {
 
 #[test]
 fn weak_upgrade_recovery_distinguishes_wrapper_and_payload_members() {
-    for (receiver, expected, absent) in [
-        ("weak.upgrade()!", "get", "count"),
-        ("weak.upgrade()!.get()", "count", "downgrade"),
+    for (receiver, separator, expected, absent) in [
+        ("weak:upgrade()!", ":", "get", "count"),
+        ("weak:upgrade()!:get()", ".", "count", "downgrade"),
     ] {
         let source = format!(
-            "import {{ \"$/shared.resin\" }}; struct Item {{ count: int, }} fn f(weak: WeakPtr<Item>)  {{ {receiver}.; }}"
+            "import {{ \"$/shared.resin\" }}; struct Item {{ count: int, }} fn f(weak: WeakPtr<Item>)  {{ {receiver}{separator}; }}"
         );
         let project = Project::new(&[("main.resin", &source)]);
         let items = project.build_hir().completions(
             &project.source("main.resin"),
-            source.rfind(".;").unwrap() + 1,
+            source.rfind(&format!("{separator};")).unwrap() + 1,
         );
         assert!(items.iter().any(|item| item.name == expected), "{items:?}");
         assert!(!items.iter().any(|item| item.name == absent), "{items:?}");
@@ -462,10 +503,10 @@ fn weak_upgrade_recovery_distinguishes_wrapper_and_payload_members() {
 
 #[test]
 fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
-    for tail in ["(()) };", "buffer."] {
+    for tail in ["(()) }", "buffer:"] {
         let source = format!(
             r#"import {{ "$/gpu.resin" }};
-            fn f() -> (() | Err<_>) = {{
+            fn f() -> (() | Err<_>) {{
                 let mut gpu = gpu_new()?;
                 let mut bytes = gpu:alloc_in::<ubyte>(4_ul, memory_default)?;
                 let mut commands = gpu:start_command_recording()?;
@@ -479,7 +520,7 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
             .source_from_text(Path::new("main.resin"), source.clone())
             .unwrap();
         let analysis = support::frontend::analyze(input.clone(), &mut loader, None);
-        if tail != "buffer." {
+        if tail != "buffer:" {
             assert!(
                 analysis.diagnostics().is_empty(),
                 "{:?}",
@@ -490,7 +531,7 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
             ("alloc_in", "-> GpuSpan<ubyte> | Err<"),
             ("start_command_recording", "GpuCommands | Err<"),
         ] {
-            let call = source.find(&format!(".{method}")).unwrap() + 1;
+            let call = source.find(&format!(":{method}")).unwrap() + 1;
             let definition = analysis
                 .definition(&input, call)
                 .unwrap_or_else(|| panic!("tail: {tail}\n{:?}", analysis.diagnostics()));
@@ -504,21 +545,13 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
             assert!(hover.contains(method), "{hover}");
             assert!(hover.contains(result), "{hover}");
         }
-        let offset = if tail == "buffer." {
+        let offset = if tail == "buffer:" {
             source.len()
         } else {
             source.find("at(0)").unwrap()
         };
         let items = analysis.completions(&input, offset);
-        for name in [
-            "at",
-            "slice",
-            "read_only",
-            "write_only",
-            "copy_to",
-            "data",
-            "length",
-        ] {
+        for name in ["at", "slice", "read_only", "write_only", "copy_to"] {
             assert!(
                 items.iter().any(|item| item.name == name),
                 "missing {name}: {items:?}"
@@ -589,7 +622,7 @@ fn gpu_commands_check_pipeline_stages_and_host_arguments() {
                 let mut compute = gpu:create_compute_pipeline(kernel)?;
                 let mut graphics = gpu:create_graphics_pipeline(vertex, fragment)?;
                 let mut empty = gpu:create_graphics_pipeline(rootless, fragment)?;
-                commands.{call}?;
+                commands:{call}?;
                 (())
             }}"#
         );
@@ -641,7 +674,7 @@ struct Root { values: Span<int>, scale: int, }
         ("create_compute_pipeline", "GpuComputePipeline<Root,"),
         ("dispatch", "GpuSpan<int>"),
     ] {
-        let call = source.find(&format!(".{method}")).unwrap() + 1;
+        let call = source.find(&format!(":{method}")).unwrap() + 1;
         let definition = analysis.definition(&input, call).unwrap();
         assert!(
             loader
@@ -695,86 +728,65 @@ struct Project {
 }
 
 #[test]
-fn inherent_methods_have_navigation_hover_and_member_completion() {
-    let library = "export { Counter , counter_new, read }; struct Counter { count: int,   }\nfn counter_new() -> Counter  { Counter { count = 7 } }\n\nfn read(self: Ptr<Counter>) -> int  { self.count }\n ";
-    for incomplete in [None, Some("c"), Some("Counter")] {
-        let tail = incomplete
-            .map(|base| format!("{base}.;"))
-            .unwrap_or_default();
+fn free_operations_have_navigation_hover_and_receiver_completion() {
+    let library = "export { Counter, counter_new, read }; struct Counter { count: int } fn counter_new() -> Counter { Counter { count = 7 } } fn read(self: Ref<Counter>) -> int { self.count }";
+    for tail in ["", "c:;", "c.;"] {
         let source = format!(
-            "import {{ \"lib.resin\" }}; fn main()  {{ let mut c = new(); c:read(); {tail} }}"
+            "import {{ \"lib.resin\" }}; fn main() {{ let c = counter_new(); c:read(); {tail} }}"
         );
         let project = Project::new(&[("main.resin", &source), ("lib.resin", library)]);
         let analysis = project.build_hir();
         let input = project.source("main.resin");
         assert_eq!(
             analysis.diagnostics().is_empty(),
-            incomplete.is_none(),
+            tail.is_empty(),
             "{:?}",
             analysis.diagnostics()
         );
-        for method in ["new", "read"] {
-            let call = source.find(&format!(".{method}()")).unwrap() + 1;
+        for name in ["counter_new", "read"] {
+            let call = source.find(&format!("{name}()")).unwrap();
             let definition = analysis.definition(&input, call).unwrap();
             assert_eq!(definition.source, project.source("lib.resin"));
             assert_eq!(
                 definition.span.start,
-                library.find(&format!("{method}(")).unwrap()
+                library.find(&format!("fn {name}")).unwrap() + 3
             );
             assert!(
                 analysis
                     .hover(&input, call)
                     .unwrap()
                     .text
-                    .starts_with(&format!("fn {method}("))
+                    .starts_with(&format!("fn {name}("))
             );
-            let items = analysis.completions(&input, call);
-            assert!(items.iter().any(
-                |item| item.name == method && item.kind == resin_hir::DefinitionKind::Function
-            ));
+            assert!(
+                analysis
+                    .completions(&input, call)
+                    .iter()
+                    .any(|item| item.name == name)
+            );
         }
-        let global = analysis.completions(&input, source.find("var c").unwrap());
-        assert!(
-            global
-                .iter()
-                .all(|item| item.name != "read" && item.name != "new")
-        );
-        if let Some(base) = incomplete {
-            let items = analysis.completions(
-                &input,
-                source.rfind(&format!("{base}.;")).unwrap() + base.len() + 1,
-            );
-            assert_eq!(
+        let global = analysis.completions(&input, source.find("let c").unwrap());
+        assert!(global.iter().any(|item| item.name == "read"));
+        assert!(global.iter().any(|item| item.name == "counter_new"));
+        if !tail.is_empty() {
+            let items = analysis.completions(&input, source.rfind(tail).unwrap() + 2);
+            assert!(
                 items
                     .iter()
-                    .map(|item| item.name.as_str())
-                    .collect::<Vec<_>>(),
-                if base == "c" {
-                    vec!["count", "read"]
-                } else {
-                    vec!["new", "read"]
-                }
+                    .any(|item| item.name == if tail == "c:;" { "read" } else { "count" }),
+                "{items:?}"
             );
+            assert!(!items.iter().any(|item| item.name == "counter_new"));
         }
     }
-    let project = Project::new(&[("main.resin", library)]);
-    let items = project.build_hir().completions(
-        &project.source("main.resin"),
-        library.find("self.count").unwrap(),
-    );
-    assert!(
-        items
-            .iter()
-            .all(|item| item.name != "read" && item.name != "new")
-    );
 }
 
 #[test]
 fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
     for receiver in ["values", "holder.values"] {
-        for tail in ["", " values.;", " holder.values.;", " holder.values.at(; "] {
+        for tail in ["", " values:;", " holder.values:;", " holder.values:at(; "] {
             let source = format!(
-                "import {{ \"$/span.resin\" }}; struct FieldsValues<T0> {{ values: T0, }}\nfn main()  {{ let mut values = [1_i, 2_i]; let mut holder = FieldsValues<_> {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }} {receiver}.at(0) = 3;{tail} }};"
+                "import {{ \"$/span.resin\" }}; struct FieldsValues<T0> {{ values: T0, }}\nfn main()  {{ let mut values = [1_i, 2_i]; let mut holder = FieldsValues<_> {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }}; {receiver}:at(0) = 3;{tail} }}"
             );
             let project = Project::new(&[("main.resin", &source)]);
             let analysis = project.build_hir();
@@ -785,10 +797,14 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
                 "{:?}",
                 analysis.diagnostics()
             );
-            let offset = source.find(".at(0)").unwrap() + 1;
+            let offset = source.find(":at(0)").unwrap() + 1;
             assert_eq!(
                 analysis.hover(&input, offset).unwrap().text,
-                "at: (ulong) -> Ref<int>"
+                if receiver == "values" {
+                    "at: (Ref<[int; 2]>, ulong) -> Ref<int>"
+                } else {
+                    "at: (Ref<Span<int>>, ulong) -> Ref<int>"
+                }
             );
             let items = analysis.completions(&input, offset);
             assert!(
@@ -798,7 +814,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
                         && item.kind == resin_hir::DefinitionKind::Function)
             );
             if !tail.is_empty() {
-                let offset = source.rfind(".;").or_else(|| source.rfind(".at(")).unwrap() + 1;
+                let offset = source.rfind(":;").or_else(|| source.rfind(":at(")).unwrap() + 1;
                 let items = analysis.completions(&input, offset);
                 assert!(
                     items.iter().any(|item| item.name == "at"),
@@ -812,14 +828,14 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
 #[test]
 fn shared_receiver_completion_and_navigation_include_ordinary_drop_methods() {
     let library = "export { Counter , drop, read }; struct Counter { count: int,   }\nfn drop(self: Ptr<Counter>)  {}\n\nfn read(self: Ptr<Counter>) -> int  { self.count }\n ";
-    for tail in ["", "c.get().;"] {
+    for tail in ["", "c:get():;"] {
         let source = format!(
             "import {{ \"lib.resin\", \"$/shared.resin\" }}; fn f(c: ArcPtr<Counter>)  {{ c:get():read(); {tail} }}"
         );
         let project = Project::new(&[("main.resin", &source), ("lib.resin", library)]);
         let analysis = project.build_hir();
         let input = project.source("main.resin");
-        let call = source.find(".read").unwrap() + 1;
+        let call = source.find(":read").unwrap() + 1;
         assert_eq!(
             analysis
                 .definition(&input, call)
@@ -841,7 +857,7 @@ fn shared_receiver_completion_and_navigation_include_ordinary_drop_methods() {
         let offset = if tail.is_empty() {
             call
         } else {
-            source.rfind(".;").unwrap() + 1
+            source.rfind(":;").unwrap() + 1
         };
         let items = analysis.completions(&input, offset);
         assert!(items.iter().any(|item| item.name == "read"));
@@ -881,7 +897,7 @@ fn inferred_errors_and_match_payloads_have_editor_types() {
     assert_eq!(origin.span.start, source.find("Err(error)").unwrap() + 4);
     assert!(
         analysis
-            .completions(&input, source.find("var result").unwrap())
+            .completions(&input, source.find("let mut result").unwrap())
             .iter()
             .all(|item| item.name != "error")
     );
@@ -937,17 +953,15 @@ fn field_completion_before_existing_statements() {
         ("root.pixels", vec!["data", "length"]),
     ] {
         for following in [
-            "if (index < ulong(root.width)) { root.pixels.at(index) := 0_ui; };",
-            "var later = root.width; later;",
+            "if (index < ulong(root.width)) { root.pixels:at(index) = 0_ui; };",
+            "let mut later = root.width; later;",
             "while (false) { root.width; };",
             "root.width;",
             "",
         ] {
-            for preceding in ["", "var earlier = root.height;"] {
+            for preceding in ["", "let mut earlier = root.height;"] {
                 let source = format!(
-                    "// é🌲\nimport {{ \"$/span.resin\" }}; struct Root {{ width: uint, height: uint, pixels: Span<uint> }};\n\
-                    @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {{\n\
-                    {preceding}\n{receiver}.\n{following}\n}};"
+                    "// é🌲\nimport {{ \"$/span.resin\" }}; struct Root {{ width: uint, height: uint, pixels: Span<uint>, }}\n@compute_shader fn kernel(index: ulong, root: Ptr<Root>)  {{\n{preceding}\n{receiver}.\n{following}\n}}"
                 );
                 let project = Project::new(&[("main.resin", &source)]);
                 let analysis = project.build_hir();
@@ -969,11 +983,18 @@ fn field_completion_before_existing_statements() {
                         }
                     );
                 }
-                if following.starts_with("var later") {
+                if following.starts_with("let mut later") {
                     assert_eq!(
                         analysis
                             .hover(&input, source.rfind("later;").unwrap())
-                            .unwrap()
+                            .unwrap_or_else(|| panic!(
+                                "{source}\n{}\n{:#?}",
+                                support::frontend::cst(&source, None)
+                                    .tree()
+                                    .root_node()
+                                    .to_sexp(),
+                                analysis.recovered_file(&input)
+                            ))
                             .text,
                         "later: uint"
                     );
@@ -992,16 +1013,19 @@ fn field_completion_before_existing_statements() {
 #[test]
 fn field_completion_uses_receiver_types_and_replaces_only_the_field() {
     for (setup, receiver) in [
-        ("var value = Fields { count = 1, label = 2 };", "value"),
+        ("let mut value = Fields { count = 1, label = 2 };", "value"),
         (
-            "var record = Fields { count = 1, label = 2 }; let mut value = &record;",
+            "let mut record = Fields { count = 1, label = 2 }; let mut value = &record;",
             "value",
         ),
         (
-            "var value = Outer { inner = Fields { count = 1, label = 2 } };",
+            "let mut value = Outer { inner = Fields { count = 1, label = 2 } };",
             "value.inner",
         ),
-        ("var value = Fields { count = 1, label = 2 };", "(value)"),
+        (
+            "let mut value = Fields { count = 1, label = 2 };",
+            "(value)",
+        ),
     ] {
         for field in ["", "co", "count"] {
             let source = format!(
@@ -1082,11 +1106,12 @@ fn field_completion_does_not_offer_unrelated_names() {
 fn field_completion_recovers_unfinished_functions_and_uninitialized_locals() {
     for source in [
         "struct Point { x: float32, y: float32, } fn main ()  { let mut point: Point; point.; }",
-        "struct FieldsXY<T0, T1> { x: T0, y: T1, }\nfn main (point: FieldsXY<float32, float32>) = { point.",
-        "struct FieldsXY<T0, T1> { x: T0, y: T1, }\nfn main () = { let mut point = FieldsXY<_, _> { x = 1, y = 2 }; point.",
+        "struct FieldsXY<T0, T1> { x: T0, y: T1, }\nfn main (point: FieldsXY<float32, float32>) { point.",
+        "struct FieldsXY<T0, T1> { x: T0, y: T1, }\nfn main () { let mut point = FieldsXY<_, _> { x = 1, y = 2 }; point.",
     ] {
         let project = Project::new(&[("main.resin", source)]);
-        let items = project.build_hir().completions(
+        let analysis = project.build_hir();
+        let items = analysis.completions(
             &project.source("main.resin"),
             source.rfind('.').unwrap() + 1,
         );
@@ -1096,7 +1121,8 @@ fn field_completion_recovers_unfinished_functions_and_uninitialized_locals() {
                 .map(|item| item.name.as_str())
                 .collect::<Vec<_>>(),
             ["x", "y"],
-            "{source}"
+            "{source}\n{:#?}",
+            analysis.recovered_file(&project.source("main.resin"))
         );
     }
 }
@@ -1221,7 +1247,7 @@ fn nested_bindings_shadow_without_leaking_out_of_their_scope() {
 fn incomplete_code_keeps_parameters_and_prior_locals_available() {
     for source in [
         "fn main (argument: int) -> int  { let mut local = 1; arg }",
-        "fn main (argument: int) -> int = { let mut local = 1; arg",
+        "fn main (argument: int) -> int { let mut local = 1; arg",
         "fn main (argument: int) -> int  { let mut local = 1; print(arg }",
     ] {
         let project = Project::new(&[("main.resin", source)]);
@@ -1242,11 +1268,11 @@ fn incomplete_code_keeps_parameters_and_prior_locals_available() {
 
 #[test]
 fn conflicting_imports_are_ambiguous_and_report_related_locations() {
-    let source = "import { \"a.resin\", \"b.resin\" }; fn main () -> int  { answer() }";
+    let source = "import { \"a.resin\", \"b.resin\" }; fn main () -> int  { answer }";
     let project = Project::new(&[
         ("main.resin", source),
-        ("a.resin", "export { answer }; fn answer () -> int  { 1 }"),
-        ("b.resin", "export { answer }; fn answer () -> int  { 2 }"),
+        ("a.resin", "export { answer }; const answer: int = 1;"),
+        ("b.resin", "export { answer }; const answer: int = 2;"),
     ]);
     let analysis = project.build_hir();
     assert!(analysis.diagnostics().iter().any(|d| d.related.len() == 2));
@@ -1334,8 +1360,8 @@ fn imported_syntax_errors_stay_at_the_dependency() {
 #[test]
 fn malformed_foreign_headers_are_diagnostics_not_panics() {
     for source in [
-        r#"extern { "bad\q": { def release(); } };"#,
-        "extern { \"unfinished: { def release(); } };",
+        r#"extern { "bad\q": { fn release(); } };"#,
+        "extern { \"unfinished: { fn release(); } };",
         "extern { { fn release(); } };",
     ] {
         let project = Project::new(&[("main.resin", source)]);
@@ -1440,7 +1466,7 @@ fn completion_respects_type_context_and_ignores_strings_and_comments() {
 
 #[test]
 fn completion_obeys_parameter_shadowing_and_module_type_order() {
-    let source = "def main (value: int) -> int = { var value = 2; val };";
+    let source = "fn main (value: int) -> int { let value = 2; val }";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.build_hir();
     let items = analysis.completions(
@@ -1453,7 +1479,7 @@ fn completion_obeys_parameter_shadowing_and_module_type_order() {
     // Module type definitions run before function signatures, but run in source
     // order relative to each other. Completion must match those frontend phases.
     for (source, expected) in [
-        ("def main (value: Num) -> () = {}; type Number = int;", true),
+        ("fn main (value: Num) -> () {} type Number = int;", true),
         ("type Earlier = Num; type Number = int;", false),
     ] {
         let project = Project::new(&[("main.resin", source)]);
@@ -1479,7 +1505,7 @@ fn completion_obeys_parameter_shadowing_and_module_type_order() {
 
 #[test]
 fn module_analysis_needs_no_entry_and_rejects_runtime_globals() {
-    let source = "export { run }; def run () -> int = { helper() }; def helper () -> int = { 1 };";
+    let source = "export { run }; fn run () -> int  { helper() } fn helper () -> int  { 1 }";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.checked();
     assert_eq!(
@@ -1500,12 +1526,12 @@ fn module_analysis_needs_no_entry_and_rejects_runtime_globals() {
             .start,
         source.find("run ()").unwrap()
     );
-    let project = Project::new(&[("main.resin", "export {}; def helper () -> int = { 1 };")]);
+    let project = Project::new(&[("main.resin", "export {}; fn helper () -> int  { 1 }")]);
     assert!(project.build_hir().hir().unwrap().entries.is_empty());
 
     for source in [
-        "var global = 1; def main () -> int = { glo };",
-        "var global: int; def main () -> int = { glo };",
+        "let mut global = 1; fn main () -> int  { glo }",
+        "let mut global: int; fn main () -> int  { glo }",
     ] {
         let project = Project::new(&[("main.resin", source)]);
         let analysis = project.build_hir();
@@ -1527,8 +1553,7 @@ fn module_analysis_needs_no_entry_and_rejects_runtime_globals() {
 
 #[test]
 fn implicit_unit_signatures_and_declaration_keywords_support_editor_features() {
-    let source =
-        "extern { \"native.h\": { def release(value: int); } }; def run() = { release(1); };";
+    let source = "extern { \"native.h\": { fn release(value: int); } }; fn run()  { release(1); }";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.checked();
     let input = project.source("main.resin");
@@ -1548,11 +1573,12 @@ fn implicit_unit_signatures_and_declaration_keywords_support_editor_features() {
             source.find(name).unwrap()
         );
     }
-    let project = Project::new(&[("main.resin", "fn run() = { let mut value = 1; ")]);
-    let items = project
-        .build_hir()
-        .completions(&project.source("main.resin"), 28);
-    for keyword in ["fn", "var", "type"] {
+    let project = Project::new(&[("main.resin", "fn run() { let mut value = 1; ")]);
+    let items = project.build_hir().completions(
+        &project.source("main.resin"),
+        "fn run() { let mut value = 1; ".len(),
+    );
+    for keyword in ["fn", "let", "type"] {
         assert!(items.iter().any(|item| item.name == keyword), "{items:?}");
     }
     let project = Project::new(&[("main.resin", "fn run()  { 1 }")]);
@@ -1565,11 +1591,11 @@ fn implicit_unit_signatures_and_declaration_keywords_support_editor_features() {
 #[test]
 fn holes_preserve_later_locals_and_functions_without_producing_ir() {
     for broken in [
-        "var broken = ;",
-        "var broken: ;",
-        "var broken = 1 + ;",
+        "let mut broken = ;",
+        "let mut broken: ;",
+        "let mut broken = 1 + ;",
         "unknown_name;",
-        "var broken = missing(1);",
+        "let mut broken = missing(1);",
     ] {
         let source = format!(
             "struct FieldsXY<T0, T1> {{ x: T0, y: T1, }}\nfn first()  {{ {broken} let mut point = FieldsXY<_, _> {{ x = 1, y = 2 }}; point.; }} fn later(arg: int) -> int  {{ let mut result = arg; result }}"
@@ -1619,7 +1645,7 @@ fn unknown_bindings_shadow_outer_values_without_fabricating_types() {
                 .unwrap()
                 .span
                 .start,
-            source.find("var point").unwrap() + 4
+            source.find("let mut point").unwrap() + 8
         );
         assert!(analysis.hir().is_err());
         let fields = analysis.completions(&input, source.rfind("count").unwrap());
@@ -1638,11 +1664,14 @@ fn unknown_bindings_shadow_outer_values_without_fabricating_types() {
 fn unrelated_errors_preserve_expression_types_and_field_completion() {
     let mut failures = Vec::new();
     for (setup, expected) in [
-        ("var value = -128b;", "sbyte"),
-        ("var value = float32(42);", "float32"),
-        ("var unused: int; let mut value = size_of(unused);", "ulong"),
+        ("let mut value = -128b;", "sbyte"),
+        ("let mut value = float32(42);", "float32"),
         (
-            "var value: (int | Err<Never>); value = (42);",
+            "let mut unused: int; let mut value = size_of(unused);",
+            "ulong",
+        ),
+        (
+            "let mut value: (int | Err<Never>); value = (42);",
             "int | Err<Never>",
         ),
     ] {
@@ -1805,7 +1834,7 @@ fn indexing_keeps_editor_types_and_shader_functions_have_no_bytecode_property() 
             .text,
         "p: long"
     );
-    for body in ["kernel.", "var alias = kernel; alias."] {
+    for body in ["kernel.", "let mut alias = kernel; alias."] {
         let source = format!(
             "@compute_shader fn kernel(index: ulong, output: Ptr<uint>)  {{}} fn main()  {{ {body} }}"
         );
@@ -1846,7 +1875,7 @@ fn failed_children_invalidate_composites_without_hiding_later_bindings() {
         "if (1 == 1) { missing } else { 42 }",
         "[missing, 42]",
         "(missing)",
-        "place := missing",
+        "place = missing",
     ] {
         let source = format!(
             "fn f()  {{ let mut place = 1; let mut bad = {expression}; let mut alias = bad; let mut healthy = 1.5f; alias; healthy; }}"
@@ -2039,7 +2068,7 @@ fn incomplete_impls_and_method_arguments_keep_editor_recovery() {
         let project = Project::new(&[("main.resin", &source[..end])]);
         project.build_hir();
     }
-    let source = "struct Counter { count: int,  }\nfn read(counter: Counter) -> int  { counter.count }\n  fn f(c: Counter)  { c.read(; }";
+    let source = "struct Counter { count: int,  }\nfn read(counter: Counter) -> int  { counter.count }\n  fn f(c: Counter)  { c:read(; }";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.build_hir();
     let offset = source.rfind("read").unwrap();
@@ -2052,7 +2081,7 @@ fn incomplete_impls_and_method_arguments_keep_editor_recovery() {
 
 #[test]
 fn pointer_replace_has_ordinary_method_hover_and_recovery() {
-    for tail in ["", "p.;"] {
+    for tail in ["", "p:;"] {
         let source = format!("fn f(p: Ptr<int>)  {{ p:replace(3); {tail} }}");
         let project = Project::new(&[("main.resin", &source)]);
         let analysis = project.build_hir();
@@ -2066,14 +2095,14 @@ fn pointer_replace_has_ordinary_method_hover_and_recovery() {
         let offset = source.find("replace").unwrap();
         assert_eq!(
             analysis.hover(&input, offset).unwrap().text,
-            "replace: (int) -> int"
+            "replace: (Ptr<int>, int) -> int"
         );
         let items = analysis.completions(
             &input,
             if tail.is_empty() {
                 offset
             } else {
-                source.rfind("p.;").unwrap() + 2
+                source.rfind("p:;").unwrap() + 2
             },
         );
         assert!(
@@ -2090,8 +2119,8 @@ fn pointer_replace_has_ordinary_method_hover_and_recovery() {
 fn formatted_string_and_literal_string_types_survive_editor_recovery() {
     for (source, members) in [
         (
-            "import { \"$/string.resin\" }; fn main()  { let mut text = fmt(\"{0}\", (42,)); text.storage.; }",
-            ["get", "downgrade"],
+            "import { \"$/string.resin\" }; fn main()  { let mut text = fmt(\"{0}\", (42,)); text.storage:; }",
+            ["get", "clone"],
         ),
         (
             "import { \"$/string.resin\" }; fn main()  { let mut text = fmt(\"{0}\", (42,)); text:get().; }",
@@ -2103,7 +2132,7 @@ fn formatted_string_and_literal_string_types_survive_editor_recovery() {
         ),
     ] {
         let project = Project::new(&[("main.resin", source)]);
-        let offset = source.rfind(".;").unwrap() + 1;
+        let offset = source.rfind(".;").or_else(|| source.rfind(":;")).unwrap() + 1;
         let items = project
             .build_hir()
             .completions(&project.source("main.resin"), offset);
@@ -2117,7 +2146,7 @@ fn formatted_string_and_literal_string_types_survive_editor_recovery() {
 fn invalid_method_arguments_preserve_receiver_facts_and_later_bindings() {
     for duplicate in ["", "fn read(self: Missing) -> int  { 0 }"] {
         let source = format!(
-            "struct Item {{ count: int, def read(self: Ptr<Item>) -> int = {{ self.count }}, {duplicate} }}  fn f(c: Item)  {{ let mut bad = c:read(missing);; let mut alias = bad; let mut healthy = 1.5f; alias; healthy; c.; }}"
+            "struct Item {{ count: int }} fn read(self: Ref<Item>) -> int {{ self.count }} {duplicate} fn f(c: Item) {{ let bad = c:read(missing); let alias = bad; let healthy = 1.5f; alias; healthy; c.; c:; }}"
         );
         let project = Project::new(&[("main.resin", &source)]);
         let analysis = project.build_hir();
@@ -2132,39 +2161,35 @@ fn invalid_method_arguments_preserve_receiver_facts_and_later_bindings() {
                 expected
             );
         }
-        assert_eq!(
-            analysis
-                .definition(&input, source.find("c.read").unwrap() + 2)
-                .unwrap()
-                .span
-                .start,
-            source.find("read(self").unwrap()
-        );
-        let members = analysis.completions(&input, source.rfind("c.;").unwrap() + 2);
-        assert!(members.iter().any(|member| member.name == "read"));
-        assert!(members.iter().any(|member| member.detail == "count: int"));
+        let fields = analysis.completions(&input, source.rfind("c.;").unwrap() + 2);
+        assert!(fields.iter().any(|member| member.detail == "count: int"));
+        let operations = analysis.completions(&input, source.rfind("c:;").unwrap() + 2);
+        assert!(operations.iter().any(|member| member.name == "read"));
     }
 }
 
 #[test]
-fn string_constructor_is_an_ordinary_discoverable_static_method() {
+fn string_constructor_is_an_ordinary_discoverable_free_function() {
     for source in [
         "import { \"$/string.resin\" }; fn main()  { let mut text = string_from_str(\"title\"); text:get().; }",
-        "import { \"$/string.resin\" }; fn main()  { String.; }",
+        "import { \"$/string.resin\" }; fn main() { string_; }",
     ] {
         let project = Project::new(&[("main.resin", source)]);
         let analysis = project.build_hir();
-        let offset = source.rfind(".;").unwrap() + 1;
+        let offset = source
+            .rfind(".;")
+            .map(|at| at + 1)
+            .unwrap_or_else(|| source.find("string_;").unwrap() + 7);
         let items = analysis.completions(&project.source("main.resin"), offset);
-        let member = if source.contains("from_str") {
+        let member = if source.contains("string_from_str") {
             "length"
         } else {
-            "from_str"
+            "string_from_str"
         };
         assert!(items.iter().any(|item| item.name == member), "{items:?}");
-        if member == "from_str" {
+        if member == "string_from_str" {
             assert!(
-                items.iter().any(|item| item.name == "from_bytes"),
+                items.iter().any(|item| item.name == "string_from_bytes"),
                 "{items:?}"
             );
         }
@@ -2192,9 +2217,8 @@ fn imported_intrinsics_keep_generic_navigation_and_declaration_signatures() {
     let input = project.source("main.resin");
     let offset = source.find("at(data").unwrap();
     let hover = analysis.hover(&input, offset).unwrap();
-    assert!(hover.text.contains("fn at<T>"), "{hover:?}");
-    assert!(hover.text.contains("data: Ptr<T>"), "{hover:?}");
+    assert_eq!(hover.text, "at: (Ptr<uint>, ulong, ulong) -> Ptr<uint>");
     let origin = analysis.definition(&input, offset).unwrap();
     assert_eq!(origin.source, project.source("library.resin"));
-    assert_eq!(origin.span.start, library.find("fn at").unwrap() + 4);
+    assert_eq!(origin.span.start, library.find("fn at").unwrap() + 3);
 }

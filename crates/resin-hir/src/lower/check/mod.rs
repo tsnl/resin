@@ -365,7 +365,12 @@ impl Checker<'_> {
                 else {
                     return Err(invalid());
                 };
-                let owner = &self.typing.typer.nominal_schemes[definition];
+                let owner = self
+                    .typing
+                    .typer
+                    .nominal_schemes
+                    .get(definition)
+                    .ok_or_else(invalid)?;
                 if signature.result.ty != crate::Type::Unit
                     || arguments.len() != owner.type_params.len()
                     || arguments
@@ -942,14 +947,15 @@ impl Expression<'_, '_> {
             .lookup_overloads(&name.val)
             .into_iter()
             .filter(|(_, _, function)| *function)
-            .map(|(declaration, signature, _)| {
+            .filter_map(|(declaration, signature, _)| {
+                let function = self.checker.function_ids.get(&declaration).copied()?;
                 self.checker.dependencies.insert(declaration);
-                super::infer::OverloadCandidate {
-                    function: self.checker.function_ids[&declaration],
+                Some(super::infer::OverloadCandidate {
+                    function,
                     declaration,
                     signature,
                     parameters: self.checker.scopes.parameters(declaration),
-                }
+                })
             })
             .collect()
     }
@@ -964,6 +970,9 @@ impl Expression<'_, '_> {
         if candidates.len() < 2 {
             return None;
         }
+        self.checker
+            .scopes
+            .record_call(name, Ty::Unit.into(), vec![], true, self.rule);
         self.constrain((
             name.span,
             Constraint::Overload {
@@ -1017,6 +1026,14 @@ impl Expression<'_, '_> {
             .iter()
             .map(|arg| self.child(arg, None))
             .collect::<Vec<_>>();
+        self.checker.scopes.record_call(
+            name,
+            args.first()
+                .map_or_else(|| Ty::Unit.into(), |arg| arg.ty.clone()),
+            args.iter().map(|arg| arg.ty.clone()).collect(),
+            true,
+            self.rule,
+        );
         self.constrain((
             name.span,
             Constraint::Overload {

@@ -224,6 +224,7 @@ impl Context {
 /// A completed source bridge call keeps generic nominal identities in HIR.
 #[derive(Clone)]
 pub(crate) struct PipelineMethod {
+    pub declaration: Option<super::scope::DeclarationId>,
     pub body: FunctionBody,
     pub params: Vec<crate::Type>,
     pub result: crate::Type,
@@ -301,6 +302,7 @@ impl Context {
         let mut params = vec![native.source_params[0].clone()];
         params.extend_from_slice(shaders);
         Ok(PipelineMethod {
+            declaration: None,
             body: native.body.clone(),
             params,
             result: Type::Union {
@@ -400,6 +402,7 @@ impl Context {
         let mut params = vec![native.source_params[0].clone(), pipeline, input];
         params.extend(native.params[3..].iter().map(super::types::ty));
         Ok(PipelineMethod {
+            declaration: None,
             body: FunctionBody::GpuPipelineDispatch {
                 context,
                 allocator: (root != Type::None).then_some(allocator),

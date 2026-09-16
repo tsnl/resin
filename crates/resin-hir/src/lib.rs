@@ -675,6 +675,7 @@ pub struct Analysis {
     imports: BTreeMap<SourceLocation, Source>,
     contexts: crate::lower::scope::Contexts,
     fields: BTreeMap<SourceLocation, Vec<Member>>,
+    expression_types: BTreeMap<SourceLocation, Type>,
     field_origins: BTreeMap<(TypeId, String), SourceLocation>,
     method_origins: BTreeMap<(TypeId, String), lower::scope::DeclarationId>,
     typer: lower::context::Context,
@@ -760,6 +761,10 @@ impl Analysis {
         };
         if document.source()[..replace.start].trim_end().ends_with('.') {
             return self.field_completions(source, document, replace, offset);
+        }
+        let before = document.source()[..replace.start].trim_end();
+        if before.ends_with(':') && !before.ends_with("::") && !document.type_context(offset) {
+            return self.operation_completions(source, document, replace, offset, before.len() - 1);
         }
         let items = self.visible_completions(documents, source, offset, replace);
         matching_completions(items, &document.source()[replace.start..offset])
@@ -946,6 +951,141 @@ impl Analysis {
         items
     }
 
+    fn operation_completions(
+        &self,
+        source: &Source,
+        document: &resin_cst::Document,
+        replace: Span,
+        offset: usize,
+        colon: usize,
+    ) -> Vec<Completion> {
+        let Some(location) = self.receiver_location(source, document, colon) else {
+            return vec![];
+        };
+        let receiver = &self.expression_types[location];
+        let mut items = self
+            .contexts
+            .visible(source, offset)
+            .into_iter()
+            .filter_map(|definition| self.operation_completion(&definition, receiver, replace))
+            .collect::<Vec<_>>();
+        let receiver = match receiver {
+            Type::Reference { referent } => referent.as_ref(),
+            ty => ty,
+        };
+        let receiver = lower::infer::Type::from_hir(receiver);
+        let solver = lower::infer::Solver::default();
+        for (name, _) in lower::context::intrinsic_methods(&receiver, &solver) {
+            let Some(signature) =
+                lower::context::primitive_operation(name, std::slice::from_ref(&receiver), &solver)
+            else {
+                continue;
+            };
+            let signature = lower::infer::Type::function(signature.params, signature.result);
+            let Some(signature) = solver.complete(&signature) else {
+                continue;
+            };
+            items.push(Completion {
+                name: name.into(),
+                detail: format!("{name}: {}", self.type_names().format(&signature)),
+                kind: DefinitionKind::Function,
+                replace,
+            });
+        }
+        // A completed call has more information than its receiver alone: use
+        // the chosen overload, explicit arguments, and shader contract there.
+        let location = SourceLocation {
+            source: source.clone(),
+            span: replace,
+        };
+        if let Some(members) = self.fields.get(&location) {
+            for member in members
+                .iter()
+                .filter(|member| member.kind == DefinitionKind::Function)
+            {
+                items.retain(|item| item.name != member.name);
+                items.push(Completion {
+                    name: member.name.clone(),
+                    detail: format!("{}: {}", member.name, member.ty),
+                    kind: member.kind,
+                    replace,
+                });
+            }
+        }
+        matching_completions(items, &document.source()[replace.start..offset])
+    }
+
+    fn receiver_location(
+        &self,
+        source: &Source,
+        document: &resin_cst::Document,
+        punctuation: usize,
+    ) -> Option<&SourceLocation> {
+        self.expression_types
+            .keys()
+            .filter(|location| {
+                &location.source == source
+                    && location.span.end <= punctuation
+                    && document.source()[location.span.end..punctuation]
+                        .trim()
+                        .is_empty()
+            })
+            .min_by_key(|location| location.span.start)
+    }
+
+    fn operation_completion(
+        &self,
+        definition: &Definition,
+        receiver: &Type,
+        replace: Span,
+    ) -> Option<Completion> {
+        let ty = definition.ty.as_ref()?;
+        let mut solver = lower::infer::Solver::default();
+        let parameters = self.contexts.type_parameters(definition);
+        let (signature, arguments) = solver
+            .apply(lower::infer::Type::from_hir(ty), parameters, None, replace)
+            .ok()?;
+        let lower::infer::Type::Node(lower::infer::Head::Function, parts) = solver.head(&signature)
+        else {
+            return None;
+        };
+        if !solver
+            .coerce(
+                &lower::infer::Type::from_hir(receiver),
+                parts.get(1)?,
+                replace,
+            )
+            .ok()?
+        {
+            return None;
+        }
+        // Preserve binders not determined by the receiver, so completion can
+        // describe the remaining argument and result types honestly.
+        for (argument, parameter) in arguments.iter().zip(parameters) {
+            if solver.complete(argument).is_none() {
+                solver
+                    .unify(
+                        argument,
+                        &lower::infer::Type::from_hir(&Type::Parameter {
+                            parameter: parameter.id,
+                        }),
+                        replace,
+                    )
+                    .ok()?;
+            }
+        }
+        Some(Completion {
+            detail: format!(
+                "{}: {}",
+                definition.name,
+                self.type_names().format(&solver.complete(&signature)?)
+            ),
+            name: definition.name.clone(),
+            kind: DefinitionKind::Function,
+            replace,
+        })
+    }
+
     fn field_completions(
         &self,
         source: &Source,
@@ -965,10 +1105,22 @@ impl Analysis {
                     .is_empty())
             .then_some(fields)
         });
+        let fields = fields
+            .filter(|members| {
+                members
+                    .iter()
+                    .any(|member| member.kind == DefinitionKind::Field)
+            })
+            .or_else(|| {
+                self.receiver_location(source, document, dot)
+                    .and_then(|location| self.fields.get(location))
+            });
         let mut items = fields
             .into_iter()
             .flatten()
-            .filter(|member| member.name.starts_with(prefix))
+            .filter(|member| {
+                member.kind == DefinitionKind::Field && member.name.starts_with(prefix)
+            })
             .map(|member| Completion {
                 name: member.name.clone(),
                 detail: format!("{}: {}", member.name, member.ty),
@@ -1221,8 +1373,8 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
         DefinitionKind::Keyword,
     ),
     (
-        "let mut",
-        "let mut name = value;\nlet mut name: Type;",
+        "let",
+        "let [mut] name = value;\nlet [mut] name: Type;",
         DefinitionKind::Keyword,
     ),
     (
@@ -1578,9 +1730,16 @@ impl Analysis {
             };
             let label = self.type_names_with(typer).format(&signature);
             let members = self.fields.entry(location.clone()).or_default();
-            if let Some(member) = members.iter_mut().find(|member| member.name == name) {
-                member.ty = label;
-            }
+            members.retain(|member| member.name != name);
+            members.push(Member {
+                name: name.to_owned(),
+                ty: label,
+                kind: DefinitionKind::Function,
+                origin: method
+                    .declaration
+                    .map(|declaration| self.contexts.definitions[declaration].location.clone()),
+                compiler_signature: true,
+            });
             return;
         }
         let (params, result, origin, compiler_signature) = match method {

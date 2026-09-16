@@ -2018,12 +2018,15 @@ impl Inference<'_> {
                 )
             {
                 match self.pipeline_overload(&method, lookup, span) {
-                    Ok(Some((method, complete))) => viable.push((
-                        None,
-                        Some(ResolvedMethod::GpuPipeline { method }),
-                        self.solver.clone(),
-                        complete,
-                    )),
+                    Ok(Some((mut method, complete))) => {
+                        method.declaration = Some(candidate.declaration);
+                        viable.push((
+                            None,
+                            Some(ResolvedMethod::GpuPipeline { method }),
+                            self.solver.clone(),
+                            complete,
+                        ));
+                    }
                     Ok(None) => {}
                     Err(error) => rejected.push(error),
                 }
