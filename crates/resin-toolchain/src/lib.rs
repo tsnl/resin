@@ -136,6 +136,8 @@ pub enum ForeignScalar {
 /// A requested C function declaration and its exact scalar ABI. `name` must be a C
 /// identifier. Only externally linked, nonvariadic functions with the host C calling
 /// convention are supported; macros and inline-only definitions are not link contracts.
+/// Parameter attributes not exposed by CIndex are rejected because they can add
+/// hidden arguments that are absent from the reported scalar function type.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ForeignFunction {
     pub name: String,

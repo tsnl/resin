@@ -46,6 +46,21 @@ fn equivalent(source: &str, expected: i32) {
 }
 
 #[test]
+fn large_native_frames_touch_stack_pages_before_using_aggregate_storage() {
+    // More than one Windows stack page, plus the snapshots made during mutation.
+    // The debug build must grow the stack before memset/calls access its low end.
+    let values = std::iter::repeat_n("0_i", 2048)
+        .collect::<Vec<_>>()
+        .join(", ");
+    equivalent(
+        &format!(
+            "export {{ main }}; def main() -> int = {{ var values = [{values}]; var pointer = &values; pointer.at(0_ul) := 20; pointer.at(2047_ul) := 22; values.at(0_ul) + values.at(2047_ul) }};"
+        ),
+        42,
+    );
+}
+
+#[test]
 fn record_parameters_and_results_preserve_independent_snapshots() {
     equivalent(
         r#"export { main };

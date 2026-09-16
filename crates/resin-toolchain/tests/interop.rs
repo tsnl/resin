@@ -191,6 +191,36 @@ async fn bool_pointer_float_and_narrow_integer_declarations_are_validated() {
 }
 
 #[tokio::test]
+async fn hidden_parameter_abi_attributes_are_rejected_after_macro_expansion() {
+    let root = TempDir::new().unwrap();
+    for attribute in ["pass_object_size", "pass_dynamic_object_size"] {
+        let mut request = inputs(&format!(
+            "#define WITH_SIZE __attribute__(({attribute}(0)))\nextern int identity(const char * const value WITH_SIZE);\n"
+        ));
+        request.functions[0].params = vec![ForeignScalar::Pointer];
+        let error = analyze(request, root.path()).await.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported parameter attribute"),
+            "{attribute}: {error}"
+        );
+    }
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+}
+
+#[tokio::test]
+async fn exposed_parameter_annotations_do_not_change_the_scalar_abi() {
+    let root = TempDir::new().unwrap();
+    let request =
+        inputs("extern int identity(int value __attribute__((annotate(\"documentation\"))));");
+    assert_eq!(
+        analyze(request, root.path()).await.unwrap().declarations()[0].symbol,
+        "identity"
+    );
+}
+
+#[tokio::test]
 async fn enum_declarations_use_their_underlying_integer_abi() {
     let root = TempDir::new().unwrap();
     let request = inputs(

@@ -259,6 +259,12 @@ unsafe fn declaration(
         })?;
         let cursor = *declarations.last().expect("collected declaration");
         let ty = (clang.cursor_type)(cursor);
+        if unsupported_parameter_attributes(clang, cursor) {
+            return Err(error(format!(
+                "C declaration {} has an unsupported parameter attribute; its scalar signature does not establish the complete calling ABI",
+                function.name
+            )));
+        }
         // A header body is not a link contract: its object is never compiled here.
         // Preserve explicit external prototypes even when libc later supplies an
         // inline definition of the same function in the captured translation unit.
@@ -297,6 +303,36 @@ unsafe fn declaration(
             symbol,
             c_signature: clang.text((clang.type_spelling)((clang.canonical_type)(ty))),
         })
+    }
+}
+
+unsafe fn unsupported_parameter_attributes(clang: &Clang, function: CXCursor) -> bool {
+    let mut unsupported = false;
+    unsafe {
+        (clang.visit)(
+            function,
+            check_parameter_attribute,
+            (&mut unsupported as *mut bool).cast(),
+        );
+    }
+    unsupported
+}
+
+extern "C" fn check_parameter_attribute(
+    cursor: CXCursor,
+    parent: CXCursor,
+    data: CXClientData,
+) -> CXChildVisitResult {
+    // CIndex omits extended parameter ABI information from CXType. For example,
+    // pass_object_size adds a hidden size_t argument while reporting one pointer.
+    // Unknown parameter attributes cannot establish a safe direct-call contract.
+    if parent.kind == CXCursor_ParmDecl && cursor.kind == CXCursor_UnexposedAttr {
+        unsafe { *data.cast::<bool>() = true };
+        CXChildVisit_Break
+    } else if cursor.kind == CXCursor_ParmDecl {
+        CXChildVisit_Recurse
+    } else {
+        CXChildVisit_Continue
     }
 }
 

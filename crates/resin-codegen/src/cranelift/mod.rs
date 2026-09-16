@@ -113,6 +113,13 @@ fn create_module(optimization: NativeOptimization) -> Result<ObjectModule, Error
         )
         .map_err(failure)?;
     settings.set("is_pic", "true").map_err(failure)?;
+    // Touch every newly allocated stack page before accessing the frame. Windows
+    // grows stacks through guard-page faults; one large decrement can skip them.
+    // Inline probes avoid a dependency on a compiler-specific stack-check helper.
+    settings.set("enable_probestack", "true").map_err(failure)?;
+    settings
+        .set("probestack_strategy", "inline")
+        .map_err(failure)?;
     let isa = cranelift_native::builder_with_options(false)
         .map_err(failure)?
         .finish(settings::Flags::new(settings))
