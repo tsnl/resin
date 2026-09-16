@@ -33,6 +33,7 @@ pub(super) fn function(
         typer,
         function_bindings,
         shaders,
+        reachable: true,
         embedded: BTreeSet::new(),
         initialization: parameters
             .iter()
@@ -55,6 +56,7 @@ enum Initialization {
 }
 
 struct Completion<'a> {
+    reachable: bool,
     solver: &'a Solver,
     methods: &'a BTreeMap<Rule, ResolvedMethod>,
     typer: &'a TyperContext,
@@ -171,6 +173,11 @@ impl Completion<'_> {
             typed::TermKind::Unwrap { value } => TermKind::Unwrap {
                 value: self.boxed(value)?,
             },
+            typed::TermKind::Return { value } => {
+                let value = self.boxed(value)?;
+                self.reachable = false;
+                TermKind::Return { value }
+            }
             typed::TermKind::Try { value } => TermKind::Try {
                 value: self.boxed(value)?,
             },
@@ -362,7 +369,7 @@ impl Completion<'_> {
             Some(Initialization::Initializing) => Some(GenerateErrorKind::EagerRecursion {
                 name: name.val.clone(),
             }),
-            Some(Initialization::Uninitialized) if read => {
+            Some(Initialization::Uninitialized) if read && self.reachable => {
                 Some(GenerateErrorKind::UninitializedValue {
                     name: name.val.clone(),
                 })
@@ -427,18 +434,30 @@ impl Completion<'_> {
     ) -> Result<TermKind> {
         let cond = self.boxed(cond)?;
         let before = self.initialization.clone();
+        let reachable = self.reachable;
         let then = self.boxed(then)?;
+        let then_reachable = self.reachable;
         let after_then = std::mem::replace(&mut self.initialization, before);
+        self.reachable = reachable;
         let els = self.boxed(els)?;
-        self.intersect_initialization(&after_then);
+        if then_reachable {
+            if self.reachable {
+                self.intersect_initialization(&after_then);
+            } else {
+                self.initialization = after_then;
+            }
+        }
+        self.reachable |= then_reachable;
         Ok(TermKind::If { cond, then, els })
     }
 
     fn while_expression(&mut self, cond: &typed::Term, body: &typed::Term) -> Result<TermKind> {
         let cond = self.boxed(cond)?;
         let after_condition = self.initialization.clone();
+        let reachable = self.reachable;
         let body = self.boxed(body)?;
         self.initialization = after_condition;
+        self.reachable = reachable;
         Ok(TermKind::While { cond, body })
     }
 
@@ -507,8 +526,14 @@ impl Completion<'_> {
         });
         let cond = self.boxed(&args[0])?;
         let before_right = self.initialization.clone();
+        let reachable = self.reachable;
         let right = self.boxed(&args[1])?;
-        self.intersect_initialization(&before_right);
+        if self.reachable {
+            self.intersect_initialization(&before_right);
+        } else {
+            self.initialization = before_right;
+        }
+        self.reachable = reachable;
         let (then, els) = if name == "&&" {
             (right, fixed)
         } else {
@@ -950,6 +975,7 @@ impl Completion<'_> {
         };
         let value = self.boxed(value)?;
         let before = self.initialization.clone();
+        let reachable = self.reachable;
         let mut after = None;
         let mut seen = vec![];
         let mut checked = vec![];
@@ -969,15 +995,18 @@ impl Completion<'_> {
             }
             seen.push(tag.clone());
             self.initialization = before.clone();
+            self.reachable = reachable;
             if let Some(binding) = arm.binding {
                 self.initialization
                     .insert(binding, Initialization::Initialized);
             }
             let body = self.elaborate(&arm.body)?;
-            if let Some(previous) = &after {
-                self.intersect_initialization(previous);
+            if self.reachable {
+                if let Some(previous) = &after {
+                    self.intersect_initialization(previous);
+                }
+                after = Some(self.initialization.clone());
             }
-            after = Some(self.initialization.clone());
             checked.push(MatchArm {
                 tag,
                 binding: arm.binding,
@@ -990,7 +1019,8 @@ impl Completion<'_> {
                 "match must cover every variant exactly once",
             ));
         }
-        self.initialization = after.expect("nonempty exhaustive match");
+        self.reachable = after.is_some();
+        self.initialization = after.unwrap_or(before);
         Ok(TermKind::Match {
             value,
             arms: checked,

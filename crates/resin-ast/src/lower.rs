@@ -272,6 +272,20 @@ impl<'a> AstGen<'a> {
                 self.span(node),
             );
         }
+        if let Some(returned) = node.child_by_field_name("return") {
+            let span = self.span(returned);
+            let value = returned
+                .child_by_field_name("value")
+                .map(|value| self.gen_term(value))
+                .unwrap_or_else(|| Spanned::new(TermKind::Unit, span));
+            let term = Spanned::new(
+                TermKind::Return {
+                    value: Box::new(value),
+                },
+                span,
+            );
+            return Spanned::new(StmtKind::Expr { term }, span);
+        }
         if let Some(define) = node.child_by_field_name("define") {
             let mut stmt = self.gen_define(define, self.span(node));
             if let StmtKind::Define { init, .. } = &mut stmt.val {

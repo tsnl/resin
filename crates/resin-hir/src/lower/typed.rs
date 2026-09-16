@@ -20,6 +20,9 @@ pub(super) struct Term {
 
 #[derive(Debug, Clone)]
 pub(super) enum TermKind {
+    Return {
+        value: Box<Term>,
+    },
     SizeOf {
         ty: Annotation<Type>,
     },

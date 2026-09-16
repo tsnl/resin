@@ -1227,6 +1227,22 @@
     }
   },
   {
+    "type": "return_statement",
+    "named": true,
+    "fields": {
+      "value": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "term",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "sizeof_term",
     "named": true,
     "fields": {
@@ -1349,6 +1365,16 @@
         "types": [
           {
             "type": "term",
+            "named": true
+          }
+        ]
+      },
+      "return": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "return_statement",
             "named": true
           }
         ]
@@ -2058,6 +2084,10 @@
   {
     "type": "pointer_deref",
     "named": true
+  },
+  {
+    "type": "return",
+    "named": false
   },
   {
     "type": "sbyte",

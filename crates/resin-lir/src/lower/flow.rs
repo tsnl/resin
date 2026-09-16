@@ -9,6 +9,10 @@ use super::FunctionLowering;
 
 impl FunctionLowering<'_> {
     pub(super) fn gen_while(&mut self, cond: &Term, body: &Term) -> Result<Ty, LowerError> {
+        if cond.exits() {
+            self.gen_term(cond, Some(&Ty::Bool))?;
+            return Ok(Ty::Unit);
+        }
         let height = self.function.stack_len();
         let condition = self.new_block("while.cond", height, 0);
         let body_block = self.new_block("while.body", height, 0);
@@ -41,14 +45,18 @@ impl FunctionLowering<'_> {
         expected: &Ty,
     ) -> Result<Ty, LowerError> {
         self.gen_term(cond, Some(&Ty::Bool))?;
+        if self.function.terminated() {
+            return Ok(expected.clone());
+        }
         let height = self.function.stack_len() - 1;
         let then_block = self.new_block("then", height, 0);
         let else_block = self.new_block("else", height, 0);
-        let join_block = self.new_block("join", height, 1);
+        let join_block =
+            (!(then.exits() && els.exits())).then(|| self.new_block("join", height, 1));
         self.terminate(Terminator::If {
             then: then_block,
             els: else_block,
-            next: Some(join_block),
+            next: join_block,
         });
 
         self.switch(then_block);
@@ -59,7 +67,9 @@ impl FunctionLowering<'_> {
         let _ = self.gen_term(els, Some(expected))?;
         self.terminate(Terminator::Merge);
 
-        self.switch(join_block);
+        if let Some(join_block) = join_block {
+            self.switch(join_block);
+        }
         Ok(expected.clone())
     }
 
@@ -77,5 +87,15 @@ impl FunctionLowering<'_> {
         self.cleanup(self.owned.len() - 1, &ty);
         self.owned.pop();
         Ok(ty)
+    }
+}
+
+impl FunctionLowering<'_> {
+    pub(super) fn gen_return(&mut self, value: &Term, expected: &Ty) -> Result<Ty, LowerError> {
+        let result = self.function.result_type().clone();
+        self.gen_term(value, Some(&result))?;
+        self.cleanup(0, &result);
+        self.terminate(Terminator::Return);
+        Ok(expected.clone())
     }
 }

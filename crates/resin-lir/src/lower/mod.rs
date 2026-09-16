@@ -80,6 +80,9 @@ struct FunctionLowering<'types> {
 }
 impl FunctionLowering<'_> {
     fn gen_term(&mut self, term: &Term, to: Option<&Ty>) -> Result<Ty, LowerError> {
+        if self.function.terminated() {
+            return Ok(to.unwrap_or(&term.ty).clone());
+        }
         let before = std::mem::replace(&mut self.source_span, term.span);
         let result = self
             .lower_term(term)
@@ -125,11 +128,17 @@ impl FunctionLowering<'_> {
     }
 
     fn emit(&mut self, instr: Instr) {
+        if self.function.terminated() {
+            return;
+        }
         self.record_origin();
         self.function.emit(instr);
     }
 
     fn terminate(&mut self, terminator: Terminator) {
+        if self.function.terminated() {
+            return;
+        }
         self.record_origin();
         self.function.terminate(terminator);
     }
@@ -156,6 +165,9 @@ impl FunctionLowering<'_> {
 
 impl FunctionLowering<'_> {
     fn cleanup(&mut self, first_scope: usize, result: &Ty) {
+        if self.function.terminated() {
+            return;
+        }
         let base = self.owned[first_scope].operand_base;
         let owned = self.locals_to_drop(first_scope);
         if owned.is_empty() && self.function.stack_len() == base + 1 {

@@ -66,6 +66,10 @@ impl FunctionBuilder {
     pub(super) fn result_type(&self) -> &Ty {
         &self.function.result
     }
+    pub(super) fn terminated(&self) -> bool {
+        self.terminated[self.current.index()]
+    }
+
     pub(super) fn stack_len(&self) -> usize {
         self.stack_boundaries.len()
     }

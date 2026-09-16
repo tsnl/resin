@@ -367,6 +367,9 @@ pub struct Term {
 
 #[derive(Debug, Clone)]
 pub enum TermKind {
+    Return {
+        value: Box<Term>,
+    },
     /// The native value size of a type; no value operand is permitted.
     SizeOf {
         of: Type,
@@ -1230,6 +1233,11 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     (
         "assert",
         "assert(condition) — require a bool; trap on false in every build profile.",
+        DefinitionKind::Keyword,
+    ),
+    (
+        "return",
+        "return value; — leave the function after scope cleanup; return; returns unit.",
         DefinitionKind::Keyword,
     ),
     ("else", "else { value }", DefinitionKind::Keyword),

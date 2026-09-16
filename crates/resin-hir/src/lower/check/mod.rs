@@ -1024,6 +1024,13 @@ impl Expression<'_, '_> {
                     ty: ann.into_tree(),
                 }
             }
+            resin_ast::TermKind::Return { value } => {
+                let value = self.child(value, Some(self.checker.result.clone()));
+                equate = Some(Ty::union([]).into());
+                TermKind::Return {
+                    value: Box::new(value),
+                }
+            }
             resin_ast::TermKind::Try { value } => {
                 let input = self.child(value, None);
                 let (value, errors) = self.result_parts(&input.ty, span)?;
@@ -1101,11 +1108,15 @@ impl Expression<'_, '_> {
             }
             resin_ast::TermKind::Block { stmts, tail } => {
                 self.checker.scopes.push_at(term.span);
+                let exits = stmts.iter().any(statement_exits);
                 let stmts = stmts
                     .iter()
                     .map(|stmt| self.statement(stmt))
                     .collect::<Vec<_>>();
-                let tail = self.child(tail, Some(out.clone()));
+                let tail = self.child(tail, (!exits).then(|| out.clone()));
+                if exits {
+                    equate = Some(Ty::union([]).into());
+                }
                 self.checker.scopes.pop();
                 TermKind::Block {
                     stmts,
@@ -1150,7 +1161,11 @@ impl Expression<'_, '_> {
                     });
                 let args = args
                     .iter()
-                    .map(|arg| self.child(arg, None))
+                    .map(|arg| {
+                        let expected =
+                            expression_exits(arg).then(|| self.checker.typing.solver.fresh());
+                        self.child(arg, expected)
+                    })
                     .collect::<Vec<_>>();
                 self.checker.scopes.record_call(
                     &Ident::new(name.clone(), *name_span),
@@ -1373,6 +1388,15 @@ impl Expression<'_, '_> {
                 }
             }
         };
+        if !contextual
+            && matches!(
+                term.val,
+                resin_ast::TermKind::If { .. } | resin_ast::TermKind::Match { .. }
+            )
+            && expression_exits(term)
+        {
+            equate = Some(Ty::union([]).into());
+        }
         if let Some(ty) = equate {
             if contextual {
                 self.constrain((span, Constraint::Coerce(ty, out.clone())));
@@ -1588,5 +1612,41 @@ fn single_argument(args: &[resin_ast::Term], span: Span) -> Result<&resin_ast::T
             span,
             format!("expected 1 argument, found {}", args.len()),
         )),
+    }
+}
+
+// Syntactic exits do not constrain a block's unreachable tail to its result type.
+fn statement_exits(statement: &resin_ast::Stmt) -> bool {
+    match &statement.val {
+        StmtKind::Expr { term } => expression_exits(term),
+        StmtKind::Define { init, .. } => expression_exits(init),
+        _ => false,
+    }
+}
+
+fn expression_exits(term: &resin_ast::Term) -> bool {
+    use resin_ast::TermKind::*;
+    match &term.val {
+        Return { .. } => true,
+        Block { stmts, tail } => stmts.iter().any(statement_exits) || expression_exits(tail),
+        If { cond, then, els } => {
+            expression_exits(cond) || (expression_exits(then) && expression_exits(els))
+        }
+        Match { value, arms } => {
+            expression_exits(value) || arms.iter().all(|arm| expression_exits(&arm.body))
+        }
+        While { cond, .. } => expression_exits(cond),
+        Call { func, args } => expression_exits(func) || args.iter().any(expression_exits),
+        Builtin { args, .. } | Array { elems: args } => args.iter().any(expression_exits),
+        Record { fields } => fields.iter().any(|(_, value)| expression_exits(value)),
+        MethodCall { receiver, args, .. } => {
+            expression_exits(receiver) || args.iter().any(expression_exits)
+        }
+        Assign { place, value } => expression_exits(place) || expression_exits(value),
+        Unwrap { value } | Try { value } => expression_exits(value),
+        Address { place } => expression_exits(place),
+        Deref { pointer } => expression_exits(pointer),
+        Field { base, .. } => expression_exits(base),
+        _ => false,
     }
 }

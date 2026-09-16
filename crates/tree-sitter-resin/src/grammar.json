@@ -876,6 +876,14 @@
       "members": [
         {
           "type": "FIELD",
+          "name": "return",
+          "content": {
+            "type": "SYMBOL",
+            "name": "return_statement"
+          }
+        },
+        {
+          "type": "FIELD",
           "name": "constant",
           "content": {
             "type": "SYMBOL",
@@ -2953,6 +2961,35 @@
         ]
       }
     },
+    "return_statement": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "return"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "value",
+              "content": {
+                "type": "SYMBOL",
+                "name": "term"
+              }
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": ";"
+        }
+      ]
+    },
     "assert_term": {
       "type": "SEQ",
       "members": [
@@ -4124,6 +4161,10 @@
       {
         "type": "STRING",
         "value": "assert"
+      },
+      {
+        "type": "STRING",
+        "value": "return"
       },
       {
         "type": "STRING",

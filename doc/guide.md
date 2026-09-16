@@ -1313,6 +1313,12 @@ Inherent methods and associated functions are declared [inside their struct](met
 
 [No Graphics API — Sebastian Aaltonen](https://www.sebastianaaltonen.com/blog/no-graphics-api)
 
+### Early returns
+
+`return value;` leaves the current function. `return;` returns unit. The value is
+preserved before locals and unfinished operands are destroyed in reverse order.
+Only paths that continue participate in definite-initialization checks.
+
 ### Assertions
 
 `assert(condition);` evaluates a `bool` once and returns unit. False traps with
