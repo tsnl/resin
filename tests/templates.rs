@@ -134,7 +134,7 @@ fn concrete_template_errors_report_the_application_chain() {
         "def field<T>(value: T) -> int = { value.missing }; def main() -> int = { field(1) };",
         "def choose<T>(condition: T) -> int = { if (condition) { 1 } else { 0 } }; def main() -> int = { choose(1) };",
         "def choose<T, U>(value: T | U) -> int = { match (value) { T(a) => { 1 }, U(b) => { 2 } } }; def main() -> int = { choose::<int, int>(1) };",
-        "def failure<E>(value: E) -> Result<int, E> = { err(value) }; def main() = { failure(1); };",
+        "def remainder<T>(value: T) -> T = { value % value }; def main() = { remainder(1.5); };",
     ] {
         let tree = hir(source);
         let error = support::frontend::lower(&tree, &[], &resin_lir::LoweringOptions::default())
