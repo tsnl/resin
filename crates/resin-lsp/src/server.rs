@@ -1,25 +1,21 @@
-use crate::{
-    text::Text,
-    worker::{self, AnalysisUpdate, Change, Update},
+//! Accept editor state and bounded requests; compiler work belongs to the coordinator.
+use crate::worker::{
+    self, Channels, DocumentVersion, EditorSnapshot, OpenDocument, QueryKind, RequestJob,
+    WorkerConfig,
 };
-use crossbeam_channel::{Receiver, Sender, select};
+use crossbeam_channel::select;
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
-use lsp_types::{Position, Uri};
-use resin_hir::DefinitionKind;
-use resin_source::normalize_path;
-use resin_source::prelude::*;
+use lsp_types::Uri;
+use resin_executor::Cancellation;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+    path::PathBuf,
+    sync::Arc,
 };
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+type Result<T> = crate::Result<T>;
 
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +25,12 @@ struct Options {
 
 pub(crate) fn run(project: PathBuf, default_library_root: PathBuf) -> Result<i32> {
     let (connection, io) = Connection::stdio();
+    let outcome = serve(connection, project, default_library_root);
+    io.join()?;
+    outcome
+}
+
+fn serve(connection: Connection, project: PathBuf, default_library_root: PathBuf) -> Result<i32> {
     let (id, params) = connection.initialize_start()?;
     let params: lsp_types::InitializeParams = serde_json::from_value(params)?;
     let options: Options = params
@@ -43,7 +45,60 @@ pub(crate) fn run(project: PathBuf, default_library_root: PathBuf) -> Result<i32
         Some(path) => project.join(path),
         None => default_library_root,
     };
-    let capabilities = lsp_types::ServerCapabilities {
+    let environment = resin_toolchain::Environment::capture()?;
+    let config = WorkerConfig {
+        library_root,
+        tools: environment.toolchain(None, None),
+        temporary: environment.temporary,
+    };
+    connection.initialize_finish(
+        id,
+        json!({"capabilities": capabilities(), "serverInfo": {
+            "name": "resin-lsp", "version": env!("CARGO_PKG_VERSION")
+        }}),
+    )?;
+    if params
+        .capabilities
+        .workspace
+        .as_ref()
+        .and_then(|w| w.did_change_watched_files.as_ref())
+        .and_then(|w| w.dynamic_registration)
+        == Some(true)
+    {
+        connection.sender.send(Message::Request(Request::new(
+            "resin-file-watchers".to_owned().into(),
+            "client/registerCapability".into(),
+            json!({"registrations": [{"id": "resin-files",
+            "method": "workspace/didChangeWatchedFiles", "registerOptions": {
+            "watchers": [{"globPattern": "**/*.resin", "kind": 7}]}}]}),
+        )))?;
+    }
+    let editor = Arc::new(EditorSnapshot {
+        revision: 0,
+        registrations: 0,
+        disk_revision: 0,
+        documents: BTreeMap::new(),
+    });
+    let (channels, worker) = worker::spawn(config, editor.clone());
+    let mut state = State {
+        connection,
+        channels,
+        editor,
+        next_epoch: 0,
+        next_request: 0,
+        published: BTreeSet::new(),
+        pending: HashMap::new(),
+        shutdown: false,
+    };
+    let outcome = state.events();
+    state.channels.shutdown.cancel();
+    drop(state);
+    worker.join().map_err(|_| "compiler coordinator panicked")?;
+    outcome
+}
+
+fn capabilities() -> lsp_types::ServerCapabilities {
+    lsp_types::ServerCapabilities {
         position_encoding: Some(lsp_types::PositionEncodingKind::UTF16),
         text_document_sync: Some(
             lsp_types::TextDocumentSyncOptions {
@@ -67,104 +122,55 @@ pub(crate) fn run(project: PathBuf, default_library_root: PathBuf) -> Result<i32
             trigger_characters: Some(vec![".".into()]),
             ..Default::default()
         }),
+        execute_command_provider: Some(lsp_types::ExecuteCommandOptions {
+            commands: vec!["resin.build".into()],
+            ..Default::default()
+        }),
         ..Default::default()
-    };
-    connection.initialize_finish(id, json!({"capabilities": capabilities, "serverInfo": {"name": "resin-lsp", "version": env!("CARGO_PKG_VERSION")}}))?;
-    if params
-        .capabilities
-        .workspace
-        .as_ref()
-        .and_then(|w| w.did_change_watched_files.as_ref())
-        .and_then(|w| w.dynamic_registration)
-        == Some(true)
-    {
-        connection.sender.send(Message::Request(Request::new(String::from("resin-file-watchers").into(), "client/registerCapability".into(), json!({"registrations": [{"id": "resin-files", "method": "workspace/didChangeWatchedFiles", "registerOptions": {"watchers": [{"globPattern": "**/*.resin", "kind": 7}]}}]}))))?;
     }
-    let (updates, receiver) = crossbeam_channel::unbounded();
-    let (results, snapshots) = crossbeam_channel::unbounded();
-    let revision = Arc::new(AtomicU64::new(0));
-    let stopping = Arc::new(AtomicBool::new(false));
-    let worker = worker::spawn(
-        library_root,
-        receiver,
-        results,
-        revision.clone(),
-        stopping.clone(),
-    );
-    let mut state = State {
-        connection,
-        updates,
-        revision,
-        stopping: stopping.clone(),
-        documents: BTreeMap::new(),
-        snapshot: None,
-        texts: BTreeMap::new(),
-        published: BTreeSet::new(),
-        pending: HashMap::new(),
-        shutdown: false,
-    };
-    let outcome = state.events(&snapshots);
-    stopping.store(true, Ordering::Release);
-    drop(state);
-    worker.join().map_err(|_| "compiler worker panicked")?;
-    io.join()?;
-    outcome
-}
-
-struct OpenDocument {
-    uri: Uri,
-    path: PathBuf,
-    version: i32,
-    source: String,
-}
-struct Query {
-    revision: u64,
-    method: String,
-    uri: Uri,
-    position: Position,
 }
 
 struct State {
     connection: Connection,
-    updates: Sender<Update>,
-    revision: Arc<AtomicU64>,
-    stopping: Arc<AtomicBool>,
-    documents: BTreeMap<String, OpenDocument>,
-    snapshot: Option<AnalysisUpdate>,
-    texts: BTreeMap<Source, Text>,
+    channels: Channels,
+    editor: Arc<EditorSnapshot>,
+    next_epoch: u64,
+    next_request: u64,
     published: BTreeSet<String>,
-    pending: HashMap<RequestId, Query>,
+    pending: HashMap<RequestId, Pending>,
     shutdown: bool,
 }
 
+struct Pending {
+    serial: u64,
+    cancellation: Cancellation,
+}
+
 impl State {
-    fn events(&mut self, snapshots: &Receiver<AnalysisUpdate>) -> Result<i32> {
+    fn events(&mut self) -> Result<i32> {
+        let never = crossbeam_channel::never();
         loop {
+            // Shutdown drains the coordinator before the client necessarily sends exit.
+            let ready = if self.shutdown {
+                &never
+            } else {
+                &self.channels.ready
+            };
             select! {
-                recv(self.connection.receiver) -> message => {
-                    let Ok(message) = message else { return Ok(if self.shutdown { 0 } else { 1 }); };
-                    match message {
-                        Message::Request(request) => self.request(request)?,
-                        Message::Notification(notification) => {
-                            if notification.method == "exit" { return Ok(if self.shutdown { 0 } else { 1 }); }
-                            if !self.shutdown { self.notification(notification)?; }
-                        }
-                        Message::Response(response) => {
-                            if let Some(error) = response.error { eprintln!("resin-lsp: client request failed: {}", error.message); }
-                        }
+                recv(self.connection.receiver) -> message => match message {
+                    Ok(Message::Request(request)) => self.request(request)?,
+                    Ok(Message::Notification(notification)) => {
+                        if notification.method == "exit" { return Ok(if self.shutdown { 0 } else { 1 }); }
+                        if !self.shutdown { self.notification(notification); }
                     }
-                }
-                recv(snapshots) -> snapshot => {
-                    let snapshot = snapshot.map_err(|_| "compiler worker stopped")?;
-                    if !self.shutdown && snapshot.revision == self.revision.load(Ordering::Acquire) {
-                        self.texts.clear();
-                        for entry in snapshot.entries.values() {
-                            for source in entry.sources() { self.texts.entry(source.clone()).or_insert_with(|| Text::new(source.text())); }
-                        }
-                        self.snapshot = Some(snapshot);
-                        self.publish()?;
-                        for (id, query) in std::mem::take(&mut self.pending) { self.answer(id, query)?; }
+                    Ok(Message::Response(response)) => {
+                        if let Some(error) = response.error { eprintln!("resin-lsp: client request failed: {}", error.message); }
                     }
+                    Err(_) => return Ok(if self.shutdown { 0 } else { 1 }),
+                },
+                recv(ready) -> ready => {
+                    if ready.is_err() { return Ok(if self.shutdown { 0 } else { 1 }); }
+                    self.receive_results()?;
                 }
             }
         }
@@ -174,404 +180,639 @@ impl State {
         self.connection.sender.send(Message::Response(response))?;
         Ok(())
     }
-    fn error(&self, id: RequestId, code: i32, message: impl Into<String>) -> Result<()> {
-        self.send(Response::new_err(id, code, message.into()))
+
+    fn error(&self, id: RequestId, code: ErrorCode, message: impl Into<String>) -> Result<()> {
+        self.send(Response::new_err(id, code as i32, message.into()))
     }
 
     fn request(&mut self, request: Request) -> Result<()> {
         if self.shutdown {
             return self.error(
                 request.id,
-                ErrorCode::InvalidRequest as i32,
+                ErrorCode::InvalidRequest,
                 "server is shutting down",
             );
         }
         if request.method == "shutdown" {
-            self.shutdown = true;
-            self.stopping.store(true, Ordering::Release);
-            for (id, _) in self.pending.drain().collect::<Vec<_>>() {
-                self.error(
-                    id,
-                    ErrorCode::RequestCanceled as i32,
-                    "server is shutting down",
-                )?;
-            }
+            return self.begin_shutdown(request.id);
+        }
+        let kind = match parse_query(&request.method, request.params) {
+            Ok(kind) => kind,
+            Err((code, message)) => return self.error(request.id, code, message),
+        };
+        if query_uri(&kind).is_some_and(|uri| !self.editor.documents.contains_key(uri.as_str())) {
             return self.send(Response::new_ok(request.id, Value::Null));
         }
-        if request.method == "textDocument/formatting" {
-            let params: lsp_types::DocumentFormattingParams =
-                match serde_json::from_value(request.params) {
-                    Ok(params) => params,
-                    Err(error) => {
-                        return self.error(
-                            request.id,
-                            ErrorCode::InvalidParams as i32,
-                            error.to_string(),
-                        );
-                    }
-                };
-            let Some(document) = self.documents.get(params.text_document.uri.as_str()) else {
-                return self.send(Response::new_ok(request.id, Value::Null));
-            };
-            // Use the latest accepted buffer even while semantic analysis is busy.
-            // Resin has one canonical style, independent of editor indent settings.
-            let result = resin_cst::format_source(&document.source)
-                .map(|formatted| formatting_edits(&document.source, &formatted));
-            return self.send(Response::new_ok(request.id, result));
-        }
-        if !matches!(
-            request.method.as_str(),
-            "textDocument/hover" | "textDocument/definition" | "textDocument/completion"
-        ) {
+        if self.pending.contains_key(&request.id) {
             return self.error(
                 request.id,
-                ErrorCode::MethodNotFound as i32,
-                format!("unsupported method: {}", request.method),
+                ErrorCode::InvalidRequest,
+                "request ID is already pending",
             );
         }
-        let params: lsp_types::TextDocumentPositionParams =
-            match serde_json::from_value(request.params) {
-                Ok(params) => params,
-                Err(error) => {
-                    return self.error(
-                        request.id,
-                        ErrorCode::InvalidParams as i32,
-                        error.to_string(),
-                    );
-                }
-            };
-        let query = Query {
-            revision: self.revision.load(Ordering::Acquire),
-            method: request.method,
-            uri: params.text_document.uri,
-            position: params.position,
+        let Ok(admission) = self.channels.admission.clone().try_acquire_owned() else {
+            return self.error(
+                request.id,
+                ErrorCode::ServerCancelled,
+                "server request capacity reached; retry after pending requests finish",
+            );
         };
-        if !self.documents.contains_key(query.uri.as_str()) {
-            return self.send(Response::new_ok(request.id, Value::Null));
-        }
-        if self
-            .snapshot
-            .as_ref()
-            .is_some_and(|s| s.revision == query.revision)
-        {
-            self.answer(request.id, query)
-        } else {
-            self.pending.insert(request.id, query);
-            Ok(())
-        }
-    }
-
-    fn answer(&self, id: RequestId, query: Query) -> Result<()> {
-        if query.revision != self.revision.load(Ordering::Acquire) {
+        let id = request.id;
+        let serial = self.next_request;
+        self.next_request += 1;
+        let cancellation = Cancellation::new();
+        let job = RequestJob {
+            serial,
+            id: id.clone(),
+            kind,
+            editor: self.editor.clone(),
+            cancellation: cancellation.clone(),
+            admission,
+        };
+        if self.channels.requests.try_send(job).is_err() {
             return self.error(
                 id,
-                ErrorCode::ContentModified as i32,
-                "document or dependencies changed",
+                ErrorCode::ServerCancelled,
+                "server request queue is full or shutting down",
             );
         }
-        let Some(document) = self.documents.get(query.uri.as_str()) else {
-            return self.send(Response::new_ok(id, Value::Null));
-        };
-        let Some(analysis) = self
-            .snapshot
-            .as_ref()
-            .and_then(|s| s.entries.get(&document.path))
-        else {
-            return self.send(Response::new_ok(id, Value::Null));
-        };
-        let Some(text) = self.texts.get(analysis.source()) else {
-            return self.send(Response::new_ok(id, Value::Null));
-        };
-        let Some(offset) = text.offset(query.position) else {
-            return self.error(
-                id,
-                ErrorCode::InvalidParams as i32,
-                "position is outside the document or splits a UTF-16 character",
-            );
-        };
-        let result = match query.method.as_str() {
-            "textDocument/hover" => {
-                serde_json::to_value(analysis.hover(analysis.source(), offset).map(|hover| {
-                    lsp_types::Hover {
-                        contents: lsp_types::HoverContents::Markup(lsp_types::MarkupContent {
-                            kind: lsp_types::MarkupKind::Markdown,
-                            value: format!("```resin\n{}\n```", hover.text),
-                        }),
-                        range: Some(text.range(hover.span)),
-                    }
-                }))?
-            }
-            "textDocument/definition" => serde_json::to_value(
-                analysis
-                    .definition(analysis.source(), offset)
-                    .and_then(|location| self.location(&document.path, &location)),
-            )?,
-            "textDocument/completion" => {
-                let items = analysis
-                    .completions(analysis.source(), offset)
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, item)| lsp_types::CompletionItem {
-                        label: item.name.clone(),
-                        // Preserve analysis ordering when clients sort completion items.
-                        sort_text: Some(format!("{index:010}")),
-                        detail: Some(item.detail),
-                        kind: Some(match item.kind {
-                            DefinitionKind::Function => lsp_types::CompletionItemKind::FUNCTION,
-                            DefinitionKind::Constant => lsp_types::CompletionItemKind::CONSTANT,
-                            DefinitionKind::Type => lsp_types::CompletionItemKind::CLASS,
-                            DefinitionKind::Keyword => lsp_types::CompletionItemKind::KEYWORD,
-                            DefinitionKind::Field => lsp_types::CompletionItemKind::FIELD,
-                            DefinitionKind::Variable | DefinitionKind::Parameter => {
-                                lsp_types::CompletionItemKind::VARIABLE
-                            }
-                        }),
-                        text_edit: Some(lsp_types::CompletionTextEdit::Edit(lsp_types::TextEdit {
-                            range: text.range(item.replace),
-                            new_text: item.name,
-                        })),
-                        ..Default::default()
-                    })
-                    .collect::<Vec<_>>();
-                serde_json::to_value(lsp_types::CompletionList {
-                    is_incomplete: false,
-                    items,
-                })?
-            }
-            _ => unreachable!(),
-        };
-        self.send(Response::new_ok(id, result))
+        self.pending.insert(
+            id,
+            Pending {
+                serial,
+                cancellation,
+            },
+        );
+        Ok(())
     }
 
-    fn update(&mut self, change: Change) -> Result<()> {
-        let revision = self.revision.fetch_add(1, Ordering::AcqRel) + 1;
-        for (id, _) in self.pending.drain().collect::<Vec<_>>() {
+    fn begin_shutdown(&mut self, id: RequestId) -> Result<()> {
+        self.shutdown = true;
+        self.channels.shutdown.cancel();
+        for (pending, request) in self.pending.drain().collect::<Vec<_>>() {
+            request.cancellation.cancel();
             self.error(
-                id,
-                ErrorCode::ContentModified as i32,
-                "document or dependencies changed",
+                pending,
+                ErrorCode::RequestCanceled,
+                "server is shutting down",
             )?;
         }
-        self.updates.send(Update {
-            revision,
-            roots: self.documents.values().map(|d| d.path.clone()).collect(),
-            change,
-        })?;
+        self.send(Response::new_ok(id, Value::Null))
+    }
+
+    fn receive_results(&mut self) -> Result<()> {
+        while let Ok(reply) = self.channels.replies.try_recv() {
+            if self
+                .pending
+                .get(&reply.response.id)
+                .is_none_or(|pending| pending.serial != reply.serial)
+            {
+                continue;
+            }
+            self.pending.remove(&reply.response.id);
+            if reply.freshness.matches(&self.editor) {
+                self.send(reply.response)?;
+            } else {
+                self.error(
+                    reply.response.id,
+                    ErrorCode::ContentModified,
+                    "document or dependencies changed",
+                )?;
+            }
+            drop(reply.admission);
+        }
+        if self.shutdown {
+            return Ok(());
+        }
+        let publication = self
+            .channels
+            .publications
+            .lock()
+            .expect("diagnostic mailbox")
+            .take();
+        let Some(publication) = publication else {
+            return Ok(());
+        };
+        if publication.revision != self.editor.revision {
+            return Ok(());
+        }
+        for notification in publication.notifications {
+            self.connection
+                .sender
+                .send(Message::Notification(notification))?;
+        }
+        // Track actual sends: coalescing may skip an earlier prepared clear.
+        for uri in self.published.difference(&publication.uris) {
+            self.connection
+                .sender
+                .send(Message::Notification(Notification::new(
+                    "textDocument/publishDiagnostics".into(),
+                    json!({ "uri": uri, "diagnostics": [] }),
+                )))?;
+        }
+        self.published = publication.uris;
         Ok(())
     }
 
-    fn notification(&mut self, notification: Notification) -> Result<()> {
-        // Invalid notifications cannot receive JSON-RPC error responses.
-        let result = self.apply_notification(&notification.method, notification.params);
-        if let Err(error) = result {
+    fn notification(&mut self, notification: Notification) {
+        if let Err(error) = self.apply_notification(&notification.method, notification.params) {
             eprintln!("resin-lsp: {}: {error}", notification.method);
         }
-        Ok(())
+    }
+
+    fn next_editor(&self) -> EditorSnapshot {
+        EditorSnapshot {
+            revision: self.editor.revision + 1,
+            registrations: self.editor.registrations,
+            disk_revision: self.editor.disk_revision,
+            documents: self.editor.documents.clone(),
+        }
+    }
+
+    fn accept(&mut self, next: EditorSnapshot) {
+        self.editor = Arc::new(next);
+        self.channels.editor.send_replace(self.editor.clone());
     }
 
     fn apply_notification(&mut self, method: &str, params: Value) -> Result<()> {
         match method {
             "textDocument/didOpen" => {
                 let params: lsp_types::DidOpenTextDocumentParams = serde_json::from_value(params)?;
-                let doc = params.text_document;
-                let path = uri_path(&doc.uri)?;
-                if self.documents.contains_key(doc.uri.as_str()) {
+                let document = params.text_document;
+                let path = uri_path(&document.uri)?;
+                if self.editor.documents.contains_key(document.uri.as_str()) {
                     return Err("document is already open".into());
                 }
-                if self.documents.values().any(|open| open.path == path) {
+                if self.editor.documents.values().any(|open| open.path == path) {
                     return Err("the same file is already open under another URI".into());
                 }
-                self.documents.insert(
-                    doc.uri.as_str().into(),
-                    OpenDocument {
-                        uri: doc.uri,
-                        path: path.clone(),
-                        version: doc.version,
-                        source: doc.text.clone(),
-                    },
+                self.next_epoch += 1;
+                let mut next = self.next_editor();
+                next.registrations += 1;
+                next.documents.insert(
+                    document.uri.as_str().to_owned(),
+                    Arc::new(OpenDocument {
+                        uri: document.uri,
+                        path,
+                        stamp: DocumentVersion {
+                            epoch: self.next_epoch,
+                            version: document.version,
+                        },
+                        text: Arc::new(document.text),
+                    }),
                 );
-                self.update(Change::Set(path, doc.text))?;
+                self.accept(next);
             }
             "textDocument/didChange" => {
                 let params: lsp_types::DidChangeTextDocumentParams =
                     serde_json::from_value(params)?;
-                let Some(document) = self.documents.get_mut(params.text_document.uri.as_str())
+                let Some(document) = self.editor.documents.get(params.text_document.uri.as_str())
                 else {
                     return Err("document is not open".into());
                 };
-                if params.text_document.version <= document.version {
+                if params.text_document.version <= document.stamp.version {
                     return Err("ignoring an out-of-order document version".into());
                 }
-                if params.content_changes.iter().any(|c| c.range.is_some()) {
+                if params
+                    .content_changes
+                    .iter()
+                    .any(|change| change.range.is_some())
+                {
                     return Err("server negotiated full-document synchronization".into());
                 }
                 let Some(change) = params.content_changes.into_iter().last() else {
                     return Ok(());
                 };
-                document.version = params.text_document.version;
-                document.source = change.text.clone();
-                let path = document.path.clone();
-                self.update(Change::Set(path, change.text))?;
+                let changed = Arc::new(OpenDocument {
+                    uri: document.uri.clone(),
+                    path: document.path.clone(),
+                    stamp: DocumentVersion {
+                        epoch: document.stamp.epoch,
+                        version: params.text_document.version,
+                    },
+                    text: Arc::new(change.text),
+                });
+                let mut next = self.next_editor();
+                next.documents
+                    .insert(changed.uri.as_str().to_owned(), changed);
+                self.accept(next);
             }
             "textDocument/didSave" => {
                 let params: lsp_types::DidSaveTextDocumentParams = serde_json::from_value(params)?;
                 uri_path(&params.text_document.uri)?;
-                self.update(Change::Refresh)?;
+                let mut next = self.next_editor();
+                next.disk_revision += 1;
+                self.accept(next);
             }
             "textDocument/didClose" => {
                 let params: lsp_types::DidCloseTextDocumentParams = serde_json::from_value(params)?;
-                if let Some(document) = self.documents.remove(params.text_document.uri.as_str()) {
-                    self.update(Change::Close(document.path))?;
+                if self
+                    .editor
+                    .documents
+                    .contains_key(params.text_document.uri.as_str())
+                {
+                    let mut next = self.next_editor();
+                    next.documents.remove(params.text_document.uri.as_str());
+                    next.registrations += 1;
+                    self.accept(next);
                 }
             }
             "workspace/didChangeWatchedFiles" => {
                 let params: lsp_types::DidChangeWatchedFilesParams =
                     serde_json::from_value(params)?;
-                let _paths = params
-                    .changes
-                    .iter()
-                    .map(|event| uri_path(&event.uri))
-                    .collect::<Result<Vec<_>>>()?;
-                self.update(Change::Refresh)?;
+                for change in params.changes {
+                    uri_path(&change.uri)?;
+                }
+                let mut next = self.next_editor();
+                next.disk_revision += 1;
+                self.accept(next);
             }
             "$/cancelRequest" => {
                 if let Some(id) = params
                     .get("id")
                     .and_then(|id| serde_json::from_value::<RequestId>(id.clone()).ok())
-                    && self.pending.remove(&id).is_some()
+                    && let Some(request) = self.pending.remove(&id)
                 {
-                    self.error(id, ErrorCode::RequestCanceled as i32, "request cancelled")?;
+                    request.cancellation.cancel();
+                    self.error(id, ErrorCode::RequestCanceled, "request cancelled")?;
                 }
             }
             _ => {}
         }
         Ok(())
     }
+}
 
-    fn uri(&self, path: &Path) -> Option<Uri> {
-        self.documents
-            .values()
-            .find(|d| d.path == path)
-            .map(|d| d.uri.clone())
-            .or_else(|| url::Url::from_file_path(path).ok()?.as_str().parse().ok())
-    }
-    fn location(&self, root: &Path, location: &SourceLocation) -> Option<lsp_types::Location> {
-        Some(lsp_types::Location {
-            uri: self.uri(
-                self.snapshot
-                    .as_ref()?
-                    .paths
-                    .get(root)?
-                    .get(&location.source.id())?,
-            )?,
-            range: self
-                .texts
-                .get(&location.source)
-                .map(|text| text.range(location.span))
-                .unwrap_or_default(),
-        })
-    }
-
-    fn publish(&mut self) -> Result<()> {
-        let mut diagnostics = BTreeMap::<String, Vec<lsp_types::Diagnostic>>::new();
-        if let Some(snapshot) = &self.snapshot {
-            for (root, analysis) in &snapshot.entries {
-                for diagnostic in analysis.diagnostics() {
-                    let Some(location) = self.location(root, &diagnostic.location) else {
-                        continue;
-                    };
-                    let related = diagnostic
-                        .related
-                        .iter()
-                        .filter_map(|note| {
-                            Some(lsp_types::DiagnosticRelatedInformation {
-                                location: self.location(root, &note.location)?,
-                                message: note.message.clone(),
-                            })
-                        })
-                        .collect::<Vec<_>>();
-                    let diagnostic = lsp_types::Diagnostic {
-                        range: location.range,
-                        severity: Some(lsp_types::DiagnosticSeverity::ERROR),
-                        source: Some("resin".into()),
-                        message: diagnostic.message.clone(),
-                        related_information: (!related.is_empty()).then_some(related),
-                        ..Default::default()
-                    };
-                    let list = diagnostics.entry(location.uri.as_str().into()).or_default();
-                    if !list.contains(&diagnostic) {
-                        list.push(diagnostic);
-                    }
-                }
-            }
-        }
-        let current = diagnostics
-            .keys()
-            .chain(self.documents.keys())
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        for uri in current.union(&self.published) {
-            let params = lsp_types::PublishDiagnosticsParams {
-                uri: uri.parse()?,
-                diagnostics: diagnostics.remove(uri).unwrap_or_default(),
-                version: self.documents.get(uri).map(|d| d.version),
-            };
-            self.connection
-                .sender
-                .send(Message::Notification(Notification::new(
-                    "textDocument/publishDiagnostics".into(),
-                    params,
-                )))?;
-        }
-        self.published = current;
-        Ok(())
+fn query_uri(kind: &QueryKind) -> Option<&Uri> {
+    match kind {
+        QueryKind::Hover { uri, .. }
+        | QueryKind::Definition { uri, .. }
+        | QueryKind::Completion { uri, .. }
+        | QueryKind::Format { uri } => Some(uri),
+        QueryKind::Build { .. } => None,
     }
 }
 
-/// Trim unchanged text around a replacement, preserving UTF-8 and CRLF boundaries.
-fn formatting_edits(source: &str, formatted: &str) -> Vec<lsp_types::TextEdit> {
-    if source == formatted {
-        return Vec::new();
+fn parse_query(method: &str, params: Value) -> std::result::Result<QueryKind, (ErrorCode, String)> {
+    let invalid = |error: serde_json::Error| (ErrorCode::InvalidParams, error.to_string());
+    match method {
+        "textDocument/formatting" => {
+            let params: lsp_types::DocumentFormattingParams =
+                serde_json::from_value(params).map_err(invalid)?;
+            Ok(QueryKind::Format {
+                uri: params.text_document.uri,
+            })
+        }
+        "textDocument/hover" | "textDocument/definition" | "textDocument/completion" => {
+            let params: lsp_types::TextDocumentPositionParams =
+                serde_json::from_value(params).map_err(invalid)?;
+            let (uri, position) = (params.text_document.uri, params.position);
+            Ok(match method {
+                "textDocument/hover" => QueryKind::Hover { uri, position },
+                "textDocument/definition" => QueryKind::Definition { uri, position },
+                _ => QueryKind::Completion { uri, position },
+            })
+        }
+        "workspace/executeCommand" => {
+            let params: lsp_types::ExecuteCommandParams =
+                serde_json::from_value(params).map_err(invalid)?;
+            if params.command != "resin.build" {
+                return Err((ErrorCode::InvalidParams, "unsupported command".into()));
+            }
+            let [request]: [Value; 1] = params.arguments.try_into().map_err(|_| {
+                (
+                    ErrorCode::InvalidParams,
+                    "resin.build requires one request object".into(),
+                )
+            })?;
+            Ok(QueryKind::Build {
+                request: serde_json::from_value(request).map_err(invalid)?,
+            })
+        }
+        _ => Err((
+            ErrorCode::MethodNotFound,
+            format!("unsupported method: {method}"),
+        )),
     }
-    let mut start = source
-        .bytes()
-        .zip(formatted.bytes())
-        .take_while(|(a, b)| a == b)
-        .count();
-    while !source.is_char_boundary(start)
-        || !formatted.is_char_boundary(start)
-        || (start > 0
-            && source.as_bytes().get(start - 1) == Some(&b'\r')
-            && source.as_bytes().get(start) == Some(&b'\n'))
-    {
-        start -= 1;
-    }
-    let suffix = source[start..]
-        .bytes()
-        .rev()
-        .zip(formatted[start..].bytes().rev())
-        .take_while(|(a, b)| a == b)
-        .count();
-    let mut end = source.len() - suffix;
-    let mut new_end = formatted.len() - suffix;
-    while !source.is_char_boundary(end)
-        || !formatted.is_char_boundary(new_end)
-        || (end > 0
-            && source.as_bytes().get(end - 1) == Some(&b'\r')
-            && source.as_bytes().get(end) == Some(&b'\n'))
-    {
-        end += 1;
-        new_end += 1;
-    }
-    vec![lsp_types::TextEdit {
-        range: Text::new(source).range(Span { start, end }),
-        new_text: formatted[start..new_end].into(),
-    }]
 }
 
 fn uri_path(uri: &Uri) -> Result<PathBuf> {
-    let path = url::Url::parse(uri.as_str())?
+    url::Url::parse(uri.as_str())?
         .to_file_path()
-        .map_err(|_| "only local file:// documents are supported")?;
-    Ok(normalize_path(&path)?)
+        .map_err(|_| "only local file:// documents are supported".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::worker::{Freshness, PreparedDiagnostics, PreparedReply};
+    use std::sync::Mutex;
+    use tokio::sync::{Semaphore, mpsc, watch};
+
+    struct Harness {
+        state: State,
+        client: Connection,
+        requests: mpsc::Receiver<RequestJob>,
+        replies: mpsc::Sender<PreparedReply>,
+        publications: Arc<Mutex<Option<PreparedDiagnostics>>>,
+        editor: watch::Receiver<Arc<EditorSnapshot>>,
+        wake: crossbeam_channel::Sender<()>,
+    }
+
+    fn harness() -> Harness {
+        let (connection, client) = Connection::memory();
+        let editor = Arc::new(EditorSnapshot::default());
+        let (editor_tx, editor_rx) = watch::channel(editor.clone());
+        let (requests, incoming) = mpsc::channel(64);
+        let (replies, receiver) = mpsc::channel(64);
+        let publications = Arc::new(Mutex::new(None));
+        let (wake, ready) = crossbeam_channel::bounded(1);
+        let channels = Channels {
+            editor: editor_tx,
+            requests,
+            admission: Arc::new(Semaphore::new(64)),
+            replies: receiver,
+            publications: publications.clone(),
+            ready,
+            shutdown: Cancellation::new(),
+        };
+        Harness {
+            state: State {
+                connection,
+                channels,
+                editor,
+                next_epoch: 0,
+                next_request: 0,
+                published: BTreeSet::new(),
+                pending: HashMap::new(),
+                shutdown: false,
+            },
+            client,
+            requests: incoming,
+            replies,
+            publications,
+            editor: editor_rx,
+            wake,
+        }
+    }
+
+    fn uri(name: &str) -> Uri {
+        url::Url::from_file_path(std::env::temp_dir().join(name))
+            .unwrap()
+            .as_str()
+            .parse()
+            .unwrap()
+    }
+
+    fn open(state: &mut State, uri: &Uri, text: &str) {
+        state
+            .apply_notification(
+                "textDocument/didOpen",
+                json!({"textDocument": {
+                    "uri": uri, "version": 1, "languageId": "resin", "text": text
+                }}),
+            )
+            .unwrap();
+    }
+
+    fn change(state: &mut State, uri: &Uri, version: i32, text: &str) {
+        state
+            .apply_notification(
+                "textDocument/didChange",
+                json!({"textDocument": {
+            "uri": uri, "version": version
+        }, "contentChanges": [{"text": text}]}),
+            )
+            .unwrap();
+    }
+
+    fn format(state: &mut State, id: i32, uri: &Uri) {
+        state
+            .request(Request::new(
+                id.into(),
+                "textDocument/formatting".into(),
+                json!({
+                    "textDocument": {"uri": uri}, "options": {"tabSize": 4, "insertSpaces": true}
+                }),
+            ))
+            .unwrap();
+    }
+
+    fn response(client: &Connection) -> Response {
+        match client.receiver.try_recv().unwrap() {
+            Message::Response(response) => response,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn full_edits_coalesce_and_reopened_epochs_survive_skipped_snapshots() {
+        let mut harness = harness();
+        let file = uri("resin-protocol-coalesce.resin");
+        let other = uri("resin-protocol-other.resin");
+        open(&mut harness.state, &file, "old text");
+        open(&mut harness.state, &other, "still dirty");
+        let old_epoch = harness.state.editor.documents[file.as_str()].stamp.epoch;
+        let old_text = Arc::downgrade(&harness.state.editor.documents[file.as_str()].text);
+        for version in 2..1002 {
+            change(&mut harness.state, &file, version, "latest edit");
+        }
+        assert!(old_text.upgrade().is_none());
+        harness
+            .state
+            .apply_notification(
+                "textDocument/didSave",
+                json!({"textDocument": {"uri": file}}),
+            )
+            .unwrap();
+        assert_eq!(
+            &**harness.state.editor.documents[other.as_str()].text,
+            "still dirty"
+        );
+        harness
+            .state
+            .apply_notification(
+                "textDocument/didClose",
+                json!({"textDocument": {"uri": file}}),
+            )
+            .unwrap();
+        open(&mut harness.state, &file, "reopened");
+        let latest = harness.editor.borrow_and_update().clone();
+        assert!(latest.documents[file.as_str()].stamp.epoch > old_epoch);
+        assert_eq!(latest.documents[file.as_str()].stamp.version, 1);
+        assert_eq!(&**latest.documents[file.as_str()].text, "reopened");
+        assert_eq!(latest.disk_revision, 1);
+        assert_eq!(latest.registrations, 4);
+        assert!(!harness.editor.has_changed().unwrap());
+    }
+
+    #[test]
+    fn admission_survives_cancellation_until_the_queued_job_is_released() {
+        let mut harness = harness();
+        let file = uri("resin-protocol-capacity.resin");
+        open(&mut harness.state, &file, "def main() = {}; ");
+        for id in 0..64 {
+            format(&mut harness.state, id, &file);
+        }
+        format(&mut harness.state, 64, &file);
+        assert_eq!(
+            response(&harness.client).error.unwrap().code,
+            ErrorCode::ServerCancelled as i32
+        );
+        harness
+            .state
+            .apply_notification("$/cancelRequest", json!({"id": 0}))
+            .unwrap();
+        assert_eq!(
+            response(&harness.client).error.unwrap().code,
+            ErrorCode::RequestCanceled as i32
+        );
+        assert!(
+            !harness.state.pending[&RequestId::from(1)]
+                .cancellation
+                .is_cancelled()
+        );
+        format(&mut harness.state, 65, &file);
+        assert_eq!(
+            response(&harness.client).error.unwrap().code,
+            ErrorCode::ServerCancelled as i32
+        );
+        let canceled = harness.requests.try_recv().unwrap();
+        assert!(canceled.cancellation.is_cancelled());
+        drop(canceled);
+        format(&mut harness.state, 66, &file);
+        assert!(harness.state.pending.contains_key(&RequestId::from(66)));
+        harness
+            .state
+            .request(Request::new(67.into(), "unrecognized".into(), Value::Null))
+            .unwrap();
+        assert_eq!(
+            response(&harness.client).error.unwrap().code,
+            ErrorCode::MethodNotFound as i32
+        );
+    }
+
+    #[test]
+    fn a_prepared_reply_is_rechecked_after_later_editor_events() {
+        let mut harness = harness();
+        let file = uri("resin-protocol-stale.resin");
+        open(&mut harness.state, &file, "def main()={};");
+        format(&mut harness.state, 1, &file);
+        let job = harness.requests.try_recv().unwrap();
+        let freshness = Freshness::document(&job.editor.documents[file.as_str()]);
+        change(&mut harness.state, &file, 2, "def main() = { 42 }; ");
+        harness
+            .replies
+            .try_send(PreparedReply {
+                serial: job.serial,
+                response: Response::new_ok(job.id, json!([])),
+                freshness,
+                admission: job.admission,
+            })
+            .ok()
+            .unwrap();
+        harness.state.receive_results().unwrap();
+        assert_eq!(
+            response(&harness.client).error.unwrap().code,
+            ErrorCode::ContentModified as i32
+        );
+        assert_eq!(harness.state.channels.admission.available_permits(), 64);
+    }
+
+    #[test]
+    fn coalesced_diagnostics_still_clear_every_uri_actually_published() {
+        let mut harness = harness();
+        let first = uri("resin-protocol-first.resin");
+        let second = uri("resin-protocol-second.resin");
+        let publication = |uri: &Uri| PreparedDiagnostics {
+            revision: 0,
+            notifications: vec![Notification::new(
+                "textDocument/publishDiagnostics".into(),
+                json!({"uri": uri, "diagnostics": []}),
+            )],
+            uris: BTreeSet::from([uri.as_str().to_owned()]),
+        };
+        *harness.publications.lock().unwrap() = Some(publication(&first));
+        harness.state.receive_results().unwrap();
+        let _ = harness.client.receiver.try_recv().unwrap();
+        *harness.publications.lock().unwrap() = Some(PreparedDiagnostics::default());
+        *harness.publications.lock().unwrap() = Some(publication(&second));
+        harness.state.receive_results().unwrap();
+        let messages = harness.client.receiver.try_iter().collect::<Vec<_>>();
+        assert_eq!(messages.len(), 2);
+        assert!(messages.iter().any(|message| matches!(message, Message::Notification(notification)
+            if notification.params["uri"] == first.as_str() && notification.params["diagnostics"] == json!([]))));
+        assert_eq!(
+            harness.state.published,
+            BTreeSet::from([second.as_str().to_owned()])
+        );
+    }
+
+    #[test]
+    fn reused_wire_id_cannot_receive_the_cancelled_requests_late_reply() {
+        let mut harness = harness();
+        let file = uri("resin-protocol-reused-id.resin");
+        open(&mut harness.state, &file, "def main() = {}; ");
+        format(&mut harness.state, 7, &file);
+        let old = harness.requests.try_recv().unwrap();
+        harness
+            .state
+            .apply_notification("$/cancelRequest", json!({"id": 7}))
+            .unwrap();
+        assert_eq!(
+            response(&harness.client).error.unwrap().code,
+            ErrorCode::RequestCanceled as i32
+        );
+        format(&mut harness.state, 7, &file);
+        let new = harness.requests.try_recv().unwrap();
+        assert_ne!(old.serial, new.serial);
+        for (job, text) in [(old, "old"), (new, "new")] {
+            harness
+                .replies
+                .try_send(PreparedReply {
+                    serial: job.serial,
+                    response: Response::new_ok(job.id, text),
+                    freshness: Freshness::default(),
+                    admission: job.admission,
+                })
+                .ok()
+                .unwrap();
+            harness.state.receive_results().unwrap();
+        }
+        assert_eq!(response(&harness.client).result.unwrap(), "new");
+        assert!(harness.client.receiver.try_recv().is_err());
+        assert_eq!(harness.state.channels.admission.available_permits(), 64);
+    }
+
+    #[test]
+    fn shutdown_waits_for_exit_after_the_coordinator_wake_channel_closes() {
+        let harness = harness();
+        let mut state = harness.state;
+        let pending = std::thread::spawn(move || state.events());
+        harness
+            .client
+            .sender
+            .send(Message::Request(Request::new(
+                1.into(),
+                "shutdown".into(),
+                Value::Null,
+            )))
+            .unwrap();
+        let reply = harness
+            .client
+            .receiver
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        assert!(matches!(reply, Message::Response(response) if response.id == RequestId::from(1)));
+        drop(harness.wake);
+        harness
+            .client
+            .sender
+            .send(Message::Notification(Notification::new(
+                "exit".into(),
+                Value::Null,
+            )))
+            .unwrap();
+        assert_eq!(pending.join().unwrap().unwrap(), 0);
+    }
 }
