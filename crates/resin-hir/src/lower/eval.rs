@@ -65,6 +65,7 @@ impl Decoder<'_> {
                 let builtin = match head.val.as_ref() {
                     "Ptr" => Some(Head::Pointer),
                     "Ref" => Some(Head::Reference),
+                    "Err" => Some(Head::Error),
                     _ => None,
                 };
                 if let Some(builtin) = builtin {

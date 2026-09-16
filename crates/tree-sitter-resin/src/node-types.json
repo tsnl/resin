@@ -481,6 +481,22 @@
     "fields": {}
   },
   {
+    "type": "error_term",
+    "named": true,
+    "fields": {
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "term",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "export_clause",
     "named": true,
     "fields": {
@@ -1125,6 +1141,10 @@
           "named": true
         },
         {
+          "type": "error_term",
+          "named": true
+        },
+        {
           "type": "if_term",
           "named": true
         },
@@ -1731,6 +1751,10 @@
         "required": false,
         "types": [
           {
+            "type": "Err",
+            "named": false
+          },
+          {
             "type": "Ptr",
             "named": false
           },
@@ -1953,6 +1977,10 @@
   },
   {
     "type": "@",
+    "named": false
+  },
+  {
+    "type": "Err",
     "named": false
   },
   {

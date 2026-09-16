@@ -215,6 +215,9 @@ pub enum Type {
     Union {
         variants: Vec<Type>,
     },
+    Error {
+        payload: Box<Type>,
+    },
     Result {
         value: Box<Type>,
         error: Box<Type>,
@@ -982,6 +985,7 @@ fn builtin_hover(document: &resin_cst::Document, token: resin_cst::Node<'_>) -> 
                 | "GpuView"
                 | "GpuArguments"
                 | "Result"
+                | "Err"
                 | "None"
                 | "true"
                 | "false"
@@ -1127,6 +1131,11 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     (
         "Result",
         "Result<T, E> — success or a typed error; postfix ? propagates errors.",
+        DefinitionKind::Type,
+    ),
+    (
+        "Err",
+        "Err<E> wraps an error payload; construct it with Err(value).",
         DefinitionKind::Type,
     ),
     (

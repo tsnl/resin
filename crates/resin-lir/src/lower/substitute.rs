@@ -330,6 +330,9 @@ impl Substitution {
                     .collect::<Result<_, _>>()?,
                 result: Box::new(self.normalize_at(result, depth + 1, state, instances)?),
             },
+            resin_hir::Type::Error { payload } => resin_hir::Type::Error {
+                payload: Box::new(self.normalize_at(payload, depth + 1, state, instances)?),
+            },
             resin_hir::Type::Result { value, error } => resin_hir::Type::Result {
                 value: Box::new(self.normalize_at(value, depth + 1, state, instances)?),
                 error: Box::new(self.normalize_at(error, depth + 1, state, instances)?),
@@ -421,6 +424,9 @@ fn materialize(
                 .collect::<Result<_, _>>()?,
             result: Box::new(materialize(result, instances)?),
         },
+        resin_hir::Type::Error { payload } => Ty::Error {
+            payload: Box::new(materialize(payload, instances)?),
+        },
         resin_hir::Type::Result { value, error } => {
             let value = materialize(value, instances)?;
             let error = materialize(error, instances)?;
@@ -484,6 +490,9 @@ fn expression(source: &Ty, instances: &super::instances::Instances<'_>) -> resin
         Ty::Function { params, result } => resin_hir::Type::Function {
             params: params.iter().map(|ty| expression(ty, instances)).collect(),
             result: Box::new(expression(result, instances)),
+        },
+        Ty::Error { payload } => resin_hir::Type::Error {
+            payload: Box::new(expression(payload, instances)),
         },
         Ty::Result { value, error } => resin_hir::Type::Result {
             value: Box::new(expression(value, instances)),
@@ -572,6 +581,7 @@ fn check_size(
             }
             check_size(result, depth + 1, remaining)?;
         }
+        resin_hir::Type::Error { payload } => check_size(payload, depth + 1, remaining)?,
         resin_hir::Type::Result { value, error } => {
             check_size(value, depth + 1, remaining)?;
             check_size(error, depth + 1, remaining)?;

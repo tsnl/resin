@@ -1350,3 +1350,8 @@ place of `Self`. The view must remain readable while its receiver is alive;
 the hook borrows its receiver and must not invalidate it. `String` uses this
 hook so formatting and nested representations show its text. Representation
 is a host operation and limits nested output to 128 levels.
+
+`Err<E>` is a builtin wrapper for an error payload of type `E`. Construct it with
+`Err(value)` or an explicit payload type such as `Err<int>(7)`. Wrappers copy and
+destroy their payload normally, have distinct type identities in unions, and
+may be nested. `repr(Err("message"))` produces `Err("message")`.

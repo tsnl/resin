@@ -14,10 +14,13 @@ pub(super) enum Representation {
 
 impl Context<'_> {
     pub(super) fn shape<'a>(&'a self, mut ty: &'a Ty) -> &'a Ty {
-        while let Ty::Defined { definition } = ty {
-            ty = self.module.types[definition.index()].body().unwrap();
+        loop {
+            ty = match ty {
+                Ty::Defined { definition } => self.module.types[definition.index()].body().unwrap(),
+                Ty::Error { payload } => payload,
+                _ => return ty,
+            };
         }
-        ty
     }
 
     pub(super) fn validate(&mut self, ty: &Ty) -> Result<(), Error> {
@@ -59,6 +62,7 @@ impl Context<'_> {
                 self.builder.type_int(64, 0)
             }
             Ty::Float32 => self.builder.type_float(32, None),
+            Ty::Error { payload } => self.type_id(payload, representation)?,
             Ty::Defined { definition } => {
                 let definition = &self.module.types[definition.index()];
                 let body = definition.body().unwrap();

@@ -269,6 +269,9 @@ pub enum Ty {
     Union {
         variants: Vec<Ty>,
     },
+    Error {
+        payload: Box<Ty>,
+    },
     Result {
         value: Box<Ty>,
         error: Box<Ty>,
@@ -732,6 +735,8 @@ impl BuiltinRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Conv {
+    WrapError,
+    UnwrapError,
     Unwrap { definition: TypeId },
     Wrap { definition: TypeId },
     Deref,

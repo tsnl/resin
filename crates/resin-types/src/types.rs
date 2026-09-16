@@ -62,6 +62,7 @@ pub(super) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), D
                 return Err(DefinitionError::NonRecord(*definition));
             }
         }
+        Ty::Error { payload } => check_references(definitions, payload)?,
         Ty::Pointer { pointee } => check_references(definitions, pointee)?,
         Ty::Array { element, .. } => check_references(definitions, element)?,
         Ty::Record { fields } => {
@@ -113,6 +114,7 @@ fn check_inline(
             check_inline(definitions, body, active)?;
             active.pop();
         }
+        Ty::Error { payload } => check_inline(definitions, payload, active)?,
         Ty::Array { element, .. } => check_inline(definitions, element, active)?,
         Ty::Record { fields } => {
             for field in fields {
@@ -196,6 +198,7 @@ pub(super) fn needs_drop(ty: &Ty, definitions: &[TypeDef]) -> bool {
         }
         Ty::Record { fields } => fields.iter().any(|f| f.ty.needs_drop(definitions)),
         Ty::Array { element, .. } => element.needs_drop(definitions),
+        Ty::Error { payload } => payload.needs_drop(definitions),
         Ty::Result { value, error } => {
             value.needs_drop(definitions) || error.needs_drop(definitions)
         }
@@ -208,6 +211,7 @@ pub(super) fn gpu_element(ty: &Ty, definitions: &[TypeDef]) -> bool {
     let plain = match ty {
         Ty::UInt8 | Ty::Int32 | Ty::UInt32 | Ty::Int64 | Ty::UInt64 | Ty::Float32 => true,
         Ty::Array { element, .. } => gpu_element(element, definitions),
+        Ty::Error { payload } => gpu_element(payload, definitions),
         Ty::Record { fields } => fields
             .iter()
             .all(|field| gpu_element(&field.ty, definitions)),
@@ -353,6 +357,9 @@ impl TypeTable {
                 }
                 self.intern(&Ty::UInt32);
             }
+            Ty::Error { payload } => {
+                self.intern(payload);
+            }
             Ty::Result { value, error } => {
                 self.intern(value);
                 self.intern(error);
@@ -396,6 +403,7 @@ pub(super) fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
                 .collect::<Vec<_>>()
                 .join(" | ")
         }
+        Ty::Error { payload } => format!("Err<{}>", format_type(payload, definitions)),
         Ty::Result { value, error } => format!(
             "Result<{}, {}>",
             format_type(value, definitions),
@@ -499,6 +507,9 @@ pub(super) fn storage_layout(
             offsets: vec![],
         });
     }
+    if let Ty::Error { payload } = ty {
+        return storage_layout(definitions, payload);
+    }
     if let Ty::Defined { definition } = ty {
         return storage_layout(definitions, definitions[definition.index()].body().unwrap());
     }
@@ -601,6 +612,7 @@ pub(super) fn value_layout(
         Ty::Union { variants } => {
             value_tagged(variants.iter().map(child).collect::<Result<Vec<_>, _>>()?)
         }
+        Ty::Error { payload } => child(payload),
         Ty::Result { value, error } => value_tagged(vec![child(value)?, child(error)?]),
         _ => Err(layout::Error(format!(
             "type {ty:?} has no known value layout"

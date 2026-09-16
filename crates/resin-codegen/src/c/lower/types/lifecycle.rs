@@ -67,6 +67,7 @@ impl Types<'_> {
                     }
                     self.drop_value(def.body().unwrap(), "p->value", &mut out);
                 }
+                Ty::Error { payload } => self.drop_value(payload, "p->value", &mut out),
                 Ty::Record { fields } => {
                     for (i, field) in fields.iter().enumerate().rev() {
                         self.drop_value(&field.ty, &format!("p->f{i}"), &mut out);
@@ -113,6 +114,7 @@ impl Types<'_> {
                 &format!("({value}).value"),
                 out,
             ),
+            Ty::Error { payload } => self.retain_fields(payload, &format!("({value}).value"), out),
             Ty::Record { fields } => {
                 for (i, field) in fields.iter().enumerate() {
                     self.retain_fields(&field.ty, &format!("({value}).f{i}"), out);

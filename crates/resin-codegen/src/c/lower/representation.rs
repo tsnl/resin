@@ -13,6 +13,9 @@ pub(super) fn descriptor(types: &Types<'_>, ty: &Ty) -> String {
                     types.module.types[definition.index()].body().unwrap(),
                 );
             }
+            Ty::Error { payload } => {
+                descriptor(types, payload);
+            }
             Ty::Array { element, .. } => {
                 descriptor(types, element);
             }
@@ -74,6 +77,16 @@ pub(super) fn declarations(types: &Types<'_>) -> String {
                         0,
                     ));
                     "NAMED"
+                }
+                Ty::Error { payload } => {
+                    fields.push(field(
+                        types,
+                        "",
+                        payload,
+                        format!("offsetof({name}, value)"),
+                        0,
+                    ));
+                    "ERROR"
                 }
                 Ty::Array {
                     element,
