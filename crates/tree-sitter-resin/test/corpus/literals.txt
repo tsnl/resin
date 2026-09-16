@@ -11,7 +11,8 @@ fn main()  { let mut a = 42_ul; let mut b = -42_l; let mut c = 1.5_f; let mut d 
       (statement
         (define
           (local_define
-            (lid)
+            (binding_pattern
+              (lid))
             (term
               (assignment_term
                 (binary_term
@@ -22,7 +23,8 @@ fn main()  { let mut a = 42_ul; let mut b = -42_l; let mut c = 1.5_f; let mut d 
       (statement
         (define
           (local_define
-            (lid)
+            (binding_pattern
+              (lid))
             (term
               (assignment_term
                 (binary_term
@@ -34,7 +36,8 @@ fn main()  { let mut a = 42_ul; let mut b = -42_l; let mut c = 1.5_f; let mut d 
       (statement
         (define
           (local_define
-            (lid)
+            (binding_pattern
+              (lid))
             (term
               (assignment_term
                 (binary_term
@@ -45,7 +48,8 @@ fn main()  { let mut a = 42_ul; let mut b = -42_l; let mut c = 1.5_f; let mut d 
       (statement
         (define
           (local_define
-            (lid)
+            (binding_pattern
+              (lid))
             (term
               (assignment_term
                 (binary_term
@@ -112,8 +116,9 @@ fn view() -> Span<ubyte>  { bytes("hello") }
 (source_file
   (function_definition
     (lid)
-    (declare
-      (lid)
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type

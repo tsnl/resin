@@ -5,16 +5,18 @@ bindings, and reference-returning indexing.
 
 The [ownership specification](lifetimes.md) describes `ArcPtr<T>`, `ArcSpan<T>`,
 `WeakPtr<T>`, `WeakSpan<T>`,
-automatic destruction, and inherent methods through `impl`.
+automatic destruction, and checked ownership moves.
 
 Resin is a deliberately small systems programming language in the spirit of C and Go.
-Data layout, mutation, pointers, control flow, and cost stay visible. Reading existing values performs compiler-defined copying; function and type
-applications consume the resulting arguments. Constructors consume field initializers.
-Shared handles make everyday resource copying safe. Raw `Ptr<T>` and `Span<T>` values remain
-non-owning and there is no borrow checker or tracing collector. Separate value and
+Data layout, mutation, pointers, control flow, and cost stay visible. Passing,
+assigning, or returning an owned value transfers it. Primitive values and structural
+aggregates of copyable values copy; named structs move. Shared handles are cloned
+explicitly when another owner is needed. Raw pointers, references, and spans remain
+nonowning, with unchecked lifetimes and aliasing; there is no borrow checker.
+Separate value and
 type namespaces keep definitions simple, including recursion through pointers.
 
-Functions take a parenthesized sequence of arguments. `fn f(a: A, b: B) -> R  { body }`
+Functions take a parenthesized sequence of arguments. `fn f(a: A, b: B) -> R { body }`
 has two parameters and is called with `f(a, b)`. Function types list parameters explicitly:
 `() -> R`, `(A) -> R`, and `(A, B) -> R`. A tuple is one value: `f((a, b))` supplies one
 argument, whose function type is `((A, B)) -> R`. Likewise, `f()` supplies no arguments,
@@ -28,11 +30,12 @@ assembling them in the type's layout order.
 Functions are top-level, immutable definitions without captured environments. Signatures are
 available before bodies are checked, so mutually recursive functions need no forward declarations.
 An omitted result annotation means unit; explicit `_` holes enable inference in locals and function
-results, including nested positions. Value bindings use `var name = value;` or `var name: Type = value;`, nominal records use
+results, including nested positions. Value bindings use `let name = value;` or `let name: Type = value;`, nominal records use
 `struct Name { field: Type, }`, and `type Name = Type;` creates transparent aliases. Declarations
-such as `var name: Type;` reserve uninitialized local storage: reads require prior initialization
+such as `let name: Type;` reserve uninitialized local storage: reads require prior initialization
 on every control-flow path. An aggregate must be initialized as a whole before its fields can be
-accessed. Record initializers keep bare `name = value` fields; parameters and struct fields
+accessed. Bindings are immutable unless their identifier has `mut`; an immutable
+uninitialized binding can be initialized once. Assignment returns unit. Record initializers keep bare `name = value` fields; parameters and struct fields
 keep bare `name: Type` declarations. Named structs replace anonymous records;
 tuples remain structural aggregates. Files have no runtime globals or initialization phase.
 
@@ -45,15 +48,15 @@ when empty.
 
 Initialized locals receive automatic destruction in reverse scope order, including
 loop iterations and early returns through `?`. Return values are preserved before
-cleanup. `impl` defines inherent methods and `drop(self: Ptr<T>)` hooks; the compiler
-runs the hook before releasing fields. Statement-only chain blocks yield unit.
+cleanup. Struct bodies contain only fields. A free `fn drop(value: Ptr<T>)`
+declared alongside its type runs before its fields are released. Statement-only chain blocks yield unit.
 Process termination and traps do not unwind scopes.
 
 ## Host and GPU
 
 Host code uses source `GpuPtr<T>` and `GpuSpan<T>` wrappers over opaque `GpuView`
 primitives, carrying an allocation
-owner, byte offset, and access permissions. Copies and interior views retain the
+owner, byte offset, and access permissions. Explicit clones and interior views retain the
 owner. Checked host operations enforce bounds, alignment, mapping state, permissions,
 and exclusion while a command recording can use the allocation. Views cannot be
 cast to ordinary pointers or constructed from raw addresses.
@@ -96,22 +99,23 @@ and verification operations belong to `resin_lir`'s public interface. See
 entry points, and a reading path.
 
 HIR is a resolved, typed tree. Its construction declares names, checks expressions,
-solves dependency groups, and elaborates source forms: methods become ordinary calls,
+solves dependency groups, and elaborates source forms: colon calls select visible free functions,
 short-circuit operators become conditionals, field projections are resolved, and layout
-queries become constants. Inference variables and lexical scopes remain private to HIR
+queries retain the queried type. Ownership completion checks definite initialization,
+partial moves, and control-flow joins, including unused function bodies. Inference variables and lexical scopes remain private to HIR
 construction and editor analysis. Failed constraints preserve healthy editor facts;
 source errors prevent publishing a complete HIR module.
 
-LIR lowering consumes HIR alone and makes storage, definite initialization, evaluation
-order, cleanup, and control flow explicit. Its typed stack machine has one parameter
+LIR lowering consumes HIR alone and makes storage, evaluation order, cleanup,
+and control flow explicit. It specializes retained operation relations using the
+lexical candidates recorded in HIR. Its typed stack machine has one parameter
 local per function and a tree of blocks with explicit `If`, `Loop`, `Merge`,
 `LoopTest`, `Continue`, and `Return` terminators. Block IDs locate storage in an
 arena; child references express unique ownership, never arbitrary jumps.
-Verification checks selection merges, distinct loop tests and continuations, and loop
-stack invariants, and both backends preserve the nesting in native control flow.
-Lowering records owned locals per lexical scope and emits conditional destruction
-at normal and error exits. Copy operations retain shared fields; compiler temporary transfers disarm the source's cleanup. Named
-values remain usable after reads; this is not source-level move checking.
+Verification checks region exits and stack invariants, and both backends preserve
+the nesting in native control flow. Lowering emits transfers that disarm the moved
+source and destroys the remaining initialized fields at normal and error exits.
+It does not repeat source initialization analysis.
 
 Shared concrete types and layout rules live in `resin-types`. The source checker and
 LIR verifier reuse these rules without sharing source scopes or inference state. Target

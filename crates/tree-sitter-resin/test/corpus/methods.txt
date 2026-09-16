@@ -1,61 +1,84 @@
 ==================
 Method calls and function-valued field calls
 ==================
-struct Item {
- 
-}
-fn read(item: Item, value: int) -> int  { value }
-
-
-fn calls(item: Item)  { item:read(1); (item.read)(1); read(item, 1); }
+struct Item { read: (int) -> int }
+fn read(item: Ref<Item>, value: int) -> int { value }
+fn calls(item: Ref<Item>) { item:read(1); (item.read)(1); read(item, 1); }
 
 ---
 
 (source_file
   (struct_definition
     (uid)
-    (function_definition
-      (lid)
-      (declare
-        (lid)
-        (type
-          (infix_type
-            (union_type
-              (unary_type
-                (primary_type
-                  (uid)))))))
-      (declare
-        (lid)
-        (type
-          (infix_type
-            (union_type
-              (unary_type
-                (primary_type
-                  (builtin_type)))))))
-      (type
-        (infix_type
-          (union_type
-            (unary_type
-              (primary_type
-                (builtin_type))))))
-      (block_body
-        (term
-          (assignment_term
-            (binary_term
-              (unary_term
-                (postfix_term
-                  (primary_term
-                    (lid))))))))))
-  (function_definition
-    (lid)
     (declare
       (lid)
       (type
         (infix_type
+          (parameter_types
+            (type
+              (infix_type
+                (union_type
+                  (unary_type
+                    (primary_type
+                      (builtin_type)))))))
+          (infix_type
+            (union_type
+              (unary_type
+                (primary_type
+                  (builtin_type)))))))))
+  (function_definition
+    (lid)
+    (parameter
+      (binding_pattern
+        (lid))
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (type
+                (infix_type
+                  (union_type
+                    (unary_type
+                      (primary_type
+                        (uid)))))))))))
+    (parameter
+      (binding_pattern
+        (lid))
+      (type
+        (infix_type
           (union_type
             (unary_type
               (primary_type
-                (uid)))))))
+                (builtin_type)))))))
+    (type
+      (infix_type
+        (union_type
+          (unary_type
+            (primary_type
+              (builtin_type))))))
+    (block_body
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (lid)))))))))
+  (function_definition
+    (lid)
+    (parameter
+      (binding_pattern
+        (lid))
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (type
+                (infix_type
+                  (union_type
+                    (unary_type
+                      (primary_type
+                        (uid)))))))))))
     (block_body
       (statement
         (term
@@ -108,23 +131,19 @@ fn calls(item: Item)  { item:read(1); (item.read)(1); read(item, 1); }
               (unary_term
                 (postfix_term
                   (primary_term
-                    (unary_type
-                      (primary_type
-                        (uid))))
-                  (method_call
-                    (lid)
-                    (arguments
-                      (term
-                        (assignment_term
-                          (binary_term
-                            (unary_term
-                              (postfix_term
-                                (primary_term
-                                  (lid)))))))
-                      (term
-                        (assignment_term
-                          (binary_term
-                            (unary_term
-                              (postfix_term
-                                (primary_term
-                                  (number))))))))))))))))))
+                    (lid))
+                  (arguments
+                    (term
+                      (assignment_term
+                        (binary_term
+                          (unary_term
+                            (postfix_term
+                              (primary_term
+                                (lid)))))))
+                    (term
+                      (assignment_term
+                        (binary_term
+                          (unary_term
+                            (postfix_term
+                              (primary_term
+                                (number)))))))))))))))))

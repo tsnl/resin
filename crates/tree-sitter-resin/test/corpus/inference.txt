@@ -10,8 +10,9 @@ fn choose(p: Ptr<int>) -> (Ptr<_>, (int) -> _)  {
 (source_file
   (function_definition
     (lid)
-    (declare
-      (lid)
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type
@@ -55,8 +56,9 @@ fn choose(p: Ptr<int>) -> (Ptr<_>, (int) -> _)  {
                               (inferred_type))))))))))))))
     (block_body
       (statement
-        (declare
-          (lid)
+        (parameter
+          (binding_pattern
+            (lid))
           (type
             (infix_type
               (union_type
@@ -113,8 +115,9 @@ fn _name(_value: _Name) -> _Name  { _value }
                 (builtin_type))))))))
   (function_definition
     (lid)
-    (declare
-      (lid)
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type

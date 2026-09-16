@@ -9,12 +9,14 @@ ordinary visible overloads.
 
 ```resin
 struct Item { value: int }
-fn consume(item: Item) -> int { item.value }
+fn consume(item: Item) -> int {
+	item.value
+}
 fn example() -> int {
-    let item = Item { value = 42 };
-    let transferred = item;
-    // item is moved and cannot be read again.
-    consume(transferred)
+	let item = Item { value = 42 };
+	let transferred = item;
+	// item is moved and cannot be read again.
+	consume(transferred)
 }
 ```
 
@@ -57,10 +59,12 @@ the first ordinary argument.
 
 ```resin
 struct Item { value: int }
-fn read(item: Ref<Item>) -> int { item.value }
+fn read(item: Ref<Item>) -> int {
+	item.value
+}
 fn example() -> int {
-    let item = Item { value = 21 };
-    read(item) + item:read()
+	let item = Item { value = 21 };
+	read(item) + item:read()
 }
 ```
 
@@ -91,10 +95,10 @@ owns a descriptor; `ArcSpan<T>` owns its elements. There are no unsized payloads
 ```resin
 import { "$/shared.resin", "$/status.resin" };
 fn example() -> int | Err<OutOfMemory> {
-    let owner = arc_ptr_alloc(42_i)?;
-    let retained = owner:clone(); // Retain the same allocation explicitly.
-    let moved = owner;          // Transfer this handle; owner is now unavailable.
-    retained:get().* + moved:get().*
+	let owner = arc_ptr_alloc(42_i)?;
+	let retained = owner:clone(); // Retain the same allocation explicitly.
+	let moved = owner; // Transfer this handle; owner is now unavailable.
+	retained:get().* + moved:get().*
 }
 ```
 

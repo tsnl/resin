@@ -38,8 +38,9 @@ fn read(value: (int | Err<NoneInt>)) -> (int | Err<_>)  {
                 (uid))))))))
   (function_definition
     (lid)
-    (declare
-      (lid)
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type
@@ -86,7 +87,8 @@ fn read(value: (int | Err<NoneInt>)) -> (int | Err<_>)  {
       (statement
         (define
           (local_define
-            (lid)
+            (binding_pattern
+              (lid))
             (term
               (assignment_term
                 (binary_term
@@ -125,8 +127,9 @@ fn nested(value: ((int | Err<Never>) | Err<Never>)) -> (int | Err<Never>)  {
 (source_file
   (function_definition
     (lid)
-    (declare
-      (lid)
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type
@@ -206,7 +209,8 @@ fn nested(value: ((int | Err<Never>) | Err<Never>)) -> (int | Err<Never>)  {
                             (unary_type
                               (primary_type
                                 (builtin_type))))))
-                      (lid)
+                      (binding_pattern
+                        (lid))
                       (block_body
                         (term
                           (assignment_term
@@ -225,7 +229,8 @@ fn nested(value: ((int | Err<Never>) | Err<Never>)) -> (int | Err<Never>)  {
                                                     (lid))
                                                   (try_suffix))))))))))))))))
                     (match_arm
-                      (lid)
+                      (binding_pattern
+                        (lid))
                       (block_body
                         (term
                           (assignment_term

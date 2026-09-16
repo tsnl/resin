@@ -9,16 +9,20 @@ leaving initialized storage behind.
 ```resin
 import { "$/span.resin" };
 
-fn first<T>(items: Ref<Span<T>>) -> Ref<T> { items:at(0_ul) }
-fn increment(value: Ref<int>) { value = value + 1; }
+fn first<T>(items: Ref<Span<T>>) -> Ref<T> {
+	items:at(0_ul)
+}
+fn increment(value: Ref<int>) {
+	value = value + 1;
+}
 
 fn example() -> int {
-    let mut items = [10_i, 20_i];
-    let view = Span<int> { data = &items:at(0_ul), length = 2_ul };
-    let reference: Ref<int> = first(view);
-    increment(reference);
-    first(view) = 42;
-    reference
+	let mut items = [10_i, 20_i];
+	let view = Span<int> { data = &items:at(0_ul), length = 2_ul };
+	let reference: Ref<int> = first(view);
+	increment(reference);
+	first(view) = 42;
+	reference
 }
 ```
 
@@ -52,8 +56,12 @@ expression's temporary lifetime, and early exits clean up acquired temporaries.
 
 ```resin
 struct Item { value: int }
-fn read(item: Ref<Item>) -> int { item.value }
-fn example() -> int { Item { value = 42 }:read() }
+fn read(item: Ref<Item>) -> int {
+	item.value
+}
+fn example() -> int {
+	Item { value = 42 }:read()
+}
 ```
 
 This argument rule does not extend local reference initializers. An explicit
@@ -62,7 +70,11 @@ a reference-returning function body. Branches can select places:
 
 ```resin
 fn choose<T>(left: Ref<T>, right: Ref<T>, flag: bool) -> Ref<T> {
-    if (flag) { left } else { right }
+	if (flag) {
+		left
+	} else {
+		right
+	}
 }
 ```
 

@@ -10,8 +10,9 @@ intrinsic "pointer_index" fn at<T>(data: Ptr<T>, length: ulong, index: ulong) ->
     (lid)
     (type_parameters
       (uid))
-    (declare
-      (lid)
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type
@@ -22,16 +23,18 @@ intrinsic "pointer_index" fn at<T>(data: Ptr<T>, length: ulong, index: ulong) ->
                     (unary_type
                       (primary_type
                         (uid)))))))))))
-    (declare
-      (lid)
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type
             (unary_type
               (primary_type
                 (builtin_type)))))))
-    (declare
-      (lid)
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type

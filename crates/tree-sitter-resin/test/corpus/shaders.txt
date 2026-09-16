@@ -12,8 +12,9 @@ fn main()  { let mut entry = kernel; }
     (decorator
       (lid))
     (lid)
-    (declare
-      (lid)
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type
@@ -40,7 +41,8 @@ fn main()  { let mut entry = kernel; }
       (statement
         (define
           (local_define
-            (lid)
+            (binding_pattern
+              (lid))
             (term
               (assignment_term
                 (binary_term

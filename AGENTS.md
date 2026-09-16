@@ -12,9 +12,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   translation in private `lower` modules and textual rendering in private `print` modules.
   A crate's complete public contract should be discoverable from its entry point.
 - HIR is a typed, desugared tree with resolved bindings and explicit operation relations.
-  Source scopes, inference variables, and recovery belong to HIR construction. Completed
-  nominal declarations retain method identities for dependent lookup during specialization.
-  HIR construction establishes definite initialization while completing each body,
+  Source scopes, inference variables, and recovery belong to HIR construction. Dependent
+  operations retain their lexical overload candidate identities during specialization.
+  HIR construction establishes definite initialization and checked moves while completing each body,
   including unused definitions. Follow runtime evaluation order and intersect branch
   states there; LIR storage lowering has no source initialization states or branch snapshots.
   LIR describes storage, cleanup, stack operations, and structured control-flow regions.
@@ -23,7 +23,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   keep these distinct and reject exits that do not match their region.
   Keep LIR verification in private `crates/resin-lir/src/verify/` modules, with the
   verification API beside the language in `lib.rs`; constructing LIR does not verify it.
-- HIR owns type expressions and completed nominal declarations, including method identities;
+- HIR owns type expressions and completed nominal declarations, including destruction and representation hooks;
   it has no concrete type interner. LIR construction creates the concrete catalog and
   translates each HIR function into a private concrete expression tree before assigning
   storage. Discard that concrete tree after lowering the function.
@@ -31,10 +31,11 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   names, and explicit conversion relations. Select numeric representations, field indices,
   and conversion operations during LIR specialization. `Type::Member` determines a field
   type from its substituted receiver; it does not infer the receiver from a desired field
-  type. `Type::Method` retains a receiver namespace and completed method arguments;
-  `FunctionParameter` and `FunctionResult` project its caller-facing signature. Dependent
-  calls and references select source nominal methods during specialization, without
-  inferring receivers or method arguments. Keep literal parsing and concrete conversion rules in `resin-types`; LIR never
+  type. `Type::Operation` retains lexical candidates, completed arguments, and operand
+  types; `FunctionParameter` and `FunctionResult` project its signature. Specialization
+  substitutes these relations and selects one applicable signature without consulting
+  source scopes or treating body failures as substitution failures. Keep literal parsing
+  and concrete conversion rules in `resin-types`; LIR never
   chooses numeric defaults. Source-known failures are still diagnosed during HIR construction.
 - HIR function signatures retain named type binders; function references retain completed
   type arguments. LIR keys instances by definition, normalized arguments, and Host/Shader
@@ -277,44 +278,50 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Every LIR function's first `parameter_count` locals are its initialized parameters,
   including foreign declarations. Zero-argument functions reserve no parameter local;
   the verifier rejects parameter counts larger than the local array.
-- Functions use `fn`, nominal records use `struct`, transparent aliases use `type`, and local value bindings use `var`, including
-  uninitialized locals. Record initializers and parameters do not take these keywords. Records require named
+- Functions use `fn`, nominal records use `struct`, transparent aliases use `type`, and local value bindings use `let`, including
+  uninitialized locals. Identifier patterns are immutable unless marked `mut`, including
+  parameters and match binders. Assignment uses `=` and returns unit. Struct fields use
+  comma separators with an optional trailing comma; value initializers use `field = value`.
+  Record initializers and parameters do not take these keywords. Records require named
   `struct` declarations; tuples provide anonymous aggregates.
   Foreign functions live in an optional top-level `extern` block between `export` and
   `import`: `extern { "header.h": { fn name(...) -> Type; }, };`. Header groups may
   be empty and retain their native include dependency. Opaque foreign types remain
   standalone `extern type Name;` declarations.
-- Methods are declared inside their owning `struct`, after its fields. Aliases inherit
-  the target namespace and cannot add methods. Local structs are field-only.
-  `value.method(args)` supplies the receiver as the first argument,
-  while `(value.field)(args)` calls a field value. Receiver parameter names are ordinary
-  identifiers. Resolve source-known methods into ordinary HIR calls; dependent methods
-  become ordinary calls during LIR specialization, before storage lowering. Compiler-provided methods use the
-  same declaration lookup, argument checking, and editor analysis as source methods;
-  register their signatures and intrinsic operations in `crates/resin-hir/src/lower/context.rs`.
-  HIR construction recognizes `drop` as a hook; direct calls remain ordinary calls.
+- Struct bodies contain only fields. Operations are ordinary free functions and are
+  exported independently of types. `value:operation(args)` supplies the first argument;
+  dots select fields, including callable field values. There is no implicit `self`.
+  Resolve overloads using all arguments and expected results. Reject ambiguous signatures;
+  body errors never provide overload fallback. Source-known calls become ordinary HIR calls;
+  dependent calls retain lexical candidate IDs for specialization before storage lowering.
+  Compiler-provided operations use the same argument checking and editor analysis path.
+  HIR registers free `drop(Ptr<T>)` and `repr_bytes(Ref<T>)` hooks with their owning
+  nominal declaration; direct calls remain ordinary calls.
 - Libraries declare low-level compiler operations with `intrinsic "operation" fn name<T>(...) -> Type;`.
   Validate each signature against an explicit primitive contract during HIR construction.
   Intrinsic functions use ordinary module lookup and generic calls; retain their source
   identity. Specialize operations before storage lowering and verify concrete operands
   independently. Do not recognize library wrappers by their public type names.
-- Reading existing values performs compiler-defined copying. Function and type
-  applications consume their argument results; operators do the same, and aggregate
-  constructors consume their field initializers. Structs define inherent methods and
-  `drop(self: Ptr<T>)` hooks. There is no static move checking or borrow checker.
-  Native wrappers must make their copying safe or expose ArcPtr-based ownership;
-  `pointer.replace(replacement)` can disarm a native owner during deliberate transfer.
+- Named structs move by default; primitives and structural aggregates whose contents
+  all copy are implicitly copyable. Ownership completion in HIR checks initialization,
+  partial moves, immutable assignment, branch joins, and loop exits/backedges, including
+  unused definitions. Moving an immutable owner is allowed. Completed HIR makes moves
+  explicit; LIR specializes borrowed reads and emits transfer/cleanup operations.
+  References and raw pointers retain unchecked lifetimes and mutable aliasing; there is
+  no borrow checker. `pointer:replace(replacement)` transfers a referent while leaving
+  initialized storage. Shared owners require explicit visible `clone` operations.
+  `ICopy`/`IClone`, traits, effects, and general function CTFE remain deferred.
   See `doc/lifetimes.md` for lifecycle rules.
 - Pointer families distinguish one value from a sequence: `Ptr<T>` / `Span<T>` are
   borrowed, `ArcPtr<T>` / `ArcSpan<T>` retain host ownership, `WeakPtr<T>` /
   `WeakSpan<T>` observe host ownership, and `GpuPtr<T>` / `GpuSpan<T>` retain GPU
   ownership. All are ordinary value types; there are no unsized payload types.
   `ArcPtr<Span<T>>` owns a descriptor, while `ArcSpan<T>` owns its elements.
-  `ArcSpan<T>.alloc(count, initial)` returns `(ArcSpan<T> | Err<OutOfMemory>)`, checks
-  allocation arithmetic, and initializes every element using ordinary copying.
+  `arc_span_alloc::<T>(count, initial)` returns `(ArcSpan<T> | Err<OutOfMemory>)`, checks
+  allocation arithmetic, and initializes every element using a copyable initializer.
   Final release destroys elements in reverse order. `get()` borrows a `Span<T>`;
-  `ArcPtr<T>.alloc(initial)` allocates one initialized value. Both are ordinary
-  source methods from `$/shared.resin`, backed by non-generic `StrongOwner` and
+  `arc_ptr_alloc(initial)` moves one initialized value into its allocation. Both are ordinary
+  source functions from `$/shared.resin`, backed by non-generic `StrongOwner` and
   `WeakOwner` primitives. Initialize native handles inside an inert shared payload.
   Borrowed views do not retain the owner. Numeric spans expose exact element bytes
   through `as_bytes()`. Image pixel writes accept bounded `Span<ubyte>` views.
@@ -324,20 +331,20 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   dispatch/draw consume completed projection plans checked again by the verifier.
   Pipeline tokens bind root, owner, and stage; validate them before projecting arguments.
   Host GPU access uses `load`, `store`, and `replace`, with no raw host pointer escape.
-  `gpu.create(initial)`, `gpu.alloc::<T>(count)`, and `gpu.alloc_in::<T>(count, memory)`
-  are ordinary generic source methods. Shader-declaration factories keep explicit native bridges.
+  `gpu:create(initial)`, `gpu:alloc::<T>(count)`, and `gpu:alloc_in::<T>(count, memory)`
+  are ordinary generic source functions. Shader-declaration factories keep explicit native bridges.
 - String literals have primitive type `str`, distinct from `Span<ubyte>` and the owned
   nominal `String`. They expose `data` and `length` over static NUL-terminated bytes;
   length excludes the appended terminator. Literal storage may be shared; treat it as read-only.
   `bytes(text)` from `$/span.resin` explicitly borrows literal bytes; never implicitly convert a `str`
-  to a span or construct a `str` from arbitrary bytes. `String.from_str(text)` copies a
-  `str`, and `String.from_bytes(bytes)` copies a raw byte span. Both append a NUL outside
+  to a span or construct a `str` from arbitrary bytes. `string_from_str(text)` copies a
+  `str`, and `string_from_bytes(bytes)` copies a raw byte span. Both append a NUL outside
   their logical length. `fmt(format, arguments)` returns `String`, wrapping
   `ArcSpan<ubyte>`; import `$/string.resin` for `String`, `fmt`, and `print`.
   Formatting and reference counting are host-only. Format tuple arguments use
-  `value.bytes()` for source String and span wrappers; the primitive accepts an
+  `value:bytes()` for source String and span wrappers; the primitive accepts an
   explicit `(Ptr<ubyte>, ulong)` byte view and does not recognize nominal wrapper names.
-  `print(text)` and the ordinary `Io.stdout().write(text)` / `Io.stderr().write(text)` methods
+  `print(text)` and the ordinary `io_stdout():write(text)` / `io_stderr():write(text)` methods
   accept `str`, `Span<ubyte>`, and `String` and write bytes verbatim. Use `.data` when
   passing literal storage to C. Ordinary byte arrays contain exactly their declared
   elements, without a sentinel; nested array stride follows the packed shared layout.
@@ -366,14 +373,11 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Structs may bind named type parameters; their fields retain those parameters in
   HIR and constructors use explicit applications such as `Cell<int> { value = 1 }`.
   Local field-only structs capture enclosing type binders in their nominal identity.
-  Methods inherit their owner's type binders and may add their own named parameters.
-  Method turbofish arguments supply only those additional parameters; owner arguments
-  come from the receiver or applied type. An associated method reference includes its
-  receiver parameter, with no implicit bound closure. Drop hooks bind only owner parameters.
-  A bound receiver whose nominal origin is unknown retains dependent field/method lookup.
-  Such method applications require explicit additional type arguments; a missing turbofish
-  supplies none. This lookup selects source-declared nominal methods. Signature queries
-  determine argument and result types without adding inference to LIR.
+  Free operations declare their whole type-parameter list. Colon-call turbofish arguments
+  supply those same parameters; signatures may infer them from every operand and result.
+  Generic drop hooks bind only owner parameters. Dependent field and operation relations
+  remain explicit in HIR; signature queries determine parameter and result types before
+  concrete storage lowering. Do not reopen source inference during specialization.
   Check source expressions into HIR, then lower that tree to LIR in a separate pass.
   Resolve dependency groups and all inference variables before handing the tree to lowering;
   retain named binders and determining member types in HIR. Scopes store these HIR schemes.
@@ -389,18 +393,20 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Pipeline creation accepts decorated shader declarations directly and requests their compiled
   representation internally. Shader functions have no bytecode property. Runtime shader aliases
   remain unsupported. Keep shader definitions inline in examples.
-- Arrays, `Span<T>`, and `str` provide indexing with `items.at(index)`, returning `Ref<T>`
+- Arrays, `Span<T>`, and `str` provide indexing with `items:at(index)`, returning `Ref<T>`
   (`Ref<ubyte>` for `str`);
   its index parameter is `ulong`, with explicit conversions for other integer types.
-  Use `items.at(index)` to read or write, and `&items.at(index)` for a pointer.
+  Use `items:at(index)` to read or write, and `&items:at(index)` for a pointer.
   Arrays retain the earlier `items(index)` spelling;
-  source spans use `.at(index)`.
+  source spans use `:at(index)`.
   Bounds checking is not part of the indexing contract. Host indexing diagnoses invalid indices;
   shader indexing is unchecked, and callers must stay within valid storage.
   Places remain a compiler expression category. Source `Ref<T>` bindings and function
   results expose a fixed, nonowning alias to initialized storage. Unannotated locals and
-  plain result holes infer value types; `var alias: Ref<T> = place;` retains the alias.
-  Assignment writes its referent and `&alias` yields `Ptr<T>`. HIR retains reference use;
+  plain result holes infer value types; `let alias: Ref<T> = place;` retains the alias.
+  Assignment writes its referent even through an immutable reference binding; `&alias`
+  yields `Ptr<T>`. Ref parameters accept temporary arguments alive through the full
+  expression; escaping aliases do not retain them. HIR retains reference use;
   specialization translates it to address/read operations and the existing pointer ABI.
   Reject direct reference aggregate payloads, nested references, and reference-valued
   generic arguments. Shader-local addresses retain their existing escape restrictions.
@@ -416,13 +422,13 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   removes `None` or traps, preserving the other members; it preserves `Err` members.
   `T | Err<E>` is an ordinary union; success values are plain and `Err(value)` wraps errors. Exhaustive `match` handles it, and postfix
   `?` returns early on error. Error holes collect the least union of propagated errors (`Never`
-  if empty). Keep mutable pointers invariant; implicit widening only copies union/Err values.
+  if empty). Keep mutable pointers invariant; widening preserves ownership transfer for union/Err values.
 - Initialized owners are destroyed in reverse scope order on normal exit and `?`;
   preserve returned values before cleanup. Chain expressions with no tail yield unit.
   Standard-library wrappers return error unions and keep integer-status C declarations private;
-  public operations use static and instance methods on resource types. `RuntimeError` is a union of named status errors.
+  public operations are exported free functions on resource types. `RuntimeError` is a union of named status errors.
   Standard-library resource handles now retain shared owners and clean up automatically;
-  do not register manual native destruction for them. `commands.submit()` and `commands.cancel()`
+  do not register manual native destruction for them. `commands:submit()` and `commands:cancel()`
   clear the shared native handle; presentation returns `(false)` for skipped frames.
   Reference counting and custom destruction are host-only; shader consumption of
   managed values is rejected.

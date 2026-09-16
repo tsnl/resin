@@ -1,5 +1,5 @@
 ==================
-Type binders and explicit function and method applications
+Type binders and explicit function and colon applications
 ==================
 struct Pair<T> {
     first: T,
@@ -29,33 +29,15 @@ fn example()  {
           (union_type
             (unary_type
               (primary_type
-                (uid)))))))
-    (function_definition
-      (lid)
-      (type_parameters
-        (uid))
-      (declare
-        (lid)
-        (type
-          (infix_type
-            (union_type
-              (unary_type
-                (uid)
-                (type_arguments
-                  (type
-                    (infix_type
-                      (union_type
-                        (unary_type
-                          (primary_type
-                            (uid))))))))))))
-      (declare
-        (lid)
-        (type
-          (infix_type
-            (union_type
-              (unary_type
-                (primary_type
-                  (uid)))))))
+                (uid))))))))
+  (function_definition
+    (lid)
+    (type_parameters
+      (uid)
+      (uid))
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type
@@ -67,34 +49,55 @@ fn example()  {
                     (union_type
                       (unary_type
                         (primary_type
-                          (uid)))))))))))
-      (block_body
-        (term
-          (assignment_term
-            (binary_term
-              (unary_term
-                (postfix_term
-                  (primary_term
-                    (constructor_term
-                      (unary_type
-                        (uid)
-                        (type_arguments
-                          (type
-                            (infix_type
-                              (union_type
-                                (unary_type
-                                  (primary_type
-                                    (uid))))))))
-                      (record_term
-                        (term_define
-                          (lid)
-                          (term
-                            (assignment_term
-                              (binary_term
-                                (unary_term
-                                  (postfix_term
-                                    (primary_term
-                                      (lid)))))))))))))))))))
+                          (uid))))))))))))
+    (parameter
+      (binding_pattern
+        (lid))
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (primary_type
+                (uid)))))))
+    (type
+      (infix_type
+        (union_type
+          (unary_type
+            (uid)
+            (type_arguments
+              (type
+                (infix_type
+                  (union_type
+                    (unary_type
+                      (primary_type
+                        (uid)))))))))))
+    (block_body
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (constructor_term
+                    (unary_type
+                      (uid)
+                      (type_arguments
+                        (type
+                          (infix_type
+                            (union_type
+                              (unary_type
+                                (primary_type
+                                  (uid))))))))
+                    (record_term
+                      (term_define
+                        (lid)
+                        (term
+                          (assignment_term
+                            (binary_term
+                              (unary_term
+                                (postfix_term
+                                  (primary_term
+                                    (lid))))))))))))))))))
   (type_definition
     (type_define
       (uid)
@@ -122,8 +125,9 @@ fn example()  {
     (lid)
     (type_parameters
       (uid))
-    (declare
-      (lid)
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type
@@ -150,7 +154,8 @@ fn example()  {
       (statement
         (define
           (local_define
-            (lid)
+            (binding_pattern
+              (lid))
             (term
               (assignment_term
                 (binary_term
@@ -173,7 +178,8 @@ fn example()  {
       (statement
         (define
           (local_define
-            (lid)
+            (binding_pattern
+              (lid))
             (term
               (assignment_term
                 (binary_term
@@ -212,33 +218,29 @@ fn example()  {
               (unary_term
                 (postfix_term
                   (primary_term
-                    (unary_type
-                      (uid)
-                      (type_arguments
-                        (type
-                          (infix_type
-                            (union_type
-                              (unary_type
-                                (primary_type
-                                  (builtin_type)))))))))
-                  (method_call
-                    (lid)
-                    (type_application
-                      (type_arguments
-                        (type
-                          (infix_type
-                            (union_type
-                              (unary_type
-                                (primary_type
-                                  (builtin_type))))))))
-                    (arguments
-                      (term
-                        (assignment_term
-                          (binary_term
-                            (unary_term
-                              (postfix_term
-                                (primary_term
-                                  (number)))))))))))))))
+                    (lid))
+                  (type_application
+                    (type_arguments
+                      (type
+                        (infix_type
+                          (union_type
+                            (unary_type
+                              (primary_type
+                                (builtin_type))))))
+                      (type
+                        (infix_type
+                          (union_type
+                            (unary_type
+                              (primary_type
+                                (builtin_type))))))))
+                  (arguments
+                    (term
+                      (assignment_term
+                        (binary_term
+                          (unary_term
+                            (postfix_term
+                              (primary_term
+                                (number))))))))))))))
       (statement
         (term
           (assignment_term

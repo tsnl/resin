@@ -64,7 +64,8 @@ fn main () -> ()  {
       (statement
         (define
           (local_define
-            (lid)
+            (binding_pattern
+              (lid))
             (term
               (assignment_term
                 (binary_term

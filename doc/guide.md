@@ -174,16 +174,16 @@ The exported entry may use the conventional three-argument form:
 
 ```resin
 export { main };
-import { "$/string.resin", "$/process.resin" };
+import { "$/string.resin", "$/process.resin", "$/span.resin" };
 
-def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> () = {
-    var args = arguments(argc, argv);
-    var index = 1_ul;
-    while (index < args.length) {
-        print(fmt("{0}\n", (argument(args, index).bytes(),)));
-        index := index + 1_ul;
-    };
-};
+fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> () {
+	let args = arguments(argc, argv);
+	let mut index = 1_ul;
+	while (index < args.length) {
+		print(fmt("{0}\n", (argument(args, index):bytes(),)));
+		index = index + 1_ul;
+	};
+}
 ```
 
 The runtime deep-copies the argument and environment arrays and strings before entering Resin.
@@ -303,13 +303,17 @@ CI checks the examples with `--format --check` on Linux, macOS, and Windows.
 export { main };
 import { "$/string.resin" };
 
-def fibonacci(n: int) -> int = {
-    if (n <= 1) { n } else { fibonacci(n - 1) + fibonacci(n - 2) }
-};
+fn fibonacci(n: int) -> int {
+	if (n <= 1) {
+		n
+	} else {
+		fibonacci(n - 1) + fibonacci(n - 2)
+	}
+}
 
-def main() = {
-    print(fmt("fibonacci(10) = {0}\n", (fibonacci(10),)));
-};
+fn main() {
+	print(fmt("fibonacci(10) = {0}\n", (fibonacci(10),)));
+}
 ```
 Functions use `fn` and are top-level, immutable definitions. Parameter types are explicit;
 omitting the result annotation means `()`. Non-unit results require `-> T` or explicit inference
@@ -331,8 +335,8 @@ callee first, followed by arguments from left to right.
 Files contain only function, foreign, type, and constant declarations, after their export/import clauses.
 There are no global variables or executable top-level statements. Values and mutable state
 belong inside functions and are passed explicitly to helpers, by value or pointer.
-Local value bindings use `let mut name = value;`, or `let mut name: Type;` to reserve uninitialized storage.
-Assignment still uses `name = value`. `struct Point { x: int, y: int };` creates a nominal type;
+Local bindings use `let name = value;`, or `let name: Type;` to reserve uninitialized storage.
+Use `let mut name = value;` for direct reassignment. Assignment uses `name = value` and returns unit. `struct Point { x: int, y: int }` creates a nominal type;
 `type Position = Point;` is a transparent alias for that same type. Only `struct` creates
 a new nominal identity. Construct values with `Point { x = 1, y = 2 }`.
 Record initializers keep bare `name = value`
@@ -354,12 +358,12 @@ Local constants become visible after their specification, and can shadow outer n
 ```resin
 const answer: int = 40 + 2;
 const (
-    read: uint = 1 << iota;    // 1
-    write: uint = 1 << iota;   // 2
-    _ = iota;                 // Skip index 2.
-    execute: uint = 1 << iota; // 8
+	read: uint = 1 << iota; // 1
+	write: uint = 1 << iota; // 2
+	_ = iota; // Skip index 2.
+	execute: uint = 1 << iota; // 8
 );
-const reset = iota;         // 0, with type long.
+const reset = iota; // 0, with type long.
 ```
 
 `iota` starts at zero in each `const` declaration and increments once per specification,
@@ -382,10 +386,12 @@ including in unused declarations. Floating-point operations round at their decla
 `sizeof(Type)` returns the native value size in bytes as `ulong`, including padding:
 
 ```resin
-struct Pair<T> { first: T, second: T };
+struct Pair<T> { first: T, second: T }
 const pair_bytes = sizeof(Pair<int>); // 8
-const real_bytes = sizeof(float64);  // 8
-def size<T>() -> ulong = { sizeof(T) };
+const real_bytes = sizeof(float64); // 8
+fn size<T>() -> ulong {
+	sizeof(T)
+}
 ```
 Only a type operand is accepted; `sizeof(value)` is an error. Generic queries resolve when
 the function is specialized. A `const` initializer must determine its size at declaration.
@@ -426,7 +432,7 @@ An `if` without `else` has an implicit unit branch, so its body must also yield 
 
 ```resin
 if (count > 0_ul) {
-    count := count - 1_ul;
+    count = count - 1_ul;
 };
 ```
 
@@ -441,15 +447,17 @@ Write `_` to request a concrete type inferred from the surrounding code:
 export { main };
 import { "$/string.resin" };
 
-def next(n: int) -> _ = { n + 1 };
+fn next(n: int) -> _ {
+	n + 1
+}
 
-def main() = {
-    var value: _;
-    var pointer: Ptr<_>;
-    value := next(41);
-    pointer := &value;
-    print(fmt("value = {0}\n", (pointer.*,)));
-};
+fn main() {
+	let mut value: _;
+	let mut pointer: Ptr<_>;
+	value = next(41);
+	pointer = &value;
+	print(fmt("value = {0}\n", (pointer.*,)));
+}
 ```
 Holes can nest inside local annotations, local type ascriptions, and function
 return annotations: `Ptr<Ptr<_>>`, `Span<_>`, `(_, Ptr<_>)`, and `(int) -> _`
@@ -474,26 +482,33 @@ inference behavior. Run `cargo run -- examples/inference.resin` for an example.
 
 ## Unions and errors
 
-Unions are structural sets of nominal structs: `A | B`, `B | A`, and `A | B | A`
+Unions are structural sets of value types: `A | B`, `B | A`, and `A | B | A`
 are the same type. Aliases preserve the identities of their targets. A variant's u32
-tag identifies its struct throughout a compiled program; it is not its position in a
+tag identifies its member type throughout a compiled program; it is not its position in a
 particular union. Tags are not persistent IDs across separate builds.
 `Never` is the empty union. Structs and aliases are declared in source order;
 a struct can refer to itself through a pointer, but aliases cannot introduce cycles.
 
 ```resin
-struct DivideByZero {};
-struct NegativeInput { value: int };
+struct DivideByZero {}
+struct NegativeInput { value: int }
 type CalculationError = DivideByZero | NegativeInput;
 
-def divide(n: int, d: int) -> (int | Err<DivideByZero>) = {
-    if (d == 0) { Err(DivideByZero {}) } else { (n / d) }
-};
+fn divide(n: int, d: int) -> (int | Err<DivideByZero>) {
+	if (d == 0) {
+		Err(DivideByZero {})
+	} else {
+		(n / d)
+	}
+}
 
-def calculate(n: int) -> (int | Err<_>) = {
-    if (n < 0) { Err(NegativeInput { value = n }) }
-    else { (divide(n, 2)?) }
-};
+fn calculate(n: int) -> (int | Err<_>) {
+	if (n < 0) {
+		Err(NegativeInput { value = n })
+	} else {
+		(divide(n, 2)?)
+	}
+}
 ```
 
 `T | Err<E>` is an ordinary union. Return a plain `T` for success and `Err(error)`
@@ -509,12 +524,12 @@ Success holes remain monomorphic and need a determining value or annotation.
 Postfix `?` evaluates its operand once. If the active member is an `Err`, it
 returns that wrapper immediately; otherwise it yields the remaining value.
 It preserves all non-error members, so `(int | str | Err<E>)?` yields `int | str`.
-The enclosing result must include every propagated error. Copied unions and error
-payloads may widen; mutable pointers remain invariant.
+The enclosing result must include every propagated error. Union and error values
+may widen while preserving their ownership transfer; mutable pointers remain invariant.
 Handle failures with exhaustive, duplicate-free matches:
 
 ```resin
-def describe(result: (int | Err<CalculationError>)) = {
+fn describe(result: (int | Err<CalculationError>))  {
     match (result) {
         int(value) => { print(fmt("value = {0}\n", (value,))) },
         Err(error) => {
@@ -524,7 +539,7 @@ def describe(result: (int | Err<CalculationError>)) = {
             }
         },
     }
-};
+}
 ```
 
 Host entry points can return `(() | Err<E>)` or `(int | Err<E>)`; an unhandled
@@ -534,89 +549,123 @@ Helpers using `Err` and `match` also compile to SPIR-V. C uses a tag and a union
 payloads; shader values use a tag and separate payload fields.
 Shared host/device buffer layouts for tagged values are not yet supported.
 
-The standard library's `RuntimeStatus.from_code(code)` converts native status integers to
+The standard library's `runtime_status_from_code(code)` converts native status integers to
 `(() | Err<RuntimeError>)`. `RuntimeError` is a union of named errors such as
 `InvalidArgument`, `OutOfMemory`, and `IoError`; `UnknownRuntimeError { code }`
-preserves unrecognized codes. `RuntimeStatus.code(error)` and `RuntimeStatus.message(error)`
+preserves unrecognized codes. `runtime_status_code(error)` and `runtime_status_message(error)`
 recover the native code and C diagnostic string. Standard-library operations already
-return error unions, so callers normally use `Gpu.new()?` rather than converting statuses.
+return error unions, so callers normally use `gpu_new()?` rather than converting statuses.
 Standard-library resources release themselves on scope exit, including early returns
-through `?`. Copies retain shared ownership.
+through `?`. Explicit clones retain shared ownership.
 
-### Ownership and methods
+### Ownership and operations
 
-`T | None` is an ordinary union containing the builtin singleton `None`. Values of
-`T` widen into it directly. Exhaustive `match` handles absence; postfix `optional!`
-removes `None` or traps. See [optional values](options.md).
+`T | None` is an ordinary union containing the builtin singleton `None`. Values
+widen into it directly; postfix `optional!` removes `None` or traps. See
+[optional values](options.md).
 
-All values use compiler-defined copying. Reading a named value copies it; applying
-a function or type consumes the resulting argument value. Infix operators follow
-the same rule, and tuple, record, and array constructors consume their initializers
-directly into fields or elements. Fresh expression results do not incur an extra
-copy or destruction simply because they cross an application boundary.
+Named structs move when assigned, passed, returned, or placed in an aggregate.
+The compiler rejects subsequent uses of a moved value. Primitive values copy,
+as do tuples, arrays, unions, and error wrappers whose contents all copy.
+A struct remains noncopyable even when every field copies. `Copy`/`Clone`
+interfaces are deferred; library `clone` functions are ordinary overloads.
 
 ```resin
-struct Resource { handle: Ptr<ubyte>,
-    def drop(self: Ptr<Resource>) = {
-        if (ulong(self.handle) != 0_ul) { release_native_handle(self.handle); };
-    },
-};
-
-// Inside a function:
-var shared = ArcPtr<Resource>.alloc(Resource { handle = Ptr<ubyte>(0_ul) })?;
-shared.get().handle := acquire_native_handle();
-var alias = shared; // Retains the same allocation; does not copy Resource.
-var weak = shared.downgrade();
+struct Item { value: int }
+fn read(item: Ref<Item>) -> int {
+	item.value
+}
+fn consume(item: Item) -> int {
+	item.value
+}
+fn example() -> int {
+	let item = Item { value = 21 };
+	let before = item:read(); // Borrow without moving.
+	let moved = item;
+	// item is now unavailable.
+	before + consume(moved)
+}
 ```
-Import `$/shared.resin` for the owner types. The example assumes native
-acquire/release declarations for the wrapped library. `alloc` copies its initializer;
-allocate an inert payload before acquiring a native handle to avoid copying live
-resources. Handle native acquisition errors before returning a completed wrapper.
-`Ptr<ArcPtr<T>>` points to the handle; `arc.get()` returns a pointer to the pointee.
-`weak.upgrade()` returns `ArcPtr<T> | None`, matched with `ArcPtr<T>(owner)` and
-`None` arms. See [the shared ownership example](../examples/shared.resin).
 
-A copied struct receives its own `drop()`. Native-library authors must therefore
-make copies safe or expose an ArcPtr-based interface that avoids copying the inner
-owner. There is no static move checking or borrow checking. A wrapper-specific
-transfer function can extract its native handle using `pointer.replace(replacement)`
-and return a fresh owner while leaving the source disarmed. Raw pointers and spans
-still require the programmer to maintain their lifetimes.
+Structs contain fields only. `item:read()` calls the visible free function
+`read(item)`; its signature determines ownership just like any other call.
+Operations can be overloaded on all their arguments. Export them separately from
+the types they use. See [free operations](methods.md).
 
-Destructors run before fields are released, and scopes clean up in reverse order.
-Reference counting and custom destructors are host-only; shaders reject consumption
-of managed values while allowing ordinary fields alongside opaque managed slots.
-See the [ownership specification](lifetimes.md) for exact rules and
-current limitations. The [ownership example](../examples/ownership.resin) demonstrates
-cleanup on success and early error returns. Do not manually free resources already
-owned by a standard-library wrapper.
+`let` is immutable by default; `let mut` permits direct assignment, which returns
+unit. Moving an immutable owner is allowed. A declared but uninitialized immutable
+binding may be initialized once. Parameters and match binders use the same
+identifier pattern, with optional `mut`:
 
-The pointer families distinguish single values from sequences:
+```resin
+fn increment(mut value: int) -> int {
+	value = value + 1;
+	value
+}
+fn increment_optional(value: int | None) -> int {
+	match (value) {
+		int(mut number) => {
+			number = number + 1;
+			number
+		},
+		None => {
+			0
+		},
+	}
+}
+```
+
+Ownership analysis runs during HIR completion, after inference, including unused
+function bodies. It tracks initialization and moved field paths in evaluation
+order, intersects reachable branch states, and checks loop backedges. Disjoint
+fields remain usable after a partial move; fields of a type with a drop hook
+cannot be moved out. LIR specializes operations and emits transfers and cleanup.
+
+References and pointers have unchecked lifetimes and mutable aliasing. A
+`Ref<T>` parameter accepts a place or a temporary that survives the full expression.
+Reading a noncopyable value through an alias is rejected; use
+`pointer:replace(replacement)` to transfer it and leave valid storage behind.
+An immutable reference binding can still write its referent. See
+[references](references.md) for the distinction between binding mutability and
+unchecked alias access.
+
+Shared owners retain allocations explicitly:
+
+```resin
+import { "$/shared.resin", "$/status.resin" };
+fn example() -> int | Err<OutOfMemory> {
+	let owner = arc_ptr_alloc(21_i)?;
+	let retained = owner:clone();
+	let moved = owner;
+	retained:get().* + moved:get().*
+}
+```
+
+`arc_ptr_alloc(initial)` consumes its initializer into one allocation.
+`arc_span_alloc(count, initial)` repeats a copyable initializer; move-only values
+cannot be repeated. Allocation checks size arithmetic and reports `OutOfMemory`.
+The final owner destroys elements in reverse order. `get` borrows a pointer or
+span without retaining the allocation; keep an owner alive while using that view.
+`downgrade` produces a weak handle, and `upgrade` returns a retained handle or
+`None`. Reference counting protects allocation lifetime, not concurrent access or
+raw aliases.
 
 | Ownership | One value | Sequence |
 | --- | --- | --- |
-| Borrowed | `Ptr<T>` | `Span<T>` |
+| Nonowning | `Ptr<T>` | `Span<T>` |
 | Shared host | `ArcPtr<T>` | `ArcSpan<T>` |
 | Weak host | `WeakPtr<T>` | `WeakSpan<T>` |
 | GPU | `GpuPtr<T>` | `GpuSpan<T>` |
 
-`Span<T>` is an ordinary address/count descriptor. `ArcSpan<T>` owns the actual
-elements, while `ArcPtr<Span<T>>` owns only a shared descriptor. There are no unsized
-payload types. Import `$/shared.resin` to create an initialized host sequence:
+A free `fn drop(value: Ptr<Item>) { ... }` declared alongside `Item` supplies its
+cleanup hook. It runs before fields are destroyed. Scope exit and early returns
+clean up owners in reverse order; moves suppress cleanup of the source. Custom
+destruction and reference counting remain host-only. See [lifetimes](lifetimes.md)
+and [the ownership example](../examples/ownership.resin).
 
-```resin
-var values = ArcSpan<uint>.alloc(64, 0_ui)?; // ArcSpan<uint>
-values.get().at(0) := 42_ui;
-var view = values.get();          // Span<uint>
-var bytes = view.as_bytes();        // Span<ubyte>
-```
-
-Allocation checks size arithmetic and reports `OutOfMemory`; each element receives
-an ordinary copy of the initial value. The final owner destroys elements in reverse
-order. `get()` returns a borrowed view, so keep an owner alive while using it.
-Numeric spans expose their in-memory bytes through `as_bytes()`. Sequence weak
-references follow the same operations: `downgrade()` returns `WeakSpan<T>`, and
-`upgrade()` returns `ArcSpan<T> | None`.
+Effects, traits, inheritance, and general compile-time execution of functions are
+not part of this language revision. Numeric constants and layout queries retain
+their existing compile-time behavior.
 
 ## Loops
 
@@ -626,15 +675,15 @@ references follow the same operations: `downgrade()` returns `WeakSpan<T>`, and
 export { main };
 import { "$/string.resin" };
 
-def main() -> () = {
-    var n = 1;
-    var sum = 0;
-    while (n <= 10) {
-        sum := sum + n;
-        n := n + 1;
-    };
-    print(fmt("sum = {0}\n", (sum,)));
-};
+fn main() -> () {
+	let mut n = 1;
+	let mut sum = 0;
+	while (n <= 10) {
+		sum = sum + n;
+		n = n + 1;
+	};
+	print(fmt("sum = {0}\n", (sum,)));
+}
 ```
 
 `true` and `false` are literals of type `bool`.
@@ -653,92 +702,77 @@ Named type parameters bind one type throughout a definition. Calls infer their
 arguments from values and expected results; explicit function arguments use `::<T>`:
 
 ```resin
-struct Pair<T> { left: T, right: T };
+struct Pair<T> { left: T, right: T }
 type View<T> = Ptr<Pair<T>>;
 
-def first<T>(pair: Pair<T>) -> T = { pair.left };
-def identity<T>(value: T) -> T = { value };
+fn first<T>(pair: Pair<T>) -> T {
+	pair.left
+}
+fn identity<T>(value: T) -> T {
+	value
+}
 
-def example() -> int = {
-    var pair = Pair<int> { left = 40, right = 2 };
-    first(pair) + identity::<int>(2)
-};
+fn example() -> int {
+	let pair = Pair<int> { left = 40, right = 2 };
+	first(pair) + identity::<int>(2)
+}
 ```
 Struct constructors take explicit type arguments. Different applications retain
 distinct nominal types, even if their layouts agree; aliases keep their target's
 identity. Pointer fields may recurse through the same generic declaration. Local
 structs remain field-only and can use enclosing function type parameters.
 
-Methods share their struct's parameters and can add their own:
+Free operations declare their own complete type parameter list. Colon calls
+pass the receiver first and can infer generic arguments from the whole signature:
 
 ```resin
-struct Cell<T> {
-    value: T,
-    def read(self: Cell<T>) -> T = { self.value },
-    def replace_with<U>(self: Cell<T>, value: U) -> Cell<U> = {
-        Cell<U> { value = value }
-    },
-};
-
-def methods() -> int = {
-    var original = Cell<ulong> { value = 7 };
-    var changed = original.replace_with::<int>(42);
-    var read = Cell<int>.read;
-    read(changed)
-};
-```
-The receiver fixes the struct's arguments. Method `::<...>` supplies only the
-additional parameters; omitting it allows deduction from arguments and expected
-results. `Cell<int>.read` is a function value whose first parameter is still the
-receiver. A generic `drop(self: Ptr<Cell<T>>)` hook uses the owner's parameters
-and cannot add its own.
-
-When a receiver's nominal type is itself a parameter, method lookup is dependent:
-
-```resin
-def read<T>(value: T) -> _ = { value.read() };
-def replace<T, U>(value: T, next: U) -> _ = {
-    value.replace_with::<U>(next)
-};
+struct Cell<T> { value: T }
+fn replace_with<T, U>(cell: Cell<T>, value: U) -> Cell<U> {
+	Cell<U> { value = value }
+}
+fn take<T>(cell: Cell<T>) -> T {
+	cell.value
+}
+fn example() -> int {
+	let original = Cell<ulong> { value = 7 };
+	let changed = original:replace_with::<ulong, int>(42);
+	changed:take()
+}
 ```
 
-Each concrete application selects the source-declared method and checks the call.
-Dependent methods can be chained with field accesses, and associated calls or
-references can use `T.method::<U>`. Additional method parameters require explicit
-arguments when the receiver's namespace is unknown. See [methods](methods.md).
+Generic bodies retain their visible overload candidates. Once operand types are
+concrete, signature substitution selects one applicable operation. Ambiguity is
+an error; a failing body is never used to discard a candidate. Caller imports do
+not change the definition's candidate set. See [free operations](methods.md).
 
 `_` is a weak inference variable in local annotations, function results, and
 explicit applications. It may resolve to a named parameter but never creates
 another generic parameter. Unsuffixed literals follow expected types before
 falling back to the ordinary integer/float defaults. Template bodies retain their
 type relationships; unsupported concrete operations and layouts fail when an
-application is required. There is no type inference during LIR specialization.
+application is required. Specialization substitutes these relations and selects concrete operations; it does
+not reopen source inference or use function bodies to deduce signature parameters.
 
 ## Operator overloading
 
-Declare Python-style dunder methods inside a struct to implement operators:
+Declare free functions with Python-style operator names:
 
 ```resin
-struct Vec2<T> { x: T, y: T,
-    def __add__(left: Vec2<T>, right: Vec2<T>) -> Vec2<T> = {
-        Vec2<T> { x = left.x + right.x, y = left.y + right.y }
-    },
-};
-
-def add<T>(left: T, right: T) -> _ = { left + right };
+struct Vec2 { x: int, y: int }
+fn __add__(left: Ref<Vec2>, right: Ref<Vec2>) -> Vec2 {
+	Vec2 { x = left.x + right.x, y = left.y + right.y }
+}
+fn __mul__(scale: int, value: Ref<Vec2>) -> Vec2 {
+	Vec2 { x = scale * value.x, y = scale * value.y }
+}
 ```
 
-Binary operators select a method from the left operand's type. Unary operators
-use their operand's type, such as `__neg__` for `-value`. The first parameter is
-the owning struct by value. Operators inherit the struct's type parameters;
-the other operand and result can use different types. Operands are evaluated
-once in order, with ordinary copying and cleanup, on both CPU and GPU.
-
-The methods remain callable by name: `left.__add__(right)` and
-`Vec2<int>.__add__(left, right)` use the same implementation as `left + right`.
-See the [operator mapping and rules](methods.md#operator-overloading), or run
-`cargo run -- examples/operators.resin` for vector addition, subtraction,
-negation, scaling, equality, and a helper shared with primitive numbers.
+Both operands participate in resolution. These signatures borrow vectors;
+value parameters would move them. Operands evaluate once, left to right.
+`__add__(left, right)` and `left:__add__(right)` select the same overload as
+`left + right`. Export the function to make it visible in another module.
+See the [operator mapping](methods.md#operator-overloading) and
+[vector example](../examples/operators.resin).
 
 ## Strings, formatting, and output
 
@@ -751,33 +785,33 @@ Literal storage may be shared; treat it as read-only.
 
 Import `$/span.resin` and use `bytes(text)` to explicitly borrow the bytes of a `str`; this preserves its pointer
 and length without copying. There is no implicit conversion, and arbitrary byte spans cannot
-be converted to `str`. `text.at(index)` returns a byte reference (`Ref<ubyte>`) and uses a `ulong` index.
+be converted to `str`. `text:at(index)` returns a byte reference (`Ref<ubyte>`) and uses a `ulong` index.
 
 Import `$/string.resin` for `String`, `fmt`, and `print`.
 `fmt(format, arguments)` is an ordinary generic host function returning `String`,
 a source wrapper with a `storage: ArcSpan<ubyte>` field. Its allocation owns the bytes and an additional
-trailing NUL outside their logical length. Copying a String retains the allocation; the final owner releases it.
+trailing NUL outside their logical length. Cloning a String retains the allocation; the final owner releases it.
 Extracting a raw span or pointer does not retain that owner.
-`String.from_str(text)` copies a `str` verbatim into an owned String. For raw bytes, use
-`String.from_bytes(span)`; the span need not be UTF-8 or have a NUL terminator. Both constructors
+`string_from_str(text)` copies a `str` verbatim into an owned String. For raw bytes, use
+`string_from_bytes(span)`; the span need not be UTF-8 or have a NUL terminator. Both constructors
 preserve embedded NULs and treat braces as ordinary bytes.
 
 ```resin
 export { main };
 import { "$/io.resin", "$/string.resin" };
 
-def main() -> (() | Err<_>) = {
-    var n = 42;
-    var message = fmt("n = {0}\n", (n,));
-    Io.stdout().write(message)?;
-    Io.stderr().write(fmt("diagnostic: {0}", (message.bytes(),)))?;
-    print("done\n");
-    (())
-};
+fn main() -> (() | Err<_>) {
+	let n = 42;
+	let message = fmt("n = {0}\n", (n,));
+	io_stdout():write(message)?;
+	io_stderr():write(fmt("diagnostic: {0}", (message:bytes(),)))?;
+	print("done\n");
+	(())
+}
 ```
 
 The format accepts `str`, `Span<ubyte>`, or `String`. In the argument tuple,
-use `view.bytes()` or `message.bytes()` for span and String values. These methods
+use `view:bytes()` or `message:bytes()` for span and String values. These methods
 provide an explicit structural byte view to the formatting primitive. Literal
 `str` arguments work directly. Other supported arguments are numbers, booleans,
 unit, and pointer addresses. The argument tuple is explicit, including the
@@ -786,8 +820,8 @@ trailing comma for a single argument. `{0}`, `{1}`, etc. are zero-based and may 
 Malformed formats and invalid indices terminate with a diagnostic before any formatted output
 is written. Formatting itself performs no output.
 
-`Io.stdout()` and `Io.stderr()` return ordinary library `Output` values. Their `write` method
-accepts `str | Span<ubyte> | String`, writes bytes verbatim, flushes, adds no newline, and returns
+`io_stdout()` and `io_stderr()` return ordinary library `Output` values. Their `write` method
+has overloads for `str`, `Ref<Span<ubyte>>`, and `Ref<String>`, writes bytes verbatim, flushes, adds no newline, and returns
 `(() | Err<WriteError>)`. The library function `print(text)` is a stdout shorthand returning unit;
 it terminates on an output error. Neither writer interprets braces. Both `fmt` and `print`
 are ordinary source functions and host-only.
@@ -799,7 +833,7 @@ constant storage for the device addresses used by Resin spans. Pass a span of up
 
 ## Console input
 
-Import `$/console.resin` for `Console.read_line()`, a line reader implemented in Resin on top of C's
+Import `$/console.resin` for `console_read_line()`, a line reader implemented in Resin on top of C's
 `getchar()`. It grows its buffer as needed and strips LF or CRLF. Write a prompt with `print`
 before reading:
 
@@ -807,18 +841,18 @@ before reading:
 export { main };
 import { "$/string.resin", "$/console.resin" };
 
-def main() -> (() | Err<_>) = {
-    print("Name: ");
-    var name = Console.read_line()?;
-    print("Hello, ");
-    Console.print(name)?;
-    print("!\n");
-    (())
-};
+fn main() -> (() | Err<_>) {
+	print("Name: ");
+	let name = console_read_line()?;
+	print("Hello, ");
+	console_print(name)?;
+	print("!\n");
+	(())
+}
 ```
 
-The result is a shared `InputLine` owner; `line.get()` borrows its `Span<ubyte>` view.
-Copies retain its allocation; the final owner frees it. `Console.print(line)` prints the bytes without adding a newline. Empty lines succeed, EOF before any
+The result is a shared `InputLine` owner; `line:get()` borrows its `Span<ubyte>` view.
+Explicit clones retain its allocation; the final owner frees it. `console_print(line)` prints the bytes without adding a newline. Empty lines succeed, EOF before any
 bytes returns `EndOfInput`, and a final line without a newline succeeds. Read and allocation
 failures are also explicit errors. See [the console API](../resin/README.md#console-input) for
 ownership and byte semantics, or run `cargo run -- examples/input.resin`.
@@ -832,21 +866,22 @@ clauses appear in that order before declarations. Each clause may appear only on
 export { answer };
 import { "helpers.resin", "$/status.resin" };
 
-def answer() -> int = { helper() };
+fn answer() -> int  { helper() }
 ```
 Imports bring only the dependency's exported names into the file's flat namespace. Without
 an export clause (or with `export {}`), everything is private. An exported function can use
 its private helpers and types. Imported bindings may be explicitly re-exported; dependencies
 are not implicitly re-exported. Functions, types, and constants can be exported.
 
-Two different bindings with the same name are an error, including imports conflicting with
-local definitions. Nested scopes can still shadow names. Re-importing the same binding through
+Different functions with the same name form an overload set, including imported
+functions. Calls must select exactly one signature. Conflicting types, constants,
+and nonfunction bindings remain errors. Nested scopes can still shadow names. Re-importing the same binding through
 multiple paths is harmless. Import paths without a leading `$` resolve relative to the
 importing file; each canonical file is loaded once. Imports never execute code. Import cycles are errors; mutually recursive
 functions within one file remain supported.
 `include` has been replaced by `import`.
 
-Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `fn`, `let mut`, `const`, `sizeof`, `if`,
+Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `fn`, `let`, `mut`, `const`, `sizeof`, `if`,
 `else`, `while`, and `match`), primitive type names, `Never`, and
 `Ptr`, `Err`, `None`, and the opaque compiler handle types are reserved,
 including in parameters and field names. Wrapper names such as `Span`, `ArcPtr`,
@@ -863,23 +898,23 @@ Other imports resolve relative to the importing file. Files have explicit import
 directories need no manifest or special entry file.
 The native Rust crate lives separately at `crates/resin-runtime/`; it has no dependency on the standard
 library. Programs use standard-library wrappers; the integer-status C ABI stays private
-to those modules. Public operations are static constructors and instance methods:
+to those modules. Public operations are exported free functions, including constructors and colon-call operations:
 
 - `$/gpu.resin`: devices, allocations, images, pipelines, and command recording.
-- `$/window.resin`: windows and input; `Gpu.new_for_window(window)` and `gpu.present(image)` live in `$/gpu.resin`.
+- `$/window.resin`: windows and input; `gpu_new_for_window(window)` and `gpu:present(image)` live in `$/gpu.resin`.
 - `$/image.resin`: PNG reading and writing.
-- `$/status.resin`: `RuntimeStatus` conversion methods and the `RuntimeError` union and its variants.
+- `$/status.resin`: Native status conversion functions and the `RuntimeError` union and its variants.
 - `$/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
-- `$/io.resin`: `Io.stdout().write(text)` and `Io.stderr().write(text)`.
+- `$/io.resin`: `io_stdout():write(text)` and `io_stderr():write(text)`.
 - `$/span.resin`: borrowed `Span<T>` and `bytes(text)` for literal byte views.
-- `$/shared.resin`: `ArcPtr<T>.alloc(initial)?`, `ArcSpan<T>.alloc(count, initial)?`, and weak owners.
-- `$/string.resin`: owned `String`, formatting with `fmt`, and `print`.
-- `$/console.resin`: `Console.read_byte()`, `Console.read_line()`, and shared `InputLine` owners with `Console.print(line)`.
+- `$/shared.resin`: `arc_ptr_alloc::<T>(initial)?`, `arc_span_alloc::<T>(count, initial)?`, and weak owners.
+- `$/string.resin`: owned `String`, `string_from_str`, `string_from_bytes`, `fmt`, and `print`.
+- `$/console.resin`: `console_read_byte()`, `console_read_line()`, and shared `InputLine` owners with `console_print(line)`.
 
 Pass decorated shader declarations directly to GPU pipeline creation. Compiled shader
 representations belong to code generation and the runtime; functions expose no bytecode property.
 GPU memory modes are exported `int` constants: `memory_default`, `memory_gpu`, and
-`memory_readback`. Pass them directly, for example `gpu.alloc_in::<uint>(count, memory_readback)`.
+`memory_readback`. Pass them directly, for example `gpu:alloc_in::<uint>(count, memory_readback)`.
 Run `cargo run -- examples/eg009_imports.resin` for an explicitly owned counter, or append
 `:independent` to run a second entry that uses two independent counters.
 
@@ -887,11 +922,11 @@ Run `cargo run -- examples/eg009_imports.resin` for an explicitly owned counter,
 export { main };
 import { "$/gpu.resin", "$/string.resin" };
 
-def main() -> (() | Err<_>) = {
-    var gpu = Gpu.new()?;
-    print("GPU ready\n");
-    (())
-};
+fn main() -> (() | Err<_>) {
+	let gpu = gpu_new()?;
+	print("GPU ready\n");
+	(())
+}
 ```
 
 ## Foreign functions
@@ -900,29 +935,28 @@ Standard-library modules keep native declarations private and export Resin wrapp
 check statuses before returning out-parameter values. For example:
 
 ```resin
-export { Gpu };
+export { Gpu, gpu_new };
 extern {
-    "resin_runtime.h": {
-        def resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
-        def resin_gpu_destroy(gpu: Ptr<ResinGpu>);
-    },
+	"resin_runtime.h": {
+		fn resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
+		fn resin_gpu_destroy(gpu: Ptr<ResinGpu>);
+	},
 };
 import { "$/status.resin", "$/shared.resin" };
 
 extern type ResinGpu;
-struct GpuOwner { handle: Ptr<ResinGpu>,
-    def drop(self: Ptr<GpuOwner>) = {
-        if (ulong(self.handle) != 0_ul) { resin_gpu_destroy(self.handle); };
-    },
-};
-struct Gpu { owner: ArcPtr<GpuOwner>,
-    def new() -> (Gpu | Err<RuntimeError>) = {
-        var owner = ArcPtr<GpuOwner>.alloc(GpuOwner { handle = Ptr<ResinGpu>(0_ul) })?;
-        RuntimeStatus.from_code(resin_gpu_create(&owner.get().handle))?;
-        (Gpu { owner = owner })
-    },
-};
-
+struct GpuOwner { handle: Ptr<ResinGpu> }
+fn drop(owner: Ptr<GpuOwner>) {
+	if (ulong(owner.handle) != 0_ul) {
+		resin_gpu_destroy(owner.handle);
+	};
+}
+struct Gpu { owner: ArcPtr<GpuOwner> }
+fn gpu_new() -> Gpu | Err<RuntimeError> {
+	let owner = arc_ptr_alloc(GpuOwner { handle = Ptr<ResinGpu>(0_ul) })?;
+	runtime_status_from_code(resin_gpu_create(&owner:get().handle))?;
+	Gpu { owner = owner }
+}
 ```
 Declare foreign functions in a top-level `extern` block after any `export` clause
 and before any `import` clause. Each header names a group of ordinary `fn`
@@ -957,22 +991,22 @@ into `ulong`, perform **byte** arithmetic, and convert back when low-level addre
 is necessary on the host. Shaders reject pointer casts; use typed pointers and indexing.
 Host pointer casts and all raw pointer dereferences remain unchecked.
 
-Arrays, spans, and `str` use `.at(index)` for indexing and return `Ref<T>` (`Ref<ubyte>` for `str`).
+Arrays, spans, and `str` use `:at(index)` for indexing and return `Ref<T>` (`Ref<ubyte>` for `str`).
 The index parameter is `ulong` (unsigned 64-bit); unsuffixed literals infer this type, while
-other integer values need an explicit conversion, such as `.at(ulong(i))`:
+other integer values need an explicit conversion, such as `:at(ulong(i))`:
 
 ```resin
-var values = [10_i, 20, 30];
-values.at(1) := 42;
-var view = Span<int> { data = &values.at(0), length = 3_ul };
-var element = view.at(1);
+let values = [10_i, 20, 30];
+values:at(1) = 42;
+let view = Span<int> { data = &values:at(0), length = 3_ul };
+let element = view:at(1);
 print(fmt("{0}\n", (element,)));
 ```
-Use `let mut element: Ref<int> = view.at(1);` to retain an alias instead of copying the
+Use `let element: Ref<int> = view:at(1);` to retain an alias instead of copying the
 value. Reference parameters and results expose the same place semantics in user
 functions; see [references](references.md) for binding, lifetime, and migration rules.
 
-Arrays retain the original `values(index)` spelling; source spans use `.at(index)`. `Span<T>` has `data: Ptr<T>`
+Arrays retain the original `values(index)` spelling; source spans use `:at(index)`. `Span<T>` has `data: Ptr<T>`
 and `length: ulong` fields. Host indexing checks
 the array or span length and terminates with a diagnostic for negative or out-of-range indices,
 before forming an element address. This failure does not unwind automatic cleanup.
@@ -1004,13 +1038,14 @@ export { main };
 import { "$/gpu.resin" };
 
 @compute_shader
-def kernel(index: ulong, output: Ptr<ulong>) = { output.* := index; };
-def main() -> (() | Err<_>) = {
-    var gpu = Gpu.new()?;
-    struct HostParams { values: GpuSpan<float32>, scale: float32 };
-var pipeline = gpu.create_compute_pipeline(kernel)?;
-    (())
-};
+fn kernel(index: ulong, output: Ptr<ulong>) {
+	output.* = index;
+}
+fn main() -> (() | Err<_>) {
+	let gpu = gpu_new()?;
+	let pipeline = gpu:create_compute_pipeline(kernel)?;
+	(())
+}
 ```
 
 `@compute_shader`, `@vertex_shader`, and `@fragment_shader` register shader candidates and
@@ -1020,8 +1055,8 @@ currently describe compiler-defined entry points; user-defined compile-time tran
 not implemented yet.
 
 Create typed pipelines from shader declarations with
-`gpu.create_compute_pipeline(kernel)` and
-`gpu.create_graphics_pipeline(vertex, fragment)`. Creation requests their embedded
+`gpu:create_compute_pipeline(kernel)` and
+`gpu:create_graphics_pipeline(vertex, fragment)`. Creation requests their embedded
 shader representation automatically and preserves the shader stage and root type.
 Creation currently requires direct declarations, including imported declarations; runtime
 function aliases are not accepted yet. A reachable pipeline creation site requests its shaders
@@ -1036,30 +1071,30 @@ imported helper changes invalidate them. Copied executables need the Vulkan load
 but neither Resin, source files, nor `spirv-opt` at runtime.
 
 Pass a typed pipeline and its host arguments to
-`commands.dispatch(pipeline, arguments, x, y, z)` or
-`commands.draw(pipeline, arguments, count)`. The compiler checks the arguments against
+`commands:dispatch(pipeline, arguments, x, y, z)` or
+`commands:draw(pipeline, arguments, count)`. The compiler checks the arguments against
 the pipeline and projects GPU views internally. Shader entries keep a typed pointer
 as their second parameter:
 
 ```resin
-struct Params { values: Span<float32>, scale: float32 };
+struct Params { values: Span<float32>, scale: float32 }
 
 @compute_shader
-def kernel(index: ulong, root: Ptr<Params>) -> () = {
+fn kernel(index: ulong, root: Ptr<Params>) -> ()  {
     if (index < root.values.length) {
-        var p: Ref<float32> = root.values.at(index);
-        p := p * root.scale;
+        let mut p: Ref<float32> = root.values:at(index);
+        p = p * root.scale;
         ()
     } else { () }
-};
+}
 ```
 The entry interfaces are:
 
-- Compute takes `(ulong, Ptr<T>)` and returns `()`. Call `gpu.compute_workgroup_size()`
+- Compute takes `(ulong, Ptr<T>)` and returns `()`. Call `gpu:compute_workgroup_size()`
   to get the `ulong` number of invocations per workgroup for that `Gpu`. The runtime
   selects it from the device's reported default subgroup size, bounded by its workgroup
   limits, and specializes each compute pipeline to match. The value stays fixed for
-  that GPU's lifetime. With `let mut workgroup_size = gpu.compute_workgroup_size();`, compute
+  that GPU's lifetime. With `let mut workgroup_size = gpu:compute_workgroup_size();`, compute
   dispatch groups with `uint((count + workgroup_size - 1_ul) / workgroup_size)`.
   The index is the global X invocation index. Dispatch only in X (`y = z = 1`) and guard
   any excess invocations in the function, as above.
@@ -1068,26 +1103,26 @@ The entry interfaces are:
   Position has `float32` fields `x, y, z, w`; Color has `r, g, b, a`, in those orders.
 - Fragment takes Color, optionally paired with `Ptr<T>`, and returns Color.
 
-Allocate typed GPU storage with `gpu.create(value)?` (an inferred `GpuPtr<T>`) or
-`gpu.alloc::<T>(count)?`. A host launch record replaces shader `Ptr<T>`
+Allocate typed GPU storage with `gpu:create(value)?` (an inferred `GpuPtr<T>`) or
+`gpu:alloc::<T>(count)?`. A host launch record replaces shader `Ptr<T>`
 and `Span<T>` fields with `GpuPtr<T>` and `GpuSpan<T>` values:
 
 ```resin
-var values = gpu.alloc::<float32>(1024)?;
-var index = 0_ul;
+let values = gpu:alloc::<float32>(1024)?;
+let mut index = 0_ul;
 while (index < values.length) {
-    values.at(index).store(1.0_f);
-    index := index + 1_ul;
+    values:at(index):store(1.0_f);
+    index = index + 1_ul;
 };
-struct HostParams { values: GpuSpan<float32>, scale: float32 };
-var pipeline = gpu.create_compute_pipeline(kernel)?;
-var commands = gpu.start_command_recording()?;
-commands.dispatch(pipeline, HostParams { values = values, scale = 2.0_f }, 16, 1, 1)?;
-commands.submit()?;
+struct HostParams { values: GpuSpan<float32>, scale: float32 }
+let pipeline = gpu:create_compute_pipeline(kernel)?;
+let commands = gpu:start_command_recording()?;
+commands:dispatch(pipeline, HostParams { values = values, scale = 2.0_f }, 16, 1, 1)?;
+commands:submit()?;
 ```
 
 Projection checks the shader root layout, translates owning views internally, and
-retains every referenced allocation. Use `commands.draw(pipeline, None, count)` for graphics
+retains every referenced allocation. Use `commands:draw(pipeline, None, count)` for graphics
 shaders without a root. Successful recording retains arguments and allocations
 through synchronous submission or cancellation. They must belong to the recording's
 GPU. See [GPU buffers](gpu-buffers.md).
@@ -1102,9 +1137,9 @@ Storage containing booleans, unit, or other numeric widths is rejected for now.
 
 Host `GpuPtr` and `GpuSpan` operations retain their allocation, including indexing,
 and slicing. `load`, `store`, and `replace` access elements on the host.
-`.read_only()` and `.write_only()` narrow per-view
+`:read_only()` and `:write_only()` narrow per-view
 access permissions. Host accesses check bounds, alignment, mapping, permissions,
-and pending recorded GPU use. `.copy_to(Span<T>)` copies into caller-owned host
+and pending recorded GPU use. `:copy_to(Span<T>)` copies into caller-owned host
 memory. GPU views cannot be converted to raw `Ptr` values; the compiler's shader
 projection is the host-to-device address conversion boundary. GPU buffer elements
 must have a shared layout without pointers, spans, owners, or drop hooks.
@@ -1112,7 +1147,7 @@ must have a shared layout without pointers, spans, owners, or drop hooks.
 Shader bodies support `ubyte`, 32-bit numbers, `long`, `ulong`, booleans, records, nominal types, local mutation,
 branches, loops, and direct calls to named Resin helpers. Foreign calls, recursion,
 indirect calls, and integer division/remainder/shifts are rejected. Arrays and spans support
-unchecked `.at()` indexing. Local addresses
+unchecked `:at()` indexing. Local addresses
 may only be used directly for loads, stores, indexing, and field access; they cannot be stored, passed,
 returned, or carried across control-flow edges. Device addresses can. `fmt` and `print` are host-only.
 
@@ -1178,20 +1213,20 @@ a host `Span<Particle>`; the shaders use the same allocation's device address.
 Input is available through `$/window.resin`. Exported `int` constants name GLFW key codes
 (`key_w`, `key_space`, `key_left_shift`, `key_escape`) and the eight mouse buttons
 (`mouse_button_left`, `mouse_button_right`, `mouse_button_middle`, `mouse_button_4` through `mouse_button_8`).
-After polling, `window.key_state(key_w)` and
-`window.mouse_button_state(mouse_button_left)` return `ButtonState` records
+After polling, `window:key_state(key_w)` and
+`window:mouse_button_state(mouse_button_left)` return `ButtonState` records
 with `down`, `pressed`, and `released` booleans. A quick tap can set both edge flags;
-key repeat does not create another press. `window.key_pressed(key)` queries `down`.
+key repeat does not create another press. `window:key_pressed(key)` queries `down`.
 
 Poll each window once per frame before reading its input. Polling pumps GLFW events for
 all windows, then commits that window's snapshot; other windows retain pending input
 until their own poll. Edges and scroll reset on the next poll of that window, and repeated
-queries read the same snapshot. `window.scroll_delta()` returns accumulated horizontal/vertical
-scroll offsets (positive vertical scroll is up). `window.cursor_position()` returns coordinates
+queries read the same snapshot. `window:scroll_delta()` returns accumulated horizontal/vertical
+scroll offsets (positive vertical scroll is up). `window:cursor_position()` returns coordinates
 in window content units, with a top-left origin and positive y downward, independently of
 framebuffer scaling. Both return `((float64, float64) | Err<RuntimeError>)`.
 
-`window.focused()` reports keyboard focus. `window.capture_cursor(capture)` hides and
+`window:focused()` reports keyboard focus. `window:capture_cursor(capture)` hides and
 captures the cursor for camera controls when `capture` is true, with unbounded virtual
 coordinates; set it false to restore normal behavior.
 GLFW synthesizes button releases on focus loss. These APIs report physical controls;
@@ -1200,14 +1235,14 @@ they do not decode typed text or implement text composition.
 Windowing is an ordinary runtime API, exposed by `resin_runtime/window.h` and
 `$/window.resin`:
 
-- `Window.new(width, height, title: String)` returns a shared window owner; use `String.from_str("Resin")` for a literal title. `window.poll_events()` processes
+- `window_new(width, height, title: String)` returns a shared window owner; use `string_from_str("Resin")` for a literal title. `window:poll_events()` processes
   GLFW events. Close state, framebuffer size, resizing, and GLFW key codes
   are available through the corresponding window methods. Predicates return `bool`;
   fallible operations return error unions, including framebuffer size as `(width, height)`.
-- `Gpu.new_for_window(window)` selects a graphics/compute/present-capable GPU for a window.
+- `gpu_new_for_window(window)` selects a graphics/compute/present-capable GPU for a window.
   The existing GPU constructors stay headless. There is one GPU per window; multiple
   windows can each have their own GPU.
-- `gpu.present(image)` blits an already-submitted `GpuImage` to the window, scaling to
+- `gpu:present(image)` blits an already-submitted `GpuImage` to the window, scaling to
   its framebuffer with FIFO presentation. Swapchains are recreated after resize.
   Its `(bool | Err<RuntimeError>)` is `(true)` when presented and `(false)` when
   skipped (minimized, timed out, or out of date): poll events and retry. Other failures propagate.
@@ -1240,7 +1275,7 @@ array element, and empty arrays have no shared host/device layout.
 
 For C calls, explicitly cast byte-array storage to `Ptr<ubyte>` and pass its logical
 length. Raw arrays and spans do not promise NUL termination. Use a `str` literal's `.data`
-or an owned `String`'s `.get().data` when a C function requires a terminator. `String.from_bytes(span)`
+or an owned `String`'s `:get().data` when a C function requires a terminator. `string_from_bytes(span)`
 copies raw bytes and appends that terminator outside the logical length.
 
 ### Shared size and alignment
@@ -1254,10 +1289,10 @@ operands are checked but not executed, as with C `sizeof`; side effects do not r
 Holes in an explicit type argument are rejected. Empty arrays/records,
 booleans, function values, and other types outside the shared profile are rejected.
 
-Use `gpu.create(value)?` to allocate and initialize one GPU element, with its type
-inferred from the value or result context. `gpu.alloc::<T>(count)?` allocates
+Use `gpu:create(value)?` to allocate and initialize one GPU element, with its type
+inferred from the value or result context. `gpu:alloc::<T>(count)?` allocates
 uninitialized elements and checks the multiplication of count by element size.
-The byte allocator `gpu.alloc_in::<ubyte>(bytes, memory)?` returns `GpuSpan<ubyte>`.
+The byte allocator `gpu:alloc_in::<ubyte>(bytes, memory)?` returns `GpuSpan<ubyte>`.
 
 ### Explicit numeric conversions
 
@@ -1290,9 +1325,16 @@ if that type cannot otherwise be inferred. An inhabited struct or union is rejec
 For example, an infallible error union can be unwrapped without inventing an error value:
 
 ```resin
-def unwrap(r: (int | Err<Never>)) -> int = {
-    match (r) { int(n) => { n }, Err(impossible) => { absurd(impossible) } }
-};
+fn unwrap(r: (int | Err<Never>)) -> int {
+	match (r) {
+		int(n) => {
+			n
+		},
+		Err(impossible) => {
+			absurd(impossible)
+		}
+	}
+}
 ```
 
 The IR explicitly marks elimination as divergent. Its continuation type is only for
@@ -1304,7 +1346,7 @@ scope destruction. Matches over inhabited variants still require exhaustive, uni
 [`T | None`](options.md) supports direct widening, exhaustive matching,
 and postfix `!` to exclude `None` or trap.
 
-Inherent methods and associated functions are declared [inside their struct](methods.md).
+Operations are [visible free functions](methods.md); struct bodies contain only fields.
 
 ## Resources
 
