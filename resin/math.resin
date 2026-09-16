@@ -1,6 +1,6 @@
 export { sqrt, sin, cos };
 
 // Host: float32 and float64. Shaders: float32. Angles are in radians.
-intrinsic "sqrt" def sqrt<T>(value: T) -> T;
-intrinsic "sin" def sin<T>(value: T) -> T;
-intrinsic "cos" def cos<T>(value: T) -> T;
+intrinsic "sqrt" fn sqrt<T>(value: T) -> T;
+intrinsic "sin" fn sin<T>(value: T) -> T;
+intrinsic "cos" fn cos<T>(value: T) -> T;

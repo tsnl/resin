@@ -200,6 +200,7 @@ impl Checker<'_> {
         let completed = elaborate::function(
             &term,
             &[],
+            &[],
             &self.typing.solver,
             &self.typing.methods,
             self.typing.typer,

@@ -139,6 +139,9 @@ pub struct MethodLookup {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Type {
+    Operation {
+        lookup: Box<OperationLookup>,
+    },
     Type,
     Unit,
     None,
@@ -373,6 +376,19 @@ pub enum TermKind {
     Return {
         value: Box<Term>,
     },
+    OperationCall {
+        lookup: OperationLookup,
+        args: Vec<Term>,
+    },
+    /// Transfer an owned place into a value; the source no longer owns its contents.
+    Move {
+        place: Box<Term>,
+    },
+    /// Reading borrowed storage requires a copyable value after substitution.
+    Read {
+        place: Box<Term>,
+    },
+
     /// The native value size of a type; no value operand is permitted.
     SizeOf {
         of: Type,
@@ -1133,7 +1149,7 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ),
     (
         "struct",
-        "struct Name { field: Type }; — a nominal record type.",
+        "struct Name { field: Type; } — a nominal record type.",
         DefinitionKind::Keyword,
     ),
     (
@@ -1191,22 +1207,22 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ),
     (
         "extern",
-        "extern { \"header.h\": { def name(parameters) -> Type; }, };\nextern type Name;",
+        "extern { \"header.h\": { fn name(parameters) -> Type; }, };\nextern type Name;",
         DefinitionKind::Keyword,
     ),
     (
         "intrinsic",
-        "intrinsic \"operation\" def name<T>(parameters) -> Type;",
+        "intrinsic \"operation\" fn name<T>(parameters) -> Type;",
         DefinitionKind::Keyword,
     ),
     (
-        "def",
-        "def name(parameters) -> Type = { body };\n\nOmitted result annotations default to ().",
+        "fn",
+        "fn name(parameters) -> Type  { body }\n\nOmitted result annotations default to ().",
         DefinitionKind::Keyword,
     ),
     (
-        "var",
-        "var name = value;\nvar name: Type;",
+        "let mut",
+        "let mut name = value;\nlet mut name: Type;",
         DefinitionKind::Keyword,
     ),
     (
@@ -1718,6 +1734,38 @@ impl GenerateError {
         Self {
             span,
             kind: GenerateErrorKind::Type { kind: error.kind },
+        }
+    }
+}
+
+/// A signature query over the overload set visible where the operation was written.
+/// Substitution selects one signature; importing more operations at a caller does
+/// not change this set. No source lookup or function-body probing is deferred.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OperationLookup {
+    pub primitive: Option<Arc<str>>,
+    pub name: Arc<str>,
+    pub candidates: Vec<FunctionId>,
+    pub type_args: Option<Vec<Type>>,
+    pub arguments: Vec<Type>,
+}
+
+impl Type {
+    /// Primitive values and recursively copyable structural aggregates may be read repeatedly.
+    /// Nominal structs and unconstrained type parameters transfer ownership.
+    pub fn copies_implicitly(&self) -> bool {
+        match self {
+            Self::Defined { .. }
+            | Self::Parameter { .. }
+            | Self::Member { .. }
+            | Self::FunctionParameter { .. }
+            | Self::FunctionResult { .. }
+            | Self::Value { .. } => false,
+            Self::Array { element, .. } => element.copies_implicitly(),
+            Self::Record { fields } => fields.iter().all(|field| field.ty.copies_implicitly()),
+            Self::Union { variants } => variants.iter().all(Self::copies_implicitly),
+            Self::Error { payload } => payload.copies_implicitly(),
+            _ => true,
         }
     }
 }

@@ -12,33 +12,38 @@ fn run(source: &str) -> std::process::Output {
 
 #[test]
 fn dependent_field_and_method_chains_use_each_concrete_owner() {
-    let output = run(r#"
-        export { main };
+    let output = run(r#"export { main };
         import { "$/string.resin" };
-        struct Small { value: int,
-            def read(self: Small) -> int = { self.value };
-        };
-        struct Large { padding: ulong, value: ulong,
-            def read(self: Large) -> ulong = { self.value };
-        };
-        struct Holder<T> { item: T,
-            def inner(self: Holder<T>) -> T = { self.item };
-        };
-        def read<T>(value: T) -> _ = { value.read() };
-        def field_method<T>(value: T) -> _ = { value.item.read() };
-        def method_field<T>(value: T) -> _ = { value.inner().value };
-        def method_method<T>(value: T) -> _ = { value.inner().read() };
-        def main() -> int = {
-            var small = Small { value = 7 };
-            var large = Large { padding = 3, value = 4294967296 };
-            var first = Holder<Small> { item = small };
-            var second = Holder<Large> { item = large };
+        struct Small { value: int;
+            
+        }
+fn read(self: Small) -> int  { self.value }
+
+        struct Large { padding: ulong; value: ulong;
+            
+        }
+fn read(self: Large) -> ulong  { self.value }
+
+        struct Holder<T> { item: T;
+            
+        }
+fn inner<T>(self: Holder<T>) -> T  { self.item }
+
+        fn read<T>(value: T) -> _  { value:read() }
+        fn field_method<T>(value: T) -> _  { value.item:read() }
+        fn method_field<T>(value: T) -> _  { value:inner().value }
+        fn method_method<T>(value: T) -> _  { value:inner():read() }
+        fn main() -> int  {
+            let mut small = Small { value = 7 };
+            let mut large = Large { padding = 3, value = 4294967296 };
+            let mut first = Holder<Small> { item = small };
+            let mut second = Holder<Large> { item = large };
             print(fmt("{0} {1} {2} {3} {4}", (
                 read(small), read(large), field_method(first),
                 method_field(second), method_method(second)
             )));
             0
-        };
+        }
     "#);
     assert!(
         output.status.success(),
@@ -50,24 +55,27 @@ fn dependent_field_and_method_chains_use_each_concrete_owner() {
 
 #[test]
 fn dependent_static_calls_and_references_apply_owner_and_method_arguments() {
-    let source = r#"
-        export { main };
-        struct Cell<T> { value: T };
+    let source = r#"export { main };
+        struct Cell<T> { value: T; }
         struct Factory<T> {
-            def make<U>(value: U) -> Cell<U> = { Cell<U> { value = value } };
-            def pass<U>(self: Factory<T>, value: U) -> Cell<U> = { Cell<U> { value = value } };
-        };
-        def direct<T, U>(value: U) -> _ = { T.make::<U>(value) };
-        def receiver<T, U>(owner: T, value: U) -> _ = { owner.pass::<U>(value) };
-        def reference<T, U>(value: U) -> _ = {
-            var make = T.make::<U>;
+            
+            
+        }
+fn factory_make<T, U>(value: U) -> Cell<U>  { Cell<U> { value = value } }
+
+fn pass<T, U>(self: Factory<T>, value: U) -> Cell<U>  { Cell<U> { value = value } }
+
+        fn direct<T, U>(value: U) -> _  { make::<U>(value) }
+        fn receiver<T, U>(owner: T, value: U) -> _  { owner:pass::<U>(value) }
+        fn reference<T, U>(value: U) -> _  {
+            let mut make = make::<U>;
             make(value)
-        };
-        def main() -> int = {
+        }
+        fn main() -> int  {
             direct::<Factory<ulong>, int>(20).value +
                 reference::<Factory<ulong>, int>(20).value +
                 receiver(Factory<ulong> {}, 2_i).value
-        };
+        }
     "#;
     let module =
         support::frontend::lower(&hir(source), &[], &resin_lir::LoweringOptions::default())
@@ -93,22 +101,25 @@ fn dependent_static_calls_and_references_apply_owner_and_method_arguments() {
 
 #[test]
 fn dependent_parameters_give_unsuffixed_arguments_their_concrete_types() {
-    let output = run(r#"
-        export { main };
+    let output = run(r#"export { main };
         import { "$/string.resin" };
         struct Narrow {
-            def sum(self: Narrow, first: ubyte, second: ushort) -> ulong = {
+            
+        }
+fn sum(self: Narrow, first: ubyte, second: ushort) -> ulong  {
                 ulong(first) + ulong(second)
-            };
-        };
+            }
+
         struct Wide {
-            def sum(self: Wide, first: ulong, second: ulong) -> ulong = { first + second };
-        };
-        def sum<T>(value: T) -> _ = { value.sum(255, 65535) };
-        def main() -> int = {
+            
+        }
+fn sum(self: Wide, first: ulong, second: ulong) -> ulong  { first + second }
+
+        fn sum<T>(value: T) -> _  { value:sum(255, 65535) }
+        fn main() -> int  {
             print(fmt("{0} {1}", (sum(Narrow {}), sum(Wide {}))));
             0
-        };
+        }
     "#);
     assert!(
         output.status.success(),
@@ -120,37 +131,40 @@ fn dependent_parameters_give_unsuffixed_arguments_their_concrete_types() {
 
 #[test]
 fn dependent_receiver_adaptation_preserves_mutation_and_evaluation_order() {
-    let output = run(r#"
-        export { main };
+    let output = run(r#"export { main };
         import { "$/string.resin", "$/shared.resin" };
-        struct Counter { value: int,
-            def add(self: Ptr<Counter>, amount: int) -> int = {
-                self.value := self.value + amount;
+        struct Counter { value: int;
+            
+            
+        }
+fn add(self: Ptr<Counter>, amount: int) -> int  {
+                self.value = self.value + amount;
                 self.value
-            };
-            def read(self: Counter) -> int = { self.value };
-        };
-        def receiver<T>(trace: Ptr<int>, value: T) -> T = {
-            trace.* := trace.* * 10 + 1;
+            }
+
+fn read(self: Counter) -> int  { self.value }
+
+        fn receiver<T>(trace: Ptr<int>, value: T) -> T  {
+            trace.* = trace.* * 10 + 1;
             value
-        };
-        def argument(trace: Ptr<int>) -> int = { trace.* := trace.* * 10 + 2; 5 };
-        def add<T>(trace: Ptr<int>, value: T) -> _ = {
-            receiver(trace, value).add(argument(trace))
-        };
-        def add_owned<T>(trace: Ptr<int>, value: T) -> _ = {
-            receiver(trace, value).get().add(argument(trace))
-        };
-        def read<T>(value: T) -> _ = { value.read() };
-        def main() -> (int | Err<_>) = {
-            var trace = 0_i;
-            var local = Counter { value = 37 };
-            var shared = ArcPtr<Counter>.alloc(Counter { value = 6 })?;
+        }
+        fn argument(trace: Ptr<int>) -> int  { trace.* = trace.* * 10 + 2; 5 }
+        fn add<T>(trace: Ptr<int>, value: T) -> _  {
+            receiver(trace, value):add(argument(trace))
+        }
+        fn add_owned<T>(trace: Ptr<int>, value: T) -> _  {
+            receiver(trace, value):get():add(argument(trace))
+        }
+        fn read<T>(value: T) -> _  { value:read() }
+        fn main() -> (int | Err<_>)  {
+            let mut trace = 0_i;
+            let mut local = Counter { value = 37 };
+            let mut shared = arc_ptr_alloc::<Counter>(Counter { value = 6 })?;
             add(&trace, &local);
             add_owned(&trace, shared);
-            print(fmt("{0} {1} {2}", (trace, read(&local), read(shared.get()))));
+            print(fmt("{0} {1} {2}", (trace, read(&local), read(shared:get()))));
             (0)
-        };
+        }
     "#);
     assert!(
         output.status.success(),
@@ -162,12 +176,11 @@ fn dependent_receiver_adaptation_preserves_mutation_and_evaluation_order() {
 
 #[test]
 fn dependent_callable_fields_use_function_signatures() {
-    let output = run(r#"
-        export { main };
-        struct Callback { invoke: (int, int) -> int };
-        def increment(value: int, amount: int) -> int = { value + amount };
-        def call<T>(value: T) -> _ = { (value.invoke)(40, 2) };
-        def main() -> int = { call(Callback { invoke = increment }) };
+    let output = run(r#"export { main };
+        struct Callback { invoke: (int, int) -> int; }
+        fn increment(value: int, amount: int) -> int  { value + amount }
+        fn call<T>(value: T) -> _  { (value.invoke)(40, 2) }
+        fn main() -> int  { call(Callback { invoke = increment }) }
     "#);
     assert_eq!(
         output.status.code(),
@@ -180,55 +193,55 @@ fn dependent_callable_fields_use_function_signatures() {
 #[test]
 fn dependent_failures_report_the_demanded_application() {
     for (declaration, body, needle) in [
-        ("struct Owner {};", "value.missing()", "missing"),
+        ("struct Owner {}", "value.missing()", "missing"),
         (
-            "struct Owner { def read(self: Owner) -> int = { 42 }; };",
+            "struct Owner {  }\nfn read(self: Owner) -> int  { 42 }\n",
             "value.read().missing",
             "ExpectedRecord",
         ),
         (
-            "struct Owner { def read(self: Owner, n: int) -> int = { n }; };",
+            "struct Owner {  }\nfn read(self: Owner, n: int) -> int  { n }\n",
             "value.read(1 == 1)",
             "",
         ),
         (
-            "struct Owner { def read(self: Owner, n: int) -> int = { n }; };",
+            "struct Owner {  }\nfn read(self: Owner, n: int) -> int  { n }\n",
             "value.read(1_i, 2_i)",
             "",
         ),
         (
-            "struct Owner { def read(self: Owner, n: int) -> int = { n }; };",
+            "struct Owner {  }\nfn read(self: Owner, n: int) -> int  { n }\n",
             "value.read()",
             "arguments",
         ),
         (
-            "struct Owner { def read(self: Owner, a: int, b: int) -> int = { a + b }; };",
+            "struct Owner {  }\nfn read(self: Owner, a: int, b: int) -> int  { a + b }\n",
             "value.read((1_i, 2_i))",
             "arguments",
         ),
         (
-            "struct Owner { def read(self: Owner, a: int, b: int) -> int = { a + b }; };",
-            "{ struct Pair { first: int, second: int }; value.read(Pair { first = 1_i, second = 2_i }) }",
+            "struct Owner {  }\nfn read(self: Owner, a: int, b: int) -> int  { a + b }\n",
+            "{ struct Pair { first: int; second: int; } value.read(Pair { first = 1_i, second = 2_i }) }",
             "",
         ),
         (
-            "struct Owner { def read(self: Owner, a: int, b: int) -> int = { a + b }; };",
+            "struct Owner {  }\nfn read(self: Owner, a: int, b: int) -> int  { a + b }\n",
             "value.read(1_i, 2_i, 3_i)",
             "",
         ),
         (
-            "struct Owner { def read<U>(self: Owner, n: U) -> U = { n }; };",
+            "struct Owner {  }\nfn read<U>(self: Owner, n: U) -> U  { n }\n",
             "value.read(42)",
             "type argument",
         ),
         (
-            "struct Owner { def read(self: Owner, n: ubyte) -> int = { int(n) }; };",
+            "struct Owner {  }\nfn read(self: Owner, n: ubyte) -> int  { int(n) }\n",
             "value.read(256)",
             "range",
         ),
     ] {
         let source = format!(
-            "{declaration} def relay<T>(value: T) -> int = {{ {body} }}; def main() = {{ relay(Owner {{}}); }};"
+            "{declaration} fn relay<T>(value: T) -> int  {{ {body} }} fn main()  {{ relay(Owner {{}}); }}"
         );
         let error =
             support::frontend::lower(&hir(&source), &[], &resin_lir::LoweringOptions::default())
@@ -244,7 +257,7 @@ fn dependent_failures_report_the_demanded_application() {
         );
         assert!(error.span.end > error.span.start, "{error:?}");
     }
-    let source = "struct FieldsCallback<T0> { callback: T0 };\ndef relay<T>(value: T) -> int = { (value.callback)() }; def main() -> int = { relay(FieldsCallback<_> { callback = 42 }) };";
+    let source = "struct FieldsCallback<T0> { callback: T0; }\nfn relay<T>(value: T) -> int  { (value.callback)() } fn main() -> int  { relay(FieldsCallback<_> { callback = 42 }) }";
     let error = support::frontend::lower(&hir(source), &[], &resin_lir::LoweringOptions::default())
         .unwrap_err()
         .remove(0);
@@ -261,7 +274,7 @@ fn dependent_failures_report_the_demanded_application() {
 #[test]
 fn unused_dependent_bodies_do_not_select_methods() {
     let tree = hir(
-        "export { main }; def unused<T>(value: T) -> _ = { value.missing().field }; def main() -> int = { 42 };",
+        "export { main }; fn unused<T>(value: T) -> _  { value:missing().field } fn main() -> int  { 42 }",
     );
     let module =
         support::frontend::lower(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
@@ -271,33 +284,35 @@ fn unused_dependent_bodies_do_not_select_methods() {
 #[test]
 fn dependent_method_calls_obey_shader_profile_rules() {
     let message = support::pipeline::shader_error(
-        r#"
-        export { kernel };
+        r#"export { kernel };
 
         extern {
             "stdlib.h": {
-                def abs(value: int) -> int;
+                fn abs(value: int) -> int;
             },
         };
-        struct Owner { value: int,
-            def read(self: Owner) -> int = { abs(self.value) };
-        };
-        def read<T>(value: T) -> _ = { value.read() };
-        @compute_shader def kernel(index: ulong, root: Ptr<Owner>) = {
-            root.value := read(root);
-        };"#,
+        struct Owner { value: int;
+            
+        }
+fn read(self: Owner) -> int  { abs(self.value) }
+
+        fn read<T>(value: T) -> _  { value:read() }
+        @compute_shader fn kernel(index: ulong, root: Ptr<Owner>)  {
+            root.value = read(root);
+        }"#,
     );
     assert!(message.contains("foreign"), "{message}");
 }
 
 #[test]
 fn growing_dependent_method_applications_obey_the_function_limit() {
-    let tree = hir(r#"
-        struct Grow<T> { value: T,
-            def grow(self: Grow<T>) = { step(Grow<Ptr<T>> { value = &self.value }); };
-        };
-        def step<T>(value: T) = { value.grow(); };
-        def main() = { step(Grow<int> { value = 1 }); };
+    let tree = hir(r#"struct Grow<T> { value: T;
+            
+        }
+fn grow<T>(self: Grow<T>)  { step(Grow<Ptr<T>> { value = &self.value }); }
+
+        fn step<T>(value: T)  { value:grow(); }
+        fn main()  { step(Grow<int> { value = 1 }); }
     "#);
     let options = resin_lir::LoweringOptions {
         max_monomorphs_per_function: std::num::NonZeroUsize::new(3).unwrap(),

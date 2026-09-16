@@ -6,12 +6,15 @@ use common::hir_module;
 #[test]
 fn unary_and_binary_slots_resolve_to_ordinary_calls() {
     let module = hir_module(
-        r#"
-        struct Number { value: int,
-            def __neg__(self: Number) -> Number = { Number { value = -self.value } };
-            def __sub__(self: Number, other: int) -> int = { self.value - other };
-        };
-        def use(value: Number) -> int = { -value - 2 };
+        r#"struct Number { value: int;
+            
+            
+        }
+fn __neg__(self: Number) -> Number  { Number { value = -self.value } }
+
+fn __sub__(self: Number, other: int) -> int  { self.value - other }
+
+        fn use(value: Number) -> int  { -value - 2 }
     "#,
     )
     .unwrap();
@@ -42,7 +45,7 @@ fn unary_and_binary_slots_resolve_to_ordinary_calls() {
 
 #[test]
 fn generic_operators_retain_signature_queries_until_specialization() {
-    let module = hir_module("def add<T, U>(left: T, right: U) -> _ = { left + right };").unwrap();
+    let module = hir_module("fn add<T, U>(left: T, right: U) -> _  { left + right }").unwrap();
     let function = &module.functions[0];
     assert!(
         matches!(
@@ -82,31 +85,31 @@ fn generic_operators_retain_signature_queries_until_specialization() {
 fn unused_operator_declarations_are_validated() {
     for (source, expected) in [
         (
-            "struct Bad { def __add__(self: Bad, x: Bad, y: Bad) -> Bad = { self }; };",
+            "struct Bad {  }\nfn __add__(self: Bad, x: Bad, y: Bad) -> Bad  { self }\n",
             "invalid number of operands",
         ),
         (
-            "struct Bad { def __invert__(self: Bad, x: Bad) -> Bad = { self }; };",
+            "struct Bad {  }\nfn __invert__(self: Bad, x: Bad) -> Bad  { self }\n",
             "invalid number of operands",
         ),
         (
-            "struct Bad { def __add__<T>(self: Bad, x: T) -> Bad = { self }; };",
+            "struct Bad {  }\nfn __add__<T>(self: Bad, x: T) -> Bad  { self }\n",
             "cannot declare additional",
         ),
         (
-            "struct Bad { def __add__(self: Ptr<Bad>, x: Bad) -> Bad = { x }; };",
+            "struct Bad {  }\nfn __add__(self: Ptr<Bad>, x: Bad) -> Bad  { x }\n",
             "owning struct by value",
         ),
         (
-            "struct Bad { def __neg__(self: int) -> int = { self }; };",
+            "struct Bad {  }\nfn bad___neg__(self: int) -> int  { self }\n",
             "owning struct by value",
         ),
         (
-            "struct Bad { def __eq__(self: Bad, other: Bad) -> int = { 1 }; };",
+            "struct Bad {  }\nfn __eq__(self: Bad, other: Bad) -> int  { 1 }\n",
             "must return bool",
         ),
         (
-            "struct Bad { def __not__(self: Bad) -> int = { 1 }; };",
+            "struct Bad {  }\nfn __not__(self: Bad) -> int  { 1 }\n",
             "must return bool",
         ),
     ] {
@@ -118,11 +121,11 @@ fn unused_operator_declarations_are_validated() {
 #[test]
 fn duplicate_operators_and_missing_left_operand_overloads_are_rejected() {
     for source in [
-        "struct A { def __add__(a: A, b: A) -> A = { a }; def __add__(a: A, b: int) -> A = { a }; };",
-        "struct A {}; def add(a: A, b: A) -> A = { a + b };",
-        "struct A { def __add__(a: A, b: int) -> A = { a }; }; def add(a: A) -> A = { 2 + a };",
-        "struct A { def __add__(a: A, b: int) -> A = { a }; }; def add(a: A) -> A = { &a + 1 };",
-        "struct A { def __eq__(a: A, b: A) -> bool = { 1 == 1 }; }; def compare(a: A) -> bool = { a != a };",
+        "struct A {   }\nfn __add__(a: A, b: A) -> A  { a }\n\nfn __add__(a: A, b: int) -> A  { a }\n",
+        "struct A {} fn add(a: A, b: A) -> A  { a + b }",
+        "struct A {  }\nfn __add__(a: A, b: int) -> A  { a }\n fn add(a: A) -> A  { 2 + a }",
+        "struct A {  }\nfn __add__(a: A, b: int) -> A  { a }\n fn add(a: A) -> A  { &a + 1 }",
+        "struct A {  }\nfn __eq__(a: A, b: A) -> bool  { 1 == 1 }\n fn compare(a: A) -> bool  { a != a }",
     ] {
         assert!(hir_module(source).is_err(), "{source}");
     }

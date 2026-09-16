@@ -4,8 +4,8 @@ Grouped foreign functions and empty header dependencies
 export { call };
 extern {
   "runtime.h": {
-    def call();
-    def other();
+    fn call();
+    fn other();
   },
   "empty.h": {},
 };
@@ -50,7 +50,7 @@ Comments and escaped header strings
 ==================
 extern /* groups */ {
   "local/quoted\"name.h" /* header */ : {
-    def /* name */ call();
+    fn /* name */ call();
   }
 };
 

@@ -167,6 +167,11 @@ impl Specialization<'_, '_> {
     }
 
     fn place(&mut self, source: &resin_hir::Term) -> Result<Box<concrete::Term>, Error> {
+        if let resin_hir::TermKind::Read { place } | resin_hir::TermKind::Move { place } =
+            &source.kind
+        {
+            return self.place(place);
+        }
         let access = match source.kind {
             resin_hir::TermKind::Local { .. }
             | resin_hir::TermKind::Field { .. }
@@ -421,6 +426,50 @@ impl Specialization<'_, '_> {
                     );
                 }
             },
+        })
+    }
+
+    fn operation_call(
+        &mut self,
+        lookup: &resin_hir::OperationLookup,
+        arguments: &[resin_hir::Term],
+        expected: &resin_hir::Type,
+    ) -> Result<concrete::TermKind, Error> {
+        let operation = self
+            .substitution
+            .operation(lookup, self.instances)
+            .map_err(|error| self.error(error.kind))?;
+        let params = operation
+            .params
+            .iter()
+            .map(|ty| self.ty(ty))
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = self.ty(&operation.result)?;
+        let expected = self.ty(expected)?;
+        self.require_assignable(&result, &expected)?;
+        let args = self.call_arguments(arguments, &params)?;
+        let (function, arguments) = match operation.target {
+            super::substitute::MethodTarget::Source {
+                function,
+                arguments,
+            } => (function, arguments),
+            super::substitute::MethodTarget::Primitive { symbol } => {
+                return self.completed_builtin(&symbol, args, &expected);
+            }
+        };
+        let function = concrete::Term {
+            span: self.span,
+            ty: Ty::Function {
+                params,
+                result: Box::new(result),
+            },
+            kind: concrete::TermKind::Function {
+                function: self.request(function, arguments)?,
+            },
+        };
+        Ok(concrete::TermKind::Call {
+            func: Box::new(function),
+            args,
         })
     }
 
@@ -898,6 +947,18 @@ impl Specialization<'_, '_> {
         expected: &resin_hir::Type,
     ) -> Result<concrete::TermKind, Error> {
         Ok(match source {
+            resin_hir::TermKind::OperationCall { lookup, args } => {
+                self.operation_call(lookup, args, expected)?
+            }
+            resin_hir::TermKind::Read { place } => {
+                if !self.argument(expected)?.copies_implicitly() {
+                    return Err(self.instance_error("cannot move a value through a reference or pointer; replace its contents instead"));
+                }
+                self.term(place)?.kind
+            }
+            resin_hir::TermKind::Move { place } => concrete::TermKind::Move {
+                place: self.place(place)?,
+            },
             resin_hir::TermKind::Constant { value } => concrete::TermKind::Constant {
                 value: self.constant(value)?,
             },

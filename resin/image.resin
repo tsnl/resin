@@ -1,45 +1,60 @@
-export { ImageData };
+export { ImageData , width, height, channels, pixels, image_data_read_png, image_data_write_pixels, write_png };
 
 extern {
 	"resin_runtime.h": {
-		def resin_image_write_png(path: Ptr<ubyte>, width: uint, height: uint, channels: uint, pixels: Ptr<ubyte>, stride: ulong) -> int;
-		def resin_image_read_png(path: Ptr<ubyte>, channels: uint, width: Ptr<uint>, height: Ptr<uint>, actual_channels: Ptr<uint>, pixels: Ptr<Ptr<ubyte>>) -> int;
-		def resin_image_free(pixels: Ptr<ubyte>) -> ();
+		fn resin_image_write_png(path: Ptr<ubyte>, width: uint, height: uint, channels: uint, pixels: Ptr<ubyte>, stride: ulong) -> int;
+		fn resin_image_read_png(path: Ptr<ubyte>, channels: uint, width: Ptr<uint>, height: Ptr<uint>, actual_channels: Ptr<uint>, pixels: Ptr<Ptr<ubyte>>) -> int;
+		fn resin_image_free(pixels: Ptr<ubyte>) -> ();
 	},
 };
 
 import { "span.resin", "status.resin", "shared.resin" };
 
 struct ImageDataOwner {
-	width: uint,
-	height: uint,
-	channels: uint,
-	pixels: Ptr<ubyte>,
-	def drop(self: Ptr<ImageDataOwner>) = {
+	width: uint;
+	height: uint;
+	channels: uint;
+	pixels: Ptr<ubyte>;
+	
+}
+fn drop(self: Ptr<ImageDataOwner>)  {
 		if (ulong(self.pixels) != 0_ul) {
 			resin_image_free(self.pixels);
 		};
-	};
-};
+	}
+
 
 struct ImageData {
-	owner: ArcPtr<ImageDataOwner>,
-	def width(self: Ptr<ImageData>) -> uint = {
-		self.owner.get().width
-	};
-	def height(self: Ptr<ImageData>) -> uint = {
-		self.owner.get().height
-	};
-	def channels(self: Ptr<ImageData>) -> uint = {
-		self.owner.get().channels
-	};
-	def pixels(self: Ptr<ImageData>) -> Span<ubyte> = {
-		var data = self.owner.get();
-		Span<ubyte> { data = data.pixels, length = ulong(data.width) * ulong(data.height) * ulong(data.channels) }
-	};
+	owner: ArcPtr<ImageDataOwner>;
+	
+	
+	
+	
 
-	def read_png(path: Ptr<ubyte>, channels: uint) -> (ImageData | Err<RuntimeError>) = {
-		var owner = ArcPtr<ImageDataOwner>.alloc(
+	
+	
+
+	
+}
+fn width(self: Ref<ImageData>) -> uint  {
+		self.owner:get().width
+	}
+
+fn height(self: Ref<ImageData>) -> uint  {
+		self.owner:get().height
+	}
+
+fn channels(self: Ref<ImageData>) -> uint  {
+		self.owner:get().channels
+	}
+
+fn pixels(self: Ref<ImageData>) -> Span<ubyte>  {
+		let mut data = self.owner:get();
+		Span<ubyte> { data = data.pixels, length = ulong(data.width) * ulong(data.height) * ulong(data.channels) }
+	}
+
+fn image_data_read_png(path: Ptr<ubyte>, channels: uint) -> (ImageData | Err<RuntimeError>)  {
+		let mut owner = arc_ptr_alloc::<ImageDataOwner>(
 			ImageDataOwner {
 				width = 0_ui,
 				height = 0_ui,
@@ -47,16 +62,17 @@ struct ImageData {
 				pixels = Ptr<ubyte>(0_ul),
 			}
 		)?;
-		var data = owner.get();
-		RuntimeStatus.from_code(resin_image_read_png(path, channels, &data.width, &data.height, &data.channels, &data.pixels))?;
+		let mut data = owner:get();
+		runtime_status_from_code(resin_image_read_png(path, channels, &data.width, &data.height, &data.channels, &data.pixels))?;
 		(ImageData { owner = owner })
-	};
-	def write_pixels(path: Ptr<ubyte>, width: uint, height: uint, channels: uint, pixels: Span<ubyte>, stride: ulong) -> (() | Err<RuntimeError>) = {
+	}
+
+fn image_data_write_pixels(path: Ptr<ubyte>, width: uint, height: uint, channels: uint, pixels: Span<ubyte>, stride: ulong) -> (() | Err<RuntimeError>)  {
 		if (width == 0_ui || height == 0_ui || channels == 0_ui || channels > 4_ui) {
 			return Err(InvalidArgument {});
 		};
-		var row_bytes = ulong(width) * ulong(channels);
-		var row_stride = if (stride == 0_ul) {
+		let mut row_bytes = ulong(width) * ulong(channels);
+		let mut row_stride = if (stride == 0_ul) {
 			row_bytes
 		} else {
 			stride
@@ -66,11 +82,11 @@ struct ImageData {
 		if (row_stride < row_bytes || pixels.length < row_bytes || ulong(height - 1_ui) > (pixels.length - row_bytes) / row_stride) {
 			Err(InvalidArgument {})
 		} else {
-			RuntimeStatus.from_code(resin_image_write_png(path, width, height, channels, pixels.data, row_stride))
+			runtime_status_from_code(resin_image_write_png(path, width, height, channels, pixels.data, row_stride))
 		}
-	};
+	}
 
-	def write_png(self: Ptr<ImageData>, path: Ptr<ubyte>) -> (() | Err<RuntimeError>) = {
-		RuntimeStatus.from_code(resin_image_write_png(path, self.width(), self.height(), self.channels(), self.pixels().data, 0_ul))
-	};
-};
+fn write_png(self: Ref<ImageData>, path: Ptr<ubyte>) -> (() | Err<RuntimeError>)  {
+		runtime_status_from_code(resin_image_write_png(path, self:width(), self:height(), self:channels(), self:pixels().data, 0_ul))
+	}
+

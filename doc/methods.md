@@ -1,6 +1,6 @@
 # Inherent methods
 
-A struct owns its methods directly. Declare fields first, followed by `def`
+A struct owns its methods directly. Declare fields first, followed by `fn`
 statements inside the same braces. There are no separate implementation blocks.
 Transparent aliases inherit the underlying nominal type's namespace and origin;
 they cannot add methods. Local structs currently contain fields only.
@@ -14,17 +14,23 @@ Functions accompany the type when it is exported and need no separate exports.
 There are no user-defined traits, interfaces, or dynamic dispatch.
 
 ```resin
-struct Counter { value: int,
-    def new(value: int) -> Counter = { Counter { value = value } };
-    def increment(counter: Ptr<Counter>) = { counter.value := counter.value + 1; };
-    def read(counter: Counter) -> int = { counter.value };
-};
+struct Counter { value: int;
+    
+    
+    
+}
+fn counter_new(value: int) -> Counter  { Counter { value = value } }
 
-def example() -> int = {
-    var counter = Counter.new(41);
-    counter.increment();
-    Counter.read(counter)
-};
+fn increment(counter: Ptr<Counter>)  { counter.value = counter.value + 1; }
+
+fn read(counter: Counter) -> int  { counter.value }
+
+
+fn example() -> int  {
+    let mut counter = counter_new(41);
+    counter:increment();
+    read(counter)
+}
 ```
 
 `counter.read()` supplies `counter` as the first argument to `Counter.read`.
@@ -61,10 +67,10 @@ verifier checks these functions and calls using its existing rules.
 A generic function can invoke a method before its receiver's nominal type is known:
 
 ```resin
-def read<T>(value: T) -> _ = { value.read() };
-def replace<T, U>(value: T, next: U) -> _ = {
-    value.replace_with::<U>(next)
-};
+fn read<T>(value: T) -> _  { value:read() }
+fn replace<T, U>(value: T, next: U) -> _  {
+    value:replace_with::<U>(next)
+}
 ```
 
 The concrete application selects the source-declared method and checks its signature.
@@ -84,16 +90,20 @@ pointer or error-union shape may need a result annotation before `.*` or `?` can
 Structs implement operators with Python-style dunder methods:
 
 ```resin
-struct Vec2<T> { x: T, y: T,
-    def __add__(left: Vec2<T>, right: Vec2<T>) -> Vec2<T> = {
+struct Vec2<T> { x: T; y: T;
+    
+    
+}
+fn __add__<T>(left: Vec2<T>, right: Vec2<T>) -> Vec2<T>  {
         Vec2<T> { x = left.x + right.x, y = left.y + right.y }
-    };
-    def __neg__(value: Vec2<T>) -> Vec2<T> = {
-        Vec2<T> { x = -value.x, y = -value.y }
-    };
-};
+    }
 
-def add<T>(left: T, right: T) -> _ = { left + right };
+fn __neg__<T>(value: Vec2<T>) -> Vec2<T>  {
+        Vec2<T> { x = -value.x, y = -value.y }
+    }
+
+
+fn add<T>(left: T, right: T) -> _  { left + right }
 ```
 
 `left + right` selects `__add__` on the left operand's nominal type; `-value`

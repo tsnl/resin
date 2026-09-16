@@ -2,22 +2,22 @@ export { main };
 
 import { "$/string.resin" };
 
-struct Meters { value: int };
+struct Meters { value: int; }
 type Distance = Meters;
 
-def to_meters(n: int) -> Meters = {
+fn to_meters(n: int) -> Meters  {
 	Meters { value = n }
-};
+}
 
-def to_distance(m: Meters) -> Distance = {
+fn to_distance(m: Meters) -> Distance  {
 	m
-};
+}
 
-def to_int(d: Distance) -> int = {
+fn to_int(d: Distance) -> int  {
 	d.value
-};
+}
 
-def main() -> () = {
-	var distance = to_distance(to_meters(42));
+fn main() -> ()  {
+	let mut distance = to_distance(to_meters(42));
 	print(fmt("distance = {0}, as int = {1}\n", (distance.value, to_int(distance))));
-};
+}

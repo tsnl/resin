@@ -113,8 +113,9 @@ export default grammar({
       "intrinsic",
       "type",
       "struct",
-      "def",
-      "var",
+      "fn",
+      "let",
+      "mut",
       "const",
       "sizeof",
       "assert",
@@ -180,10 +181,10 @@ export default grammar({
 
     foreign_function: ($) =>
       seq(
-        "def",
+        "fn",
         field("name", $.lid),
         "(",
-        list("params", $.declare, ","),
+        list("params", $.parameter, ","),
         ")",
         optional(seq("->", field("result", $.type))),
         ";",
@@ -192,11 +193,11 @@ export default grammar({
       seq(
         "intrinsic",
         field("operation", $.string),
-        "def",
+        "fn",
         field("name", $.lid),
         optional(field("type_params", $.type_parameters)),
         "(",
-        list("params", $.declare, ","),
+        list("params", $.parameter, ","),
         ")",
         "->",
         field("result", $.type),
@@ -212,10 +213,8 @@ export default grammar({
         field("name", $.uid),
         optional(field("type_params", $.type_parameters)),
         "{",
-        list("fields", $.declare, ","),
-        repeat(field("method", $.function_definition)),
+        repeat(seq(field("fields", $.declare), ";")),
         "}",
-        ";",
       ),
 
     decorator: ($) => seq("@", field("name", $.lid)),
@@ -223,16 +222,14 @@ export default grammar({
     function_definition: ($) =>
       seq(
         repeat(field("decorator", $.decorator)),
-        "def",
+        "fn",
         field("name", $.lid),
         optional(field("type_params", $.type_parameters)),
         "(",
-        list("params", $.declare, ","),
+        list("params", $.parameter, ","),
         ")",
         optional(seq("->", field("result", $.type))),
-        "=",
         field("body", $.block_body),
-        ";",
       ),
     block_body: ($) =>
       seq(
@@ -253,7 +250,7 @@ export default grammar({
         field("constant", $.const_declaration),
         field("struct", $.struct_definition),
         seq(field("define", $.define), ";"),
-        seq("var", field("declare", $.declare), ";"),
+        seq("let", field("declare", $.parameter), ";"),
         seq(field("expr", $.term), ";"),
       ),
 
@@ -277,12 +274,12 @@ export default grammar({
 
     define: ($) =>
       choice(
-        seq("var", field("term", $.local_define)),
+        seq("let", field("term", $.local_define)),
         seq("type", field("type", $.type_define)),
       ),
     local_define: ($) =>
       seq(
-        field("name", $.lid),
+        field("pattern", $.binding_pattern),
         optional(seq(":", field("ann", $.type))),
         "=",
         field("init", $.term),
@@ -297,6 +294,10 @@ export default grammar({
       ),
     type_parameters: ($) => seq("<", list1("params", $.uid, ","), ">"),
     type_arguments: ($) => seq("<", list1("args", $.type, ","), ">"),
+    binding_pattern: ($) =>
+      seq(optional(field("mutable", "mut")), field("name", $.lid)),
+    parameter: ($) =>
+      seq(field("pattern", $.binding_pattern), ":", field("ann", $.type)),
     declare: ($) => seq(field("name", $.lid), ":", field("ann", $.type)),
 
     //
@@ -310,7 +311,7 @@ export default grammar({
         prec.right(
           seq(
             field("place", $.binary_term),
-            ":=",
+            "=",
             field("value", $.assignment_term),
           ),
         ),
@@ -379,23 +380,13 @@ export default grammar({
           ),
         ),
       ),
-    field_access: ($) =>
-      seq(
-        ".",
-        choice(
-          field("name", $.tuple_index),
-          seq(
-            field("name", $.lid),
-            optional(field("type_args", $.type_application)),
-          ),
-        ),
-      ),
+    field_access: ($) => seq(".", field("name", choice($.tuple_index, $.lid))),
     tuple_index: () => token(/0|[1-9][0-9]*/),
     method_call: ($) =>
       prec(
         1,
         seq(
-          ".",
+          ":",
           field("name", $.lid),
           optional(field("type_args", $.type_application)),
           field("args", $.arguments),
@@ -495,7 +486,7 @@ export default grammar({
           seq(
             field("variant", choice($.type, "Err")),
             "(",
-            field("name", choice($.lid, "_")),
+            field("pattern", choice($.binding_pattern, "_")),
             ")",
           ),
           field("variant", choice("None", "_")),

@@ -171,9 +171,15 @@ pub enum TermKind {
 pub type Stmt = Spanned<StmtKind>;
 
 #[derive(Debug, Clone)]
+pub struct BindingPattern {
+    pub name: Ident,
+    pub mutable: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct MatchArm {
     pub variant: MatchVariant,
-    pub name: Option<Ident>,
+    pub pattern: Option<BindingPattern>,
     pub body: Term,
 }
 
@@ -198,26 +204,26 @@ pub enum StmtKind {
         operation: Arc<str>,
         type_params: Vec<Ident>,
         name: Ident,
-        params: Vec<(Ident, Type)>,
+        params: Vec<(BindingPattern, Type)>,
         result: Type,
     },
     ForeignFunction {
         header: Arc<str>,
         name: Ident,
-        params: Vec<(Ident, Type)>,
+        params: Vec<(BindingPattern, Type)>,
         result: Type,
     },
     Function {
         type_params: Vec<Ident>,
         decorators: Vec<Ident>,
         name: Ident,
-        params: Vec<(Ident, Type)>,
+        params: Vec<(BindingPattern, Type)>,
         result: Type,
         body: Term,
     },
-    /// `var name[: Type] = init;` The name is in scope; eager recursive reads are invalid.
+    /// `let [mut] name[: Type] = init;` The name is in scope; eager recursive reads are invalid.
     Define {
-        name: Ident,
+        pattern: BindingPattern,
         ann: Option<Type>,
         init: Term,
     },
@@ -233,9 +239,9 @@ pub enum StmtKind {
         body: Type,
         methods: Vec<Stmt>,
     },
-    /// `var name: ann;`
+    /// `let [mut] name: ann;`
     Declare {
-        name: Ident,
+        pattern: BindingPattern,
         ann: Type,
     },
     /// `term;`

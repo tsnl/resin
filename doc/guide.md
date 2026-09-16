@@ -311,8 +311,7 @@ def main() = {
     print(fmt("fibonacci(10) = {0}\n", (fibonacci(10),)));
 };
 ```
-
-Functions use `def` and are top-level, immutable definitions. Parameter types are explicit;
+Functions use `fn` and are top-level, immutable definitions. Parameter types are explicit;
 omitting the result annotation means `()`. Non-unit results require `-> T` or explicit inference
 with `-> _`; a non-unit tail expression without an annotation is a type error.
 Foreign functions can also omit `-> ()` for C `void` results. Function types still spell out
@@ -332,8 +331,8 @@ callee first, followed by arguments from left to right.
 Files contain only function, foreign, type, and constant declarations, after their export/import clauses.
 There are no global variables or executable top-level statements. Values and mutable state
 belong inside functions and are passed explicitly to helpers, by value or pointer.
-Local value bindings use `var name = value;`, or `var name: Type;` to reserve uninitialized storage.
-Assignment still uses `name := value`. `struct Point { x: int, y: int };` creates a nominal type;
+Local value bindings use `let mut name = value;`, or `let mut name: Type;` to reserve uninitialized storage.
+Assignment still uses `name = value`. `struct Point { x: int, y: int };` creates a nominal type;
 `type Position = Point;` is a transparent alias for that same type. Only `struct` creates
 a new nominal identity. Construct values with `Point { x = 1, y = 2 }`.
 Record initializers keep bare `name = value`
@@ -388,7 +387,6 @@ const pair_bytes = sizeof(Pair<int>); // 8
 const real_bytes = sizeof(float64);  // 8
 def size<T>() -> ulong = { sizeof(T) };
 ```
-
 Only a type operand is accepted; `sizeof(value)` is an error. Generic queries resolve when
 the function is specialized. A `const` initializer must determine its size at declaration.
 Sizes follow Resin's 64-bit native representations, including the one-byte placeholder for
@@ -422,7 +420,7 @@ suffixes require integer notation. Hexadecimal literals accept integer suffixes,
 `0xffff_ffff_ui` and `0xff_ub`. A signed byte suffix needs its separator (`0x7f_b`);
 otherwise `b/B` remains a hex digit. Hex `d/D/f/F` always remain digits.
 Use an explicit supported width for otherwise unconstrained shader literals, such as
-`var step = 0_i;`: the shader profile supports `ubyte`, `int`, `uint`, `ulong`, and `float32`.
+`let mut step = 0_i;`: the shader profile supports `ubyte`, `int`, `uint`, `ulong`, and `float32`.
 
 An `if` without `else` has an implicit unit branch, so its body must also yield unit:
 
@@ -453,7 +451,6 @@ def main() = {
     print(fmt("value = {0}\n", (pointer.*,)));
 };
 ```
-
 Holes can nest inside local annotations, local type ascriptions, and function
 return annotations: `Ptr<Ptr<_>>`, `Span<_>`, `(_, Ptr<_>)`, and `(int) -> _`
 all use the same inference mechanism. Each `_` is independent. Local constraints
@@ -571,7 +568,6 @@ shared.get().handle := acquire_native_handle();
 var alias = shared; // Retains the same allocation; does not copy Resource.
 var weak = shared.downgrade();
 ```
-
 Import `$/shared.resin` for the owner types. The example assumes native
 acquire/release declarations for the wrapped library. `alloc` copies its initializer;
 allocate an inert payload before acquiring a native handle to avoid copying live
@@ -668,7 +664,6 @@ def example() -> int = {
     first(pair) + identity::<int>(2)
 };
 ```
-
 Struct constructors take explicit type arguments. Different applications retain
 distinct nominal types, even if their layouts agree; aliases keep their target's
 identity. Pointer fields may recurse through the same generic declaration. Local
@@ -692,7 +687,6 @@ def methods() -> int = {
     read(changed)
 };
 ```
-
 The receiver fixes the struct's arguments. Method `::<...>` supplies only the
 additional parameters; omitting it allows deduction from arguments and expected
 results. `Cell<int>.read` is a function value whose first parameter is still the
@@ -840,7 +834,6 @@ import { "helpers.resin", "$/status.resin" };
 
 def answer() -> int = { helper() };
 ```
-
 Imports bring only the dependency's exported names into the file's flat namespace. Without
 an export clause (or with `export {}`), everything is private. An exported function can use
 its private helpers and types. Imported bindings may be explicitly re-exported; dependencies
@@ -853,7 +846,7 @@ importing file; each canonical file is loaded once. Imports never execute code. 
 functions within one file remain supported.
 `include` has been replaced by `import`.
 
-Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `def`, `var`, `const`, `sizeof`, `if`,
+Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `fn`, `let mut`, `const`, `sizeof`, `if`,
 `else`, `while`, and `match`), primitive type names, `Never`, and
 `Ptr`, `Err`, `None`, and the opaque compiler handle types are reserved,
 including in parameters and field names. Wrapper names such as `Span`, `ArcPtr`,
@@ -931,13 +924,12 @@ struct Gpu { owner: ArcPtr<GpuOwner>,
 };
 
 ```
-
 Declare foreign functions in a top-level `extern` block after any `export` clause
-and before any `import` clause. Each header names a group of ordinary `def`
+and before any `import` clause. Each header names a group of ordinary `fn`
 signatures. Groups use comma separators with an optional trailing comma; the block
 ends with `};`. The block and individual groups may be empty. Every declared header
 remains a native dependency even when none of its functions is called, including
-empty groups. The old `extern "header.h" def ...;` spelling
+empty groups. The old `extern "header.h" fn ...;` spelling
 is no longer accepted.
 
 Header groups do not introduce a scope: their functions have the module's usual
@@ -976,8 +968,7 @@ var view = Span<int> { data = &values.at(0), length = 3_ul };
 var element = view.at(1);
 print(fmt("{0}\n", (element,)));
 ```
-
-Use `var element: Ref<int> = view.at(1);` to retain an alias instead of copying the
+Use `let mut element: Ref<int> = view.at(1);` to retain an alias instead of copying the
 value. Reference parameters and results expose the same place semantics in user
 functions; see [references](references.md) for binding, lifetime, and migration rules.
 
@@ -991,7 +982,7 @@ allocation size, or lifetime.
 
 Initialize output slots before passing their addresses: Resin does not infer initialization
 effects from foreign calls. String literals are NUL-terminated; pass their storage with a
-span data field, such as `path.data` for `var path = "triangle.png";`.
+span data field, such as `path.data` for `let mut path = "triangle.png";`.
 
 ## Shaders and graphics
 
@@ -1062,14 +1053,13 @@ def kernel(index: ulong, root: Ptr<Params>) -> () = {
     } else { () }
 };
 ```
-
 The entry interfaces are:
 
 - Compute takes `(ulong, Ptr<T>)` and returns `()`. Call `gpu.compute_workgroup_size()`
   to get the `ulong` number of invocations per workgroup for that `Gpu`. The runtime
   selects it from the device's reported default subgroup size, bounded by its workgroup
   limits, and specializes each compute pipeline to match. The value stays fixed for
-  that GPU's lifetime. With `var workgroup_size = gpu.compute_workgroup_size();`, compute
+  that GPU's lifetime. With `let mut workgroup_size = gpu.compute_workgroup_size();`, compute
   dispatch groups with `uint((count + workgroup_size - 1_ul) / workgroup_size)`.
   The index is the global X invocation index. Dispatch only in X (`y = z = 1`) and guard
   any excess invocations in the function, as above.
@@ -1154,7 +1144,6 @@ fit that profile too. The emitted byte profile additionally enables supported `s
 nix-shell --run 'cargo run -- examples/window.resin'
 nix-shell --run 'cargo run -- examples/particles.resin'
 ```
-
 The demo renders a triangle until Escape or the close button is pressed. It uses a `while`
 event loop and defines its decorated shader functions inline, as does the headless triangle demo.
 Resizing scales the fixed-size offscreen image. Building this demo requires `spirv-opt`; running the

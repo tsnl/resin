@@ -7,17 +7,17 @@ A function returning `Ref<T>` exposes that storage to its caller. Reading it cop
 ```resin
 import { "$/span.resin" };
 
-def first<T>(items: Span<T>) -> Ref<T> = { items.at(0_ul) };
-def increment(value: Ref<int>) = { value := value + 1; };
+fn first<T>(items: Span<T>) -> Ref<T>  { items:at(0_ul) }
+fn increment(value: Ref<int>)  { value = value + 1; }
 
-def example() -> int = {
-    var items = [10_i, 20_i];
-    var view = Span<int> { data = &items.at(0_ul), length = 2_ul };
-    var reference: Ref<int> = first(view);
+fn example() -> int  {
+    let mut items = [10_i, 20_i];
+    let mut view = Span<int> { data = &items:at(0_ul), length = 2_ul };
+    let mut reference: Ref<int> = first(view);
     increment(reference);
-    first(view) := 42;
+    first(view) = 42;
     reference
-};
+}
 ```
 
 The source spelling is **Ref**. A **place** is the compiler's category for an
@@ -31,9 +31,9 @@ holes infer value types, including when their initializer returns a reference.
 
 ```resin
 var value: int = 1;
-var reference: Ref<_> = value; // Alias value's storage; infer int as the referent.
-var copy = reference;         // Copy int into independent storage.
-reference := 2;               // Update value. copy remains 1.
+let mut reference: Ref<_> = value; // Alias value's storage; infer int as the referent.
+let mut copy = reference;         // Copy int into independent storage.
+reference = 2;               // Update value. copy remains 1.
 ```
 
 A reference binding cannot be rebound. Passing a place to a `Ref<T>` parameter
@@ -47,9 +47,9 @@ ordinary values cannot initialize references. Functions returning references che
 their body in a reference context, including branch and match results:
 
 ```resin
-def choose<T>(left: Ref<T>, right: Ref<T>, flag: bool) -> Ref<T> = {
+fn choose<T>(left: Ref<T>, right: Ref<T>, flag: bool) -> Ref<T>  {
     if (flag) { left } else { right }
-};
+}
 ```
 
 Generic functions, function values, source methods, and dependent method calls
@@ -66,7 +66,7 @@ implicit. `Ref<Ptr<T>>` aliases a pointer slot: assignment changes the stored
 pointer, and reading the reference yields that pointer.
 
 ```resin
-def refer<T>(pointer: Ptr<T>) -> Ref<T> = { pointer.* };
+fn refer<T>(pointer: Ptr<T>) -> Ref<T>  { pointer.* }
 ```
 
 References do not retain shared owners or destroy referents when their bindings
@@ -92,7 +92,7 @@ diagnostics and unchecked shader indexing retain their existing behavior.
 | `var value = items.at(i).*;` | `var value = items.at(i);` |
 | `items.at(i).* := value;` | `items.at(i) := value;` |
 | `native_call(items.at(i));` with a `Ptr<T>` parameter | `native_call(&items.at(i));` |
-| `var p = items.at(i); p.* := value;` | `var r: Ref<T> = items.at(i); r := value;` |
+| `var p = items.at(i); p.* = value;` | `var r: Ref<T> = items.at(i); r = value;` |
 
 For pointer-valued elements, `items.at(i)` now reads the stored pointer, while
 `&items.at(i)` addresses its slot. An additional `.*` dereferences that stored

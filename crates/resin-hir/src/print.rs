@@ -141,7 +141,7 @@ impl Printer {
         if let Some(body) = &function.body {
             fields.push(self.term(body));
         }
-        list("def", fields)
+        list("fn", fields)
     }
 
     fn parameter(&self, parameter: &Parameter) -> SExp {
@@ -166,6 +166,14 @@ impl Printer {
 
     fn kind(&self, kind: &TermKind) -> SExp {
         match kind {
+            TermKind::OperationCall { lookup, args } => list(
+                "operation-call",
+                std::iter::once(atom(&lookup.name))
+                    .chain(args.iter().map(|arg| self.term(arg)))
+                    .collect(),
+            ),
+            TermKind::Read { place } => list("read", vec![self.term(place)]),
+            TermKind::Move { place } => list("move", vec![self.term(place)]),
             TermKind::Constant { value } => list("constant", vec![quoted(format!("{value:?}"))]),
             TermKind::Numeric { text } => list("numeric", vec![quoted(text)]),
             TermKind::SizeOf { of } => list("value-sizeof", vec![self.ty(of)]),
@@ -414,6 +422,7 @@ impl TypeNames {
                 .unwrap_or_else(|| format!("T{}", parameter.index())),
             Type::Member { base, name } => format!("{}.{}", self.format(base), name),
             Type::Method { lookup } => self.method(lookup),
+            Type::Operation { lookup } => format!("operation({})", lookup.name),
             Type::FunctionParameter { function, index } => {
                 format!("parameter({}, {index})", self.format(function))
             }

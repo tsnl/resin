@@ -1,12 +1,12 @@
 ==================
 Associated method references with explicit type arguments
 ==================
-def example() = {
-    var first = Cell<int>.select::<ulong>;
-    var second = Factory.create::<Ptr<int>>;
-    Cell<int>.select::<ulong>(7, 42);
-    (Cell<int>.select::<ulong>)(7, 42);
-};
+fn example()  {
+    let mut first = select::<int, ulong>;
+    let mut second = create::<Ptr<int>>;
+    select::<int, ulong>(7, 42);
+    (select::<int, ulong>)(7, 42);
+}
 ---
 
 (source_file

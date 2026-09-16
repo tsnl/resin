@@ -532,7 +532,7 @@ mod tests {
     async fn repeated_full_and_delta_submissions_share_passes_and_missing_handles_recover() {
         let directory = TempDir::new().unwrap();
         let server = server(&directory, 1).await;
-        let full = inputs(&server, "export { main }; def main() -> int = { 7 };");
+        let full = inputs(&server, "export { main }; fn main() -> int  { 7 }");
         let first = analyze(
             &server,
             InputSelection::Full {
@@ -590,9 +590,9 @@ mod tests {
         let directory = TempDir::new().unwrap();
         let server = server(&directory, 4).await;
         let path = directory.path().join("coincidental.resin");
-        std::fs::write(&path, "export { answer }; def answer() -> int = { 1 };").unwrap();
+        std::fs::write(&path, "export { answer }; fn answer() -> int  { 1 }").unwrap();
         let text = format!(
-            "import {{ {:?} }}; def main() -> int = {{ answer() }};",
+            "import {{ {:?} }}; fn main() -> int  {{ answer() }}",
             path.to_str().unwrap()
         );
         let response = analyze(
@@ -617,11 +617,11 @@ mod tests {
         let server = server(&directory, 8).await;
         let mut full = inputs(
             &server,
-            "export { main }; import { \"left/module.resin\", \"right/module.resin\" }; def main() -> int = { left() + right() };",
+            "export { main }; import { \"left/module.resin\", \"right/module.resin\" }; fn main() -> int  { left() + right() }",
         );
         for (side, number) in [("left", 7), ("right", 8)] {
             let name = format!("{side}/module.resin");
-            full.sources.push(SourceFile { name: name.clone(), text: format!("export {{ {side} }}; extern {{ \"same.h\": {{ def native_{side}() -> int; }} }}; def {side}() -> int = {{ native_{side}() }};") });
+            full.sources.push(SourceFile { name: name.clone(), text: format!("export {{ {side} }}; extern {{ \"same.h\": {{ fn native_{side}() -> int; }} }}; fn {side}() -> int  {{ native_{side}() }}") });
             full.imports.push(resin_protocol::ImportBinding {
                 importer: "main.resin".into(),
                 reference: name.clone(),
@@ -729,7 +729,7 @@ mod tests {
     async fn uploaded_runtime_basename_does_not_replace_the_compiler_abi() {
         let directory = TempDir::new().unwrap();
         let server = server(&directory, 4).await;
-        let mut full = inputs(&server, "export { main }; def main() -> int = { 9 };");
+        let mut full = inputs(&server, "export { main }; fn main() -> int  { 9 }");
         let shadow = bundle(&[(
             "resin_runtime.h",
             "#error user include root replaced compiler runtime\n",
@@ -768,7 +768,7 @@ mod tests {
             "folder/CoM1.data",
             "conout$",
         ] {
-            let mut full = inputs(&server, "def main() = {};");
+            let mut full = inputs(&server, "fn main()  {}");
             full.headers.bundles.push(bundle(&[(path, "")]));
             assert_eq!(
                 capture(
@@ -787,7 +787,7 @@ mod tests {
             [("A/x.h", ""), ("a/y.h", "")],
             [("same.h", ""), ("SAME.h", "")],
         ] {
-            let mut full = inputs(&server, "def main() = {};");
+            let mut full = inputs(&server, "fn main()  {}");
             full.headers.bundles.push(bundle(&files));
             assert_eq!(
                 capture(
@@ -802,7 +802,7 @@ mod tests {
                 ErrorCode::InvalidRequest
             );
         }
-        let mut full = inputs(&server, "extern { \"empty.h\": {} }; def main() = {};");
+        let mut full = inputs(&server, "extern { \"empty.h\": {} }; fn main()  {}");
         let header = bundle(&[("empty.h", "")]);
         full.headers.bundles.push(header.clone());
         full.headers.bindings.push(HeaderBinding {

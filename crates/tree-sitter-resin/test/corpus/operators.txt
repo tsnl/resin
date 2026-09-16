@@ -2,12 +2,20 @@
 Operator declarations on generic structs
 ==================
 struct Number<T> {
- value: T,
- def __add__(left: Number<T>, right: Number<T>) -> Number<T> = { left };
- def __neg__(value: Number<T>) -> Number<T> = { value };
- def __lshift__(value: Number<T>, shift: int) -> Number<T> = { value };
- def __eq__(left: Number<T>, right: Number<T>) -> bool = { true };
-};
+ value: T;
+ 
+ 
+ 
+ 
+}
+fn __add__<T>(left: Number<T>, right: Number<T>) -> Number<T>  { left }
+
+fn __neg__<T>(value: Number<T>) -> Number<T>  { value }
+
+fn __lshift__<T>(value: Number<T>, shift: int) -> Number<T>  { value }
+
+fn __eq__<T>(left: Number<T>, right: Number<T>) -> bool  { true }
+
 
 ---
 

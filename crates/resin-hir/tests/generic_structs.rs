@@ -9,7 +9,7 @@ fn compile(source: &str) -> Result<resin_hir::Module, resin_source::SourceError>
 
 #[test]
 fn nominal_definitions_keep_one_body_with_rigid_field_binders() {
-    let module = compile("struct Pair<T> { first: T, second: T }; def small(value: Pair<int>) -> Pair<int> = { value }; def large(value: Pair<ulong>) -> Pair<ulong> = { value };").unwrap();
+    let module = compile("struct Pair<T> { first: T; second: T; } fn small(value: Pair<int>) -> Pair<int>  { value } fn large(value: Pair<ulong>) -> Pair<ulong>  { value }").unwrap();
     let pairs = module
         .types
         .iter()
@@ -50,7 +50,7 @@ fn nominal_definitions_keep_one_body_with_rigid_field_binders() {
 
 #[test]
 fn nominal_arguments_deduce_function_types_without_equating_binders() {
-    let module = compile("struct Cell<T> { value: T }; def read<T>(cell: Cell<T>) -> T = { cell.value }; def main() -> int = { read(Cell<int> { value = 42 }) };").unwrap();
+    let module = compile("struct Cell<T> { value: T; } fn read<T>(cell: Cell<T>) -> T  { cell.value } fn main() -> int  { read(Cell<int> { value = 42 }) }").unwrap();
     let cell = module
         .types
         .iter()
@@ -70,9 +70,9 @@ fn nominal_arguments_deduce_function_types_without_equating_binders() {
 #[test]
 fn nominal_names_and_arguments_remain_distinct_during_inference() {
     for source in [
-        "struct Cell<T> { value: T }; def take(cell: Cell<int>) = {}; def main() = { take(Cell<ulong> { value = 42 }); };",
-        "struct Left<T> { value: T }; struct Right<T> { value: T }; def take(value: Left<int>) = {}; def main() = { take(Right<int> { value = 42 }); };",
-        "struct Cell<T> { value: T }; def main() = { var cell = Cell<int> { value = 42 }; cell := Cell<ulong> { value = 42 }; };",
+        "struct Cell<T> { value: T; } fn take(cell: Cell<int>)  {} fn main()  { take(Cell<ulong> { value = 42 }); }",
+        "struct Left<T> { value: T; } struct Right<T> { value: T; } fn take(value: Left<int>)  {} fn main()  { take(Right<int> { value = 42 }); }",
+        "struct Cell<T> { value: T; } fn main()  { let mut cell = Cell<int> { value = 42 }; cell = Cell<ulong> { value = 42 }; }",
     ] {
         assert!(compile(source).is_err(), "{source}");
     }
@@ -81,14 +81,14 @@ fn nominal_names_and_arguments_remain_distinct_during_inference() {
 #[test]
 fn generic_struct_declaration_and_application_errors_are_source_errors() {
     for source in [
-        "struct Pair<T, T> { value: T };",
-        "struct Pair<T> { value: _ };",
-        "struct Pair<T> { value: Missing };",
-        "struct Pair<T> { value: T }; def take(value: Pair) = {};",
-        "struct Pair<T> { value: T }; def take(value: Pair<int, int>) = {};",
-        "struct Pair<T> { value: T }; def main() = { Pair<int> { missing = 42 }; };",
-        "struct Pair<T> { first: T, second: T }; def main() = { Pair<int> { first = 42 }; };",
-        "struct Pair<T> { value: T }; def main() = { Pair<int> { value = 1 == 1 }; };",
+        "struct Pair<T, T> { value: T; }",
+        "struct Pair<T> { value: _; }",
+        "struct Pair<T> { value: Missing; }",
+        "struct Pair<T> { value: T; } fn take(value: Pair)  {}",
+        "struct Pair<T> { value: T; } fn take(value: Pair<int, int>)  {}",
+        "struct Pair<T> { value: T; } fn main()  { Pair<int> { missing = 42 }; }",
+        "struct Pair<T> { first: T; second: T; } fn main()  { Pair<int> { first = 42 }; }",
+        "struct Pair<T> { value: T; } fn main()  { Pair<int> { value = 1 == 1 }; }",
     ] {
         assert!(compile(source).is_err(), "{source}");
     }
@@ -96,7 +96,7 @@ fn generic_struct_declaration_and_application_errors_are_source_errors() {
 
 #[test]
 fn nested_generic_aliases_expand_to_the_original_nominal_declaration() {
-    let module = compile("struct Cell<T> { value: T }; type Renamed<U> = Cell<U>; type Nested<V> = Renamed<Ptr<V>>; def take(value: Nested<int>) -> Cell<Ptr<int>> = { value };").unwrap();
+    let module = compile("struct Cell<T> { value: T; } type Renamed<U> = Cell<U>; type Nested<V> = Renamed<Ptr<V>>; fn take(value: Nested<int>) -> Cell<Ptr<int>>  { value }").unwrap();
     let function = &module.functions[0];
     assert_eq!(
         function.signature.params[0].annotation.ty,
@@ -115,7 +115,7 @@ fn nested_generic_aliases_expand_to_the_original_nominal_declaration() {
 
 #[test]
 fn local_nominal_results_carry_captures_as_well_as_explicit_arguments() {
-    let module = compile("def pair<T>(value: T) -> _ = { struct Local<U> { outer: T, inner: U }; Local<int> { outer = value, inner = 35 } }; def small() -> _ = { pair(7_i) }; def large() -> _ = { pair(4294967296_ul) };").unwrap();
+    let module = compile("fn pair<T>(value: T) -> _  { struct Local<U> { outer: T; inner: U; } Local<int> { outer = value, inner = 35 } } fn small() -> _  { pair(7_i) } fn large() -> _  { pair(4294967296_ul) }").unwrap();
     let pair = &module.functions[0];
     let local = module
         .types
@@ -153,8 +153,8 @@ fn local_nominal_results_carry_captures_as_well_as_explicit_arguments() {
 #[test]
 fn generic_foreign_values_fail_without_panicking() {
     for source in [
-        "extern { \"native.h\": { def native(value: Cell<int>); } }; struct Cell<T> { value: T };",
-        "extern { \"native.h\": { def native() -> Cell<int>; } }; struct Cell<T> { value: T };",
+        "extern { \"native.h\": { fn native(value: Cell<int>); } }; struct Cell<T> { value: T; }",
+        "extern { \"native.h\": { fn native() -> Cell<int>; } }; struct Cell<T> { value: T; }",
     ] {
         let error = compile(source).unwrap_err();
         assert!(error.to_string().contains("Foreign"), "{error}");
@@ -168,7 +168,7 @@ fn shader_interface_expansion_bounds_duplicated_generic_fields() {
         ty = format!("Pair<{ty}>");
     }
     let source = format!(
-        "struct Pair<T> {{ left: T, right: T }}; @fragment_shader def fragment(color: {ty}) -> {ty} = {{ color }};"
+        "struct Pair<T> {{ left: T; right: T; }} @fragment_shader fn fragment(color: {ty}) -> {ty} = {{ color }};"
     );
     let error = compile(&source).unwrap_err();
     assert!(
@@ -181,14 +181,14 @@ fn shader_interface_expansion_bounds_duplicated_generic_fields() {
 
 #[test]
 fn shader_interface_expansion_counts_record_depth() {
-    let mut source = "struct Layer0 { value: float32 };".to_owned();
+    let mut source = "struct Layer0 { value: float32; }".to_owned();
     for layer in 1..=128 {
         source.push_str(&format!(
-            "struct Layer{layer} {{ value: Layer{} }};",
+            "struct Layer{layer} {{ value: Layer{} }}",
             layer - 1
         ));
     }
-    source.push_str("@fragment_shader def fragment(color: Layer128) -> Layer128 = { color };");
+    source.push_str("@fragment_shader fn fragment(color: Layer128) -> Layer128  { color }");
     let error = compile(&source).unwrap_err();
     assert!(
         error

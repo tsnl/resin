@@ -14,7 +14,7 @@ Shared handles make everyday resource copying safe. Raw `Ptr<T>` and `Span<T>` v
 non-owning and there is no borrow checker or tracing collector. Separate value and
 type namespaces keep definitions simple, including recursion through pointers.
 
-Functions take a parenthesized sequence of arguments. `def f(a: A, b: B) -> R = { body };`
+Functions take a parenthesized sequence of arguments. `fn f(a: A, b: B) -> R  { body }`
 has two parameters and is called with `f(a, b)`. Function types list parameters explicitly:
 `() -> R`, `(A) -> R`, and `(A, B) -> R`. A tuple is one value: `f((a, b))` supplies one
 argument, whose function type is `((A, B)) -> R`. Likewise, `f()` supplies no arguments,
@@ -29,7 +29,7 @@ Functions are top-level, immutable definitions without captured environments. Si
 available before bodies are checked, so mutually recursive functions need no forward declarations.
 An omitted result annotation means unit; explicit `_` holes enable inference in locals and function
 results, including nested positions. Value bindings use `var name = value;` or `var name: Type = value;`, nominal records use
-`struct Name { field: Type };`, and `type Name = Type;` creates transparent aliases. Declarations
+`struct Name { field: Type; }`, and `type Name = Type;` creates transparent aliases. Declarations
 such as `var name: Type;` reserve uninitialized local storage: reads require prior initialization
 on every control-flow path. An aggregate must be initialized as a whole before its fields can be
 accessed. Record initializers keep bare `name = value` fields; parameters and struct fields

@@ -43,6 +43,26 @@ pub(super) fn check_instr(
                 stack.push(target.ty.clone());
             }
         }
+        Instr::TakeField { local, path } | Instr::SetField { local, path } => {
+            let mut ty = function
+                .locals
+                .get(local.index())
+                .ok_or_else(|| {
+                    location.error(VerifyErrorKind::InvalidLocal {
+                        local: local.index(),
+                    })
+                })?
+                .ty
+                .clone();
+            for index in path {
+                ty = project_static(&module.types, ty, *index, location)?;
+            }
+            if matches!(instr, Instr::TakeField { .. }) {
+                stack.push(ty);
+            } else {
+                expect_type(ty, pop_one(stack, location)?, location)?;
+            }
+        }
         Instr::WeakEmpty => stack.push(Ty::WeakOwner),
         Instr::OwnerAllocate { element } => {
             check_type(&module.types, element, location)?;
@@ -234,7 +254,11 @@ pub(super) fn check_instr(
                 return Err(location.error(VerifyErrorKind::ExpectedPointer { found: address }));
             };
             expect_type(*pointee, value.clone(), location)?;
-            stack.push(value);
+            stack.push(if matches!(instr, Instr::Store) {
+                Ty::Unit
+            } else {
+                value
+            });
         }
         Instr::Discard => {
             pop_one(stack, location)?;

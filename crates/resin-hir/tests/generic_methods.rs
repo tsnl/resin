@@ -9,7 +9,7 @@ fn compile(source: &str) -> Result<resin_hir::Module, resin_source::SourceError>
 
 #[test]
 fn method_schemes_keep_owner_binders_before_additional_method_binders() {
-    let module = compile("struct Cell<T> { value: T, def choose<U>(self: Cell<T>, value: U) -> U = { value }; }; def main(cell: Cell<int>) -> ulong = { cell.choose::<ulong>(42) };").unwrap();
+    let module = compile("struct Cell<T> { value: T;  }\nfn choose<T, U>(self: Cell<T>, value: U) -> U  { value }\n fn main(cell: Cell<int>) -> ulong  { cell:choose::<ulong>(42) }").unwrap();
     let owner = module
         .types
         .iter()
@@ -51,7 +51,7 @@ fn method_schemes_keep_owner_binders_before_additional_method_binders() {
 
 #[test]
 fn different_owner_applications_retain_one_polymorphic_method_body() {
-    let module = compile("struct Cell<T> { value: T, def read(self: Cell<T>) -> T = { self.value }; }; def small(value: Cell<int>) -> int = { value.read() }; def large(value: Cell<ulong>) -> ulong = { value.read() };").unwrap();
+    let module = compile("struct Cell<T> { value: T;  }\nfn read<T>(self: Cell<T>) -> T  { self.value }\n fn small(value: Cell<int>) -> int  { value:read() } fn large(value: Cell<ulong>) -> ulong  { value:read() }").unwrap();
     let owner = module
         .types
         .iter()
@@ -77,7 +77,7 @@ fn different_owner_applications_retain_one_polymorphic_method_body() {
 
 #[test]
 fn recursive_method_results_complete_against_their_own_rigid_binders() {
-    let module = compile("struct Cell<T> { value: T, def choose<U>(self: Cell<T>, value: U, stop: bool) -> _ = { if (stop) { value } else { self.choose(value, 1 == 1) } }; }; def main() -> int = { Cell<ulong> { value = 7 }.choose(42, 1 == 0) };").unwrap();
+    let module = compile("struct Cell<T> { value: T;  }\nfn choose<T, U>(self: Cell<T>, value: U, stop: bool) -> _  { if (stop) { value } else { self:choose(value, 1 == 1) } }\n fn main() -> int  { Cell<ulong> { value = 7 }:choose(42, 1 == 0) }").unwrap();
     let method = module
         .functions
         .iter()
@@ -95,7 +95,7 @@ fn recursive_method_results_complete_against_their_own_rigid_binders() {
 #[test]
 fn drop_hooks_bind_only_their_owner_parameters() {
     let module =
-        compile("struct Cell<T> { value: T, def drop(self: Ptr<Cell<T>>) = {}; };").unwrap();
+        compile("struct Cell<T> { value: T;  }\nfn drop<T>(self: Ptr<Cell<T>>)  {}\n").unwrap();
     let owner = module
         .types
         .iter()
@@ -123,10 +123,10 @@ fn drop_hooks_bind_only_their_owner_parameters() {
 #[test]
 fn explicit_method_arguments_cannot_replace_or_repeat_owner_arguments() {
     for source in [
-        "struct Cell<T> { value: T, def read(self: Cell<T>) -> T = { self.value }; }; def main() = { Cell<int> { value = 1 }.read::<int>(); };",
-        "struct Cell<T> { value: T, def choose<U>(self: Cell<T>, value: U) -> U = { value }; }; def main() = { Cell<int> { value = 1 }.choose::<int, ulong>(2); };",
-        "struct Cell<T> { value: T, def read(self: Cell<T>) -> T = { self.value }; }; def main() = { Cell<int>.read(Cell<uint> { value = 1 }); };",
-        "struct Plain { def read(self: Plain) -> int = { 42 }; }; def main() = { Plain {}.read::<int>(); };",
+        "struct Cell<T> { value: T;  }\nfn read<T>(self: Cell<T>) -> T  { self.value }\n fn main()  { Cell<int> { value = 1 }:read::<int>(); }",
+        "struct Cell<T> { value: T;  }\nfn choose<T, U>(self: Cell<T>, value: U) -> U  { value }\n fn main()  { Cell<int> { value = 1 }:choose::<int, ulong>(2); }",
+        "struct Cell<T> { value: T;  }\nfn read<T>(self: Cell<T>) -> T  { self.value }\n fn main()  { read::<int>(Cell<uint> { value = 1 }); }",
+        "struct Plain {  }\nfn read(self: Plain) -> int  { 42 }\n fn main()  { Plain {}:read::<int>(); }",
     ] {
         assert!(compile(source).is_err(), "{source}");
     }
@@ -135,11 +135,11 @@ fn explicit_method_arguments_cannot_replace_or_repeat_owner_arguments() {
 #[test]
 fn invalid_method_binders_and_destructor_signatures_are_definition_errors() {
     for source in [
-        "struct Cell<T> { value: T, def choose<U, U>(self: Cell<T>, value: U) -> U = { value }; };",
-        "struct Cell<T> { value: T, def drop<U>(self: Ptr<Cell<T>>) = {}; };",
-        "struct Cell<T> { value: T, def drop(self: Ptr<Cell<int>>) = {}; };",
-        "struct Cell<T> { value: T, def drop(self: Ptr<Cell<T>>) -> int = { 0 }; };",
-        "struct Cell<T> { value: T, def choose<U>(self: Cell<T>, value: U) -> U = { value }; }; def escaped(value: U) = {};",
+        "struct Cell<T> { value: T;  }\nfn choose<T, U, U>(self: Cell<T>, value: U) -> U  { value }\n",
+        "struct Cell<T> { value: T;  }\nfn drop<T, U>(self: Ptr<Cell<T>>)  {}\n",
+        "struct Cell<T> { value: T;  }\nfn drop<T>(self: Ptr<Cell<int>>)  {}\n",
+        "struct Cell<T> { value: T;  }\nfn drop<T>(self: Ptr<Cell<T>>) -> int  { 0 }\n",
+        "struct Cell<T> { value: T;  }\nfn choose<T, U>(self: Cell<T>, value: U) -> U  { value }\n fn escaped(value: U)  {}",
     ] {
         assert!(compile(source).is_err(), "{source}");
     }
@@ -147,7 +147,7 @@ fn invalid_method_binders_and_destructor_signatures_are_definition_errors() {
 
 #[test]
 fn undetermined_method_arguments_require_annotations() {
-    let error = compile("struct Factory { def create<T>(self: Factory) -> T = { 41 }; }; def main() = { Factory {}.create(); };").unwrap_err();
+    let error = compile("struct Factory {  }\nfn create<T>(self: Factory) -> T  { 41 }\n fn main()  { Factory {}:create(); }").unwrap_err();
     assert!(error.to_string().contains("annotat"), "{error}");
 }
 
@@ -184,17 +184,17 @@ fn rejects_local_and_imported_owner(declaration: &str, use_site: &str, expected:
 fn source_drop_hooks_reject_structural_unwrapping_before_and_after_importing() {
     for (declaration, owner) in [
         (
-            "struct Managed { _0: int, def drop(self: Ptr<Managed>) = {}; };",
+            "struct Managed { _0: int,  }\nfn drop(self: Ptr<Managed>)  {}\n",
             "Managed",
         ),
         (
-            "struct Managed<T> { _0: T, def drop(self: Ptr<Managed<T>>) = {}; };",
+            "struct Managed<T> { _0: T,  }\nfn drop<T>(self: Ptr<Managed<T>>)  {}\n",
             "Managed<int>",
         ),
     ] {
         rejects_local_and_imported_owner(
             declaration,
-            &format!("type Raw = (int,); def unwrap(value: {owner}) -> Raw = {{ Raw(value) }};"),
+            &format!("type Raw = (int,); fn unwrap(value: {owner}) -> Raw  {{ Raw(value) }}"),
             "UnwrapManaged",
         );
     }

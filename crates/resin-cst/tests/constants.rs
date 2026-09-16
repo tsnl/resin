@@ -16,7 +16,7 @@ async fn every_constant_specification_requires_an_explicit_initializer() {
     ] {
         for source in [
             declaration.to_owned(),
-            format!("def f() = {{ {declaration} }};"),
+            format!("fn f()  {{ {declaration} }}"),
         ] {
             let document = common::parse(&source, None).await;
             assert!(document.tree().root_node().has_error(), "{source}");
@@ -31,7 +31,7 @@ async fn explicit_initializers_allow_optional_types_and_discarded_names() {
         "const ( first: uint = iota; _ = iota; next = iota; a, b: uint = iota, iota + 10; );";
     for source in [
         declaration.to_owned(),
-        format!("def f() = {{ {declaration} }};"),
+        format!("fn f()  {{ {declaration} }}"),
     ] {
         let document = common::parse(&source, None).await;
         assert!(!document.tree().root_node().has_error(), "{source}");

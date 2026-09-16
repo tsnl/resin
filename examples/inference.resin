@@ -2,18 +2,18 @@ export { main };
 
 import { "$/string.resin" };
 
-def fibonacci(n: int) -> _ = {
+fn fibonacci(n: int) -> _  {
 	if (n <= 1) {
 		n
 	} else {
 		fibonacci(n - 1) + fibonacci(n - 2)
 	}
-};
+}
 
-def main() = {
-	var n: _;
-	var pointer: Ptr<_>;
-	n := fibonacci(10);
-	pointer := &n;
+fn main()  {
+	let mut n: _;
+	let mut pointer: Ptr<_>;
+	n = fibonacci(10);
+	pointer = &n;
 	print(fmt("fibonacci(10) = {0}\n", (pointer.*,)));
-};
+}

@@ -2,10 +2,12 @@
 Method calls and function-valued field calls
 ==================
 struct Item {
- def read(item: Item, value: int) -> int = { value };
-};
+ 
+}
+fn read(item: Item, value: int) -> int  { value }
 
-def calls(item: Item) = { item.read(1); (item.read)(1); Item.read(item, 1); };
+
+fn calls(item: Item)  { item:read(1); (item.read)(1); read(item, 1); }
 
 ---
 

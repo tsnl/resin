@@ -1,22 +1,23 @@
 ==================
 Inherent destruction and shared ownership
 ==================
+struct Item { value: int;
+    
+}
+fn drop(self: Ptr<Item>)  {}
 
-struct Item { value: int,
-    def drop(self: Ptr<Item>) = {};
-};
 
-def main() = {
-    var owner = ArcPtr<Item>.alloc(Item { value = 42 })?;
-    var weak: WeakPtr<Item>;
-    weak := owner.downgrade();
-    var maybe: ArcPtr<Item> | None;
-    maybe := weak.upgrade();
+fn main()  {
+    let mut owner = arc_ptr_alloc::<Item>(Item { value = 42 })?;
+    let mut weak: WeakPtr<Item>;
+    weak = owner:downgrade();
+    let mut maybe: ArcPtr<Item> | None;
+    maybe = weak:upgrade();
     match (maybe) {
-        ArcPtr<Item>(item) => { item.get().value; },
+        ArcPtr<Item>(item) => { item:get().value; },
         None => {},
     };
-};
+}
 
 ---
 

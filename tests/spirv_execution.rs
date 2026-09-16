@@ -171,20 +171,19 @@ fn physical_byte_record_strides_preserve_neighboring_elements() {
         c: 255,
     };
     let Some(actual) = execute(
-        r#"
-        export { kernel };
+        r#"export { kernel };
         import { "$/span.resin" };
-        struct Bytes3 { a: ubyte, b: ubyte, c: ubyte };
-        struct Root { count: ulong, inputs: Ptr<Bytes3>, outputs: Ptr<Bytes3> };
-        @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {
+        struct Bytes3 { a: ubyte; b: ubyte; c: ubyte; }
+        struct Root { count: ulong; inputs: Ptr<Bytes3>; outputs: Ptr<Bytes3>; }
+        @compute_shader fn kernel(index: ulong, root: Ptr<Root>)  {
             if (index < root.count) {
-                var inputs = Span<Bytes3> { data = root.inputs, length = root.count };
-                var outputs = Span<Bytes3> { data = root.outputs, length = root.count };
-                var output: Ref<_> = outputs.at(index);
-                output := inputs.at(index);
-                output.b := output.b + 1_ub;
+                let mut inputs = Span<Bytes3> { data = root.inputs, length = root.count };
+                let mut outputs = Span<Bytes3> { data = root.outputs, length = root.count };
+                let mut output: Ref<_> = outputs:at(index);
+                output = inputs:at(index);
+                output.b = output.b + 1_ub;
             };
-        };
+        }
     "#,
         &inputs,
         sentinel,
@@ -284,27 +283,27 @@ fn mixed_record_copies_preserve_nested_byte_fields() {
 #[test]
 fn an_unconditionally_failing_nested_loop_condition_stops_before_caller_stores() {
     let source = r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: ulong, inputs: Ptr<uint>, outputs: Ptr<uint> };
-        def fail() -> bool = {
-            var value: None;
-            value := None;
-            var test: bool;
-            test := value!;
+        struct Root { count: ulong; inputs: Ptr<uint>; outputs: Ptr<uint>; }
+        fn fail() -> bool  {
+            let mut value: None;
+            value = None;
+            let mut test: bool;
+            test = value!;
             test
-        };
-        def condition() -> bool = { fail() };
-        @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {
+        }
+        fn condition() -> bool  { fail() }
+        @compute_shader fn kernel(index: ulong, root: Ptr<Root>)  {
             if (index < root.count) {
-                var output = Span<uint> { data = root.outputs, length = root.count };
-                var step = 0_ui;
+                let mut output = Span<uint> { data = root.outputs, length = root.count };
+                let mut step = 0_ui;
                 while (step < 1_ui) {
-                    while (condition()) { output.at(index) := 1_ui; };
-                    output.at(index) := 2_ui;
-                    step := step + 1_ui;
+                    while (condition()) { output:at(index) = 1_ui; };
+                    output:at(index) = 2_ui;
+                    step = step + 1_ui;
                 };
-                output.at(index) := 3_ui;
+                output:at(index) = 3_ui;
             };
-        };"#;
+        }"#;
     let sentinel = 0xabcd1234_u32;
     let Some(actual) = execute(source, &[0_u32; 65], sentinel) else {
         return;

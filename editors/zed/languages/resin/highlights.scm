@@ -5,7 +5,7 @@
 ["Ptr" "Ref" "Err" "None"] @type.builtin
 
 ; Keep declaration and control keywords in sync with the grammar's reserved words.
-["export" "import" "extern" "intrinsic" "type" "struct" "def" "var" "const"] @keyword
+["export" "import" "extern" "intrinsic" "type" "struct" "fn" "let" "mut" "const"] @keyword
 ["if" "else" "while" "match" "assert" "return" "break" "continue"] @keyword
 
 (function_definition name: (lid) @function)
@@ -14,9 +14,9 @@
 (const_spec name: (lid) @constant)
 "sizeof" @function.builtin
 ((primary_term (lid) @constant.builtin) (#eq? @constant.builtin "iota"))
-(function_definition params: (declare name: (lid) @variable.parameter))
-(foreign_function params: (declare name: (lid) @variable.parameter))
-(intrinsic_function params: (declare name: (lid) @variable.parameter))
+(function_definition params: (parameter pattern: (binding_pattern name: (lid) @variable.parameter)))
+(foreign_function params: (parameter pattern: (binding_pattern name: (lid) @variable.parameter)))
+(intrinsic_function params: (parameter pattern: (binding_pattern name: (lid) @variable.parameter)))
 (postfix_term prefix: (primary_term (lid) @function) . suffix: (arguments))
 ((primary_term (lid) @function.builtin)
   (#any-of? @function.builtin "sizeof"))
@@ -26,7 +26,7 @@
 (method_call name: (lid) @function)
 (record_term fields: (term_define name: (lid) @property))
 (struct_definition fields: (declare name: (lid) @property))
-(match_arm name: (lid) @variable.parameter)
+(match_arm pattern: (binding_pattern name: (lid) @variable.parameter))
 
 (pointer_deref) @operator
 (try_suffix) @operator
@@ -34,7 +34,7 @@
 (string) @string
 (comment) @comment
 
-["=" ":=" "->" "=>" "||" "&&" "|" "^" "&" "==" "!=" "<" "<=" ">" ">="
+["=" "->" "=>" "||" "&&" "|" "^" "&" "==" "!=" "<" "<=" ">" ">="
  "<<" ">>" "+" "-" "*" "/" "%" "!" "~"] @operator
 ["(" ")" "[" "]" "{" "}"] @punctuation.bracket
 [";" "," ":" "." "::"] @punctuation.delimiter

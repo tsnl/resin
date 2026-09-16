@@ -187,10 +187,9 @@ docker build -f deploy/Dockerfile -t resin-server .
 docker run --rm --name resin-server -p 127.0.0.1:7412:7412 resin-server
 export RESIN_SERVER=http://127.0.0.1:7412
 ```
-
 The container runs as UID 10001 and contains server libraries, headers, archive, and
 native tools. It requires no client workspace mount. Persistent volumes for
-`/var/lib/resin` may retain dependency/native build state; provision them writable by
+`/let mut/lib/resin` may retain dependency/native build state; provision them writable by
 UID 10001. Cache heads are in memory and restart cold. See Docker's
 [container run documentation](https://docs.docker.com/engine/containers/run/).
 

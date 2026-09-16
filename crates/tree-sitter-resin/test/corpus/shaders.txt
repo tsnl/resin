@@ -1,10 +1,9 @@
 ==================
 Shader decorator and function reference
 ==================
-
 @compute_shader
-def kernel(i: uint) -> uint = { i };
-def main() = { var entry = kernel; };
+fn kernel(i: uint) -> uint  { i }
+fn main()  { let mut entry = kernel; }
 
 ---
 

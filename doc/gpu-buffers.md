@@ -9,15 +9,15 @@ need an explicit `$/span.resin` import.
 
 ```resin
 var gpu = Gpu.new()?;
-var scalar = gpu.create(42)?;                  // GpuPtr<long>, inferred from the value
-var values = gpu.alloc::<float32>(1024)?;
-var index = 0_ul;
+let mut scalar = gpu.create(42)?;                  // GpuPtr<long>, inferred from the value
+let mut values = gpu.alloc::<float32>(1024)?;
+let mut index = 0_ul;
 while (index < values.length) {
     values.at(index).store(1.0_f);
-    index := index + 1_ul;
+    index = index + 1_ul;
 };
-var first = values.slice(0, 16);            // GpuSpan<float32>, same owner
-var readable = first.read_only();
+let mut first = values.slice(0, 16);            // GpuSpan<float32>, same owner
+let mut readable = first.read_only();
 ```
 
 `gpu.create(initial)` initializes one element and infers its type from the value
@@ -64,19 +64,19 @@ Create pipelines from decorated shader declarations. The compiler preserves thei
 root type and stage, then checks host arguments when recording a dispatch or draw:
 
 ```resin
-struct Params { values: Span<float32>, scale: float32 };
+struct Params { values: Span<float32>; scale: float32; }
 
 @compute_shader
-def kernel(index: ulong, root: Ptr<Params>) = {
+fn kernel(index: ulong, root: Ptr<Params>)  {
     if (index < root.values.length) {
-        var value: Ref<float32> = root.values.at(index);
-        value := value * root.scale;
+        let mut value: Ref<float32> = root.values:at(index);
+        value = value * root.scale;
     };
-};
+}
 
-struct HostParams { values: GpuSpan<float32>, scale: float32 };
+struct HostParams { values: GpuSpan<float32>; scale: float32; }
 var pipeline = gpu.create_compute_pipeline(kernel)?;
-var commands = gpu.start_command_recording()?;
+let mut commands = gpu.start_command_recording()?;
 commands.dispatch(pipeline, HostParams { values = values, scale = 2.0_f }, 16, 1, 1)?;
 commands.submit()?;
 ```

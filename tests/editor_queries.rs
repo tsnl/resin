@@ -86,7 +86,7 @@ fn constants_and_sizeof_are_highlighted_and_outlined() {
 
 #[test]
 fn declaration_keywords_are_visible_in_outlines_and_struct_textobjects() {
-    let source = "struct Point { x: float32, y: float32, }; type Position = Point;";
+    let source = "struct Point { x: float32; y: float32; } type Position = Point;";
     let outline = captures(ZED_QUERIES[3].1, source);
     for (kind, text) in [
         ("context", "struct"),
@@ -102,7 +102,7 @@ fn declaration_keywords_are_visible_in_outlines_and_struct_textobjects() {
     let objects = captures(ZED_QUERIES[5].1, source);
     assert!(objects.contains(&(
         "class.around".into(),
-        "struct Point { x: float32, y: float32, };".into()
+        "struct Point { x: float32; y: float32; }".into()
     )));
     for field in ["x: float32", "y: float32"] {
         assert!(objects.contains(&("class.inside".into(), field.into())));
@@ -111,10 +111,10 @@ fn declaration_keywords_are_visible_in_outlines_and_struct_textobjects() {
 
 #[test]
 fn reserved_words_have_highlight_rules() {
-    let source = "export { f }; import { \"x.resin\" }; extern type Handle; struct S { value: int }; type T = S; def f() -> (() | Err<Never>) = { var x: Span<Ptr<ubyte>>; free(x); while (0 < 1) { if (0 == 1) { () } else { () }; }; match (value) { ()(v) => { (v) }, Err(e) => { Err(e) } } };";
+    let source = "export { f }; import { \"x.resin\" }; extern type Handle; struct S { value: int; } type T = S; fn f() -> (() | Err<Never>)  { let mut x: Span<Ptr<ubyte>>; free(x); while (0 < 1) { if (0 == 1) { () } else { () }; }; match (value) { ()(v) => { (v) }, Err(e) => { Err(e) } } }";
     let highlighted = captures(ZED_QUERIES[0].1, source);
     for word in [
-        "export", "import", "extern", "type", "struct", "def", "var", "if", "else", "while",
+        "export", "import", "extern", "type", "struct", "fn", "let", "mut", "if", "else", "while",
         "match",
     ] {
         assert!(
@@ -126,7 +126,7 @@ fn reserved_words_have_highlight_rules() {
 
 #[test]
 fn result_syntax_is_highlighted_and_structs_have_outlines() {
-    let source = "struct Broken { code: int }; def fail() -> (int | Err<Never>) = { match (value) { int(n) => { (n?) }, Err(error) => { Err(error) } } };";
+    let source = "struct Broken { code: int; } fn fail() -> (int | Err<Never>)  { match (value) { int(n) => { (n?) }, Err(error) => { Err(error) } } }";
     let captured = captures(ZED_QUERIES[0].1, source);
     for (kind, text) in [
         ("keyword", "struct"),
@@ -146,7 +146,7 @@ fn result_syntax_is_highlighted_and_structs_have_outlines() {
 
 #[test]
 fn none_and_postfix_unwrapping_are_highlighted() {
-    let source = "def f(o: int | None) -> int = { var empty: int | None; empty := None; o! };";
+    let source = "fn f(o: int | None) -> int  { let mut empty: int | None; empty = None; o! }";
     let captured = captures(ZED_QUERIES[0].1, source);
     for (kind, text) in [("type.builtin", "None"), ("operator", "!")] {
         assert!(
@@ -158,7 +158,7 @@ fn none_and_postfix_unwrapping_are_highlighted() {
 
 #[test]
 fn inference_holes_are_highlighted_as_types() {
-    let source = "def f(p: Ptr<int>) -> Ptr<_> = { var value: _; value := p; value };";
+    let source = "fn f(p: Ptr<int>) -> Ptr<_>  { let mut value: _; value = p; value }";
     let captured = captures(ZED_QUERIES[0].1, source);
     assert!(captured.contains(&("type.builtin".into(), "_".into())));
 }
@@ -168,20 +168,20 @@ fn queries_capture_resin_constructs() {
     let source = r#"export { main, Number };
         extern {
             "lib.h": {
-                def native (arg: int) -> int;
-                def finish();
+                fn native (arg: int) -> int;
+                fn finish();
             },
         };
         import { "$/core.resin" };
-        struct FieldsField<T0> { field: T0 };
+        struct FieldsField<T0> { field: T0; }
 extern type Handle;
-        struct Number {field: int};
+        struct Number {field: int;}
         // a function
-        def main (parameter: int) -> int = {
-            var local = FieldsField<_> {field = 2}; var pointer: Ptr<int>; var values = [1, 2];
+        fn main (parameter: int) -> int  {
+            let mut local = FieldsField<_> {field = 2}; let mut pointer: Ptr<int>; let mut values = [1, 2];
             native(parameter) + local.field + pointer.*
-        };
-        def reset() = {};
+        }
+        fn reset()  {}
     "#;
     let mut parser = tree_sitter::Parser::new();
     parser
@@ -202,8 +202,8 @@ extern type Handle;
         ("highlights", "type.builtin", "int"),
         ("highlights", "property", "field"),
         ("highlights", "keyword", "export"),
-        ("highlights", "keyword", "def"),
-        ("highlights", "keyword", "var"),
+        ("highlights", "keyword", "fn"),
+        ("highlights", "keyword", "let"),
         ("highlights", "keyword", "type"),
         ("highlights", "function", "reset"),
         ("highlights", "function", "finish"),
@@ -247,7 +247,7 @@ fn queries_run_on_examples_libraries_and_incomplete_code() {
         }
     }
     let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), ""));
-    let mut sources = vec!["def main (argument: int) -> int = { pri".into()];
+    let mut sources = vec!["fn main (argument: int) -> int = { pri".into()];
     visit(&root.join("examples"), &mut sources);
     visit(&root.join("resin"), &mut sources);
     for source in sources {
@@ -259,7 +259,7 @@ fn queries_run_on_examples_libraries_and_incomplete_code() {
 
 #[test]
 fn comparison_operators_are_not_type_brackets() {
-    let source = "def main () -> () = { var less = 1 < 2; var greater = 2 > 1; };";
+    let source = "fn main () -> ()  { let mut less = 1 < 2; let mut greater = 2 > 1; }";
     let query = include_str!("../editors/zed/languages/resin/brackets.scm");
     assert!(
         !captures(query, source)
@@ -270,7 +270,7 @@ fn comparison_operators_are_not_type_brackets() {
 
 #[test]
 fn shader_decorators_are_highlighted_as_attributes() {
-    let source = "@compute_shader def kernel(i: uint) -> uint = { i };";
+    let source = "@compute_shader fn kernel(i: uint) -> uint  { i }";
     let highlighted = captures(ZED_QUERIES[0].1, source);
     assert!(highlighted.contains(&("attribute".into(), "@".into())));
     assert!(highlighted.contains(&("attribute".into(), "compute_shader".into())));
@@ -278,7 +278,7 @@ fn shader_decorators_are_highlighted_as_attributes() {
 
 #[test]
 fn intrinsic_declarations_have_function_navigation_and_parameter_highlights() {
-    let source = r#"intrinsic "pointer_index" def at<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;"#;
+    let source = r#"intrinsic "pointer_index" fn at<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;"#;
     let highlights = captures(ZED_QUERIES[0].1, source);
     for (kind, text) in [
         ("keyword", "intrinsic"),
@@ -295,17 +295,17 @@ fn intrinsic_declarations_have_function_navigation_and_parameter_highlights() {
 
 #[test]
 fn helix_queries_capture_highlights_indentation_and_textobjects() {
-    let source = "struct Cell<T> { value: T };\n\
-        // increment\n\
-        def increment(value: int) -> int = {\n\
-            var cell = Cell<int> { value = 1 };\n\
-            var less = value < 10;\n\
-            cell.value + value\n\
-        };";
+    let source = r#"struct Cell<T> { value: T; }
+        // increment
+        fn increment(value: int) -> int {
+            let cell = Cell<int> { value = 1 };
+            let less = value < 10;
+            cell.value + value
+        }"#;
     let highlights = captures(HELIX_QUERIES[0].1, source);
     for (kind, text) in [
         ("keyword", "struct"),
-        ("keyword", "def"),
+        ("keyword", "fn"),
         ("type", "Cell"),
         ("type.builtin", "int"),
         ("function", "increment"),
@@ -324,11 +324,11 @@ fn helix_queries_capture_highlights_indentation_and_textobjects() {
         assert!(indents.contains(&("outdent".into(), text.into())));
     }
     assert!(!indents.contains(&("outdent".into(), "<".into())));
-    let comparison = "def compare(value: int) -> bool = { value > 10 };";
+    let comparison = "fn compare(value: int) -> bool  { value > 10 }";
     assert!(!captures(HELIX_QUERIES[1].1, comparison).contains(&("outdent".into(), ">".into())));
     let objects = captures(HELIX_QUERIES[2].1, source);
     for (kind, text) in [
-        ("class.around", "struct Cell<T> { value: T };"),
+        ("class.around", "struct Cell<T> { value: T; }"),
         ("class.inside", "value: T"),
         ("comment.around", "// increment"),
     ] {

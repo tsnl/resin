@@ -85,7 +85,7 @@ fn lir_error(output: &Hir, error: resin_lir::Error) -> SourceError {
 fn declarations_do_not_instantiate_unused_concrete_operations() {
     let source = Source::new(
         "entry",
-        "export { main, invalid }; def main() -> int = { 42 }; def invalid() -> bool = { (1 == 1) + (1 == 1) };",
+        "export { main, invalid }; fn main() -> int  { 42 } fn invalid() -> bool  { (1 == 1) + (1 == 1) }",
     );
     let mut loader = loader();
     let declarations = support::frontend::analyze(source.clone(), &mut loader, None);
@@ -102,7 +102,7 @@ fn declarations_do_not_instantiate_unused_concrete_operations() {
 fn target_sets_are_canonicalized_for_scheduling() {
     let source = Source::new(
         "entry",
-        "export { first, second }; def first() -> int = { 1 }; def second() -> int = { 2 };",
+        "export { first, second }; fn first() -> int  { 1 } fn second() -> int  { 2 }",
     );
     let mut loader = loader();
     let output = support::frontend::analyze(source, &mut loader, None);
@@ -117,7 +117,7 @@ fn target_sets_are_canonicalized_for_scheduling() {
 fn the_same_declaration_can_be_requested_on_host_and_shader() {
     let source = Source::new(
         "entry",
-        "export { kernel }; @compute_shader def kernel(i: ulong, out: Ptr<uint>) = { out.* := uint(i); };",
+        "export { kernel }; @compute_shader fn kernel(i: ulong, out: Ptr<uint>)  { out.* = uint(i); }",
     );
     let mut loader = loader();
     let output = support::frontend::analyze(source.clone(), &mut loader, None);
@@ -141,10 +141,7 @@ fn the_same_declaration_can_be_requested_on_host_and_shader() {
 
 #[test]
 fn invalid_requests_fail_without_discarding_source_analysis() {
-    let source = Source::new(
-        "entry",
-        "export { main }; def main() = {}; def private() = {};",
-    );
+    let source = Source::new("entry", "export { main }; fn main()  {} fn private()  {}");
     let mut loader = loader();
     let output = support::frontend::analyze(source, &mut loader, None);
     assert!(output.hir().is_ok());
@@ -162,7 +159,7 @@ fn invalid_requests_fail_without_discarding_source_analysis() {
 fn unused_source_initialization_errors_still_prevent_compilation() {
     let source = Source::new(
         "entry",
-        "export { main }; def main() = {}; def unused() -> int = { var x: int; x };",
+        "export { main }; fn main()  {} fn unused() -> int  { let mut x: int; x }",
     );
     let output = support::frontend::analyze(source, &mut loader(), None);
     assert!(output.hir().is_err());
@@ -177,7 +174,7 @@ fn unused_source_initialization_errors_still_prevent_compilation() {
 fn demanded_nominals_retain_field_conversions_and_real_drop_identities() {
     let source = Source::new(
         "entry",
-        "export { main }; struct Unused {}; struct Owner { n: int, def drop(self: Ptr<Owner>) = {}; }; def main() -> int = { var owner = Owner { n = 42 }; owner.n };",
+        "export { main }; struct Unused {} struct Owner { n: int;  }\nfn drop(self: Ptr<Owner>)  {}\n fn main() -> int  { let mut owner = Owner { n = 42 }; owner.n }",
     );
     let output = support::frontend::analyze(source, &mut loader(), None);
     let module = module(&output, &[host("main")]);
@@ -201,7 +198,7 @@ fn demanded_nominals_retain_field_conversions_and_real_drop_identities() {
 fn unsupported_shader_operations_fail_during_compilation_with_application_notes() {
     let source = Source::new(
         "entry",
-        "export { main, kernel }; def main() -> int = { 42 }; @compute_shader def kernel(i: ulong, out: Ptr<uint>) = { out.* := uint(i) / 2_ui; };",
+        "export { main, kernel }; fn main() -> int  { 42 } @compute_shader fn kernel(i: ulong, out: Ptr<uint>)  { out.* = uint(i) / 2_ui; }",
     );
     let mut loader = loader();
     let output = support::frontend::analyze(source.clone(), &mut loader, None);
@@ -225,7 +222,7 @@ fn unsupported_shader_operations_fail_during_compilation_with_application_notes(
 fn shader_recursion_is_rejected_before_publishing_lir() {
     let source = Source::new(
         "entry",
-        "export { kernel }; def helper(i: ulong, out: Ptr<uint>) = { kernel(i, out); }; @compute_shader def kernel(i: ulong, out: Ptr<uint>) = { helper(i, out); };",
+        "export { kernel }; fn helper(i: ulong, out: Ptr<uint>)  { kernel(i, out); } @compute_shader fn kernel(i: ulong, out: Ptr<uint>)  { helper(i, out); }",
     );
     let mut loader = loader();
     let output = support::frontend::analyze(source, &mut loader, None);
@@ -249,20 +246,20 @@ fn shader_recursion_is_rejected_before_publishing_lir() {
 fn shader_calls_cannot_enter_foreign_functions_or_store_function_values() {
     for (helper, body, message) in [
         (
-            "extern { \"stdlib.h\": { def abs(i: int) -> int; } };",
+            "extern { \"stdlib.h\": { fn abs(i: int) -> int; } };",
             "out.* := uint(abs(int(i)));",
             "foreign",
         ),
         (
-            "def helper(i: uint) -> uint = { i };",
-            "var f = helper; out.* := f(uint(i));",
+            "fn helper(i: uint) -> uint  { i }",
+            "var f = helper; out.* = f(uint(i));",
             "does not support type",
         ),
     ] {
         let source = Source::new(
             "entry",
             format!(
-                "export {{ kernel }}; {helper} @compute_shader def kernel(i: ulong, out: Ptr<uint>) = {{ {body} }};"
+                "export {{ kernel }}; {helper} @compute_shader fn kernel(i: ulong, out: Ptr<uint>)  {{ {body} }}"
             ),
         );
         let output = support::frontend::analyze(source, &mut loader(), None);
@@ -284,7 +281,7 @@ fn shader_pointer_casts_fail_before_codegen_including_generic_helpers() {
         ("", "Ptr<uint>(i);", "Ptr<uint>(i)"),
         ("", "Ptr<ubyte>(out);", "Ptr<ubyte>(out)"),
         (
-            "def address<T>(p: Ptr<T>) -> ulong = { ulong(p) };",
+            "fn address<T>(p: Ptr<T>) -> ulong  { ulong(p) }",
             "address(out);",
             "ulong(p)",
         ),
@@ -292,7 +289,7 @@ fn shader_pointer_casts_fail_before_codegen_including_generic_helpers() {
         let source = Source::new(
             "pointer.resin",
             format!(
-                "export {{ kernel }}; {helper} @compute_shader def kernel(i: ulong, out: Ptr<uint>) = {{ {body} }};"
+                "export {{ kernel }}; {helper} @compute_shader fn kernel(i: ulong, out: Ptr<uint>)  {{ {body} }}"
             ),
         );
         let output = support::frontend::analyze(source.clone(), &mut loader(), None);

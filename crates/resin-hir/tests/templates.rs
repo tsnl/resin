@@ -9,7 +9,7 @@ fn compile(source: &str) -> Result<resin_hir::Module, resin_source::SourceError>
 
 #[test]
 fn named_functions_keep_one_polymorphic_body_and_complete_weak_results() {
-    let module = compile("def identity<T>(value: T) -> _ = { value }; def main() -> int = { identity(1) }; def other() -> bool = { identity::<bool>(1 == 1) };").unwrap();
+    let module = compile("fn identity<T>(value: T) -> _  { value } fn main() -> int  { identity(1) } fn other() -> bool  { identity::<bool>(1 == 1) }").unwrap();
     let identity = &module.functions[0];
     assert_eq!(identity.signature.type_params.len(), 1);
     assert_eq!(
@@ -26,7 +26,7 @@ fn named_functions_keep_one_polymorphic_body_and_complete_weak_results() {
 
 #[test]
 fn arithmetic_and_literals_remain_polymorphic_and_enclosing_binders_are_preserved() {
-    let module = compile("def increment<T>(value: T) -> T = { value + 1 }; def twice<U>(value: U) -> U = { increment(increment(value)) }; def main() -> uint = { twice(2) };").unwrap();
+    let module = compile("fn increment<T>(value: T) -> T  { value + 1 } fn twice<U>(value: U) -> U  { increment(increment(value)) } fn main() -> uint  { twice(2) }").unwrap();
     assert_eq!(module.functions.len(), 3);
     let TermKind::Block { tail, .. } = &module.functions[0].body.as_ref().unwrap().kind else {
         panic!("block");
@@ -48,7 +48,10 @@ fn arithmetic_and_literals_remain_polymorphic_and_enclosing_binders_are_preserve
 
 #[test]
 fn members_and_layout_queries_retain_determining_types() {
-    let module = compile("def read<T>(value: Ptr<T>) -> _ = { value.member }; def measure<T>() -> ulong = { size_of(T) };").unwrap();
+    let module = compile(
+        "fn read<T>(value: Ptr<T>) -> _  { value.member } fn measure<T>() -> ulong  { size_of(T) }",
+    )
+    .unwrap();
     assert!(matches!(
         module.functions[0].signature.result.ty,
         Type::Member { .. }
@@ -67,7 +70,7 @@ fn members_and_layout_queries_retain_determining_types() {
 
 #[test]
 fn recursive_groups_complete_results_without_equating_distinct_binders() {
-    let module = compile("def left<T>(value: T, stop: bool) -> _ = { if (stop) { value } else { right(value, 1 == 1) } }; def right<U>(value: U, stop: bool) -> _ = { if (stop) { value } else { left(value, 1 == 1) } }; def main() -> int = { left(1, 1 == 1) };").unwrap();
+    let module = compile("fn left<T>(value: T, stop: bool) -> _  { if (stop) { value } else { right(value, 1 == 1) } } fn right<U>(value: U, stop: bool) -> _  { if (stop) { value } else { left(value, 1 == 1) } } fn main() -> int  { left(1, 1 == 1) }").unwrap();
     for function in &module.functions[..2] {
         assert_eq!(
             function.signature.result.ty,
@@ -85,9 +88,9 @@ fn recursive_groups_complete_results_without_equating_distinct_binders() {
 #[test]
 fn unresolved_results_and_undetermined_arguments_require_annotations() {
     for source in [
-        "def looped<T>() -> _ = { looped::<T>() }; def main() -> int = { looped::<int>() };",
-        "def create<T>() -> T = { 0 }; def main() = { create(); };",
-        "def marker<T>() = {}; def main() = { marker(); };",
+        "fn looped<T>() -> _  { looped::<T>() } fn main() -> int  { looped::<int>() }",
+        "fn create<T>() -> T  { 0 } fn main()  { create(); }",
+        "fn marker<T>()  {} fn main()  { marker(); }",
     ] {
         let error = compile(source).unwrap_err();
         assert!(error.to_string().contains("annotat"), "{source}: {error}");
@@ -97,10 +100,10 @@ fn unresolved_results_and_undetermined_arguments_require_annotations() {
 #[test]
 fn applications_do_not_generalize_local_storage_or_discard_explicit_arity() {
     for source in [
-        "def identity<T>(value: T) -> T = { value }; def main() = { identity::<int, int>(1); };",
-        "def identity(value: int) -> int = { value }; def main() = { identity::<int>(1); };",
-        "def identity<T>(value: T) -> T = { value }; def main() = { var f = identity; f(1); f(1 == 1); };",
-        "def pair<T>(a: T, b: T) -> T = { a }; def main() = { pair(1_i, 2_l); };",
+        "fn identity<T>(value: T) -> T  { value } fn main()  { identity::<int, int>(1); }",
+        "fn identity(value: int) -> int  { value } fn main()  { identity::<int>(1); }",
+        "fn identity<T>(value: T) -> T  { value } fn main()  { let mut f = identity; f(1); f(1 == 1); }",
+        "fn pair<T>(a: T, b: T) -> T  { a } fn main()  { pair(1_i, 2_l); }",
     ] {
         assert!(compile(source).is_err(), "{source}");
     }
@@ -108,7 +111,7 @@ fn applications_do_not_generalize_local_storage_or_discard_explicit_arity() {
 
 #[test]
 fn result_payloads_and_error_sets_retain_bound_parameters() {
-    let module = compile("def propagate<T, E>(input: (T | Err<E>)) -> (_ | Err<_>) = { (input?) }; def recover<T, E>(input: (T | Err<E>), fallback: T) -> T = { match (input) { T(value) => { value }, Err(error) => { fallback } } }; def combine<T, E, F>(a: (T | Err<E>), b: (T | Err<F>)) -> (T | Err<_>) = { a?; (b?) };").unwrap();
+    let module = compile("fn propagate<T, E>(input: (T | Err<E>)) -> (_ | Err<_>)  { (input?) } fn recover<T, E>(input: (T | Err<E>), fallback: T) -> T  { match (input) { T(value) => { value }, Err(error) => { fallback } } } fn combine<T, E, F>(a: (T | Err<E>), b: (T | Err<F>)) -> (T | Err<_>)  { a?; (b?) }").unwrap();
     let signature = &module.functions[0].signature;
     assert_eq!(
         signature.result.ty,

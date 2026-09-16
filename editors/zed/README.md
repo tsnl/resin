@@ -16,7 +16,6 @@ From the Resin repository root:
 nix-shell --run 'cargo install --path . --locked'
 nix-shell --run 'rustup target add wasm32-wasip2'
 ```
-
 The repository's `rust-toolchain.toml` declares the `wasm32-wasip2` target,
 so Rustup installs it when activating the project toolchain. If Zed reports
 `can't find crate for core`, run the target-install command above from this
@@ -30,7 +29,7 @@ On systems whose executable is named `zeditor`, use `nix-shell --run 'zeditor .'
 Zed compiles the extension and downloads the WASI SDK to build the grammar.
 Rebuild it from Zed's Extensions view after changing the adapter or queries.
 Restarting `resin --lsp` alone does not reload highlighting queries or the pinned
-Tree-sitter grammar. If `struct`, `match`, or `def` still look like ordinary
+Tree-sitter grammar. If `struct`, `match`, or `fn` still look like ordinary
 identifiers, rebuild/reinstall the dev extension from this checkout's `editors/zed/`.
 An `Error loading highlights query` with `Invalid node type "::"` means the
 queries require a newer parser than the extension's grammar pin. Update the
@@ -142,7 +141,7 @@ grammar and loaded `examples/eg009_imports.resin`. Hover displayed
 `next(counter: Ptr<Counter>) -> int`, go-to-definition opened `lib/counter.resin`,
 and the outline included both `Counter` and `next`.
 
-The earlier grammar pin at `70a05ac` added `def`/`var`/`type` declarations and optional unit
+The earlier grammar pin at `70a05ac` added `fn`/`var`/`type` declarations and optional unit
 result annotations. Compiler/LSP regressions and query captures cover this syntax,
 including hover/completion for omitted unit results. This revision was validated
 through automated tests and WASI builds; the editor smoke test above used `79e4a26`.

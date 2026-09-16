@@ -1,12 +1,12 @@
 export { kernel, main };
-def convert(i: uint) -> uint = {
-    var f = float32(i);
-    var wide = ulong(i);
-    var round = 16777217_ui;
-    var negative = -1.9_f;
+fn convert(i: uint) -> uint  {
+    let mut f = float32(i);
+    let mut wide = ulong(i);
+    let mut round = 16777217_ui;
+    let mut negative = -1.9_f;
     if (int(negative) == -1_i && float32(round) == 16777216.0_f && uint(wide) == i) {
         uint(f + 42.75_f)
     } else { 99_ui }
-};
-@compute_shader def kernel(i: ulong, p: Ptr<uint>) = { if (i == 0_ul) { p.* := convert(uint(i)); }; };
-def main() -> int = { var result = 0_ui; kernel(0_ul, &result); if (result == 42_ui) { 0 } else { 1 } };
+}
+@compute_shader fn kernel(i: ulong, p: Ptr<uint>)  { if (i == 0_ul) { p.* = convert(uint(i)); }; }
+fn main() -> int  { let mut result = 0_ui; kernel(0_ul, &result); if (result == 42_ui) { 0 } else { 1 } }

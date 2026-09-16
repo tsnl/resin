@@ -170,6 +170,7 @@ define_id! { pub(crate) struct SourceModuleId(usize); }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SourceOrigin {
+    pub function: bool,
     pub module: SourceModuleId,
     pub span: Span,
 }

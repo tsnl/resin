@@ -43,6 +43,9 @@ pub(super) enum TermKind {
     Return {
         value: Box<Term>,
     },
+    Move {
+        place: Box<Term>,
+    },
     Constant {
         value: Value,
     },

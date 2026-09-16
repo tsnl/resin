@@ -1,13 +1,13 @@
 ==================
 References and initialized binding annotations
 ==================
-def identity<T>(value: Ref<T>) -> Ref<T> = { value };
-def example() -> int = {
-    var value: int = 1;
-    var alias: Ref<_> = identity(value);
-    alias := 42;
+fn identity<T>(value: Ref<T>) -> Ref<T>  { value }
+fn example() -> int  {
+    let mut value: int = 1;
+    let mut alias: Ref<_> = identity(value);
+    alias = 42;
     value
-};
+}
 ---
 
 (source_file

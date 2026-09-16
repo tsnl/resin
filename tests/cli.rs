@@ -73,7 +73,7 @@ fn build_run_and_lsp_require_an_explicit_reachable_server() {
     let directory = TempDir::new().unwrap();
     let source = directory.path().join("main.resin");
     let destination = directory.path().join("program");
-    let text = "export { main }; def main() -> int = { 37 };";
+    let text = "export { main }; fn main() -> int  { 37 }";
     fs::write(&source, text).unwrap();
     fs::write(&destination, "previous output").unwrap();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -122,13 +122,13 @@ fn build_run_and_lsp_require_an_explicit_reachable_server() {
 #[test]
 fn omitted_unit_returns_run_and_reject_non_unit_tails() {
     let output = cli(
-        r#"export { main }; import { "$/string.resin" }; def greet() = { print("hello\n"); }; def main() = { greet() };"#,
+        r#"export { main }; import { "$/string.resin" }; fn greet()  { print("hello\n"); } fn main()  { greet() }"#,
         &[],
     );
     success(&output);
     assert_eq!(output.stdout, b"hello\n");
 
-    let output = cli("export { main }; def main() = { 42 };", &[]);
+    let output = cli("export { main }; fn main()  { 42 }", &[]);
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("TypeMismatch"));
@@ -137,7 +137,7 @@ fn omitted_unit_returns_run_and_reject_non_unit_tails() {
 #[test]
 fn destruction_runs_when_native_status_propagates_to_the_entry() {
     let output = cli(
-        "export { main }; import { \"$/string.resin\", \"$/status.resin\" }; struct Cleanup { def drop(self: Ptr<Cleanup>) = { print(fmt(\"cleanup\\n\", ())); }; };  def main() -> (() | Err<_>) = { RuntimeStatus.from_code(0)?; var cleanup = Cleanup {}; RuntimeStatus.from_code(8)?; (()) };",
+        "export { main }; import { \"$/string.resin\", \"$/status.resin\" }; struct Cleanup {  }\nfn drop(self: Ptr<Cleanup>)  { print(fmt(\"cleanup\\n\", ())); }\n  fn main() -> (() | Err<_>)  { runtime_status_from_code(0)?; let mut cleanup = Cleanup {}; runtime_status_from_code(8)?; (()) }",
         &[],
     );
     assert_eq!(output.status.code(), Some(1));
@@ -156,7 +156,7 @@ fn default_output_downloads_and_runs_without_a_client_build_directory() {
     let input = sources.join("hello world.resin");
     fs::write(
         &input,
-        r#"export { main }; import { "$/string.resin" }; def main () -> int = { print("hello\n"); 7 };"#,
+        r#"export { main }; import { "$/string.resin" }; fn main () -> int  { print("hello\n"); 7 }"#,
     )
     .unwrap();
     let output = invoke(temp.path(), &input, &[]);
@@ -176,7 +176,7 @@ fn cached_programs_track_foreign_headers() {
     let header = temp.path().join("value header.h");
     fs::write(&header, "static inline int value(void) { return 41; }\n").unwrap();
     fs::write(&input, format!(
-        "export {{ main }}; extern {{ \"{}\": {{ def value() -> int; }} }}; def main() -> int = {{ value() }};",
+        "export {{ main }}; extern {{ \"{}\": {{ fn value() -> int; }} }}; fn main() -> int  {{ value() }}",
         header.to_string_lossy().replace('\\', "/")
     )).unwrap();
     assert_eq!(
@@ -208,24 +208,23 @@ fn cached_programs_track_foreign_headers() {
 
 #[test]
 fn strings_are_c_compatible_in_both_profiles() {
-    let source = r#"
-        export { main };
+    let source = r#"export { main };
 
         extern {
             "string.h": {
-                def strlen(text: Ptr<ubyte>) -> ulong;
+                fn strlen(text: Ptr<ubyte>) -> ulong;
             },
         };
         import { "$/string.resin" };
-        def main() -> int = {
-            var path = "triangle.png";
-            var text = "a\0b";
+        fn main() -> int  {
+            let mut path = "triangle.png";
+            let mut text = "a\0b";
             if (strlen(path.data) == ulong(12)
                 && strlen(text.data) == ulong(1)) {
                 print(fmt("{0}:{1}", (path, text)));
                 0
             } else { 1 }
-        };"#;
+        }"#;
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
     fs::write(&input, source).unwrap();
@@ -248,7 +247,7 @@ fn executable_destination_builds_without_running() {
     let input = temp.path().join("source.resin");
     fs::write(
         &input,
-        r#"export { main }; import { "$/string.resin" }; def main () -> int = { print("ran\n"); 7 };"#,
+        r#"export { main }; import { "$/string.resin" }; fn main () -> int  { print("ran\n"); 7 }"#,
     )
     .unwrap();
     let destination = format!("dist/custom program{}", std::env::consts::EXE_SUFFIX);
@@ -271,7 +270,7 @@ fn output_directories_receive_the_source_name() {
         let input = temp.path().join("hello.resin");
         fs::write(
             &input,
-            r#"export { main }; import { "$/string.resin" }; def main() -> () = { print("hello\n"); };"#,
+            r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print("hello\n"); }"#,
         )
         .unwrap();
         let output = invoke(temp.path(), &input, &["-o", destination]);
@@ -299,7 +298,7 @@ fn sources_with_the_same_name_keep_distinct_cached_results() {
         let input = directory.join("source.resin");
         fs::write(
             &input,
-            format!(r#"export {{ main }}; import {{ "$/string.resin" }}; def main() -> () = {{ print(fmt("{folder}", ())); }};"#),
+            format!(r#"export {{ main }}; import {{ "$/string.resin" }}; fn main() -> ()  {{ print(fmt("{folder}", ())); }}"#),
         )
         .unwrap();
         let output = invoke_with(&service, temp.path(), &input, &[]);
@@ -317,7 +316,7 @@ fn invalid_destination_parents_fail_before_building_or_running() {
     let input = temp.path().join("source.resin");
     fs::write(
         &input,
-        r#"export { main }; import { "$/string.resin" }; def main() -> () = { print("ran\n"); };"#,
+        r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print("ran\n"); }"#,
     )
     .unwrap();
     fs::write(temp.path().join("not-a-directory"), "keep me").unwrap();
@@ -337,7 +336,7 @@ fn directory_outputs_cannot_overwrite_the_source() {
     let input = temp
         .path()
         .join(format!("source{}", std::env::consts::EXE_SUFFIX));
-    let source = r#"export { main }; import { "$/string.resin" }; def main() -> () = { print("must not run"); };"#;
+    let source = r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print("must not run"); }"#;
     fs::write(&input, source).unwrap();
     let output = invoke(temp.path(), &input, &["-o", "."]);
     assert!(!output.status.success());
@@ -349,7 +348,7 @@ fn directory_outputs_cannot_overwrite_the_source() {
 
 #[test]
 fn run_returns_the_program_exit_status() {
-    let output = cli("export { main }; def main () -> int = { 37 };", &[]);
+    let output = cli("export { main }; fn main () -> int  { 37 }", &[]);
     assert_eq!(
         output.status.code(),
         Some(37),
@@ -361,7 +360,7 @@ fn run_returns_the_program_exit_status() {
 #[test]
 fn run_prints_program_output() {
     let output = cli(
-        r#"export { main }; import { "$/string.resin" }; def main() -> () = { var n = 42; print(fmt("x = {0}\n", (n,))); };"#,
+        r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { let mut n = 42; print(fmt("x = {0}\n", (n,))); }"#,
         &[],
     );
     success(&output);
@@ -370,11 +369,10 @@ fn run_prints_program_output() {
 
 #[test]
 fn one_file_can_have_multiple_exported_entry_points() {
-    let source = r#"
-        export { main, demo, status }; import { "$/string.resin" };
-        def main() -> () = { print("main"); };
-        def demo() -> () = { print("demo"); };
-        def status() -> int = { 23 };
+    let source = r#"export { main, demo, status }; import { "$/string.resin" };
+        fn main() -> ()  { print("main"); }
+        fn demo() -> ()  { print("demo"); }
+        fn status() -> int  { 23 }
     "#;
     for (entry, expected, code) in [
         (None, &b"main"[..], 0),
@@ -392,7 +390,7 @@ fn one_file_can_have_multiple_exported_entry_points() {
         assert_eq!(output.stdout, expected);
     }
     let output = selected(
-        "export { demo }; def demo() -> int = { 42 };",
+        "export { demo }; fn demo() -> int  { 42 }",
         Some("demo"),
         &[],
     );
@@ -402,29 +400,29 @@ fn one_file_can_have_multiple_exported_entry_points() {
 #[test]
 fn selected_entries_must_be_exported_resin_functions_with_the_right_signature() {
     for (source, entry, expected) in [
-        ("def main() -> () = {};", None, "not exported"),
+        ("fn main() -> ()  {}", None, "not exported"),
         (
-            "export { main }; def main() -> () = {}; def hidden() -> () = {};",
+            "export { main }; fn main() -> ()  {} fn hidden() -> ()  {}",
             Some("hidden"),
             "not exported",
         ),
         (
-            "export { main }; def main() -> () = {};",
+            "export { main }; fn main() -> ()  {}",
             Some("missing"),
             "not exported",
         ),
         (
-            "export { demo }; def demo(n: int) -> int = { n };",
+            "export { demo }; fn demo(n: int) -> int  { n }",
             Some("demo"),
             "take () or (int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>)",
         ),
         (
-            "export { demo }; def demo() -> uint = { uint(0) };",
+            "export { demo }; fn demo() -> uint  { uint(0) }",
             Some("demo"),
             "take () or (int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>)",
         ),
         (
-            "export { rand }; extern { \"stdlib.h\": { def rand() -> int; } };",
+            "export { rand }; extern { \"stdlib.h\": { fn rand() -> int; } };",
             Some("rand"),
             "Resin function",
         ),
@@ -450,7 +448,7 @@ fn selectors_work_with_output_paths_and_source_protection() {
     });
     fs::create_dir(&folder).unwrap();
     let input = folder.join("hello world.resin");
-    let source = "export { demo }; def demo() -> int = { 19 };";
+    let source = "export { demo }; fn demo() -> int  { 19 }";
     fs::write(&input, source).unwrap();
     let selected = selector(&input, Some("demo"));
     let output = invoke(temp.path(), &selected, &["-o", "dist/"]);
@@ -469,7 +467,7 @@ fn selectors_work_with_output_paths_and_source_protection() {
 #[test]
 fn malformed_selectors_are_rejected() {
     for entry in ["", "1", "demo-name", "two words"] {
-        let output = selected("export { main }; def main() -> () = {};", Some(entry), &[]);
+        let output = selected("export { main }; fn main() -> ()  {}", Some(entry), &[]);
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stderr).contains("FILE[:ENTRY]"));
     }
@@ -480,7 +478,7 @@ fn missing_runtime_preserves_existing_output() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("input.resin");
     let output = temp.path().join("program");
-    fs::write(&input, "export { main }; def main () -> int = { 0 };").unwrap();
+    fs::write(&input, "export { main }; fn main () -> int  { 0 }").unwrap();
     fs::write(&output, "keep me").unwrap();
     let service = Service::configured(|_, environment| {
         environment.variables.insert(
@@ -508,7 +506,7 @@ fn builds_and_executes_paths_with_spaces_and_shell_punctuation() {
         .path()
         .join(format!("program ; literal{}", std::env::consts::EXE_SUFFIX));
     let output = cli(
-        "export { main }; def main () -> int = { 19 };",
+        "export { main }; fn main () -> int  { 19 }",
         &["-o", executable.to_str().unwrap()],
     );
     success(&output);
@@ -519,7 +517,7 @@ fn builds_and_executes_paths_with_spaces_and_shell_punctuation() {
 fn bad_destinations_and_missing_compilers_preserve_files() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("input.resin");
-    let source = "export { main }; def main () -> int = { 0 };";
+    let source = "export { main }; fn main () -> int  { 0 }";
     fs::write(&input, source).unwrap();
     let service = Service::new();
     let output = service
@@ -563,7 +561,7 @@ fn invalid_options_and_source_report_errors() {
         vec!["--unknown"],
     ] {
         assert!(
-            !cli("export { main }; def main() = {};", &args)
+            !cli("export { main }; fn main()  {}", &args)
                 .status
                 .success()
         );
@@ -580,7 +578,7 @@ fn decorated_host_calls_need_no_spirv_opt() {
     });
     let temp = TempDir::new().unwrap();
     let input = temp.path().join("host.resin");
-    fs::write(&input, "export { main }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() -> int = { var output = 0_ui; kernel(7_ul, &output); if (output == 7_ui) { 0 } else { 1 } };").unwrap();
+    fs::write(&input, "export { main }; @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { i }; } fn main() -> int  { let mut output = 0_ui; kernel(7_ul, &output); if (output == 7_ui) { 0 } else { 1 } }").unwrap();
     success(&invoke_with(&service, temp.path(), &input, &[]));
 }
 
@@ -591,25 +589,24 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
     };
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("stages.resin");
-    fs::write(&input, r#"
-        export { main };
+    fs::write(&input, r#"export { main };
         import { "$/graphics.resin", "$/gpu.resin" };
-        @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i + 1_ui }; };
-        @vertex_shader def vertex(i: int) -> Vertex = {
+        @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { i + 1_ui }; }
+        @vertex_shader fn vertex(i: int) -> Vertex  {
             Vertex {
                 position = Position { x = 0.0_f, y = 0.0_f, z = 0.0_f, w = 1.0_f },
                 color = Color { r = 1.0_f, g = 0.0_f, b = 0.0_f, a = 1.0_f },
             }
-        };
-        @fragment_shader def fragment(color: Color) -> Color = { color };
-        def main() -> (() | Err<_>) = {
+        }
+        @fragment_shader fn fragment(color: Color) -> Color  { color }
+        fn main() -> (() | Err<_>)  {
             if (0 == 1) {
-                var gpu = Gpu.new()?;
-                gpu.create_compute_pipeline(kernel)?;
-                gpu.create_graphics_pipeline(vertex, fragment)?;
+                let mut gpu = gpu_new()?;
+                gpu:create_compute_pipeline(kernel)?;
+                gpu:create_graphics_pipeline(vertex, fragment)?;
             };
             (())
-        };
+        }
     "#).unwrap();
     let destination = temp
         .path()
@@ -683,7 +680,7 @@ fn removed_artifact_switches_and_duplicate_destinations_are_rejected_before_buil
     let service = Service::new();
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
-    fs::write(&input, "export { main }; def main() = {};").unwrap();
+    fs::write(&input, "export { main }; fn main()  {}").unwrap();
     for args in [
         vec!["--target", "c"],
         vec!["--stage", "compute"],
@@ -706,18 +703,17 @@ fn process_entries_receive_literal_arguments_in_run_and_compiled_modes() {
     let service = Service::new();
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("args.resin");
-    fs::write(&input, r#"
-        export { main }; import { "$/string.resin", "$/process.resin" };
-        def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> int = {
-            var args = arguments(argc, argv);
-            var with_sentinel = arguments(argc + 1, argv);
-            var index = 1_ul;
+    fs::write(&input, r#"export { main }; import { "$/string.resin", "$/process.resin" };
+        fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> int  {
+            let mut args = arguments(argc, argv);
+            let mut with_sentinel = arguments(argc + 1, argv);
+            let mut index = 1_ul;
             while (index < args.length) {
-                print(fmt("[{0}]\n", (argument(args, index).bytes(),)));
-                index := index + 1_ul;
+                print(fmt("[{0}]\n", (argument(args, index):bytes(),)));
+                index = index + 1_ul;
             };
-            if (argc == 6 && ulong(with_sentinel.at(ulong(argc))) == 0_ul && argument(args, 0_ul).length > 0_ul) { 0 } else { 1 }
-        };
+            if (argc == 6 && ulong(with_sentinel:at(ulong(argc))) == 0_ul && argument(args, 0_ul).length > 0_ul) { 0 } else { 1 }
+        }
     "#).unwrap();
     let args = ["hello world", "", "--flag", "semi;$(literal)", "λ"];
     let expected = "[hello world]\n[]\n[--flag]\n[semi;$(literal)]\n[λ]\n";
@@ -781,33 +777,32 @@ fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
     .unwrap();
     let input = temp.path().join("environment.resin");
     let header_path = header.to_string_lossy().replace('\\', "/");
-    fs::write(&input, format!(r#"
-        export {{ main }};
+    fs::write(&input, format!(r#"export {{ main }};
 
         extern {{
             "{header_path}": {{
-                def mutate_environment() -> int;
+                fn mutate_environment() -> int;
             }},
             "stdlib.h": {{
-                def getenv(name: Ptr<ubyte>) -> Ptr<ubyte>;
+                fn getenv(name: Ptr<ubyte>) -> Ptr<ubyte>;
             }},
         }};
         import {{ "$/string.resin", "$/process.resin", "$/span.resin" }};
-        def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> (int | Err<_>) = {{
-            var name = "RESIN_SNAPSHOT_TEST";
-            var empty = "RESIN_SNAPSHOT_EMPTY";
-            var missing = "RESIN_SNAPSHOT_MISSING";
-            var before = environment_get(envp, name.data)?;
-            var status = mutate_environment();
-            var after = environment_get(envp, name.data)?;
-            var live = c_string(getenv(name.data));
-            var absent = match (environment_get(envp, missing.data)) {{ Span<ubyte>(value) => {{ 1 == 0 }}, Err(error) => {{ 1 == 1 }} }};
-            var env = environment(envp);
-            var with_sentinel = Span<Ptr<ubyte>> {{ data = envp, length = env.length + 1_ul }};
-            print(fmt("{{0}}/{{1}}/{{2}}\n", (before.bytes(), after.bytes(), live.bytes())));
+        fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> (int | Err<_>)  {{
+            let mut name = "RESIN_SNAPSHOT_TEST";
+            let mut empty = "RESIN_SNAPSHOT_EMPTY";
+            let mut missing = "RESIN_SNAPSHOT_MISSING";
+            let mut before = environment_get(envp, name.data)?;
+            let mut status = mutate_environment();
+            let mut after = environment_get(envp, name.data)?;
+            let mut live = c_string(getenv(name.data));
+            let mut absent = match (environment_get(envp, missing.data)) {{ Span<ubyte>(value) => {{ 1 == 0 }}, Err(error) => {{ 1 == 1 }} }};
+            let mut env = environment(envp);
+            let mut with_sentinel = Span<Ptr<ubyte>> {{ data = envp, length = env.length + 1_ul }};
+            print(fmt("{{0}}/{{1}}/{{2}}\n", (before:bytes(), after:bytes(), live:bytes())));
             (if (status == 0 && absent && environment_get(envp, empty.data)?.length == 0_ul
-                && env.length >= 2_ul && ulong(with_sentinel.at(env.length)) == 0_ul) {{ 0 }} else {{ 1 }})
-        }};"#)).unwrap();
+                && env.length >= 2_ul && ulong(with_sentinel:at(env.length)) == 0_ul) {{ 0 }} else {{ 1 }})
+        }}"#)).unwrap();
     let output = service
         .command()
         .current_dir(temp.path())
@@ -851,7 +846,7 @@ fn process_entry_signatures_results_and_argument_bounds_are_checked() {
         "argc: int, argv: Ptr<Ptr<ubyte>>",
     ] {
         let output = cli(
-            &format!("export {{ main }}; def main({signature}) = {{}};"),
+            &format!("export {{ main }}; fn main({signature})  {{}}"),
             &[],
         );
         assert!(!output.status.success());
@@ -863,12 +858,12 @@ fn process_entry_signatures_results_and_argument_bounds_are_checked() {
         ("(() | Err<E>)", "Err(E {})", 1),
     ] {
         let source = format!(
-            "export {{ main }}; struct E {{}}; def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> {result} = {{ {body} }};"
+            "export {{ main }}; struct E {{}} fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> {result}  {{ {body} }}"
         );
         assert_eq!(cli(&source, &[]).status.code(), Some(code));
     }
     let output = cli(
-        r#"export { main }; import { "$/process.resin" }; def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) = { argument(arguments(argc, argv), ulong(argc)); };"#,
+        r#"export { main }; import { "$/process.resin" }; fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>)  { argument(arguments(argc, argv), ulong(argc)); }"#,
         &[],
     );
     assert!(!output.status.success());
@@ -882,7 +877,7 @@ fn process_arguments_preserve_non_utf8_bytes() {
     let service = Service::new();
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("bytes.resin");
-    fs::write(&input, r#"export { main }; import { "$/string.resin", "$/process.resin" }; def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) = { print(fmt("{0}", (argument(arguments(argc, argv), 1_ul).bytes(),))); };"#).unwrap();
+    fs::write(&input, r#"export { main }; import { "$/string.resin", "$/process.resin" }; fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>)  { print(fmt("{0}", (argument(arguments(argc, argv), 1_ul):bytes(),))); }"#).unwrap();
     let output = service
         .command()
         .current_dir(temp.path())
@@ -899,7 +894,7 @@ fn process_arguments_preserve_non_utf8_bytes() {
 fn output_long_option_builds_without_running() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let source = temp.path().join("main.resin");
-    fs::write(&source, "export { main }; def main() -> int = { 42 };").unwrap();
+    fs::write(&source, "export { main }; fn main() -> int  { 42 }").unwrap();
     let destination = temp
         .path()
         .join(format!("published{}", std::env::consts::EXE_SUFFIX));

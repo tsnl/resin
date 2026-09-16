@@ -2,29 +2,29 @@ export { main, failure };
 
 import { "$/string.resin", "$/status.resin" };
 
-struct DivideByZero {};
-struct NegativeInput { value: int };
+struct DivideByZero {}
+struct NegativeInput { value: int; }
 type Number = int;
 
-def divide(n: Number, d: Number) -> (Number | Err<DivideByZero>) = {
+fn divide(n: Number, d: Number) -> (Number | Err<DivideByZero>)  {
 	if (d == 0) {
 		Err(DivideByZero {})
 	} else {
 		(n / d)
 	}
-};
+}
 
-def calculate(n: int) -> (int | Err<_>) = {
+fn calculate(n: int) -> (int | Err<_>)  {
 	if (n < 0) {
 		Err(NegativeInput { value = n })
 	} else {
 		(divide(n, 2)?)
 	}
-};
+}
 
-def main() -> (() | Err<_>) = {
-	RuntimeStatus.from_code(0)?;
-	var answer = calculate(84)?;
+fn main() -> (() | Err<_>)  {
+	runtime_status_from_code(0)?;
+	let mut answer = calculate(84)?;
 	print(fmt("answer = {0}\n", (answer,)));
 	match (calculate(-1)) {
 		int(value) => {
@@ -42,9 +42,9 @@ def main() -> (() | Err<_>) = {
 		},
 	};
 	(())
-};
+}
 
-def failure() -> (() | Err<_>) = {
+fn failure() -> (() | Err<_>)  {
 	divide(1, 0)?;
 	(())
-};
+}

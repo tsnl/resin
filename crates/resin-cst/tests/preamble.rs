@@ -6,11 +6,11 @@ async fn preamble_queries_decode_paths_and_preserve_empty_header_groups() {
     let source = r#"// import { "comment.resin" };
 export { call };
 extern {
-    "local/é\"quoted.h": { def call(); },
+    "local/é\"quoted.h": { fn call(); },
     "empty.h": {},
 };
 import { "../types.resin", "back\\slash.resin" };
-def body() = { "import { \"body.resin\" };" };
+fn body()  { "import { \"body.resin\" };" }
 "#;
     let document = parse(source, None).await;
     let preamble = document.preamble();
@@ -33,13 +33,13 @@ def body() = { "import { \"body.resin\" };" };
 async fn unrelated_body_errors_do_not_invalidate_dependency_declarations() {
     let prefix = "extern { \"local.h\": {} }; import { \"types.resin\" };";
     for body in [
-        "def main() = { var x = ; };",
-        "def main() = { \"unterminated",
-        "def main(",
+        "fn main()  { let mut x = ; }",
+        "fn main() = { \"unterminated",
+        "fn main(",
         "struct Broken { value:",
         "const broken = ;",
         "const unfinished =",
-        "extern type Handle; def main() = { missing( };",
+        "extern type Handle; fn main()  { missing( }",
     ] {
         let document = parse(format!("{prefix}{body}"), None).await;
         assert!(document.tree().root_node().has_error(), "{body}");
@@ -55,7 +55,7 @@ async fn incomplete_preambles_retain_complete_paths_and_report_incompleteness() 
     for source in [
         "import { \"one.resin\", \"two.resin\"",
         "import { \"one.resin\", \"unfinished",
-        "extern { \"local.h\": { def call();",
+        "extern { \"local.h\": { fn call();",
         "extern { \"local.h\":",
     ] {
         let document = parse(source, None).await;
@@ -82,8 +82,8 @@ async fn malformed_preambles_never_claim_to_be_complete() {
         "export { broken\nimport { \"one.resin\" };",
         "import {}; extern { \"late.h\": {} };",
         "extern { \"bad\\q.h\": {} };",
-        "extern \"legacy.h\" def legacy();",
-        "def first() = {}; import { \"late.resin\" };",
+        "extern \"legacy.h\" fn legacy();",
+        "fn first()  {} import { \"late.resin\" };",
         "extern type Native; extern { \"late.h\": {} };",
         "const count = 1; import { \"late.resin\" };",
     ] {
@@ -95,7 +95,7 @@ async fn malformed_preambles_never_claim_to_be_complete() {
 #[tokio::test]
 async fn misplaced_clauses_report_errors_without_collecting_body_dependencies() {
     let source = r#"import { "valid.resin" };
-        def broken() = { import { "body.resin" }; };
+        fn broken()  { import { "body.resin" }; }
         import { "late.resin" };
     "#;
     let preamble = parse(source, None).await.preamble();
@@ -123,11 +123,11 @@ async fn opaque_foreign_types_are_body_declarations() {
 
 #[test]
 fn grouped_foreign_functions_have_stable_multiline_formatting() {
-    let source = "extern{\"local.h\":{def call(value:int)->int;},\"empty.h\":{},};";
+    let source = "extern{\"local.h\":{fn call(value:int)->int;},\"empty.h\":{},};";
     let formatted = resin_cst::format_source(source).unwrap();
     assert_eq!(
         formatted,
-        "extern {\n\t\"local.h\": {\n\t\tdef call(value: int) -> int;\n\t},\n\t\"empty.h\": {},\n};\n"
+        "extern {\n\t\"local.h\": {\n\t\tfn call(value: int) -> int;\n\t},\n\t\"empty.h\": {},\n};\n"
     );
     assert_eq!(resin_cst::format_source(&formatted).unwrap(), formatted);
 }

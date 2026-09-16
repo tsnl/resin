@@ -8,18 +8,17 @@ fn run(source: &str) -> std::process::Output {
 
 #[test]
 fn nested_template_calls_use_context_and_preserve_numeric_widths() {
-    let output = run(r#"
-        export { main };
+    let output = run(r#"export { main };
         import { "$/string.resin" };
-        def identity<T>(value: T) -> _ = { value };
-        def increment<T>(value: T) -> T = { value + 1 };
-        def twice<U>(value: U) -> U = { increment(increment(value)) };
-        def main() -> int = {
-            var small: ubyte; small := identity(253);
-            var large: ulong; large := identity(4294967296);
+        fn identity<T>(value: T) -> _  { value }
+        fn increment<T>(value: T) -> T  { value + 1 }
+        fn twice<U>(value: U) -> U  { increment(increment(value)) }
+        fn main() -> int  {
+            let mut small: ubyte; small = identity(253);
+            let mut large: ulong; large = identity(4294967296);
             print(fmt("{0} {1}", (twice(small), twice(large))));
             0
-        };
+        }
     "#);
     assert!(
         output.status.success(),
@@ -31,19 +30,18 @@ fn nested_template_calls_use_context_and_preserve_numeric_widths() {
 
 #[test]
 fn template_fields_and_layout_follow_each_nominal_argument() {
-    let output = run(r#"
-        export { main };
+    let output = run(r#"export { main };
         import { "$/string.resin" };
-        struct Small { value: int };
-        struct Large { padding: ulong, value: uint };
-        def read<T>(value: Ptr<T>) -> _ = { value.value };
-        def measure<T>() -> ulong = { size_of(T) };
-        def main() -> int = {
-            var small = Small { value = 42 };
-            var large = Large { padding = 3, value = 7 };
+        struct Small { value: int; }
+        struct Large { padding: ulong; value: uint; }
+        fn read<T>(value: Ptr<T>) -> _  { value.value }
+        fn measure<T>() -> ulong  { size_of(T) }
+        fn main() -> int  {
+            let mut small = Small { value = 42 };
+            let mut large = Large { padding = 3, value = 7 };
             print(fmt("{0} {1} {2} {3}", (read(&small), read(&large), measure::<Small>(), measure::<Large>())));
             0
-        };
+        }
     "#);
     assert!(
         output.status.success(),
@@ -55,17 +53,16 @@ fn template_fields_and_layout_follow_each_nominal_argument() {
 
 #[test]
 fn generic_identity_preserves_shared_ownership() {
-    let output = run(r#"
-        export { main };
+    let output = run(r#"export { main };
         import { "$/shared.resin" };
-        def identity<T>(value: T) -> T = { value };
-        def main() -> (int | Err<_>) = {
-            var copy = {
-                var owner = ArcPtr<int>.alloc(42)?;
+        fn identity<T>(value: T) -> T  { value }
+        fn main() -> (int | Err<_>)  {
+            let mut copy = {
+                let mut owner = arc_ptr_alloc::<int>(42)?;
                 identity(owner)
             };
-            (copy.get().*)
-        };
+            (copy:get().*)
+        }
     "#);
     assert_eq!(
         output.status.code(),
@@ -77,22 +74,21 @@ fn generic_identity_preserves_shared_ownership() {
 
 #[test]
 fn generic_results_propagate_union_errors_and_match_payloads() {
-    let output = run(r#"
-        export { main };
-        struct A {};
-        struct B {};
-        def propagate<T, E>(input: (T | Err<E>)) -> (_ | Err<_>) = { (input?) };
-        def recover<T, E>(input: (T | Err<E>), fallback: T) -> T = {
+    let output = run(r#"export { main };
+        struct A {}
+        struct B {}
+        fn propagate<T, E>(input: (T | Err<E>)) -> (_ | Err<_>)  { (input?) }
+        fn recover<T, E>(input: (T | Err<E>), fallback: T) -> T  {
             match (input) { T(value) => { value }, Err(error) => { fallback } }
-        };
-        def combine<T, E, F>(a: (T | Err<E>), b: (T | Err<F>)) -> (T | Err<_>) = {
+        }
+        fn combine<T, E, F>(a: (T | Err<E>), b: (T | Err<F>)) -> (T | Err<_>)  {
             a?; (b?)
-        };
-        def main() -> int = {
-            var first = (int | Err<A>)((7));
-            var second = (int | Err<B>)(Err(B {}));
+        }
+        fn main() -> int  {
+            let mut first = (int | Err<A>)((7));
+            let mut second = (int | Err<B>)(Err(B {}));
             recover(propagate(first), 0) + recover(combine(first, second), 35)
-        };
+        }
     "#);
     assert_eq!(
         output.status.code(),
@@ -104,15 +100,14 @@ fn generic_results_propagate_union_errors_and_match_payloads() {
 
 #[test]
 fn expected_results_select_arguments_and_concrete_casts_run_after_substitution() {
-    let output = run(r#"
-        export { main };
-        def make<T>() -> T = { 41 };
-        def as_int<T>(input: T) -> int = { int(input) };
-        def choose<T>(condition: T) -> int = { if (condition) { 1 } else { 0 } };
-        def main() -> int = {
-            var value: uint; value := make();
+    let output = run(r#"export { main };
+        fn make<T>() -> T  { 41 }
+        fn as_int<T>(input: T) -> int  { int(input) }
+        fn choose<T>(condition: T) -> int  { if (condition) { 1 } else { 0 } }
+        fn main() -> int  {
+            let mut value: uint; value = make();
             as_int(value) + choose(1 == 1)
-        };
+        }
     "#);
     assert_eq!(
         output.status.code(),
@@ -129,12 +124,12 @@ fn hir(source: &str) -> resin_hir::Module {
 #[test]
 fn concrete_template_errors_report_the_application_chain() {
     for source in [
-        "def add<T>(value: T) -> T = { value + value }; def relay<U>(value: U) -> U = { add(value) }; def main() = { relay(1 == 1); };",
-        "def byte<T>() -> T = { 256 }; def main() -> ubyte = { byte() };",
-        "def field<T>(value: T) -> int = { value.missing }; def main() -> int = { field(1) };",
-        "def choose<T>(condition: T) -> int = { if (condition) { 1 } else { 0 } }; def main() -> int = { choose(1) };",
-        "def choose<T, U>(value: T | U) -> int = { match (value) { T(a) => { 1 }, U(b) => { 2 } } }; def main() -> int = { choose::<int, int>(1) };",
-        "def remainder<T>(value: T) -> T = { value % value }; def main() = { remainder(1.5); };",
+        "fn add<T>(value: T) -> T  { value + value } fn relay<U>(value: U) -> U  { add(value) } fn main()  { relay(1 == 1); }",
+        "fn byte<T>() -> T  { 256 } fn main() -> ubyte  { byte() }",
+        "fn field<T>(value: T) -> int  { value.missing } fn main() -> int  { field(1) }",
+        "fn choose<T>(condition: T) -> int  { if (condition) { 1 } else { 0 } } fn main() -> int  { choose(1) }",
+        "fn choose<T, U>(value: T | U) -> int  { match (value) { T(a) => { 1 }, U(b) => { 2 } } } fn main() -> int  { choose::<int, int>(1) }",
+        "fn remainder<T>(value: T) -> T  { value % value } fn main()  { remainder(1.5); }",
     ] {
         let tree = hir(source);
         let error = support::frontend::lower(&tree, &[], &resin_lir::LoweringOptions::default())
@@ -146,12 +141,11 @@ fn concrete_template_errors_report_the_application_chain() {
 
 #[test]
 fn generic_union_matches_use_concrete_tags_after_substitution() {
-    let output = run(r#"
-        export { main };
-        def choose<T, U>(value: T | U) -> int = {
+    let output = run(r#"export { main };
+        fn choose<T, U>(value: T | U) -> int  {
             match (value) { T(a) => { 42 }, U(b) => { 0 } }
-        };
-        def main() -> int = { choose::<int, bool>(1) };
+        }
+        fn main() -> int  { choose::<int, bool>(1) }
     "#);
     assert_eq!(
         output.status.code(),
@@ -163,13 +157,13 @@ fn generic_union_matches_use_concrete_tags_after_substitution() {
 
 #[test]
 fn source_recursion_memoizes_instances_and_respects_the_configured_limit() {
-    let tree = hir("def recur<T>(value: T) = { recur(value) }; def main() = { recur(1); };");
+    let tree = hir("fn recur<T>(value: T)  { recur(value) } fn main()  { recur(1); }");
     let module =
         support::frontend::lower(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
     assert_eq!(module.functions.len(), 2);
     let source = resin_source::Source::new(
         "growing.resin",
-        "export { main }; def grow<T>(value: T) = { grow(&value) }; def main() = { grow(1); };",
+        "export { main }; fn grow<T>(value: T)  { grow(&value) } fn main()  { grow(1); }",
     );
     let mut loader = resin_source::Loader::new(resin_source::library_root());
     let output = support::frontend::analyze(source, &mut loader, None);

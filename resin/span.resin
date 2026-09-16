@@ -1,37 +1,45 @@
-export { Span, bytes };
+export { Span, bytes , at, slice, as_bytes };
 
 // Borrowed storage. The caller keeps the allocation alive throughout each access.
 struct Span<T> {
-	data: Ptr<T>,
-	length: ulong,
+	data: Ptr<T>;
+	length: ulong;
 
-	def at(self: Span<T>, index: ulong) -> Ref<T> = {
+	
+
+	
+
+	
+
+	// Primitive byte transport for formatting and native interfaces.
+	
+}
+fn at<T>(self: Ref<Span<T>>, index: ulong) -> Ref<T>  {
 		pointer_index(self.data, self.length, index).*
-	};
+	}
 
-	def slice(self: Span<T>, start: ulong, length: ulong) -> Span<T> = {
+fn slice<T>(self: Ref<Span<T>>, start: ulong, length: ulong) -> Span<T>  {
 		Span<T> {
 			data = pointer_range(self.data, self.length, start, length),
 			length = length,
 		}
-	};
+	}
 
-	def as_bytes(self: Span<T>) -> Span<ubyte> = {
-		var raw = self.bytes();
+fn as_bytes<T>(self: Ref<Span<T>>) -> Span<ubyte>  {
+		let mut raw = self:bytes();
 		Span<ubyte> { data = raw.0, length = raw.1 }
-	};
+	}
 
-	// Primitive byte transport for formatting and native interfaces.
-	def bytes(self: Span<T>) -> (Ptr<ubyte>, ulong) = {
+fn bytes<T>(self: Ref<Span<T>>) -> (Ptr<ubyte>, ulong)  {
 		pointer_bytes(self.data, self.length)
-	};
-};
+	}
+
 
 // Literal length excludes the NUL terminator; borrowing never copies the bytes.
-def bytes(text: str) -> Span<ubyte> = {
+fn bytes(text: str) -> Span<ubyte>  {
 	Span<ubyte> { data = text.data, length = text.length }
-};
+}
 
-intrinsic "pointer_index" def pointer_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;
-intrinsic "pointer_range" def pointer_range<T>(data: Ptr<T>, capacity: ulong, start: ulong, length: ulong) -> Ptr<T>;
-intrinsic "pointer_bytes" def pointer_bytes<T>(data: Ptr<T>, length: ulong) -> (Ptr<ubyte>, ulong);
+intrinsic "pointer_index" fn pointer_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;
+intrinsic "pointer_range" fn pointer_range<T>(data: Ptr<T>, capacity: ulong, start: ulong, length: ulong) -> Ptr<T>;
+intrinsic "pointer_bytes" fn pointer_bytes<T>(data: Ptr<T>, length: ulong) -> (Ptr<ubyte>, ulong);

@@ -2,46 +2,50 @@ export { main, failure };
 
 import { "$/span.resin", "$/string.resin", "$/shared.resin", "$/status.resin" };
 
-struct Failed {};
+struct Failed {}
 
 struct Allocation {
-	data: ArcSpan<int>,
-	def get(self: Ptr<Allocation>) -> Span<int> = {
-		self.data.get()
-	};
-	def drop(self: Ptr<Allocation>) = {
+	data: ArcSpan<int>;
+	
+	
+}
+fn get(self: Ptr<Allocation>) -> Span<int>  {
+		self.data:get()
+	}
+
+fn drop(self: Ptr<Allocation>)  {
 		// The owned elements are released automatically after this hook.
 		print("releasing allocation\n");
-	};
-};
+	}
 
-def allocate() -> (Allocation | Err<OutOfMemory>) = {
-	(Allocation { data = ArcSpan<int>.alloc(1, 0_i)? })
-};
 
-def fail_if(fail: bool) -> (() | Err<Failed>) = {
+fn allocate() -> (Allocation | Err<OutOfMemory>)  {
+	(Allocation { data = arc_span_alloc::<int>(1, 0_i)? })
+}
+
+fn fail_if(fail: bool) -> (() | Err<Failed>)  {
 	if (fail) {
 		Err(Failed {})
 	} else {
 		(())
 	}
-};
+}
 
-def work(fail: bool) -> (int | Err<_>) = {
-	var value = allocate()?;
-	var data = value.get();
-	data.at(0) := 42;
+fn work(fail: bool) -> (int | Err<_>)  {
+	let mut value = allocate()?;
+	let mut data = value:get();
+	data:at(0) = 42;
 	fail_if(fail)?;
-	(data.at(0))
-};
+	(data:at(0))
+}
 
-def main() -> (() | Err<_>) = {
-	var answer = work(1 == 0)?;
+fn main() -> (() | Err<_>)  {
+	let mut answer = work(1 == 0)?;
 	print(fmt("answer = {0}\n", (answer,)));
 	(())
-};
+}
 
-def failure() -> (() | Err<_>) = {
+fn failure() -> (() | Err<_>)  {
 	work(1 == 1)?;
 	(())
-};
+}

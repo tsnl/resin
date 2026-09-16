@@ -140,7 +140,7 @@ struct Export {
     symbol: Symbol,
 }
 
-type Exports = BTreeMap<Arc<str>, Export>;
+type Exports = BTreeMap<Arc<str>, Vec<Export>>;
 
 /// Check modules in import order while retaining independent editor facts after errors.
 pub fn analyze_program(
@@ -245,13 +245,15 @@ impl<'a> ProgramBuilder<'a> {
         scopes: &mut Scopes,
         names: &mut BTreeMap<Arc<str>, SourceOrigin>,
     ) {
-        for (name, export) in &self.exports[dependency] {
-            match bind(self.program, index, names, name, export.origin, span) {
-                Ok(false) => continue,
-                Err(error) => self.diagnostics.push(error),
-                Ok(true) => {}
+        for (name, exports) in &self.exports[dependency] {
+            for export in exports {
+                match bind(self.program, index, names, name, export.origin, span) {
+                    Ok(false) => continue,
+                    Err(error) => self.diagnostics.push(error),
+                    Ok(true) => {}
+                }
+                scopes.import(name.clone(), export.symbol);
             }
-            scopes.import(name.clone(), export.symbol);
         }
     }
 
@@ -264,6 +266,7 @@ impl<'a> ProgramBuilder<'a> {
                     .filter(|name| name.val.as_ref() != "_")
                 {
                     let origin = SourceOrigin {
+                        function: false,
                         module: SourceModuleId::from_index(index),
                         span: name.span,
                     };
@@ -278,6 +281,12 @@ impl<'a> ProgramBuilder<'a> {
                 continue;
             };
             let origin = SourceOrigin {
+                function: matches!(
+                    stmt.val,
+                    StmtKind::Function { .. }
+                        | StmtKind::ForeignFunction { .. }
+                        | StmtKind::IntrinsicFunction { .. }
+                ),
                 module: SourceModuleId::from_index(index),
                 span: name.span,
             };
@@ -295,11 +304,14 @@ impl<'a> ProgramBuilder<'a> {
         self.exports.push(
             symbols
                 .into_iter()
-                .filter_map(|(name, symbol)| {
-                    names
-                        .get(&name)
-                        .copied()
-                        .map(|origin| (name, Export { origin, symbol }))
+                .filter_map(|(name, symbols)| {
+                    names.get(&name).copied().map(|origin| {
+                        let exports = symbols
+                            .into_iter()
+                            .map(|symbol| Export { origin, symbol })
+                            .collect();
+                        (name, exports)
+                    })
                 })
                 .collect(),
         );
@@ -335,10 +347,9 @@ fn declaration_name(stmt: &StmtKind) -> Option<&Ident> {
         | StmtKind::ForeignFunction { name, .. }
         | StmtKind::IntrinsicFunction { name, .. }
         | StmtKind::Function { name, .. }
-        | StmtKind::Define { name, .. }
         | StmtKind::DefineType { name, .. }
-        | StmtKind::Struct { name, .. }
-        | StmtKind::Declare { name, .. } => Some(name),
+        | StmtKind::Struct { name, .. } => Some(name),
+        StmtKind::Define { pattern, .. } | StmtKind::Declare { pattern, .. } => Some(&pattern.name),
         _ => None,
     }
 }
@@ -352,6 +363,9 @@ fn bind(
     span: Span,
 ) -> Result<bool, SourceError> {
     if let Some(previous) = names.get(name) {
+        if previous.function && origin.function {
+            return Ok(true);
+        }
         if *previous == origin {
             return Ok(false);
         }
@@ -391,15 +405,21 @@ impl Generator {
         }
         Ok(symbols
             .into_iter()
-            .filter_map(|(name, symbol)| {
+            .filter_map(|(name, symbols)| {
+                // Overload sets are exported operations, not unambiguous executable roots.
+                if symbols.len() != 1 {
+                    return None;
+                }
                 Some((
                     name,
-                    self.function_bindings.get(&symbol.definition).copied()?,
+                    self.function_bindings
+                        .get(&symbols[0].definition)
+                        .copied()?,
                 ))
             })
             .collect())
     }
-    fn exports(&self, file: &SourceFile) -> (BTreeMap<Arc<str>, Symbol>, Vec<GenerateError>) {
+    fn exports(&self, file: &SourceFile) -> (BTreeMap<Arc<str>, Vec<Symbol>>, Vec<GenerateError>) {
         let mut exports = BTreeMap::new();
         let mut errors = Vec::new();
         for name in &file.exports {
@@ -410,8 +430,8 @@ impl Generator {
                         name: name.val.clone(),
                     },
                 });
-            } else if let Some(symbol) = self.symbol(&name.val) {
-                exports.insert(name.val.clone(), symbol);
+            } else if let Some(symbols) = self.symbols(&name.val) {
+                exports.insert(name.val.clone(), symbols);
             } else {
                 errors.push(GenerateError {
                     span: name.span,
@@ -819,7 +839,7 @@ fn duplicate(name: &Ident) -> GenerateError {
 fn method_signature(
     evaluator: &Evaluator<'_>,
     declaration: DeclarationId,
-    params: &[(Ident, resin_ast::Type)],
+    params: &[(resin_ast::BindingPattern, resin_ast::Type)],
     result: &resin_ast::Type,
 ) -> Result<typed::Signature, GenerateError> {
     Ok(typed::Signature {
@@ -853,7 +873,7 @@ fn elaborate_signature(source: &typed::Signature) -> Signature {
             .enumerate()
             .map(|(index, (name, a))| Parameter {
                 binding: source.parameters.get(index).copied().flatten(),
-                name: name.clone(),
+                name: name.name.clone(),
                 annotation: elaborate_annotation(a),
             })
             .collect(),
@@ -950,7 +970,8 @@ impl Generator {
 
 fn check_parameters(signature: &typed::Signature) -> Result<(), GenerateError> {
     let mut names = std::collections::HashSet::new();
-    for (name, _) in &signature.params {
+    for (pattern, _) in &signature.params {
+        let name = &pattern.name;
         crate::lower::infer::check_binding_name(name)?;
         if !names.insert(&name.val) {
             return Err(GenerateError {
@@ -1189,11 +1210,15 @@ fn shader_error(decorator: &Ident, message: &str) -> GenerateError {
 }
 
 impl Generator {
-    fn symbol(&self, name: &str) -> Option<Symbol> {
-        self.scopes
-            .lookup(name, false)
-            .or_else(|| self.scopes.lookup(name, true))
-            .map(|definition| Symbol { definition })
+    fn symbols(&self, name: &str) -> Option<Vec<Symbol>> {
+        let is_type = name.chars().next().is_some_and(char::is_uppercase);
+        let declarations = self.scopes.lookup_all(name, is_type);
+        (!declarations.is_empty()).then(|| {
+            declarations
+                .into_iter()
+                .map(|definition| Symbol { definition })
+                .collect()
+        })
     }
 }
 
@@ -1238,15 +1263,14 @@ mod extern_tests {
     #[test]
     fn preamble_signatures_resolve_types_declared_in_the_body() {
         let file = parse(
-            r#"
-            extern { "native.h": {
-                def handle(value: Ptr<Handle>) -> Ptr<Handle>;
-                def scalar(value: Scalar) -> Scalar;
-                def cell(value: Ptr<Cell<int>>) -> Ptr<Cell<int>>;
+            r#"extern { "native.h": {
+                fn handle(value: Ptr<Handle>) -> Ptr<Handle>;
+                fn scalar(value: Scalar) -> Scalar;
+                fn cell(value: Ptr<Cell<int>>) -> Ptr<Cell<int>>;
             } };
             extern type Handle;
             type Scalar = int;
-            struct Cell<T> { value: T };
+            struct Cell<T> { value: T; }
         "#,
         );
         let module = generate(&file).unwrap();

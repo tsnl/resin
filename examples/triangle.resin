@@ -3,7 +3,7 @@ export { main, vertex, fragment };
 import { "$/string.resin", "$/gpu.resin", "$/graphics.resin", "$/shared.resin", "$/image.resin" };
 
 @vertex_shader
-def vertex(index: int) -> Vertex = {
+fn vertex(index: int) -> Vertex  {
 	if (index == 0) {
 		Vertex {
 			position = Position {
@@ -50,34 +50,34 @@ def vertex(index: int) -> Vertex = {
 			},
 		}
 	}
-};
+}
 
 @fragment_shader
-def fragment(color: Color) -> Color = {
+fn fragment(color: Color) -> Color  {
 	color
-};
+}
 
-def main() -> (() | Err<_>) = {
-	var gpu = Gpu.new()?;
+fn main() -> (() | Err<_>)  {
+	let mut gpu = gpu_new()?;
 
-	var pipeline = gpu.create_graphics_pipeline(vertex, fragment)?;
+	let mut pipeline = gpu:create_graphics_pipeline(vertex, fragment)?;
 
-	var image = gpu.create_image(256, 256)?;
+	let mut image = gpu:create_image(256, 256)?;
 
-	var pixels = gpu.alloc::<ubyte>(262144)?;
+	let mut pixels = gpu:alloc::<ubyte>(262144)?;
 
-	var commands = gpu.start_command_recording()?;
+	let mut commands = gpu:start_command_recording()?;
 
-	commands.begin_rendering(image, 0.0, 0.0, 0.0, 1.0)?;
-	commands.draw(pipeline, None, 3)?;
-	commands.end_rendering()?;
-	commands.copy_image_to_buffer(image, pixels)?;
-	commands.submit()?;
+	commands:begin_rendering(image, 0.0, 0.0, 0.0, 1.0)?;
+	commands:draw(pipeline, None, 3)?;
+	commands:end_rendering()?;
+	commands:copy_image_to_buffer(image, pixels)?;
+	commands:submit()?;
 
-	var path = "triangle.png";
-	var host = ArcSpan<ubyte>.alloc(pixels.length, 0_ub)?;
-	pixels.copy_to(host.get());
-	ImageData.write_pixels(path.data, 256, 256, 4, host.get(), 0)?;
+	let mut path = "triangle.png";
+	let mut host = arc_span_alloc::<ubyte>(pixels.length, 0_ub)?;
+	pixels:copy_to(host:get());
+	image_data_write_pixels(path.data, 256, 256, 4, host:get(), 0)?;
 	print("wrote triangle.png\n");
 	(())
-};
+}

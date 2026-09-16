@@ -36,7 +36,8 @@ fn first_statement(file: &SourceFile) -> &resin_ast::Stmt {
 
 #[test]
 fn omitted_function_results_lower_to_unit() {
-    let source = "extern { \"header.h\": { def foreign(); } }; def implicit() = {}; def explicit() -> () = {};";
+    let source =
+        "extern { \"header.h\": { fn foreign(); } }; fn implicit()  {} fn explicit() -> ()  {}";
     let file = parse(source);
     for statement in &file.stmts {
         let (name, result) = match &statement.val {
@@ -58,14 +59,13 @@ fn omitted_function_results_lower_to_unit() {
 
 #[test]
 fn definition_keywords_preserve_statement_and_field_spans() {
-    let source = r#"
-        struct Pair { first: int, second: int };
-        def make(seed: int) -> Pair = {
-            var first = seed;
-            var second: int;
-            second := seed + 1;
-            Pair { first = first, second = { var next = second; next } }
-        };
+    let source = r#"struct Pair { first: int; second: int; }
+        fn make(seed: int) -> Pair  {
+            let mut first = seed;
+            let mut second: int;
+            second = seed + 1;
+            Pair { first = first, second = { let mut next = second; next } }
+        }
     "#;
     let file = parse(source);
     let text = |span: Span| &source[span.start..span.end];
@@ -73,7 +73,7 @@ fn definition_keywords_preserve_statement_and_field_spans() {
     assert!(matches!(definition.val, StmtKind::Struct { .. }));
     assert_eq!(
         text(definition.span),
-        "struct Pair { first: int, second: int };"
+        "struct Pair { first: int; second: int; }"
     );
     let function = &file.stmts[1];
     let StmtKind::Function {
@@ -82,9 +82,9 @@ fn definition_keywords_preserve_statement_and_field_spans() {
     else {
         panic!("expected function");
     };
-    assert!(text(function.span).starts_with("def make("));
+    assert!(text(function.span).starts_with("fn make("));
     assert_eq!(text(name.span), "make");
-    assert_eq!(text(params[0].0.span), "seed");
+    assert_eq!(text(params[0].0.name.span), "seed");
     let TermKind::Block { stmts, tail } = &body.val else {
         panic!("expected function body");
     };
@@ -110,7 +110,7 @@ fn definition_keywords_preserve_statement_and_field_spans() {
 
 #[test]
 fn while_has_a_condition_and_a_scoped_body() {
-    let file = parse("def main() -> () = { while (ready) { count := count + 1; }; };");
+    let file = parse("fn main() -> ()  { while (ready) { count = count + 1; }; }");
     let StmtKind::Expr { term } = &first_statement(&file).val else {
         panic!("expected expression statement");
     };
@@ -125,14 +125,14 @@ fn while_has_a_condition_and_a_scoped_body() {
     assert!(matches!(tail.val, TermKind::Unit));
     assert!(format_source(&file).contains("(while"));
 
-    parse("def main() -> () = { while (ready) {}; };");
-    parse("def f () -> () = { while (ready) { while (ready) {}; } };");
-    parse("def main() -> () = { var value = while (ready) { 42 }; };");
+    parse("fn main() -> ()  { while (ready) {}; }");
+    parse("fn f () -> ()  { while (ready) { while (ready) {}; } }");
+    parse("fn main() -> ()  { let mut value = while (ready) { 42 }; }");
 }
 
 #[test]
 fn assignment_is_right_associative_and_deref_is_explicit() {
-    let file = parse("def main() -> () = { p.* := q.* := 1; };");
+    let file = parse("fn main() -> ()  { p.* = q.* = 1; }");
     let StmtKind::Expr { term } = &first_statement(&file).val else {
         panic!("expected expression statement");
     };
@@ -155,7 +155,7 @@ fn assignment_is_right_associative_and_deref_is_explicit() {
 
 #[test]
 fn assignment_can_be_sequenced_in_a_block() {
-    let file = parse("def f (p: Ptr<int>) -> int = { p.* := 1; p.* };");
+    let file = parse("fn f (p: Ptr<int>) -> int  { p.* = 1; p.* }");
     let StmtKind::Function { body, .. } = &file.stmts[0].val else {
         panic!("expected function definition");
     };
@@ -168,7 +168,7 @@ fn assignment_can_be_sequenced_in_a_block() {
 
 #[test]
 fn dereference_composes_with_other_postfix_operations() {
-    let file = parse("def main() -> () = { p.next.* := 1; };");
+    let file = parse("fn main() -> ()  { p.next.* = 1; }");
     let StmtKind::Expr { term } = &first_statement(&file).val else {
         panic!("expected expression statement");
     };

@@ -28,7 +28,6 @@ Start a [compiler service](doc/compiler-service.md#local-development), set
 cargo run -- examples/eg001.resin
 cargo run -- examples/eg001.resin -o dist/
 ```
-
 The first command builds and runs the Fibonacci program; the second builds an optimized
 executable without running it. Inspect the generated `main.c` beside each cached executable
 under the service working directory's `build/`. Downloads execute locally; there
@@ -36,13 +35,13 @@ is no bytecode interpreter behind the CLI.
 
 A few language choices explain much of the implementation:
 
-- Functions use `def` and are top-level declarations with typed parameters;
+- Functions use `fn` and are top-level declarations with typed parameters;
   an omitted result type means unit. Their names are available before their
   bodies are checked, allowing mutual recursion. Explicit `_` holes opt into
   inference in local annotations and function results; omission still means unit.
 - Function signatures retain separate parameters. An empty argument list supplies
   no values; a tuple is an explicit single argument.
-- Value binding statements use `var`, including uninitialized locals; nominal
+- Value binding statements use `let mut`, including uninitialized locals; nominal
   records use `struct`, and `type` creates transparent aliases. Record fields remain
   `name = value`; parameters remain `name: Type`.
 - `A | B` is a structural union of value types. `Result<T, E>` is first-class;

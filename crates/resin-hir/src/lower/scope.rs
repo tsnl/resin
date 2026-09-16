@@ -45,18 +45,28 @@ pub(crate) struct Contexts {
     constants: BTreeMap<DeclarationId, crate::Term>,
 }
 impl Contexts {
-    fn lookup(&self, mut cursor: Cursor, name: &str, is_type: bool) -> Option<usize> {
+    fn lookup_all(&self, mut cursor: Cursor, name: &str, is_type: bool) -> Vec<DeclarationId> {
         loop {
             let scope = &self.scopes[cursor.scope];
             let mut matches = scope.entries[..cursor.prefix]
                 .iter()
                 .filter(|entry| entry.name.as_ref() == name && entry.is_type == is_type)
-                .map(|entry| entry.definition);
-            if let Some(first) = matches.next() {
-                return matches.all(|other| other == first).then_some(first);
+                .map(|entry| entry.definition)
+                .collect::<Vec<_>>();
+            matches.sort_unstable();
+            matches.dedup();
+            if !matches.is_empty() {
+                return matches;
             }
-            cursor = scope.parent?;
+            let Some(parent) = scope.parent else {
+                return vec![];
+            };
+            cursor = parent;
         }
+    }
+    fn lookup(&self, cursor: Cursor, name: &str, is_type: bool) -> Option<DeclarationId> {
+        let matches = self.lookup_all(cursor, name, is_type);
+        (matches.len() == 1).then(|| matches[0])
     }
     fn cursor_at(&self, source: &Source, offset: usize) -> Option<Cursor> {
         let mut id = self
@@ -122,6 +132,12 @@ pub(crate) struct ContextView {
     data: Rc<RefCell<Analysis>>,
 }
 impl ContextView {
+    pub(super) fn lookup_all(&self, name: &str, is_type: bool) -> Vec<DeclarationId> {
+        self.data
+            .borrow()
+            .contexts
+            .lookup_all(self.cursor, name, is_type)
+    }
     pub(super) fn capture(&self) -> Cursor {
         self.cursor
     }
@@ -300,7 +316,12 @@ impl Scopes {
         let is_type = kind == DefinitionKind::Type;
         let duplicate = scope.entries[..self.view.cursor.prefix]
             .iter()
-            .any(|entry| entry.name == name.val && entry.is_type == is_type);
+            .any(|entry| {
+                entry.name == name.val
+                    && entry.is_type == is_type
+                    && !(kind == DefinitionKind::Function
+                        && contexts.definitions[entry.definition].kind == DefinitionKind::Function)
+            });
         let id = contexts.definitions.len();
         contexts.definitions.push(Definition {
             name: name.val.to_string(),
@@ -352,6 +373,16 @@ impl Scopes {
     }
     pub(crate) fn lookup_inferred(&self, name: &str) -> Option<(DeclarationId, Type, bool)> {
         let id = self.view.lookup(name, false)?;
+        Some(self.inferred_definition(id))
+    }
+    pub(crate) fn lookup_overloads(&self, name: &str) -> Vec<(DeclarationId, Type, bool)> {
+        self.view
+            .lookup_all(name, false)
+            .into_iter()
+            .map(|id| self.inferred_definition(id))
+            .collect()
+    }
+    fn inferred_definition(&self, id: DeclarationId) -> (DeclarationId, Type, bool) {
         let (ty, function) = self.inferred.get(&id).cloned().unwrap_or_else(|| {
             let data = self.view.data.borrow();
             let definition = &data.contexts.definitions[id];
@@ -362,7 +393,7 @@ impl Scopes {
                 .unwrap_or(Type::Invalid);
             (ty, definition.kind == DefinitionKind::Function)
         });
-        Some((id, ty, function))
+        (id, ty, function)
     }
     pub(crate) fn set_parameters(&self, id: DeclarationId, parameters: &[crate::TypeParameter]) {
         self.view

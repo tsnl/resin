@@ -23,6 +23,10 @@ pub(super) fn recovery(document: &Document) -> Option<Document> {
     }
     let mut text = document.text.to_string();
     text.extend(closers.into_iter().rev());
+    let recovered = reparse(text.clone(), None);
+    if !recovered.tree.root_node().has_error() {
+        return Some(recovered);
+    }
     text.push(';');
     Some(reparse(text, None))
 }

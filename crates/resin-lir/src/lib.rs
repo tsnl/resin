@@ -181,8 +181,11 @@ pub enum Instr {
     /// `[] -> []`: clear a local's initialization flag without destroying its value.
     ForgetLocal { local: LocalId },
     /// `[] -> [value]`: transfer an initialized local and clear its initialization flag.
-    /// Used for compiler temporaries; source reads still copy.
     TakeLocal { local: LocalId },
+    /// `[] -> [value]`: transfer a field and disarm cleanup for that part of the local.
+    TakeField { local: LocalId, path: Vec<usize> },
+    /// `[value] -> []`: replace a field, destroying only its still-initialized parts.
+    SetField { local: LocalId, path: Vec<usize> },
     /// `[] -> []`: destroy a local if initialized, then clear its initialization flag.
     DropLocal { local: LocalId },
     /// `[value] -> []`: destroy a local's previous initialized value, then transfer
@@ -224,8 +227,8 @@ pub enum Instr {
     PointerBytes,
     /// `[address] -> [value]`: copy an initialized pointee, retaining managed owners.
     Load,
-    /// `[address, value] -> [value]`: copy into storage, destroying its previous live
-    /// value and marking a tracked local initialized; preserve the input value as result.
+    /// `[address, value] -> [unit]`: copy into storage, destroying its previous live
+    /// value and marking a tracked local initialized; produce unit.
     Store,
     /// `[address, replacement] -> [previous value]`: exchange an initialized pointee
     /// with an owned replacement, transferring both values without copying or destruction.

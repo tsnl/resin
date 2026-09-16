@@ -16,6 +16,12 @@ use std::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Head {
+    Operation {
+        name: Arc<str>,
+        candidates: Vec<FunctionId>,
+        explicit: Option<usize>,
+        primitive: Option<Arc<str>>,
+    },
     Atom(Ty),
     Parameter {
         id: crate::TypeParameterId,
@@ -114,6 +120,21 @@ impl Type {
 impl Type {
     pub fn from_hir(source: &crate::Type) -> Self {
         match source {
+            crate::Type::Operation { lookup } => Self::Node(
+                Head::Operation {
+                    primitive: lookup.primitive.clone(),
+                    name: lookup.name.clone(),
+                    candidates: lookup.candidates.clone(),
+                    explicit: lookup.type_args.as_ref().map(Vec::len),
+                },
+                lookup
+                    .type_args
+                    .iter()
+                    .flatten()
+                    .chain(&lookup.arguments)
+                    .map(Self::from_hir)
+                    .collect(),
+            ),
             crate::Type::Type => Ty::Type.into(),
             crate::Type::Unit => Ty::Unit.into(),
             crate::Type::None => Ty::None.into(),
@@ -244,6 +265,7 @@ impl Head {
             self,
             Self::Member { .. }
                 | Self::Method { .. }
+                | Self::Operation { .. }
                 | Self::FunctionParameter { .. }
                 | Self::FunctionResult
                 | Self::Value
@@ -256,6 +278,7 @@ impl Head {
             Self::Parameter { .. }
             | Self::Member { .. }
             | Self::Method { .. }
+            | Self::Operation { .. }
             | Self::FunctionParameter { .. }
             | Self::FunctionResult
             | Self::Nominal { .. }
@@ -327,6 +350,20 @@ impl Head {
     fn completed(&self, children: Vec<crate::Type>) -> crate::Type {
         let mut children = children.into_iter();
         match self {
+            Self::Operation {
+                name,
+                candidates,
+                explicit,
+                primitive,
+            } => crate::Type::Operation {
+                lookup: Box::new(crate::OperationLookup {
+                    primitive: primitive.clone(),
+                    name: name.clone(),
+                    candidates: candidates.clone(),
+                    type_args: explicit.map(|count| children.by_ref().take(count).collect()),
+                    arguments: children.collect(),
+                }),
+            },
             Self::Atom(ty) => super::types::ty(ty),
             Self::Union => completed_union(children.collect()),
             Self::Parameter { id } => crate::Type::Parameter { parameter: *id },
@@ -1194,6 +1231,14 @@ pub(crate) struct Equation {
     relation: Constraint,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct OverloadCandidate {
+    pub function: FunctionId,
+    pub declaration: DeclarationId,
+    pub parameters: Vec<crate::TypeParameter>,
+    pub signature: Type,
+}
+
 #[derive(Clone)]
 pub(crate) struct AppliedMethod {
     pub declaration: DeclarationId,
@@ -1204,6 +1249,9 @@ pub(crate) struct AppliedMethod {
 
 #[derive(Clone)]
 pub(crate) enum ResolvedMethod {
+    Operation {
+        signature: Type,
+    },
     Intrinsic {
         signature: super::context::IntrinsicMethod,
         receiver_conversion: Option<crate::ReceiverConversion>,
@@ -1301,6 +1349,15 @@ impl<'a> Inference<'a> {
 
 #[derive(Clone)]
 pub(crate) enum Constraint {
+    Overload {
+        name: Arc<str>,
+        candidates: Vec<OverloadCandidate>,
+        primitive: Option<Arc<str>>,
+        expected: Option<Type>,
+        type_args: Option<Vec<Type>>,
+        args: Option<Vec<Type>>,
+        out: Type,
+    },
     Equal(Type, Type),
     Depends(Type),
     Coerce(Type, Type),
@@ -1852,8 +1909,186 @@ impl Inference<'_> {
         }
     }
 
+    fn overload(
+        &mut self,
+        owner: Rule,
+        name: &str,
+        candidates: &[OverloadCandidate],
+        primitive: &Option<Arc<str>>,
+        expected: &Option<Type>,
+        explicit: &Option<Vec<Type>>,
+        args: Option<&[Type]>,
+        out: &Type,
+        span: Span,
+    ) -> Result<bool> {
+        if candidates.is_empty()
+            && let (Some(symbol), Some(args)) = (primitive, args)
+        {
+            return self.constraint(
+                owner,
+                &Constraint::Builtin(symbol.clone(), args.to_vec(), out.clone()),
+                span,
+            );
+        }
+        if let Some(application) = self.applications.get(&owner).cloned() {
+            return self.complete_overload(owner, application, args, out, span);
+        }
+        if let Some(args) = args
+            && args.iter().any(|arg| self.solver.dependent(arg))
+        {
+            if args
+                .iter()
+                .chain(explicit.iter().flatten())
+                .any(|arg| self.solver.complete(arg).is_none())
+            {
+                return Ok(false);
+            }
+            let signature = Type::Node(
+                Head::Operation {
+                    primitive: primitive.clone(),
+                    name: name.into(),
+                    candidates: candidates
+                        .iter()
+                        .map(|candidate| candidate.function)
+                        .collect(),
+                    explicit: explicit.as_ref().map(Vec::len),
+                },
+                explicit.iter().flatten().chain(args).cloned().collect(),
+            );
+            let complete = self.dependent_call(&signature, args, out, span)?;
+            if complete {
+                self.methods
+                    .insert(owner, ResolvedMethod::Operation { signature });
+            }
+            return Ok(complete);
+        }
+        let baseline = self.solver.clone();
+        let mut viable = Vec::new();
+        for candidate in candidates {
+            self.solver = baseline.clone();
+            let matched = (|| {
+                let (signature, type_args) = self.solver.apply(
+                    candidate.signature.clone(),
+                    &candidate.parameters,
+                    explicit.clone(),
+                    span,
+                )?;
+                let Type::Node(Head::Function, parts) = self.solver.head(&signature) else {
+                    return Err(error(span, "overload candidate is not a function"));
+                };
+                let application = AppliedMethod {
+                    declaration: candidate.declaration,
+                    type_args,
+                    params: parts[1..].to_vec(),
+                    result: parts[0].clone(),
+                };
+                if let Some(args) = args {
+                    self.arguments(args, &application.params, span)?;
+                    self.solver.unify(&application.result, out, span)?;
+                    if let Some(expected) = expected {
+                        self.solver.coerce(&application.result, expected, span)?;
+                    }
+                } else {
+                    self.solver.coerce(&signature, out, span)?;
+                }
+                Ok(application)
+            })();
+            if let Ok(application) = matched {
+                viable.push((Some(application), self.solver.clone(), true));
+            }
+        }
+        self.solver = baseline.clone();
+        if let (Some(symbol), Some(args)) = (primitive, args) {
+            if let Ok(complete) = self.constraint(
+                owner,
+                &Constraint::Builtin(symbol.clone(), args.to_vec(), out.clone()),
+                span,
+            ) {
+                let context = expected
+                    .as_ref()
+                    .map_or(Ok(true), |expected| self.solver.coerce(out, expected, span));
+                if let Ok(context) = context {
+                    viable.push((None, self.solver.clone(), complete && context));
+                }
+            }
+        }
+        self.solver = baseline;
+        if viable.len() == 1 {
+            let (application, solver, complete) = viable.pop().unwrap();
+            self.solver = solver;
+            let Some(application) = application else {
+                return Ok(complete);
+            };
+            self.applications.insert(owner, application.clone());
+            return self.complete_overload(owner, application, args, out, span);
+        }
+        let known = args.map_or_else(
+            || self.solver.complete(out).is_some(),
+            |args| args.iter().all(|arg| self.solver.complete(arg).is_some()),
+        );
+        if !known || !viable.is_empty() {
+            return Ok(false);
+        }
+        Err(error(
+            span,
+            if viable.is_empty() {
+                format!("no overload of `{name}` matches this signature")
+            } else {
+                format!(
+                    "ambiguous overload of `{name}`: {} signatures match",
+                    viable.len()
+                )
+            },
+        ))
+    }
+
+    fn complete_overload(
+        &mut self,
+        owner: Rule,
+        application: AppliedMethod,
+        args: Option<&[Type]>,
+        out: &Type,
+        span: Span,
+    ) -> Result<bool> {
+        let complete = if let Some(args) = args {
+            let arguments = self.arguments(args, &application.params, span)?;
+            self.solver.unify(&application.result, out, span)? && arguments
+        } else {
+            self.solver.coerce(
+                &Type::function(application.params.clone(), application.result.clone()),
+                out,
+                span,
+            )?
+        };
+        if complete {
+            self.methods.insert(owner, application.resolved(None));
+        }
+        Ok(complete)
+    }
+
     fn constraint(&mut self, owner: Rule, constraint: &Constraint, span: Span) -> Result<bool> {
         match constraint {
+            Constraint::Overload {
+                name,
+                candidates,
+                primitive,
+                expected,
+                type_args,
+                args,
+                out,
+            } => {
+                return self.overload(
+                    owner,
+                    name,
+                    candidates,
+                    primitive,
+                    expected,
+                    type_args,
+                    args.as_deref(),
+                    out,
+                    span,
+                );
+            }
             Constraint::Method {
                 receiver: receiver_type,
                 name,
@@ -2462,6 +2697,13 @@ impl Inference<'_> {
 impl Constraint {
     fn inputs(&self) -> Vec<&Type> {
         match self {
+            Self::Overload {
+                args, type_args, ..
+            } => args
+                .iter()
+                .flatten()
+                .chain(type_args.iter().flatten())
+                .collect(),
             Self::Depends(from)
             | Self::ExcludeNone(from, _)
             | Self::Equal(from, _)

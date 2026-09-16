@@ -2,18 +2,18 @@ export { main };
 
 import { "$/string.resin" };
 
-def add(x: int, y: int) -> int = {
+fn add(x: int, y: int) -> int  {
 	x + y
-};
+}
 
-def apply(f: (int, int) -> int, x: int, y: int) -> int = {
+fn apply(f: (int, int) -> int, x: int, y: int) -> int  {
 	f(x, y)
-};
+}
 
-def inc(n: int) -> int = {
+fn inc(n: int) -> int  {
 	apply(add, n, 1)
-};
+}
 
-def main() -> () = {
+fn main() -> ()  {
 	print(fmt("inc(41) = {0}\n", (inc(41),)));
-};
+}

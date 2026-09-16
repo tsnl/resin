@@ -8,10 +8,10 @@ const (
 	execute: uint = 1 << iota;
 );
 
-struct Pair<T> { first: T, second: T };
+struct Pair<T> { first: T; second: T; }
 const pair_bytes = sizeof(Pair<int>);
 
-def main() = {
+fn main()  {
 	const permissions = read | write;
 	print(fmt("read/write = {0}, execute = {1}, pair bytes = {2}\n", (permissions, execute, pair_bytes)));
-};
+}

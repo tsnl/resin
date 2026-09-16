@@ -81,6 +81,7 @@ pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
 
         Instr::WeakEmpty
         | Instr::TakeLocal { .. }
+        | Instr::TakeField { .. }
         | Instr::Push { .. }
         | Instr::Function { .. }
         | Instr::LocalAddress { .. } => StackEffect { pops: 0, pushes: 1 },
@@ -110,7 +111,9 @@ pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
         Instr::GpuArgumentsDispatch => StackEffect { pops: 5, pushes: 1 },
         Instr::AccessDynamic | Instr::Store | Instr::Replace => StackEffect { pops: 2, pushes: 1 },
         Instr::ForgetLocal { .. } | Instr::DropLocal { .. } => StackEffect { pops: 0, pushes: 0 },
-        Instr::Discard | Instr::SetLocal { .. } => StackEffect { pops: 1, pushes: 0 },
+        Instr::Discard | Instr::SetLocal { .. } | Instr::SetField { .. } => {
+            StackEffect { pops: 1, pushes: 0 }
+        }
         Instr::MakeRecord { fields } => StackEffect {
             pops: fields.len(),
             pushes: 1,

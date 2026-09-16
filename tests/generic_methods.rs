@@ -8,21 +8,26 @@ fn run(source: &str) -> std::process::Output {
 
 #[test]
 fn generic_owner_methods_support_static_and_receiver_calls() {
-    let output = run(r#"
-        export { main };
+    let output = run(r#"export { main };
         import { "$/string.resin" };
-        struct Cell<T> { value: T,
-            def make(value: T) -> Cell<T> = { Cell<T> { value = value } };
-            def read(self: Cell<T>) -> T = { self.value };
-            def with<U>(self: Cell<T>, value: U) -> Cell<U> = { Cell<U> { value = value } };
-        };
-        def main() -> int = {
-            var first = Cell<int>.make(7);
-            var second = first.with::<ulong>(4294967296);
-            var third = Cell<int>.with::<ubyte>(first, 255);
-            print(fmt("{0} {1} {2}", (first.read(), second.read(), third.read())));
+        struct Cell<T> { value: T;
+            
+            
+            
+        }
+fn cell_make<T>(value: T) -> Cell<T>  { Cell<T> { value = value } }
+
+fn read<T>(self: Cell<T>) -> T  { self.value }
+
+fn with<T, U>(self: Cell<T>, value: U) -> Cell<U>  { Cell<U> { value = value } }
+
+        fn main() -> int  {
+            let mut first = cell_make::<int>(7);
+            let mut second = first:with::<ulong>(4294967296);
+            let mut third = with::<int, ubyte>(first, 255);
+            print(fmt("{0} {1} {2}", (first:read(), second:read(), third:read())));
             0
-        };
+        }
     "#);
     assert!(
         output.status.success(),
@@ -34,21 +39,22 @@ fn generic_owner_methods_support_static_and_receiver_calls() {
 
 #[test]
 fn factory_method_arguments_follow_expected_results_and_explicit_holes() {
-    let output = run(r#"
-        export { main };
+    let output = run(r#"export { main };
         import { "$/string.resin" };
-        struct Cell<T> { value: T };
+        struct Cell<T> { value: T; }
         struct Factory {
-            def create<T>(self: Factory) -> Cell<T> = { Cell<T> { value = 41 } };
-        };
-        def main() -> int = {
-            var factory = Factory {};
-            var first: Cell<int>; first := factory.create();
-            var second = factory.create::<ulong>();
-            var third: Cell<ubyte>; third := factory.create::<_>();
+            
+        }
+fn create<T>(self: Factory) -> Cell<T>  { Cell<T> { value = 41 } }
+
+        fn main() -> int  {
+            let mut factory = Factory {};
+            let mut first: Cell<int>; first = factory:create();
+            let mut second = factory:create::<ulong>();
+            let mut third: Cell<ubyte>; third = factory:create::<_>();
             print(fmt("{0} {1} {2}", (first.value, second.value, third.value)));
             first.value + 1
-        };
+        }
     "#);
     assert_eq!(
         output.status.code(),
@@ -61,18 +67,21 @@ fn factory_method_arguments_follow_expected_results_and_explicit_holes() {
 
 #[test]
 fn method_references_keep_owner_arguments_and_infer_only_remaining_binders() {
-    let output = run(r#"
-        export { main };
-        struct Cell<T> { value: T,
-            def make(value: T) -> Cell<T> = { Cell<T> { value = value } };
-            def select<U>(cell: Cell<T>, value: U) -> U = { value };
-        };
-        def main() -> int = {
-            var make = Cell<int>.make;
-            var select = Cell<int>.select::<int>;
-            var cell = make(7);
+    let output = run(r#"export { main };
+        struct Cell<T> { value: T;
+            
+            
+        }
+fn cell_make<T>(value: T) -> Cell<T>  { Cell<T> { value = value } }
+
+fn select<T, U>(cell: Cell<T>, value: U) -> U  { value }
+
+        fn main() -> int  {
+            let mut make = cell_make::<int>;
+            let mut select = select::<int, int>;
+            let mut cell = make(7);
             select(cell, 35) + cell.value
-        };
+        }
     "#);
     assert_eq!(
         output.status.code(),
@@ -84,20 +93,23 @@ fn method_references_keep_owner_arguments_and_infer_only_remaining_binders() {
 
 #[test]
 fn recursive_methods_complete_results_without_changing_owner_or_method_binders() {
-    let output = run(r#"
-        export { main };
-        struct Cell<T> { value: T,
-            def read(self: Cell<T>, depth: int) -> _ = {
-                if (depth == 0) { self.value } else { self.read(depth - 1) }
-            };
-            def choose<U>(self: Cell<T>, value: U, depth: int) -> _ = {
-                if (depth == 0) { value } else { self.choose(value, depth - 1) }
-            };
-        };
-        def main() -> int = {
-            var cell = Cell<int> { value = 7 };
-            cell.read(3) + cell.choose(35, 3)
-        };
+    let output = run(r#"export { main };
+        struct Cell<T> { value: T;
+            
+            
+        }
+fn read<T>(self: Cell<T>, depth: int) -> _  {
+                if (depth == 0) { self.value } else { self:read(depth - 1) }
+            }
+
+fn choose<T, U>(self: Cell<T>, value: U, depth: int) -> _  {
+                if (depth == 0) { value } else { self:choose(value, depth - 1) }
+            }
+
+        fn main() -> int  {
+            let mut cell = Cell<int> { value = 7 };
+            cell:read(3) + cell:choose(35, 3)
+        }
     "#);
     assert_eq!(
         output.status.code(),
@@ -109,26 +121,31 @@ fn recursive_methods_complete_results_without_changing_owner_or_method_binders()
 
 #[test]
 fn generic_drop_hooks_use_each_owner_argument_and_reverse_scope_order() {
-    let output = run(r#"
-        export { main };
-        struct Tracked<T> { trace: Ptr<ulong>, value: T,
-            def make(trace: Ptr<ulong>, value: T) -> Tracked<T> = {
+    let output = run(r#"export { main };
+        struct Tracked<T> { trace: Ptr<ulong>; value: T;
+            
+            
+            
+        }
+fn tracked_make<T>(trace: Ptr<ulong>, value: T) -> Tracked<T>  {
                 Tracked<T> { trace = trace, value = value }
-            };
-            def read(self: Ptr<Tracked<T>>) -> T = { self.value };
-            def drop(self: Ptr<Tracked<T>>) = {
-                self.trace.* := self.trace.* * 10 + size_of(T);
-            };
-        };
-        def main() -> int = {
-            var trace = 0_ul;
+            }
+
+fn read<T>(self: Ptr<Tracked<T>>) -> T  { self.value }
+
+fn drop<T>(self: Ptr<Tracked<T>>)  {
+                self.trace.* = self.trace.* * 10 + size_of(T);
+            }
+
+        fn main() -> int  {
+            let mut trace = 0_ul;
             {
-                var first = Tracked<int>.make(&trace, 7);
-                var second = Tracked<ulong>.make(&trace, 35);
-                if (first.read() != 7 || second.read() != 35) { trace := 100; };
+                let mut first = tracked_make::<int>(&trace, 7);
+                let mut second = tracked_make::<ulong>(&trace, 35);
+                if (first:read() != 7 || second:read() != 35) { trace = 100; };
             };
             int(trace)
-        };
+        }
     "#);
     assert_eq!(
         output.status.code(),
@@ -140,26 +157,27 @@ fn generic_drop_hooks_use_each_owner_argument_and_reverse_scope_order() {
 
 #[test]
 fn generic_drop_hooks_run_on_result_propagation() {
-    let output = run(r#"
-        export { main };
-        struct Failed {};
-        struct Tracked<T> { trace: Ptr<ulong>, value: T,
-            def drop(self: Ptr<Tracked<T>>) = {
-                self.trace.* := self.trace.* * 10 + size_of(T);
-            };
-        };
-        def fail() -> (() | Err<Failed>) = { Err(Failed {}) };
-        def work<T>(trace: Ptr<ulong>, value: T) -> (() | Err<_>) = {
-            var local = Tracked<T> { trace = trace, value = value };
+    let output = run(r#"export { main };
+        struct Failed {}
+        struct Tracked<T> { trace: Ptr<ulong>; value: T;
+            
+        }
+fn drop<T>(self: Ptr<Tracked<T>>)  {
+                self.trace.* = self.trace.* * 10 + size_of(T);
+            }
+
+        fn fail() -> (() | Err<Failed>)  { Err(Failed {}) }
+        fn work<T>(trace: Ptr<ulong>, value: T) -> (() | Err<_>)  {
+            let mut local = Tracked<T> { trace = trace, value = value };
             fail()?;
             (())
-        };
-        def main() -> int = {
-            var trace = 0_ul;
+        }
+        fn main() -> int  {
+            let mut trace = 0_ul;
             work(&trace, 1_i);
             work(&trace, 1_ub);
             int(trace)
-        };
+        }
     "#);
     assert_eq!(
         output.status.code(),
@@ -175,12 +193,15 @@ fn imported_generic_aliases_share_the_owners_method_instances() {
     for (name, source) in [
         (
             "cell.resin",
-            r#"
-            export { Cell };
-            struct Cell<T> { value: T,
-                def make(value: T) -> Cell<T> = { Cell<T> { value = value } };
-                def read(self: Cell<T>) -> T = { self.value };
-            };
+            r#"export { Cell , cell_make, read };
+            struct Cell<T> { value: T;
+                
+                
+            }
+fn cell_make<T>(value: T) -> Cell<T>  { Cell<T> { value = value } }
+
+fn read<T>(self: Cell<T>) -> T  { self.value }
+
         "#,
         ),
         (
@@ -189,10 +210,9 @@ fn imported_generic_aliases_share_the_owners_method_instances() {
         ),
         (
             "main.resin",
-            r#"
-            export { main };
+            r#"export { main };
             import { "cell.resin", "alias.resin" };
-            def main() -> int = { Cell<int>.make(20).read() + Renamed<int>.make(22).read() };
+            fn main() -> int  { make::<int>(20):read() + make::<int>(22):read() }
         "#,
         ),
     ] {
@@ -223,12 +243,13 @@ fn imported_generic_aliases_share_the_owners_method_instances() {
 #[test]
 fn shader_receivers_use_the_specialized_generic_owner_method() {
     let module = support::module(
-        r#"
-        export { kernel };
-        struct Cell<T> { value: T,
-            def increment(self: Ptr<Cell<T>>) = { self.value := self.value + 1; };
-        };
-        @compute_shader def kernel(index: ulong, root: Ptr<Cell<uint>>) = { root.increment(); };
+        r#"export { kernel };
+        struct Cell<T> { value: T;
+            
+        }
+fn increment<T>(self: Ptr<Cell<T>>)  { self.value = self.value + 1; }
+
+        @compute_shader fn kernel(index: ulong, root: Ptr<Cell<uint>>)  { root:increment(); }
     "#,
     );
     let project = support::project::Project::new(&module, None).unwrap();

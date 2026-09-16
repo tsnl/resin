@@ -198,6 +198,32 @@
     }
   },
   {
+    "type": "binding_pattern",
+    "named": true,
+    "fields": {
+      "mutable": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "mut",
+            "named": false
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "lid",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "block_body",
     "named": true,
     "fields": {
@@ -541,16 +567,6 @@
             "named": true
           }
         ]
-      },
-      "type_args": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "type_application",
-            "named": true
-          }
-        ]
       }
     }
   },
@@ -573,7 +589,7 @@
         "required": false,
         "types": [
           {
-            "type": "declare",
+            "type": "parameter",
             "named": true
           }
         ]
@@ -671,7 +687,7 @@
         "required": false,
         "types": [
           {
-            "type": "declare",
+            "type": "parameter",
             "named": true
           }
         ]
@@ -824,7 +840,7 @@
         "required": false,
         "types": [
           {
-            "type": "declare",
+            "type": "parameter",
             "named": true
           }
         ]
@@ -875,12 +891,12 @@
           }
         ]
       },
-      "name": {
+      "pattern": {
         "multiple": false,
         "required": true,
         "types": [
           {
-            "type": "lid",
+            "type": "binding_pattern",
             "named": true
           }
         ]
@@ -906,7 +922,7 @@
           }
         ]
       },
-      "name": {
+      "pattern": {
         "multiple": false,
         "required": false,
         "types": [
@@ -915,7 +931,7 @@
             "named": false
           },
           {
-            "type": "lid",
+            "type": "binding_pattern",
             "named": true
           }
         ]
@@ -1000,6 +1016,32 @@
         "types": [
           {
             "type": "type_application",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "parameter",
+    "named": true,
+    "fields": {
+      "ann": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "type",
+            "named": true
+          }
+        ]
+      },
+      "pattern": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binding_pattern",
             "named": true
           }
         ]
@@ -1341,7 +1383,7 @@
         "required": false,
         "types": [
           {
-            "type": "declare",
+            "type": "parameter",
             "named": true
           }
         ]
@@ -1408,16 +1450,6 @@
         "types": [
           {
             "type": "declare",
-            "named": true
-          }
-        ]
-      },
-      "method": {
-        "multiple": true,
-        "required": false,
-        "types": [
-          {
-            "type": "function_definition",
             "named": true
           }
         ]
@@ -1884,10 +1916,6 @@
     "named": false
   },
   {
-    "type": ":=",
-    "named": false
-  },
-  {
     "type": ";",
     "named": false
   },
@@ -2013,10 +2041,6 @@
     "named": false
   },
   {
-    "type": "def",
-    "named": false
-  },
-  {
     "type": "else",
     "named": false
   },
@@ -2041,6 +2065,10 @@
     "named": false
   },
   {
+    "type": "fn",
+    "named": false
+  },
+  {
     "type": "if",
     "named": false
   },
@@ -2057,6 +2085,10 @@
     "named": false
   },
   {
+    "type": "let",
+    "named": false
+  },
+  {
     "type": "lid",
     "named": true
   },
@@ -2066,6 +2098,10 @@
   },
   {
     "type": "match",
+    "named": false
+  },
+  {
+    "type": "mut",
     "named": false
   },
   {
@@ -2138,10 +2174,6 @@
   },
   {
     "type": "ushort",
-    "named": false
-  },
-  {
-    "type": "var",
     "named": false
   },
   {

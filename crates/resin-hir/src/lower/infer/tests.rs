@@ -34,7 +34,7 @@ fn record(ty: Ty) -> Ty {
 fn empty_arrays_need_an_injected_element_type() {
     let compile = |source: &str| crate::lower::generate(&crate::lower::test_source(source).file);
     assert_eq!(
-        compile("def main() = { []; };").unwrap_err().kind,
+        compile("fn main()  { []; }").unwrap_err().kind,
         GenerateErrorKind::Type {
             kind: TypeErrorKind::EmptyArrayNeedsElementType
         }

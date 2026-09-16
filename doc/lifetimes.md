@@ -11,7 +11,6 @@ flowchart LR
     place -->|"load coercion / copy"| value["T"]
     value -->|"store: place := value"| place
 ```
-
 Variables, pointer dereferences, and fields projected from places follow this
 model. Array and span indexing returns `Ref<T>`, so user-defined indexing wrappers
 can expose the same interface. `items.at(i)` is the element's place. The `.at()`
@@ -44,7 +43,7 @@ with distinct destruction responsibilities. Resin has no unsized payload types.
 Using a variable, field, or pointee as a value copies its contents. Address formation
 and assignment destinations preserve the place instead. Indexing an array preserves
 its storage address; it does not copy the array. Indexing returns
-`Ref<T>`, so `items.at(i)` requests an element value and `items.at(i) := x` addresses
+`Ref<T>`, so `items.at(i)` requests an element value and `items.at(i) = x` addresses
 the element for assignment.
 
 `Place<T>` is compiler terminology, not a source-level type. Variables denote places;
@@ -166,7 +165,6 @@ struct Resource { handle: Ptr<ubyte>,
     };
 };
 ```
-
 The example assumes native acquire/release declarations. A production factory
 also handles native acquisition failure before exposing the completed wrapper.
 Allocation failure occurs before acquisition, so there is no live handle to leak.

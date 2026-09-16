@@ -10,13 +10,14 @@ fn generate(source: &str) -> Result<resin_hir::Module, resin_source::SourceError
 #[test]
 fn owner_operations_keep_generic_payloads_in_ordinary_signatures() {
     let module = generate(
-        r#"
-        intrinsic "owner_allocate" def allocate<T>(count: ulong, initial: T) -> StrongOwner | None;
-        intrinsic "owner_data" def data<T>(owner: Ptr<StrongOwner>) -> Ptr<T>;
-        struct Shared<T> { owner: StrongOwner,
-            def get(self: Ptr<Shared<T>>) -> Ptr<T> = { data::<T>(&self.owner) };
-        };
-        def borrow<T>(value: Ptr<Shared<T>>) -> Ptr<T> = { value.get() };
+        r#"intrinsic "owner_allocate" fn allocate<T>(count: ulong, initial: T) -> StrongOwner | None;
+        intrinsic "owner_data" fn data<T>(owner: Ptr<StrongOwner>) -> Ptr<T>;
+        struct Shared<T> { owner: StrongOwner;
+            
+        }
+fn get<T>(self: Ptr<Shared<T>>) -> Ptr<T>  { data::<T>(&self.owner) }
+
+        fn borrow<T>(value: Ptr<Shared<T>>) -> Ptr<T>  { value:get() }
     "#,
     )
     .unwrap();
@@ -50,10 +51,10 @@ fn owner_operations_keep_generic_payloads_in_ordinary_signatures() {
 #[test]
 fn owner_handles_cannot_be_constructed_or_dereferenced() {
     for source in [
-        "def bad() -> StrongOwner = { StrongOwner(0_ul) };",
-        "def bad(value: StrongOwner) = { value.*; };",
-        "def bad(value: WeakOwner) = { value.*; };",
-        "def bad(value: WeakOwner) -> StrongOwner = { StrongOwner(value) };",
+        "fn bad() -> StrongOwner  { StrongOwner(0_ul) }",
+        "fn bad(value: StrongOwner)  { value.*; }",
+        "fn bad(value: WeakOwner)  { value.*; }",
+        "fn bad(value: WeakOwner) -> StrongOwner  { StrongOwner(value) }",
     ] {
         assert!(generate(source).is_err(), "{source}");
     }
@@ -62,10 +63,10 @@ fn owner_handles_cannot_be_constructed_or_dereferenced() {
 #[test]
 fn owner_primitives_reject_forged_contracts() {
     for source in [
-        r#"intrinsic "owner_allocate" def bad<T>(count: int, initial: T) -> StrongOwner | None;"#,
-        r#"intrinsic "owner_data" def bad<T>(owner: StrongOwner) -> Ptr<T>;"#,
-        r#"intrinsic "owner_upgrade" def bad(owner: Ptr<StrongOwner>) -> StrongOwner | None;"#,
-        r#"intrinsic "owner_downgrade" def bad(owner: Ptr<StrongOwner>) -> StrongOwner;"#,
+        r#"intrinsic "owner_allocate" fn bad<T>(count: int, initial: T) -> StrongOwner | None;"#,
+        r#"intrinsic "owner_data" fn bad<T>(owner: StrongOwner) -> Ptr<T>;"#,
+        r#"intrinsic "owner_upgrade" fn bad(owner: Ptr<StrongOwner>) -> StrongOwner | None;"#,
+        r#"intrinsic "owner_downgrade" fn bad(owner: Ptr<StrongOwner>) -> StrongOwner;"#,
     ] {
         assert!(generate(source).is_err(), "{source}");
     }

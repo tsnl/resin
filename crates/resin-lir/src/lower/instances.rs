@@ -378,6 +378,22 @@ impl<'a> Instances<'a> {
         }
     }
 
+    pub(super) fn signature(
+        &self,
+        function: FunctionId,
+    ) -> Result<resin_hir::Signature, LowerError> {
+        self.source
+            .functions
+            .get(function.index())
+            .map(|function| function.signature.clone())
+            .ok_or_else(|| {
+                LowerError::invalid_hir(
+                    Span { start: 0, end: 0 },
+                    "operation refers to a missing declaration",
+                )
+            })
+    }
+
     pub(super) fn method(
         &self,
         receiver: &resin_hir::Type,

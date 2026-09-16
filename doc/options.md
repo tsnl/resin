@@ -7,9 +7,9 @@ union directly; `None` represents absence.
 ```resin
 type OptionalInt = int | None;
 
-def choose(value: OptionalInt) -> int = {
+fn choose(value: OptionalInt) -> int  {
     match (value) { int(number) => { number }, None => { 0 } }
-};
+}
 ```
 
 `match` covers every member exactly once. A type pattern binds the value of that
@@ -24,8 +24,8 @@ is the same type as `int | None`. A union does not distinguish two occurrences o
 Postfix `!` removes `None` from the operand's possible types:
 
 ```resin
-def require_number(value: int | None) -> int = { value! };
-def require_choice(value: int | bool | None) -> int | bool = { value! };
+fn require_number(value: int | None) -> int  { value! }
+fn require_choice(value: int | bool | None) -> int | bool  { value! }
 ```
 
 The operand is evaluated once. If it is `None`, the host traps with

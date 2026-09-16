@@ -1,4 +1,4 @@
-export { ArcPtr, ArcSpan, WeakPtr, WeakSpan };
+export { ArcPtr, ArcSpan, WeakPtr, WeakSpan , arc_ptr_alloc, get, downgrade, arc_span_alloc, weak_ptr_empty, upgrade, weak_span_empty };
 
 import { "status.resin", "span.resin" };
 
@@ -7,8 +7,12 @@ import { "status.resin", "span.resin" };
 // Allocation copies its initializer with the ordinary value rules. For native
 // resource payloads, allocate an inert value and initialize through get().
 struct ArcPtr<T> {
-	owner: StrongOwner,
-	def alloc(initial: T) -> (ArcPtr<T> | Err<OutOfMemory>) = {
+	owner: StrongOwner;
+	
+	
+	
+}
+fn arc_ptr_alloc<T>(initial: T) -> (ArcPtr<T> | Err<OutOfMemory>)  {
 		match (owner_allocate(1_ul, initial)) {
 			StrongOwner(owner) => {
 				(ArcPtr<T> { owner = owner })
@@ -17,18 +21,24 @@ struct ArcPtr<T> {
 				Err(OutOfMemory {})
 			},
 		}
-	};
-	def get(self: Ptr<ArcPtr<T>>) -> Ptr<T> = {
+	}
+
+fn get<T>(self: Ref<ArcPtr<T>>) -> Ptr<T>  {
 		owner_data::<T>(&self.owner)
-	};
-	def downgrade(self: Ptr<ArcPtr<T>>) -> WeakPtr<T> = {
+	}
+
+fn downgrade<T>(self: Ref<ArcPtr<T>>) -> WeakPtr<T>  {
 		WeakPtr<T> { owner = owner_downgrade(&self.owner) }
-	};
-};
+	}
+
 
 struct ArcSpan<T> {
-	owner: StrongOwner,
-	def alloc(count: ulong, initial: T) -> (ArcSpan<T> | Err<OutOfMemory>) = {
+	owner: StrongOwner;
+	
+	
+	
+}
+fn arc_span_alloc<T>(count: ulong, initial: T) -> (ArcSpan<T> | Err<OutOfMemory>)  {
 		match (owner_allocate(count, initial)) {
 			StrongOwner(owner) => {
 				(ArcSpan<T> { owner = owner })
@@ -37,21 +47,27 @@ struct ArcSpan<T> {
 				Err(OutOfMemory {})
 			},
 		}
-	};
-	def get(self: Ptr<ArcSpan<T>>) -> Span<T> = {
+	}
+
+fn get<T>(self: Ref<ArcSpan<T>>) -> Span<T>  {
 		Span<T> { data = owner_data::<T>(&self.owner), length = owner_length(&self.owner) }
-	};
-	def downgrade(self: Ptr<ArcSpan<T>>) -> WeakSpan<T> = {
+	}
+
+fn downgrade<T>(self: Ref<ArcSpan<T>>) -> WeakSpan<T>  {
 		WeakSpan<T> { owner = owner_downgrade(&self.owner) }
-	};
-};
+	}
+
 
 struct WeakPtr<T> {
-	owner: WeakOwner,
-	def empty() -> WeakPtr<T> = {
+	owner: WeakOwner;
+	
+	
+}
+fn weak_ptr_empty<T>() -> WeakPtr<T>  {
 		WeakPtr<T> { owner = weak_empty() }
-	};
-	def upgrade(self: Ptr<WeakPtr<T>>) -> ArcPtr<T> | None = {
+	}
+
+fn upgrade<T>(self: Ref<WeakPtr<T>>) -> ArcPtr<T> | None  {
 		match (owner_upgrade(&self.owner)) {
 			StrongOwner(owner) => {
 				ArcPtr<T> { owner = owner }
@@ -60,15 +76,19 @@ struct WeakPtr<T> {
 				None
 			},
 		}
-	};
-};
+	}
+
 
 struct WeakSpan<T> {
-	owner: WeakOwner,
-	def empty() -> WeakSpan<T> = {
+	owner: WeakOwner;
+	
+	
+}
+fn weak_span_empty<T>() -> WeakSpan<T>  {
 		WeakSpan<T> { owner = weak_empty() }
-	};
-	def upgrade(self: Ptr<WeakSpan<T>>) -> ArcSpan<T> | None = {
+	}
+
+fn upgrade<T>(self: Ref<WeakSpan<T>>) -> ArcSpan<T> | None  {
 		match (owner_upgrade(&self.owner)) {
 			StrongOwner(owner) => {
 				ArcSpan<T> { owner = owner }
@@ -77,12 +97,12 @@ struct WeakSpan<T> {
 				None
 			},
 		}
-	};
-};
+	}
 
-intrinsic "owner_allocate" def owner_allocate<T>(count: ulong, initial: T) -> StrongOwner | None;
-intrinsic "owner_data" def owner_data<T>(owner: Ptr<StrongOwner>) -> Ptr<T>;
-intrinsic "owner_length" def owner_length(owner: Ptr<StrongOwner>) -> ulong;
-intrinsic "owner_downgrade" def owner_downgrade(owner: Ptr<StrongOwner>) -> WeakOwner;
-intrinsic "owner_upgrade" def owner_upgrade(owner: Ptr<WeakOwner>) -> StrongOwner | None;
-intrinsic "weak_empty" def weak_empty() -> WeakOwner;
+
+intrinsic "owner_allocate" fn owner_allocate<T>(count: ulong, initial: T) -> StrongOwner | None;
+intrinsic "owner_data" fn owner_data<T>(owner: Ptr<StrongOwner>) -> Ptr<T>;
+intrinsic "owner_length" fn owner_length(owner: Ptr<StrongOwner>) -> ulong;
+intrinsic "owner_downgrade" fn owner_downgrade(owner: Ptr<StrongOwner>) -> WeakOwner;
+intrinsic "owner_upgrade" fn owner_upgrade(owner: Ptr<WeakOwner>) -> StrongOwner | None;
+intrinsic "weak_empty" fn weak_empty() -> WeakOwner;

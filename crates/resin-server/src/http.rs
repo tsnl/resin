@@ -506,7 +506,7 @@ mod tests {
                     entry: "main.resin".into(),
                     sources: vec![resin_protocol::SourceFile {
                         name: "main.resin".into(),
-                        text: "export { main }; def main() = { missing };".into(),
+                        text: "export { main }; fn main()  { missing }".into(),
                     }],
                     imports: vec![],
                     headers: Default::default(),

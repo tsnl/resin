@@ -4,66 +4,66 @@ export {
 
 import { "$/string.resin" };
 
-struct FibonacciMismatch { index: ulong, slow: ulong, fast: ulong };
+struct FibonacciMismatch { index: ulong; slow: ulong; fast: ulong; }
 
-def fibonacci(n: ulong) -> ulong = {
+fn fibonacci(n: ulong) -> ulong  {
 	if (n <= ulong(1)) {
 		n
 	} else {
-		var f0 = fibonacci(n - 2);
-		var f1 = fibonacci(n - 1);
+		let mut f0 = fibonacci(n - 2);
+		let mut f1 = fibonacci(n - 1);
 		f0 + f1
 	}
-};
+}
 
-def fast_fibonacci(n: ulong) -> ulong = {
+fn fast_fibonacci(n: ulong) -> ulong  {
 	if (n <= ulong(1)) {
 		n
 	} else {
-		var f0 = ulong(0);
-		var f1 = ulong(1);
-		var i = ulong(1);
+		let mut f0 = ulong(0);
+		let mut f1 = ulong(1);
+		let mut i = ulong(1);
 
 		while (i < n) {
 			// Compute new f0, f1:
-			var new_f0 = f1;
-			var new_f1 = f0 + f1;
+			let mut new_f0 = f1;
+			let mut new_f1 = f0 + f1;
 
 			// Update:
-			f0 := new_f0;
-			f1 := new_f1;
-			i := i + 1;
+			f0 = new_f0;
+			f1 = new_f1;
+			i = i + 1;
 		};
 
 		// Done:
 		f1
 	}
-};
+}
 
-def compare_fibonacci(index: ulong, slow: ulong, fast: ulong) -> (() | Err<FibonacciMismatch>) = {
+fn compare_fibonacci(index: ulong, slow: ulong, fast: ulong) -> (() | Err<FibonacciMismatch>)  {
 	if (slow == fast) {
 		(())
 	} else {
 		Err(FibonacciMismatch { index = index, slow = slow, fast = fast })
 	}
-};
+}
 
-def test_fibonacci(n: ulong) -> (() | Err<_>) = {
-	var i = ulong(0);
+fn test_fibonacci(n: ulong) -> (() | Err<_>)  {
+	let mut i = ulong(0);
 	while (i < n) {
-		var slow_f = fibonacci(i);
-		var fast_f = fast_fibonacci(i);
+		let mut slow_f = fibonacci(i);
+		let mut fast_f = fast_fibonacci(i);
 		print(fmt("slow_fibonacci({0}) = {1}, fast_fibonacci({1}) = {2}\n", (i, slow_f, fast_f)));
 		compare_fibonacci(i, slow_f, fast_f)?;
-		i := i + 1;
+		i = i + 1;
 	};
 	(())
-};
+}
 
-def main() -> (() | Err<_>) = {
+fn main() -> (() | Err<_>)  {
 	test_fibonacci(30)?;
 
-	var n = ulong(100);
+	let mut n = ulong(100);
 	print(fmt("fibonacci({0}) = {1}\n", (n, fast_fibonacci(n))));
 	(())
-};
+}

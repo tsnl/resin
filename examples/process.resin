@@ -1,22 +1,22 @@
 export { main };
 import { "$/string.resin", "$/process.resin", "$/span.resin" };
 
-def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> (() | Err<_>) = {
-	var args = arguments(argc, argv);
-	var index = 0_ul;
+fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> (() | Err<_>)  {
+	let mut args = arguments(argc, argv);
+	let mut index = 0_ul;
 	while (index < args.length) {
-		print(fmt("argument {0}: {1}\n", (index, argument(args, index).bytes())));
-		index := index + 1_ul;
+		print(fmt("argument {0}: {1}\n", (index, argument(args, index):bytes())));
+		index = index + 1_ul;
 	};
 	// Look up one deliberately chosen variable; avoid dumping the environment.
-	var name = "RESIN_GREETING";
+	let mut name = "RESIN_GREETING";
 	match (environment_get(envp, name.data)) {
 		Span<ubyte>(value) => {
-			print(fmt("greeting: {0}\n", (value.bytes(),)));
+			print(fmt("greeting: {0}\n", (value:bytes(),)));
 		},
 		Err(error) => {
 			print("RESIN_GREETING is not set\n");
 		},
 	};
 	(())
-};
+}

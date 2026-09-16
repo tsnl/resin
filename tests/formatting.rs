@@ -43,16 +43,16 @@ fn check(source: &str, expected: &str) {
 #[test]
 fn operator_method_names_remain_attached_to_the_parameter_list() {
     check(
-        "struct A{x:int,def __add__(a:A,b:A)->A={a};def __neg__(a:A)->A={a};def __lshift__(a:A,b:int)->A={a};};",
-        "struct A {\n\tx: int,\n\tdef __add__(a: A, b: A) -> A = {\n\t\ta\n\t};\n\tdef __neg__(a: A) -> A = {\n\t\ta\n\t};\n\tdef __lshift__(a: A, b: int) -> A = {\n\t\ta\n\t};\n};\n",
+        "struct A{x:int;}\nfn __add__(a:A,b:A)->A{a}\n\nfn __neg__(a:A)->A{a}\n\nfn __lshift__(a:A,b:int)->A{a}\n",
+        "struct A {\n\tx: int;\n\t\n\t\n\t\n}\nfn __add__(a: A, b: A) -> A  {\n\t\ta\n\t}\n\nfn __neg__(a: A) -> A  {\n\t\ta\n\t}\n\nfn __lshift__(a: A, b: int) -> A  {\n\t\ta\n\t}\n\n",
     );
 }
 
 #[test]
 fn constant_groups_keep_specifications_and_comments_together() {
     check(
-        "const answer:int=42;const(a,b:uint=1<<iota,8<<iota;_,_=iota,iota;c,d:uint=1<<iota,8<<iota;);def f()={const(local=sizeof(int);next=sizeof(int););local};",
-        "const answer: int = 42;\nconst (\n\ta, b: uint = 1 << iota, 8 << iota;\n\t_, _ = iota, iota;\n\tc, d: uint = 1 << iota, 8 << iota;\n);\ndef f() = {\n\tconst (\n\t\tlocal = sizeof(int);\n\t\tnext = sizeof(int);\n\t);\n\tlocal\n};\n",
+        "const answer:int=42;const(a,b:uint=1<<iota,8<<iota;_,_=iota,iota;c,d:uint=1<<iota,8<<iota;);fn f(){const(local=sizeof(int);next=sizeof(int););local}",
+        "const answer: int = 42;\nconst (\n\ta, b: uint = 1 << iota, 8 << iota;\n\t_, _ = iota, iota;\n\tc, d: uint = 1 << iota, 8 << iota;\n);\nfn f()  {\n\tconst (\n\t\tlocal = sizeof(int);\n\t\tnext = sizeof(int);\n\t);\n\tlocal\n}\n",
     );
     check(
         "const(a=iota; // zero\nb=iota;);",
@@ -63,52 +63,52 @@ fn constant_groups_keep_specifications_and_comments_together() {
 #[test]
 fn trailing_commas_and_nested_lists() {
     check(
-        "export {main,}; import {\"$/test.resin\",}; struct FieldsXY<T0, T1> { x: T0, y: T1 };\ndef main(a:int,b:float32,)={var xs=[1,2,3,]; call(a,b,); var r=FieldsXY<_, _> {x=1,y=2,}; ();};",
-        "export {\n\tmain,\n};\nimport {\n\t\"$/test.resin\",\n};\nstruct FieldsXY<T0, T1> { x: T0, y: T1 };\ndef main(\n\ta: int,\n\tb: float32,\n) = {\n\tvar xs = [\n\t\t1,\n\t\t2,\n\t\t3,\n\t];\n\tcall(\n\t\ta,\n\t\tb,\n\t);\n\tvar r = FieldsXY<_, _> {\n\t\tx = 1,\n\t\ty = 2,\n\t};\n\t();\n};\n",
+        "export {main,}; import {\"$/test.resin\",}; struct FieldsXY<T0, T1> { x: T0; y: T1; }\nfn main(a:int,b:float32,){let mut xs=[1,2,3,]; call(a,b,); let mut r=FieldsXY<_, _> {x=1,y=2,}; ();}",
+        "export {\n\tmain,\n};\nimport {\n\t\"$/test.resin\",\n};\nstruct FieldsXY<T0, T1> { x: T0; y: T1; }\nfn main(\n\ta: int,\n\tb: float32,\n)  {\n\tlet mut xs = [\n\t\t1,\n\t\t2,\n\t\t3,\n\t];\n\tcall(\n\t\ta,\n\t\tb,\n\t);\n\tlet mut r = FieldsXY<_, _> {\n\t\tx = 1,\n\t\ty = 2,\n\t};\n\t();\n}\n",
     );
     check(
-        "extern {\"x.h\":{def call(x:(int,),);}}; struct FieldsXY<T0, T1> { x: T0, y: T1 };\ntype Pair=FieldsXY<int, float32>; def main()={f([1,2,],3);};",
-        "extern {\n\t\"x.h\": {\n\t\tdef call(\n\t\t\tx: (int,),\n\t\t);\n\t}\n};\nstruct FieldsXY<T0, T1> { x: T0, y: T1 };\ntype Pair = FieldsXY<int, float32>;\ndef main() = {\n\tf(\n\t\t[\n\t\t\t1,\n\t\t\t2,\n\t\t],\n\t\t3\n\t);\n};\n",
+        "extern {\"x.h\":{fn call(x:(int,),);}}; struct FieldsXY<T0, T1> { x: T0; y: T1; }\ntype Pair=FieldsXY<int, float32>; fn main(){f([1,2,],3);}",
+        "extern {\n\t\"x.h\": {\n\t\tfn call(\n\t\t\tx: (int,),\n\t\t);\n\t}\n};\nstruct FieldsXY<T0, T1> { x: T0; y: T1; }\ntype Pair = FieldsXY<int, float32>;\nfn main()  {\n\tf(\n\t\t[\n\t\t\t1,\n\t\t\t2,\n\t\t],\n\t\t3\n\t);\n}\n",
     );
 }
 
 #[test]
 fn compact_lists_and_canonical_spacing() {
     check(
-        "\n\nexport{main};\n\n\n\nstruct FieldsXY<T0, T1> { x: T0, y: T1 };\ndef main ( ) -> ( ) ={\n\nvar xs = [\n1,\n2\n];\n\n\nvar r=FieldsXY<_, _> {x=1,y=2};var p=Ptr<Ptr<int>>( & &xs);var x= -(1+2)*3;while(x<2){x:=x+1;};if(x>0){x}else{0}\n\n};\n\n",
-        "export { main };\n\nstruct FieldsXY<T0, T1> { x: T0, y: T1 };\ndef main() -> () = {\n\tvar xs = [1, 2];\n\n\tvar r = FieldsXY<_, _> { x = 1, y = 2 };\n\tvar p = Ptr<Ptr<int>>(& &xs);\n\tvar x = -(1 + 2) * 3;\n\twhile (x < 2) {\n\t\tx := x + 1;\n\t};\n\tif (x > 0) {\n\t\tx\n\t} else {\n\t\t0\n\t}\n};\n",
+        "export{main};\n\n\n\nstruct FieldsXY<T0, T1> { x: T0; y: T1; }\nfn main ( ) -> ( ) {\n\nlet mut xs = [\n1,\n2\n];\n\n\nlet mut r=FieldsXY<_, _> {x=1,y=2};let mut p=Ptr<Ptr<int>>( & &xs);let mut x= -(1+2)*3;while(x<2){x=x+1;};if(x>0){x}else{0}\n\n}\n\n",
+        "export { main };\n\nstruct FieldsXY<T0, T1> { x: T0; y: T1; }\nfn main() -> ()  {\n\tlet mut xs = [1, 2];\n\n\tlet mut r = FieldsXY<_, _> { x = 1, y = 2 };\n\tlet mut p = Ptr<Ptr<int>>(& &xs);\n\tlet mut x = -(1 + 2) * 3;\n\twhile (x < 2) {\n\t\tx = x + 1;\n\t};\n\tif (x > 0) {\n\t\tx\n\t} else {\n\t\t0\n\t}\n}\n",
     );
 }
 
 #[test]
 fn comments_keep_contents_and_attachment() {
     check(
-        "// header 😀\n\n\n\ndef main()={ // body\nvar a=[1, // first\n2, /* last */]; // array\n\n\n/* standalone\n   keep this indentation\n\n   and blank line */\nvar b=1; /* trailing */ var c=2;\ncall(\n// argument\nb);\n}; // end",
-        "// header 😀\n\ndef main() = { // body\n\tvar a = [\n\t\t1, // first\n\t\t2, /* last */\n\t]; // array\n\n\t/* standalone\n   keep this indentation\n\n   and blank line */\n\tvar b = 1; /* trailing */\n\tvar c = 2;\n\tcall(\n\t\t// argument\n\t\tb\n\t);\n}; // end\n",
+        "// header 😀\n\n\n\nfn main(){ // body\nlet mut a=[1, // first\n2, /* last */]; // array\n\n\n/* standalone\n   keep this indentation\n\n   and blank line */\nlet mut b=1; /* trailing */ let mut c=2;\ncall(\n// argument\nb);\n} // end",
+        "// header 😀\n\nfn main()  { // body\n\tlet mut a = [\n\t\t1, // first\n\t\t2, /* last */\n\t]; // array\n\n\t/* standalone\n   keep this indentation\n\n   and blank line */\n\tlet mut b = 1; /* trailing */\n\tlet mut c = 2;\n\tcall(\n\t\t// argument\n\t\tb\n\t);\n} // end\n",
     );
     check(
-        "def main()={var a=[1,/* comma */2,/* end */];};",
-        "def main() = {\n\tvar a = [\n\t\t1, /* comma */\n\t\t2, /* end */\n\t];\n};\n",
+        "fn main(){let mut a=[1,/* comma */2,/* end */];}",
+        "fn main()  {\n\tlet mut a = [\n\t\t1, /* comma */\n\t\t2, /* end */\n\t];\n}\n",
     );
 }
 
 #[test]
 fn pointer_dereference_stays_attached_to_its_operand() {
     check(
-        "def f(p:Ptr<int>)={p .* := 1;var x=p .*+1;p .*(x);};",
-        "def f(p: Ptr<int>) = {\n\tp.* := 1;\n\tvar x = p.* + 1;\n\tp.*(x);\n};\n",
+        "fn f(p:Ptr<int>){p.* = 1;let mut x=p.*+1;p.*(x);}",
+        "fn f(p: Ptr<int>)  {\n\tp.* = 1;\n\tlet mut x = p.* + 1;\n\tp.*(x);\n}\n",
     );
 }
 
 #[test]
 fn structs_results_and_match() {
     check(
-        "struct Empty{};struct Item{x:int,};type Errors=Empty|Item;def run()->(_ | Err<_>)={cleanup();(cleanup());{cleanup();};var value=read() ?;match(value){int(v)=>{v},Err(e)=>{0},}};",
-        "struct Empty {};\nstruct Item {\n\tx: int,\n};\ntype Errors = Empty | Item;\ndef run() -> (_ | Err<_>) = {\n\tcleanup();\n\t(cleanup());\n\t{\n\t\tcleanup();\n\t};\n\tvar value = read()?;\n\tmatch (value) {\n\t\tint(v) => {\n\t\t\tv\n\t\t},\n\t\tErr(e) => {\n\t\t\t0\n\t\t},\n\t}\n};\n",
+        "struct Empty{}struct Item{x:int;}type Errors=Empty|Item;fn run()->(_ | Err<_>){cleanup();(cleanup());{cleanup();};let mut value=read()?;match(value){int(v)=>{v},Err(e)=>{0},}}",
+        "struct Empty {}\nstruct Item {\n\tx: int;\n}\ntype Errors = Empty | Item;\nfn run() -> (_ | Err<_>)  {\n\tcleanup();\n\t(cleanup());\n\t{\n\t\tcleanup();\n\t};\n\tlet mut value = read()?;\n\tmatch (value) {\n\t\tint(v) => {\n\t\t\tv\n\t\t},\n\t\tErr(e) => {\n\t\t\t0\n\t\t},\n\t}\n}\n",
     );
     check(
-        "def main()={if(true)(1)else(0);match(x){int(v)=>{},Err(e)=>{}};[f(),g()];};",
-        "def main() = {\n\tif (true) (1) else (0);\n\tmatch (x) {\n\t\tint(v) => {},\n\t\tErr(e) => {}\n\t};\n\t[f(), g()];\n};\n",
+        "fn main(){if(true)(1)else(0);match(x){int(v)=>{},Err(e)=>{}};[f(),g()];}",
+        "fn main()  {\n\tif (true) (1) else (0);\n\tmatch (x) {\n\t\tint(v) => {},\n\t\tErr(e) => {}\n\t};\n\t[f(), g()];\n}\n",
     );
 }
 
@@ -118,14 +118,14 @@ fn empty_invalid_and_literal_buffers() {
         assert_eq!(format_source(source).as_deref(), Some(""));
     }
     check("/* only */", "/* only */\n");
-    check("def main()={};", "def main() = {};\n");
+    check("fn main(){}", "fn main()  {}\n");
     check(
-        "def main()={var s=\"😀  // /* \\\" \\n\";var n=0x0f;};\r\n",
-        "def main() = {\n\tvar s = \"😀  // /* \\\" \\n\";\n\tvar n = 0x0f;\n};\n",
+        "fn main(){let mut s=\"😀  // /* \\\" \\n\";let mut n=0x0f;}\r\n",
+        "fn main()  {\n\tlet mut s = \"😀  // /* \\\" \\n\";\n\tlet mut n = 0x0f;\n}\n",
     );
     for source in [
-        "def main( = {",
-        "def main() = { var x = ; };",
+        "fn main( = {",
+        "fn main()  { let mut x = ; }",
         "/* unfinished",
     ] {
         assert!(format_source(source).is_none());
@@ -143,7 +143,7 @@ fn comments_at_every_token_boundary_preserve_syntax() {
             }
         }
     }
-    let source = "export {main}; extern {\"x.h\": {def ext(x: int);}}; import {\"missing.resin\"}; struct FieldsX<T0> { x: T0 };\nstruct T {x: Ptr<int>, y: (int,)}; def main(a: int) -> (_ | Err<Never>) = { f(); var p = & &a; var x = f([1, 2,], FieldsX<_> {x = 3})?; while (x < 3) { x := x + 1; }; match (x) { int(v) => { if (v == 3) { v } else { -v } }, Err(e) => { 0 } } };";
+    let source = "export {main}; extern {\"x.h\": {fn ext(x: int);}}; import {\"missing.resin\"}; struct FieldsX<T0> { x: T0; }\nstruct T {x: Ptr<int>; y: (int,);} fn main(a: int) -> (_ | Err<Never>)  { f(); let mut p = & &a; let mut x = f([1, 2,], FieldsX<_> {x = 3})?; while (x < 3) { x = x + 1; }; match (x) { int(v) => { if (v == 3) { v } else { -v } }, Err(e) => { 0 } } }";
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_resin::LANGUAGE.into())
@@ -204,52 +204,52 @@ fn repository_sources_preserve_syntax_and_are_idempotent() {
 #[test]
 fn shader_decorators_stay_on_their_own_lines() {
     check(
-        "@compute_shader def kernel(i:uint)->uint={i};",
-        "@compute_shader\ndef kernel(i: uint) -> uint = {\n\ti\n};\n",
+        "@compute_shader fn kernel(i:uint)->uint{i}",
+        "@compute_shader\nfn kernel(i: uint) -> uint  {\n\ti\n}\n",
     );
 }
 
 #[test]
 fn else_if_chains_keep_else_and_if_together() {
     check(
-        "def f(x:int)->int={if(x==0){1}else if(x==1){2}else{3}};",
-        "def f(x: int) -> int = {\n\tif (x == 0) {\n\t\t1\n\t} else if (x == 1) {\n\t\t2\n\t} else {\n\t\t3\n\t}\n};\n",
+        "fn f(x:int)->int{if(x==0){1}else if(x==1){2}else{3}}",
+        "fn f(x: int) -> int  {\n\tif (x == 0) {\n\t\t1\n\t} else if (x == 1) {\n\t\t2\n\t} else {\n\t\t3\n\t}\n}\n",
     );
 }
 
 #[test]
 fn numeric_suffixes_and_one_armed_if_keep_their_spelling() {
     check(
-        "def main()={var a=42_ul;var b=-42_l;if(a>0_ul){var c=1.5_f;};};",
-        "def main() = {\n\tvar a = 42_ul;\n\tvar b = -42_l;\n\tif (a > 0_ul) {\n\t\tvar c = 1.5_f;\n\t};\n};\n",
+        "fn main(){let mut a=42_ul;let mut b=-42_l;if(a>0_ul){let mut c=1.5_f;};}",
+        "fn main()  {\n\tlet mut a = 42_ul;\n\tlet mut b = -42_l;\n\tif (a > 0_ul) {\n\t\tlet mut c = 1.5_f;\n\t};\n}\n",
     );
 }
 
 #[test]
 fn singleton_tuples_do_not_expand_for_their_trailing_comma() {
     check(
-        "type Single=(int,);def main(x:(int,))={var a=(\n1,\n);var b=((1,2),);var c=((1,),);f((x,));};",
-        "type Single = (int,);\ndef main(x: (int,)) = {\n\tvar a = (1,);\n\tvar b = ((1, 2),);\n\tvar c = ((1,),);\n\tf((x,));\n};\n",
+        "type Single=(int,);fn main(x:(int,)){let mut a=(\n1,\n);let mut b=((1,2),);let mut c=((1,),);f((x,));}",
+        "type Single = (int,);\nfn main(x: (int,))  {\n\tlet mut a = (1,);\n\tlet mut b = ((1, 2),);\n\tlet mut c = ((1,),);\n\tf((x,));\n}\n",
     );
     check(
-        "def main()={var a=(1,/* note */);var b=(1,// note\n);var c=([1,],);var d=(1,2,);};",
-        "def main() = {\n\tvar a = (1, /* note */);\n\tvar b = (\n\t\t1, // note\n\t);\n\tvar c = (\n\t\t[\n\t\t\t1,\n\t\t],\n\t);\n\tvar d = (\n\t\t1,\n\t\t2,\n\t);\n};\n",
+        "fn main(){let mut a=(1,/* note */);let mut b=(1,// note\n);let mut c=([1,],);let mut d=(1,2,);}",
+        "fn main()  {\n\tlet mut a = (1, /* note */);\n\tlet mut b = (\n\t\t1, // note\n\t);\n\tlet mut c = (\n\t\t[\n\t\t\t1,\n\t\t],\n\t);\n\tlet mut d = (\n\t\t1,\n\t\t2,\n\t);\n}\n",
     );
 }
 
 #[test]
 fn optional_unwrap_suffix_stays_attached_and_preserves_operators() {
     check(
-        "def f(x: int | None) -> bool = { x ! != 0 };",
-        "def f(x: int | None) -> bool = {\n\tx! != 0\n};\n",
+        "fn f(x: int | None) -> bool  { x! != 0 }",
+        "fn f(x: int | None) -> bool  {\n\tx! != 0\n}\n",
     );
 }
 
 #[test]
 fn structs_format_fields_before_method_declarations() {
     check(
-        "struct N{v:int, def new(v:int)->N={N{v=v}};def read(self:N)->int={self.v}; };def main()->int={N.new(42).read()};",
-        "struct N {\n\tv: int,\n\tdef new(v: int) -> N = {\n\t\tN { v = v }\n\t};\n\tdef read(self: N) -> int = {\n\t\tself.v\n\t};\n};\ndef main() -> int = {\n\tN.new(42).read()\n};\n",
+        "struct N{v:int;  }\nfn n_new(v:int)->N{N{v=v}}\n\nfn read(self:N)->int{self.v}\nfn main()->int{n_new(42):read()}",
+        "struct N {\n\tv: int;\n\t\n\t\n}\nfn n_new(v: int) -> N  {\n\t\tN { v = v }\n\t}\n\nfn read(self: N) -> int  {\n\t\tself.v\n\t}\n\nfn main() -> int  {\n\tn_new(42):read()\n}\n",
     );
 }
 
@@ -277,8 +277,8 @@ fn numeric_suffixes_format_with_lowercase_and_one_separator() {
         ("123", "123"),
         ("1.5", "1.5"),
     ] {
-        let source = format!("def main()={{var n={input};}};");
-        let expected = format!("def main() = {{\n\tvar n = {output};\n}};\n");
+        let source = format!("fn main(){{let mut n={input};}}");
+        let expected = format!("fn main()  {{\n\tlet mut n = {output};\n}}\n");
         let formatted = format_source(&source).unwrap();
         assert_eq!(formatted, expected, "{input}");
         assert_eq!(format_source(&formatted).unwrap(), formatted);
@@ -295,38 +295,38 @@ fn numeric_suffixes_format_with_lowercase_and_one_separator() {
         );
     }
     check(
-        "// 42UL\ndef main()={var text=\"42UL 1.5F\";};",
-        "// 42UL\ndef main() = {\n\tvar text = \"42UL 1.5F\";\n};\n",
+        "// 42UL\nfn main(){let mut text=\"42UL 1.5F\";}",
+        "// 42UL\nfn main()  {\n\tlet mut text = \"42UL 1.5F\";\n}\n",
     );
 }
 
 #[test]
 fn template_delimiters_and_turbofish_are_attached() {
     check(
-        "def id <T>(x:T)->T={x};def main()={var f=id :: <Ptr<int>>;gpu.alloc :: < Pair<int,long> > (4);var n=2>1;};",
-        "def id<T>(x: T) -> T = {\n\tx\n};\ndef main() = {\n\tvar f = id::<Ptr<int>>;\n\tgpu.alloc::<Pair<int, long>>(4);\n\tvar n = 2 > 1;\n};\n",
+        "fn id <T>(x:T)->T{x}fn main(){let mut f=id:: <Ptr<int>>;gpu:alloc:: < Pair<int,long> >(4);let mut n=2>1;}",
+        "fn id<T>(x: T) -> T  {\n\tx\n}\nfn main()  {\n\tlet mut f = id::<Ptr<int>>;\n\tgpu:alloc::<Pair<int, long>>(4);\n\tlet mut n = 2 > 1;\n}\n",
     );
 }
 
 #[test]
 fn intrinsic_declarations_format_without_semantic_lookup() {
     check(
-        "intrinsic \"pointer_index\" def at <T>(data:Ptr<T>,length:ulong,index:ulong)->Ptr<T>;",
-        "intrinsic \"pointer_index\" def at<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;\n",
+        "intrinsic \"pointer_index\" fn at <T>(data:Ptr<T>,length:ulong,index:ulong)->Ptr<T>;",
+        "intrinsic \"pointer_index\" fn at<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;\n",
     );
 }
 
 #[test]
 fn reference_types_and_initialized_binding_annotations() {
     check(
-        "def identity<T>(value:Ref<T>)->Ref<T>={value};def main()={var value:int=1;var alias:Ref<_>=identity(value);alias:=2;};",
-        "def identity<T>(value: Ref<T>) -> Ref<T> = {\n\tvalue\n};\ndef main() = {\n\tvar value: int = 1;\n\tvar alias: Ref<_> = identity(value);\n\talias := 2;\n};\n",
+        "fn identity<T>(value:Ref<T>)->Ref<T>{value}fn main(){let mut value:int=1;let mut alias:Ref<_>=identity(value);alias=2;}",
+        "fn identity<T>(value: Ref<T>) -> Ref<T>  {\n\tvalue\n}\nfn main()  {\n\tlet mut value: int = 1;\n\tlet mut alias: Ref<_> = identity(value);\n\talias = 2;\n}\n",
     );
 }
 
 #[test]
 fn error_constructors_and_type_arguments_preserve_syntax() {
-    let source = "def f() -> Err<str> = { Err(\"failure\") };";
+    let source = "fn f() -> Err<str>  { Err(\"failure\") }";
     let formatted = format_source(source).unwrap();
     assert_eq!(syntax(source), syntax(&formatted));
     assert_eq!(format_source(&formatted).unwrap(), formatted);

@@ -2,17 +2,19 @@
 Type binders and explicit function and method applications
 ==================
 struct Pair<T> {
-    first: T,
-    def map<U>(self: Pair<T>, value: U) -> Pair<U> = { Pair<U> { first = value } };
-};
+    first: T;
+    
+}
+fn map<T, U>(self: Pair<T>, value: U) -> Pair<U>  { Pair<U> { first = value } }
+
 type Shared<T> = ArcPtr<Pair<T>>;
-def identity<T>(value: T) -> _ = { value };
-def example() = {
-    var f = identity::<Ptr<int>>;
-    var output = gpu.alloc::<Pair<int>>(4);
-    Pair<int>.create::<long>(1);
+fn identity<T>(value: T) -> _  { value }
+fn example()  {
+    let mut f = identity::<Ptr<int>>;
+    let mut output = gpu:alloc::<Pair<int>>(4);
+    create::<int, long>(1);
     identity::<int>(1) < 2;
-};
+}
 ---
 
 (source_file

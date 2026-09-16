@@ -23,6 +23,33 @@ pub(super) fn instruction(
     let id = match instr {
         Instr::ForgetLocal { .. } | Instr::Discard => return Ok(None),
         Instr::TakeLocal { local } => load(context, result.unwrap(), locals[local.index()])?,
+        Instr::TakeField { local, path } | Instr::SetField { local, path } => {
+            let pointee = if matches!(instr, Instr::TakeField { .. }) {
+                result.unwrap()
+            } else {
+                &args[0].ty
+            };
+            let address = Slot {
+                ty: Ty::Pointer {
+                    pointee: Box::new(pointee.clone()),
+                },
+                id: locals[local.index()],
+                local: Some(LocalAddress {
+                    root: locals[local.index()],
+                    indices: path
+                        .iter()
+                        .map(|index| LocalIndex::Static {
+                            index: *index as u32,
+                        })
+                        .collect(),
+                }),
+            };
+            if matches!(instr, Instr::SetField { .. }) {
+                store(context, &address, args[0].id)?;
+                return Ok(None);
+            }
+            dereference(context, &address)?
+        }
         Instr::SetLocal { local } => {
             context
                 .builder
@@ -57,7 +84,11 @@ pub(super) fn instruction(
                 args[1].id
             };
             store(context, &args[0], args[1].id)?;
-            previous
+            if matches!(instr, Instr::Store) {
+                literal(context, &Ty::Unit, &Value::Unit)?
+            } else {
+                previous
+            }
         }
         Instr::MakeVariant { ty, tag } => variant(context, ty, tag, args[0].id)?,
         Instr::IsVariant { tag } => {

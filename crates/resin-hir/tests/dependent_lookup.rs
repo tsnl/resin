@@ -16,7 +16,7 @@ fn tail(function: &resin_hir::Function) -> &Term {
 
 #[test]
 fn dependent_methods_retain_the_receiver_and_determining_result() {
-    let module = compile("def read<T>(value: T) -> _ = { value.read() };").unwrap();
+    let module = compile("fn read<T>(value: T) -> _  { value:read() }").unwrap();
     let read = &module.functions[0];
     let Type::Value { of } = &read.signature.result.ty else {
         panic!("read dependent result as a value")
@@ -67,7 +67,7 @@ fn dependent_field_and_method_results_compose_without_concrete_declarations() {
 
 #[test]
 fn dependent_associated_references_retain_explicit_method_arguments() {
-    let module = compile("def select<T, U>() -> _ = { T.make::<U> };").unwrap();
+    let module = compile("fn select<T, U>() -> _  { make::<U> }").unwrap();
     let select = &module.functions[0];
     let Type::Method { lookup } = &select.signature.result.ty else {
         panic!("associated method reference")
@@ -88,7 +88,7 @@ fn dependent_associated_references_retain_explicit_method_arguments() {
 
 #[test]
 fn dependent_callable_fields_remain_ordinary_calls() {
-    let module = compile("def call<T>(value: T) -> _ = { (value.callback)(41) };").unwrap();
+    let module = compile("fn call<T>(value: T) -> _  { (value.callback)(41) }").unwrap();
     let TermKind::Use { arg } = &tail(&module.functions[0]).kind else {
         panic!("read callable field result")
     };
@@ -105,8 +105,8 @@ fn dependent_callable_fields_remain_ordinary_calls() {
 #[test]
 fn weak_receiver_and_method_variables_are_not_template_parameters() {
     for source in [
-        "def make<T>() -> T = { 0 }; def main() -> int = { make().read() };",
-        "def read<T>(value: T) -> _ = { value.read::<_>() };",
+        "fn make<T>() -> T  { 0 } fn main() -> int  { make():read() }",
+        "fn read<T>(value: T) -> _  { value:read::<_>() }",
     ] {
         let error = compile(source).unwrap_err();
         assert!(error.to_string().contains("annotat"), "{source}: {error}");

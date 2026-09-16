@@ -48,7 +48,7 @@ pub(super) struct Signature {
     pub type_params: Vec<crate::TypeParameter>,
     pub declaration: Option<DeclarationId>,
     pub parameters: Vec<Option<DeclarationId>>,
-    pub params: Vec<(Ident, Annotation)>,
+    pub params: Vec<(resin_ast::BindingPattern, Annotation)>,
     pub result: Annotation,
 }
 impl Checker<'_> {
@@ -85,7 +85,7 @@ impl Checker<'_> {
 
     fn signature(
         &mut self,
-        params: &[(Ident, resin_ast::Type)],
+        params: &[(resin_ast::BindingPattern, resin_ast::Type)],
         result: &resin_ast::Type,
         infer: bool,
     ) -> Signature {
@@ -115,6 +115,7 @@ pub(super) struct CheckedFile {
 }
 struct Checker<'a> {
     loop_depth: usize,
+    function_ids: std::collections::HashMap<DeclarationId, FunctionId>,
     typing: Inference<'a>,
     scopes: Scopes,
     errors: Vec<GenerateError>,
@@ -131,6 +132,7 @@ struct Checker<'a> {
 impl<'a> Checker<'a> {
     fn new(typer: &'a mut Context, scopes: Scopes) -> Self {
         Self {
+            function_ids: Default::default(),
             typing: Inference::new(typer),
             scopes,
             errors: vec![],
@@ -229,6 +231,18 @@ pub(in crate::lower) fn file(
     let mut checker = Checker::new(&mut generator.typer, scopes);
     checker.module_constants(file);
     let (declarations, mut signatures, sources) = checker.declarations(file, methods);
+    for declaration in &declarations {
+        generator
+            .function_bindings
+            .entry(declaration.id)
+            .or_insert_with(|| {
+                let id = FunctionId::from_index(generator.functions.len());
+                generator.functions.push(None);
+                id
+            });
+    }
+    checker.function_ids = generator.function_bindings.clone();
+    checker.drop_hooks(file, &declarations, &signatures);
     checker.declare_gpu_contracts(
         &declarations,
         &signatures,
@@ -275,6 +289,7 @@ pub(in crate::lower) fn file(
         let completed = super::elaborate::function(
             &body.term,
             &signature.parameters,
+            &signature.params,
             &solver,
             &methods,
             &generator.typer,
@@ -296,6 +311,77 @@ pub(in crate::lower) fn file(
 }
 
 impl Checker<'_> {
+    fn drop_hooks(
+        &mut self,
+        file: &SourceFile,
+        declarations: &[typed::Declaration],
+        signatures: &Signatures,
+    ) {
+        for declaration in declarations
+            .iter()
+            .filter(|declaration| declaration.name.val.as_ref() == "drop")
+        {
+            let result = (|| {
+                let signature = signatures[&declaration.id]
+                    .clone()
+                    .resolve(&self.typing.solver)?;
+                let invalid = || {
+                    GenerateError::inference(
+                        declaration.name.span,
+                        "drop must have signature fn drop<T>(value: Ptr<Owner<T>>) with only the owner's type parameters",
+                    )
+                };
+                let [(_, parameter)] = signature.params.as_slice() else {
+                    return Err(invalid());
+                };
+                let crate::Type::Pointer { pointee } = &parameter.ty else {
+                    return Err(invalid());
+                };
+                let crate::Type::Defined {
+                    definition,
+                    arguments,
+                } = pointee.as_ref()
+                else {
+                    return Err(invalid());
+                };
+                let owner = &self.typing.typer.nominal_schemes[definition];
+                if signature.result.ty != crate::Type::Unit
+                    || arguments.len() != owner.type_params.len()
+                    || arguments
+                        != &signature
+                            .type_params
+                            .iter()
+                            .map(|parameter| crate::Type::Parameter {
+                                parameter: parameter.id,
+                            })
+                            .collect::<Vec<_>>()
+                {
+                    return Err(invalid());
+                }
+                if !file.stmts.iter().any(|statement| matches!(&statement.val, StmtKind::Struct { name, .. } if name.val == owner.name)) {
+                    return Err(GenerateError::inference(declaration.name.span, "a drop hook must be defined in the same module as its struct"));
+                }
+                if self
+                    .typing
+                    .typer
+                    .definition(*definition)
+                    .ok()
+                    .is_some_and(|definition| definition.drop_hook().is_some())
+                {
+                    return Err(GenerateError::inference(
+                        declaration.name.span,
+                        "duplicate drop hook for this struct",
+                    ));
+                }
+                self.typing
+                    .typer
+                    .define_drop(*definition, self.function_ids[&declaration.id]);
+                Ok(())
+            })();
+            self.record(result);
+        }
+    }
+
     fn declare_gpu_contracts(
         &mut self,
         declarations: &[typed::Declaration],
@@ -601,7 +687,7 @@ impl Checker<'_> {
     fn bind_parameters(&mut self, signature: &mut Signature) {
         for (name, ann) in &signature.params {
             let binding = self
-                .bind(name, ann.ty.clone(), DefinitionKind::Parameter)
+                .bind(&name.name, ann.ty.clone(), DefinitionKind::Parameter)
                 .map_err(|error| self.errors.push(error))
                 .ok();
             signature.parameters.push(binding);
@@ -787,6 +873,104 @@ struct Expression<'p, 'a> {
 }
 
 impl Expression<'_, '_> {
+    fn overload_candidates(&mut self, name: &Ident) -> Vec<super::infer::OverloadCandidate> {
+        self.checker
+            .scopes
+            .lookup_overloads(&name.val)
+            .into_iter()
+            .filter(|(_, _, function)| *function)
+            .map(|(declaration, signature, _)| {
+                self.checker.dependencies.insert(declaration);
+                super::infer::OverloadCandidate {
+                    function: self.checker.function_ids[&declaration],
+                    declaration,
+                    signature,
+                    parameters: self.checker.scopes.parameters(declaration),
+                }
+            })
+            .collect()
+    }
+
+    fn overload_reference(
+        &mut self,
+        name: &Ident,
+        explicit: Option<Vec<Type>>,
+        out: Type,
+    ) -> Option<TermKind> {
+        let candidates = self.overload_candidates(name);
+        if candidates.len() < 2 {
+            return None;
+        }
+        self.constrain((
+            name.span,
+            Constraint::Overload {
+                name: name.val.clone(),
+                candidates,
+                primitive: None,
+                expected: None,
+                type_args: explicit,
+                args: None,
+                out,
+            },
+        ));
+        Some(TermKind::MethodReference {
+            rule: self.rule,
+            name: name.clone(),
+        })
+    }
+
+    fn overload_call(
+        &mut self,
+        func: &resin_ast::Term,
+        args: &[resin_ast::Term],
+        out: Type,
+        expected: Option<Type>,
+    ) -> Option<TermKind> {
+        let (name, explicit) = match &func.val {
+            resin_ast::TermKind::Var { name } => (name, None),
+            resin_ast::TermKind::TypeApply { function, args } => {
+                let resin_ast::TermKind::Var { name } = &function.val else {
+                    return None;
+                };
+                (
+                    name,
+                    Some(
+                        args.iter()
+                            .map(|arg| self.annotation(arg, true).ty)
+                            .collect(),
+                    ),
+                )
+            }
+            _ => return None,
+        };
+        let candidates = self.overload_candidates(name);
+        if candidates.len() < 2 {
+            return None;
+        }
+        let args = args
+            .iter()
+            .map(|arg| self.child(arg, None))
+            .collect::<Vec<_>>();
+        self.constrain((
+            name.span,
+            Constraint::Overload {
+                name: name.val.clone(),
+                candidates,
+                primitive: None,
+                expected,
+                type_args: explicit,
+                args: Some(args.iter().map(|arg| arg.ty.clone()).collect()),
+                out,
+            },
+        ));
+        Some(TermKind::Builtin {
+            rule: self.rule,
+            name: name.val.clone(),
+            name_span: name.span,
+            args,
+        })
+    }
+
     fn method_reference(
         &mut self,
         receiver_type: typed::Annotation<Type>,
@@ -864,6 +1048,39 @@ impl Expression<'_, '_> {
         expected: Option<Type>,
         out: Type,
     ) -> Result<Term> {
+        if let resin_ast::TermKind::MethodCall {
+            receiver,
+            name,
+            type_args,
+            args,
+        } = &term.val
+            && !self.checker.scopes.lookup_overloads(&name.val).is_empty()
+        {
+            let mut func = resin_ast::Term {
+                span: name.span,
+                val: resin_ast::TermKind::Var { name: name.clone() },
+            };
+            if !type_args.is_empty() {
+                func = resin_ast::Term {
+                    span: name.span,
+                    val: resin_ast::TermKind::TypeApply {
+                        function: Box::new(func),
+                        args: type_args.clone(),
+                    },
+                };
+            }
+            let args = std::iter::once(receiver.as_ref().clone())
+                .chain(args.iter().cloned())
+                .collect();
+            let call = resin_ast::Term {
+                span: term.span,
+                val: resin_ast::TermKind::Call {
+                    func: Box::new(func),
+                    args,
+                },
+            };
+            return self.term_inner(&call, expected, out);
+        }
         let propagate = matches!(
             term.val,
             resin_ast::TermKind::If { .. }
@@ -960,6 +1177,8 @@ impl Expression<'_, '_> {
                 } else if let Some(value) = self.checker.scopes.constant(&name.val) {
                     equate = Some(Type::from_hir(&value.ty));
                     TermKind::Constant { value }
+                } else if let Some(reference) = self.overload_reference(name, None, out.clone()) {
+                    reference
                 } else {
                     let (declaration, ty, type_args) = self.checker.value(name, None)?;
                     equate = Some(ty);
@@ -988,13 +1207,19 @@ impl Expression<'_, '_> {
                 }
                 match &func.val {
                     resin_ast::TermKind::Var { name } => {
-                        let (declaration, ty, type_args) =
-                            self.checker.value(name, Some(arguments))?;
-                        equate = Some(ty);
-                        TermKind::Var {
-                            declaration,
-                            name: name.clone(),
-                            type_args,
+                        if let Some(reference) =
+                            self.overload_reference(name, Some(arguments.clone()), out.clone())
+                        {
+                            reference
+                        } else {
+                            let (declaration, ty, type_args) =
+                                self.checker.value(name, Some(arguments))?;
+                            equate = Some(ty);
+                            TermKind::Var {
+                                declaration,
+                                name: name.clone(),
+                                type_args,
+                            }
                         }
                     }
                     resin_ast::TermKind::Field { base, name } => {
@@ -1072,9 +1297,9 @@ impl Expression<'_, '_> {
                             Constraint::Variant(input.ty.clone(), pattern, payload.clone()),
                         ));
                     }
-                    let binding = arm.name.as_ref().and_then(|name| {
+                    let binding = arm.pattern.as_ref().and_then(|pattern| {
                         self.checker
-                            .bind(name, payload, DefinitionKind::Variable)
+                            .bind(&pattern.name, payload, DefinitionKind::Variable)
                             .map_err(|error| self.checker.errors.push(error))
                             .ok()
                     });
@@ -1082,6 +1307,7 @@ impl Expression<'_, '_> {
                     checked.push(MatchArm {
                         error: matches!(arm.variant, resin_ast::MatchVariant::Error),
                         wildcard: matches!(arm.variant, resin_ast::MatchVariant::Wildcard),
+                        mutable: arm.pattern.as_ref().is_some_and(|pattern| pattern.mutable),
                         binding,
                         variant,
                         body,
@@ -1188,14 +1414,30 @@ impl Expression<'_, '_> {
                     true,
                     self.rule,
                 );
-                self.constrain((
-                    span,
+                let dunder = crate::OPERATOR_METHODS
+                    .iter()
+                    .find(|(_, symbol, arity)| *symbol == name.as_ref() && *arity == args.len())
+                    .map(|(method, _, _)| *method);
+                let constraint = if let Some(dunder) = dunder {
+                    let candidates =
+                        self.overload_candidates(&Ident::new(dunder.into(), *name_span));
+                    Constraint::Overload {
+                        name: name.clone(),
+                        candidates,
+                        primitive: Some(name.clone()),
+                        expected: expected.clone(),
+                        type_args: None,
+                        args: Some(args.iter().map(|arg| arg.ty.clone()).collect()),
+                        out: out.clone(),
+                    }
+                } else {
                     Constraint::Builtin(
                         name.clone(),
                         args.iter().map(|arg| arg.ty.clone()).collect(),
                         out.clone(),
-                    ),
-                ));
+                    )
+                };
+                self.constrain((span, constraint));
                 TermKind::Builtin {
                     rule: self.rule,
                     name_span: *name_span,
@@ -1342,6 +1584,10 @@ impl Expression<'_, '_> {
                         ty: ann.into_tree(),
                         arg: Box::new(arg),
                     }
+                } else if let Some(call) =
+                    self.overload_call(func, args, out.clone(), expected.clone())
+                {
+                    call
                 } else {
                     let func = self.child(func, None);
                     let args = args
@@ -1365,7 +1611,7 @@ impl Expression<'_, '_> {
             resin_ast::TermKind::Assign { place, value } => {
                 let place = self.child(place, None);
                 let value = self.child(value, Some(place.ty.clone()));
-                equate = Some(place.ty.clone());
+                equate = Some(Type::from(Ty::Unit));
                 TermKind::Assign {
                     place: Box::new(place),
                     value: Box::new(value),
@@ -1437,7 +1683,8 @@ impl Expression<'_, '_> {
             Ok(statement) => statement,
             Err(error) => {
                 match &stmt.val {
-                    StmtKind::Declare { name, .. } => {
+                    StmtKind::Declare { pattern, .. } => {
+                        let name = &pattern.name;
                         let _ = self
                             .checker
                             .bind(name, Type::Invalid, DefinitionKind::Variable);
@@ -1461,7 +1708,8 @@ impl Expression<'_, '_> {
                 self.checker.local_constants(specs)?;
                 StatementKind::CompileTimeDefinition
             }
-            StmtKind::Define { name, ann, init } => {
+            StmtKind::Define { pattern, ann, init } => {
+                let name = &pattern.name;
                 let ty = if let Some(ann) = ann {
                     self.annotation(ann, true).ty
                 } else {
@@ -1488,17 +1736,20 @@ impl Expression<'_, '_> {
                     self.checker.scopes.set_inferred(binding, binding_type);
                 }
                 StatementKind::Define {
+                    mutable: pattern.mutable,
                     binding,
                     name: name.clone(),
                     init,
                 }
             }
-            StmtKind::Declare { name, ann } => {
+            StmtKind::Declare { pattern, ann } => {
+                let name = &pattern.name;
                 let ann = self.annotation(ann, true);
                 let binding = self
                     .checker
                     .bind(name, ann.ty.clone(), DefinitionKind::Variable)?;
                 StatementKind::Declare {
+                    mutable: pattern.mutable,
                     binding,
                     name: name.clone(),
                     ty: ann.into_tree(),

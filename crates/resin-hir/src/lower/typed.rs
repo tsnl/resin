@@ -139,6 +139,7 @@ pub(super) struct Annotation<T = Ty> {
 pub(super) struct MatchArm {
     pub error: bool,
     pub wildcard: bool,
+    pub mutable: bool,
     pub variant: Option<Annotation<Type>>,
     pub binding: Option<DeclarationId>,
     pub body: Term,
@@ -153,11 +154,13 @@ pub(super) struct Statement {
 pub(super) enum StatementKind {
     Error(GenerateError),
     Define {
+        mutable: bool,
         binding: Option<DeclarationId>,
         name: Ident,
         init: Term,
     },
     Declare {
+        mutable: bool,
         binding: DeclarationId,
         name: Ident,
         ty: Annotation<Type>,
@@ -173,7 +176,7 @@ pub(super) struct Signature {
     pub type_params: Vec<crate::TypeParameter>,
     pub declaration: Option<DeclarationId>,
     pub parameters: Vec<Option<DeclarationId>>,
-    pub params: Vec<(Ident, Annotation<crate::Type>)>,
+    pub params: Vec<(resin_ast::BindingPattern, Annotation<crate::Type>)>,
     pub result: Annotation<crate::Type>,
 }
 

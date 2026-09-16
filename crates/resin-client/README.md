@@ -23,7 +23,6 @@ export RESIN_SERVER=http://127.0.0.1:7412
 cargo run -- examples/eg001.resin
 cargo run -- --lsp /path/to/project
 ```
-
 Configure the editor to launch `resin --lsp /path/to/project` with `RESIN_SERVER`
 in its environment. Capability negotiation must succeed before LSP initialization.
 The stdio client reserves stdout for protocol messages and stderr for logs.
@@ -72,7 +71,7 @@ Resin has a fixed source style:
 - Comments and literal spellings are preserved, including whitespace within block
   comments. Same-line trailing comments stay attached to their preceding token.
 
-For example, `var xs = [1,2,3,];` becomes:
+For example, `let mut xs = [1,2,3,];` becomes:
 
 ```resin
 var xs = [

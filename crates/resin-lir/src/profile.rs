@@ -101,7 +101,7 @@ fn instruction(typer: &TyperContext, op: &Instr) -> Result<(), String> {
         Instr::ForgetLocal { .. } | Instr::Discard | Instr::TakeLocal { .. }
         | Instr::SetLocal { .. } | Instr::LocalAddress { .. } | Instr::Function { .. }
         | Instr::Call { .. } | Instr::TransferLoad | Instr::Load
-        | Instr::Store | Instr::Replace | Instr::MakeVariant { .. } | Instr::IsVariant { .. }
+        | Instr::TakeField { .. } | Instr::SetField { .. } | Instr::Store | Instr::Replace | Instr::MakeVariant { .. } | Instr::IsVariant { .. }
         | Instr::VariantPayload { .. } | Instr::ExcludeNone | Instr::Widen { .. }
         | Instr::NumericCast { .. } | Instr::Ascribe { .. }
         | Instr::MakeArray { .. } | Instr::MakeRecord { .. } | Instr::AccessStatic { .. }

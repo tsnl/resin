@@ -56,7 +56,7 @@ fn checking_resolves_types_in_earlier_expressions_and_annotations() {
 #[test]
 fn recovery_keeps_signatures_and_healthy_trees_without_lowering_failed_bodies() {
     let checked = check(
-        "def bad() -> int = { missing() }; def healthy() -> _ = { 42_i };",
+        "fn bad() -> int  { missing() } fn healthy() -> _  { 42_i }",
         &mut Generator::new(),
     );
     assert!(!checked.errors.is_empty());
@@ -147,7 +147,7 @@ fn declaration_identities_do_not_depend_on_unique_source_spans() {
             panic!()
         };
         name.span = Span { start: 0, end: 0 };
-        params[0].0.span = name.span;
+        params[0].0.name.span = name.span;
         body.span = name.span;
         let resin_ast::TermKind::Block { tail, .. } = &mut body.val else {
             panic!()

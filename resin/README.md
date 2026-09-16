@@ -46,13 +46,13 @@ Constructors return the new handle, not an integer and an out-parameter:
 export { main };
 import { "$/gpu.resin" };
 
-def main() -> (() | Err<_>) = {
-    var gpu = Gpu.new()?;
-    var data = gpu.alloc::<uint>(64)?;
-    var commands = gpu.start_command_recording()?;
-    commands.submit()?;
+fn main() -> (() | Err<_>)  {
+    let mut gpu = gpu_new()?;
+    let mut data = gpu:alloc::<uint>(64)?;
+    let mut commands = gpu:start_command_recording()?;
+    commands:submit()?;
     (())
-};
+}
 ```
 
 Resources use shared owners. Copying a handle retains its allocation, and initialized
@@ -164,14 +164,14 @@ Small native helpers expose standard-stream operations and integer-width convers
 export { main };
 import { "$/console.resin", "$/string.resin" };
 
-def main() -> (() | Err<_>) = {
+fn main() -> (() | Err<_>)  {
     print("Name: ");
-    var name = Console.read_line()?;
+    let mut name = console_read_line()?;
     print("Hello, ");
-    Console.print(name)?;
+    console_print(name)?;
     print("!\n");
     (())
-};
+}
 ```
 
 The prompt is a separate `print` call, which flushes before input blocks. Unlike Python's

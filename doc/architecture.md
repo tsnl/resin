@@ -127,7 +127,6 @@ intrinsic "pointer_index" def pointer_at<T>(
     data: Ptr<T>, length: ulong, index: ulong
 ) -> Ptr<T>;
 ```
-
 The operation string selects a compiler contract; the function name belongs to the
 source module. HIR checks the declared signature against that contract, preserving
 its type binders and source identity. Calls use ordinary import resolution, generic
@@ -213,7 +212,7 @@ and type dependencies enter the worklist. Decorated functions remain host-callab
 shader artifacts and pipeline creation request separate shader instances. C emits
 host instances, while SPIR-V follows the requested shader graph.
 
-Source functions bind named parameters with `def identity<T>(value: T) -> T`.
+Source functions bind named parameters with `fn identity<T>(value: T) -> T`.
 Every declaration reference creates a fresh application, deduced from operands and
 expected results or supplied with `identity::<int>`. Bound parameters remain rigid
 inside the definition; local function values remain monomorphic. A `_` is a weak

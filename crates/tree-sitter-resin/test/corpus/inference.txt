@@ -1,10 +1,10 @@
 ==================
 Nested explicit inference holes
 ==================
-def choose(p: Ptr<int>) -> (Ptr<_>, (int) -> _) = {
-    var output: Ptr<Ptr<_>>;
+fn choose(p: Ptr<int>) -> (Ptr<_>, (int) -> _)  {
+    let mut output: Ptr<Ptr<_>>;
     (p, f)
-};
+}
 ---
 
 (source_file
@@ -98,7 +98,7 @@ def choose(p: Ptr<int>) -> (Ptr<_>, (int) -> _) = {
 Underscores in identifiers are not holes
 ==================
 type _Name = int;
-def _name(_value: _Name) -> _Name = { _value };
+fn _name(_value: _Name) -> _Name  { _value }
 ---
 
 (source_file

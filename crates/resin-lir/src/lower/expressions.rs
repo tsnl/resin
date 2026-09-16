@@ -10,6 +10,7 @@ impl FunctionLowering<'_> {
         let span = term.span;
         let expected = &term.ty;
         match &term.kind {
+            TermKind::Move { place } => return self.gen_move(place),
             TermKind::Constant { value } => self.emit(Instr::Push {
                 value: value.clone(),
             }),
