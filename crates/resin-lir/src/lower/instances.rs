@@ -45,6 +45,7 @@ pub(super) struct Instances<'a> {
     type_error: Option<ErrorKind>,
     entries: BTreeMap<std::sync::Arc<str>, FunctionId>,
     shaders: BTreeMap<FunctionId, ShaderEntry>,
+    text_views: BTreeMap<TypeId, FunctionId>,
 }
 
 impl<'a> Instances<'a> {
@@ -64,6 +65,7 @@ impl<'a> Instances<'a> {
             type_error: None,
             entries: BTreeMap::new(),
             shaders: BTreeMap::new(),
+            text_views: BTreeMap::new(),
         }
     }
 
@@ -552,6 +554,7 @@ impl<'a> Instances<'a> {
                 span: error.span,
                 kind: error.kind,
             })?;
+        self.text_view(TypeId::from_index(index), &instance)?;
         self.definitions[index] = TypeDef::Nominal {
             gpu_projection,
             gpu_pipeline,
@@ -559,6 +562,47 @@ impl<'a> Instances<'a> {
             body: Some(body),
             drop,
         };
+        Ok(())
+    }
+
+    fn text_view(&mut self, id: TypeId, instance: &Nominal) -> Result<(), LowerError> {
+        let source = &self.source.types[instance.definition.index()];
+        let Some(&function) = source.methods.get("repr_bytes") else {
+            return Ok(());
+        };
+        let signature = &self.source.functions[function.index()].signature;
+        let invalid = || {
+            LowerError::invalid_hir(
+                signature.result.span,
+                "repr_bytes must take Ptr<Self> and return a borrowed byte view, with no additional type parameters",
+            )
+        };
+        if signature.type_params.len() != instance.arguments.len() || signature.params.len() != 1 {
+            return Err(invalid());
+        }
+        let substitution =
+            super::substitute::Substitution::new(&signature.type_params, &instance.arguments)?;
+        let receiver = substitution.normalize(&signature.params[0].annotation.ty, self)?;
+        let expected = resin_hir::Type::Pointer {
+            pointee: Box::new(self.nominal_origin(id)),
+        };
+        let result = substitution.ty(&signature.result.ty, self)?;
+        if receiver != expected || result != Ty::byte_span() {
+            return Err(invalid());
+        }
+        let hook = self
+            .request(
+                function,
+                instance.arguments.clone(),
+                Profile::Host,
+                None,
+                None,
+            )
+            .map_err(|error| LowerError {
+                span: error.span,
+                kind: error.kind,
+            })?;
+        self.text_views.insert(id, hook);
         Ok(())
     }
 
@@ -582,6 +626,7 @@ impl<'a> Instances<'a> {
                 })
                 .collect(),
             shaders: std::mem::take(&mut self.shaders),
+            text_views: std::mem::take(&mut self.text_views),
             types: TypeTable::from(std::mem::take(&mut self.definitions)),
             ..Default::default()
         };

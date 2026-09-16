@@ -233,30 +233,6 @@ fn invalid_print_types_are_rejected() {
             r#"export { main }; import { "$/string.resin" }; def main() -> () = { print(fmt("{0}", (1,), (2,))); };"#,
             "arguments, found",
         ),
-        (
-            r#"export { main }; import { "$/string.resin" }; def main() -> () = { print(fmt("{0}", ({ x = 1 },))); };"#,
-            "UnformattableType",
-        ),
-        (
-            r#"export { main }; import { "$/string.resin" }; def main() -> () = { print(fmt("{0}", ([1, 2],))); };"#,
-            "UnformattableType",
-        ),
-        (
-            r#"export { main }; import { "$/string.resin" }; def main() = { fmt("{0}", (String.from_str("text"),)); };"#,
-            "UnformattableType",
-        ),
-        (
-            r#"export { main }; import { "$/string.resin", "$/span.resin" }; def main() = { fmt("{0}", (bytes("text"),)); };"#,
-            "UnformattableType",
-        ),
-        (
-            r#"export { main }; import { "$/string.resin" }; struct ByteView { data: Ptr<ubyte>, length: ulong }; def main() = { fmt("{0}", (ByteView { data = "text".data, length = 4_ul },)); };"#,
-            "UnformattableType",
-        ),
-        (
-            r#"export { main }; import { "$/string.resin" }; def f () -> int = { 1 }; def main() -> () = { print(fmt("{0}", (f,))); };"#,
-            "UnformattableType",
-        ),
     ] {
         let error = pipeline::source_module(source).unwrap_err().to_string();
         assert!(error.contains(diagnostic), "{source}: {error}");
@@ -480,12 +456,79 @@ fn raw_byte_views_and_owned_strings_preserve_non_utf8() {
 }
 
 #[test]
-fn invalid_specialized_format_arguments_produce_source_errors() {
-    let source = r#"export { main }; import { "$/string.resin" };
+fn formats_owned_temporary_results() {
+    prints(
+        r#"export { main }; import { "$/string.resin" };
         def text() -> String = { fmt("{0}+i{1}", (40, 85)) };
-        def main() = { print(fmt("{0}\n", (text(),))); };"#;
-    let error = pipeline::source_module(source).unwrap_err().to_string();
-    assert!(error.contains("UnformattableType"), "{error}");
-    assert!(!error.contains("invalid IR"), "{error}");
-    assert!(error.contains("string.resin"), "{error}");
+        def main() = { print(fmt("{0}\n", (text(),))); };"#,
+        b"40+i85\n",
+    );
+}
+
+#[test]
+fn repr_renders_fields_arrays_tuples_and_active_union_payloads() {
+    prints(r#"export { main }; import { "$/string.resin" };
+        struct Complex { real: float64, imaginary: float64 };
+        struct Problem { message: str, detail: String };
+        def main() = {
+            print(repr(Complex { real = -1.0, imaginary = 2.5 }));
+            print("\n");
+            print(repr(([1, 2, 3], true, None, "a\n\0\"\\世界")));
+            print("\n");
+            var problem: int | Problem = Problem { message = "bad", detail = String.from_str("input") };
+            print(repr(problem));
+            print("\n");
+            print(fmt("{0} {1}", ([4, 5], String.from_str("raw"))));
+        };"#,
+        "Complex { real = -1, imaginary = 2.5 }\n([1, 2, 3], true, None, \"a\\n\\0\\\"\\\\世界\")\nProblem { message = \"bad\", detail = \"input\" }\n[4, 5] raw".as_bytes());
+}
+
+#[test]
+fn entry_errors_display_owned_payload_contents() {
+    let output = run(r#"export { main }; import { "$/string.resin" };
+        struct Problem { message: String, code: int };
+        def main() -> Result<(), Problem> = {
+            err(Problem { message = String.from_str("bad input"), code = 7 })
+        };"#);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        output.stderr,
+        b"unhandled error: Problem { message = \"bad input\", code = 7 }\n"
+    );
+}
+
+#[test]
+fn text_representation_hooks_require_a_borrowed_receiver_and_byte_view() {
+    let error = pipeline::source_module(
+        r#"export { main };
+        struct Bad { def repr_bytes(self: Bad) -> int = { 1 }; };
+        def main() = { var bad = Bad {}; };"#,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("repr_bytes must take"), "{error}");
+}
+
+#[test]
+fn verifier_rejects_invalid_text_view_callbacks() {
+    let mut module = module(
+        r#"export { main }; import { "$/string.resin" };
+        def main() = { print(repr(String.from_str("x"))); };"#,
+    );
+    let hook = *module.text_views.values().next().unwrap();
+    module.functions[hook.index()].result = Ty::Unit;
+    let error = resin_lir::verify(&module).unwrap_err();
+    assert!(matches!(
+        error.kind,
+        resin_lir::VerifyErrorKind::InvalidTextView
+    ));
+}
+
+#[test]
+fn repr_does_not_follow_pointers() {
+    prints(
+        r#"export { main }; import { "$/string.resin" };
+        def main() = { print(repr(Ptr<int>(1_ul))); };"#,
+        b"0x1",
+    );
 }

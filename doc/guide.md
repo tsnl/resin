@@ -1334,3 +1334,19 @@ arms are rejected.
 Error payloads can be any value type, including `str`, numbers, tuples, and owned
 `String` values. Inferred error sets collect their union; mutable pointers remain
 invariant and errors are still owned and destroyed normally.
+
+### Value representations
+
+Import `repr` from `$/string.resin` to obtain an owned `String` describing any
+host value. Records show their names and fields, arrays and tuples show their
+elements, and unions show their active payload. Strings are quoted and escaped;
+pointers show addresses and opaque handles show their type. `fmt` accepts these
+values too, while direct string arguments retain their verbatim text behavior.
+Unhandled entry-point errors include this representation before cleanup.
+
+A struct may provide `repr_bytes(self: Ptr<Self>)` returning the primitive
+`{ data: Ptr<ubyte>, length: ulong }` byte view. Use the actual struct name in
+place of `Self`. The view must remain readable while its receiver is alive;
+the hook borrows its receiver and must not invalidate it. `String` uses this
+hook so formatting and nested representations show its text. Representation
+is a host operation and limits nested output to 128 levels.

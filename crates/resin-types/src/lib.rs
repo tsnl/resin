@@ -455,6 +455,7 @@ pub enum Intrinsic {
     WeakEmpty,
     StringFromBytes,
     FormatBytes,
+    Repr,
     Sqrt,
     Sin,
     Cos,
@@ -713,6 +714,7 @@ impl From<DefinitionError> for TypeError {
 /// Operand relationships shared by concrete checking and inference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuiltinRule {
+    Repr,
     Assert,
     Float,
     Arithmetic,

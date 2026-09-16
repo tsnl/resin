@@ -14,6 +14,7 @@ pub(super) fn check(module: &Module) -> Result<(), VerifyError> {
     check_shaders(module)?;
     check_bodies(module)?;
     check_profiles(module)?;
+    check_text_views(module)?;
     check_drop_hooks(module)
 }
 
@@ -205,4 +206,23 @@ fn check_instruction_profiles(
         }
         _ => Ok(()),
     }
+}
+
+fn check_text_views(module: &Module) -> Result<(), VerifyError> {
+    for (&id, &hook) in &module.text_views {
+        let error = || Location::type_definition(id).error(VerifyErrorKind::InvalidTextView);
+        let function = module.functions.get(hook.index()).ok_or_else(error)?;
+        let receiver = Ty::Pointer {
+            pointee: Box::new(Ty::Defined { definition: id }),
+        };
+        if !matches!(module.types.get(id.index()), Some(TypeDef::Nominal { .. }))
+            || function.profile != crate::Profile::Host
+            || function.parameter_count != 1
+            || function.locals.first().map(|local| &local.ty) != Some(&receiver)
+            || function.result != Ty::byte_span()
+        {
+            return Err(error());
+        }
+    }
+    Ok(())
 }

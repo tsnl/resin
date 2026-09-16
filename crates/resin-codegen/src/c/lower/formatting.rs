@@ -59,7 +59,7 @@ fn bytes(ty: &Ty, expr: &str) -> Result<(String, String), Error> {
     }
 }
 
-fn value(_types: &Types<'_>, ty: &Ty, expr: String) -> Result<String, Error> {
+fn value(types: &Types<'_>, ty: &Ty, expr: String) -> Result<String, Error> {
     let (kind, member, value) = match ty {
         Ty::Unit => ("UNIT", "unsigned_value", "0".into()),
         Ty::Bool => ("BOOL", "unsigned_value", expr),
@@ -76,7 +76,7 @@ fn value(_types: &Types<'_>, ty: &Ty, expr: String) -> Result<String, Error> {
             "unsigned_value",
             format!("(uint64_t)(uintptr_t)({expr})"),
         ),
-        ty @ (Ty::Str | Ty::Record { .. }) => {
+        ty if *ty == Ty::Str || *ty == Ty::byte_span() => {
             let (data, length) = bytes(ty, &expr)?;
             (
                 "BYTES",
@@ -84,7 +84,14 @@ fn value(_types: &Types<'_>, ty: &Ty, expr: String) -> Result<String, Error> {
                 format!("{{ .data = {data}, .length = {length} }}"),
             )
         }
-        _ => return Err(Error(format!("cannot format {ty:?}"))),
+        _ => {
+            let descriptor = super::representation::descriptor(types, ty);
+            (
+                "REPR",
+                "repr",
+                format!("{{ .type = &{descriptor}, .data = &({expr}) }}"),
+            )
+        }
     };
     Ok(format!(
         "{{ .kind = RESIN_PRINT_{kind}, .value = {{ .{member} = {value} }} }}"

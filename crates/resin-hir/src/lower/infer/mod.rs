@@ -2191,7 +2191,7 @@ impl Inference<'_> {
                 let rule = BuiltinRule::lookup(name, args.len())
                     .map_err(|e| GenerateError::typing(span, e))?;
                 let complete = match rule {
-                    BuiltinRule::Format | BuiltinRule::StringFromBytes => {
+                    BuiltinRule::Repr | BuiltinRule::Format | BuiltinRule::StringFromBytes => {
                         self.solver.unify(out, &Ty::StrongOwner.into(), span)?
                     }
                     BuiltinRule::Assert => {

@@ -313,6 +313,8 @@ pub struct Module {
     pub functions: Vec<Function>,
     /// Decorated shader candidates and whether their static artifact is requested.
     pub shaders: BTreeMap<FunctionId, ShaderEntry>,
+    /// Borrowed text representations: Ptr<Nominal> -> the primitive byte view.
+    pub text_views: BTreeMap<TypeId, FunctionId>,
     /// Optional source origins; direct IR clients may leave this empty.
     pub origins: SourceMap,
 }
@@ -615,6 +617,7 @@ pub enum VerifyErrorKind {
     UnsupportedGpuElement { ty: Ty },
     InvalidVariant,
     InvalidDropHook,
+    InvalidTextView,
     InvalidForeignHeader { header: Arc<str> },
     InvalidForeignSignature,
     OpaqueValue { ty: Ty },

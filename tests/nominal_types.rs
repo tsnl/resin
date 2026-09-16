@@ -83,6 +83,7 @@ fn a_linked_list_is_finite_through_its_next_pointer() {
     verify(&Module {
         foreign_headers: Default::default(),
         shaders: Default::default(),
+        text_views: Default::default(),
         origins: Default::default(),
         entries: Default::default(),
         types: vec![linked_list_type()].into(),
@@ -99,6 +100,7 @@ fn an_inline_recursive_type_is_rejected() {
     let module = Module {
         foreign_headers: Default::default(),
         shaders: Default::default(),
+        text_views: Default::default(),
         origins: Default::default(),
         entries: Default::default(),
         types: vec![TypeDef::new(
@@ -127,6 +129,7 @@ fn incomplete_definitions_are_rejected_by_the_verifier_and_printed_explicitly() 
     let definition = context.reserve_type("Pending");
     let module = Module {
         shaders: Default::default(),
+        text_views: Default::default(),
         origins: Default::default(),
         types: context.definitions().to_vec().into(),
         ..Default::default()
@@ -167,6 +170,7 @@ fn nominal_types_do_not_equal_their_representations() {
     let module = Module {
         foreign_headers: Default::default(),
         shaders: Default::default(),
+        text_views: Default::default(),
         origins: Default::default(),
         entries: Default::default(),
         types: vec![TypeDef::new(

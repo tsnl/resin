@@ -34,18 +34,7 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
                 "Result entry points must have an int or () success type".into(),
             ));
         }
-        let mut error_name = "\"invalid error tag\"".to_string();
-        for member in error.members() {
-            let name = quoted(&resin_types::format_type(&member, &module.types));
-            error_name = if matches!(error.as_ref(), Ty::Union { .. }) {
-                format!(
-                    "(r_result.payload.v1.tag == {}u ? {name} : {error_name})",
-                    types.id(&member)
-                )
-            } else {
-                name
-            };
-        }
+        let descriptor = super::representation::descriptor(types, error);
         let success = if value.as_ref() == &Ty::Unit {
             "0"
         } else {
@@ -54,7 +43,7 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
         let mut cleanup = String::new();
         types.drop_value(&function.result, "r_result", &mut cleanup);
         return Ok(format!(
-            "{setup}  {} r_result = r_fn{}({argument});\n  if (r_result.tag == 1u) {{ fprintf(stderr, \"unhandled error: %s\\n\", {error_name}); {cleanup} return 1; }}\n  return {success};\n",
+            "{setup}  {} r_result = r_fn{}({argument});\n  if (r_result.tag == 1u) {{ resin_report_error(&{descriptor}, &r_result.payload.v1); {cleanup} return 1; }}\n  return {success};\n",
             types.name(&function.result),
             id.index()
         ));
@@ -64,17 +53,6 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
     } else {
         format!("{setup}  return r_fn{}({argument});\n", id.index())
     })
-}
-
-fn quoted(text: &str) -> String {
-    let escaped: String = text
-        .bytes()
-        .map(|byte| match byte {
-            b' '..=b'~' if !matches!(byte, b'"' | b'\\') => char::from(byte).to_string(),
-            _ => format!("\\{byte:03o}"),
-        })
-        .collect();
-    format!("\"{escaped}\"")
 }
 
 fn string_array(ty: &Ty) -> bool {

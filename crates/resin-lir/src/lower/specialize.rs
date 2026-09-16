@@ -828,6 +828,7 @@ impl Specialization<'_, '_> {
         }
         let args = self.arguments(args)?;
         let math = match op {
+            Intrinsic::Repr => Some("repr"),
             Intrinsic::Sqrt => Some("sqrt"),
             Intrinsic::Sin => Some("sin"),
             Intrinsic::Cos => Some("cos"),

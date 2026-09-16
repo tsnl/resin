@@ -13,6 +13,7 @@ mod gpu;
 mod ops;
 mod pipeline;
 mod projection;
+mod representation;
 mod types;
 mod value;
 
