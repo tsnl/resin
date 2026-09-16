@@ -237,8 +237,8 @@ fn dependent_operator_errors_report_the_requested_instantiation() {
             "{declaration} def relay<T>(value: T) -> int = {{ {expression} }}; def main() = {{ relay(Value {{}}); }};"
         );
         let hir = support::hir(&source);
-        let errors =
-            support::frontend::lower(&hir, &[], &resin_lir::LoweringOptions::default()).unwrap_err();
+        let errors = support::frontend::lower(&hir, &[], &resin_lir::LoweringOptions::default())
+            .unwrap_err();
         let error = &errors[0];
         assert!(error.to_string().contains(expected), "{source}\n{error}");
         assert!(
