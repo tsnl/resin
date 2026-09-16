@@ -483,10 +483,10 @@ export default grammar({
           seq(
             field("variant", choice($.type, "ok", "err")),
             "(",
-            field("name", $.lid),
+            field("name", choice($.lid, "_")),
             ")",
           ),
-          field("variant", "None"),
+          field("variant", choice("None", "_")),
         ),
         "=>",
         field("body", $.block_body),

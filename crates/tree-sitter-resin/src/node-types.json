@@ -898,6 +898,10 @@
         "required": false,
         "types": [
           {
+            "type": "_",
+            "named": false
+          },
+          {
             "type": "lid",
             "named": true
           }
@@ -909,6 +913,10 @@
         "types": [
           {
             "type": "None",
+            "named": false
+          },
+          {
+            "type": "_",
             "named": false
           },
           {

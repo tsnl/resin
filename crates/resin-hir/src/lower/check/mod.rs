@@ -1042,6 +1042,7 @@ impl Expression<'_, '_> {
                     self.checker.scopes.push_at(arm.body.span);
                     let payload = self.checker.typing.solver.fresh();
                     let (variant, pattern) = match &arm.variant {
+                        resin_ast::MatchVariant::Wildcard => (None, Pattern::Ok),
                         resin_ast::MatchVariant::Ok => (None, Pattern::Ok),
                         resin_ast::MatchVariant::Err => (None, Pattern::Err),
                         resin_ast::MatchVariant::Type(ty) => {
@@ -1050,10 +1051,12 @@ impl Expression<'_, '_> {
                             (Some(ann.into_tree()), Pattern::Type(ty))
                         }
                     };
-                    self.constrain((
-                        arm.body.span,
-                        Constraint::Variant(input.ty.clone(), pattern, payload.clone()),
-                    ));
+                    if !matches!(arm.variant, resin_ast::MatchVariant::Wildcard) {
+                        self.constrain((
+                            arm.body.span,
+                            Constraint::Variant(input.ty.clone(), pattern, payload.clone()),
+                        ));
+                    }
                     let binding = arm.name.as_ref().and_then(|name| {
                         self.checker
                             .bind(name, payload, DefinitionKind::Variable)
@@ -1062,6 +1065,7 @@ impl Expression<'_, '_> {
                     });
                     let body = self.child(&arm.body, Some(out.clone()));
                     checked.push(MatchArm {
+                        wildcard: matches!(arm.variant, resin_ast::MatchVariant::Wildcard),
                         binding,
                         variant,
                         failure: matches!(arm.variant, resin_ast::MatchVariant::Err),

@@ -298,9 +298,13 @@ pub struct GpuProjection {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Case {
+    /// Final arm covering any remaining variants after specialization. No binding.
+    Wildcard,
     Ok,
     Err,
-    Type { ty: Type },
+    Type {
+        ty: Type,
+    },
 }
 
 /// A lexical declaration's identity. Names survive only for diagnostics.

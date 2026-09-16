@@ -3211,8 +3211,17 @@
                   "type": "FIELD",
                   "name": "name",
                   "content": {
-                    "type": "SYMBOL",
-                    "name": "lid"
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "SYMBOL",
+                        "name": "lid"
+                      },
+                      {
+                        "type": "STRING",
+                        "value": "_"
+                      }
+                    ]
                   }
                 },
                 {
@@ -3225,8 +3234,17 @@
               "type": "FIELD",
               "name": "variant",
               "content": {
-                "type": "STRING",
-                "value": "None"
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "STRING",
+                    "value": "None"
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "_"
+                  }
+                ]
               }
             }
           ]
