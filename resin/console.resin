@@ -79,7 +79,7 @@ struct Console {
 
 	// Reads bytes through LF or EOF, only CR immediately before LF is stripped.
 }
-fn console_print(line: InputLine) -> (() | Err<InputWriteError>) {
+fn console_print(line: Ref<InputLine>) -> (() | Err<InputWriteError>) {
 	let mut bytes = line:get();
 	let mut index = 0_ul;
 	let mut written = 0;

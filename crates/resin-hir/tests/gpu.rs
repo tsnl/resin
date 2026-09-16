@@ -76,10 +76,10 @@ fn contract_declarations_may_follow_their_users_and_dependencies() {
     generate(&format!(
         r#"{declarations}
         struct FieldsScaleValues<T0, T1> {{ scale: T0, values: T1, }}
-fn main(values: DeviceRange<int>) -> (() | Err<Failure>) = {{
+fn main(values: DeviceRange<int>) -> (() | Err<Failure>) {{
             let mut pipeline = Device {{}}:compute(kernel)?;
-            Commands {{}}.dispatch(pipeline, FieldsScaleValues<_, _> {{ scale = 2.0, values  values }}, 1, 1, 1)
-        }};
+            Commands {{}}:dispatch(pipeline, FieldsScaleValues<_, _> {{ scale = 2.0, values = values }}, 1, 1, 1)
+        }}
         {contracts}
     "#
     ))
@@ -104,10 +104,7 @@ fn gpu_ptr_new<T>(value: T) -> GpuPtr<T>  { GpuPtr<T> { value = value } }
 #[test]
 fn allocator_registration_does_not_synthesize_constructor_methods() {
     let error = pipelines("fn main(device: Device)  { device:new(42); }").unwrap_err();
-    assert!(
-        error.to_string().contains("unknown method `new`"),
-        "{error}"
-    );
+    assert!(error.to_string().contains("UnboundValue"), "{error}");
 }
 
 #[test]
@@ -179,16 +176,16 @@ fn create(gpu: Device) -> (ComputeProgram<Params, PipelineOwner> | Err<Failure>)
 fn creation_requires_direct_decorated_shader_declarations() {
     for (expression, expected) in [
         (
-            "gpu.compute((Ptr<ubyte>(0_ul), 0_ul))",
+            "gpu:compute((Ptr<ubyte>(0_ul), 0_ul))",
             "requires decorated shader declarations",
         ),
-        ("gpu.compute(alias)", "requires direct shader declarations"),
+        ("gpu:compute(alias)", "requires direct shader declarations"),
         (
-            "gpu.compute(ordinary)",
+            "gpu:compute(ordinary)",
             "requires a decorated shader declaration",
         ),
         (
-            "gpu.compute(choose())",
+            "gpu:compute(choose())",
             "requires direct shader declarations",
         ),
     ] {
@@ -210,19 +207,19 @@ fn creation_requires_direct_decorated_shader_declarations() {
 fn dispatch_rejects_raw_views_wrong_fields_and_incompatible_stages() {
     for (tail, expected) in [
         (
-            "Commands {}.dispatch(pipeline, HostParams<_> { scale = 1.0_f, values = raw }, 1, 1, 1)",
+            "Commands {}:dispatch(pipeline, HostParams<_> { scale = 1.0_f, values = raw }, 1, 1, 1)",
             "incompatible inferred types",
         ),
         (
-            "Commands {}.dispatch(pipeline, WrongParams<_> { scale = 1.0_f, wrong = values }, 1, 1, 1)",
+            "Commands {}:dispatch(pipeline, WrongParams<_> { scale = 1.0_f, wrong = values }, 1, 1, 1)",
             "must match the shader root",
         ),
         (
-            "Commands {}.draw(pipeline, HostParams<_> { scale = 1.0_f, values = values }, 3)",
+            "Commands {}:draw(pipeline, HostParams<_> { scale = 1.0_f, values = values }, 3)",
             "draw requires a graphics pipeline",
         ),
         (
-            "Commands {}.dispatch(pipeline, None, 1, 1, 1)",
+            "Commands {}:dispatch(pipeline, None, 1, 1, 1)",
             "incompatible inferred types",
         ),
     ] {
@@ -242,7 +239,7 @@ fn native_bridges_cannot_escape_through_method_references() {
         ),
         (
             "fn escape()  { let mut factory = compute; }",
-            "only source methods can be referenced as function values",
+            "native bridge references cannot escape",
         ),
         (
             "fn escape(commands: Commands)  { let mut dispatch = commands.dispatch; }",

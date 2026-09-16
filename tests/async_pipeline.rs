@@ -123,7 +123,7 @@ async fn explicit_snapshot_pipeline_retains_editor_facts_and_owned_codegen() {
     assert_eq!(definition.source, fresh_library);
     assert_eq!(
         definition.span.start,
-        library.text().find("fn answer").unwrap() + 4
+        library.text().find("fn answer").unwrap() + 3
     );
     let unrelated =
         Source::with_identity(SourceId::new("other/main.resin"), main.name(), main.text());

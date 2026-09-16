@@ -1,4 +1,4 @@
-export { String, fmt, print, repr, string_from_str, string_from_bytes, get, repr_bytes, bytes };
+export { String, fmt, print, repr, string_from_str, string_from_bytes, get, repr_bytes, bytes, clone };
 
 extern {
 	"resin_runtime/print.h": {
@@ -77,3 +77,7 @@ fn repr<T>(value: T) -> String {
 	String { storage = ArcSpan<ubyte> { owner = repr_value(value) } }
 }
 intrinsic "repr" fn repr_value<T>(value: T) -> StrongOwner;
+
+fn clone(value: Ref<String>) -> String {
+	String { storage = value.storage:clone() }
+}

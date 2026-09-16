@@ -230,7 +230,7 @@ impl Specialization<'_, '_> {
             values: source
                 .values
                 .iter()
-                .map(|arg| self.term(arg))
+                .map(|arg| self.call_argument(arg))
                 .collect::<Result<_, _>>()?,
             params: source
                 .params
@@ -607,11 +607,31 @@ impl Specialization<'_, '_> {
             .iter()
             .zip(params)
             .map(|(source, param)| {
-                let value = self.term(source)?;
+                let value = self.call_argument(source)?;
                 self.require_assignable(&value.ty, param)?;
                 Ok(value)
             })
             .collect()
+    }
+
+    fn call_argument(&mut self, source: &resin_hir::Term) -> Result<concrete::Term, Error> {
+        // Dependent overload parameters can become references only after
+        // specialization. Apply the same temporary materialization as HIR's
+        // argument completion, without extending local reference bindings.
+        if let resin_hir::TermKind::Use { arg } = &source.kind
+            && let resin_hir::Type::Reference { referent } = self.argument(&source.ty)?
+            && self.argument(&arg.ty)? == *referent
+        {
+            return Ok(concrete::Term {
+                span: source.span,
+                ty: self.ty(&source.ty)?,
+                kind: concrete::TermKind::Adapt {
+                    conversion: concrete::ReceiverConversion::Address,
+                    arg: self.place(arg)?,
+                },
+            });
+        }
+        self.term(source)
     }
 
     fn record(
@@ -1090,7 +1110,10 @@ impl Specialization<'_, '_> {
                 let args = self.arguments(args)?;
                 let pipeline = resin_types::gpu_pipeline_contract(
                     self.instances.typer().definitions(),
-                    &args.values[1].ty,
+                    args.values[1]
+                        .ty
+                        .deref_target()
+                        .unwrap_or(&args.values[1].ty),
                 )
                 .map_err(|message| self.instance_error(message))?;
                 let projection = if pipeline.root == Ty::None {

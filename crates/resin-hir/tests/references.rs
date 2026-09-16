@@ -67,12 +67,21 @@ fn reference_binding_does_not_widen_or_implicitly_dereference_pointers() {
     for source in [
         "fn invalid()  { let mut x = 1_i; let mut r: Ref<int | None> = x; }",
         "fn invalid(p: Ptr<int>)  { let mut r: Ref<int> = p; }",
-        "fn accept(value: Ref<int>)  {} fn invalid()  { accept(1_i); }",
-        "struct Cell { value: int,  }\nfn get(self: Ref<Cell>) -> Ref<int>  { self.value }\n fn invalid()  { Cell { value = 1 }:get(); }",
     ] {
         assert!(
             hir_module(source).is_err(),
             "accepted invalid binding: {source}"
         );
+    }
+}
+
+#[test]
+fn reference_parameters_accept_temporary_arguments() {
+    for source in [
+        "fn accept(value: Ref<int>) {} fn main() { accept(1_i); }",
+        "struct Cell { value: int } fn get(self: Ref<Cell>) -> Ref<int> { self.value } fn main() { Cell { value = 1 }:get(); }",
+        "fn get<T>(value: Ref<T>) -> Ref<T> { value } fn main() { get(1_i); }",
+    ] {
+        hir_module(source).unwrap_or_else(|error| panic!("{source}\n{error}"));
     }
 }

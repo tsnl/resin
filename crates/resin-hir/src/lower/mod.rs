@@ -897,18 +897,8 @@ impl Generator {
         let id = self.reserve_function(source.declaration.expect("checked function"));
         // Native bridges and the remaining compiler-provided method declarations
         // consume concrete signatures. Ordinary source calls use schemes in scopes.
-        let solver = infer::Solver::default();
-        let params = source
-            .params
-            .iter()
-            .map(|(_, a)| solver.resolve(&infer::Type::from_hir(&a.ty)))
-            .collect::<Option<Vec<_>>>();
-        if let (Some(params), Some(result)) = (
-            params,
-            solver.resolve(&infer::Type::from_hir(&source.result.ty)),
-        ) {
-            self.typer.register_function(id, params, result);
-        }
+        let params = source.params.iter().map(|(_, a)| a.ty.clone()).collect();
+        self.typer.register_function(id, params, &source.result.ty);
         self.functions[id.index()] = Some(Function {
             location: Some(SourceLocation {
                 source: self.source.clone(),
@@ -1009,7 +999,7 @@ impl Generator {
             typed::DeclarationKind::Function { decorators } => {
                 let id = self.declare_source_function(name, signature)?;
                 for decorator in decorators {
-                    if (!gpu::is_bridge(&decorator.val)) || !name.val.contains('.') {
+                    if !gpu::is_bridge(&decorator.val) {
                         self.declare_shader(id, decorator)?;
                     }
                 }

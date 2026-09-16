@@ -20,6 +20,18 @@ fn values_move_and_primitives_copy() {
 }
 
 #[test]
+fn widening_copyable_values_does_not_move_them() {
+    accepts(
+        "struct Item {} fn f(value: int) -> int | Item { let widened: int | Item = value; value }",
+    );
+    accepts("struct Item {} fn f(value: Ref<int>) -> int | Item { value }");
+    rejects(
+        "struct Item {} fn f(value: Ref<Item>) -> int | Item { value }",
+        "reference",
+    );
+}
+
+#[test]
 fn assignment_requires_mut_and_returns_unit() {
     rejects("fn f() { let value = 1; value = 2; }", "immutable");
     rejects("fn f(value: int) { value = 2; }", "immutable");

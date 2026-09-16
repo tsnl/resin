@@ -198,6 +198,23 @@ impl Checker<'_> {
             return Ok((declaration, ty, vec![]));
         }
         self.dependencies.insert(declaration);
+        if self
+            .function_ids
+            .get(&declaration)
+            .and_then(|id| self.typing.typer.functions.get(id))
+            .is_some_and(|function| {
+                matches!(
+                    function.body,
+                    super::context::FunctionBody::GpuPipelineFactory { .. }
+                        | super::context::FunctionBody::GpuPipelineRecord { .. }
+                )
+            })
+        {
+            return Err(GenerateError::inference(
+                name.span,
+                "GPU pipeline bridges require direct calls; native bridge references cannot escape",
+            ));
+        }
         let parameters = self.scopes.parameters(declaration);
         let (ty, arguments) = self
             .typing
@@ -250,6 +267,7 @@ pub(in crate::lower) fn file(
         &mut generator.function_bindings,
         &generator.source,
     );
+    checker.declare_gpu_bridges(&declarations, &signatures);
     let mut bodies = checker.bodies(&mut signatures, sources);
     checker.solve_functions(&signatures, &mut bodies);
     checker.require_holes();
@@ -382,6 +400,48 @@ impl Checker<'_> {
                 Ok(())
             })();
             self.record(result);
+        }
+    }
+
+    fn declare_gpu_bridges(
+        &mut self,
+        declarations: &[typed::Declaration],
+        signatures: &Signatures,
+    ) {
+        for declaration in declarations {
+            let typed::DeclarationKind::Function { decorators } = &declaration.kind else {
+                continue;
+            };
+            for decorator in decorators
+                .iter()
+                .filter(|decorator| super::gpu::is_bridge(&decorator.val))
+            {
+                let result = (|| {
+                    let signature = signatures[&declaration.id]
+                        .clone()
+                        .resolve(&self.typing.solver)?;
+                    let function = self.function_ids[&declaration.id];
+                    let params = signature
+                        .params
+                        .iter()
+                        .map(|(_, annotation)| annotation.ty.clone())
+                        .collect();
+                    if !signature.type_params.is_empty()
+                        || !self.typing.typer.register_function(
+                            function,
+                            params,
+                            &signature.result.ty,
+                        )
+                    {
+                        return Err(GenerateError::inference(
+                            decorator.span,
+                            "GPU bridges require a fixed, explicit signature",
+                        ));
+                    }
+                    self.typing.typer.register_bridge(function, decorator)
+                })();
+                self.record(result);
+            }
         }
     }
 
@@ -950,7 +1010,7 @@ impl Expression<'_, '_> {
         };
         let candidates = self.overload_candidates(name);
         let primitive = super::context::is_primitive_operation(&name.val).then(|| name.val.clone());
-        if candidates.len() < 2 && primitive.is_none() {
+        if candidates.is_empty() && primitive.is_none() {
             return None;
         }
         let args = args

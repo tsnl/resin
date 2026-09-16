@@ -54,6 +54,66 @@ impl Generator {
     }
 }
 
+impl Context {
+    pub(super) fn register_bridge(
+        &mut self,
+        function: FunctionId,
+        decorator: &Ident,
+    ) -> Result<(), GenerateError> {
+        let invalid = || {
+            GenerateError::inference(
+                decorator.span,
+                format!("invalid @{} bridge signature", decorator.val),
+            )
+        };
+        let declaration = self.declared_function(function);
+        let owner = declaration
+            .params
+            .first()
+            .and_then(|receiver| self.receiver_definition(receiver))
+            .ok_or_else(invalid)?;
+        if decorator.val.as_ref() == "gpu_allocator" {
+            if declaration.params.get(1..) != Some(&[Ty::UInt64, Ty::UInt64, Ty::Int32][..])
+                || !matches!(declaration.result.fallible_parts(), Some((Ty::GpuView, _)))
+            {
+                return Err(invalid());
+            }
+            if self
+                .gpu_allocators
+                .insert(owner, function)
+                .is_some_and(|previous| previous != function)
+            {
+                return Err(GenerateError::inference(
+                    decorator.span,
+                    "a type can declare only one GPU allocator",
+                ));
+            }
+        } else {
+            let body = bridge_body(function, &decorator.val, declaration).ok_or_else(invalid)?;
+            if decorator.val.as_ref() == "gpu_pipeline_context"
+                && self
+                    .gpu_pipeline_contexts
+                    .insert(owner, function)
+                    .is_some_and(|previous| previous != function)
+            {
+                return Err(GenerateError::inference(
+                    decorator.span,
+                    "a pipeline owner can declare only one GPU context accessor",
+                ));
+            }
+            self.functions.get_mut(&function).unwrap().body = body;
+        }
+        Ok(())
+    }
+}
+
+fn source_value(ty: &crate::Type) -> &crate::Type {
+    match ty {
+        crate::Type::Reference { referent } => referent,
+        _ => ty,
+    }
+}
+
 fn bridge_body(
     function: FunctionId,
     name: &str,
@@ -61,8 +121,12 @@ fn bridge_body(
 ) -> Option<FunctionBody> {
     let params = &declaration.params;
     if name == "gpu_pipeline_context" {
-        return matches!(params.as_slice(), [Ty::Defined { .. }])
-            .then_some(FunctionBody::Defined(function));
+        return (declaration.source_params.len() == 1
+            && matches!(
+                source_value(&declaration.source_params[0]),
+                crate::Type::Defined { .. }
+            ))
+        .then_some(FunctionBody::Defined(function));
     }
     let (value, _) = declaration.result.fallible_parts()?;
     let bytes = Ty::byte_span();
@@ -91,7 +155,9 @@ fn bridge_body(
                 vec![root, Ty::UInt32, Ty::UInt32, Ty::UInt32]
             };
             (*value == Ty::Unit
-                && matches!(params.get(1), Some(Ty::Defined { .. }))
+                && declaration.source_params.get(1).is_some_and(|parameter| {
+                    matches!(source_value(parameter), crate::Type::Defined { .. })
+                })
                 && params.get(2..) == Some(tail.as_slice()))
             .then_some(FunctionBody::GpuPipelineRecord {
                 record: function,
@@ -232,7 +298,7 @@ impl Context {
             definition,
             arguments: vec![root, super::types::ty(owner)],
         };
-        let mut params = vec![super::types::ty(&native.params[0])];
+        let mut params = vec![native.source_params[0].clone()];
         params.extend_from_slice(shaders);
         Ok(PipelineMethod {
             body: native.body.clone(),
@@ -293,7 +359,7 @@ impl Context {
         let root = apply(&metadata.root)?;
         let owner = apply(&metadata.owner)?;
         let native = self.declared_function(record);
-        if owner != super::types::ty(&native.params[1]) {
+        if &owner != source_value(&native.source_params[1]) {
             return Err("pipeline owner does not match the command recorder".into());
         }
         let owner_id = self
@@ -324,7 +390,14 @@ impl Context {
         } else {
             self.source_projection(&root, 0)?
         };
-        let mut params = vec![super::types::ty(&native.params[0]), pipeline.clone(), input];
+        let pipeline = if matches!(native.source_params[1], Type::Reference { .. }) {
+            Type::Reference {
+                referent: Box::new(pipeline.clone()),
+            }
+        } else {
+            pipeline.clone()
+        };
+        let mut params = vec![native.source_params[0].clone(), pipeline, input];
         params.extend(native.params[3..].iter().map(super::types::ty));
         Ok(PipelineMethod {
             body: FunctionBody::GpuPipelineDispatch {

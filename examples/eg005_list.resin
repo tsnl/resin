@@ -11,11 +11,11 @@ fn cons(value: int, next: Ptr<List>) -> List {
 	List { value = value, next = next }
 }
 
-fn car(node: List) -> int {
+fn car(node: Ref<List>) -> int {
 	node.value
 }
 
-fn cdr(node: List) -> Ptr<List> {
+fn cdr(node: Ref<List>) -> Ptr<List> {
 	node.next
 }
 

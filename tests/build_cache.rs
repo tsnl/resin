@@ -381,7 +381,7 @@ fn removed_shaders_disappear_from_the_cached_project() {
             output.* = uint(index);
         }
         fn main() -> (() | Err<_>)  {
-            if (0 == 1) { gpu_new()?:create_compute_pipeline(kernel)?; };
+            if (0 == 1) { let gpu = gpu_new()?; gpu:create_compute_pipeline(kernel)?; };
             (())
         }
         "#,

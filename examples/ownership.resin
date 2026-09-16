@@ -7,7 +7,7 @@ struct Failed {}
 struct Allocation {
 	data: ArcSpan<int>,
 }
-fn get(self: Ptr<Allocation>) -> Span<int> {
+fn get(self: Ref<Allocation>) -> Span<int> {
 	self.data:get()
 }
 

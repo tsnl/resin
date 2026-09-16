@@ -1938,6 +1938,44 @@ impl Inference<'_> {
         if let Some(application) = self.applications.get(&owner).cloned() {
             return self.complete_overload(owner, application, args, out, span);
         }
+        if primitive
+            .as_ref()
+            .is_some_and(|name| super::context::is_primitive_operation(name))
+            && args.and_then(|args| args.first()).is_some_and(|arg| {
+                matches!(
+                    self.solver.shape_hint(arg),
+                    Type::Variable(_) | Type::Apply { .. }
+                )
+            })
+        {
+            // A source candidate cannot win while a primitive candidate's
+            // receiver shape is still unknown (for example record.values).
+            return Ok(false);
+        }
+        if let [candidate] = candidates.as_slice()
+            && primitive.is_none()
+            && !self
+                .typer
+                .functions
+                .get(&candidate.function)
+                .is_some_and(|function| {
+                    matches!(
+                        function.body,
+                        FunctionBody::GpuPipelineFactory { .. }
+                            | FunctionBody::GpuPipelineRecord { .. }
+                    )
+                })
+        {
+            // A single compatible generic signature already determines its
+            // result's shape. Retain that information (for example Ptr<T>)
+            // instead of hiding it behind a dependent operation projection.
+            let baseline = self.solver.clone();
+            if let Ok(application) = self.match_overload(candidate, lookup, span) {
+                self.applications.insert(owner, application.clone());
+                return self.complete_overload(owner, application, args, out, span);
+            }
+            self.solver = baseline;
+        }
         if let Some(args) = args
             && args.iter().any(|arg| self.solver.dependent(arg))
         {
@@ -1969,37 +2007,34 @@ impl Inference<'_> {
         }
         let baseline = self.solver.clone();
         let mut viable = Vec::new();
+        let mut rejected = Vec::new();
         for candidate in candidates {
             self.solver = baseline.clone();
-            let matched = (|| {
-                let (signature, type_args) = self.solver.apply(
-                    candidate.signature.clone(),
-                    &candidate.parameters,
-                    explicit.clone(),
-                    span,
-                )?;
-                let Type::Node(Head::Function, parts) = self.solver.head(&signature) else {
-                    return Err(error(span, "overload candidate is not a function"));
-                };
-                let application = AppliedMethod {
-                    declaration: candidate.declaration,
-                    type_args,
-                    params: parts[1..].to_vec(),
-                    result: parts[0].clone(),
-                };
-                if let Some(args) = args {
-                    self.arguments(args, &application.params, span)?;
-                    self.solver.unify(&application.result, out, span)?;
-                    if let Some(expected) = expected {
-                        self.solver.coerce(&application.result, expected, span)?;
-                    }
-                } else {
-                    self.solver.coerce(&signature, out, span)?;
+            if let Some(method) = self.typer.functions.get(&candidate.function).cloned()
+                && matches!(
+                    method.body,
+                    FunctionBody::GpuPipelineFactory { .. }
+                        | FunctionBody::GpuPipelineRecord { .. }
+                )
+            {
+                match self.pipeline_overload(&method, lookup, span) {
+                    Ok(Some((method, complete))) => viable.push((
+                        None,
+                        Some(ResolvedMethod::GpuPipeline { method }),
+                        self.solver.clone(),
+                        complete,
+                    )),
+                    Ok(None) => {}
+                    Err(error) => rejected.push(error),
                 }
-                Ok(application)
-            })();
-            if let Ok(application) = matched {
-                viable.push((Some(application), None, self.solver.clone(), true));
+                continue;
+            }
+            let matched = self.match_overload(candidate, lookup, span);
+            match matched {
+                Ok(application) => {
+                    viable.push((Some(application), None, self.solver.clone(), true))
+                }
+                Err(error) => rejected.push(error),
             }
         }
         self.solver = baseline.clone();
@@ -2031,6 +2066,13 @@ impl Inference<'_> {
             || self.solver.complete(out).is_some(),
             |args| args.iter().all(|arg| self.solver.complete(arg).is_some()),
         );
+        if viable.is_empty()
+            && candidates.len() == 1
+            && primitive.is_none()
+            && let Some(error) = rejected.pop()
+        {
+            return Err(error);
+        }
         if !known || !viable.is_empty() {
             return Ok(false);
         }
@@ -2045,6 +2087,100 @@ impl Inference<'_> {
                 )
             },
         ))
+    }
+
+    fn match_overload(
+        &mut self,
+        candidate: &OverloadCandidate,
+        lookup: &Overload,
+        span: Span,
+    ) -> Result<AppliedMethod> {
+        let (signature, type_args) = self.solver.apply(
+            candidate.signature.clone(),
+            &candidate.parameters,
+            lookup.type_args.clone(),
+            span,
+        )?;
+        let Type::Node(Head::Function, parts) = self.solver.head(&signature) else {
+            return Err(error(span, "overload candidate is not a function"));
+        };
+        let application = AppliedMethod {
+            declaration: candidate.declaration,
+            type_args,
+            params: parts[1..].to_vec(),
+            result: parts[0].clone(),
+        };
+        if let Some(args) = &lookup.args {
+            self.arguments(args, &application.params, span)?;
+            self.solver.unify(&application.result, &lookup.out, span)?;
+            if let Some(expected) = &lookup.expected {
+                self.solver.coerce(&application.result, expected, span)?;
+            }
+        } else {
+            self.solver.coerce(&signature, &lookup.out, span)?;
+        }
+        Ok(application)
+    }
+
+    fn pipeline_overload(
+        &mut self,
+        bridge: &FunctionDecl,
+        lookup: &Overload,
+        span: Span,
+    ) -> Result<Option<(super::gpu::PipelineMethod, bool)>> {
+        let args = lookup
+            .args
+            .as_ref()
+            .ok_or_else(|| error(span, "GPU bridges require a direct call"))?;
+        if lookup.type_args.is_some() {
+            return Err(error(
+                span,
+                "GPU bridge arguments are inferred from shader declarations",
+            ));
+        }
+        argument_count(bridge.params.len(), args.len(), span)?;
+        let needed = if matches!(bridge.body, FunctionBody::GpuPipelineFactory { .. }) {
+            args.len() - 1
+        } else {
+            1
+        };
+        let Some(inputs) = args[1..]
+            .iter()
+            .take(needed)
+            .map(|ty| self.solver.complete(&Type::value(ty.clone())))
+            .collect::<Option<Vec<_>>>()
+        else {
+            return Ok(None);
+        };
+        let mut method = self
+            .typer
+            .source_pipeline_method(bridge, &inputs)
+            .map_err(|message| error(span, message))?;
+        let projection =
+            matches!(method.body, FunctionBody::GpuPipelineDispatch { .. }).then_some(2);
+        let mut complete = true;
+        for (index, (arg, param)) in args.iter().zip(&method.params).enumerate() {
+            let param = Type::from_hir(param);
+            complete &= if projection == Some(index) {
+                self.projection_argument(arg, &param, span, 0)?
+            } else {
+                self.solver.coerce(arg, &param, span)?
+            };
+        }
+        complete &= self
+            .solver
+            .unify(&Type::from_hir(&method.result), &lookup.out, span)?;
+        if let Some(expected) = &lookup.expected {
+            complete &= self
+                .solver
+                .coerce(&Type::from_hir(&method.result), expected, span)?;
+        }
+        if complete && let Some(index) = projection {
+            method.params[index] = self
+                .solver
+                .require_complete(&Type::value(args[index].clone()), span)?;
+        }
+        Ok(Some((method, complete)))
     }
 
     fn primitive_overload(
@@ -2090,6 +2226,9 @@ impl Inference<'_> {
         out: &Type,
         span: Span,
     ) -> Result<bool> {
+        for argument in &application.type_args {
+            super::eval::reference_type(&self.solver, argument, false, span)?;
+        }
         let complete = if let Some(args) = args {
             let arguments = self.arguments(args, &application.params, span)?;
             self.solver.unify(&application.result, out, span)? && arguments

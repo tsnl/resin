@@ -249,7 +249,7 @@ fn streams_write_literals_and_owned_strings_verbatim() {
             let mut out = io_stdout();
             let mut error = io_stderr();
             let mut text = fmt("n = {0}", (42,));
-            let mut copy = text;
+            let copy = text:clone();
             out:write("raw {0}\0")?;
             out:write(copy)?;
             out:write(bytes(" bytes"))?;

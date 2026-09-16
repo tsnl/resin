@@ -138,13 +138,26 @@ fn record(
     out: &mut String,
 ) -> Result<String, Error> {
     let (context, allocator, recorder) = functions;
-    let metadata = resin_types::gpu_pipeline_contract(&types.module.types, &args[1].ty)
+    let pipeline = args[1].ty.deref_target().unwrap_or(&args[1].ty);
+    let metadata = resin_types::gpu_pipeline_contract(&types.module.types, pipeline)
         .expect("verified source pipeline");
     let (root, owner) = (&metadata.root, &metadata.owner);
     let draw = metadata.kind == resin_types::GpuPipelineKind::Graphics;
-    let token = format!("({}).value.f0", args[1].expr);
+    let receiver = if args[1].ty.deref_target().is_some() {
+        format!("*({})", args[1].expr)
+    } else {
+        args[1].expr.clone()
+    };
+    let token = format!("({receiver}).value.f0");
     writeln!(out, "  if ({token}.root_type != {}u || {token}.owner_type != {}u || {token}.kind != {}u) resin_fail(\"GPU pipeline contract does not match its source wrapper\");", types.id(root), types.id(owner), pipeline_kind(metadata.kind)).unwrap();
-    let native_owner = owner_value(types, owner, &format!("{token}.owner"));
+    let borrowed = owner_value(types, owner, &format!("{token}.owner"));
+    let native_owner = format!("{name}_owner");
+    writeln!(
+        out,
+        "  {} {native_owner} = {borrowed}; (void){native_owner};",
+        types.name(owner)
+    )
+    .unwrap();
     let Some(allocator) = allocator else {
         return Ok(record_call(
             types,
@@ -167,7 +180,10 @@ fn record(
         "  {} {} = {};",
         types.name(gpu_type),
         gpu.expr,
-        call(context, &[types.copy(owner, &native_owner)])
+        call(
+            context,
+            &[owner_argument(types, context, 0, owner, &native_owner)]
+        )
     )
     .unwrap();
     let (_, error) = result.fallible_parts().expect("verified recording result");
@@ -237,7 +253,7 @@ fn record_call(
     };
     let mut values = vec![
         types.copy(&args[0].ty, &args[0].expr),
-        types.copy(owner, native_owner),
+        owner_argument(types, recorder, 1, owner, native_owner),
         root,
     ];
     values.extend(args[3..].iter().map(|arg| types.copy(&arg.ty, &arg.expr)));
@@ -246,6 +262,24 @@ fn record_call(
 
 fn call(function: FunctionId, args: &[String]) -> String {
     format!("r_fn{}({})", function.index(), args.join(", "))
+}
+
+fn owner_argument(
+    types: &Types<'_>,
+    function: FunctionId,
+    index: usize,
+    owner: &Ty,
+    value: &str,
+) -> String {
+    if types.module.functions[function.index()].locals[index]
+        .ty
+        .deref_target()
+        == Some(owner)
+    {
+        format!("&({value})")
+    } else {
+        types.copy(owner, value)
+    }
 }
 
 fn pipeline_kind(kind: resin_types::GpuPipelineKind) -> u32 {

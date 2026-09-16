@@ -18,13 +18,7 @@ fn check(source: &str, generator: &mut Generator) -> CheckedFile {
 fn checking_resolves_types_in_earlier_expressions_and_annotations() {
     let mut generator = Generator::new();
     let checked = check(
-        "def narrow(n: int) -> int = { n };\n\
-         def value() -> _ = {\n\
-             var item = 42;\n\
-             var pointer: Ptr<_>;\n\
-             pointer := &item;\n\
-             narrow(pointer.*)\n\
-         };",
+        "fn narrow(n: int) -> int  { n }\nfn value() -> _  {\nlet mut item = 42;\nlet mut pointer: Ptr<_>;\npointer = &item;\nnarrow(pointer.*)\n}",
         &mut generator,
     );
     assert!(checked.errors.is_empty(), "{:?}", checked.errors);
@@ -79,12 +73,7 @@ fn recursive_groups_follow_dependencies() {
 fn completed_bodies_keep_shadowed_references_after_discarding_construction_state() {
     let mut generator = Generator::new();
     let mut checked = check(
-        "def target(n: int) -> int = { n };\n\
-         def caller(target: int) -> int = {\n\
-             var outer = target;\n\
-             { var target = outer + 1; target } + target\n\
-         };\n\
-         def invoke() -> int = { target(7) };",
+        "fn target(n: int) -> int  { n }\nfn caller(target: int) -> int  {\nlet mut outer = target;\n{ let mut target = outer + 1; target } + target\n}\nfn invoke() -> int  { target(7) }",
         &mut generator,
     );
     assert!(checked.errors.is_empty(), "{:?}", checked.errors);
@@ -135,8 +124,7 @@ fn completed_bodies_keep_shadowed_references_after_discarding_construction_state
 fn declaration_identities_do_not_depend_on_unique_source_spans() {
     use resin_source::prelude::*;
     let mut file = crate::lower::test_source(
-        "def integer(value: int) -> _ = { value };\n\
-         def boolean(value: bool) -> _ = { value };",
+        "fn integer(value: int) -> _  { value }\nfn boolean(value: bool) -> _  { value }",
     )
     .file;
     for stmt in &mut file.stmts {

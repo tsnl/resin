@@ -79,7 +79,7 @@ fn recursive_check_is_read_only_and_formatting_is_idempotent() {
 fn errors_preserve_invalid_files_and_do_not_hide_other_inputs() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let root = temp.path();
-    let invalid = "fn broken()  { let mut x = ; }";
+    let invalid = "fn broken() { let mut x = ; }";
     fs::write(root.join("invalid.resin"), invalid).unwrap();
     fs::write(root.join("valid.resin"), "fn f(){}").unwrap();
     fs::write(root.join("binary.resin"), [0xff, 0xfe]).unwrap();
@@ -105,7 +105,7 @@ fn errors_preserve_invalid_files_and_do_not_hide_other_inputs() {
     assert_eq!(fs::read(root.join("binary.resin")).unwrap(), [0xff, 0xfe]);
     assert_eq!(
         fs::read_to_string(root.join("valid.resin")).unwrap(),
-        "fn f()  {}\n"
+        "fn f() {}\n"
     );
 }
 
@@ -163,7 +163,7 @@ fn formatter_flag_aliases_work_before_and_after_paths() {
         for name in ["first.resin", "second.resin"] {
             assert_eq!(
                 fs::read_to_string(root.join(name)).unwrap(),
-                "fn main()  {}\n"
+                "fn main() {}\n"
             );
         }
     }
@@ -217,7 +217,7 @@ fn format_mode_treats_colons_as_literal_filename_characters() {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
-    assert_eq!(fs::read_to_string(path).unwrap(), "fn main()  {}\n");
+    assert_eq!(fs::read_to_string(path).unwrap(), "fn main() {}\n");
 }
 
 #[cfg(unix)]
@@ -242,7 +242,7 @@ fn skips_symlinks_and_preserves_modes() {
             .unwrap()
             .is_symlink()
     );
-    assert_eq!(fs::read_to_string(&odd).unwrap(), "fn main()  {}\n");
+    assert_eq!(fs::read_to_string(&odd).unwrap(), "fn main() {}\n");
     assert_eq!(
         fs::metadata(&odd).unwrap().permissions().mode() & 0o777,
         0o640
@@ -266,5 +266,5 @@ fn accepts_non_utf8_paths() {
     ));
     fs::write(&path, "fn main(){}").unwrap();
     assert!(fmt(temp.path(), &["."]).status.success());
-    assert_eq!(fs::read_to_string(path).unwrap(), "fn main()  {}\n");
+    assert_eq!(fs::read_to_string(path).unwrap(), "fn main() {}\n");
 }

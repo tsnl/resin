@@ -62,3 +62,34 @@ fn generic_relations_and_operators_select_visible_signatures() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn gpu_bridges_borrow_receivers_and_pipelines_through_native_generation() {
+    let source = r#"
+        export { main };
+        import { "$/gpu.resin" };
+        @compute_shader fn kernel(index: ulong, root: Ptr<uint>) { root.* = uint(index); }
+        fn main() -> int | Err<_> {
+            if (false) {
+                let gpu = gpu_new()?;
+                let value = gpu:create(0_ui)?;
+                let pipeline = gpu:create_compute_pipeline(kernel)?;
+                let commands = gpu:start_command_recording()?;
+                commands:dispatch(pipeline, 0_ui, 1_ui, 1_ui, 1_ui)?;
+                commands:cancel();
+                let retained = pipeline:clone();
+            };
+            0
+        }
+    "#;
+    let module = support::module(source);
+    let output = support::project::Project::new(&module, Some("main"))
+        .unwrap()
+        .run();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

@@ -118,6 +118,11 @@ impl Completion<'_> {
 
     fn consume(&mut self, mut term: Term, target: crate::Type) -> Result<Term> {
         self.require_available(&term)?;
+        let value_type = match &term.ty {
+            crate::Type::Reference { referent } => referent.as_ref(),
+            ty => ty,
+        }
+        .clone();
         if matches!(target, crate::Type::Reference { .. }) {
             if !reference_place(&term) {
                 return Err(GenerateError::inference(
@@ -125,7 +130,7 @@ impl Completion<'_> {
                     "reference binding requires an initialized place, not a temporary value",
                 ));
             }
-        } else if !target.copies_implicitly() && reference_place(&term) {
+        } else if !value_type.copies_implicitly() && reference_place(&term) {
             let span = term.span;
             let ty = term.ty.clone();
             if let Some((binding, path)) = owned_path(&term) {
@@ -138,8 +143,10 @@ impl Completion<'_> {
                         place: Box::new(term),
                     },
                 };
-            } else if self.solver.resolve(&Type::from_hir(&target)).is_none()
-                && !matches!(target, crate::Type::Defined { .. })
+            } else if (self.solver.resolve(&Type::from_hir(&value_type)).is_none()
+                && !matches!(value_type, crate::Type::Defined { .. }))
+                || (self.solver.resolve(&Type::from_hir(&target)).is_none()
+                    && !matches!(target, crate::Type::Defined { .. }))
             {
                 term = Term {
                     span,
@@ -210,7 +217,29 @@ impl Completion<'_> {
     }
 
     fn argument(&mut self, source: &typed::Term, target: &Type) -> Result<Term> {
-        self.elaborate_as(source, self.solver.require_complete(target, source.span)?)
+        let target = self.solver.require_complete(target, source.span)?;
+        let term = Term {
+            span: source.span,
+            ty: self.solver.require_complete(&source.actual, source.span)?,
+            kind: self.elaborate_kind(source)?,
+        };
+        if let crate::Type::Reference { referent } = &target
+            && !reference_place(&term)
+        {
+            let value = self.consume(term, *referent.clone())?;
+            // Only argument passing materializes temporaries. Reference bindings
+            // and results still require a place; storage lowering owns this value
+            // until the enclosing full expression finishes.
+            return Ok(Term {
+                span: source.span,
+                ty: target,
+                kind: TermKind::Adapt {
+                    conversion: crate::ReceiverConversion::Address,
+                    arg: Box::new(value),
+                },
+            });
+        }
+        self.consume(term, target)
     }
 
     fn ty(&self, source: &typed::Term) -> Result<Ty> {
@@ -351,6 +380,9 @@ impl Completion<'_> {
                         .require_complete(&signature.result, source.span)?;
                     let kind = self.intrinsic_method(signature, None, None, args, source.span)?;
                     self.convert_method_result(source, result, kind)?
+                }
+                Some(ResolvedMethod::GpuPipeline { method }) => {
+                    self.source_pipeline(method, None, &Ident::new(name.clone(), *name_span), args)?
                 }
                 None => self.builtin(source, name, args)?,
                 _ => unreachable!("operator resolution"),
@@ -529,11 +561,24 @@ impl Completion<'_> {
             },
             _ => return self.boxed(source),
         };
-        Ok(Box::new(Term {
+        let place = Term {
             span: source.span,
             ty: self.solver.require_complete(&source.actual, source.span)?,
             kind,
-        }))
+        };
+        Ok(Box::new(
+            if let crate::Type::Reference { referent } = &place.ty {
+                Term {
+                    span: source.span,
+                    ty: *referent.clone(),
+                    kind: TermKind::Use {
+                        arg: Box::new(place),
+                    },
+                }
+            } else {
+                place
+            },
+        ))
     }
 
     fn assign(&mut self, place: &typed::Term, value: &typed::Term) -> Result<TermKind> {
@@ -900,47 +945,69 @@ impl Completion<'_> {
         _name: &Ident,
         arguments: &[typed::Term],
     ) -> Result<TermKind> {
-        if let FunctionBody::GpuPipelineFactory { factory, graphics } = method.body {
-            let receiver_type = self
-                .solver
-                .resolve(&Type::from_hir(&method.params[0]))
-                .expect("fixed native GPU receiver");
-            return self.pipeline_create(receiver, arguments, &[receiver_type], factory, graphics);
-        }
-        let receiver_type = self
-            .solver
-            .resolve(&Type::from_hir(&method.params[0]))
-            .expect("fixed native GPU receiver");
-        let receiver = receiver
-            .map(|value| self.adapt(value, &self.ty(value)?, &receiver_type))
-            .transpose()?;
-        let values = receiver
+        let sources = receiver
             .into_iter()
-            .map(|value| *value)
-            .chain(
-                arguments
-                    .iter()
-                    .map(|value| self.elaborate(value))
-                    .collect::<Result<Vec<_>>>()?,
-            )
-            .collect();
-        let args = Arguments {
-            values,
-            params: method.params,
-        };
+            .chain(arguments.iter())
+            .collect::<Vec<_>>();
+        let values = sources
+            .iter()
+            .zip(&method.params)
+            .map(|(source, parameter)| self.argument(source, &Type::from_hir(parameter)))
+            .collect::<Result<Vec<_>>>()?;
+        if let FunctionBody::GpuPipelineFactory { factory, graphics } = method.body {
+            let stages = if graphics {
+                &["vertex", "fragment"][..]
+            } else {
+                &["compute"][..]
+            };
+            let mut shaders = Vec::new();
+            for (term, stage) in values[1..].iter().zip(stages) {
+                let TermKind::Function { function, .. } = term.kind else {
+                    return Err(GenerateError::inference(
+                        term.span,
+                        "pipeline creation requires direct shader declarations; runtime aliases are unsupported",
+                    ));
+                };
+                let entry = self.shaders.get(&function).ok_or_else(|| {
+                    GenerateError::inference(
+                        term.span,
+                        "pipeline creation requires a decorated shader declaration",
+                    )
+                })?;
+                if entry.stage.as_ref() != *stage {
+                    return Err(GenerateError::inference(
+                        term.span,
+                        format!("pipeline requires a @{stage}_shader declaration"),
+                    ));
+                }
+                self.embedded.insert(function);
+                shaders.push(function);
+            }
+            return Ok(TermKind::GpuPipelineCreate {
+                factory,
+                shaders,
+                args: Arguments {
+                    values: vec![values.into_iter().next().unwrap()],
+                    params: vec![method.params[0].clone()],
+                },
+            });
+        }
         let FunctionBody::GpuPipelineDispatch {
             context,
             allocator,
             record,
         } = method.body
         else {
-            unreachable!("completed pipeline bridge")
+            unreachable!("completed pipeline bridge");
         };
         Ok(TermKind::GpuPipelineDispatch {
             context,
             allocator,
             record,
-            args,
+            args: Arguments {
+                values,
+                params: method.params,
+            },
         })
     }
 

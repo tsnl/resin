@@ -121,7 +121,12 @@ impl FunctionLowering<'_> {
                 self.gen_declare(*binding, name, ty.clone())
             }
             Statement::Expr { term } => {
+                self.enter_scope();
                 self.gen_term(term, None)?;
+                self.emit(Instr::Discard);
+                self.emit(Instr::Push { value: Value::Unit });
+                self.cleanup(self.owned.len() - 1, &Ty::Unit);
+                self.owned.pop();
                 self.emit(Instr::Discard);
                 Ok(())
             }

@@ -3,7 +3,7 @@ mod support;
 #[test]
 fn assertions_evaluate_once_and_remain_enabled_in_optimized_programs() {
     let module = support::module(
-        "export { main }; fn main()  { let mut n = 0; assert((n = n + 1) == 1); assert(n == 1); }",
+        "export { main }; fn main() { let mut n = 0; assert({ n = n + 1; n } == 1); assert(n == 1); }",
     );
     let output = support::project::Project::new(&module, Some("main"))
         .unwrap()

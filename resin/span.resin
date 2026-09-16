@@ -1,4 +1,4 @@
-export { Span, bytes, at, slice, as_bytes };
+export { Span, bytes, at, slice, as_bytes, clone };
 
 // Borrowed storage. The caller keeps the allocation alive throughout each access.
 struct Span<T> {
@@ -35,3 +35,7 @@ fn bytes(text: str) -> Span<ubyte> {
 intrinsic "pointer_index" fn pointer_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;
 intrinsic "pointer_range" fn pointer_range<T>(data: Ptr<T>, capacity: ulong, start: ulong, length: ulong) -> Ptr<T>;
 intrinsic "pointer_bytes" fn pointer_bytes<T>(data: Ptr<T>, length: ulong) -> (Ptr<ubyte>, ulong);
+
+fn clone<T>(value: Ref<Span<T>>) -> Span<T> {
+	Span<T> { data = value.data, length = value.length }
+}

@@ -178,6 +178,7 @@ pub(crate) struct SourceOrigin {
 #[derive(Debug, Clone)]
 pub(crate) struct FunctionDecl {
     pub body: FunctionBody,
+    pub source_params: Vec<crate::Type>,
     pub params: Vec<Ty>,
     pub result: Ty,
 }
@@ -218,15 +219,35 @@ impl Context {
         self.namespaces.insert(ty, BTreeMap::new());
         ty
     }
-    pub(crate) fn register_function(&mut self, function: FunctionId, params: Vec<Ty>, result: Ty) {
-        self.functions.insert(
-            function,
-            FunctionDecl {
-                body: FunctionBody::Defined(function),
-                params,
-                result,
-            },
-        );
+    pub(crate) fn register_function(
+        &mut self,
+        function: FunctionId,
+        source_params: Vec<crate::Type>,
+        source_result: &crate::Type,
+    ) -> bool {
+        let solver = super::infer::Solver::default();
+        let abi = |ty: &crate::Type| {
+            if let crate::Type::Reference { referent } = ty {
+                solver
+                    .resolve(&super::infer::Type::from_hir(referent))
+                    .map(|pointee| Ty::Pointer {
+                        pointee: Box::new(pointee),
+                    })
+            } else {
+                solver.resolve(&super::infer::Type::from_hir(ty))
+            }
+        };
+        let params = source_params.iter().map(abi).collect::<Option<Vec<_>>>();
+        let (Some(params), Some(result)) = (params, abi(source_result)) else {
+            return false;
+        };
+        self.functions.entry(function).or_insert(FunctionDecl {
+            body: FunctionBody::Defined(function),
+            source_params,
+            params,
+            result,
+        });
+        true
     }
     pub(crate) fn declared_function(&self, function: FunctionId) -> &FunctionDecl {
         &self.functions[&function]

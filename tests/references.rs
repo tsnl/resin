@@ -69,14 +69,14 @@ fn get<T>(self: Ref<Cell<T>>) -> Ref<T>  { self.value }
 
 fn set<T>(self: Ref<Cell<T>>, other: Ref<T>)  { self.value = other; }
 
-        fn get<C>(cell: Ref<C>) -> _  { cell:get() }
-        fn set<C, T>(cell: Ref<C>, value: Ref<T>)  { cell:set(value); }
+        fn read_cell<C>(cell: Ref<C>) -> _  { cell:get() }
+        fn set_cell<C, T>(cell: Ref<C>, value: Ref<T>)  { cell:set(value); }
         fn main() -> int  {
             let mut cell = Cell<int> { value = 1 };
             cell:get() = 7;
             let mut replacement = 35_i;
-            let mut old = get(cell);
-            set(cell, replacement);
+            let mut old = read_cell(cell);
+            set_cell(cell, replacement);
             old + cell.value
         }
     "#
@@ -125,7 +125,7 @@ fn references_to_pointer_slots_are_fixed_aliases() {
 }
 
 #[test]
-fn references_borrow_managed_storage_and_value_reads_copy() {
+fn references_borrow_managed_storage_and_replacements_destroy_the_old_value() {
     assert_eq!(
         result(
             r#"export { main };
@@ -141,23 +141,23 @@ fn drop(self: Ptr<Resource>)  { self.drops.* = self.drops.* + 1; }
                 let mut resource = Resource { drops = &drops };
                 {
                     let mut reference: Ref<Resource> = identity(resource);
-                    { let mut copied = reference; };
-                    if (drops != 1_i) { drops = 90; };
+                    { let borrowed: Ref<Resource> = reference; };
+                    if (drops != 0_i) { drops = 90; };
                     reference = Resource { drops = &drops };
                 };
-                if (drops != 3_i) { drops = 90; };
+                if (drops != 1_i) { drops = 90; };
             };
             drops
         }
     "#
         ),
-        4
+        2
     );
 }
 
 #[test]
-fn dependent_reference_results_bind_but_dependent_value_temporaries_do_not() {
-    for body in ["get(cell)", "cell.get()"] {
+fn dependent_reference_results_and_temporary_arguments_preserve_reference_semantics() {
+    for body in ["read_cell(cell)", "cell:get()"] {
         let source = format!(
             r#"export {{ main }};
             struct Cell {{ value: int,
@@ -165,7 +165,7 @@ fn dependent_reference_results_bind_but_dependent_value_temporaries_do_not() {
             }}
 fn get(self: Ref<Cell>) -> Ref<int>  {{ self.value }}
 
-            fn get<C>(cell: Ref<C>) -> Ref<int>  {{ cell:get() }}
+            fn read_cell<C>(cell: Ref<C>) -> Ref<int>  {{ cell:get() }}
             fn main() -> int  {{ let mut cell = Cell {{ value = 1 }}; {body} = 42; cell.value }}
         "#
         );
@@ -180,11 +180,7 @@ fn take(self: Ref<Cell>, value: Ref<int>)  {}
         fn call<C>(cell: Ref<C>)  { cell:take(value()); }
         fn main()  { let mut cell = Cell { value = 1 }; call(cell); }
     "#;
-    let error = support::pipeline::source_module(source).unwrap_err();
-    assert!(
-        error.to_string().contains("reference binding requires"),
-        "{error}"
-    );
+    support::pipeline::source_module(source).unwrap();
 }
 
 #[test]

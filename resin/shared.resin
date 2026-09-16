@@ -94,17 +94,17 @@ intrinsic "owner_upgrade" fn owner_upgrade(owner: Ptr<WeakOwner>) -> StrongOwner
 intrinsic "weak_empty" fn weak_empty() -> WeakOwner;
 
 fn clone<T>(value: Ref<ArcPtr<T>>) -> ArcPtr<T> {
-    ArcPtr<T> { owner = value.owner }
+	ArcPtr<T> { owner = value.owner }
 }
 
 fn clone<T>(value: Ref<ArcSpan<T>>) -> ArcSpan<T> {
-    ArcSpan<T> { owner = value.owner }
+	ArcSpan<T> { owner = value.owner }
 }
 
 fn clone<T>(value: Ref<WeakPtr<T>>) -> WeakPtr<T> {
-    WeakPtr<T> { owner = value.owner }
+	WeakPtr<T> { owner = value.owner }
 }
 
 fn clone<T>(value: Ref<WeakSpan<T>>) -> WeakSpan<T> {
-    WeakSpan<T> { owner = value.owner }
+	WeakSpan<T> { owner = value.owner }
 }
