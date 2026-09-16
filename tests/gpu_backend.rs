@@ -529,7 +529,8 @@ fn template_helpers_execute_with_shader_specific_instances() {
 fn at_indexing_mutates_shader_arrays_and_span_fields() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: uint, pixels: Ptr<uint> };
+        struct FieldsValues<T0> { values: T0 };
+struct Root { count: uint, pixels: Ptr<uint> };
         def read(i: uint) -> uint = {
             var values = [10_ui, 20_ui];
             var previous = (&values.at(0_ul)).replace(i);
@@ -537,7 +538,7 @@ fn at_indexing_mutates_shader_arrays_and_span_fields() {
         };
         @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = { var i = uint(invocation);
             if (i < root.count) {
-                var holder = { values = Span<uint> { data = root.pixels, length = 67_ul } };
+                var holder = FieldsValues<_> { values = Span<uint> { data = root.pixels, length = 67_ul } };
                 holder.values.at(ulong(i)) := 7_ui;
                 var value = read(i);
                 holder.values.at(ulong(i)) := value;

@@ -557,12 +557,6 @@ fn string_views_preserve_fields_and_byte_indexing() {
         (Instr::AccessStatic { index: 1 }, Ty::UInt64),
         (
             Instr::Ascribe {
-                ty: Ty::byte_span(),
-            },
-            Ty::byte_span(),
-        ),
-        (
-            Instr::Ascribe {
                 ty: Ty::Str.view_record().unwrap(),
             },
             Ty::Str.view_record().unwrap(),

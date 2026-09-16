@@ -47,9 +47,9 @@ struct InputLine {
 		var data = self.owner.get();
 		Span<ubyte> { data = data.data, length = data.length }
 	};
-	def bytes(self: Ptr<InputLine>) -> { data: Ptr<ubyte>, length: ulong } = {
+	def bytes(self: Ptr<InputLine>) -> (Ptr<ubyte>, ulong) = {
 		var view = self.get();
-		{ data = view.data, length = view.length }
+		(view.data, view.length)
 	};
 };
 

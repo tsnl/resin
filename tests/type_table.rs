@@ -5,10 +5,11 @@ mod support;
 fn nominal_and_structural_types_share_one_index_space() {
     let module = support::module(
         r#"
-        struct First { value: int };
+        struct FieldsValue<T0> { value: T0 };
+struct First { value: int };
         struct Second { value: int };
         type Alias = First;
-        type Record = { value: int };
+        type Record = FieldsValue<int>;
         type RecordAlias = Record;
         type Optional = int | None;
         type Flattened = None | Optional | int;
@@ -43,7 +44,11 @@ fn nominal_and_structural_types_share_one_index_space() {
     assert_eq!(module.types[first_index].body(), second_definition.body());
     assert_eq!(
         module.types.id(module.types[first_index].body().unwrap()),
-        module.types.id(&record)
+        module
+            .types
+            .id(module.types[module.types.id(&record).unwrap().index()]
+                .body()
+                .unwrap())
     );
     assert_eq!(
         module.functions[2].result,

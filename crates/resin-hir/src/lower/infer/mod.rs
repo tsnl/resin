@@ -1810,6 +1810,48 @@ impl Inference<'_> {
         Ok(None)
     }
 
+    // GPU projection reads fields from a source aggregate without converting or
+    // discarding its nominal identity. Only this boundary accepts matching shapes.
+    fn projection_argument(
+        &mut self,
+        from: &Type,
+        to: &Type,
+        span: Span,
+        depth: usize,
+    ) -> Result<bool> {
+        if depth >= 128 {
+            return Err(error(
+                span,
+                "GPU argument projection exceeds the depth limit",
+            ));
+        }
+        match (self.shape(from, false, span)?, self.solver.head(to)) {
+            (
+                Type::Node(Head::Record(names), fields),
+                Type::Node(Head::Record(expected), targets),
+            ) => {
+                if names != expected {
+                    return Err(error(
+                        span,
+                        "GPU argument fields must match the shader root's field names and order",
+                    ));
+                }
+                let mut complete = true;
+                for (field, target) in fields.iter().zip(targets) {
+                    complete &= self.projection_argument(field, &target, span, depth + 1)?;
+                }
+                Ok(complete)
+            }
+            (
+                Type::Node(Head::Array(length), fields),
+                Type::Node(Head::Array(expected), targets),
+            ) if length == expected => {
+                self.projection_argument(&fields[0], &targets[0], span, depth + 1)
+            }
+            _ => self.solver.coerce(from, to, span),
+        }
+    }
+
     fn constraint(&mut self, owner: Rule, constraint: &Constraint, span: Span) -> Result<bool> {
         match constraint {
             Constraint::Method {
@@ -1862,7 +1904,7 @@ impl Inference<'_> {
                     else {
                         return Ok(false);
                     };
-                    let method = self
+                    let mut method = self
                         .typer
                         .source_pipeline_method(&method, &inputs)
                         .map_err(|message| error(span, message))?;
@@ -1870,11 +1912,26 @@ impl Inference<'_> {
                         .iter()
                         .map(Type::from_hir)
                         .collect::<Vec<_>>();
-                    let a = self.arguments(args, &params, span)?;
+                    let projection =
+                        matches!(method.body, FunctionBody::GpuPipelineDispatch { .. })
+                            .then_some(2 - usize::from(!associated));
+                    let mut a = true;
+                    for (index, (arg, param)) in args.iter().zip(&params).enumerate() {
+                        a &= if projection == Some(index) {
+                            self.projection_argument(arg, param, span, 0)?
+                        } else {
+                            self.solver.coerce(arg, param, span)?
+                        };
+                    }
                     let b = self
                         .solver
                         .coerce(&Type::from_hir(&method.result), out, span)?;
                     if a && b {
+                        if let Some(index) = projection {
+                            method.params[2] = self
+                                .solver
+                                .require_complete(&Type::value(args[index].clone()), span)?;
+                        }
                         self.methods
                             .insert(owner, ResolvedMethod::GpuPipeline { method });
                     }

@@ -17,11 +17,12 @@ struct Span<T> {
 	};
 
 	def as_bytes(self: Span<T>) -> Span<ubyte> = {
-		Span<ubyte>(self.bytes())
+		var raw = self.bytes();
+		Span<ubyte> { data = raw.0, length = raw.1 }
 	};
 
 	// Primitive byte transport for formatting and native interfaces.
-	def bytes(self: Span<T>) -> { data: Ptr<ubyte>, length: ulong } = {
+	def bytes(self: Span<T>) -> (Ptr<ubyte>, ulong) = {
 		pointer_bytes(self.data, self.length)
 	};
 };
@@ -33,4 +34,4 @@ def bytes(text: str) -> Span<ubyte> = {
 
 intrinsic "pointer_index" def pointer_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;
 intrinsic "pointer_range" def pointer_range<T>(data: Ptr<T>, capacity: ulong, start: ulong, length: ulong) -> Ptr<T>;
-intrinsic "pointer_bytes" def pointer_bytes<T>(data: Ptr<T>, length: ulong) -> { data: Ptr<ubyte>, length: ulong };
+intrinsic "pointer_bytes" def pointer_bytes<T>(data: Ptr<T>, length: ulong) -> (Ptr<ubyte>, ulong);

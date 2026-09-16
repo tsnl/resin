@@ -2,6 +2,7 @@ export { kernel, main };
 
 import { "$/span.resin", "$/string.resin", "$/gpu.resin", "$/shared.resin", "$/image.resin" };
 
+struct HostRoot { width: uint, height: uint, pixels: GpuSpan<uint> };
 struct Root { width: uint, height: uint, pixels: Span<uint> };
 
 def pixel(index: uint) -> uint = {
@@ -24,7 +25,7 @@ def main() -> (() | Err<_>) = {
 	var height = 256_ui;
 	var count = ulong(width) * ulong(height);
 	var pixels = gpu.alloc::<uint>(count)?;
-	var root = { width = width, height = height, pixels = pixels };
+	var root = HostRoot { width = width, height = height, pixels = pixels };
 	var commands = gpu.start_command_recording()?;
 
 	var workgroup_size = gpu.compute_workgroup_size();

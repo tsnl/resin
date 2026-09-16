@@ -2,6 +2,7 @@ export { main };
 
 import { "$/string.resin" };
 
+struct Pair { a: int, b: int };
 def clamp(n: int, lo: int, hi: int) -> int = {
 	if ((n < lo) || (n > hi)) {
 		lo
@@ -14,8 +15,8 @@ def both(a: int, b: int) -> bool = {
 	(a != 0) && (b != 0)
 };
 
-def pair(a: int, b: int) -> { a: int, b: int } = {
-	{ a = a, b = b }
+def pair(a: int, b: int) -> Pair = {
+	Pair { a = a, b = b }
 };
 
 def main() -> () = {

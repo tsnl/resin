@@ -21,11 +21,11 @@ struct String {
 		self.storage.get()
 	};
 	// A borrowed text view for repr and automatic formatting.
-	def repr_bytes(self: Ptr<String>) -> { data: Ptr<ubyte>, length: ulong } = { self.bytes() };
+	def repr_bytes(self: Ptr<String>) -> (Ptr<ubyte>, ulong) = { self.bytes() };
 	// Explicit transport for formatting tuple arguments.
-	def bytes(self: Ptr<String>) -> { data: Ptr<ubyte>, length: ulong } = {
+	def bytes(self: Ptr<String>) -> (Ptr<ubyte>, ulong) = {
 		var view = self.get();
-		{ data = view.data, length = view.length }
+		(view.data, view.length)
 	};
 };
 

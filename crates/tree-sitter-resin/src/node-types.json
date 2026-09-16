@@ -280,10 +280,6 @@
           "named": true
         },
         {
-          "type": "record_term",
-          "named": true
-        },
-        {
           "type": "tuple_term",
           "named": true
         },
@@ -304,10 +300,6 @@
       "types": [
         {
           "type": "paren_type",
-          "named": true
-        },
-        {
-          "type": "record_type",
           "named": true
         },
         {
@@ -1225,22 +1217,6 @@
         "types": [
           {
             "type": "term_define",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "record_type",
-    "named": true,
-    "fields": {
-      "field": {
-        "multiple": true,
-        "required": true,
-        "types": [
-          {
-            "type": "declare",
             "named": true
           }
         ]

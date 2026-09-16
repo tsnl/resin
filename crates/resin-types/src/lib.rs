@@ -432,7 +432,20 @@ impl Ty {
     }
 
     pub fn byte_span() -> Self {
-        Self::pointer_length(Self::UInt8)
+        Self::Record {
+            fields: vec![
+                RecordField {
+                    name: "_0".into(),
+                    ty: Self::Pointer {
+                        pointee: Box::new(Self::UInt8),
+                    },
+                },
+                RecordField {
+                    name: "_1".into(),
+                    ty: Self::UInt64,
+                },
+            ],
+        }
     }
 }
 

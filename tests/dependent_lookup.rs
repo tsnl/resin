@@ -208,7 +208,7 @@ fn dependent_failures_report_the_demanded_application() {
         ),
         (
             "struct Owner { def read(self: Owner, a: int, b: int) -> int = { a + b }; };",
-            "value.read({ first = 1_i, second = 2_i })",
+            "{ struct Pair { first: int, second: int }; value.read(Pair { first = 1_i, second = 2_i }) }",
             "",
         ),
         (
@@ -244,7 +244,7 @@ fn dependent_failures_report_the_demanded_application() {
         );
         assert!(error.span.end > error.span.start, "{error:?}");
     }
-    let source = "def relay<T>(value: T) -> int = { (value.callback)() }; def main() -> int = { relay({ callback = 42 }) };";
+    let source = "struct FieldsCallback<T0> { callback: T0 };\ndef relay<T>(value: T) -> int = { (value.callback)() }; def main() -> int = { relay(FieldsCallback<_> { callback = 42 }) };";
     let error = support::frontend::lower(&hir(source), &[], &resin_lir::LoweringOptions::default())
         .unwrap_err()
         .remove(0);

@@ -184,19 +184,17 @@ fn rejects_local_and_imported_owner(declaration: &str, use_site: &str, expected:
 fn source_drop_hooks_reject_structural_unwrapping_before_and_after_importing() {
     for (declaration, owner) in [
         (
-            "struct Managed { value: int, def drop(self: Ptr<Managed>) = {}; };",
+            "struct Managed { _0: int, def drop(self: Ptr<Managed>) = {}; };",
             "Managed",
         ),
         (
-            "struct Managed<T> { value: T, def drop(self: Ptr<Managed<T>>) = {}; };",
+            "struct Managed<T> { _0: T, def drop(self: Ptr<Managed<T>>) = {}; };",
             "Managed<int>",
         ),
     ] {
         rejects_local_and_imported_owner(
             declaration,
-            &format!(
-                "type Raw = {{ value: int }}; def unwrap(value: {owner}) -> Raw = {{ Raw(value) }};"
-            ),
+            &format!("type Raw = (int,); def unwrap(value: {owner}) -> Raw = {{ Raw(value) }};"),
             "UnwrapManaged",
         );
     }

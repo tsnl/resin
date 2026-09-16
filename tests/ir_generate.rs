@@ -297,7 +297,8 @@ def from_meters (m: Meters) -> int = { m.value };
 fn field_access_autoderefs_a_named_pointer() {
     let module = compile(
         r#"
-type P = Ptr<{ x: int }>;
+struct FieldsX<T0> { x: T0 };
+type P = Ptr<FieldsX<int>>;
 def f (p: P) -> int = { p.x };
 "#,
     );

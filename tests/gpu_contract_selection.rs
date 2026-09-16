@@ -4,6 +4,7 @@ mod support;
 use resin_source::{Loader, Source};
 
 const PIPELINES: &str = r#"
+
 struct Failure {};
 struct ComputeProgram<Root, Owner> { token: GpuPipelineContract };
 struct GraphicsProgram<Root, Owner> { token: GpuPipelineContract };
@@ -13,9 +14,9 @@ struct Device {
     @gpu_allocator
     def allocate(self: Device, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | Err<Failure>) = { Err(Failure {}) };
     @gpu_compute_pipeline
-    def compute(self: Device, code: {data: Ptr<ubyte>, length: ulong}) -> (PipelineOwner | Err<Failure>) = { Err(Failure {}) };
+    def compute(self: Device, code: (Ptr<ubyte>, ulong)) -> (PipelineOwner | Err<Failure>) = { Err(Failure {}) };
     @gpu_graphics_pipeline
-    def graphics(self: Device, vertex: {data: Ptr<ubyte>, length: ulong}, fragment: {data: Ptr<ubyte>, length: ulong}) -> (PipelineOwner | Err<Failure>) = { Err(Failure {}) };
+    def graphics(self: Device, vertex: (Ptr<ubyte>, ulong), fragment: (Ptr<ubyte>, ulong)) -> (PipelineOwner | Err<Failure>) = { Err(Failure {}) };
 };
 struct PipelineOwner { owner: StrongOwner,
     @gpu_pipeline_context
@@ -31,8 +32,9 @@ struct Params { value: Ptr<int> };
 "#;
 
 const USE_PROJECTION: &str = r#"
+struct FieldsValue<T0> { value: T0 };
 def record(commands: Commands, pipeline: ComputeProgram<Params, PipelineOwner>, value: Alpha<int>) -> (() | Err<Failure>) = {
-    commands.dispatch(pipeline, {value = value}, 1, 1, 1)
+    commands.dispatch(pipeline, FieldsValue<_> {value = value}, 1, 1, 1)
 };
 "#;
 

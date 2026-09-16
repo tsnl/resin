@@ -173,11 +173,12 @@ fn queries_capture_resin_constructs() {
             },
         };
         import { "$/core.resin" };
-        extern type Handle;
+        struct FieldsField<T0> { field: T0 };
+extern type Handle;
         struct Number {field: int};
         // a function
         def main (parameter: int) -> int = {
-            var local = {field = 2}; var pointer: Ptr<int>; var values = [1, 2];
+            var local = FieldsField<_> {field = 2}; var pointer: Ptr<int>; var values = [1, 2];
             native(parameter) + local.field + pointer.*
         };
         def reset() = {};

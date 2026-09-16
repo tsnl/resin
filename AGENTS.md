@@ -278,7 +278,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   including foreign declarations. Zero-argument functions reserve no parameter local;
   the verifier rejects parameter counts larger than the local array.
 - Functions use `def`, nominal records use `struct`, transparent aliases use `type`, and local value bindings use `var`, including
-  uninitialized locals. Record initializers and parameters do not take these keywords.
+  uninitialized locals. Record initializers and parameters do not take these keywords. Records require named
+  `struct` declarations; tuples provide anonymous aggregates.
   Foreign functions live in an optional top-level `extern` block between `export` and
   `import`: `extern { "header.h": { def name(...) -> Type; }, };`. Header groups may
   be empty and retain their native include dependency. Opaque foreign types remain
@@ -344,7 +345,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `ArcSpan<ubyte>`; import `$/string.resin` for `String`, `fmt`, and `print`.
   Formatting and reference counting are host-only. Format tuple arguments use
   `value.bytes()` for source String and span wrappers; the primitive accepts an
-  explicit structural byte view and does not recognize nominal wrapper names.
+  explicit `(Ptr<ubyte>, ulong)` byte view and does not recognize nominal wrapper names.
   `print(text)` and the ordinary `Io.stdout().write(text)` / `Io.stderr().write(text)` methods
   accept `str`, `Span<ubyte>`, and `String` and write bytes verbatim. Use `.data` when
   passing literal storage to C. Ordinary byte arrays contain exactly their declared

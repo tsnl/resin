@@ -32,8 +32,9 @@ results, including nested positions. Value bindings use `var name = value;` or `
 `struct Name { field: Type };`, and `type Name = Type;` creates transparent aliases. Declarations
 such as `var name: Type;` reserve uninitialized local storage: reads require prior initialization
 on every control-flow path. An aggregate must be initialized as a whole before its fields can be
-accessed. Record initializers keep bare `name = value` fields; parameters and record type fields
-keep bare `name: Type` declarations. Files have no runtime globals or initialization phase.
+accessed. Record initializers keep bare `name = value` fields; parameters and struct fields
+keep bare `name: Type` declarations. Named structs replace anonymous records;
+tuples remain structural aggregates. Files have no runtime globals or initialization phase.
 
 Unions are canonical sets of value types, with program-local u32 tags independent of
 union membership. `T | Err<E>` combines a plain success value with an error wrapper.

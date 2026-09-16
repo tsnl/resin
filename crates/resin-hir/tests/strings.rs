@@ -80,9 +80,9 @@ fn owned_strings_are_ordinary_source_declarations() {
 #[test]
 fn string_literals_cannot_be_forged_from_arbitrary_storage() {
     for source in [
-        r#"struct Bytes { data: Ptr<ubyte>, length: ulong }; def bad() -> Bytes = { "text" };"#,
+        r#"struct Bytes (Ptr<ubyte>, ulong); def bad() -> Bytes = { "text" };"#,
         r#"struct String { owner: StrongOwner }; def bad() -> String = { "text" };"#,
-        r#"struct Bytes { data: Ptr<ubyte>, length: ulong }; def bad(bytes: Bytes) -> str = { str(bytes) };"#,
+        r#"struct Bytes (Ptr<ubyte>, ulong); def bad(bytes: Bytes) -> str = { str(bytes) };"#,
         r#"def bad(data: Ptr<ubyte>) -> str = { str { data = data, length = 1_ul } };"#,
         r#"def bad() -> _ = { "text".unknown };"#,
     ] {

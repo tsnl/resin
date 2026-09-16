@@ -351,7 +351,7 @@ def main() -> (() | Err<_>) = {
 		previous_cursor := cursor;
 		was_dragging := dragging;
 		apply_camera(camera, &params);
-		var root = {
+		var root = HostParams {
 			dt = params.dt,
 			yaw_cos = params.yaw_cos,
 			yaw_sin = params.yaw_sin,

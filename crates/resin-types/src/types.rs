@@ -260,7 +260,7 @@ pub(super) fn widens_to(ty: &Ty, to: &Ty) -> bool {
 }
 
 pub(super) fn view_record(ty: &Ty) -> Option<Ty> {
-    matches!(ty, Ty::Str).then(Ty::byte_span)
+    matches!(ty, Ty::Str).then(|| Ty::pointer_length(Ty::UInt8))
 }
 
 //

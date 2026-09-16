@@ -144,16 +144,16 @@ fn nested_host_owners_and_explicit_gpu_loads_preserve_allocation_lifetimes() {
 #[test]
 fn custom_allocators_must_return_the_requested_size_and_alignment() {
     for (bytes, value) in [
-        ("1_ul", "allocation.value!"),
+        ("1_ul", "allocation.0!"),
         (
             "bytes + 1_ul",
-            "invalid_offset(allocation.value!, 1_ul, 0_ul, 1_ul)",
+            "invalid_offset(allocation.0!, 1_ul, 0_ul, 1_ul)",
         ),
     ] {
         let library = allocator_library(bytes, value);
         for action in [
             "var values = gpu.alloc::<long>(2_ul)?;",
-            "var pipeline = gpu.create_compute_pipeline(kernel)?; var commands = gpu.start_command_recording()?; commands.dispatch(pipeline, { left = 1_l, right = 2_l }, 1_ui, 1_ui, 1_ui)?;",
+            "var pipeline = gpu.create_compute_pipeline(kernel)?; var commands = gpu.start_command_recording()?; commands.dispatch(pipeline, Root { left = 1_l, right = 2_l }, 1_ui, 1_ui, 1_ui)?;",
         ] {
             let source = format!(
                 r#"
@@ -197,7 +197,7 @@ fn allocator_library(bytes: &str, value: &str) -> String {
         @gpu_allocator
         def malloc(self: Gpu, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | Err<RuntimeError>) = {{
             var allocation = gpu_view_allocate(self.native(), self.owner.owner, {bytes}, alignment, memory);
-            RuntimeStatus.from_code(allocation.status)?;
+            RuntimeStatus.from_code(allocation.1)?;
             ({value})
         }};
     "#));
@@ -208,7 +208,8 @@ fn allocator_library(bytes: &str, value: &str) -> String {
 const COMPUTE: &str = r#"
     export { main };
     import { "$/gpu.resin", "$/status.resin", "$/span.resin" };
-    struct Parameters { increment: uint, values: Span<uint> };
+    struct FieldsIncrementValues<T0, T1> { increment: T0, values: T1 };
+struct Parameters { increment: uint, values: Span<uint> };
     @compute_shader def kernel(index: ulong, root: Ptr<Parameters>) = {
         if (index < root.values.length) {
             var item: Ref<uint> = root.values.at(index);
@@ -220,7 +221,7 @@ const COMPUTE: &str = r#"
         var values = gpu.alloc::<uint>(4_ul)?;
         var i = 0_ul;
         while (i < values.length) { values.at(i).store(uint(i)); i := i + 1_ul; };
-        var arguments = { increment = 5_ui, values = values.slice(1_ul, 2_ul) };
+        var arguments = FieldsIncrementValues<_, _> { increment = 5_ui, values = values.slice(1_ul, 2_ul) };
         var pipeline = gpu.create_compute_pipeline(kernel)?;
         ACTION
     };
@@ -256,6 +257,7 @@ fn generic_operator_overloads_execute_on_the_gpu() {
             def __add__(a: Cell<T>, b: Cell<T>) -> Cell<T> = { Cell<T> { value = a.value + b.value } };
         };
         struct Parameters { values: Span<Cell<uint>> };
+        struct HostParameters { values: GpuSpan<Cell<uint>> };
         def add<T>(a: T, b: T) -> _ = { a + b };
         @compute_shader def kernel(index: ulong, root: Ptr<Parameters>) = {
             if (index < root.values.length) {
@@ -273,7 +275,7 @@ fn generic_operator_overloads_execute_on_the_gpu() {
             };
             var pipeline = gpu.create_compute_pipeline(kernel)?;
             var commands = gpu.start_command_recording()?;
-            commands.dispatch(pipeline, { values = values }, 1_ui, 1_ui, 1_ui)?;
+            commands.dispatch(pipeline, HostParameters { values = values }, 1_ui, 1_ui, 1_ui)?;
             commands.submit()?;
             if (values.at(0).load().value == 40 && values.at(1).load().value == 41
                 && values.at(2).load().value == 42) { 0 } else { 1 }
@@ -288,7 +290,8 @@ fn source_sequences_project_offsets_and_retain_resources_through_submit() {
     let Some(output) = run(r#"
         export { main };
         import { "$/gpu.resin", "$/span.resin" };
-        struct Root { values: Span<uint>, scalar: Ptr<uint> };
+        struct FieldsValuesScalar<T0, T1> { values: T0, scalar: T1 };
+struct Root { values: Span<uint>, scalar: Ptr<uint> };
         @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {
             if (index < root.values.length) { root.values.at(index) := root.values.at(index) + 10_ui; };
             if (index == 0_ul) { root.scalar.* := 42_ui; };
@@ -302,7 +305,7 @@ fn source_sequences_project_offsets_and_retain_resources_through_submit() {
             var commands = gpu.start_command_recording()?;
             {
                 var pipeline = (&gpu).create_compute_pipeline(kernel)?;
-                (&commands).dispatch(pipeline, { values = values.slice(2_ul, 2_ul), scalar = scalar }, 2_ui, 1_ui, 1_ui)?;
+                (&commands).dispatch(pipeline, FieldsValuesScalar<_, _> { values = values.slice(2_ul, 2_ul), scalar = scalar }, 2_ui, 1_ui, 1_ui)?;
             };
             commands.submit()?;
             (if (values.at(1_ul).load() == 1_ui && values.at(2_ul).load() == 12_ui && values.at(3_ul).load() == 13_ui && values.at(4_ul).load() == 4_ui && scalar.load() == 42_ui) { 0_i } else { 1_i })
@@ -318,7 +321,8 @@ fn source_pipeline_contract_retagging_cannot_change_the_shader_root() {
     let Some(output) = run(r#"
         export { main };
         import { "$/gpu.resin" };
-        struct Root { value: uint };
+        struct FieldsValue<T0> { value: T0 };
+struct Root { value: uint };
         struct Other { value: uint };
         @compute_shader def kernel(index: ulong, root: Ptr<Root>) = {};
         def main() -> (int | Err<_>) = {
@@ -326,7 +330,7 @@ fn source_pipeline_contract_retagging_cannot_change_the_shader_root() {
             var pipeline = gpu.create_compute_pipeline(kernel)?;
             var forged = GpuComputePipeline<Other, GpuPipelineOwner> { contract = pipeline.contract };
             var commands = gpu.start_command_recording()?;
-            commands.dispatch(forged, { value = 0_ui }, 1_ui, 1_ui, 1_ui)?;
+            commands.dispatch(forged, FieldsValue<_> { value = 0_ui }, 1_ui, 1_ui, 1_ui)?;
             (0_i)
         };
     "#) else {
@@ -430,7 +434,8 @@ fn inferred_signed_long_pointers_project_and_precomputed_inputs_evaluate_once() 
     let Some(output) = run(r#"
         export { main };
         import { "$/gpu.resin", "$/span.resin", "$/shared.resin" };
-        struct Parameters { value: Ptr<long>, values: Span<long>, increment: long };
+        struct FieldsValueValuesIncrement<T0, T1, T2> { value: T0, values: T1, increment: T2 };
+struct Parameters { value: Ptr<long>, values: Span<long>, increment: long };
         @compute_shader def kernel(index: ulong, root: Ptr<Parameters>) = {
             if (index == 0_ul && root.value.* < 0_l) {
                 root.value.* := -root.value.* + root.increment;
@@ -443,7 +448,7 @@ fn inferred_signed_long_pointers_project_and_precomputed_inputs_evaluate_once() 
         };
         def launch(pipeline: GpuComputePipeline<Parameters, GpuPipelineOwner>, value: GpuPtr<long>, values: GpuSpan<long>, calls: Ptr<int>) -> _ = {
             calls.* := calls.* + 1_i;
-            (pipeline, { value = value, values = values, increment = 7_l }, 1_ui, 1_ui, 1_ui)
+            (pipeline, FieldsValueValuesIncrement<_, _, _> { value = value, values = values, increment = 7_l }, 1_ui, 1_ui, 1_ui)
         };
         def main() -> (int | Err<_>) = {
             var gpu = Gpu.new()?;
@@ -470,22 +475,24 @@ fn returned_typed_pipelines_and_recordings_keep_scoped_resources_alive() {
     let Some(output) = run(r#"
         export { main };
         import { "$/gpu.resin", "$/span.resin", "$/shared.resin" };
-        struct Parameters { values: Span<uint> };
+        struct FieldsCommandsValues<T0, T1> { commands: T0, values: T1 };
+struct FieldsValues<T0> { values: T0 };
+struct Parameters { values: Span<uint> };
         @compute_shader def kernel(index: ulong, root: Ptr<Parameters>) = {
             if (index < root.values.length) { root.values.at(index) := 42_ui; };
         };
         def make_pipeline(gpu: Gpu) -> (GpuComputePipeline<Parameters, GpuPipelineOwner> | Err<_>) = {
             gpu.create_compute_pipeline(kernel)
         };
-        def record() -> ({ commands: GpuCommands, values: GpuSpan<uint> } | Err<_>) = {
+        def record() -> (FieldsCommandsValues<GpuCommands, GpuSpan<uint>> | Err<_>) = {
             var gpu = Gpu.new()?;
             var values = gpu.alloc::<uint>(1_ul)?;
             values.at(0_ul).store(0_ui);
             var pipeline = make_pipeline(gpu)?;
             var alias = pipeline;
             var commands = gpu.start_command_recording()?;
-            commands.dispatch(alias, { values = values }, 1_ui, 1_ui, 1_ui)?;
-            ({ commands = commands, values = values })
+            commands.dispatch(alias, FieldsValues<_> { values = values }, 1_ui, 1_ui, 1_ui)?;
+            (FieldsCommandsValues<_, _> { commands = commands, values = values })
         };
         def main() -> (int | Err<_>) = {
             var recorded = record()?;
@@ -523,7 +530,7 @@ fn dispatch_rejects_argument_views_from_another_device() {
         var other = Gpu.new()?;
         var foreign_values = other.alloc::<uint>(1_ul)?;
         var commands = gpu.start_command_recording()?;
-        commands.dispatch(pipeline, { increment = 5_ui, values = foreign_values }, 1_ui, 1_ui, 1_ui)?;
+        commands.dispatch(pipeline, FieldsIncrementValues<_, _> { increment = 5_ui, values = foreign_values }, 1_ui, 1_ui, 1_ui)?;
         (0_i)
     "#);
     let Some(output) = run(&source) else { return };
@@ -536,7 +543,8 @@ fn rooted_graphics_stages_receive_automatically_projected_arguments() {
     let Some(output) = run(r#"
         export { main };
         import { "$/gpu.resin", "$/graphics.resin" };
-        struct Parameters { color: Ptr<Color>, offset: float32 };
+        struct FieldsColorOffset<T0, T1> { color: T0, offset: T1 };
+struct Parameters { color: Ptr<Color>, offset: float32 };
         @vertex_shader def vertex(index: int, root: Ptr<Parameters>) -> Vertex = {
             Vertex {
                 position = Position {
@@ -561,7 +569,7 @@ fn rooted_graphics_stages_receive_automatically_projected_arguments() {
             var pixels = gpu.alloc::<ubyte>(256_ul)?;
             var commands = gpu.start_command_recording()?;
             commands.begin_rendering(image, 0.0_f, 0.0_f, 0.0_f, 1.0_f)?;
-            commands.draw(pipeline, { color = color, offset = 0.0_f }, 3_ui)?;
+            commands.draw(pipeline, FieldsColorOffset<_, _> { color = color, offset = 0.0_f }, 3_ui)?;
             commands.end_rendering()?;
             commands.copy_image_to_buffer(image, pixels)?;
             commands.submit()?;
@@ -575,7 +583,7 @@ fn rooted_graphics_stages_receive_automatically_projected_arguments() {
 }
 
 const VIEW_PRIMITIVES: &str = r#"
-    intrinsic "gpu_view_allocate" def allocate<N>(gpu: Ptr<N>, owner: StrongOwner, bytes: ulong, alignment: ulong, memory: int) -> { value: GpuView | None, status: int };
+    intrinsic "gpu_view_allocate" def allocate<N>(gpu: Ptr<N>, owner: StrongOwner, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | None, int);
     intrinsic "gpu_view_offset" def offset(view: GpuView, bytes: ulong, size: ulong, alignment: ulong) -> GpuView;
     intrinsic "gpu_view_restrict" def restrict(view: GpuView, access: uint) -> GpuView;
     intrinsic "gpu_view_load" def load<T>(view: GpuView) -> T;
@@ -590,8 +598,8 @@ const VIEW_PRIMITIVES: &str = r#"
     def allocate_ints(count: ulong) -> (GpuView | Err<RuntimeError>) = {
         var gpu = Gpu.new()?;
         var allocated = allocate(gpu.native(), gpu.owner.owner, count * size_of(int), align_of(int), 0);
-        RuntimeStatus.from_code(allocated.status)?;
-        (allocated.value!)
+        RuntimeStatus.from_code(allocated.1)?;
+        (allocated.0!)
     };
 "#;
 

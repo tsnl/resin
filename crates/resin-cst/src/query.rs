@@ -58,7 +58,9 @@ pub(super) fn reference(node: Node<'_>) -> bool {
                 return false;
             }
             if parent.kind() == "declare"
-                && parent.parent().is_some_and(|n| n.kind() == "record_type")
+                && parent
+                    .parent()
+                    .is_some_and(|n| n.kind() == "struct_definition")
             {
                 return false;
             }

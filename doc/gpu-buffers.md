@@ -74,9 +74,10 @@ def kernel(index: ulong, root: Ptr<Params>) = {
     };
 };
 
+struct HostParams { values: GpuSpan<float32>, scale: float32 };
 var pipeline = gpu.create_compute_pipeline(kernel)?;
 var commands = gpu.start_command_recording()?;
-commands.dispatch(pipeline, { values = values, scale = 2.0_f }, 16, 1, 1)?;
+commands.dispatch(pipeline, HostParams { values = values, scale = 2.0_f }, 16, 1, 1)?;
 commands.submit()?;
 ```
 

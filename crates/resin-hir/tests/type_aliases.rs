@@ -9,7 +9,7 @@ fn compile(source: &str) -> Result<resin_hir::Module, resin_source::SourceError>
 
 #[test]
 fn transparent_aliases_expose_structure_for_deduction() {
-    let module = compile("type Pair<T, U> = { first: T, second: U }; type Repeated<T> = Pair<T, T>; def first<T>(value: Repeated<T>) -> T = { value.first }; def main() -> int = { first({ first = 42, second = 0 }) };").unwrap();
+    let module = compile("type Pair<T, U> = (T, U); type Repeated<T> = Pair<T, T>; def first<T>(value: Repeated<T>) -> T = { value.0 }; def main() -> int = { first((42, 0)) };").unwrap();
     assert!(matches!(
         module.functions[0].signature.params[0].annotation.ty,
         Type::Record { .. }
@@ -20,7 +20,7 @@ fn transparent_aliases_expose_structure_for_deduction() {
 
 #[test]
 fn local_aliases_capture_outer_binders_without_capturing_their_own_arguments() {
-    let module = compile("type Pair<T, U> = { first: T, second: U }; def combine<T>(value: T) -> _ = { type Captured<U> = Pair<T, U>; type Shadow<T> = Pair<T, int>; var first: Captured<int>; first := { first = value, second = 42 }; var second: Shadow<bool>; second := { first = 1 == 1, second = 0 }; first }; def main() -> int = { combine(0).second };").unwrap();
+    let module = compile("type Pair<T, U> = (T, U); def combine<T>(value: T) -> _ = { type Captured<U> = Pair<T, U>; type Shadow<T> = Pair<T, int>; var first: Captured<int>; first := (value, 42); var second: Shadow<bool>; second := (true, 0); first }; def main() -> int = { combine(0).1 };").unwrap();
     let signature = &module.functions[0].signature;
     let Type::Record { fields } = &signature.result.ty else {
         panic!("record")
@@ -56,7 +56,7 @@ fn alias_arity_holes_and_cycles_are_definition_errors() {
 
 #[test]
 fn alias_expansion_has_its_own_size_limit() {
-    let mut source = "type Double<T> = { first: T, second: T }; type A0 = int;".to_owned();
+    let mut source = "type Double<T> = (T, T); type A0 = int;".to_owned();
     for index in 1..18 {
         source.push_str(&format!("type A{index} = Double<A{}>;", index - 1));
     }

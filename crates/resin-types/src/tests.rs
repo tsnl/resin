@@ -394,9 +394,12 @@ fn string_views_expose_bytes_without_accepting_arbitrary_storage() {
         Ty::UInt64
     );
     assert_eq!(
-        context.ascribe(&Ty::Str, &Ty::byte_span()).unwrap(),
+        context
+            .ascribe(&Ty::Str, &Ty::Str.view_record().unwrap())
+            .unwrap(),
         vec![Conv::ViewRecord]
     );
+    assert!(context.ascribe(&Ty::Str, &Ty::byte_span()).is_err());
     assert!(!Ty::Str.widens_to(&Ty::byte_span()));
     assert!(!Ty::byte_span().widens_to(&Ty::Str));
     assert!(context.ascribe(&Ty::byte_span(), &Ty::Str).is_err());

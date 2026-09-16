@@ -184,19 +184,19 @@ struct Gpu {
 	@gpu_allocator
 	def malloc(self: Gpu, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | Err<RuntimeError>) = {
 		var allocation = gpu_view_allocate(self.native(), self.owner.owner, bytes, alignment, memory);
-		RuntimeStatus.from_code(allocation.status)?;
-		(allocation.value!)
+		RuntimeStatus.from_code(allocation.1)?;
+		(allocation.0!)
 	};
 	@gpu_compute_pipeline
-	def create_compute_pipeline(self: Gpu, code: { data: Ptr<ubyte>, length: ulong }) -> (GpuPipelineOwner | Err<RuntimeError>) = {
+	def create_compute_pipeline(self: Gpu, code: (Ptr<ubyte>, ulong)) -> (GpuPipelineOwner | Err<RuntimeError>) = {
 		var owner = ArcPtr<PipelineOwner>.alloc(PipelineOwner { handle = Ptr<ResinPipeline>(0_ul), gpu = self })?;
-		RuntimeStatus.from_code(resin_gpu_create_compute_pipeline(self.native(), code.data, code.length, &owner.get().handle))?;
+		RuntimeStatus.from_code(resin_gpu_create_compute_pipeline(self.native(), code.0, code.1, &owner.get().handle))?;
 		(GpuPipelineOwner { owner = owner })
 	};
 	@gpu_graphics_pipeline
-	def create_graphics_pipeline(self: Gpu, vertex: { data: Ptr<ubyte>, length: ulong }, fragment: { data: Ptr<ubyte>, length: ulong }) -> (GpuPipelineOwner | Err<RuntimeError>) = {
+	def create_graphics_pipeline(self: Gpu, vertex: (Ptr<ubyte>, ulong), fragment: (Ptr<ubyte>, ulong)) -> (GpuPipelineOwner | Err<RuntimeError>) = {
 		var owner = ArcPtr<PipelineOwner>.alloc(PipelineOwner { handle = Ptr<ResinPipeline>(0_ul), gpu = self })?;
-		RuntimeStatus.from_code(resin_gpu_create_graphics_pipeline(self.native(), vertex.data, vertex.length, fragment.data, fragment.length, &owner.get().handle))?;
+		RuntimeStatus.from_code(resin_gpu_create_graphics_pipeline(self.native(), vertex.0, vertex.1, fragment.0, fragment.1, &owner.get().handle))?;
 		(GpuPipelineOwner { owner = owner })
 	};
 	def create_image(self: Gpu, width: uint, height: uint) -> (GpuImage | Err<RuntimeError>) = {
@@ -333,7 +333,7 @@ struct GpuCommands {
 	};
 };
 
-intrinsic "gpu_view_allocate" def gpu_view_allocate<N>(gpu: Ptr<N>, owner: StrongOwner, bytes: ulong, alignment: ulong, memory: int) -> { value: GpuView | None, status: int };
+intrinsic "gpu_view_allocate" def gpu_view_allocate<N>(gpu: Ptr<N>, owner: StrongOwner, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | None, int);
 intrinsic "gpu_view_load" def gpu_view_load<T>(view: GpuView) -> T;
 intrinsic "gpu_view_store" def gpu_view_store<T>(view: GpuView, value: T) -> ();
 intrinsic "gpu_view_replace" def gpu_view_replace<T>(view: GpuView, value: T) -> T;
