@@ -115,6 +115,8 @@ export default grammar({
       "struct",
       "def",
       "var",
+      "const",
+      "sizeof",
       "if",
       "else",
       "while",
@@ -149,6 +151,7 @@ export default grammar({
               $.foreign_type,
               $.type_definition,
               $.struct_definition,
+              $.const_declaration,
             ),
           ),
         ),
@@ -231,11 +234,30 @@ export default grammar({
 
     statement: ($) =>
       choice(
+        field("constant", $.const_declaration),
         field("struct", $.struct_definition),
         seq(field("define", $.define), ";"),
         seq("var", field("declare", $.declare), ";"),
         seq(field("expr", $.term), ";"),
       ),
+
+    const_declaration: ($) =>
+      seq(
+        "const",
+        choice(
+          field("spec", $.const_spec),
+          seq("(", repeat(seq(field("spec", $.const_spec), ";")), ")"),
+        ),
+        ";",
+      ),
+    const_spec: ($) =>
+      seq(
+        list1("name", choice($.lid, $.discard), ","),
+        optional(seq(":", field("ann", $.type))),
+        "=",
+        list1("init", $.term, ","),
+      ),
+    discard: () => "_",
 
     define: ($) =>
       choice(
@@ -416,6 +438,7 @@ export default grammar({
 
     primary_term: ($) =>
       choice(
+        $.sizeof_term,
         $.constructor_term,
         $.closed_term,
         $.lid,
@@ -426,6 +449,7 @@ export default grammar({
         $.match_term,
         $.unary_type,
       ),
+    sizeof_term: ($) => seq("sizeof", "(", field("type", $.type), ")"),
     match_term: ($) =>
       seq(
         "match",

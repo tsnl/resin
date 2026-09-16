@@ -42,6 +42,7 @@ pub(crate) struct Contexts {
     pub definitions: Vec<Definition>,
     parameters: BTreeMap<DeclarationId, Vec<crate::TypeParameter>>,
     pending_aliases: HashSet<DeclarationId>,
+    constants: BTreeMap<DeclarationId, crate::Term>,
 }
 impl Contexts {
     fn lookup(&self, mut cursor: Cursor, name: &str, is_type: bool) -> Option<usize> {
@@ -205,6 +206,20 @@ pub(crate) struct Scopes {
     calls: Vec<MethodCall>,
 }
 impl Scopes {
+    pub(super) fn constant(&self, name: &str) -> Option<crate::Term> {
+        let id = self.view.lookup(name, false)?;
+        self.view.data.borrow().contexts.constants.get(&id).cloned()
+    }
+
+    pub(super) fn set_constant(&mut self, id: DeclarationId, value: crate::Term) {
+        self.set_inferred(id, Type::from_hir(&value.ty));
+        self.view
+            .data
+            .borrow_mut()
+            .contexts
+            .constants
+            .insert(id, value);
+    }
     pub(super) fn for_source(source: Source, data: Rc<RefCell<Analysis>>) -> Self {
         let mut shared = data.borrow_mut();
         let scope = shared.contexts.scopes.len();

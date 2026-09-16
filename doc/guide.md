@@ -310,7 +310,7 @@ value. A trailing comma, as in `f(value,)`, does not create a tuple. Use `f((val
 a singleton tuple. Access tuple members by index: `pair.0`, `pair.1`. Calls evaluate the
 callee first, followed by arguments from left to right.
 
-Files contain only function, foreign, and type declarations, after their export/import clauses.
+Files contain only function, foreign, type, and constant declarations, after their export/import clauses.
 There are no global variables or executable top-level statements. Values and mutable state
 belong inside functions and are passed explicitly to helpers, by value or pointer.
 Local value bindings use `var name = value;`, or `var name: Type;` to reserve uninitialized storage.
@@ -324,6 +324,58 @@ Calls and conversions require parentheses: `fibonacci(n)`, `int(n)`, and `proces
 `process [1, 2]` and `process { value }` are not calls. Nominal record construction retains
 its dedicated `Name { field = value }` syntax.
 See `examples/` for functions, recursion, records, pointers, and linked lists.
+
+### Constants and `iota`
+
+`const` declares a compile-time numeric, `bool`, or `str` value at module or local scope.
+Constants have no mutable storage: assignment, address-taking, and reference binding are errors.
+Module constants can be exported and may refer to later constants; cycles are errors.
+Local constants become visible after their specification, and can shadow outer names.
+
+```resin
+const answer: int = 40 + 2;
+const (
+    read: uint = 1 << iota;    // 1
+    write: uint = 1 << iota;   // 2
+    _ = iota;                 // Skip index 2.
+    execute: uint = 1 << iota; // 8
+);
+const reset = iota;         // 0, with type long.
+```
+
+`iota` starts at zero in each `const` declaration and increments once per specification,
+including discarded `_` specifications. Every specification requires an explicit
+`= expression`, including later rows in a group and discarded names. Each row supplies
+its own expression list and optional type annotation. A specification can bind multiple
+names, such as `a, b: uint = iota, iota + 10;`; their counts must match. Resin requires
+semicolons and uses `: Type` annotations and lowercase value names.
+
+Constants use Resin's fixed-width types. An annotation or numeric suffix selects a type;
+otherwise numeric inference finishes at the declaration, defaulting to `long` or `float64`.
+Later uses do not change that type. Arithmetic, comparisons, logical and bitwise operators,
+numeric conversions, constant references, and type layout queries are allowed. Function calls
+and aggregate initializers are not constant expressions. Integer overflow, zero divisors,
+non-finite floating-point results, and shifts outside the operand width are compile errors,
+including in unused declarations. Floating-point operations round at their declared precision.
+
+### Type sizes
+
+`sizeof(Type)` returns the native value size in bytes as `ulong`, including padding:
+
+```resin
+struct Pair<T> { first: T, second: T };
+const pair_bytes = sizeof(Pair<int>); // 8
+const real_bytes = sizeof(float64);  // 8
+def size<T>() -> ulong = { sizeof(T) };
+```
+
+Only a type operand is accepted; `sizeof(value)` is an error. Generic queries resolve when
+the function is specialized. A `const` initializer must determine its size at declaration.
+Sizes follow Resin's 64-bit native representations, including the one-byte placeholder for
+unit/empty records, an element placeholder for empty arrays, and union tags. Opaque foreign
+types and `Ref<T>` bindings have no queryable value layout.
+The existing `size_of` and `align_of` builtins retain their narrower shared CPU/GPU storage
+layout contract. `sizeof` does not imply that a type supports GPU storage.
 
 Numeric suffixes are case insensitive and fix the literal's primitive type. Prefix an
 integer width with `u` for unsigned values. The formatter writes lowercase suffixes with
@@ -738,7 +790,7 @@ def answer() -> int = { helper() };
 Imports bring only the dependency's exported names into the file's flat namespace. Without
 an export clause (or with `export {}`), everything is private. An exported function can use
 its private helpers and types. Imported bindings may be explicitly re-exported; dependencies
-are not implicitly re-exported. Only functions and types can be exported.
+are not implicitly re-exported. Functions, types, and constants can be exported.
 
 Two different bindings with the same name are an error, including imports conflicting with
 local definitions. Nested scopes can still shadow names. Re-importing the same binding through
@@ -747,13 +799,13 @@ importing file; each canonical file is loaded once. Imports never execute code. 
 functions within one file remain supported.
 `include` has been replaced by `import`.
 
-Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `def`, `var`, `if`,
+Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `def`, `var`, `const`, `sizeof`, `if`,
 `else`, `while`, and `match`), primitive type names, `Never`, and
 `Ptr`, `Result`, `None`, and the opaque compiler handle types are reserved,
 including in parameters and field names. Wrapper names such as `Span`, `ArcPtr`,
 and `GpuSpan` are ordinary source type names.
 Names such as `if_value` are ordinary identifiers. `ok`, `err`,
-`size_of`, `align_of`, and `absurd` are unshadowable compiler builtins, not syntax
+`size_of`, `align_of`, `iota`, and `absurd` are unshadowable compiler builtins, not syntax
 keywords: definitions and parameters cannot use those names, but record fields can.
 
 Imports beginning with `$/` resolve from the repository's [`resin/`](../resin/) library root,

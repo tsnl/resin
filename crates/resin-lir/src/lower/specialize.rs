@@ -804,6 +804,16 @@ impl Specialization<'_, '_> {
             },
             resin_hir::TermKind::Numeric { text } => self.numeric(text, expected)?,
             resin_hir::TermKind::Layout { of, size } => self.layout(of, *size)?,
+            resin_hir::TermKind::SizeOf { of } => {
+                let ty = self.ty(of)?;
+                let layout = resin_types::layout::value(self.instances.typer().definitions(), &ty)
+                    .map_err(|error| self.instance_error(error.to_string()))?;
+                concrete::TermKind::Constant {
+                    value: Value::UInt64 {
+                        value: layout.size as u64,
+                    },
+                }
+            }
             resin_hir::TermKind::Local { binding, name } => concrete::TermKind::Local {
                 binding: *binding,
                 name: name.clone(),

@@ -20,6 +20,12 @@ pub(super) struct Term {
 
 #[derive(Debug, Clone)]
 pub(super) enum TermKind {
+    SizeOf {
+        ty: Annotation<Type>,
+    },
+    Constant {
+        value: crate::Term,
+    },
     Error(GenerateError),
     Unit,
     None,
@@ -149,7 +155,7 @@ pub(super) enum StatementKind {
         name: Ident,
         ty: Annotation<Type>,
     },
-    TypeDefinition,
+    CompileTimeDefinition,
     Expr {
         term: Term,
     },
