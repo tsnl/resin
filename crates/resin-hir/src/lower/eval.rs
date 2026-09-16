@@ -75,6 +75,9 @@ impl Decoder<'_> {
                             "type application has the wrong number of arguments",
                         ));
                     }
+                    if builtin == Head::Error {
+                        self.solver.errors(&arguments[0], ann.span)?;
+                    }
                     Type::Node(builtin, arguments)
                 } else {
                     self.named(head, arguments)?
@@ -112,8 +115,8 @@ impl Decoder<'_> {
                 Type::result(value, error)
             }
             TypeKind::Union { left, right } => {
-                let left = self.ty(left, false)?;
-                let right = self.ty(right, false)?;
+                let left = self.ty(left, infer)?;
+                let right = self.ty(right, infer)?;
                 self.solver.union(vec![left, right])
             }
         })

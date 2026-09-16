@@ -494,7 +494,7 @@ export default grammar({
       seq(
         choice(
           seq(
-            field("variant", choice($.type, "ok", "err")),
+            field("variant", choice($.type, "ok", "err", "Err")),
             "(",
             field("name", choice($.lid, "_")),
             ")",

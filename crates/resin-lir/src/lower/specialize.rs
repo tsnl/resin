@@ -263,7 +263,7 @@ impl Specialization<'_, '_> {
 
     fn arm(&mut self, source: &resin_hir::MatchArm) -> Result<concrete::MatchArm, Error> {
         let tag = match &source.tag {
-            resin_hir::Case::Wildcard => {
+            resin_hir::Case::Error { .. } | resin_hir::Case::Wildcard => {
                 return Err(self
                     .instance_error("wildcard must be expanded before concrete arm translation"));
             }
@@ -272,6 +272,7 @@ impl Specialization<'_, '_> {
             resin_hir::Case::Type { ty: value } => Case::Type(self.ty(value)?),
         };
         Ok(concrete::MatchArm {
+            error_payload: None,
             tag,
             binding: source.binding,
             body: self.term(&source.body)?,
@@ -290,6 +291,29 @@ impl Specialization<'_, '_> {
         };
         let mut completed = vec![];
         for (index, arm) in arms.iter().enumerate() {
+            if let resin_hir::Case::Error { payload } = &arm.tag {
+                let payload = self.ty(payload)?;
+                let body = self.term(&arm.body)?;
+                let mut matched = 0;
+                tags.retain(|tag| {
+                    if matches!(tag, Case::Type(Ty::Error { .. })) {
+                        completed.push(concrete::MatchArm {
+                            tag: tag.clone(),
+                            error_payload: Some(payload.clone()),
+                            binding: arm.binding,
+                            body: body.clone(),
+                        });
+                        matched += 1;
+                        false
+                    } else {
+                        true
+                    }
+                });
+                if matched == 0 {
+                    return Err(self.instance_error("Err arm has no remaining error members"));
+                }
+                continue;
+            }
             if arm.tag == resin_hir::Case::Wildcard {
                 if index + 1 != arms.len() || arm.binding.is_some() || tags.is_empty() {
                     return Err(self.instance_error(
@@ -298,6 +322,7 @@ impl Specialization<'_, '_> {
                 }
                 let body = self.term(&arm.body)?;
                 completed.extend(tags.drain(..).map(|tag| concrete::MatchArm {
+                    error_payload: None,
                     tag,
                     binding: None,
                     body: body.clone(),

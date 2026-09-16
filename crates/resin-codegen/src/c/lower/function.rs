@@ -73,7 +73,9 @@ fn locals(types: &Types<'_>, function: &resin_lir::Function, flow: &FunctionType
     }
     for (block, inputs) in flow.inputs.iter().enumerate() {
         for (i, ty) in inputs.iter().enumerate() {
-            writeln!(out, "  {} r_b{block}_{i};", types.name(ty)).unwrap();
+            // Native optimizers can diagnose inactive union storage across recursive
+            // joins. Initialize its representation; verified LIR still proves every read.
+            writeln!(out, "  {} r_b{block}_{i} = {{0}};", types.name(ty)).unwrap();
             if tracks_initialization(types, ty) {
                 writeln!(
                     out,
@@ -756,6 +758,24 @@ fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
     if matches!(to, Ty::Union { variants } if variants.contains(from)) {
         return variant(types, to, &Case::Type(from.clone()), value);
     }
+    if let (Ty::Error { payload: source }, Ty::Error { payload: target }) = (from, to) {
+        let payload = widen(types, source, target, &format!("({value}).value"));
+        return format!("({}){{ .value = {payload} }}", types.name(to));
+    }
+    if !matches!(from, Ty::Union { .. } | Ty::Result { .. })
+        && let Ty::Union { variants } = to
+        && let Some(target) = variants
+            .iter()
+            .find(|ty| *ty == from)
+            .or_else(|| variants.iter().find(|ty| from.widens_to(ty)))
+    {
+        return variant(
+            types,
+            to,
+            &Case::Type(target.clone()),
+            &widen(types, from, target, value),
+        );
+    }
     let initializer = if matches!(to, Ty::Defined { .. }) {
         ".value = {0}"
     } else {
@@ -763,7 +783,12 @@ fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
     };
     let mut expression = format!("({}){{ {initializer} }}", types.name(to));
     for (case, payload) in from.payloads().unwrap_or_default().into_iter().rev() {
-        let Some(target) = to.payload(&case) else {
+        let target = to.payload(&case).map(|ty| (case.clone(), ty)).or_else(|| {
+            to.payloads()?
+                .into_iter()
+                .find(|(_, target)| payload.widens_to(target))
+        });
+        let Some((target_case, target)) = target else {
             continue;
         };
         let tag = types.tag(&case);
@@ -773,7 +798,7 @@ fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
             &target,
             &format!("({value}).payload.v{tag}"),
         );
-        let constructed = variant(types, to, &case, &payload);
+        let constructed = variant(types, to, &target_case, &payload);
         expression = format!("(({value}).tag == {tag}u ? {constructed} : {expression})");
     }
     expression

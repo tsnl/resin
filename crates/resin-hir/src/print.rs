@@ -318,6 +318,7 @@ impl Printer {
 
     fn arm(&self, arm: &MatchArm) -> SExp {
         let tag = match &arm.tag {
+            Case::Error { .. } => atom("Err"),
             Case::Wildcard => atom("_"),
             Case::Ok => atom("ok"),
             Case::Err => atom("err"),

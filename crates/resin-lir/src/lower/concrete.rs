@@ -157,6 +157,8 @@ pub(super) struct Arguments {
 
 #[derive(Debug, Clone)]
 pub(super) struct MatchArm {
+    /// Destructure an Err member and widen its payload to this binding type.
+    pub(super) error_payload: Option<Ty>,
     pub(super) tag: Case,
     pub(super) binding: Option<BindingId>,
     pub(super) body: Term,

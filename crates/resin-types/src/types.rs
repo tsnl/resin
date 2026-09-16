@@ -277,7 +277,10 @@ pub(super) fn widens_to(ty: &Ty, to: &Ty) -> bool {
                 error: be,
             },
         ) => av == bv && ae.widens_to(be),
-        _ => ty.members().iter().all(|ty| to.members().contains(ty)),
+        (Ty::Error { payload: source }, Ty::Error { payload: target }) => source.widens_to(target),
+        _ => ty.members().iter().all(|source| to.members().iter().any(|target|
+            source == target || matches!((source, target), (Ty::Error { payload: a }, Ty::Error { payload: b }) if a.widens_to(b))
+        )),
     }
 }
 

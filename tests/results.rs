@@ -248,7 +248,7 @@ fn errors_discovered_through_recursive_payloads_join_before_sets_close() {
 
 #[test]
 fn propagation_rejects_wrong_types_and_narrower_errors() {
-    rejects("def f() -> int = { 1? };", "Result");
+    rejects("def f() -> int = { 1? };", "Err");
     rejects(
         "struct E {}; def f(r: Result<int, E>) -> int = { r? };",
         "Result return",

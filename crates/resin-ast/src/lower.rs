@@ -708,6 +708,7 @@ impl<'a> AstGen<'a> {
                             "_" => MatchVariant::Wildcard,
                             "ok" => MatchVariant::Ok,
                             "err" => MatchVariant::Err,
+                            "Err" => MatchVariant::Error,
                             _ => MatchVariant::Type(self.gen_type(variant)),
                         };
                         MatchArm {

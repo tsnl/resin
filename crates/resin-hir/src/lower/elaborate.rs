@@ -995,13 +995,33 @@ impl Completion<'_> {
                     "wildcard must be the final arm and cover a remaining variant",
                 ));
             }
-            if !arm.wildcard && (!tags.contains(&tag) || seen.contains(&tag)) {
+            let matched: Vec<_> = if matches!(tag, crate::Case::Error { .. }) {
+                tags.iter()
+                    .filter(|tag| {
+                        matches!(
+                            tag,
+                            crate::Case::Type {
+                                ty: crate::Type::Error { .. }
+                            }
+                        )
+                    })
+                    .cloned()
+                    .collect()
+            } else {
+                vec![tag.clone()]
+            };
+            if !arm.wildcard
+                && (matched.is_empty()
+                    || matched
+                        .iter()
+                        .any(|tag| !tags.contains(tag) || seen.contains(tag)))
+            {
                 return Err(GenerateError::inference(
                     arm.body.span,
                     "unknown or duplicate match variant",
                 ));
             }
-            seen.push(tag.clone());
+            seen.extend(matched);
             self.initialization = before.clone();
             self.reachable = reachable;
             if let Some(binding) = arm.binding {
@@ -1041,6 +1061,24 @@ impl Completion<'_> {
         if arm.wildcard {
             return Ok(crate::Case::Wildcard);
         }
+        if arm.error {
+            let members = match ty {
+                crate::Type::Union { variants } => variants.clone(),
+                ty => vec![ty.clone()],
+            };
+            let payloads = members
+                .into_iter()
+                .filter_map(|ty| match ty {
+                    crate::Type::Error { payload } => Some(Type::from_hir(&payload)),
+                    _ => None,
+                })
+                .collect();
+            let payload = self
+                .solver
+                .require_complete(&self.solver.union(payloads), arm.body.span)?;
+            return Ok(crate::Case::Error { payload });
+        }
+
         match (&arm.variant, ty) {
             (None, crate::Type::Result { .. }) => Ok(if arm.failure {
                 crate::Case::Err

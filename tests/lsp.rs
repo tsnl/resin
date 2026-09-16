@@ -409,7 +409,11 @@ fn string_completions_distinguish_literal_views_and_owned_constructors() {
     let uri = uri(&temp.path().join("strings.resin"));
     for (version, expression, labels) in [
         (1, "\"text\".", vec!["data", "length", "at"]),
-        (2, "String.", vec!["bytes", "from_bytes", "from_str", "get", "repr_bytes"]),
+        (
+            2,
+            "String.",
+            vec!["bytes", "from_bytes", "from_str", "get", "repr_bytes"],
+        ),
     ] {
         let source = format!("import {{ \"$/string.resin\" }}; def main() = {{ {expression}; }};");
         if version == 1 {
