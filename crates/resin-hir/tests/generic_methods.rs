@@ -8,17 +8,23 @@ fn compile(source: &str) -> Result<resin_hir::Module, resin_source::SourceError>
 }
 
 #[test]
-fn method_schemes_keep_owner_binders_before_additional_method_binders() {
-    let module = compile("struct Cell<T> { value: T,  }\nfn choose<T, U>(self: Cell<T>, value: U) -> U  { value }\n fn main(cell: Cell<int>) -> ulong  { cell:choose::<ulong>(42) }").unwrap();
+fn operation_binders_are_independent_of_struct_binders() {
+    let module = compile("struct Cell<T> { value: T,  }\nfn choose<T, U>(self: Cell<T>, value: U) -> U  { value }\n fn main(cell: Cell<int>) -> ulong  { cell:choose::<_, ulong>(42) }").unwrap();
     let owner = module
         .types
         .iter()
         .find(|definition| definition.name.as_ref() == "Cell")
         .unwrap();
-    let method_id = owner.methods[&"choose".into()];
+    let method_id = resin_types::FunctionId::from_index(
+        module
+            .functions
+            .iter()
+            .position(|function| function.name.as_ref() == "choose")
+            .unwrap(),
+    );
     let method = &module.functions[method_id.index()];
     assert_eq!(method.signature.type_params.len(), 2);
-    assert_eq!(method.signature.type_params[0].id, owner.type_params[0].id);
+    assert_ne!(method.signature.type_params[0].id, owner.type_params[0].id);
     assert_eq!(method.signature.type_params[0].name.val.as_ref(), "T");
     assert_eq!(method.signature.type_params[1].name.val.as_ref(), "U");
     assert_eq!(
@@ -57,19 +63,24 @@ fn different_owner_applications_retain_one_polymorphic_method_body() {
         .iter()
         .find(|definition| definition.name.as_ref() == "Cell")
         .unwrap();
-    let method = &module.functions[owner.methods[&"read".into()].index()];
+    let method = module
+        .functions
+        .iter()
+        .find(|function| function.name.as_ref() == "read")
+        .unwrap();
+    assert_ne!(owner.type_params[0].id, method.signature.type_params[0].id);
     assert_eq!(method.signature.type_params.len(), 1);
     assert_eq!(
         method.signature.result.ty,
         Type::Parameter {
-            parameter: owner.type_params[0].id
+            parameter: method.signature.type_params[0].id
         }
     );
     assert_eq!(
         module
             .functions
             .iter()
-            .filter(|function| function.name.as_ref() == "Cell.read")
+            .filter(|function| function.name.as_ref() == "read")
             .count(),
         1
     );
@@ -81,7 +92,7 @@ fn recursive_method_results_complete_against_their_own_rigid_binders() {
     let method = module
         .functions
         .iter()
-        .find(|function| function.name.as_ref() == "Cell.choose")
+        .find(|function| function.name.as_ref() == "choose")
         .unwrap();
     assert_eq!(method.signature.type_params.len(), 2);
     assert_eq!(
@@ -102,9 +113,9 @@ fn drop_hooks_bind_only_their_owner_parameters() {
         .find(|definition| definition.name.as_ref() == "Cell")
         .unwrap();
     let drop = &module.functions[owner.drop.unwrap().index()];
-    assert_eq!(owner.drop, Some(owner.methods[&"drop".into()]));
+    assert_eq!(drop.name.as_ref(), "drop");
     assert_eq!(drop.signature.type_params.len(), 1);
-    assert_eq!(drop.signature.type_params[0].id, owner.type_params[0].id);
+    assert_ne!(drop.signature.type_params[0].id, owner.type_params[0].id);
     assert_eq!(drop.signature.result.ty, Type::Unit);
     let Type::Pointer { pointee } = &drop.signature.params[0].annotation.ty else {
         panic!("drop pointer")
@@ -115,16 +126,16 @@ fn drop_hooks_bind_only_their_owner_parameters() {
     assert_eq!(
         arguments,
         &[Type::Parameter {
-            parameter: owner.type_params[0].id
+            parameter: drop.signature.type_params[0].id
         }]
     );
 }
 
 #[test]
-fn explicit_method_arguments_cannot_replace_or_repeat_owner_arguments() {
+fn explicit_operation_arguments_match_the_complete_signature() {
     for source in [
-        "struct Cell<T> { value: T,  }\nfn read<T>(self: Cell<T>) -> T  { self.value }\n fn main()  { Cell<int> { value = 1 }:read::<int>(); }",
-        "struct Cell<T> { value: T,  }\nfn choose<T, U>(self: Cell<T>, value: U) -> U  { value }\n fn main()  { Cell<int> { value = 1 }:choose::<int, ulong>(2); }",
+        "struct Cell<T> { value: T,  }\nfn read<T>(self: Cell<T>) -> T  { self.value }\n fn main()  { Cell<int> { value = 1 }:read::<int, int>(); }",
+        "struct Cell<T> { value: T,  }\nfn choose<T, U>(self: Cell<T>, value: U) -> U  { value }\n fn main()  { Cell<int> { value = 1 }:choose::<ulong>(2); }",
         "struct Cell<T> { value: T,  }\nfn read<T>(self: Cell<T>) -> T  { self.value }\n fn main()  { read::<int>(Cell<uint> { value = 1 }); }",
         "struct Plain {  }\nfn read(self: Plain) -> int  { 42 }\n fn main()  { Plain {}:read::<int>(); }",
     ] {

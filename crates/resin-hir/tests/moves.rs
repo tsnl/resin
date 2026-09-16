@@ -41,6 +41,32 @@ fn assignment_requires_mut_and_returns_unit() {
         "immutable",
     );
     accepts("fn f(mut value: int) { value = 2 }");
+    accepts(
+        "fn f(flag: bool) -> int { let value: int; if (flag) { value = 1; } else { value = 2; }; value }",
+    );
+    rejects(
+        "fn f(flag: bool) { let value: int; while (flag) { value = 1; }; }",
+        "immutable",
+    );
+    rejects(
+        "struct Item {} fn f() { let value = Item {}; let moved = value; value = Item {}; }",
+        "immutable",
+    );
+    rejects(
+        "struct Item { value: int } fn f(item: Item) { item.value = 2; }",
+        "immutable",
+    );
+}
+
+#[test]
+fn match_binders_are_immutable_unless_marked_mut() {
+    rejects(
+        "fn f(value: int | None) { match (value) { int(number) => { number = 2; }, None => {} }; }",
+        "immutable",
+    );
+    accepts(
+        "fn f(value: int | None) { match (value) { int(mut number) => { number = 2; }, None => {} }; }",
+    );
 }
 
 #[test]

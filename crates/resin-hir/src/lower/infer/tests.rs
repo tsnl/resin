@@ -206,13 +206,16 @@ fn retries_discard_failed_method_choices_and_preserve_completed_groups() {
     let mut typer = Context::new();
     let mut inference = infer::Inference::new(&mut typer);
     let span = Span { start: 0, end: 0 };
-    let method = |out| infer::Constraint::Method {
-        receiver: Ty::Str.into(),
-        name: "at".into(),
-        type_args: None,
-        args: vec![Ty::UInt64.into()],
-        out,
-        associated: false,
+    let method = |out| infer::Constraint::Overload {
+        lookup: infer::Overload {
+            name: "at".into(),
+            candidates: vec![],
+            primitive: Some("at".into()),
+            expected: None,
+            type_args: None,
+            args: Some(vec![Ty::Str.into(), Ty::UInt64.into()]),
+            out,
+        },
     };
     let (earlier, first) = inference.expression();
     inference.constrain(earlier, (span, method(first.clone())));

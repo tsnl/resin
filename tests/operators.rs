@@ -13,9 +13,9 @@ fn dunder_calls_references_and_operators_share_one_specialization() {
         struct Number<T> { value: T,
             
         }
-fn __add__<T>(a: Number<T>, b: T) -> T  { a.value + b }
+fn __add__<T>(a: Ref<Number<T>>, b: T) -> T  { a.value + b }
 
-        fn named<T, U>(a: T, b: U) -> _  { a:__add__(b) }
+        fn named<T, U>(a: Ref<T>, b: U) -> _  { a:__add__(b) }
         fn main() -> int  {
             let mut number = Number<int> { value = 40 };
             let mut add = __add__::<int>;
@@ -29,7 +29,7 @@ fn __add__<T>(a: Number<T>, b: T) -> T  { a.value + b }
         module
             .functions
             .iter()
-            .filter(|f| f.name.as_deref() == Some("Number.__add__"))
+            .filter(|f| f.name.as_deref() == Some("__add__"))
             .count(),
         1
     );
@@ -54,20 +54,20 @@ fn operators_support_generic_owners_aliases_and_distinct_operand_and_result_type
             
             
         }
-fn __add__<T>(a: Vector<T>, b: Vector<T>) -> Vector<T>  { Vector<T> { x = a.x + b.x, y = a.y + b.y } }
+fn __add__<T>(a: Ref<Vector<T>>, b: Ref<Vector<T>>) -> Vector<T>  { Vector<T> { x = a.x + b.x, y = a.y + b.y } }
 
-fn __neg__<T>(a: Vector<T>) -> Vector<T>  { Vector<T> { x = -a.x, y = -a.y } }
+fn __neg__<T>(a: Ref<Vector<T>>) -> Vector<T>  { Vector<T> { x = -a.x, y = -a.y } }
 
-fn __mul__<T>(a: Vector<T>, scale: T) -> Vector<T>  { Vector<T> { x = a.x * scale, y = a.y * scale } }
+fn __mul__<T>(a: Ref<Vector<T>>, scale: Ref<T>) -> Vector<T>  { Vector<T> { x = a.x * scale, y = a.y * scale } }
 
-fn __truediv__<T>(a: Vector<T>, b: Vector<T>) -> T  { a.x * b.x + a.y * b.y }
+fn __truediv__<T>(a: Ref<Vector<T>>, b: Ref<Vector<T>>) -> T  { a.x * b.x + a.y * b.y }
 
-fn __eq__<T>(a: Vector<T>, b: Vector<T>) -> bool  { a.x == b.x && a.y == b.y }
+fn __eq__<T>(a: Ref<Vector<T>>, b: Ref<Vector<T>>) -> bool  { a.x == b.x && a.y == b.y }
 
         type Pair<T> = Vector<T>;
-        fn add<T>(a: T, b: T) -> _  { a + b }
-        fn multiply<T, U>(a: T, b: U) -> _  { a * b }
-        fn dot<T>(a: T, b: T) -> _  { a / b }
+        fn add<T>(a: Ref<T>, b: Ref<T>) -> _  { a + b }
+        fn multiply<T, U>(a: Ref<T>, b: U) -> _  { a * b }
+        fn dot<T>(a: Ref<T>, b: Ref<T>) -> _  { a / b }
         fn main() -> int  {
             let mut first = Pair<int> { x = 2, y = 3 };
             let mut second = Vector<int> { x = 4, y = 5 };
@@ -94,7 +94,7 @@ fn operator_operands_are_evaluated_once_in_order_and_reference_values_are_read()
         }
 fn __add__(a: Number, b: Number) -> Number  { Number { value = a.value + b.value } }
 
-fn __sub__(a: Number, b: int) -> int  { a.value - b }
+fn __sub__(a: Ref<Number>, b: int) -> int  { a.value - b }
 
         fn next(state: Ptr<int>, digit: int) -> Number  {
             state.* = state.* * 10 + digit;
@@ -126,7 +126,7 @@ fn __add__<T>(a: Cell<T>, b: Cell<T>) -> Cell<T>  { Cell<T> { value = a.value + 
 
         fn add<T>(a: T, b: T) -> _  { a + b }
         @compute_shader fn kernel(index: ulong, root: Ptr<Cell<uint>>)  {
-            root.* = add(root.*, Cell<uint> { value = 42 });
+            root.* = add(Cell<uint> { value = root.value }, Cell<uint> { value = 42 });
         }
     "#,
     );
@@ -160,45 +160,45 @@ fn every_operator_symbol_dispatches_without_changing_precedence() {
             
             
         }
-fn __pos__(a: Bits) -> int  { a.value }
+fn __pos__(a: Ref<Bits>) -> int  { a.value }
 
-fn __neg__(a: Bits) -> int  { -a.value }
+fn __neg__(a: Ref<Bits>) -> int  { -a.value }
 
-fn __invert__(a: Bits) -> int  { ~a.value }
+fn __invert__(a: Ref<Bits>) -> int  { ~a.value }
 
-fn __not__(a: Bits) -> bool  { a.value == 0 }
+fn __not__(a: Ref<Bits>) -> bool  { a.value == 0 }
 
-fn __add__(a: Bits, b: int) -> int  { a.value + b }
+fn __add__(a: Ref<Bits>, b: int) -> int  { a.value + b }
 
-fn __sub__(a: Bits, b: int) -> int  { a.value - b }
+fn __sub__(a: Ref<Bits>, b: int) -> int  { a.value - b }
 
-fn __mul__(a: Bits, b: int) -> int  { a.value * b }
+fn __mul__(a: Ref<Bits>, b: int) -> int  { a.value * b }
 
-fn __truediv__(a: Bits, b: int) -> int  { a.value / b }
+fn __truediv__(a: Ref<Bits>, b: int) -> int  { a.value / b }
 
-fn __mod__(a: Bits, b: int) -> int  { a.value % b }
+fn __mod__(a: Ref<Bits>, b: int) -> int  { a.value % b }
 
-fn __lshift__(a: Bits, b: int) -> int  { a.value << b }
+fn __lshift__(a: Ref<Bits>, b: int) -> int  { a.value << b }
 
-fn __rshift__(a: Bits, b: int) -> int  { a.value >> b }
+fn __rshift__(a: Ref<Bits>, b: int) -> int  { a.value >> b }
 
-fn __and__(a: Bits, b: int) -> int  { a.value & b }
+fn __and__(a: Ref<Bits>, b: int) -> int  { a.value & b }
 
-fn __or__(a: Bits, b: int) -> int  { a.value | b }
+fn __or__(a: Ref<Bits>, b: int) -> int  { a.value | b }
 
-fn __xor__(a: Bits, b: int) -> int  { a.value ^ b }
+fn __xor__(a: Ref<Bits>, b: int) -> int  { a.value ^ b }
 
-fn __eq__(a: Bits, b: int) -> bool  { a.value == b }
+fn __eq__(a: Ref<Bits>, b: int) -> bool  { a.value == b }
 
-fn __ne__(a: Bits, b: int) -> bool  { a.value != b }
+fn __ne__(a: Ref<Bits>, b: int) -> bool  { a.value != b }
 
-fn __lt__(a: Bits, b: int) -> bool  { a.value < b }
+fn __lt__(a: Ref<Bits>, b: int) -> bool  { a.value < b }
 
-fn __le__(a: Bits, b: int) -> bool  { a.value <= b }
+fn __le__(a: Ref<Bits>, b: int) -> bool  { a.value <= b }
 
-fn __gt__(a: Bits, b: int) -> bool  { a.value > b }
+fn __gt__(a: Ref<Bits>, b: int) -> bool  { a.value > b }
 
-fn __ge__(a: Bits, b: int) -> bool  { a.value >= b }
+fn __ge__(a: Ref<Bits>, b: int) -> bool  { a.value >= b }
 
         fn main() -> int  {
             let mut x = Bits { value = 6 };
@@ -240,7 +240,7 @@ fn __add__(self: Narrow, value: ubyte) -> int  { int(value) - 213 }
 }
 
 #[test]
-fn operator_copies_and_results_use_ordinary_owner_cleanup() {
+fn operator_borrows_and_results_use_ordinary_owner_cleanup() {
     let output = run(r#"export { main };
         import { "$/shared.resin" };
         struct Payload { drops: Ptr<int>,
@@ -251,9 +251,9 @@ fn drop(self: Ptr<Payload>)  { self.drops.* = self.drops.* + 1; }
         struct Value { owner: ArcPtr<Payload>, value: int,
             
         }
-fn __add__(a: Value, b: Value) -> Value  { Value { owner = a.owner, value = a.value + b.value } }
+fn __add__(a: Ref<Value>, b: Ref<Value>) -> Value  { Value { owner = a.owner:clone(), value = a.value + b.value } }
 
-        fn add<T>(a: T, b: T) -> _  { a + b }
+        fn add<T>(a: Ref<T>, b: Ref<T>) -> _  { a + b }
         fn main() -> int | Err<_>  {
             let mut drops = 0_i;
             let mut answer = 0_i;
@@ -278,7 +278,7 @@ fn __add__(a: Value, b: Value) -> Value  { Value { owner = a.owner, value = a.va
 #[test]
 fn dependent_operator_errors_report_the_requested_instantiation() {
     for (declaration, expression, expected) in [
-        ("struct Value {};", "value + 1", "operator +"),
+        ("struct Value {}", "value + 1", "overload of `+`"),
         (
             "struct Value {  }\nfn __add__(a: Value, b: ubyte) -> int  { int(b) }\n",
             "value + 256",
@@ -287,7 +287,7 @@ fn dependent_operator_errors_report_the_requested_instantiation() {
         (
             "struct Value {  }\nfn __add__(a: Value, b: int) -> int  { b }\n",
             "value + (1 == 1)",
-            "Bool",
+            "no matching overload",
         ),
     ] {
         let source = format!(
@@ -321,7 +321,7 @@ fn __add__(a: Number, b: int) -> int  {{ {body} }}
 
             fn add<T>(a: T) -> _  {{ a + 1 }}
             @compute_shader fn kernel(index: ulong, root: Ptr<Number>)  {{
-                root.value = add(root.*);
+                root.value = add(Number {{ value = root.value }});
             }}
         "#
         );

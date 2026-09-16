@@ -126,7 +126,7 @@ fn bridge_body(
                 source_value(&declaration.source_params[0]),
                 crate::Type::Defined { .. }
             ))
-        .then_some(FunctionBody::Defined(function));
+        .then_some(FunctionBody::Ordinary);
     }
     let (value, _) = declaration.result.fallible_parts()?;
     let bytes = Ty::byte_span();

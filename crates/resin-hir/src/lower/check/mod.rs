@@ -1017,6 +1017,15 @@ impl Expression<'_, '_> {
             }
             _ => return None,
         };
+        if self
+            .checker
+            .scopes
+            .lookup_overloads(&name.val)
+            .iter()
+            .any(|(_, _, function)| !function)
+        {
+            return None;
+        }
         let candidates = self.overload_candidates(name);
         let primitive = super::context::is_primitive_operation(&name.val).then(|| name.val.clone());
         if candidates.is_empty() && primitive.is_none() {
@@ -1125,6 +1134,176 @@ impl Expression<'_, '_> {
         self.checker.expressions.push((term.span, out.clone()));
         self.checker.scopes.record_inferred(term.span, out);
         checked
+    }
+
+    fn builtin(
+        &mut self,
+        name: &Arc<str>,
+        name_span: &Span,
+        args: &[resin_ast::Term],
+        span: Span,
+        out: &Type,
+        expected: &Option<Type>,
+    ) -> TermKind {
+        self.checker
+            .method_dependencies(&crate::MethodName::Operator {
+                symbol: name.clone(),
+                arity: args.len(),
+            });
+        let args = args
+            .iter()
+            .map(|arg| {
+                let expected = if matches!(name.as_ref(), "&&" | "||" | "assert") {
+                    Some(Ty::Bool.into())
+                } else {
+                    expression_exits(arg).then(|| self.checker.typing.solver.fresh())
+                };
+                self.child(arg, expected)
+            })
+            .collect::<Vec<_>>();
+        self.checker.scopes.record_call(
+            &Ident::new(name.clone(), *name_span),
+            args[0].ty.clone(),
+            args.iter().map(|arg| arg.ty.clone()).collect(),
+            true,
+            self.rule,
+        );
+        let dunder = crate::OPERATOR_METHODS
+            .iter()
+            .find(|(_, symbol, arity)| *symbol == name.as_ref() && *arity == args.len())
+            .map(|(method, _, _)| *method);
+        let constraint = if let Some(dunder) = dunder {
+            let candidates = self.overload_candidates(&Ident::new(dunder.into(), *name_span));
+            Constraint::Overload {
+                lookup: super::infer::Overload {
+                    name: name.clone(),
+                    candidates,
+                    primitive: Some(name.clone()),
+                    expected: expected.clone(),
+                    type_args: None,
+                    args: Some(args.iter().map(|arg| arg.ty.clone()).collect()),
+                    out: out.clone(),
+                },
+            }
+        } else {
+            Constraint::Builtin(
+                name.clone(),
+                args.iter().map(|arg| arg.ty.clone()).collect(),
+                out.clone(),
+            )
+        };
+        self.constrain((span, constraint));
+        TermKind::Builtin {
+            rule: self.rule,
+            name_span: *name_span,
+            name: name.clone(),
+            args,
+        }
+    }
+
+    fn call(
+        &mut self,
+        func: &resin_ast::Term,
+        args: &[resin_ast::Term],
+        span: Span,
+        out: &Type,
+        expected: &Option<Type>,
+    ) -> Result<(TermKind, Option<Type>)> {
+        let mut equate = None;
+        let kind = if let resin_ast::TermKind::Var { name } = &func.val
+            && name.val.as_ref() == "absurd"
+        {
+            let arg = single_argument(args, span)?;
+            let arg = self.child(arg, Some(Ty::union([]).into()));
+            TermKind::Absurd { arg: Box::new(arg) }
+        } else if let resin_ast::TermKind::Var { name } = &func.val
+            && matches!(name.val.as_ref(), "size_of" | "align_of")
+        {
+            let arg = single_argument(args, span)?;
+            // Check the operand for typing only. Never execute its effects or read its locals.
+            let ann = if let resin_ast::TermKind::Type { ty } = &arg.val {
+                self.annotation(ty, false)
+            } else {
+                let unevaluated = std::mem::replace(&mut self.checker.unevaluated, true);
+                let term = self.child(arg, None);
+                self.checker.unevaluated = unevaluated;
+                Annotation {
+                    holes: Vec::new(),
+                    ty: term.ty,
+                    span: term.span,
+                }
+            };
+            equate = Some(Ty::UInt64.into());
+            self.constrain((span, Constraint::Layout(ann.ty.clone())));
+            TermKind::Layout {
+                ty: ann.into_tree(),
+                size: name.val.as_ref() == "size_of",
+            }
+        } else if let resin_ast::TermKind::Type { ty } = &func.val
+            && matches!(&ty.val, resin_ast::TypeKind::App { head, .. } if head.val.as_ref() == "Err")
+        {
+            let ann = self.annotation(ty, true);
+            super::eval::reference_type(&self.checker.typing.solver, &ann.ty, false, span)?;
+            let Type::Node(super::infer::Head::Error, parts) =
+                self.checker.typing.solver.head(&ann.ty)
+            else {
+                unreachable!("Err annotation");
+            };
+            let arg = self.child(single_argument(args, span)?, Some(parts[0].clone()));
+            equate = Some(ann.ty.clone());
+            TermKind::Ascribe {
+                ty: ann.into_tree(),
+                arg: Box::new(arg),
+            }
+        } else if let resin_ast::TermKind::Type { ty } = &func.val {
+            let unit = resin_ast::Term {
+                span,
+                val: resin_ast::TermKind::Unit,
+            };
+            let arg = if args.is_empty() {
+                &unit
+            } else {
+                single_argument(args, span)?
+            };
+            let ann = self.annotation(ty, true);
+            super::eval::reference_type(&self.checker.typing.solver, &ann.ty, false, span)?;
+            let arg = {
+                let literal = matches!(arg.val, resin_ast::TermKind::Num { .. })
+                    || matches!(&arg.val, resin_ast::TermKind::Builtin { name, args, .. } if matches!(name.as_ref(), "+" | "-") && matches!(args.as_slice(), [resin_ast::Term { val: resin_ast::TermKind::Num { .. }, .. }]));
+                let arg = self.child(arg, None);
+                self.constrain((
+                    span,
+                    Constraint::Ascribe(arg.ty.clone(), ann.ty.clone(), literal),
+                ));
+                arg
+            };
+            equate = Some(ann.ty.clone());
+            TermKind::Ascribe {
+                ty: ann.into_tree(),
+                arg: Box::new(arg),
+            }
+        } else if let Some(call) = self.overload_call(func, args, out.clone(), expected.clone()) {
+            call
+        } else {
+            let func = self.child(func, None);
+            let args = args
+                .iter()
+                .map(|arg| self.child(arg, None))
+                .collect::<Vec<_>>();
+            self.constrain((
+                span,
+                Constraint::Call(
+                    func.ty.clone(),
+                    args.iter().map(|arg| arg.ty.clone()).collect(),
+                    out.clone(),
+                ),
+            ));
+            TermKind::Call {
+                func: Box::new(func),
+                args,
+            }
+        };
+        Ok((kind, equate))
     }
 
     fn term_inner(
@@ -1474,225 +1653,12 @@ impl Expression<'_, '_> {
                 name,
                 name_span,
                 args,
-            } => {
-                self.checker
-                    .method_dependencies(&crate::MethodName::Operator {
-                        symbol: name.clone(),
-                        arity: args.len(),
-                    });
-                let args = args
-                    .iter()
-                    .map(|arg| {
-                        let expected = if matches!(name.as_ref(), "&&" | "||" | "assert") {
-                            Some(Ty::Bool.into())
-                        } else {
-                            expression_exits(arg).then(|| self.checker.typing.solver.fresh())
-                        };
-                        self.child(arg, expected)
-                    })
-                    .collect::<Vec<_>>();
-                self.checker.scopes.record_call(
-                    &Ident::new(name.clone(), *name_span),
-                    args[0].ty.clone(),
-                    args.iter().map(|arg| arg.ty.clone()).collect(),
-                    true,
-                    self.rule,
-                );
-                let dunder = crate::OPERATOR_METHODS
-                    .iter()
-                    .find(|(_, symbol, arity)| *symbol == name.as_ref() && *arity == args.len())
-                    .map(|(method, _, _)| *method);
-                let constraint = if let Some(dunder) = dunder {
-                    let candidates =
-                        self.overload_candidates(&Ident::new(dunder.into(), *name_span));
-                    Constraint::Overload {
-                        lookup: super::infer::Overload {
-                            name: name.clone(),
-                            candidates,
-                            primitive: Some(name.clone()),
-                            expected: expected.clone(),
-                            type_args: None,
-                            args: Some(args.iter().map(|arg| arg.ty.clone()).collect()),
-                            out: out.clone(),
-                        },
-                    }
-                } else {
-                    Constraint::Builtin(
-                        name.clone(),
-                        args.iter().map(|arg| arg.ty.clone()).collect(),
-                        out.clone(),
-                    )
-                };
-                self.constrain((span, constraint));
-                TermKind::Builtin {
-                    rule: self.rule,
-                    name_span: *name_span,
-                    name: name.clone(),
-                    args,
-                }
-            }
-            resin_ast::TermKind::MethodCall {
-                receiver,
-                name,
-                type_args,
-                args,
-            } => {
-                let arguments: Vec<_> = type_args
-                    .iter()
-                    .map(|ann| self.annotation(ann, true).ty)
-                    .collect();
-                for argument in &arguments {
-                    super::eval::reference_type(
-                        &self.checker.typing.solver,
-                        argument,
-                        false,
-                        span,
-                    )?;
-                }
-                let type_args = (!arguments.is_empty()).then_some(arguments);
-                self.checker.method_dependencies(&name.val.clone().into());
-                let (receiver, annotation, receiver_type, associated) =
-                    if let resin_ast::TermKind::Type { ty } = &receiver.val {
-                        let annotation = self.annotation(ty, false);
-                        let ty = annotation.ty.clone();
-                        (None, Some(annotation), ty, true)
-                    } else {
-                        let receiver = self.child(receiver, None);
-                        let ty = receiver.ty.clone();
-                        (Some(receiver), None, ty, false)
-                    };
-                self.checker
-                    .scopes
-                    .record_members(name.span, receiver_type.clone(), associated);
-                let args = args
-                    .iter()
-                    .map(|arg| self.child(arg, None))
-                    .collect::<Vec<_>>();
-                self.checker.scopes.record_call(
-                    name,
-                    receiver_type.clone(),
-                    args.iter().map(|arg| arg.ty.clone()).collect(),
-                    associated,
-                    self.rule,
-                );
-                let constraint = Constraint::Method {
-                    receiver: receiver_type.clone(),
-                    name: name.val.clone(),
-                    type_args,
-                    args: args.iter().map(|arg| arg.ty.clone()).collect(),
-                    out: out.clone(),
-                    associated,
-                };
-                self.constrain((span, constraint));
-                TermKind::MethodCall {
-                    rule: self.rule,
-                    receiver: receiver.map(Box::new),
-                    receiver_type: annotation.map(Annotation::into_tree).unwrap_or(
-                        typed::Annotation {
-                            ty: receiver_type,
-                            span,
-                        },
-                    ),
-                    name: name.clone(),
-                    args,
-                }
-            }
+            } => self.builtin(name, name_span, args, span, &out, &expected),
+            resin_ast::TermKind::MethodCall { .. } => unreachable!("receiver call was desugared"),
             resin_ast::TermKind::Call { func, args } => {
-                if let resin_ast::TermKind::Var { name } = &func.val
-                    && name.val.as_ref() == "absurd"
-                {
-                    let arg = single_argument(args, span)?;
-                    let arg = self.child(arg, Some(Ty::union([]).into()));
-                    TermKind::Absurd { arg: Box::new(arg) }
-                } else if let resin_ast::TermKind::Var { name } = &func.val
-                    && matches!(name.val.as_ref(), "size_of" | "align_of")
-                {
-                    let arg = single_argument(args, span)?;
-                    // Check the operand for typing only. Never execute its effects or read its locals.
-                    let ann = if let resin_ast::TermKind::Type { ty } = &arg.val {
-                        self.annotation(ty, false)
-                    } else {
-                        let unevaluated = std::mem::replace(&mut self.checker.unevaluated, true);
-                        let term = self.child(arg, None);
-                        self.checker.unevaluated = unevaluated;
-                        Annotation {
-                            holes: Vec::new(),
-                            ty: term.ty,
-                            span: term.span,
-                        }
-                    };
-                    equate = Some(Ty::UInt64.into());
-                    self.constrain((span, Constraint::Layout(ann.ty.clone())));
-                    TermKind::Layout {
-                        ty: ann.into_tree(),
-                        size: name.val.as_ref() == "size_of",
-                    }
-                } else if let resin_ast::TermKind::Type { ty } = &func.val
-                    && matches!(&ty.val, resin_ast::TypeKind::App { head, .. } if head.val.as_ref() == "Err")
-                {
-                    let ann = self.annotation(ty, true);
-                    super::eval::reference_type(&self.checker.typing.solver, &ann.ty, false, span)?;
-                    let Type::Node(super::infer::Head::Error, parts) =
-                        self.checker.typing.solver.head(&ann.ty)
-                    else {
-                        unreachable!("Err annotation");
-                    };
-                    let arg = self.child(single_argument(args, span)?, Some(parts[0].clone()));
-                    equate = Some(ann.ty.clone());
-                    TermKind::Ascribe {
-                        ty: ann.into_tree(),
-                        arg: Box::new(arg),
-                    }
-                } else if let resin_ast::TermKind::Type { ty } = &func.val {
-                    let unit = resin_ast::Term {
-                        span,
-                        val: resin_ast::TermKind::Unit,
-                    };
-                    let arg = if args.is_empty() {
-                        &unit
-                    } else {
-                        single_argument(args, span)?
-                    };
-                    let ann = self.annotation(ty, true);
-                    super::eval::reference_type(&self.checker.typing.solver, &ann.ty, false, span)?;
-                    let arg = {
-                        let literal = matches!(arg.val, resin_ast::TermKind::Num { .. })
-                            || matches!(&arg.val, resin_ast::TermKind::Builtin { name, args, .. } if matches!(name.as_ref(), "+" | "-") && matches!(args.as_slice(), [resin_ast::Term { val: resin_ast::TermKind::Num { .. }, .. }]));
-                        let arg = self.child(arg, None);
-                        self.constrain((
-                            span,
-                            Constraint::Ascribe(arg.ty.clone(), ann.ty.clone(), literal),
-                        ));
-                        arg
-                    };
-                    equate = Some(ann.ty.clone());
-                    TermKind::Ascribe {
-                        ty: ann.into_tree(),
-                        arg: Box::new(arg),
-                    }
-                } else if let Some(call) =
-                    self.overload_call(func, args, out.clone(), expected.clone())
-                {
-                    call
-                } else {
-                    let func = self.child(func, None);
-                    let args = args
-                        .iter()
-                        .map(|arg| self.child(arg, None))
-                        .collect::<Vec<_>>();
-                    self.constrain((
-                        span,
-                        Constraint::Call(
-                            func.ty.clone(),
-                            args.iter().map(|arg| arg.ty.clone()).collect(),
-                            out.clone(),
-                        ),
-                    ));
-                    TermKind::Call {
-                        func: Box::new(func),
-                        args,
-                    }
-                }
+                let (kind, result) = self.call(func, args, span, &out, &expected)?;
+                equate = result;
+                kind
             }
             resin_ast::TermKind::Assign { place, value } => {
                 let place = self.child(place, None);

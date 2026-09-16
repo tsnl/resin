@@ -186,7 +186,7 @@ pub(crate) struct FunctionDecl {
 /// Ordinary signatures can have a source body or a compiler-provided definition.
 #[derive(Debug, Clone)]
 pub(crate) enum FunctionBody {
-    Defined(FunctionId),
+    Ordinary,
     GpuPipelineFactory {
         factory: FunctionId,
         graphics: bool,
@@ -242,7 +242,7 @@ impl Context {
             return false;
         };
         self.functions.entry(function).or_insert(FunctionDecl {
-            body: FunctionBody::Defined(function),
+            body: FunctionBody::Ordinary,
             source_params,
             params,
             result,

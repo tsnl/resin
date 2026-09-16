@@ -29,18 +29,18 @@ fn read(self: Large) -> ulong  { self.value }
         }
 fn inner<T>(self: Holder<T>) -> T  { self.item }
 
-        fn read<T>(value: T) -> _  { value:read() }
+        fn relay_read<T>(value: T) -> _  { value:read() }
         fn field_method<T>(value: T) -> _  { value.item:read() }
         fn method_field<T>(value: T) -> _  { value:inner().value }
         fn method_method<T>(value: T) -> _  { value:inner():read() }
         fn main() -> int  {
             let mut small = Small { value = 7 };
             let mut large = Large { padding = 3, value = 4294967296 };
-            let mut first = Holder<Small> { item = small };
-            let mut second = Holder<Large> { item = large };
+            let first = Holder<Small> { item = Small { value = 7 } };
+            let second = Holder<Large> { item = Large { padding = 3, value = 4294967296 } };
             print(fmt("{0} {1} {2} {3} {4}", (
-                read(small), read(large), field_method(first),
-                method_field(second), method_method(second)
+                relay_read(small), relay_read(large), field_method(first),
+                method_field(Holder<Large> { item = Large { padding = 3, value = 4294967296 } }), method_method(second)
             )));
             0
         }
@@ -65,10 +65,10 @@ fn factory_make<T, U>(value: U) -> Cell<U>  { Cell<U> { value = value } }
 
 fn pass<T, U>(self: Factory<T>, value: U) -> Cell<U>  { Cell<U> { value = value } }
 
-        fn direct<T, U>(value: U) -> _  { make::<U>(value) }
-        fn receiver<T, U>(owner: T, value: U) -> _  { owner:pass::<U>(value) }
+        fn direct<T, U>(value: U) -> _ { factory_make::<T, U>(value) }
+        fn receiver<T, U>(owner: T, value: U) -> _  { owner:pass(value) }
         fn reference<T, U>(value: U) -> _  {
-            let mut make = make::<U>;
+            let make = factory_make::<T, U>;
             make(value)
         }
         fn main() -> int  {
@@ -84,7 +84,7 @@ fn pass<T, U>(self: Factory<T>, value: U) -> Cell<U>  { Cell<U> { value = value 
         module
             .functions
             .iter()
-            .filter(|function| { function.name.as_deref() == Some("Factory.make") })
+            .filter(|function| { function.name.as_deref() == Some("factory_make") })
             .count(),
         1
     );
@@ -142,7 +142,7 @@ fn add(self: Ptr<Counter>, amount: int) -> int  {
                 self.value
             }
 
-fn read(self: Counter) -> int  { self.value }
+fn read(self: Ptr<Counter>) -> int  { self.value }
 
         fn receiver<T>(trace: Ptr<int>, value: T) -> T  {
             trace.* = trace.* * 10 + 1;
@@ -155,14 +155,14 @@ fn read(self: Counter) -> int  { self.value }
         fn add_owned<T>(trace: Ptr<int>, value: T) -> _  {
             receiver(trace, value):get():add(argument(trace))
         }
-        fn read<T>(value: T) -> _  { value:read() }
+        fn relay_read<T>(value: T) -> _  { value:read() }
         fn main() -> (int | Err<_>)  {
             let mut trace = 0_i;
             let mut local = Counter { value = 37 };
             let mut shared = arc_ptr_alloc::<Counter>(Counter { value = 6 })?;
             add(&trace, &local);
-            add_owned(&trace, shared);
-            print(fmt("{0} {1} {2}", (trace, read(&local), read(shared:get()))));
+            add_owned(&trace, shared:clone());
+            print(fmt("{0} {1} {2}", (trace, relay_read(&local), relay_read(shared:get()))));
             (0)
         }
     "#);
@@ -193,50 +193,54 @@ fn dependent_callable_fields_use_function_signatures() {
 #[test]
 fn dependent_failures_report_the_demanded_application() {
     for (declaration, body, needle) in [
-        ("struct Owner {}", "value.missing()", "missing"),
+        (
+            "struct Owner {} fn missing(value: bool) -> int { 0 }",
+            "value:missing()",
+            "missing",
+        ),
         (
             "struct Owner {  }\nfn read(self: Owner) -> int  { 42 }\n",
-            "value.read().missing",
+            "value:read().missing",
             "ExpectedRecord",
         ),
         (
             "struct Owner {  }\nfn read(self: Owner, n: int) -> int  { n }\n",
-            "value.read(1 == 1)",
+            "value:read(1 == 1)",
             "",
         ),
         (
             "struct Owner {  }\nfn read(self: Owner, n: int) -> int  { n }\n",
-            "value.read(1_i, 2_i)",
+            "value:read(1_i, 2_i)",
             "",
         ),
         (
             "struct Owner {  }\nfn read(self: Owner, n: int) -> int  { n }\n",
-            "value.read()",
+            "value:read()",
             "arguments",
         ),
         (
             "struct Owner {  }\nfn read(self: Owner, a: int, b: int) -> int  { a + b }\n",
-            "value.read((1_i, 2_i))",
+            "value:read((1_i, 2_i))",
             "arguments",
         ),
         (
             "struct Owner {  }\nfn read(self: Owner, a: int, b: int) -> int  { a + b }\n",
-            "{ struct Pair { first: int, second: int, } value.read(Pair { first = 1_i, second = 2_i }) }",
+            "{ struct Pair { first: int, second: int, } value:read(Pair { first = 1_i, second = 2_i }) }",
             "",
         ),
         (
             "struct Owner {  }\nfn read(self: Owner, a: int, b: int) -> int  { a + b }\n",
-            "value.read(1_i, 2_i, 3_i)",
+            "value:read(1_i, 2_i, 3_i)",
             "",
         ),
         (
             "struct Owner {  }\nfn read<U>(self: Owner, n: U) -> U  { n }\n",
-            "value.read(42)",
-            "type argument",
+            "value:read::<int, int>(42)",
+            "no matching overload",
         ),
         (
             "struct Owner {  }\nfn read(self: Owner, n: ubyte) -> int  { int(n) }\n",
-            "value.read(256)",
+            "value:read(256)",
             "range",
         ),
     ] {
@@ -274,11 +278,16 @@ fn dependent_failures_report_the_demanded_application() {
 #[test]
 fn unused_dependent_bodies_do_not_select_methods() {
     let tree = hir(
-        "export { main }; fn unused<T>(value: T) -> _  { value:missing().field } fn main() -> int  { 42 }",
+        "export { main }; fn missing(value: int) -> int { value } fn unused<T>(value: T) -> _  { value:missing().field } fn main() -> int  { 42 }",
     );
     let module =
         support::frontend::lower(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
-    assert_eq!(module.functions.len(), 1);
+    assert!(
+        module
+            .functions
+            .iter()
+            .all(|function| function.name.as_deref() != Some("unused"))
+    );
 }
 
 #[test]
@@ -294,11 +303,11 @@ fn dependent_method_calls_obey_shader_profile_rules() {
         struct Owner { value: int,
             
         }
-fn read(self: Owner) -> int  { abs(self.value) }
+fn read(self: Ptr<Owner>) -> int  { abs(self.value) }
 
-        fn read<T>(value: T) -> _  { value:read() }
+        fn relay_read<T>(value: T) -> _  { value:read() }
         @compute_shader fn kernel(index: ulong, root: Ptr<Owner>)  {
-            root.value = read(root);
+            root.value = relay_read(root);
         }"#,
     );
     assert!(message.contains("foreign"), "{message}");

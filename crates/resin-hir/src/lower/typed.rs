@@ -86,13 +86,6 @@ pub(super) enum TermKind {
         name: Arc<str>,
         args: Vec<Term>,
     },
-    MethodCall {
-        rule: Rule,
-        receiver: Option<Box<Term>>,
-        receiver_type: Annotation<Type>,
-        name: Ident,
-        args: Vec<Term>,
-    },
     MethodReference {
         rule: Rule,
         name: Ident,

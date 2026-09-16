@@ -121,6 +121,7 @@ impl Substitution {
             candidates: lookup.candidates.clone(),
             type_args: explicit.clone(),
             arguments: args.clone(),
+            literal_arguments: lookup.literal_arguments.clone(),
         };
         if !state.operations.insert(query.clone()) {
             return Err(operation_error("cyclic operation signature"));
@@ -150,16 +151,35 @@ impl Substitution {
                 if let Some(explicit) = &explicit {
                     substitution = Self::new(&signature.type_params, explicit)?;
                 }
-                let bound = signature.params.iter().zip(&args).all(|(parameter, arg)| {
-                    match_parameter(
-                        &parameter.annotation.ty,
-                        arg,
-                        &mut substitution.arguments,
-                        0,
-                    )
-                });
+                let bound = signature.params.iter().zip(&args).enumerate().all(
+                    |(index, (parameter, arg))| {
+                        lookup.literal_arguments.contains(&index)
+                            || match_parameter(
+                                &parameter.annotation.ty,
+                                arg,
+                                &mut substitution.arguments,
+                                0,
+                            )
+                    },
+                );
                 if !bound {
                     continue;
+                }
+                // All nonliteral operands determine binders first. A binder
+                // constrained only by a literal uses HIR's recorded fallback.
+                for &index in &lookup.literal_arguments {
+                    let Some(parameter) = signature.params.get(index) else {
+                        return Err(operation_error(
+                            "numeric operand index exceeds argument count",
+                        ));
+                    };
+                    let ty = value_type(&parameter.annotation.ty);
+                    if let resin_hir::Type::Parameter { parameter } = ty {
+                        substitution
+                            .arguments
+                            .entry(*parameter)
+                            .or_insert_with(|| args[index].clone());
+                    }
                 }
                 let Some(arguments) = signature
                     .type_params
@@ -182,7 +202,7 @@ impl Substitution {
                             )
                         })
                         .collect::<Result<Vec<_>, _>>()?;
-                    for (param, arg) in params.iter().zip(&args) {
+                    for (index, (param, arg)) in params.iter().zip(&args).enumerate() {
                         let (target, source) = match param {
                             resin_hir::Type::Reference { referent } => {
                                 (referent.as_ref(), value_type(arg))
@@ -191,7 +211,12 @@ impl Substitution {
                         };
                         let source = materialize(source, instances)?;
                         let target = materialize(target, instances)?;
-                        if !source.widens_to(&target) {
+                        let compatible = if lookup.literal_arguments.contains(&index) {
+                            numeric_literal_matches(&source, &target)
+                        } else {
+                            source.widens_to(&target)
+                        };
+                        if !compatible {
                             return Ok(None);
                         }
                     }
@@ -224,30 +249,48 @@ impl Substitution {
                 if explicit.is_none()
                     && let Some(candidate) = primitive_operation(symbol, &args)
                 {
-                    let compatible = candidate.params.iter().zip(&args).all(|(param, arg)| {
+                    let compatible = candidate.params.iter().zip(&args).enumerate().all(|(index, (param, arg))| {
                         let param = value_type(param);
                         let arg = value_type(arg);
-                        matches!((materialize(arg, instances), materialize(param, instances)), (Ok(arg), Ok(param)) if arg.widens_to(&param))
+                        matches!((materialize(arg, instances), materialize(param, instances)), (Ok(arg), Ok(param)) if if lookup.literal_arguments.contains(&index) { numeric_literal_matches(&arg, &param) } else { arg.widens_to(&param) })
                     });
                     if compatible {
                         matches.push(candidate);
                     }
                 }
-                let types = args
+                let context = args
                     .iter()
-                    .map(|arg| materialize(value_type(arg), instances))
+                    .enumerate()
+                    .find(|(index, _)| !lookup.literal_arguments.contains(index))
+                    .map(|(_, ty)| value_type(ty));
+                let primitive_args = args
+                    .iter()
+                    .enumerate()
+                    .map(|(index, arg)| {
+                        let arg = value_type(arg);
+                        if lookup.literal_arguments.contains(&index)
+                            && let Some(context) = context
+                        {
+                            return context.clone();
+                        }
+                        arg.clone()
+                    })
+                    .collect::<Vec<_>>();
+                let types = primitive_args
+                    .iter()
+                    .map(|arg| materialize(arg, instances))
                     .collect::<Result<Vec<_>, _>>()?;
-                if let Ok(call) = instances.typer().type_builtin_call(symbol, &types) {
+                if let Ok(call) = instances.typer().builtin_instance(symbol, &types) {
                     let result = if call.result == Ty::Bool {
                         resin_hir::Type::Bool
                     } else {
-                        value_type(&args[0]).clone()
+                        primitive_args[0].clone()
                     };
                     matches.push(ResolvedMethod {
                         target: MethodTarget::Primitive {
                             symbol: symbol.clone(),
                         },
-                        params: args.iter().map(|arg| value_type(arg).clone()).collect(),
+                        params: primitive_args,
                         result,
                     });
                 }
@@ -811,6 +854,10 @@ fn consume_node(depth: usize, remaining: &mut usize) -> Result<(), super::LowerE
         },
     })?;
     Ok(())
+}
+
+fn numeric_literal_matches(fallback: &Ty, target: &Ty) -> bool {
+    target.is_numeric() && (fallback.is_integer() || !target.is_integer())
 }
 
 fn operation_error(message: impl Into<std::sync::Arc<str>>) -> super::LowerError {

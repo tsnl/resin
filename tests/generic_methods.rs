@@ -7,7 +7,7 @@ fn run(source: &str) -> std::process::Output {
 }
 
 #[test]
-fn generic_owner_methods_support_static_and_receiver_calls() {
+fn generic_free_operations_support_direct_and_receiver_calls() {
     let output = run(r#"export { main };
         import { "$/string.resin" };
         struct Cell<T> { value: T,
@@ -17,13 +17,13 @@ fn generic_owner_methods_support_static_and_receiver_calls() {
         }
 fn cell_make<T>(value: T) -> Cell<T>  { Cell<T> { value = value } }
 
-fn read<T>(self: Cell<T>) -> T  { self.value }
+fn read<T>(self: Ref<Cell<T>>) -> T  { self.value }
 
-fn with<T, U>(self: Cell<T>, value: U) -> Cell<U>  { Cell<U> { value = value } }
+fn with<T, U>(self: Ref<Cell<T>>, value: U) -> Cell<U>  { Cell<U> { value = value } }
 
         fn main() -> int  {
             let mut first = cell_make::<int>(7);
-            let mut second = first:with::<ulong>(4294967296);
+            let mut second = first:with::<_, ulong>(4294967296);
             let mut third = with::<int, ubyte>(first, 255);
             print(fmt("{0} {1} {2}", (first:read(), second:read(), third:read())));
             0
@@ -45,7 +45,7 @@ fn factory_method_arguments_follow_expected_results_and_explicit_holes() {
         struct Factory {
             
         }
-fn create<T>(self: Factory) -> Cell<T>  { Cell<T> { value = 41 } }
+fn create<T>(self: Ref<Factory>) -> Cell<T>  { Cell<T> { value = 41 } }
 
         fn main() -> int  {
             let mut factory = Factory {};
@@ -66,7 +66,7 @@ fn create<T>(self: Factory) -> Cell<T>  { Cell<T> { value = 41 } }
 }
 
 #[test]
-fn method_references_keep_owner_arguments_and_infer_only_remaining_binders() {
+fn free_function_references_retain_all_explicit_binders() {
     let output = run(r#"export { main };
         struct Cell<T> { value: T,
             
@@ -74,13 +74,13 @@ fn method_references_keep_owner_arguments_and_infer_only_remaining_binders() {
         }
 fn cell_make<T>(value: T) -> Cell<T>  { Cell<T> { value = value } }
 
-fn select<T, U>(cell: Cell<T>, value: U) -> U  { value }
+fn select<T, U>(cell: Ref<Cell<T>>, value: U) -> U  { value }
 
         fn main() -> int  {
             let mut make = cell_make::<int>;
-            let mut select = select::<int, int>;
+            let select_int = select::<int, int>;
             let mut cell = make(7);
-            select(cell, 35) + cell.value
+            select_int(cell, 35) + cell.value
         }
     "#);
     assert_eq!(
@@ -98,11 +98,11 @@ fn recursive_methods_complete_results_without_changing_owner_or_method_binders()
             
             
         }
-fn read<T>(self: Cell<T>, depth: int) -> _  {
+fn read<T>(self: Ref<Cell<T>>, depth: int) -> _  {
                 if (depth == 0) { self.value } else { self:read(depth - 1) }
             }
 
-fn choose<T, U>(self: Cell<T>, value: U, depth: int) -> _  {
+fn choose<T, U>(self: Ref<Cell<T>>, value: U, depth: int) -> _  {
                 if (depth == 0) { value } else { self:choose(value, depth - 1) }
             }
 
@@ -131,7 +131,7 @@ fn tracked_make<T>(trace: Ptr<ulong>, value: T) -> Tracked<T>  {
                 Tracked<T> { trace = trace, value = value }
             }
 
-fn read<T>(self: Ptr<Tracked<T>>) -> T  { self.value }
+fn read<T>(self: Ref<Tracked<T>>) -> T  { self.value }
 
 fn drop<T>(self: Ptr<Tracked<T>>)  {
                 self.trace.* = self.trace.* * 10 + size_of(T);
@@ -188,7 +188,7 @@ fn drop<T>(self: Ptr<Tracked<T>>)  {
 }
 
 #[test]
-fn imported_generic_aliases_share_the_owners_method_instances() {
+fn imported_generic_aliases_share_free_operation_instances() {
     let directory = tempfile::tempdir().unwrap();
     for (name, source) in [
         (
@@ -200,7 +200,7 @@ fn imported_generic_aliases_share_the_owners_method_instances() {
             }
 fn cell_make<T>(value: T) -> Cell<T>  { Cell<T> { value = value } }
 
-fn read<T>(self: Cell<T>) -> T  { self.value }
+fn read<T>(self: Ref<Cell<T>>) -> T  { self.value }
 
         "#,
         ),
@@ -212,14 +212,14 @@ fn read<T>(self: Cell<T>) -> T  { self.value }
             "main.resin",
             r#"export { main };
             import { "cell.resin", "alias.resin" };
-            fn main() -> int  { make::<int>(20):read() + make::<int>(22):read() }
+            fn main() -> int  { cell_make::<int>(20):read() + cell_make::<int>(22):read() }
         "#,
         ),
     ] {
         std::fs::write(directory.path().join(name), source).unwrap();
     }
     let module = support::pipeline::file_module(&directory.path().join("main.resin")).unwrap();
-    for name in ["Cell.make", "Cell.read"] {
+    for name in ["cell_make", "read"] {
         assert_eq!(
             module
                 .functions

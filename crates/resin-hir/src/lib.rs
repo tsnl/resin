@@ -1522,7 +1522,7 @@ impl Analysis {
             };
             let origin = if matches!(
                 method.body,
-                crate::lower::context::FunctionBody::Defined(_)
+                crate::lower::context::FunctionBody::Ordinary
                     | crate::lower::context::FunctionBody::GpuPipelineFactory { .. }
                     | crate::lower::context::FunctionBody::GpuPipelineRecord { .. }
             ) {
@@ -1907,6 +1907,9 @@ pub struct OperationLookup {
     pub candidates: Vec<FunctionId>,
     pub type_args: Option<Vec<Type>>,
     pub arguments: Vec<Type>,
+    /// Unsuffixed numeric operands use the selected parameter type. Their entries
+    /// in `arguments` retain the numeric fallback chosen during HIR construction.
+    pub literal_arguments: Vec<usize>,
 }
 
 impl Type {

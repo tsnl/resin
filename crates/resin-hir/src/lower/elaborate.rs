@@ -4,7 +4,7 @@ use super::infer::{ResolvedMethod, Rule, Solver, Type};
 use super::scope::DeclarationId;
 use super::{typed, types};
 use crate::ReceiverConversion;
-use crate::lower::context::{FunctionBody, FunctionDecl};
+use crate::lower::context::FunctionBody;
 use crate::{Arguments, MatchArm, Statement, Term, TermKind};
 use crate::{GenerateError, GenerateErrorKind};
 use resin_source::prelude::*;
@@ -242,17 +242,6 @@ impl Completion<'_> {
         self.consume(term, target)
     }
 
-    fn ty(&self, source: &typed::Term) -> Result<Ty> {
-        self.solver.require(&source.ty, source.span)
-    }
-
-    fn annotation(&self, source: &typed::Annotation<Type>) -> Result<typed::Annotation> {
-        Ok(typed::Annotation {
-            ty: self.solver.require(&source.ty, source.span)?,
-            span: source.span,
-        })
-    }
-
     fn boxed(&mut self, source: &typed::Term) -> Result<Box<Term>> {
         self.elaborate(source).map(Box::new)
     }
@@ -385,70 +374,7 @@ impl Completion<'_> {
                     self.source_pipeline(method, None, &Ident::new(name.clone(), *name_span), args)?
                 }
                 None => self.builtin(source, name, args)?,
-                _ => unreachable!("operator resolution"),
             },
-            typed::TermKind::MethodCall {
-                rule,
-                receiver,
-                receiver_type,
-                name,
-                args,
-            } => {
-                let method = self.methods.get(rule).expect("solved method").clone();
-                match method {
-                    ResolvedMethod::Dependent { signature } => TermKind::DependentMethodCall {
-                        lookup: self.method_lookup(&signature, name.span)?,
-                        receiver: receiver
-                            .as_deref()
-                            .map(|receiver| self.boxed(receiver))
-                            .transpose()?,
-                        args: args
-                            .iter()
-                            .enumerate()
-                            .map(|(index, arg)| {
-                                self.argument(
-                                    arg,
-                                    &Type::Node(
-                                        super::infer::Head::FunctionParameter { index },
-                                        vec![signature.clone()],
-                                    ),
-                                )
-                            })
-                            .collect::<Result<_>>()?,
-                    },
-                    ResolvedMethod::GpuPipeline { method } => {
-                        self.source_pipeline(method, receiver.as_deref(), name, args)?
-                    }
-                    ResolvedMethod::Intrinsic {
-                        signature,
-                        receiver_conversion,
-                    } => {
-                        let result = self
-                            .solver
-                            .require_complete(&signature.result, source.span)?;
-                        let kind = self.intrinsic_method(
-                            signature,
-                            receiver_conversion,
-                            receiver.as_deref(),
-                            args,
-                            source.span,
-                        )?;
-                        self.convert_method_result(source, result, kind)?
-                    }
-                    ResolvedMethod::Compiler { declaration } => {
-                        let result = types::ty(&declaration.result);
-                        let kind = self.method(
-                            declaration,
-                            receiver.as_deref(),
-                            &self.annotation(receiver_type)?.ty,
-                            name,
-                            args,
-                        )?;
-                        self.convert_method_result(source, result, kind)?
-                    }
-                    source => self.source_method_call(&source, receiver.as_deref(), name, args)?,
-                }
-            }
             typed::TermKind::MethodReference { rule, name } => {
                 match self.methods.get(rule).expect("solved method reference") {
                     ResolvedMethod::Source {
@@ -460,7 +386,6 @@ impl Completion<'_> {
                         lookup: self.method_lookup(signature, name.span)?,
                     },
                     ResolvedMethod::Operation { .. }
-                    | ResolvedMethod::Compiler { .. }
                     | ResolvedMethod::GpuPipeline { .. }
                     | ResolvedMethod::Intrinsic { .. } => {
                         unreachable!("source method reference")
@@ -1011,143 +936,6 @@ impl Completion<'_> {
         })
     }
 
-    fn method(
-        &mut self,
-        declaration: FunctionDecl,
-        receiver: Option<&typed::Term>,
-        receiver_ty: &Ty,
-        name: &Ident,
-        arguments: &[typed::Term],
-    ) -> Result<TermKind> {
-        if let FunctionBody::GpuPipelineFactory { factory, graphics } = declaration.body {
-            return self.pipeline_create(
-                receiver,
-                arguments,
-                &declaration.params,
-                factory,
-                graphics,
-            );
-        }
-        let receiver = receiver
-            .map(|r| self.adapt(r, receiver_ty, &declaration.params[0]))
-            .transpose()?;
-        let offset = usize::from(receiver.is_some());
-        let values = receiver
-            .into_iter()
-            .map(|term| *term)
-            .chain(
-                arguments
-                    .iter()
-                    .zip(&declaration.params[offset..])
-                    .map(|(arg, param)| self.argument(arg, &param.clone().into()))
-                    .collect::<Result<Vec<_>>>()?,
-            )
-            .collect();
-        let args = Arguments {
-            values,
-            params: declaration.params.iter().map(types::ty).collect(),
-        };
-        Ok(match declaration.body {
-            FunctionBody::GpuPipelineDispatch {
-                context,
-                allocator,
-                record,
-            } => TermKind::GpuPipelineDispatch {
-                context,
-                allocator,
-                record,
-                args,
-            },
-            FunctionBody::GpuPipelineFactory { .. } | FunctionBody::GpuPipelineRecord { .. } => {
-                unreachable!("specialized pipeline bridge")
-            }
-            FunctionBody::Defined(function) => {
-                let ty = Ty::Function {
-                    params: declaration.params.clone(),
-                    result: Box::new(declaration.result),
-                };
-                let func = Box::new(Term {
-                    span: name.span,
-                    ty: types::ty(&ty),
-                    kind: TermKind::Function {
-                        function,
-                        type_args: vec![],
-                    },
-                });
-                TermKind::Call {
-                    func,
-                    args: args.values,
-                }
-            }
-        })
-    }
-
-    fn pipeline_create(
-        &mut self,
-        receiver: Option<&typed::Term>,
-        arguments: &[typed::Term],
-        params: &[Ty],
-        factory: FunctionId,
-        graphics: bool,
-    ) -> Result<TermKind> {
-        let terms = arguments;
-        let stages = if graphics {
-            &["vertex", "fragment"][..]
-        } else {
-            &["compute"][..]
-        };
-        let mut shaders = Vec::new();
-        for (shader, stage) in terms[usize::from(receiver.is_none())..].iter().zip(stages) {
-            let term = self.elaborate(shader)?;
-            let TermKind::Function { function, .. } = term.kind else {
-                return Err(GenerateError::inference(
-                    shader.span,
-                    "pipeline creation requires direct shader declarations; runtime aliases are unsupported",
-                ));
-            };
-            let entry = self.shaders.get(&function).ok_or_else(|| {
-                GenerateError::inference(
-                    shader.span,
-                    "pipeline creation requires a decorated shader declaration",
-                )
-            })?;
-            if entry.stage.as_ref() != *stage {
-                return Err(GenerateError::inference(
-                    shader.span,
-                    format!("pipeline requires a @{stage}_shader declaration"),
-                ));
-            }
-            self.embedded.insert(function);
-            shaders.push(function);
-        }
-        let owner = if let Some(receiver) = receiver {
-            *self.adapt(receiver, &self.ty(receiver)?, &params[0])?
-        } else {
-            self.elaborate(&terms[0])?
-        };
-        let args = Arguments {
-            values: vec![owner],
-            params: vec![types::ty(&params[0])],
-        };
-        Ok(TermKind::GpuPipelineCreate {
-            factory,
-            shaders,
-            args,
-        })
-    }
-
-    fn adapt(&mut self, source: &typed::Term, from: &Ty, to: &Ty) -> Result<Box<Term>> {
-        let conversion = ReceiverConversion::between(from, to).expect("checked receiver");
-        Ok(Box::new(Term {
-            span: source.span,
-            ty: types::ty(to),
-            kind: TermKind::Adapt {
-                conversion,
-                arg: self.boxed(source)?,
-            },
-        }))
-    }
-
     fn call(&mut self, func: &typed::Term, args: &[typed::Term]) -> Result<TermKind> {
         if matches!(
             self.solver.head(&func.ty),
@@ -1508,7 +1296,7 @@ mod tests {
     };
 
     #[test]
-    fn completion_uses_the_selected_method_after_its_namespace_is_gone() {
+    fn completion_uses_the_selected_operation_after_lookup_is_gone() {
         let span = Span { start: 0, end: 0 };
         let (solver, methods, rule, ty) = {
             let mut context = Context::new();
@@ -1518,13 +1306,16 @@ mod tests {
                 rule,
                 (
                     span,
-                    Constraint::Method {
-                        receiver: Ty::Str.into(),
-                        name: "at".into(),
-                        type_args: None,
-                        args: vec![Ty::UInt64.into()],
-                        out: ty.clone(),
-                        associated: false,
+                    Constraint::Overload {
+                        lookup: super::super::infer::Overload {
+                            name: "at".into(),
+                            candidates: vec![],
+                            primitive: Some("at".into()),
+                            expected: None,
+                            type_args: None,
+                            args: Some(vec![Ty::Str.into(), Ty::UInt64.into()]),
+                            out: ty.clone(),
+                        },
                     },
                 ),
             );
@@ -1535,28 +1326,27 @@ mod tests {
             span,
             actual: ty.clone(),
             ty,
-            kind: typed::TermKind::MethodCall {
+            kind: typed::TermKind::Builtin {
                 rule,
-                receiver: Some(Box::new(typed::Term {
-                    span,
-                    ty: Ty::Str.into(),
-                    actual: Ty::Str.into(),
-                    kind: typed::TermKind::String {
-                        value: "bytes".into(),
+                // Completion consumes the chosen operation, never its spelling.
+                name: "no_such_operation".into(),
+                name_span: span,
+                args: vec![
+                    typed::Term {
+                        span,
+                        ty: Ty::Str.into(),
+                        actual: Ty::Str.into(),
+                        kind: typed::TermKind::String {
+                            value: "bytes".into(),
+                        },
                     },
-                })),
-                receiver_type: typed::Annotation {
-                    span,
-                    ty: Ty::Str.into(),
-                },
-                // Names remain diagnostic metadata; completion must not resolve it again.
-                name: Ident::new("no_such_method".into(), span),
-                args: vec![typed::Term {
-                    span,
-                    ty: Ty::UInt64.into(),
-                    actual: Ty::UInt64.into(),
-                    kind: typed::TermKind::Num { value: "0".into() },
-                }],
+                    typed::Term {
+                        span,
+                        ty: Ty::UInt64.into(),
+                        actual: Ty::UInt64.into(),
+                        kind: typed::TermKind::Num { value: "0".into() },
+                    },
+                ],
             },
         };
         let completed = function(

@@ -66,3 +66,8 @@ fn receiver_calls_are_free_function_calls() {
     )
     .unwrap();
 }
+
+#[test]
+fn local_function_values_shadow_primitive_operations() {
+    hir_module("fn identity(value: int) -> int { value } fn main() -> int { let at = identity; let replace = identity; at(20) + 22:replace() }").unwrap();
+}

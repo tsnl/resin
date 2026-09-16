@@ -21,6 +21,7 @@ pub(crate) enum Head {
         candidates: Vec<FunctionId>,
         explicit: Option<usize>,
         primitive: Option<Arc<str>>,
+        literal_arguments: Vec<usize>,
     },
     Atom(Ty),
     Parameter {
@@ -123,6 +124,7 @@ impl Type {
             crate::Type::Operation { lookup } => Self::Node(
                 Head::Operation {
                     primitive: lookup.primitive.clone(),
+                    literal_arguments: lookup.literal_arguments.clone(),
                     name: lookup.name.clone(),
                     candidates: lookup.candidates.clone(),
                     explicit: lookup.type_args.as_ref().map(Vec::len),
@@ -355,9 +357,11 @@ impl Head {
                 candidates,
                 explicit,
                 primitive,
+                literal_arguments,
             } => crate::Type::Operation {
                 lookup: Box::new(crate::OperationLookup {
                     primitive: primitive.clone(),
+                    literal_arguments: literal_arguments.clone(),
                     name: name.clone(),
                     candidates: candidates.clone(),
                     type_args: explicit.map(|count| children.by_ref().take(count).collect()),
@@ -1254,7 +1258,6 @@ pub(crate) enum ResolvedMethod {
     },
     Intrinsic {
         signature: super::context::IntrinsicMethod,
-        receiver_conversion: Option<crate::ReceiverConversion>,
     },
     GpuPipeline {
         method: super::gpu::PipelineMethod,
@@ -1268,9 +1271,6 @@ pub(crate) enum ResolvedMethod {
         params: Vec<Type>,
         result: Type,
         receiver_conversion: Option<crate::ReceiverConversion>,
-    },
-    Compiler {
-        declaration: FunctionDecl,
     },
 }
 
@@ -1376,14 +1376,6 @@ pub(crate) enum Constraint {
     Address(Type, Type),
     Field(Type, Arc<str>, Type),
     Call(Type, Vec<Type>, Type),
-    Method {
-        receiver: Type,
-        name: Arc<str>,
-        type_args: Option<Vec<Type>>,
-        args: Vec<Type>,
-        out: Type,
-        associated: bool,
-    },
     MethodReference {
         receiver: Type,
         name: Arc<str>,
@@ -1479,9 +1471,7 @@ impl Inference<'_> {
                     ..
                 } in &self.constraints
                 {
-                    if let Constraint::Method { receiver, .. }
-                    | Constraint::MethodReference { receiver, .. } = constraint
-                    {
+                    if let Constraint::MethodReference { receiver, .. } = constraint {
                         seeded |= self.solver.default_numbers(std::slice::from_ref(receiver));
                     }
                 }
@@ -1728,82 +1718,6 @@ impl Inference<'_> {
         Ok(Some(application))
     }
 
-    fn check_method_call(
-        &mut self,
-        constraint: &Constraint,
-        params: &[Type],
-        result: &Type,
-        span: Span,
-    ) -> Result<(bool, Option<crate::ReceiverConversion>)> {
-        let Constraint::Method {
-            receiver,
-            args,
-            out,
-            associated,
-            ..
-        } = constraint
-        else {
-            unreachable!("method call constraint");
-        };
-        let offset = usize::from(!associated);
-        let arguments = params.get(offset..).ok_or_else(|| {
-            error(
-                span,
-                "method receiver does not match: this function has no receiver parameter",
-            )
-        })?;
-        let arguments = self.arguments(args, arguments, span)?;
-        let result = self.solver.unify(result, out, span)?;
-        let conversion = if *associated {
-            None
-        } else {
-            let Some(conversion) = self.source_receiver(receiver, &params[0], span)? else {
-                return Ok((false, None));
-            };
-            Some(conversion)
-        };
-        Ok((arguments && result, conversion))
-    }
-
-    fn source_receiver(
-        &mut self,
-        from: &Type,
-        to: &Type,
-        span: Span,
-    ) -> Result<Option<crate::ReceiverConversion>> {
-        use crate::ReceiverConversion;
-        let source = self.solver.head(from);
-        let target = self.solver.head(to);
-        if matches!(source, Type::Variable(_) | Type::Apply { .. })
-            || matches!(target, Type::Apply { .. })
-        {
-            return Ok(None);
-        }
-        let (conversion, adapted) = match (&source, &target) {
-            (_, Type::Node(Head::Reference, _)) => {
-                (ReceiverConversion::Address, Type::reference(from.clone()))
-            }
-            (_, Type::Variable(_)) => (ReceiverConversion::Value, from.clone()),
-            (Type::Node(a, _), Type::Node(b, _)) if a == b => {
-                (ReceiverConversion::Value, from.clone())
-            }
-            (Type::Node(Head::Pointer, parts), _) => (ReceiverConversion::Load, parts[0].clone()),
-            (_, Type::Node(Head::Pointer, _)) => {
-                (ReceiverConversion::Address, Type::pointer(from.clone()))
-            }
-            _ => {
-                return Err(error(
-                    span,
-                    "method receiver does not match the first parameter",
-                ));
-            }
-        };
-        if !self.solver.unify(&adapted, to, span)? {
-            return Ok(None);
-        }
-        Ok(Some(conversion))
-    }
-
     fn arguments(&mut self, args: &[Type], params: &[Type], span: Span) -> Result<bool> {
         argument_count(params.len(), args.len(), span)?;
         let mut complete = true;
@@ -1928,6 +1842,7 @@ impl Inference<'_> {
         if candidates.is_empty()
             && let (Some(symbol), Some(args)) = (primitive, args)
             && !super::context::is_primitive_operation(symbol)
+            && !args.iter().any(|arg| self.solver.dependent(arg))
         {
             return self.constraint(
                 owner,
@@ -1937,6 +1852,11 @@ impl Inference<'_> {
         }
         if let Some(application) = self.applications.get(&owner).cloned() {
             return self.complete_overload(owner, application, args, out, span);
+        }
+        if let Some(ResolvedMethod::Operation { signature }) = self.methods.get(&owner).cloned()
+            && let Some(args) = args
+        {
+            return self.dependent_call(&signature, args, out, span);
         }
         if primitive
             .as_ref()
@@ -1979,7 +1899,26 @@ impl Inference<'_> {
         if let Some(args) = args
             && args.iter().any(|arg| self.solver.dependent(arg))
         {
-            if args
+            let mut literal_arguments = vec![];
+            let selection_args = args
+                .iter()
+                .enumerate()
+                .map(|(index, arg)| {
+                    if let Type::Variable(id) = self.solver.head(arg) {
+                        let fallback = match self.solver.variables[id].class {
+                            Class::Number => Some(Ty::Int64),
+                            Class::Float => Some(Ty::Float64),
+                            _ => None,
+                        };
+                        if let Some(fallback) = fallback {
+                            literal_arguments.push(index);
+                            return fallback.into();
+                        }
+                    }
+                    arg.clone()
+                })
+                .collect::<Vec<_>>();
+            if selection_args
                 .iter()
                 .chain(explicit.iter().flatten())
                 .any(|arg| self.solver.complete(arg).is_none())
@@ -1995,15 +1934,25 @@ impl Inference<'_> {
                         .map(|candidate| candidate.function)
                         .collect(),
                     explicit: explicit.as_ref().map(Vec::len),
+                    literal_arguments,
                 },
-                explicit.iter().flatten().chain(args).cloned().collect(),
+                explicit
+                    .iter()
+                    .flatten()
+                    .cloned()
+                    .chain(selection_args)
+                    .collect(),
             );
-            let complete = self.dependent_call(&signature, args, out, span)?;
-            if complete {
-                self.methods
-                    .insert(owner, ResolvedMethod::Operation { signature });
-            }
-            return Ok(complete);
+            // Retain the determining lookup before projecting its parameters.
+            // Rebuilding it from those projected arguments would nest the same
+            // operation inside itself on the next constraint-solving iteration.
+            self.methods.insert(
+                owner,
+                ResolvedMethod::Operation {
+                    signature: signature.clone(),
+                },
+            );
+            return self.dependent_call(&signature, args, out, span);
         }
         let baseline = self.solver.clone();
         let mut viable = Vec::new();
@@ -2213,10 +2162,7 @@ impl Inference<'_> {
         let arguments = self.arguments(args, &signature.params, span)?;
         let result = self.solver.unify(&signature.result, &lookup.out, span)?;
         Ok((
-            Some(ResolvedMethod::Intrinsic {
-                signature,
-                receiver_conversion: None,
-            }),
+            Some(ResolvedMethod::Intrinsic { signature }),
             arguments && result,
         ))
     }
@@ -2251,181 +2197,6 @@ impl Inference<'_> {
     fn constraint(&mut self, owner: Rule, constraint: &Constraint, span: Span) -> Result<bool> {
         match constraint {
             Constraint::Overload { lookup } => return self.overload(owner, lookup, span),
-            Constraint::Method {
-                receiver: receiver_type,
-                name,
-                type_args,
-                args,
-                out,
-                associated,
-            } => {
-                if matches!(
-                    self.method_receiver(receiver_type),
-                    Type::Variable(_) | Type::Apply { .. }
-                ) {
-                    return Ok(false);
-                }
-                if let Some(receiver) = self.solver.resolve(receiver_type)
-                    && let Some(method) = self.typer.method(&receiver, name)
-                    && matches!(
-                        method.body,
-                        FunctionBody::GpuPipelineFactory { .. }
-                            | FunctionBody::GpuPipelineRecord { .. }
-                    )
-                {
-                    if !associated
-                        && crate::ReceiverConversion::between(&receiver, &method.params[0])
-                            .is_none()
-                    {
-                        return Err(error(
-                            span,
-                            "pipeline method receiver does not match its native bridge",
-                        ));
-                    }
-                    argument_count(
-                        method.params.len() - usize::from(!associated),
-                        args.len(),
-                        span,
-                    )?;
-                    let inputs = &args[usize::from(*associated)..];
-                    let needed = if matches!(method.body, FunctionBody::GpuPipelineFactory { .. }) {
-                        inputs.len()
-                    } else {
-                        1
-                    };
-                    let Some(inputs) = inputs
-                        .iter()
-                        .take(needed)
-                        .map(|ty| self.solver.complete(ty))
-                        .collect::<Option<Vec<_>>>()
-                    else {
-                        return Ok(false);
-                    };
-                    let mut method = self
-                        .typer
-                        .source_pipeline_method(&method, &inputs)
-                        .map_err(|message| error(span, message))?;
-                    let params = method.params[usize::from(!associated)..]
-                        .iter()
-                        .map(Type::from_hir)
-                        .collect::<Vec<_>>();
-                    let projection =
-                        matches!(method.body, FunctionBody::GpuPipelineDispatch { .. })
-                            .then_some(2 - usize::from(!associated));
-                    let mut a = true;
-                    for (index, (arg, param)) in args.iter().zip(&params).enumerate() {
-                        a &= if projection == Some(index) {
-                            self.projection_argument(arg, param, span, 0)?
-                        } else {
-                            self.solver.coerce(arg, param, span)?
-                        };
-                    }
-                    let b = self
-                        .solver
-                        .coerce(&Type::from_hir(&method.result), out, span)?;
-                    if a && b {
-                        if let Some(index) = projection {
-                            method.params[2] = self
-                                .solver
-                                .require_complete(&Type::value(args[index].clone()), span)?;
-                        }
-                        self.methods
-                            .insert(owner, ResolvedMethod::GpuPipeline { method });
-                    }
-                    return Ok(a && b);
-                }
-                if let Some(application) = self.method_application(
-                    owner,
-                    receiver_type,
-                    &name.clone().into(),
-                    type_args,
-                    span,
-                )? {
-                    let (complete, conversion) = self.check_method_call(
-                        constraint,
-                        &application.params,
-                        &application.result,
-                        span,
-                    )?;
-                    if complete {
-                        self.methods.insert(owner, application.resolved(conversion));
-                    }
-                    return Ok(complete);
-                }
-                if let Some((_, signature)) =
-                    super::context::intrinsic_methods(receiver_type, &self.solver)
-                        .into_iter()
-                        .find(|(candidate, _)| *candidate == name.as_ref())
-                {
-                    if type_args.is_some() {
-                        return Err(error(span, "compiler methods do not accept type arguments"));
-                    }
-                    let (complete, receiver_conversion) = self.check_method_call(
-                        constraint,
-                        &signature.params,
-                        &signature.result,
-                        span,
-                    )?;
-                    if complete {
-                        self.methods.insert(
-                            owner,
-                            ResolvedMethod::Intrinsic {
-                                signature,
-                                receiver_conversion,
-                            },
-                        );
-                    }
-                    return Ok(complete);
-                }
-                if let Some(signature) = self.dependent_method(
-                    receiver_type,
-                    &name.clone().into(),
-                    type_args,
-                    *associated,
-                ) {
-                    let complete = self.dependent_call(&signature, args, out, span)?;
-                    if complete {
-                        self.methods
-                            .insert(owner, ResolvedMethod::Dependent { signature });
-                    }
-                    return Ok(complete);
-                }
-                if type_args.is_some() {
-                    return Err(error(span, "compiler methods do not accept type arguments"));
-                }
-                let Some(receiver_type) = self.solver.resolve(receiver_type) else {
-                    if matches!(
-                        self.solver.head(receiver_type),
-                        Type::Node(Head::Nominal { .. }, _)
-                    ) {
-                        return Err(error(span, format!("unknown method `{name}`")));
-                    }
-                    return Ok(false);
-                };
-                let method = self
-                    .typer
-                    .method(&receiver_type, name)
-                    .ok_or_else(|| error(span, format!("unknown method `{name}`")))?;
-                let params = method
-                    .arguments(&receiver_type, *associated)
-                    .ok_or_else(|| {
-                        error(span, "method receiver does not match the first parameter")
-                    })?;
-                let params = params.iter().cloned().map(Type::from).collect::<Vec<_>>();
-                let a = self.arguments(args, &params, span)?;
-                let b = self
-                    .solver
-                    .coerce(&method.result.clone().into(), out, span)?;
-                if a && b {
-                    self.methods.insert(
-                        owner,
-                        ResolvedMethod::Compiler {
-                            declaration: method,
-                        },
-                    );
-                }
-                return Ok(a && b);
-            }
             Constraint::MethodReference {
                 receiver,
                 name,
@@ -2881,15 +2652,6 @@ impl Constraint {
             | Self::Ascribe(from, _, _)
             | Self::Variant(from, _, _) => vec![from],
             Self::Call(func, args, _) => std::iter::once(func).chain(args).collect(),
-            Self::Method {
-                receiver,
-                args,
-                type_args,
-                ..
-            } => std::iter::once(receiver)
-                .chain(args)
-                .chain(type_args.iter().flatten())
-                .collect(),
             Self::MethodReference {
                 receiver,
                 type_args,
