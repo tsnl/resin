@@ -33,6 +33,16 @@ pub struct ResinPrintArg {
     value: ResinPrintData,
 }
 
+// Native code generation constructs this pointer-only argument transport directly.
+const _: () = {
+    assert!(size_of::<ResinPrintArg>() == 24);
+    assert!(align_of::<ResinPrintArg>() == 8);
+    assert!(std::mem::offset_of!(ResinPrintArg, kind) == 0);
+    assert!(std::mem::offset_of!(ResinPrintArg, value) == 8);
+    assert!(size_of::<ResinPrintBytes>() == 16);
+    assert!(std::mem::offset_of!(ResinPrintBytes, length) == 8);
+};
+
 /// Write bytes to stdout and flush, without interpreting braces or adding a newline.
 /// # Safety
 /// `data` must be readable for `length` bytes; NULL is allowed for an empty buffer.

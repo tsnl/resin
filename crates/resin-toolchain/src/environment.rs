@@ -9,6 +9,10 @@ impl Environment {
     pub(super) fn resolve_tools(&self, cc: Option<&OsStr>, spirv_opt: Option<&OsStr>) -> Toolchain {
         let settings = Settings {
             cc: self.optional_tool(self.compiler(cc, "CC", crate::DEFAULT_C_COMPILER)),
+            clang: self.optional_tool(self.compiler(None, "CLANG", "clang")),
+            libclang: self
+                .variable("LIBCLANG_PATH")
+                .map(|path| self.directory.join(path)),
             spirv_opt: self.optional_tool(self.compiler(spirv_opt, "SPIRV_OPT", "spirv-opt")),
             ninja: self.optional_tool(self.compiler(None, "NINJA", "ninja")),
             runtime_include: self.path(

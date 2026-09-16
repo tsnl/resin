@@ -13,6 +13,8 @@ use tokio::{fs, io::AsyncWriteExt, process::Command};
 #[derive(Clone)]
 pub(super) struct Settings {
     pub(super) cc: PathBuf,
+    pub(super) clang: PathBuf,
+    pub(super) libclang: Option<PathBuf>,
     pub(super) spirv_opt: PathBuf,
     pub(super) ninja: PathBuf,
     pub(super) runtime_include: PathBuf,
@@ -222,7 +224,7 @@ impl Settings {
             .collect()
     }
 
-    async fn fingerprint(&self, cancellation: &Cancellation) -> Result<String, Error> {
+    pub(super) async fn fingerprint(&self, cancellation: &Cancellation) -> Result<String, Error> {
         let mut hash = blake3::Hasher::new();
         state_bytes(&mut hash, b"resin-toolchain-v1");
         state_bytes(&mut hash, std::env::consts::OS.as_bytes());
@@ -242,6 +244,37 @@ impl Settings {
             &self.runtime_include,
         ] {
             hash_contents(path, &mut hash, cancellation).await?;
+        }
+        Ok(format!("{}\n", hash.finalize().to_hex()))
+    }
+
+    /// Unlike Ninja's preprocessed-input state, external result caches need the
+    /// complete explicitly configured SDK context as well as tool identities.
+    pub(super) async fn external_fingerprint(
+        &self,
+        cancellation: &Cancellation,
+    ) -> Result<String, Error> {
+        let mut hash = blake3::Hasher::new();
+        state_bytes(&mut hash, b"resin-external-tools-v1");
+        state_bytes(&mut hash, self.fingerprint(cancellation).await?.as_bytes());
+        hash_contents(&self.clang, &mut hash, cancellation).await?;
+        if let Some(libclang) = &self.libclang {
+            hash_contents(libclang, &mut hash, cancellation).await?;
+        }
+        for name in [
+            "CPATH",
+            "C_INCLUDE_PATH",
+            "CPLUS_INCLUDE_PATH",
+            "INCLUDE",
+            "LIB",
+            "LIBPATH",
+            "LIBRARY_PATH",
+        ] {
+            if let Some(paths) = self.environment.get(OsStr::new(name)) {
+                for path in std::env::split_paths(paths) {
+                    hash_contents(&self.directory.join(path), &mut hash, cancellation).await?;
+                }
+            }
         }
         Ok(format!("{}\n", hash.finalize().to_hex()))
     }

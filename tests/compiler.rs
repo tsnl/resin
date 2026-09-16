@@ -12,21 +12,37 @@ fn build(
     environment: &Environment,
     profile: CProfile,
 ) -> resin_toolchain::Executable {
-    let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
     let lir =
         support::pipeline::verified_lir(compilation, "main", resin_lir::Profile::Host).unwrap();
-    let project = support::frontend::generate(lir.view(), Some("main"), directory.path()).unwrap();
-    let built = support::frontend::build(
-        &environment.toolchain(None, None),
-        project.directory(),
-        project.name(),
-        "main",
-        profile,
-    )
-    .unwrap();
-    built
-        .executable(project.program().unwrap().file_name().unwrap())
-        .unwrap()
+    support::frontend::block_on(async {
+        let cancellation = resin_executor::Cancellation::new();
+        let object = resin_codegen::generate_native(
+            std::sync::Arc::new(lir),
+            "main".into(),
+            match profile {
+                CProfile::Debug => resin_codegen::NativeOptimization::None,
+                CProfile::Release => resin_codegen::NativeOptimization::Speed,
+            },
+            std::sync::Arc::new(resin_codegen::NativeInputs::default()),
+            support::frontend::execution(),
+            &cancellation,
+        )
+        .await
+        .unwrap();
+        environment
+            .toolchain(None, None)
+            .link_native(
+                resin_toolchain::NativeLink {
+                    objects: vec![object.shared_bytes()],
+                    runtime: true,
+                },
+                &std::env::temp_dir(),
+                support::frontend::execution(),
+                &cancellation,
+            )
+            .await
+            .unwrap()
+    })
 }
 
 #[test]
@@ -43,24 +59,14 @@ fn compilation_uses_supplied_source_versions_and_explicit_profiles() {
     let mut loader =
         Loader::new(environment.path("RESIN_LIBRARY_ROOT", resin_source::library_root()));
     let mut previous = None;
-    for (profile, destination, code, directory) in [
-        (
-            CProfile::Debug,
-            Some(temp.path().join("copied")),
-            42,
-            "debug",
-        ),
-        (CProfile::Release, None, 43, "release"),
+    for (profile, destination, code) in [
+        (CProfile::Debug, Some(temp.path().join("copied")), 42),
+        (CProfile::Release, None, 43),
     ] {
         let source = loader.source_from_text(&path, format!("export {{ main }}; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = {{ var i = uint(invocation); output.* := i; }}; def main() -> int = {{ var output = 0_ui; kernel({code}_ul, &output); if (output == {code}_ui) {{ {code} }} else {{ 0 }} }};")).unwrap();
         let compilation =
             support::frontend::analyze(source.clone(), &mut loader, previous.as_ref());
         let artifact = build(&compilation, &environment, profile);
-        assert!(
-            fs::read_to_string(artifact.path().parent().unwrap().join("toolchain.ninja"))
-                .unwrap()
-                .contains(if directory == "debug" { "-O0" } else { "-O3" })
-        );
         assert_eq!(support::frontend::run(&artifact).unwrap(), code);
         assert!(
             compilation.same(&support::frontend::analyze(

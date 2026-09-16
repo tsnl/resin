@@ -23,6 +23,19 @@ fn tail(function: &resin_hir::Function) -> &resin_hir::Term {
     tail
 }
 
+fn native(
+    checked: std::sync::Arc<resin_lir::VerifiedModule>,
+) -> Result<resin_codegen::NativeObject, resin_codegen::GenerationError> {
+    support::frontend::block_on(resin_codegen::generate_native(
+        checked,
+        "main".into(),
+        resin_codegen::NativeOptimization::None,
+        std::sync::Arc::new(resin_codegen::NativeInputs::default()),
+        support::frontend::execution(),
+        &resin_executor::Cancellation::new(),
+    ))
+}
+
 #[test]
 fn hir_resolves_calls_and_preserves_type_dependent_operations_for_lir() {
     let module = hir(r#"
@@ -93,12 +106,11 @@ fn lir_lowering_needs_only_the_resolved_tree() {
     assert_eq!(first, second);
     drop(module);
     let checked = resin_lir::VerifiedModule::new(first).unwrap();
-    let directory = tempfile::TempDir::new().unwrap();
-    assert!(support::frontend::generate(checked.view(), Some("main"), directory.path()).is_ok());
+    assert!(native(std::sync::Arc::new(checked)).is_ok());
 }
 
 #[test]
-fn generated_files_outlive_lir_and_its_verification_certificate() {
+fn generated_bytes_outlive_lir_and_its_verification_certificate() {
     let module = hir(r#"
         export { main, kernel };
         @compute_shader def kernel(i: ulong, output: Ptr<ulong>) = { output.* := i; };
@@ -108,24 +120,20 @@ fn generated_files_outlive_lir_and_its_verification_certificate() {
         support::frontend::lower(&module, &[], &resin_lir::LoweringOptions::default()).unwrap(),
     )
     .unwrap();
-    let host_directory = tempfile::TempDir::new().unwrap();
-    let shader_directory = tempfile::TempDir::new().unwrap();
-    let host =
-        support::frontend::generate(checked.view(), Some("main"), host_directory.path()).unwrap();
-    let shaders =
-        support::frontend::generate(checked.view(), None, shader_directory.path()).unwrap();
+    let checked = std::sync::Arc::new(checked);
+    let host = native(checked.clone()).unwrap();
+    let function = *checked.view().module().shaders.keys().next().unwrap();
+    let shaders = support::frontend::block_on(resin_codegen::generate_spirv(
+        checked.clone(),
+        function,
+        support::frontend::execution(),
+        &resin_executor::Cancellation::new(),
+    ))
+    .unwrap();
     drop(checked);
     drop(module);
-    assert!(
-        std::fs::read_to_string(host.c_source().unwrap())
-            .unwrap()
-            .contains("int main(")
-    );
-    assert_eq!(
-        &std::fs::read(shaders.shaders()[0].unoptimized_spirv()).unwrap()[..4],
-        &[3, 2, 35, 7]
-    );
-    assert!(host.build_file().is_file() && shaders.build_file().is_file());
+    assert!(!host.bytes().is_empty());
+    assert_eq!(&shaders[..4], &[3, 2, 35, 7]);
 }
 
 #[test]

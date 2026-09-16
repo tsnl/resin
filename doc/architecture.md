@@ -16,8 +16,8 @@ package names. Each language crate owns its representation and the translation t
 produces it. Applications acquire imports through the concrete `resin_source::Loader`
 and pass immutable `SourceGraph` values to `resin_ast::build_program`. `resin-source` owns
 immutable text and standard-library resolution; `resin-types` owns concrete types and
-representation rules. Neither depends on a compiler phase. `resin-toolchain` runs
-generated Ninja projects and retains native artifacts without depending on compiler
+representation rules. Neither depends on a compiler phase. `resin-toolchain` parses and compiles C interoperability adapters, optimizes shaders,
+links native objects, and retains artifacts without depending on compiler
 or type crates. Server analysis/build handlers each sequence their compiler passes
 explicitly and share immutable cache heads. `resin-protocol` contains only wire data;
 `resin-client` acquires local sources/header bundles and renders remote diagnostics
@@ -41,11 +41,14 @@ flowchart LR
     ast --> hir[HIR: resolved tree]
     hir --> lir[LIR: storage and structured regions]
     lir --> verified[Verified LIR]
-    verified --> project[Codegen: C + SPIR-V + build.ninja]
-    project --> ninja[Ninja]
-    ninja --> spirv[spirv-opt: optimized SPIR-V]
-    spirv --> headers[resin-server --embed: C headers]
-    headers --> executable[C compiler: executable]
+    verified --> spirv[SPIR-V emission]
+    spirv --> optimized[spirv-opt]
+    verified --> native[Cranelift: native object]
+    optimized --> native
+    headers[C header snapshots] --> interop[Clang + libclang: C adapters]
+    native --> link[Native linker]
+    interop --> link
+    link --> executable[Executable]
 ```
 
 These arrows show data flow. Cargo dependencies point toward the languages a
@@ -62,7 +65,7 @@ pass consumes. Source and type vocabulary are independent foundations.
 | `resin-ast` | `resin-cst` | Source AST, `build_ast` / `build_program`, parse diagnostics |
 | `resin-hir` | `resin-ast`, `resin-cst` | Resolved tree, `build_hir` / `Hir::build`, editor analysis |
 | `resin-lir` | `resin-hir` | Storage and control-flow lowering, `build_lir`, verification |
-| `resin-codegen` | `resin-lir` | Generate a complete on-disk C/SPIR-V/Ninja project |
+| `resin-codegen` | `resin-lir` | Emit immutable native objects and SPIR-V binaries |
 | `resin-toolchain` | none | Async native builds and independently owned output generations |
 | `resin-protocol` | none | Strict versioned request, diagnostic, query, and artifact data |
 | `resin-server` | Compiler crates, `resin-cache`, `resin-toolchain` | HTTP admission, explicit cached passes, managed inputs, native output streaming |
@@ -83,9 +86,8 @@ directly by types, HIR, and LIR; it owns no domain types or diagnostics.
 
 For each phase, start with `lib.rs`: language data appears beside the operations
 that accept the preceding language and produce this one. Follow an operation into
-private `lower` or `print` only when its implementation matters. Codegen's entry
-point exposes one project-generation operation. Its C tree and SPIR-V builder are private to
-the target modules. Source and type entry points contain their definitions directly;
+private `lower` or `print` only when its implementation matters. Codegen exposes native-object and SPIR-V generation operations. Its Cranelift and
+SPIR-V builders are private to the target modules. Source and type entry points contain their definitions directly;
 language-specific builders and solver state stay private. In `resin-types`, the
 public type model and operations remain in `lib.rs`; private `types.rs` implements
 representation, table, and layout algorithms, while private `typer.rs` implements
@@ -109,7 +111,7 @@ compiler returns `resin_hir::Hover` and `resin_hir::Completion` directly.
 | AST | [source nodes](../crates/resin-ast/src/lib.rs) | [CST → AST](../crates/resin-ast/src/lower.rs) | [S-expressions](../crates/resin-ast/src/print.rs) |
 | HIR | [resolved nodes](../crates/resin-hir/src/lib.rs) | [AST → HIR](../crates/resin-hir/src/lower/mod.rs) | [typed S-expressions](../crates/resin-hir/src/print.rs) |
 | LIR | [instructions and blocks](../crates/resin-lir/src/lib.rs) | [HIR → LIR](../crates/resin-lir/src/lower/mod.rs) | [S-expressions](../crates/resin-lir/src/print/mod.rs) |
-| C | [private C tree](../crates/resin-codegen/src/c/mod.rs) | [verified LIR → C](../crates/resin-codegen/src/c/lower/mod.rs) | [C text](../crates/resin-codegen/src/c/print.rs) |
+| Native | Private Cranelift IR | [verified LIR → native object](../crates/resin-codegen/src/cranelift/mod.rs) | Platform object bytes |
 | SPIR-V | Private `rspirv` module | [verified LIR → SPIR-V](../crates/resin-codegen/src/spirv/mod.rs) | Binary assembly; inspect with `spirv-dis` |
 
 Prefer small functions named for the operation they perform. The
@@ -357,11 +359,12 @@ Target lowering accepts a certificate for the module being lowered. Instruction
 effects stay private to verification; backends obtain checked operand counts through
 `resin_lir::FunctionTypes::operand_count(block, index)`.
 
-C lowering chooses the ABI, runtime operations, and native entry wrapper. It builds
-an owned tree of translation units, functions, conditionals, loops, and returns;
-leaf strings contain target syntax for declarations, expressions, and operand transfers.
-The C printer formats only that completed target tree, without consulting LIR or
-verification facts.
+Cranelift lowering chooses the internal calling convention, native layouts, runtime
+operations, and C-ABI entry wrapper. Scalar values remain SSA operands; aggregate
+values use independently owned stack snapshots. Structured LIR branches and loops
+become explicit control-flow blocks, with copies on incoming and outgoing edges to
+preserve parallel transfers. Ownership callbacks retain and destroy completed types.
+Small C-ABI bridges connect source foreign declarations to cached adapter symbols.
 
 SPIR-V lowering resolves reachable functions, checks device restrictions, and emits
 binary instructions with `rspirv`. It preserves structured selection and loop regions
@@ -373,7 +376,7 @@ The optimizer runs separately in the toolchain; codegen invokes no external proc
 ## Calling the passes
 
 The application resolves its source inputs and calls each async translation explicitly.
-This complete one-file example creates a generated project without running native tools:
+This complete one-file example emits an object without running native tools:
 
 ```rust
 use resin_executor::{Cancellation, Execution};
@@ -402,14 +405,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         &execution, &cancellation,
     ).await?;
     let checked = resin_lir::VerifiedModule::build(lir, &execution, &cancellation).await?;
-    let temporary_parent = tempfile::TempDir::new()?;
-    let project = resin_codegen::generate(
-        Arc::new(checked), Some("main".into()),
-        Arc::new(resin_codegen::NativeHeaders::default()), temporary_parent.path(),
+    let object = resin_codegen::generate_native(
+        Arc::new(checked), "main".into(), resin_codegen::NativeOptimization::None,
+        Arc::new(resin_codegen::NativeInputs::default()),
         &execution, &cancellation,
     ).await?;
-    let text = tokio::fs::read_to_string(project.c_source().unwrap()).await?;
-    assert!(text.contains("main") && project.build_file().is_file());
+    assert!(!object.bytes().is_empty());
     Ok(())
 }
 ```
@@ -445,83 +446,49 @@ program and syntax documents for queries. LIR construction selects host/shader r
 and their dependencies; an empty entry list requests every ordinary root. Verification
 is a separate async `VerifiedModule::build` operation.
 
-Codegen receives `Arc<VerifiedModule>`, an optional host entry, immutable
-`Arc<NativeHeaders>`, and an existing temporary parent directory. `generate` creates a unique child directory and returns a
-`GeneratedProject` that owns it. C/SPIR-V lowering completes before files are written.
-`None` selects a shader-only project. Optimized binaries, embedded headers, and native
-executables remain planned outputs for Ninja. Retained generated inputs stay immutable;
-native tools stage their own copies. The final project owner removes its directory.
+Codegen receives `Arc<VerifiedModule>` and explicit immutable inputs. `generate_native`
+accepts an entry, optimization level, C adapter symbols, and optimized shader bytes.
+It returns shared platform object bytes with a C-ABI `main`. `generate_spirv` emits
+one requested shader as shared bytes. Neither pass reads source or header files or
+runs external tools. Cranelift lowers all host language operations directly, including
+aggregate snapshots, structured control flow, ownership callbacks, and GPU host calls.
+Host layouts come from `resin-types`; GPU-shared layouts retain their stricter checks.
 
-`NativeHeaders` owns canonical staged file bytes, ordered include roots, and bindings
-from each LIR `ForeignHeader { source, spelling }` to a staged or target-system include.
-HIR and LIR preserve the declaring source separately from spelling, including empty
-extern groups. Different modules can therefore bind equal basenames to different
-headers. An explicit runtime include prevents user roots from replacing the compiler
-ABI. Codegen validates and writes these supplied bytes without loading any source or
-header path. The server validates complete bindings and keys generation by every
-bundle byte and ordered root, including currently unused files. Direct compiler callers
-may supply default empty bindings to keep their literal native includes.
+The server owns the sequence of operations and each cache. It preserves source-scoped
+`ForeignHeader { source, spelling }` bindings, including empty extern groups. Equal
+basenames in different modules must remain distinct. Native keys include complete
+header bundles and ordered include roots, including unused files that might affect
+conditional includes. The managed runtime header binding cannot be replaced by a
+user include root.
 
-The toolchain takes any compatible on-disk Ninja project and captured `Environment`
-settings. Async `Toolchain::build(project, name, entry, profile, execution, cancellation)`
-stages inputs, supplies rules/settings, runs Ninja, and publishes an owned output
-generation. `BuiltProject` and `Executable` clones share that generation. The staging
-lock ends with the build; retaining, copying, or running A does not lock out build B.
-Generations live under `build/.artifacts`, separately from incremental cache slots.
-Unix retains immutable published file inodes through hard links; Windows copies files
-so executing an image cannot block replacing the cache file. Final-owner cleanup
-removes only that generation. The inspectable debug/release cache remains available
-for Ninja reuse after artifact handles are released.
+`Toolchain::compile_foreign` receives captured file bytes, ordered includes and
+include roots, and scalar/pointer adapter signatures. Clang preprocesses the small
+adapter translation unit; libclang reads that exact captured input to inspect and
+validate declarations. Clang compiles the same bytes into an object. Static inline
+functions and macros remain usable because each adapter calls them inside their C
+translation unit. This C compilation contains interoperability code only; Resin
+functions are compiled by Cranelift. Adapter objects can be reused across Resin body
+edits. All metadata returned from libclang is owned Rust data.
 
-C projects declare `native-inputs.json`, described by `resin_toolchain::NativeInputs`:
+Native dependency reports validate includes against staged files and configured SDK
+roots. This is input ownership validation; native tools still execute under the service
+account. Operators control process and network isolation. Tool settings and SDK inputs
+belong to the service, and no build request selects a local executable or compiler flag.
 
-```json
-{
-  "translation_units": [{ "source": "main.c", "preprocessed": "main.i" }],
-  "restrict_header_paths": false,
-  "c_flags": [],
-  "preprocessing_flags": ["-I", "."],
-  "generated_prerequisites": ["shader_1.h"]
-}
-```
+`Toolchain::optimize_shader` runs the configured `spirv-opt -O` on immutable SPIR-V.
+The server supplies optimized bytes to Cranelift, which embeds aligned data with its
+exact length. `Toolchain::link_native` links completed objects with the runtime archive.
+The returned executable retains its own temporary generation; later builds cannot
+change an earlier download or execution. Cancellation terminates child process trees
+before staging ownership is released.
 
-The toolchain first configures stable `toolchain.state`, builds declared prerequisite
-Ninja targets, then preprocesses each original C unit into its declared `.i` file.
-It preserves line markers, including system-header provenance needed by compiler
-diagnostics. Exact captured bytes are recorded in `native-inputs.state` with explicit
-length framing; unchanged content preserves its timestamp. The
-`compile_preprocessed_program` Ninja rule compiles `main.i`, so headers changed after
-capture cannot alter that build. Generated `main.c` remains available for inspection.
-
-Common compiler options belong in `c_flags`; include roots and macro definitions
-belong in `preprocessing_flags`. Both stages use the configured compiler, target
-options, and captured environment, while only preprocessing applies include/define
-arguments. C edges depend on `native-inputs.state`; shader/embedding edges depend
-only on `toolchain.state`. This detects changed header contents with preserved mtimes,
-new shadowing headers, and conditional includes without hashing unrelated workspace
-files. Shader-only graphs need no manifest or C preprocessing. Handwritten C projects
-use this same captured-input contract; `compile_program` remains available for raw C
-graphs that do not declare input capture.
-
-Server-generated projects enable `restrict_header_paths`. The same preprocessing
-invocation writes a compiler dependency report; validation permits canonical staged
-paths, the configured runtime, and compiler-discovered system include roots before
-publishing captured C. Discovery excludes ambient CPATH-style overlays from that allow
-list. Dependency reports are independent of C `#line` display names. This enforces
-native input ownership, not an operating-system sandbox; native tools run under the
-service account and operators control isolation. Arbitrary direct native graphs may
-leave this opt-in restriction disabled.
-
-Persistent tool/runtime settings use BLAKE3 with explicitly framed input bytes,
-including executable contents. They do not use Rust's unspecified `DefaultHasher`
-encoding. Native cache directory labels also use a specified BLAKE3 encoding.
-
-Ninja orders unoptimized SPIR-V → `spirv-opt -O` → the configured executable's `--embed` headers → C linking.
-The embed command uses the Resin executable captured with `current_exe`, never a PATH
-lookup. The server needs Ninja, a C compiler (`CC`/server `--cc`), and SPIR-V Tools
-(`SPIRV_OPT`/server `--spirv-opt`); a tool is checked when its graph command runs. Host-only
-projects never invoke the shader optimizer. Native settings use per-command cwd and
-environment rather than process-wide mutations.
+The service needs Clang (`CLANG`), libclang (`LIBCLANG_PATH` when not discoverable), a
+linker driver (`CC` or server `--cc`), and SPIR-V Tools (`SPIRV_OPT` or server
+`--spirv-opt`) for shaders. Native builds do not invoke Ninja. The development shell
+still supplies Ninja for handwritten native fixtures and building dependencies.
+Required tools report errors when used. Host-only builds never invoke the shader
+optimizer. Commands use captured environments and working directories without
+process-wide mutation.
 
 ## Source identity and reuse
 

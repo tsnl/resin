@@ -211,7 +211,7 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
 }
 
 #[test]
-fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
+fn inferred_types_lower_to_native_code_and_preserve_effect_order() {
     runs(
         "export { main }; def main() -> _ = { var n: _; var p: Ptr<_>; n := 40_i; p := &n; p.* := p.* + 2; p.* };",
         42,
@@ -243,7 +243,7 @@ fn array_and_span_indexing_use_element_sizes() {
 }
 
 #[test]
-fn numbered_examples_compile_as_strict_c11() {
+fn numbered_examples_compile_and_execute() {
     for entry in fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/examples")).unwrap() {
         let path = entry.unwrap().path();
         if path.extension().is_some_and(|ext| ext == "resin")
@@ -1122,9 +1122,12 @@ fn compute_entry_preserves_ulong_indices_on_the_host() {
 fn structured_loops_propagate_errors_from_conditions_and_nested_bodies() {
     let m = module(include_str!("fixtures/structured_control.resin"));
     let project = support::project::Project::new(&m, Some("main")).unwrap();
-    let source = fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
-    assert!(source.contains("while (true)"));
-    assert!(!source.contains("goto "), "{source}");
+    assert!(
+        m.functions
+            .iter()
+            .flat_map(|function| &function.blocks)
+            .any(|block| matches!(block.terminator, resin_lir::Terminator::Loop { .. }))
+    );
     let output = project.run();
     assert!(
         output.status.success(),
@@ -1142,11 +1145,29 @@ fn sequential_conditionals_and_error_propagation_keep_constant_nesting() {
         source.push_str("if (value == 0) { value := 1; } else { value := 0; }; step()?; ");
     }
     source.push_str("ok(value) };");
-    let project = support::project::Project::new(&module(&source), Some("main")).unwrap();
-    let c = fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
-    assert!(
-        c.lines()
-            .all(|line| line.len() - line.trim_start().len() < 32)
-    );
+    let module = module(&source);
+    // A continuation advances within its region; it must not nest the next If.
+    for function in &module.functions {
+        let mut pending = vec![(function.entry, 0)];
+        while let Some((block, depth)) = pending.pop() {
+            assert!(depth < 8, "sequential conditions became nested regions");
+            match function.blocks[block.index()].terminator {
+                resin_lir::Terminator::If { then, els, next } => {
+                    pending.extend([(then, depth + 1), (els, depth + 1)]);
+                    pending.extend(next.map(|next| (next, depth)));
+                }
+                resin_lir::Terminator::Loop {
+                    condition,
+                    body,
+                    next,
+                } => {
+                    pending.extend([(condition, depth + 1), (body, depth + 1)]);
+                    pending.extend(next.map(|next| (next, depth)));
+                }
+                _ => {}
+            }
+        }
+    }
+    let project = support::project::Project::new(&module, Some("main")).unwrap();
     assert!(project.run().status.success());
 }

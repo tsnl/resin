@@ -1,3 +1,4 @@
+use super::runtime;
 use super::{function::Operand, scalar_type, unsupported};
 use crate::Error;
 use cranelift_codegen::ir::{
@@ -5,22 +6,15 @@ use cranelift_codegen::ir::{
     condcodes::{FloatCC, IntCC},
 };
 use cranelift_frontend::FunctionBuilder;
+use cranelift_object::ObjectModule;
 use resin_types::prelude::*;
 
-pub(super) fn zero(builder: &mut FunctionBuilder<'_>, ty: ir::Type) -> ir::Value {
-    if ty == ir::types::F32 {
-        builder.ins().f32const(0.0)
-    } else if ty == ir::types::F64 {
-        builder.ins().f64const(0.0)
-    } else {
-        builder.ins().iconst(ty, 0)
-    }
-}
-
 pub(super) fn builtin(
+    module: &mut ObjectModule,
     builder: &mut FunctionBuilder<'_>,
     name: &str,
     args: &[Operand],
+    failure_name: &str,
 ) -> Result<ir::Value, Error> {
     let Some(first) = args.first() else {
         return Err(unsupported(format!("builtin {name:?}")));
@@ -47,7 +41,7 @@ pub(super) fn builtin(
         return Ok(comparison(builder, name, &first.ty, a, b));
     }
     if first.ty.is_integer() {
-        return integer(builder, name, first, b);
+        return integer(module, builder, name, first, b, failure_name);
     }
     Ok(match name {
         "&&" if first.ty == Ty::Bool => builder.ins().band(a, b),
@@ -96,10 +90,12 @@ fn comparison(
 }
 
 fn integer(
+    module: &mut ObjectModule,
     builder: &mut FunctionBuilder<'_>,
     name: &str,
     first: &Operand,
     b: ir::Value,
+    failure_name: &str,
 ) -> Result<ir::Value, Error> {
     let a = first.value;
     Ok(match name {
@@ -109,14 +105,20 @@ fn integer(
         "&" => builder.ins().band(a, b),
         "|" => builder.ins().bor(a, b),
         "^" => builder.ins().bxor(a, b),
-        "/" | "%" => divide(builder, name, first, b)?,
+        "/" | "%" => divide(module, builder, name, first, b, failure_name)?,
         "<<" | ">>" => {
             let bits = scalar_type(&first.ty)?.bits();
             let invalid =
                 builder
                     .ins()
                     .icmp_imm_s(IntCC::UnsignedGreaterThanOrEqual, b, i64::from(bits));
-            builder.ins().trapnz(invalid, ir::TrapCode::unwrap_user(3));
+            runtime::guard_symbol(
+                module,
+                builder,
+                invalid,
+                "shift count out of range",
+                failure_name,
+            )?;
             if name == "<<" {
                 builder.ins().ishl(a, b)
             } else if signed(&first.ty) {
@@ -130,14 +132,16 @@ fn integer(
 }
 
 fn divide(
+    module: &mut ObjectModule,
     builder: &mut FunctionBuilder<'_>,
     name: &str,
     first: &Operand,
     divisor: ir::Value,
+    failure_name: &str,
 ) -> Result<ir::Value, Error> {
     let original = scalar_type(&first.ty)?;
-    // Integer helpers in the C backend operate at 64 bits. Extending here also
-    // avoids target restrictions on division of narrow integer values.
+    // Widen first to avoid target restrictions on narrow integer division.
+    // Truncating the result afterward preserves wrapping at the source width.
     let a = resize(
         builder,
         first.value,
@@ -152,7 +156,8 @@ fn divide(
         ir::types::I64,
         signed(&first.ty),
     );
-    builder.ins().trapz(b, ir::TrapCode::unwrap_user(4));
+    let invalid = builder.ins().icmp_imm_s(IntCC::Equal, b, 0);
+    runtime::guard_symbol(module, builder, invalid, "division by zero", failure_name)?;
     let value = if signed(&first.ty) {
         // Resin's signed division wraps MIN/-1. Cranelift traps for that pair;
         // use a safe divisor and explicitly select the language's wrapped value.
@@ -181,9 +186,11 @@ fn divide(
 }
 
 pub(super) fn convert(
+    module: &mut ObjectModule,
     builder: &mut FunctionBuilder<'_>,
     operand: &Operand,
     to: &Ty,
+    failure_name: &str,
 ) -> Result<ir::Value, Error> {
     let from = &operand.ty;
     let source = scalar_type(from)?;
@@ -193,7 +200,7 @@ pub(super) fn convert(
         return Ok(value);
     }
     if from.is_integer() && to.is_integer() {
-        integer_bounds(builder, operand, to)?;
+        integer_bounds(module, builder, operand, to, failure_name)?;
         return Ok(resize(builder, value, source, target, signed(from)));
     }
     if from.is_integer() && matches!(to, Ty::Float32 | Ty::Float64) {
@@ -205,7 +212,7 @@ pub(super) fn convert(
         });
     }
     if matches!(from, Ty::Float32 | Ty::Float64) && to.is_integer() {
-        return float_to_integer(builder, operand, to);
+        return float_to_integer(module, builder, operand, to, failure_name);
     }
     if *from == Ty::Float32 && *to == Ty::Float64 {
         return Ok(builder.ins().fpromote(target, value));
@@ -217,9 +224,11 @@ pub(super) fn convert(
 }
 
 fn integer_bounds(
+    module: &mut ObjectModule,
     builder: &mut FunctionBuilder<'_>,
     operand: &Operand,
     to: &Ty,
+    failure_name: &str,
 ) -> Result<(), Error> {
     let from = scalar_type(&operand.ty)?;
     let target = scalar_type(to)?;
@@ -229,7 +238,13 @@ fn integer_bounds(
         let invalid = builder
             .ins()
             .icmp_imm_s(IntCC::SignedLessThan, operand.value, low as i64);
-        builder.ins().trapnz(invalid, ir::TrapCode::unwrap_user(5));
+        runtime::guard_symbol(
+            module,
+            builder,
+            invalid,
+            "numeric conversion out of range",
+            failure_name,
+        )?;
     }
     if high < source_high {
         let condition = if signed(&operand.ty) {
@@ -240,15 +255,23 @@ fn integer_bounds(
         let invalid = builder
             .ins()
             .icmp_imm_s(condition, operand.value, high as i64);
-        builder.ins().trapnz(invalid, ir::TrapCode::unwrap_user(5));
+        runtime::guard_symbol(
+            module,
+            builder,
+            invalid,
+            "numeric conversion out of range",
+            failure_name,
+        )?;
     }
     Ok(())
 }
 
 fn float_to_integer(
+    module: &mut ObjectModule,
     builder: &mut FunctionBuilder<'_>,
     operand: &Operand,
     to: &Ty,
+    failure_name: &str,
 ) -> Result<ir::Value, Error> {
     let target = scalar_type(to)?;
     let source = scalar_type(&operand.ty)?;
@@ -267,7 +290,14 @@ fn float_to_integer(
         .fcmp(FloatCC::GreaterThanOrEqual, truncated, lower);
     let below = builder.ins().fcmp(FloatCC::LessThan, truncated, upper);
     let valid = builder.ins().band(above, below);
-    builder.ins().trapz(valid, ir::TrapCode::unwrap_user(5));
+    let invalid = builder.ins().icmp_imm_s(IntCC::Equal, valid, 0);
+    runtime::guard_symbol(
+        module,
+        builder,
+        invalid,
+        "numeric conversion out of range",
+        failure_name,
+    )?;
     let result = if signed(to) {
         builder.ins().fcvt_to_sint(ir::types::I64, truncated)
     } else {

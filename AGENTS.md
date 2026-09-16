@@ -7,7 +7,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 
 - Make the compiler educational to read. Prefer explicit data and direct control flow;
   a reader should be able to tell what a pass consumes, produces, and computes locally.
-- Follow one direction: syntax → AST → HIR → LIR → verified LIR → C/SPIR-V → native tools.
+- Follow one direction: syntax → AST → HIR → LIR → verified LIR → Cranelift/SPIR-V → native tools.
   Put each phase's public language definitions and operations in `lib.rs`. Keep incoming
   translation in private `lower` modules and textual rendering in private `print` modules.
   A crate's complete public contract should be discoverable from its entry point.
@@ -95,7 +95,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   by consumers instead of re-exported through `resin-types`. Use `tempfile` for temporary
   files. Do not move domain types, source diagnostics, or phase state into `resin-common`
   to break a dependency cycle.
-  C has a private target language, lowering, and printing inside `codegen`; SPIR-V lowering
+  Cranelift host lowering and SPIR-V lowering stay private inside `codegen`; SPIR-V
   emits binary instructions directly through `rspirv`.
 - Use canonical crate and module names; do not rename dependencies or language types
   for brevity. Prefer a qualified name when two phases use the same type name.
@@ -130,7 +130,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   payload at construction and at pattern matching sites.
 - Language trees may expose their data directly; service objects and retained results
   should protect their invariants. Require the least information an operation needs.
-  Code generation consumes verified LIR; the toolchain consumes an on-disk Ninja project
+  Code generation consumes verified LIR; the toolchain consumes immutable objects/header bundles
   and explicit build settings. Neither requires mutable compiler caches or rereads Resin sources.
 - Treat `Source` as immutable named text, never implicitly as a file. Clones share a
   source version; changed text is a new value. `SourceId` is reconstructible logical
@@ -147,7 +147,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `resin-cache` to immutable capacity-bounded completed-value snapshots. Applications
   sequence passes directly; do not add a reusable compiler orchestration wrapper.
   Execution defaults to available logical CPUs, with a fallback of one. Each native
-  build reserves one slot and invokes Ninja with `-j 1`. Started synchronous foreign
+  operation reserves one slot for its process. Started synchronous foreign
   calls retain their slot until they finish; queued work observes cancellation.
 - Applications publish immutable cache generations through safe shared-pointer CAS.
   On a lost race, rebase every requested hit/miss handle on the current head with the
@@ -221,7 +221,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 
 ## Development Practices
 
-- Target 64-bit Linux, macOS, and Windows (MSVC with LLVM Clang for emitted C).
+- Target 64-bit Linux, macOS, and Windows (MSVC ABI with LLVM Clang for C interoperability).
   Keep host builds independent of a Vulkan SDK or GPU. GPU execution still requires the
   runtime's Vulkan features; MoltenVK discovery does not imply full GPU compatibility.
 - Keep the native C ABI in `crates/resin-runtime/` and language-facing modules in `resin/`.
@@ -248,26 +248,29 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Managed definitions use immutable local mirror files and keep server source identities.
 - Server handlers call `resin_hir::Hir::build` on assembled immutable `BuiltProgram`
   values, then select explicit host/shader entries for `resin_lir::build_lir`.
-  `resin_codegen::generate` accepts verified LIR and immutable `NativeHeaders`, writes
-  supplied header bundles, C, SPIR-V and Ninja edges into a unique owned temporary child.
+  `resin_codegen::generate_native` accepts verified LIR, an entry, optimization and
+  immutable native inputs, returning shared platform object bytes. `generate_spirv`
+  returns one shader's unoptimized bytes. Both are independent of external tools.
+  Cranelift is the sole Resin host backend; C remains an interoperability language.
   HIR and LIR retain source-scoped `ForeignHeader` values even for empty extern groups.
   Never bind includes by basename alone. Preserve ordered include roots and whole-bundle
-  contents in native keys, and protect the compiler-injected runtime ABI include.
-  `resin-toolchain` stages that directory, configures native tools, and invokes Ninja.
-  The toolchain owns native command rules. The graph optimizes SPIR-V with `spirv-opt`,
-  runs the configured service executable with `--embed` to write
-  aligned byte-array headers, then compiles C. Ninja owns ordering and incremental builds.
+  contents in adapter keys, and protect the compiler-injected runtime ABI include.
+  The server explicitly caches foreign adapters, shaders, optimized shader bytes,
+  native objects, and executable generations. `resin-toolchain` preprocesses captured
+  C adapters with Clang, inspects the same bytes with libclang, and compiles those bytes.
+  It optimizes SPIR-V with `spirv-opt` and links native objects with the runtime archive.
+  Cranelift embeds optimized shader bytes directly with alignment and exact length.
   Inspect cached intermediates or immutable `Hir` results; do not add CLI inspection modes.
-  Toolchain APIs consume explicit settings. Only staging/building holds the cache lock;
-  retained `BuiltProject` and `Executable` handles share an immutable artifact generation
-  that survives later builds and is removed when its final owner drops. Cancelled native
-  work terminates its process tree before releasing staging ownership.
-  Capture the Resin executable with `std::env::current_exe()` rather than resolving it on
-  PATH. Do not run a blanket native-tool preflight: report failures when a build needs the
-  tool. Document Ninja, a C compiler (`CC`/`--cc`), and `spirv-opt` (`SPIRV_OPT`/`--spirv-opt`) as installation
-  requirements on the server; `NINJA` selects the build runner. Client `-I`/`--include-root`
-  uploads complete header directory bundles. Server tool paths never come from build requests. Embedding preserves arbitrary bytes and
-  their exact logical length, including empty inputs, without appending a NUL.
+  Toolchain APIs consume explicit settings. Retained `Executable` handles share an
+  immutable artifact generation that survives later builds and is removed when its
+  final owner drops. Cancelled native work terminates its process tree before releasing
+  staging ownership. Native settings and default system SDK installations remain stable
+  during an operation; operators restart services when changing implicit SDK installations.
+  Do not run a blanket native-tool preflight: report failures when a build needs the
+  tool. Document Clang (`CLANG`), libclang (`LIBCLANG_PATH`), a linker driver (`CC`/`--cc`),
+  and `spirv-opt` (`SPIRV_OPT`/`--spirv-opt`) as server requirements. Ninja remains for
+  handwritten C fixtures and dependency builds. Client `-I`/`--include-root` uploads
+  complete header directory bundles. Server tool paths never come from build requests.
 - Without `-o`, request a debug build, download to owned temporary storage, and run
   locally with local argv/env/cwd. With `-o`, request release and atomically publish the
   verified download without running it. Failed/cancelled downloads preserve prior output.

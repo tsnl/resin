@@ -24,9 +24,9 @@ The default binary directory is `$CARGO_TARGET_DIR/release`, or `target/release`
 Use `--bin-dir PATH` to select another build. `--suite http`, `--suite lsp`, and
 `--suite build` run individual groups; the default runs all three. `--label TEXT`
 records a label alongside the machine, revision, fixture, and sample metadata.
-Use `--host-backend cranelift` for the opt-in
-[scalar host backend prototype](../doc/cranelift-prototype.md); the default is `c`.
-The prototype document includes a [measured C/Cranelift comparison](../doc/cranelift-prototype.md#recorded-comparison--2026-09-15).
+The server uses Cranelift for host compilation. Historical scalar-prototype timings
+remain in the [prototype comparison](../doc/cranelift-prototype.md#recorded-comparison--2026-09-15);
+that prototype omitted runtime linking and is not equivalent to the full backend.
 
 Results contain every sample, sample counts, median, and nearest-rank p95. A p95
 computed from three cold trials is just the largest sample; increase `--trials`
@@ -107,10 +107,9 @@ Do not compare these optimized HTTP timings directly with the earlier unoptimize
 compiler-only measurements in [the implementation validation record](../doc/compiler-service-validation.md).
 
 Current cache reuse is per-file for CST/AST and per complete source graph for HIR.
-A source edit therefore still rebuilds whole-graph semantic analysis. Warm builds
-still validate native inputs, preprocess C, invoke Ninja, retain files, and hash and
-download the artifact. A cache hit does not yet reduce the complete build request
-to an artifact lookup. Cache capacities count entries, and retained generations
+A source edit therefore still rebuilds whole-graph semantic analysis. Warm builds validate captured native input and tool identities, then reuse C adapters,
+shader bytes, objects, and executables when their keys match. Artifact hashing and
+download still occur on each request. Cache capacities count entries, and retained generations
 can keep dependencies alive after eviction from the current cache.
 
 ## Recorded Linux run — 2026-09-15

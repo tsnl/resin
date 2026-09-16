@@ -16,7 +16,7 @@ let
 in
 pkgs.mkShell (
   {
-    # Fortify requires optimization, but Resin's default C builds use -O0.
+    # Handwritten native test fixtures include unoptimized C builds.
     hardeningDisable = [ "fortify" ];
 
     packages =
@@ -24,6 +24,8 @@ pkgs.mkShell (
       [
         rustup
         helix
+        clang
+        libclang
         shaderc # Handwritten GLSL fixtures in the runtime tests.
         spirv-tools
         nodejs_26
@@ -46,6 +48,7 @@ pkgs.mkShell (
       ]
       ++ lib.optional linux wayland-scanner;
     buildInputs = windowLibraries;
+    LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
 
   }
   // lib.optionalAttrs linux {

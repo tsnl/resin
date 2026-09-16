@@ -130,6 +130,23 @@ ResinGpuPtr resin_gpu_ptr_offset(
     size_t bytes,
     size_t alignment);
 
+/* Pointer-based compiler ABI. View/span pointers must be non-null, aligned,
+   and initialized for the call. They borrow the same owner as the by-value
+   operations; copying ABI bytes does not retain or release it. */
+void *resin_gpu_ptr_host_ref(
+    const ResinGpuPtr *value,
+    size_t bytes,
+    size_t alignment,
+    uint32_t required_access);
+/* out must be aligned and writable; it may alias value. The resulting view
+   borrows its owner. Writing out does not release any previous owner. */
+void resin_gpu_ptr_offset_into(
+    const ResinGpuPtr *value,
+    size_t byte_offset,
+    size_t bytes,
+    size_t alignment,
+    ResinGpuPtr *out);
+
 /* Compiler-only projection construction. The root and dependency addresses
    remain private to generated launch code. No CPU locks are taken until a
    projected dispatch or draw is successfully recorded. */
@@ -138,6 +155,13 @@ void *resin_gpu_projection_root(ResinArc *projection);
 ResinDeviceAddress resin_gpu_projection_pointer(
     ResinArc *projection,
     ResinGpuPtr value,
+    size_t bytes,
+    size_t alignment);
+/* Same root/dependency retention as the by-value projection operations. */
+ResinArc *resin_gpu_projection_new_ref(const ResinGpuPtr *root);
+ResinDeviceAddress resin_gpu_projection_pointer_ref(
+    ResinArc *projection,
+    const ResinGpuPtr *value,
     size_t bytes,
     size_t alignment);
 /* These borrow projection; success retains it through completion/cancellation. */
@@ -155,6 +179,10 @@ ResinStatus resin_gpu_copy_image_to_span(
     ResinCommandBuffer *commands,
     ResinImage *image,
     ResinGpuSpan destination);
+ResinStatus resin_gpu_copy_image_to_span_ref(
+    ResinCommandBuffer *commands,
+    ResinImage *image,
+    const ResinGpuSpan *destination);
 
 /* SPIR-V byte lengths must be multiples of four. */
 ResinStatus resin_gpu_create_compute_pipeline(

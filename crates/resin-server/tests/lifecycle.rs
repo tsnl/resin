@@ -31,7 +31,6 @@ impl Service {
                 temporary: root.into(),
                 tools: environment.toolchain(compiler.map(Path::as_os_str), None),
                 target: resin_server::host_target(),
-                host_backend: resin_server::HostBackend::C,
                 capacities: Capacities {
                     generated: 1,
                     ..Default::default()
@@ -188,7 +187,7 @@ async fn unread_artifact_stream_survives_eviction_of_its_generation() {
     .unwrap();
     assert!(other.status().is_success(), "{:?}", other.status());
     let _other = other.bytes().await.unwrap();
-    assert_eq!(service.server.counters().generated_builds, 2);
+    assert_eq!(service.server.counters().native_object_builds, 2);
     let bytes = tokio::time::timeout(Duration::from_secs(15), response.bytes())
         .await
         .unwrap()
@@ -203,7 +202,7 @@ async fn unread_artifact_stream_survives_eviction_of_its_generation() {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn disconnect_during_native_compilation_reaps_the_real_compiler_process() {
+async fn disconnect_during_native_linking_reaps_the_real_linker_process() {
     use std::{os::unix::fs::PermissionsExt, path::PathBuf};
     use tokio::{io::AsyncWriteExt, net::TcpStream};
     let directory = TempDir::new().unwrap();
@@ -214,7 +213,7 @@ async fn disconnect_during_native_compilation_reaps_the_real_compiler_process() 
         format!("'{}'", value.to_string_lossy().replace('\'', "'\\''"))
     }
     let script = format!(
-        "#!/bin/sh\nfor argument in \"$@\"; do\n case \"$argument\" in\n *.i) printf '%s' \"$$\" > {}; exec sleep 60 ;;\n esac\ndone\nexec {} \"$@\"\n",
+        "#!/bin/sh\nfor argument in \"$@\"; do\n case \"$argument\" in\n *.o|*.obj) printf '%s' \"$$\" > {}; exec sleep 60 ;;\n esac\ndone\nexec {} \"$@\"\n",
         quote(marker.as_os_str()),
         quote(&real)
     );
@@ -240,7 +239,7 @@ async fn disconnect_during_native_compilation_reaps_the_real_compiler_process() 
         }
     })
     .await
-    .expect("native compiler did not reach its gated .i compilation");
+    .expect("native linker did not reach its gated object link");
     drop(connection);
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
@@ -257,7 +256,7 @@ async fn disconnect_during_native_compilation_reaps_the_real_compiler_process() 
         }
     })
     .await
-    .expect("compiler process survived client disconnect");
+    .expect("linker process survived client disconnect");
     // The server remains available; no explicit DELETE or service shutdown caused reaping.
     let response = reqwest::Client::new()
         .get(service.url("/v1/capabilities"))

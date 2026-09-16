@@ -1,7 +1,7 @@
 //! Build requests explicitly select each immutable pass and then run native tools.
 use crate::{
-    HostBackend, OwnedArtifact, Server,
-    caches::{GenerationKey, NativeKey},
+    OwnedArtifact, Server,
+    caches::{ForeignKey, LinkKey, NativeKey, ShaderKey, ToolBytesKey},
     http::failure,
     inputs::{self, internal},
     publication,
@@ -156,22 +156,15 @@ pub(crate) async fn run(
     .map_err(internal)?
     .remove(&key)
     .expect("selected verified LIR");
-    let executable = match server.config.host_backend {
-        HostBackend::C => {
-            build_c(
-                server,
-                verified,
-                key,
-                frozen.headers,
-                &request.contract,
-                cancellation,
-            )
-            .await?
-        }
-        HostBackend::Cranelift => {
-            build_native(server, verified, key, &request.contract, cancellation).await?
-        }
-    };
+    let executable = build_native(
+        server,
+        verified,
+        key,
+        frozen.headers,
+        &request.contract,
+        cancellation,
+    )
+    .await?;
     let path = executable.path().to_owned();
     let (length, digest) = server
         .execution
@@ -212,36 +205,36 @@ pub(crate) async fn run(
     })
 }
 
-async fn build_c(
+async fn build_native(
     server: &Server,
     verified: Arc<resin_lir::VerifiedModule>,
-    key: resin_lir::LirKey,
-    headers: Arc<resin_codegen::NativeHeaders>,
+    lir: resin_lir::LirKey,
+    headers: Arc<crate::headers::NativeHeaders>,
     contract: &BuildContract,
     cancellation: &Cancellation,
 ) -> Result<resin_toolchain::Executable, Failure> {
-    let generation_key = GenerationKey {
-        lir: key,
-        host_entry: Some(contract.entry.export.clone()),
-        headers,
-        target: server.config.target.clone(),
-        managed_snapshot: server.managed.snapshot().into(),
-    };
-    let generated = publication::select(
-        &server.caches.generated,
-        vec![generation_key.clone()],
+    // Validate every shader before invoking any optimizer, compiler or linker.
+    let shader_keys = verified
+        .view()
+        .module()
+        .shaders
+        .iter()
+        .filter(|(_, shader)| shader.embedded)
+        .map(|(&function, _)| ShaderKey {
+            lir: lir.clone(),
+            function,
+        })
+        .collect();
+    let shaders = publication::select(
+        &server.caches.shaders,
+        shader_keys,
         |key| {
             let verified = verified.clone();
             async move {
-                server
-                    .caches
-                    .generated_builds
-                    .fetch_add(1, Ordering::Relaxed);
-                resin_codegen::generate(
+                server.caches.shader_builds.fetch_add(1, Ordering::Relaxed);
+                resin_codegen::generate_spirv(
                     verified,
-                    key.host_entry,
-                    key.headers,
-                    &server.config.temporary,
+                    key.function,
                     &server.execution,
                     cancellation,
                 )
@@ -253,47 +246,103 @@ async fn build_c(
         cancellation,
     )
     .await
-    .map_err(internal)?
-    .remove(&generation_key)
-    .expect("selected generated project");
-    let profile = match contract.profile {
-        BuildProfile::Debug => resin_toolchain::CProfile::Debug,
-        BuildProfile::Release => resin_toolchain::CProfile::Release,
-    };
-    let built = server
+    .map_err(compilation)?;
+    let tools = server
         .config
         .tools
-        .build(
-            generated.directory(),
-            generated.name(),
-            &contract.entry.export,
-            profile,
-            &server.execution,
-            cancellation,
-        )
+        .fingerprint(&server.execution, cancellation)
         .await
-        .map_err(|error| failure(ErrorCode::CompilationFailed, error.to_string()))?;
-    built
-        .executable(
-            generated
-                .program()
-                .expect("host output")
-                .file_name()
-                .expect("program filename"),
-        )
-        .map_err(internal)
-}
-
-async fn build_native(
-    server: &Server,
-    verified: Arc<resin_lir::VerifiedModule>,
-    lir: resin_lir::LirKey,
-    contract: &BuildContract,
-    cancellation: &Cancellation,
-) -> Result<resin_toolchain::Executable, Failure> {
+        .map_err(compilation)?;
+    let optimized = publication::select(
+        &server.caches.optimized,
+        shaders
+            .values()
+            .map(|bytes| ToolBytesKey {
+                bytes: bytes.as_ref().clone(),
+                tools: tools.clone(),
+            })
+            .collect(),
+        |key| async move {
+            server
+                .caches
+                .shader_optimizations
+                .fetch_add(1, Ordering::Relaxed);
+            server
+                .config
+                .tools
+                .optimize_shader(
+                    key.bytes,
+                    &server.config.temporary,
+                    &server.execution,
+                    cancellation,
+                )
+                .await
+                .map(Arc::new)
+        },
+        &server.execution,
+        cancellation,
+    )
+    .await
+    .map_err(compilation)?;
+    let crate::foreign::Prepared {
+        inputs: foreign_inputs,
+        bindings: foreign,
+    } = crate::foreign::prepare(verified.view().module(), &headers)?;
+    let foreign_object =
+        if foreign_inputs.functions.is_empty() && foreign_inputs.includes.is_empty() {
+            None
+        } else {
+            let key = ForeignKey {
+                inputs: foreign_inputs,
+                tools: tools.clone(),
+            };
+            Some(
+                publication::select(
+                    &server.caches.foreign,
+                    vec![key.clone()],
+                    |key| async move {
+                        server.caches.foreign_builds.fetch_add(1, Ordering::Relaxed);
+                        server
+                            .config
+                            .tools
+                            .compile_foreign(
+                                key.inputs,
+                                &server.config.temporary,
+                                &server.execution,
+                                cancellation,
+                            )
+                            .await
+                            .map(Arc::new)
+                    },
+                    &server.execution,
+                    cancellation,
+                )
+                .await
+                .map_err(compilation)?
+                .remove(&key)
+                .expect("selected foreign object"),
+            )
+        };
+    let inputs = Arc::new(resin_codegen::NativeInputs {
+        foreign,
+        shaders: shaders
+            .into_iter()
+            .map(|(key, bytes)| {
+                let optimized = optimized[&ToolBytesKey {
+                    bytes: bytes.as_ref().clone(),
+                    tools: tools.clone(),
+                }]
+                    .as_ref()
+                    .clone();
+                (key.function, optimized)
+            })
+            .collect(),
+        runtime: Default::default(),
+    });
     let key = NativeKey {
         lir,
         entry: contract.entry.export.clone(),
+        inputs,
         optimization: match contract.profile {
             BuildProfile::Debug => resin_codegen::NativeOptimization::None,
             BuildProfile::Release => resin_codegen::NativeOptimization::Speed,
@@ -314,6 +363,7 @@ async fn build_native(
                     verified,
                     key.entry,
                     key.optimization,
+                    key.inputs,
                     &server.execution,
                     cancellation,
                 )
@@ -325,19 +375,104 @@ async fn build_native(
         cancellation,
     )
     .await
-    .map_err(|error| failure(ErrorCode::CompilationFailed, error.to_string()))?
+    .map_err(compilation)?
     .remove(&key)
     .expect("selected native object");
-    // Only pure object generation is cached. Each request owns its linked output.
-    server
-        .config
-        .tools
-        .link_object(
-            object.shared_bytes(),
-            &server.config.temporary,
-            &server.execution,
-            cancellation,
-        )
-        .await
-        .map_err(|error| failure(ErrorCode::CompilationFailed, error.to_string()))
+    let mut objects = vec![object.shared_bytes()];
+    if let Some(foreign) = foreign_object {
+        objects.push(foreign.bytes());
+    }
+    link(
+        server,
+        LinkKey {
+            generation: 0,
+            objects,
+            tools,
+        },
+        cancellation,
+    )
+    .await
+}
+
+async fn link(
+    server: &Server,
+    mut key: LinkKey,
+    cancellation: &Cancellation,
+) -> Result<resin_toolchain::Executable, Failure> {
+    // External links for the same immutable inputs share one in-flight operation.
+    // Waiting retains no executor permit; unrelated object keys proceed independently.
+    let coordination = link_coordination(server, &key)?;
+    let _linking = tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => return Err(compilation(resin_executor::Error::Cancelled)),
+        guard = coordination.lock() => guard,
+    };
+    // Recheck the cache after acquiring the key, including its current owned file.
+    // An administrator may remove temporary outputs. Rebuild a missing generation
+    // from retained object bytes, without mutating any existing executable handle.
+    let previous = server
+        .caches
+        .executables
+        .load_full()
+        .iter()
+        .filter(|(old, _)| old.objects == key.objects && old.tools == key.tools)
+        .max_by_key(|(old, _)| old.generation)
+        .map(|(old, output)| (old.generation, output.clone()));
+    if let Some((generation, output)) = previous {
+        key.generation = generation;
+        if tokio::fs::metadata(output.path()).await.is_err() {
+            key.generation = generation
+                .checked_add(1)
+                .ok_or_else(|| compilation("executable generation overflow"))?;
+        }
+    }
+    let executable = publication::select(
+        &server.caches.executables,
+        vec![key.clone()],
+        |key| async move {
+            server
+                .caches
+                .executable_builds
+                .fetch_add(1, Ordering::Relaxed);
+            server
+                .config
+                .tools
+                .link_native(
+                    resin_toolchain::NativeLink {
+                        objects: key.objects,
+                        runtime: true,
+                    },
+                    &server.config.temporary,
+                    &server.execution,
+                    cancellation,
+                )
+                .await
+                .map(Arc::new)
+        },
+        &server.execution,
+        cancellation,
+    )
+    .await
+    .map_err(compilation)?
+    .remove(&key)
+    .expect("selected executable");
+    Ok(executable.as_ref().clone())
+}
+
+fn link_coordination(
+    server: &Server,
+    key: &LinkKey,
+) -> Result<Arc<tokio::sync::Mutex<()>>, Failure> {
+    let mut links = server.links.lock().map_err(internal)?;
+    links.retain(|_, waiting| waiting.strong_count() != 0);
+    if let Some(waiting) = links.get(key).and_then(std::sync::Weak::upgrade) {
+        return Ok(waiting);
+    }
+    let waiting = Arc::new(tokio::sync::Mutex::new(()));
+    links.insert(key.clone(), Arc::downgrade(&waiting));
+    Ok(waiting)
+}
+
+fn compilation(error: impl std::fmt::Display) -> Failure {
+    failure(ErrorCode::CompilationFailed, error.to_string())
 }

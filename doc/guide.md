@@ -31,7 +31,7 @@ and serves stdio LSP. The separate `resin-server` application owns semantic comp
 and native tools. Build/run and LSP require an explicit `RESIN_SERVER` HTTP(S) URL;
 formatting works locally without a service.
 
-On Linux or macOS, enter `nix-shell` for Rustup (using `rust-toolchain.toml`), a C compiler,
+On Linux or macOS, enter `nix-shell` for Rustup (using `rust-toolchain.toml`), Clang, libclang, a native linker driver,
 CMake, Ninja, GLFW's native build dependencies, SPIR-V Tools, and `glslc` for handwritten
 test fixtures. On Linux it also supplies Vulkan tools, validation layers, and RenderDoc.
 The parser is included in `crates/tree-sitter-resin/`; run `cargo test --workspace` directly.
@@ -41,11 +41,11 @@ Cargo builds and statically links the GLFW source bundled in `glfw-sys`; no GLFW
 or library search path is needed. Cargo uses `rust-toolchain.toml` to install the project's
 Rust toolchain. Outside Nix:
 
-- Linux: install Rustup, a C compiler, CMake, Ninja, SPIR-V Tools (`spirv-opt`, `spirv-val`),
+- Linux: install Rustup, Clang and libclang development packages, a native linker driver, CMake, Ninja, SPIR-V Tools (`spirv-opt`, `spirv-val`),
   `glslc` for tests, pkg-config, and the X11, Wayland, and xkbcommon development packages,
   including `wayland-scanner`. For GPU execution, add the Vulkan
   loader and a Vulkan driver.
-- macOS: install Xcode Command Line Tools (`xcode-select --install`), Rustup, CMake, Ninja, and SPIR-V Tools
+- macOS: install Xcode Command Line Tools (`xcode-select --install`), Rustup, LLVM (Clang and libclang), CMake, Ninja, and SPIR-V Tools
   (`brew install cmake ninja spirv-tools shaderc`; Shaderc supplies `glslc` for tests).
   Start the compiler service below before requesting a host program.
   For GPU programs, install the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#mac), which supplies
@@ -70,7 +70,10 @@ The [compiler service guide](compiler-service.md) covers remote deployment, nati
 installation paths, cache settings, header bundles, and pinned dependencies.
 The service never starts automatically and the client has no local compiler fallback.
 
-Windows emitted C uses the GNU-style `clang` driver with the MSVC ABI, not `cl` or `clang-cl`.
+Windows C interoperability uses the GNU-style `clang` driver with the MSVC ABI.
+Set `LIBCLANG_PATH` to the LLVM `bin` directory containing `libclang.dll`.
+On macOS, Homebrew LLVM supplies libclang; set `CLANG` and `LIBCLANG_PATH` to its
+`bin/clang` and `lib` paths when using that installation.
 MinGW and cross-compiling Resin programs are not tested. macOS enables Vulkan portability
 enumeration and the portability-subset extension when available, but does not relax the runtime's
 Vulkan 1.3 feature requirements. Some MoltenVK devices and presentation paths may still report
@@ -102,14 +105,15 @@ After changing `crates/tree-sitter-resin/grammar.js`, regenerate from that direc
 `tree-sitter generate --js-runtime native`.
 Commit grammar changes and generated files together in this repository.
 
-The service's native builds require Ninja and a C compiler, selected with `CC` or server `--cc` (default `cc`
-on Unix, `clang` on Windows MSVC). Shader builds use the `spirv-opt` binary from
-[SPIR-V Tools](https://github.com/KhronosGroup/SPIRV-Tools),
-selected with `SPIRV_OPT` or server `--spirv-opt`; `NINJA` selects the build runner. Resin performs
-no tool preflight; required commands report errors when executed. Host-only builds never
-invoke `spirv-opt`. SPIR-V embedding invokes the running service executable through the platform
-`current_exe` API, so it neither searches PATH for Resin nor mixes compiler versions.
-Backend tests build generated projects through the same Ninja toolchain.
+The service compiles Resin directly to native objects with Cranelift. It needs Clang
+(`CLANG`, default `clang`) and libclang (`LIBCLANG_PATH` when not discoverable) for
+C header inspection and cached interoperability adapters. The linker driver is selected
+with `CC` or server `--cc` (default `cc` on Unix, `clang` on Windows MSVC).
+Shader builds use `spirv-opt` from [SPIR-V Tools](https://github.com/KhronosGroup/SPIRV-Tools),
+selected with `SPIRV_OPT` or server `--spirv-opt`. Required tools report errors when used;
+host-only builds never invoke the shader optimizer. Optimized shader bytes are embedded
+directly in native objects. Ninja remains a development dependency for handwritten C
+fixtures and dependency builds; the Resin host build path does not use it.
 Generated shaders are validated with `spirv-val` and optimized with `spirv-opt`. Set
 `RESIN_REQUIRE_SPIRV_TOOLS=1` to require these tools in tests. Handwritten GLSL fixtures
 in runtime tests still use `glslc` from `PATH` and skip if absent, unless GPU tests are required.
@@ -209,14 +213,14 @@ non-main entry), with `.exe` on Windows; otherwise PATH names the file exactly. 
 extension for Windows executable filenames.
 
 Compilation happens on the selected service: explicit CST → AST → HIR → LIR →
-verified LIR → C/SPIR-V passes produce a Ninja project. Ninja prepares embedded
-shaders and compiles captured preprocessed C. Compiler libraries remain independently
+verified LIR → Cranelift/SPIR-V passes produce immutable object and shader bytes.
+The service optimizes shaders, compiles cached C adapters, and links native objects. Compiler libraries remain independently
 usable; see the [architecture](architecture.md#calling-the-passes) for their async APIs.
 The client checks the returned target, revision, filename, length, and BLAKE3 digest
 before replacing any output. Failed or cancelled downloads preserve an existing file.
 
-Native caches and intermediates live under the service working directory's `build/`.
-Completed artifact generations retain independent lifetimes during downloads. CPU
+Native objects and shader bytes are retained in server caches. Native staging and
+completed executable generations live under `--temporary`, with independent lifetimes during downloads. CPU
 cache heads are shared across callers; equivalent logical sources and import graphs
 can reuse editor analysis when a separate CLI later builds the same saved bytes.
 Header directory contents and native settings participate in native invalidation.
@@ -256,7 +260,7 @@ The coordinator bounds requests, coalesces accepted editor states, and rejects
 stale results by document epoch/version and dependencies. Superseded analysis and
 shutdown cancel owned HTTP work. The service bounds compiler work with `Execution`
 (default: available logical CPUs), shares immutable cache heads through compare-and-swap,
-and reserves one slot per native build with Ninja `-j 1`. Started synchronous parser
+and reserves a slot for each native process. Started synchronous parser
 calls may finish before releasing a slot; native cancellation terminates and reaps
 owned process trees. Entry-count capacities are not byte limits.
 

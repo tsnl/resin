@@ -9,7 +9,7 @@ RUN cargo build --release --locked -p resin-server -p resin-runtime
 
 FROM docker.io/library/debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libc6-dev ninja-build spirv-tools git ca-certificates \
+    gcc libc6-dev clang libclang-dev spirv-tools git ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home resin \
     && mkdir -p /var/lib/resin /var/tmp/resin \

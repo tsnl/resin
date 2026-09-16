@@ -4,13 +4,14 @@ use resin_protocol::{BuildMetadata, Capabilities, EntryProfile, Failure, Target}
 use std::{
     collections::BTreeMap,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
 };
 use tokio::sync::Semaphore;
 
 mod analyze;
 mod build;
 mod caches;
+mod foreign;
 mod headers;
 mod http;
 mod inputs;
@@ -64,16 +65,7 @@ pub struct Config {
     pub temporary: PathBuf,
     pub tools: resin_toolchain::Toolchain,
     pub target: Target,
-    pub host_backend: HostBackend,
     pub capacities: Capacities,
-}
-
-/// Host emission selected for this server instance. Cranelift is a scalar-only prototype.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
-pub enum HostBackend {
-    #[default]
-    C,
-    Cranelift,
 }
 
 /// Observation counters for embedding applications and tests, not an HTTP administration API.
@@ -84,7 +76,10 @@ pub struct Counters {
     pub ast_builds: u64,
     pub hir_builds: u64,
     pub verified_builds: u64,
-    pub generated_builds: u64,
+    pub foreign_builds: u64,
+    pub shader_builds: u64,
+    pub shader_optimizations: u64,
+    pub executable_builds: u64,
     pub native_object_builds: u64,
 }
 
@@ -97,6 +92,7 @@ pub struct Server {
     pub(crate) instance: String,
     pub(crate) requests: Mutex<BTreeMap<String, Cancellation>>,
     pub(crate) admission: Arc<Semaphore>,
+    pub(crate) links: Mutex<BTreeMap<caches::LinkKey, Weak<tokio::sync::Mutex<()>>>>,
     pub(crate) stopping: Cancellation,
 }
 
@@ -128,6 +124,7 @@ impl Server {
             instance: token(),
             requests: Mutex::new(BTreeMap::new()),
             admission,
+            links: Mutex::new(BTreeMap::new()),
             stopping,
         })
     }

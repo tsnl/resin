@@ -644,8 +644,9 @@ fn declarations_do_not_create_a_module_initializer() {
     assert_eq!(module.functions[0].name.as_deref(), Some("answer"));
     assert_eq!(module.entries.len(), 1);
     let project = support::project::Project::new(&module, Some("answer")).unwrap();
-    let source = fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
-    assert!(source.contains("int main(int r_argc, char **r_argv) {\n  (void)r_argc; (void)r_argv;\n  atexit(resin_cleanup);\n  return r_fn0();\n}"));
+    let output = project.run();
+    assert_eq!(output.status.code(), Some(42));
+    assert!(output.stdout.is_empty() && output.stderr.is_empty());
 }
 
 #[test]

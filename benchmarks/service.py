@@ -47,7 +47,6 @@ def arguments():
     parser.add_argument("--build-samples", type=positive, default=8)
     parser.add_argument("--build-edit-samples", type=positive, default=5)
     parser.add_argument("--suite", choices=["http", "lsp", "build", "all"], default="all")
-    parser.add_argument("--host-backend", choices=["c", "cranelift"], default="c")
     parser.add_argument("--label", help="Optional description of this run")
     args = parser.parse_args()
     args.bin_dir = args.bin_dir.resolve()
@@ -355,10 +354,9 @@ class Benchmark:
                 connection = Http(port, timeout=2)
                 started = time.perf_counter()
                 try:
-                    backend = ["--host-backend", "cranelift"] if self.args.host_backend == "cranelift" else []
                     process = subprocess.Popen(
                         [self.server_binary, "--listen", f"127.0.0.1:{port}", "--library-root", ROOT / "resin",
-                         "--temporary", directory, *backend],
+                         "--temporary", directory],
                         cwd=directory, stdout=log, stderr=log,
                     )
                     deadline = started + 30

@@ -16,11 +16,13 @@ use std::{
 mod environment;
 mod files;
 mod headers;
+mod interop;
 mod ninja;
 mod object;
 mod platform;
 mod process;
 mod settings;
+mod shader;
 
 use platform::RUNTIME_ARCHIVE;
 use resin_executor::{Cancellation, Execution};
@@ -116,6 +118,78 @@ pub struct CTranslationUnit {
     pub preprocessed: PathBuf,
 }
 
+//
+// Captured C interoperability
+//
+
+/// Scalar C boundary types. Integer widths are 8, 16, 32, or 64; floats are 32 or 64.
+/// Void is permitted only as a function result. Pointers cross this boundary as void*.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ForeignScalar {
+    Void,
+    Bool,
+    Integer { bits: u8, signed: bool },
+    Float { bits: u8 },
+    Pointer,
+}
+
+/// One C call wrapper: `symbol` is the exported adapter and `name` is its C callee.
+/// Both names must be C identifiers. The adapter applies ordinary C argument/result
+/// conversions, including calls to function-like macros and static inline functions.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ForeignFunction {
+    pub symbol: String,
+    pub name: String,
+    pub params: Vec<ForeignScalar>,
+    pub result: ForeignScalar,
+}
+
+/// Complete staged header bytes and ordered include context for C interoperability.
+/// File/include-directory paths are portable relative paths. `includes` names staged
+/// or system headers. Header bytes never come from client filesystem paths.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ForeignInputs {
+    pub files: BTreeMap<Arc<str>, Arc<[u8]>>,
+    pub includes: Vec<String>,
+    pub include_directories: Vec<String>,
+    pub functions: Vec<ForeignFunction>,
+}
+
+/// Owned header declaration facts. Macros may have no corresponding C declaration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForeignDeclaration {
+    pub name: String,
+    pub symbol: String,
+    pub c_signature: Option<String>,
+    pub inline: bool,
+}
+
+/// Completed adapters plus metadata extracted from the same captured preprocessed C.
+/// Cache identity belongs to the caller and must include the inputs and captured Clang
+/// installation/settings. Keep the installed SDK and compiler stable while reusing it.
+#[derive(Clone, Debug)]
+pub struct ForeignObject {
+    bytes: Arc<[u8]>,
+    declarations: Arc<[ForeignDeclaration]>,
+    includes: Arc<[String]>,
+    diagnostics: Arc<[String]>,
+}
+
+impl ForeignObject {
+    pub fn bytes(&self) -> Arc<[u8]> {
+        self.bytes.clone()
+    }
+    pub fn declarations(&self) -> &[ForeignDeclaration] {
+        &self.declarations
+    }
+    pub fn includes(&self) -> &[String] {
+        &self.includes
+    }
+    pub fn diagnostics(&self) -> &[String] {
+        &self.diagnostics
+    }
+}
+
 /// Resolved tools and their immutable execution environment.
 #[derive(Clone)]
 pub struct Toolchain {
@@ -123,6 +197,40 @@ pub struct Toolchain {
 }
 
 impl Toolchain {
+    /// Capture the current identity of configured tools, runtime and explicit SDK roots.
+    /// Applications include this value in external-result cache keys. Installations
+    /// must remain stable from this capture until the corresponding operation finishes.
+    pub async fn fingerprint(
+        &self,
+        execution: &Execution,
+        cancellation: &Cancellation,
+    ) -> Result<String, Error> {
+        let _permit = execution.acquire(cancellation).await?;
+        self.settings.external_fingerprint(cancellation).await
+    }
+
+    /// Compile only scalar C interoperability adapters. CLANG selects the compiler;
+    /// LIBCLANG_PATH selects its CIndex library (file or directory). No Ninja graph or
+    /// Resin program is generated. Parsing/compilation consume the same captured bytes;
+    /// cancellation owns and reaps native work before removing temporary inputs.
+    pub async fn compile_foreign(
+        &self,
+        inputs: Arc<ForeignInputs>,
+        temporary: &Path,
+        execution: &Execution,
+        cancellation: &Cancellation,
+    ) -> Result<ForeignObject, Error> {
+        let (temporary, settings, execution) = (
+            temporary.to_path_buf(),
+            self.settings.clone(),
+            execution.clone(),
+        );
+        process::supervise(cancellation, move |cancellation| async move {
+            interop::compile(inputs, &temporary, &settings, &execution, &cancellation).await
+        })
+        .await
+    }
+
     /// Link a self-contained host object with the configured C compiler's linker driver.
     /// The object supplies `main` and may reference the host C/math libraries. This
     /// operation does not compile C, run Ninja, or link Resin's runtime archive.
@@ -313,5 +421,57 @@ impl From<resin_executor::Error> for Error {
         } else {
             Self::new(error.to_string())
         }
+    }
+}
+
+//
+// Completed object and shader operations
+//
+
+/// Immutable object inputs and the native runtime required by their references.
+/// Object order is preserved; platform libraries follow the captured runtime archive.
+#[derive(Clone, Debug)]
+pub struct NativeLink {
+    pub objects: Vec<Arc<[u8]>>,
+    pub runtime: bool,
+}
+
+impl Toolchain {
+    /// Link captured objects into a separately owned executable generation.
+    /// This invokes the configured linker driver without running C compilation or Ninja.
+    pub async fn link_native(
+        &self,
+        inputs: NativeLink,
+        temporary: &Path,
+        execution: &Execution,
+        cancellation: &Cancellation,
+    ) -> Result<Executable, Error> {
+        let temporary = temporary.to_path_buf();
+        let settings = self.settings.clone();
+        let execution = execution.clone();
+        process::supervise(cancellation, move |cancellation| async move {
+            let _permit = execution.acquire(&cancellation).await?;
+            object::link_native(inputs, &temporary, &settings, &cancellation).await
+        })
+        .await
+    }
+
+    /// Optimize captured SPIR-V for Vulkan 1.3 and return owned binary bytes.
+    /// Cancellation or abandonment drains the optimizer before staging is removed.
+    pub async fn optimize_shader(
+        &self,
+        bytes: Arc<[u8]>,
+        temporary: &Path,
+        execution: &Execution,
+        cancellation: &Cancellation,
+    ) -> Result<Arc<[u8]>, Error> {
+        let temporary = temporary.to_path_buf();
+        let settings = self.settings.clone();
+        let execution = execution.clone();
+        process::supervise(cancellation, move |cancellation| async move {
+            let _permit = execution.acquire(&cancellation).await?;
+            shader::optimize(bytes, &temporary, &settings, &cancellation).await
+        })
+        .await
     }
 }

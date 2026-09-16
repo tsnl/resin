@@ -175,16 +175,11 @@ fn greeting_example_and_eof_error() {
 fn failures_release_the_current_buffer_and_report_the_right_error() {
     for mode in 0..=6 {
         let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
-        let header = temp.path().join("faults.h");
-        fs::write(
-            &header,
-            format!(
-                "#define TEST_MODE {mode}\n{}",
-                include_str!("support/console_faults.h")
-            ),
-        )
-        .unwrap();
-        let header = header.to_string_lossy().replace('\\', "/");
+        let native = format!(
+            "#define TEST_MODE {mode}\n{}",
+            include_str!("support/console_faults.h")
+        );
+        let header = "fixture.h";
         let source = format!(
             r#"
             export {{ main }};
@@ -224,14 +219,10 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
         let path = temp.path().join("main.resin");
         fs::write(&path, source).unwrap();
         let module = pipeline::file_module(&path).unwrap();
-        // Include before the generated header list so all foreign calls use the test shims.
-        let project = project::Project::new(&module, Some("main")).unwrap();
-        let path = project.generated.c_source().unwrap();
-        let source = format!(
-            "#include \"{header}\"\n{}",
-            fs::read_to_string(path).unwrap()
-        );
-        fs::write(path, source).unwrap();
+        // The shim is the first captured include for the foreign adapters.
+        let project = project::Project::new(&module, Some("main"))
+            .unwrap()
+            .with_native(native);
         let output = Program::compile(temp, &project).run(b"");
         assert!(
             output.status.success(),

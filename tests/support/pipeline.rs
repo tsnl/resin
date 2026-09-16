@@ -271,10 +271,15 @@ pub fn shader_error(source: &str) -> String {
             .collect::<Vec<_>>()
             .join("\n"),
         Ok(lir) => {
-            let directory = tempfile::TempDir::new().unwrap();
-            crate::support::frontend::generate(lir.view(), None, directory.path())
-                .unwrap_err()
-                .to_string()
+            let function = *lir.view().module().shaders.keys().next().unwrap();
+            crate::support::frontend::block_on(resin_codegen::generate_spirv(
+                std::sync::Arc::new(lir),
+                function,
+                crate::support::frontend::execution(),
+                &resin_executor::Cancellation::new(),
+            ))
+            .unwrap_err()
+            .to_string()
         }
     }
 }

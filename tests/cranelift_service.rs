@@ -1,4 +1,4 @@
-//! The experimental backend travels through the same upload/download protocol.
+//! Native compilation travels through the upload/download protocol.
 #[allow(dead_code)]
 mod support;
 
@@ -6,8 +6,7 @@ use std::{fs, path::Path, process::Command};
 use support::service::Service;
 
 fn service() -> Service {
-    Service::configured(|config, environment| {
-        config.host_backend = resin_server::HostBackend::Cranelift;
+    Service::configured(|_, environment| {
         // Direct object linking must not need a build graph runner.
         environment
             .variables
@@ -62,7 +61,6 @@ fn uploaded_edits_cache_objects_and_retain_downloaded_generations() {
     fs::write(&source, "export { main }; def main() -> int = { 42 };").unwrap();
     build(&service, &source, &new_output);
     assert_eq!(service.server.counters().native_object_builds, 2);
-    assert_eq!(service.server.counters().generated_builds, 0);
     assert_eq!(exit_code(&old_output), Some(37));
     assert_eq!(exit_code(&new_output), Some(42));
 }
@@ -93,14 +91,14 @@ fn run_and_build_use_distinct_optimization_keys() {
 }
 
 #[test]
-fn unsupported_native_program_preserves_existing_output_and_reports_backend() {
+fn invalid_program_preserves_existing_output() {
     let service = service();
     let client = tempfile::tempdir().unwrap();
     let source = client.path().join("main.resin");
     let destination = client.path().join("previous-output");
     fs::write(
         &source,
-        "export { main }; def main() -> int = { var pair = (17_i, 25_i); pair.0 + pair.1 };",
+        "export { main }; def main() -> int = { missing_definition() };",
     )
     .unwrap();
     fs::write(&destination, b"previous output").unwrap();
@@ -113,7 +111,6 @@ fn unsupported_native_program_preserves_existing_output_and_reports_backend() {
         .unwrap();
     assert!(!output.status.success());
     let error = String::from_utf8_lossy(&output.stderr);
-    assert!(error.to_lowercase().contains("cranelift"), "{error}");
+    assert!(error.contains("missing_definition"), "{error}");
     assert_eq!(fs::read(&destination).unwrap(), b"previous output");
-    assert_eq!(service.server.counters().generated_builds, 0);
 }

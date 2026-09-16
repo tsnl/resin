@@ -175,6 +175,21 @@ pub unsafe extern "C" fn resin_gpu_ptr_host(
     unsafe { gpu_view::host(value, bytes, alignment, required_access) }
 }
 
+/// Pointer-based ABI for [`resin_gpu_ptr_host`], borrowing the view's bytes.
+///
+/// # Safety
+/// `value` must point to an initialized, aligned view for this call. Its owner
+/// and returned storage obey the requirements of [`resin_gpu_ptr_host`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_ptr_host_ref(
+    value: *const ResinGpuPtr,
+    bytes: usize,
+    alignment: usize,
+    required_access: u32,
+) -> *mut c_void {
+    unsafe { gpu_view::host(*value, bytes, alignment, required_access) }
+}
+
 /// Derive a checked interior view without retaining its borrowed owner.
 ///
 /// # Safety
@@ -190,6 +205,26 @@ pub unsafe extern "C" fn resin_gpu_ptr_offset(
     unsafe { gpu_view::offset(value, byte_offset, bytes, alignment) }
 }
 
+/// Pointer-based ABI for [`resin_gpu_ptr_offset`], writing a borrowed view.
+/// Reads the input before writing `out`, so the two pointers may alias.
+/// Neither copying the input nor writing the output retains its owner.
+///
+/// # Safety
+/// `value` must point to an initialized, aligned view and `out` to aligned,
+/// writable storage. Owner lifetimes obey [`resin_gpu_ptr_offset`]. Writing
+/// `out` does not release any owner previously stored there.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_ptr_offset_into(
+    value: *const ResinGpuPtr,
+    byte_offset: usize,
+    bytes: usize,
+    alignment: usize,
+    out: *mut ResinGpuPtr,
+) {
+    let result = unsafe { gpu_view::offset(*value, byte_offset, bytes, alignment) };
+    unsafe { out.write(result) };
+}
+
 //
 // Compiler-generated launch projection
 //
@@ -201,6 +236,17 @@ pub unsafe extern "C" fn resin_gpu_ptr_offset(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn resin_gpu_projection_new(root: ResinGpuPtr) -> *mut ResinArc {
     unsafe { gpu_view::projection_new(root) }
+}
+
+/// Pointer-based ABI for [`resin_gpu_projection_new`]. The new projection
+/// retains the root's owner; borrowing its bytes adds no other retain.
+///
+/// # Safety
+/// `root` must point to an initialized, aligned view satisfying
+/// [`resin_gpu_projection_new`]'s requirements for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_projection_new_ref(root: *const ResinGpuPtr) -> *mut ResinArc {
+    unsafe { gpu_view::projection_new(*root) }
 }
 
 /// Obtain root storage solely for compiler-generated projection construction.
@@ -228,6 +274,22 @@ pub unsafe extern "C" fn resin_gpu_projection_pointer(
     alignment: usize,
 ) -> ResinDeviceAddress {
     unsafe { gpu_view::projection_pointer(projection, value, bytes, alignment) }
+}
+
+/// Pointer-based ABI for [`resin_gpu_projection_pointer`]. Retains allocation
+/// dependencies in the same projection, while borrowing the view's bytes.
+///
+/// # Safety
+/// `value` must point to an initialized, aligned view for this call. The view
+/// and `projection` obey [`resin_gpu_projection_pointer`]'s requirements.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_projection_pointer_ref(
+    projection: *mut ResinArc,
+    value: *const ResinGpuPtr,
+    bytes: usize,
+    alignment: usize,
+) -> ResinDeviceAddress {
+    unsafe { gpu_view::projection_pointer(projection, *value, bytes, alignment) }
 }
 
 /// Record a projected dispatch. Success retains the projection and prevents
@@ -282,6 +344,21 @@ pub unsafe extern "C" fn resin_gpu_copy_image_to_span(
     destination: ResinGpuSpan,
 ) -> ResinStatus {
     unsafe { gpu_view::copy_image_to_span(commands, image, destination) }
+}
+
+/// Pointer-based ABI for [`resin_gpu_copy_image_to_span`], borrowing the span's
+/// bytes. Success retains its allocation through completion or cancellation.
+///
+/// # Safety
+/// `destination` must point to an initialized, aligned span for this call.
+/// Object lifetimes and synchronization obey [`resin_gpu_copy_image_to_span`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_copy_image_to_span_ref(
+    commands: *mut ResinCommandBuffer,
+    image: *mut ResinImage,
+    destination: *const ResinGpuSpan,
+) -> ResinStatus {
+    unsafe { gpu_view::copy_image_to_span(commands, image, *destination) }
 }
 
 #[repr(i32)]

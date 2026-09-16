@@ -365,7 +365,6 @@ mod tests {
                 temporary: directory.path().to_owned(),
                 tools: environment.toolchain(None, None),
                 target: crate::host_target(),
-                host_backend: crate::HostBackend::C,
                 capacities: crate::Capacities::default(),
             })
             .await

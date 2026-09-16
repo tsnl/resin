@@ -207,14 +207,8 @@ impl Project {
         self.profile_executable("debug")
     }
 
-    fn profile_executable(&self, profile: &str) -> PathBuf {
-        let directories: Vec<_> = fs::read_dir(self.service.directory.path().join("build"))
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .filter(|path| path.file_name().unwrap() != ".artifacts")
-            .collect();
-        assert_eq!(directories.len(), 1);
-        directories[0].join(profile).join("program")
+    fn profile_executable(&self, _profile: &str) -> PathBuf {
+        self.service.artifacts().pop().expect("retained executable")
     }
 }
 
@@ -286,13 +280,7 @@ fn entry_points_have_separate_reusable_artifacts() {
     assert_eq!(project.calls(), 2);
     assert_eq!(project.service.server.counters().hir_builds, 1);
     assert_eq!(project.service.server.counters().verified_builds, 2);
-    assert_eq!(
-        fs::read_dir(project.service.directory.path().join("build"))
-            .unwrap()
-            .filter(|entry| entry.as_ref().unwrap().file_name() != ".artifacts")
-            .count(),
-        2
-    );
+    assert_eq!(project.service.artifacts().len(), 2);
     let mut input = original.as_os_str().to_os_string();
     input.push(":missing");
     project.input = input.into();
@@ -341,35 +329,24 @@ fn executable_output_optimizes_and_both_profiles_stay_cached() {
     );
     assert_eq!(project.calls(), 2);
 
-    let flags = fs::read_to_string(project.temp.path().join("flags")).unwrap();
-    let optimizations: Vec<_> = flags
-        .lines()
-        .map(|line| {
-            line.split_whitespace()
-                .filter(|flag| flag.starts_with("-O"))
-                .collect::<Vec<_>>()
-        })
-        .collect();
-    assert_eq!(optimizations, [vec!["-O0"], vec!["-O3"]]);
+    assert_eq!(project.service.server.counters().native_object_builds, 2);
+    assert_eq!(project.service.server.counters().verified_builds, 1);
 }
 
 #[test]
-fn generated_c_and_native_artifacts_stay_on_the_server() {
+fn native_objects_and_artifacts_stay_on_the_server() {
     let project = Project::new();
     printed(&project.run(), b"first");
-    let source = project.executable().parent().unwrap().join("main.c");
-    assert!(
-        fs::read_to_string(source)
-            .unwrap()
-            .contains("int main(int r_argc, char **r_argv)")
-    );
+    let directory = project.executable().parent().unwrap().to_path_buf();
+    assert!(directory.join("input0.o").is_file());
+    assert!(!directory.join("main.c").exists());
     assert_eq!(project.calls(), 1);
     assert!(!project.temp.path().join("build").exists());
     assert!(!project.temp.path().join("main.c").exists());
 }
 
 #[test]
-fn removed_shaders_disappear_from_the_cached_project() {
+fn removing_shaders_keeps_the_previous_generation_usable() {
     if shaders::optimizer().is_none() {
         return;
     }
@@ -391,27 +368,19 @@ fn removed_shaders_disappear_from_the_cached_project() {
     )
     .unwrap();
     printed(&project.run(), b"");
-    let directory = project.executable().parent().unwrap().to_path_buf();
-    assert!(fs::read_dir(&directory).unwrap().any(|entry| {
-        entry
-            .unwrap()
-            .file_name()
-            .to_string_lossy()
-            .ends_with(".unoptimized.spv")
-    }));
+    let previous = project.executable();
+    let bytes = fs::read(&previous).unwrap();
+    let shaders = project.service.server.counters().shader_builds;
+    assert_eq!(shaders, 1);
     fs::write(&project.input, host).unwrap();
     printed(&project.run(), b"first");
-    for entry in fs::read_dir(&directory).unwrap() {
-        let name = entry.unwrap().file_name();
-        assert!(
-            !name.to_string_lossy().starts_with("shader_"),
-            "obsolete shader input or output retained: {name:?}"
-        );
-    }
+    assert_eq!(project.service.server.counters().shader_builds, shaders);
+    assert_eq!(fs::read(&previous).unwrap(), bytes);
+    printed(&Command::new(previous).output().unwrap(), b"");
 }
 
 #[test]
-fn changed_source_rebuilds_in_the_same_directory() {
+fn changed_source_preserves_previous_executable_generation() {
     let project = Project::new();
     printed(&project.run(), b"first");
     let executable = project.executable();
@@ -422,7 +391,8 @@ fn changed_source_rebuilds_in_the_same_directory() {
     .unwrap();
     printed(&project.run(), b"second");
     assert_eq!(project.calls(), 2);
-    assert_eq!(project.executable(), executable);
+    assert_ne!(project.executable(), executable);
+    printed(&Command::new(executable).output().unwrap(), b"first");
     printed(&project.run(), b"second");
     assert_eq!(project.calls(), 2);
 }
@@ -510,7 +480,11 @@ fn runtime_headers_and_archive_changes_invalidate_the_cache() {
     assert_eq!(project.calls(), 3);
     fs::copy(original, &library).unwrap();
     printed(&run(), b"first");
-    assert_eq!(project.calls(), 4);
+    assert_eq!(
+        project.calls(),
+        3,
+        "restoring the original runtime reuses its retained executable"
+    );
 }
 
 #[test]
@@ -519,8 +493,6 @@ fn failed_rebuilds_preserve_the_old_executable_but_never_run_it() {
     printed(&project.run(), b"first");
     let executable = project.executable();
     let original = fs::read(&executable).unwrap();
-    let state = executable.parent().unwrap().join("toolchain.state");
-    let previous_state = fs::read(&state).unwrap();
     fs::write(&project.compiler, "#!/bin/sh\nexit 9\n").unwrap();
     for _ in 0..2 {
         let output = project.run();
@@ -528,37 +500,27 @@ fn failed_rebuilds_preserve_the_old_executable_but_never_run_it() {
         assert!(output.stdout.is_empty());
         assert_eq!(fs::read(&executable).unwrap(), original);
     }
-    assert_eq!(
-        fs::read(state).unwrap(),
-        previous_state,
-        "failed Ninja work must not replace retained successful settings"
-    );
     fs::write(&project.compiler, WRAPPER).unwrap();
     printed(&project.run(), b"first");
-    assert_eq!(project.calls(), 2);
-}
-
-#[test]
-fn missing_artifacts_are_restored_or_rebuilt() {
-    let project = Project::new();
-    printed(&project.run(), b"first");
-    let executable = project.executable();
-    fs::remove_file(&executable).unwrap();
-    printed(&project.run(), b"first");
-    assert!(executable.is_file());
     assert_eq!(
         project.calls(),
         1,
-        "a valid Ninja output can be republished"
+        "restoring the original tool reuses its retained executable"
     );
+}
 
-    let work = executable.parent().unwrap().join(".ninja-work");
-    fs::remove_file(work.join(executable.file_name().unwrap())).unwrap();
+#[test]
+fn missing_artifacts_are_relinked_from_retained_objects() {
+    let project = Project::new();
     printed(&project.run(), b"first");
+    let native = project.service.server.counters().native_object_builds;
+    fs::remove_file(project.executable()).unwrap();
+    printed(&project.run(), b"first");
+    assert!(project.executable().is_file());
+    assert_eq!(project.calls(), 2);
     assert_eq!(
-        project.calls(),
-        2,
-        "a missing Ninja output must be compiled again"
+        project.service.server.counters().native_object_builds,
+        native
     );
 }
 
@@ -584,7 +546,7 @@ fn concurrent_runs_share_one_build() {
 }
 
 #[test]
-fn all_spirv_is_generated_before_shader_or_c_compilers_run() {
+fn all_spirv_is_generated_before_native_tools_run() {
     let mut project = Project::new();
     project.configure(|_, environment| {
         environment

@@ -13,7 +13,7 @@ pub(crate) struct Frozen {
     pub graph: SourceGraph,
     pub syntax: BTreeMap<Source, Arc<resin_cst::Document>>,
     pub acquisition: Vec<SourceError>,
-    pub headers: Arc<resin_codegen::NativeHeaders>,
+    pub headers: Arc<crate::headers::NativeHeaders>,
 }
 
 pub(crate) async fn capture(
@@ -455,7 +455,6 @@ mod tests {
             temporary: directory.path().into(),
             tools: environment.toolchain(None, None),
             target: crate::host_target(),
-            host_backend: crate::HostBackend::C,
             capacities: crate::Capacities {
                 inputs: input_capacity,
                 ..Default::default()
@@ -713,8 +712,8 @@ mod tests {
             .unwrap();
         assert_eq!(server.counters().hir_builds, counts.hir_builds);
         assert_eq!(
-            server.counters().generated_builds,
-            counts.generated_builds + 1
+            server.counters().native_object_builds,
+            counts.native_object_builds + 1
         );
         assert_eq!(
             tokio::process::Command::new(next.executable.path())

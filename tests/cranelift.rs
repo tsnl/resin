@@ -1,4 +1,4 @@
-//! Execute the same verified source programs through C and the native prototype.
+//! Exercise native scalar lowering under both supported optimization settings.
 use resin_codegen::{NativeObject, NativeOptimization};
 use resin_executor::{Cancellation, Execution};
 use resin_source::{Source, SourceGraph};
@@ -77,45 +77,6 @@ async fn output(executable: &resin_toolchain::Executable) -> Output {
         .unwrap()
 }
 
-async fn c_executable(
-    checked: Arc<resin_lir::VerifiedModule>,
-    directory: &Path,
-    tools: &resin_toolchain::Toolchain,
-    execution: &Execution,
-) -> resin_toolchain::Executable {
-    let cancellation = Cancellation::new();
-    let generated = resin_codegen::generate(
-        checked,
-        Some("main".into()),
-        Arc::new(resin_codegen::NativeHeaders::default()),
-        directory,
-        execution,
-        &cancellation,
-    )
-    .await
-    .unwrap();
-    let built = tools
-        .build(
-            generated.directory(),
-            generated.name(),
-            "main",
-            resin_toolchain::CProfile::Release,
-            execution,
-            &cancellation,
-        )
-        .await
-        .unwrap();
-    built
-        .executable(
-            generated
-                .program()
-                .unwrap()
-                .strip_prefix(generated.directory())
-                .unwrap(),
-        )
-        .unwrap()
-}
-
 async fn native_executable(
     checked: Arc<resin_lir::VerifiedModule>,
     optimization: NativeOptimization,
@@ -128,14 +89,18 @@ async fn native_executable(
         checked,
         "main".into(),
         optimization,
+        Arc::new(Default::default()),
         execution,
         &cancellation,
     )
     .await
     .unwrap();
     tools
-        .link_object(
-            Arc::from(object.bytes()),
+        .link_native(
+            resin_toolchain::NativeLink {
+                objects: vec![object.shared_bytes()],
+                runtime: true,
+            },
             directory,
             execution,
             &cancellation,
@@ -149,14 +114,6 @@ async fn equivalent(text: &str, expected: i32) {
     let checked = checked(text, &execution).await;
     let directory = TempDir::new().unwrap();
     let tools = tools(directory.path());
-    let reference =
-        output(&c_executable(checked.clone(), directory.path(), &tools, &execution).await).await;
-    assert_eq!(
-        reference.status.code(),
-        Some(expected),
-        "C: {text}\n{}",
-        String::from_utf8_lossy(&reference.stderr)
-    );
     for optimization in [NativeOptimization::None, NativeOptimization::Speed] {
         let native = native_executable(
             checked.clone(),
@@ -173,8 +130,8 @@ async fn equivalent(text: &str, expected: i32) {
             "{optimization:?}: {text}\n{}",
             String::from_utf8_lossy(&native.stderr)
         );
-        assert_eq!(native.stdout, reference.stdout);
-        assert_eq!(native.stderr, reference.stderr);
+        assert!(native.stdout.is_empty());
+        assert!(native.stderr.is_empty());
     }
 }
 
@@ -214,7 +171,7 @@ async fn integer_widths_wrap_and_keep_signed_division_remainder_and_shifts() {
 }
 
 #[tokio::test]
-async fn floating_operations_and_conversions_match_c_including_nan_and_narrowing() {
+async fn floating_operations_and_conversions_preserve_nan_and_narrowing() {
     equivalent(r#"export { main };
         def mix(a: float32, b: float64) -> float64 = { float64(a * 2_f - 0.5_f) + b / 2_d };
         def main() -> int = {
@@ -316,12 +273,6 @@ async fn invalid_integer_operations_fail_instead_of_silently_returning_a_value()
             &execution,
         )
         .await;
-        assert!(
-            !output(&c_executable(checked.clone(), directory.path(), &tools, &execution).await)
-                .await
-                .status
-                .success()
-        );
         for optimization in [NativeOptimization::None, NativeOptimization::Speed] {
             let native = native_executable(
                 checked.clone(),
@@ -340,14 +291,9 @@ async fn invalid_integer_operations_fail_instead_of_silently_returning_a_value()
 }
 
 #[tokio::test]
-async fn aggregates_owners_foreign_headers_and_shader_entries_fail_explicitly() {
+async fn foreign_functions_and_shader_entries_fail_explicitly() {
     let execution = Execution::new(NonZeroUsize::new(2).unwrap());
     let sources = [
-        "export { main }; def main() -> int = { var pair = (1_i, 2_i); pair.0 + pair.1 };",
-        "export { main }; struct Cell { value: int }; def main() -> int = { var cell = Cell { value = 3 }; cell.value };",
-        "export { main }; def main() -> int = { var values = [1_i, 2_i]; values.at(0_ul) };",
-        "export { main }; intrinsic \"owner_allocate\" def allocate<T>(count: ulong, initial: T) -> StrongOwner | None; def main() -> int = { var owner = allocate(1_ul, 7_i); 0 };",
-        "export { main }; extern { \"stdio.h\": {} }; def main() -> int = { 0 };",
         "export { main }; extern { \"stdlib.h\": { def abs(value: int) -> int; } }; def main() -> int = { abs(-3) };",
     ];
     for source in sources {
@@ -357,6 +303,7 @@ async fn aggregates_owners_foreign_headers_and_shader_entries_fail_explicitly() 
                 checked.clone(),
                 "main".into(),
                 optimization,
+                Arc::new(Default::default()),
                 &execution,
                 &Cancellation::new(),
             )
@@ -367,7 +314,10 @@ async fn aggregates_owners_foreign_headers_and_shader_entries_fail_explicitly() 
                 "{error}"
             );
             assert!(
-                error.to_string().to_lowercase().contains("cranelift"),
+                error
+                    .to_string()
+                    .to_lowercase()
+                    .contains("native code generation"),
                 "{source}\n{error}"
             );
         }
@@ -378,6 +328,7 @@ async fn aggregates_owners_foreign_headers_and_shader_entries_fail_explicitly() 
             shader,
             "main".into(),
             NativeOptimization::None,
+            Arc::new(Default::default()),
             &execution,
             &Cancellation::new()
         )
@@ -408,6 +359,7 @@ async fn independent_concurrent_objects_and_executables_keep_their_own_lifetimes
                     checked,
                     "main".into(),
                     optimization,
+                    Arc::new(Default::default()),
                     &execution,
                     &Cancellation::new(),
                 )
@@ -424,8 +376,11 @@ async fn independent_concurrent_objects_and_executables_keep_their_own_lifetimes
         let retained = object.clone();
         drop(object);
         let executable = tools
-            .link_object(
-                Arc::from(retained.bytes()),
+            .link_native(
+                resin_toolchain::NativeLink {
+                    objects: vec![retained.shared_bytes()],
+                    runtime: true,
+                },
                 output_root.path(),
                 &execution,
                 &Cancellation::new(),
@@ -459,6 +414,7 @@ async fn queued_cancellation_returns_no_object_and_releases_execution_capacity()
         checked.clone(),
         "main".into(),
         NativeOptimization::Speed,
+        Arc::new(Default::default()),
         &execution,
         &cancellation,
     ));
@@ -479,6 +435,7 @@ async fn queued_cancellation_returns_no_object_and_releases_execution_capacity()
         checked,
         "main".into(),
         NativeOptimization::None,
+        Arc::new(Default::default()),
         &execution,
         &Cancellation::new(),
     )

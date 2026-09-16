@@ -65,19 +65,15 @@ impl Device {
 
     pub(super) fn run(&mut self, workload: &Workload, config: &Config) -> Result<Vec<f64>> {
         let built = build(workload, &workload_path(workload), None, &[])?;
-        let shaders = built.generated.shaders();
+        let shaders = &built.shaders;
         if shaders.len() != 1 {
             return Err("a compute benchmark must declare exactly one shader".into());
         }
-        let bytes = std::fs::read(
-            built
-                .artifacts
-                .path(shaders[0].spirv().file_name().unwrap()),
-        )?;
+        let bytes = &shaders[0];
         let pipeline = checked(
             "create compute pipeline",
             // These bytes were produced by this build's verified Resin shader.
-            unsafe { self.gpu.create_compute_pipeline(&bytes) },
+            unsafe { self.gpu.create_compute_pipeline(bytes) },
         )?;
         let count = config.size.unwrap_or(workload.count);
         let expected: Vec<_> = (0..count).map(|lane| expected(workload, lane)).collect();

@@ -1,13 +1,18 @@
 //! Validate the real preprocessor's dependency report before publishing captured C.
 use crate::{Error, Settings, platform};
 use resin_executor::Cancellation;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+
+pub(super) struct Roots {
+    canonical: Vec<PathBuf>,
+    system: Vec<PathBuf>,
+}
 
 pub(super) async fn allowed_roots(
     settings: &Settings,
     directory: &Path,
     cancellation: &Cancellation,
-) -> Result<Vec<PathBuf>, Error> {
+) -> Result<Roots, Error> {
     let mut command = settings.command(&settings.cc)?;
     // Search-variable user overlays must not expand this compiler-installation allow list.
     // MSVC's INCLUDE remains the toolchain's explicit Windows SDK installation setting.
@@ -29,19 +34,25 @@ pub(super) async fn allowed_roots(
         tokio::fs::canonicalize(directory).await?,
         tokio::fs::canonicalize(&settings.runtime_include).await?,
     ];
+    let mut system = Vec::new();
     for path in search_roots(&diagnostic)? {
         cancellation.check()?;
-        let path = tokio::fs::canonicalize(settings.directory.join(path)).await?;
+        let declared = settings.directory.join(path);
+        let path = tokio::fs::canonicalize(&declared).await?;
         if path.parent().is_none() {
             return Err(Error::new(
                 "compiler reported a filesystem root as a system include directory".into(),
             ));
         }
+        system.push(declared);
         roots.push(path);
     }
     roots.sort();
     roots.dedup();
-    Ok(roots)
+    Ok(Roots {
+        canonical: roots,
+        system,
+    })
 }
 
 fn search_roots(diagnostic: &[u8]) -> Result<Vec<PathBuf>, Error> {
@@ -75,14 +86,27 @@ fn search_roots(diagnostic: &[u8]) -> Result<Vec<PathBuf>, Error> {
 pub(super) async fn validate(
     depfile: &Path,
     directory: &Path,
-    roots: &[PathBuf],
+    roots: &Roots,
     cancellation: &Cancellation,
 ) -> Result<(), Error> {
     let bytes = tokio::fs::read(depfile).await?;
     for path in dependencies(&bytes)? {
         cancellation.check()?;
-        let resolved = tokio::fs::canonicalize(directory.join(path)).await?;
-        if !roots.iter().any(|root| resolved.starts_with(root)) {
+        let original = directory.join(path);
+        let resolved = tokio::fs::canonicalize(&original).await?;
+        // Trusted SDKs can contain symlinked header subtrees (e.g. glibc's Linux
+        // headers in Nix). Admit that declared route, without trusting symlinks
+        // inside uploaded staging or widening permission to its destination tree.
+        let system_alias = !original
+            .components()
+            .any(|part| part == Component::ParentDir)
+            && roots.system.iter().any(|root| original.starts_with(root));
+        if !system_alias
+            && !roots
+                .canonical
+                .iter()
+                .any(|root| resolved.starts_with(root))
+        {
             return Err(Error::new(format!(
                 "native header dependency is outside staged inputs and configured toolchain roots: {}",
                 resolved.display()
@@ -94,7 +118,7 @@ pub(super) async fn validate(
 
 // GCC and Clang emit Make dependency escaping, independent of C #line directives.
 // The fixed -MT target avoids parsing drive-letter colons or caller target names.
-fn dependencies(bytes: &[u8]) -> Result<Vec<PathBuf>, Error> {
+pub(super) fn dependencies(bytes: &[u8]) -> Result<Vec<PathBuf>, Error> {
     let body = bytes
         .strip_prefix(b"resin-input:")
         .ok_or_else(|| Error::new("compiler emitted an invalid dependency report".into()))?;
@@ -160,5 +184,45 @@ mod tests {
     fn compiler_dependency_paths_decode_make_escaping_and_continuations() {
         assert_eq!(dependencies(b"resin-input: main.c path\\ with\\ space.h \\\n dollar$$name.h escaped\\#name.h C:/sdk/include.h\n").unwrap(), ["main.c", "path with space.h", "dollar$name.h", "escaped#name.h", "C:/sdk/include.h"].map(PathBuf::from));
         assert!(dependencies(b"unexpected-target: header.h").is_err());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod aliases {
+    use super::*;
+    #[tokio::test]
+    async fn sdk_symlinks_are_allowed_without_allowing_staged_symlink_escape() {
+        let temporary = tempfile::tempdir().unwrap();
+        let sdk = temporary.path().join("sdk");
+        let staging = temporary.path().join("staging");
+        let external = temporary.path().join("kernel");
+        for path in [&sdk, &staging, &external] {
+            tokio::fs::create_dir(path).await.unwrap();
+        }
+        tokio::fs::write(external.join("errno.h"), b"#define ERRNO 1")
+            .await
+            .unwrap();
+        std::os::unix::fs::symlink(&external, sdk.join("linux")).unwrap();
+        std::os::unix::fs::symlink(&external, staging.join("escape")).unwrap();
+        let roots = Roots {
+            canonical: vec![sdk.clone(), staging.clone()],
+            system: vec![sdk.clone()],
+        };
+        let dependency = staging.join("input.d");
+        for (path, allowed) in [
+            (sdk.join("linux/errno.h"), true),
+            (staging.join("escape/errno.h"), false),
+            (external.join("errno.h"), false),
+        ] {
+            tokio::fs::write(&dependency, format!("resin-input: {}\n", path.display()))
+                .await
+                .unwrap();
+            assert_eq!(
+                validate(&dependency, &staging, &roots, &Cancellation::new())
+                    .await
+                    .is_ok(),
+                allowed
+            );
+        }
     }
 }

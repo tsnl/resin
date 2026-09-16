@@ -224,19 +224,19 @@ example of an abstraction earning its place:
 
 ```rust
 let checked = resin_lir::VerifiedModule::build(module, &execution, &cancellation).await?;
-let project = resin_codegen::generate(
-    std::sync::Arc::new(checked), Some("main".into()), directory,
+let object = resin_codegen::generate_native(
+    std::sync::Arc::new(checked), "main".into(), resin_codegen::NativeOptimization::None,
+    std::sync::Arc::new(resin_codegen::NativeInputs::default()),
     &execution, &cancellation,
 ).await?;
-let text = tokio::fs::read_to_string(project.c_source().unwrap()).await?;
+assert!(!object.bytes().is_empty());
 ```
 
 The wrapper keeps a module with the analysis that certifies it. The caller can
 share the certificate with generation; obtaining editable LIR consumes the wrapper
 and discards the certificate. This prevents a verified flag from surviving an edit
-to the data it describes. Codegen completes its private target trees and writes a
-source project. Callers receive file paths and a Ninja graph; the target trees never
-become another public language for them to learn.
+to the data it describes. Codegen completes its private target representation and returns immutable object
+bytes. Callers link those bytes with native tools; Cranelift state remains private.
 
 Immutable sources apply the same idea to editor changes. A `Source` is a shared
 handle to one text version, with a stable logical identity and a diagnostic name.

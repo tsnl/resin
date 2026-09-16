@@ -66,7 +66,7 @@ root resin -> resin-client -> resin-protocol
 resin-server -> resin-protocol / resin-cache
              -> individual compiler crates / resin-toolchain
 
-syntax -> AST -> HIR -> LIR -> verified LIR -> C/SPIR-V -> native tools
+syntax -> AST -> HIR -> LIR -> verified LIR -> Cranelift/SPIR-V -> native tools
 ```
 
 Keep one merged `resin-client`; migrate the existing `resin-lsp` implementation
@@ -299,14 +299,14 @@ old snapshots, dependency handles, and live consumers can keep evicted values al
   Use bounded workers, cooperative yield/cancellation checkpoints, and async I/O.
   Isolate unavoidable synchronous foreign calls, including Tree-sitter parsing,
   on workers so protocol/I/O tasks remain responsive.
-- Bound queues and coordinate compiler jobs with Ninja/native-tool concurrency.
+- Bound queues and coordinate compiler jobs with native-tool concurrency.
   Cancellation must stop queued work and reap owned native children; a started
   blocking call may need to finish before cancellation completes.
 - Keep execution/request context separate from semantic keys and completed caches.
   Pass process settings explicitly; do not change process-wide environment or
   working directory to configure concurrent builds.
 - `resin-toolchain` supplies async native-process/artifact operations, consumes
-  generated projects and explicit settings, and does not sequence compiler passes.
+  captured headers, native objects and explicit settings, and does not sequence compiler passes.
 - Publish artifacts into immutable owned locations. Retaining/downloading artifact A
   must not hold an exclusive staging lock needed to build B. Files remain alive
   until their final consumer releases them, independently of cache membership.
@@ -507,7 +507,7 @@ and run the C preprocessor on the server.
   profile, and relevant build settings. Advertise server capabilities and reject
   unsupported targets; remote compilation alone does not provide cross-compilation.
 - Server handlers call compiler passes, publish caches, and invoke code generation,
-  Ninja, C compilers, and SPIR-V tools. Keep pass order visible in build/query handlers.
+  Clang interoperability adapters, native linking, and SPIR-V tools. Keep pass order visible in build/query handlers.
   Preserve the existing toolchain library for native operations, without adding
   a reusable compiler orchestration wrapper.
 - Resolve the native embedding helper explicitly when running as `resin-server`;

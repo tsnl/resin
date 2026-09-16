@@ -63,7 +63,7 @@ jobs:
           rustc --version &
           toolchain_pid=$!
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libwayland-dev libxkbcommon-dev wayland-protocols glslc spirv-tools mesa-vulkan-drivers
+          sudo apt-get install -y clang libclang-dev cmake ninja-build pkg-config libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libwayland-dev libxkbcommon-dev wayland-protocols glslc spirv-tools mesa-vulkan-drivers
           wait "$toolchain_pid"
       - name: Select the Linux software Vulkan driver
         if: runner.os == 'Linux'
@@ -76,7 +76,10 @@ jobs:
           done
       - name: macOS native build tools
         if: runner.os == 'macOS'
-        run: brew install ninja shaderc spirv-tools
+        run: |
+          brew install llvm ninja shaderc spirv-tools
+          echo "CLANG=$(brew --prefix llvm)/bin/clang" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
       - name: Windows Ninja
         if: runner.os == 'Windows'
         shell: pwsh
@@ -92,6 +95,7 @@ jobs:
             "$name=$([Environment]::GetEnvironmentVariable($name))" >> $env:GITHUB_ENV
           }
           "$env:ProgramFiles\LLVM\bin" >> $env:GITHUB_PATH
+          "LIBCLANG_PATH=$env:ProgramFiles\LLVM\bin" >> $env:GITHUB_ENV
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:

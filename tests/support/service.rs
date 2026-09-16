@@ -51,7 +51,6 @@ impl Service {
             temporary: directory.path().into(),
             tools: environment.toolchain(None, None),
             target: resin_server::host_target(),
-            host_backend: resin_server::HostBackend::C,
             capacities: resin_server::Capacities::default(),
         };
         configure(&mut config, &mut environment);
@@ -83,6 +82,22 @@ impl Service {
             cancellation,
             worker: Some(worker),
         }
+    }
+
+    /// Inspect retained native generations without depending on cache-key filenames.
+    pub fn artifacts(&self) -> Vec<PathBuf> {
+        let mut paths = std::fs::read_dir(self.directory.path())
+            .unwrap()
+            .map(|entry| {
+                entry
+                    .unwrap()
+                    .path()
+                    .join(format!("program{}", std::env::consts::EXE_SUFFIX))
+            })
+            .filter(|path| path.is_file())
+            .collect::<Vec<_>>();
+        paths.sort_by_key(|path| std::fs::metadata(path).unwrap().modified().unwrap());
+        paths
     }
 
     pub fn command(&self) -> Command {

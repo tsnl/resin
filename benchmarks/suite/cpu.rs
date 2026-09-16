@@ -23,10 +23,7 @@ pub fn run(workload: &Workload, config: &Config) -> Result<Vec<f64>> {
         Some("main"),
         &[("benchmark.h", include_str!("../support/benchmark.h"))],
     )?;
-    let program = built.generated.program().ok_or("missing CPU executable")?;
-    let executable = built
-        .artifacts
-        .executable(program.strip_prefix(built.generated.directory())?)?;
+    let executable = built.executable.as_ref().ok_or("missing CPU executable")?;
     let count = config.size.unwrap_or(workload.count);
     let output = Command::new(executable.path())
         .args([

@@ -1,22 +1,36 @@
-//! Backend clients supply verified LIR and receive source files plus a build graph.
+//! Public backend operations consume verified LIR and return owned binary artifacts.
+use resin_codegen::{NativeInputs, NativeObject, NativeOptimization};
+use resin_executor::{Cancellation, Execution};
 use resin_lir::{BasicBlock, BlockId, Function, Instr, Local, Module, Terminator, VerifiedModule};
 use resin_source::prelude::*;
 use resin_types::prelude::*;
-use std::{fs, path::Path, sync::Arc};
-use tempfile::TempDir;
+use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 
-async fn generate(
+async fn native(
     checked: &Arc<VerifiedModule>,
-    entry: Option<&str>,
-    parent: &Path,
-) -> Result<resin_codegen::GeneratedProject, resin_codegen::GenerationError> {
-    resin_codegen::generate(
+    entry: &str,
+    inputs: NativeInputs,
+) -> Result<NativeObject, resin_codegen::GenerationError> {
+    resin_codegen::generate_native(
         checked.clone(),
-        entry.map(str::to_owned),
-        Arc::new(resin_codegen::NativeHeaders::default()),
-        parent,
-        &resin_executor::Execution::default(),
-        &resin_executor::Cancellation::new(),
+        entry.into(),
+        NativeOptimization::Speed,
+        Arc::new(inputs),
+        &Execution::default(),
+        &Cancellation::new(),
+    )
+    .await
+}
+
+async fn shader(
+    checked: &Arc<VerifiedModule>,
+    function: usize,
+) -> Result<Arc<[u8]>, resin_codegen::GenerationError> {
+    resin_codegen::generate_spirv(
+        checked.clone(),
+        FunctionId::from_index(function),
+        &Execution::default(),
+        &Cancellation::new(),
     )
     .await
 }
@@ -42,13 +56,19 @@ fn constant_function(parameters: Vec<Ty>, result: Ty, value: Value) -> Function 
 }
 
 fn module() -> Module {
-    let pointer = Ty::Pointer {
-        pointee: Box::new(Ty::UInt64),
-    };
     let mut module = Module {
         functions: vec![
             constant_function(vec![], Ty::Int32, Value::Int32 { value: 42 }),
-            constant_function(vec![Ty::UInt64, pointer], Ty::Unit, Value::Unit),
+            constant_function(
+                vec![
+                    Ty::UInt64,
+                    Ty::Pointer {
+                        pointee: Box::new(Ty::UInt64),
+                    },
+                ],
+                Ty::Unit,
+                Value::Unit,
+            ),
         ],
         entries: [("main".into(), FunctionId::from_index(0))].into(),
         shaders: [(
@@ -65,147 +85,9 @@ fn module() -> Module {
     module
 }
 
-fn embedded_module() -> Module {
+fn bad_shader() -> Module {
     let mut module = module();
-    let shader = FunctionId::from_index(1);
-    module.shaders.get_mut(&shader).unwrap().embedded = true;
-    module
-}
-
-#[tokio::test]
-async fn declared_headers_are_emitted_without_foreign_function_references() {
-    let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
-    let mut module = module();
-    module.foreign_headers.insert(resin_lir::ForeignHeader {
-        source: SourceId::new("native.resin"),
-        spelling: "standalone/header.h".into(),
-    });
-    assert!(
-        module
-            .functions
-            .iter()
-            .all(|function| function.foreign.is_none())
-    );
-    let checked = Arc::new(VerifiedModule::new(module).unwrap());
-    let project = generate(&checked, Some("main"), directory.path())
-        .await
-        .unwrap();
-    let source = fs::read_to_string(project.c_source().unwrap()).unwrap();
-    assert!(
-        source.contains("#include <standalone/header.h>"),
-        "{source}"
-    );
-}
-
-#[tokio::test]
-async fn generated_project_outlives_its_verified_input_and_retains_opaque_names() {
-    let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
-    let project = {
-        let mut module = embedded_module();
-        module.origins.functions.insert(
-            FunctionId::from_index(0),
-            SourceLocation {
-                source: Source::new("editor://buffer/λ", "main"),
-                span: Span { start: 0, end: 4 },
-            },
-        );
-        let checked = Arc::new(VerifiedModule::new(module).unwrap());
-        generate(&checked, Some("main"), directory.path())
-            .await
-            .unwrap()
-    };
-    assert_eq!(project.directory().parent(), Some(directory.path()));
-    assert_eq!(project.name(), "editor://buffer/λ");
-    assert_eq!(project.entry(), Some("main"));
-    let source = fs::read_to_string(project.c_source().unwrap()).unwrap();
-    assert!(source.contains("int main("));
-    let shader = &project.shaders()[0];
-    assert_eq!(shader.function(), FunctionId::from_index(1));
-    assert_eq!(shader.stage(), Stage::Compute);
-    assert!(source.contains(&format!(
-        "#include \"{}\"",
-        shader.header().file_name().unwrap().to_str().unwrap()
-    )));
-    assert_eq!(
-        &fs::read(shader.unoptimized_spirv()).unwrap()[..4],
-        &[3, 2, 35, 7]
-    );
-    assert!(project.build_file().is_file());
-    assert!(!project.directory().join("main.i").exists());
-    for output in [shader.spirv(), shader.header(), project.program().unwrap()] {
-        assert!(!output.exists(), "generation must not invoke native tools");
-    }
-}
-
-#[tokio::test]
-async fn shader_only_generation_batches_declared_functions_without_a_host_entry() {
-    let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
-    let mut module = module();
-    module.entries.clear();
-    module.functions.push(module.functions[1].clone());
-    module.shaders.insert(
-        FunctionId::from_index(2),
-        module.shaders[&FunctionId::from_index(1)].clone(),
-    );
-    let checked = Arc::new(VerifiedModule::new(module).unwrap());
-    let project = generate(&checked, None, directory.path()).await.unwrap();
-    assert!(project.c_source().is_none());
-    assert!(project.program().is_none());
-    assert!(project.entry().is_none());
-    assert_eq!(project.name(), "shaders");
-    assert!(!project.directory().join("native-inputs.json").exists());
-    assert!(
-        !fs::read_to_string(project.build_file())
-            .unwrap()
-            .contains("native-inputs.state")
-    );
-    assert_eq!(project.shaders().len(), 2);
-    let first = &project.shaders()[0];
-    let second = &project.shaders()[1];
-    assert_ne!(first.unoptimized_spirv(), second.unoptimized_spirv());
-    assert_ne!(first.symbol(), second.symbol());
-    for shader in project.shaders() {
-        assert_eq!(
-            &fs::read(shader.unoptimized_spirv()).unwrap()[..4],
-            &[3, 2, 35, 7]
-        );
-    }
-}
-
-#[tokio::test]
-async fn host_generation_does_not_emit_shader_instances() {
-    let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
-    let checked = Arc::new(VerifiedModule::new(module()).unwrap());
-    let project = generate(&checked, Some("main"), directory.path())
-        .await
-        .unwrap();
-    assert!(project.shaders().is_empty());
-    assert!(
-        !fs::read_to_string(project.c_source().unwrap())
-            .unwrap()
-            .contains("r_fn1(")
-    );
-    let shaders = generate(&checked, None, directory.path()).await.unwrap();
-    assert_ne!(shaders.directory(), project.directory());
-}
-
-#[tokio::test]
-async fn lowering_failure_leaves_existing_outputs_untouched() {
-    let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
-    let checked = Arc::new(VerifiedModule::new(embedded_module()).unwrap());
-    let project = generate(&checked, Some("main"), directory.path())
-        .await
-        .unwrap();
-    let before_c = fs::read(project.c_source().unwrap()).unwrap();
-    let before_spirv = fs::read(project.shaders()[0].unoptimized_spirv()).unwrap();
-    let error = generate(&checked, Some("missing"), directory.path())
-        .await
-        .unwrap_err();
-    assert!(error.to_string().contains("not exported"));
-    let mut bad = embedded_module();
-    // The language permits pointers, but this backend representation cannot store a
-    // shader-local address in a physical pointer value. This remains a target-lowering error.
-    bad.functions[1].locals.extend([
+    module.functions[1].locals.extend([
         Local {
             name: None,
             ty: Ty::UInt64,
@@ -217,7 +99,7 @@ async fn lowering_failure_leaves_existing_outputs_untouched() {
             },
         },
     ]);
-    bad.functions[1].blocks[0].instrs.splice(
+    module.functions[1].blocks[0].instrs.splice(
         0..0,
         [
             Instr::LocalAddress {
@@ -228,272 +110,307 @@ async fn lowering_failure_leaves_existing_outputs_untouched() {
             },
         ],
     );
-    let checked = Arc::new(VerifiedModule::new(bad).unwrap());
-    let error = generate(&checked, Some("main"), directory.path())
-        .await
-        .unwrap_err();
-    assert!(error.to_string().contains("shader-local addresses"));
-    assert_eq!(fs::read(project.c_source().unwrap()).unwrap(), before_c);
-    assert_eq!(
-        fs::read(project.shaders()[0].unoptimized_spirv()).unwrap(),
-        before_spirv
-    );
-    assert_eq!(
-        fs::read_dir(directory.path()).unwrap().count(),
-        1,
-        "failed generations must leave no child directory"
-    );
+    module
 }
 
 #[tokio::test]
-async fn build_graph_orders_shader_optimization_embedding_and_c_compilation() {
-    let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
-    let checked = Arc::new(VerifiedModule::new(embedded_module()).unwrap());
-    let project = generate(&checked, Some("main"), directory.path())
+async fn artifacts_outlive_verified_inputs_and_opaque_source_names_are_not_paths() {
+    let mut module = module();
+    module.origins.functions.insert(
+        FunctionId::from_index(0),
+        SourceLocation {
+            source: Source::new("editor://buffer/λ", "main"),
+            span: Span { start: 0, end: 4 },
+        },
+    );
+    let checked = Arc::new(VerifiedModule::new(module).unwrap());
+    let weak = Arc::downgrade(&checked);
+    let object = native(&checked, "main", NativeInputs::default())
         .await
         .unwrap();
-    let graph = fs::read_to_string(project.build_file()).unwrap();
-    assert!(graph.contains("include toolchain.ninja"));
+    let binary = shader(&checked, 1).await.unwrap();
+    let before = object.bytes().to_vec();
+    drop(checked);
     assert!(
-        graph.contains("shader_1.spv: optimize_shader shader_1.unoptimized.spv | toolchain.state")
+        weak.upgrade().is_none(),
+        "completed artifacts must release their compiler inputs"
     );
-    assert!(graph.contains("shader_1.h: embed_shader shader_1.spv | toolchain.state"));
-    assert!(graph.contains(
-        "compile_preprocessed_program main.i | toolchain.state $runtime_library native-inputs.state shader_1.h"
-    ));
-    let inputs: serde_json::Value =
-        serde_json::from_slice(&fs::read(project.directory().join("native-inputs.json")).unwrap())
-            .unwrap();
-    assert_eq!(
-        inputs,
-        serde_json::json!({
-            "translation_units": [{ "source": "main.c", "preprocessed": "main.i" }],
-            "c_flags": [],
-            "restrict_header_paths": false,
-            "preprocessing_flags": [],
-            "generated_prerequisites": ["shader_1.h"],
-        })
-    );
-    assert!(
-        !graph.contains("command ="),
-        "native commands belong to the toolchain"
-    );
+    assert_eq!(object.bytes(), before);
+    assert!(!object.bytes().is_empty());
+    assert_eq!(&binary[..4], &[3, 2, 35, 7]);
 }
 
 #[tokio::test]
-async fn code_generation_cannot_select_an_absent_entry_or_profile() {
+async fn shader_only_clients_select_each_declared_function_without_a_host_entry() {
     let mut module = module();
-    module.shaders.clear();
-    module.functions.truncate(1);
+    module.entries.clear();
+    module.functions.push(module.functions[1].clone());
+    module.shaders.insert(
+        FunctionId::from_index(2),
+        ShaderEntry {
+            stage: "compute".into(),
+            embedded: false,
+        },
+    );
     let checked = Arc::new(VerifiedModule::new(module).unwrap());
-    let parent = TempDir::new().unwrap();
-    for entry in [None, Some("missing")] {
-        assert!(generate(&checked, entry, parent.path()).await.is_err());
-        assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0);
+    let (first, second) = tokio::join!(shader(&checked, 1), shader(&checked, 2));
+    for bytes in [first.unwrap(), second.unwrap()] {
+        assert_eq!(&bytes[..4], &[3, 2, 35, 7]);
+        assert_eq!(bytes.len() % 4, 0);
     }
 }
 
 #[tokio::test]
-async fn parallel_generations_and_retained_clones_own_independent_files() {
-    fn send_and_sync<T: Send + Sync>() {}
-    send_and_sync::<VerifiedModule>();
-    send_and_sync::<resin_codegen::GeneratedProject>();
-
-    let parent = TempDir::new().unwrap();
-    let checked = Arc::new(VerifiedModule::new(embedded_module()).unwrap());
-    let execution = resin_executor::Execution::new(2.try_into().unwrap());
-    let cancellation = resin_executor::Cancellation::new();
-    let build = || {
-        resin_codegen::generate(
-            checked.clone(),
-            Some("main".into()),
-            Arc::new(resin_codegen::NativeHeaders::default()),
-            parent.path(),
-            &execution,
-            &cancellation,
-        )
-    };
-    let (first, second) = tokio::join!(build(), build());
-    let first = first.unwrap();
-    let second = second.unwrap();
-    let first_directory = first.directory().to_path_buf();
-    let second_directory = second.directory().to_path_buf();
-    assert_ne!(first_directory, second_directory);
-    let original_c = fs::read(first.c_source().unwrap()).unwrap();
-    assert_eq!(original_c, fs::read(second.c_source().unwrap()).unwrap());
-    assert_eq!(
-        fs::read(first.build_file()).unwrap(),
-        fs::read(second.build_file()).unwrap()
+async fn host_generation_does_not_lower_an_unrequested_shader() {
+    let checked = Arc::new(VerifiedModule::new(bad_shader()).unwrap());
+    assert!(
+        !native(&checked, "main", NativeInputs::default())
+            .await
+            .unwrap()
+            .bytes()
+            .is_empty()
     );
-
-    let retained = first.clone();
-    drop(first);
-    drop(second);
-    assert!(!second_directory.exists());
-    let next = build().await.unwrap();
-    assert_eq!(fs::read(retained.c_source().unwrap()).unwrap(), original_c);
-    assert!(retained.shaders()[0].unoptimized_spirv().is_file());
-    drop(retained);
-    assert!(!first_directory.exists());
-    assert!(next.build_file().is_file());
+    assert!(
+        shader(&checked, 1)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("shader-local addresses")
+    );
 }
 
 #[tokio::test]
-async fn cancellation_while_queued_creates_no_generation_directory() {
-    use std::{future::Future, task::Poll};
-    let parent = TempDir::new().unwrap();
-    let execution = resin_executor::Execution::new(1.try_into().unwrap());
-    let cancellation = resin_executor::Cancellation::new();
-    let permit = execution.acquire(&cancellation).await.unwrap();
-    let mut future = Box::pin(resin_codegen::generate(
-        Arc::new(VerifiedModule::new(module()).unwrap()),
-        Some("main".into()),
-        Arc::new(resin_codegen::NativeHeaders::default()),
-        parent.path(),
+async fn later_failures_preserve_completed_objects_and_shader_bytes() {
+    let checked = Arc::new(VerifiedModule::new(module()).unwrap());
+    let object = native(&checked, "main", NativeInputs::default())
+        .await
+        .unwrap();
+    let binary = shader(&checked, 1).await.unwrap();
+    let before_object = object.bytes().to_vec();
+    let before_shader = binary.to_vec();
+    assert!(
+        native(&checked, "missing", NativeInputs::default())
+            .await
+            .is_err()
+    );
+    assert!(
+        shader(&Arc::new(VerifiedModule::new(bad_shader()).unwrap()), 1)
+            .await
+            .is_err()
+    );
+    assert_eq!(object.bytes(), before_object);
+    assert_eq!(&*binary, before_shader);
+}
+
+#[tokio::test]
+async fn embedded_shaders_require_explicit_complete_binaries_and_keep_exact_bytes() {
+    let mut module = module();
+    module
+        .shaders
+        .get_mut(&FunctionId::from_index(1))
+        .unwrap()
+        .embedded = true;
+    let checked = Arc::new(VerifiedModule::new(module).unwrap());
+    assert!(
+        native(&checked, "main", NativeInputs::default())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("missing shader binary")
+    );
+    let binary = shader(&checked, 1).await.unwrap();
+    let inputs = NativeInputs {
+        shaders: [(FunctionId::from_index(1), binary.clone())].into(),
+        ..Default::default()
+    };
+    let object = native(&checked, "main", inputs).await.unwrap();
+    assert!(
+        object
+            .bytes()
+            .windows(binary.len())
+            .any(|bytes| bytes == &*binary)
+    );
+    for (function, bytes) in [(1, vec![1, 2, 3]), (99, vec![1, 2, 3, 4])] {
+        let inputs = NativeInputs {
+            shaders: [(FunctionId::from_index(function), bytes.into())].into(),
+            ..Default::default()
+        };
+        assert!(native(&checked, "main", inputs).await.is_err());
+    }
+}
+
+#[tokio::test]
+async fn code_generation_rejects_absent_entries_and_wrong_profiles() {
+    let mut module = module();
+    let checked = Arc::new(VerifiedModule::new(module.clone()).unwrap());
+    assert!(
+        native(&checked, "absent", NativeInputs::default())
+            .await
+            .is_err()
+    );
+    assert!(
+        shader(&checked, 0)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("not a shader")
+    );
+    module
+        .entries
+        .insert("kernel".into(), FunctionId::from_index(1));
+    assert!(
+        VerifiedModule::new(module).is_err(),
+        "the verifier rejects shader-profile functions in the host export map"
+    );
+}
+
+#[tokio::test]
+async fn independent_parallel_generations_and_retained_clones_own_their_bytes() {
+    fn send_sync<T: Send + Sync>() {}
+    send_sync::<NativeObject>();
+    let checked = Arc::new(VerifiedModule::new(module()).unwrap());
+    let (first, second) = tokio::join!(
+        native(&checked, "main", NativeInputs::default()),
+        native(&checked, "main", NativeInputs::default())
+    );
+    let (first, second) = (first.unwrap(), second.unwrap());
+    assert_eq!(first.bytes(), second.bytes());
+    let retained = first.clone();
+    let bytes = first.shared_bytes();
+    let weak = Arc::downgrade(&bytes);
+    assert!(Arc::ptr_eq(&bytes, &retained.shared_bytes()));
+    drop(first);
+    drop(bytes);
+    drop(second);
+    assert!(weak.upgrade().is_some());
+    assert!(!retained.bytes().is_empty());
+    drop(retained);
+    assert!(weak.upgrade().is_none());
+}
+
+#[tokio::test]
+async fn queued_cancellation_returns_no_native_or_shader_artifact() {
+    let execution = Execution::new(NonZeroUsize::new(1).unwrap());
+    let checked = Arc::new(VerifiedModule::new(module()).unwrap());
+    let cancellation = Cancellation::new();
+    let permit = execution.acquire(&Cancellation::new()).await.unwrap();
+    let mut native = Box::pin(resin_codegen::generate_native(
+        checked.clone(),
+        "main".into(),
+        NativeOptimization::None,
+        Arc::new(NativeInputs::default()),
         &execution,
         &cancellation,
     ));
-    let pending = std::future::poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx))).await;
-    assert!(pending.is_pending());
+    let mut shader = Box::pin(resin_codegen::generate_spirv(
+        checked,
+        FunctionId::from_index(1),
+        &execution,
+        &cancellation,
+    ));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(5), &mut native)
+            .await
+            .is_err()
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(5), &mut shader)
+            .await
+            .is_err()
+    );
     cancellation.cancel();
     assert!(matches!(
-        future.await,
+        native.await,
+        Err(resin_codegen::GenerationError::Execution {
+            error: resin_executor::Error::Cancelled
+        })
+    ));
+    assert!(matches!(
+        shader.await,
         Err(resin_codegen::GenerationError::Execution {
             error: resin_executor::Error::Cancelled
         })
     ));
     drop(permit);
     execution.wait_idle().await;
-    assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0);
 }
 
 #[tokio::test]
-async fn supplied_native_files_and_source_scoped_bindings_are_owned_and_complete() {
-    use resin_codegen::{NativeHeaders, NativeInclude};
+async fn explicit_headers_remain_source_dependencies_without_codegen_filesystem_reads() {
     let mut module = module();
-    let left = resin_lir::ForeignHeader {
-        source: SourceId::new("left.resin"),
-        spelling: "same.h".into(),
+    let header = resin_lir::ForeignHeader {
+        source: SourceId::new("module.resin"),
+        spelling: "absent/header.h".into(),
     };
-    let right = resin_lir::ForeignHeader {
-        source: SourceId::new("right.resin"),
-        spelling: "same.h".into(),
-    };
-    module.foreign_headers.extend([left.clone(), right.clone()]);
+    module.foreign_headers.insert(header.clone());
     let checked = Arc::new(VerifiedModule::new(module).unwrap());
-    let headers = Arc::new(NativeHeaders {
-        files: [
-            (
-                "native/left/same.h".into(),
-                Arc::<[u8]>::from(b"/* left */\n".as_slice()),
-            ),
-            (
-                "native/right/same.h".into(),
-                Arc::<[u8]>::from(b"/* right */\n".as_slice()),
-            ),
-        ]
-        .into(),
-        bindings: [
-            (
-                left,
-                NativeInclude::Staged {
-                    path: "native/left/same.h".into(),
-                },
-            ),
-            (
-                right,
-                NativeInclude::Staged {
-                    path: "native/right/same.h".into(),
-                },
-            ),
-        ]
-        .into(),
-        include_directories: vec!["native/left".into(), "native/right".into()],
-        runtime: None,
-    });
-    let parent = TempDir::new().unwrap();
-    let generated = resin_codegen::generate(
-        checked,
-        Some("main".into()),
-        headers.clone(),
-        parent.path(),
-        &resin_executor::Execution::default(),
-        &resin_executor::Cancellation::new(),
-    )
-    .await
-    .unwrap();
-    drop(headers);
-    let c = fs::read_to_string(generated.c_source().unwrap()).unwrap();
-    assert!(c.contains("#include \"native/left/same.h\""));
-    assert!(c.contains("#include \"native/right/same.h\""));
-    assert_eq!(
-        fs::read(generated.directory().join("native/left/same.h")).unwrap(),
-        b"/* left */\n"
-    );
-    let metadata: serde_json::Value = serde_json::from_slice(
-        &fs::read(generated.directory().join("native-inputs.json")).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(
-        metadata["preprocessing_flags"],
-        serde_json::json!(["-Inative/left", "-Inative/right"])
-    );
+    native(&checked, "main", NativeInputs::default())
+        .await
+        .unwrap();
+    assert!(checked.view().module().foreign_headers.contains(&header));
+    // Acquiring/validating this dependency is the application's native-input pass.
+    // Root extern_preamble tests still require deleting an empty header to fail.
 }
 
 #[tokio::test]
-async fn unsafe_native_paths_fail_before_publishing_a_generation() {
-    use resin_codegen::NativeHeaders;
-    for path in [
-        "../escape.h",
-        "main.c",
-        "native/../escape.h",
-        "native/C:/escape.h",
-        "native/NUL.h",
-        "native/folder/CoM9.data",
-    ] {
-        let parent = TempDir::new().unwrap();
-        let headers = Arc::new(NativeHeaders {
-            files: [(path.into(), Arc::<[u8]>::from(b"".as_slice()))].into(),
-            ..Default::default()
+async fn source_scoped_foreign_bindings_keep_distinct_adapter_symbols() {
+    let mut module = module();
+    module.shaders.clear();
+    module.functions.truncate(1);
+    module.functions[0].blocks[0].instrs = vec![
+        Instr::Function {
+            function: FunctionId::from_index(1),
+        },
+        Instr::Call { arguments: 0 },
+        Instr::Function {
+            function: FunctionId::from_index(2),
+        },
+        Instr::Call { arguments: 0 },
+        Instr::CallBuiltin {
+            name: "+".into(),
+            params: vec![Ty::Int32, Ty::Int32],
+            result: Ty::Int32,
+        },
+    ];
+    for side in ["left", "right"] {
+        let header = resin_lir::ForeignHeader {
+            source: SourceId::new(format!("{side}.resin")),
+            spelling: "same.h".into(),
+        };
+        module.foreign_headers.insert(header.clone());
+        let mut function = constant_function(vec![], Ty::Int32, Value::Int32 { value: 0 });
+        function.name = Some(format!("{side}_call").into());
+        function.foreign = Some(resin_lir::Foreign {
+            header,
+            params: vec![],
         });
-        let result = resin_codegen::generate(
-            Arc::new(VerifiedModule::new(module()).unwrap()),
-            Some("main".into()),
-            headers,
-            parent.path(),
-            &resin_executor::Execution::default(),
-            &resin_executor::Cancellation::new(),
-        )
-        .await;
-        assert!(result.is_err());
-        assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0);
+        function.blocks.clear();
+        module.functions.push(function);
     }
-}
-
-#[tokio::test]
-async fn native_file_and_directory_case_aliases_are_rejected() {
-    for paths in [
-        ["native/left.h", "native/LEFT.h"],
-        ["native/A/x.h", "native/a/y.h"],
+    let checked = Arc::new(VerifiedModule::new(module).unwrap());
+    assert!(
+        native(&checked, "main", NativeInputs::default())
+            .await
+            .is_err()
+    );
+    let inputs = NativeInputs {
+        foreign: [
+            (FunctionId::from_index(1), "left_bound_adapter".into()),
+            (FunctionId::from_index(2), "right_bound_adapter".into()),
+        ]
+        .into(),
+        ..Default::default()
+    };
+    let object = native(&checked, "main", inputs).await.unwrap();
+    for symbol in [
+        b"left_bound_adapter".as_slice(),
+        b"right_bound_adapter".as_slice(),
     ] {
-        let parent = TempDir::new().unwrap();
-        let headers = Arc::new(resin_codegen::NativeHeaders {
-            files: paths
-                .into_iter()
-                .map(|path| (path.into(), Arc::<[u8]>::from(b"".as_slice())))
-                .collect(),
-            ..Default::default()
-        });
-        let result = resin_codegen::generate(
-            Arc::new(VerifiedModule::new(module()).unwrap()),
-            Some("main".into()),
-            headers,
-            parent.path(),
-            &resin_executor::Execution::default(),
-            &resin_executor::Cancellation::new(),
-        )
-        .await;
-        assert!(result.is_err());
-        assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0);
+        assert!(
+            object
+                .bytes()
+                .windows(symbol.len())
+                .any(|bytes| bytes == symbol)
+        );
     }
 }

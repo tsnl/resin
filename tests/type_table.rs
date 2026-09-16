@@ -61,10 +61,13 @@ fn nominal_and_structural_types_share_one_index_space() {
 fn both_emitters_use_payload_table_indices_as_union_tags() {
     let mut module = support::module(
         r#"
-        export { main, kernel };
+        export { main, kernel, none_tag, uint_tag };
         struct HostOnly { unrelated: float64 };
         def choose(i: uint) -> uint | None = { if (i == 0_ui) { None } else { i } };
         def main() -> int = { int(choose(42_ui)!) };
+        def tag(i: uint) -> int = { var value = choose(i); int(Ptr<uint>(ulong(&value)).*) };
+        def none_tag() -> int = { tag(0_ui) };
+        def uint_tag() -> int = { tag(42_ui) };
         @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := choose(i)!; };
         "#,
     );
@@ -79,34 +82,57 @@ fn both_emitters_use_payload_table_indices_as_union_tags() {
         name: Some("type_value".into()),
         profile: resin_lir::Profile::Host,
         foreign: None,
-        result: Ty::Type,
-        parameter_count: 1,
+        result: Ty::Int32,
+        parameter_count: 0,
         locals: vec![resin_lir::Local {
             name: None,
-            ty: Ty::Unit,
+            ty: Ty::Type,
         }],
         entry: resin_lir::BlockId::from_index(0),
         blocks: vec![resin_lir::BasicBlock {
             name: None,
-            instrs: vec![resin_lir::Instr::Push {
-                value: Value::Type {
-                    ty: optional.clone(),
+            instrs: vec![
+                resin_lir::Instr::Push {
+                    value: Value::Type {
+                        ty: optional.clone(),
+                    },
                 },
-            }],
+                resin_lir::Instr::SetLocal {
+                    local: LocalId::from_index(0),
+                },
+                resin_lir::Instr::LocalAddress {
+                    local: LocalId::from_index(0),
+                },
+                resin_lir::Instr::PointerCast {
+                    ty: Ty::Pointer {
+                        pointee: Box::new(Ty::UInt64),
+                    },
+                },
+                resin_lir::Instr::Load,
+                resin_lir::Instr::NumericCast { ty: Ty::Int32 },
+            ],
             terminator: resin_lir::Terminator::Return,
         }],
     });
+    module
+        .entries
+        .insert("type_value".into(), FunctionId::from_index(type_function));
     let host_project = support::project::Project::new(&module, Some("main")).unwrap();
     let shader_project = support::project::Project::new(&module, None).unwrap();
-    let host = std::fs::read_to_string(host_project.generated.c_source().unwrap()).unwrap();
     let shader = std::fs::read(shader_project.generated.shaders()[0].unoptimized_spirv()).unwrap();
-    assert!(
-        host.contains(&format!("struct r_t{optional_id} {{")),
-        "{host}"
-    );
-    assert!(host.contains(&format!(".tag == {none_id}u")), "{host}");
-    assert!(host.contains(&format!(" v{uint_id};")), "{host}");
-    assert!(host.contains(&format!(".tag = {uint_id}u")), "{host}");
+    assert_eq!(host_project.run().status.code(), Some(42));
+    for (entry, expected) in [
+        ("none_tag", none_id),
+        ("uint_tag", uint_id),
+        ("type_value", optional_id),
+    ] {
+        let project = support::project::Project::new(&module, Some(entry)).unwrap();
+        assert_eq!(
+            project.run().status.code(),
+            Some(expected as i32),
+            "{entry}"
+        );
+    }
     use support::shaders::instructions;
     let uint_type = instructions(&shader, 21)
         .find(|args| args[1..] == [32, 0])
@@ -125,14 +151,6 @@ fn both_emitters_use_payload_table_indices_as_union_tags() {
     assert!(
         instructions(&shader, 80)
             .any(|args| { constants.get(&args[2]) == Some(&(uint_id as u32)) })
-    );
-    let type_body = host
-        .rsplit_once(&format!("r_fn{type_function}("))
-        .unwrap()
-        .1;
-    assert!(
-        type_body.contains(&format!(" r_v0_0 = {optional_id};")),
-        "{type_body}"
     );
 }
 

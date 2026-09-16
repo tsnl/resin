@@ -247,6 +247,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "clang-sys"
+version = "1.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "157a8ba7b480713b56f4c09fd13fc3e0a22a5dfab8097ba61cbc5feef950788a"
+dependencies = [
+ "glob",
+ "libc",
+ "libloading",
+]
+
+[[package]]
 name = "clap"
 version = "4.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -729,6 +740,12 @@ dependencies = [
  "cmake",
  "pkg-config",
 ]
+
+[[package]]
+name = "glob"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "hashbrown"
@@ -1465,7 +1482,6 @@ dependencies = [
  "resin-source",
  "resin-types",
  "rspirv",
- "serde_json",
  "tempfile",
  "tokio",
 ]
@@ -1587,7 +1603,9 @@ name = "resin-toolchain"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "clang-sys",
  "libc",
+ "libloading",
  "resin-executor",
  "serde",
  "serde_json",

@@ -52,20 +52,10 @@ fn success(output: &Output) {
     );
 }
 
-fn server_artifact(service: &Service, profile: &str) -> PathBuf {
-    let files: Vec<_> = fs::read_dir(service.directory.path().join("build"))
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| {
-            path.file_name().unwrap() != "shaders" && path.file_name().unwrap() != ".artifacts"
-        })
-        .collect();
+fn server_artifact(service: &Service, _profile: &str) -> PathBuf {
+    let files = service.artifacts();
     assert_eq!(files.len(), 1, "{files:?}");
-    let executable = files[0]
-        .join(profile)
-        .join(format!("program{}", std::env::consts::EXE_SUFFIX));
-    assert!(executable.is_file());
-    executable
+    files[0].clone()
 }
 
 #[test]
@@ -203,7 +193,7 @@ fn cached_programs_track_foreign_headers() {
     );
     let edited = service.server.counters();
     assert_eq!(edited.hir_builds, cold.hir_builds);
-    assert_eq!(edited.generated_builds, cold.generated_builds + 1);
+    assert_eq!(edited.native_object_builds, cold.native_object_builds + 1);
 }
 
 #[test]
@@ -307,7 +297,7 @@ fn sources_with_the_same_name_keep_distinct_cached_results() {
         assert_eq!(output.stdout, folder.as_bytes());
     }
     assert_eq!(service.server.counters().hir_builds, 2);
-    assert_eq!(service.server.counters().generated_builds, 2);
+    assert_eq!(service.server.counters().native_object_builds, 2);
     assert!(!temp.path().join("build").exists());
 }
 
@@ -635,46 +625,24 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
         fs::read(&executable).unwrap(),
         fs::read(&destination).unwrap()
     );
-    let directory = executable.parent().unwrap();
-    let c = fs::read_to_string(directory.join("main.c")).unwrap();
-    let shaders = fs::read_dir(directory)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| {
-            path.extension().is_some_and(|extension| extension == "spv")
-                && !path.to_string_lossy().ends_with(".unoptimized.spv")
+    let bytes = fs::read(&executable).unwrap();
+    // Every embedded module keeps its SPIR-V magic and word alignment in the object.
+    let shaders = bytes
+        .windows(20)
+        .enumerate()
+        .filter(|(_, header)| {
+            header[..4] == [3, 2, 35, 7]
+                && header[4..8] == [0, 6, 1, 0]
+                && header[16..20] == [0, 0, 0, 0]
         })
+        .map(|(offset, _)| offset)
         .collect::<Vec<_>>();
-    assert_eq!(shaders.len(), 3);
-    assert!(directory.join("build.ninja").is_file());
-    for shader in shaders {
-        let raw = fs::read(shader.with_extension("unoptimized.spv")).unwrap();
-        assert_eq!(&raw[..4], &[3, 2, 35, 7]);
-        let bytes = fs::read(&shader).unwrap();
-        assert_eq!(&bytes[..4], &[3, 2, 35, 7]);
-        assert_eq!(bytes.len() % 4, 0);
-        let header = fs::read_to_string(shader.with_extension("h")).unwrap();
-        let embedded = header
-            .split("0x")
-            .skip(1)
-            .map(|hex| u8::from_str_radix(&hex[..2], 16).unwrap())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            embedded, bytes,
-            "generated header must embed the exact SPIR-V bytes"
-        );
-        assert!(header.contains("_Alignas(4)"));
-        assert!(
-            c.contains(
-                shader
-                    .with_extension("h")
-                    .file_name()
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-            )
-        );
-    }
+    assert!(
+        shaders.len() >= 3,
+        "all three shader stages must be embedded"
+    );
+    assert!(shaders.iter().all(|offset| offset % 4 == 0));
+    assert_eq!(service.server.counters().shader_builds, 3);
     success(&Command::new(destination).output().unwrap());
 }
 

@@ -653,6 +653,212 @@ fn value_overflow() -> layout::Error {
     layout::Error("value layout is too large".into())
 }
 
+pub(super) fn host_layout(
+    definitions: &[TypeDef],
+    ty: &Ty,
+) -> Result<layout::Layout, layout::Error> {
+    host_representation(definitions, ty, &mut Vec::new())
+}
+
+fn host_representation(
+    definitions: &[TypeDef],
+    ty: &Ty,
+    active: &mut Vec<TypeId>,
+) -> Result<layout::Layout, layout::Error> {
+    let scalar = match ty {
+        Ty::Unit | Ty::None | Ty::Bool | Ty::Int8 | Ty::UInt8 => Some(1),
+        Ty::Int16 | Ty::UInt16 => Some(2),
+        Ty::Int32 | Ty::UInt32 | Ty::Float32 => Some(4),
+        Ty::Int64
+        | Ty::UInt64
+        | Ty::Float64
+        | Ty::Type
+        | Ty::Pointer { .. }
+        | Ty::Function { .. }
+        | Ty::StrongOwner
+        | Ty::WeakOwner
+        | Ty::GpuArguments => Some(8),
+        _ => None,
+    };
+    if let Some(size) = scalar {
+        return Ok(layout::Layout {
+            size,
+            align: size,
+            offsets: vec![],
+        });
+    }
+    match ty {
+        Ty::Str => Ok(layout::Layout {
+            size: 16,
+            align: 8,
+            offsets: vec![0, 8],
+        }),
+        Ty::GpuView => Ok(layout::Layout {
+            size: 24,
+            align: 8,
+            offsets: vec![0, 8, 16],
+        }),
+        Ty::GpuPipelineContract => Ok(layout::Layout {
+            size: 24,
+            align: 8,
+            offsets: vec![0, 8, 12, 16],
+        }),
+        Ty::Array { element, length } => {
+            let element = host_representation(definitions, element, active)?;
+            Ok(layout::Layout {
+                size: element
+                    .size
+                    .checked_mul((*length).max(1))
+                    .ok_or_else(overflow)?,
+                align: element.align,
+                offsets: vec![],
+            })
+        }
+        Ty::Record { fields } => {
+            let fields = fields
+                .iter()
+                .map(|field| host_representation(definitions, &field.ty, active))
+                .collect::<Result<Vec<_>, _>>()?;
+            host_record(&fields)
+        }
+        Ty::Defined { definition } => {
+            if active.contains(definition) {
+                return Err(layout::Error("recursive inline host layout".into()));
+            }
+            let body = definitions
+                .get(definition.index())
+                .and_then(TypeDef::body)
+                .ok_or_else(|| layout::Error("incomplete host type definition".into()))?;
+            active.push(*definition);
+            let layout = host_representation(definitions, body, active);
+            active.pop();
+            layout
+        }
+        Ty::Union { .. } | Ty::Result { .. } => {
+            let mut size = 0;
+            let mut align = 1;
+            for (_, payload) in ty.payloads().unwrap() {
+                let payload = host_representation(definitions, &payload, active)?;
+                size = size.max(payload.size);
+                align = align.max(payload.align);
+            }
+            let payload = round_up(4, align)?;
+            let align = align.max(4);
+            Ok(layout::Layout {
+                size: round_up(payload.checked_add(size).ok_or_else(overflow)?, align)?,
+                align,
+                offsets: vec![0, payload],
+            })
+        }
+        _ => Err(layout::Error(format!("type {ty:?} has no host layout"))),
+    }
+}
+
+fn host_record(fields: &[layout::Layout]) -> Result<layout::Layout, layout::Error> {
+    let mut size = 0;
+    let mut align = 1;
+    let mut offsets = Vec::new();
+    for field in fields {
+        size = round_up(size, field.align)?;
+        offsets.push(size);
+        size = size.checked_add(field.size).ok_or_else(overflow)?;
+        align = align.max(field.align);
+    }
+    Ok(layout::Layout {
+        size: round_up(size.max(1), align)?,
+        align,
+        offsets,
+    })
+}
+
+#[cfg(test)]
+mod host_layout_tests {
+    use crate::{RecordField, Ty, TypeDef, TypeId, host_layout};
+
+    fn record(types: &[Ty]) -> Ty {
+        Ty::Record {
+            fields: types
+                .iter()
+                .enumerate()
+                .map(|(index, ty)| RecordField {
+                    name: index.to_string().into(),
+                    ty: ty.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn host_only_records_keep_c_alignment_and_shared_types_keep_shared_layout() {
+        let ty = record(&[Ty::Bool, Ty::Float64, Ty::Str, Ty::Unit]);
+        let layout = host_layout(&[], &ty).unwrap();
+        assert_eq!(
+            (layout.size, layout.align, layout.offsets),
+            (40, 8, vec![0, 8, 16, 32])
+        );
+        assert!(crate::layout::layout(&[], &ty).is_err());
+        let shared = record(&[Ty::UInt8, Ty::UInt64, Ty::Float32]);
+        assert_eq!(
+            host_layout(&[], &shared).unwrap(),
+            crate::layout::layout(&[], &shared).unwrap()
+        );
+    }
+
+    #[test]
+    fn variants_reserve_aligned_payload_and_empty_values_keep_physical_storage() {
+        let union = Ty::union_of([Ty::UInt64, Ty::None]);
+        let layout = host_layout(&[], &union).unwrap();
+        assert_eq!(
+            (layout.size, layout.align, layout.offsets),
+            (16, 8, vec![0, 8])
+        );
+        assert_eq!(host_layout(&[], &record(&[])).unwrap().size, 1);
+        let empty = Ty::Array {
+            element: Box::new(Ty::Float64),
+            length: 0,
+        };
+        assert_eq!(host_layout(&[], &empty).unwrap().size, 8);
+        assert!(crate::layout::layout(&[], &empty).is_err());
+    }
+
+    #[test]
+    fn foreign_and_recursive_pointers_need_no_pointee_layout() {
+        let foreign = Ty::Foreign {
+            name: "FILE".into(),
+        };
+        assert!(host_layout(&[], &foreign).is_err());
+        assert_eq!(
+            host_layout(
+                &[],
+                &Ty::Pointer {
+                    pointee: Box::new(foreign)
+                }
+            )
+            .unwrap()
+            .size,
+            8
+        );
+        let recursive = Ty::Defined {
+            definition: TypeId::from_index(0),
+        };
+        let table = vec![TypeDef::new(
+            "Node",
+            record(&[
+                Ty::Pointer {
+                    pointee: Box::new(recursive.clone()),
+                },
+                Ty::Bool,
+            ]),
+        )];
+        assert_eq!(host_layout(&table, &recursive).unwrap().size, 16);
+        let invalid = vec![TypeDef::new(
+            "Inline",
+            record(std::slice::from_ref(&recursive)),
+        )];
+        assert!(host_layout(&invalid, &recursive).is_err());
+    }
+}
+
 fn round_up(size: usize, align: usize) -> Result<usize, layout::Error> {
     size.checked_add(align - 1)
         .map(|n| n & !(align - 1))

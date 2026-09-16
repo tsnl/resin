@@ -882,6 +882,15 @@ pub fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
 // Host/device storage layout
 //
 
+/// Complete 64-bit host storage layout. Unlike [`layout::layout`], this accepts
+/// host-only values. Record offsets follow declaration order; union/Result
+/// offsets are `[tag, payload]`. Nominal values have their body's representation.
+/// Empty arrays reserve one element of physical storage while retaining length zero.
+/// Opaque foreign values have no layout; pointers to them do.
+pub fn host_layout(definitions: &[TypeDef], ty: &Ty) -> Result<layout::Layout, layout::Error> {
+    types::host_layout(definitions, ty)
+}
+
 pub mod layout {
     use crate::{Ty, TypeDef};
 
@@ -894,6 +903,7 @@ pub mod layout {
     }
     impl std::error::Error for Error {}
 
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct Layout {
         pub size: usize,
         pub align: usize,

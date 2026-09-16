@@ -30,13 +30,13 @@ and unsupported targets fail explicitly. Nested URL prefixes are preserved, allo
 an operator to mount the API behind a reverse proxy. Editors inherit `RESIN_SERVER`;
 LSP initialization succeeds only after capability negotiation.
 
-The service needs Ninja, a C compiler (`CC`/server `--cc`), the runtime archive and
-headers, and SPIR-V Tools (`SPIRV_OPT`/server `--spirv-opt`) when compiling shaders.
-`NINJA` selects Ninja. Git is needed for configured dependencies. Host-only compilation
+The service needs Clang (`CLANG`), libclang (`LIBCLANG_PATH`), a linker driver
+(`CC`/server `--cc`), the runtime archive and headers, and SPIR-V Tools
+(`SPIRV_OPT`/server `--spirv-opt`) when compiling shaders. Git is needed for configured dependencies. Host-only compilation
 needs no GPU or Vulkan SDK. Programs using GPU/window functionality need the required
 runtime libraries/device on the **client** that runs the downloaded program.
-The service uses its own executable for `--embed`; keep its runtime archive and
-library/header installation from the same build. The client has no native tool flags.
+Keep the service runtime archive and library/header installation from the same build.
+Cranelift embeds optimized shader bytes directly in native objects. The client has no native tool flags.
 
 ## Inputs and identity
 
@@ -121,9 +121,9 @@ Default capacities are **entries**, not bytes:
 request admission. Embedding applications may set individual `Config.capacities`.
 Active requests and streamed downloads retain selected outputs after head eviction;
 final owners release temporary directories. Cancellation propagates to bounded CPU
-work and native process trees. SIGINT/SIGTERM drain service work. Native Ninja caches
-live under the service working directory's `build/`; `--temporary` owns transient
-projects/artifacts and `--storage` owns pinned dependency checkouts.
+work and native process trees. SIGINT/SIGTERM drain service work. The server retains
+immutable C adapters, shaders, native objects, and executables in separate caches;
+`--temporary` owns native staging and artifacts, and `--storage` owns pinned dependency checkouts.
 
 ## Wire contract
 

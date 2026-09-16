@@ -20,7 +20,7 @@ async fn explicit_snapshot_pipeline_retains_editor_facts_and_owned_codegen() {
     send_and_sync::<resin_hir::Module>();
     send_and_sync::<resin_lir::Module>();
     send_and_sync::<resin_lir::VerifiedModule>();
-    send_and_sync::<resin_codegen::GeneratedProject>();
+    send_and_sync::<resin_codegen::NativeObject>();
 
     let execution = Execution::new(2.try_into().unwrap());
     let cancellation = Cancellation::new();
@@ -153,12 +153,11 @@ async fn explicit_snapshot_pipeline_retains_editor_facts_and_owned_codegen() {
         .await
         .unwrap(),
     );
-    let parent = tempfile::tempdir().unwrap();
-    let generated = send_future(resin_codegen::generate(
+    let generated = send_future(resin_codegen::generate_native(
         verified.clone(),
-        Some("main".into()),
-        std::sync::Arc::new(resin_codegen::NativeHeaders::default()),
-        parent.path(),
+        "main".into(),
+        resin_codegen::NativeOptimization::None,
+        Arc::new(resin_codegen::NativeInputs::default()),
         &execution,
         &cancellation,
     ))
@@ -166,12 +165,7 @@ async fn explicit_snapshot_pipeline_retains_editor_facts_and_owned_codegen() {
     .unwrap();
     drop(verified);
     drop(hir);
-    let c = tokio::fs::read_to_string(generated.c_source().unwrap())
-        .await
-        .unwrap();
-    assert!(c.contains("int main("), "{c}");
-    assert!(generated.build_file().is_file());
-    assert!(!generated.program().unwrap().exists());
+    assert!(!generated.bytes().is_empty());
     assert_eq!(
         reconstructed_hir.hover(&main, offset).unwrap().text,
         original_hover.text

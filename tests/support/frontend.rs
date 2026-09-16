@@ -74,22 +74,6 @@ pub fn lower(
     })
 }
 
-pub fn generate(
-    module: resin_lir::Verified<'_>,
-    entry: Option<&str>,
-    parent: &Path,
-) -> Result<resin_codegen::GeneratedProject, resin_codegen::GenerationError> {
-    let module = resin_lir::VerifiedModule::new(module.module().clone()).unwrap();
-    block_on(resin_codegen::generate(
-        Arc::new(module),
-        entry.map(str::to_owned),
-        std::sync::Arc::new(resin_codegen::NativeHeaders::default()),
-        parent,
-        execution(),
-        &Cancellation::new(),
-    ))
-}
-
 pub fn analyze(
     source: Source,
     loader: &mut Loader,

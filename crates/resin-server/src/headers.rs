@@ -1,7 +1,19 @@
 //! Validate uploaded directory snapshots and bind source-scoped native includes.
 use crate::{http::failure, managed::Managed};
 use base64::Engine;
-use resin_codegen::{NativeHeaders, NativeInclude};
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct NativeHeaders {
+    pub files: BTreeMap<Arc<str>, Arc<[u8]>>,
+    pub bindings: BTreeMap<resin_lir::ForeignHeader, NativeInclude>,
+    pub include_directories: Vec<Arc<str>>,
+    pub runtime: Option<NativeInclude>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum NativeInclude {
+    Staged { path: Arc<str> },
+    System { spelling: Arc<str> },
+}
 use resin_protocol::{ErrorCode, Failure, HeaderInputs, HeaderTarget, IncludeRoot};
 use resin_source::{Source, SourceError};
 use std::{

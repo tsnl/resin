@@ -269,12 +269,12 @@ fn cpu_name() -> Option<String> {
 //
 
 struct Built {
-    generated: resin_codegen::GeneratedProject,
-    artifacts: resin_toolchain::BuiltProject,
+    executable: Option<resin_toolchain::Executable>,
+    shaders: Vec<Arc<[u8]>>,
 }
 
 fn build(
-    workload: &Workload,
+    _workload: &Workload,
     source: &Path,
     entry: Option<&str>,
     extra_files: &[(&str, &str)],
@@ -308,50 +308,173 @@ fn build(
             )
             .await?;
             let lir = resin_lir::VerifiedModule::build(lir, &execution, &cancellation).await?;
-            let generated = resin_codegen::generate(
-                Arc::new(lir),
-                entry.map(str::to_owned),
-                std::sync::Arc::new(resin_codegen::NativeHeaders::default()),
-                &std::env::temp_dir(),
-                &execution,
-                &cancellation,
-            )
-            .await?;
-            for (name, contents) in extra_files {
-                tokio::fs::write(generated.directory().join(name), contents).await?;
-            }
-            if generated.c_source().is_some() && !extra_files.is_empty() {
-                let path = generated.directory().join("native-inputs.json");
-                let mut inputs: resin_toolchain::NativeInputs =
-                    serde_json::from_slice(&tokio::fs::read(&path).await?)?;
-                inputs.preprocessing_flags.extend(["-I".into(), ".".into()]);
-                if extra_files.iter().any(|(name, _)| *name == "benchmark.h") {
-                    inputs
-                        .preprocessing_flags
-                        .push("-D_POSIX_C_SOURCE=200809L".into());
-                }
-                tokio::fs::write(path, serde_json::to_vec(&inputs)?).await?;
-            }
+            let lir = Arc::new(lir);
+            let temporary = tempfile::tempdir()?;
             let mut environment = resin_toolchain::Environment::capture()?;
-            // Cargo builds the matching Resin executable, used by Ninja's embedding step.
             environment.executable = env!("CARGO_BIN_EXE_resin").into();
             environment.directory = Path::new(env!("CARGO_MANIFEST_DIR")).into();
-            let artifacts = environment
-                .toolchain(None, None)
-                .build(
-                    generated.directory(),
-                    &format!("benchmark-{}", workload.name),
-                    entry.unwrap_or("benchmark-shader"),
-                    resin_toolchain::CProfile::Release,
+            let tools = environment.toolchain(None, None);
+            let mut shaders = Vec::new();
+            let mut native = resin_codegen::NativeInputs::default();
+            for &function in lir.view().module().shaders.keys() {
+                let bytes =
+                    resin_codegen::generate_spirv(lir.clone(), function, &execution, &cancellation)
+                        .await?;
+                let bytes = tools
+                    .optimize_shader(bytes, temporary.path(), &execution, &cancellation)
+                    .await?;
+                native.shaders.insert(function, bytes.clone());
+                shaders.push(bytes);
+            }
+            let executable = if let Some(entry) = entry {
+                let mut foreign = foreign_inputs(lir.view().module(), extra_files)?;
+                for (index, function) in lir.view().module().functions.iter().enumerate() {
+                    let Some(declaration) = &function.foreign else {
+                        continue;
+                    };
+                    let symbol = format!("benchmark_foreign_{index}");
+                    native.foreign.insert(
+                        resin_types::FunctionId::from_index(index),
+                        symbol.clone().into(),
+                    );
+                    foreign.functions.push(resin_toolchain::ForeignFunction {
+                        symbol,
+                        name: function
+                            .name
+                            .as_ref()
+                            .ok_or("unnamed foreign function")?
+                            .to_string(),
+                        params: declaration
+                            .params
+                            .iter()
+                            .map(foreign_scalar)
+                            .collect::<Result<_>>()?,
+                        result: foreign_scalar(&function.result)?,
+                    });
+                }
+                let mut objects = Vec::new();
+                if !foreign.functions.is_empty() {
+                    objects.push(
+                        tools
+                            .compile_foreign(
+                                Arc::new(foreign),
+                                temporary.path(),
+                                &execution,
+                                &cancellation,
+                            )
+                            .await?
+                            .bytes(),
+                    );
+                }
+                let object = resin_codegen::generate_native(
+                    lir,
+                    entry.into(),
+                    resin_codegen::NativeOptimization::Speed,
+                    Arc::new(native),
                     &execution,
                     &cancellation,
                 )
                 .await?;
+                objects.insert(0, object.shared_bytes());
+                Some(
+                    tools
+                        .link_native(
+                            resin_toolchain::NativeLink {
+                                objects,
+                                runtime: true,
+                            },
+                            &std::env::temp_dir(),
+                            &execution,
+                            &cancellation,
+                        )
+                        .await?,
+                )
+            } else {
+                None
+            };
             Ok(Built {
-                generated,
-                artifacts,
+                executable,
+                shaders,
             })
         })
+}
+
+fn foreign_scalar(ty: &resin_types::Ty) -> Result<resin_toolchain::ForeignScalar> {
+    use resin_toolchain::ForeignScalar;
+    use resin_types::Ty;
+    Ok(match ty {
+        Ty::Unit => ForeignScalar::Void,
+        Ty::Bool => ForeignScalar::Bool,
+        Ty::Pointer { .. } => ForeignScalar::Pointer,
+        Ty::Int8 | Ty::UInt8 => ForeignScalar::Integer {
+            bits: 8,
+            signed: matches!(ty, Ty::Int8),
+        },
+        Ty::Int16 | Ty::UInt16 => ForeignScalar::Integer {
+            bits: 16,
+            signed: matches!(ty, Ty::Int16),
+        },
+        Ty::Int32 | Ty::UInt32 => ForeignScalar::Integer {
+            bits: 32,
+            signed: matches!(ty, Ty::Int32),
+        },
+        Ty::Int64 | Ty::UInt64 => ForeignScalar::Integer {
+            bits: 64,
+            signed: matches!(ty, Ty::Int64),
+        },
+        Ty::Float32 => ForeignScalar::Float { bits: 32 },
+        Ty::Float64 => ForeignScalar::Float { bits: 64 },
+        _ => return Err(format!("unsupported benchmark foreign type {ty:?}").into()),
+    })
+}
+
+fn foreign_inputs(
+    module: &resin_lir::Module,
+    extra: &[(&str, &str)],
+) -> Result<resin_toolchain::ForeignInputs> {
+    let mut inputs = resin_toolchain::ForeignInputs::default();
+    let root = Path::new(resin_runtime::INCLUDE_DIR);
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(directory)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                let name = format!(
+                    "runtime/{}",
+                    path.strip_prefix(root)?
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                );
+                inputs.files.insert(name.into(), fs::read(path)?.into());
+            }
+        }
+    }
+    for (name, contents) in extra {
+        inputs
+            .files
+            .insert(format!("bundle/{name}").into(), contents.as_bytes().into());
+    }
+    inputs.include_directories = vec!["runtime".into(), "bundle".into()];
+    // Feature-selection macros in fixture headers must precede libc includes.
+    inputs
+        .includes
+        .extend(extra.iter().map(|(name, _)| format!("bundle/{name}")));
+    for header in &module.foreign_headers {
+        let name = [
+            &format!("runtime/{}", header.spelling),
+            &format!("bundle/{}", header.spelling),
+        ]
+        .into_iter()
+        .find(|name| inputs.files.contains_key(name.as_str()))
+        .cloned()
+        .unwrap_or_else(|| header.spelling.to_string());
+        if !inputs.includes.contains(&name) {
+            inputs.includes.push(name);
+        }
+    }
+    Ok(inputs)
 }
 
 fn workload_path(workload: &Workload) -> PathBuf {

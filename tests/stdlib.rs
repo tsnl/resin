@@ -13,10 +13,9 @@ fn run(source: &str, native: &str) -> std::process::Output {
     let path = temp.path().join("main.resin");
     fs::write(&path, source).unwrap();
     let module = pipeline::file_module(&path).unwrap_or_else(|error| panic!("{error}"));
-    let project = project::Project::new(&module, Some("main")).unwrap();
-    let path = project.generated.c_source().unwrap();
-    let c = format!("{native}\n{}", fs::read_to_string(path).unwrap());
-    fs::write(path, c).unwrap();
+    let project = project::Project::new(&module, Some("main"))
+        .unwrap()
+        .with_native(native);
     let cc = std::env::var_os("CC").unwrap_or_else(|| resin_toolchain::DEFAULT_C_COMPILER.into());
     let built = project.build(&toolchain::c(&cc)).unwrap();
     let executable = built
@@ -389,7 +388,9 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
                 "gpu_begin_rendering" => ("GpuCommands", "begin_rendering"),
                 "gpu_end_rendering" => ("GpuCommands", "end_rendering"),
                 "gpu_draw" | "gpu_projected_draw" => ("GpuCommands", "draw"),
-                "gpu_copy_image_to_span" => ("GpuCommands", "copy_image_to_buffer"),
+                "gpu_copy_image_to_span" | "gpu_copy_image_to_span_ref" => {
+                    ("GpuCommands", "copy_image_to_buffer")
+                }
                 "gpu_submit" => ("GpuCommands", "submit"),
                 "gpu_cancel_command_buffer" => ("GpuCommands", "cancel"),
                 "window_poll_events" => ("Window", "poll_events"),

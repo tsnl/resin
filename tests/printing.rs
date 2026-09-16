@@ -69,9 +69,6 @@ fn string_storage_is_terminated_without_changing_its_logical_length() {
     for local in m.functions[0].locals.iter().skip(1) {
         assert_eq!(local.ty, Ty::Str);
     }
-    let project = support::project::Project::new(&m, Some("main")).unwrap();
-    let c = std::fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
-    assert!(c.contains("static uint8_t r_literal_"), "{c}");
     prints(
         r#"export { main };
 
@@ -272,22 +269,16 @@ fn shader_print_rejects_host_only_string_types() {
 }
 
 #[test]
-fn generated_c_uses_the_shared_runtime_header() {
+fn native_code_calls_the_shared_printing_runtime() {
     let project = support::project::Project::new(
         &module(r#"export { main }; import { "$/string.resin" }; def main() -> () = { print("hello"); };"#),
         Some("main"),
     )
     .unwrap();
-    let source = std::fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
-    assert_eq!(
-        source
-            .lines()
-            .filter(|line| *line == "#include <resin_runtime.h>")
-            .count(),
-        1
-    );
-    assert!(source.contains("resin_print("));
-    assert!(!source.contains("static void r_cleanup"));
+    let output = project.run();
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"hello");
+    assert!(output.stderr.is_empty());
 }
 
 #[test]
