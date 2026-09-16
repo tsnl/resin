@@ -266,6 +266,10 @@ pub enum Instr {
 /// loop-condition, and loop-body continuations need their own explicit terminator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Terminator {
+    /// Leave the nearest enclosing loop body, preserving its carried operands.
+    Break,
+    /// Restart the nearest enclosing loop from within its body or a nested selection.
+    NextIteration,
     /// Complete a selection arm, transferring all operands to its If's merge.
     /// Nested tail selections may forward to the same merge. Invalid at function
     /// scope or as the completion of a loop condition or body.
@@ -632,6 +636,7 @@ pub enum VerifyErrorKind {
     UnexpectedMerge,
     UnexpectedLoopTest,
     UnexpectedContinue,
+    UnexpectedLoopExit,
     MissingLoopTest,
     MissingRegionResult,
     MissingRegionContinuation,

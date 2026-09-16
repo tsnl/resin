@@ -632,3 +632,15 @@ fn expression_module(param: Ty, result: Ty, instrs: Vec<Instr>) -> Module {
         ..Default::default()
     }
 }
+
+#[test]
+fn explicit_loop_exits_require_an_enclosing_body() {
+    for exit in [Terminator::Break, Terminator::NextIteration] {
+        let mut module = expression_module(Ty::Unit, Ty::Unit, vec![]);
+        module.functions[0].blocks[0].terminator = exit;
+        assert_eq!(
+            verify(&module).unwrap_err().kind,
+            VerifyErrorKind::UnexpectedLoopExit
+        );
+    }
+}

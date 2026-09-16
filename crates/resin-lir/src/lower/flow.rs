@@ -28,7 +28,12 @@ impl FunctionLowering<'_> {
         self.terminate(Terminator::LoopTest);
 
         self.switch(body_block);
-        self.gen_term(body, None)?;
+        self.loop_scopes.push(self.owned.len());
+        self.enter_scope();
+        let result = self.gen_term(body, None)?;
+        self.cleanup(self.owned.len() - 1, &result);
+        self.owned.pop();
+        self.loop_scopes.pop();
         self.emit(Instr::Discard);
         self.terminate(Terminator::Continue);
 
@@ -96,6 +101,26 @@ impl FunctionLowering<'_> {
         self.gen_term(value, Some(&result))?;
         self.cleanup(0, &result);
         self.terminate(Terminator::Return);
+        Ok(expected.clone())
+    }
+}
+
+impl FunctionLowering<'_> {
+    pub(super) fn gen_loop_exit(
+        &mut self,
+        exit: Terminator,
+        expected: &Ty,
+    ) -> Result<Ty, LowerError> {
+        let Some(&scope) = self.loop_scopes.last() else {
+            return Err(LowerError::invalid_hir(
+                self.source_span,
+                "loop exit outside a loop body",
+            ));
+        };
+        self.emit(Instr::Push { value: Value::Unit });
+        self.cleanup(scope, &Ty::Unit);
+        self.emit(Instr::Discard);
+        self.terminate(exit);
         Ok(expected.clone())
     }
 }

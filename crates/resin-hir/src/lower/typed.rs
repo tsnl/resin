@@ -20,6 +20,8 @@ pub(super) struct Term {
 
 #[derive(Debug, Clone)]
 pub(super) enum TermKind {
+    Break,
+    Continue,
     Return {
         value: Box<Term>,
     },

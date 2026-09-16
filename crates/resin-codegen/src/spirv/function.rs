@@ -57,6 +57,7 @@ pub(super) fn lower(
         arrays,
         destinations,
         has_loop_test: stacks.tests.iter().map(Option::is_some).collect(),
+        loop_targets: vec![],
         may_fail: false,
     };
     lowering.region(function.entry.index(), vec![], None)?;
@@ -86,6 +87,7 @@ struct FunctionLowering<'a, 'm> {
     arrays: HashMap<Ty, Word>,
     destinations: Vec<Destination>,
     has_loop_test: Vec<bool>,
+    loop_targets: Vec<(usize, usize)>,
     may_fail: bool,
 }
 
@@ -207,6 +209,16 @@ impl FunctionLowering<'_, '_> {
                     } else {
                         return self.exit(stack, exit.unwrap());
                     }
+                }
+                Terminator::Break | Terminator::NextIteration => {
+                    let (condition, merge) = *self.loop_targets.last().expect("verified loop exit");
+                    let destination = if self.function.blocks[block].terminator == Terminator::Break
+                    {
+                        merge
+                    } else {
+                        condition
+                    };
+                    return self.exit(stack, ExitTarget::Merge { destination });
                 }
                 Terminator::Return => {
                     if stack[0].local.is_some() {
@@ -411,6 +423,7 @@ impl FunctionLowering<'_, '_> {
             .branch_conditional(test, body_label, merge, [])
             .unwrap();
         self.context.builder.begin_block(Some(body_label)).unwrap();
+        self.loop_targets.push((condition, merge_destination));
         self.region(
             body,
             tested,
@@ -418,6 +431,7 @@ impl FunctionLowering<'_, '_> {
                 destination: condition,
             }),
         )?;
+        self.loop_targets.pop();
         self.context
             .builder
             .begin_block(Some(continue_label))
@@ -510,7 +524,7 @@ fn output(
             stack.extend(flow.results[block][index].clone());
         }
         let (next, result) = match function.blocks[block].terminator {
-            Terminator::Return => (None, None),
+            Terminator::Return | Terminator::Break | Terminator::NextIteration => (None, None),
             Terminator::Merge | Terminator::LoopTest | Terminator::Continue => (None, Some(stack)),
             Terminator::If { then, els, next } => {
                 let yes = output(function, flow, then.index(), outputs, tests);

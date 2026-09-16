@@ -119,6 +119,8 @@ export default grammar({
       "sizeof",
       "assert",
       "return",
+      "break",
+      "continue",
       "if",
       "else",
       "while",
@@ -247,6 +249,7 @@ export default grammar({
     statement: ($) =>
       choice(
         field("return", $.return_statement),
+        field("loop_exit", $.loop_exit_statement),
         field("constant", $.const_declaration),
         field("struct", $.struct_definition),
         seq(field("define", $.define), ";"),
@@ -448,6 +451,8 @@ export default grammar({
         "}",
       ),
     unit_term: () => prec.dynamic(1, choice(seq("{", "}"), seq("(", ")"))),
+
+    loop_exit_statement: () => seq(choice("break", "continue"), ";"),
 
     return_statement: ($) =>
       seq("return", optional(field("value", $.term)), ";"),

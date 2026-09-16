@@ -47,6 +47,7 @@ fn print_statements(out: &mut String, statements: &[CStatement], depth: usize) {
                 }
             }
             CStatement::Return { value } => writeln!(out, "{indent}return {value};").unwrap(),
+            CStatement::Continue => writeln!(out, "{indent}continue;").unwrap(),
             CStatement::Break => writeln!(out, "{indent}break;").unwrap(),
             CStatement::If {
                 condition,

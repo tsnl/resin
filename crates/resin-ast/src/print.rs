@@ -238,6 +238,8 @@ fn sexp_term(term: &Term) -> SExp {
             term.span,
             vec![sexp_term(cond), sexp_term(then), sexp_term(els)],
         ),
+        TermKind::Break => symbol("break"),
+        TermKind::Continue => symbol("continue"),
         TermKind::Return { value } => list_sp("return", term.span, vec![sexp_term(value)]),
         TermKind::While { cond, body } => {
             list_sp("while", term.span, vec![sexp_term(cond), sexp_term(body)])

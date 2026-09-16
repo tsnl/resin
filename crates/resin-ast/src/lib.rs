@@ -74,6 +74,8 @@ pub type Term = Spanned<TermKind>;
 
 #[derive(Debug, Clone)]
 pub enum TermKind {
+    Break,
+    Continue,
     Return {
         value: Box<Term>,
     },

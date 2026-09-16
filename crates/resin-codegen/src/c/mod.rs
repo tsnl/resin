@@ -48,6 +48,7 @@ pub(super) enum CStatement {
         body: Vec<CStatement>,
     },
     Break,
+    Continue,
     Return {
         value: String,
     },

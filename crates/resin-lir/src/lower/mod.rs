@@ -77,6 +77,7 @@ struct FunctionLowering<'types> {
     function: FunctionBuilder,
     bindings: HashMap<BindingId, ValueBinding>,
     owned: Vec<Scope>,
+    loop_scopes: Vec<usize>,
 }
 impl FunctionLowering<'_> {
     fn gen_term(&mut self, term: &Term, to: Option<&Ty>) -> Result<Ty, LowerError> {

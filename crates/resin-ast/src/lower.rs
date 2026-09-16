@@ -272,6 +272,20 @@ impl<'a> AstGen<'a> {
                 self.span(node),
             );
         }
+        if let Some(exit) = node.child_by_field_name("loop_exit") {
+            let span = self.span(exit);
+            let kind = if self.text(exit).starts_with("break") {
+                TermKind::Break
+            } else {
+                TermKind::Continue
+            };
+            return Spanned::new(
+                StmtKind::Expr {
+                    term: Spanned::new(kind, span),
+                },
+                span,
+            );
+        }
         if let Some(returned) = node.child_by_field_name("return") {
             let span = self.span(returned);
             let value = returned

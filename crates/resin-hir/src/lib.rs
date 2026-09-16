@@ -367,6 +367,8 @@ pub struct Term {
 
 #[derive(Debug, Clone)]
 pub enum TermKind {
+    Break,
+    Continue,
     Return {
         value: Box<Term>,
     },
@@ -1238,6 +1240,16 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     (
         "return",
         "return value; — leave the function after scope cleanup; return; returns unit.",
+        DefinitionKind::Keyword,
+    ),
+    (
+        "break",
+        "break; — leave the nearest loop after scope cleanup.",
+        DefinitionKind::Keyword,
+    ),
+    (
+        "continue",
+        "continue; — start the nearest loop’s next iteration after scope cleanup.",
         DefinitionKind::Keyword,
     ),
     ("else", "else { value }", DefinitionKind::Keyword),

@@ -21,6 +21,10 @@ impl FunctionLowering<'_> {
                 self.gen_term(value, None)?;
                 self.emit(Instr::ExcludeNone);
             }
+            TermKind::Break => return self.gen_loop_exit(crate::Terminator::Break, expected),
+            TermKind::Continue => {
+                return self.gen_loop_exit(crate::Terminator::NextIteration, expected);
+            }
             TermKind::Return { value } => return self.gen_return(value, expected),
             TermKind::Try { value } => return self.gen_try(span, value),
             TermKind::Match { value, arms } => return self.gen_match(value, arms, expected),
