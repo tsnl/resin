@@ -64,6 +64,38 @@ fn resolved_tree_is_sufficient_to_lower_control_flow() {
 }
 
 #[test]
+fn explicit_header_dependencies_survive_without_foreign_functions() {
+    let mut tree = conditional();
+    tree.foreign_headers.insert("empty.h".into());
+    let module = resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default()).unwrap();
+    assert_eq!(module.foreign_headers, tree.foreign_headers);
+    assert!(
+        module
+            .functions
+            .iter()
+            .all(|function| function.foreign.is_none())
+    );
+    assert!(resin_lir::format_module(&module).contains("\"empty.h\""));
+    resin_lir::verify(&module).unwrap();
+}
+
+#[test]
+fn invalid_standalone_header_dependencies_fail_verification() {
+    for header in ["", "bad\nheader.h", "bad>header.h", "bad\"header.h"] {
+        let module = resin_lir::Module {
+            foreign_headers: [header.into()].into(),
+            ..Default::default()
+        };
+        let error = resin_lir::verify(&module).unwrap_err();
+        assert_eq!(error.location, resin_lir::VerifyLocation::Module);
+        assert!(matches!(
+            error.kind,
+            resin_lir::VerifyErrorKind::InvalidForeignHeader { .. }
+        ));
+    }
+}
+
+#[test]
 fn lowering_preserves_source_handles_without_inventing_missing_origins() {
     let source = Source::new("editor://scratch", "choose");
     let other = Source::new("editor://other", "choose");

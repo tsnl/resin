@@ -570,9 +570,13 @@ impl Foreign {
     pub fn valid(&self, result: &Ty) -> bool {
         self.params.iter().all(Ty::foreign_value)
             && (*result == Ty::Unit || result.foreign_value())
-            && !self.header.is_empty()
-            && self
-                .header
+            && Self::valid_header(&self.header)
+    }
+
+    /// A nonempty header name that can appear literally in a native include.
+    pub fn valid_header(header: &str) -> bool {
+        !header.is_empty()
+            && header
                 .bytes()
                 .all(|c| c.is_ascii_alphanumeric() || b"_./- :~()".contains(&c))
     }

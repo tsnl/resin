@@ -760,7 +760,15 @@ fn at_indexing_checks_bounds_before_later_effects() {
     for receiver in ["values", "holder.values"] {
         for index in ["2", "18446744073709551615_ul"] {
             let output = run_module(&module(&format!(
-                r#"export {{ main }}; import {{ "$/span.resin" }}; extern "stdio.h" def puts(text: Ptr<ubyte>) -> int; def main() -> int = {{
+                r#"export {{ main }};
+
+                extern {{
+                    "stdio.h": {{
+                        def puts(text: Ptr<ubyte>) -> int;
+                    }},
+                }};
+                import {{ "$/span.resin" }};
+                def main() -> int = {{
                     var values = [1, 2];
                     var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }};
                     {receiver}.at({index}) := 9;

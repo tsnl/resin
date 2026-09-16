@@ -133,6 +133,25 @@ export {
 	mouse_button_8,
 };
 
+extern {
+	"resin_runtime.h": {
+		def resin_window_create(width: uint, height: uint, title: Ptr<ubyte>, window: Ptr<Ptr<ResinWindow>>) -> int;
+		def resin_window_destroy(window: Ptr<ResinWindow>) -> ();
+		def resin_window_poll_events(window: Ptr<ResinWindow>) -> int;
+		def resin_window_should_close(window: Ptr<ResinWindow>) -> int;
+		def resin_window_set_should_close(window: Ptr<ResinWindow>, close: int) -> int;
+		def resin_window_framebuffer_size(window: Ptr<ResinWindow>, width: Ptr<uint>, height: Ptr<uint>) -> int;
+		def resin_window_set_size(window: Ptr<ResinWindow>, width: uint, height: uint) -> int;
+		def resin_window_key_pressed(window: Ptr<ResinWindow>, key: int) -> int;
+		def resin_window_key_state(window: Ptr<ResinWindow>, key: int) -> uint;
+		def resin_window_mouse_button_state(window: Ptr<ResinWindow>, button: int) -> uint;
+		def resin_window_cursor_position(window: Ptr<ResinWindow>, x: Ptr<float64>, y: Ptr<float64>) -> int;
+		def resin_window_scroll_delta(window: Ptr<ResinWindow>, x: Ptr<float64>, y: Ptr<float64>) -> int;
+		def resin_window_focused(window: Ptr<ResinWindow>) -> int;
+		def resin_window_capture_cursor(window: Ptr<ResinWindow>, capture: int) -> int;
+	},
+};
+
 import { "status.resin", "shared.resin", "string.resin" };
 
 // GLFW physical key codes, independent of typed characters or keyboard layout.
@@ -403,18 +422,3 @@ struct Window {
 		)
 	};
 };
-
-extern "resin_runtime.h" def resin_window_create(width: uint, height: uint, title: Ptr<ubyte>, window: Ptr<Ptr<ResinWindow>>) -> int;
-extern "resin_runtime.h" def resin_window_destroy(window: Ptr<ResinWindow>) -> ();
-extern "resin_runtime.h" def resin_window_poll_events(window: Ptr<ResinWindow>) -> int;
-extern "resin_runtime.h" def resin_window_should_close(window: Ptr<ResinWindow>) -> int;
-extern "resin_runtime.h" def resin_window_set_should_close(window: Ptr<ResinWindow>, close: int) -> int;
-extern "resin_runtime.h" def resin_window_framebuffer_size(window: Ptr<ResinWindow>, width: Ptr<uint>, height: Ptr<uint>) -> int;
-extern "resin_runtime.h" def resin_window_set_size(window: Ptr<ResinWindow>, width: uint, height: uint) -> int;
-extern "resin_runtime.h" def resin_window_key_pressed(window: Ptr<ResinWindow>, key: int) -> int;
-extern "resin_runtime.h" def resin_window_key_state(window: Ptr<ResinWindow>, key: int) -> uint;
-extern "resin_runtime.h" def resin_window_mouse_button_state(window: Ptr<ResinWindow>, button: int) -> uint;
-extern "resin_runtime.h" def resin_window_cursor_position(window: Ptr<ResinWindow>, x: Ptr<float64>, y: Ptr<float64>) -> int;
-extern "resin_runtime.h" def resin_window_scroll_delta(window: Ptr<ResinWindow>, x: Ptr<float64>, y: Ptr<float64>) -> int;
-extern "resin_runtime.h" def resin_window_focused(window: Ptr<ResinWindow>) -> int;
-extern "resin_runtime.h" def resin_window_capture_cursor(window: Ptr<ResinWindow>, capture: int) -> int;

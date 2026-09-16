@@ -20,6 +20,8 @@ use std::{fmt, sync::Arc};
 #[derive(Debug, Clone)]
 pub struct SourceFile {
     pub exports: Vec<Ident>,
+    /// Declared native dependencies, including header groups with no functions.
+    pub foreign_headers: Vec<Spanned<Arc<str>>>,
     pub imports: Vec<Spanned<Arc<str>>>,
     pub stmts: Vec<Stmt>,
 }

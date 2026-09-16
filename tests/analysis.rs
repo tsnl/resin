@@ -1298,9 +1298,9 @@ fn imported_syntax_errors_stay_at_the_dependency() {
 #[test]
 fn malformed_foreign_headers_are_diagnostics_not_panics() {
     for source in [
-        r#"extern "bad\q" def release();"#,
-        "extern \"unfinished def release();",
-        "extern def release();",
+        r#"extern { "bad\q": { def release(); } };"#,
+        "extern { \"unfinished: { def release(); } };",
+        "extern { { def release(); } };",
     ] {
         let project = Project::new(&[("main.resin", source)]);
         let input = project.source("main.resin");
@@ -1315,7 +1315,7 @@ fn malformed_foreign_headers_are_diagnostics_not_panics() {
 
 #[test]
 fn malformed_function_names_do_not_create_editor_definitions() {
-    let source = "extern \"native.h\" def releasex: int); def main() = {};";
+    let source = "extern { \"native.h\": { def releasex: int); } }; def main() = {};";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.build_hir();
     let input = project.source("main.resin");
@@ -1491,15 +1491,13 @@ fn module_analysis_needs_no_entry_and_rejects_runtime_globals() {
 
 #[test]
 fn implicit_unit_signatures_and_declaration_keywords_support_editor_features() {
-    let source = "extern \"native.h\" def release(value: int); def run() = { release(1); };";
+    let source =
+        "extern { \"native.h\": { def release(value: int); } }; def run() = { release(1); };";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.checked();
     let input = project.source("main.resin");
     for (name, signature) in [
-        (
-            "release",
-            "extern \"native.h\" def release(value: int) -> ()",
-        ),
+        ("release", "def release(value: int) -> ()"),
         ("run", "def run() -> ()"),
     ] {
         let offset = source.rfind(name).unwrap();

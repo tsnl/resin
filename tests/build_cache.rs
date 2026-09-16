@@ -27,7 +27,7 @@ fn foreign_header_changes_rebuild_including_nested_dependencies() {
     fs::write(
         &project.input,
         format!(
-            "export {{ main }}; import {{ \"$/string.resin\" }}; extern \"{}\" def value () -> int; def main() -> () = {{ print(fmt(\"{{0}}\", (value(),))); }};",
+            "export {{ main }}; extern {{ \"{}\": {{ def value () -> int; }} }}; import {{ \"$/string.resin\" }}; def main() -> () = {{ print(fmt(\"{{0}}\", (value(),))); }};",
             header.display()
         ),
     )

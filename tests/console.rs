@@ -188,9 +188,14 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
         let source = format!(
             r#"
             export {{ main }};
-            import {{ "$/console.resin" }};
-            extern "{header}" def console_test_mode() -> int;
-            extern "{header}" def console_test_frees() -> int;
+
+            extern {{
+                "{header}": {{
+                    def console_test_mode() -> int;
+                    def console_test_frees() -> int;
+                }},
+            }};
+           import {{ "$/console.resin" }};
             def exercise() -> int = {{
                 var mode = console_test_mode();
                 match (Console.read_line()) {{
@@ -214,8 +219,7 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
                 var result = exercise();
                 var expected = if (console_test_mode() == 0) {{ 0 }} else {{ 1 }};
                 if (console_test_frees() != expected) {{ 6 }} else {{ result }}
-            }};
-        "#
+            }};"#
         );
         let path = temp.path().join("main.resin");
         fs::write(&path, source).unwrap();

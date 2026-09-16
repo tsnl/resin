@@ -244,8 +244,11 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   including foreign declarations. Zero-argument functions reserve no parameter local;
   the verifier rejects parameter counts larger than the local array.
 - Functions use `def`, nominal records use `struct`, transparent aliases use `type`, and local value bindings use `var`, including
-  uninitialized locals. Record initializers and parameters do not take these keywords. Foreign functions use
-  `extern "header.h" def name(...) -> Type;`.
+  uninitialized locals. Record initializers and parameters do not take these keywords.
+  Foreign functions live in an optional top-level `extern` block between `export` and
+  `import`: `extern { "header.h": { def name(...) -> Type; }, };`. Header groups may
+  be empty and retain their native include dependency. Opaque foreign types remain
+  standalone `extern type Name;` declarations.
 - Methods are declared inside their owning `struct`, after its fields. Aliases inherit
   the target namespace and cannot add methods. Local structs are field-only.
   `value.method(args)` supplies the receiver as the first argument,

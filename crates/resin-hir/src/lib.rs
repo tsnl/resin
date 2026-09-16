@@ -22,7 +22,11 @@ mod snapshot;
 pub use snapshot::{Diagnostic, Hir};
 
 use resin_common::define_id;
-use std::{collections::BTreeMap, fmt, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    sync::Arc,
+};
 
 //
 // HIR language
@@ -228,6 +232,8 @@ pub type BindingId = usize;
 #[derive(Debug, Clone, Default)]
 pub struct Module {
     pub entries: BTreeMap<Arc<str>, FunctionId>,
+    /// Explicit native dependencies, including header groups with no functions.
+    pub foreign_headers: BTreeSet<Arc<str>>,
     pub types: Vec<TypeDefinition>,
     pub functions: Vec<Function>,
     pub shaders: BTreeMap<FunctionId, ShaderEntry>,
@@ -1012,7 +1018,7 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ),
     (
         "extern",
-        "extern — foreign function or opaque type declaration",
+        "extern { \"header.h\": { def name(parameters) -> Type; }, };\nextern type Name;",
         DefinitionKind::Keyword,
     ),
     (
@@ -1447,6 +1453,7 @@ pub enum GenerateErrorKind {
     IncompleteSyntax,
     Inference { message: Arc<str> },
     InvalidModuleItem,
+    InvalidForeignHeader { header: Arc<str> },
     InvalidForeignSignature,
     InvalidShader { message: Arc<str> },
     UnresolvedImport { path: Arc<str> },

@@ -1,5 +1,11 @@
 export { Io, Output, WriteError };
 
+extern {
+	"resin_runtime/print.h": {
+		def resin_stream_write(stream: uint, data: Ptr<ubyte>, length: ulong) -> int;
+	},
+};
+
 import { "span.resin", "string.resin" };
 
 // Native stream selectors for resin_stream_write.
@@ -39,5 +45,3 @@ struct Io {
 		Output { stream = stream_stderr }
 	};
 };
-
-extern "resin_runtime/print.h" def resin_stream_write(stream: uint, data: Ptr<ubyte>, length: ulong) -> int;
