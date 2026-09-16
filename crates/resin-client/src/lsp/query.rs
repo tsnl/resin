@@ -275,7 +275,7 @@ pub(super) async fn prepare_diagnostics(
                         .filter_map(|note| {
                             Some(lsp_types::DiagnosticRelatedInformation {
                                 location: renderer.location(&note.span)?,
-                                message: note.message.clone(),
+                                message: diagnostic_message(&note.message),
                             })
                         })
                         .collect::<Vec<_>>();
@@ -291,7 +291,7 @@ pub(super) async fn prepare_diagnostics(
                             }
                         }),
                         source: Some("resin".into()),
-                        message: diagnostic.message.clone(),
+                        message: diagnostic_message(&diagnostic.message),
                         related_information: (!related.is_empty()).then_some(related),
                         ..Default::default()
                     };
@@ -460,4 +460,14 @@ fn formatting_edits(source: &str, formatted: &str) -> Vec<lsp_types::TextEdit> {
         range: Text::new(source).range(Span { start, end }),
         new_text: formatted[start..new_end].into(),
     }]
+}
+
+// Editor diagnostics are compact labels; source/type printers may include indentation.
+fn diagnostic_message(message: &str) -> String {
+    message
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
