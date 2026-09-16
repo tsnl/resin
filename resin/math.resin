@@ -6,8 +6,8 @@ intrinsic "sin" fn sin<T>(value: T) -> T;
 intrinsic "cos" fn cos<T>(value: T) -> T;
 
 struct Complex<T> {
-	real: T;
-	imag: T;
+	real: T,
+	imag: T,
 }
 
 fn complex<T>(real: T, imag: T) -> Complex<T> {

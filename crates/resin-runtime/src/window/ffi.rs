@@ -52,6 +52,22 @@ pub unsafe extern "C" fn resin_window_poll_events(window: *const ResinWindow) ->
 }
 
 /// # Safety
+/// `window` must be a live window on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_window_wait_events(
+    window: *const ResinWindow,
+    timeout: f64,
+) -> ResinStatus {
+    let Some(window) = (unsafe { window.as_ref() }) else {
+        return ResinStatus::InvalidArgument;
+    };
+    match window.wait_events(timeout) {
+        Ok(()) => ResinStatus::Success,
+        Err(status) => status,
+    }
+}
+
+/// # Safety
 /// `window` must be null or a live window on the main thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn resin_window_should_close(window: *const ResinWindow) -> i32 {
@@ -286,6 +302,10 @@ mod tests {
 
             assert_eq!(
                 resin_window_poll_events(ptr::null()),
+                ResinStatus::InvalidArgument
+            );
+            assert_eq!(
+                resin_window_wait_events(ptr::null(), 0.01),
                 ResinStatus::InvalidArgument
             );
             assert_eq!(

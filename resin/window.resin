@@ -1,10 +1,11 @@
-export { Window, ResinWindow, ButtonState, key_unknown, key_space, key_apostrophe, key_comma, key_minus, key_period, key_slash, key_digit_0, key_digit_1, key_digit_2, key_digit_3, key_digit_4, key_digit_5, key_digit_6, key_digit_7, key_digit_8, key_digit_9, key_semicolon, key_equal, key_a, key_b, key_c, key_d, key_e, key_f, key_g, key_h, key_i, key_j, key_k, key_l, key_m, key_n, key_o, key_p, key_q, key_r, key_s, key_t, key_u, key_v, key_w, key_x, key_y, key_z, key_left_bracket, key_backslash, key_right_bracket, key_grave_accent, key_world_1, key_world_2, key_escape, key_enter, key_tab, key_backspace, key_insert, key_delete, key_right, key_left, key_down, key_up, key_page_up, key_page_down, key_home, key_end, key_caps_lock, key_scroll_lock, key_num_lock, key_print_screen, key_pause, key_f1, key_f2, key_f3, key_f4, key_f5, key_f6, key_f7, key_f8, key_f9, key_f10, key_f11, key_f12, key_f13, key_f14, key_f15, key_f16, key_f17, key_f18, key_f19, key_f20, key_f21, key_f22, key_f23, key_f24, key_f25, key_keypad_0, key_keypad_1, key_keypad_2, key_keypad_3, key_keypad_4, key_keypad_5, key_keypad_6, key_keypad_7, key_keypad_8, key_keypad_9, key_keypad_decimal, key_keypad_divide, key_keypad_multiply, key_keypad_subtract, key_keypad_add, key_keypad_enter, key_keypad_equal, key_left_shift, key_left_control, key_left_alt, key_left_super, key_right_shift, key_right_control, key_right_alt, key_right_super, key_menu, mouse_button_left, mouse_button_right, mouse_button_middle, mouse_button_4, mouse_button_5, mouse_button_6, mouse_button_7, mouse_button_8, native, window_new, poll_events, should_close, set_should_close, framebuffer_size, set_size, key_pressed, key_state, mouse_button_state, cursor_position, scroll_delta, focused, capture_cursor, clone };
+export { Window, ResinWindow, ButtonState, key_unknown, key_space, key_apostrophe, key_comma, key_minus, key_period, key_slash, key_digit_0, key_digit_1, key_digit_2, key_digit_3, key_digit_4, key_digit_5, key_digit_6, key_digit_7, key_digit_8, key_digit_9, key_semicolon, key_equal, key_a, key_b, key_c, key_d, key_e, key_f, key_g, key_h, key_i, key_j, key_k, key_l, key_m, key_n, key_o, key_p, key_q, key_r, key_s, key_t, key_u, key_v, key_w, key_x, key_y, key_z, key_left_bracket, key_backslash, key_right_bracket, key_grave_accent, key_world_1, key_world_2, key_escape, key_enter, key_tab, key_backspace, key_insert, key_delete, key_right, key_left, key_down, key_up, key_page_up, key_page_down, key_home, key_end, key_caps_lock, key_scroll_lock, key_num_lock, key_print_screen, key_pause, key_f1, key_f2, key_f3, key_f4, key_f5, key_f6, key_f7, key_f8, key_f9, key_f10, key_f11, key_f12, key_f13, key_f14, key_f15, key_f16, key_f17, key_f18, key_f19, key_f20, key_f21, key_f22, key_f23, key_f24, key_f25, key_keypad_0, key_keypad_1, key_keypad_2, key_keypad_3, key_keypad_4, key_keypad_5, key_keypad_6, key_keypad_7, key_keypad_8, key_keypad_9, key_keypad_decimal, key_keypad_divide, key_keypad_multiply, key_keypad_subtract, key_keypad_add, key_keypad_enter, key_keypad_equal, key_left_shift, key_left_control, key_left_alt, key_left_super, key_right_shift, key_right_control, key_right_alt, key_right_super, key_menu, mouse_button_left, mouse_button_right, mouse_button_middle, mouse_button_4, mouse_button_5, mouse_button_6, mouse_button_7, mouse_button_8, native, window_new, poll_events, wait_events, set_should_close, framebuffer_size, set_size, key_pressed, key_state, mouse_button_state, cursor_position, scroll_delta, focused, capture_cursor, clone };
 
 extern {
 	"resin_runtime.h": {
 		fn resin_window_create(width: uint, height: uint, title: Ptr<ubyte>, window: Ptr<Ptr<ResinWindow>>) -> int;
 		fn resin_window_destroy(window: Ptr<ResinWindow>) -> ();
 		fn resin_window_poll_events(window: Ptr<ResinWindow>) -> int;
+		fn resin_window_wait_events(window: Ptr<ResinWindow>, timeout: float64) -> int;
 		fn resin_window_should_close(window: Ptr<ResinWindow>) -> int;
 		fn resin_window_set_should_close(window: Ptr<ResinWindow>, close: int) -> int;
 		fn resin_window_framebuffer_size(window: Ptr<ResinWindow>, width: Ptr<uint>, height: Ptr<uint>) -> int;
@@ -233,6 +234,10 @@ fn window_new(width: uint, height: uint, title: Ref<String>) -> (Window | Err<Ru
 
 fn poll_events(self: Ref<Window>) -> (() | Err<RuntimeError>) {
 	runtime_status_from_code(resin_window_poll_events(self:native()))
+}
+
+fn wait_events(self: Ref<Window>, timeout: float64) -> () | Err<RuntimeError> {
+	runtime_status_from_code(resin_window_wait_events(self:native(), timeout))
 }
 
 fn should_close(self: Ref<Window>) -> bool {

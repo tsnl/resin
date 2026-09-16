@@ -23,7 +23,11 @@ fn complex_arithmetic_borrows_operands_and_preserves_float_width() {
     let output = support::project::Project::new(&module, Some("main"))
         .unwrap()
         .run();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

@@ -21,6 +21,9 @@ void resin_window_destroy(ResinWindow *window);
    Poll each window once per frame. Queries do not consume edges or scroll deltas;
    press and release can both be set for a short tap. Repeats do not set press edges. */
 ResinStatus resin_window_poll_events(const ResinWindow *window);
+/* Like poll_events, but sleeps until an event arrives or timeout seconds elapse.
+   Timeout must be finite and positive. Use either poll or wait once per frame. */
+ResinStatus resin_window_wait_events(const ResinWindow *window, double timeout);
 int resin_window_should_close(const ResinWindow *window);
 ResinStatus resin_window_set_should_close(const ResinWindow *window, int close);
 ResinStatus resin_window_framebuffer_size(const ResinWindow *window, uint32_t *width, uint32_t *height);

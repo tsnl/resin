@@ -1262,6 +1262,28 @@ dependencies, so presentation fences can safely govern resource reuse and teardo
 This initial path is deliberately synchronous and presents offscreen images; rendering
 directly into swapchain images and multiple frames in flight are not implemented.
 
+### Mandelbrot explorer
+
+Run `resin examples/eg011_mandelbrot.resin` with the compiler service running.
+The example keeps the escape-time calculation on the CPU, using `Complex<float64>`
+from `$/math.resin`. A fullscreen triangle colors the resulting iteration grid.
+The 480×360 image scales with the window; resizing preserves the complex plane's aspect ratio.
+Only changes to the view or iteration budget recompute the grid.
+
+- **Arrows / WASD:** pan.
+- **Scroll / + / −:** zoom around the center.
+- **[ / ]:** halve or double the iteration budget (32–4096).
+- **R / Home:** reset the view and restore 256 iterations.
+- **Escape:** close.
+
+Black pixels have not escaped within the chosen budget; this does not prove membership.
+Run the exported `test` entry for known orbits, the strict escape-radius boundary,
+pixel coordinates, and zoom limits: `resin examples/eg011_mandelbrot.resin:test`.
+
+`window:wait_events(seconds)?` waits for input or a timeout and commits the same input
+snapshot as `poll_events`. Use either operation once per frame; the timeout must be finite
+and positive. The explorer uses it to avoid spinning while idle or minimized.
+
 ## Representation details
 
 ### Byte-array storage

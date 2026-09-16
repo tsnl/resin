@@ -22,6 +22,8 @@ import { "$/gpu.resin", "$/status.resin" };
 - `image.resin`: PNG I/O.
 - `status.resin`: native status conversion and named errors.
 - `graphics.resin`: shared shader input/output types.
+- `math.resin`: square root, trigonometry, and `Complex<T>` arithmetic. `complex(real, imag)`
+  constructs a value; `add`, `mul`, `squared`, and `magnitude_squared` borrow their operands.
 - `io.resin`: stdout and stderr byte output accepting `str`, `Span<ubyte>`, and `String`.
 - `console.resin`: byte and line input, and shared input-line ownership and printing.
 - `process.resin`: checked argument views and lookups in the frozen startup environment.
