@@ -243,7 +243,7 @@ async fn retained_compilations_keep_their_own_source_versions_and_editor_queries
 async fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
     let source = Source::new(
         "entry",
-        "export { first, second }; struct FieldsN<T0> { n: T0 };\ndef first() -> bool = { (1 == 1) + (1 == 1) }; def second() -> int = { var r = FieldsN<_> { n = 1 }; r + r; 0 };",
+        "export { first, second }; def first() -> bool = { (1 == 1) + (1 == 1) }; def second() -> int = { var r = (1,); r + r; 0 };",
     );
     let mut loader = Loader::new(resin_source::library_root());
     let cache = Cache::new(16);
