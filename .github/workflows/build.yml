@@ -25,6 +25,9 @@ jobs:
         working-directory: crates/tree-sitter-resin
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The Zed manifest pins an earlier commit, whose parser must match.
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -38,6 +41,10 @@ jobs:
         run: npm run lint
       - name: Check grammar types
         run: npm run typecheck
+      - name: Check Zed grammar pin
+        run: python ../../scripts/check-zed-grammar.py
+      - name: Validate editor queries against the current grammar
+        run: cargo test -p tree-sitter-resin --test editor_queries --locked
 
   native:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
