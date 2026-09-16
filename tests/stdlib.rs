@@ -381,6 +381,7 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
                 "gpu_submit" => "submit",
                 "gpu_cancel_command_buffer" => "cancel",
                 "window_poll_events" => "poll_events",
+                "window_wait_events" => "wait_events",
                 "window_should_close" => "should_close",
                 "window_set_should_close" => "set_should_close",
                 "window_framebuffer_size" => "framebuffer_size",
@@ -1166,4 +1167,68 @@ fn window_constructor_accepts_owned_titles_until_the_native_call_returns() {
     );
     success(&output);
     assert_eq!(output.stdout, b"named {0}");
+}
+
+#[test]
+fn argparse_yields_aliases_values_and_duplicates_in_order() {
+    success(&run(
+        r#"export { main };
+        import { "$/argparse.resin", "$/span.resin", "$/string.resin" };
+        fn main() -> () | Err<_> {
+            let argv = ["app".data, "-v".data, "--count=12".data, "-o".data, "a path.png".data,
+                "--count".data, "4294967295".data, "--real".data, "-0.125".data, "--output=".data];
+            let parser = argparse(Span<Ptr<ubyte>> { data = &argv:at(0_ul), length = 10_ul },
+                "  --verbose|-v --count= --output|-o= --real= ");
+            let flag = parser:next()?!;
+            assert(flag:named("--verbose") && flag.value.length == 0_ul);
+            let count = parser:next()?!;
+            assert(count:named("--count") && argument_integer(count.value)? == 12_ui);
+            let path = parser:next()?!;
+            assert(path:named("--output") && path.value.length == 10_ul);
+            let repeated = parser:next()?!;
+            assert(argument_integer(repeated.value)? == 4294967295_ui);
+            let real = parser:next()?!;
+            assert(argument_number(real.value)? == -0.125_f);
+            let empty = parser:next()?!;
+            assert(empty:named("--output") && empty.value.length == 0_ul);
+            assert(match (parser:next()?) { None => { true }, Argument(item) => { false } });
+        }
+    "#,
+        "",
+    ));
+}
+
+#[test]
+fn argparse_reports_errors_and_numeric_parsing_respects_span_bounds() {
+    success(&run(
+        r#"export { main };
+        import { "$/argparse.resin", "$/span.resin", "$/string.resin" };
+        fn rejected(option: str) {
+            let argv = ["app".data, option.data];
+            let parser = argparse(Span<Ptr<ubyte>> { data = &argv:at(0_ul), length = 2_ul }, "--flag --count=");
+            assert(match (parser:next()) {
+                Err(message) => { message:get().length > 0_ul },
+                Argument(item) => { false }, None => { false },
+            });
+        }
+        fn bad_integer(text: str) {
+            assert(match (argument_integer(bytes(text))) { Err(message) => { true }, uint(value) => { false } });
+        }
+        fn bad_number(text: str) {
+            assert(match (argument_number(bytes(text))) { Err(message) => { true }, float32(value) => { false } });
+        }
+        fn main() -> () | Err<_> {
+            rejected("--unknown"); rejected("--count"); rejected("--flag=yes"); rejected("positional");
+            bad_integer(""); bad_integer("4294967296"); bad_integer("-1"); bad_integer("1x");
+            bad_number(""); bad_number("nan"); bad_number("inf"); bad_number("1e100"); bad_number("1.0junk");
+            let bounded = [49_ub, 46_ub, 50_ub, 53_ub, 57_ub];
+            assert(argument_number(Span<ubyte> { data = &bounded:at(0_ul), length = 4_ul })? == 1.25_f);
+            let embedded = [49_ub, 0_ub, 50_ub];
+            assert(match (argument_number(Span<ubyte> { data = &embedded:at(0_ul), length = 3_ul })) {
+                Err(message) => { true }, float32(value) => { false },
+            });
+        }
+    "#,
+        "",
+    ));
 }

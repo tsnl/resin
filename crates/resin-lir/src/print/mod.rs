@@ -135,6 +135,7 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
         Instr::GpuViewStore => symbol("gpu-view-store"),
         Instr::GpuViewReplace => symbol("gpu-view-replace"),
         Instr::GpuViewCopyTo => symbol("gpu-view-copy-to"),
+        Instr::GpuViewCopyFrom => symbol("gpu-view-copy-from"),
         Instr::GpuViewCopyImage => symbol("gpu-view-copy-image"),
         Instr::GpuComputePipeline {
             factory, shader, ..

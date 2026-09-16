@@ -22,9 +22,13 @@ import { "$/gpu.resin", "$/status.resin" };
 - `image.resin`: PNG I/O.
 - `status.resin`: native status conversion and named errors.
 - `graphics.resin`: shared shader input/output types.
+- `math.resin`: square root, trigonometry, and `Complex<T>` arithmetic. `complex(real, imag)`
+  constructs a value; `add`, `mul`, `squared`, and `magnitude_squared` borrow their operands.
 - `io.resin`: stdout and stderr byte output accepting `str`, `Span<ubyte>`, and `String`.
 - `console.resin`: byte and line input, and shared input-line ownership and printing.
 - `process.resin`: checked argument views and lookups in the frozen startup environment.
+- `argparse.resin`: streaming option parsing with aliases, required values, and checked numbers.
+  For example, `argparse(args, "--help|-h --count=")` accepts `-h`, `--count 12`, and `--count=12`.
 
 Public operations are exported free functions, callable with colon syntax; scalar
 options and control codes are exported constants. Fallible runtime operations return
@@ -70,7 +74,9 @@ type: `gpu:create_compute_pipeline(kernel)` and
 `commands:draw(pipeline, None, count)`. The compiler checks host arguments and
 projects GPU views to the shader's raw pointers and spans inside recording.
 Recorded allocations reject CPU access until submission or cancellation. Use
-`:copy_to(Span<T>)` for host readback without escaping a raw pointer into GPU memory.
+`:copy_to(Span<T>)` for host readback and `:copy_from(Span<T>)` for bounded host uploads,
+without escaping a raw pointer into GPU memory. Uploads write the source length into
+the beginning of a writable, host-visible destination span.
 See [GPU buffers](../doc/gpu-buffers.md).
 
 Submission consumes a recording even on failure. `commands:submit()` and
@@ -85,7 +91,7 @@ dropping one already consumed does not cancel it again. Submission waits for GPU
 | `WeakPtr<T>` / `WeakSpan<T>` | `weak_ptr_empty::<T>()` / `weak_span_empty::<T>()`, `:upgrade()` |
 | `Gpu` | `gpu_new()`, `gpu_new_at(index)`, `gpu_new_for_window(window)`, `gpu:compute_workgroup_size()`, `gpu:create_compute_pipeline(kernel)`, `gpu:create_image(...)` |
 | `GpuPtr<T>` | `gpu:create(value)`, `:load()`, `:store(value)`, `:replace(value)`, `:slice(start, length)`, `:read_only()`, `:write_only()` |
-| `GpuSpan<T>` | `gpu:alloc::<T>(count)`, `gpu:alloc_in::<T>(count, memory)`, `:at(index)`, `:slice(start, length)`, `:copy_to(destination)`, `:read_only()`, `:write_only()` |
+| `GpuSpan<T>` | `gpu:alloc::<T>(count)`, `gpu:alloc_in::<T>(count, memory)`, `:at(index)`, `:slice(start, length)`, `:copy_to(destination)`, `:copy_from(source)`, `:read_only()`, `:write_only()` |
 | `GpuComputePipeline<Root, Owner>` / `GpuGraphicsPipeline<Root, Owner>` | `gpu:create_compute_pipeline(kernel)`, `gpu:create_graphics_pipeline(vertex, fragment)` |
 | `GpuCommands` | `gpu:start_command_recording()`, `commands:dispatch(pipeline, arguments, x, y, z)`, `commands:draw(pipeline, arguments, count)`, `commands:submit()`, `commands:cancel()` |
 | `Window` | `window_new(width, height, string_from_str("Resin"))`, `window:poll_events()`, `window:framebuffer_size()`, input and cursor methods |

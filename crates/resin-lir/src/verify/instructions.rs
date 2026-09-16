@@ -30,6 +30,7 @@ pub(super) fn check_instr(
         | Instr::GpuViewStore
         | Instr::GpuViewReplace
         | Instr::GpuViewCopyTo
+        | Instr::GpuViewCopyFrom
         | Instr::GpuViewCopyImage
         | Instr::GpuArgumentsDispatch
         | Instr::GpuArgumentsDraw => super::gpu::check(module, instr, stack, location)?,

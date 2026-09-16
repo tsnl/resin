@@ -202,6 +202,33 @@ all platforms; an empty value succeeds with length zero. It never reads live OS 
 See `examples/process.resin` for looking up a selected variable without dumping the environment.
 Program arguments apply only to run mode; `-o` builds the executable to invoke separately.
 
+`$/argparse.resin` provides a streaming option parser. Its small specification lists
+space-separated spellings, with `|` for aliases and a trailing `=` for a required value:
+
+```resin
+let parser = argparse(arguments(argc, argv), "--help|-h --count= --output|-o=");
+while (true) {
+    let option = match (parser:next()?) {
+        Argument(option) => { option },
+        None => { break; },
+    };
+    if (option:named("--count")) {
+        let count = argument_integer(option.value)?;
+        print(fmt("Count: {0}\n", (count,)));
+    };
+};
+```
+
+The parser accepts `--count 12` and `--count=12`, returns canonical names for aliases,
+and yields repeated options in command-line order. Unknown options, missing values,
+and values attached to flags return `Err<String>`. It supports options only, without
+positional arguments or bundled short flags. A separate value may start with `-`,
+including negative numbers and filenames. Flags have an empty value view.
+`argument_integer` checks unsigned 32-bit range; `argument_number` parses finite
+float32 values from bounded bytes. Returned views borrow the process argument snapshot
+and the literal specification. Applications handle defaults, ranges, and help text.
+
+
 With `-o PATH` (or `--output PATH`, also accepted as `--out PATH`), Resin builds and copies the executable without running it.
 A successful build and copy returns status 0, independently of the program's eventual exit status.
 An existing directory or trailing separator receives the source name (or `source-entry` for a
@@ -1139,7 +1166,9 @@ Host `GpuPtr` and `GpuSpan` operations retain their allocation, including indexi
 and slicing. `load`, `store`, and `replace` access elements on the host.
 `:read_only()` and `:write_only()` narrow per-view
 access permissions. Host accesses check bounds, alignment, mapping, permissions,
-and pending recorded GPU use. `:copy_to(Span<T>)` copies into caller-owned host
+and pending recorded GPU use. `:copy_from(Span<T>)` uploads a bounded host span into the beginning of a writable,
+host-visible GPU span; its source length must fit the destination.
+`:copy_to(Span<T>)` copies into caller-owned host
 memory. GPU views cannot be converted to raw `Ptr` values; the compiler's shader
 projection is the host-to-device address conversion boundary. GPU buffer elements
 must have a shared layout without pointers, spans, owners, or drop hooks.
@@ -1261,6 +1290,66 @@ Presentation additionally requires `VK_EXT_swapchain_maintenance1` and its insta
 dependencies, so presentation fences can safely govern resource reuse and teardown.
 This initial path is deliberately synchronous and presents offscreen images; rendering
 directly into swapchain images and multiple frames in flight are not implemented.
+
+### Mandelbrot explorer
+
+Run `resin examples/eg011_mandelbrot.resin` with the compiler service running.
+The GPU `compute` entry is a one-line call to `evaluate_segment`; `--cpu` calls
+that same ordinary function in a loop. Each invocation handles up to 32 adjacent
+pixels in one row, clipping the final segment at the right edge. Segment origins
+are prepared on the host; large dispatches use batches of descriptors within
+Vulkan's workgroup limit. `pixels_per_segment` controls the chunk size. Pixels are
+independent, so this grouping is a scheduling choice, not an algorithm requirement.
+Orbit iteration, palette evaluation, and color blending are separate functions,
+using `Complex<float32>` from `$/math.resin`.
+
+Both interactive paths produce the same RGBA8 GPU buffer: CPU mode uploads its
+completed bytes once with `:copy_from`, and GPU mode writes directly. A fullscreen
+triangle presents that buffer through the same pipeline. The example groups pipeline
+setup, uploads, dispatch, presentation, and readback in its GPU helpers section.
+Headless CPU mode writes its host bytes directly, without GPU setup.
+Pass example options after Resin's `--` separator:
+
+```sh
+resin examples/eg011_mandelbrot.resin -- --help
+resin examples/eg011_mandelbrot.resin -- --cpu
+resin examples/eg011_mandelbrot.resin -- --output mandelbrot.png --width 1920 --height 1080
+resin examples/eg011_mandelbrot.resin -- --cpu --output detail.png --real -0.7435 --imag 0.1314 --span 0.005 --iterations 1024
+```
+
+`--output PATH` writes a PNG once and exits without creating a window. GPU output needs
+a Vulkan device; CPU output needs neither a display nor a Vulkan device. Interactive
+mode uses Vulkan for presentation with either solver. `--screenshot PATH` sets the
+interactive screenshot filename, defaulting to `mandelbrot.png`; saving replaces that file.
+`--width`/`--height` accept 1–8192, `--iterations` accepts 32–4096, and `--samples`
+accepts 1–16. `--real`, `--imag`, and `--span` set the initial view.
+
+The image matches the window's framebuffer resolution and preserves the complex plane's
+aspect ratio when resized. Moving uses one sample per pixel; when input stops, a second
+pass blends the selected number of subpixel colors (default four; `--samples 1`
+disables refinement). Samples use prefixes of a fixed 16-point Halton lookup table,
+with radical inverses in bases 2 and 3.
+Headless output and screenshots use the selected sample count immediately.
+The default budget is 256 iterations
+per sample, with early escape and shortcuts for the main cardioid and period-two bulb.
+The image is recomputed only after a change or for that refinement pass.
+Zoom stops at a vertical span of `framebuffer_height * 1e-6` to leave room for subpixel
+offsets with float32 coordinates near the Mandelbrot set.
+
+- **Arrows / WASD:** pan.
+- **Scroll / + / −:** zoom around the center.
+- **[ / ]:** halve or double the iteration budget (32–4096).
+- **R / Home:** reset the view and restore 256 iterations.
+- **P:** save the current view as a PNG screenshot at framebuffer resolution.
+- **Escape:** close.
+
+Black pixels have not escaped within the chosen budget; this does not prove membership.
+Run the exported `test` entry for known orbits, the strict escape-radius boundary,
+pixel coordinates, and zoom limits: `resin examples/eg011_mandelbrot.resin:test`.
+
+`window:wait_events(seconds)?` waits for input or a timeout and commits the same input
+snapshot as `poll_events`. Use either operation once per frame; the timeout must be finite
+and positive. The explorer uses it to avoid spinning while idle or minimized.
 
 ## Representation details
 

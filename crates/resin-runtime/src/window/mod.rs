@@ -78,6 +78,15 @@ impl ResinWindow {
         self.native.input.borrow_mut().commit();
     }
 
+    pub fn wait_events(&self, timeout: f64) -> Result<(), ResinStatus> {
+        if !timeout.is_finite() || timeout <= 0.0 {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        unsafe { glfw_sys::glfwWaitEventsTimeout(timeout) };
+        self.native.input.borrow_mut().commit();
+        Ok(())
+    }
+
     pub fn should_close(&self) -> bool {
         unsafe { glfw_sys::glfwWindowShouldClose(self.native.handle) != glfw_sys::GLFW_FALSE }
     }

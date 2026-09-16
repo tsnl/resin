@@ -372,6 +372,7 @@ fn recorded_gpu_work_denies_cpu_access_through_all_aliases() {
     for access in [
         "let mut value = values:at(0_ul):load();",
         "values:at(0_ul):store(7_ui);",
+        "let source = [7_ui]; values:copy_from(Span<uint> { data = &source:at(0_ul), length = 1_ul });",
     ] {
         let source = COMPUTE.replace(
             "ACTION",
@@ -580,6 +581,7 @@ const VIEW_PRIMITIVES: &str = r#"intrinsic "gpu_view_allocate" fn allocate<N>(gp
     intrinsic "gpu_view_store" fn store<T>(view: GpuView, value: T) -> ();
     intrinsic "gpu_view_replace" fn replace<T>(view: GpuView, value: T) -> T;
     intrinsic "gpu_view_copy_to" fn copy_to<T>(view: GpuView, count: ulong, destination: Ptr<T>, length: ulong) -> ();
+    intrinsic "gpu_view_copy_from" fn copy_from<T>(view: GpuView, capacity: ulong, source: Ptr<T>, count: ulong) -> ();
     struct DeviceScalar<T> {
         view: GpuView,
         
@@ -638,6 +640,12 @@ fn gpu_view_primitives_preserve_access_bounds_and_alignment_checks() {
         ("let mut value = offset(view, 1, 4, 4);", "misaligned"),
         ("let mut value = offset(view, 8, 4, 4);", "out of bounds"),
         ("copy_to(view, 2, &result:at(0), 1);", "too short"),
+        ("copy_from(view, 1, &result:at(0), 2);", "too short"),
+        (
+            "copy_from(restrict(view, 1), 2, &result:at(0), 2);",
+            "permission",
+        ),
+        ("copy_from(view, 3, &result:at(0), 3);", "out of bounds"),
     ] {
         let source = format!(
             r#"export {{ main }};
@@ -645,7 +653,9 @@ fn gpu_view_primitives_preserve_access_bounds_and_alignment_checks() {
             {VIEW_PRIMITIVES}
             fn main() -> (int | Err<_>)  {{
                 let mut view = allocate_ints(2)?;
-                let mut result = [0_i, 0_i];
+                // Keep the host source valid when testing a three-element copy
+                // against the shorter GPU allocation.
+                let mut result = [0_i, 0_i, 0_i];
                 {operation}(0)
             }}
         "#
@@ -696,6 +706,8 @@ fn gpu_sequences_allow_empty_tail_views_and_report_allocation_overflow() {
             alias:copy_to(Span<uint> { data = Ptr<uint>(0_ul), length = 0_ul });
             let mut zero = gpu:alloc::<uint>(0_ul)?;
             zero:copy_to(Span<uint> { data = Ptr<uint>(0_ul), length = 0_ul });
+            alias:copy_from(Span<uint> { data = Ptr<uint>(0_ul), length = 0_ul });
+            zero:copy_from(Span<uint> { data = Ptr<uint>(0_ul), length = 0_ul });
             let mut overflow = match (gpu:alloc::<uint>(18446744073709551615_ul)) {
                 GpuSpan<uint>(allocated) => { 0_i },
                 Err(error) => { runtime_status_code(error) },
@@ -741,4 +753,26 @@ fn gpu_sequences_reject_out_of_bounds_indices_and_overflowing_ranges() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+
+#[test]
+fn host_upload_copies_only_the_source_length_into_a_gpu_slice() {
+    let Some(output) = run(r#"export { main };
+        import { "$/gpu.resin", "$/span.resin" };
+        fn main() -> () | Err<_> {
+            let gpu = gpu_new()?;
+            let values = gpu:alloc::<uint>(5_ul)?;
+            let initial = [10_ui, 20_ui, 30_ui, 40_ui, 50_ui];
+            values:copy_from(Span<uint> { data = &initial:at(0_ul), length = 5_ul });
+            let patch = [7_ui, 8_ui];
+            values:slice(1_ul, 3_ul):write_only():copy_from(Span<uint> { data = &patch:at(0_ul), length = 2_ul });
+            let result = [0_ui, 0_ui, 0_ui, 0_ui, 0_ui];
+            values:copy_to(Span<uint> { data = &result:at(0_ul), length = 5_ul });
+            assert(result:at(0_ul) == 10_ui && result:at(1_ul) == 7_ui && result:at(2_ul) == 8_ui);
+            assert(result:at(3_ul) == 40_ui && result:at(4_ul) == 50_ui);
+        }
+    "#) else {
+        return;
+    };
+    success(&output);
 }

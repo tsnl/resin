@@ -247,6 +247,10 @@ fn array_and_span_indexing_use_element_sizes() {
 fn numbered_examples_compile_as_strict_c11() {
     for entry in fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/examples")).unwrap() {
         let path = entry.unwrap().path();
+        // The interactive example has a bounded window test in mandelbrot.rs.
+        if path.ends_with("eg011_mandelbrot.resin") {
+            continue;
+        }
         if path.extension().is_some_and(|ext| ext == "resin")
             && path
                 .file_stem()

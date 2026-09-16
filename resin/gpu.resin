@@ -1,4 +1,4 @@
-export { Gpu, GpuPtr, GpuSpan, GpuComputePipeline, GpuGraphicsPipeline, GpuImage, GpuPipelineOwner, GpuCommands, memory_default, memory_gpu, memory_readback, ResinGpu, ResinGpuDeviceInfo, ResinImage, ResinPipeline, ResinCommandBuffer, load, store, replace, slice, read_only, write_only, at, copy_to, native, compute_workgroup_size, gpu_device_count, gpu_enumerate_devices, gpu_new, gpu_new_at, gpu_new_for_window, create, alloc, alloc_in, malloc, create_compute_pipeline, create_graphics_pipeline, create_image, start_command_recording, present, width, height, context, dispatch, begin_rendering, end_rendering, draw, copy_image_to_buffer, submit, cancel, clone };
+export { Gpu, GpuPtr, GpuSpan, GpuComputePipeline, GpuGraphicsPipeline, GpuImage, GpuPipelineOwner, GpuCommands, memory_default, memory_gpu, memory_readback, ResinGpu, ResinGpuDeviceInfo, ResinImage, ResinPipeline, ResinCommandBuffer, load, store, replace, slice, read_only, write_only, at, copy_to, copy_from, native, compute_workgroup_size, gpu_device_count, gpu_enumerate_devices, gpu_new, gpu_new_at, gpu_new_for_window, create, alloc, alloc_in, malloc, create_compute_pipeline, create_graphics_pipeline, create_image, start_command_recording, present, width, height, context, dispatch, begin_rendering, end_rendering, draw, copy_image_to_buffer, submit, cancel, clone };
 
 extern {
 	"resin_runtime.h": {
@@ -99,6 +99,11 @@ fn slice<T>(self: Ref<GpuSpan<T>>, start: ulong, length: ulong) -> GpuSpan<T> {
 
 fn copy_to<T>(self: Ref<GpuSpan<T>>, destination: Span<T>) {
 	gpu_view_copy_to(self.data.view, self.length, destination.data, destination.length);
+}
+
+// Copy a bounded host span into the beginning of a writable GPU span.
+fn copy_from<T>(self: Ref<GpuSpan<T>>, source: Ref<Span<T>>) {
+	gpu_view_copy_from(self.data.view, self.length, source.data, source.length);
 }
 
 fn read_only<T>(self: Ref<GpuSpan<T>>) -> GpuSpan<T> {
@@ -368,6 +373,7 @@ intrinsic "gpu_view_replace" fn gpu_view_replace<T>(view: GpuView, value: T) -> 
 intrinsic "gpu_view_range" fn gpu_view_range<T>(view: GpuView, capacity: ulong, start: ulong, length: ulong) -> GpuView;
 intrinsic "gpu_view_copy_to" fn gpu_view_copy_to<T>(view: GpuView, count: ulong, destination: Ptr<T>, capacity: ulong) -> ();
 intrinsic "gpu_view_restrict" fn gpu_view_restrict(view: GpuView, mask: uint) -> GpuView;
+intrinsic "gpu_view_copy_from" fn gpu_view_copy_from<T>(view: GpuView, capacity: ulong, source: Ptr<T>, count: ulong) -> ();
 intrinsic "gpu_view_copy_image" fn gpu_view_copy_image(view: GpuView, length: ulong, commands: Ptr<ubyte>, image: Ptr<ubyte>) -> int;
 
 fn clone(value: Ref<Gpu>) -> Gpu {

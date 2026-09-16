@@ -937,6 +937,7 @@ impl Specialization<'_, '_> {
                 | Intrinsic::GpuViewStore
                 | Intrinsic::GpuViewReplace
                 | Intrinsic::GpuViewCopyTo
+                | Intrinsic::GpuViewCopyFrom
         ) {
             let [element] = type_args.as_slice() else {
                 return Err(self.instance_error("GPU access requires exactly one element type"));

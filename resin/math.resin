@@ -1,6 +1,35 @@
-export { sqrt, sin, cos };
+export { sqrt, sin, cos, Complex, complex, add, mul, squared, magnitude_squared };
 
 // Host: float32 and float64. Shaders: float32. Angles are in radians.
 intrinsic "sqrt" fn sqrt<T>(value: T) -> T;
 intrinsic "sin" fn sin<T>(value: T) -> T;
 intrinsic "cos" fn cos<T>(value: T) -> T;
+
+struct Complex<T> {
+	real: T,
+	imag: T,
+}
+
+fn complex<T>(real: T, imag: T) -> Complex<T> {
+	Complex<T> { real = real, imag = imag }
+}
+
+fn add<T>(left: Ref<Complex<T>>, right: Ref<Complex<T>>) -> Complex<T> {
+	complex(left.real + right.real, left.imag + right.imag)
+}
+
+fn mul<T>(left: Ref<Complex<T>>, right: Ref<Complex<T>>) -> Complex<T> {
+	// (a + bi)(c + di) = (ac - bd) + i(ad + bc).
+	complex(
+		left.real * right.real - left.imag * right.imag,
+		left.real * right.imag + left.imag * right.real,
+	)
+}
+
+fn squared<T>(value: Ref<Complex<T>>) -> Complex<T> {
+	mul(value, value)
+}
+
+fn magnitude_squared<T>(value: Ref<Complex<T>>) -> T {
+	value.real * value.real + value.imag * value.imag
+}

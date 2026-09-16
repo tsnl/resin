@@ -157,6 +157,7 @@ fn windows_present_resize_and_release_resources() {
         #include <resin_runtime.h>
         #include <assert.h>
         #include <stdio.h>
+        #include <math.h>
         static void check(ResinStatus status) {
             if (status != RESIN_STATUS_SUCCESS) fprintf(stderr, "runtime: %s\n", resin_status_string(status));
             assert(status == RESIN_STATUS_SUCCESS);
@@ -168,6 +169,10 @@ fn windows_present_resize_and_release_resources() {
             ResinStatus status = resin_window_create(96, 64, "Resin test", &window);
             if (status == RESIN_STATUS_WINDOW_UNAVAILABLE) return 77;
             check(status);
+            assert(resin_window_wait_events(window, 0.0) == RESIN_STATUS_INVALID_ARGUMENT);
+            assert(resin_window_wait_events(window, -1.0) == RESIN_STATUS_INVALID_ARGUMENT);
+            assert(resin_window_wait_events(window, INFINITY) == RESIN_STATUS_INVALID_ARGUMENT);
+            assert(resin_window_wait_events(window, NAN) == RESIN_STATUS_INVALID_ARGUMENT);
             status = resin_gpu_create_for_window(window, &gpu);
             if (status == RESIN_STATUS_UNSUPPORTED || status == RESIN_STATUS_VULKAN_UNAVAILABLE) {
                 resin_window_destroy(window);
@@ -201,7 +206,7 @@ fn windows_present_resize_and_release_resources() {
                 /* Drain pending compositor configures before applying a new size.
                    On Wayland, polling afterward can restore the previous size
                    before it has been presented. */
-                check(resin_window_poll_events(window));
+                check(resin_window_wait_events(window, 0.001));
                 if (frame == 4) check(resin_window_set_size(window, 160, 120));
                 if (frame == 16) check(resin_window_set_size(window, 96, 64));
                 uint32_t width = 0, height = 0;
