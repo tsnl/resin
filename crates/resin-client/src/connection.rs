@@ -14,6 +14,7 @@ use std::{
 };
 
 const MAX_JSON_BYTES: usize = 64 * 1024 * 1024;
+const CANCELLATION_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(super) async fn connect(url: &str) -> Result<Client, Error> {
     let base = base_url(url)?;
@@ -405,8 +406,7 @@ async fn bounded_body(mut response: reqwest::Response) -> Result<Vec<u8>, Error>
     Ok(bytes)
 }
 
-/// Keep the original POST alive while resolving cancellation. A 404 can mean the
-/// request has not been admitted yet, so it never ends cancellation retries.
+/// Allow remote cleanup after cancellation, then close a stalled HTTP exchange.
 async fn perform<T>(
     client: &Client,
     request: &str,
@@ -422,6 +422,18 @@ async fn perform<T>(
         _ = cancellation.cancelled() => {},
         result = &mut post => return result,
     }
+    let _ = tokio::time::timeout(CANCELLATION_TIMEOUT, cancel_request(client, request, post)).await;
+    Err(Error::cancelled())
+}
+
+/// A 404 can precede admission. Keep the POST alive while retrying cancellation,
+/// including while draining an acknowledged request, within the caller's deadline.
+async fn cancel_request<T>(
+    client: &Client,
+    request: &str,
+    post: impl Future<Output = Result<T, Error>>,
+) {
+    tokio::pin!(post);
     loop {
         let delete = client
             .http
@@ -431,15 +443,15 @@ async fn perform<T>(
         tokio::pin!(delete);
         tokio::select! {
             biased;
-            _ = &mut post => return Err(Error::cancelled()),
+            _ = &mut post => return,
             response = &mut delete => if response.is_ok_and(|response| response.status() == reqwest::StatusCode::NO_CONTENT) {
                 let _ = post.await;
-                return Err(Error::cancelled());
+                return;
             },
         }
         tokio::select! {
             biased;
-            _ = &mut post => return Err(Error::cancelled()),
+            _ = &mut post => return,
             _ = tokio::time::sleep(Duration::from_millis(25)) => {},
         }
     }
@@ -918,6 +930,83 @@ mod tests {
         assert!(race.finished.load(Ordering::SeqCst));
         assert!(race.deletes.load(Ordering::SeqCst) >= 2);
         server.abort();
+    }
+
+    struct Stalled {
+        posted: tokio::sync::Notify,
+        release: tokio::sync::Notify,
+        deletes: AtomicUsize,
+        cancellation_status: Option<StatusCode>,
+    }
+
+    async fn stalled_cancellation(cancellation_status: Option<StatusCode>) {
+        async fn analyze(State(stalled): State<Arc<Stalled>>) -> impl IntoResponse {
+            stalled.posted.notify_one();
+            stalled.release.notified().await;
+            (
+                StatusCode::from_u16(499).unwrap(),
+                Json(rejected(ErrorCode::Cancelled)),
+            )
+        }
+        async fn cancel(State(stalled): State<Arc<Stalled>>) -> StatusCode {
+            stalled.deletes.fetch_add(1, Ordering::SeqCst);
+            if let Some(status) = stalled.cancellation_status {
+                return status;
+            }
+            std::future::pending().await
+        }
+        let stalled = Arc::new(Stalled {
+            posted: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+            deletes: AtomicUsize::new(0),
+            cancellation_status,
+        });
+        let router = Router::new()
+            .route("/v1/capabilities", get(|| async { Json(advertised()) }))
+            .route("/v1/analyze", post(analyze))
+            .route("/v1/requests/{id}", delete(cancel))
+            .with_state(stalled.clone());
+        let (url, server) = mock(router).await;
+        let client = Client::connect(&url).await.unwrap();
+        let cancellation = Cancellation::new();
+        let request = tokio::spawn({
+            let cancellation = cancellation.clone();
+            async move {
+                client
+                    .analyze(&captured(), None, 1, vec![], &cancellation)
+                    .await
+            }
+        });
+        stalled.posted.notified().await;
+        cancellation.cancel();
+        let outcome =
+            tokio::time::timeout(CANCELLATION_TIMEOUT + Duration::from_secs(2), request).await;
+        // Release the mock response only after observing whether cancellation returned.
+        stalled.release.notify_one();
+        let error = outcome
+            .expect("cancellation must finish while the original POST remains stalled")
+            .unwrap()
+            .unwrap_err();
+        assert!(error.is_cancelled());
+        let deletes = stalled.deletes.load(Ordering::SeqCst);
+        if cancellation_status == Some(StatusCode::NO_CONTENT) {
+            assert_eq!(deletes, 1, "acknowledged cancellation only drains the POST");
+        } else {
+            assert!(
+                deletes >= 2,
+                "unacknowledged cancellation retries until the deadline"
+            );
+        }
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn cancellation_deadline_bounds_stalled_posts_and_cancel_requests() {
+        tokio::join!(
+            stalled_cancellation(Some(StatusCode::NO_CONTENT)),
+            stalled_cancellation(Some(StatusCode::NOT_FOUND)),
+            stalled_cancellation(None),
+        );
     }
 
     #[test]

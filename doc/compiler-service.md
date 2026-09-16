@@ -131,7 +131,9 @@ The full strict serde contract is [resin-protocol/lib.rs](../crates/resin-protoc
 Protocol version is 1; unknown fields and malformed inputs fail explicitly.
 Request bodies and client JSON responses are limited to 64 MiB. Artifact files stream
 separately. Connection/capability negotiation has a 10-second timeout; long builds
-remain cancellable rather than using a fixed build timeout.
+remain cancellable rather than using a fixed build timeout. Once cancelled, clients
+allow up to five seconds for cancellation retries and response cleanup, then close
+the HTTP exchange so a stalled service cannot block editor shutdown indefinitely.
 
 | Route | Contract |
 | --- | --- |
