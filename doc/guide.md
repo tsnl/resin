@@ -1294,10 +1294,12 @@ directly into swapchain images and multiple frames in flight are not implemented
 ### Mandelbrot explorer
 
 Run `resin examples/eg011_mandelbrot.resin` with the compiler service running.
-The default GPU mode solves pixels in a compute shader; `--cpu` runs the same solver
-by calling that exact `compute` entry in a CPU loop. Each invocation handles one
-explicit 8×8 tile, clipped at image edges. Tile origins are prepared on the host;
-large dispatches use batches of tile descriptors within Vulkan's workgroup limit.
+The GPU `compute` entry is a one-line call to `evaluate_segment`; `--cpu` calls
+that same ordinary function in a loop. Each invocation handles up to 32 adjacent
+pixels in one row, clipping the final segment at the right edge. Segment origins
+are prepared on the host; large dispatches use batches of descriptors within
+Vulkan's workgroup limit. `pixels_per_segment` controls the chunk size. Pixels are
+independent, so this grouping is a scheduling choice, not an algorithm requirement.
 Orbit iteration, palette evaluation, and color blending are separate functions,
 using `Complex<float32>` from `$/math.resin`.
 

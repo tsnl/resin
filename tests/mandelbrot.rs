@@ -75,7 +75,67 @@ fn explorer_builds_and_can_render_resize_and_close_in_both_modes() {
 }
 
 #[test]
-fn compute_matches_cpu_for_halton_prefixes_and_partial_tiles() {
+fn a_segment_writes_only_its_own_row_range() {
+    let mut source = std::fs::read_to_string(example()).unwrap().replace(
+        "export { main, test };",
+        "export { main, test, segment_bounds };",
+    );
+    source.push_str(
+        r#"
+        fn segment_bounds() -> () | Err<_> {
+            let plot = plot_new(35, 2);
+            let segments = segments_new(plot.width, plot.height)?;
+            let count = ulong(plot.width) * ulong(plot.height) * 4_ul;
+            let pixels = arc_span_alloc::<ubyte>(count + 1_ul, 123_ub)?;
+            let lut = halton_samples();
+            let root = Parameters { plot = plot:clone(), solver = mandelbrot_new(32),
+                samples = Span<Sample> { data = &lut:at(0_ul), length = 1_ul },
+                segments = segments:get(), pixels = pixels:get():slice(0_ul, count) };
+            assert(segments:get().length == 4_ul);
+            evaluate_segment(0_ul, &root);
+            let mut i = 0_ul;
+            while (i < 32_ul) {
+                assert(pixels:get():at(i * 4_ul + 3_ul) == 255_ub);
+                i = i + 1_ul;
+            };
+            i = 32_ul * 4_ul;
+            while (i <= count) {
+                assert(pixels:get():at(i) == 123_ub);
+                i = i + 1_ul;
+            };
+            evaluate_segment(1_ul, &root);
+            i = 32_ul;
+            while (i < 35_ul) {
+                assert(pixels:get():at(i * 4_ul + 3_ul) == 255_ub);
+                i = i + 1_ul;
+            };
+            i = 35_ul * 4_ul;
+            while (i <= count) {
+                assert(pixels:get():at(i) == 123_ub);
+                i = i + 1_ul;
+            };
+            dispatch_host(&root);
+            evaluate_segment(4_ul, &root);
+            i = 0_ul;
+            while (i < 70_ul) {
+                assert(pixels:get():at(i * 4_ul + 3_ul) == 255_ub);
+                i = i + 1_ul;
+            };
+            assert(pixels:get():at(count) == 123_ub);
+        }
+    "#,
+    );
+    let (_project, executable) = build_example(&source, "segment_bounds");
+    let output = Command::new(executable.path()).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn compute_matches_cpu_for_halton_prefixes_and_partial_segments() {
     let mut source = std::fs::read_to_string(example())
         .unwrap()
         .replace("export { main, test };", "export { main, test, compare };");
@@ -84,12 +144,12 @@ fn compute_matches_cpu_for_halton_prefixes_and_partial_tiles() {
         fn compare() -> () | Err<_> {
             let gpu = gpu_new()?;
             let pipeline = gpu:create_compute_pipeline(compute)?;
-            // Non-square, partial right/bottom tiles and an incomplete workgroup.
+            // Non-square, short row tails and an incomplete final workgroup.
             let plot = plot_new(37, 19);
             let solver = mandelbrot_new(32);
             let count = ulong(plot.width) * ulong(plot.height) * 4_ul;
             let pixels = gpu:alloc::<ubyte>(count + 1_ul)?;
-            let tiles = upload(gpu, tiles_new(plot.width, plot.height)?:get())?;
+            let segments = upload(gpu, segments_new(plot.width, plot.height)?:get())?;
             let lut = halton_samples();
             let positions = upload(gpu, Span<Sample> { data = &lut:at(0_ul), length = 16_ul })?;
             let group_size = gpu:compute_workgroup_size();
@@ -100,14 +160,14 @@ fn compute_matches_cpu_for_halton_prefixes_and_partial_tiles() {
                 // Two explicit slices exercise batch-local invocation indices.
                 let first = HostParameters {
                     plot = plot:clone(), solver = mandelbrot_new(solver.max_iters),
-                    samples = positions:slice(0_ul, ulong(samples)), tiles = tiles:slice(0_ul, 7_ul), pixels = pixels:clone(),
+                    samples = positions:slice(0_ul, ulong(samples)), segments = segments:slice(0_ul, 7_ul), pixels = pixels:clone(),
                 };
                 let second = HostParameters {
                     plot = plot:clone(), solver = mandelbrot_new(solver.max_iters),
-                    samples = positions:slice(0_ul, ulong(samples)), tiles = tiles:slice(7_ul, tiles.length - 7_ul), pixels = pixels:clone(),
+                    samples = positions:slice(0_ul, ulong(samples)), segments = segments:slice(7_ul, segments.length - 7_ul), pixels = pixels:clone(),
                 };
                 commands:dispatch(pipeline, first, uint((7_ul + group_size - 1_ul) / group_size), 1, 1)?;
-                commands:dispatch(pipeline, second, uint((tiles.length - 7_ul + group_size - 1_ul) / group_size), 1, 1)?;
+                commands:dispatch(pipeline, second, uint((segments.length - 7_ul + group_size - 1_ul) / group_size), 1, 1)?;
                 commands:submit()?;
                 let actual = arc_span_alloc::<ubyte>(count + 1_ul, 0_ub)?;
                 pixels:copy_to(actual:get());

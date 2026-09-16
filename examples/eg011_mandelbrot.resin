@@ -135,14 +135,14 @@ fn halton_samples() -> _ {
 }
 
 type Sample = (float32, float32);
-type TileOrigin = (uint, uint);
-const tile_size = 8_ui;
+type SegmentOrigin = (uint, uint);
+const pixels_per_segment = 32_ui;
 
 struct Parameters {
 	plot: Plot,
 	solver: Mandelbrot,
 	samples: Span<Sample>,
-	tiles: Span<TileOrigin>,
+	segments: Span<SegmentOrigin>,
 	pixels: Span<ubyte>,
 }
 
@@ -170,62 +170,56 @@ fn store_pixel(pixels: Ref<Span<ubyte>>, index: ulong, color: Color) {
 	pixels:at(index * 4_ul + 3_ul) = 255_ub;
 }
 
-// One invocation owns one explicit 8x8 tile, clipped at the image edges.
-// This entry is also an ordinary function: CPU execution calls it directly.
-@compute_shader
-fn compute(tile_index: ulong, root: Ptr<Parameters>) {
-	if (tile_index >= root.tiles.length) {
+// Each segment owns up to 32 adjacent pixels in one row. Segment origins come
+// from segments_new; the final segment in each row stops at the right edge.
+fn evaluate_segment(segment_index: ulong, root: Ptr<Parameters>) {
+	if (segment_index >= root.segments.length) {
 		return;
 	};
-	let origin = root.tiles:at(tile_index);
-	let mut y = origin.1;
-	while (y < origin.1 + tile_size && y < root.plot.height) {
-		let mut x = origin.0;
-		while (x < origin.0 + tile_size && x < root.plot.width) {
-			root.pixels:store_pixel(ulong(y) * ulong(root.plot.width) + ulong(x), evaluate_pixel(root, x, y));
-			x = x + 1;
-		};
-		y = y + 1;
+	let origin = root.segments:at(segment_index);
+	let mut x = origin.0;
+	while (x < origin.0 + pixels_per_segment && x < root.plot.width) {
+		root.pixels:store_pixel(ulong(origin.1) * ulong(root.plot.width) + ulong(x), evaluate_pixel(root, x, origin.1));
+		x = x + 1;
 	};
 }
 
 // Explicit origins avoid shader integer division and make dispatch batches simple.
-fn tiles_new(width: uint, height: uint) -> ArcSpan<TileOrigin> | Err<_> {
-	let columns = (ulong(width) + ulong(tile_size) - 1_ul) / ulong(tile_size);
-	let rows = (ulong(height) + ulong(tile_size) - 1_ul) / ulong(tile_size);
-	let tiles = arc_span_alloc::<TileOrigin>(columns * rows, (0_ui, 0_ui))?;
+fn segments_new(width: uint, height: uint) -> ArcSpan<SegmentOrigin> | Err<_> {
+	let columns = (ulong(width) + ulong(pixels_per_segment) - 1_ul) / ulong(pixels_per_segment);
+	let segments = arc_span_alloc::<SegmentOrigin>(columns * ulong(height), (0_ui, 0_ui))?;
 	let mut index = 0_ul;
 	let mut y = 0_ui;
 	while (y < height) {
 		let mut x = 0_ui;
 		while (x < width) {
-			tiles:get():at(index) = (x, y);
+			segments:get():at(index) = (x, y);
 			index = index + 1_ul;
-			x = x + tile_size;
+			x = x + pixels_per_segment;
 		};
-		y = y + tile_size;
+		y = y + 1;
 	};
-	tiles
+	segments
 }
 
 fn clone(self: Ref<Plot>) -> Plot {
 	Plot { width = self.width, height = self.height, center = complex(self.center.real, self.center.imag), span = self.span }
 }
 
-// A serial dispatch adapter, with no separate CPU implementation of the kernel.
+// CPU execution calls the same evaluator as the shader wrapper.
 fn dispatch_host(root: Ptr<Parameters>) {
-	let mut tile = 0_ul;
-	while (tile < root.tiles.length) {
-		compute(tile, root);
-		tile = tile + 1_ul;
+	let mut segment = 0_ul;
+	while (segment < root.segments.length) {
+		evaluate_segment(segment, root);
+		segment = segment + 1_ul;
 	};
 }
 
 fn host_image(plot: Ref<Plot>, solver: Ref<Mandelbrot>, samples: int) -> ArcSpan<ubyte> | Err<_> {
 	let pixels = arc_span_alloc::<ubyte>(ulong(plot.width) * ulong(plot.height) * 4_ul, 0_ub)?;
-	let tiles = tiles_new(plot.width, plot.height)?;
+	let segments = segments_new(plot.width, plot.height)?;
 	let lut = halton_samples();
-	let root = Parameters { plot = plot:clone(), solver = mandelbrot_new(solver.max_iters), samples = Span<Sample> { data = &lut:at(0_ul), length = ulong(samples) }, tiles = tiles:get(), pixels = pixels:get() };
+	let root = Parameters { plot = plot:clone(), solver = mandelbrot_new(solver.max_iters), samples = Span<Sample> { data = &lut:at(0_ul), length = ulong(samples) }, segments = segments:get(), pixels = pixels:get() };
 	dispatch_host(&root);
 	pixels
 }
@@ -238,8 +232,13 @@ struct HostParameters {
 	plot: Plot,
 	solver: Mandelbrot,
 	samples: GpuSpan<Sample>,
-	tiles: GpuSpan<TileOrigin>,
+	segments: GpuSpan<SegmentOrigin>,
 	pixels: GpuSpan<ubyte>,
+}
+
+@compute_shader
+fn compute(segment_index: ulong, root: Ptr<Parameters>) {
+	evaluate_segment(segment_index, root);
 }
 
 @vertex_shader
@@ -278,7 +277,7 @@ struct Renderer {
 	graphics: GpuGraphicsPipeline<Parameters, GpuPipelineOwner>,
 	compute: GpuComputePipeline<Parameters, GpuPipelineOwner>,
 	samples: GpuSpan<Sample>,
-	tiles: GpuSpan<TileOrigin>,
+	segments: GpuSpan<SegmentOrigin>,
 	pixels: GpuSpan<ubyte>,
 	image: GpuImage,
 }
@@ -294,28 +293,28 @@ fn renderer_new(gpu: Gpu, width: uint, height: uint) -> Renderer | Err<_> {
 	let compute_pipeline = gpu:create_compute_pipeline(compute)?;
 	let lut = halton_samples();
 	let samples = upload(gpu, Span<Sample> { data = &lut:at(0_ul), length = 16_ul })?;
-	let tiles = upload(gpu, tiles_new(width, height)?:get())?;
+	let segments = upload(gpu, segments_new(width, height)?:get())?;
 	let pixels = gpu:alloc::<ubyte>(ulong(width) * ulong(height) * 4_ul)?;
 	let image = gpu:create_image(width, height)?;
-	Renderer { gpu = gpu, graphics = graphics, compute = compute_pipeline, samples = samples, tiles = tiles, pixels = pixels, image = image }
+	Renderer { gpu = gpu, graphics = graphics, compute = compute_pipeline, samples = samples, segments = segments, pixels = pixels, image = image }
 }
 
 fn resize(self: Ref<Renderer>, width: uint, height: uint) -> () | Err<_> {
-	self.tiles = upload(self.gpu, tiles_new(width, height)?:get())?;
+	self.segments = upload(self.gpu, segments_new(width, height)?:get())?;
 	self.pixels = self.gpu:alloc::<ubyte>(ulong(width) * ulong(height) * 4_ul)?;
 	self.image = self.gpu:create_image(width, height)?;
 }
 
 fn parameters(self: Ref<Renderer>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, samples: int, start: ulong, count: ulong) -> HostParameters {
-	HostParameters { plot = plot:clone(), solver = mandelbrot_new(solver.max_iters), samples = self.samples:slice(0_ul, ulong(samples)), tiles = self.tiles:slice(start, count), pixels = self.pixels:clone() }
+	HostParameters { plot = plot:clone(), solver = mandelbrot_new(solver.max_iters), samples = self.samples:slice(0_ul, ulong(samples)), segments = self.segments:slice(start, count), pixels = self.pixels:clone() }
 }
 
 fn dispatch_gpu(self: Ref<Renderer>, commands: Ref<GpuCommands>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, samples: int) -> () | Err<_> {
 	let group_size = self.gpu:compute_workgroup_size();
 	let capacity = 65535_ul * group_size;
 	let mut start = 0_ul;
-	while (start < self.tiles.length) {
-		let remaining = self.tiles.length - start;
+	while (start < self.segments.length) {
+		let remaining = self.segments.length - start;
 		let count = if (remaining < capacity) {
 			remaining
 		} else {
@@ -337,7 +336,7 @@ fn render(self: Ref<Renderer>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, samples
 	};
 	// Both execution modes reach the same buffer and presentation pipeline.
 	commands:begin_rendering(self.image, 0.0_f, 0.0_f, 0.0_f, 1.0_f)?;
-	commands:draw(self.graphics, self:parameters(plot, solver, samples, 0_ul, self.tiles.length), 3)?;
+	commands:draw(self.graphics, self:parameters(plot, solver, samples, 0_ul, self.segments.length), 3)?;
 	commands:end_rendering()?;
 	commands:submit()?;
 }
@@ -587,10 +586,10 @@ fn test() {
 	edge.center.real = 2.0_f;
 	edge.span = 2.0_f;
 	let pixels = [0_ub, 0_ub, 0_ub, 0_ub, 123_ub];
-	let tiles = [(0_ui, 0_ui)];
-	let root = Parameters { plot = edge, solver = mandelbrot_new(32), samples = Span<Sample> { data = &lut:at(0_ul), length = 4_ul }, tiles = Span<TileOrigin> { data = &tiles:at(0_ul), length = 1_ul }, pixels = Span<ubyte> { data = &pixels:at(0_ul), length = 4_ul } };
+	let segments = [(0_ui, 0_ui)];
+	let root = Parameters { plot = edge, solver = mandelbrot_new(32), samples = Span<Sample> { data = &lut:at(0_ul), length = 4_ul }, segments = Span<SegmentOrigin> { data = &segments:at(0_ul), length = 1_ul }, pixels = Span<ubyte> { data = &pixels:at(0_ul), length = 4_ul } };
 	dispatch_host(&root);
-	compute(1_ul, &root);
+	evaluate_segment(1_ul, &root);
 	let first = palette(1);
 	let second = palette(2);
 	assert(pixels:at(0_ul) == channel((first.r + second.r) * 0.5_f));
