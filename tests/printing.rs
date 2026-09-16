@@ -223,7 +223,7 @@ fn invalid_print_types_are_rejected() {
         ),
         (
             r#"export { main }; import { "$/string.resin" }; def main() -> () = { print(fmt(1, (2,))); };"#,
-            "TypeMismatch",
+            "destination union",
         ),
         (
             r#"export { main }; import { "$/string.resin" }; def main() -> () = { print(fmt("hello")); };"#,
