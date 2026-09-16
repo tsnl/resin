@@ -247,19 +247,27 @@ async fn build_native(
     )
     .await
     .map_err(compilation)?;
-    let tools = server
-        .config
-        .tools
-        .fingerprint(&server.execution, cancellation)
-        .await
-        .map_err(compilation)?;
+    let shader_tools = if shaders.is_empty() {
+        String::new()
+    } else {
+        server
+            .config
+            .tools
+            .fingerprint(
+                resin_toolchain::NativeOperation::Shader,
+                &server.execution,
+                cancellation,
+            )
+            .await
+            .map_err(compilation)?
+    };
     let optimized = publication::select(
         &server.caches.optimized,
         shaders
             .values()
             .map(|bytes| ToolBytesKey {
                 bytes: bytes.as_ref().clone(),
-                tools: tools.clone(),
+                tools: shader_tools.clone(),
             })
             .collect(),
         |key| async move {
@@ -294,7 +302,16 @@ async fn build_native(
         } else {
             let key = ForeignKey {
                 inputs: foreign_inputs,
-                tools: tools.clone(),
+                tools: server
+                    .config
+                    .tools
+                    .fingerprint(
+                        resin_toolchain::NativeOperation::Foreign,
+                        &server.execution,
+                        cancellation,
+                    )
+                    .await
+                    .map_err(compilation)?,
             };
             Some(
                 publication::select(
@@ -330,7 +347,7 @@ async fn build_native(
             .map(|(key, bytes)| {
                 let optimized = optimized[&ToolBytesKey {
                     bytes: bytes.as_ref().clone(),
-                    tools: tools.clone(),
+                    tools: shader_tools.clone(),
                 }]
                     .as_ref()
                     .clone();
@@ -382,6 +399,16 @@ async fn build_native(
     if let Some(foreign) = foreign_object {
         objects.push(foreign.bytes());
     }
+    let tools = server
+        .config
+        .tools
+        .fingerprint(
+            resin_toolchain::NativeOperation::Link { runtime: true },
+            &server.execution,
+            cancellation,
+        )
+        .await
+        .map_err(compilation)?;
     link(
         server,
         LinkKey {

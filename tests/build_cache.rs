@@ -103,14 +103,14 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
     printed(&run(), b"true");
     assert_eq!(calls(), 1);
     assert_eq!(project.calls(), 1);
-    // A changed shader tool rebuilds identical SPIR-V. Its unchanged header must
-    // settle after this rebuild instead of keeping native compilation dirty.
+    // A changed optimizer rebuilds identical SPIR-V. The retained native object
+    // and executable depend on those bytes, so neither needs rebuilding.
     let wrapper = fs::read_to_string(&shader_compiler).unwrap();
     fs::write(&shader_compiler, format!("{wrapper}# updated wrapper\n")).unwrap();
     printed(&run(), b"true");
     printed(&run(), b"true");
     assert_eq!(calls(), 2);
-    assert_eq!(project.calls(), 2);
+    assert_eq!(project.calls(), 1);
     fs::write(
         &helper,
         "export { pixel }; def pixel (i: uint) -> uint = { i + uint (2) };",
@@ -118,7 +118,7 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
     .unwrap();
     printed(&run(), b"true");
     assert_eq!(calls(), 3);
-    assert_eq!(project.calls(), 3);
+    assert_eq!(project.calls(), 2);
     fs::write(
         &helper,
         "export { pixel }; def pixel (i: uint) -> uint = { i / uint (2) };",
@@ -128,7 +128,7 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     assert_eq!(calls(), 3);
-    assert_eq!(project.calls(), 3);
+    assert_eq!(project.calls(), 2);
 }
 
 struct Project {
@@ -466,23 +466,31 @@ fn runtime_headers_and_archive_changes_invalidate_the_cache() {
     printed(&run(), b"first");
     printed(&run(), b"first");
     assert_eq!(project.calls(), 1);
+    let before = project.service.server.counters();
     let header = include.join("resin_runtime/print.h");
     let mut text = fs::read_to_string(&header).unwrap();
     text.push_str("\n// changed header\n");
     fs::write(header, text).unwrap();
     printed(&run(), b"first");
-    assert_eq!(project.calls(), 2);
+    let after = project.service.server.counters();
+    assert_eq!(after.foreign_builds, before.foreign_builds + 1);
+    assert_eq!(after.native_object_builds, before.native_object_builds);
+    assert_eq!(
+        project.calls(),
+        1,
+        "a header comment leaves adapter bytes unchanged"
+    );
 
     fs::write(&library, "not a library").unwrap();
     let output = run();
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
-    assert_eq!(project.calls(), 3);
+    assert_eq!(project.calls(), 2);
     fs::copy(original, &library).unwrap();
     printed(&run(), b"first");
     assert_eq!(
         project.calls(),
-        3,
+        2,
         "restoring the original runtime reuses its retained executable"
     );
 }

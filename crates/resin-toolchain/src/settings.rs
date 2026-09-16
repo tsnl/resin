@@ -1,5 +1,5 @@
 //! Explicit host settings supplied by the compiler's caller.
-use crate::{CProfile, Error, NativeInputs, files, platform};
+use crate::{CProfile, Error, NativeInputs, NativeOperation, files, platform};
 use resin_executor::Cancellation;
 use std::{
     collections::{BTreeMap, HashSet},
@@ -248,35 +248,86 @@ impl Settings {
         Ok(format!("{}\n", hash.finalize().to_hex()))
     }
 
-    /// Unlike Ninja's preprocessed-input state, external result caches need the
-    /// complete explicitly configured SDK context as well as tool identities.
-    pub(super) async fn external_fingerprint(
+    /// Native operations consume different tools. In particular, object linking
+    /// reads neither Resin source nor the C frontend and its header installation.
+    pub(super) async fn operation_fingerprint(
         &self,
+        operation: NativeOperation,
         cancellation: &Cancellation,
     ) -> Result<String, Error> {
         let mut hash = blake3::Hasher::new();
-        state_bytes(&mut hash, b"resin-external-tools-v1");
-        state_bytes(&mut hash, self.fingerprint(cancellation).await?.as_bytes());
-        hash_contents(&self.clang, &mut hash, cancellation).await?;
-        if let Some(libclang) = &self.libclang {
-            hash_contents(libclang, &mut hash, cancellation).await?;
+        state_bytes(&mut hash, b"resin-native-operation-v1");
+        state_bytes(&mut hash, std::env::consts::OS.as_bytes());
+        state_bytes(&mut hash, std::env::consts::ARCH.as_bytes());
+        hash.update(&(self.environment.len() as u64).to_le_bytes());
+        for (name, value) in &self.environment {
+            state_string(&mut hash, name);
+            state_string(&mut hash, value);
         }
-        for name in [
-            "CPATH",
-            "C_INCLUDE_PATH",
-            "CPLUS_INCLUDE_PATH",
-            "INCLUDE",
-            "LIB",
-            "LIBPATH",
-            "LIBRARY_PATH",
-        ] {
-            if let Some(paths) = self.environment.get(OsStr::new(name)) {
+        state_string(&mut hash, self.directory.as_os_str());
+        match operation {
+            NativeOperation::Foreign => {
+                state_bytes(&mut hash, b"foreign");
+                hash_contents(&self.clang, &mut hash, cancellation).await?;
+                let library = crate::interop::library(self)?;
+                hash_contents(&library, &mut hash, cancellation).await?;
+                hash_contents(&self.runtime_include, &mut hash, cancellation).await?;
+                self.hash_search_roots(
+                    &[
+                        "CPATH",
+                        "C_INCLUDE_PATH",
+                        "CPLUS_INCLUDE_PATH",
+                        "OBJC_INCLUDE_PATH",
+                        "INCLUDE",
+                    ],
+                    &mut hash,
+                    cancellation,
+                )
+                .await?;
+            }
+            NativeOperation::Shader => {
+                state_bytes(&mut hash, b"shader");
+                hash_contents(&self.spirv_opt, &mut hash, cancellation).await?;
+            }
+            NativeOperation::Link { runtime } => {
+                state_bytes(&mut hash, b"link");
+                hash.update(&[u8::from(runtime)]);
+                hash_contents(&self.cc, &mut hash, cancellation).await?;
+                if runtime {
+                    hash_contents(&self.runtime_library, &mut hash, cancellation).await?;
+                }
+                self.hash_search_roots(
+                    &["LIB", "LIBPATH", "LIBRARY_PATH"],
+                    &mut hash,
+                    cancellation,
+                )
+                .await?;
+            }
+        }
+        Ok(hash.finalize().to_hex().to_string())
+    }
+
+    async fn hash_search_roots(
+        &self,
+        names: &[&str],
+        hash: &mut blake3::Hasher,
+        cancellation: &Cancellation,
+    ) -> Result<(), Error> {
+        for name in names {
+            let entry = self.environment.iter().find(|(key, _)| {
+                if cfg!(windows) {
+                    key.as_encoded_bytes().eq_ignore_ascii_case(name.as_bytes())
+                } else {
+                    key == &OsStr::new(name)
+                }
+            });
+            if let Some((_, paths)) = entry {
                 for path in std::env::split_paths(paths) {
-                    hash_contents(&self.directory.join(path), &mut hash, cancellation).await?;
+                    hash_contents(&self.directory.join(path), hash, cancellation).await?;
                 }
             }
         }
-        Ok(format!("{}\n", hash.finalize().to_hex()))
+        Ok(())
     }
 }
 

@@ -190,6 +190,14 @@ impl ForeignObject {
     }
 }
 
+/// Native operation whose configured tools and SDK inputs form a cache identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeOperation {
+    Foreign,
+    Shader,
+    Link { runtime: bool },
+}
+
 /// Resolved tools and their immutable execution environment.
 #[derive(Clone)]
 pub struct Toolchain {
@@ -197,16 +205,25 @@ pub struct Toolchain {
 }
 
 impl Toolchain {
-    /// Capture the current identity of configured tools, runtime and explicit SDK roots.
-    /// Applications include this value in external-result cache keys. Installations
-    /// must remain stable from this capture until the corresponding operation finishes.
+    /// Hash the configured inputs used by this operation, including tool file contents.
+    /// Unused tools are neither discovered nor read. Explicit header/library roots
+    /// are captured where relevant; default SDK installations must stay stable for
+    /// the service lifetime. Inputs must stay stable until the operation completes.
     pub async fn fingerprint(
         &self,
+        operation: NativeOperation,
         execution: &Execution,
         cancellation: &Cancellation,
     ) -> Result<String, Error> {
-        let _permit = execution.acquire(cancellation).await?;
-        self.settings.external_fingerprint(cancellation).await
+        let settings = self.settings.clone();
+        let execution = execution.clone();
+        process::supervise(cancellation, move |cancellation| async move {
+            let _permit = execution.acquire(&cancellation).await?;
+            settings
+                .operation_fingerprint(operation, &cancellation)
+                .await
+        })
+        .await
     }
 
     /// Compile only scalar C interoperability adapters. CLANG selects the compiler;

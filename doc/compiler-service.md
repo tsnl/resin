@@ -114,7 +114,7 @@ Default capacities are **entries**, not bytes:
 | Input handles | 64 |
 | Source / CST / AST, each | 4096 |
 | HIR / verified LIR, each | 64 |
-| Generated projects | 32 |
+| Foreign adapters / raw shaders / optimized shaders / native objects / executables, each | 32 |
 | Simultaneously admitted HTTP requests | 64 |
 
 `resin-server --cache-capacity N` overrides every cache; `--requests N` sets positive

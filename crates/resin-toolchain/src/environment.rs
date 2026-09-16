@@ -7,12 +7,11 @@ use std::{
 
 impl Environment {
     pub(super) fn resolve_tools(&self, cc: Option<&OsStr>, spirv_opt: Option<&OsStr>) -> Toolchain {
+        let clang = self.optional_tool(self.compiler(None, "CLANG", "clang"));
         let settings = Settings {
             cc: self.optional_tool(self.compiler(cc, "CC", crate::DEFAULT_C_COMPILER)),
-            clang: self.optional_tool(self.compiler(None, "CLANG", "clang")),
-            libclang: self
-                .variable("LIBCLANG_PATH")
-                .map(|path| self.directory.join(path)),
+            libclang: self.libclang(&clang),
+            clang,
             spirv_opt: self.optional_tool(self.compiler(spirv_opt, "SPIRV_OPT", "spirv-opt")),
             ninja: self.optional_tool(self.compiler(None, "NINJA", "ninja")),
             runtime_include: self.path(
@@ -28,6 +27,34 @@ impl Environment {
         Toolchain {
             settings: std::sync::Arc::new(settings),
         }
+    }
+
+    fn libclang(&self, compiler: &Path) -> Option<PathBuf> {
+        let filename = crate::interop::library_filename();
+        if let Some(path) = self.variable("LIBCLANG_PATH") {
+            let path = self.directory.join(path);
+            return Some(if path.is_dir() {
+                path.join(filename)
+            } else {
+                path
+            });
+        }
+        // Common Clang installations keep CIndex beside the driver or in ../lib.
+        // Capture the selected file once; unusual wrappers can set LIBCLANG_PATH.
+        for compiler in
+            std::iter::once(compiler.to_path_buf()).chain(std::fs::canonicalize(compiler).ok())
+        {
+            let directory = compiler.parent()?;
+            for candidate in [
+                directory.join(&filename),
+                directory.join("../lib").join(&filename),
+            ] {
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+        None
     }
 
     fn compiler<'a>(

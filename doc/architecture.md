@@ -475,6 +475,14 @@ roots. This is input ownership validation; native tools still execute under the 
 account. Operators control process and network isolation. Tool settings and SDK inputs
 belong to the service, and no build request selects a local executable or compiler flag.
 
+Cache validation hashes tool contents separately for foreign adapters, shader
+optimization, and linking. Header compilation hashes the selected Clang executable,
+the actual libclang shared library, runtime headers, and explicit header search
+roots. Linking hashes its driver, runtime archive, and explicit library roots.
+Unneeded stages do not inspect their tools. Implicit SDK installations must remain
+stable during a service lifetime; restart after replacing them. Explicit inputs must
+remain stable between validation and completion of the native operation.
+
 `Toolchain::optimize_shader` runs the configured `spirv-opt -O` on immutable SPIR-V.
 The server supplies optimized bytes to Cranelift, which embeds aligned data with its
 exact length. `Toolchain::link_native` links completed objects with the runtime archive.

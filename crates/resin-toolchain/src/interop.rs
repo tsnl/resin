@@ -43,7 +43,7 @@ pub(super) async fn compile(
         .filter(|path| path != Path::new("foreign.c"))
         .map(|path| logical_path(&path, directory.path()))
         .collect::<Vec<_>>();
-    let library = library(settings, cancellation).await?;
+    let library = library(settings)?;
     let captured = fs::read(directory.path().join("foreign.i")).await?;
     let parse_root = directory.path().to_path_buf();
     let functions = inputs.functions.clone();
@@ -117,43 +117,17 @@ async fn preprocess(
     Ok(())
 }
 
-async fn library(settings: &Settings, cancellation: &Cancellation) -> Result<PathBuf, Error> {
+pub(super) fn library_filename() -> OsString {
     #[cfg(windows)]
-    let filename = OsString::from("libclang.dll");
+    return OsString::from("libclang.dll");
     #[cfg(not(windows))]
-    let filename = libloading::library_filename("clang");
-    if let Some(path) = &settings.libclang {
-        return Ok(if fs::metadata(path).await?.is_dir() {
-            path.join(filename)
-        } else {
-            path.clone()
-        });
-    }
-    let mut command = settings.command(&settings.clang)?;
-    command.arg("-print-resource-dir");
-    let (output, _) = process::capture(command, "Clang resource discovery", cancellation).await?;
-    let resource = PathBuf::from(
-        String::from_utf8(output)
-            .map_err(|error| Error::new(error.to_string()))?
-            .trim(),
-    );
-    let adjacent = settings
-        .clang
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(&filename);
-    if fs::try_exists(&adjacent).await? {
-        return Ok(adjacent);
-    }
-    let path = resource
-        .ancestors()
-        .nth(2)
-        .unwrap_or(Path::new("."))
-        .join(filename);
-    if fs::try_exists(&path).await? {
-        return Ok(path);
-    }
-    Err(Error::new("cannot locate libclang beside the selected Clang installation; set LIBCLANG_PATH to its library file or directory".into()))
+    return libloading::library_filename("clang");
+}
+
+pub(super) fn library(settings: &Settings) -> Result<PathBuf, Error> {
+    settings.libclang.clone().ok_or_else(|| Error::new(
+        "cannot locate libclang beside the selected Clang installation; set LIBCLANG_PATH to its library file or directory".into()
+    ))
 }
 
 fn wrapper(inputs: &ForeignInputs) -> Result<String, Error> {
