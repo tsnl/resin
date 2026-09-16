@@ -5,7 +5,7 @@ struct Input { kind: uint, value: float32, wide: ulong, }
 struct Output { progress: uint, value: ulong, }
 struct Root { count: ulong, inputs: Ptr<Input>, outputs: Ptr<Output>, }
 
-fn convert(input: Input) -> ulong  {
+fn convert(input: Ref<Input>) -> ulong  {
 	if (input.kind == 0_ui) {
 		ulong(ubyte(input.value))
 	} else {
@@ -38,14 +38,14 @@ fn convert(input: Input) -> ulong  {
 	}
 }
 
-fn ready(input: Input, progress: Ptr<uint>) -> bool  {
+fn ready(input: Ref<Input>, progress: Ptr<uint>) -> bool  {
 	progress.* = 2_ui;
 	convert(input);
 	progress.* = 3_ui;
 	1_ui == 1_ui
 }
 
-fn in_loop(input: Input, progress: Ptr<uint>) -> ulong  {
+fn in_loop(input: Ref<Input>, progress: Ptr<uint>) -> ulong  {
 	let mut step = 0_ui;
 	let mut result = 0_ul;
 	while (step < 1_ui && ready(input, progress)) {
@@ -60,10 +60,12 @@ fn kernel(index: ulong, root: Ptr<Root>)  {
 	if (index < root.count) {
 		let mut inputs = Span<Input> { data = root.inputs, length = root.count };
 		let mut outputs = Span<Output> { data = root.outputs, length = root.count };
-		let mut output: Ref<Output> = outputs:at(index);
+		let mut output: Ref<Output> = fixture_index(outputs.data, outputs.length, index).*;
 		output.progress = 1_ui;
-		let mut value = in_loop(inputs:at(index), &output.progress);
+		let mut value = in_loop(fixture_index(inputs.data, inputs.length, index).*, &output.progress);
 		output.value = value;
 		output.progress = 4_ui;
 	};
 }
+
+intrinsic "pointer_index" fn fixture_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;

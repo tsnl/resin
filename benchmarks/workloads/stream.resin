@@ -2,6 +2,8 @@ export { Root, kernel, cpu };
 
 import { "$/span.resin" };
 
+intrinsic "pointer_index" fn device_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;
+
 struct Root {
 	count: uint,
 	iterations: uint,
@@ -15,7 +17,7 @@ fn kernel(index: ulong, root: Ptr<Root>) {
 	if (index < ulong(root.count)) {
 		let mut input = Span<uint> { data = root.input, length = ulong(root.count) };
 		let mut output = Span<uint> { data = root.output, length = ulong(root.count) };
-		output:at(index) = input:at(index) * 1664525_ui + uint(index);
+		device_index(output.data, output.length, index).* = device_index(input.data, input.length, index).* * 1664525_ui + uint(index);
 	};
 }
 

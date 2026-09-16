@@ -277,6 +277,7 @@ pub(in crate::lower) fn file(
         &checker.typing.solver,
         checker.typing.typer,
         &checker.typing.methods,
+        &checker.function_ids,
     );
     let Checker {
         mut typing,
@@ -1330,6 +1331,142 @@ impl Expression<'_, '_> {
         Ok((kind, equate))
     }
 
+    fn type_application(
+        &mut self,
+        func: &resin_ast::Term,
+        type_args: &[resin_ast::Type],
+        span: Span,
+        out: Type,
+    ) -> Result<(TermKind, Option<Type>)> {
+        let mut equate = None;
+        let arguments: Vec<_> = type_args
+            .iter()
+            .map(|ann| self.annotation(ann, true).ty)
+            .collect();
+        for argument in &arguments {
+            super::eval::reference_type(&self.checker.typing.solver, argument, false, span)?;
+        }
+        let kind = match &func.val {
+            resin_ast::TermKind::Var { name } => {
+                if let Some(reference) =
+                    self.overload_reference(name, Some(arguments.clone()), out.clone())
+                {
+                    reference
+                } else {
+                    let (declaration, ty, type_args) = self.checker.value(name, Some(arguments))?;
+                    equate = Some(ty);
+                    TermKind::Var {
+                        declaration,
+                        name: name.clone(),
+                        type_args,
+                    }
+                }
+            }
+            resin_ast::TermKind::Field { base, name } => {
+                let base = self.child(base, None);
+                let TermKind::Type { ty } = base.kind else {
+                    return Err(GenerateError::inference(
+                        span,
+                        "method references require a type receiver",
+                    ));
+                };
+                self.method_reference(ty, name, Some(arguments), out.clone())
+            }
+            _ => {
+                return Err(GenerateError::inference(
+                    span,
+                    "type arguments require a function declaration",
+                ));
+            }
+        };
+        Ok((kind, equate))
+    }
+
+    fn match_expression(
+        &mut self,
+        value: &resin_ast::Term,
+        arms: &[resin_ast::MatchArm],
+        out: &Type,
+    ) -> TermKind {
+        let input = self.child(value, None);
+        let mut checked = vec![];
+        for arm in arms {
+            self.checker.scopes.push_at(arm.body.span);
+            let payload = self.checker.typing.solver.fresh();
+            let (variant, pattern) = match &arm.variant {
+                resin_ast::MatchVariant::Wildcard => (None, Pattern::Error),
+                resin_ast::MatchVariant::Error => (None, Pattern::Error),
+                resin_ast::MatchVariant::Type(ty) => {
+                    let ann = self.annotation(ty, false);
+                    let ty = ann.ty.clone();
+                    (Some(ann.into_tree()), Pattern::Type(ty))
+                }
+            };
+            if !matches!(arm.variant, resin_ast::MatchVariant::Wildcard) {
+                self.constrain((
+                    arm.body.span,
+                    Constraint::Variant(input.ty.clone(), pattern, payload.clone()),
+                ));
+            }
+            let binding = arm.pattern.as_ref().and_then(|pattern| {
+                self.checker
+                    .bind(&pattern.name, payload, DefinitionKind::Variable)
+                    .map_err(|error| self.checker.errors.push(error))
+                    .ok()
+            });
+            let body = self.child(&arm.body, Some(out.clone()));
+            checked.push(MatchArm {
+                error: matches!(arm.variant, resin_ast::MatchVariant::Error),
+                wildcard: matches!(arm.variant, resin_ast::MatchVariant::Wildcard),
+                mutable: arm.pattern.as_ref().is_some_and(|pattern| pattern.mutable),
+                binding,
+                variant,
+                body,
+            });
+            self.checker.scopes.pop();
+        }
+        TermKind::Match {
+            value: Box::new(input),
+            arms: checked,
+        }
+    }
+
+    fn receiver_call(
+        &mut self,
+        receiver: &resin_ast::Term,
+        name: &Ident,
+        type_args: &[resin_ast::Type],
+        args: &[resin_ast::Term],
+        span: Span,
+        context: (Option<Type>, Type),
+    ) -> Result<Term> {
+        let (expected, out) = context;
+        let mut func = resin_ast::Term {
+            span: name.span,
+            val: resin_ast::TermKind::Var { name: name.clone() },
+        };
+        if !type_args.is_empty() {
+            func = resin_ast::Term {
+                span: name.span,
+                val: resin_ast::TermKind::TypeApply {
+                    function: Box::new(func),
+                    args: type_args.to_vec(),
+                },
+            };
+        }
+        let args = std::iter::once(receiver.clone())
+            .chain(args.iter().cloned())
+            .collect();
+        let call = resin_ast::Term {
+            span,
+            val: resin_ast::TermKind::Call {
+                func: Box::new(func),
+                args,
+            },
+        };
+        self.term_inner(&call, expected, out)
+    }
+
     fn term_inner(
         &mut self,
         term: &resin_ast::Term,
@@ -1343,30 +1480,7 @@ impl Expression<'_, '_> {
             args,
         } = &term.val
         {
-            let mut func = resin_ast::Term {
-                span: name.span,
-                val: resin_ast::TermKind::Var { name: name.clone() },
-            };
-            if !type_args.is_empty() {
-                func = resin_ast::Term {
-                    span: name.span,
-                    val: resin_ast::TermKind::TypeApply {
-                        function: Box::new(func),
-                        args: type_args.clone(),
-                    },
-                };
-            }
-            let args = std::iter::once(receiver.as_ref().clone())
-                .chain(args.iter().cloned())
-                .collect();
-            let call = resin_ast::Term {
-                span: term.span,
-                val: resin_ast::TermKind::Call {
-                    func: Box::new(func),
-                    args,
-                },
-            };
-            return self.term_inner(&call, expected, out);
+            return self.receiver_call(receiver, name, type_args, args, term.span, (expected, out));
         }
         let propagate = matches!(
             term.val,
@@ -1476,56 +1590,10 @@ impl Expression<'_, '_> {
                     }
                 }
             }
-            resin_ast::TermKind::TypeApply {
-                function: func,
-                args: type_args,
-            } => {
-                let arguments: Vec<_> = type_args
-                    .iter()
-                    .map(|ann| self.annotation(ann, true).ty)
-                    .collect();
-                for argument in &arguments {
-                    super::eval::reference_type(
-                        &self.checker.typing.solver,
-                        argument,
-                        false,
-                        span,
-                    )?;
-                }
-                match &func.val {
-                    resin_ast::TermKind::Var { name } => {
-                        if let Some(reference) =
-                            self.overload_reference(name, Some(arguments.clone()), out.clone())
-                        {
-                            reference
-                        } else {
-                            let (declaration, ty, type_args) =
-                                self.checker.value(name, Some(arguments))?;
-                            equate = Some(ty);
-                            TermKind::Var {
-                                declaration,
-                                name: name.clone(),
-                                type_args,
-                            }
-                        }
-                    }
-                    resin_ast::TermKind::Field { base, name } => {
-                        let base = self.child(base, None);
-                        let TermKind::Type { ty } = base.kind else {
-                            return Err(GenerateError::inference(
-                                span,
-                                "method references require a type receiver",
-                            ));
-                        };
-                        self.method_reference(ty, name, Some(arguments), out.clone())
-                    }
-                    _ => {
-                        return Err(GenerateError::inference(
-                            span,
-                            "type arguments require a function declaration",
-                        ));
-                    }
-                }
+            resin_ast::TermKind::TypeApply { function, args } => {
+                let (kind, result) = self.type_application(function, args, span, out.clone())?;
+                equate = result;
+                kind
             }
             resin_ast::TermKind::Type { ty } => {
                 let ann = self.annotation(ty, true);
@@ -1563,49 +1631,7 @@ impl Expression<'_, '_> {
                     value: Box::new(input),
                 }
             }
-            resin_ast::TermKind::Match { value, arms } => {
-                let input = self.child(value, None);
-                let mut checked = vec![];
-                for arm in arms {
-                    self.checker.scopes.push_at(arm.body.span);
-                    let payload = self.checker.typing.solver.fresh();
-                    let (variant, pattern) = match &arm.variant {
-                        resin_ast::MatchVariant::Wildcard => (None, Pattern::Error),
-                        resin_ast::MatchVariant::Error => (None, Pattern::Error),
-                        resin_ast::MatchVariant::Type(ty) => {
-                            let ann = self.annotation(ty, false);
-                            let ty = ann.ty.clone();
-                            (Some(ann.into_tree()), Pattern::Type(ty))
-                        }
-                    };
-                    if !matches!(arm.variant, resin_ast::MatchVariant::Wildcard) {
-                        self.constrain((
-                            arm.body.span,
-                            Constraint::Variant(input.ty.clone(), pattern, payload.clone()),
-                        ));
-                    }
-                    let binding = arm.pattern.as_ref().and_then(|pattern| {
-                        self.checker
-                            .bind(&pattern.name, payload, DefinitionKind::Variable)
-                            .map_err(|error| self.checker.errors.push(error))
-                            .ok()
-                    });
-                    let body = self.child(&arm.body, Some(out.clone()));
-                    checked.push(MatchArm {
-                        error: matches!(arm.variant, resin_ast::MatchVariant::Error),
-                        wildcard: matches!(arm.variant, resin_ast::MatchVariant::Wildcard),
-                        mutable: arm.pattern.as_ref().is_some_and(|pattern| pattern.mutable),
-                        binding,
-                        variant,
-                        body,
-                    });
-                    self.checker.scopes.pop();
-                }
-                TermKind::Match {
-                    value: Box::new(input),
-                    arms: checked,
-                }
-            }
+            resin_ast::TermKind::Match { value, arms } => self.match_expression(value, arms, &out),
             resin_ast::TermKind::If { cond, then, els } => {
                 let cond = self.child(cond, None);
                 self.constrain((cond.span, Constraint::Boolean(cond.ty.clone())));

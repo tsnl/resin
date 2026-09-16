@@ -678,6 +678,7 @@ pub struct Analysis {
     contexts: crate::lower::scope::Contexts,
     fields: BTreeMap<SourceLocation, Vec<Member>>,
     expression_types: BTreeMap<SourceLocation, Type>,
+    operation_signatures: BTreeMap<SourceLocation, String>,
     field_origins: BTreeMap<(TypeId, String), SourceLocation>,
     method_origins: BTreeMap<(TypeId, String), lower::scope::DeclarationId>,
     typer: lower::context::Context,
@@ -1076,11 +1077,15 @@ impl Analysis {
                     .ok()?;
             }
         }
+        let signature = solver.complete(&signature)?;
         Some(Completion {
             detail: format!(
                 "{}: {}",
                 definition.name,
-                self.type_names().format(&solver.complete(&signature)?)
+                self.operation_signatures
+                    .get(&definition.location)
+                    .cloned()
+                    .unwrap_or_else(|| self.type_names().format(&signature))
             ),
             name: definition.name.clone(),
             kind: DefinitionKind::Function,

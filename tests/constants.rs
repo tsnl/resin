@@ -87,9 +87,9 @@ fn sizeof_matches_native_c_representations() {
         r#"#include <stdint.h>
         #include <stdbool.h>
         #include "resin_runtime.h"
-        struct TestRecord { int8_t a, double b, uint16_t c, }
-        struct TestStr { uint8_t *data, uint64_t length, }
-        struct TestUnion { uint32_t tag, union { int32_t a; int32_t b; } payload, }
+        struct TestRecord { int8_t a; double b; uint16_t c; };
+        struct TestStr { uint8_t *data; uint64_t length; };
+        struct TestUnion { uint32_t tag; union { int32_t a; int32_t b; } payload; };
         static inline uint64_t native_size(uint32_t index) {
             const uint64_t sizes[] = {
                 sizeof(bool), sizeof(int8_t), sizeof(uint16_t), sizeof(double),

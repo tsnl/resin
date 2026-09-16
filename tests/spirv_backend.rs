@@ -5,7 +5,6 @@ use support::toolchain;
 
 use support::shaders::{self, instructions};
 mod support;
-use support::module;
 
 #[test]
 fn compute_workgroup_size_specializes_execution_mode_and_wide_index_arithmetic() {
@@ -58,7 +57,11 @@ fn example(name: &str) -> resin_lir::Module {
 
 #[test]
 fn shader_indexing_emits_no_bounds_checks() {
-    for indexing in ["values(i)", "values.at(i)", "view.at(i)"] {
+    for indexing in [
+        "values(i)",
+        "values:at(i)",
+        "device_index(view.data, view.length, i).*",
+    ] {
         let m = module(&format!(
             "export {{ kernel }}; import {{ \"$/span.resin\" }}; @compute_shader fn kernel(i: ulong, output: Ptr<uint>)  {{ let mut values = [1_ui, 2_ui]; let mut view = Span<uint> {{ data = output, length = 2_ul }}; output.* = {indexing}; }}"
         ));
@@ -158,7 +161,7 @@ fn graphics_output_guards_follow_the_emitted_entry_fallibility() {
             } else {
                 String::new()
             };
-            let source = format!("export {{ {name} }}; {types} {entry} = {{ {check} {body} }};");
+            let source = format!("export {{ {name} }}; {types} {entry} {{ {check} {body} }}");
             let module = module(&source);
             let project = support::project::Project::new(&module, None).unwrap();
             let shader = &project.generated.shaders()[0];
@@ -295,7 +298,7 @@ fn device_pointers_and_shared_roots_compile() {
             Stage::Compute,
         ),
         (
-            "export { kernel }; import { \"$/span.resin\" }; struct Data { wide: ulong, values: Ptr<uint>, } @compute_shader fn kernel (invocation: ulong, root: Ptr<Data>) -> ()  { let mut i = uint(invocation); let mut p = root.values; let mut q: Ref<uint> = Span<uint> { data = p, length = 64_ul }:at(ulong(i)); q = uint(3); root.wide = ulong(4294967297); }",
+            "export { kernel }; import { \"$/span.resin\" }; struct Data { wide: ulong, values: Ptr<uint>, } @compute_shader fn kernel (invocation: ulong, root: Ptr<Data>) -> ()  { let mut i = uint(invocation); let mut p = root.values; let mut q: Ref<uint> = device_index(p, 64_ul, ulong(i)).*; q = uint(3); root.wide = ulong(4294967297); }",
             Stage::Compute,
         ),
         (
@@ -486,9 +489,9 @@ fn managed_fields_are_opaque_until_consumed_by_a_shader() {
         project.build(&toolchain::spirv(&frontend)).unwrap();
     }
     for body in [
-        "var value = root.owner;",
-        "root.owner := root.owner;",
-        "var result = root.weak.upgrade();",
+        "let value = root.owner:clone();",
+        "root.owner = root.owner:clone();",
+        "let mut result = root.weak:upgrade();",
     ] {
         let error = pipeline::shader_error(&format!(
             "{prefix} @compute_shader fn kernel(invocation: ulong, root: Ptr<Root>)  {{ let mut i = uint(invocation); {body} }}"
@@ -527,7 +530,7 @@ fn literal_strings_report_the_missing_shader_storage_support() {
 #[test]
 fn compute_index_uses_wide_arithmetic_and_indexes_spans_directly() {
     let m = module(
-        "export { kernel }; import { \"$/span.resin\" }; @compute_shader fn kernel(index: ulong, output: Ptr<Span<ulong>>)  { if (index < output.length) { output:at(index) = index; }; }",
+        "export { kernel }; import { \"$/span.resin\" }; @compute_shader fn kernel(index: ulong, output: Ptr<Span<ulong>>)  { if (index < output.length) { output.*:at(index) = index; }; }",
     );
     let project = support::project::Project::new(&m, None).unwrap();
     let source = std::fs::read(project.generated.shaders()[0].unoptimized_spirv()).unwrap();
@@ -602,14 +605,13 @@ fn structured_loop_conditions_and_early_returns_compile_to_spirv() {
 #[test]
 fn sequential_conditionals_and_error_propagation_preserve_structured_control() {
     let mut source = String::from(
-        "export { kernel }; struct Failed {} fn step() -> (() | Err<Failed>)  { (()) } fn helper(value: uint) -> (uint | Err<Failed>) = { let mut result = value; ",
+        "export { kernel }; struct Failed {} fn step() -> (() | Err<Failed>)  { (()) } fn helper(value: uint) -> (uint | Err<Failed>) { let mut result = value; ",
     );
     for _ in 0..512 {
-        source.push_str(
-            "if (result == 0_ui) { result := 1_ui; } else { result := 0_ui; }; step()?; ",
-        );
+        source
+            .push_str("if (result == 0_ui) { result = 1_ui; } else { result = 0_ui; }; step()?; ");
     }
-    source.push_str("(result) }; @compute_shader fn kernel(i: ulong, output: Ptr<uint>)  { output.* = match (helper(uint(i))) { uint(value) => { value }, Err(error) => { 99_ui } }; }");
+    source.push_str("(result) } @compute_shader fn kernel(i: ulong, output: Ptr<uint>)  { output.* = match (helper(uint(i))) { uint(value) => { value }, Err(error) => { 99_ui } }; }");
     let project = support::project::Project::new(&module(&source), None).unwrap();
     let source = std::fs::read(project.generated.shaders()[0].unoptimized_spirv()).unwrap();
     assert_eq!(
@@ -620,4 +622,10 @@ fn sequential_conditionals_and_error_propagation_preserve_structured_control() {
     if let Some(frontend) = shaders::optimizer() {
         project.build(&toolchain::spirv(&frontend)).unwrap();
     }
+}
+
+fn module(source: &str) -> resin_lir::Module {
+    support::module(&format!(
+        r#"{source} intrinsic "pointer_index" fn device_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;"#
+    ))
 }

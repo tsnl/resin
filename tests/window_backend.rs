@@ -285,7 +285,7 @@ fn run_example(name: &str) {
     let TermKind::Block { stmts, .. } = &mut body.val else {
         panic!("main body")
     };
-    stmts.insert(0, support::statements("var test_frames = 0;").remove(0));
+    stmts.insert(0, support::statements("let mut test_frames = 0;").remove(0));
     let body = stmts
         .iter_mut()
         .find_map(|stmt| match &mut stmt.val {
@@ -300,7 +300,7 @@ fn run_example(name: &str) {
         panic!("loop body")
     };
     // Close through the runtime after three frames; leave the interactive demo unbounded.
-    stmts.extend(support::statements("test_frames := test_frames + 1; if (test_frames == 3) { window.set_should_close(1 == 1)?; } else { () };"));
+    stmts.extend(support::statements("test_frames = test_frames + 1; if (test_frames == 3) { window:set_should_close(1 == 1)?; } else { () };"));
     let module = pipeline::generate_program(&ast).unwrap();
     let project = support::project::Project::new(&module, Some("main")).unwrap();
     let built = project.build(&toolchain::spirv(&compiler)).unwrap();

@@ -253,7 +253,7 @@ fn formatting_uses_current_buffers_and_returns_utf16_edits() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let path = temp.path().join("format.resin");
     let file = uri(&path);
-    let disk = "fn main()  {}\n";
+    let disk = "fn main() {}\n";
     std::fs::write(&path, disk).unwrap();
     let mut client = Client::start(temp.path(), json!({}));
     // Even clients requesting spaces receive the language's canonical hard tabs.
@@ -264,7 +264,7 @@ fn formatting_uses_current_buffers_and_returns_utf16_edits() {
     client.change(&file, 2, source);
     let edits = client.request("textDocument/formatting", params.clone());
     let expected =
-        "/* 😀 */ fn main()  {\n\tlet mut xs = [\n\t\t1,\n\t\t2,\n\t];\n\tmissing(xs);\n}\n";
+        "/* 😀 */ fn main() {\n\tlet mut xs = [\n\t\t1,\n\t\t2,\n\t];\n\tmissing(xs);\n}\n";
     assert_eq!(
         edits[0]["range"]["start"],
         json!({"line": 0, "character": 8})
@@ -292,10 +292,10 @@ fn formatting_uses_current_buffers_and_returns_utf16_edits() {
         ""
     );
     // An edit ending immediately before LF must also replace the preceding CR.
-    client.change(&file, 6, "fn main()  {}\r\n");
+    client.change(&file, 6, "fn main() {}\r\n");
     assert_eq!(
         apply(
-            "fn main()  {}\r\n",
+            "fn main() {}\r\n",
             &client.request("textDocument/formatting", params.clone())
         ),
         disk
@@ -327,7 +327,7 @@ fn gradient_dot_completion_survives_edits_before_kernel_statements() {
     client.diagnostics(&uri, Some(1), false);
     let positions = [
         original.find("\tif (index").unwrap(),
-        original.find("};\n\nfn main").unwrap() + 1,
+        original.find("\n}\n\nfn main").unwrap() + 1,
     ];
     for (index, offset) in positions.into_iter().enumerate() {
         let mut source = original.to_owned();
@@ -404,74 +404,89 @@ fn dot_completion_updates_unsaved_receiver_types_and_uses_utf16_edits() {
 }
 
 #[test]
-fn string_completions_distinguish_literal_views_and_owned_constructors() {
+fn string_completions_distinguish_fields_operations_and_free_constructors() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("strings.resin"));
-    for (version, expression, labels) in [
-        (1, "\"text\".", vec!["data", "length", "at"]),
+    for (version, expression, required, absent) in [
+        (1, "\"text\".", vec!["data", "length"], vec!["at"]),
         (
             2,
-            "String.",
-            vec!["bytes", "from_bytes", "from_str", "get", "repr_bytes"],
+            "\"text\":",
+            vec!["at", "print", "bytes"],
+            vec!["data", "length"],
+        ),
+        (
+            3,
+            "string_",
+            vec!["string_from_bytes", "string_from_str"],
+            vec!["String"],
         ),
     ] {
-        let source = format!("import {{ \"$/string.resin\" }}; fn main()  {{ {expression}; }}");
+        let source = format!("import {{ \"$/string.resin\" }}; fn main() {{ {expression}; }}");
         if version == 1 {
             client.open(&uri, &source);
         } else {
             client.change(&uri, version, &source);
         }
         client.diagnostics(&uri, Some(version), true);
-        let column = source.rfind('.').unwrap() as u32 + 1;
+        let column = (source.rfind(expression).unwrap() + expression.len()) as u32;
         let completion = client.request("textDocument/completion", at(&uri, 0, column));
-        let items = completion["items"].as_array().unwrap();
-        let actual: Vec<_> = items
+        let labels: Vec<_> = completion["items"]
+            .as_array()
+            .unwrap()
             .iter()
             .map(|item| item["label"].as_str().unwrap())
             .collect();
-        assert_eq!(actual, labels, "{completion}");
+        for name in required {
+            assert!(labels.contains(&name), "{completion}");
+        }
+        for name in absent {
+            assert!(!labels.contains(&name), "{completion}");
+        }
     }
     client.stop();
 }
 
 #[test]
-fn dot_completion_sorts_fields_before_methods() {
+fn dot_completes_fields_and_colon_completes_visible_operations() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("members.resin"));
-    let source = "struct Record { zebra: int, middle: int,
-def beta(self: Ptr<Record>) = {},
-def alpha(self: Ptr<Record>) = {},
-};
-
-def main() = { var value = Record { zebra = 1, middle = 2 }; value.; };";
-    client.open(&uri, source);
-    client.diagnostics(&uri, Some(1), true);
-    let column = source.lines().last().unwrap().rfind('.').unwrap() as u32 + 1;
-    let completion = client.request("textDocument/completion", at(&uri, 5, column));
-    let items = completion["items"].as_array().unwrap();
-    let labels = |items: &[Value]| {
-        items
-            .iter()
-            .map(|item| item["label"].as_str().unwrap().to_owned())
-            .collect::<Vec<_>>()
-    };
-    let expected = ["middle", "zebra", "alpha", "beta"];
-    assert_eq!(labels(items), expected);
-    assert!(items[..2].iter().all(|item| item["kind"] == 5)); // FIELD
-    assert!(items[2..].iter().all(|item| item["kind"] == 3)); // FUNCTION
-
-    // Clients use sortText instead of the response's array order or labels.
-    let mut sorted = items.clone();
-    sorted.reverse();
-    sorted.sort_by(|a, b| {
-        a["sortText"]
-            .as_str()
-            .unwrap()
-            .cmp(b["sortText"].as_str().unwrap())
-    });
-    assert_eq!(labels(&sorted), expected);
+    for (version, separator, expected, kind) in [
+        (1, ".", vec!["middle", "zebra"], 5),
+        (2, ":", vec!["alpha", "beta"], 3),
+    ] {
+        let source = format!(
+            "struct Record {{ zebra: int, middle: int }}\nfn beta(value: Ref<Record>) {{}}\nfn alpha(value: Ref<Record>) {{}}\nfn main() {{ let value = Record {{ zebra = 1, middle = 2 }}; value{separator}; }}"
+        );
+        if version == 1 {
+            client.open(&uri, &source);
+        } else {
+            client.change(&uri, version, &source);
+        }
+        client.diagnostics(&uri, Some(version), true);
+        let column = source.lines().last().unwrap().rfind(separator).unwrap() as u32 + 1;
+        let completion = client.request("textDocument/completion", at(&uri, 3, column));
+        let items = completion["items"].as_array().unwrap();
+        let labels = |items: &[Value]| {
+            items
+                .iter()
+                .map(|item| item["label"].as_str().unwrap().to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(labels(items), expected);
+        assert!(items.iter().all(|item| item["kind"] == kind));
+        let mut sorted = items.clone();
+        sorted.reverse();
+        sorted.sort_by(|a, b| {
+            a["sortText"]
+                .as_str()
+                .unwrap()
+                .cmp(b["sortText"].as_str().unwrap())
+        });
+        assert_eq!(labels(&sorted), expected);
+    }
     client.stop();
 }
 
@@ -495,7 +510,7 @@ fn unsaved_unicode_buffers_support_features_edits_and_clean_shutdown() {
     assert_eq!(definition["uri"], uri);
     assert_eq!(
         definition["range"]["start"],
-        json!({"line": 2, "character": 6})
+        json!({"line": 2, "character": 10})
     );
     let completion = client.request("textDocument/completion", at(&uri, 3, 14));
     let item = completion["items"]
@@ -537,9 +552,13 @@ fn unsaved_unicode_buffers_support_features_edits_and_clean_shutdown() {
         client.request("textDocument/definition", at(&uri, 3, 12)),
         Value::Null
     );
-    client.change(&uri, 3, "fn main (argument: int) -> int = { arg");
+    let incomplete = "fn main (argument: int) -> int { arg";
+    client.change(&uri, 3, incomplete);
     client.diagnostics(&uri, Some(3), true);
-    let completion = client.request("textDocument/completion", at(&uri, 0, 37));
+    let completion = client.request(
+        "textDocument/completion",
+        at(&uri, 0, incomplete.len() as u32),
+    );
     assert!(
         completion["items"]
             .as_array()

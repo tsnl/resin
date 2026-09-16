@@ -472,8 +472,17 @@ impl Scopes {
         solver: &Solver,
         typer: &Context,
         methods: &BTreeMap<Rule, ResolvedMethod>,
+        functions: &HashMap<DeclarationId, FunctionId>,
     ) {
         let mut data = self.view.data.borrow_mut();
+        for (&declaration, function) in functions {
+            if let Some(method) = typer.functions.get(function)
+                && let Some(label) = typer.gpu_method_label(method, false)
+            {
+                let location = data.contexts.definitions[declaration].location.clone();
+                data.operation_signatures.insert(location, label);
+            }
+        }
         for (id, (ty, _)) in self.inferred.drain() {
             data.contexts.definitions[id].ty = solver.complete(&ty);
         }

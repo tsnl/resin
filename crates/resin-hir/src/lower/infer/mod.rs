@@ -1481,11 +1481,29 @@ impl Inference<'_> {
                 if self.solver.finish_errors(roots) {
                     continue;
                 }
-                if let Some(Equation { span, owner, .. }) = self.constraints.first() {
-                    errors.push(error(
-                        *span,
-                        "cannot infer this operation; annotate its operand or result",
-                    ));
+                if let Some(Equation {
+                    span,
+                    owner,
+                    relation,
+                    ..
+                }) = self.constraints.first()
+                {
+                    let message = match relation {
+                        Constraint::Overload { lookup }
+                            if lookup.args.as_ref().is_some_and(|args| {
+                                args.iter().all(|arg| self.solver.complete(arg).is_some())
+                            }) =>
+                        {
+                            format!(
+                                "ambiguous overload of `{}`; more than one signature matches",
+                                lookup.name
+                            )
+                        }
+                        _ => {
+                            "cannot infer this operation; annotate its operand or result".to_owned()
+                        }
+                    };
+                    errors.push(error(*span, message));
                     failed.push(*owner);
                     continue 'retry;
                 }

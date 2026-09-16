@@ -92,7 +92,7 @@ fn inferred_values_and_slices_keep_their_allocation_and_gpu_alive() {
             let mut number = value()?;
             let mut member = field()?;
             let mut values = slice()?;
-            let mut alias = values.data;
+            let alias = values.data:clone();
             let mut tail = alias:slice(1_ul, 2_ul);
             number:store(number:load() + 1_i);
             member:store(member:load() + 2_i);
@@ -116,22 +116,23 @@ fn nested_host_owners_and_explicit_gpu_loads_preserve_allocation_lifetimes() {
             
             
         }
-fn increment(self: Ptr<Item>)  { self.value = self.value + 1_i; }
+fn increment(self: Ref<Item>)  { self.value = self.value + 1_i; }
 
-fn read(self: Item) -> int  { self.value }
+fn read(self: Ref<Item>) -> int  { self.value }
 
         struct Outer { item: Item, }
         fn field() -> (GpuPtr<Outer> | Err<_>)  {
             let mut gpu = gpu_new()?;
             let mut pointer = gpu:create(Outer { item = Item { value = 40_i } })?;
-            let mut owner = arc_ptr_alloc::<GpuPtr<Outer>>(pointer)?;
+            let mut owner = arc_ptr_alloc::<GpuPtr<Outer>>(pointer:clone())?;
             let mut indirect = &owner;
-            let mut item = indirect:get():load();
+            let mut item = indirect.*:get().*:load();
             item.item:increment();
-            let mut previous = indirect:get():replace(item);
+            let previous = indirect.*:get().*:replace(item);
+            item = pointer:load();
             item.item.value = item.item:read() + previous.item.value - 39_i;
             pointer:store(item);
-            (indirect:get().*)
+            (indirect.*:get().*:clone())
         }
         fn main() -> (int | Err<_>)  {
             let mut result = field()?;
@@ -154,8 +155,8 @@ fn custom_allocators_must_return_the_requested_size_and_alignment() {
     ] {
         let library = allocator_library(bytes, value);
         for action in [
-            "var values = gpu.alloc::<long>(2_ul)?;",
-            "var pipeline = gpu.create_compute_pipeline(kernel)?; let mut commands = gpu.start_command_recording()?; commands.dispatch(pipeline, Root { left = 1_l, right = 2_l }, 1_ui, 1_ui, 1_ui)?;",
+            "let mut values = gpu:alloc::<long>(2_ul)?;",
+            "let mut pipeline = gpu:create_compute_pipeline(kernel)?; let mut commands = gpu:start_command_recording()?; commands:dispatch(pipeline, Root { left = 1_l, right = 2_l }, 1_ui, 1_ui, 1_ui)?;",
         ] {
             let source = format!(
                 r#"export {{ main }};
@@ -191,10 +192,10 @@ fn allocator_library(bytes: &str, value: &str) -> String {
         .replace("\"window.resin\"", "\"$/window.resin\"")
         .replace("\"shared.resin\"", "\"$/shared.resin\"")
         .replace("\"span.resin\"", "\"$/span.resin\"");
-    let start = library.find("\t@gpu_allocator").unwrap();
-    let end = start + library[start..].find("\t@gpu_compute_pipeline").unwrap();
+    let start = library.find("@gpu_allocator").unwrap();
+    let end = start + library[start..].find("@gpu_compute_pipeline").unwrap();
     library.replace_range(start..end, &format!(r#"@gpu_allocator
-        fn malloc(self: Gpu, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | Err<RuntimeError>)  {{
+        fn malloc(self: Ref<Gpu>, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | Err<RuntimeError>)  {{
             let mut allocation = gpu_view_allocate(self:native(), self.owner.owner, {bytes}, alignment, memory);
             runtime_status_from_code(allocation.1)?;
             ({value})
@@ -208,6 +209,9 @@ const COMPUTE: &str = r#"export { main };
     import { "$/gpu.resin", "$/status.resin", "$/span.resin" };
     struct FieldsIncrementValues<T0, T1> { increment: T0, values: T1, }
 struct Parameters { increment: uint, values: Span<uint>, }
+fn clone<A, B>(value: Ref<FieldsIncrementValues<A, B>>) -> FieldsIncrementValues<A, B> {
+    FieldsIncrementValues<A, B> { increment = value.increment, values = value.values:clone() }
+}
     @compute_shader fn kernel(index: ulong, root: Ptr<Parameters>)  {
         if (index < root.values.length) {
             let mut item: Ref<uint> = root.values:at(index);
@@ -229,16 +233,16 @@ struct Parameters { increment: uint, values: Span<uint>, }
 fn projected_scalar_and_span_arguments_dispatch_and_allow_readback_after_submit() {
     let source = COMPUTE.replace(
         "ACTION",
-        r#"var commands = gpu.start_command_recording()?;
-        commands.dispatch(pipeline, arguments, 1_ui, 1_ui, 1_ui)?;
-        commands.submit()?;
-        let mut again = gpu.start_command_recording()?;
-        again.dispatch(pipeline, arguments, 1_ui, 1_ui, 1_ui)?;
-        again.submit()?;
+        r#"let mut commands = gpu:start_command_recording()?;
+        commands:dispatch(pipeline, arguments:clone(), 1_ui, 1_ui, 1_ui)?;
+        commands:submit()?;
+        let mut again = gpu:start_command_recording()?;
+        again:dispatch(pipeline, arguments:clone(), 1_ui, 1_ui, 1_ui)?;
+        again:submit()?;
         let mut result = [0_ui, 0_ui, 0_ui, 0_ui];
-        values.copy_to(Span<uint> { data = &result.at(0_ul), length = 4_ul });
-        (if (result.at(0_ul) == 0_ui && result.at(1_ul) == 11_ui
-            && result.at(2_ul) == 12_ui && result.at(3_ul) == 3_ui) { 0 } else { 1 })
+        values:copy_to(Span<uint> { data = &result:at(0_ul), length = 4_ul });
+        (if (result:at(0_ul) == 0_ui && result:at(1_ul) == 11_ui
+            && result:at(2_ul) == 12_ui && result:at(3_ul) == 3_ui) { 0 } else { 1 })
     "#,
     );
     let Some(output) = run(&source) else { return };
@@ -260,7 +264,7 @@ fn __add__<T>(a: Cell<T>, b: Cell<T>) -> Cell<T>  { Cell<T> { value = a.value + 
         @compute_shader fn kernel(index: ulong, root: Ptr<Parameters>)  {
             if (index < root.values.length) {
                 let mut cell: Ref<Cell<uint>> = root.values:at(index);
-                cell = add(cell, Cell<uint> { value = 40 });
+                cell = add(Cell<uint> { value = cell.value }, Cell<uint> { value = 40 });
             };
         }
         fn main() -> int | Err<_>  {
@@ -273,7 +277,7 @@ fn __add__<T>(a: Cell<T>, b: Cell<T>) -> Cell<T>  { Cell<T> { value = a.value + 
             };
             let mut pipeline = gpu:create_compute_pipeline(kernel)?;
             let mut commands = gpu:start_command_recording()?;
-            commands:dispatch(pipeline, HostParameters { values = values }, 1_ui, 1_ui, 1_ui)?;
+            commands:dispatch(pipeline, HostParameters { values = values:clone() }, 1_ui, 1_ui, 1_ui)?;
             commands:submit()?;
             if (values:at(0):load().value == 40 && values:at(1):load().value == 41
                 && values:at(2):load().value == 42) { 0 } else { 1 }
@@ -301,8 +305,8 @@ struct Root { values: Span<uint>, scalar: Ptr<uint>, }
             let mut scalar = gpu:create(0_ui)?;
             let mut commands = gpu:start_command_recording()?;
             {
-                let mut pipeline = (&gpu):create_compute_pipeline(kernel)?;
-                (&commands):dispatch(pipeline, FieldsValuesScalar<_, _> { values = values:slice(2_ul, 2_ul), scalar = scalar }, 2_ui, 1_ui, 1_ui)?;
+                let mut pipeline = gpu:create_compute_pipeline(kernel)?;
+                commands:dispatch(pipeline, FieldsValuesScalar<_, _> { values = values:slice(2_ul, 2_ul), scalar = scalar:clone() }, 2_ui, 1_ui, 1_ui)?;
             };
             commands:submit()?;
             (if (values:at(1_ul):load() == 1_ui && values:at(2_ul):load() == 12_ui && values:at(3_ul):load() == 13_ui && values:at(4_ul):load() == 4_ui && scalar:load() == 42_ui) { 0_i } else { 1_i })
@@ -340,23 +344,23 @@ struct Root { value: uint, }
 fn failed_dispatch_and_cancel_restore_cpu_access_and_last_command_alias_cancels() {
     let source = COMPUTE.replace(
         "ACTION",
-        r#"var cancelled = gpu.start_command_recording()?;
-        cancelled.cancel();
-        let mut failed = match (cancelled.dispatch(pipeline, arguments, 1_ui, 1_ui, 1_ui)) {
-            ()(value) => { 0_i }, Err(error) => { RuntimeStatus.code(error) },
+        r#"let mut cancelled = gpu:start_command_recording()?;
+        cancelled:cancel();
+        let mut failed = match (cancelled:dispatch(pipeline, arguments:clone(), 1_ui, 1_ui, 1_ui)) {
+            ()(value) => { 0_i }, Err(error) => { runtime_status_code(error) },
         };
-        values.at(1_ul).store(20_ui);
-        let mut commands = gpu.start_command_recording()?;
-        commands.dispatch(pipeline, arguments, 1_ui, 1_ui, 1_ui)?;
+        values:at(1_ul):store(20_ui);
+        let mut commands = gpu:start_command_recording()?;
+        commands:dispatch(pipeline, arguments:clone(), 1_ui, 1_ui, 1_ui)?;
         let mut alias = commands;
-        alias.cancel();
-        values.at(1_ul).store(21_ui);
+        alias:cancel();
+        values:at(1_ul):store(21_ui);
         {
-            let mut abandoned = gpu.start_command_recording()?;
+            let mut abandoned = gpu:start_command_recording()?;
             let mut last = abandoned;
-            last.dispatch(pipeline, arguments, 1_ui, 1_ui, 1_ui)?;
+            last:dispatch(pipeline, arguments:clone(), 1_ui, 1_ui, 1_ui)?;
         };
-        (if (failed == 1_i && values.at(1_ul).load() == 21_ui) { 0 } else { 1 })
+        (if (failed == 1_i && values:at(1_ul):load() == 21_ui) { 0 } else { 1 })
     "#,
     );
     let Some(output) = run(&source) else { return };
@@ -366,14 +370,14 @@ fn failed_dispatch_and_cancel_restore_cpu_access_and_last_command_alias_cancels(
 #[test]
 fn recorded_gpu_work_denies_cpu_access_through_all_aliases() {
     for access in [
-        "var value = values.at(0_ul).load();",
-        "values.at(0_ul).store(7_ui);",
+        "let mut value = values:at(0_ul):load();",
+        "values:at(0_ul):store(7_ui);",
     ] {
         let source = COMPUTE.replace(
             "ACTION",
             &format!(
-                r#"var commands = gpu.start_command_recording()?;
-            commands.dispatch(pipeline, arguments, 1_ui, 1_ui, 1_ui)?;
+                r#"let mut commands = gpu:start_command_recording()?;
+            commands:dispatch(pipeline, arguments:clone(), 1_ui, 1_ui, 1_ui)?;
             {access}
             (0_i)
         "#
@@ -392,12 +396,12 @@ fn recorded_gpu_work_denies_cpu_access_through_all_aliases() {
 #[test]
 fn restricted_gpu_pointers_and_spans_trap_on_disallowed_access() {
     for access in [
-        "number.read_only().store(8_i);",
-        "var value = number.write_only().load();",
-        "number.read_only().replace(8_i);",
-        "number.write_only().replace(8_i);",
-        "values.read_only().at(0_ul).store(8_i);",
-        "var value = values.write_only().at(0_ul).load();",
+        "number:read_only():store(8_i);",
+        "let mut value = number:write_only():load();",
+        "number:read_only():replace(8_i);",
+        "number:write_only():replace(8_i);",
+        "values:read_only():at(0_ul):store(8_i);",
+        "let mut value = values:write_only():at(0_ul):load();",
     ] {
         let source = format!(
             r#"export {{ main }};
@@ -445,12 +449,12 @@ struct Parameters { value: Ptr<long>, values: Span<long>, increment: long, }
             let mut gpu = gpu_new()?;
             let mut calls = 0_i;
             let mut value = gpu:create(-42)?;
-            let mut allocation_request = allocation(gpu, &calls);
+            let mut allocation_request = allocation(gpu:clone(), &calls);
             let mut values = allocation_request.0:alloc::<long>(allocation_request.1)?;
             values:at(0_ul):store(0_l);
             let mut pipeline = gpu:create_compute_pipeline(kernel)?;
             let mut commands = gpu:start_command_recording()?;
-            let mut launch_request = launch(pipeline, value, values, &calls);
+            let mut launch_request = launch(pipeline, value:clone(), values:clone(), &calls);
             commands:dispatch(launch_request.0, launch_request.1, launch_request.2, launch_request.3, launch_request.4)?;
             commands:submit()?;
             (if (calls == 2_i && value:load() == 49_l && values:at(0_ul):load() == 98_l) { 0 } else { 1 })
@@ -471,7 +475,7 @@ struct Parameters { values: Span<uint>, }
         @compute_shader fn kernel(index: ulong, root: Ptr<Parameters>)  {
             if (index < root.values.length) { root.values:at(index) = 42_ui; };
         }
-        fn make_pipeline(gpu: Gpu) -> (GpuComputePipeline<Parameters, GpuPipelineOwner> | Err<_>)  {
+        fn make_pipeline(gpu: Ref<Gpu>) -> (GpuComputePipeline<Parameters, GpuPipelineOwner> | Err<_>)  {
             gpu:create_compute_pipeline(kernel)
         }
         fn record() -> (FieldsCommandsValues<GpuCommands, GpuSpan<uint>> | Err<_>)  {
@@ -479,9 +483,9 @@ struct Parameters { values: Span<uint>, }
             let mut values = gpu:alloc::<uint>(1_ul)?;
             values:at(0_ul):store(0_ui);
             let mut pipeline = make_pipeline(gpu)?;
-            let mut alias = pipeline;
+            let alias = pipeline:clone();
             let mut commands = gpu:start_command_recording()?;
-            commands:dispatch(alias, FieldsValues<_> { values = values }, 1_ui, 1_ui, 1_ui)?;
+            commands:dispatch(alias, FieldsValues<_> { values = values:clone() }, 1_ui, 1_ui, 1_ui)?;
             (FieldsCommandsValues<_, _> { commands = commands, values = values })
         }
         fn main() -> (int | Err<_>)  {
@@ -499,14 +503,14 @@ struct Parameters { values: Span<uint>, }
 fn pipelines_from_another_device_fail_recording_without_locking_arguments() {
     let source = COMPUTE.replace(
         "ACTION",
-        r#"var other = Gpu.new()?;
-        let mut commands = other.start_command_recording()?;
-        let mut failed = match (commands.dispatch(pipeline, arguments, 1_ui, 1_ui, 1_ui)) {
-            ()(value) => { 0_i }, Err(error) => { RuntimeStatus.code(error) },
+        r#"let mut other = gpu_new()?;
+        let mut commands = other:start_command_recording()?;
+        let mut failed = match (commands:dispatch(pipeline, arguments:clone(), 1_ui, 1_ui, 1_ui)) {
+            ()(value) => { 0_i }, Err(error) => { runtime_status_code(error) },
         };
-        values.at(1_ul).store(42_ui);
-        commands.cancel();
-        (if (failed == 1_i && values.at(1_ul).load() == 42_ui) { 0_i } else { 1_i })
+        values:at(1_ul):store(42_ui);
+        commands:cancel();
+        (if (failed == 1_i && values:at(1_ul):load() == 42_ui) { 0_i } else { 1_i })
     "#,
     );
     let Some(output) = run(&source) else { return };
@@ -515,10 +519,10 @@ fn pipelines_from_another_device_fail_recording_without_locking_arguments() {
 
 #[test]
 fn dispatch_rejects_argument_views_from_another_device() {
-    let source = COMPUTE.replace("ACTION", r#"var other = Gpu.new()?;
-        let mut foreign_values = other.alloc::<uint>(1_ul)?;
-        let mut commands = gpu.start_command_recording()?;
-        commands.dispatch(pipeline, FieldsIncrementValues<_, _> { increment = 5_ui, values = foreign_values }, 1_ui, 1_ui, 1_ui)?;
+    let source = COMPUTE.replace("ACTION", r#"let mut other = gpu_new()?;
+        let mut foreign_values = other:alloc::<uint>(1_ul)?;
+        let mut commands = gpu:start_command_recording()?;
+        commands:dispatch(pipeline, FieldsIncrementValues<_, _> { increment = 5_ui, values = foreign_values }, 1_ui, 1_ui, 1_ui)?;
         (0_i)
     "#);
     let Some(output) = run(&source) else { return };
@@ -543,9 +547,9 @@ struct Parameters { color: Ptr<Color>, offset: float32, }
             }
         }
         @fragment_shader fn fragment(color: Color, root: Ptr<Parameters>) -> Color  {
-            root.color.*
+            Color { r = root.color.r, g = root.color.g, b = root.color.b, a = root.color.a }
         }
-        fn make_pipeline(gpu: Gpu) -> (GpuGraphicsPipeline<Parameters, GpuPipelineOwner> | Err<_>)  {
+        fn make_pipeline(gpu: Ref<Gpu>) -> (GpuGraphicsPipeline<Parameters, GpuPipelineOwner> | Err<_>)  {
             gpu:create_graphics_pipeline(vertex, fragment)
         }
         fn main() -> (int | Err<_>)  {
@@ -581,9 +585,9 @@ const VIEW_PRIMITIVES: &str = r#"intrinsic "gpu_view_allocate" fn allocate<N>(gp
         
         
     }
-fn read<T>(self: DeviceScalar<T>) -> T  { load::<T>(self.view) }
+fn read<T>(self: Ref<DeviceScalar<T>>) -> T  { load::<T>(self.view) }
 
-fn write<T>(self: DeviceScalar<T>, value: T)  { store(self.view, value); }
+fn write<T>(self: Ref<DeviceScalar<T>>, value: T)  { store(self.view, value); }
 
     fn allocate_ints(count: ulong) -> (GpuView | Err<RuntimeError>)  {
         let mut gpu = gpu_new()?;
@@ -623,11 +627,17 @@ fn gpu_view_primitives_keep_owners_offsets_and_typed_source_methods() {
 fn gpu_view_primitives_preserve_access_bounds_and_alignment_checks() {
     for (operation, diagnostic) in [
         ("store(restrict(view, 1), 8_i);", "permission"),
-        ("var value = load::<int>(restrict(view, 2));", "permission"),
-        ("var value = replace(restrict(view, 1), 8_i);", "permission"),
-        ("var value = offset(view, 1, 4, 4);", "misaligned"),
-        ("var value = offset(view, 8, 4, 4);", "out of bounds"),
-        ("copy_to(view, 2, &result.at(0), 1);", "too short"),
+        (
+            "let mut value = load::<int>(restrict(view, 2));",
+            "permission",
+        ),
+        (
+            "let mut value = replace(restrict(view, 1), 8_i);",
+            "permission",
+        ),
+        ("let mut value = offset(view, 1, 4, 4);", "misaligned"),
+        ("let mut value = offset(view, 8, 4, 4);", "out of bounds"),
+        ("copy_to(view, 2, &result:at(0), 1);", "too short"),
     ] {
         let source = format!(
             r#"export {{ main }};
@@ -664,7 +674,7 @@ fn gpu_allocation_rejects_managed_and_opaque_elements_before_access() {
             r#"import {{ "$/gpu.resin", "$/shared.resin" }};
             extern type Native;
             fn invalid(gpu: Gpu) -> (() | Err<_>)  {{
-                gpu.alloc::<{element}>(0_ul)?;
+                gpu:alloc::<{element}>(0_ul)?;
                 (())
             }}
         "#
@@ -701,13 +711,13 @@ fn gpu_sequences_allow_empty_tail_views_and_report_allocation_overflow() {
 #[test]
 fn gpu_sequences_reject_out_of_bounds_indices_and_overflowing_ranges() {
     for operation in [
-        "values.at(3_ul);",
-        "values.at(18446744073709551615_ul);",
-        "values.slice(3_ul, 0_ul).at(0_ul);",
-        "values.slice(4_ul, 0_ul);",
-        "values.slice(2_ul, 2_ul);",
-        "values.slice(18446744073709551615_ul, 2_ul);",
-        "values.data.slice(18446744073709551615_ul, 1_ul);",
+        "values:at(3_ul);",
+        "values:at(18446744073709551615_ul);",
+        "values:slice(3_ul, 0_ul):at(0_ul);",
+        "values:slice(4_ul, 0_ul);",
+        "values:slice(2_ul, 2_ul);",
+        "values:slice(18446744073709551615_ul, 2_ul);",
+        "values.data:slice(18446744073709551615_ul, 1_ul);",
     ] {
         let source = format!(
             r#"export {{ main }};

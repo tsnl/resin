@@ -163,7 +163,7 @@ fn source_drop_hooks_reject_gpu_elements_before_and_after_importing() {
     ] {
         let use_site = format!(
             r#"fn invalid(gpu: Gpu) -> (() | Err<_>)  {{
-                gpu.alloc::<{owner}>(0_ul)?;
+                gpu:alloc::<{owner}>(0_ul)?;
                 (())
             }}
             "#
@@ -208,7 +208,7 @@ fn source_gpu_library_resolves_generic_allocation_and_explicit_access() {
             let mut value = scalar:load();
             value.right = 3_i;
             scalar:store(value);
-            scalar:replace(value);
+            scalar:replace(Pair { left = 4_i, right = 5_i });
             let mut values = gpu:alloc::<int>(4_ul)?;
             values:at(1_ul):store(7_i);
             let mut tail = values:slice(1_ul, 2_ul);

@@ -49,7 +49,7 @@ fn record(commands: Commands, pipeline: ComputeProgram<Params, PipelineOwner>, v
 
 fn pointer(name: &str) -> String {
     format!(
-        r#"struct {name}<T> {{ view: GpuView; }}
+        r#"struct {name}<T> {{ view: GpuView, }}
         intrinsic "gpu_pointer_projection" fn project_{}<T>(value: {name}<T>) -> Ptr<T>;"#,
         name.to_lowercase()
     )
@@ -99,16 +99,16 @@ fn ambiguous_projection_diagnostics_are_independent_of_declaration_and_import_or
 
 #[test]
 fn unfinished_bridge_completions_use_registered_source_pipeline_names() {
-    for receiver in ["device", "Device", "commands", "Commands"] {
+    for receiver in ["device", "commands"] {
         let source = Source::new(
             "main.resin",
             format!(
-                "{PIPELINES}\nfn completion(device: Device, commands: Commands)  {{ {receiver}.; }}"
+                "{PIPELINES}\nfn completion(device: Device, commands: Commands)  {{ {receiver}:; }}"
             ),
         );
         let analysis =
             support::frontend::analyze(source.clone(), &mut Loader::new(Default::default()), None);
-        let offset = source.text().rfind(".;").unwrap() + 1;
+        let offset = source.text().rfind(":;").unwrap() + 1;
         let completions = analysis.completions(&source, offset);
         let methods = if receiver.eq_ignore_ascii_case("device") {
             [

@@ -33,7 +33,9 @@ fn execute<I: Copy, O: Copy>(source: &str, inputs: &[I], sentinel: O) -> Option<
     // Keep the same GPU-before-build lock order as the other GPU suites.
     let _lock = lock_gpu();
     let mut gpu = gpu()?;
-    let module = support::module(source);
+    let module = support::module(&format!(
+        r#"{source} intrinsic "pointer_index" fn device_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;"#
+    ));
     let project = support::project::Project::new(&module, None).unwrap();
     let built = project.build(&toolchain::spirv(&optimizer)).unwrap();
     let shader = &project.generated.shaders()[0];
@@ -179,8 +181,9 @@ fn physical_byte_record_strides_preserve_neighboring_elements() {
             if (index < root.count) {
                 let mut inputs = Span<Bytes3> { data = root.inputs, length = root.count };
                 let mut outputs = Span<Bytes3> { data = root.outputs, length = root.count };
-                let mut output: Ref<_> = outputs:at(index);
-                output = inputs:at(index);
+                let mut output: Ref<_> = device_index(outputs.data, outputs.length, index).*;
+                let input: Ref<Bytes3> = device_index(inputs.data, inputs.length, index).*;
+                output = Bytes3 { a = input.a, b = input.b, c = input.c };
                 output.b = output.b + 1_ub;
             };
         }
@@ -297,11 +300,11 @@ fn an_unconditionally_failing_nested_loop_condition_stops_before_caller_stores()
                 let mut output = Span<uint> { data = root.outputs, length = root.count };
                 let mut step = 0_ui;
                 while (step < 1_ui) {
-                    while (condition()) { output:at(index) = 1_ui; };
-                    output:at(index) = 2_ui;
+                    while (condition()) { device_index(output.data, output.length, index).* = 1_ui; };
+                    device_index(output.data, output.length, index).* = 2_ui;
                     step = step + 1_ui;
                 };
-                output:at(index) = 3_ui;
+                device_index(output.data, output.length, index).* = 3_ui;
             };
         }"#;
     let sentinel = 0xabcd1234_u32;

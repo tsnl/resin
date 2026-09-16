@@ -62,7 +62,7 @@ fn kernel(invocation: ulong, root: Ptr<Root>)  {
 	let mut index = uint(invocation);
 	if (index < root.count) {
 		let mut output = Span<uint> { data = root.pixels, length = ulong(root.count) };
-		output:at(invocation) = match (evaluate(index)) {
+		fixture_index(output.data, output.length, invocation).* = match (evaluate(index)) {
 			uint(value) => {
 				value
 			},
@@ -86,3 +86,5 @@ fn main() -> int  {
 		1
 	}
 }
+
+intrinsic "pointer_index" fn fixture_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;

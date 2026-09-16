@@ -416,7 +416,11 @@ impl Completion<'_> {
                 pointer: self.boxed(pointer)?,
             },
             typed::TermKind::Field { base, name } => TermKind::Field {
-                base: self.place(base)?,
+                base: if constant_place(base) {
+                    self.boxed(base)?
+                } else {
+                    self.place(base)?
+                },
                 name: name.val.clone(),
             },
         })
