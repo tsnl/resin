@@ -1,131 +1,93 @@
-use resin_hir::{MethodName, TermKind, Type};
+use resin_hir::{Term, TermKind, Type};
 
 mod common;
 use common::hir_module;
 
+fn tail(function: &resin_hir::Function) -> &Term {
+    let mut term = function.body.as_ref().unwrap();
+    loop {
+        term = match &term.kind {
+            TermKind::Block { tail, .. } => tail,
+            TermKind::Use { arg } | TermKind::Convert { arg } => arg,
+            TermKind::Read { place } | TermKind::Move { place } => place,
+            _ => return term,
+        };
+    }
+}
+
 #[test]
-fn unary_and_binary_slots_resolve_to_ordinary_calls() {
+fn unary_and_binary_operators_resolve_to_ordinary_free_calls() {
     let module = hir_module(
-        r#"struct Number { value: int,
-            
-            
-        }
-fn __neg__(self: Number) -> Number  { Number { value = -self.value } }
-
-fn __sub__(self: Number, other: int) -> int  { self.value - other }
-
-        fn use(value: Number) -> int  { -value - 2 }
-    "#,
+        "struct Number { value: int }
+         fn __neg__(value: Number) -> Number { Number { value = -value.value } }
+         fn __sub__(left: Number, right: int) -> int { left.value - right }
+         fn use(value: Number) -> int { -value - 2 }",
     )
     .unwrap();
-    let owner = module
-        .types
-        .iter()
-        .find(|ty| ty.name.as_ref() == "Number")
-        .unwrap();
-    for arity in [1, 2] {
-        let operator = MethodName::Operator {
-            symbol: "-".into(),
-            arity,
-        };
-        let name = if arity == 1 { "__neg__" } else { "__sub__" };
-        assert_eq!(owner.methods[&operator], owner.methods[&name.into()]);
-    }
     let function = module
         .functions
         .iter()
         .find(|f| f.name.as_ref() == "use")
         .unwrap();
-    let TermKind::Block { tail, .. } = &function.body.as_ref().unwrap().kind else {
-        panic!()
+    let TermKind::Call { func, args } = &tail(function).kind else {
+        panic!("ordinary call")
     };
-    assert!(matches!(tail.kind, TermKind::Call { .. }));
-    assert_eq!(tail.ty, Type::Int32);
+    let TermKind::Function { function, .. } = func.kind else {
+        panic!("resolved operation")
+    };
+    assert_eq!(module.functions[function.index()].name.as_ref(), "__sub__");
+    assert!(matches!(args[0].kind, TermKind::Call { .. }));
+    assert_eq!(
+        module.functions[function.index()].signature.result.ty,
+        Type::Int32
+    );
 }
 
 #[test]
-fn generic_operators_retain_signature_queries_until_specialization() {
-    let module = hir_module("fn add<T, U>(left: T, right: U) -> _  { left + right }").unwrap();
+fn generic_operators_retain_all_operand_types_until_specialization() {
+    let module = hir_module("fn add<T, U>(left: T, right: U) -> _ { left + right }").unwrap();
     let function = &module.functions[0];
-    assert!(
-        matches!(
-            function.signature.result.ty,
-            Type::FunctionResult { .. } | Type::Value { .. }
-        ),
-        "{:?}",
-        function.signature.result.ty
-    );
-    let TermKind::Block { tail, .. } = &function.body.as_ref().unwrap().kind else {
-        panic!()
+    assert!(matches!(
+        function.signature.result.ty,
+        Type::FunctionResult { .. } | Type::Value { .. }
+    ));
+    let TermKind::OperationCall { lookup, args } = &tail(function).kind else {
+        panic!("dependent operation")
     };
-    let mut tail = tail.as_ref();
-    while let TermKind::Use { arg } = &tail.kind {
-        tail = arg;
-    }
-    let TermKind::DependentMethodCall {
-        lookup,
-        receiver,
-        args,
-    } = &tail.kind
-    else {
-        panic!("{tail:?}")
-    };
+    assert_eq!(lookup.primitive.as_deref(), Some("+"));
     assert_eq!(
-        lookup.name,
-        MethodName::Operator {
-            symbol: "+".into(),
-            arity: 2
-        }
+        lookup.arguments,
+        function
+            .signature
+            .params
+            .iter()
+            .map(|p| p.annotation.ty.clone())
+            .collect::<Vec<_>>()
     );
-    assert!(lookup.associated && receiver.is_none());
     assert_eq!(args.len(), 2);
 }
 
 #[test]
-fn unused_operator_declarations_are_validated() {
-    for (source, expected) in [
-        (
-            "struct Bad {  }\nfn __add__(self: Bad, x: Bad, y: Bad) -> Bad  { self }\n",
-            "invalid number of operands",
-        ),
-        (
-            "struct Bad {  }\nfn __invert__(self: Bad, x: Bad) -> Bad  { self }\n",
-            "invalid number of operands",
-        ),
-        (
-            "struct Bad {  }\nfn __add__<T>(self: Bad, x: T) -> Bad  { self }\n",
-            "cannot declare additional",
-        ),
-        (
-            "struct Bad {  }\nfn __add__(self: Ptr<Bad>, x: Bad) -> Bad  { x }\n",
-            "owning struct by value",
-        ),
-        (
-            "struct Bad {  }\nfn bad___neg__(self: int) -> int  { self }\n",
-            "owning struct by value",
-        ),
-        (
-            "struct Bad {  }\nfn __eq__(self: Bad, other: Bad) -> int  { 1 }\n",
-            "must return bool",
-        ),
-        (
-            "struct Bad {  }\nfn __not__(self: Bad) -> int  { 1 }\n",
-            "must return bool",
-        ),
-    ] {
-        let error = hir_module(source).unwrap_err().to_string();
-        assert!(error.contains(expected), "{source}\n{error}");
-    }
+fn operators_support_borrowed_receivers_additional_binders_and_right_operand_dispatch() {
+    hir_module(
+        "struct Number { value: int }
+         fn __add__<T>(left: Ref<Number>, right: T) -> T { right }
+         fn __add__(left: int, right: Ref<Number>) -> int { left + right.value }
+         fn sum(value: Number) -> int { value + 7 + (35 + value) }",
+    )
+    .unwrap();
 }
 
 #[test]
-fn duplicate_operators_and_missing_left_operand_overloads_are_rejected() {
+fn invalid_operator_calls_and_unused_body_errors_are_rejected() {
     for source in [
-        "struct A {   }\nfn __add__(a: A, b: A) -> A  { a }\n\nfn __add__(a: A, b: int) -> A  { a }\n",
-        "struct A {} fn add(a: A, b: A) -> A  { a + b }",
-        "struct A {  }\nfn __add__(a: A, b: int) -> A  { a }\n fn add(a: A) -> A  { 2 + a }",
-        "struct A {  }\nfn __add__(a: A, b: int) -> A  { a }\n fn add(a: A) -> A  { &a + 1 }",
-        "struct A {  }\nfn __eq__(a: A, b: A) -> bool  { 1 == 1 }\n fn compare(a: A) -> bool  { a != a }",
+        "struct A {} fn __add__(a: A, b: A, c: A) -> A { a } fn use(a: A, b: A) -> A { a + b }",
+        "struct A {} fn add(a: A, b: A) -> A { a + b }",
+        "struct A {} fn __add__(a: A, b: int) -> A { a } fn add(a: A) -> A { 2 + a }",
+        "struct A {} fn __add__(a: A, b: int) -> A { a } fn add(a: A) -> A { &a + 1 }",
+        "struct A {} fn __eq__(a: A, b: A) -> bool { true } fn compare(a: A) -> bool { a != a }",
+        "struct A {} fn __add__<T>(a: A, b: T) -> A { missing }",
+        "struct A {} fn __add__(a: A, b: int) -> A { a } fn __add__(a: A, b: int) -> A { a } fn use(a: A) -> A { a + 1 }",
     ] {
         assert!(hir_module(source).is_err(), "{source}");
     }

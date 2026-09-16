@@ -1,7 +1,7 @@
 mod support;
 
 #[test]
-fn generic_aliases_borrow_storage_and_preserve_nominal_methods() {
+fn generic_aliases_borrow_storage_and_resolve_free_operations() {
     let module = support::module(
         r#"export { main };
         struct FieldsDataLength<T0, T1> { data: T0, length: T1, }
@@ -9,10 +9,10 @@ type View<T> = FieldsDataLength<Ptr<T>, ulong>;
         struct Item { value: int,
             
         }
-fn read(self: Item) -> int  { self.value }
+fn read(self: Ref<Item>) -> int  { self.value }
 
         type Renamed<T> = Item;
-        fn first<T>(view: View<T>) -> T  { view.data.* }
+        fn first<T>(view: View<T>) -> Ref<T>  { view.data.* }
         fn main() -> int  {
             let mut item = Renamed<bool> { value = 42 };
             first(View<Item> { data = &item, length = 1 }):read()

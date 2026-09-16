@@ -1862,10 +1862,14 @@ impl Inference<'_> {
             .as_ref()
             .is_some_and(|name| super::context::is_primitive_operation(name))
             && args.and_then(|args| args.first()).is_some_and(|arg| {
-                matches!(
-                    self.solver.shape_hint(arg),
-                    Type::Variable(_) | Type::Apply { .. }
-                )
+                match self.solver.shape_hint(arg) {
+                    Type::Variable(id) => !matches!(
+                        self.solver.variables[id].class,
+                        Class::Number | Class::Float
+                    ),
+                    Type::Apply { .. } => true,
+                    _ => false,
+                }
             })
         {
             // A source candidate cannot win while a primitive candidate's

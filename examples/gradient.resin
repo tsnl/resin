@@ -33,7 +33,7 @@ fn main() -> (() | Err<_>) {
 	let mut height = 256_ui;
 	let mut count = ulong(width) * ulong(height);
 	let mut pixels = gpu:alloc::<uint>(count)?;
-	let mut root = HostRoot { width = width, height = height, pixels = pixels };
+	let mut root = HostRoot { width = width, height = height, pixels = pixels:clone() };
 	let mut commands = gpu:start_command_recording()?;
 
 	let mut workgroup_size = gpu:compute_workgroup_size();

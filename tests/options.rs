@@ -36,12 +36,13 @@ fn optional_values_match_and_unwrap_once() {
 fn unwrapped_values_widen_in_return_argument_and_field_contexts() {
     let output = run(r#"struct A { number: int, } struct B {}
         struct Record { item: A | B, }
+        fn optional() -> A | None { A { number = 14 } }
         fn widen(o: A | None) -> A | B  { o! }
         fn read(value: A | B) -> int  { match (value) { A(a) => { a.number }, B(b) => { 0 } } }
         fn main() -> int  {
             let mut o: A | None; o = A { number = 14 };
             let mut record = Record { item = o! };
-            if (read(widen(o)) + read(o!) + read(record.item) == 42) { 0 } else { 1 }
+            if (read(widen(optional())) + read(optional()!) + read(record.item) == 42) { 0 } else { 1 }
         }
     "#);
     assert_eq!(

@@ -89,9 +89,9 @@ fn definition_keywords_preserve_statement_and_field_spans() {
         panic!("expected function body");
     };
     assert!(matches!(stmts[0].val, StmtKind::Define { .. }));
-    assert_eq!(text(stmts[0].span), "var first = seed;");
+    assert_eq!(text(stmts[0].span), "let mut first = seed;");
     assert!(matches!(stmts[1].val, StmtKind::Declare { .. }));
-    assert_eq!(text(stmts[1].span), "var second: int;");
+    assert_eq!(text(stmts[1].span), "let mut second: int;");
     assert!(matches!(stmts[2].val, StmtKind::Expr { .. }));
     let TermKind::Call { args, .. } = &tail.val else {
         panic!("expected nominal conversion");
@@ -104,7 +104,7 @@ fn definition_keywords_preserve_statement_and_field_spans() {
     let TermKind::Block { stmts, tail } = &fields[1].1.val else {
         panic!("expected block-valued field");
     };
-    assert_eq!(text(stmts[0].span), "var next = second;");
+    assert_eq!(text(stmts[0].span), "let mut next = second;");
     expect_var(tail, "next");
 }
 

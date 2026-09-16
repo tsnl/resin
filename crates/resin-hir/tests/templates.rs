@@ -32,13 +32,16 @@ fn arithmetic_and_literals_remain_polymorphic_and_enclosing_binders_are_preserve
         panic!("block");
     };
     let mut tail = tail.as_ref();
-    while let TermKind::Use { arg } | TermKind::Convert { arg } = &tail.kind {
+    while let TermKind::Use { arg } | TermKind::Convert { arg } | TermKind::Read { place: arg } =
+        &tail.kind
+    {
         tail = arg;
     }
-    let TermKind::DependentMethodCall { args, lookup, .. } = &tail.kind else {
+    let TermKind::OperationCall { args, lookup } = &tail.kind else {
         panic!("addition: {tail:?}");
     };
-    assert_eq!(lookup.receiver, module.functions[0].signature.result.ty);
+    assert_eq!(lookup.arguments[0], module.functions[0].signature.result.ty);
+    assert_eq!(lookup.literal_arguments, [1]);
     assert!(matches!(
         args[1].ty,
         Type::FunctionParameter { index: 1, .. }

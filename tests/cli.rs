@@ -703,7 +703,7 @@ fn process_entries_receive_literal_arguments_in_run_and_compiled_modes() {
     let service = Service::new();
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("args.resin");
-    fs::write(&input, r#"export { main }; import { "$/string.resin", "$/process.resin" };
+    fs::write(&input, r#"export { main }; import { "$/string.resin", "$/span.resin", "$/process.resin" };
         fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> int  {
             let mut args = arguments(argc, argv);
             let mut with_sentinel = arguments(argc + 1, argv);
@@ -877,7 +877,7 @@ fn process_arguments_preserve_non_utf8_bytes() {
     let service = Service::new();
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("bytes.resin");
-    fs::write(&input, r#"export { main }; import { "$/string.resin", "$/process.resin" }; fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>)  { print(fmt("{0}", (argument(arguments(argc, argv), 1_ul):bytes(),))); }"#).unwrap();
+    fs::write(&input, r#"export { main }; import { "$/string.resin", "$/span.resin", "$/process.resin" }; fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>)  { print(fmt("{0}", (argument(arguments(argc, argv), 1_ul):bytes(),))); }"#).unwrap();
     let output = service
         .command()
         .current_dir(temp.path())

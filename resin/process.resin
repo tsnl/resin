@@ -28,7 +28,7 @@ fn c_string(text: Ptr<ubyte>) -> Span<ubyte> {
 	Span<ubyte> { data = text, length = strlen(text) }
 }
 
-fn argument(args: Span<Ptr<ubyte>>, index: ulong) -> Span<ubyte> {
+fn argument(args: Ref<Span<Ptr<ubyte>>>, index: ulong) -> Span<ubyte> {
 	c_string(args:at(index))
 }
 

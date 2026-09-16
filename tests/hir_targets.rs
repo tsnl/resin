@@ -247,12 +247,12 @@ fn shader_calls_cannot_enter_foreign_functions_or_store_function_values() {
     for (helper, body, message) in [
         (
             "extern { \"stdlib.h\": { fn abs(i: int) -> int; } };",
-            "out.* := uint(abs(int(i)));",
+            "out.* = uint(abs(int(i)));",
             "foreign",
         ),
         (
             "fn helper(i: uint) -> uint  { i }",
-            "var f = helper; out.* = f(uint(i));",
+            "let mut f = helper; out.* = f(uint(i));",
             "does not support type",
         ),
     ] {

@@ -193,7 +193,7 @@ fn revised_source_cannot_borrow_editor_facts_from_its_previous_version() {
 }
 
 #[test]
-fn nominal_declarations_retain_method_identities_with_their_type_expressions() {
+fn nominal_declarations_retain_fields_and_drop_hooks_while_operations_are_free() {
     let source = module(
         "owner.resin",
         "struct Owner { value: int,   }\nfn read(self: Owner) -> int  { self.value }\n\nfn drop(self: Ptr<Owner>)  {}\n type Alias = Owner;",
@@ -212,13 +212,17 @@ fn nominal_declarations_retain_method_identities_with_their_type_expressions() {
         panic!()
     };
     assert_eq!(fields[0].ty, Type::Int32);
+    assert!(owner.methods.is_empty());
+    let read = hir
+        .functions
+        .iter()
+        .find(|function| function.name.as_ref() == "read")
+        .unwrap();
+    assert_eq!(read.signature.result.ty, Type::Int32);
     assert_eq!(
-        hir.functions[owner.methods[&"read".into()].index()]
-            .name
-            .as_ref(),
-        "Owner.read"
+        hir.functions[owner.drop.unwrap().index()].name.as_ref(),
+        "drop"
     );
-    assert_eq!(owner.drop, Some(owner.methods[&"drop".into()]));
     assert!(
         !hir.types
             .iter()

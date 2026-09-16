@@ -350,7 +350,7 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
     for marker in [
         "",
         "{ let mut unused = (); };",
-        "var unused: _; unused = 1;",
+        "let mut unused: _; unused = 1;",
     ] {
         let source = format!(
             "fn consume(p: Ptr<ubyte>)  {{}} fn main()  {{ {marker} let mut value = 0; consume(&value); }}"
@@ -388,9 +388,9 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
 #[test]
 fn pointer_reinterpretation_does_not_narrow_source_storage() {
     for bindings in [
-        "var n = 300; let mut bytes = Ptr<ubyte>(&n);",
-        "var n: _; n = 300; let mut bytes = Ptr<ubyte>(&n);",
-        "var n: int; n = 300; let mut source: Ptr<int>; source = &n; let mut bytes = Ptr<ubyte>(source);",
+        "let mut n = 300; let mut bytes = Ptr<ubyte>(&n);",
+        "let mut n: _; n = 300; let mut bytes = Ptr<ubyte>(&n);",
+        "let mut n: int; n = 300; let mut source: Ptr<int>; source = &n; let mut bytes = Ptr<ubyte>(source);",
     ] {
         for marker in ["", "{ let mut unused = (); };"] {
             let source = format!("export {{ main }}; fn main()  {{ {bindings} {marker} }}");
@@ -403,7 +403,7 @@ fn pointer_reinterpretation_does_not_narrow_source_storage() {
                 .unwrap();
             assert_eq!(
                 n.ty,
-                if bindings.contains("var n: int") {
+                if bindings.contains("let mut n: int") {
                     Ty::Int32
                 } else {
                     Ty::Int64
@@ -519,7 +519,7 @@ fn layout_operands_do_not_read_or_initialize_runtime_locals() {
         Ty::UInt64
     );
     rejects(
-        "fn f() -> int  { let mut n: int; size_of(n = 42); n }",
+        "fn f() -> int  { let mut n: int; size_of({ n = 42; n }); n }",
         "UninitializedValue",
     );
 }
@@ -643,7 +643,10 @@ fn unsuffixed_numbers_infer_from_uses_and_fall_back_to_64_bits() {
         ("1 + 2.5", Ty::Float64),
         ("1.5 + 2", Ty::Float64),
     ] {
-        for body in [expression.to_owned(), format!("var n = {expression}; n")] {
+        for body in [
+            expression.to_owned(),
+            format!("let mut n = {expression}; n"),
+        ] {
             assert_eq!(
                 result(&format!("fn value() -> _  {{ {body} }}"), "value"),
                 ty,
@@ -669,14 +672,13 @@ fn unsuffixed_numbers_infer_from_uses_and_fall_back_to_64_bits() {
         }
         for literal in literals {
             for body in [
-                format!("var n = {literal}; let mut p: Ptr<{name}>; p = &n; n"),
-                format!("var n = {literal}; take(n)"),
-                format!("var n = {literal}; n + take(1)"),
-                format!("var n = {literal}; take(1) + n"),
+                format!("let mut n = {literal}; let mut p: Ptr<{name}>; p = &n; n"),
+                format!("let mut n = {literal}; take(n)"),
+                format!("let mut n = {literal}; n + take(1)"),
+                format!("let mut n = {literal}; take(1) + n"),
             ] {
-                let source = format!(
-                    "fn take(n: {name}) -> {name} = {{ n }}; fn value() -> _  {{ {body} }}"
-                );
+                let source =
+                    format!("fn take(n: {name}) -> {name} {{ n }} fn value() -> _  {{ {body} }}");
                 assert_eq!(result(&source, "value"), ty, "{source}");
             }
         }

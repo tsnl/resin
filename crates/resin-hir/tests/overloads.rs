@@ -71,3 +71,9 @@ fn receiver_calls_are_free_function_calls() {
 fn local_function_values_shadow_primitive_operations() {
     hir_module("fn identity(value: int) -> int { value } fn main() -> int { let at = identity; let replace = identity; at(20) + 22:replace() }").unwrap();
 }
+
+#[test]
+fn numeric_literals_receive_context_from_source_overloads_of_primitive_names() {
+    hir_module("fn replace(value: int) -> int { value + 1 } fn use() -> bool { replace(1) == 2 }")
+        .unwrap();
+}

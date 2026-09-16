@@ -56,7 +56,7 @@ fn record() -> Ty {
 }
 
 #[test]
-fn chained_assignment_preserves_the_value() {
+fn store_returns_unit_so_numeric_assignment_cannot_be_chained() {
     let function = Function {
         profile: crate::Profile::Host,
         foreign: None,
@@ -93,11 +93,18 @@ fn chained_assignment_preserves_the_value() {
         }],
     };
 
-    verify(&Module {
+    let error = verify(&Module {
         functions: vec![function],
         ..Default::default()
     })
-    .unwrap();
+    .unwrap_err();
+    assert!(matches!(
+        error.kind,
+        VerifyErrorKind::TypeMismatch {
+            expected: Ty::Int32,
+            found: Ty::Unit
+        }
+    ));
 }
 
 #[test]

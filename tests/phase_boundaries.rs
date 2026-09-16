@@ -31,18 +31,18 @@ fn hir_resolves_calls_and_preserves_type_dependent_operations_for_lir() {
 fn read(item: Item) -> int  { item.value }
 
 
-        fn read(item: Item) -> int  { item:read() }
+        fn relay(item: Item) -> int { item:read() }
         fn both(a: bool, b: bool) -> bool  { a && b }
         fn measure() -> ulong  { size_of(int) }
     "#);
-    let read = function(&module, "read");
+    let read = function(&module, "relay");
     let resin_hir::TermKind::Call { func, args } = &tail(read).kind else {
         panic!("ordinary call")
     };
     let resin_hir::TermKind::Function { function: id, .. } = func.kind else {
         panic!("resolved function")
     };
-    assert_eq!(module.functions[id.index()].name.as_ref(), "Item.read");
+    assert_eq!(module.functions[id.index()].name.as_ref(), "read");
     assert_eq!(args.len(), 1);
     assert!(matches!(
         tail(function(&module, "both")).kind,
@@ -56,11 +56,11 @@ fn read(item: Item) -> int  { item.value }
         }
     ));
     assert!(matches!(
-        tail(function(&module, "Item.read")).kind,
+        tail(function(&module, "read")).kind,
         resin_hir::TermKind::Field { ref name, .. } if name.as_ref() == "value"
     ));
     let printed = resin_hir::format_module(&module);
-    assert!(printed.contains("Item.read") && printed.contains("(if") && printed.contains("(call"));
+    assert!(printed.contains("read") && printed.contains("(if") && printed.contains("(call"));
     resin_lir::verify(
         &support::frontend::lower(&module, &[], &resin_lir::LoweringOptions::default()).unwrap(),
     )

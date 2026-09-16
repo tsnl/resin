@@ -66,7 +66,7 @@ fn while_does_not_assume_its_body_ran() {
         "export { main }; fn main () -> int  { let mut x: int; while (1 == 0) { x = 1; }; x }",
         "export { main }; fn main () -> ()  { let mut x: int; while (x < 3) { x = 1; }; }",
         "export { main }; fn main () -> ()  { let mut x: int; while (1 == 0) { x = x + 1; }; }",
-        "export { main }; fn main () -> int  { let mut x: int; while ((1 == 0) && ((x = 1) == 1)) {}; x }",
+        "export { main }; fn main () -> int  { let mut x: int; while ((1 == 0) && ({ x = 1; x } == 1)) {}; x }",
         "export { main }; fn main () -> int  { let mut x: int; while (1 == 1) { x = 1; }; x }",
     ] {
         assert!(
@@ -77,7 +77,9 @@ fn while_does_not_assume_its_body_ran() {
             "{source}"
         );
     }
-    compile("export { main }; fn main () -> int  { let mut x: int; while ((x = 1) == 0) {}; x }");
+    compile(
+        "export { main }; fn main () -> int  { let mut x: int; while ({ x = 1; x } == 0) {}; x }",
+    );
 }
 
 #[test]
@@ -464,7 +466,7 @@ fn pointers_cannot_be_used_in_arithmetic_and_indexing_is_explicit() {
         let source = format!("fn bad(p: Ptr<int>) -> Ptr<int>  {{ {body} }}");
         assert!(generate(&parse(&source)).is_err(), "{source}");
     }
-    for body in ["xs(0).* := 3", "xs(1.5)", "xs(0, 1)"] {
+    for body in ["xs(0).* = 3", "xs(1.5)", "xs(0, 1)"] {
         let source = format!("fn bad() -> int  {{ let mut xs = [1, 2]; {body} }}");
         assert!(generate(&parse(&source)).is_err(), "{source}");
     }
@@ -481,5 +483,5 @@ fn one_armed_if_preserves_conditional_initialization_and_scope() {
     ] {
         assert!(generate(&parse(source)).is_err(), "{source}");
     }
-    compile("fn main() -> int  { let mut x: int; if ((x = 2) == 2) {}; x }");
+    compile("fn main() -> int  { let mut x: int; if ({ x = 2; x } == 2) {}; x }");
 }

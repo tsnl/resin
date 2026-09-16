@@ -280,7 +280,13 @@ impl Substitution {
                     .iter()
                     .map(|arg| materialize(arg, instances))
                     .collect::<Result<Vec<_>, _>>()?;
-                if let Ok(call) = instances.typer().builtin_instance(symbol, &types) {
+                let literals_match = lookup.literal_arguments.iter().all(|&index| {
+                    materialize(value_type(&args[index]), instances)
+                        .is_ok_and(|fallback| numeric_literal_matches(&fallback, &types[index]))
+                });
+                if literals_match
+                    && let Ok(call) = instances.typer().builtin_instance(symbol, &types)
+                {
                     let result = if call.result == Ty::Bool {
                         resin_hir::Type::Bool
                     } else {

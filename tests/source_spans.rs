@@ -106,31 +106,31 @@ fn empty_slices_allow_one_past_the_end_without_advancing_null() {
 fn primitive_boundaries_report_invalid_ranges_indices_and_byte_counts() {
     for (storage, cases) in [
         (
-            "var values = [1_ul, 2_ul, 3_ul]; let mut view = Span<ulong> { data = &values.at(0), length = 3_ul };",
+            "let mut values = [1_ul, 2_ul, 3_ul]; let mut view = Span<ulong> { data = &values:at(0), length = 3_ul };",
             [
-                ("view.at(3)", "index"),
-                ("view.slice(2, 2)", "slice out of bounds"),
+                ("view:at(3)", "index"),
+                ("view:slice(2, 2)", "slice out of bounds"),
                 (
-                    "view.slice(0xffffffffffffffff_ul, 0)",
+                    "view:slice(0xffffffffffffffff_ul, 0)",
                     "slice out of bounds",
                 ),
                 (
-                    "Span<ulong> { data = Ptr<ulong>(0_ul), length = 0xffffffffffffffff_ul }.as_bytes()",
+                    "Span<ulong> { data = Ptr<ulong>(0_ul), length = 0xffffffffffffffff_ul }:as_bytes()",
                     "byte length overflow",
                 ),
             ],
         ),
         (
-            "var view = Span<uint> { data = Ptr<uint>(0_ul), length = 2_ul };",
+            "let mut view = Span<uint> { data = Ptr<uint>(0_ul), length = 2_ul };",
             [
-                ("view.slice(3, 0)", "span slice out of bounds"),
-                ("view.slice(1, 2)", "span slice out of bounds"),
+                ("view:slice(3, 0)", "span slice out of bounds"),
+                ("view:slice(1, 2)", "span slice out of bounds"),
                 (
-                    "view.slice(0xffffffffffffffff_ul, 1)",
+                    "view:slice(0xffffffffffffffff_ul, 1)",
                     "span slice out of bounds",
                 ),
                 (
-                    "Span<uint> { data = Ptr<uint>(0_ul), length = 0xffffffffffffffff_ul }.as_bytes()",
+                    "Span<uint> { data = Ptr<uint>(0_ul), length = 0xffffffffffffffff_ul }:as_bytes()",
                     "span byte length overflow",
                 ),
             ],
@@ -232,14 +232,14 @@ fn reference_returning_index_wrappers_preserve_nested_places() {
     import { "$/span.resin" };
     struct Payload { value: int, }
     struct Entry { nested: Payload, }
-    fn at(items: Span<Entry>, index: ulong) -> Ref<Entry>  { items:at(index) }
+    fn entry_at(items: Ref<Span<Entry>>, index: ulong) -> Ref<Entry>  { items:at(index) }
     fn main() -> int  {
         let mut items = [Entry { nested = Payload { value = 1 } }, Entry { nested = Payload { value = 2 } }];
         let mut span = Span<Entry> { data = Ptr<Entry>(&items), length = 2_ul };
-        at(span, 1_ul).nested.value = 42;
-        let mut p = &at(span, 1_ul).nested.value;
+        entry_at(span, 1_ul).nested.value = 42;
+        let mut p = &entry_at(span, 1_ul).nested.value;
         p.* = p.* + 1;
-        let mut copied = at(span, 1_ul).nested;
+        let mut copied = Payload { value = entry_at(span, 1_ul).nested.value };
         copied.value = 99;
         if (items(1).nested.value == 43 && copied.value == 99 && items(0).nested.value == 1) { 0 } else { 1 }
     }
@@ -253,7 +253,7 @@ fn reference_returning_index_wrappers_preserve_nested_places() {
 
 #[test]
 fn opaque_native_elements_cannot_be_indexed_or_sliced() {
-    for operation in ["view.at(0_ul)", "view.slice(0_ul, 1_ul)"] {
+    for operation in ["view:at(0_ul)", "view:slice(0_ul, 1_ul)"] {
         let source = format!(
             r#"export {{ main }};
             import {{ "$/span.resin" }};

@@ -52,11 +52,11 @@ fn pointer_and_array_methods_keep_generic_nominal_payloads_symbolic() {
 }
 
 #[test]
-fn gpu_argument_methods_accept_pointer_receivers_and_associated_calls() {
+fn gpu_argument_operations_accept_explicit_values_in_both_call_spellings() {
     generate(
         r#"fn record(arguments: Ptr<GpuArguments>, commands: Ptr<ubyte>) -> int  {
-            arguments:dispatch_native(commands, 1, 1, 1);
-            arguments:draw_native(commands, 3);
+            arguments.*:dispatch_native(commands, 1, 1, 1);
+            arguments.*:draw_native(commands, 3);
             dispatch_native(arguments.*, commands, 1, 1, 1);
             draw_native(arguments.*, commands, 3)
         }

@@ -168,7 +168,7 @@ fn shader_interface_expansion_bounds_duplicated_generic_fields() {
         ty = format!("Pair<{ty}>");
     }
     let source = format!(
-        "struct Pair<T> {{ left: T, right: T, }} @fragment_shader fn fragment(color: {ty}) -> {ty} = {{ color }};"
+        "struct Pair<T> {{ left: T, right: T, }} @fragment_shader fn fragment(color: {ty}) -> {ty} {{ color }}"
     );
     let error = compile(&source).unwrap_err();
     assert!(

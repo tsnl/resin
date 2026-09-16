@@ -87,7 +87,7 @@ fn generic_results_propagate_union_errors_and_match_payloads() {
         fn main() -> int  {
             let mut first = (int | Err<A>)((7));
             let mut second = (int | Err<B>)(Err(B {}));
-            recover(propagate(first), 0) + recover(combine(first, second), 35)
+            recover(propagate(first), 0) + recover(combine((int | Err<A>)(7), second), 35)
         }
     "#);
     assert_eq!(
@@ -124,12 +124,12 @@ fn hir(source: &str) -> resin_hir::Module {
 #[test]
 fn concrete_template_errors_report_the_application_chain() {
     for source in [
-        "fn add<T>(value: T) -> T  { value + value } fn relay<U>(value: U) -> U  { add(value) } fn main()  { relay(1 == 1); }",
+        "fn add<T>(value: Ref<T>) -> T { value + value } fn relay<U>(value: U) -> U  { add(value) } fn main()  { relay(1 == 1); }",
         "fn byte<T>() -> T  { 256 } fn main() -> ubyte  { byte() }",
         "fn field<T>(value: T) -> int  { value.missing } fn main() -> int  { field(1) }",
         "fn choose<T>(condition: T) -> int  { if (condition) { 1 } else { 0 } } fn main() -> int  { choose(1) }",
         "fn choose<T, U>(value: T | U) -> int  { match (value) { T(a) => { 1 }, U(b) => { 2 } } } fn main() -> int  { choose::<int, int>(1) }",
-        "fn remainder<T>(value: T) -> T  { value % value } fn main()  { remainder(1.5); }",
+        "fn remainder<T>(value: Ref<T>) -> T { value % value } fn main()  { remainder(1.5); }",
     ] {
         let tree = hir(source);
         let error = support::frontend::lower(&tree, &[], &resin_lir::LoweringOptions::default())
