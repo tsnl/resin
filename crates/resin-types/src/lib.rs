@@ -713,6 +713,7 @@ impl From<DefinitionError> for TypeError {
 /// Operand relationships shared by concrete checking and inference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuiltinRule {
+    Assert,
     Float,
     Arithmetic,
     Comparison,

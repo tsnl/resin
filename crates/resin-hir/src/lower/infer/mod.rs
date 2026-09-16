@@ -2212,6 +2212,13 @@ impl Inference<'_> {
                     BuiltinRule::Format | BuiltinRule::StringFromBytes => {
                         self.solver.unify(out, &Ty::StrongOwner.into(), span)?
                     }
+                    BuiltinRule::Assert => {
+                        let complete = self.solver.unify(out, &Ty::Unit.into(), span)?;
+                        if !self.constraint(owner, &Constraint::Boolean(args[0].clone()), span)? {
+                            return Ok(false);
+                        }
+                        complete
+                    }
                     BuiltinRule::Float => self.solver.unify(out, &args[0], span)?,
                     BuiltinRule::Boolean => {
                         let complete = self.solver.unify(out, &Ty::Bool.into(), span)?;

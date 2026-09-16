@@ -13,6 +13,7 @@ pub(super) fn lookup(name: &str, arity: usize) -> Result<BuiltinRule, TypeError>
         "~" => (BuiltinRule::Arithmetic, arity == 1),
         "*" | "/" | "%" | "<<" | ">>" | "&" | "|" | "^" => (BuiltinRule::Arithmetic, arity == 2),
         "==" | "!=" | "<" | "<=" | ">" | ">=" => (BuiltinRule::Comparison, arity == 2),
+        "assert" => (BuiltinRule::Assert, arity == 1),
         "!" => (BuiltinRule::Boolean, arity == 1),
         "&&" | "||" => (BuiltinRule::Boolean, arity == 2),
         "sqrt" | "sin" | "cos" => (BuiltinRule::Float, arity == 1),
@@ -192,6 +193,10 @@ pub(super) fn type_builtin_call(
 ) -> Result<BuiltinCall, TypeError> {
     let rule = BuiltinRule::lookup(name, args.len())?;
     let result = match rule {
+        BuiltinRule::Assert => {
+            context.as_bool(&args[0])?;
+            Ty::Unit
+        }
         BuiltinRule::Float => {
             if !matches!(args[0], Ty::Float32 | Ty::Float64) {
                 return Err(TypeError::new(TypeErrorKind::UnsupportedBuiltin {
@@ -513,7 +518,7 @@ pub(super) fn shader_builtin_instance(
         .body(&arguments[0])
         .map_err(|error| error.to_string())?;
     let supported = match (name, arguments.len()) {
-        ("+" | "-" | "~" | "!", 1) => true,
+        ("+" | "-" | "~" | "!" | "assert", 1) => true,
         (
             "+" | "-" | "*" | "&" | "|" | "^" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||",
             2,

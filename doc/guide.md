@@ -1312,3 +1312,9 @@ Inherent methods and associated functions are declared [inside their struct](met
 ## Resources
 
 [No Graphics API — Sebastian Aaltonen](https://www.sebastianaaltonen.com/blog/no-graphics-api)
+
+### Assertions
+
+`assert(condition);` evaluates a `bool` once and returns unit. False traps with
+`assertion failed` on the host, or stops the current shader invocation through
+the shader failure path. Assertions remain enabled in optimized builds.

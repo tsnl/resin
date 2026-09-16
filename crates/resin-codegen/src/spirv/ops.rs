@@ -375,6 +375,9 @@ fn builtin(
     args: &[Slot],
     result: &Ty,
 ) -> Result<Word, Error> {
+    if name == "assert" {
+        return context.zero(&Ty::Unit);
+    }
     let unsupported = || Error(format!("unsupported shader builtin {name:?}"));
     let Some(first) = args.first() else {
         return Err(unsupported());
@@ -586,6 +589,9 @@ pub(super) fn invalid(
     args: &[Slot],
 ) -> Result<Option<Word>, Error> {
     match instr {
+        Instr::CallBuiltin { name, .. } if name.as_ref() == "assert" => {
+            emit(context, Op::LogicalNot, &Ty::Bool, &[args[0].id]).map(Some)
+        }
         Instr::ExcludeNone => {
             is_variant(context, &args[0].ty, &Case::Type(Ty::None), args[0].id).map(Some)
         }
