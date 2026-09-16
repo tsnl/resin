@@ -1265,10 +1265,18 @@ directly into swapchain images and multiple frames in flight are not implemented
 ### Mandelbrot explorer
 
 Run `resin examples/eg011_mandelbrot.resin` with the compiler service running.
-The example keeps the escape-time calculation on the CPU, using `Complex<float64>`
-from `$/math.resin`. A fullscreen triangle colors the resulting iteration grid.
-The 480×360 image scales with the window; resizing preserves the complex plane's aspect ratio.
-Only changes to the view or iteration budget recompute the grid.
+Set `const use_gpu = true` near the top of the example to solve pixels in a compute
+shader, or `false` to run the same solver in a CPU loop. Both paths share the orbit,
+palette, and sampling code, using `Complex<float32>` from `$/math.resin`.
+A fullscreen triangle displays the resulting color buffer; both modes require Vulkan.
+
+The image matches the window's framebuffer resolution and preserves the complex plane's
+aspect ratio when resized. Moving uses one sample per pixel; when input stops, a second
+pass averages four subpixel colors on a 2×2 grid. The default budget is 256 iterations
+per sample, with early escape and shortcuts for the main cardioid and period-two bulb.
+The image is recomputed only after a change or for that refinement pass.
+Zoom stops at a vertical span of `framebuffer_height * 1e-6` to leave room for subpixel
+offsets with float32 coordinates near the Mandelbrot set.
 
 - **Arrows / WASD:** pan.
 - **Scroll / + / −:** zoom around the center.

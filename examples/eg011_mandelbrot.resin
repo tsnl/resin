@@ -11,23 +11,27 @@ import {
 	"$/window.resin",
 };
 
+// Both modes use the same float32 solver and sampling code.
+const use_gpu = true;
+
 struct Plot {
 	width: uint,
 	height: uint,
-	center: Complex<float64>,
-	span: float64,
-	aspect: float64,
+	center: Complex<float32>,
+	span: float32,
+	aspect: float32,
 }
 
-fn plot_new(width: uint, height: uint, aspect: float64) -> Plot {
-	Plot { width = width, height = height, center = complex(-0.5_d, 0.0_d), span = 3.0_d, aspect = aspect }
+fn plot_new(width: uint, height: uint, aspect: float32) -> Plot {
+	Plot { width = width, height = height, center = complex(-0.5_f, 0.0_f), span = 3.0_f, aspect = aspect }
 }
 
-// Sample pixel centers; positive imaginary coordinates point upwards.
-fn at(self: Ref<Plot>, x: uint, y: uint) -> Complex<float64> {
+// Coordinates are in pixels; (x + 0.5, y + 0.5) is the pixel center.
+// Positive imaginary coordinates point upwards.
+fn at(self: Ref<Plot>, x: float32, y: float32) -> Complex<float32> {
 	complex(
-		self.center.real + ((float64(x) + 0.5_d) / float64(self.width) - 0.5_d) * self.span * self.aspect,
-		self.center.imag + (0.5_d - (float64(y) + 0.5_d) / float64(self.height)) * self.span,
+		self.center.real + (x / float32(self.width) - 0.5_f) * self.span * self.aspect,
+		self.center.imag + (0.5_f - y / float32(self.height)) * self.span,
 	)
 }
 
@@ -41,52 +45,86 @@ fn mandelbrot_new(max_iters: int) -> Mandelbrot {
 
 // Zero means the orbit stayed inside the escape radius for this iteration budget;
 // it is not a proof of membership. Escape requires a magnitude strictly above two.
-fn escape_iterations(self: Ref<Mandelbrot>, c: Ref<Complex<float64>>) -> int {
+fn escape_iterations(self: Ref<Mandelbrot>, c: Complex<float32>) -> int {
 	// The main cardioid and period-two bulb are known interiors.
-	let x = c.real - 0.25_d;
+	let x = c.real - 0.25_f;
 	let y2 = c.imag * c.imag;
 	let q = x * x + y2;
-	if (q * (q + x) <= 0.25_d * y2 || (c.real + 1.0_d) * (c.real + 1.0_d) + y2 <= 0.0625_d) {
+	if (q * (q + x) <= 0.25_f * y2 || (c.real + 1.0_f) * (c.real + 1.0_f) + y2 <= 0.0625_f) {
 		return 0;
 	};
 	let mut n = 0_i;
-	let mut a = complex(0.0_d, 0.0_d);
+	let mut a = complex(0.0_f, 0.0_f);
 	while (n < self.max_iters) {
-		let square = a:squared();
-		a = square:add(c);
+		// z = z*z + c, with arithmetic on values shared by host and shader.
+		let real = a.real * a.real - a.imag * a.imag + c.real;
+		a.imag = 2.0_f * a.real * a.imag + c.imag;
+		a.real = real;
 		n = n + 1;
-		if (a:magnitude_squared() > 4.0_d) {
+		if (a.real * a.real + a.imag * a.imag > 4.0_f) {
 			return n;
 		};
 	};
 	0
 }
 
-fn escapes_ball(self: Ref<Mandelbrot>, c: Ref<Complex<float64>>) -> bool {
+fn escapes_ball(self: Ref<Mandelbrot>, c: Complex<float32>) -> bool {
 	self:escape_iterations(c) != 0
 }
 
-fn solve(self: Ref<Mandelbrot>, plot: Ref<Plot>, iterations: Ref<GpuSpan<uint>>) {
+// Average colors, rather than escape counts, at four subpixel locations.
+fn solve(self: Ref<Mandelbrot>, plot: Ref<Plot>, x: uint, y: uint, samples: int) -> Color {
+	let mut r = 0.0_f;
+	let mut g = 0.0_f;
+	let mut b = 0.0_f;
+	let mut sample = 0_i;
+	while (sample < samples) {
+		let dx = if (samples == 1) {
+			0.5_f
+		} else if ((sample & 1) == 0) {
+			0.25_f
+		} else {
+			0.75_f
+		};
+		let dy = if (samples == 1) {
+			0.5_f
+		} else if (sample < 2) {
+			0.25_f
+		} else {
+			0.75_f
+		};
+		let c = plot:at(float32(x) + dx, float32(y) + dy);
+		let color = palette(self:escape_iterations(c));
+		r = r + color.r;
+		g = g + color.g;
+		b = b + color.b;
+		sample = sample + 1;
+	};
+	let scale = 1.0_f / float32(samples);
+	Color { r = r * scale, g = g * scale, b = b * scale, a = 1.0_f }
+}
+
+fn solve_cpu(self: Ref<Mandelbrot>, plot: Ref<Plot>, pixels: Ref<GpuSpan<Color>>, samples: int) {
 	let mut y = 0_ui;
 	while (y < plot.height) {
 		let mut x = 0_ui;
 		while (x < plot.width) {
-			let c = plot:at(x, y);
-			let count = self:escape_iterations(c);
-			let pixel = iterations:at(ulong(y) * ulong(plot.width) + ulong(x));
-			pixel:store(uint(count));
+			let color = self:solve(plot, x, y, samples);
+			pixels:at(ulong(y) * ulong(plot.width) + ulong(x)):store(color);
 			x = x + 1;
 		};
 		y = y + 1;
 	};
 }
 
-fn zoom(plot: Ref<Plot>, factor: float64) {
+fn zoom(plot: Ref<Plot>, factor: float32) {
+	// Keep subpixel offsets distinguishable with float32 coordinates.
+	let minimum = float32(plot.height) * 1.0e-6_f;
 	let next = plot.span * factor;
-	plot.span = if (next < 1.0e-12_d) {
-		1.0e-12_d
-	} else if (next > 8.0_d) {
-		8.0_d
+	plot.span = if (next < minimum) {
+		minimum
+	} else if (next > 8.0_f) {
+		8.0_f
 	} else {
 		next
 	};
@@ -97,7 +135,7 @@ fn input(window: Ref<Window>, plot: Ref<Plot>, solver: Ref<Mandelbrot>) -> bool 
 		return false;
 	};
 	let mut changed = false;
-	let step = plot.span * 0.06_d;
+	let step = plot.span * 0.06_f;
 	if (window:key_pressed(key_left) || window:key_pressed(key_a)) {
 		plot.center.real = plot.center.real - step;
 		changed = true;
@@ -115,11 +153,11 @@ fn input(window: Ref<Window>, plot: Ref<Plot>, solver: Ref<Mandelbrot>) -> bool 
 		changed = true;
 	};
 	if (window:key_pressed(key_equal)) {
-		plot:zoom(0.85_d);
+		plot:zoom(0.85_f);
 		changed = true;
 	};
 	if (window:key_pressed(key_minus)) {
-		plot:zoom(1.0_d / 0.85_d);
+		plot:zoom(1.0_f / 0.85_f);
 		changed = true;
 	};
 	if (window:key_state(key_right_bracket).pressed && solver.max_iters < 4096) {
@@ -131,26 +169,69 @@ fn input(window: Ref<Window>, plot: Ref<Plot>, solver: Ref<Mandelbrot>) -> bool 
 		changed = true;
 	};
 	if (window:key_state(key_r).pressed || window:key_state(key_home).pressed) {
-		plot.center.real = -0.5_d;
-		plot.center.imag = 0.0_d;
-		plot.span = 3.0_d;
+		plot.center.real = -0.5_f;
+		plot.center.imag = 0.0_f;
+		plot.span = 3.0_f;
 		solver.max_iters = 256;
 		changed = true;
 	};
 	changed
 }
 
-// The CPU solves the grid. A fullscreen triangle colors the iteration counts.
-struct Pixels {
-	iterations: Span<uint>,
-	width: uint,
-	height: uint,
+struct Parameters {
+	plot: Plot,
+	solver: Mandelbrot,
+	samples: int,
+	pixels: Span<Color>,
 }
 
-struct HostPixels {
-	iterations: GpuSpan<uint>,
-	width: uint,
-	height: uint,
+struct HostParameters {
+	plot: Plot,
+	solver: Mandelbrot,
+	samples: int,
+	pixels: GpuSpan<Color>,
+}
+
+fn clone(self: Ref<Plot>) -> Plot {
+	Plot {
+		width = self.width,
+		height = self.height,
+		center = complex(self.center.real, self.center.imag),
+		span = self.span,
+		aspect = self.aspect,
+	}
+}
+
+fn clone(self: Ref<HostParameters>) -> HostParameters {
+	HostParameters {
+		plot = self.plot:clone(),
+		solver = mandelbrot_new(self.solver.max_iters),
+		samples = self.samples,
+		pixels = self.pixels:clone(),
+	}
+}
+
+// Shaders currently lack integer division. Correct the float estimate at row
+// boundaries using exact integer comparisons, including images above 2^24 pixels.
+fn row_index(index: ulong, width: uint) -> uint {
+	let mut row = uint(float32(index) / float32(width));
+	while (ulong(row) * ulong(width) > index) {
+		row = row - 1;
+	};
+	while (ulong(row + 1) * ulong(width) <= index) {
+		row = row + 1;
+	};
+	row
+}
+
+@compute_shader
+fn compute(index: ulong, root: Ptr<Parameters>) {
+	if (index >= ulong(root.plot.width) * ulong(root.plot.height)) {
+		return;
+	};
+	let y = row_index(index, root.plot.width);
+	let x = uint(index - ulong(y) * ulong(root.plot.width));
+	root.pixels:at(index) = root.solver:solve(root.plot, x, y, root.samples);
 }
 
 @vertex_shader
@@ -172,15 +253,19 @@ fn vertex(index: int) -> Vertex {
 }
 
 @fragment_shader
-fn fragment(uv: Color, root: Ptr<Pixels>) -> Color {
-	let x = uint(uv.r * float32(root.width));
-	let y = uint(uv.g * float32(root.height));
-	let count = root.iterations:at(ulong(y) * ulong(root.width) + ulong(x));
+fn fragment(uv: Color, root: Ptr<Parameters>) -> Color {
+	let x = uint(uv.r * float32(root.plot.width));
+	let y = uint(uv.g * float32(root.plot.height));
+	let color: Ref<Color> = root.pixels:at(ulong(y) * ulong(root.plot.width) + ulong(x));
+	Color { r = color.r, g = color.g, b = color.b, a = color.a }
+}
+
+fn palette(count: int) -> Color {
 	if (count == 0) {
 		return Color { r = 0.0_f, g = 0.0_f, b = 0.0_f, a = 1.0_f };
 	};
 	// Repeating blue-to-gold bands; reserve black for bounded orbits.
-	let t = float32((count & 63_ui) + 1_ui) / 65.0_f;
+	let t = float32((count & 63) + 1) / 65.0_f;
 	let u = 1.0_f - t;
 	Color {
 		r = 9.0_f * u * t * t * t,
@@ -192,13 +277,13 @@ fn fragment(uv: Color, root: Ptr<Pixels>) -> Color {
 
 fn test() {
 	let mandelbrot = mandelbrot_new(128);
-	let zero = complex(0.0_d, 0.0_d);
-	let minus_one = complex(-1.0_d, 0.0_d);
-	let minus_two = complex(-2.0_d, 0.0_d);
-	let i = complex(0.0_d, 1.0_d);
-	let one = complex(1.0_d, 0.0_d);
-	let two = complex(2.0_d, 0.0_d);
-	let three = complex(3.0_d, 0.0_d);
+	let zero = complex(0.0_f, 0.0_f);
+	let minus_one = complex(-1.0_f, 0.0_f);
+	let minus_two = complex(-2.0_f, 0.0_f);
+	let i = complex(0.0_f, 1.0_f);
+	let one = complex(1.0_f, 0.0_f);
+	let two = complex(2.0_f, 0.0_f);
+	let three = complex(3.0_f, 0.0_f);
 	assert(!mandelbrot:escapes_ball(zero));
 	assert(!mandelbrot:escapes_ball(minus_one));
 	assert(!mandelbrot:escapes_ball(minus_two));
@@ -207,21 +292,24 @@ fn test() {
 	assert(mandelbrot:escape_iterations(two) == 2);
 	assert(mandelbrot:escape_iterations(three) == 1);
 	let limited = mandelbrot_new(1);
-	assert(!limited:escapes_ball(two));
-	let upper = complex(-0.75_d, 0.25_d);
-	let lower = complex(-0.75_d, -0.25_d);
+	assert(!limited:escapes_ball(complex(2.0_f, 0.0_f)));
+	let upper = complex(-0.75_f, 0.25_f);
+	let lower = complex(-0.75_f, -0.25_f);
 	assert(mandelbrot:escape_iterations(upper) == mandelbrot:escape_iterations(lower));
-	let mut plot = plot_new(2, 2, 2.0_d);
-	let top_left = plot:at(0, 0);
-	let bottom_right = plot:at(1, 1);
-	assert(top_left.real == -2.0_d && top_left.imag == 0.75_d);
-	assert(bottom_right.real == 1.0_d && bottom_right.imag == -0.75_d);
-	plot:zoom(0.5_d);
-	assert(plot.span == 1.5_d && plot.center.real == -0.5_d);
-	plot:zoom(100.0_d);
-	assert(plot.span == 8.0_d);
-	plot:zoom(1.0e-15_d);
-	assert(plot.span == 1.0e-12_d);
+	let mut plot = plot_new(2, 2, 2.0_f);
+	let top_left = plot:at(0.5_f, 0.5_f);
+	let bottom_right = plot:at(1.5_f, 1.5_f);
+	assert(top_left.real == -2.0_f && top_left.imag == 0.75_f);
+	assert(bottom_right.real == 1.0_f && bottom_right.imag == -0.75_f);
+	plot:zoom(0.5_f);
+	assert(plot.span == 1.5_f && plot.center.real == -0.5_f);
+	plot:zoom(100.0_f);
+	assert(plot.span == 8.0_f);
+	plot:zoom(1.0e-15_f);
+	assert(plot.span == 2.0e-6_f);
+	assert(row_index(16777215_ul, 4096_ui) == 4095_ui);
+	assert(row_index(33554431_ul, 4096_ui) == 8191_ui);
+	assert(row_index(33554432_ul, 4096_ui) == 8192_ui);
 	print("Mandelbrot tests passed\n");
 }
 
@@ -231,26 +319,36 @@ fn main() -> () | Err<_> {
 	let window = window_new(960, 720, string_from_str("Mandelbrot | arrows: pan | +/-: zoom | [/]: detail | R: reset"))?;
 	let gpu = gpu_new_for_window(window)?;
 	let pipeline = gpu:create_graphics_pipeline(vertex, fragment)?;
-	// Solve at half the initial window resolution, then scale when presenting.
-	let width = 480_ui;
-	let height = 360_ui;
-	let iterations = gpu:alloc::<uint>(ulong(width) * ulong(height))?;
-	let image = gpu:create_image(width, height)?;
-	let mut plot = plot_new(width, height, 4.0_d / 3.0_d);
+	let compute_pipeline = gpu:create_compute_pipeline(compute)?;
+	let width = 960_ui;
+	let height = 720_ui;
+	let mut pixels = gpu:alloc::<Color>(ulong(width) * ulong(height))?;
+	let mut image = gpu:create_image(width, height)?;
+	let mut plot = plot_new(width, height, 4.0_f / 3.0_f);
 	let mut solver = mandelbrot_new(256);
 	let mut dirty = true;
+	let mut refine = false;
 	while (true) {
-		window:wait_events(1.0_d / 60.0_d)?;
+		if (dirty || refine) {
+			window:poll_events()?;
+		} else {
+			window:wait_events(1.0_d / 60.0_d)?;
+		};
 		if (window:should_close() || window:key_state(key_escape).pressed) {
 			break;
 		};
 		let size = window:framebuffer_size()?;
 		if (size.0 == 0 || size.1 == 0) {
+			window:wait_events(1.0_d / 60.0_d)?;
 			continue;
 		};
-		let aspect = float64(size.0) / float64(size.1);
-		if (aspect != plot.aspect) {
-			plot.aspect = aspect;
+		if (size.0 != plot.width || size.1 != plot.height) {
+			plot.width = size.0;
+			plot.height = size.1;
+			plot.aspect = float32(size.0) / float32(size.1);
+			plot:zoom(1.0_f);
+			pixels = gpu:alloc::<Color>(ulong(size.0) * ulong(size.1))?;
+			image = gpu:create_image(size.0, size.1)?;
 			dirty = true;
 		};
 		let previous_limit = solver.max_iters;
@@ -264,21 +362,41 @@ fn main() -> () | Err<_> {
 		if (window:focused() && scroll.1 != 0.0_d) {
 			plot:zoom(
 				if (scroll.1 > 0.0_d) {
-					1.0_d / (1.0_d + 0.2_d * scroll.1)
+					1.0_f / (1.0_f + 0.2_f * float32(scroll.1))
 				} else {
-					1.0_d - 0.2_d * scroll.1
+					1.0_f - 0.2_f * float32(scroll.1)
 				}
 			);
 			dirty = true;
 		};
-		if (dirty) {
-			solver:solve(plot, iterations);
-			let pixels = HostPixels { iterations = iterations:clone(), width = width, height = height };
+		if (dirty || refine) {
+			// Render one sample while moving, then refine to a 2x2 grid when idle.
+			let samples = if (dirty) {
+				1_i
+			} else {
+				4_i
+			};
+			let root = HostParameters {
+				plot = plot:clone(),
+				solver = mandelbrot_new(solver.max_iters),
+				samples = samples,
+				pixels = pixels:clone(),
+			};
+			if (!use_gpu) {
+				solver:solve_cpu(plot, pixels, samples);
+			};
 			let commands = gpu:start_command_recording()?;
+			if (use_gpu) {
+				let count = ulong(plot.width) * ulong(plot.height);
+				let group_size = gpu:compute_workgroup_size();
+				let groups = uint((count + group_size - 1_ul) / group_size);
+				commands:dispatch(compute_pipeline, root:clone(), groups, 1, 1)?;
+			};
 			commands:begin_rendering(image, 0.0_f, 0.0_f, 0.0_f, 1.0_f)?;
-			commands:draw(pipeline, pixels, 3)?;
+			commands:draw(pipeline, root, 3)?;
 			commands:end_rendering()?;
 			commands:submit()?;
+			refine = dirty;
 			dirty = false;
 		};
 		gpu:present(image)?;
