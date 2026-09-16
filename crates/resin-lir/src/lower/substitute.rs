@@ -424,14 +424,6 @@ fn materialize(
         resin_hir::Type::Result { value, error } => {
             let value = materialize(value, instances)?;
             let error = materialize(error, instances)?;
-            if error.variants().is_none() {
-                return Err(super::LowerError {
-                    span: Span { start: 0, end: 0 },
-                    kind: crate::ErrorKind::InvalidInstance {
-                        message: "Result errors must be structs or unions of structs".into(),
-                    },
-                });
-            }
             Ty::Result {
                 value: Box::new(value),
                 error: Box::new(error),

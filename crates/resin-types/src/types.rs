@@ -54,9 +54,6 @@ pub(super) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), D
             }
         }
         Ty::Result { value, error } => {
-            if error.variants().is_none() {
-                return Err(DefinitionError::InvalidUnion);
-            }
             check_references(definitions, value)?;
             check_references(definitions, error)?;
         }
