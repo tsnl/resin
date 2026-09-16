@@ -1,0 +1,45 @@
+export { main };
+import { "$/string.resin" };
+
+struct Vec2<T> {
+	x: T,
+	y: T,
+
+	def __add__(left: Vec2<T>, right: Vec2<T>) -> Vec2<T> = {
+		Vec2<T> { x = left.x + right.x, y = left.y + right.y }
+	};
+
+	def __sub__(left: Vec2<T>, right: Vec2<T>) -> Vec2<T> = {
+		Vec2<T> { x = left.x - right.x, y = left.y - right.y }
+	};
+
+	def __neg__(value: Vec2<T>) -> Vec2<T> = {
+		Vec2<T> { x = -value.x, y = -value.y }
+	};
+
+	def __mul__(value: Vec2<T>, scale: T) -> Vec2<T> = {
+		Vec2<T> { x = value.x * scale, y = value.y * scale }
+	};
+
+	def __eq__(left: Vec2<T>, right: Vec2<T>) -> bool = {
+		left.x == right.x && left.y == right.y
+	};
+};
+
+// The same helper uses primitive addition or a struct's overload.
+def twice<T>(value: T) -> _ = {
+	value + value
+};
+
+def main() = {
+	var position = Vec2<int> { x = 1, y = 2 };
+	var velocity = Vec2<int> { x = 3, y = 4 };
+	var next = position + velocity * 2;
+	var displacement = next - position;
+	var reverse = -velocity;
+	print(fmt("position = ({0}, {1}), displacement = ({2}, {3})\n", (next.x, next.y, displacement.x, displacement.y)));
+	print(fmt("reverse = ({0}, {1}), twice(21) = {2}\n", (reverse.x, reverse.y, twice(21))));
+	if (twice(velocity) == displacement) {
+		print("generic vector addition agrees\n");
+	};
+};

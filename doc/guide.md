@@ -711,6 +711,32 @@ falling back to the ordinary integer/float defaults. Template bodies retain thei
 type relationships; unsupported concrete operations and layouts fail when an
 application is required. There is no type inference during LIR specialization.
 
+## Operator overloading
+
+Declare Python-style dunder methods inside a struct to implement operators:
+
+```resin
+struct Vec2<T> { x: T, y: T,
+    def __add__(left: Vec2<T>, right: Vec2<T>) -> Vec2<T> = {
+        Vec2<T> { x = left.x + right.x, y = left.y + right.y }
+    };
+};
+
+def add<T>(left: T, right: T) -> _ = { left + right };
+```
+
+Binary operators select a method from the left operand's type. Unary operators
+use their operand's type, such as `__neg__` for `-value`. The first parameter is
+the owning struct by value. Operators inherit the struct's type parameters;
+the other operand and result can use different types. Operands are evaluated
+once in order, with ordinary copying and cleanup, on both CPU and GPU.
+
+The methods remain callable by name: `left.__add__(right)` and
+`Vec2<int>.__add__(left, right)` use the same implementation as `left + right`.
+See the [operator mapping and rules](methods.md#operator-overloading), or run
+`cargo run -- examples/operators.resin` for vector addition, subtraction,
+negation, scaling, equality, and a helper shared with primitive numbers.
+
 ## Strings, formatting, and output
 
 String literals have primitive type `str`, distinct from raw `Span<ubyte>` views and owned

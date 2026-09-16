@@ -79,6 +79,80 @@ before specialization, which performs no deduction. Primitive compiler-provided
 methods still require a source-known receiver shape. Operations requiring a known
 pointer or Result shape may need a result annotation before `.*` or `?` can be used.
 
+## Operator overloading
+
+Structs implement operators with Python-style dunder methods:
+
+```resin
+struct Vec2<T> { x: T, y: T,
+    def __add__(left: Vec2<T>, right: Vec2<T>) -> Vec2<T> = {
+        Vec2<T> { x = left.x + right.x, y = left.y + right.y }
+    };
+    def __neg__(value: Vec2<T>) -> Vec2<T> = {
+        Vec2<T> { x = -value.x, y = -value.y }
+    };
+};
+
+def add<T>(left: T, right: T) -> _ = { left + right };
+```
+
+`left + right` selects `__add__` on the left operand's nominal type; `-value`
+selects `__neg__` on its operand's type. The same generic `add` function works
+with primitive numbers and structs. Transparent aliases inherit the original
+struct's operators. Exporting a struct makes its operator methods available to
+importers.
+
+| Expression | Method |
+| --- | --- |
+| `+value` | `__pos__` |
+| `-value` | `__neg__` |
+| `~value` | `__invert__` |
+| `!value` | `__not__` |
+| `left + right` | `__add__` |
+| `left - right` | `__sub__` |
+| `left * right` | `__mul__` |
+| `left / right` | `__truediv__` |
+| `left % right` | `__mod__` |
+| `left << right`, `left >> right` | `__lshift__`, `__rshift__` |
+| `left & right`, `left \| right`, `left ^ right` | `__and__`, `__or__`, `__xor__` |
+| `left == right`, `left != right` | `__eq__`, `__ne__` |
+| `left < right`, `left <= right` | `__lt__`, `__le__` |
+| `left > right`, `left >= right` | `__gt__`, `__ge__` |
+
+A unary method takes one parameter; a binary method takes two. The first
+parameter must be the owning struct by value, with its declared type parameters.
+The second parameter and result may have different types; for example,
+`__mul__(value: Vec2<T>, scale: T) -> Vec2<T>` supports vector scaling.
+Comparisons and `__not__` must return `bool`. Each method name has one declaration,
+and its signature is checked even if unused. Operators inherit their struct's type
+parameters and cannot add method-local type parameters.
+
+Dunder methods also support ordinary calls and function references:
+`left.__add__(right)`, `Vec2<int>.__add__(left, right)`, and
+`var add_vectors = Vec2<int>.__add__;`. These forms share the same function
+specializations as operator expressions. Hover and go-to-definition on an operator
+symbol show its selected method.
+
+Operands are evaluated once, left to right, with ordinary copying and cleanup.
+Operator lookup reads `Ref<T>` operands as values and does not automatically
+dereference pointers or take addresses. Precedence remains unchanged. Source-known
+operators resolve during HIR construction; generic operators retain signature
+queries until specialization selects a primitive operation or source method.
+Both CPU and GPU code use the resulting ordinary operations and calls.
+
+`__not__` is a Resin-specific extension to Python's naming convention. Conditions
+still require `bool`; Resin does not implicitly call `__bool__`. Primitive `/`
+retains Resin's existing numeric semantics, including integer division. Every
+comparison selects its own method: `__eq__` does not supply `__ne__` automatically.
+Reflected methods such as `__radd__` and in-place methods such as `__iadd__` have
+no special dispatch. Assignment, address-of, dereference, indexing, postfix `!`
+and `?`, and short-circuit `&&` / `||` retain their existing behavior. Constant
+expressions do not execute operator methods.
+
+Run `cargo run -- examples/operators.resin` for a generic vector example.
+
+## Shader and ownership rules
+
 Methods cannot be shader entry points, but shader helpers can call them.
 Pointer receivers follow the existing GPU address restrictions: a shader-local
 address cannot escape into a callee.
