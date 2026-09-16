@@ -200,7 +200,12 @@ impl Specialization<'_, '_> {
             Ok(concrete::Term {
                 span: source.span,
                 ty,
-                kind: self.kind(&source.kind, &source.ty)?,
+                kind: match &source.kind {
+                    resin_hir::TermKind::Use { arg } => {
+                        self.reference_use(arg, &source.ty, access)?
+                    }
+                    kind => self.kind(kind, &source.ty)?,
+                },
             })
         })();
         self.span = previous_span;
@@ -522,7 +527,7 @@ impl Specialization<'_, '_> {
                     Ok(Box::new(concrete::Term {
                         span: receiver.span,
                         ty: params[0].clone(),
-                        kind: self.reference_use(receiver, &method.params[0])?,
+                        kind: self.reference_use(receiver, &method.params[0], Access::Value)?,
                     }))
                 } else {
                     self.method_receiver(receiver, &params[0])
@@ -771,6 +776,7 @@ impl Specialization<'_, '_> {
         &mut self,
         source: &resin_hir::Term,
         expected: &resin_hir::Type,
+        access: Access,
     ) -> Result<concrete::TermKind, Error> {
         let from = self.argument(&source.ty)?;
         let target = self.argument(expected)?;
@@ -796,6 +802,9 @@ impl Specialization<'_, '_> {
             return Ok(concrete::TermKind::Address { place });
         }
         let value = if let resin_hir::Type::Reference { referent } = from {
+            if access == Access::Value && !referent.copies_implicitly() {
+                return Err(self.instance_error("cannot move a value through a reference or pointer; replace its contents instead"));
+            }
             concrete::Term {
                 span: source.span,
                 ty: self.ty(&referent)?,
@@ -807,7 +816,7 @@ impl Specialization<'_, '_> {
             // Identity uses preserve place access, including opaque managed fields
             // addressed from a shader. Do not introduce a value read here.
             if from == target {
-                return self.kind(&source.kind, &source.ty);
+                return Ok(self.complete_term(source, access)?.kind);
             }
             self.term(source)?
         };
@@ -995,10 +1004,19 @@ impl Specialization<'_, '_> {
                 self.operation_call(lookup, args, expected)?
             }
             resin_hir::TermKind::Read { place } => {
-                if !self.argument(expected)?.copies_implicitly() {
+                let source = self.argument(&place.ty)?;
+                let value = self.term(place)?;
+                if !matches!(source, resin_hir::Type::Reference { .. })
+                    && reference_place(&value)
+                    && !value.ty.copies_implicitly()
+                {
                     return Err(self.instance_error("cannot move a value through a reference or pointer; replace its contents instead"));
                 }
-                self.term(place)?.kind
+                // A dependent result can become a fresh owned value instead of
+                // a reference. Such a value transfers directly without copying.
+                // Reference values preserve their address; reference_use checks
+                // copyability only when a consumer requests the referent value.
+                value.kind
             }
             resin_hir::TermKind::Move { place } => concrete::TermKind::Move {
                 place: self.place(place)?,
@@ -1087,7 +1105,9 @@ impl Specialization<'_, '_> {
                     self.boxed(arg)?
                 },
             },
-            resin_hir::TermKind::Use { arg } => return self.reference_use(arg, expected),
+            resin_hir::TermKind::Use { arg } => {
+                return self.reference_use(arg, expected, Access::Value);
+            }
             resin_hir::TermKind::Convert { arg } => self.conversion(arg, expected)?,
             resin_hir::TermKind::GpuPipelineCreate {
                 factory,

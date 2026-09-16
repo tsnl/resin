@@ -1,6 +1,46 @@
 mod support;
 
 #[test]
+fn dependent_reads_distinguish_references_from_fresh_owned_results() {
+    let error = support::pipeline::source_module(
+        r#"
+        struct Item { value: int }
+        fn copy<T>(value: Ref<T>) -> T { value }
+        fn main() { let original = Item { value = 42 }; let duplicate = copy(original); }
+    "#,
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("cannot move a value through a reference"),
+        "{error}"
+    );
+    let source = r#"
+        export { main };
+        struct Item { value: int }
+        fn duplicate(value: Ref<Item>) -> Item { Item { value = value.value } }
+        fn forwarded<T>(value: Ref<T>) -> _ { value:duplicate() }
+        fn copy<T>(value: Ref<T>) -> T { value }
+        fn main() -> int {
+            let original = Item { value = 42 };
+            let fresh = forwarded(original);
+            assert(fresh.value == original.value && copy(42_i) == 42);
+            0
+        }
+    "#;
+    let output = support::project::Project::new(&support::module(source), Some("main"))
+        .unwrap()
+        .run();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn reference_arguments_keep_temporaries_until_the_full_expression_finishes() {
     let source = r#"
         export { main };

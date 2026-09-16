@@ -1,8 +1,8 @@
 pub const MARKERS: [&str; 4] = [
     "",
     "{ let mut unused = (); };",
-    "var unused: _; unused = 1_ui;",
-    "var unused: (() | Err<Never>); unused = (()); match (unused) { ()(v) => {}, Err(e) => { absurd(e) } };",
+    "let unused: _; unused = 1_ui;",
+    "let unused: (() | Err<Never>); unused = (()); match (unused) { ()(v) => {}, Err(e) => { absurd(e) } };",
 ];
 
 pub fn variants() -> Vec<String> {

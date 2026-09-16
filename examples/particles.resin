@@ -69,7 +69,29 @@ fn advance(p: Particle, dt: float32) -> Particle {
 fn kernel(index: ulong, root: Ptr<Params>) -> () {
 	if (index < root.particles.length) {
 		let mut p: Ref<Particle> = root.particles:at(index);
-		p = advance(advance(p, root.dt), root.dt);
+		p = advance(advance(p:clone(), root.dt), root.dt);
+	}
+}
+
+fn clone(p: Ref<Particle>) -> Particle {
+	Particle { x = p.x, y = p.y, z = p.z, vx = p.vx, vy = p.vy, vz = p.vz }
+}
+
+fn clone(color: Ref<Color>) -> Color {
+	Color { r = color.r, g = color.g, b = color.b, a = color.a }
+}
+
+fn clone(params: Ref<HostParams>) -> HostParams {
+	HostParams {
+		dt = params.dt,
+		yaw_cos = params.yaw_cos,
+		yaw_sin = params.yaw_sin,
+		pitch_cos = params.pitch_cos,
+		pitch_sin = params.pitch_sin,
+		zoom = params.zoom,
+		aspect = params.aspect,
+		radius = params.radius,
+		particles = params.particles:clone(),
 	}
 }
 
@@ -117,11 +139,11 @@ fn heat_color(heat: float32) -> Color {
 	// Blue, cyan, warm yellow, orange, coral red. These are albedo colors;
 	// the fragment shader applies lighting and distance fog afterwards.
 	let mut colors = [
-		Color { r = 0.16_f, g = 0.30_f, b = 0.90_f, a = 1.0_f },
-		Color { r = 0.08_f, g = 0.75_f, b = 0.82_f, a = 1.0_f },
-		Color { r = 0.95_f, g = 0.88_f, b = 0.38_f, a = 1.0_f },
-		Color { r = 0.98_f, g = 0.46_f, b = 0.12_f, a = 1.0_f },
-		Color { r = 0.88_f, g = 0.10_f, b = 0.16_f, a = 1.0_f },
+		(0.16_f, 0.30_f, 0.90_f),
+		(0.08_f, 0.75_f, 0.82_f),
+		(0.95_f, 0.88_f, 0.38_f),
+		(0.98_f, 0.46_f, 0.12_f),
+		(0.88_f, 0.10_f, 0.16_f),
 	];
 	let mut scaled = heat * 4.0_f;
 	let mut segment = if (scaled < 3.0_f) {
@@ -133,9 +155,9 @@ fn heat_color(heat: float32) -> Color {
 	let mut low = colors(segment);
 	let mut high = colors(segment + 1);
 	Color {
-		r = low.r + (high.r - low.r) * blend,
-		g = low.g + (high.g - low.g) * blend,
-		b = low.b + (high.b - low.b) * blend,
+		r = low.0 + (high.0 - low.0) * blend,
+		g = low.1 + (high.1 - low.1) * blend,
+		b = low.2 + (high.2 - low.2) * blend,
 		a = 1.0_f,
 	}
 }
@@ -146,7 +168,7 @@ fn vertex(index: int, root: Ptr<Params>) -> Vertex {
 	let mut local = index - particle * 24;
 	let mut sector = int(float32(local) / 3.0_f);
 	let mut corner = local - sector * 3;
-	let mut p = root.particles:at(ulong(particle));
+	let p: Ref<Particle> = root.particles:at(ulong(particle));
 	let mut horizontal_depth = -p.x * root.yaw_sin + p.y * root.yaw_cos;
 	let mut height = (p.z - 25.0_f) * 0.9_f;
 	let mut depth = horizontal_depth * root.pitch_cos - height * root.pitch_sin;
@@ -234,7 +256,7 @@ fn random_particle(state: Ptr<uint>) -> Particle {
 	}
 }
 
-fn initialize(particles: GpuSpan<Particle>, seed: uint) {
+fn initialize(particles: Ref<GpuSpan<Particle>>, seed: uint) {
 	let mut state = seed | 1_ui;
 	let mut index = 0_ul;
 	while (index < particles.length) {
@@ -278,7 +300,7 @@ fn move_camera(camera: Ptr<Camera>, dx: float64, dy: float64, scroll: float64) {
 	camera.zoom = clamp(camera.zoom * expf(clamp(float32(scroll), -20.0_f, 20.0_f) * 0.12_f), 0.35_f, 3.0_f);
 }
 
-fn apply_camera(camera: Camera, params: Ptr<HostParams>) {
+fn apply_camera<P>(camera: Ref<Camera>, params: Ptr<P>) {
 	params.yaw_cos = cosf(camera.yaw);
 	params.yaw_sin = sinf(camera.yaw);
 	params.pitch_cos = cosf(camera.pitch);
@@ -313,7 +335,7 @@ fn main() -> (() | Err<_>) {
 		zoom = 1.0_f,
 		aspect = 0.625_f,
 		radius = 0.004_f,
-		particles = particles,
+		particles = particles:clone(),
 	};
 	let mut image = gpu:create_image(1280, 800)?;
 
@@ -367,12 +389,12 @@ fn main() -> (() | Err<_>) {
 			zoom = params.zoom,
 			aspect = params.aspect,
 			radius = params.radius,
-			particles = params.particles,
+			particles = params.particles:clone(),
 		};
 		let mut commands = gpu:start_command_recording()?;
 
 		if (!paused) {
-			commands:dispatch(compute, root, groups, 1, 1)?;
+			commands:dispatch(compute, root:clone(), groups, 1, 1)?;
 		};
 		commands:begin_rendering(image, 0.004_f, 0.008_f, 0.02_f, 1.0_f)?;
 		commands:draw(graphics, root, count * 24_ui)?;

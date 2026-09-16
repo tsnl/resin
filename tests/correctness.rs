@@ -206,7 +206,7 @@ fn nominal_conversion_requires_an_explicit_ascription() {
 #[test]
 fn record_layout_does_not_reorder_side_effects() {
     let module = compile(
-        "struct R { a: int, b: int, } fn f (x: int) -> int  { let mut r = R { b = (x = 1), a = (x = 2) }; x }",
+        "struct R { a: int, b: int, } fn f (mut x: int) -> int { let r = R { b = { x = 1; x }, a = { x = 2; x } }; x }",
     );
     let function = module
         .functions
@@ -274,23 +274,16 @@ fn lambdas_and_nested_definitions_are_parse_errors() {
 }
 
 #[test]
-fn record_type_members_are_parse_errors_instead_of_panics() {
-    assert!(
-        !support::frontend::ast(&support::frontend::cst(
-            "fn main() -> ()  { let mut x = { T = int }; }",
-            None
-        ))
-        .errors
-        .is_empty()
-    );
-    assert!(
-        !support::frontend::ast(&support::frontend::cst(
-            "struct FieldsA<T0> { a: T0, }\nfn main() -> ()  { let mut x = FieldsA<_> { a = 1, T = int }; }",
-            None
-        ))
-        .errors
-        .is_empty()
-    );
+fn record_type_members_are_rejected_instead_of_panicking() {
+    for source in [
+        "fn main() { let x = { T = int }; }",
+        "struct Item { a: int } fn main() { let x = Item { a = 1, T = int }; }",
+    ] {
+        assert!(
+            support::pipeline::source_module(source).is_err(),
+            "{source}"
+        );
+    }
     compile("export { main }; fn main() -> ()  { let mut x = { type T = int; T(1) }; }");
 }
 
@@ -358,12 +351,12 @@ fn signed_literals_respect_context_and_the_minimum_integer() {
 #[test]
 fn returned_pointers_support_field_assignment() {
     compile(
-        "struct FieldsX<T0> { x: T0, }\nfn id (p: Ptr<FieldsX<int>>) -> Ptr<FieldsX<int>>  { p } fn f (p: Ptr<FieldsX<int>>) -> int  { id(p).x = 1 }",
+        "struct FieldsX<T0> { x: T0, }\nfn id (p: Ptr<FieldsX<int>>) -> Ptr<FieldsX<int>>  { p } fn f (p: Ptr<FieldsX<int>>) { id(p).x = 1 }",
     );
     compile(
-        "struct FieldsX<T0> { x: T0, }\nstruct R { inner: FieldsX<int>, } fn id (p: Ptr<R>) -> Ptr<R>  { p } fn f (p: Ptr<R>) -> int  { id(p).inner.x = 1 }",
+        "struct FieldsX<T0> { x: T0, }\nstruct R { inner: FieldsX<int>, } fn id (p: Ptr<R>) -> Ptr<R>  { p } fn f (p: Ptr<R>) { id(p).inner.x = 1 }",
     );
-    let src = "struct FieldsX<T0> { x: T0, }\nfn id (r: FieldsX<int>) -> FieldsX<int>  { r } fn f (r: FieldsX<int>) -> int  { id(r).x = 1 }";
+    let src = "struct FieldsX<T0> { x: T0, }\nfn id (r: FieldsX<int>) -> FieldsX<int>  { r } fn f (r: FieldsX<int>) { id(r).x = 1 }";
     assert!(matches!(
         pipeline::generate(&parse(src)).unwrap_err().kind,
         GenerateErrorKind::NotAPlace
@@ -374,7 +367,7 @@ fn returned_pointers_support_field_assignment() {
 fn nested_field_access_evaluates_its_base_once() {
     for src in [
         "struct FieldsInner<T0> { inner: T0, }\nstruct FieldsX<T0> { x: T0, }\nfn id (r: FieldsInner<FieldsX<int>>) -> FieldsInner<FieldsX<int>>  { r } fn f (r: FieldsInner<FieldsX<int>>) -> int  { id(r).inner.x }",
-        "struct FieldsP<T0> { p: T0, }\nstruct FieldsX<T0> { x: T0, }\nfn id (r: FieldsP<Ptr<FieldsX<int>>>) -> FieldsP<Ptr<FieldsX<int>>>  { r } fn f (r: FieldsP<Ptr<FieldsX<int>>>) -> int  { id(r).p.x = 1 }",
+        "struct FieldsP<T0> { p: T0, }\nstruct FieldsX<T0> { x: T0, }\nfn id (r: FieldsP<Ptr<FieldsX<int>>>) -> FieldsP<Ptr<FieldsX<int>>>  { r } fn f (r: FieldsP<Ptr<FieldsX<int>>>) { id(r).p.x = 1 }",
     ] {
         let module = compile(src);
         let f = module
@@ -398,24 +391,25 @@ fn nested_field_access_evaluates_its_base_once() {
 fn uninitialized_reads_are_rejected_on_all_paths() {
     for src in [
         "fn f () -> int  { let mut x: int; x }",
-        "fn consume(a: int, b: int)  {} fn main()  { let mut value: int; consume(value, value = 1); }",
-        "fn f (c: int) -> int  { let mut x: int; if (c == 0) { x = 1 } else { 0 }; x }",
-        "fn f (c: int) -> int  { let mut x: int; (c == 0) && ((x = 1) == 1); x }",
+        "fn consume(a: int, b: int)  {} fn main()  { let mut value: int; consume(value, { value = 1; value }); }",
+        "fn f (c: int) -> int  { let mut x: int; if (c == 0) { x = 1 } else {}; x }",
+        "fn f (c: int) -> int  { let mut x: int; (c == 0) && ({ x = 1; x } == 1); x }",
         "export { main }; fn main() -> ()  { let mut x: int; let mut y = x; }",
         "struct FieldsX<T0> { x: T0, }\nfn f () -> int  { let mut r: FieldsX<int>; r.x }",
         "struct FieldsX<T0> { x: T0, }\nfn f () -> int  { let mut r: FieldsX<int>; r.x = 1; r.x }",
     ] {
         assert!(
-            matches!(
-                pipeline::generate(&parse(src)).unwrap_err().kind,
-                GenerateErrorKind::UninitializedValue { .. }
-            ),
+            pipeline::generate(&parse(src))
+                .unwrap_err()
+                .to_string()
+                .to_lowercase()
+                .contains("uninitialized"),
             "{src}"
         );
     }
     compile("fn f () -> int  { let mut x: int; x = 1; x }");
     compile(
-        "fn consume(a: int, b: int)  {} fn main()  { let mut value: int; consume(value = 1, value); }",
+        "fn consume(a: int, b: int)  {} fn main()  { let mut value: int; consume({ value = 1; value }, value); }",
     );
     compile("fn f (c: int) -> int  { let mut x: int; if (c == 0) { x = 1 } else { x = 2 }; x }");
     compile(

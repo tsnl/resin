@@ -168,7 +168,7 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
         1,
     );
     runs(
-        "export { main }; struct Bad { code: int, } fn fail(counter: Ptr<int>) -> (int | Err<Bad>)  { counter.* = counter.* + 1; Err(Bad { code = 7 }) } fn work(counter: Ptr<int>) -> (int | Err<Bad>)  { ((counter.* = counter.* + 10) + fail(counter)? + (counter.* = 1000)) } fn main() -> int  { let mut count = 0; let mut result = work(&count); match (result) { int(n) => { 99 }, Err(e) => { count + e.code } } }",
+        "export { main }; struct Bad { code: int, } fn fail(counter: Ptr<int>) -> (int | Err<Bad>)  { counter.* = counter.* + 1; Err(Bad { code = 7 }) } fn work(counter: Ptr<int>) -> (int | Err<Bad>)  { ({ counter.* = counter.* + 10; counter.* } + fail(counter)? + { counter.* = 1000; counter.* }) } fn main() -> int  { let mut count = 0; let mut result = work(&count); match (result) { int(n) => { 99 }, Err(e) => { count + e.code } } }",
         18,
     );
     runs(
@@ -222,7 +222,7 @@ fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
         0,
     );
     runs(
-        "export { main }; struct FieldsAB<T0, T1> { a: T0, b: T1, }\nfn main() -> _  { let mut n = 0_i; let mut pair: FieldsAB<_, _>; pair = FieldsAB<_, _> { b = (n = n + 1), a = (n = n + 1) }; pair.a * 10 + pair.b }",
+        "export { main }; struct FieldsAB<T0, T1> { a: T0, b: T1, }\nfn main() -> _  { let mut n = 0_i; let mut pair: FieldsAB<_, _>; pair = FieldsAB<_, _> { b = { n = n + 1; n }, a = { n = n + 1; n } }; pair.a * 10 + pair.b }",
         21,
     );
     runs(
@@ -238,7 +238,7 @@ fn array_and_span_indexing_use_element_sizes() {
         47,
     );
     runs(
-        "export { main }; struct Payload { marker: uint, wide: ulong, amount: float32, } fn main () -> int  { let mut values = [Payload { marker = uint(1), wide = ulong(4294967297), amount = float32(0.5) }, Payload { marker = uint(2), wide = ulong(8589934593), amount = float32(1.5) }]; let mut p = values(0); let mut q = values(1); q.amount = q.amount + float32(2.0); if (q.wide == ulong(8589934593) && q.marker == uint(2) && q.amount == float32(3.5) && p.amount == float32(0.5)) { 0 } else { 1 } }",
+        "export { main }; struct Payload { marker: uint, wide: ulong, amount: float32, } fn main () -> int  { let mut values = [Payload { marker = uint(1), wide = ulong(4294967297), amount = float32(0.5) }, Payload { marker = uint(2), wide = ulong(8589934593), amount = float32(1.5) }]; let p: Ref<Payload> = values:at(0); let q: Ref<Payload> = values:at(1); q.amount = q.amount + float32(2.0); if (q.wide == ulong(8589934593) && q.marker == uint(2) && q.amount == float32(3.5) && p.amount == float32(0.5)) { 0 } else { 1 } }",
         0,
     );
 }
@@ -278,7 +278,7 @@ fn discarded_branch_results_compile_and_preserve_effects() {
 #[test]
 fn while_rechecks_conditions_and_discards_body_values() {
     runs(
-        "export { main }; fn main () -> int  { let mut n = 0; let mut sum = 0; while ((n = n + 1) <= 4) { sum = sum + n }; sum + n }",
+        "export { main }; fn main () -> int  { let mut n = 0; let mut sum = 0; while ({ n = n + 1; n } <= 4) { sum = sum + n }; sum + n }",
         15,
     );
     runs(
@@ -286,7 +286,7 @@ fn while_rechecks_conditions_and_discards_body_values() {
         0,
     );
     runs(
-        "export { main }; fn main () -> int  { let mut n: int; while ((n = 7) == 0) {}; n }",
+        "export { main }; fn main () -> int  { let mut n: int; while ({ n = 7; n } == 0) {}; n }",
         7,
     );
     runs(
@@ -310,7 +310,7 @@ fn while_nests_with_branches_and_preserves_outer_values() {
         12,
     );
     runs(
-        "export { main }; fn main () -> int  { let mut n = 0; while (if (n < 3) { (1 == 1) && ((n = n + 1) < 3) } else { 1 == 0 }) {}; n }",
+        "export { main }; fn main () -> int  { let mut n = 0; while (if (n < 3) { (1 == 1) && ({ n = n + 1; n } < 3) } else { 1 == 0 }) {}; n }",
         3,
     );
 }
@@ -363,7 +363,7 @@ fn calls_take_lists_and_tuples_are_explicit_values() {
 fn arguments_are_evaluated_left_to_right_after_the_callee() {
     runs(
         r#"export { main };
-        fn mark(trace: Ptr<int>, digit: int) -> int  { trace.* = trace.* * 10 + digit }
+        fn mark(trace: Ptr<int>, digit: int) -> int  { trace.* = trace.* * 10 + digit; trace.* }
         fn consume(a: int, b: int)  {}
         fn callee(trace: Ptr<int>) -> (int, int) -> ()  { mark(trace, 1); consume }
         fn main() -> int  {
@@ -387,13 +387,13 @@ fn expression_cleanup_preserves_scope_order_on_failure_and_success() {
             "[make(trace, 1), { let mut inner = make(trace, 2); fail()? }]",
             21,
         ),
-        ("[make(trace, 1), make(trace, 2).get().accept(fail()?)]", 21),
+        ("[make(trace, 1), make(trace, 2):get():accept(fail()?)]", 21),
         (
             "consume(make(trace, 1), { let mut inner = make(trace, 2); owned_error(trace)? })",
             215,
         ),
         (
-            "last(make(trace, 1), if (make(trace, 3).get().truth()) { make(trace, 2) } else { make(trace, 4) }, fail()?)",
+            "last(make(trace, 1), if (make(trace, 3):get():truth()) { make(trace, 2) } else { make(trace, 4) }, fail()?)",
             231,
         ),
         (
@@ -433,12 +433,12 @@ fn truth(self: Ptr<Resource>) -> bool  { 1 == 1 }
         "#;
         let source = format!(
             "{declarations}
-            def attempt(trace: Ptr<int>) -> () | Err<_> = {{ {call}; () }};
-            def main() -> int = {{
-                var trace = 0;
+            fn attempt(trace: Ptr<int>) -> () | Err<_> {{ {call}; () }}
+            fn main() -> int {{
+                let mut trace = 0;
                 attempt(&trace);
                 if (trace == {expected}) {{ 0 }} else {{ 1 }}
-            }};"
+            }}"
         );
         runs(&source, 0);
     }
@@ -463,7 +463,7 @@ fn tuple_projection_preserves_places_and_nested_values() {
 #[test]
 fn nominal_records_preserve_source_order_and_field_layout() {
     runs(
-        "export { main }; struct R { a: int, b: int, } fn main () -> int  { let mut x = 0; let mut r = R { b = (x = 1), a = (x = 2) }; r.a * 10 + r.b + x }",
+        "export { main }; struct R { a: int, b: int, } fn main () -> int  { let mut x = 0; let mut r = R { b = { x = 1; x }, a = { x = 2; x } }; r.a * 10 + r.b + x }",
         23,
     );
 }
@@ -479,7 +479,7 @@ fn loaded_values_do_not_change_after_later_stores() {
 #[test]
 fn short_circuiting_and_joins_preserve_effects() {
     runs(
-        "export { main }; fn main () -> int  { let mut x = 0; let mut a = (1 == 2) && ((x = 1) == 1); let mut b = (1 == 1) || ((x = 2) == 2); let mut n = if (a || b) { 3 } else { 4 }; n + x }",
+        "export { main }; fn main () -> int  { let mut x = 0; let mut a = (1 == 2) && ({ x = 1; x } == 1); let mut b = (1 == 1) || ({ x = 2; x } == 2); let mut n = if (a || b) { 3 } else { 4 }; n + x }",
         3,
     );
 }
@@ -774,10 +774,10 @@ fn at_indexing_checks_bounds_before_later_effects() {
                 struct FieldsValues<T0> {{ values: T0, }}
 fn main() -> int  {{
                     let mut values = [1, 2];
-                    let mut holder = FieldsValues<_> {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }}
-                    {receiver}.at({index}) = 9;
+                    let mut holder = FieldsValues<_> {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }};
+                    {receiver}:at({index}) = 9;
                     puts("after".data); 0
-                }};"#
+                }}"#
             )));
             assert!(!output.status.success());
             assert!(output.stdout.is_empty());
@@ -824,21 +824,6 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
     file.stmts.retain(|s| !matches!(&s.val, resin_ast::StmtKind::Function { name, .. } if name.val.as_ref() == "main"));
     // Exercise random particle generation, camera math, and the shader bodies on
     // stack-backed storage. GPU initialization stores these same generated values.
-    for statement in &mut file.stmts {
-        let resin_ast::StmtKind::Function { name, params, .. } = &mut statement.val else {
-            continue;
-        };
-        if name.val.as_ref() == "apply_camera" {
-            let resin_ast::TypeKind::App { args, .. } = &mut params[1].1.val else {
-                panic!()
-            };
-            let resin_ast::TypeKind::Atom { name } = &mut args[0].val else {
-                panic!()
-            };
-            assert_eq!(name.val.as_ref(), "HostParams");
-            name.val = "Params".into();
-        }
-    }
     file.stmts.extend(support::parse(r#"fn main() -> int  {
             let mut state = 12345_ui | 1_ui;
             let mut particle = random_particle(&state);
@@ -870,7 +855,7 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
             particle.y = 20_f;
             let mut far = vertex(0, &params);
             let mut far_rim = vertex(1, &params);
-            valid = valid && fragment(near.color).b > fragment(far.color).b;
+            valid = valid && fragment(near.color).b > fragment(far.color:clone()).b;
             valid = valid && near_rim.position.x - near.position.x > far_rim.position.x - far.position.x;
             // Camera controls change the projection without changing the simulation.
             let mut camera = Camera { yaw = 0_f, pitch = 0_f, zoom = 1_f };
@@ -1054,7 +1039,7 @@ fn shared_layout_queries_follow_padding_and_do_not_evaluate_operands() {
             let mut values = [1_ui, 2_ui, 3_ui];
             if (size_of(uint) == 4_ul && align_of(ulong) == 8_ul && size_of(Outer) == 40_ul &&
                 align_of(Outer) == 8_ul && size_of(Span<uint>) == 16_ul &&
-                size_of(values) == 12_ul && size_of(side = 1_ui) == 4_ul && side == 0_ui) { 0 } else { 1 }
+                size_of(values) == 12_ul && size_of({ side = 1_ui; side }) == 4_ul && side == 0_ui) { 0 } else { 1 }
         }
     "#,
         0,
@@ -1142,12 +1127,12 @@ fn structured_loops_propagate_errors_from_conditions_and_nested_bodies() {
 #[test]
 fn sequential_conditionals_and_error_propagation_keep_constant_nesting() {
     let mut source = String::from(
-        "export { main }; struct Failed {} fn step() -> (() | Err<Failed>)  { (()) } fn main() -> (int | Err<Failed>) = { let mut value = 0; ",
+        "export { main }; struct Failed {} fn step() -> (() | Err<Failed>)  { (()) } fn main() -> (int | Err<Failed>) { let mut value = 0; ",
     );
     for _ in 0..512 {
-        source.push_str("if (value == 0) { value := 1; } else { value := 0; }; step()?; ");
+        source.push_str("if (value == 0) { value = 1; } else { value = 0; }; step()?; ");
     }
-    source.push_str("(value) };");
+    source.push_str("(value) }");
     let project = support::project::Project::new(&module(&source), Some("main")).unwrap();
     let c = fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
     assert!(
