@@ -177,7 +177,7 @@ fn verifier_rejects_invalid_sum_instructions_and_types() {
     };
     assert!(matches!(
         resin_lir::verify(&m).unwrap_err().kind,
-        resin_lir::VerifyErrorKind::InvalidVariant
+        resin_lir::VerifyErrorKind::InvalidReturnStack { .. }
     ));
 
     let mut m = module(source);
@@ -257,7 +257,7 @@ fn propagation_rejects_wrong_types_and_narrower_errors() {
         "struct A {}; struct B {}; def f(r: Result<int, B>) -> Result<int, A> = { ok(r?) };",
         "every propagated error",
     );
-    rejects("def f() -> Result<int, bool> = { ok(1) };", "structs");
+    module("def f() -> Result<int, bool> = { ok(1) };");
 }
 
 #[test]
@@ -305,5 +305,35 @@ fn wildcard_matches_ignore_payloads_and_cover_remaining_variants() {
     rejects(
         "def f(v: int | None) = { match (v) { int(_) => {}, None => {}, _ => {} } };",
         "remaining variant",
+    );
+}
+
+#[test]
+fn error_sets_collect_builtin_and_owned_values() {
+    let source = r#"export { main }; import { "$/string.resin" };
+        def text() -> Result<int, str> = { err("failed") };
+        def number() -> Result<int, int> = { err(42_i) };
+        def owned() -> Result<int, String> = { err(String.from_str("owned")) };
+        def choose(which: int) -> Result<int, _> = {
+            if (which == 0) { ok(text()?) } else if (which == 1) { ok(number()?) } else { ok(owned()?) }
+        };
+        def main() = {
+            match (choose(0)) { ok(_) => { assert(false); }, err(error) => {
+                match (error) { str(text) => { assert(text.length == 6_ul); }, _ => { assert(false); } }
+            } };
+            match (choose(1)) { ok(_) => { assert(false); }, err(error) => {
+                match (error) { int(value) => { assert(value == 42); }, _ => { assert(false); } }
+            } };
+            match (choose(2)) { ok(_) => { assert(false); }, err(error) => {
+                match (error) { String(text) => { assert(text.get().length == 5_ul); }, _ => { assert(false); } }
+            } };
+        };"#;
+    let output = support::project::Project::new(&module(source), Some("main"))
+        .unwrap()
+        .run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }

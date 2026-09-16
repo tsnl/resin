@@ -35,15 +35,15 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
             ));
         }
         let mut error_name = "\"invalid error tag\"".to_string();
-        for definition in error.variants().unwrap() {
-            let name = quoted(module.types[definition.index()].name().unwrap());
-            error_name = if matches!(error.as_ref(), Ty::Defined { .. }) {
-                name
-            } else {
+        for member in error.members() {
+            let name = quoted(&resin_types::format_type(&member, &module.types));
+            error_name = if matches!(error.as_ref(), Ty::Union { .. }) {
                 format!(
                     "(r_result.payload.v1.tag == {}u ? {name} : {error_name})",
-                    definition.tag()
+                    types.id(&member)
                 )
+            } else {
+                name
             };
         }
         let success = if value.as_ref() == &Ty::Unit {

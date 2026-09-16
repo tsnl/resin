@@ -491,10 +491,6 @@ impl Solver {
                 self.variables[id].class = Class::Errors;
                 Ok(())
             }
-            Type::Node(Head::Atom(ty), _) if ty.variants().is_some() => Ok(()),
-            Type::Node(head, _) if head.determining() || matches!(head, Head::Nominal { .. }) => {
-                Ok(())
-            }
             Type::Apply { .. } => Ok(()),
             Type::Node(Head::Union, members) => {
                 for member in members {
@@ -502,10 +498,8 @@ impl Solver {
                 }
                 Ok(())
             }
-            _ => Err(error(
-                span,
-                "Result errors must be structs or unions of structs",
-            )),
+            Type::Node(head, _) if head != Head::Reference => Ok(()),
+            _ => Err(error(span, "error payloads must be value types")),
         }
     }
 
@@ -528,16 +522,9 @@ impl Solver {
                         .collect()
                 }))
             }
-            Type::Node(Head::Atom(ty), _) => ty
-                .variants()
-                .map(|ids| {
-                    Some(
-                        ids.into_iter()
-                            .map(|definition| Ty::Defined { definition }.into())
-                            .collect(),
-                    )
-                })
-                .ok_or_else(|| error(span, "error and union payloads must be nominal structs")),
+            Type::Node(Head::Atom(ty), _) => {
+                Ok(Some(ty.members().into_iter().map(Type::from).collect()))
+            }
             Type::Node(Head::Union, members) => {
                 let mut result = vec![];
                 for member in members {
@@ -548,15 +535,10 @@ impl Solver {
                 }
                 Ok(Some(result))
             }
-            Type::Node(head, children)
-                if head.determining() || matches!(head, Head::Nominal { .. }) =>
-            {
+            Type::Node(head, children) if head != Head::Reference => {
                 Ok(Some(vec![Type::Node(head, children)]))
             }
-            _ => Err(error(
-                span,
-                "error and union payloads must be nominal structs",
-            )),
+            _ => Err(error(span, "error payloads must be value types")),
         }
     }
 

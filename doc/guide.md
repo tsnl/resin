@@ -1330,3 +1330,7 @@ the shader failure path. Assertions remain enabled in optimized builds.
 In a `match`, `Variant(_)` ignores the payload. A final `_ => { ... }` arm
 covers all remaining variants. Duplicate, unreachable, and non-final wildcard
 arms are rejected.
+
+Error payloads can be any value type, including `str`, numbers, tuples, and owned
+`String` values. Inferred error sets collect their union; mutable pointers remain
+invariant and errors are still owned and destroyed normally.
