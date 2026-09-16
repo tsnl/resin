@@ -1,5 +1,8 @@
 # CPU and GPU benchmarks
 
+For compiler latency, HTTP service reuse, editor requests, and local source parsing,
+see the [compiler service benchmarks](service.md).
+
 This suite measures optimized Resin programs using dedicated workloads. Run CPU
 and GPU benchmarks separately from the repository root:
 
