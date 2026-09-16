@@ -192,7 +192,7 @@ fn type_mismatch_is_a_type_error() {
 
 #[test]
 fn linked_list_type_is_finite_through_its_pointer() {
-    let module = compile("struct List { value: int; next: Ptr<List>; }");
+    let module = compile("struct List { value: int, next: Ptr<List>, }");
     assert_eq!(
         module.types.iter().filter(|d| d.name().is_some()).count(),
         1
@@ -207,7 +207,7 @@ fn linked_list_type_is_finite_through_its_pointer() {
 #[test]
 fn inline_recursive_type_is_rejected_during_generation() {
     assert!(matches!(
-        compile_err("struct Bad { next: Bad; }"),
+        compile_err("struct Bad { next: Bad, }"),
         GenerateErrorKind::Type {
             kind: TypeErrorKind::RecursiveTypeWithoutIndirection { .. }
         }
@@ -266,7 +266,7 @@ fn if_joins_then_and_else_values() {
 #[test]
 fn nominal_ascription_wraps_and_unwraps_one_layer() {
     let module = compile(
-        r#"struct Meters { value: int; }
+        r#"struct Meters { value: int, }
 fn to_meters (n: int) -> Meters  { Meters { value = n } }
 fn from_meters (m: Meters) -> int  { m.value }
 "#,
@@ -294,7 +294,7 @@ fn from_meters (m: Meters) -> int  { m.value }
 #[test]
 fn field_access_autoderefs_a_named_pointer() {
     let module = compile(
-        r#"struct FieldsX<T0> { x: T0; }
+        r#"struct FieldsX<T0> { x: T0, }
 type P = Ptr<FieldsX<int>>;
 fn f (p: P) -> int  { p.x }
 "#,
@@ -330,8 +330,8 @@ fn nested_nominal_ascription_does_not_skip_a_layer() {
         compile_err(
             r#"export { main };
 
-struct Meters { value: int; }
-struct Distance { value: Meters; }
+struct Meters { value: int, }
+struct Distance { value: Meters, }
 
 fn main() -> ()  {
     let mut x = Distance(1);
@@ -348,8 +348,8 @@ fn nested_nominal_ascription_wraps_the_defining_body() {
     let module = compile(
         r#"export { main };
 
-struct Meters { value: int; }
-struct Distance { value: Meters; }
+struct Meters { value: int, }
+struct Distance { value: Meters, }
 
 fn main() -> ()  {
     let mut x = Distance { value = Meters { value = 1 } };
@@ -382,7 +382,7 @@ fn main() -> ()  {
 #[test]
 fn nominal_record_ascription_wraps_the_representation() {
     let module = compile(
-        r#"struct List { value: int; next: Ptr<List>; }
+        r#"struct List { value: int, next: Ptr<List>, }
 fn nil (p: Ptr<List>) -> List  { List { value = 0, next = p } }
 "#,
     );
@@ -432,7 +432,7 @@ fn span_and_literal_locals_are_typed() {
     let module = compile(
         r#"export { main };
 
-struct Span<T> { data: Ptr<T>; length: ulong; }
+struct Span<T> { data: Ptr<T>, length: ulong, }
 type Buf = Span<int>;
 
 fn main() -> ()  {

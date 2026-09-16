@@ -59,7 +59,7 @@ fn string_views_support_fields_and_indexing() {
 fn owned_strings_are_ordinary_source_declarations() {
     let module = generate(
         r#"intrinsic "string_from_bytes" fn copy(data: Ptr<ubyte>, length: ulong) -> StrongOwner;
-        struct String { owner: StrongOwner;
+        struct String { owner: StrongOwner,
             
         }
 fn string_from_str(text: str) -> String  { String { owner = copy(text.data, text.length) } }
@@ -72,7 +72,7 @@ fn string_from_str(text: str) -> String  { String { owner = copy(text.data, text
     assert_eq!(result(&module, "text"), Type::Str);
     assert!(matches!(result(&module, "owned"), Type::Defined { .. }));
     // The spelling carries no compiler representation or privileged methods.
-    generate("struct String { count: uint; } fn make() -> String  { String { count = 7_ui } }")
+    generate("struct String { count: uint, } fn make() -> String  { String { count = 7_ui } }")
         .unwrap();
 }
 
@@ -80,7 +80,7 @@ fn string_from_str(text: str) -> String  { String { owner = copy(text.data, text
 fn string_literals_cannot_be_forged_from_arbitrary_storage() {
     for source in [
         r#"struct Bytes (Ptr<ubyte>, ulong); fn bad() -> Bytes  { "text" }"#,
-        r#"struct String { owner: StrongOwner; } fn bad() -> String  { "text" }"#,
+        r#"struct String { owner: StrongOwner, } fn bad() -> String  { "text" }"#,
         r#"struct Bytes (Ptr<ubyte>, ulong); fn bad(bytes: Bytes) -> str  { str(bytes) }"#,
         r#"fn bad(data: Ptr<ubyte>) -> str  { str { data = data, length = 1_ul } }"#,
         r#"fn bad() -> _  { "text".unknown }"#,

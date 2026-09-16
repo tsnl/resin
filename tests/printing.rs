@@ -83,7 +83,7 @@ fn string_storage_is_terminated_without_changing_its_logical_length() {
         };
         import { "$/string.resin" };
 
-        struct FieldsText<T0> { text: T0; }
+        struct FieldsText<T0> { text: T0, }
 fn main() -> int  {
             let mut text = "héllo";
             let mut empty = "";
@@ -468,8 +468,8 @@ fn formats_owned_temporary_results() {
 #[test]
 fn repr_renders_fields_arrays_tuples_and_active_union_payloads() {
     prints(r#"export { main }; import { "$/string.resin" };
-        struct Complex { real: float64; imaginary: float64; }
-        struct Problem { message: str; detail: String; }
+        struct Complex { real: float64, imaginary: float64, }
+        struct Problem { message: str, detail: String, }
         fn main()  {
             print(repr(Complex { real = -1.0, imaginary = 2.5 }));
             print("\n");
@@ -486,7 +486,7 @@ fn repr_renders_fields_arrays_tuples_and_active_union_payloads() {
 #[test]
 fn entry_errors_display_owned_payload_contents() {
     let output = run(r#"export { main }; import { "$/string.resin" };
-        struct Problem { message: String; code: int; }
+        struct Problem { message: String, code: int, }
         fn main() -> (() | Err<Problem>)  {
             Err(Problem { message = string_from_str("bad input"), code = 7 })
         }"#);

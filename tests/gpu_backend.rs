@@ -37,9 +37,9 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
     let module = support::module(
         r#"export { kernel, main }; import { "$/span.resin" };
 
-        struct Data { marker: uint; wide: ulong; amount: float32; }
-        struct Payload { tag: uint; data: Data; end: uint; }
-        struct Params { count: uint; values: Ptr<Payload>; tail: float32; }
+        struct Data { marker: uint, wide: ulong, amount: float32, }
+        struct Payload { tag: uint, data: Data, end: uint, }
+        struct Params { count: uint, values: Ptr<Payload>, tail: float32, }
         fn at (values: Ptr<Payload>, index: uint) -> Ref<Payload>  { Span<Payload> { data = values, length = 67_ul }:at(ulong(index)) }
         fn bump (p: Ptr<Payload>, index: uint) -> ()  {
             let mut old = p.*;
@@ -418,7 +418,7 @@ fn fragment_shaders_read_typed_root_parameters() {
 #[test]
 fn shader_while_loops_execute_with_nested_and_zero_trip_iterations() {
     compute_values(
-        "export { kernel }; import { \"$/span.resin\" }; struct PixelRoot { count: uint; pixels: Ptr<uint>; } @compute_shader fn kernel(invocation: ulong, root: Ptr<PixelRoot>)  { let mut index = uint(invocation); if (index < root.count) { let mut output = Span<uint> { data = root.pixels, length = 67_ul }; output:at(ulong(index)) = { let mut total = uint(0); let mut n = index; while (n > uint(0) && n <= index) { let mut j = uint(0); while (j < n) { total = total + uint(1); j = j + uint(1); }; n = n - uint(1); }; total }; }; }",
+        "export { kernel }; import { \"$/span.resin\" }; struct PixelRoot { count: uint, pixels: Ptr<uint>, } @compute_shader fn kernel(invocation: ulong, root: Ptr<PixelRoot>)  { let mut index = uint(invocation); if (index < root.count) { let mut output = Span<uint> { data = root.pixels, length = 67_ul }; output:at(ulong(index)) = { let mut total = uint(0); let mut n = index; while (n > uint(0) && n <= index) { let mut j = uint(0); while (j < n) { total = total + uint(1); j = j + uint(1); }; n = n - uint(1); }; total }; }; }",
         |index| index * (index + 1) / 2,
     );
 }
@@ -426,7 +426,7 @@ fn shader_while_loops_execute_with_nested_and_zero_trip_iterations() {
 #[test]
 fn shader_results_propagate_and_match_union_payloads_on_device() {
     compute_values(
-        "export { kernel }; import { \"$/span.resin\" }; struct Zero {} struct Odd { index: uint; } fn checked(i: uint) -> (uint | Err<Zero | Odd>)  { if (i == uint(0)) { Err(Zero {}) } else { if ((i & uint(1)) == uint(1)) { Err(Odd { index = i }) } else { (i) } } } fn add(i: uint) -> (uint | Err<_>)  { let mut value = checked(i)?; (value + uint(10)) } struct PixelRoot { count: uint; pixels: Ptr<uint>; } @compute_shader fn kernel(invocation: ulong, root: Ptr<PixelRoot>)  { let mut i = uint(invocation); if (i < root.count) { let mut output = Span<uint> { data = root.pixels, length = 67_ul }; output:at(ulong(i)) = { match (add(i)) { uint(value) => { value }, Err(error) => { match (error) { Zero(zero) => { uint(0) }, Odd(odd) => { odd.index * uint(2) } } } } }; }; }",
+        "export { kernel }; import { \"$/span.resin\" }; struct Zero {} struct Odd { index: uint, } fn checked(i: uint) -> (uint | Err<Zero | Odd>)  { if (i == uint(0)) { Err(Zero {}) } else { if ((i & uint(1)) == uint(1)) { Err(Odd { index = i }) } else { (i) } } } fn add(i: uint) -> (uint | Err<_>)  { let mut value = checked(i)?; (value + uint(10)) } struct PixelRoot { count: uint, pixels: Ptr<uint>, } @compute_shader fn kernel(invocation: ulong, root: Ptr<PixelRoot>)  { let mut i = uint(invocation); if (i < root.count) { let mut output = Span<uint> { data = root.pixels, length = 67_ul }; output:at(ulong(i)) = { match (add(i)) { uint(value) => { value }, Err(error) => { match (error) { Zero(zero) => { uint(0) }, Odd(odd) => { odd.index * uint(2) } } } } }; }; }",
         |index| {
             if index == 0 {
                 0
@@ -443,7 +443,7 @@ fn shader_results_propagate_and_match_union_payloads_on_device() {
 fn optional_unwrap_stops_shader_callers_on_none() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: uint; pixels: Ptr<uint>; }
+        struct Root { count: uint, pixels: Ptr<uint>, }
         fn choose(i: uint) -> uint  { let mut value: uint | None; value = if ((i & 1_ui) == 0_ui) { i } else { None }; value! }
         @compute_shader fn kernel(invocation: ulong, root: Ptr<Root>)  { let mut i = uint(invocation);
             if (i < root.count) {
@@ -461,7 +461,7 @@ fn optional_unwrap_stops_shader_callers_on_none() {
 fn none_elimination_preserves_shader_union_members() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: uint; pixels: Ptr<uint>; }
+        struct Root { count: uint, pixels: Ptr<uint>, }
         fn choose(i: uint) -> uint | bool | None  {
             if ((i & 3_ui) == 0_ui) { None } else { if ((i & 3_ui) == 1_ui) { i } else { 1_ui == 1_ui } }
         }
@@ -487,8 +487,8 @@ fn none_elimination_preserves_shader_union_members() {
 fn inherent_methods_execute_in_shader_helpers() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: uint; pixels: Ptr<uint>; }
-        struct Counter { value: uint;
+        struct Root { count: uint, pixels: Ptr<uint>, }
+        struct Counter { value: uint,
             
             
             
@@ -517,7 +517,7 @@ fn read(self: Counter) -> uint  { self.value }
 fn template_helpers_execute_with_shader_specific_instances() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: uint; pixels: Ptr<uint>; }
+        struct Root { count: uint, pixels: Ptr<uint>, }
         fn increment<T>(value: T) -> T  { value + 1 }
         fn twice<U>(value: U) -> U  { increment(increment(value)) }
         @compute_shader fn kernel(invocation: ulong, root: Ptr<Root>)  {
@@ -535,8 +535,8 @@ fn template_helpers_execute_with_shader_specific_instances() {
 fn at_indexing_mutates_shader_arrays_and_span_fields() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct FieldsValues<T0> { values: T0; }
-struct Root { count: uint; pixels: Ptr<uint>; }
+        struct FieldsValues<T0> { values: T0, }
+struct Root { count: uint, pixels: Ptr<uint>, }
         fn read(i: uint) -> uint  {
             let mut values = [10_ui, 20_ui];
             let mut previous = (&values:at(0_ul)):replace(i);
@@ -623,7 +623,7 @@ fn one_compute_artifact_specializes_for_each_suitable_device() {
     let module = support::module(
         r#"export { kernel };
         import { "$/span.resin" };
-        struct Root { count: uint; pixels: Ptr<uint>; }
+        struct Root { count: uint, pixels: Ptr<uint>, }
         @compute_shader fn kernel(index: ulong, root: Ptr<Root>)  {
             if (index < ulong(root.count)) {
                 let mut pixels = Span<uint> { data = root.pixels, length = ulong(root.count) };
@@ -776,7 +776,7 @@ fn shader_array_indexing_with_an_explicit_bounds_guard() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
         fn read(i: uint) -> uint  { let mut values = [uint(10), uint(20), uint(30)]; values(i) }
-        struct PixelRoot { count: uint; pixels: Ptr<uint>; } @compute_shader fn kernel(invocation: ulong, root: Ptr<PixelRoot>)  { let mut i = uint(invocation); if (i < 3_ui) { let mut output = Span<uint> { data = root.pixels, length = 67_ul }; output:at(ulong(i)) = { read(i) + uint(1) }; }; }"#,
+        struct PixelRoot { count: uint, pixels: Ptr<uint>, } @compute_shader fn kernel(invocation: ulong, root: Ptr<PixelRoot>)  { let mut i = uint(invocation); if (i < 3_ui) { let mut output = Span<uint> { data = root.pixels, length = 67_ul }; output:at(ulong(i)) = { read(i) + uint(1) }; }; }"#,
         |i| if i < 3 { (i + 1) * 10 + 1 } else { u32::MAX },
     );
 }
@@ -785,7 +785,7 @@ fn shader_array_indexing_with_an_explicit_bounds_guard() {
 fn shader_span_indexing_with_an_explicit_bounds_guard() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: uint; pixels: Ptr<uint>; }
+        struct Root { count: uint, pixels: Ptr<uint>, }
         fn write(i: uint, pixels: Span<uint>)  { pixels:at(ulong(i)) = uint(42); }
         @compute_shader fn kernel(invocation: ulong, root: Ptr<Root>)  { let mut i = uint(invocation);
             let mut pixels = Span<uint> { data = root.pixels, length = ulong(3) };
@@ -802,7 +802,7 @@ fn shader_span_indexing_with_an_explicit_bounds_guard() {
 fn numeric_suffixes_and_one_armed_if_execute_on_device() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct PixelRoot { count: uint; pixels: Ptr<uint>; } @compute_shader fn kernel(invocation: ulong, root: Ptr<PixelRoot>)  { let mut i = uint(invocation); if (i < root.count) { let mut output = Span<uint> { data = root.pixels, length = 67_ul }; output:at(ulong(i)) = {
+        struct PixelRoot { count: uint, pixels: Ptr<uint>, } @compute_shader fn kernel(invocation: ulong, root: Ptr<PixelRoot>)  { let mut i = uint(invocation); if (i < root.count) { let mut output = Span<uint> { data = root.pixels, length = 67_ul }; output:at(ulong(i)) = {
             let mut result = 0_ui;
             if ((i & 1_ui) == 0_ui) { result = i + 10_ui; };
             if (1.5_f + 2.5_f == 4_f && 42_ul > 0_ul) { result = result + 1_ui; };
@@ -877,7 +877,7 @@ fn numeric_conversion_failures_stop_shader_helpers_before_stores() {
 fn byte_spans_read_and_write_device_storage() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: uint; pixels: Ptr<ubyte>; }
+        struct Root { count: uint, pixels: Ptr<ubyte>, }
         fn read(bytes: Span<ubyte>, index: ulong) -> ubyte  { bytes:at(index) }
         @compute_shader fn kernel(invocation: ulong, root: Ptr<Root>)  { let mut i = uint(invocation);
             if (i < root.count) {
@@ -897,7 +897,7 @@ fn byte_spans_read_and_write_device_storage() {
 fn packed_byte_arrays_execute_in_shaders() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: uint; pixels: Ptr<uint>; }
+        struct Root { count: uint, pixels: Ptr<uint>, }
         @compute_shader fn kernel(index: ulong, root: Ptr<Root>)  {
             if (index < ulong(root.count)) {
                 let mut rows = [[65_ub, 66_ub], [0_ub, 255_ub]];

@@ -38,7 +38,7 @@ fn returns_leave_nested_expressions_and_preserve_initialization() {
 fn returns_drop_owners_once_in_reverse_order_and_preserve_the_result() {
     succeeds(
         r#"export { main };
-        struct Resource { trace: Ptr<int>; digit: int;
+        struct Resource { trace: Ptr<int>, digit: int,
             
         }
 fn drop(self: Ptr<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
@@ -85,7 +85,7 @@ fn shader_returns_preserve_structured_selection_and_loops() {
 fn loop_exits_target_the_nearest_loop_and_drop_exited_scopes() {
     succeeds(
         r#"export { main };
-        struct Resource { trace: Ptr<int>; digit: int;
+        struct Resource { trace: Ptr<int>, digit: int,
             
         }
 fn drop(self: Ptr<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }

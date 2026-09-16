@@ -2,7 +2,7 @@ export { main };
 
 import { "$/console.resin", "$/string.resin" };
 
-fn main() -> (() | Err<_>)  {
+fn main() -> (() | Err<_>) {
 	print("What is your name? ");
 	let mut name = console_read_line()?;
 

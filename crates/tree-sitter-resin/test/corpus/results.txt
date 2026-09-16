@@ -1,7 +1,7 @@
 ==================
 Structs, aliases, unions, and Err wrappers
 ==================
-struct SomeInt { value: int; }
+struct SomeInt { value: int, }
 struct NoneInt {}
 type OptionInt = SomeInt | NoneInt;
 fn read(value: (int | Err<NoneInt>)) -> (int | Err<_>)  {

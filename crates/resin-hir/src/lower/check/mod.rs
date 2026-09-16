@@ -288,8 +288,11 @@ pub(in crate::lower) fn file(
         };
         let completed = super::elaborate::function(
             &body.term,
-            &signature.parameters,
-            &signature.params,
+            signature
+                .parameters
+                .iter()
+                .zip(&signature.params)
+                .filter_map(|(id, (pattern, _))| id.map(|id| (id, pattern.mutable))),
             &solver,
             &methods,
             &generator.typer,
@@ -904,13 +907,15 @@ impl Expression<'_, '_> {
         self.constrain((
             name.span,
             Constraint::Overload {
-                name: name.val.clone(),
-                candidates,
-                primitive: None,
-                expected: None,
-                type_args: explicit,
-                args: None,
-                out,
+                lookup: super::infer::Overload {
+                    name: name.val.clone(),
+                    candidates,
+                    primitive: None,
+                    expected: None,
+                    type_args: explicit,
+                    args: None,
+                    out,
+                },
             },
         ));
         Some(TermKind::MethodReference {
@@ -954,13 +959,15 @@ impl Expression<'_, '_> {
         self.constrain((
             name.span,
             Constraint::Overload {
-                name: name.val.clone(),
-                candidates,
-                primitive: None,
-                expected,
-                type_args: explicit,
-                args: Some(args.iter().map(|arg| arg.ty.clone()).collect()),
-                out,
+                lookup: super::infer::Overload {
+                    name: name.val.clone(),
+                    candidates,
+                    primitive: None,
+                    expected,
+                    type_args: explicit,
+                    args: Some(args.iter().map(|arg| arg.ty.clone()).collect()),
+                    out,
+                },
             },
         ));
         Some(TermKind::Builtin {
@@ -1422,13 +1429,15 @@ impl Expression<'_, '_> {
                     let candidates =
                         self.overload_candidates(&Ident::new(dunder.into(), *name_span));
                     Constraint::Overload {
-                        name: name.clone(),
-                        candidates,
-                        primitive: Some(name.clone()),
-                        expected: expected.clone(),
-                        type_args: None,
-                        args: Some(args.iter().map(|arg| arg.ty.clone()).collect()),
-                        out: out.clone(),
+                        lookup: super::infer::Overload {
+                            name: name.clone(),
+                            candidates,
+                            primitive: Some(name.clone()),
+                            expected: expected.clone(),
+                            type_args: None,
+                            args: Some(args.iter().map(|arg| arg.ty.clone()).collect()),
+                            out: out.clone(),
+                        },
                     }
                 } else {
                     Constraint::Builtin(

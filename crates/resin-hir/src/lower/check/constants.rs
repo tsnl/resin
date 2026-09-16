@@ -199,8 +199,7 @@ impl Checker<'_> {
         self.errors.extend(self.typing.solve(&roots));
         let completed = elaborate::function(
             &term,
-            &[],
-            &[],
+            [],
             &self.typing.solver,
             &self.typing.methods,
             self.typing.typer,

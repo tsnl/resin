@@ -1,7 +1,7 @@
 export { main };
 import { "$/string.resin", "$/process.resin", "$/span.resin" };
 
-fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> (() | Err<_>)  {
+fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> (() | Err<_>) {
 	let mut args = arguments(argc, argv);
 	let mut index = 0_ul;
 	while (index < args.length) {

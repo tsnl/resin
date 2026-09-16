@@ -2,12 +2,17 @@ export { Root, kernel, cpu };
 
 import { "$/span.resin" };
 
-struct Root { count: uint; iterations: uint; input: Ptr<uint>; output: Ptr<uint>; }
+struct Root {
+	count: uint,
+	iterations: uint,
+	input: Ptr<uint>,
+	output: Ptr<uint>,
+}
 
 // Each lane follows a different, data-dependent branch on every iteration.
 // Keep this recurrence stable: it is the structured-control-flow baseline.
 @compute_shader
-fn kernel(index: ulong, root: Ptr<Root>)  {
+fn kernel(index: ulong, root: Ptr<Root>) {
 	if (index < ulong(root.count)) {
 		let mut lane = uint(index);
 		let mut x = lane * 747796405_ui + 2891336453_ui;
@@ -26,7 +31,7 @@ fn kernel(index: ulong, root: Ptr<Root>)  {
 	};
 }
 
-fn cpu(root: Ptr<Root>)  {
+fn cpu(root: Ptr<Root>) {
 	let mut index = 0_ul;
 	while (index < ulong(root.count)) {
 		kernel(index, root);

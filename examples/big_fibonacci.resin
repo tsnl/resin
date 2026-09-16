@@ -4,9 +4,13 @@ export {
 
 import { "$/string.resin" };
 
-struct FibonacciMismatch { index: ulong; slow: ulong; fast: ulong; }
+struct FibonacciMismatch {
+	index: ulong,
+	slow: ulong,
+	fast: ulong,
+}
 
-fn fibonacci(n: ulong) -> ulong  {
+fn fibonacci(n: ulong) -> ulong {
 	if (n <= ulong(1)) {
 		n
 	} else {
@@ -16,7 +20,7 @@ fn fibonacci(n: ulong) -> ulong  {
 	}
 }
 
-fn fast_fibonacci(n: ulong) -> ulong  {
+fn fast_fibonacci(n: ulong) -> ulong {
 	if (n <= ulong(1)) {
 		n
 	} else {
@@ -40,7 +44,7 @@ fn fast_fibonacci(n: ulong) -> ulong  {
 	}
 }
 
-fn compare_fibonacci(index: ulong, slow: ulong, fast: ulong) -> (() | Err<FibonacciMismatch>)  {
+fn compare_fibonacci(index: ulong, slow: ulong, fast: ulong) -> (() | Err<FibonacciMismatch>) {
 	if (slow == fast) {
 		(())
 	} else {
@@ -48,7 +52,7 @@ fn compare_fibonacci(index: ulong, slow: ulong, fast: ulong) -> (() | Err<Fibona
 	}
 }
 
-fn test_fibonacci(n: ulong) -> (() | Err<_>)  {
+fn test_fibonacci(n: ulong) -> (() | Err<_>) {
 	let mut i = ulong(0);
 	while (i < n) {
 		let mut slow_f = fibonacci(i);
@@ -60,7 +64,7 @@ fn test_fibonacci(n: ulong) -> (() | Err<_>)  {
 	(())
 }
 
-fn main() -> (() | Err<_>)  {
+fn main() -> (() | Err<_>) {
 	test_fibonacci(30)?;
 
 	let mut n = ulong(100);

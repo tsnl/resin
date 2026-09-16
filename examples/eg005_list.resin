@@ -2,25 +2,28 @@ export { main };
 
 import { "$/string.resin" };
 
-struct List { value: int; next: Ptr<List>; }
+struct List {
+	value: int,
+	next: Ptr<List>,
+}
 
-fn cons(value: int, next: Ptr<List>) -> List  {
+fn cons(value: int, next: Ptr<List>) -> List {
 	List { value = value, next = next }
 }
 
-fn car(node: List) -> int  {
+fn car(node: List) -> int {
 	node.value
 }
 
-fn cdr(node: List) -> Ptr<List>  {
+fn cdr(node: List) -> Ptr<List> {
 	node.next
 }
 
-fn at(p: Ptr<List>) -> int  {
+fn at(p: Ptr<List>) -> int {
 	p.value
 }
 
-fn main() -> ()  {
+fn main() -> () {
 	let mut tail = cons(2, Ptr<List>(ulong(0)));
 	let mut head = cons(1, &tail);
 	print(fmt("list = {0}, {1}\n", (car(head), at(cdr(head)))));

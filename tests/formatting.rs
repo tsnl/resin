@@ -43,8 +43,8 @@ fn check(source: &str, expected: &str) {
 #[test]
 fn operator_method_names_remain_attached_to_the_parameter_list() {
     check(
-        "struct A{x:int;}\nfn __add__(a:A,b:A)->A{a}\n\nfn __neg__(a:A)->A{a}\n\nfn __lshift__(a:A,b:int)->A{a}\n",
-        "struct A {\n\tx: int;\n\t\n\t\n\t\n}\nfn __add__(a: A, b: A) -> A  {\n\t\ta\n\t}\n\nfn __neg__(a: A) -> A  {\n\t\ta\n\t}\n\nfn __lshift__(a: A, b: int) -> A  {\n\t\ta\n\t}\n\n",
+        "struct A{x:int,}\nfn __add__(a:A,b:A)->A{a}\n\nfn __neg__(a:A)->A{a}\n\nfn __lshift__(a:A,b:int)->A{a}\n",
+        "struct A {\n\tx: int,\n\t\n\t\n\t\n}\nfn __add__(a: A, b: A) -> A  {\n\t\ta\n\t}\n\nfn __neg__(a: A) -> A  {\n\t\ta\n\t}\n\nfn __lshift__(a: A, b: int) -> A  {\n\t\ta\n\t}\n\n",
     );
 }
 
@@ -63,11 +63,11 @@ fn constant_groups_keep_specifications_and_comments_together() {
 #[test]
 fn trailing_commas_and_nested_lists() {
     check(
-        "export {main,}; import {\"$/test.resin\",}; struct FieldsXY<T0, T1> { x: T0; y: T1; }\nfn main(a:int,b:float32,){let mut xs=[1,2,3,]; call(a,b,); let mut r=FieldsXY<_, _> {x=1,y=2,}; ();}",
+        "export {main,}; import {\"$/test.resin\",}; struct FieldsXY<T0, T1> { x: T0, y: T1, }\nfn main(a:int,b:float32,){let mut xs=[1,2,3,]; call(a,b,); let mut r=FieldsXY<_, _> {x=1,y=2,}; ();}",
         "export {\n\tmain,\n};\nimport {\n\t\"$/test.resin\",\n};\nstruct FieldsXY<T0, T1> { x: T0; y: T1; }\nfn main(\n\ta: int,\n\tb: float32,\n)  {\n\tlet mut xs = [\n\t\t1,\n\t\t2,\n\t\t3,\n\t];\n\tcall(\n\t\ta,\n\t\tb,\n\t);\n\tlet mut r = FieldsXY<_, _> {\n\t\tx = 1,\n\t\ty = 2,\n\t};\n\t();\n}\n",
     );
     check(
-        "extern {\"x.h\":{fn call(x:(int,),);}}; struct FieldsXY<T0, T1> { x: T0; y: T1; }\ntype Pair=FieldsXY<int, float32>; fn main(){f([1,2,],3);}",
+        "extern {\"x.h\":{fn call(x:(int,),);}}; struct FieldsXY<T0, T1> { x: T0, y: T1, }\ntype Pair=FieldsXY<int, float32>; fn main(){f([1,2,],3);}",
         "extern {\n\t\"x.h\": {\n\t\tfn call(\n\t\t\tx: (int,),\n\t\t);\n\t}\n};\nstruct FieldsXY<T0, T1> { x: T0; y: T1; }\ntype Pair = FieldsXY<int, float32>;\nfn main()  {\n\tf(\n\t\t[\n\t\t\t1,\n\t\t\t2,\n\t\t],\n\t\t3\n\t);\n}\n",
     );
 }
@@ -103,7 +103,7 @@ fn pointer_dereference_stays_attached_to_its_operand() {
 #[test]
 fn structs_results_and_match() {
     check(
-        "struct Empty{}struct Item{x:int;}type Errors=Empty|Item;fn run()->(_ | Err<_>){cleanup();(cleanup());{cleanup();};let mut value=read()?;match(value){int(v)=>{v},Err(e)=>{0},}}",
+        "struct Empty{}struct Item{x:int,}type Errors=Empty|Item;fn run()->(_ | Err<_>){cleanup();(cleanup());{cleanup();};let mut value=read()?;match(value){int(v)=>{v},Err(e)=>{0},}}",
         "struct Empty {}\nstruct Item {\n\tx: int;\n}\ntype Errors = Empty | Item;\nfn run() -> (_ | Err<_>)  {\n\tcleanup();\n\t(cleanup());\n\t{\n\t\tcleanup();\n\t};\n\tlet mut value = read()?;\n\tmatch (value) {\n\t\tint(v) => {\n\t\t\tv\n\t\t},\n\t\tErr(e) => {\n\t\t\t0\n\t\t},\n\t}\n}\n",
     );
     check(
@@ -143,7 +143,7 @@ fn comments_at_every_token_boundary_preserve_syntax() {
             }
         }
     }
-    let source = "export {main}; extern {\"x.h\": {fn ext(x: int);}}; import {\"missing.resin\"}; struct FieldsX<T0> { x: T0; }\nstruct T {x: Ptr<int>; y: (int,);} fn main(a: int) -> (_ | Err<Never>)  { f(); let mut p = & &a; let mut x = f([1, 2,], FieldsX<_> {x = 3})?; while (x < 3) { x = x + 1; }; match (x) { int(v) => { if (v == 3) { v } else { -v } }, Err(e) => { 0 } } }";
+    let source = "export {main}; extern {\"x.h\": {fn ext(x: int);}}; import {\"missing.resin\"}; struct FieldsX<T0> { x: T0, }\nstruct T {x: Ptr<int>; y: (int,);} fn main(a: int) -> (_ | Err<Never>)  { f(); let mut p = & &a; let mut x = f([1, 2,], FieldsX<_> {x = 3})?; while (x < 3) { x = x + 1; }; match (x) { int(v) => { if (v == 3) { v } else { -v } }, Err(e) => { 0 } } }";
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_resin::LANGUAGE.into())
@@ -248,8 +248,8 @@ fn optional_unwrap_suffix_stays_attached_and_preserves_operators() {
 #[test]
 fn structs_format_fields_before_method_declarations() {
     check(
-        "struct N{v:int;  }\nfn n_new(v:int)->N{N{v=v}}\n\nfn read(self:N)->int{self.v}\nfn main()->int{n_new(42):read()}",
-        "struct N {\n\tv: int;\n\t\n\t\n}\nfn n_new(v: int) -> N  {\n\t\tN { v = v }\n\t}\n\nfn read(self: N) -> int  {\n\t\tself.v\n\t}\n\nfn main() -> int  {\n\tn_new(42):read()\n}\n",
+        "struct N{v:int,  }\nfn n_new(v:int)->N{N{v=v}}\n\nfn read(self:N)->int{self.v}\nfn main()->int{n_new(42):read()}",
+        "struct N {\n\tv: int,\n\t\n\t\n}\nfn n_new(v: int) -> N  {\n\t\tN { v = v }\n\t}\n\nfn read(self: N) -> int  {\n\t\tself.v\n\t}\n\nfn main() -> int  {\n\tn_new(42):read()\n}\n",
     );
 }
 

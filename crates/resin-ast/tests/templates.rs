@@ -8,7 +8,7 @@ fn parse(text: &str) -> SourceFile {
 
 #[test]
 fn type_and_function_binders_remain_separate_from_weak_variables() {
-    let source = "struct Pair<T> { first: T;  }\nfn map<T, U>(self: Pair<T>, value: U) -> Pair<_>  { Pair<U> { first = value } }\n type Shared<T> = ArcPtr<Pair<T>>;";
+    let source = "struct Pair<T> { first: T,  }\nfn map<T, U>(self: Pair<T>, value: U) -> Pair<_>  { Pair<U> { first = value } }\n type Shared<T> = ArcPtr<Pair<T>>;";
     let file = parse(source);
     let StmtKind::Struct {
         type_params, body, ..

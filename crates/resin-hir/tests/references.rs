@@ -42,13 +42,13 @@ fn reference_binding_requires_an_initialized_place() {
 #[test]
 fn references_cannot_be_hidden_in_value_storage_or_generic_arguments() {
     for source in [
-        "struct Invalid { value: Ref<int>; }",
-        "type R = Ref<int>; struct Invalid { value: R; }",
+        "struct Invalid { value: Ref<int>, }",
+        "type R = Ref<int>; struct Invalid { value: R, }",
         "fn invalid(value: Ptr<Ref<int>>)  {}",
         "fn invalid(value: Ref<Ref<int>>)  {}",
         "fn invalid(value: (Ref<int> | Err<None>))  {}",
         "fn invalid(value: Ref<int> | None)  {}",
-        "struct Cell<T> { value: T; } fn invalid(value: Cell<Ref<int>>)  {}",
+        "struct Cell<T> { value: T, } fn invalid(value: Cell<Ref<int>>)  {}",
         "fn identity<T>(value: T) -> T  { value } fn invalid()  { let mut x = 1_i; identity::<Ref<int>>(x); }",
         "struct Cell {  }\nfn cell_accept<T>(value: T)  {}\n fn invalid()  { let mut x = 1_i; cell_accept::<Ref<int>>(x); }",
         "fn invalid()  { let mut value: Ref<int> = Ref<int>(1_i); }",
@@ -68,7 +68,7 @@ fn reference_binding_does_not_widen_or_implicitly_dereference_pointers() {
         "fn invalid()  { let mut x = 1_i; let mut r: Ref<int | None> = x; }",
         "fn invalid(p: Ptr<int>)  { let mut r: Ref<int> = p; }",
         "fn accept(value: Ref<int>)  {} fn invalid()  { accept(1_i); }",
-        "struct Cell { value: int;  }\nfn get(self: Ref<Cell>) -> Ref<int>  { self.value }\n fn invalid()  { Cell { value = 1 }:get(); }",
+        "struct Cell { value: int,  }\nfn get(self: Ref<Cell>) -> Ref<int>  { self.value }\n fn invalid()  { Cell { value = 1 }:get(); }",
     ] {
         assert!(
             hir_module(source).is_err(),

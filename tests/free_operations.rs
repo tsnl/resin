@@ -4,8 +4,8 @@ mod support;
 fn generic_relations_and_operators_select_visible_signatures() {
     let source = r#"
         export { main };
-        struct Left { value: int; }
-        struct Right { value: int; }
+        struct Left { value: int, }
+        struct Right { value: int, }
         fn relate(a: Left, b: Right) -> int { a.value + b.value }
         fn relate(a: Right, b: Left) -> int { a.value - b.value }
         fn relate(a: int, b: int) -> int { a + b }

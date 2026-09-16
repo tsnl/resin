@@ -559,7 +559,7 @@ copy or destruction simply because they cross an application boundary.
 struct Resource { handle: Ptr<ubyte>,
     def drop(self: Ptr<Resource>) = {
         if (ulong(self.handle) != 0_ul) { release_native_handle(self.handle); };
-    };
+    },
 };
 
 // Inside a function:
@@ -674,10 +674,10 @@ Methods share their struct's parameters and can add their own:
 ```resin
 struct Cell<T> {
     value: T,
-    def read(self: Cell<T>) -> T = { self.value };
+    def read(self: Cell<T>) -> T = { self.value },
     def replace_with<U>(self: Cell<T>, value: U) -> Cell<U> = {
         Cell<U> { value = value }
-    };
+    },
 };
 
 def methods() -> int = {
@@ -722,7 +722,7 @@ Declare Python-style dunder methods inside a struct to implement operators:
 struct Vec2<T> { x: T, y: T,
     def __add__(left: Vec2<T>, right: Vec2<T>) -> Vec2<T> = {
         Vec2<T> { x = left.x + right.x, y = left.y + right.y }
-    };
+    },
 };
 
 def add<T>(left: T, right: T) -> _ = { left + right };
@@ -913,14 +913,14 @@ extern type ResinGpu;
 struct GpuOwner { handle: Ptr<ResinGpu>,
     def drop(self: Ptr<GpuOwner>) = {
         if (ulong(self.handle) != 0_ul) { resin_gpu_destroy(self.handle); };
-    };
+    },
 };
 struct Gpu { owner: ArcPtr<GpuOwner>,
     def new() -> (Gpu | Err<RuntimeError>) = {
         var owner = ArcPtr<GpuOwner>.alloc(GpuOwner { handle = Ptr<ResinGpu>(0_ul) })?;
         RuntimeStatus.from_code(resin_gpu_create(&owner.get().handle))?;
         (Gpu { owner = owner })
-    };
+    },
 };
 
 ```

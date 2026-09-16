@@ -69,7 +69,7 @@ fn success(output: &Output) {
 fn inferred_values_and_slices_keep_their_allocation_and_gpu_alive() {
     let Some(output) = run(r#"export { main };
         import { "$/gpu.resin", "$/span.resin", "$/shared.resin" };
-        struct Pair { left: int; right: int; }
+        struct Pair { left: int, right: int, }
         fn value() -> (GpuPtr<int> | Err<_>)  {
             let mut gpu = gpu_new()?;
             gpu:create(42_i)
@@ -112,7 +112,7 @@ fn inferred_values_and_slices_keep_their_allocation_and_gpu_alive() {
 fn nested_host_owners_and_explicit_gpu_loads_preserve_allocation_lifetimes() {
     let Some(output) = run(r#"export { main };
         import { "$/gpu.resin", "$/shared.resin" };
-        struct Item { value: int;
+        struct Item { value: int,
             
             
         }
@@ -120,7 +120,7 @@ fn increment(self: Ptr<Item>)  { self.value = self.value + 1_i; }
 
 fn read(self: Item) -> int  { self.value }
 
-        struct Outer { item: Item; }
+        struct Outer { item: Item, }
         fn field() -> (GpuPtr<Outer> | Err<_>)  {
             let mut gpu = gpu_new()?;
             let mut pointer = gpu:create(Outer { item = Item { value = 40_i } })?;
@@ -160,7 +160,7 @@ fn custom_allocators_must_return_the_requested_size_and_alignment() {
             let source = format!(
                 r#"export {{ main }};
                 import {{ "gpu.resin", "$/status.resin" }};
-                struct Root {{ left: long; right: long; }}
+                struct Root {{ left: long, right: long, }}
                 @compute_shader fn kernel(index: ulong, root: Ptr<Root>)  {{}}
                 fn main() -> (int | Err<_>)  {{
                     let mut gpu = gpu_new()?;
@@ -206,8 +206,8 @@ fn allocator_library(bytes: &str, value: &str) -> String {
 
 const COMPUTE: &str = r#"export { main };
     import { "$/gpu.resin", "$/status.resin", "$/span.resin" };
-    struct FieldsIncrementValues<T0, T1> { increment: T0; values: T1; }
-struct Parameters { increment: uint; values: Span<uint>; }
+    struct FieldsIncrementValues<T0, T1> { increment: T0, values: T1, }
+struct Parameters { increment: uint, values: Span<uint>, }
     @compute_shader fn kernel(index: ulong, root: Ptr<Parameters>)  {
         if (index < root.values.length) {
             let mut item: Ref<uint> = root.values:at(index);
@@ -249,13 +249,13 @@ fn projected_scalar_and_span_arguments_dispatch_and_allow_readback_after_submit(
 fn generic_operator_overloads_execute_on_the_gpu() {
     let source = r#"export { main };
         import { "$/gpu.resin", "$/span.resin" };
-        struct Cell<T> { value: T;
+        struct Cell<T> { value: T,
             
         }
 fn __add__<T>(a: Cell<T>, b: Cell<T>) -> Cell<T>  { Cell<T> { value = a.value + b.value } }
 
-        struct Parameters { values: Span<Cell<uint>>; }
-        struct HostParameters { values: GpuSpan<Cell<uint>>; }
+        struct Parameters { values: Span<Cell<uint>>, }
+        struct HostParameters { values: GpuSpan<Cell<uint>>, }
         fn add<T>(a: T, b: T) -> _  { a + b }
         @compute_shader fn kernel(index: ulong, root: Ptr<Parameters>)  {
             if (index < root.values.length) {
@@ -287,8 +287,8 @@ fn __add__<T>(a: Cell<T>, b: Cell<T>) -> Cell<T>  { Cell<T> { value = a.value + 
 fn source_sequences_project_offsets_and_retain_resources_through_submit() {
     let Some(output) = run(r#"export { main };
         import { "$/gpu.resin", "$/span.resin" };
-        struct FieldsValuesScalar<T0, T1> { values: T0; scalar: T1; }
-struct Root { values: Span<uint>; scalar: Ptr<uint>; }
+        struct FieldsValuesScalar<T0, T1> { values: T0, scalar: T1, }
+struct Root { values: Span<uint>, scalar: Ptr<uint>, }
         @compute_shader fn kernel(index: ulong, root: Ptr<Root>)  {
             if (index < root.values.length) { root.values:at(index) = root.values:at(index) + 10_ui; };
             if (index == 0_ul) { root.scalar.* = 42_ui; };
@@ -317,9 +317,9 @@ struct Root { values: Span<uint>; scalar: Ptr<uint>; }
 fn source_pipeline_contract_retagging_cannot_change_the_shader_root() {
     let Some(output) = run(r#"export { main };
         import { "$/gpu.resin" };
-        struct FieldsValue<T0> { value: T0; }
-struct Root { value: uint; }
-        struct Other { value: uint; }
+        struct FieldsValue<T0> { value: T0, }
+struct Root { value: uint, }
+        struct Other { value: uint, }
         @compute_shader fn kernel(index: ulong, root: Ptr<Root>)  {}
         fn main() -> (int | Err<_>)  {
             let mut gpu = gpu_new()?;
@@ -425,8 +425,8 @@ fn restricted_gpu_pointers_and_spans_trap_on_disallowed_access() {
 fn inferred_signed_long_pointers_project_and_precomputed_inputs_evaluate_once() {
     let Some(output) = run(r#"export { main };
         import { "$/gpu.resin", "$/span.resin", "$/shared.resin" };
-        struct FieldsValueValuesIncrement<T0, T1, T2> { value: T0; values: T1; increment: T2; }
-struct Parameters { value: Ptr<long>; values: Span<long>; increment: long; }
+        struct FieldsValueValuesIncrement<T0, T1, T2> { value: T0, values: T1, increment: T2, }
+struct Parameters { value: Ptr<long>, values: Span<long>, increment: long, }
         @compute_shader fn kernel(index: ulong, root: Ptr<Parameters>)  {
             if (index == 0_ul && root.value.* < 0_l) {
                 root.value.* = -root.value.* + root.increment;
@@ -465,9 +465,9 @@ struct Parameters { value: Ptr<long>; values: Span<long>; increment: long; }
 fn returned_typed_pipelines_and_recordings_keep_scoped_resources_alive() {
     let Some(output) = run(r#"export { main };
         import { "$/gpu.resin", "$/span.resin", "$/shared.resin" };
-        struct FieldsCommandsValues<T0, T1> { commands: T0; values: T1; }
-struct FieldsValues<T0> { values: T0; }
-struct Parameters { values: Span<uint>; }
+        struct FieldsCommandsValues<T0, T1> { commands: T0, values: T1, }
+struct FieldsValues<T0> { values: T0, }
+struct Parameters { values: Span<uint>, }
         @compute_shader fn kernel(index: ulong, root: Ptr<Parameters>)  {
             if (index < root.values.length) { root.values:at(index) = 42_ui; };
         }
@@ -530,8 +530,8 @@ fn dispatch_rejects_argument_views_from_another_device() {
 fn rooted_graphics_stages_receive_automatically_projected_arguments() {
     let Some(output) = run(r#"export { main };
         import { "$/gpu.resin", "$/graphics.resin" };
-        struct FieldsColorOffset<T0, T1> { color: T0; offset: T1; }
-struct Parameters { color: Ptr<Color>; offset: float32; }
+        struct FieldsColorOffset<T0, T1> { color: T0, offset: T1, }
+struct Parameters { color: Ptr<Color>, offset: float32, }
         @vertex_shader fn vertex(index: int, root: Ptr<Parameters>) -> Vertex  {
             Vertex {
                 position = Position {
@@ -577,7 +577,7 @@ const VIEW_PRIMITIVES: &str = r#"intrinsic "gpu_view_allocate" fn allocate<N>(gp
     intrinsic "gpu_view_replace" fn replace<T>(view: GpuView, value: T) -> T;
     intrinsic "gpu_view_copy_to" fn copy_to<T>(view: GpuView, count: ulong, destination: Ptr<T>, length: ulong) -> ();
     struct DeviceScalar<T> {
-        view: GpuView;
+        view: GpuView,
         
         
     }

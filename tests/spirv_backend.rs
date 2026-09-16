@@ -134,7 +134,7 @@ fn shader_calls_guard_only_helpers_with_emitted_failure_exits() {
 
 #[test]
 fn graphics_output_guards_follow_the_emitted_entry_fallibility() {
-    let types = "struct Position { x: float32; y: float32; z: float32; w: float32; } struct Color { r: float32; g: float32; b: float32; a: float32; } struct Vertex { position: Position; color: Color; }";
+    let types = "struct Position { x: float32, y: float32, z: float32, w: float32, } struct Color { r: float32, g: float32, b: float32, a: float32, } struct Vertex { position: Position, color: Color, }";
     for checked in [false, true] {
         for (entry, expression, body) in [
             (
@@ -173,7 +173,7 @@ fn graphics_output_guards_follow_the_emitted_entry_fallibility() {
 #[test]
 fn shader_helpers_can_propagate_and_handle_results() {
     let m = module(
-        "export { kernel }; struct Bad { index: uint; } fn checked(i: uint) -> (uint | Err<Bad>)  { if (i == uint(0)) { Err(Bad { index = i }) } else { (i) } } fn helper(i: uint) -> (uint | Err<_>)  { let mut value = checked(i)?; (value + uint(1)) } @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { match (helper(i)) { uint(value) => { value }, Err(error) => { error.index } } }; }",
+        "export { kernel }; struct Bad { index: uint, } fn checked(i: uint) -> (uint | Err<Bad>)  { if (i == uint(0)) { Err(Bad { index = i }) } else { (i) } } fn helper(i: uint) -> (uint | Err<_>)  { let mut value = checked(i)?; (value + uint(1)) } @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { match (helper(i)) { uint(value) => { value }, Err(error) => { error.index } } }; }",
     );
     let project = support::project::Project::new(&m, None).unwrap();
     if let Some(frontend) = shaders::optimizer() {
@@ -291,15 +291,15 @@ fn device_pointers_and_shared_roots_compile() {
     };
     for (source, stage) in [
         (
-            "export { kernel }; struct Node { value: uint; next: Ptr<Node>; } fn select (a: Ptr<Node>, b: Ptr<Node>, i: uint) -> Ptr<Node>  { if (i == uint(0)) { a } else { b } } @compute_shader fn kernel (invocation: ulong, root: Ptr<Node>) -> ()  { let mut i = uint(invocation); let mut p = select(root, root.next, i); p.value = uint(7); }",
+            "export { kernel }; struct Node { value: uint, next: Ptr<Node>, } fn select (a: Ptr<Node>, b: Ptr<Node>, i: uint) -> Ptr<Node>  { if (i == uint(0)) { a } else { b } } @compute_shader fn kernel (invocation: ulong, root: Ptr<Node>) -> ()  { let mut i = uint(invocation); let mut p = select(root, root.next, i); p.value = uint(7); }",
             Stage::Compute,
         ),
         (
-            "export { kernel }; import { \"$/span.resin\" }; struct Data { wide: ulong; values: Ptr<uint>; } @compute_shader fn kernel (invocation: ulong, root: Ptr<Data>) -> ()  { let mut i = uint(invocation); let mut p = root.values; let mut q: Ref<uint> = Span<uint> { data = p, length = 64_ul }:at(ulong(i)); q = uint(3); root.wide = ulong(4294967297); }",
+            "export { kernel }; import { \"$/span.resin\" }; struct Data { wide: ulong, values: Ptr<uint>, } @compute_shader fn kernel (invocation: ulong, root: Ptr<Data>) -> ()  { let mut i = uint(invocation); let mut p = root.values; let mut q: Ref<uint> = Span<uint> { data = p, length = 64_ul }:at(ulong(i)); q = uint(3); root.wide = ulong(4294967297); }",
             Stage::Compute,
         ),
         (
-            "export { fragment }; struct Color { r: float32; g: float32; b: float32; a: float32; } struct Params { scale: float32; } @fragment_shader fn fragment (color: Color, root: Ptr<Params>) -> Color  { Color { r = color.r * root.scale, g = color.g, b = color.b, a = color.a } }",
+            "export { fragment }; struct Color { r: float32, g: float32, b: float32, a: float32, } struct Params { scale: float32, } @fragment_shader fn fragment (color: Color, root: Ptr<Params>) -> Color  { Color { r = color.r * root.scale, g = color.g, b = color.b, a = color.a } }",
             Stage::Fragment,
         ),
     ] {
@@ -325,7 +325,7 @@ fn shader_addresses_cannot_hide_unsupported_layouts_or_escape_locals() {
             "shader-local addresses cannot escape",
         ),
         (
-            "export { kernel }; struct Data { flag: bool; } @compute_shader fn kernel (invocation: ulong, root: Ptr<Data>) -> ()  { let mut i = uint(invocation); () }",
+            "export { kernel }; struct Data { flag: bool, } @compute_shader fn kernel (invocation: ulong, root: Ptr<Data>) -> ()  { let mut i = uint(invocation); () }",
             "no shared host/device layout",
         ),
         (
@@ -366,7 +366,7 @@ fn unsupported_shader_features_are_diagnosed() {
             "foreign",
         ),
         (
-            "export { kernel }; intrinsic \"format_bytes\" fn render<A>(data: Ptr<ubyte>, length: ulong, args: A) -> StrongOwner; struct Root { data: Ptr<ubyte>; length: ulong; } @compute_shader fn kernel(invocation: ulong, root: Ptr<Root>)  { let mut text = render(root.data, root.length, ()); }",
+            "export { kernel }; intrinsic \"format_bytes\" fn render<A>(data: Ptr<ubyte>, length: ulong, args: A) -> StrongOwner; struct Root { data: Ptr<ubyte>, length: ulong, } @compute_shader fn kernel(invocation: ulong, root: Ptr<Root>)  { let mut text = render(root.data, root.length, ()); }",
             "shader cannot consume managed values",
         ),
         (
@@ -477,7 +477,7 @@ fn imported_backend_errors_retain_expression_origins() {
 
 #[test]
 fn managed_fields_are_opaque_until_consumed_by_a_shader() {
-    let prefix = "export { kernel }; import { \"$/shared.resin\" }; struct Host { value: float64; } struct Root { owner: ArcPtr<Host>; weak: WeakPtr<Host>; result: uint; }";
+    let prefix = "export { kernel }; import { \"$/shared.resin\" }; struct Host { value: float64, } struct Root { owner: ArcPtr<Host>, weak: WeakPtr<Host>, result: uint, }";
     let m = module(&format!(
         "{prefix} @compute_shader fn kernel(invocation: ulong, root: Ptr<Root>)  {{ let mut i = uint(invocation); root.result = i; let mut address = &root.owner; }}"
     ));

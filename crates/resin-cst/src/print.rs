@@ -157,7 +157,7 @@ fn finish_group(
                 matches!(
                     p.kind(),
                     "block_body" | "chain_term" | "match_term" | "extern_clause" | "foreign_group"
-                ) || p.kind() == "struct_definition"
+                )
             });
     let singleton_tuple = tokens[start].parent().is_some_and(|parent| {
         matches!(parent.kind(), "tuple_term" | "tuple_type")

@@ -213,7 +213,7 @@ export default grammar({
         field("name", $.uid),
         optional(field("type_params", $.type_parameters)),
         "{",
-        repeat(seq(field("fields", $.declare), ";")),
+        list("fields", $.declare, ","),
         "}",
       ),
 

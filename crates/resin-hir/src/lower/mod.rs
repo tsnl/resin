@@ -1270,7 +1270,7 @@ mod extern_tests {
             } };
             extern type Handle;
             type Scalar = int;
-            struct Cell<T> { value: T; }
+            struct Cell<T> { value: T, }
         "#,
         );
         let module = generate(&file).unwrap();

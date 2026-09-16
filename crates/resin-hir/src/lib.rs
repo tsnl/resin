@@ -1149,7 +1149,7 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ),
     (
         "struct",
-        "struct Name { field: Type; } — a nominal record type.",
+        "struct Name { field: Type, } — a nominal record type.",
         DefinitionKind::Keyword,
     ),
     (

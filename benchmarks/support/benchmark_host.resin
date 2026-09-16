@@ -11,7 +11,7 @@ extern {
 
 import { "$/shared.resin", "@WORKLOAD@" };
 
-fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> (() | Err<_>)  {
+fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> (() | Err<_>) {
 	let mut count = uint(benchmark_argument(argc, argv, 1_ui));
 	let mut iterations = uint(benchmark_argument(argc, argv, 2_ui));
 	let mut samples = benchmark_argument(argc, argv, 3_ui);

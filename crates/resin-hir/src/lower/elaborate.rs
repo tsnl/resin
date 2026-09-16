@@ -20,14 +20,14 @@ pub(super) struct CompletedBody {
 
 pub(super) fn function(
     source: &typed::Term,
-    parameters: &[Option<DeclarationId>],
-    patterns: &[(resin_ast::BindingPattern, typed::Annotation<crate::Type>)],
+    parameters: impl IntoIterator<Item = (DeclarationId, bool)>,
     solver: &Solver,
     methods: &BTreeMap<Rule, ResolvedMethod>,
     typer: &TyperContext,
     function_bindings: &HashMap<DeclarationId, FunctionId>,
     shaders: &BTreeMap<FunctionId, ShaderEntry>,
 ) -> Result<CompletedBody> {
+    let mutable: BTreeMap<_, _> = parameters.into_iter().collect();
     let mut completion = Completion {
         solver,
         methods,
@@ -37,17 +37,12 @@ pub(super) fn function(
         reachable: true,
         loops: Vec::new(),
         embedded: BTreeSet::new(),
-        initialization: parameters
-            .iter()
-            .flatten()
+        initialization: mutable
+            .keys()
             .map(|id| (*id, Initialization::Initialized))
             .collect(),
-        mutable: parameters
-            .iter()
-            .zip(patterns)
-            .filter_map(|(id, (pattern, _))| id.map(|id| (id, pattern.mutable)))
-            .collect(),
-        written: parameters.iter().flatten().copied().collect(),
+        written: mutable.keys().copied().collect(),
+        mutable,
         moved: BTreeMap::new(),
     };
     let body = completion.elaborate(source)?;
@@ -1492,8 +1487,7 @@ mod tests {
         };
         let completed = function(
             &source,
-            &[],
-            &[],
+            [],
             &solver,
             &methods,
             &TyperContext::new(),

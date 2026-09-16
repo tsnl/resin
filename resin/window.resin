@@ -1,137 +1,4 @@
-export {
-	Window,
-	ResinWindow,
-	ButtonState,
-	key_unknown,
-	key_space,
-	key_apostrophe,
-	key_comma,
-	key_minus,
-	key_period,
-	key_slash,
-	key_digit_0,
-	key_digit_1,
-	key_digit_2,
-	key_digit_3,
-	key_digit_4,
-	key_digit_5,
-	key_digit_6,
-	key_digit_7,
-	key_digit_8,
-	key_digit_9,
-	key_semicolon,
-	key_equal,
-	key_a,
-	key_b,
-	key_c,
-	key_d,
-	key_e,
-	key_f,
-	key_g,
-	key_h,
-	key_i,
-	key_j,
-	key_k,
-	key_l,
-	key_m,
-	key_n,
-	key_o,
-	key_p,
-	key_q,
-	key_r,
-	key_s,
-	key_t,
-	key_u,
-	key_v,
-	key_w,
-	key_x,
-	key_y,
-	key_z,
-	key_left_bracket,
-	key_backslash,
-	key_right_bracket,
-	key_grave_accent,
-	key_world_1,
-	key_world_2,
-	key_escape,
-	key_enter,
-	key_tab,
-	key_backspace,
-	key_insert,
-	key_delete,
-	key_right,
-	key_left,
-	key_down,
-	key_up,
-	key_page_up,
-	key_page_down,
-	key_home,
-	key_end,
-	key_caps_lock,
-	key_scroll_lock,
-	key_num_lock,
-	key_print_screen,
-	key_pause,
-	key_f1,
-	key_f2,
-	key_f3,
-	key_f4,
-	key_f5,
-	key_f6,
-	key_f7,
-	key_f8,
-	key_f9,
-	key_f10,
-	key_f11,
-	key_f12,
-	key_f13,
-	key_f14,
-	key_f15,
-	key_f16,
-	key_f17,
-	key_f18,
-	key_f19,
-	key_f20,
-	key_f21,
-	key_f22,
-	key_f23,
-	key_f24,
-	key_f25,
-	key_keypad_0,
-	key_keypad_1,
-	key_keypad_2,
-	key_keypad_3,
-	key_keypad_4,
-	key_keypad_5,
-	key_keypad_6,
-	key_keypad_7,
-	key_keypad_8,
-	key_keypad_9,
-	key_keypad_decimal,
-	key_keypad_divide,
-	key_keypad_multiply,
-	key_keypad_subtract,
-	key_keypad_add,
-	key_keypad_enter,
-	key_keypad_equal,
-	key_left_shift,
-	key_left_control,
-	key_left_alt,
-	key_left_super,
-	key_right_shift,
-	key_right_control,
-	key_right_alt,
-	key_right_super,
-	key_menu,
-	mouse_button_left,
-	mouse_button_right,
-	mouse_button_middle,
-	mouse_button_4,
-	mouse_button_5,
-	mouse_button_6,
-	mouse_button_7,
-	mouse_button_8,
- native, window_new, poll_events, should_close, set_should_close, framebuffer_size, set_size, key_pressed, key_state, mouse_button_state, cursor_position, scroll_delta, focused, capture_cursor };
+export { Window, ResinWindow, ButtonState, key_unknown, key_space, key_apostrophe, key_comma, key_minus, key_period, key_slash, key_digit_0, key_digit_1, key_digit_2, key_digit_3, key_digit_4, key_digit_5, key_digit_6, key_digit_7, key_digit_8, key_digit_9, key_semicolon, key_equal, key_a, key_b, key_c, key_d, key_e, key_f, key_g, key_h, key_i, key_j, key_k, key_l, key_m, key_n, key_o, key_p, key_q, key_r, key_s, key_t, key_u, key_v, key_w, key_x, key_y, key_z, key_left_bracket, key_backslash, key_right_bracket, key_grave_accent, key_world_1, key_world_2, key_escape, key_enter, key_tab, key_backspace, key_insert, key_delete, key_right, key_left, key_down, key_up, key_page_up, key_page_down, key_home, key_end, key_caps_lock, key_scroll_lock, key_num_lock, key_print_screen, key_pause, key_f1, key_f2, key_f3, key_f4, key_f5, key_f6, key_f7, key_f8, key_f9, key_f10, key_f11, key_f12, key_f13, key_f14, key_f15, key_f16, key_f17, key_f18, key_f19, key_f20, key_f21, key_f22, key_f23, key_f24, key_f25, key_keypad_0, key_keypad_1, key_keypad_2, key_keypad_3, key_keypad_4, key_keypad_5, key_keypad_6, key_keypad_7, key_keypad_8, key_keypad_9, key_keypad_decimal, key_keypad_divide, key_keypad_multiply, key_keypad_subtract, key_keypad_add, key_keypad_enter, key_keypad_equal, key_left_shift, key_left_control, key_left_alt, key_left_super, key_right_shift, key_right_control, key_right_alt, key_right_super, key_menu, mouse_button_left, mouse_button_right, mouse_button_middle, mouse_button_4, mouse_button_5, mouse_button_6, mouse_button_7, mouse_button_8, native, window_new, poll_events, should_close, set_should_close, framebuffer_size, set_size, key_pressed, key_state, mouse_button_state, cursor_position, scroll_delta, focused, capture_cursor };
 
 extern {
 	"resin_runtime.h": {
@@ -331,124 +198,110 @@ const (
 	input_released: uint = 1 << iota;
 );
 
-struct ButtonState { down: bool; pressed: bool; released: bool; }
+struct ButtonState {
+	down: bool,
+	pressed: bool,
+	released: bool,
+}
 
-fn button_state(bits: uint) -> ButtonState  {
+fn button_state(bits: uint) -> ButtonState {
 	ButtonState { down = (bits & input_down) != 0_ui, pressed = (bits & input_pressed) != 0_ui, released = (bits & input_released) != 0_ui }
 }
 
 extern type ResinWindow;
 struct WindowOwner {
-	handle: Ptr<ResinWindow>;
-	
+	handle: Ptr<ResinWindow>,
 }
-fn drop(self: Ptr<WindowOwner>)  {
-		if (ulong(self.handle) != 0_ul) {
-			resin_window_destroy(self.handle);
-		};
-	}
-
+fn drop(self: Ptr<WindowOwner>) {
+	if (ulong(self.handle) != 0_ul) {
+		resin_window_destroy(self.handle);
+	};
+}
 
 struct Window {
-	owner: ArcPtr<WindowOwner>;
-	
-
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
+	owner: ArcPtr<WindowOwner>,
 }
-fn native(self: Ref<Window>) -> Ptr<ResinWindow>  {
-		self.owner:get().handle
-	}
+fn native(self: Ref<Window>) -> Ptr<ResinWindow> {
+	self.owner:get().handle
+}
 
-fn window_new(width: uint, height: uint, title: String) -> (Window | Err<RuntimeError>)  {
-		let mut owner = arc_ptr_alloc::<WindowOwner>(WindowOwner { handle = Ptr<ResinWindow>(0_ul) })?;
-		runtime_status_from_code(resin_window_create(width, height, title:get().data, &owner:get().handle))?;
-		(Window { owner = owner })
-	}
+fn window_new(width: uint, height: uint, title: String) -> (Window | Err<RuntimeError>) {
+	let mut owner = arc_ptr_alloc::<WindowOwner>(WindowOwner { handle = Ptr<ResinWindow>(0_ul) })?;
+	runtime_status_from_code(resin_window_create(width, height, title:get().data, &owner:get().handle))?;
+	(Window { owner = owner })
+}
 
-fn poll_events(self: Ref<Window>) -> (() | Err<RuntimeError>)  {
-		runtime_status_from_code(resin_window_poll_events(self:native()))
-	}
+fn poll_events(self: Ref<Window>) -> (() | Err<RuntimeError>) {
+	runtime_status_from_code(resin_window_poll_events(self:native()))
+}
 
-fn should_close(self: Ref<Window>) -> bool  {
-		resin_window_should_close(self:native()) != 0
-	}
+fn should_close(self: Ref<Window>) -> bool {
+	resin_window_should_close(self:native()) != 0
+}
 
-fn set_should_close(self: Ref<Window>, close: bool) -> (() | Err<RuntimeError>)  {
-		runtime_status_from_code(
-			resin_window_set_should_close(
-				self:native(),
-				if (close) {
-					1
-				} else {
-					0
-				}
-			)
+fn set_should_close(self: Ref<Window>, close: bool) -> (() | Err<RuntimeError>) {
+	runtime_status_from_code(
+		resin_window_set_should_close(
+			self:native(),
+			if (close) {
+				1
+			} else {
+				0
+			}
 		)
-	}
+	)
+}
 
-fn framebuffer_size(self: Ref<Window>) -> ((uint, uint) | Err<RuntimeError>)  {
-		let mut width = uint(0);
-		let mut height = uint(0);
-		runtime_status_from_code(resin_window_framebuffer_size(self:native(), &width, &height))?;
-		((width, height))
-	}
+fn framebuffer_size(self: Ref<Window>) -> ((uint, uint) | Err<RuntimeError>) {
+	let mut width = uint(0);
+	let mut height = uint(0);
+	runtime_status_from_code(resin_window_framebuffer_size(self:native(), &width, &height))?;
+	((width, height))
+}
 
-fn set_size(self: Ref<Window>, width: uint, height: uint) -> (() | Err<RuntimeError>)  {
-		runtime_status_from_code(resin_window_set_size(self:native(), width, height))
-	}
+fn set_size(self: Ref<Window>, width: uint, height: uint) -> (() | Err<RuntimeError>) {
+	runtime_status_from_code(resin_window_set_size(self:native(), width, height))
+}
 
-fn key_pressed(self: Ref<Window>, key: int) -> bool  {
-		resin_window_key_pressed(self:native(), key) != 0
-	}
+fn key_pressed(self: Ref<Window>, key: int) -> bool {
+	resin_window_key_pressed(self:native(), key) != 0
+}
 
-fn key_state(self: Ref<Window>, key: int) -> ButtonState  {
-		button_state(resin_window_key_state(self:native(), key))
-	}
+fn key_state(self: Ref<Window>, key: int) -> ButtonState {
+	button_state(resin_window_key_state(self:native(), key))
+}
 
-fn mouse_button_state(self: Ref<Window>, button: int) -> ButtonState  {
-		button_state(resin_window_mouse_button_state(self:native(), button))
-	}
+fn mouse_button_state(self: Ref<Window>, button: int) -> ButtonState {
+	button_state(resin_window_mouse_button_state(self:native(), button))
+}
 
-fn cursor_position(self: Ref<Window>) -> ((float64, float64) | Err<RuntimeError>)  {
-		let mut x = 0.0_d;
-		let mut y = 0.0_d;
-		runtime_status_from_code(resin_window_cursor_position(self:native(), &x, &y))?;
-		((x, y))
-	}
+fn cursor_position(self: Ref<Window>) -> ((float64, float64) | Err<RuntimeError>) {
+	let mut x = 0.0_d;
+	let mut y = 0.0_d;
+	runtime_status_from_code(resin_window_cursor_position(self:native(), &x, &y))?;
+	((x, y))
+}
 
-fn scroll_delta(self: Ref<Window>) -> ((float64, float64) | Err<RuntimeError>)  {
-		let mut x = 0.0_d;
-		let mut y = 0.0_d;
-		runtime_status_from_code(resin_window_scroll_delta(self:native(), &x, &y))?;
-		((x, y))
-	}
+fn scroll_delta(self: Ref<Window>) -> ((float64, float64) | Err<RuntimeError>) {
+	let mut x = 0.0_d;
+	let mut y = 0.0_d;
+	runtime_status_from_code(resin_window_scroll_delta(self:native(), &x, &y))?;
+	((x, y))
+}
 
-fn focused(self: Ref<Window>) -> bool  {
-		resin_window_focused(self:native()) != 0
-	}
+fn focused(self: Ref<Window>) -> bool {
+	resin_window_focused(self:native()) != 0
+}
 
-fn capture_cursor(self: Ref<Window>, capture: bool) -> (() | Err<RuntimeError>)  {
-		runtime_status_from_code(
-			resin_window_capture_cursor(
-				self:native(),
-				if (capture) {
-					1
-				} else {
-					0
-				}
-			)
+fn capture_cursor(self: Ref<Window>, capture: bool) -> (() | Err<RuntimeError>) {
+	runtime_status_from_code(
+		resin_window_capture_cursor(
+			self:native(),
+			if (capture) {
+				1
+			} else {
+				0
+			}
 		)
-	}
-
+	)
+}

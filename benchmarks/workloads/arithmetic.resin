@@ -2,11 +2,16 @@ export { Root, kernel, cpu };
 
 import { "$/span.resin" };
 
-struct Root { count: uint; iterations: uint; input: Ptr<uint>; output: Ptr<uint>; }
+struct Root {
+	count: uint,
+	iterations: uint,
+	input: Ptr<uint>,
+	output: Ptr<uint>,
+}
 
 // Loop-carried integer arithmetic without a data-dependent branch.
 @compute_shader
-fn kernel(index: ulong, root: Ptr<Root>)  {
+fn kernel(index: ulong, root: Ptr<Root>) {
 	if (index < ulong(root.count)) {
 		let mut x = uint(index) * 747796405_ui + 2891336453_ui;
 		let mut n = 0_ui;
@@ -20,7 +25,7 @@ fn kernel(index: ulong, root: Ptr<Root>)  {
 	};
 }
 
-fn cpu(root: Ptr<Root>)  {
+fn cpu(root: Ptr<Root>) {
 	let mut index = 0_ul;
 	while (index < ulong(root.count)) {
 		kernel(index, root);

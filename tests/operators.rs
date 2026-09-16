@@ -10,7 +10,7 @@ fn run(source: &str) -> std::process::Output {
 fn dunder_calls_references_and_operators_share_one_specialization() {
     let module = support::module(
         r#"export { main };
-        struct Number<T> { value: T;
+        struct Number<T> { value: T,
             
         }
 fn __add__<T>(a: Number<T>, b: T) -> T  { a.value + b }
@@ -47,7 +47,7 @@ fn __add__<T>(a: Number<T>, b: T) -> T  { a.value + b }
 #[test]
 fn operators_support_generic_owners_aliases_and_distinct_operand_and_result_types() {
     let output = run(r#"export { main };
-        struct Vector<T> { x: T; y: T;
+        struct Vector<T> { x: T, y: T,
             
             
             
@@ -88,7 +88,7 @@ fn __eq__<T>(a: Vector<T>, b: Vector<T>) -> bool  { a.x == b.x && a.y == b.y }
 #[test]
 fn operator_operands_are_evaluated_once_in_order_and_reference_values_are_read() {
     let output = run(r#"export { main };
-        struct Number { value: int;
+        struct Number { value: int,
             
             
         }
@@ -119,7 +119,7 @@ fn __sub__(a: Number, b: int) -> int  { a.value - b }
 fn generic_overloads_lower_to_shader_calls() {
     let module = support::module(
         r#"export { kernel };
-        struct Cell<T> { value: T;
+        struct Cell<T> { value: T,
             
         }
 fn __add__<T>(a: Cell<T>, b: Cell<T>) -> Cell<T>  { Cell<T> { value = a.value + b.value } }
@@ -138,7 +138,7 @@ fn __add__<T>(a: Cell<T>, b: Cell<T>) -> Cell<T>  { Cell<T> { value = a.value + 
 #[test]
 fn every_operator_symbol_dispatches_without_changing_precedence() {
     let output = run(r#"export { main };
-        struct Bits { value: int;
+        struct Bits { value: int,
             
             
             
@@ -243,12 +243,12 @@ fn __add__(self: Narrow, value: ubyte) -> int  { int(value) - 213 }
 fn operator_copies_and_results_use_ordinary_owner_cleanup() {
     let output = run(r#"export { main };
         import { "$/shared.resin" };
-        struct Payload { drops: Ptr<int>;
+        struct Payload { drops: Ptr<int>,
             
         }
 fn drop(self: Ptr<Payload>)  { self.drops.* = self.drops.* + 1; }
 
-        struct Value { owner: ArcPtr<Payload>; value: int;
+        struct Value { owner: ArcPtr<Payload>, value: int,
             
         }
 fn __add__(a: Value, b: Value) -> Value  { Value { owner = a.owner, value = a.value + b.value } }
@@ -314,7 +314,7 @@ fn operator_calls_obey_shader_foreign_call_and_recursion_rules() {
         let source = format!(
             r#"export {{ kernel }};
             extern {{ "stdlib.h": {{ fn abs(value: int) -> int; }}, }};
-            struct Number {{ value: int;
+            struct Number {{ value: int,
                 
             }}
 fn __add__(a: Number, b: int) -> int  {{ {body} }}

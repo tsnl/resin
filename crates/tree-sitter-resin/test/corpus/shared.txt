@@ -1,7 +1,7 @@
 ==================
 Inherent destruction and shared ownership
 ==================
-struct Item { value: int;
+struct Item { value: int,
     
 }
 fn drop(self: Ptr<Item>)  {}

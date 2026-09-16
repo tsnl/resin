@@ -10,7 +10,7 @@ fn run(source: &str) -> std::process::Output {
 fn generic_owner_methods_support_static_and_receiver_calls() {
     let output = run(r#"export { main };
         import { "$/string.resin" };
-        struct Cell<T> { value: T;
+        struct Cell<T> { value: T,
             
             
             
@@ -41,7 +41,7 @@ fn with<T, U>(self: Cell<T>, value: U) -> Cell<U>  { Cell<U> { value = value } }
 fn factory_method_arguments_follow_expected_results_and_explicit_holes() {
     let output = run(r#"export { main };
         import { "$/string.resin" };
-        struct Cell<T> { value: T; }
+        struct Cell<T> { value: T, }
         struct Factory {
             
         }
@@ -68,7 +68,7 @@ fn create<T>(self: Factory) -> Cell<T>  { Cell<T> { value = 41 } }
 #[test]
 fn method_references_keep_owner_arguments_and_infer_only_remaining_binders() {
     let output = run(r#"export { main };
-        struct Cell<T> { value: T;
+        struct Cell<T> { value: T,
             
             
         }
@@ -94,7 +94,7 @@ fn select<T, U>(cell: Cell<T>, value: U) -> U  { value }
 #[test]
 fn recursive_methods_complete_results_without_changing_owner_or_method_binders() {
     let output = run(r#"export { main };
-        struct Cell<T> { value: T;
+        struct Cell<T> { value: T,
             
             
         }
@@ -122,7 +122,7 @@ fn choose<T, U>(self: Cell<T>, value: U, depth: int) -> _  {
 #[test]
 fn generic_drop_hooks_use_each_owner_argument_and_reverse_scope_order() {
     let output = run(r#"export { main };
-        struct Tracked<T> { trace: Ptr<ulong>; value: T;
+        struct Tracked<T> { trace: Ptr<ulong>, value: T,
             
             
             
@@ -159,7 +159,7 @@ fn drop<T>(self: Ptr<Tracked<T>>)  {
 fn generic_drop_hooks_run_on_result_propagation() {
     let output = run(r#"export { main };
         struct Failed {}
-        struct Tracked<T> { trace: Ptr<ulong>; value: T;
+        struct Tracked<T> { trace: Ptr<ulong>, value: T,
             
         }
 fn drop<T>(self: Ptr<Tracked<T>>)  {
@@ -194,7 +194,7 @@ fn imported_generic_aliases_share_the_owners_method_instances() {
         (
             "cell.resin",
             r#"export { Cell , cell_make, read };
-            struct Cell<T> { value: T;
+            struct Cell<T> { value: T,
                 
                 
             }
@@ -244,7 +244,7 @@ fn read<T>(self: Cell<T>) -> T  { self.value }
 fn shader_receivers_use_the_specialized_generic_owner_method() {
     let module = support::module(
         r#"export { kernel };
-        struct Cell<T> { value: T;
+        struct Cell<T> { value: T,
             
         }
 fn increment<T>(self: Ptr<Cell<T>>)  { self.value = self.value + 1; }

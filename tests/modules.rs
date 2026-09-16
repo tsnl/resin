@@ -162,7 +162,7 @@ fn reexports_keep_binding_identity_through_diamond_imports() {
     let project = Project::new(&[
         (
             "base.resin",
-            "export { Number, make }; struct Number { value: int; } fn make(counter: Ptr<int>) -> Number  { counter.* = counter.* + 1; Number { value = 42 } }",
+            "export { Number, make }; struct Number { value: int, } fn make(counter: Ptr<int>) -> Number  { counter.* = counter.* + 1; Number { value = 42 } }",
         ),
         (
             "left.resin",
@@ -297,7 +297,7 @@ fn exported_functions_can_return_private_types() {
     let project = Project::new(&[
         (
             "library.resin",
-            "export { make, read }; struct Hidden { value: int; } fn make () -> Hidden  { Hidden { value = 42 } } fn read (n: Hidden) -> int  { n.value }",
+            "export { make, read }; struct Hidden { value: int, } fn make () -> Hidden  { Hidden { value = 42 } } fn read (n: Hidden) -> int  { n.value }",
         ),
         (
             "main.resin",
@@ -312,11 +312,11 @@ fn private_nominal_types_keep_distinct_identities() {
     Project::new(&[
         (
             "left.resin",
-            "export { make }; struct Hidden { value: int; } fn make () -> Hidden  { Hidden { value = 42 } }",
+            "export { make }; struct Hidden { value: int, } fn make () -> Hidden  { Hidden { value = 42 } }",
         ),
         (
             "right.resin",
-            "export { read }; struct Hidden { value: int; } fn read (n: Hidden) -> int  { n.value }",
+            "export { read }; struct Hidden { value: int, } fn read (n: Hidden) -> int  { n.value }",
         ),
         (
             "main.resin",
@@ -573,7 +573,7 @@ fn compiler_builtins_cannot_be_redefined_in_any_module_or_scope() {
 fn builtin_spellings_are_valid_field_names() {
     let project = Project::new(&[(
         "main.resin",
-        "export { main }; struct Fields { absurd: int; shader: int; } fn main () -> int  { let mut value = Fields { absurd = 20, shader = 22 }; value.absurd + value.shader }",
+        "export { main }; struct Fields { absurd: int, shader: int, } fn main () -> int  { let mut value = Fields { absurd = 20, shader = 22 }; value.absurd + value.shader }",
     )]);
     assert_eq!(project.run().status.code(), Some(42));
 }
@@ -630,7 +630,7 @@ fn lowering_rejects_runtime_module_items_even_in_constructed_asts() {
 fn declarations_do_not_create_a_module_initializer() {
     let empty = support::module("");
     assert!(empty.functions.is_empty());
-    let types = support::module("export { Item }; struct Item { value: int; }");
+    let types = support::module("export { Item }; struct Item { value: int, }");
     assert!(types.functions.is_empty());
     assert!(types.entries.is_empty());
     let module =
@@ -671,7 +671,7 @@ fn shader_objects_can_reference_private_helpers() {
 #[test]
 fn inherent_methods_belong_to_structs_and_follow_exported_types() {
     let source = r#"export { Counter , counter_new, add, read };
-        struct Counter { value: int;
+        struct Counter { value: int,
             
             
             
@@ -753,7 +753,7 @@ fn methods_validate_declarations_and_call_receivers() {
 #[test]
 fn method_syntax_and_field_calls_have_distinct_meanings() {
     let source = r#"export { main };
-        struct Counter { read: (int) -> int;
+        struct Counter { read: (int) -> int,
             
             
         }
@@ -777,7 +777,7 @@ fn counter_other(self: int) -> int  { self }
         String::from_utf8_lossy(&output.stderr)
     );
     let error = pipeline::generate(&support::parse(
-        "struct Record { call: (int) -> int; } fn f(r: Record) -> int  { r:call(1) }",
+        "struct Record { call: (int) -> int, } fn f(r: Record) -> int  { r:call(1) }",
     ))
     .unwrap_err();
     assert!(error.to_string().contains("unknown method"));
@@ -794,7 +794,7 @@ fn indexing_methods_require_ulong_and_do_not_replace_nominal_methods() {
     }
     let project = Project::new(&[(
         "main.resin",
-        "export { main }; struct Item { value: int;  }\nfn at(item: Item, flag: bool) -> int  { if (flag) { item.value } else { 0 } }\n  fn main() -> int  { let mut item = Item { value = 42 }; item:at(1 == 1) }",
+        "export { main }; struct Item { value: int,  }\nfn at(item: Item, flag: bool) -> int  { if (flag) { item.value } else { 0 } }\n  fn main() -> int  { let mut item = Item { value = 42 }; item:at(1 == 1) }",
     )]);
     assert_eq!(project.run().status.code(), Some(42));
 }
@@ -804,7 +804,7 @@ fn aliases_share_the_nominal_namespace_and_origin() {
     let project = Project::new(&[
         (
             "library.resin",
-            "export { Alias, Item , read }; struct Item { value: int;  }\nfn read(value: Item) -> int  { value.value }\n type Alias = Item; ",
+            "export { Alias, Item , read }; struct Item { value: int,  }\nfn read(value: Item) -> int  { value.value }\n type Alias = Item; ",
         ),
         (
             "main.resin",
@@ -836,7 +836,7 @@ fn struct_methods_resolve_later_aliases_and_recursive_siblings() {
         "main.resin",
         r#"export { main };
         struct Owner {
-            value: int;
+            value: int,
             
             
             
@@ -862,7 +862,7 @@ fn owner_odd(n: int) -> bool  { if (n == 0) { 1 == 0 } else { owner_even(n - 1) 
 
 #[test]
 fn local_structs_are_field_only() {
-    let source = "fn f() -> int  { struct Local { value: int; } Local { value = 42 }.value }";
+    let source = "fn f() -> int  { struct Local { value: int, } Local { value = 42 }.value }";
     pipeline::generate(&support::parse(source)).unwrap();
     let source = "fn f()  { let mut captured = 42; struct Local {  }\nfn local_read() -> int  { captured }\n }";
     let error = pipeline::generate(&support::parse(source)).unwrap_err();

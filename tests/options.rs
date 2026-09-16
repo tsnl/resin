@@ -13,7 +13,7 @@ fn run(source: &str) -> Output {
 
 #[test]
 fn optional_values_match_and_unwrap_once() {
-    let output = run(r#"struct Item { number: int; }
+    let output = run(r#"struct Item { number: int, }
         fn make(calls: Ptr<int>) -> Item | None  { calls.* = calls.* + 1; Item { number = 41 } }
         fn main() -> int  {
             let mut calls = 0;
@@ -34,8 +34,8 @@ fn optional_values_match_and_unwrap_once() {
 
 #[test]
 fn unwrapped_values_widen_in_return_argument_and_field_contexts() {
-    let output = run(r#"struct A { number: int; } struct B {}
-        struct Record { item: A | B; }
+    let output = run(r#"struct A { number: int, } struct B {}
+        struct Record { item: A | B, }
         fn widen(o: A | None) -> A | B  { o! }
         fn read(value: A | B) -> int  { match (value) { A(a) => { a.number }, B(b) => { 0 } } }
         fn main() -> int  {
@@ -79,7 +79,7 @@ fn none_elimination_preserves_all_other_union_members() {
 
 #[test]
 fn result_cases_remain_distinct_inside_optional_unions() {
-    let output = run(r#"struct Item { number: int; }
+    let output = run(r#"struct Item { number: int, }
         type Outcome = (Item | Err<Item>);
         fn make(fail: bool) -> Outcome  { if (fail) { Err(Item { number = 2 }) } else { (Item { number = 40 }) } }
         fn optional(fail: bool) -> Outcome | None  { make(fail) }
@@ -98,7 +98,7 @@ fn result_cases_remain_distinct_inside_optional_unions() {
 
 #[test]
 fn structural_members_keep_their_identity_across_union_widening() {
-    let output = run(r#"struct FieldsNumber<T0> { number: T0; }
+    let output = run(r#"struct FieldsNumber<T0> { number: T0, }
 type Callback = (int) -> int;
         type Record = FieldsNumber<int>;
         fn increment(n: int) -> int  { n + 1 }
@@ -124,7 +124,7 @@ type Callback = (int) -> int;
 
 #[test]
 fn all_value_producers_widen_at_the_consumer() {
-    let output = run(r#"struct FieldsNumber<T0> { number: T0; }
+    let output = run(r#"struct FieldsNumber<T0> { number: T0, }
 type Record = FieldsNumber<uint>;
         fn record() -> Record | None  { FieldsNumber<_> { number = 42_ui } }
         fn field(r: Record) -> uint | None  { r.number }
@@ -172,7 +172,7 @@ fn optional_patterns_and_unwrap_are_checked() {
         "fn f(value: int) -> int  { value! }",
         "struct E {} fn f(r: (int | Err<E>)) -> int  { r! }",
         "struct A {} struct B {} fn f(o: Ptr<A> | None) -> Ptr<A | B>  { o! }",
-        "struct Span<T> { data: Ptr<T>; length: ulong; } fn f(o: Span<int> | None) -> Span<int | None>  { o! }",
+        "struct Span<T> { data: Ptr<T>, length: ulong, } fn f(o: Span<int> | None) -> Span<int | None>  { o! }",
         "fn f(x: int | None)  { match (x) { int(n) => {}, None => {}, None => {} } }",
         "type Both = int | bool; fn f(x: Both)  { match (x) { Both(v) => {} } }",
     ] {

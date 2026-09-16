@@ -3,10 +3,12 @@ export { main, failure };
 import { "$/string.resin", "$/status.resin" };
 
 struct DivideByZero {}
-struct NegativeInput { value: int; }
+struct NegativeInput {
+	value: int,
+}
 type Number = int;
 
-fn divide(n: Number, d: Number) -> (Number | Err<DivideByZero>)  {
+fn divide(n: Number, d: Number) -> (Number | Err<DivideByZero>) {
 	if (d == 0) {
 		Err(DivideByZero {})
 	} else {
@@ -14,7 +16,7 @@ fn divide(n: Number, d: Number) -> (Number | Err<DivideByZero>)  {
 	}
 }
 
-fn calculate(n: int) -> (int | Err<_>)  {
+fn calculate(n: int) -> (int | Err<_>) {
 	if (n < 0) {
 		Err(NegativeInput { value = n })
 	} else {
@@ -22,7 +24,7 @@ fn calculate(n: int) -> (int | Err<_>)  {
 	}
 }
 
-fn main() -> (() | Err<_>)  {
+fn main() -> (() | Err<_>) {
 	runtime_status_from_code(0)?;
 	let mut answer = calculate(84)?;
 	print(fmt("answer = {0}\n", (answer,)));
@@ -44,7 +46,7 @@ fn main() -> (() | Err<_>)  {
 	(())
 }
 
-fn failure() -> (() | Err<_>)  {
+fn failure() -> (() | Err<_>) {
 	divide(1, 0)?;
 	(())
 }

@@ -162,7 +162,7 @@ fn byte_views_reject_nonnumeric_elements_after_specialization() {
     let compilation = compile(
         r#"export { main };
         import { "$/span.resin" };
-        struct Entry { value: uint; }
+        struct Entry { value: uint, }
         fn main()  {
             let mut entry = Entry { value = 1_ui };
             Span<Entry> { data = &entry, length = 1_ul }:as_bytes();
@@ -188,7 +188,7 @@ fn shader_span_indexing_uses_record_layout_and_device_pointer_stride() {
     let compilation = compile(
         r#"export { kernel };
         import { "$/span.resin" };
-        struct Root { values: Span<uint>; }
+        struct Root { values: Span<uint>, }
         @compute_shader fn kernel(index: ulong, root: Ptr<Root>)  {
             root.values:at(index) = 42_ui;
         }
@@ -230,8 +230,8 @@ fn shader_local_addresses_cannot_become_physical_pointer_index_operands() {
 fn reference_returning_index_wrappers_preserve_nested_places() {
     let output = run(r#"export { main };
     import { "$/span.resin" };
-    struct Payload { value: int; }
-    struct Entry { nested: Payload; }
+    struct Payload { value: int, }
+    struct Entry { nested: Payload, }
     fn at(items: Span<Entry>, index: ulong) -> Ref<Entry>  { items:at(index) }
     fn main() -> int  {
         let mut items = [Entry { nested = Payload { value = 1 } }, Entry { nested = Payload { value = 2 } }];

@@ -32,8 +32,8 @@ fn nested_template_calls_use_context_and_preserve_numeric_widths() {
 fn template_fields_and_layout_follow_each_nominal_argument() {
     let output = run(r#"export { main };
         import { "$/string.resin" };
-        struct Small { value: int; }
-        struct Large { padding: ulong; value: uint; }
+        struct Small { value: int, }
+        struct Large { padding: ulong, value: uint, }
         fn read<T>(value: Ptr<T>) -> _  { value.value }
         fn measure<T>() -> ulong  { size_of(T) }
         fn main() -> int  {

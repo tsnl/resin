@@ -41,9 +41,9 @@ fn address_acquisition_and_whole_value_assignment_do_not_read_storage() {
     valid(
         "fn main() -> int  { let mut value: int; let mut pointer = &value; value = 42; pointer.* }",
     );
-    uninitialized("struct R { value: int; } fn main()  { let mut record: R; record.value = 42; }");
+    uninitialized("struct R { value: int, } fn main()  { let mut record: R; record.value = 42; }");
     uninitialized(
-        "struct R { value: int; } fn main()  { let mut record: R; let mut address = &record.value; }",
+        "struct R { value: int, } fn main()  { let mut record: R; let mut address = &record.value; }",
     );
 }
 

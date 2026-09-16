@@ -12,7 +12,7 @@ fn owner_operations_keep_generic_payloads_in_ordinary_signatures() {
     let module = generate(
         r#"intrinsic "owner_allocate" fn allocate<T>(count: ulong, initial: T) -> StrongOwner | None;
         intrinsic "owner_data" fn data<T>(owner: Ptr<StrongOwner>) -> Ptr<T>;
-        struct Shared<T> { owner: StrongOwner;
+        struct Shared<T> { owner: StrongOwner,
             
         }
 fn get<T>(self: Ptr<Shared<T>>) -> Ptr<T>  { data::<T>(&self.owner) }

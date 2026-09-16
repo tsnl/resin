@@ -64,7 +64,7 @@ fn source_shared_elements_drop_in_reverse_and_unwind_on_allocation_failure() {
     success(&run(
         r#"export { main };
         import { "$/shared.resin", "$/status.resin" };
-        struct Item { trace: Ptr<int>; digit: int;
+        struct Item { trace: Ptr<int>, digit: int,
             
         }
 fn drop(self: Ptr<Item>)  {
@@ -98,7 +98,7 @@ fn source_owned_wrappers_retain_payloads_and_borrow_temporary_receivers() {
     success(&run(
         r#"export { main };
         import { "$/shared.resin", "$/status.resin" };
-        struct Item { trace: Ptr<int>; digit: int;
+        struct Item { trace: Ptr<int>, digit: int,
             
         }
 fn drop(self: Ptr<Item>)  {
@@ -207,8 +207,8 @@ fn owned_spans_release_managed_elements_on_success_and_error() {
         import { "$/shared.resin" };
         struct Failed {}
         struct Item {
-            trace: Ptr<int>;
-            digit: int;
+            trace: Ptr<int>,
+            digit: int,
             
         }
 fn drop(self: Ptr<Item>)  { if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; }; }

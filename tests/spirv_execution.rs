@@ -173,8 +173,8 @@ fn physical_byte_record_strides_preserve_neighboring_elements() {
     let Some(actual) = execute(
         r#"export { kernel };
         import { "$/span.resin" };
-        struct Bytes3 { a: ubyte; b: ubyte; c: ubyte; }
-        struct Root { count: ulong; inputs: Ptr<Bytes3>; outputs: Ptr<Bytes3>; }
+        struct Bytes3 { a: ubyte, b: ubyte, c: ubyte, }
+        struct Root { count: ulong, inputs: Ptr<Bytes3>, outputs: Ptr<Bytes3>, }
         @compute_shader fn kernel(index: ulong, root: Ptr<Root>)  {
             if (index < root.count) {
                 let mut inputs = Span<Bytes3> { data = root.inputs, length = root.count };
@@ -283,7 +283,7 @@ fn mixed_record_copies_preserve_nested_byte_fields() {
 #[test]
 fn an_unconditionally_failing_nested_loop_condition_stops_before_caller_stores() {
     let source = r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: ulong; inputs: Ptr<uint>; outputs: Ptr<uint>; }
+        struct Root { count: ulong, inputs: Ptr<uint>, outputs: Ptr<uint>, }
         fn fail() -> bool  {
             let mut value: None;
             value = None;

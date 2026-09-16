@@ -45,8 +45,8 @@ fn sizeof_matches_layout_after_generic_specialization() {
     assert_eq!(
         result(
             r#"export { main };
-        struct Pair<T> { first: T; second: T; }
-        struct Node { next: Ptr<Node>; value: int; }
+        struct Pair<T> { first: T, second: T, }
+        struct Node { next: Ptr<Node>, value: int, }
         const pair_bytes = sizeof(Pair<int>);
         const node_bytes = sizeof(Node);
         fn size<T>() -> ulong  { sizeof(T) }
@@ -87,9 +87,9 @@ fn sizeof_matches_native_c_representations() {
         r#"#include <stdint.h>
         #include <stdbool.h>
         #include "resin_runtime.h"
-        struct TestRecord { int8_t a; double b; uint16_t c; }
-        struct TestStr { uint8_t *data; uint64_t length; }
-        struct TestUnion { uint32_t tag; union { int32_t a; int32_t b; } payload; }
+        struct TestRecord { int8_t a, double b, uint16_t c, }
+        struct TestStr { uint8_t *data, uint64_t length, }
+        struct TestUnion { uint32_t tag, union { int32_t a; int32_t b; } payload, }
         static inline uint64_t native_size(uint32_t index) {
             const uint64_t sizes[] = {
                 sizeof(bool), sizeof(int8_t), sizeof(uint16_t), sizeof(double),
@@ -136,10 +136,10 @@ fn sizeof_matches_native_c_representations() {
         result(&format!(
             r#"export {{ main }};
         extern {{ "{}": {{ fn native_size(index: uint) -> ulong; }} }};
-        struct Record {{ a: sbyte; b: float64; c: ushort; }}
-        struct First {{ value: int; }}
-        struct Second {{ value: int; }}
-        struct Failure {{ value: int; }}
+        struct Record {{ a: sbyte, b: float64, c: ushort, }}
+        struct First {{ value: int, }}
+        struct Second {{ value: int, }}
+        struct Failure {{ value: int, }}
         {declarations}
         fn main() -> int  {{ if ({conditions}) {{ 42 }} else {{ 1 }} }}
     "#,

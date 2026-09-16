@@ -12,7 +12,7 @@ fn rejects(source: &str, message: &str) {
 #[test]
 fn structs_mint_identities_and_aliases_do_not() {
     let m = module(
-        "struct Point { x: int; } type Position = Point; type Number = int; fn copy(p: Position) -> Point  { p } fn number(n: Number) -> int  { n }",
+        "struct Point { x: int, } type Position = Point; type Number = int; fn copy(p: Position) -> Point  { p } fn number(n: Number) -> int  { n }",
     );
     assert_eq!(m.types.iter().filter(|d| d.name().is_some()).count(), 1);
     assert_eq!(
@@ -28,7 +28,7 @@ fn structs_mint_identities_and_aliases_do_not() {
 #[test]
 fn unions_are_canonical_and_tags_belong_to_structs() {
     let m = module(
-        "struct A {} struct B { n: int; } type First = A | B | A; type Second = B | A; fn f(v: First) -> Second  { v } fn a() -> First  { A {} }",
+        "struct A {} struct B { n: int, } type First = A | B | A; type Second = B | A; fn f(v: First) -> Second  { v } fn a() -> First  { A {} }",
     );
     assert_eq!(
         m.functions[0].result,
@@ -86,7 +86,7 @@ fn nested_error_unions_flatten_and_holes_remain_monomorphic() {
 #[test]
 fn result_and_union_matches_are_exhaustive() {
     module(
-        "struct A {} struct B { n: int; } fn f(v: A | B) -> int  { match (v) { A(a) => { 0 }, B(b) => { b.n } } } fn g(v: (int | Err<A>)) -> int  { match (v) { int(n) => { n }, Err(e) => { 0 } } }",
+        "struct A {} struct B { n: int, } fn f(v: A | B) -> int  { match (v) { A(a) => { 0 }, B(b) => { b.n } } } fn g(v: (int | Err<A>)) -> int  { match (v) { int(n) => { n }, Err(e) => { 0 } } }",
     );
     rejects(
         "struct A {} struct B {} fn f(v: A | B) -> int  { match (v) { A(a) => { 0 } } }",
@@ -220,14 +220,14 @@ fn old_result_names_are_ordinary_identifiers() {
         "type Result<T, E> = T | Err<E>; fn ok(value: int) -> int  { value } fn err(value: int) -> int  { value } fn f() -> Result<int, str>  { ok(err(42)) }",
     );
     module(
-        "struct Fields { ok: int; err: int; } fn f() -> int  { let mut fields = Fields { ok = 1, err = 2 }; fields.ok + fields.err }",
+        "struct Fields { ok: int, err: int, } fn f() -> int  { let mut fields = Fields { ok = 1, err = 2 }; fields.ok + fields.err }",
     );
 }
 
 #[test]
 fn errors_discovered_through_recursive_payloads_join_before_sets_close() {
     let m = module(
-        "struct B {} struct E { nested: (int | Err<B>); } fn f(n: int) -> (int | Err<_>)  { match (g(n)) { int(value) => { (value) }, Err(error) => { (error.nested?) } } } fn g(n: int) -> (int | Err<_>)  { if (n > 0) { f(n - 1); () } else { () }; Err(E { nested = Err(B {}) }) }",
+        "struct B {} struct E { nested: (int | Err<B>), } fn f(n: int) -> (int | Err<_>)  { match (g(n)) { int(value) => { (value) }, Err(error) => { (error.nested?) } } } fn g(n: int) -> (int | Err<_>)  { if (n > 0) { f(n - 1); () } else { () }; Err(E { nested = Err(B {}) }) }",
     );
     assert_eq!(
         m.functions[0].result,

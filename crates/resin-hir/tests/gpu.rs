@@ -17,13 +17,13 @@ fn compute_workgroup_size_is_an_ordinary_source_name() {
 // These names deliberately differ from the library. Contracts are explicit
 // declarations; no compiler type or method is selected from a public spelling.
 const PIPELINES: &str = r#"struct Failure {}
-struct DeviceReference<T> { allocation: GpuView; }
-struct HostRange<T> { data: Ptr<T>; length: ulong; }
-struct DeviceRange<T> { data: DeviceReference<T>; length: ulong; }
+struct DeviceReference<T> { allocation: GpuView, }
+struct HostRange<T> { data: Ptr<T>, length: ulong, }
+struct DeviceRange<T> { data: DeviceReference<T>, length: ulong, }
 intrinsic "gpu_pointer_projection" fn pointer_projection<T>(value: DeviceReference<T>) -> Ptr<T>;
 intrinsic "gpu_span_projection" fn span_projection<T>(value: DeviceRange<T>) -> HostRange<T>;
-struct ComputeProgram<Root, Owner> { contract: GpuPipelineContract; }
-struct GraphicsProgram<Root, Owner> { contract: GpuPipelineContract; }
+struct ComputeProgram<Root, Owner> { contract: GpuPipelineContract, }
+struct GraphicsProgram<Root, Owner> { contract: GpuPipelineContract, }
 intrinsic "gpu_compute_pipeline_type" fn compute_type<Root, Owner>(contract: GpuPipelineContract) -> ComputeProgram<Root, Owner>;
 intrinsic "gpu_graphics_pipeline_type" fn graphics_type<Root, Owner>(contract: GpuPipelineContract) -> GraphicsProgram<Root, Owner>;
 struct Device {
@@ -40,7 +40,7 @@ struct Device {
 @gpu_graphics_pipeline
     fn graphics(self: Device, vertex: (Ptr<ubyte>, ulong), fragment: (Ptr<ubyte>, ulong)) -> (PipelineOwner | Err<Failure>)  { Err(Failure {}) }
 
-struct PipelineOwner { owner: StrongOwner;
+struct PipelineOwner { owner: StrongOwner,
     
 }
 @gpu_pipeline_context
@@ -56,9 +56,9 @@ struct Commands {
 @gpu_draw
     fn draw(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments | None, count: uint) -> (() | Err<Failure>)  { (()) }
 
-struct HostParams<T> { scale: float32; values: T; }
-struct WrongParams<T> { scale: float32; wrong: T; }
-struct Params { scale: float32; values: HostRange<int>; }
+struct HostParams<T> { scale: float32, values: T, }
+struct WrongParams<T> { scale: float32, wrong: T, }
+struct Params { scale: float32, values: HostRange<int>, }
 @compute_shader fn kernel(index: ulong, root: Ptr<Params>)  {}
 "#;
 
@@ -75,7 +75,7 @@ fn contract_declarations_may_follow_their_users_and_dependencies() {
     let declarations = declarations.join("\n");
     generate(&format!(
         r#"{declarations}
-        struct FieldsScaleValues<T0, T1> {{ scale: T0; values: T1; }}
+        struct FieldsScaleValues<T0, T1> {{ scale: T0, values: T1, }}
 fn main(values: DeviceRange<int>) -> (() | Err<Failure>) = {{
             let mut pipeline = Device {{}}:compute(kernel)?;
             Commands {{}}.dispatch(pipeline, FieldsScaleValues<_, _> {{ scale = 2.0, values  values }}, 1, 1, 1)
@@ -89,12 +89,12 @@ fn main(values: DeviceRange<int>) -> (() | Err<Failure>) = {{
 #[test]
 fn former_gpu_type_names_are_ordinary_generic_declarations() {
     generate(
-        r#"struct GpuPtr<T> { value: T;  }
+        r#"struct GpuPtr<T> { value: T,  }
 fn gpu_ptr_new<T>(value: T) -> GpuPtr<T>  { GpuPtr<T> { value = value } }
 
-        struct GpuSpan<T> { value: T; }
-        struct GpuComputePipeline<T> { value: T; }
-        struct GpuGraphicsPipeline<T> { value: T; }
+        struct GpuSpan<T> { value: T, }
+        struct GpuComputePipeline<T> { value: T, }
+        struct GpuGraphicsPipeline<T> { value: T, }
         fn main() -> int  { gpu_ptr_new::<int>(42).value }
     "#,
     )
@@ -126,7 +126,7 @@ fn opaque_gpu_views_cannot_be_dereferenced_or_cast_to_raw_addresses() {
 #[test]
 fn dispatch_infers_source_host_fields_from_the_pipeline_root() {
     let module = pipelines(
-        r#"struct FieldsScaleValues<T0, T1> { scale: T0; values: T1; }
+        r#"struct FieldsScaleValues<T0, T1> { scale: T0, values: T1, }
 fn main(values: DeviceRange<int>) -> (() | Err<Failure>)  {
             let mut pipeline = Device {}:compute(kernel)?;
             Commands {}:dispatch(pipeline, FieldsScaleValues<_, _> { scale = 2.0, values = values }, 1, 1, 1)
@@ -165,7 +165,7 @@ fn main(values: DeviceRange<int>) -> (() | Err<Failure>)  {
 
 #[test]
 fn pipeline_types_cross_functions_and_accept_precomputed_arguments() {
-    pipelines(r#"struct FieldsScaleValues<T0, T1> { scale: T0; values: T1; }
+    pipelines(r#"struct FieldsScaleValues<T0, T1> { scale: T0, values: T1, }
 fn create(gpu: Device) -> (ComputeProgram<Params, PipelineOwner> | Err<Failure>)  { gpu:compute(kernel) }
         fn dispatch(pipeline: ComputeProgram<Params, PipelineOwner>, values: DeviceRange<int>) -> (() | Err<Failure>)  {
             let mut arguments = (pipeline, FieldsScaleValues<_, _> { scale = 1.0_f, values = values }, 1_ui, 1_ui, 1_ui);

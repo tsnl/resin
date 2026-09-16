@@ -27,7 +27,7 @@ fn recovery_keeps_original_byte_spans_and_incomplete_function_bodies() {
 
 #[test]
 fn recovering_valid_syntax_matches_strict_generation() {
-    let source = "struct Point { x: int;  }\nfn get(self: Point) -> int  { self.x }\n ";
+    let source = "struct Point { x: int,  }\nfn get(self: Point) -> int  { self.x }\n ";
     let document = common::syntax(source);
     let recovered = common::ast(document.clone());
     let strict = common::ast(document.clone()).file;
@@ -115,7 +115,7 @@ fn generic_pipeline_annotations_keep_both_arguments() {
 
 #[test]
 fn recovery_retains_struct_fields_and_free_function_declarations() {
-    let source = "struct Item { value: int;  }\nfn read(self: Item) -> int  { self. }\n fn later() -> int  { 42 }";
+    let source = "struct Item { value: int,  }\nfn read(self: Item) -> int  { self. }\n fn later() -> int  { 42 }";
     let document = common::syntax(source);
     let file = common::ast(document.clone()).file;
     let StmtKind::Struct { body, methods, .. } = &file.stmts[0].val else {
@@ -137,7 +137,7 @@ fn recovery_retains_struct_fields_and_free_function_declarations() {
 
 #[test]
 fn fields_must_precede_struct_methods() {
-    let source = "struct Item { def read() -> int = { 42 }; value: int; }";
+    let source = "struct Item { def read() -> int = { 42 }, value: int, }";
     let document = common::syntax(source);
     assert!(!common::ast(document.clone()).errors.is_empty());
 }

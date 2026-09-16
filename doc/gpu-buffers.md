@@ -64,7 +64,7 @@ Create pipelines from decorated shader declarations. The compiler preserves thei
 root type and stage, then checks host arguments when recording a dispatch or draw:
 
 ```resin
-struct Params { values: Span<float32>; scale: float32; }
+struct Params { values: Span<float32>, scale: float32, }
 
 @compute_shader
 fn kernel(index: ulong, root: Ptr<Params>)  {
@@ -74,7 +74,7 @@ fn kernel(index: ulong, root: Ptr<Params>)  {
     };
 }
 
-struct HostParams { values: GpuSpan<float32>; scale: float32; }
+struct HostParams { values: GpuSpan<float32>, scale: float32, }
 var pipeline = gpu.create_compute_pipeline(kernel)?;
 let mut commands = gpu.start_command_recording()?;
 commands.dispatch(pipeline, HostParams { values = values, scale = 2.0_f }, 16, 1, 1)?;

@@ -1,9 +1,9 @@
 export { kernel };
 import { "$/span.resin" };
 
-struct Input { kind: uint; value: float32; wide: ulong; }
-struct Output { progress: uint; value: ulong; }
-struct Root { count: ulong; inputs: Ptr<Input>; outputs: Ptr<Output>; }
+struct Input { kind: uint, value: float32, wide: ulong, }
+struct Output { progress: uint, value: ulong, }
+struct Root { count: ulong, inputs: Ptr<Input>, outputs: Ptr<Output>, }
 
 fn convert(input: Input) -> ulong  {
 	if (input.kind == 0_ui) {

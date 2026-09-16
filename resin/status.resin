@@ -1,16 +1,4 @@
-export {
-	RuntimeError,
-	InvalidArgument,
-	VulkanUnavailable,
-	Unsupported,
-	OutOfMemory,
-	VulkanError,
-	IoError,
-	Incomplete,
-	WindowUnavailable,
-	UnknownRuntimeError,
-	RuntimeStatus,
- runtime_status_from_code, runtime_status_code, runtime_status_message };
+export { RuntimeError, InvalidArgument, VulkanUnavailable, Unsupported, OutOfMemory, VulkanError, IoError, Incomplete, WindowUnavailable, UnknownRuntimeError, RuntimeStatus, runtime_status_from_code, runtime_status_code, runtime_status_message };
 
 extern {
 	"resin_runtime.h": {
@@ -28,79 +16,76 @@ struct VulkanError {}
 struct IoError {}
 struct Incomplete {}
 struct WindowUnavailable {}
-struct UnknownRuntimeError { code: int; }
+struct UnknownRuntimeError {
+	code: int,
+}
 type RuntimeError = InvalidArgument | VulkanUnavailable | Unsupported | OutOfMemory | VulkanError | IoError | Incomplete | WindowUnavailable | UnknownRuntimeError;
 
-struct RuntimeStatus {
-	
-	
-	
+struct RuntimeStatus {}
+fn runtime_status_from_code(code: int) -> (() | Err<RuntimeError>) {
+	if (code == status_invalid_argument) {
+		return Err(InvalidArgument {});
+	};
+	if (code == status_vulkan_unavailable) {
+		return Err(VulkanUnavailable {});
+	};
+	if (code == status_unsupported) {
+		return Err(Unsupported {});
+	};
+	if (code == status_out_of_memory) {
+		return Err(OutOfMemory {});
+	};
+	if (code == status_vulkan_error) {
+		return Err(VulkanError {});
+	};
+	if (code == status_io_error) {
+		return Err(IoError {});
+	};
+	if (code == status_incomplete) {
+		return Err(Incomplete {});
+	};
+	if (code == status_window_unavailable) {
+		return Err(WindowUnavailable {});
+	};
+	if (code == status_success) {
+		(())
+	} else {
+		Err(UnknownRuntimeError { code = code })
+	}
 }
-fn runtime_status_from_code(code: int) -> (() | Err<RuntimeError>)  {
-		if (code == status_invalid_argument) {
-			return Err(InvalidArgument {});
-		};
-		if (code == status_vulkan_unavailable) {
-			return Err(VulkanUnavailable {});
-		};
-		if (code == status_unsupported) {
-			return Err(Unsupported {});
-		};
-		if (code == status_out_of_memory) {
-			return Err(OutOfMemory {});
-		};
-		if (code == status_vulkan_error) {
-			return Err(VulkanError {});
-		};
-		if (code == status_io_error) {
-			return Err(IoError {});
-		};
-		if (code == status_incomplete) {
-			return Err(Incomplete {});
-		};
-		if (code == status_window_unavailable) {
-			return Err(WindowUnavailable {});
-		};
-		if (code == status_success) {
-			(())
-		} else {
-			Err(UnknownRuntimeError { code = code })
-		}
-	}
 
-fn runtime_status_code(error: RuntimeError) -> int  {
-		match (error) {
-			InvalidArgument(error) => {
-				status_invalid_argument
-			},
-			VulkanUnavailable(error) => {
-				status_vulkan_unavailable
-			},
-			Unsupported(error) => {
-				status_unsupported
-			},
-			OutOfMemory(error) => {
-				status_out_of_memory
-			},
-			VulkanError(error) => {
-				status_vulkan_error
-			},
-			IoError(error) => {
-				status_io_error
-			},
-			Incomplete(error) => {
-				status_incomplete
-			},
-			WindowUnavailable(error) => {
-				status_window_unavailable
-			},
-			UnknownRuntimeError(error) => {
-				error.code
-			},
-		}
+fn runtime_status_code(error: RuntimeError) -> int {
+	match (error) {
+		InvalidArgument(error) => {
+			status_invalid_argument
+		},
+		VulkanUnavailable(error) => {
+			status_vulkan_unavailable
+		},
+		Unsupported(error) => {
+			status_unsupported
+		},
+		OutOfMemory(error) => {
+			status_out_of_memory
+		},
+		VulkanError(error) => {
+			status_vulkan_error
+		},
+		IoError(error) => {
+			status_io_error
+		},
+		Incomplete(error) => {
+			status_incomplete
+		},
+		WindowUnavailable(error) => {
+			status_window_unavailable
+		},
+		UnknownRuntimeError(error) => {
+			error.code
+		},
 	}
+}
 
-fn runtime_status_message(error: RuntimeError) -> Ptr<ubyte>  {
-		resin_status_string(runtime_status_code(error))
-	}
-
+fn runtime_status_message(error: RuntimeError) -> Ptr<ubyte> {
+	resin_status_string(runtime_status_code(error))
+}

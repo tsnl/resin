@@ -2,7 +2,7 @@
 Type binders and explicit function and method applications
 ==================
 struct Pair<T> {
-    first: T;
+    first: T,
     
 }
 fn map<T, U>(self: Pair<T>, value: U) -> Pair<U>  { Pair<U> { first = value } }

@@ -14,17 +14,17 @@ fn run(source: &str) -> std::process::Output {
 fn dependent_field_and_method_chains_use_each_concrete_owner() {
     let output = run(r#"export { main };
         import { "$/string.resin" };
-        struct Small { value: int;
+        struct Small { value: int,
             
         }
 fn read(self: Small) -> int  { self.value }
 
-        struct Large { padding: ulong; value: ulong;
+        struct Large { padding: ulong, value: ulong,
             
         }
 fn read(self: Large) -> ulong  { self.value }
 
-        struct Holder<T> { item: T;
+        struct Holder<T> { item: T,
             
         }
 fn inner<T>(self: Holder<T>) -> T  { self.item }
@@ -56,7 +56,7 @@ fn inner<T>(self: Holder<T>) -> T  { self.item }
 #[test]
 fn dependent_static_calls_and_references_apply_owner_and_method_arguments() {
     let source = r#"export { main };
-        struct Cell<T> { value: T; }
+        struct Cell<T> { value: T, }
         struct Factory<T> {
             
             
@@ -133,7 +133,7 @@ fn sum(self: Wide, first: ulong, second: ulong) -> ulong  { first + second }
 fn dependent_receiver_adaptation_preserves_mutation_and_evaluation_order() {
     let output = run(r#"export { main };
         import { "$/string.resin", "$/shared.resin" };
-        struct Counter { value: int;
+        struct Counter { value: int,
             
             
         }
@@ -177,7 +177,7 @@ fn read(self: Counter) -> int  { self.value }
 #[test]
 fn dependent_callable_fields_use_function_signatures() {
     let output = run(r#"export { main };
-        struct Callback { invoke: (int, int) -> int; }
+        struct Callback { invoke: (int, int) -> int, }
         fn increment(value: int, amount: int) -> int  { value + amount }
         fn call<T>(value: T) -> _  { (value.invoke)(40, 2) }
         fn main() -> int  { call(Callback { invoke = increment }) }
@@ -221,7 +221,7 @@ fn dependent_failures_report_the_demanded_application() {
         ),
         (
             "struct Owner {  }\nfn read(self: Owner, a: int, b: int) -> int  { a + b }\n",
-            "{ struct Pair { first: int; second: int; } value.read(Pair { first = 1_i, second = 2_i }) }",
+            "{ struct Pair { first: int, second: int, } value.read(Pair { first = 1_i, second = 2_i }) }",
             "",
         ),
         (
@@ -257,7 +257,7 @@ fn dependent_failures_report_the_demanded_application() {
         );
         assert!(error.span.end > error.span.start, "{error:?}");
     }
-    let source = "struct FieldsCallback<T0> { callback: T0; }\nfn relay<T>(value: T) -> int  { (value.callback)() } fn main() -> int  { relay(FieldsCallback<_> { callback = 42 }) }";
+    let source = "struct FieldsCallback<T0> { callback: T0, }\nfn relay<T>(value: T) -> int  { (value.callback)() } fn main() -> int  { relay(FieldsCallback<_> { callback = 42 }) }";
     let error = support::frontend::lower(&hir(source), &[], &resin_lir::LoweringOptions::default())
         .unwrap_err()
         .remove(0);
@@ -291,7 +291,7 @@ fn dependent_method_calls_obey_shader_profile_rules() {
                 fn abs(value: int) -> int;
             },
         };
-        struct Owner { value: int;
+        struct Owner { value: int,
             
         }
 fn read(self: Owner) -> int  { abs(self.value) }
@@ -306,7 +306,7 @@ fn read(self: Owner) -> int  { abs(self.value) }
 
 #[test]
 fn growing_dependent_method_applications_obey_the_function_limit() {
-    let tree = hir(r#"struct Grow<T> { value: T;
+    let tree = hir(r#"struct Grow<T> { value: T,
             
         }
 fn grow<T>(self: Grow<T>)  { step(Grow<Ptr<T>> { value = &self.value }); }

@@ -61,7 +61,7 @@ fn reference_methods_and_dependent_calls_mutate_the_original() {
     assert_eq!(
         result(
             r#"export { main };
-        struct Cell<T> { value: T;
+        struct Cell<T> { value: T,
             
             
         }
@@ -129,7 +129,7 @@ fn references_borrow_managed_storage_and_value_reads_copy() {
     assert_eq!(
         result(
             r#"export { main };
-        struct Resource { drops: Ptr<int>;
+        struct Resource { drops: Ptr<int>,
             
         }
 fn drop(self: Ptr<Resource>)  { self.drops.* = self.drops.* + 1; }
@@ -160,7 +160,7 @@ fn dependent_reference_results_bind_but_dependent_value_temporaries_do_not() {
     for body in ["get(cell)", "cell.get()"] {
         let source = format!(
             r#"export {{ main }};
-            struct Cell {{ value: int;
+            struct Cell {{ value: int,
                 
             }}
 fn get(self: Ref<Cell>) -> Ref<int>  {{ self.value }}
@@ -171,7 +171,7 @@ fn get(self: Ref<Cell>) -> Ref<int>  {{ self.value }}
         );
         assert_eq!(result(&source), 42);
     }
-    let source = r#"struct Cell { value: int;
+    let source = r#"struct Cell { value: int,
             
         }
 fn take(self: Ref<Cell>, value: Ref<int>)  {}
@@ -210,7 +210,7 @@ fn stored_function_signatures_preserve_reference_parameters_and_results() {
         result(
             r#"export { main };
         type Access = (Ref<int>) -> Ref<int>;
-        struct Accessor { call: Access; }
+        struct Accessor { call: Access, }
         fn identity(value: Ref<int>) -> Ref<int>  { value }
         fn invoke<F>(function: F, value: Ref<int>) -> Ref<int>  { function(value) }
         fn main() -> int  {

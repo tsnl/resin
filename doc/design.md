@@ -29,7 +29,7 @@ Functions are top-level, immutable definitions without captured environments. Si
 available before bodies are checked, so mutually recursive functions need no forward declarations.
 An omitted result annotation means unit; explicit `_` holes enable inference in locals and function
 results, including nested positions. Value bindings use `var name = value;` or `var name: Type = value;`, nominal records use
-`struct Name { field: Type; }`, and `type Name = Type;` creates transparent aliases. Declarations
+`struct Name { field: Type, }`, and `type Name = Type;` creates transparent aliases. Declarations
 such as `var name: Type;` reserve uninitialized local storage: reads require prior initialization
 on every control-flow path. An aggregate must be initialized as a whole before its fields can be
 accessed. Record initializers keep bare `name = value` fields; parameters and struct fields

@@ -25,7 +25,7 @@ fn tail(function: &resin_hir::Function) -> &resin_hir::Term {
 
 #[test]
 fn hir_resolves_calls_and_preserves_type_dependent_operations_for_lir() {
-    let module = hir(r#"struct Item { value: int;
+    let module = hir(r#"struct Item { value: int,
             
         }
 fn read(item: Item) -> int  { item.value }

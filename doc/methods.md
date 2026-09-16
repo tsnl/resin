@@ -14,7 +14,7 @@ Functions accompany the type when it is exported and need no separate exports.
 There are no user-defined traits, interfaces, or dynamic dispatch.
 
 ```resin
-struct Counter { value: int;
+struct Counter { value: int,
     
     
     
@@ -90,7 +90,7 @@ pointer or error-union shape may need a result annotation before `.*` or `?` can
 Structs implement operators with Python-style dunder methods:
 
 ```resin
-struct Vec2<T> { x: T; y: T;
+struct Vec2<T> { x: T, y: T,
     
     
 }

@@ -2,7 +2,7 @@
 Operator declarations on generic structs
 ==================
 struct Number<T> {
- value: T;
+ value: T,
  
  
  

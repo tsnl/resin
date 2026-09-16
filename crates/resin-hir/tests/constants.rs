@@ -118,11 +118,11 @@ fn iota_is_restricted_to_constant_initializers() {
 #[test]
 fn sizeof_accepts_only_types_and_preserves_generic_queries() {
     accepts(
-        "struct Pair<T> { first: T; second: T; } const bytes = sizeof(Pair<int>); fn size<T>() -> ulong  { sizeof(T) } fn main() -> ulong  { bytes + size::<int>() }",
+        "struct Pair<T> { first: T, second: T, } const bytes = sizeof(Pair<int>); fn size<T>() -> ulong  { sizeof(T) } fn main() -> ulong  { bytes + size::<int>() }",
     );
-    accepts("struct Node { next: Ptr<Node>; value: int; } const bytes = sizeof(Node);");
+    accepts("struct Node { next: Ptr<Node>, value: int, } const bytes = sizeof(Node);");
     accepts(
-        "struct FieldsXY<T0, T1> { x: T0; y: T1; }\ntype Number = int; const bytes = sizeof(Number); fn value() -> ulong  { sizeof(FieldsXY<int, long>) }",
+        "struct FieldsXY<T0, T1> { x: T0, y: T1, }\ntype Number = int; const bytes = sizeof(Number); fn value() -> ulong  { sizeof(FieldsXY<int, long>) }",
     );
     for source in [
         "fn unused()  { sizeof(1); }",

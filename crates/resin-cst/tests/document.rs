@@ -76,6 +76,27 @@ fn formatting_needs_no_semantic_context() {
     assert!(resin_cst::format_source("fn broken( = {").is_none());
 }
 
+#[test]
+fn struct_fields_follow_delimiter_formatting() {
+    for (source, expected) in [
+        ("struct Empty{}", "struct Empty {}\n"),
+        (
+            "struct Point<T>{x:T,y:T}",
+            "struct Point<T> { x: T, y: T }\n",
+        ),
+        (
+            "struct Point<T>{x:T,y:T,}",
+            "struct Point<T> {\n\tx: T,\n\ty: T,\n}\n",
+        ),
+    ] {
+        assert_eq!(resin_cst::format_source(source).as_deref(), Some(expected));
+        assert_eq!(
+            resin_cst::format_source(expected).as_deref(),
+            Some(expected)
+        );
+    }
+}
+
 #[tokio::test]
 async fn source_wrapper_names_preserve_token_queries_and_formatting() {
     let source = "fn first(values: GpuSpan<uint>) -> GpuPtr<uint>  { values:at(0_ul) }";

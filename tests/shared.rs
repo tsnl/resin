@@ -2,7 +2,7 @@ use support::pipeline;
 mod support;
 
 const RESOURCE: &str = r#"import { "$/shared.resin" };
-struct Resource { trace: Ptr<int>; digit: int;
+struct Resource { trace: Ptr<int>, digit: int,
     
     
     
@@ -53,7 +53,7 @@ fn rejects(source: &str, message: &str) {
 
 #[test]
 fn at_indexing_preserves_shared_array_owners_and_overwrite_cleanup() {
-    run(r#"struct FieldsValues<T0> { values: T0; }
+    run(r#"struct FieldsValues<T0> { values: T0, }
 fn main() -> int  {
         let mut trace = 0; let mut weak = weak_ptr_empty::<Resource>();
         {
@@ -71,7 +71,7 @@ fn main() -> int  {
 
 #[test]
 fn assignment_branches_preserve_initialization_and_overwrite_cleanup() {
-    run(r#"struct Tracked { drops: Ptr<int>; value: int;
+    run(r#"struct Tracked { drops: Ptr<int>, value: int,
         
     }
 fn drop(self: Ptr<Tracked>)  { self.drops.* = self.drops.* + 1; }
@@ -136,7 +136,7 @@ fn assignment_propagation_tracks_success_and_error_cleanup() {
 
 #[test]
 fn temporary_projection_keeps_nominal_and_nested_destructors() {
-    run(r#"struct Outer { trace: Ptr<int>; inner: ArcPtr<Resource>;
+    run(r#"struct Outer { trace: Ptr<int>, inner: ArcPtr<Resource>,
         
     }
 fn drop(self: Ptr<Outer>)  { self.trace.* = self.trace.* * 10 + 2; }
@@ -158,9 +158,9 @@ fn drop(self: Ptr<Outer>)  { self.trace.* = self.trace.* * 10 + 2; }
 
 #[test]
 fn function_fields_named_drop_remain_callable() {
-    run(r#"struct FieldsDrop<T0> { drop: T0; }
+    run(r#"struct FieldsDrop<T0> { drop: T0, }
 fn increment(value: int) -> int  { value + 1 }
-    struct Callback { drop: (int) -> int; }
+    struct Callback { drop: (int) -> int, }
     fn main() -> int  {
         let mut record = FieldsDrop<_> { drop = increment };
         let mut nominal = Callback { drop = increment };
@@ -187,7 +187,7 @@ fn all_applications_consume_fresh_arguments_without_an_extra_drop() {
 
 #[test]
 fn generic_record_initializers_preserve_layout_and_cleanup_on_partial_failure() {
-    run(r#"struct Pair<T> { first: T; second: T; }
+    run(r#"struct Pair<T> { first: T, second: T, }
     struct Failed {}
     fn ready(fail: bool) -> (() | Err<Failed>)  {
         if (fail) { Err(Failed {}) } else { (()) }
@@ -234,7 +234,7 @@ fn named_values_are_copied_even_when_the_type_has_a_destructor() {
 
 #[test]
 fn shared_copies_reassignment_weak_upgrade_and_expiration() {
-    run(r#"struct Shared { value: ArcPtr<Resource>; }
+    run(r#"struct Shared { value: ArcPtr<Resource>, }
     fn main() -> int  {
         let mut trace = 0;
         let mut weak = weak_ptr_empty::<Resource>();
@@ -295,7 +295,7 @@ fn early_errors_destroy_only_acquired_owners() {
 
 #[test]
 fn arrays_options_and_methods_consume_fresh_payloads() {
-    run(r#"struct Pair { value: Resource; }
+    run(r#"struct Pair { value: Resource, }
     struct Sink {
         
     }
@@ -336,7 +336,7 @@ fn indexing_preserves_array_storage_and_only_value_reads_copy_elements() {
 
 #[test]
 fn destruction_preserves_results_and_runs_per_scope_and_iteration() {
-    run(r#"struct Set { target: Ptr<int>; value: int;
+    run(r#"struct Set { target: Ptr<int>, value: int,
         
     }
 fn drop(self: Ptr<Set>)  { self.target.* = self.value; }
@@ -379,7 +379,7 @@ fn former_defer_keyword_can_name_an_ordinary_immediate_call() {
 #[test]
 fn weak_cycles_and_nested_pointer_handle_access() {
     run(
-        r#"struct Node { trace: Ptr<int>; live: bool; parent: WeakPtr<Node>;
+        r#"struct Node { trace: Ptr<int>, live: bool, parent: WeakPtr<Node>,
         
     }
 fn drop(self: Ptr<Node>)  { if (self.live) { self.trace.* = self.trace.* + 1; }; }
@@ -464,7 +464,7 @@ fn option_unwrap_transfers_fresh_payloads_and_copies_named_options() {
 
 #[test]
 fn destruction_hooks_are_ordinary_calls_and_remain_automatic() {
-    run(r#"struct Manual { trace: Ptr<int>; digit: int;
+    run(r#"struct Manual { trace: Ptr<int>, digit: int,
         
     }
 fn drop(self: Ptr<Manual>)  {
@@ -512,7 +512,7 @@ fn temporary_single_and_sequence_owners_live_until_scope_exit_and_error_cleanup(
     let source = r#"export { main };
         import { "$/shared.resin", "$/status.resin" };
         struct Stop {}
-        struct Marker { trace: Ptr<int>; digit: int;
+        struct Marker { trace: Ptr<int>, digit: int,
             
         }
 fn drop(self: Ptr<Marker>)  {
@@ -606,7 +606,7 @@ fn pointer_replace_transfers_managed_values_and_leaves_ordinary_names_available(
 
 #[test]
 fn loop_condition_and_body_errors_preserve_scope_cleanup() {
-    run(r#"struct Stopped { code: uint; }
+    run(r#"struct Stopped { code: uint, }
     fn check(stop: bool) -> (() | Err<Stopped>)  {
         if (stop) { Err(Stopped { code = 7_ui }) } else { (()) }
     }

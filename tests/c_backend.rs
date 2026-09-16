@@ -58,7 +58,7 @@ fn array_value_projections_copy_the_element_and_destroy_the_container() {
         let mut program = module(
             r#"export { main };
             import { "$/shared.resin" };
-            struct Resource { trace: Ptr<int>; digit: int;
+            struct Resource { trace: Ptr<int>, digit: int,
                 
             }
 fn drop(self: Ptr<Resource>)  {
@@ -168,15 +168,15 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
         1,
     );
     runs(
-        "export { main }; struct Bad { code: int; } fn fail(counter: Ptr<int>) -> (int | Err<Bad>)  { counter.* = counter.* + 1; Err(Bad { code = 7 }) } fn work(counter: Ptr<int>) -> (int | Err<Bad>)  { ((counter.* = counter.* + 10) + fail(counter)? + (counter.* = 1000)) } fn main() -> int  { let mut count = 0; let mut result = work(&count); match (result) { int(n) => { 99 }, Err(e) => { count + e.code } } }",
+        "export { main }; struct Bad { code: int, } fn fail(counter: Ptr<int>) -> (int | Err<Bad>)  { counter.* = counter.* + 1; Err(Bad { code = 7 }) } fn work(counter: Ptr<int>) -> (int | Err<Bad>)  { ((counter.* = counter.* + 10) + fail(counter)? + (counter.* = 1000)) } fn main() -> int  { let mut count = 0; let mut result = work(&count); match (result) { int(n) => { 99 }, Err(e) => { count + e.code } } }",
         18,
     );
     runs(
-        "export { main }; struct A {} struct B { n: int; } struct C {} fn small() -> (int | Err<B>)  { Err(B { n = 42 }) } fn broad() -> (int | Err<A | B | C>)  { small() } fn main() -> int  { match (broad()) { int(n) => { n }, Err(e) => { match (e) { C(c) => { 3 }, B(b) => { b.n }, A(a) => { 1 } } } } }",
+        "export { main }; struct A {} struct B { n: int, } struct C {} fn small() -> (int | Err<B>)  { Err(B { n = 42 }) } fn broad() -> (int | Err<A | B | C>)  { small() } fn main() -> int  { match (broad()) { int(n) => { n }, Err(e) => { match (e) { C(c) => { 3 }, B(b) => { b.n }, A(a) => { 1 } } } } }",
         42,
     );
     runs(
-        "export { main }; struct Inner { value: int | Err<Never>; } fn nested() -> Inner | Err<Never>  { Inner { value = 42 } } fn main() -> int | Err<_>  { let mut inner = nested()?; inner.value? }",
+        "export { main }; struct Inner { value: int | Err<Never>, } fn nested() -> Inner | Err<Never>  { Inner { value = 42 } } fn main() -> int | Err<_>  { let mut inner = nested()?; inner.value? }",
         42,
     );
     runs(
@@ -222,7 +222,7 @@ fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
         0,
     );
     runs(
-        "export { main }; struct FieldsAB<T0, T1> { a: T0; b: T1; }\nfn main() -> _  { let mut n = 0_i; let mut pair: FieldsAB<_, _>; pair = FieldsAB<_, _> { b = (n = n + 1), a = (n = n + 1) }; pair.a * 10 + pair.b }",
+        "export { main }; struct FieldsAB<T0, T1> { a: T0, b: T1, }\nfn main() -> _  { let mut n = 0_i; let mut pair: FieldsAB<_, _>; pair = FieldsAB<_, _> { b = (n = n + 1), a = (n = n + 1) }; pair.a * 10 + pair.b }",
         21,
     );
     runs(
@@ -238,7 +238,7 @@ fn array_and_span_indexing_use_element_sizes() {
         47,
     );
     runs(
-        "export { main }; struct Payload { marker: uint; wide: ulong; amount: float32; } fn main () -> int  { let mut values = [Payload { marker = uint(1), wide = ulong(4294967297), amount = float32(0.5) }, Payload { marker = uint(2), wide = ulong(8589934593), amount = float32(1.5) }]; let mut p = values(0); let mut q = values(1); q.amount = q.amount + float32(2.0); if (q.wide == ulong(8589934593) && q.marker == uint(2) && q.amount == float32(3.5) && p.amount == float32(0.5)) { 0 } else { 1 } }",
+        "export { main }; struct Payload { marker: uint, wide: ulong, amount: float32, } fn main () -> int  { let mut values = [Payload { marker = uint(1), wide = ulong(4294967297), amount = float32(0.5) }, Payload { marker = uint(2), wide = ulong(8589934593), amount = float32(1.5) }]; let mut p = values(0); let mut q = values(1); q.amount = q.amount + float32(2.0); if (q.wide == ulong(8589934593) && q.marker == uint(2) && q.amount == float32(3.5) && p.amount == float32(0.5)) { 0 } else { 1 } }",
         0,
     );
 }
@@ -306,7 +306,7 @@ fn while_nests_with_branches_and_preserves_outer_values() {
         10,
     );
     runs(
-        "export { main }; struct FieldsFirstBodyLast<T0, T1, T2> { first: T0; body: T1; last: T2; }\nfn main () -> int  { let mut n = 0; let mut r = FieldsFirstBodyLast<_, _, _> { first = 9, body = while (n < 3) { n = n + 1; }, last = n }; r.first + r.last }",
+        "export { main }; struct FieldsFirstBodyLast<T0, T1, T2> { first: T0, body: T1, last: T2, }\nfn main () -> int  { let mut n = 0; let mut r = FieldsFirstBodyLast<_, _, _> { first = 9, body = while (n < 3) { n = n + 1; }, last = n }; r.first + r.last }",
         12,
     );
     runs(
@@ -403,7 +403,7 @@ fn expression_cleanup_preserves_scope_order_on_failure_and_success() {
     ] {
         let declarations = r#"export { main };
             import { "$/shared.resin" };
-            struct Resource { trace: Ptr<int>; digit: int;
+            struct Resource { trace: Ptr<int>, digit: int,
                 
                 
                 
@@ -415,7 +415,7 @@ fn accept(self: Ptr<Resource>, other: ArcPtr<Resource>) -> ArcPtr<Resource>  { o
 fn truth(self: Ptr<Resource>) -> bool  { 1 == 1 }
 
             struct Failed {}
-            struct OwnedFailed { value: ArcPtr<Resource>; }
+            struct OwnedFailed { value: ArcPtr<Resource>, }
             fn make(trace: Ptr<int>, digit: int) -> ArcPtr<Resource>  {
                 let mut optional: ArcPtr<Resource> | None;
                 optional = match (arc_ptr_alloc::<Resource>(Resource { trace = trace, digit = 0 })) {
@@ -463,7 +463,7 @@ fn tuple_projection_preserves_places_and_nested_values() {
 #[test]
 fn nominal_records_preserve_source_order_and_field_layout() {
     runs(
-        "export { main }; struct R { a: int; b: int; } fn main () -> int  { let mut x = 0; let mut r = R { b = (x = 1), a = (x = 2) }; r.a * 10 + r.b + x }",
+        "export { main }; struct R { a: int, b: int, } fn main () -> int  { let mut x = 0; let mut r = R { b = (x = 1), a = (x = 2) }; r.a * 10 + r.b + x }",
         23,
     );
 }
@@ -735,8 +735,8 @@ fn at_indexing_borrows_array_places_and_supports_field_receivers() {
     runs(
         r#"export { main };
         import { "$/span.resin" };
-        struct FieldsValues<T0> { values: T0; }
-struct Holder { values: Span<int>; }
+        struct FieldsValues<T0> { values: T0, }
+struct Holder { values: Span<int>, }
         fn view(p: Ptr<int>, calls: Ptr<int>) -> Holder  {
             calls.* = calls.* + 1;
             Holder { values = Span<int> { data = p, length = 3_ul } }
@@ -771,7 +771,7 @@ fn at_indexing_checks_bounds_before_later_effects() {
                     }},
                 }};
                 import {{ "$/span.resin" }};
-                struct FieldsValues<T0> {{ values: T0; }}
+                struct FieldsValues<T0> {{ values: T0, }}
 fn main() -> int  {{
                     let mut values = [1, 2];
                     let mut holder = FieldsValues<_> {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }}
@@ -908,7 +908,7 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
 #[test]
 fn spirv_is_only_special_on_function_declarations() {
     runs(
-        "export { main }; struct FieldsSpirv<T0> { spirv: T0; }\nfn main() -> int  { let mut record = FieldsSpirv<_> { spirv = 1 }; record.spirv = 2; record.spirv }",
+        "export { main }; struct FieldsSpirv<T0> { spirv: T0, }\nfn main() -> int  { let mut record = FieldsSpirv<_> { spirv = 1 }; record.spirv = 2; record.spirv }",
         2,
     );
 }
@@ -959,7 +959,7 @@ fn else_if_chains_select_one_branch_and_short_circuit_conditions() {
 fn one_armed_if_evaluates_once_and_runs_branch_cleanup() {
     runs(
         r#"export { main };
-    struct Add { value: Ptr<int>;
+    struct Add { value: Ptr<int>,
         
     }
 fn drop(self: Ptr<Add>)  { self.value.* = self.value.* + 10; }
@@ -984,7 +984,7 @@ fn dedicated_cleanup_bindings_retain_acquisitions_on_both_exits() {
             &format!(
                 r#"export {{ main }};
             struct E {{}}
-            struct Capture {{ resource: Ptr<int>; trace: Ptr<int>;
+            struct Capture {{ resource: Ptr<int>, trace: Ptr<int>,
                 
             }}
 fn drop(self: Ptr<Capture>)  {{ self.trace.* = self.trace.* * 10 + self.resource.*; }}
@@ -1017,7 +1017,7 @@ fn drop(self: Ptr<Capture>)  {{ self.trace.* = self.trace.* * 10 + self.resource
 fn byte_arrays_have_packed_storage_and_nested_stride() {
     runs(
         r#"export { main };
-        struct FieldsBytesTail<T0, T1> { bytes: T0; tail: T1; }
+        struct FieldsBytesTail<T0, T1> { bytes: T0, tail: T1, }
 fn main() -> int  {
             let mut binary = [65_ub, 66_ub];
             let mut copied = binary;
@@ -1047,8 +1047,8 @@ fn shared_layout_queries_follow_padding_and_do_not_evaluate_operands() {
     runs(
         r#"export { main };
         import { "$/span.resin" };
-        struct Inner { x: uint; y: ulong; z: float32; }
-        struct Outer { first: uint; inner: Inner; last: float32; }
+        struct Inner { x: uint, y: ulong, z: float32, }
+        struct Outer { first: uint, inner: Inner, last: float32, }
         fn main() -> int  {
             let mut side = 0_ui;
             let mut values = [1_ui, 2_ui, 3_ui];

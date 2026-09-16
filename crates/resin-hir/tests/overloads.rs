@@ -58,7 +58,7 @@ fn ambiguous_overloads_are_rejected() {
 fn receiver_calls_are_free_function_calls() {
     hir_module(
         r#"
-        struct Item { value: int; }
+        struct Item { value: int, }
         fn read(value: Ref<Item>) -> int { value.value }
         fn read(value: int) -> int { value }
         fn main() -> int { let value = Item { value= 21 }; value:read() + read(value) }

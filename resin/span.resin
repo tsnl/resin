@@ -1,42 +1,34 @@
-export { Span, bytes , at, slice, as_bytes };
+export { Span, bytes, at, slice, as_bytes };
 
 // Borrowed storage. The caller keeps the allocation alive throughout each access.
 struct Span<T> {
-	data: Ptr<T>;
-	length: ulong;
-
-	
-
-	
-
-	
+	data: Ptr<T>,
+	length: ulong,
 
 	// Primitive byte transport for formatting and native interfaces.
-	
 }
-fn at<T>(self: Ref<Span<T>>, index: ulong) -> Ref<T>  {
-		pointer_index(self.data, self.length, index).*
-	}
+fn at<T>(self: Ref<Span<T>>, index: ulong) -> Ref<T> {
+	pointer_index(self.data, self.length, index).*
+}
 
-fn slice<T>(self: Ref<Span<T>>, start: ulong, length: ulong) -> Span<T>  {
-		Span<T> {
-			data = pointer_range(self.data, self.length, start, length),
-			length = length,
-		}
+fn slice<T>(self: Ref<Span<T>>, start: ulong, length: ulong) -> Span<T> {
+	Span<T> {
+		data = pointer_range(self.data, self.length, start, length),
+		length = length,
 	}
+}
 
-fn as_bytes<T>(self: Ref<Span<T>>) -> Span<ubyte>  {
-		let mut raw = self:bytes();
-		Span<ubyte> { data = raw.0, length = raw.1 }
-	}
+fn as_bytes<T>(self: Ref<Span<T>>) -> Span<ubyte> {
+	let mut raw = self:bytes();
+	Span<ubyte> { data = raw.0, length = raw.1 }
+}
 
-fn bytes<T>(self: Ref<Span<T>>) -> (Ptr<ubyte>, ulong)  {
-		pointer_bytes(self.data, self.length)
-	}
-
+fn bytes<T>(self: Ref<Span<T>>) -> (Ptr<ubyte>, ulong) {
+	pointer_bytes(self.data, self.length)
+}
 
 // Literal length excludes the NUL terminator; borrowing never copies the bytes.
-fn bytes(text: str) -> Span<ubyte>  {
+fn bytes(text: str) -> Span<ubyte> {
 	Span<ubyte> { data = text.data, length = text.length }
 }
 

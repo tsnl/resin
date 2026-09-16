@@ -17,41 +17,41 @@ import {
 };
 
 struct Particle {
-	x: float32;
-	y: float32;
-	z: float32;
-	vx: float32;
-	vy: float32;
-	vz: float32;
+	x: float32,
+	y: float32,
+	z: float32,
+	vx: float32,
+	vy: float32,
+	vz: float32,
 }
 
 struct Params {
-	dt: float32;
-	yaw_cos: float32;
-	yaw_sin: float32;
-	pitch_cos: float32;
-	pitch_sin: float32;
-	zoom: float32;
-	aspect: float32;
-	radius: float32;
-	particles: Span<Particle>;
+	dt: float32,
+	yaw_cos: float32,
+	yaw_sin: float32,
+	pitch_cos: float32,
+	pitch_sin: float32,
+	zoom: float32,
+	aspect: float32,
+	radius: float32,
+	particles: Span<Particle>,
 }
 
 struct HostParams {
-	dt: float32;
-	yaw_cos: float32;
-	yaw_sin: float32;
-	pitch_cos: float32;
-	pitch_sin: float32;
-	zoom: float32;
-	aspect: float32;
-	radius: float32;
-	particles: GpuSpan<Particle>;
+	dt: float32,
+	yaw_cos: float32,
+	yaw_sin: float32,
+	pitch_cos: float32,
+	pitch_sin: float32,
+	zoom: float32,
+	aspect: float32,
+	radius: float32,
+	particles: GpuSpan<Particle>,
 }
 
 // Relax the initial random velocities toward the Lorenz attractor's flow.
 // Two small, fixed substeps keep the simulation stable, independently of camera motion.
-fn advance(p: Particle, dt: float32) -> Particle  {
+fn advance(p: Particle, dt: float32) -> Particle {
 	let mut vx = 0.15_f * p.vx + 0.85_f * (10.0_f * (p.y - p.x));
 	let mut vy = 0.15_f * p.vy + 0.85_f * (p.x * (28.0_f - p.z) - p.y);
 	let mut vz = 0.15_f * p.vz + 0.85_f * (p.x * p.y - 2.666667_f * p.z);
@@ -66,7 +66,7 @@ fn advance(p: Particle, dt: float32) -> Particle  {
 }
 
 @compute_shader
-fn kernel(index: ulong, root: Ptr<Params>) -> ()  {
+fn kernel(index: ulong, root: Ptr<Params>) -> () {
 	if (index < root.particles.length) {
 		let mut p: Ref<Particle> = root.particles:at(index);
 		p = advance(advance(p, root.dt), root.dt);
@@ -75,7 +75,7 @@ fn kernel(index: ulong, root: Ptr<Params>) -> ()  {
 
 // Float division is available in shaders. Correct rounding at the upper end of
 // the 24-million-vertex draw, where adjacent integers no longer fit in float32.
-fn particle_index(index: int) -> int  {
+fn particle_index(index: int) -> int {
 	let mut particle = int(float32(index) / 24.0_f);
 	if (particle * 24 > index) {
 		particle = particle - 1;
@@ -83,7 +83,7 @@ fn particle_index(index: int) -> int  {
 	particle
 }
 
-fn positive(value: float32) -> float32  {
+fn positive(value: float32) -> float32 {
 	if (value > 0.0_f) {
 		value
 	} else {
@@ -94,7 +94,7 @@ fn positive(value: float32) -> float32  {
 // Approximate settled speed percentiles: 5/25/50/75/95% at 20/45/65/115/220
 // units per simulation second. Fixed anchors keep colors stable across frames
 // and reseeds. Interpolate squared speeds to avoid a square root per vertex.
-fn speed_heat(squared_speed: float32) -> float32  {
+fn speed_heat(squared_speed: float32) -> float32 {
 	let mut heat = if (squared_speed < 2025.0_f) {
 		0.25_f * (squared_speed - 400.0_f) / 1625.0_f
 	} else if (squared_speed < 4225.0_f) {
@@ -113,7 +113,7 @@ fn speed_heat(squared_speed: float32) -> float32  {
 	}
 }
 
-fn heat_color(heat: float32) -> Color  {
+fn heat_color(heat: float32) -> Color {
 	// Blue, cyan, warm yellow, orange, coral red. These are albedo colors;
 	// the fragment shader applies lighting and distance fog afterwards.
 	let mut colors = [
@@ -141,7 +141,7 @@ fn heat_color(heat: float32) -> Color  {
 }
 
 @vertex_shader
-fn vertex(index: int, root: Ptr<Params>) -> Vertex  {
+fn vertex(index: int, root: Ptr<Params>) -> Vertex {
 	let mut particle = particle_index(index);
 	let mut local = index - particle * 24;
 	let mut sector = int(float32(local) / 3.0_f);
@@ -182,7 +182,7 @@ fn vertex(index: int, root: Ptr<Params>) -> Vertex  {
 }
 
 @fragment_shader
-fn fragment(color: Color) -> Color  {
+fn fragment(color: Color) -> Color {
 	let mut nx = color.r;
 	let mut ny = color.g;
 	let mut squared_z = positive(1.0_f - nx * nx - ny * ny);
@@ -214,7 +214,7 @@ fn fragment(color: Color) -> Color  {
 }
 
 // Host-only xorshift32: reproducible random positions and independent velocities.
-fn random(state: Ptr<uint>) -> float32  {
+fn random(state: Ptr<uint>) -> float32 {
 	let mut x = state.*;
 	x = x ^ (x << 13_ui);
 	x = x ^ (x >> 17_ui);
@@ -223,7 +223,7 @@ fn random(state: Ptr<uint>) -> float32  {
 	float32(x & 0xffffff_ui) / 16777216.0_f
 }
 
-fn random_particle(state: Ptr<uint>) -> Particle  {
+fn random_particle(state: Ptr<uint>) -> Particle {
 	Particle {
 		x = random(state) * 48.0_f - 24.0_f,
 		y = random(state) * 60.0_f - 30.0_f,
@@ -234,7 +234,7 @@ fn random_particle(state: Ptr<uint>) -> Particle  {
 	}
 }
 
-fn initialize(particles: GpuSpan<Particle>, seed: uint)  {
+fn initialize(particles: GpuSpan<Particle>, seed: uint) {
 	let mut state = seed | 1_ui;
 	let mut index = 0_ul;
 	while (index < particles.length) {
@@ -245,16 +245,23 @@ fn initialize(particles: GpuSpan<Particle>, seed: uint)  {
 
 // Camera math runs on the host; shaders receive only the resulting basis and zoom.
 
-struct Camera { yaw: float32; pitch: float32; zoom: float32; }
-struct MousePosition { x: float64; y: float64; }
-fn mouse_position(position: (float64, float64)) -> MousePosition  {
+struct Camera {
+	yaw: float32,
+	pitch: float32,
+	zoom: float32,
+}
+struct MousePosition {
+	x: float64,
+	y: float64,
+}
+fn mouse_position(position: (float64, float64)) -> MousePosition {
 	MousePosition { x = position.0, y = position.1 }
 }
-fn default_camera() -> Camera  {
+fn default_camera() -> Camera {
 	Camera { yaw = 0.0_f, pitch = 0.24_f, zoom = 1.0_f }
 }
 
-fn clamp(value: float32, low: float32, high: float32) -> float32  {
+fn clamp(value: float32, low: float32, high: float32) -> float32 {
 	if (value < low) {
 		low
 	} else if (value > high) {
@@ -264,14 +271,14 @@ fn clamp(value: float32, low: float32, high: float32) -> float32  {
 	}
 }
 
-fn move_camera(camera: Ptr<Camera>, dx: float64, dy: float64, scroll: float64)  {
+fn move_camera(camera: Ptr<Camera>, dx: float64, dy: float64, scroll: float64) {
 	camera.yaw = camera.yaw + float32(dx) * 0.006_f;
 	// Stop short of the poles so dragging never flips the view upside down.
 	camera.pitch = clamp(camera.pitch + float32(dy) * 0.006_f, -1.4_f, 1.4_f);
 	camera.zoom = clamp(camera.zoom * expf(clamp(float32(scroll), -20.0_f, 20.0_f) * 0.12_f), 0.35_f, 3.0_f);
 }
 
-fn apply_camera(camera: Camera, params: Ptr<HostParams>)  {
+fn apply_camera(camera: Camera, params: Ptr<HostParams>) {
 	params.yaw_cos = cosf(camera.yaw);
 	params.yaw_sin = sinf(camera.yaw);
 	params.pitch_cos = cosf(camera.pitch);
@@ -279,7 +286,7 @@ fn apply_camera(camera: Camera, params: Ptr<HostParams>)  {
 	params.zoom = camera.zoom;
 }
 
-fn main() -> (() | Err<_>)  {
+fn main() -> (() | Err<_>) {
 	let mut count = 1000000_ui;
 	let mut title = "Resin | 1,000,000 particles | Drag: orbit | Scroll: zoom | Home: reset view | Space: pause | R: reseed | Esc: quit";
 	let mut window = window_new(1280, 800, string_from_str(title))?;

@@ -3,9 +3,9 @@ mod support;
 use resin_source::{Loader, Source, library_root};
 use resin_types::{GpuProjectionOperation, Ty};
 
-const CONTRACTS: &str = r#"struct DeviceReference<T> { allocation: GpuView; }
-    struct HostRange<T> { pointer: Ptr<T>; count: ulong; }
-    struct DeviceRange<T> { pointer: DeviceReference<T>; count: ulong; }
+const CONTRACTS: &str = r#"struct DeviceReference<T> { allocation: GpuView, }
+    struct HostRange<T> { pointer: Ptr<T>, count: ulong, }
+    struct DeviceRange<T> { pointer: DeviceReference<T>, count: ulong, }
     intrinsic "gpu_pointer_projection" fn project_pointer<T>(value: DeviceReference<T>) -> Ptr<T>;
     intrinsic "gpu_span_projection" fn project_range<T>(value: DeviceRange<T>) -> HostRange<T>;
 "#;
@@ -64,9 +64,9 @@ fn source_gpu_contracts_retain_nominal_identity_and_produce_concrete_plans() {
 #[test]
 fn projection_registration_rejects_invalid_representations_and_retagged_elements() {
     for source in [
-        r#"struct View<T> { raw: Ptr<T>; } intrinsic "gpu_pointer_projection" fn register<T>(value: View<T>) -> Ptr<T>;"#,
-        r#"struct View<T> { allocation: GpuView; } intrinsic "gpu_pointer_projection" fn register<T>(value: View<T>) -> Ptr<ulong>;"#,
-        r#"struct View<T> { allocation: GpuView; } intrinsic "gpu_pointer_projection" fn register<T>(value: View<T>) -> Ptr<T>; intrinsic "gpu_pointer_projection" fn duplicate<T>(value: View<T>) -> Ptr<T>;"#,
+        r#"struct View<T> { raw: Ptr<T>, } intrinsic "gpu_pointer_projection" fn register<T>(value: View<T>) -> Ptr<T>;"#,
+        r#"struct View<T> { allocation: GpuView, } intrinsic "gpu_pointer_projection" fn register<T>(value: View<T>) -> Ptr<ulong>;"#,
+        r#"struct View<T> { allocation: GpuView, } intrinsic "gpu_pointer_projection" fn register<T>(value: View<T>) -> Ptr<T>; intrinsic "gpu_pointer_projection" fn duplicate<T>(value: View<T>) -> Ptr<T>;"#,
     ] {
         let error = support::frontend::check_hir(&support::program(source))
             .into_module()
@@ -99,7 +99,7 @@ fn source_cannot_call_a_projection_contract_to_escape_a_device_address() {
 
 #[test]
 fn pipeline_contracts_are_explicit_and_preserve_source_parameter_identity() {
-    let source = r#"struct Compute<R, O> { token: GpuPipelineContract; }
+    let source = r#"struct Compute<R, O> { token: GpuPipelineContract, }
         intrinsic "gpu_compute_pipeline_type" fn register<R, O>(token: GpuPipelineContract) -> Compute<R, O>;
         fn materialize(value: Compute<uint, StrongOwner>)  {}
     "#;
@@ -125,9 +125,9 @@ fn pipeline_contracts_are_explicit_and_preserve_source_parameter_identity() {
 #[test]
 fn pipeline_type_contracts_reject_invalid_storage_and_direct_calls() {
     for source in [
-        r#"struct Compute<R, O> { token: StrongOwner; } intrinsic "gpu_compute_pipeline_type" fn register<R, O>(token: GpuPipelineContract) -> Compute<R, O>;"#,
-        r#"struct Compute<R, O> { token: GpuPipelineContract; } intrinsic "gpu_compute_pipeline_type" fn register<R, O>(token: GpuPipelineContract) -> Compute<O, R>;"#,
-        r#"struct Compute<R, O> { token: GpuPipelineContract; extra: uint; } intrinsic "gpu_compute_pipeline_type" fn register<R, O>(token: GpuPipelineContract) -> Compute<R, O>;"#,
+        r#"struct Compute<R, O> { token: StrongOwner, } intrinsic "gpu_compute_pipeline_type" fn register<R, O>(token: GpuPipelineContract) -> Compute<R, O>;"#,
+        r#"struct Compute<R, O> { token: GpuPipelineContract, } intrinsic "gpu_compute_pipeline_type" fn register<R, O>(token: GpuPipelineContract) -> Compute<O, R>;"#,
+        r#"struct Compute<R, O> { token: GpuPipelineContract, extra: uint, } intrinsic "gpu_compute_pipeline_type" fn register<R, O>(token: GpuPipelineContract) -> Compute<R, O>;"#,
     ] {
         assert!(
             support::frontend::check_hir(&support::program(source))
@@ -135,7 +135,7 @@ fn pipeline_type_contracts_reject_invalid_storage_and_direct_calls() {
                 .is_err()
         );
     }
-    let source = r#"struct Compute<R, O> { token: GpuPipelineContract; }
+    let source = r#"struct Compute<R, O> { token: GpuPipelineContract, }
         intrinsic "gpu_compute_pipeline_type" fn register<R, O>(token: GpuPipelineContract) -> Compute<R, O>;
         fn forge(token: GpuPipelineContract) -> Compute<uint, StrongOwner>  { register(token) }
     "#;
@@ -153,11 +153,11 @@ fn pipeline_type_contracts_reject_invalid_storage_and_direct_calls() {
 fn source_drop_hooks_reject_gpu_elements_before_and_after_importing() {
     for (declaration, owner) in [
         (
-            "struct Managed { value: int;  }\nfn drop(self: Ptr<Managed>)  {}\n",
+            "struct Managed { value: int,  }\nfn drop(self: Ptr<Managed>)  {}\n",
             "Managed",
         ),
         (
-            "struct Managed<T> { value: T;  }\nfn drop<T>(self: Ptr<Managed<T>>)  {}\n",
+            "struct Managed<T> { value: T,  }\nfn drop<T>(self: Ptr<Managed<T>>)  {}\n",
             "Managed<int>",
         ),
     ] {
@@ -201,7 +201,7 @@ fn source_gpu_library_resolves_generic_allocation_and_explicit_access() {
         "gpu-library.resin",
         r#"export { main };
         import { "$/gpu.resin", "$/span.resin" };
-        struct Pair { left: int; right: int; }
+        struct Pair { left: int, right: int, }
         fn main() -> (() | Err<_>)  {
             let mut gpu = gpu_new()?;
             let mut scalar = gpu:create(Pair { left = 1_i, right = 2_i })?;

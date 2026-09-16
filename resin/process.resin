@@ -15,26 +15,26 @@ import { "span.resin" };
 struct EnvironmentVariableNotFound {}
 
 // Views borrow the startup snapshot until process exit. Do not free their data.
-fn arguments(argc: int, argv: Ptr<Ptr<ubyte>>) -> Span<Ptr<ubyte>>  {
+fn arguments(argc: int, argv: Ptr<Ptr<ubyte>>) -> Span<Ptr<ubyte>> {
 	Span<Ptr<ubyte>> { data = argv, length = ulong(argc) }
 }
 
-fn environment(envp: Ptr<Ptr<ubyte>>) -> Span<Ptr<ubyte>>  {
+fn environment(envp: Ptr<Ptr<ubyte>>) -> Span<Ptr<ubyte>> {
 	Span<Ptr<ubyte>> { data = envp, length = resin_string_array_length(envp) }
 }
 
 // NUL-terminated strings become length-delimited views without copying.
-fn c_string(text: Ptr<ubyte>) -> Span<ubyte>  {
+fn c_string(text: Ptr<ubyte>) -> Span<ubyte> {
 	Span<ubyte> { data = text, length = strlen(text) }
 }
 
-fn argument(args: Span<Ptr<ubyte>>, index: ulong) -> Span<ubyte>  {
+fn argument(args: Span<Ptr<ubyte>>, index: ulong) -> Span<ubyte> {
 	c_string(args:at(index))
 }
 
 // Exact case-sensitive name lookup in the frozen snapshot, including on Windows.
 // A present empty value succeeds with length zero; absence is a distinct error.
-fn environment_get(envp: Ptr<Ptr<ubyte>>, name: Ptr<ubyte>) -> (Span<ubyte> | Err<EnvironmentVariableNotFound>)  {
+fn environment_get(envp: Ptr<Ptr<ubyte>>, name: Ptr<ubyte>) -> (Span<ubyte> | Err<EnvironmentVariableNotFound>) {
 	let mut value = resin_environment_get(envp, name);
 	if (ulong(value) == 0_ul) {
 		Err(EnvironmentVariableNotFound {})

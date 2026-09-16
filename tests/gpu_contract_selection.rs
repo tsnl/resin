@@ -4,8 +4,8 @@ mod support;
 use resin_source::{Loader, Source};
 
 const PIPELINES: &str = r#"struct Failure {}
-struct ComputeProgram<Root, Owner> { token: GpuPipelineContract; }
-struct GraphicsProgram<Root, Owner> { token: GpuPipelineContract; }
+struct ComputeProgram<Root, Owner> { token: GpuPipelineContract, }
+struct GraphicsProgram<Root, Owner> { token: GpuPipelineContract, }
 intrinsic "gpu_compute_pipeline_type" fn compute_type<R, O>(token: GpuPipelineContract) -> ComputeProgram<R, O>;
 intrinsic "gpu_graphics_pipeline_type" fn graphics_type<R, O>(token: GpuPipelineContract) -> GraphicsProgram<R, O>;
 struct Device {
@@ -22,7 +22,7 @@ struct Device {
 @gpu_graphics_pipeline
     fn graphics(self: Device, vertex: (Ptr<ubyte>, ulong), fragment: (Ptr<ubyte>, ulong)) -> (PipelineOwner | Err<Failure>)  { Err(Failure {}) }
 
-struct PipelineOwner { owner: StrongOwner;
+struct PipelineOwner { owner: StrongOwner,
     
 }
 @gpu_pipeline_context
@@ -38,10 +38,10 @@ struct Commands {
 @gpu_draw
     fn draw(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments | None, count: uint) -> (() | Err<Failure>)  { (()) }
 
-struct Params { value: Ptr<int>; }
+struct Params { value: Ptr<int>, }
 "#;
 
-const USE_PROJECTION: &str = r#"struct FieldsValue<T0> { value: T0; }
+const USE_PROJECTION: &str = r#"struct FieldsValue<T0> { value: T0, }
 fn record(commands: Commands, pipeline: ComputeProgram<Params, PipelineOwner>, value: Alpha<int>) -> (() | Err<Failure>)  {
     commands:dispatch(pipeline, FieldsValue<_> {value = value}, 1, 1, 1)
 }

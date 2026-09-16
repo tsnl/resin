@@ -2,7 +2,7 @@ export { main };
 
 import { "$/string.resin" };
 
-fn fibonacci(n: int) -> _  {
+fn fibonacci(n: int) -> _ {
 	if (n <= 1) {
 		n
 	} else {
@@ -10,7 +10,7 @@ fn fibonacci(n: int) -> _  {
 	}
 }
 
-fn main()  {
+fn main() {
 	let mut n: _;
 	let mut pointer: Ptr<_>;
 	n = fibonacci(10);

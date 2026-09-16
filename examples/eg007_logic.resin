@@ -2,8 +2,11 @@ export { main };
 
 import { "$/string.resin" };
 
-struct Pair { a: int; b: int; }
-fn clamp(n: int, lo: int, hi: int) -> int  {
+struct Pair {
+	a: int,
+	b: int,
+}
+fn clamp(n: int, lo: int, hi: int) -> int {
 	if ((n < lo) || (n > hi)) {
 		lo
 	} else {
@@ -11,15 +14,15 @@ fn clamp(n: int, lo: int, hi: int) -> int  {
 	}
 }
 
-fn both(a: int, b: int) -> bool  {
+fn both(a: int, b: int) -> bool {
 	(a != 0) && (b != 0)
 }
 
-fn pair(a: int, b: int) -> Pair  {
+fn pair(a: int, b: int) -> Pair {
 	Pair { a = a, b = b }
 }
 
-fn main() -> ()  {
+fn main() -> () {
 	let mut xs = [1, 2, 3];
 	print(
 		fmt(

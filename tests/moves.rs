@@ -3,12 +3,12 @@ mod support;
 #[test]
 fn moves_and_partial_replacements_destroy_each_value_once() {
     let source = r#"export { main };
-        struct Item { trace: Ptr<int>; digit: int;
+        struct Item { trace: Ptr<int>, digit: int,
             
         }
 fn drop(value: Ptr<Item>) { value.trace.* = value.trace.* * 10 + value.digit; }
 
-        struct Pair { a: Item; b: Item; }
+        struct Pair { a: Item, b: Item, }
         fn main() -> int {
             let mut trace: int = 0;
             {
@@ -35,7 +35,7 @@ fn drop(value: Ptr<Item>) { value.trace.* = value.trace.* * 10 + value.digit; }
 #[test]
 fn returned_error_payloads_keep_exactly_one_owner() {
     let source = r#"export { main };
-        struct Item { trace: Ptr<int>; }
+        struct Item { trace: Ptr<int>, }
         fn drop(value: Ptr<Item>) { value.trace.* = value.trace.* + 1; }
         fn route(value: Item, failed: bool) -> Item | Err<Item> {
             if (failed) { return Err(value); };

@@ -1,4 +1,4 @@
-export { Io, Output, WriteError , write, io_stdout, io_stderr };
+export { Io, Output, WriteError, write, io_stdout, io_stderr };
 
 extern {
 	"resin_runtime/print.h": {
@@ -16,38 +16,33 @@ const (
 
 struct WriteError {}
 struct Output {
-	stream: uint;
+	stream: uint,
 	// Writes bytes verbatim and flushes. No formatting or newline is added.
-	
 }
-fn write(self: Ref<Output>, text: str | Span<ubyte> | String) -> (() | Err<WriteError>)  {
-		let mut status = match (text) {
-			str(literal) => {
-				resin_stream_write(self.stream, literal.data, literal.length)
-			},
-			Span<ubyte>(bytes) => {
-				resin_stream_write(self.stream, bytes.data, bytes.length)
-			},
-			String(string) => {
-				resin_stream_write(self.stream, string:get().data, string:get().length)
-			},
-		};
-		if (status == 0) {
-			(())
-		} else {
-			Err(WriteError {})
-		}
+fn write(self: Ref<Output>, text: str | Span<ubyte> | String) -> (() | Err<WriteError>) {
+	let mut status = match (text) {
+		str(literal) => {
+			resin_stream_write(self.stream, literal.data, literal.length)
+		},
+		Span<ubyte>(bytes) => {
+			resin_stream_write(self.stream, bytes.data, bytes.length)
+		},
+		String(string) => {
+			resin_stream_write(self.stream, string:get().data, string:get().length)
+		},
+	};
+	if (status == 0) {
+		(())
+	} else {
+		Err(WriteError {})
 	}
-
-struct Io {
-	
-	
 }
-fn io_stdout() -> Output  {
-		Output { stream = stream_stdout }
-	}
 
-fn io_stderr() -> Output  {
-		Output { stream = stream_stderr }
-	}
+struct Io {}
+fn io_stdout() -> Output {
+	Output { stream = stream_stdout }
+}
 
+fn io_stderr() -> Output {
+	Output { stream = stream_stderr }
+}

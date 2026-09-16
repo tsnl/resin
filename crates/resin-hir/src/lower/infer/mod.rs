@@ -1348,15 +1348,20 @@ impl<'a> Inference<'a> {
 //
 
 #[derive(Clone)]
+pub(crate) struct Overload {
+    pub name: Arc<str>,
+    pub candidates: Vec<OverloadCandidate>,
+    pub primitive: Option<Arc<str>>,
+    pub expected: Option<Type>,
+    pub type_args: Option<Vec<Type>>,
+    pub args: Option<Vec<Type>>,
+    pub out: Type,
+}
+
+#[derive(Clone)]
 pub(crate) enum Constraint {
     Overload {
-        name: Arc<str>,
-        candidates: Vec<OverloadCandidate>,
-        primitive: Option<Arc<str>>,
-        expected: Option<Type>,
-        type_args: Option<Vec<Type>>,
-        args: Option<Vec<Type>>,
-        out: Type,
+        lookup: Overload,
     },
     Equal(Type, Type),
     Depends(Type),
@@ -1909,18 +1914,17 @@ impl Inference<'_> {
         }
     }
 
-    fn overload(
-        &mut self,
-        owner: Rule,
-        name: &str,
-        candidates: &[OverloadCandidate],
-        primitive: &Option<Arc<str>>,
-        expected: &Option<Type>,
-        explicit: &Option<Vec<Type>>,
-        args: Option<&[Type]>,
-        out: &Type,
-        span: Span,
-    ) -> Result<bool> {
+    fn overload(&mut self, owner: Rule, lookup: &Overload, span: Span) -> Result<bool> {
+        let Overload {
+            name,
+            candidates,
+            primitive,
+            expected,
+            type_args: explicit,
+            args,
+            out,
+        } = lookup;
+        let args = args.as_deref();
         if candidates.is_empty()
             && let (Some(symbol), Some(args)) = (primitive, args)
         {
@@ -1946,7 +1950,7 @@ impl Inference<'_> {
             let signature = Type::Node(
                 Head::Operation {
                     primitive: primitive.clone(),
-                    name: name.into(),
+                    name: name.clone(),
                     candidates: candidates
                         .iter()
                         .map(|candidate| candidate.function)
@@ -1998,18 +2002,18 @@ impl Inference<'_> {
             }
         }
         self.solver = baseline.clone();
-        if let (Some(symbol), Some(args)) = (primitive, args) {
-            if let Ok(complete) = self.constraint(
+        if let (Some(symbol), Some(args)) = (primitive, args)
+            && let Ok(complete) = self.constraint(
                 owner,
                 &Constraint::Builtin(symbol.clone(), args.to_vec(), out.clone()),
                 span,
-            ) {
-                let context = expected
-                    .as_ref()
-                    .map_or(Ok(true), |expected| self.solver.coerce(out, expected, span));
-                if let Ok(context) = context {
-                    viable.push((None, self.solver.clone(), complete && context));
-                }
+            )
+        {
+            let context = expected
+                .as_ref()
+                .map_or(Ok(true), |expected| self.solver.coerce(out, expected, span));
+            if let Ok(context) = context {
+                viable.push((None, self.solver.clone(), complete && context));
             }
         }
         self.solver = baseline;
@@ -2068,27 +2072,7 @@ impl Inference<'_> {
 
     fn constraint(&mut self, owner: Rule, constraint: &Constraint, span: Span) -> Result<bool> {
         match constraint {
-            Constraint::Overload {
-                name,
-                candidates,
-                primitive,
-                expected,
-                type_args,
-                args,
-                out,
-            } => {
-                return self.overload(
-                    owner,
-                    name,
-                    candidates,
-                    primitive,
-                    expected,
-                    type_args,
-                    args.as_deref(),
-                    out,
-                    span,
-                );
-            }
+            Constraint::Overload { lookup } => return self.overload(owner, lookup, span),
             Constraint::Method {
                 receiver: receiver_type,
                 name,
@@ -2698,7 +2682,9 @@ impl Constraint {
     fn inputs(&self) -> Vec<&Type> {
         match self {
             Self::Overload {
-                args, type_args, ..
+                lookup: Overload {
+                    args, type_args, ..
+                },
             } => args
                 .iter()
                 .flatten()

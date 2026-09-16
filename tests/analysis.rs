@@ -9,7 +9,7 @@ use tempfile::TempDir;
 
 #[test]
 fn operator_symbols_navigate_to_the_selected_overload() {
-    let library = "export { Number , __add__ }; struct Number<T> { value: T;  }\nfn __add__<T>(a: Number<T>, b: T) -> T  { a.value + b }\n";
+    let library = "export { Number , __add__ }; struct Number<T> { value: T,  }\nfn __add__<T>(a: Number<T>, b: T) -> T  { a.value + b }\n";
     let source = "import { \"library.resin\" }; fn main() -> int  { Number<int> { value = 40 } + 2 } fn named(value: Number<int>) -> int  { value:__add__(2) }";
     let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
     let analysis = project.checked();
@@ -106,7 +106,7 @@ fn gpu_workgroup_size_has_source_method_hover_completion_and_navigation() {
 
 #[test]
 fn generic_method_calls_show_substituted_signatures_and_original_definitions() {
-    let library = "export { Cell , read, choose }; struct Cell<T> { value: T;   }\nfn read<T>(self: Ptr<Cell<T>>) -> T  { self.value }\n\nfn choose<T, U>(self: Ptr<Cell<T>>, value: U) -> U  { value }\n";
+    let library = "export { Cell , read, choose }; struct Cell<T> { value: T,   }\nfn read<T>(self: Ptr<Cell<T>>) -> T  { self.value }\n\nfn choose<T, U>(self: Ptr<Cell<T>>, value: U) -> U  { value }\n";
     let source = "import { \"library.resin\" }; type IntCell = Cell<int>; fn use(cell: Ptr<IntCell>) -> ulong  { cell:read(); cell:choose::<ulong>(42) }";
     let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
     let analysis = project.checked();
@@ -133,7 +133,7 @@ fn generic_method_calls_show_substituted_signatures_and_original_definitions() {
 
 #[test]
 fn unfinished_generic_method_access_keeps_owner_substitution_and_method_binders() {
-    let library = "export { Cell , read, choose, cell_make }; struct Cell<T> { value: T;    }\nfn read<T>(self: Ptr<Cell<T>>) -> T  { self.value }\n\nfn choose<T, U>(self: Ptr<Cell<T>>, value: U) -> U  { value }\n\nfn cell_make<T>(value: T) -> Cell<T>  { Cell<T> { value = value } }\n";
+    let library = "export { Cell , read, choose, cell_make }; struct Cell<T> { value: T,    }\nfn read<T>(self: Ptr<Cell<T>>) -> T  { self.value }\n\nfn choose<T, U>(self: Ptr<Cell<T>>, value: U) -> U  { value }\n\nfn cell_make<T>(value: T) -> Cell<T>  { Cell<T> { value = value } }\n";
     for receiver in ["cell", "Cell<int>"] {
         let source = format!(
             "import {{ \"library.resin\" }}; fn use(cell: Ptr<Cell<int>>)  {{ {receiver}.; }}"
@@ -181,9 +181,9 @@ fn generic_method_editor_snapshots_keep_completed_imported_schemes() {
     );
     let original = Source::new(
         "library.resin",
-        "export { Cell , read }; struct Cell<T> { value: T;  }\nfn read<T>(self: Ptr<Cell<T>>) -> T  { self.value }\n",
+        "export { Cell , read }; struct Cell<T> { value: T,  }\nfn read<T>(self: Ptr<Cell<T>>) -> T  { self.value }\n",
     );
-    let changed = original.with_text("export { Cell , read }; struct Cell<T> { padding: ubyte; value: T;  }\nfn read<T>(self: Ptr<Cell<T>>) -> long  { 42 }\n");
+    let changed = original.with_text("export { Cell , read }; struct Cell<T> { padding: ubyte, value: T,  }\nfn read<T>(self: Ptr<Cell<T>>) -> long  { 42 }\n");
     let mut loader = resin_source::Loader::new(Default::default());
     loader
         .set_import(&input, "library.resin", original.clone())
@@ -216,7 +216,7 @@ fn generic_method_editor_snapshots_keep_completed_imported_schemes() {
 
 #[test]
 fn generic_nominal_fields_retain_substitution_and_declaration_navigation() {
-    let library = "export { Cell }; struct Cell<T> { value: T; }";
+    let library = "export { Cell }; struct Cell<T> { value: T, }";
     for (parameters, receiver, result) in [
         ("", "Cell<int>", "int"),
         ("", "Ptr<Ptr<Cell<int>>>", "int"),
@@ -249,7 +249,7 @@ fn generic_nominal_fields_retain_substitution_and_declaration_navigation() {
 
 #[test]
 fn nominal_wrappers_of_generic_fields_keep_navigation_and_method_completion() {
-    let library = "export { Outer , read }; struct Cell<T> { value: T; } struct Wrapped { cell: Cell<int>; } struct Outer { wrapped: Wrapped; read: int;  }\nfn read(self: Ptr<Outer>) -> int  { self.wrapped.cell.value }\n";
+    let library = "export { Outer , read }; struct Cell<T> { value: T, } struct Wrapped { cell: Cell<int>, } struct Outer { wrapped: Wrapped, read: int,  }\nfn read(self: Ptr<Outer>) -> int  { self.wrapped.cell.value }\n";
     let source = "import { \"library.resin\" }; fn use(outer: Ptr<Outer>) -> int  { read(outer); outer:read(); outer.wrapped.cell.value }";
     let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
     let analysis = project.checked();
@@ -283,7 +283,7 @@ fn nominal_wrappers_of_generic_fields_keep_navigation_and_method_completion() {
 
 #[test]
 fn generic_field_completion_survives_an_unfinished_access() {
-    let source = "struct Cell<T> { value: T; } fn read(cell: Ptr<Cell<int>>)  { cell.; }";
+    let source = "struct Cell<T> { value: T, } fn read(cell: Ptr<Cell<int>>)  { cell.; }";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.build_hir();
     assert!(!analysis.diagnostics().is_empty());
@@ -312,10 +312,10 @@ fn generic_field_editor_snapshots_keep_original_imported_declarations() {
     );
     let original = Source::new(
         "library.resin",
-        "export { Cell }; struct Cell<T> { value: T; }",
+        "export { Cell }; struct Cell<T> { value: T, }",
     );
     let changed =
-        original.with_text("export { Cell }; struct Cell<T> { padding: ubyte; value: long; }");
+        original.with_text("export { Cell }; struct Cell<T> { padding: ubyte, value: long, }");
     let mut loader = resin_source::Loader::new(Default::default());
     loader
         .set_import(&input, "library.resin", original.clone())
@@ -431,7 +431,7 @@ fn template_scopes_retain_named_types_and_imported_schemes() {
 
 #[test]
 fn option_payload_fields_remain_available_in_incomplete_code() {
-    let source = "struct Item { count: int; } fn f(value: Item | None)  { value!.; }";
+    let source = "struct Item { count: int, } fn f(value: Item | None)  { value!.; }";
     let project = Project::new(&[("main.resin", source)]);
     let items = project.build_hir().completions(
         &project.source("main.resin"),
@@ -448,7 +448,7 @@ fn weak_upgrade_recovery_distinguishes_wrapper_and_payload_members() {
         ("weak.upgrade()!.get()", "count", "downgrade"),
     ] {
         let source = format!(
-            "import {{ \"$/shared.resin\" }}; struct Item {{ count: int; }} fn f(weak: WeakPtr<Item>)  {{ {receiver}.; }}"
+            "import {{ \"$/shared.resin\" }}; struct Item {{ count: int, }} fn f(weak: WeakPtr<Item>)  {{ {receiver}.; }}"
         );
         let project = Project::new(&[("main.resin", &source)]);
         let items = project.build_hir().completions(
@@ -571,9 +571,9 @@ fn gpu_commands_check_pipeline_stages_and_host_arguments() {
     ] {
         let source = format!(
             r#"import {{ "$/gpu.resin", "$/graphics.resin" }};
-            struct Root {{ value: Ptr<int>; }}
-            struct HostRoot<T> {{ value: T; }}
-            struct WrongRoot<T> {{ other: T; }}
+            struct Root {{ value: Ptr<int>, }}
+            struct HostRoot<T> {{ value: T, }}
+            struct WrongRoot<T> {{ other: T, }}
             @compute_shader
             fn kernel(index: ulong, root: Ptr<Root>)  {{}}
             @vertex_shader
@@ -618,8 +618,8 @@ fn gpu_commands_check_pipeline_stages_and_host_arguments() {
 #[test]
 fn typed_pipeline_calls_show_shader_contracts_in_editor_signatures() {
     let source = r#"import { "$/gpu.resin", "$/span.resin" };
-        struct FieldsValuesScale<T0, T1> { values: T0; scale: T1; }
-struct Root { values: Span<int>; scale: int; }
+        struct FieldsValuesScale<T0, T1> { values: T0, scale: T1, }
+struct Root { values: Span<int>, scale: int, }
         @compute_shader
         fn kernel(index: ulong, root: Ptr<Root>)  {}
         fn f(gpu: Gpu, commands: GpuCommands, values: GpuSpan<int>) -> (() | Err<_>)  {
@@ -696,7 +696,7 @@ struct Project {
 
 #[test]
 fn inherent_methods_have_navigation_hover_and_member_completion() {
-    let library = "export { Counter , counter_new, read }; struct Counter { count: int;   }\nfn counter_new() -> Counter  { Counter { count = 7 } }\n\nfn read(self: Ptr<Counter>) -> int  { self.count }\n ";
+    let library = "export { Counter , counter_new, read }; struct Counter { count: int,   }\nfn counter_new() -> Counter  { Counter { count = 7 } }\n\nfn read(self: Ptr<Counter>) -> int  { self.count }\n ";
     for incomplete in [None, Some("c"), Some("Counter")] {
         let tail = incomplete
             .map(|base| format!("{base}.;"))
@@ -774,7 +774,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
     for receiver in ["values", "holder.values"] {
         for tail in ["", " values.;", " holder.values.;", " holder.values.at(; "] {
             let source = format!(
-                "import {{ \"$/span.resin\" }}; struct FieldsValues<T0> {{ values: T0; }}\nfn main()  {{ let mut values = [1_i, 2_i]; let mut holder = FieldsValues<_> {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }} {receiver}.at(0) = 3;{tail} }};"
+                "import {{ \"$/span.resin\" }}; struct FieldsValues<T0> {{ values: T0, }}\nfn main()  {{ let mut values = [1_i, 2_i]; let mut holder = FieldsValues<_> {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }} {receiver}.at(0) = 3;{tail} }};"
             );
             let project = Project::new(&[("main.resin", &source)]);
             let analysis = project.build_hir();
@@ -811,7 +811,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
 
 #[test]
 fn shared_receiver_completion_and_navigation_include_ordinary_drop_methods() {
-    let library = "export { Counter , drop, read }; struct Counter { count: int;   }\nfn drop(self: Ptr<Counter>)  {}\n\nfn read(self: Ptr<Counter>) -> int  { self.count }\n ";
+    let library = "export { Counter , drop, read }; struct Counter { count: int,   }\nfn drop(self: Ptr<Counter>)  {}\n\nfn read(self: Ptr<Counter>) -> int  { self.count }\n ";
     for tail in ["", "c.get().;"] {
         let source = format!(
             "import {{ \"lib.resin\", \"$/shared.resin\" }}; fn f(c: ArcPtr<Counter>)  {{ c:get():read(); {tail} }}"
@@ -851,7 +851,7 @@ fn shared_receiver_completion_and_navigation_include_ordinary_drop_methods() {
 
 #[test]
 fn inferred_errors_and_match_payloads_have_editor_types() {
-    let source = "struct Broken { code: int; } fn fail() -> (int | Err<_>)  { Err(Broken { code = 7 }) } fn main()  { let mut result = fail(); match (result) { int(value) => { value; }, Err(error) => { error.code; } }; }";
+    let source = "struct Broken { code: int, } fn fail() -> (int | Err<_>)  { Err(Broken { code = 7 }) } fn main()  { let mut result = fail(); match (result) { int(value) => { value; }, Err(error) => { error.code; } }; }";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.checked();
     let input = project.source("main.resin");
@@ -891,7 +891,7 @@ fn inferred_errors_and_match_payloads_have_editor_types() {
 fn inferred_imported_results_and_local_annotations_support_editor_queries() {
     let source =
         "import { \"lib.resin\" }; fn main()  { let mut value: _; value = make(); value.count; }";
-    let library = "export { make }; struct Counter { count: int; } fn make() -> _  { Counter { count = 42 } }";
+    let library = "export { make }; struct Counter { count: int, } fn make() -> _  { Counter { count = 42 } }";
     let project = Project::new(&[("main.resin", source), ("lib.resin", library)]);
     let analysis = project.checked();
     let input = project.source("main.resin");
@@ -1005,7 +1005,7 @@ fn field_completion_uses_receiver_types_and_replaces_only_the_field() {
     ] {
         for field in ["", "co", "count"] {
             let source = format!(
-                "struct Fields {{ count: long; label: long; }} struct Outer {{ inner: Fields; }} fn main ()  {{ {setup} {receiver}.{field}; }}"
+                "struct Fields {{ count: long, label: long, }} struct Outer {{ inner: Fields, }} fn main ()  {{ {setup} {receiver}.{field}; }}"
             );
             let project = Project::new(&[("main.resin", &source)]);
             let start = source.rfind('.').unwrap() + 1;
@@ -1042,7 +1042,7 @@ fn field_completion_resolves_imported_nominal_function_results() {
         ("main.resin", source),
         (
             "lib.resin",
-            "export { make }; struct Counter { count: int; } fn make () -> Counter  { Counter { count = 0 } }",
+            "export { make }; struct Counter { count: int, } fn make () -> Counter  { Counter { count = 0 } }",
         ),
     ]);
     let items = project.build_hir().completions(
@@ -1062,7 +1062,7 @@ fn field_completion_resolves_imported_nominal_function_results() {
 fn field_completion_does_not_offer_unrelated_names() {
     for expression in ["1.", "missing.", "\"text.\"", "// value."] {
         let source = format!(
-            "struct FieldsCount<T0> {{ count: T0; }}\nfn main ()  {{ let mut value = FieldsCount<_> {{ count = 1 }}; {expression}\n }}"
+            "struct FieldsCount<T0> {{ count: T0, }}\nfn main ()  {{ let mut value = FieldsCount<_> {{ count = 1 }}; {expression}\n }}"
         );
         let project = Project::new(&[("main.resin", &source)]);
         assert!(
@@ -1081,9 +1081,9 @@ fn field_completion_does_not_offer_unrelated_names() {
 #[test]
 fn field_completion_recovers_unfinished_functions_and_uninitialized_locals() {
     for source in [
-        "struct Point { x: float32; y: float32; } fn main ()  { let mut point: Point; point.; }",
-        "struct FieldsXY<T0, T1> { x: T0; y: T1; }\nfn main (point: FieldsXY<float32, float32>) = { point.",
-        "struct FieldsXY<T0, T1> { x: T0; y: T1; }\nfn main () = { let mut point = FieldsXY<_, _> { x = 1, y = 2 }; point.",
+        "struct Point { x: float32, y: float32, } fn main ()  { let mut point: Point; point.; }",
+        "struct FieldsXY<T0, T1> { x: T0, y: T1, }\nfn main (point: FieldsXY<float32, float32>) = { point.",
+        "struct FieldsXY<T0, T1> { x: T0, y: T1, }\nfn main () = { let mut point = FieldsXY<_, _> { x = 1, y = 2 }; point.",
     ] {
         let project = Project::new(&[("main.resin", source)]);
         let items = project.build_hir().completions(
@@ -1276,7 +1276,7 @@ fn missing_imports_and_cycles_have_source_ranges() {
         ("main.resin", source),
         (
             "available.resin",
-            "export { make }; struct Point { x: int; } fn make() -> Point  { Point { x = 1 } }",
+            "export { make }; struct Point { x: int, } fn make() -> Point  { Point { x = 1 } }",
         ),
     ]);
     let analysis = project.build_hir();
@@ -1572,7 +1572,7 @@ fn holes_preserve_later_locals_and_functions_without_producing_ir() {
         "var broken = missing(1);",
     ] {
         let source = format!(
-            "struct FieldsXY<T0, T1> {{ x: T0; y: T1; }}\nfn first()  {{ {broken} let mut point = FieldsXY<_, _> {{ x = 1, y = 2 }}; point.; }} fn later(arg: int) -> int  {{ let mut result = arg; result }}"
+            "struct FieldsXY<T0, T1> {{ x: T0, y: T1, }}\nfn first()  {{ {broken} let mut point = FieldsXY<_, _> {{ x = 1, y = 2 }}; point.; }} fn later(arg: int) -> int  {{ let mut result = arg; result }}"
         );
         let project = Project::new(&[("main.resin", &source)]);
         let analysis = project.build_hir();
@@ -1596,7 +1596,7 @@ fn holes_preserve_later_locals_and_functions_without_producing_ir() {
 fn unknown_bindings_shadow_outer_values_without_fabricating_types() {
     for initializer in ["", "missing(1)", "1 + (1 == 1)"] {
         let source = format!(
-            "struct FieldsX<T0> {{ x: T0; }}\nstruct FieldsCount<T0> {{ count: T0; }}\nfn main(point: FieldsX<int>)  {{ let mut point = {initializer}; let mut alias = point; alias.; let mut healthy = FieldsCount<_> {{ count = 42 }}; healthy.count; }}"
+            "struct FieldsX<T0> {{ x: T0, }}\nstruct FieldsCount<T0> {{ count: T0; }}\nfn main(point: FieldsX<int>)  {{ let mut point = {initializer}; let mut alias = point; alias.; let mut healthy = FieldsCount<_> {{ count = 42 }}; healthy.count; }}"
         );
         let project = Project::new(&[("main.resin", &source)]);
         let analysis = project.build_hir();
@@ -1648,7 +1648,7 @@ fn unrelated_errors_preserve_expression_types_and_field_completion() {
     ] {
         for broken in ["", "fn broken()  { missing; }"] {
             let source = format!(
-                "{broken} struct FieldsPayload<T0> {{ payload: T0; }}\nfn main()  {{ {setup} value; let mut record = FieldsPayload<_> {{ payload = value }}; record.payload; }}"
+                "{broken} struct FieldsPayload<T0> {{ payload: T0, }}\nfn main()  {{ {setup} value; let mut record = FieldsPayload<_> {{ payload = value }}; record.payload; }}"
             );
             let project = Project::new(&[("main.resin", &source)]);
             let analysis = project.build_hir();
@@ -1680,7 +1680,7 @@ fn unrelated_errors_preserve_expression_types_and_field_completion() {
 
 #[test]
 fn failed_compound_constraints_do_not_poison_independent_inference() {
-    let source = "struct FieldsFirstSecond<T0, T1> { first: T0; second: T1; }\nfn main()  { let mut value: _; let mut broken: FieldsFirstSecond<int, bool>; broken = FieldsFirstSecond<_, _> { first = value, second = 0 }; value = 1.5f; value; }";
+    let source = "struct FieldsFirstSecond<T0, T1> { first: T0, second: T1, }\nfn main()  { let mut value: _; let mut broken: FieldsFirstSecond<int, bool>; broken = FieldsFirstSecond<_, _> { first = value, second = 0 }; value = 1.5f; value; }";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.build_hir();
     assert!(!analysis.diagnostics().is_empty());
@@ -1710,7 +1710,7 @@ fn recovery_uses_unsaved_imports_and_keeps_nominal_field_types() {
         ("main.resin", source),
         (
             "lib.resin",
-            "export { make }; struct Point { x: float32; } fn broken()  { let mut hole = ; } fn make() -> Point  { Point { x = 1 } }",
+            "export { make }; struct Point { x: float32, } fn broken()  { let mut hole = ; } fn make() -> Point  { Point { x = 1 } }",
         ),
     ]);
     let analysis = project.build_hir();
@@ -1725,7 +1725,7 @@ fn recovery_uses_unsaved_imports_and_keeps_nominal_field_types() {
 
 #[test]
 fn recovered_ast_contains_expression_type_and_field_holes() {
-    let source = "struct FieldsX<T0> { x: T0; }\nfn main()  { let mut value = ; let mut typed: ; let mut point = FieldsX<_> { x = 1 }; point.; }";
+    let source = "struct FieldsX<T0> { x: T0, }\nfn main()  { let mut value = ; let mut typed: ; let mut point = FieldsX<_> { x = 1 }; point.; }";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.build_hir();
     let ast = resin_ast::format_source(
@@ -1742,11 +1742,11 @@ fn recovered_ast_contains_expression_type_and_field_holes() {
 #[test]
 fn editor_analysis_tolerates_truncation_and_deleted_tokens() {
     for source in [
-        "export { main }; struct Point { x: int; } fn main(arg: Ptr<Point>)  { let mut value = arg.x + 1; print(fmt(\"{}\", value)); }",
-        "struct FieldsLeftRight<T0, T1> { left: T0; right: T1; }\nfn main(arg: int) -> int  { let mut pair = FieldsLeftRight<_, _> { left = arg, right = 1 }; if (arg == 0) (pair.left) else (pair.right) }",
+        "export { main }; struct Point { x: int, } fn main(arg: Ptr<Point>)  { let mut value = arg.x + 1; print(fmt(\"{}\", value)); }",
+        "struct FieldsLeftRight<T0, T1> { left: T0, right: T1, }\nfn main(arg: int) -> int  { let mut pair = FieldsLeftRight<_, _> { left = arg, right = 1 }; if (arg == 0) (pair.left) else (pair.right) }",
         "fn main()  { let mut values = [1, 2]; while (1 == 1) { let mut missing: Ptr<int>; }; }",
-        "struct Cleanup { value: Ptr<int>;  }\nfn drop(self: Ptr<Cleanup>)  { self.value.* = 42; }\n  fn main()  { let mut n = 0; let mut cleanup = Cleanup { value = &n }; }",
-        "struct Item { value: int; } fn main()  { let mut owner = ArcPtr<Item> { value = 42 }; let mut weak = owner:downgrade(); match (weak:upgrade()) { ArcPtr<Item>(item) => { item.value; }, None => {} }; }",
+        "struct Cleanup { value: Ptr<int>,  }\nfn drop(self: Ptr<Cleanup>)  { self.value.* = 42; }\n  fn main()  { let mut n = 0; let mut cleanup = Cleanup { value = &n }; }",
+        "struct Item { value: int, } fn main()  { let mut owner = ArcPtr<Item> { value = 42 }; let mut weak = owner:downgrade(); match (weak:upgrade()) { ArcPtr<Item>(item) => { item.value; }, None => {} }; }",
     ] {
         for end in 0..=source.len() {
             let project = Project::new(&[("main.resin", &source[..end])]);
@@ -1767,7 +1767,7 @@ fn checking_rejects_holes_even_when_given_a_recovered_ast() {
     for source in [
         "fn main()  { let mut value = ; }",
         "fn main()  { let mut value: ; }",
-        "struct FieldsX<T0> { x: T0; }\nfn main(point: FieldsX<int>)  { point.; }",
+        "struct FieldsX<T0> { x: T0, }\nfn main(point: FieldsX<int>)  { point.; }",
     ] {
         let project = Project::new(&[("main.resin", source)]);
         let analysis = project.build_hir();
@@ -1877,7 +1877,7 @@ fn failed_children_invalidate_composites_without_hiding_later_bindings() {
 fn broken_annotations_and_duplicate_declarations_retain_recognizable_children() {
     for (source, name, expected) in [
         (
-            "struct FieldsABCD<T0, T1, T2, T3> { a: T0; b: T1; c: T2; d: T3; }\nfn f() -> FieldsABCD<_, _, _, Missing>  {} fn later()  { let mut healthy = 1.5f; healthy; }",
+            "struct FieldsABCD<T0, T1, T2, T3> { a: T0, b: T1, c: T2, d: T3, }\nfn f() -> FieldsABCD<_, _, _, Missing>  {} fn later()  { let mut healthy = 1.5f; healthy; }",
             "healthy",
             "healthy: float32",
         ),
@@ -2030,7 +2030,7 @@ fn recursive_failure_discards_copied_caller_result_facts() {
 
 #[test]
 fn incomplete_impls_and_method_arguments_keep_editor_recovery() {
-    let source = "struct Counter { count: int;  }\nfn add(counter: Counter, amount: int) -> int  { counter.count + amount }\n  fn f(c: Counter) -> int  { c:add(1) }";
+    let source = "struct Counter { count: int,  }\nfn add(counter: Counter, amount: int) -> int  { counter.count + amount }\n  fn f(c: Counter) -> int  { c:add(1) }";
     for end in source
         .char_indices()
         .map(|(index, _)| index)
@@ -2039,7 +2039,7 @@ fn incomplete_impls_and_method_arguments_keep_editor_recovery() {
         let project = Project::new(&[("main.resin", &source[..end])]);
         project.build_hir();
     }
-    let source = "struct Counter { count: int;  }\nfn read(counter: Counter) -> int  { counter.count }\n  fn f(c: Counter)  { c.read(; }";
+    let source = "struct Counter { count: int,  }\nfn read(counter: Counter) -> int  { counter.count }\n  fn f(c: Counter)  { c.read(; }";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.build_hir();
     let offset = source.rfind("read").unwrap();
@@ -2117,7 +2117,7 @@ fn formatted_string_and_literal_string_types_survive_editor_recovery() {
 fn invalid_method_arguments_preserve_receiver_facts_and_later_bindings() {
     for duplicate in ["", "fn read(self: Missing) -> int  { 0 }"] {
         let source = format!(
-            "struct Item {{ count: int, def read(self: Ptr<Item>) -> int = {{ self.count }}; {duplicate} }}  fn f(c: Item)  {{ let mut bad = c:read(missing);; let mut alias = bad; let mut healthy = 1.5f; alias; healthy; c.; }}"
+            "struct Item {{ count: int, def read(self: Ptr<Item>) -> int = {{ self.count }}, {duplicate} }}  fn f(c: Item)  {{ let mut bad = c:read(missing);; let mut alias = bad; let mut healthy = 1.5f; alias; healthy; c.; }}"
         );
         let project = Project::new(&[("main.resin", &source)]);
         let analysis = project.build_hir();

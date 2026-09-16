@@ -39,7 +39,7 @@ fn intrinsic_contracts_reject_unknown_operations_and_forged_signatures() {
 
 #[test]
 fn pointer_and_array_methods_keep_generic_nominal_payloads_symbolic() {
-    let source = r#"struct Cell<T> { value: T; }
+    let source = r#"struct Cell<T> { value: T, }
         fn replace<T>(storage: Ptr<Cell<T>>, value: T) -> Cell<T>  {
             storage:replace(Cell<T> { value = value })
         }

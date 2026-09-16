@@ -51,6 +51,29 @@ pub const TAGS_QUERY: &str = include_str!("../../queries/tags.scm");
 #[cfg(test)]
 mod tests {
     #[test]
+    fn struct_fields_are_comma_separated_with_an_optional_trailing_comma() {
+        for source in [
+            "struct Empty {}",
+            "struct Cell<T> { value: T }",
+            "struct Cell<T> { value: T, }",
+            "struct Point<T> { x: T, y: T }",
+            "struct Point<T> { x: T, y: T, }",
+            "struct Nested<T> { pair: (T, T), next: Ptr<Nested<T>> }",
+        ] {
+            assert!(!parse(source).root_node().has_error(), "{source}");
+        }
+        for source in [
+            "struct Point<T> { x: T; y: T; }",
+            "struct Point<T> { x: T y: T }",
+            "struct Point<T> { x: T,, y: T }",
+            "struct Point<T> { x = T, y = T }",
+            "struct Point { fn get() -> int { 0 } }",
+        ] {
+            assert!(parse(source).root_node().has_error(), "{source}");
+        }
+    }
+
+    #[test]
     fn records_require_named_structs() {
         for source in [
             "type Point = { x: int, y: int };",
@@ -60,7 +83,7 @@ mod tests {
             assert!(parse(source).root_node().has_error(), "{source}");
         }
         for source in [
-            "struct Point { x: int; y: int; } fn value() -> Point  { Point { x = 1, y = 2 } }",
+            "struct Point { x: int, y: int, } fn value() -> Point  { Point { x = 1, y = 2 } }",
             "fn pair() -> (int, bool)  { (1, true) }",
             "fn empty() -> ()  {}",
         ] {
@@ -121,7 +144,7 @@ mod tests {
                 .has_error()
         );
         assert!(
-            !parse("struct FieldsAB<T0, T1> { a: T0; b: T1; }\nfn main() -> ()  { let mut x = FieldsAB<_, _> { a = 1, b = 2 }; }")
+            !parse("struct FieldsAB<T0, T1> { a: T0, b: T1, }\nfn main() -> ()  { let mut x = FieldsAB<_, _> { a = 1, b = 2 }; }")
                 .root_node()
                 .has_error()
         );
@@ -280,12 +303,12 @@ mod tests {
     fn type_formers_use_angle_brackets_without_conflicting_with_operators() {
         for source in [
             "type P = Ptr<int>; type Pp = Ptr<Ptr<int>>; type S = Span<Ptr<int>>;",
-            "struct Span<T> { data: Ptr<T>; length: ulong; } struct ArcPtr<T> { owner: StrongOwner; } type GpuSpan<T> = Span<T>;",
+            "struct Span<T> { data: Ptr<T>, length: ulong, } struct ArcPtr<T> { owner: StrongOwner, } type GpuSpan<T> = Span<T>;",
             "type P = GpuSpan<int, int>;",
-            "struct FieldsX<T0> { x: T0; }\ntype G = GpuPtr<int>; type S = GpuSpan<FieldsX<uint>>; type Nested = Ptr<GpuSpan<GpuPtr<int>>>;",
+            "struct FieldsX<T0> { x: T0, }\ntype G = GpuPtr<int>; type S = GpuSpan<FieldsX<uint>>; type Nested = Ptr<GpuSpan<GpuPtr<int>>>;",
             "fn launch(args: GpuArguments) -> GpuArguments  { args }",
             "fn first(p: GpuSpan<int>) -> GpuPtr<int>  { p:at(0_ul) } fn make() -> GpuPtr<_>  { gpu:create::<int>(3_i) }",
-            "struct FieldsX<T0> { x: T0; }\ntype P = Ptr<()>; type S = Span<(int, int)>; type R = Ptr<FieldsX<int>>; type F = Ptr<(int) -> int>;",
+            "struct FieldsX<T0> { x: T0, }\ntype P = Ptr<()>; type S = Span<(int, int)>; type R = Ptr<FieldsX<int>>; type F = Ptr<(int) -> int>;",
             "fn main() -> ()  { let mut p = Ptr<int>(ulong(0)); let mut x = ulong(p) > ulong(0); let mut y = 8 >> 1; let mut z = 1 < 2; }",
             "fn main() -> ()  { let mut p = Ptr < Ptr < int > >(ulong(0)); }",
             "fn fibonacci(n: int) -> int  { n } fn main() -> ()  { let mut x = fibonacci(2); let mut y = fibonacci(3); }",
@@ -311,8 +334,8 @@ mod tests {
     #[test]
     fn definition_keywords_belong_to_statements_not_fields_or_parameters() {
         for source in [
-            "struct FieldsXY<T0, T1> { x: T0; y: T1; }\ntype Point = FieldsXY<int, int>; fn make(x: int) -> Point  { let mut y: int; y = x + 1; Point { x = x, y = y } }",
-            "struct FieldsAB<T0, T1> { a: T0; b: T1; }\nstruct FieldsC<T0> { c: T0; }\nfn main() -> ()  { let mut record = FieldsAB<_, _> { a = { let mut x = 1; x }, b = FieldsC<_> { c = 2 } }; }",
+            "struct FieldsXY<T0, T1> { x: T0, y: T1, }\ntype Point = FieldsXY<int, int>; fn make(x: int) -> Point  { let mut y: int; y = x + 1; Point { x = x, y = y } }",
+            "struct FieldsAB<T0, T1> { a: T0, b: T1, }\nstruct FieldsC<T0> { c: T0; }\nfn main() -> ()  { let mut record = FieldsAB<_, _> { a = { let mut x = 1; x }, b = FieldsC<_> { c = 2 } }; }",
             "fn main() -> ()  { type T = int; let mut x = T(1); let mut callback = main; }",
             "extern { \"stdlib.h\": { fn abs(n: int) -> int; } };",
             "fn/* comment */main() -> ()  { let mut/* comment */n = 1; }",

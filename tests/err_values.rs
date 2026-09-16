@@ -30,7 +30,7 @@ fn error_wrappers_preserve_identity_payloads_and_ownership() {
 
 #[test]
 fn error_wrappers_cannot_hide_reference_payloads() {
-    let error = pipeline::source_module("struct Invalid { error: Err<Ref<int>>; } fn main()  {}")
+    let error = pipeline::source_module("struct Invalid { error: Err<Ref<int>>, } fn main()  {}")
         .unwrap_err()
         .to_string();
     assert!(
@@ -166,7 +166,7 @@ fn inferred_errors_collect_across_plain_returns_and_propagation() {
 fn question_mark_preserves_success_unions_and_destroys_exited_scopes() {
     let module = module(
         r#"export { main };
-        struct Resource { trace: Ptr<int>; digit: int;
+        struct Resource { trace: Ptr<int>, digit: int,
             
         }
 fn drop(self: Ptr<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }

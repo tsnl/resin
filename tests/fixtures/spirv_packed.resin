@@ -1,10 +1,10 @@
 export { kernel };
 import { "$/span.resin" };
 
-struct Bytes3 { a: ubyte; b: ubyte; c: ubyte; }
-struct Rows { first: Bytes3; second: Bytes3; }
-struct Sample { lead: ubyte; rows: Rows; marker: uint; wide: ulong; tail: ubyte; }
-struct Root { count: ulong; inputs: Ptr<Sample>; outputs: Ptr<Sample>; }
+struct Bytes3 { a: ubyte, b: ubyte, c: ubyte, }
+struct Rows { first: Bytes3, second: Bytes3, }
+struct Sample { lead: ubyte, rows: Rows, marker: uint, wide: ulong, tail: ubyte, }
+struct Root { count: ulong, inputs: Ptr<Sample>, outputs: Ptr<Sample>, }
 
 fn update(output: Ptr<Sample>, index: ulong)  {
 	let mut row = if ((index & 1_ul) == 0_ul) {

@@ -1,7 +1,7 @@
 export { kernel, main };
 import { "$/span.resin" };
-struct Root { count: uint; pixels: Ptr<uint>; }
-struct Stop { code: uint; }
+struct Root { count: uint, pixels: Ptr<uint>, }
+struct Stop { code: uint, }
 struct First {}
 struct Second {}
 struct Third {}

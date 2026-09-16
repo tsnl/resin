@@ -158,11 +158,11 @@ struct Resource { handle: Ptr<ubyte>,
         var owner = ArcPtr<Resource>.alloc(Resource { handle = Ptr<ubyte>(0_ul) })?;
         owner.get().handle := acquire_native_handle();
         (owner)
-    };
-    def address(self: Ptr<Resource>) -> Ptr<ubyte> = { self.handle };
+    },
+    def address(self: Ptr<Resource>) -> Ptr<ubyte> = { self.handle },
     def drop(self: Ptr<Resource>) = {
         if (ulong(self.handle) != 0_ul) { release_native_handle(self.handle); };
-    };
+    },
 };
 ```
 The example assumes native acquire/release declarations. A production factory

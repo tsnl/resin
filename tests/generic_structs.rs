@@ -9,7 +9,7 @@ fn run(source: &str) -> std::process::Output {
 #[test]
 fn constructors_and_nominal_arguments_infer_function_parameters() {
     let output = run(r#"export { main }; import { "$/string.resin" };
-        struct Pair<T> { first: T; second: T; }
+        struct Pair<T> { first: T, second: T, }
         fn sum<T>(pair: Pair<T>) -> T  { pair.first + pair.second }
         fn make<T>(first: T, second: T) -> Pair<T>  {
             Pair<T> { first = first, second = second }
@@ -32,7 +32,7 @@ fn constructors_and_nominal_arguments_infer_function_parameters() {
 #[test]
 fn pointers_to_generic_records_preserve_field_places() {
     let output = run(r#"export { main };
-        struct Cell<T> { value: T; }
+        struct Cell<T> { value: T, }
         fn replace<T>(cell: Ptr<Cell<T>>, value: T) -> T  {
             let mut previous = cell.value;
             cell.value = value;
@@ -55,9 +55,9 @@ fn pointers_to_generic_records_preserve_field_places() {
 #[test]
 fn nongeneric_wrappers_can_nest_generic_nominal_storage() {
     let output = run(r#"export { main };
-        struct Cell<T> { value: T; }
-        struct Wrapped { cell: Cell<int>; }
-        struct Outer { wrapped: Wrapped; }
+        struct Cell<T> { value: T, }
+        struct Wrapped { cell: Cell<int>, }
+        struct Outer { wrapped: Wrapped, }
         fn main() -> int  {
             let mut outer = Outer {
                 wrapped = Wrapped { cell = Cell<int> { value = 7 } }
@@ -77,9 +77,9 @@ fn nongeneric_wrappers_can_nest_generic_nominal_storage() {
 #[test]
 fn nongeneric_wrapper_layout_queries_wait_for_nominal_specialization() {
     let output = run(r#"export { main };
-        struct Cell<T> { value: T; }
-        struct Wrapped { cell: Cell<int>; }
-        struct Outer { wrapped: Wrapped; }
+        struct Cell<T> { value: T, }
+        struct Wrapped { cell: Cell<int>, }
+        struct Outer { wrapped: Wrapped, }
         fn main() -> int  { int(size_of(Wrapped) + size_of(Outer) + align_of(Outer)) }
     "#);
     assert_eq!(
@@ -94,7 +94,7 @@ fn nongeneric_wrapper_layout_queries_wait_for_nominal_specialization() {
 fn array_and_span_index_calls_preserve_generic_field_places() {
     let output = run(r#"export { main };
         import { "$/span.resin" };
-        struct Cell<T> { value: T; }
+        struct Cell<T> { value: T, }
         fn copy_through_array<T>(value: T) -> T  {
             let mut cells = [Cell<T> { value = value }];
             cells(0_ul).value
@@ -119,7 +119,7 @@ fn array_and_span_index_calls_preserve_generic_field_places() {
 #[test]
 fn recursive_generic_pointers_reuse_their_concrete_identity() {
     let output = run(r#"export { main };
-        struct Node<T> { value: T; next: Ptr<Node<T>>; }
+        struct Node<T> { value: T, next: Ptr<Node<T>>, }
         fn read<T>(node: Ptr<Node<T>>) -> T  { node.value }
         fn main() -> int  {
             let mut tail = Node<int> { value = 35, next = Ptr<Node<int>>(0_ul) };
@@ -138,7 +138,7 @@ fn recursive_generic_pointers_reuse_their_concrete_identity() {
 #[test]
 fn generic_nominal_error_types_keep_result_payloads() {
     let output = run(r#"export { main };
-        struct Failure<T> { value: T; }
+        struct Failure<T> { value: T, }
         fn fail<T>(value: T) -> (T | Err<Failure<T>>)  {
             Err(Failure<T> { value = value })
         }
@@ -162,7 +162,7 @@ fn generic_nominal_error_types_keep_result_payloads() {
 fn shader_fields_specialize_generic_nominal_storage() {
     let module = support::module(
         r#"export { kernel };
-        struct Cell<T> { value: T; }
+        struct Cell<T> { value: T, }
         fn increment<T>(cell: Ptr<Cell<T>>)  { cell.value = cell.value + 1; }
         @compute_shader fn kernel(index: ulong, root: Ptr<Cell<uint>>)  {
             increment(root);
@@ -180,7 +180,7 @@ fn imported_aliases_preserve_nominal_identity_and_instance_reuse() {
     for (name, source) in [
         (
             "pair.resin",
-            "export { Pair }; struct Pair<T> { first: T; second: T; }",
+            "export { Pair }; struct Pair<T> { first: T, second: T, }",
         ),
         (
             "alias.resin",
@@ -222,7 +222,7 @@ fn imported_aliases_preserve_nominal_identity_and_instance_reuse() {
 
 #[test]
 fn unused_generic_arguments_do_not_demand_recursive_layouts() {
-    let source = "struct Recursive<T> { next: Recursive<T>; } fn marker<T>() -> int  { 42 } fn main() -> int  { marker::<Recursive<int>>() }";
+    let source = "struct Recursive<T> { next: Recursive<T>, } fn marker<T>() -> int  { 42 } fn main() -> int  { marker::<Recursive<int>>() }";
     let module = support::module(source);
     assert!(!module.types.iter().any(|definition| {
         definition
@@ -233,7 +233,7 @@ fn unused_generic_arguments_do_not_demand_recursive_layouts() {
 
 #[test]
 fn demanding_an_infinite_generic_layout_reports_the_application() {
-    let source = "struct Recursive<T> { next: Recursive<T>; } fn measure<T>() -> ulong  { size_of(T) } fn main() -> ulong  { measure::<Recursive<int>>() }";
+    let source = "struct Recursive<T> { next: Recursive<T>, } fn measure<T>() -> ulong  { size_of(T) } fn main() -> ulong  { measure::<Recursive<int>>() }";
     let hir = support::hir(source);
     let error = support::frontend::lower(&hir, &[], &resin_lir::LoweringOptions::default())
         .unwrap_err()
@@ -250,7 +250,7 @@ fn demanding_an_infinite_generic_layout_reports_the_application() {
 
 #[test]
 fn generic_constructor_literals_are_range_checked_after_substitution() {
-    let source = "struct Cell<T> { value: T; } fn make<T>() -> Cell<T>  { Cell<T> { value = 256 } } fn main() -> Cell<ubyte>  { make() }";
+    let source = "struct Cell<T> { value: T, } fn make<T>() -> Cell<T>  { Cell<T> { value = 256 } } fn main() -> Cell<ubyte>  { make() }";
     let hir = support::hir(source);
     let error = support::frontend::lower(&hir, &[], &resin_lir::LoweringOptions::default())
         .unwrap_err()
@@ -263,7 +263,7 @@ fn generic_constructor_literals_are_range_checked_after_substitution() {
 fn local_structs_capture_outer_types_and_specialize_each_layout() {
     let output = run(r#"export { main }; import { "$/string.resin" };
         fn pair<T>(value: T) -> _  {
-            struct Local<U> { outer: T; inner: U; }
+            struct Local<U> { outer: T, inner: U, }
             Local<int> { outer = value, inner = 35 }
         }
         fn measure<T>(value: T) -> ulong  { size_of(T) }
@@ -288,7 +288,7 @@ fn local_structs_capture_outer_types_and_specialize_each_layout() {
 #[test]
 fn optional_generic_structs_preserve_the_payload_after_unwrapping() {
     let output = run(r#"export { main };
-        struct Cell<T> { value: T; }
+        struct Cell<T> { value: T, }
         fn present<T>(value: T) -> Cell<T> | None  { Cell<T> { value = value } }
         fn main() -> int  { present(42_i)!.value }
     "#);
@@ -304,13 +304,13 @@ fn optional_generic_structs_preserve_the_payload_after_unwrapping() {
 fn nongeneric_wrappers_copy_shared_generic_storage_and_destroy_it_once() {
     let output = run(r#"export { main };
         import { "$/shared.resin" };
-        struct Resource { trace: Ptr<int>; answer: int;
+        struct Resource { trace: Ptr<int>, answer: int,
             
         }
 fn drop(self: Ptr<Resource>)  { if (self.answer != 0) { self.trace.* = self.trace.* + 1; }; }
 
-        struct Cell<T> { value: T; }
-        struct Envelope { owner: ArcPtr<Cell<Resource>>; }
+        struct Cell<T> { value: T, }
+        struct Envelope { owner: ArcPtr<Cell<Resource>>, }
         fn main() -> int  {
             let mut trace = 0_i;
             {
@@ -344,7 +344,7 @@ fn foreign_pointer_signatures_keep_generic_pointees() {
                 fn free(value: Ptr<Cell<int>>);
             },
         };
-        struct Cell<T> { value: T; }
+        struct Cell<T> { value: T, }
         fn main() -> int  { free(Ptr<Cell<int>>(0_ul)); 42 }"#);
     assert_eq!(
         output.status.code(),

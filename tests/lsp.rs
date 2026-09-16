@@ -374,7 +374,7 @@ fn dot_completion_updates_unsaved_receiver_types_and_uses_utf16_edits() {
     let uri = uri(&temp.path().join("fields.resin"));
     for (version, field, typed) in [(1, "count", ""), (2, "length", "le")] {
         let source = format!(
-            "struct Field {{ {field}: long; }} fn main ()  {{ let mut value = Field {{ {field} = 1 }}; /* 😀 */ value.{typed}; }}"
+            "struct Field {{ {field}: long, }} fn main ()  {{ let mut value = Field {{ {field} = 1 }}; /* 😀 */ value.{typed}; }}"
         );
         if version == 1 {
             client.open(&uri, &source);
@@ -441,8 +441,8 @@ fn dot_completion_sorts_fields_before_methods() {
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("members.resin"));
     let source = "struct Record { zebra: int, middle: int,
-def beta(self: Ptr<Record>) = {};
-def alpha(self: Ptr<Record>) = {};
+def beta(self: Ptr<Record>) = {},
+def alpha(self: Ptr<Record>) = {},
 };
 
 def main() = { var value = Record { zebra = 1, middle = 2 }; value.; };";
@@ -750,7 +750,7 @@ fn holes_do_not_block_later_features_and_repair_clears_diagnostics() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("holes.resin"));
-    let broken = "struct FieldsCount<T0> { count: T0; } fn main()  { let mut missing = ; let mut value = FieldsCount<_> { count = 1 }; value.count; }";
+    let broken = "struct FieldsCount<T0> { count: T0, } fn main()  { let mut missing = ; let mut value = FieldsCount<_> { count = 1 }; value.count; }";
     client.open(&uri, broken);
     client.diagnostics(&uri, Some(1), true);
     let end = broken.rfind("count").unwrap() as u32 + 2;

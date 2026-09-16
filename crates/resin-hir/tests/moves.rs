@@ -34,14 +34,14 @@ fn assignment_requires_mut_and_returns_unit() {
 #[test]
 fn field_moves_preserve_siblings_and_block_whole_reads() {
     accepts(
-        "struct Item {} struct Pair { a: Item; b: Item; } fn f(value: Pair) { let a = value.a; let b = value.b; }",
+        "struct Item {} struct Pair { a: Item, b: Item, } fn f(value: Pair) { let a = value.a; let b = value.b; }",
     );
     rejects(
-        "struct Item {} struct Pair { a: Item; b: Item; } fn f(value: Pair) { let a = value.a; value; }",
+        "struct Item {} struct Pair { a: Item, b: Item, } fn f(value: Pair) { let a = value.a; value; }",
         "moved",
     );
     accepts(
-        "struct Item {} struct Pair { a: Item; b: Item; } fn f(mut value: Pair) { let a = value.a; value.a = Item {}; value; }",
+        "struct Item {} struct Pair { a: Item, b: Item, } fn f(mut value: Pair) { let a = value.a; value.a = Item {}; value; }",
     );
 }
 
@@ -63,7 +63,7 @@ fn branches_and_loop_backedges_check_moves() {
 #[test]
 fn references_do_not_consume_their_referents() {
     accepts(
-        "struct Item { value: int; } fn inspect(value: Ref<Item>) -> int { value.value } fn f(value: Item) -> int { inspect(value) + inspect(value) }",
+        "struct Item { value: int, } fn inspect(value: Ref<Item>) -> int { value.value } fn f(value: Item) -> int { inspect(value) + inspect(value) }",
     );
     rejects(
         "struct Item {} fn f(value: Ref<Item>) -> Item { value }",

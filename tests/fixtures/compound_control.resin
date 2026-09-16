@@ -1,6 +1,6 @@
 export { kernel, main };
-struct State { counter: uint; result: uint; }
-struct Pair { a: uint; b: uint; }
+struct State { counter: uint, result: uint, }
+struct Pair { a: uint, b: uint, }
 fn touch(p: Ptr<State>) -> uint  { let mut old = p.counter; p.counter = old + 1_ui; old }
 fn choose(p: Ptr<State>) -> Ptr<uint>  { touch(p); &p.result }
 fn identity(n: uint) -> uint  { n }

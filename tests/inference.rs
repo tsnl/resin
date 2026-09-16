@@ -37,8 +37,8 @@ fn explicit_holes_are_not_editor_recovery_holes() {
 #[test]
 fn holes_compose_inside_pointers_spans_records_and_functions() {
     let m = module(
-        r#"struct FieldsPointerNumberFlag<T0, T1, T2> { pointer: T0; number: T1; flag: T2; }
-        struct Span<T> { data: Ptr<T>; length: ulong; }
+        r#"struct FieldsPointerNumberFlag<T0, T1, T2> { pointer: T0, number: T1, flag: T2, }
+        struct Span<T> { data: Ptr<T>, length: ulong, }
         fn pointer(p: Ptr<Ptr<int>>) -> Ptr<Ptr<_>>  { p }
         fn span(p: Span<Ptr<int>>) -> Span<Ptr<_>>  { p }
         fn plus(n: int) -> int  { n + 1 }
@@ -111,11 +111,11 @@ fn shadowed_function_names_do_not_create_inference_dependencies() {
 #[test]
 fn casts_do_not_choose_an_unrelated_nominal_type_for_a_hole() {
     rejects(
-        "struct One { value: int; } struct Two { value: int; } fn value() -> _  { let mut v: _; v = One { value = 1 }; v = Two { value = 2 }; v }",
+        "struct One { value: int, } struct Two { value: int, } fn value() -> _  { let mut v: _; v = One { value = 1 }; v = Two { value = 2 }; v }",
         "TypeMismatch",
     );
     let m = module(
-        "struct One { value: int; } fn value() -> _  { let mut v = One { value = 1 }; _(v) }",
+        "struct One { value: int, } fn value() -> _  { let mut v = One { value = 1 }; _(v) }",
     );
     assert_eq!(
         m.functions[0].result,
@@ -172,10 +172,10 @@ fn recursive_groups_infer_from_bodies_not_callers() {
 
 #[test]
 fn nominal_identity_and_local_type_definitions_survive_inference() {
-    let m = module("struct Meters { value: int; } fn make() -> _  { Meters { value = 42 } }");
+    let m = module("struct Meters { value: int, } fn make() -> _  { Meters { value = 42 } }");
     assert!(matches!(m.functions[0].result, Ty::Defined { .. }));
     let m = module(
-        "fn main() -> _  { struct Meters { value: int; } let mut distance = Meters { value = 42 }; distance.value }",
+        "fn main() -> _  { struct Meters { value: int, } let mut distance = Meters { value = 42 }; distance.value }",
     );
     assert_eq!(m.types.iter().filter(|d| d.name().is_some()).count(), 1);
     assert_eq!(m.functions[0].result, Ty::Int32);
@@ -194,7 +194,7 @@ fn ambiguous_infinite_and_forbidden_holes_are_diagnostics() {
         "fn f(x: _)  {}",
         "fn f(x: Ptr<_>)  {}",
         "type Foo = Ptr<_>;",
-        "struct Foo { value: _; }",
+        "struct Foo { value: _, }",
         "extern { \"api.h\": { fn f() -> _; } };",
         "fn main() -> _  { type Foo = _; () }",
     ] {
@@ -475,7 +475,7 @@ fn never_elimination_requires_an_empty_input_and_resolved_context() {
 #[test]
 fn layout_operands_check_nested_declarations_without_emitting_them() {
     let m = module(
-        "fn effect() -> int  { 42 } fn measure() -> _  { size_of({ struct Local { n: int; } effect(); let mut value = Local { n = effect() }; value }) }",
+        "fn effect() -> int  { 42 } fn measure() -> _  { size_of({ struct Local { n: int, } effect(); let mut value = Local { n = effect() }; value }) }",
     );
     assert_eq!(
         m.types
@@ -527,11 +527,11 @@ fn layout_operands_do_not_read_or_initialize_runtime_locals() {
 #[test]
 fn nested_record_annotations_reject_duplicate_field_names() {
     for source in [
-        "struct FieldsNN<T0, T1> { n: T0; n: T1; }\nfn f(x: FieldsNN<int, int>)  {}",
-        "struct FieldsNN<T0, T1> { n: T0; n: T1; }\nfn f()  { let mut x: Ptr<FieldsNN<int, int>>; }",
-        "fn f()  { struct Local { n: int; n: int; } }",
-        "struct FieldsNN<T0, T1> { n: T0; n: T1; }\nfn f()  { type Local = FieldsNN<int, int>; }",
-        "struct FieldsNN<T0, T1> { n: T0; n: T1; }\nfn f()  { { let mut x: FieldsNN<int, int>; }; }",
+        "struct FieldsNN<T0, T1> { n: T0, n: T1, }\nfn f(x: FieldsNN<int, int>)  {}",
+        "struct FieldsNN<T0, T1> { n: T0, n: T1, }\nfn f()  { let mut x: Ptr<FieldsNN<int, int>>; }",
+        "fn f()  { struct Local { n: int, n: int, } }",
+        "struct FieldsNN<T0, T1> { n: T0, n: T1, }\nfn f()  { type Local = FieldsNN<int, int>; }",
+        "struct FieldsNN<T0, T1> { n: T0, n: T1, }\nfn f()  { { let mut x: FieldsNN<int, int>; }; }",
     ] {
         rejects(source, "DuplicateField");
     }

@@ -59,7 +59,7 @@ fn omitted_function_results_lower_to_unit() {
 
 #[test]
 fn definition_keywords_preserve_statement_and_field_spans() {
-    let source = r#"struct Pair { first: int; second: int; }
+    let source = r#"struct Pair { first: int, second: int, }
         fn make(seed: int) -> Pair  {
             let mut first = seed;
             let mut second: int;
@@ -73,7 +73,7 @@ fn definition_keywords_preserve_statement_and_field_spans() {
     assert!(matches!(definition.val, StmtKind::Struct { .. }));
     assert_eq!(
         text(definition.span),
-        "struct Pair { first: int; second: int; }"
+        "struct Pair { first: int, second: int, }"
     );
     let function = &file.stmts[1];
     let StmtKind::Function {

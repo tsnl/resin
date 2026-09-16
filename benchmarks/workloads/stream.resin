@@ -2,11 +2,16 @@ export { Root, kernel, cpu };
 
 import { "$/span.resin" };
 
-struct Root { count: uint; iterations: uint; input: Ptr<uint>; output: Ptr<uint>; }
+struct Root {
+	count: uint,
+	iterations: uint,
+	input: Ptr<uint>,
+	output: Ptr<uint>,
+}
 
 // One read and one write per lane, with little arithmetic between them.
 @compute_shader
-fn kernel(index: ulong, root: Ptr<Root>)  {
+fn kernel(index: ulong, root: Ptr<Root>) {
 	if (index < ulong(root.count)) {
 		let mut input = Span<uint> { data = root.input, length = ulong(root.count) };
 		let mut output = Span<uint> { data = root.output, length = ulong(root.count) };
@@ -14,7 +19,7 @@ fn kernel(index: ulong, root: Ptr<Root>)  {
 	};
 }
 
-fn cpu(root: Ptr<Root>)  {
+fn cpu(root: Ptr<Root>) {
 	let mut index = 0_ul;
 	while (index < ulong(root.count)) {
 		kernel(index, root);

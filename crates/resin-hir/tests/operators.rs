@@ -6,7 +6,7 @@ use common::hir_module;
 #[test]
 fn unary_and_binary_slots_resolve_to_ordinary_calls() {
     let module = hir_module(
-        r#"struct Number { value: int;
+        r#"struct Number { value: int,
             
             
         }

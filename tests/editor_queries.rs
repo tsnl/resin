@@ -86,7 +86,7 @@ fn constants_and_sizeof_are_highlighted_and_outlined() {
 
 #[test]
 fn declaration_keywords_are_visible_in_outlines_and_struct_textobjects() {
-    let source = "struct Point { x: float32; y: float32; } type Position = Point;";
+    let source = "struct Point { x: float32, y: float32, } type Position = Point;";
     let outline = captures(ZED_QUERIES[3].1, source);
     for (kind, text) in [
         ("context", "struct"),
@@ -102,7 +102,7 @@ fn declaration_keywords_are_visible_in_outlines_and_struct_textobjects() {
     let objects = captures(ZED_QUERIES[5].1, source);
     assert!(objects.contains(&(
         "class.around".into(),
-        "struct Point { x: float32; y: float32; }".into()
+        "struct Point { x: float32, y: float32, }".into()
     )));
     for field in ["x: float32", "y: float32"] {
         assert!(objects.contains(&("class.inside".into(), field.into())));
@@ -111,7 +111,7 @@ fn declaration_keywords_are_visible_in_outlines_and_struct_textobjects() {
 
 #[test]
 fn reserved_words_have_highlight_rules() {
-    let source = "export { f }; import { \"x.resin\" }; extern type Handle; struct S { value: int; } type T = S; fn f() -> (() | Err<Never>)  { let mut x: Span<Ptr<ubyte>>; free(x); while (0 < 1) { if (0 == 1) { () } else { () }; }; match (value) { ()(v) => { (v) }, Err(e) => { Err(e) } } }";
+    let source = "export { f }; import { \"x.resin\" }; extern type Handle; struct S { value: int, } type T = S; fn f() -> (() | Err<Never>)  { let mut x: Span<Ptr<ubyte>>; free(x); while (0 < 1) { if (0 == 1) { () } else { () }; }; match (value) { ()(v) => { (v) }, Err(e) => { Err(e) } } }";
     let highlighted = captures(ZED_QUERIES[0].1, source);
     for word in [
         "export", "import", "extern", "type", "struct", "fn", "let", "mut", "if", "else", "while",
@@ -126,7 +126,7 @@ fn reserved_words_have_highlight_rules() {
 
 #[test]
 fn result_syntax_is_highlighted_and_structs_have_outlines() {
-    let source = "struct Broken { code: int; } fn fail() -> (int | Err<Never>)  { match (value) { int(n) => { (n?) }, Err(error) => { Err(error) } } }";
+    let source = "struct Broken { code: int, } fn fail() -> (int | Err<Never>)  { match (value) { int(n) => { (n?) }, Err(error) => { Err(error) } } }";
     let captured = captures(ZED_QUERIES[0].1, source);
     for (kind, text) in [
         ("keyword", "struct"),
@@ -173,9 +173,9 @@ fn queries_capture_resin_constructs() {
             },
         };
         import { "$/core.resin" };
-        struct FieldsField<T0> { field: T0; }
+        struct FieldsField<T0> { field: T0, }
 extern type Handle;
-        struct Number {field: int;}
+        struct Number {field: int,}
         // a function
         fn main (parameter: int) -> int  {
             let mut local = FieldsField<_> {field = 2}; let mut pointer: Ptr<int>; let mut values = [1, 2];
@@ -295,7 +295,7 @@ fn intrinsic_declarations_have_function_navigation_and_parameter_highlights() {
 
 #[test]
 fn helix_queries_capture_highlights_indentation_and_textobjects() {
-    let source = r#"struct Cell<T> { value: T; }
+    let source = r#"struct Cell<T> { value: T, }
         // increment
         fn increment(value: int) -> int {
             let cell = Cell<int> { value = 1 };
@@ -328,7 +328,7 @@ fn helix_queries_capture_highlights_indentation_and_textobjects() {
     assert!(!captures(HELIX_QUERIES[1].1, comparison).contains(&("outdent".into(), ">".into())));
     let objects = captures(HELIX_QUERIES[2].1, source);
     for (kind, text) in [
-        ("class.around", "struct Cell<T> { value: T; }"),
+        ("class.around", "struct Cell<T> { value: T, }"),
         ("class.inside", "value: T"),
         ("comment.around", "// increment"),
     ] {

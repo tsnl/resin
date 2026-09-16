@@ -2,7 +2,7 @@ export { main };
 
 import { "$/string.resin" };
 
-fn main()  {
+fn main() {
 	let mut n = 1;
 	let mut sum = 0;
 	while (n <= 10) {

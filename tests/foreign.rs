@@ -58,7 +58,7 @@ fn foreign_functions_forward_separate_c_arguments() {
 fn pointers_roundtrip_and_address_expressions_evaluate_once() {
     let output = run(r#"export { main };
 
-        struct FieldsValue<T0> { value: T0; }
+        struct FieldsValue<T0> { value: T0, }
 fn identity(p: Ptr<FieldsValue<int>>, calls: Ptr<int>) -> Ptr<FieldsValue<int>>  {
             calls.* = calls.* + 1;
             p
@@ -79,8 +79,8 @@ fn identity(p: Ptr<FieldsValue<int>>, calls: Ptr<int>) -> Ptr<FieldsValue<int>> 
 fn foreign_aggregate_values_and_implicit_pointer_casts_are_rejected() {
     for source in [
         "extern { \"native.h\": { fn consume (value: Native) -> (); } }; extern type Native;",
-        "extern { \"native.h\": { fn consume (value: FieldsX<int>) -> (); } }; struct FieldsX<T0> { x: T0; }",
-        "extern { \"native.h\": { fn produce () -> FieldsX<int>; } }; struct FieldsX<T0> { x: T0; }",
+        "extern { \"native.h\": { fn consume (value: FieldsX<int>) -> (); } }; struct FieldsX<T0> { x: T0, }",
+        "extern { \"native.h\": { fn produce () -> FieldsX<int>; } }; struct FieldsX<T0> { x: T0, }",
         "extern { \"native.h\": { fn callback (f: () -> int) -> (); } };",
     ] {
         assert!(
@@ -95,7 +95,7 @@ fn foreign_aggregate_values_and_implicit_pointer_casts_are_rejected() {
     for source in [
         "export { main }; extern type Native; fn main() -> ()  { let mut value: Native; }",
         "extern type Native; fn identity (n: Native) -> Native  { n }",
-        "extern type Native; struct Wrapped { value: Native; }",
+        "extern type Native; struct Wrapped { value: Native, }",
         "extern type Native; fn read (n: Ptr<Native>) -> ()  { n.*; }",
     ] {
         assert!(error(source).contains("OpaqueValue"), "{source}");

@@ -2,21 +2,29 @@ export { kernel, main };
 
 import { "$/span.resin", "$/string.resin", "$/gpu.resin", "$/shared.resin", "$/image.resin" };
 
-struct HostRoot { width: uint; height: uint; pixels: GpuSpan<uint>; }
-struct Root { width: uint; height: uint; pixels: Span<uint>; }
+struct HostRoot {
+	width: uint,
+	height: uint,
+	pixels: GpuSpan<uint>,
+}
+struct Root {
+	width: uint,
+	height: uint,
+	pixels: Span<uint>,
+}
 
-fn pixel(index: uint) -> uint  {
+fn pixel(index: uint) -> uint {
 	0xff400000_ui | (index & 0xffff_ui)
 }
 
 @compute_shader
-fn kernel(index: ulong, root: Ptr<Root>)  {
+fn kernel(index: ulong, root: Ptr<Root>) {
 	if (index < ulong(root.width) * ulong(root.height) && index < root.pixels.length) {
 		root.pixels:at(index) = pixel(uint(index));
 	};
 }
 
-fn main() -> (() | Err<_>)  {
+fn main() -> (() | Err<_>) {
 	let mut gpu = gpu_new()?;
 
 	let mut pipeline = gpu:create_compute_pipeline(kernel)?;
