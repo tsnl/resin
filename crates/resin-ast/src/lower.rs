@@ -631,7 +631,8 @@ impl<'a> AstGen<'a> {
             "assert_term" => {
                 let condition =
                     self.gen_term(child.child_by_field_name("condition").unwrap_or(child));
-                self.call_var("assert", vec![condition], span)
+                let keyword_span = self.span(child.child(0).unwrap_or(child));
+                self.call_var("assert", keyword_span, vec![condition], span)
             }
             "boolean" => Spanned::new(
                 TermKind::Bool {
