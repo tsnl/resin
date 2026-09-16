@@ -343,3 +343,39 @@ The broad run includes the final restart, managed navigation, portable-path, nat
 lifecycle, download-integrity, and header-dependency regressions. Linux execution is
 verified here; Windows/macOS hosted execution remains manual under the CI policy.
 The Docker/systemd examples are manual deployment pathways, with no installer.
+
+## Rebased stack and direct-native review (2026-09-15)
+
+The seven-PR stack was rebased onto `main` at `b0f9b4fb`, preserving constant
+declarations, constant editor completions, and per-GPU compute workgroup sizes.
+The review added the following corrections and regression coverage:
+
+- AST import assembly uses heap-backed traversal. A 4,096-module test preserves
+  dependency order and nested error locations without growing the worker stack.
+  A real HTTP analysis of 1,200 modules returns 200 with no diagnostics; the previous
+  server aborted with stack overflow at 886 modules on this Linux machine.
+- HTTP cancellation has a five-second total retry/drain deadline, including
+  acknowledged requests whose original response remains stalled.
+- LSP file watches cover arbitrary workspace filenames and configured external
+  include roots. Creating/deleting an extensionless local header refreshes
+  diagnostics without another edit to the Resin buffer.
+- Direct C calls reject unsupported parameter attributes that can introduce hidden
+  machine arguments. Native frames use inline stack probes for guard-page growth.
+- Constant `sizeof` evaluation and Cranelift share `resin_types::layout::value`.
+  Type values retain their 64-bit representation, verified through generic
+  specialization and actual nested-record field addresses. The C layout comparison
+  uses an external prototype and a separately compiled handwritten fixture.
+
+After rebuilding the workspace packages in the final worktree:
+
+- `cargo test --locked --workspace --all-features`: **1,240 tests and 21 doctests
+  passed**, with zero ignored tests. SPIR-V Tools, GLSLC, GPU, and window execution
+  were required; Xvfb supplied an X11 display and particle tests used their full workload.
+- Strict workspace/all-targets/all-features Clippy, formatting, and whitespace
+  checks passed.
+- The explicit-service host smoke test passed (`fibonacci(10) = 55`).
+
+Managed-source navigation mirrors retain their files and source text until the LSP
+session exits, including older managed snapshots; compiler cache eviction does not
+reclaim them. This documented client retention limitation remains a follow-up.
+Windows/macOS execution and Docker deployment were not rerun during this review.
