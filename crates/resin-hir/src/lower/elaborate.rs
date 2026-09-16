@@ -484,7 +484,9 @@ impl Completion<'_> {
             typed::TermKind::Deref { pointer } => TermKind::Deref {
                 pointer: self.boxed(pointer)?,
             },
-            _ => return self.boxed(source),
+            // Accessing a field or assigning through a returned reference must
+            // preserve its place; consuming it here would read the whole value.
+            _ => self.elaborate_kind(source)?,
         };
         let place = Term {
             span: source.span,
@@ -965,6 +967,13 @@ impl Completion<'_> {
             _ => None,
         };
         if let Some((ty, conversion)) = receiver {
+            let base = if conversion == ReceiverConversion::Address {
+                let place = self.place(func)?;
+                self.require_available(&place)?;
+                place
+            } else {
+                self.boxed(func)?
+            };
             let args = Arguments {
                 params: vec![
                     ty.clone(),
@@ -976,7 +985,7 @@ impl Completion<'_> {
                         ty,
                         kind: TermKind::Adapt {
                             conversion,
-                            arg: self.boxed(func)?,
+                            arg: base,
                         },
                     },
                     self.elaborate(&args[0])?,

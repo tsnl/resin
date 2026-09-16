@@ -225,7 +225,7 @@ fn native(self: Ref<Window>) -> Ptr<ResinWindow> {
 	self.owner:get().handle
 }
 
-fn window_new(width: uint, height: uint, title: String) -> (Window | Err<RuntimeError>) {
+fn window_new(width: uint, height: uint, title: Ref<String>) -> (Window | Err<RuntimeError>) {
 	let mut owner = arc_ptr_alloc::<WindowOwner>(WindowOwner { handle = Ptr<ResinWindow>(0_ul) })?;
 	runtime_status_from_code(resin_window_create(width, height, title:get().data, &owner:get().handle))?;
 	(Window { owner = owner })

@@ -43,8 +43,8 @@ fn source_strings_format_explicit_byte_views_and_keep_the_terminator_outside_len
         r#"export { main };
         import { "$/span.resin", "$/shared.resin", "$/string.resin" };
         fn main() -> int  {
-            let mut bytes = [65_ub, 0_ub, 66_ub];
-            let mut text = string_from_bytes(Span<ubyte> { data = &bytes:at(0), length = 3_ul });
+            let buffer = [65_ub, 0_ub, 66_ub];
+            let mut text = string_from_bytes(Span<ubyte> { data = &buffer:at(0), length = 3_ul });
             let mut weak = text.storage:downgrade();
             let mut formatted = fmt("{0}:{1}:{2}", (42, text:bytes(), "end"));
             let mut raw = formatted:get();
@@ -63,7 +63,7 @@ fn source_strings_format_explicit_byte_views_and_keep_the_terminator_outside_len
 fn source_shared_elements_drop_in_reverse_and_unwind_on_allocation_failure() {
     success(&run(
         r#"export { main };
-        import { "$/shared.resin", "$/status.resin" };
+        import { "$/shared.resin", "$/span.resin", "$/status.resin" };
         struct Item { trace: Ptr<int>, digit: int,
             
         }
@@ -80,10 +80,10 @@ fn drop(self: Ptr<Item>)  {
         fn main() -> (int | Err<_>)  {
             let mut trace = 0;
             {
-                let mut items = arc_span_alloc::<Item>(3, Item { trace = &trace, digit = 0 })?;
-                items:get():at(0).digit = 1;
-                items:get():at(1).digit = 2;
-                items:get():at(2).digit = 3;
+                let items = arc_ptr_alloc([Item { trace = &trace, digit = 0 }, Item { trace = &trace, digit = 0 }, Item { trace = &trace, digit = 0 }])?;
+                items:get().*:at(0).digit = 1;
+                items:get().*:at(1).digit = 2;
+                items:get().*:at(2).digit = 3;
             };
             let mut failed = match (fail(&trace)) { ()(value) => { 1 == 0 }, Err(error) => { 1 == 1 } };
             (if (failed && trace == 3214) { 0 } else { 1 })
@@ -97,7 +97,7 @@ fn drop(self: Ptr<Item>)  {
 fn source_owned_wrappers_retain_payloads_and_borrow_temporary_receivers() {
     success(&run(
         r#"export { main };
-        import { "$/shared.resin", "$/status.resin" };
+        import { "$/shared.resin", "$/span.resin", "$/status.resin" };
         struct Item { trace: Ptr<int>, digit: int,
             
         }
@@ -113,13 +113,12 @@ fn drop(self: Ptr<Item>)  {
                 let mut owner = arc_ptr_alloc::<Item>(Item { trace = &trace, digit = 0 })?;
                 owner:get().digit = 7;
                 weak = owner:downgrade();
-                let mut copy = owner;
+                let copy = owner:clone();
                 valid = valid && copy:get().digit == 7 && weak:upgrade()!:get().digit == 7;
                 let mut values = arc_span_alloc::<uint>(3, 42_ui)?;
                 values:get():at(2) = 9_ui;
                 valid = valid && values:get():at(0) == 42_ui && values:get():at(2) == 9_ui;
-                let mut borrowed = arc_span_alloc::<uint>(1, 13_ui)?:get();
-                valid = valid && borrowed:at(0) == 13_ui;
+                valid = valid && arc_span_alloc::<uint>(1, 13_ui)?:get():at(0) == 13_ui;
                 let mut empty = arc_span_alloc::<uint>(0, 0_ui)?;
                 valid = valid && empty:get().length == 0_ul;
             };
@@ -140,7 +139,7 @@ fn source_owners_allocate_initialized_typed_storage_and_reports_overflow() {
     let output = run(
         r#"export { main };
         import { "$/shared.resin", "$/span.resin", "$/status.resin" };
-        struct Empty {}
+        type Empty = ();
         fn main() -> (int | Err<_>)  {
             let mut weak = weak_span_empty::<uint>();
             let mut valid = 1 == 1;
@@ -148,7 +147,7 @@ fn source_owners_allocate_initialized_typed_storage_and_reports_overflow() {
                 let mut memory: ArcSpan<uint>;
                 memory = arc_span_alloc::<uint>(4, 7_ui)?;
                 weak = memory:downgrade();
-                let mut alias = memory;
+                let alias = memory:clone();
                 let mut values = memory:get();
                 valid = valid && values.length == 4_ul && values:at(3) == 7_ui;
                 values:at(3) = 42_ui;
@@ -156,7 +155,7 @@ fn source_owners_allocate_initialized_typed_storage_and_reports_overflow() {
                 valid = valid && values:as_bytes().length == 4_ul * size_of(uint);
                 let mut upgraded = weak:upgrade()!;
                 valid = valid && upgraded:get():at(3) == 42_ui;
-                let mut descriptor = arc_ptr_alloc::<Span<uint>>(values)?;
+                let mut descriptor = arc_ptr_alloc::<Span<uint>>(values:clone())?;
                 let mut previous = descriptor:get():replace(Span<uint> { data = values.data, length = 2_ul });
                 valid = valid && previous.length == 4_ul && descriptor:get().length == 2_ul;
                 valid = valid && memory:get().length == 4_ul;
@@ -167,7 +166,7 @@ fn source_owners_allocate_initialized_typed_storage_and_reports_overflow() {
             };
             let mut empty = arc_span_alloc::<uint>(0, 0_ui)?;
             valid = valid && empty:get().length == 0_ul;
-            let mut empty_elements = arc_span_alloc::<Empty>(19, Empty {})?;
+            let mut empty_elements = arc_span_alloc::<Empty>(19, ())?;
             valid = valid && empty_elements:get().length == 19_ul;
             let mut failure: (ArcSpan<uint> | Err<OutOfMemory>);
             failure = arc_span_alloc::<uint>(0xffffffffffffffff_ul, 0_ui);
@@ -201,7 +200,7 @@ fn source_owners_allocate_initialized_typed_storage_and_reports_overflow() {
 }
 
 #[test]
-fn owned_spans_release_managed_elements_on_success_and_error() {
+fn shared_arrays_release_managed_elements_on_success_and_error() {
     let output = run(
         r#"export { main };
         import { "$/shared.resin" };
@@ -219,9 +218,8 @@ fn drop(self: Ptr<Item>)  { if (self.digit != 0) { self.trace.* = self.trace.* *
             (owner)
         }
         fn work(trace: Ptr<int>, fail: bool) -> (() | Err<_>)  {
-            let mut values = arc_span_alloc::<ArcPtr<Item>>(2, item(trace, 1)?)?;
-            values:get():at(1) = item(trace, 2)?;
-            let mut alias = values;
+            let values = arc_ptr_alloc([item(trace, 1)?, item(trace, 2)?])?;
+            let alias = values:clone();
             if (fail) { Err(Failed {}) } else { (()) }
         }
         fn main() -> (int | Err<_>)  {
@@ -235,8 +233,11 @@ fn drop(self: Ptr<Item>)  { if (self.digit != 0) { self.trace.* = self.trace.* *
             };
             valid = valid && failed && trace == 21;
             trace = 0;
-            let mut rejected = match (arc_span_alloc::<ArcPtr<Item>>(0xffffffffffffffff_ul, item(&trace, 3)?)) {
-                ArcSpan<ArcPtr<Item>>(values) => { 1 == 0 },
+            let mut rejected = match ({
+                let owner = item(&trace, 3)?;
+                arc_span_alloc::<ulong>(0xffffffffffffffff_ul, 0_ul)
+            }) {
+                ArcSpan<ulong>(values) => { 1 == 0 },
                 Err(error) => { 1 == 1 },
             };
             (if (valid && rejected && trace == 3) { 0 } else { 1 })
@@ -259,9 +260,9 @@ fn generic_owned_span_methods_preserve_lifetimes_and_widened_results() {
         fn optional<T>(count: ulong, initial: T) -> ArcSpan<T> | None  {
             match (arc_span_alloc::<T>(count, initial)) { ArcSpan<T>(owner) => { owner }, Err(error) => { None } }
         }
-        fn borrowed<T>(owner: Ptr<ArcSpan<T>>) -> Span<T>  { owner:get() }
-        fn weaken<T>(owner: ArcSpan<T>) -> WeakSpan<T>  { owner:downgrade() }
-        fn upgrade<T>(weak: WeakSpan<T>) -> ArcSpan<T> | None | Other  { weak:upgrade() }
+        fn borrowed<T>(owner: Ref<ArcSpan<T>>) -> Span<T> { owner:get() }
+        fn weaken<T>(owner: Ref<ArcSpan<T>>) -> WeakSpan<T>  { owner:downgrade() }
+        fn widen_upgrade<T>(weak: Ref<WeakSpan<T>>) -> ArcSpan<T> | None | Other  { weak:upgrade() }
         fn first<T>(initial: T) -> T  {
             let mut owner = optional(1, initial)!;
             owner:get():at(0)
@@ -272,10 +273,10 @@ fn generic_owned_span_methods_preserve_lifetimes_and_widened_results() {
             {
                 let mut owner = allocate(2, 7_ui)?;
                 weak = weaken(owner);
-                let mut view = borrowed(&owner);
+                let mut view = borrowed(owner);
                 view:at(1) = 42_ui;
                 valid = valid && view.length == 2_ul && owner:get():at(1) == 42_ui;
-                valid = valid && match (upgrade(weak)) {
+                valid = valid && match (widen_upgrade(weak)) {
                     ArcSpan<uint>(live) => { live:get():at(1) == 42_ui },
                     None => { 1 == 0 },
                     Other(other) => { 1 == 0 },
@@ -284,7 +285,7 @@ fn generic_owned_span_methods_preserve_lifetimes_and_widened_results() {
                 valid = valid && another:get().length == 3_ul && another:get():at(2) == 9_ui;
                 valid = valid && first(17_ui) == 17_ui;
             };
-            valid = valid && match (upgrade(weak)) {
+            valid = valid && match (widen_upgrade(weak)) {
                 ArcSpan<uint>(live) => { 1 == 0 },
                 None => { 1 == 1 },
                 Other(other) => { 1 == 0 },
@@ -314,7 +315,7 @@ fn borrowed_span_slices_preserve_aliases_and_accept_empty_null_views() {
             let mut values = arc_span_alloc::<uint>(4, 0_ui)?;
             let mut view = values:get();
             let mut middle = view:slice(1, 2);
-            let mut alias = middle;
+            let alias = middle:clone();
             alias:at(1) = 42_ui;
             let mut valid = middle.length == 2_ul && view:at(2) == 42_ui;
             valid = valid && view:at(0) == 0_ui && view:at(3) == 0_ui;
@@ -333,27 +334,16 @@ fn borrowed_span_slices_preserve_aliases_and_accept_empty_null_views() {
 
 #[test]
 fn every_native_status_operation_has_a_public_result_wrapper() {
-    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), ""));
-    let source = TempDir::new_in(std::env::temp_dir()).unwrap();
-    let path = source.path().join("main.resin");
-    fs::write(
-        &path,
-        "import { \"$/gpu.resin\", \"$/window.resin\", \"$/image.resin\", \"$/console.resin\" };",
-    )
-    .unwrap();
-    let module = support::frontend::check_hir(&pipeline::load(&path).unwrap())
-        .into_module()
-        .unwrap();
-    for name in ["gpu", "window", "image", "console"] {
-        let public = support::frontend::check_hir(
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let libraries = ["gpu", "window", "image", "console"];
+    let modules = libraries.map(|name| {
+        support::frontend::check_hir(
             &pipeline::load(&root.join(format!("resin/{name}.resin"))).unwrap(),
         )
         .into_module()
-        .unwrap();
-        assert!(
-            public.entries.is_empty(),
-            "operations are methods, not free function exports"
-        );
+        .unwrap()
+    });
+    for name in libraries {
         let header = fs::read_to_string(
             Path::new(resin_runtime::INCLUDE_DIR).join(format!("resin_runtime/{name}.h")),
         )
@@ -364,53 +354,56 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
                 continue;
             };
             let name = declaration.split('(').next().unwrap();
-            let (receiver, method) = match name {
-                "gpu_create" => ("Gpu", "new"),
-                "gpu_create_at" => ("Gpu", "new_at"),
-                "gpu_device_count" => ("Gpu", "device_count"),
-                "gpu_enumerate_devices" => ("Gpu", "enumerate_devices"),
-                "gpu_create_for_window" => ("Gpu", "new_for_window"),
-                "window_create" => ("Window", "new"),
-                "image_read_png" => ("ImageData", "read_png"),
-                "image_write_png" => ("ImageData", "write_pixels"),
+            let operation = match name {
+                "gpu_create" => "gpu_new",
+                "gpu_create_at" => "gpu_new_at",
+                "gpu_device_count" => "gpu_device_count",
+                "gpu_enumerate_devices" => "gpu_enumerate_devices",
+                "gpu_create_for_window" => "gpu_new_for_window",
+                "window_create" => "window_new",
+                "image_read_png" => "image_data_read_png",
+                "image_write_png" => "image_data_write_pixels",
                 // These raw native operations have been replaced by owning
                 // views and compiler-generated projection in Resin source.
                 "gpu_malloc" | "gpu_dispatch" | "gpu_copy_image_to_buffer" | "gpu_set_pipeline" => {
                     continue;
                 }
-                "gpu_ptr_allocate" => ("Gpu", "malloc"),
-                "gpu_create_compute_pipeline" => ("Gpu", "create_compute_pipeline"),
-                "gpu_create_graphics_pipeline" => ("Gpu", "create_graphics_pipeline"),
-                "gpu_create_image" => ("Gpu", "create_image"),
-                "gpu_start_command_recording" => ("Gpu", "start_command_recording"),
-                "gpu_projected_dispatch" => ("GpuCommands", "dispatch"),
-                "gpu_begin_rendering" => ("GpuCommands", "begin_rendering"),
-                "gpu_end_rendering" => ("GpuCommands", "end_rendering"),
-                "gpu_draw" | "gpu_projected_draw" => ("GpuCommands", "draw"),
-                "gpu_copy_image_to_span" => ("GpuCommands", "copy_image_to_buffer"),
-                "gpu_submit" => ("GpuCommands", "submit"),
-                "gpu_cancel_command_buffer" => ("GpuCommands", "cancel"),
-                "window_poll_events" => ("Window", "poll_events"),
-                "window_should_close" => ("Window", "should_close"),
-                "window_set_should_close" => ("Window", "set_should_close"),
-                "window_framebuffer_size" => ("Window", "framebuffer_size"),
-                "window_set_size" => ("Window", "set_size"),
-                "window_key_pressed" => ("Window", "key_pressed"),
-                "window_key_state" => ("Window", "key_state"),
-                "window_mouse_button_state" => ("Window", "mouse_button_state"),
-                "window_cursor_position" => ("Window", "cursor_position"),
-                "window_scroll_delta" => ("Window", "scroll_delta"),
-                "window_focused" => ("Window", "focused"),
-                "window_capture_cursor" => ("Window", "capture_cursor"),
-                "gpu_present" => ("Gpu", "present"),
-                _ => panic!("missing method mapping for native operation: {name}"),
+                "gpu_ptr_allocate" => "malloc",
+                "gpu_create_compute_pipeline" => "create_compute_pipeline",
+                "gpu_create_graphics_pipeline" => "create_graphics_pipeline",
+                "gpu_create_image" => "create_image",
+                "gpu_start_command_recording" => "start_command_recording",
+                "gpu_projected_dispatch" => "dispatch",
+                "gpu_begin_rendering" => "begin_rendering",
+                "gpu_end_rendering" => "end_rendering",
+                "gpu_draw" | "gpu_projected_draw" => "draw",
+                "gpu_copy_image_to_span" => "copy_image_to_buffer",
+                "gpu_submit" => "submit",
+                "gpu_cancel_command_buffer" => "cancel",
+                "window_poll_events" => "poll_events",
+                "window_should_close" => "should_close",
+                "window_set_should_close" => "set_should_close",
+                "window_framebuffer_size" => "framebuffer_size",
+                "window_set_size" => "set_size",
+                "window_key_pressed" => "key_pressed",
+                "window_key_state" => "key_state",
+                "window_mouse_button_state" => "mouse_button_state",
+                "window_cursor_position" => "cursor_position",
+                "window_scroll_delta" => "scroll_delta",
+                "window_focused" => "focused",
+                "window_capture_cursor" => "capture_cursor",
+                "gpu_present" => "present",
+                _ => panic!("missing operation mapping for native operation: {name}"),
             };
-            let qualified = format!("{receiver}.{method}");
-            let function = module
-                .functions
+            let function = modules
                 .iter()
-                .find(|function| function.name.as_ref() == qualified.as_str())
-                .unwrap_or_else(|| panic!("missing source function {qualified}"));
+                .find_map(|module| {
+                    module
+                        .entries
+                        .get(operation)
+                        .map(|id| &module.functions[id.index()])
+                })
+                .unwrap_or_else(|| panic!("missing exported operation {operation}"));
             assert!(function.foreign_header.is_none(), "{name}");
             assert!(
                 matches!(function.signature.result.ty, resin_hir::Type::Union { .. }),
@@ -484,10 +477,10 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
         import { "$/image.resin", "$/span.resin", "$/status.resin" };
         fn main() -> (int | Err<_>)  {
             let mut path = "pixel.png";
-            let mut pixels = [ubyte(1), ubyte(2), ubyte(3), ubyte(255)];
-            image_data_write_pixels(path.data, 1, 1, 4, Span<ubyte> { data = &pixels:at(0), length = 4_ul }, 0)?;
+            let mut buffer = [ubyte(1), ubyte(2), ubyte(3), ubyte(255)];
+            image_data_write_pixels(path.data, 1, 1, 4, Span<ubyte> { data = &buffer:at(0), length = 4_ul }, 0)?;
             let mut image = image_data_read_png(path.data, 0)?;
-            let mut alias = image;
+            let alias = image:clone();
             let mut copy_path = "copy.png";
             alias:write_png(copy_path.data)?;
             let mut copied = image_data_read_png(copy_path.data, 0)?;
@@ -500,12 +493,12 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     );
     success(&output);
     for call in [
-        "ImageData.read_png(path.data, 4)?",
-        "ImageData.write_pixels(path.data, 1, 1, 4, Span<ubyte> { data = &pixels.at(0), length = 4_ul }, 0)?",
+        "image_data_read_png(path.data, 4)?",
+        "image_data_write_pixels(path.data, 1, 1, 4, Span<ubyte> { data = &buffer:at(0), length = 4_ul }, 0)?",
     ] {
         let output = run(
             &format!(
-                "export {{ main }}; import {{ \"$/image.resin\", \"$/span.resin\", \"$/string.resin\" }}; struct Cleanup {{  }}\nfn drop(self: Ptr<Cleanup>)  {{ print(fmt(\"cleanup\\n\", ())); }}\n  fn main() -> (() | Err<_>)  {{ let mut path = \"missing/pixel.png\"; let mut pixels = [0_ub, 0_ub, 0_ub, 0_ub]; let mut cleanup = Cleanup {{}}; {call}; (()) }}"
+                "export {{ main }}; import {{ \"$/image.resin\", \"$/span.resin\", \"$/string.resin\" }}; struct Cleanup {{  }}\nfn drop(self: Ptr<Cleanup>)  {{ print(fmt(\"cleanup\\n\", ())); }}\n  fn main() -> (() | Err<_>)  {{ let mut path = \"missing/pixel.png\"; let mut buffer = [0_ub, 0_ub, 0_ub, 0_ub]; let mut cleanup = Cleanup {{}}; {call}; (()) }}"
             ),
             "",
         );
@@ -532,8 +525,8 @@ fn png_pixel_views_check_dimensions_padding_and_storage_before_native_access() {
                 r#"export {{ main }};
                 import {{ "$/image.resin", "$/span.resin", "$/status.resin" }};
                 fn main() -> int  {{
-                    let mut pixels = [0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub];
-                    let mut bytes = Span<ubyte> {{ data = &pixels:at(0), length = {length}_ul }};
+                    let mut buffer = [0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub];
+                    let mut bytes = Span<ubyte> {{ data = &buffer:at(0), length = {length}_ul }};
                     match (image_data_write_pixels("missing/pixel.png".data, {width}, {height}, {channels}, bytes, {stride})) {{
                         ()(value) => {{ 1 }},
                         Err(error) => {{ if (runtime_status_code(error) == 1) {{ 0 }} else {{ 1 }} }},
@@ -550,8 +543,8 @@ fn png_pixel_views_check_dimensions_padding_and_storage_before_native_access() {
         r#"export { main };
         import { "$/image.resin", "$/span.resin" };
         fn main() -> (int | Err<_>)  {
-            let mut pixels = [1_ub, 2_ub, 3_ub, 255_ub, 99_ub, 4_ub, 5_ub, 6_ub, 255_ub];
-            let mut bytes = Span<ubyte> { data = &pixels:at(0), length = 9_ul };
+            let mut buffer = [1_ub, 2_ub, 3_ub, 255_ub, 99_ub, 4_ub, 5_ub, 6_ub, 255_ub];
+            let mut bytes = Span<ubyte> { data = &buffer:at(0), length = 9_ul };
             image_data_write_pixels("padded.png".data, 1, 2, 4, bytes, 5)?;
             let mut image = image_data_read_png("padded.png".data, 0)?;
             let mut loaded = image:pixels();
@@ -1035,12 +1028,12 @@ fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
                         let mut original = gpu:start_command_recording()?;
                         let mut pipeline = gpu:create_graphics_pipeline(vertex, fragment)?;
                         original:begin_rendering(gpu:create_image(1_ui, 1_ui)?, 0_f, 0_f, 0_f, 1_f)?;
-                        let mut drawing = original;
+                        let drawing = original:clone();
                         drawing:draw(pipeline, None, 7)?;
                         original:end_rendering()?;
                         original
                     };
-                    let mut alias = commands;
+                    let alias = commands:clone();
                     test_recorded();
                     if (mode < 2) {
                         let mut code = match (alias:submit()) {
