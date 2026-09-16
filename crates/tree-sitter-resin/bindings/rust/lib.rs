@@ -50,6 +50,24 @@ pub const TAGS_QUERY: &str = include_str!("../../queries/tags.scm");
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn records_require_named_structs() {
+        for source in [
+            "type Point = { x: int, y: int };",
+            "def value() = { var point = { x = 1, y = 2 }; };",
+            "def value(point: { x: int }) = {};",
+        ] {
+            assert!(parse(source).root_node().has_error(), "{source}");
+        }
+        for source in [
+            "struct Point { x: int, y: int }; def value() -> Point = { Point { x = 1, y = 2 } };",
+            "def pair() -> (int, bool) = { (1, true) };",
+            "def empty() -> () = {};",
+        ] {
+            assert!(!parse(source).root_node().has_error(), "{source}");
+        }
+    }
+
     fn parse(source: &str) -> tree_sitter::Tree {
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(&super::LANGUAGE.into()).unwrap();
@@ -103,7 +121,7 @@ mod tests {
                 .has_error()
         );
         assert!(
-            !parse("def main() -> () = { var x = { a = 1, b = 2 }; };")
+            !parse("struct FieldsAB<T0, T1> { a: T0, b: T1 };\ndef main() -> () = { var x = FieldsAB<_, _> { a = 1, b = 2 }; };")
                 .root_node()
                 .has_error()
         );
@@ -263,10 +281,10 @@ mod tests {
             "type P = Ptr<int>; type Pp = Ptr<Ptr<int>>; type S = Span<Ptr<int>>;",
             "struct Span<T> { data: Ptr<T>, length: ulong }; struct ArcPtr<T> { owner: StrongOwner }; type GpuSpan<T> = Span<T>;",
             "type P = GpuSpan<int, int>;",
-            "type G = GpuPtr<int>; type S = GpuSpan<{ x: uint }>; type Nested = Ptr<GpuSpan<GpuPtr<int>>>;",
+            "struct FieldsX<T0> { x: T0 };\ntype G = GpuPtr<int>; type S = GpuSpan<FieldsX<uint>>; type Nested = Ptr<GpuSpan<GpuPtr<int>>>;",
             "def launch(args: GpuArguments) -> GpuArguments = { args };",
             "def first(p: GpuSpan<int>) -> GpuPtr<int> = { p.at(0_ul) }; def make() -> GpuPtr<_> = { gpu.create::<int>(3_i) };",
-            "type P = Ptr<()>; type S = Span<(int, int)>; type R = Ptr<{ x: int }>; type F = Ptr<(int) -> int>;",
+            "struct FieldsX<T0> { x: T0 };\ntype P = Ptr<()>; type S = Span<(int, int)>; type R = Ptr<FieldsX<int>>; type F = Ptr<(int) -> int>;",
             "def main() -> () = { var p = Ptr<int>(ulong(0)); var x = ulong(p) > ulong(0); var y = 8 >> 1; var z = 1 < 2; };",
             "def main() -> () = { var p = Ptr < Ptr < int > > (ulong (0)); };",
             "def fibonacci(n: int) -> int = { n }; def main() -> () = { var x = fibonacci(2); var y = fibonacci (3); };",
@@ -292,8 +310,8 @@ mod tests {
     #[test]
     fn definition_keywords_belong_to_statements_not_fields_or_parameters() {
         for source in [
-            "type Point = { x: int, y: int }; def make(x: int) -> Point = { var y: int; y := x + 1; Point { x = x, y = y } };",
-            "def main() -> () = { var record = { a = { var x = 1; x }, b = { c = 2 } }; };",
+            "struct FieldsXY<T0, T1> { x: T0, y: T1 };\ntype Point = FieldsXY<int, int>; def make(x: int) -> Point = { var y: int; y := x + 1; Point { x = x, y = y } };",
+            "struct FieldsAB<T0, T1> { a: T0, b: T1 };\nstruct FieldsC<T0> { c: T0 };\ndef main() -> () = { var record = FieldsAB<_, _> { a = { var x = 1; x }, b = FieldsC<_> { c = 2 } }; };",
             "def main() -> () = { type T = int; var x = T(1); var callback = main; };",
             "extern { \"stdlib.h\": { def abs(n: int) -> int; } };",
             "def/* comment */main() -> () = { var/* comment */n = 1; };",

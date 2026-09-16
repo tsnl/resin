@@ -58,13 +58,14 @@ fn foreign_functions_forward_separate_c_arguments() {
 fn pointers_roundtrip_and_address_expressions_evaluate_once() {
     let output = run(r#"export { main };
 
-        def identity(p: Ptr<{ value: int }>, calls: Ptr<int>) -> Ptr<{ value: int }> = {
+        struct FieldsValue<T0> { value: T0 };
+def identity(p: Ptr<FieldsValue<int>>, calls: Ptr<int>) -> Ptr<FieldsValue<int>> = {
             calls.* := calls.* + 1;
             p
         };
         def main () -> int = {
             var calls = 0;
-            var record = { value = 1 };
+            var record = FieldsValue<_> { value = 1 };
             var pointer = &identity(&record, &calls).value;
             var copy = Ptr<int> (ulong (pointer));
             copy.* := 41;
@@ -78,8 +79,8 @@ fn pointers_roundtrip_and_address_expressions_evaluate_once() {
 fn foreign_aggregate_values_and_implicit_pointer_casts_are_rejected() {
     for source in [
         "extern { \"native.h\": { def consume (value: Native) -> (); } }; extern type Native;",
-        "extern { \"native.h\": { def consume (value: { x: int }) -> (); } };",
-        "extern { \"native.h\": { def produce () -> { x: int }; } };",
+        "extern { \"native.h\": { def consume (value: FieldsX<int>) -> (); } }; struct FieldsX<T0> { x: T0 };",
+        "extern { \"native.h\": { def produce () -> FieldsX<int>; } }; struct FieldsX<T0> { x: T0 };",
         "extern { \"native.h\": { def callback (f: () -> int) -> (); } };",
     ] {
         assert!(

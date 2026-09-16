@@ -22,11 +22,11 @@ pub(super) fn check(
             Ty::Record {
                 fields: vec![
                     RecordField {
-                        name: "value".into(),
+                        name: "_0".into(),
                         ty: Ty::union_of([Ty::GpuView, Ty::None]),
                     },
                     RecordField {
-                        name: "status".into(),
+                        name: "_1".into(),
                         ty: Ty::Int32,
                     },
                 ],

@@ -5,7 +5,8 @@ fn generic_aliases_borrow_storage_and_preserve_nominal_methods() {
     let module = support::module(
         r#"
         export { main };
-        type View<T> = { data: Ptr<T>, length: ulong };
+        struct FieldsDataLength<T0, T1> { data: T0, length: T1 };
+type View<T> = FieldsDataLength<Ptr<T>, ulong>;
         struct Item { value: int,
             def read(self: Item) -> int = { self.value };
         };

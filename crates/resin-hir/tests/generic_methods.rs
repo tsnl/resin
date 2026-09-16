@@ -195,7 +195,7 @@ fn source_drop_hooks_reject_structural_unwrapping_before_and_after_importing() {
         rejects_local_and_imported_owner(
             declaration,
             &format!(
-                "type Raw = {{ value: int }}; def unwrap(value: {owner}) -> Raw = {{ Raw(value) }};"
+                "struct FieldsValue<T0> {{ value: T0 }};\ntype Raw = FieldsValue<int>; def unwrap(value: {owner}) -> Raw = {{ Raw(value) }};"
             ),
             "UnwrapManaged",
         );

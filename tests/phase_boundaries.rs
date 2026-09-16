@@ -167,7 +167,7 @@ fn a_later_phase_error_preserves_earlier_compilation_products() {
 
 #[test]
 fn unsupported_concrete_operations_fail_during_lir_construction() {
-    let source = "export { main }; def main() -> int = { var r = { x = 1 }; r + r; 0 };";
+    let source = "export { main }; struct FieldsX<T0> { x: T0 };\ndef main() -> int = { var r = FieldsX<_> { x = 1 }; r + r; 0 };";
     let hir = hir(source);
     let error = support::frontend::lower(&hir, &[], &resin_lir::LoweringOptions::default())
         .unwrap_err()

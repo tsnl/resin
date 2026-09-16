@@ -37,15 +37,17 @@ fn explicit_holes_are_not_editor_recovery_holes() {
 #[test]
 fn holes_compose_inside_pointers_spans_records_and_functions() {
     let m = module(
-        "\
-        struct Span<T> { data: Ptr<T>, length: ulong };\
-        def pointer(p: Ptr<Ptr<int>>) -> Ptr<Ptr<_>> = { p };\
-        def span(p: Span<Ptr<int>>) -> Span<Ptr<_>> = { p };\
-        def plus(n: int) -> int = { n + 1 };\
-        def function() -> (int) -> _ = { plus };\
-        def record(p: Ptr<int>) -> { pointer: Ptr<_>, number: _, flag: _ } = {\
-            { flag = 1 == 1, number = 7, pointer = p }\
-        };",
+        r#"
+        struct FieldsPointerNumberFlag<T0, T1, T2> { pointer: T0, number: T1, flag: T2 };
+        struct Span<T> { data: Ptr<T>, length: ulong };
+        def pointer(p: Ptr<Ptr<int>>) -> Ptr<Ptr<_>> = { p };
+        def span(p: Span<Ptr<int>>) -> Span<Ptr<_>> = { p };
+        def plus(n: int) -> int = { n + 1 };
+        def function() -> (int) -> _ = { plus };
+        def record(p: Ptr<int>) -> FieldsPointerNumberFlag<Ptr<_>, _, _> = {
+            FieldsPointerNumberFlag<_, _, _> { flag = true, number = 7, pointer = p }
+        };
+        "#,
     );
     for f in &m.functions[..2] {
         assert_eq!(f.result, f.locals[0].ty);
@@ -57,7 +59,10 @@ fn holes_compose_inside_pointers_spans_records_and_functions() {
             result: Box::new(Ty::Int32)
         }
     );
-    let Ty::Record { fields } = &m.functions[4].result else {
+    let Ty::Defined { definition } = &m.functions[4].result else {
+        panic!()
+    };
+    let Ty::Record { fields } = m.types[definition.index()].body().unwrap() else {
         panic!()
     };
     assert_eq!(fields[1].ty, Ty::Int64);
@@ -528,11 +533,11 @@ fn layout_operands_do_not_read_or_initialize_runtime_locals() {
 #[test]
 fn nested_record_annotations_reject_duplicate_field_names() {
     for source in [
-        "def f(x: { n: int, n: int }) = {};",
-        "def f() = { var x: Ptr<{ n: int, n: int }>; };",
+        "struct FieldsNN<T0, T1> { n: T0, n: T1 };\ndef f(x: FieldsNN<int, int>) = {};",
+        "struct FieldsNN<T0, T1> { n: T0, n: T1 };\ndef f() = { var x: Ptr<FieldsNN<int, int>>; };",
         "def f() = { struct Local { n: int, n: int }; };",
-        "def f() = { type Local = { n: int, n: int }; };",
-        "def f() = { { var x: { n: int, n: int }; }; };",
+        "struct FieldsNN<T0, T1> { n: T0, n: T1 };\ndef f() = { type Local = FieldsNN<int, int>; };",
+        "struct FieldsNN<T0, T1> { n: T0, n: T1 };\ndef f() = { { var x: FieldsNN<int, int>; }; };",
     ] {
         rejects(source, "DuplicateField");
     }

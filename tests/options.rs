@@ -103,8 +103,9 @@ fn result_cases_remain_distinct_inside_optional_unions() {
 #[test]
 fn structural_members_keep_their_identity_across_union_widening() {
     let output = run(r#"
-        type Callback = (int) -> int;
-        type Record = { number: int };
+        struct FieldsNumber<T0> { number: T0 };
+type Callback = (int) -> int;
+        type Record = FieldsNumber<int>;
         def increment(n: int) -> int = { n + 1 };
         def select(p: Ptr<int>, use_pointer: bool) -> Ptr<int> | Callback = { if (use_pointer) { p } else { increment } };
         def widen(value: Ptr<int> | Callback) -> None | Record | Callback | Ptr<int> = { value };
@@ -129,8 +130,9 @@ fn structural_members_keep_their_identity_across_union_widening() {
 #[test]
 fn all_value_producers_widen_at_the_consumer() {
     let output = run(r#"
-        type Record = { number: uint };
-        def record() -> Record | None = { { number = 42_ui } };
+        struct FieldsNumber<T0> { number: T0 };
+type Record = FieldsNumber<uint>;
+        def record() -> Record | None = { FieldsNumber<_> { number = 42_ui } };
         def field(r: Record) -> uint | None = { r.number };
         def load(p: Ptr<uint>) -> uint | None = { p.* };
         def literal() -> uint | None = { 42 };

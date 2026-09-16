@@ -125,7 +125,7 @@ fn sizeof_accepts_only_types_and_preserves_generic_queries() {
     );
     accepts("struct Node { next: Ptr<Node>, value: int }; const bytes = sizeof(Node);");
     accepts(
-        "type Number = int; const bytes = sizeof(Number); def value() -> ulong = { sizeof({ x: int, y: long }) };",
+        "struct FieldsXY<T0, T1> { x: T0, y: T1 };\ntype Number = int; const bytes = sizeof(Number); def value() -> ulong = { sizeof(FieldsXY<int, long>) };",
     );
     for source in [
         "def unused() = { sizeof(1); };",

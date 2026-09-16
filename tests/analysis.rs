@@ -535,39 +535,44 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
 fn gpu_commands_check_pipeline_stages_and_host_arguments() {
     for (call, valid) in [
         (
-            "dispatch(compute, { value = buffer }, 1_ui, 1_ui, 1_ui)",
+            "dispatch(compute, HostRoot<_> { value = buffer }, 1_ui, 1_ui, 1_ui)",
             true,
         ),
-        ("draw(graphics, { value = buffer }, 3_ui)", true),
+        ("draw(graphics, HostRoot<_> { value = buffer }, 3_ui)", true),
         ("draw(empty, None, 3_ui)", true),
         (
-            "dispatch(graphics, { value = buffer }, 1_ui, 1_ui, 1_ui)",
+            "dispatch(graphics, HostRoot<_> { value = buffer }, 1_ui, 1_ui, 1_ui)",
             false,
         ),
-        ("draw(compute, { value = buffer }, 3_ui)", false),
+        ("draw(compute, HostRoot<_> { value = buffer }, 3_ui)", false),
         ("dispatch(compute, None, 1_ui, 1_ui, 1_ui)", false),
         ("dispatch(compute, 0_ul, 1_ui, 1_ui, 1_ui)", false),
         (
-            "dispatch(compute, { value = pointer }, 1_ui, 1_ui, 1_ui)",
+            "dispatch(compute, HostRoot<_> { value = pointer }, 1_ui, 1_ui, 1_ui)",
             false,
         ),
         (
-            "dispatch(compute, { value = bytes }, 1_ui, 1_ui, 1_ui)",
+            "dispatch(compute, HostRoot<_> { value = bytes }, 1_ui, 1_ui, 1_ui)",
             false,
         ),
         (
-            "dispatch(compute, { other = buffer }, 1_ui, 1_ui, 1_ui)",
+            "dispatch(compute, WrongRoot<_> { other = buffer }, 1_ui, 1_ui, 1_ui)",
             false,
         ),
         ("dispatch(compute, buffer, 1_ui, 1_ui, 1_ui)", false),
         ("draw(graphics, None, 3_ui)", false),
-        ("draw(graphics, { value = pointer }, 3_ui)", false),
-        ("draw(empty, { value = buffer }, 3_ui)", false),
+        (
+            "draw(graphics, HostRoot<_> { value = pointer }, 3_ui)",
+            false,
+        ),
+        ("draw(empty, HostRoot<_> { value = buffer }, 3_ui)", false),
         ("set_pipeline(compute)", false),
     ] {
         let source = format!(
             r#"import {{ "$/gpu.resin", "$/graphics.resin" }};
             struct Root {{ value: Ptr<int> }};
+            struct HostRoot<T> {{ value: T }};
+            struct WrongRoot<T> {{ other: T }};
             @compute_shader
             def kernel(index: ulong, root: Ptr<Root>) = {{}};
             @vertex_shader
@@ -612,12 +617,13 @@ fn gpu_commands_check_pipeline_stages_and_host_arguments() {
 #[test]
 fn typed_pipeline_calls_show_shader_contracts_in_editor_signatures() {
     let source = r#"import { "$/gpu.resin", "$/span.resin" };
-        struct Root { values: Span<int>, scale: int };
+        struct FieldsValuesScale<T0, T1> { values: T0, scale: T1 };
+struct Root { values: Span<int>, scale: int };
         @compute_shader
         def kernel(index: ulong, root: Ptr<Root>) = {};
         def f(gpu: Gpu, commands: GpuCommands, values: GpuSpan<int>) -> (() | Err<_>) = {
             var pipeline = gpu.create_compute_pipeline(kernel)?;
-            commands.dispatch(pipeline, { values = values, scale = 2 }, 1, 1, 1)?;
+            commands.dispatch(pipeline, FieldsValuesScale<_, _> { values = values, scale = 2 }, 1, 1, 1)?;
             (())
         };"#;
     let mut loader = resin_source::Loader::new(resin_source::library_root());
@@ -766,7 +772,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
     for receiver in ["values", "holder.values"] {
         for tail in ["", " values.;", " holder.values.;", " holder.values.at(; "] {
             let source = format!(
-                "import {{ \"$/span.resin\" }}; def main() = {{ var values = [1_i, 2_i]; var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }}; {receiver}.at(0) := 3;{tail} }};"
+                "import {{ \"$/span.resin\" }}; struct FieldsValues<T0> {{ values: T0 }};\ndef main() = {{ var values = [1_i, 2_i]; var holder = FieldsValues<_> {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }}; {receiver}.at(0) := 3;{tail} }};"
             );
             let project = Project::new(&[("main.resin", &source)]);
             let analysis = project.build_hir();
@@ -984,19 +990,21 @@ fn field_completion_before_existing_statements() {
 #[test]
 fn field_completion_uses_receiver_types_and_replaces_only_the_field() {
     for (setup, receiver) in [
-        ("var value = { count = 1, label = 2 };", "value"),
+        ("var value = Fields { count = 1, label = 2 };", "value"),
         (
-            "var record = { count = 1, label = 2 }; var value = &record;",
+            "var record = Fields { count = 1, label = 2 }; var value = &record;",
             "value",
         ),
         (
-            "var value = { inner = { count = 1, label = 2 } };",
+            "var value = Outer { inner = Fields { count = 1, label = 2 } };",
             "value.inner",
         ),
-        ("var value = { count = 1, label = 2 };", "(value)"),
+        ("var value = Fields { count = 1, label = 2 };", "(value)"),
     ] {
         for field in ["", "co", "count"] {
-            let source = format!("def main () = {{ {setup} {receiver}.{field}; }};");
+            let source = format!(
+                "struct Fields {{ count: long, label: long }}; struct Outer {{ inner: Fields }}; def main () = {{ {setup} {receiver}.{field}; }};"
+            );
             let project = Project::new(&[("main.resin", &source)]);
             let start = source.rfind('.').unwrap() + 1;
             let offset = start + field.len().min(2);
@@ -1051,7 +1059,9 @@ fn field_completion_resolves_imported_nominal_function_results() {
 #[test]
 fn field_completion_does_not_offer_unrelated_names() {
     for expression in ["1.", "missing.", "\"text.\"", "// value."] {
-        let source = format!("def main () = {{ var value = {{ count = 1 }}; {expression}\n }};");
+        let source = format!(
+            "struct FieldsCount<T0> {{ count: T0 }};\ndef main () = {{ var value = FieldsCount<_> {{ count = 1 }}; {expression}\n }};"
+        );
         let project = Project::new(&[("main.resin", &source)]);
         assert!(
             project
@@ -1070,8 +1080,8 @@ fn field_completion_does_not_offer_unrelated_names() {
 fn field_completion_recovers_unfinished_functions_and_uninitialized_locals() {
     for source in [
         "struct Point { x: float32, y: float32 }; def main () = { var point: Point; point.; };",
-        "def main (point: { x: float32, y: float32 }) = { point.",
-        "def main () = { var point = { x = 1, y = 2 }; point.",
+        "struct FieldsXY<T0, T1> { x: T0, y: T1 };\ndef main (point: FieldsXY<float32, float32>) = { point.",
+        "struct FieldsXY<T0, T1> { x: T0, y: T1 };\ndef main () = { var point = FieldsXY<_, _> { x = 1, y = 2 }; point.",
     ] {
         let project = Project::new(&[("main.resin", source)]);
         let items = project.build_hir().completions(
@@ -1567,7 +1577,7 @@ fn holes_preserve_later_locals_and_functions_without_producing_ir() {
         "var broken = missing(1);",
     ] {
         let source = format!(
-            "def first() = {{ {broken} var point = {{ x = 1, y = 2 }}; point.; }}; def later(arg: int) -> int = {{ var result = arg; result }};"
+            "struct FieldsXY<T0, T1> {{ x: T0, y: T1 }};\ndef first() = {{ {broken} var point = FieldsXY<_, _> {{ x = 1, y = 2 }}; point.; }}; def later(arg: int) -> int = {{ var result = arg; result }};"
         );
         let project = Project::new(&[("main.resin", &source)]);
         let analysis = project.build_hir();
@@ -1591,7 +1601,7 @@ fn holes_preserve_later_locals_and_functions_without_producing_ir() {
 fn unknown_bindings_shadow_outer_values_without_fabricating_types() {
     for initializer in ["", "missing(1)", "1 + (1 == 1)"] {
         let source = format!(
-            "def main(point: {{ x: int }}) = {{ var point = {initializer}; var alias = point; alias.; var healthy = {{ count = 42 }}; healthy.count; }};"
+            "struct FieldsX<T0> {{ x: T0 }};\nstruct FieldsCount<T0> {{ count: T0 }};\ndef main(point: FieldsX<int>) = {{ var point = {initializer}; var alias = point; alias.; var healthy = FieldsCount<_> {{ count = 42 }}; healthy.count; }};"
         );
         let project = Project::new(&[("main.resin", &source)]);
         let analysis = project.build_hir();
@@ -1643,7 +1653,7 @@ fn unrelated_errors_preserve_expression_types_and_field_completion() {
     ] {
         for broken in ["", "def broken() = { missing; };"] {
             let source = format!(
-                "{broken} def main() = {{ {setup} value; var record = {{ payload = value }}; record.payload; }};"
+                "{broken} struct FieldsPayload<T0> {{ payload: T0 }};\ndef main() = {{ {setup} value; var record = FieldsPayload<_> {{ payload = value }}; record.payload; }};"
             );
             let project = Project::new(&[("main.resin", &source)]);
             let analysis = project.build_hir();
@@ -1675,7 +1685,7 @@ fn unrelated_errors_preserve_expression_types_and_field_completion() {
 
 #[test]
 fn failed_compound_constraints_do_not_poison_independent_inference() {
-    let source = "def main() = { var value: _; var broken: { first: int, second: bool }; broken := { first = value, second = 0 }; value := 1.5f; value; };";
+    let source = "struct FieldsFirstSecond<T0, T1> { first: T0, second: T1 };\ndef main() = { var value: _; var broken: FieldsFirstSecond<int, bool>; broken := FieldsFirstSecond<_, _> { first = value, second = 0 }; value := 1.5f; value; };";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.build_hir();
     assert!(!analysis.diagnostics().is_empty());
@@ -1721,7 +1731,7 @@ fn recovery_uses_unsaved_imports_and_keeps_nominal_field_types() {
 
 #[test]
 fn recovered_ast_contains_expression_type_and_field_holes() {
-    let source = "def main() = { var value = ; var typed: ; var point = { x = 1 }; point.; };";
+    let source = "struct FieldsX<T0> { x: T0 };\ndef main() = { var value = ; var typed: ; var point = FieldsX<_> { x = 1 }; point.; };";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.build_hir();
     let ast = resin_ast::format_source(
@@ -1739,7 +1749,7 @@ fn recovered_ast_contains_expression_type_and_field_holes() {
 fn editor_analysis_tolerates_truncation_and_deleted_tokens() {
     for source in [
         "export { main }; struct Point { x: int }; def main(arg: Ptr<Point>) = { var value = arg.x + 1; print(fmt(\"{}\", value)); };",
-        "def main(arg: int) -> int = { var pair = { left = arg, right = 1 }; if (arg == 0) (pair.left) else (pair.right) };",
+        "struct FieldsLeftRight<T0, T1> { left: T0, right: T1 };\ndef main(arg: int) -> int = { var pair = FieldsLeftRight<_, _> { left = arg, right = 1 }; if (arg == 0) (pair.left) else (pair.right) };",
         "def main() = { var values = [1, 2]; while (1 == 1) { var missing: Ptr<int>; }; };",
         "struct Cleanup { value: Ptr<int>, def drop(self: Ptr<Cleanup>) = { self.value.* := 42; }; };  def main() = { var n = 0; var cleanup = Cleanup { value = &n }; };",
         "struct Item { value: int }; def main() = { var owner = ArcPtr<Item> { value = 42 }; var weak = owner.downgrade(); match (weak.upgrade()) { ArcPtr<Item>(item) => { item.value; }, None => {} }; };",
@@ -1763,7 +1773,7 @@ fn checking_rejects_holes_even_when_given_a_recovered_ast() {
     for source in [
         "def main() = { var value = ; };",
         "def main() = { var value: ; };",
-        "def main(point: { x: int }) = { point.; };",
+        "struct FieldsX<T0> { x: T0 };\ndef main(point: FieldsX<int>) = { point.; };",
     ] {
         let project = Project::new(&[("main.resin", source)]);
         let analysis = project.build_hir();
@@ -1873,7 +1883,7 @@ fn failed_children_invalidate_composites_without_hiding_later_bindings() {
 fn broken_annotations_and_duplicate_declarations_retain_recognizable_children() {
     for (source, name, expected) in [
         (
-            "def f() -> { a: _, b: _, c: _, d: Missing } = {}; def later() = { var healthy = 1.5f; healthy; };",
+            "struct FieldsABCD<T0, T1, T2, T3> { a: T0, b: T1, c: T2, d: T3 };\ndef f() -> FieldsABCD<_, _, _, Missing> = {}; def later() = { var healthy = 1.5f; healthy; };",
             "healthy",
             "healthy: float32",
         ),

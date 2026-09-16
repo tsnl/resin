@@ -480,12 +480,12 @@ pub(super) fn primitive_signature(
             ],
             record(&[
                 (
-                    "value",
+                    "_0",
                     Type::Union {
                         variants: vec![Type::None, Type::GpuView],
                     },
                 ),
-                ("status", Type::Int32),
+                ("_1", Type::Int32),
             ]),
         ),
         ("gpu_view_offset", []) => (

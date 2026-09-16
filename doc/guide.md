@@ -337,11 +337,12 @@ Assignment still uses `name := value`. `struct Point { x: int, y: int };` create
 `type Position = Point;` is a transparent alias for that same type. Only `struct` creates
 a new nominal identity. Construct values with `Point { x = 1, y = 2 }`.
 Record initializers keep bare `name = value`
-fields, and parameters and record type fields keep bare `name: Type` declarations.
+fields, and parameters and struct fields keep bare `name: Type` declarations.
 Type formers use angle brackets: `Ptr<int>`, `Span<float32>`, and `Ptr<Ptr<int>>`.
 Calls and conversions require parentheses: `fibonacci(n)`, `int(n)`, and `process([1, 2])`.
 `process [1, 2]` and `process { value }` are not calls. Nominal record construction retains
-its dedicated `Name { field = value }` syntax.
+its dedicated `Name { field = value }` syntax. Anonymous record types and values
+are not supported; use a named `struct` or a tuple.
 See `examples/` for functions, recursion, records, pointers, and linked lists.
 
 ### Constants and `iota`
@@ -1015,7 +1016,8 @@ import { "$/gpu.resin" };
 def kernel(index: ulong, output: Ptr<ulong>) = { output.* := index; };
 def main() -> (() | Err<_>) = {
     var gpu = Gpu.new()?;
-    var pipeline = gpu.create_compute_pipeline(kernel)?;
+    struct HostParams { values: GpuSpan<float32>, scale: float32 };
+var pipeline = gpu.create_compute_pipeline(kernel)?;
     (())
 };
 ```
@@ -1072,7 +1074,7 @@ The entry interfaces are:
   The index is the global X invocation index. Dispatch only in X (`y = z = 1`) and guard
   any excess invocations in the function, as above.
 - Vertex takes an `int` vertex index, optionally paired with `Ptr<T>`, and returns
-  `{ position: Position, color: Color }`.
+  `Vertex` with `position: Position` and `color: Color` fields.
   Position has `float32` fields `x, y, z, w`; Color has `r, g, b, a`, in those orders.
 - Fragment takes Color, optionally paired with `Ptr<T>`, and returns Color.
 
@@ -1087,9 +1089,10 @@ while (index < values.length) {
     values.at(index).store(1.0_f);
     index := index + 1_ul;
 };
+struct HostParams { values: GpuSpan<float32>, scale: float32 };
 var pipeline = gpu.create_compute_pipeline(kernel)?;
 var commands = gpu.start_command_recording()?;
-commands.dispatch(pipeline, { values = values, scale = 2.0_f }, 16, 1, 1)?;
+commands.dispatch(pipeline, HostParams { values = values, scale = 2.0_f }, 16, 1, 1)?;
 commands.submit()?;
 ```
 
@@ -1348,7 +1351,7 @@ values too, while direct string arguments retain their verbatim text behavior.
 Unhandled entry-point errors include this representation before cleanup.
 
 A struct may provide `repr_bytes(self: Ptr<Self>)` returning the primitive
-`{ data: Ptr<ubyte>, length: ulong }` byte view. Use the actual struct name in
+`(Ptr<ubyte>, ulong)` byte view. Use the actual struct name in
 place of `Self`. The view must remain readable while its receiver is alive;
 the hook borrows its receiver and must not invalidate it. `String` uses this
 hook so formatting and nested representations show its text. Representation

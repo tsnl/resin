@@ -366,7 +366,7 @@ fn unsupported_shader_features_are_diagnosed() {
             "foreign",
         ),
         (
-            "export { kernel }; intrinsic \"format_bytes\" def render<A>(data: Ptr<ubyte>, length: ulong, args: A) -> StrongOwner; struct Root { data: Ptr<ubyte>, length: ulong }; @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = { var text = render(root.data, root.length, ()); };",
+            "export { kernel }; intrinsic \"format_bytes\" def render<A>(data: Ptr<ubyte>, length: ulong, args: A) -> StrongOwner; struct Root (Ptr<ubyte>, ulong); @compute_shader def kernel(invocation: ulong, root: Ptr<Root>) = { var text = render(root.data, root.length, ()); };",
             "shader cannot consume managed values",
         ),
         (

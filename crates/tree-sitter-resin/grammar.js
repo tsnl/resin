@@ -422,7 +422,6 @@ export default grammar({
         $.paren_term,
         $.tuple_term,
         $.array_term,
-        $.record_term,
         $.chain_term,
         $.unit_term,
       ),
@@ -570,8 +569,7 @@ export default grammar({
     builtin_type: () => choice(...BUILTIN_TYPES),
     inferred_type: () => "_",
 
-    closed_type: ($) =>
-      choice($.paren_type, $.tuple_type, $.unit_type, $.record_type),
+    closed_type: ($) => choice($.paren_type, $.tuple_type, $.unit_type),
     paren_type: ($) => seq("(", field("inner", $.type), ")"),
     tuple_type: ($) =>
       seq(
@@ -583,7 +581,6 @@ export default grammar({
         ")",
       ),
     unit_type: () => seq("(", ")"),
-    record_type: ($) => seq("{", list1("field", $.declare, ","), "}"),
 
     // Tokens
     //

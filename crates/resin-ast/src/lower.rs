@@ -761,7 +761,6 @@ impl<'a> AstGen<'a> {
             "paren_term" => self.gen_paren_term(child),
             "tuple_term" => self.gen_tuple_term(child),
             "array_term" => self.gen_array_term(child),
-            "record_term" => self.gen_record_term(child),
             "chain_term" => self.gen_chain_term(child),
             "unit_term" if child.has_error() => self.hole(child),
             "unit_term" => Spanned::new(TermKind::Unit, self.span(node)),
@@ -1089,22 +1088,8 @@ impl<'a> AstGen<'a> {
                     .collect();
                 Spanned::new(TypeKind::Record { fields }, self.span(child))
             }
-            "record_type" => self.gen_record_type(child),
             _ => Spanned::new(TypeKind::Hole, self.span(node)),
         }
-    }
-
-    fn gen_record_type(&self, node: Node) -> Type {
-        if node.kind() != "record_type" || node.is_missing() || node.is_error() {
-            return Spanned::new(TypeKind::Hole, self.span(node));
-        }
-        let mut fields = Vec::new();
-        let mut cursor = node.walk();
-        for f in node.children_by_field_name("field", &mut cursor) {
-            let (name, ann) = self.gen_declare(f);
-            fields.push((name, ann));
-        }
-        Spanned::new(TypeKind::Record { fields }, self.span(node))
     }
 
     fn gen_declare(&self, node: Node) -> (Ident, Type) {

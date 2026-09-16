@@ -63,20 +63,20 @@ fn constant_groups_keep_specifications_and_comments_together() {
 #[test]
 fn trailing_commas_and_nested_lists() {
     check(
-        "export {main,}; import {\"$/test.resin\",}; def main(a:int,b:float32,)={var xs=[1,2,3,]; call(a,b,); var r={x=1,y=2,}; ();};",
-        "export {\n\tmain,\n};\nimport {\n\t\"$/test.resin\",\n};\ndef main(\n\ta: int,\n\tb: float32,\n) = {\n\tvar xs = [\n\t\t1,\n\t\t2,\n\t\t3,\n\t];\n\tcall(\n\t\ta,\n\t\tb,\n\t);\n\tvar r = {\n\t\tx = 1,\n\t\ty = 2,\n\t};\n\t();\n};\n",
+        "export {main,}; import {\"$/test.resin\",}; struct FieldsXY<T0, T1> { x: T0, y: T1 };\ndef main(a:int,b:float32,)={var xs=[1,2,3,]; call(a,b,); var r=FieldsXY<_, _> {x=1,y=2,}; ();};",
+        "export {\n\tmain,\n};\nimport {\n\t\"$/test.resin\",\n};\nstruct FieldsXY<T0, T1> { x: T0, y: T1 };\ndef main(\n\ta: int,\n\tb: float32,\n) = {\n\tvar xs = [\n\t\t1,\n\t\t2,\n\t\t3,\n\t];\n\tcall(\n\t\ta,\n\t\tb,\n\t);\n\tvar r = FieldsXY<_, _> {\n\t\tx = 1,\n\t\ty = 2,\n\t};\n\t();\n};\n",
     );
     check(
-        "extern {\"x.h\":{def call(x:(int,),);}}; type Pair={x:int,y:float32,}; def main()={f([1,2,],3);};",
-        "extern {\n\t\"x.h\": {\n\t\tdef call(\n\t\t\tx: (int,),\n\t\t);\n\t}\n};\ntype Pair = {\n\tx: int,\n\ty: float32,\n};\ndef main() = {\n\tf(\n\t\t[\n\t\t\t1,\n\t\t\t2,\n\t\t],\n\t\t3\n\t);\n};\n",
+        "extern {\"x.h\":{def call(x:(int,),);}}; struct FieldsXY<T0, T1> { x: T0, y: T1 };\ntype Pair=FieldsXY<int, float32>; def main()={f([1,2,],3);};",
+        "extern {\n\t\"x.h\": {\n\t\tdef call(\n\t\t\tx: (int,),\n\t\t);\n\t}\n};\nstruct FieldsXY<T0, T1> { x: T0, y: T1 };\ntype Pair = FieldsXY<int, float32>;\ndef main() = {\n\tf(\n\t\t[\n\t\t\t1,\n\t\t\t2,\n\t\t],\n\t\t3\n\t);\n};\n",
     );
 }
 
 #[test]
 fn compact_lists_and_canonical_spacing() {
     check(
-        "\n\nexport{main};\n\n\n\ndef main ( ) -> ( ) ={\n\nvar xs = [\n1,\n2\n];\n\n\nvar r={x=1,y=2};var p=Ptr<Ptr<int>>( & &xs);var x= -(1+2)*3;while(x<2){x:=x+1;};if(x>0){x}else{0}\n\n};\n\n",
-        "export { main };\n\ndef main() -> () = {\n\tvar xs = [1, 2];\n\n\tvar r = { x = 1, y = 2 };\n\tvar p = Ptr<Ptr<int>>(& &xs);\n\tvar x = -(1 + 2) * 3;\n\twhile (x < 2) {\n\t\tx := x + 1;\n\t};\n\tif (x > 0) {\n\t\tx\n\t} else {\n\t\t0\n\t}\n};\n",
+        "\n\nexport{main};\n\n\n\nstruct FieldsXY<T0, T1> { x: T0, y: T1 };\ndef main ( ) -> ( ) ={\n\nvar xs = [\n1,\n2\n];\n\n\nvar r=FieldsXY<_, _> {x=1,y=2};var p=Ptr<Ptr<int>>( & &xs);var x= -(1+2)*3;while(x<2){x:=x+1;};if(x>0){x}else{0}\n\n};\n\n",
+        "export { main };\n\nstruct FieldsXY<T0, T1> { x: T0, y: T1 };\ndef main() -> () = {\n\tvar xs = [1, 2];\n\n\tvar r = FieldsXY<_, _> { x = 1, y = 2 };\n\tvar p = Ptr<Ptr<int>>(& &xs);\n\tvar x = -(1 + 2) * 3;\n\twhile (x < 2) {\n\t\tx := x + 1;\n\t};\n\tif (x > 0) {\n\t\tx\n\t} else {\n\t\t0\n\t}\n};\n",
     );
 }
 
@@ -143,7 +143,7 @@ fn comments_at_every_token_boundary_preserve_syntax() {
             }
         }
     }
-    let source = "export {main}; extern {\"x.h\": {def ext(x: int);}}; import {\"missing.resin\"}; struct T {x: Ptr<int>, y: (int,)}; def main(a: int) -> (_ | Err<Never>) = { f(); var p = & &a; var x = f([1, 2,], {x = 3})?; while (x < 3) { x := x + 1; }; match (x) { int(v) => { if (v == 3) { v } else { -v } }, Err(e) => { 0 } } };";
+    let source = "export {main}; extern {\"x.h\": {def ext(x: int);}}; import {\"missing.resin\"}; struct FieldsX<T0> { x: T0 };\nstruct T {x: Ptr<int>, y: (int,)}; def main(a: int) -> (_ | Err<Never>) = { f(); var p = & &a; var x = f([1, 2,], FieldsX<_> {x = 3})?; while (x < 3) { x := x + 1; }; match (x) { int(v) => { if (v == 3) { v } else { -v } }, Err(e) => { 0 } } };";
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_resin::LANGUAGE.into())

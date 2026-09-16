@@ -31,9 +31,9 @@ struct Device {
     @gpu_allocator
     def malloc(self: Device, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | Err<Failure>) = { Err(Failure {}) };
     @gpu_compute_pipeline
-    def compute(self: Device, code: { data: Ptr<ubyte>, length: ulong }) -> (PipelineOwner | Err<Failure>) = { Err(Failure {}) };
+    def compute(self: Device, code: (Ptr<ubyte>, ulong)) -> (PipelineOwner | Err<Failure>) = { Err(Failure {}) };
     @gpu_graphics_pipeline
-    def graphics(self: Device, vertex: { data: Ptr<ubyte>, length: ulong }, fragment: { data: Ptr<ubyte>, length: ulong }) -> (PipelineOwner | Err<Failure>) = { Err(Failure {}) };
+    def graphics(self: Device, vertex: (Ptr<ubyte>, ulong), fragment: (Ptr<ubyte>, ulong)) -> (PipelineOwner | Err<Failure>) = { Err(Failure {}) };
 };
 struct PipelineOwner { owner: StrongOwner,
     @gpu_pipeline_context
@@ -45,6 +45,8 @@ struct Commands {
     @gpu_draw
     def draw(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments | None, count: uint) -> (() | Err<Failure>) = { (()) };
 };
+struct HostParams<T> { scale: float32, values: T };
+struct WrongParams<T> { scale: float32, wrong: T };
 struct Params { scale: float32, values: HostRange<int> };
 @compute_shader def kernel(index: ulong, root: Ptr<Params>) = {};
 "#;
@@ -63,9 +65,10 @@ fn contract_declarations_may_follow_their_users_and_dependencies() {
     generate(&format!(
         r#"
         {declarations}
-        def main(values: DeviceRange<int>) -> (() | Err<Failure>) = {{
+        struct FieldsScaleValues<T0, T1> {{ scale: T0, values: T1 }};
+def main(values: DeviceRange<int>) -> (() | Err<Failure>) = {{
             var pipeline = Device {{}}.compute(kernel)?;
-            Commands {{}}.dispatch(pipeline, {{ scale = 2.0, values = values }}, 1, 1, 1)
+            Commands {{}}.dispatch(pipeline, FieldsScaleValues<_, _> {{ scale = 2.0, values = values }}, 1, 1, 1)
         }};
         {contracts}
     "#
@@ -110,9 +113,10 @@ fn opaque_gpu_views_cannot_be_dereferenced_or_cast_to_raw_addresses() {
 fn dispatch_infers_source_host_fields_from_the_pipeline_root() {
     let module = pipelines(
         r#"
-        def main(values: DeviceRange<int>) -> (() | Err<Failure>) = {
+        struct FieldsScaleValues<T0, T1> { scale: T0, values: T1 };
+def main(values: DeviceRange<int>) -> (() | Err<Failure>) = {
             var pipeline = Device {}.compute(kernel)?;
-            Commands {}.dispatch(pipeline, { scale = 2.0, values = values }, 1, 1, 1)
+            Commands {}.dispatch(pipeline, FieldsScaleValues<_, _> { scale = 2.0, values = values }, 1, 1, 1)
         };
     "#,
     )
@@ -132,11 +136,14 @@ fn dispatch_infers_source_host_fields_from_the_pipeline_root() {
         panic!()
     };
     assert!(allocator.is_some());
-    let Type::Record { fields } = &args.params[2] else {
+    let Type::Defined {
+        arguments: fields, ..
+    } = &args.params[2]
+    else {
         panic!()
     };
-    assert_eq!(fields[0].ty, Type::Float32);
-    let Type::Defined { arguments, .. } = &fields[1].ty else {
+    assert_eq!(fields[0], Type::Float32);
+    let Type::Defined { arguments, .. } = &fields[1] else {
         panic!()
     };
     assert_eq!(arguments, &[Type::Int32]);
@@ -146,9 +153,10 @@ fn dispatch_infers_source_host_fields_from_the_pipeline_root() {
 #[test]
 fn pipeline_types_cross_functions_and_accept_precomputed_arguments() {
     pipelines(r#"
-        def create(gpu: Device) -> (ComputeProgram<Params, PipelineOwner> | Err<Failure>) = { gpu.compute(kernel) };
+        struct FieldsScaleValues<T0, T1> { scale: T0, values: T1 };
+def create(gpu: Device) -> (ComputeProgram<Params, PipelineOwner> | Err<Failure>) = { gpu.compute(kernel) };
         def dispatch(pipeline: ComputeProgram<Params, PipelineOwner>, values: DeviceRange<int>) -> (() | Err<Failure>) = {
-            var arguments = (pipeline, { scale = 1.0_f, values = values }, 1_ui, 1_ui, 1_ui);
+            var arguments = (pipeline, FieldsScaleValues<_, _> { scale = 1.0_f, values = values }, 1_ui, 1_ui, 1_ui);
             Commands {}.dispatch(arguments.0, arguments.1, arguments.2, arguments.3, arguments.4)
         };
         def associated(gpu: Device) -> _ = { Device.compute(gpu, kernel) };
@@ -159,7 +167,7 @@ fn pipeline_types_cross_functions_and_accept_precomputed_arguments() {
 fn creation_requires_direct_decorated_shader_declarations() {
     for (expression, expected) in [
         (
-            "gpu.compute({ data = Ptr<ubyte>(0_ul), length = 0_ul })",
+            "gpu.compute((Ptr<ubyte>(0_ul), 0_ul))",
             "requires decorated shader declarations",
         ),
         ("gpu.compute(alias)", "requires direct shader declarations"),
@@ -191,15 +199,15 @@ fn creation_requires_direct_decorated_shader_declarations() {
 fn dispatch_rejects_raw_views_wrong_fields_and_incompatible_stages() {
     for (tail, expected) in [
         (
-            "Commands {}.dispatch(pipeline, { scale = 1.0_f, values = raw }, 1, 1, 1)",
+            "Commands {}.dispatch(pipeline, HostParams<_> { scale = 1.0_f, values = raw }, 1, 1, 1)",
             "incompatible inferred types",
         ),
         (
-            "Commands {}.dispatch(pipeline, { scale = 1.0_f, wrong = values }, 1, 1, 1)",
-            "missing field `values`",
+            "Commands {}.dispatch(pipeline, WrongParams<_> { scale = 1.0_f, wrong = values }, 1, 1, 1)",
+            "must match the shader root",
         ),
         (
-            "Commands {}.draw(pipeline, { scale = 1.0_f, values = values }, 3)",
+            "Commands {}.draw(pipeline, HostParams<_> { scale = 1.0_f, values = values }, 3)",
             "draw requires a graphics pipeline",
         ),
         (

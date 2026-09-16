@@ -124,7 +124,7 @@ fn function_types_accept_unit_tuples_and_higher_order_calls() {
 #[test]
 fn type_formers_take_types_between_angle_brackets() {
     let m = compile(
-        "export { main }; struct Span<T> { data: Ptr<T>, length: ulong }; type Pointer = Ptr<Ptr<int>>; type View = Span<{ value: int, next: Pointer }>; type Callback = Ptr<(int) -> int>; type UnitPointer = Ptr<()>; def identity(p: Pointer) -> Pointer = { p }; def main() -> () = { var p = Ptr<int>(ulong(0)); };",
+        "export { main }; struct FieldsValueNext<T0, T1> { value: T0, next: T1 };\nstruct Span<T> { data: Ptr<T>, length: ulong }; type Pointer = Ptr<Ptr<int>>; type View = Span<FieldsValueNext<int, Pointer>>; type Callback = Ptr<(int) -> int>; type UnitPointer = Ptr<()>; def identity(p: Pointer) -> Pointer = { p }; def main() -> () = { var p = Ptr<int>(ulong(0)); };",
     );
     assert_eq!(
         m.functions[0].result,
@@ -288,7 +288,7 @@ fn record_type_members_are_parse_errors_instead_of_panics() {
     );
     assert!(
         !support::frontend::ast(&support::frontend::cst(
-            "def main() -> () = { var x = { a = 1, T = int }; };",
+            "struct FieldsA<T0> { a: T0 };\ndef main() -> () = { var x = FieldsA<_> { a = 1, T = int }; };",
             None
         ))
         .errors
@@ -361,12 +361,12 @@ fn signed_literals_respect_context_and_the_minimum_integer() {
 #[test]
 fn returned_pointers_support_field_assignment() {
     compile(
-        "def id (p: Ptr<{ x: int }>) -> Ptr<{ x: int }> = { p }; def f (p: Ptr<{ x: int }>) -> int = { id(p).x := 1 };",
+        "struct FieldsX<T0> { x: T0 };\ndef id (p: Ptr<FieldsX<int>>) -> Ptr<FieldsX<int>> = { p }; def f (p: Ptr<FieldsX<int>>) -> int = { id(p).x := 1 };",
     );
     compile(
-        "struct R { inner: { x: int } }; def id (p: Ptr<R>) -> Ptr<R> = { p }; def f (p: Ptr<R>) -> int = { id(p).inner.x := 1 };",
+        "struct FieldsX<T0> { x: T0 };\nstruct R { inner: FieldsX<int> }; def id (p: Ptr<R>) -> Ptr<R> = { p }; def f (p: Ptr<R>) -> int = { id(p).inner.x := 1 };",
     );
-    let src = "def id (r: { x: int }) -> { x: int } = { r }; def f (r: { x: int }) -> int = { id(r).x := 1 };";
+    let src = "struct FieldsX<T0> { x: T0 };\ndef id (r: FieldsX<int>) -> FieldsX<int> = { r }; def f (r: FieldsX<int>) -> int = { id(r).x := 1 };";
     assert!(matches!(
         pipeline::generate(&parse(src)).unwrap_err().kind,
         GenerateErrorKind::NotAPlace
@@ -376,8 +376,8 @@ fn returned_pointers_support_field_assignment() {
 #[test]
 fn nested_field_access_evaluates_its_base_once() {
     for src in [
-        "def id (r: { inner: { x: int } }) -> { inner: { x: int } } = { r }; def f (r: { inner: { x: int } }) -> int = { id(r).inner.x };",
-        "def id (r: { p: Ptr<{ x: int }> }) -> { p: Ptr<{ x: int }> } = { r }; def f (r: { p: Ptr<{ x: int }> }) -> int = { id(r).p.x := 1 };",
+        "struct FieldsInner<T0> { inner: T0 };\nstruct FieldsX<T0> { x: T0 };\ndef id (r: FieldsInner<FieldsX<int>>) -> FieldsInner<FieldsX<int>> = { r }; def f (r: FieldsInner<FieldsX<int>>) -> int = { id(r).inner.x };",
+        "struct FieldsP<T0> { p: T0 };\nstruct FieldsX<T0> { x: T0 };\ndef id (r: FieldsP<Ptr<FieldsX<int>>>) -> FieldsP<Ptr<FieldsX<int>>> = { r }; def f (r: FieldsP<Ptr<FieldsX<int>>>) -> int = { id(r).p.x := 1 };",
     ] {
         let module = compile(src);
         let f = module
@@ -405,8 +405,8 @@ fn uninitialized_reads_are_rejected_on_all_paths() {
         "def f (c: int) -> int = { var x: int; if (c == 0) { x := 1 } else { 0 }; x };",
         "def f (c: int) -> int = { var x: int; (c == 0) && ((x := 1) == 1); x };",
         "export { main }; def main() -> () = { var x: int; var y = x; };",
-        "def f () -> int = { var r: { x: int }; r.x };",
-        "def f () -> int = { var r: { x: int }; r.x := 1; r.x };",
+        "struct FieldsX<T0> { x: T0 };\ndef f () -> int = { var r: FieldsX<int>; r.x };",
+        "struct FieldsX<T0> { x: T0 };\ndef f () -> int = { var r: FieldsX<int>; r.x := 1; r.x };",
     ] {
         assert!(
             matches!(

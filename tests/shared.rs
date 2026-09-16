@@ -49,10 +49,11 @@ fn rejects(source: &str, message: &str) {
 #[test]
 fn at_indexing_preserves_shared_array_owners_and_overwrite_cleanup() {
     run(r#"
-    def main() -> int = {
+    struct FieldsValues<T0> { values: T0 };
+def main() -> int = {
         var trace = 0; var weak = WeakPtr<Resource>.empty();
         {
-            var holder = { values = [shared_resource(&trace, 1)] };
+            var holder = FieldsValues<_> { values = [shared_resource(&trace, 1)] };
             weak := holder.values.at(0).downgrade();
             var saved = holder.values.at(0);
             holder.values.at(0) := shared_resource(&trace, 2);
@@ -154,10 +155,11 @@ fn temporary_projection_keeps_nominal_and_nested_destructors() {
 #[test]
 fn function_fields_named_drop_remain_callable() {
     run(r#"
-    def increment(value: int) -> int = { value + 1 };
+    struct FieldsDrop<T0> { drop: T0 };
+def increment(value: int) -> int = { value + 1 };
     struct Callback { drop: (int) -> int };
     def main() -> int = {
-        var record = { drop = increment };
+        var record = FieldsDrop<_> { drop = increment };
         var nominal = Callback { drop = increment };
         if ((record.drop)(20) + (nominal.drop)(20) == 42) { 0 } else { 1 }
     };

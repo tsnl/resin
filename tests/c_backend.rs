@@ -221,7 +221,7 @@ fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
         0,
     );
     runs(
-        "export { main }; def main() -> _ = { var n = 0_i; var pair: { a: _, b: _ }; pair := { b = (n := n + 1), a = (n := n + 1) }; pair.a * 10 + pair.b };",
+        "export { main }; struct FieldsAB<T0, T1> { a: T0, b: T1 };\ndef main() -> _ = { var n = 0_i; var pair: FieldsAB<_, _>; pair := FieldsAB<_, _> { b = (n := n + 1), a = (n := n + 1) }; pair.a * 10 + pair.b };",
         21,
     );
     runs(
@@ -305,7 +305,7 @@ fn while_nests_with_branches_and_preserves_outer_values() {
         10,
     );
     runs(
-        "export { main }; def main () -> int = { var n = 0; var r = { first = 9, body = while (n < 3) { n := n + 1; }, last = n }; r.first + r.last };",
+        "export { main }; struct FieldsFirstBodyLast<T0, T1, T2> { first: T0, body: T1, last: T2 };\ndef main () -> int = { var n = 0; var r = FieldsFirstBodyLast<_, _, _> { first = 9, body = while (n < 3) { n := n + 1; }, last = n }; r.first + r.last };",
         12,
     );
     runs(
@@ -732,7 +732,8 @@ fn at_indexing_borrows_array_places_and_supports_field_receivers() {
     runs(
         r#"export { main };
         import { "$/span.resin" };
-        struct Holder { values: Span<int> };
+        struct FieldsValues<T0> { values: T0 };
+struct Holder { values: Span<int> };
         def view(p: Ptr<int>, calls: Ptr<int>) -> Holder = {
             calls.* := calls.* + 1;
             Holder { values = Span<int> { data = p, length = 3_ul } }
@@ -743,7 +744,7 @@ fn at_indexing_borrows_array_places_and_supports_field_receivers() {
             var values = [10_i, 20, 30]; var calls = 0;
             var p: Ref<int> = view(Ptr<int>(&values), &calls).values.at(ulong(index(&calls)));
             p := 42;
-            var record = { values = [3, 4] };
+            var record = FieldsValues<_> { values = [3, 4] };
             record.values.at(0) := 8;
             var holder = view(Ptr<int>(&values), &calls);
             element(holder.values, 0) := 11;
@@ -767,9 +768,10 @@ fn at_indexing_checks_bounds_before_later_effects() {
                     }},
                 }};
                 import {{ "$/span.resin" }};
-                def main() -> int = {{
+                struct FieldsValues<T0> {{ values: T0 }};
+def main() -> int = {{
                     var values = [1, 2];
-                    var holder = {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }};
+                    var holder = FieldsValues<_> {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }};
                     {receiver}.at({index}) := 9;
                     puts("after".data); 0
                 }};"#
@@ -904,7 +906,7 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
 #[test]
 fn spirv_is_only_special_on_function_declarations() {
     runs(
-        "export { main }; def main() -> int = { var record = { spirv = 1 }; record.spirv := 2; record.spirv };",
+        "export { main }; struct FieldsSpirv<T0> { spirv: T0 };\ndef main() -> int = { var record = FieldsSpirv<_> { spirv = 1 }; record.spirv := 2; record.spirv };",
         2,
     );
 }
@@ -1011,12 +1013,13 @@ fn byte_arrays_have_packed_storage_and_nested_stride() {
     runs(
         r#"
         export { main };
-        def main() -> int = {
+        struct FieldsBytesTail<T0, T1> { bytes: T0, tail: T1 };
+def main() -> int = {
             var binary = [65_ub, 66_ub];
             var copied = binary;
             var nested = [[1_ub, 2_ub], [3_ub, 4_ub]];
             var embedded = [65_ub, 0_ub, 66_ub];
-            var record = { bytes = copied, tail = 255_ub };
+            var record = FieldsBytesTail<_, _> { bytes = copied, tail = 255_ub };
             binary.at(0) := 90_ub;
             if (size_of(binary) == 2_ul && align_of(binary) == 1_ul &&
                 size_of(nested) == 4_ul && size_of(embedded) == 3_ul &&

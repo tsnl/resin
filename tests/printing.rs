@@ -82,11 +82,12 @@ fn string_storage_is_terminated_without_changing_its_logical_length() {
         };
         import { "$/string.resin" };
 
-        def main() -> int = {
+        struct FieldsText<T0> { text: T0 };
+def main() -> int = {
             var text = "héllo";
             var empty = "";
             var copy = text;
-            var record = { text = copy };
+            var record = FieldsText<_> { text = copy };
             var pointer = record.text.data;
             if (strlen(pointer) == ulong(6) && Ptr<ubyte>(ulong(pointer) + ulong(6)).* == ubyte(0)
                 && strlen(empty.data) == ulong(0)) {

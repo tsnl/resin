@@ -1,5 +1,5 @@
 ==================
-Structs, aliases, unions, and Results
+Structs, aliases, unions, and Err wrappers
 ==================
 struct SomeInt { value: int };
 struct NoneInt {};

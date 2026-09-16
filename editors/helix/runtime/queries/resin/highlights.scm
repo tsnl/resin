@@ -25,7 +25,6 @@
 (field_access name: (tuple_index) @variable.other.member)
 (method_call name: (lid) @function)
 (record_term fields: (term_define name: (lid) @variable.other.member))
-(record_type field: (declare name: (lid) @variable.other.member))
 (struct_definition fields: (declare name: (lid) @variable.other.member))
 (match_arm name: (lid) @variable.parameter)
 

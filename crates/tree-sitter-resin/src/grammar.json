@@ -2644,10 +2644,6 @@
         },
         {
           "type": "SYMBOL",
-          "name": "record_term"
-        },
-        {
-          "type": "SYMBOL",
           "name": "chain_term"
         },
         {
@@ -3789,10 +3785,6 @@
         {
           "type": "SYMBOL",
           "name": "unit_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "record_type"
         }
       ]
     },
@@ -3888,90 +3880,6 @@
         {
           "type": "STRING",
           "value": ")"
-        }
-      ]
-    },
-    "record_type": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "{"
-        },
-        {
-          "type": "SEQ",
-          "members": [
-            {
-              "type": "FIELD",
-              "name": "field",
-              "content": {
-                "type": "SYMBOL",
-                "name": "declare"
-              }
-            },
-            {
-              "type": "CHOICE",
-              "members": [
-                {
-                  "type": "SEQ",
-                  "members": [
-                    {
-                      "type": "STRING",
-                      "value": ","
-                    },
-                    {
-                      "type": "SEQ",
-                      "members": [
-                        {
-                          "type": "REPEAT",
-                          "content": {
-                            "type": "SEQ",
-                            "members": [
-                              {
-                                "type": "FIELD",
-                                "name": "field",
-                                "content": {
-                                  "type": "SYMBOL",
-                                  "name": "declare"
-                                }
-                              },
-                              {
-                                "type": "STRING",
-                                "value": ","
-                              }
-                            ]
-                          }
-                        },
-                        {
-                          "type": "CHOICE",
-                          "members": [
-                            {
-                              "type": "FIELD",
-                              "name": "field",
-                              "content": {
-                                "type": "SYMBOL",
-                                "name": "declare"
-                              }
-                            },
-                            {
-                              "type": "BLANK"
-                            }
-                          ]
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "BLANK"
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "STRING",
-          "value": "}"
         }
       ]
     },
