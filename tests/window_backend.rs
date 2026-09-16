@@ -1,6 +1,3 @@
-use tempfile::TempDir;
-#[path = "support/toolchain.rs"]
-mod toolchain;
 use std::{
     ffi::OsStr,
     path::Path,
@@ -8,6 +5,8 @@ use std::{
     time::{Duration, Instant},
 };
 use support::pipeline;
+use support::toolchain;
+use tempfile::TempDir;
 
 use resin_ast::{StmtKind, TermKind};
 use resin_runtime::testing::lock_gpu;
@@ -275,11 +274,7 @@ fn run_example(name: &str) {
         .path()
         .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
     let mut ast = pipeline::load(&source).unwrap();
-    let body = ast
-        .modules
-        .last_mut()
-        .unwrap()
-        .file
+    let body = std::sync::Arc::make_mut(&mut ast.modules.last_mut().unwrap().file)
         .stmts
         .iter_mut()
         .find_map(|stmt| match &mut stmt.val {
@@ -309,11 +304,13 @@ fn run_example(name: &str) {
     let module = pipeline::generate_program(&ast).unwrap();
     let project = support::project::Project::new(&module, Some("main")).unwrap();
     let built = project.build(&toolchain::spirv(&compiler)).unwrap();
-    built
-        .executable(project.generated.program().unwrap().file_name().unwrap())
-        .unwrap()
-        .copy_to(&executable)
-        .unwrap();
+    support::frontend::copy(
+        &built
+            .executable(project.generated.program().unwrap().file_name().unwrap())
+            .unwrap(),
+        &executable,
+    )
+    .unwrap();
     if !display_available() {
         return;
     }

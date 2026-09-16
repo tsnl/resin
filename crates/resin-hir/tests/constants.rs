@@ -132,7 +132,12 @@ fn sizeof_accepts_only_types_and_preserves_generic_queries() {
         "def unused(value: int) = { sizeof(value); };",
         "def unused() = { sizeof(int, long); };",
     ] {
-        let parsed = resin_ast::build_ast(&resin_cst::build_cst(source, None));
+        let parsed = common::run(resin_ast::build_ast(
+            common::syntax(source),
+            &resin_executor::Execution::default(),
+            &resin_executor::Cancellation::new(),
+        ))
+        .unwrap();
         assert!(
             !parsed.errors.is_empty(),
             "sizeof accepted a value operand: {source}"

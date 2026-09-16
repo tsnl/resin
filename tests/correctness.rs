@@ -1,12 +1,14 @@
-use resin_hir::GenerateErrorKind;
-use resin_types::prelude::*;
-#[path = "support/pipeline.rs"]
-mod pipeline;
+#[allow(dead_code)]
+mod support;
+
 use resin_ast::SourceFile;
+use resin_hir::GenerateErrorKind;
 use resin_lir::Instr;
+use resin_types::prelude::*;
+use support::pipeline;
 
 fn parse(src: &str) -> SourceFile {
-    let parsed = resin_ast::build_ast(&resin_cst::build_cst(src, None));
+    let parsed = support::frontend::ast(&support::frontend::cst(src, None));
     assert!(parsed.errors.is_empty(), "{src}\n{:?}", parsed.errors);
     parsed.file
 }
@@ -26,9 +28,9 @@ fn only_parenthesized_lists_apply_functions() {
         "x.method [1]",
     ] {
         let source = format!("def main() = {{ {call}; }};");
-        let document = resin_cst::build_cst(source.clone(), None);
+        let document = support::frontend::cst(source.clone(), None);
         assert!(
-            !resin_ast::build_ast(&document).errors.is_empty(),
+            !support::frontend::ast(&document).errors.is_empty(),
             "{source}"
         );
         assert!(resin_cst::format_source(&source).is_none(), "{source}");
@@ -143,7 +145,7 @@ fn type_formers_take_types_between_angle_brackets() {
         "type P = Ptr<int, int>;",
     ] {
         assert!(
-            !resin_ast::build_ast(&resin_cst::build_cst(source, None))
+            !support::frontend::ast(&support::frontend::cst(source, None))
                 .errors
                 .is_empty(),
             "{source}"
@@ -266,7 +268,7 @@ fn lambdas_and_nested_definitions_are_parse_errors() {
         "def missing (n) = { n };",
     ] {
         assert!(
-            !resin_ast::build_ast(&resin_cst::build_cst(source, None))
+            !support::frontend::ast(&support::frontend::cst(source, None))
                 .errors
                 .is_empty(),
             "{source}"
@@ -277,7 +279,7 @@ fn lambdas_and_nested_definitions_are_parse_errors() {
 #[test]
 fn record_type_members_are_parse_errors_instead_of_panics() {
     assert!(
-        !resin_ast::build_ast(&resin_cst::build_cst(
+        !support::frontend::ast(&support::frontend::cst(
             "def main() -> () = { var x = { T = int }; };",
             None
         ))
@@ -285,7 +287,7 @@ fn record_type_members_are_parse_errors_instead_of_panics() {
         .is_empty()
     );
     assert!(
-        !resin_ast::build_ast(&resin_cst::build_cst(
+        !support::frontend::ast(&support::frontend::cst(
             "def main() -> () = { var x = { a = 1, T = int }; };",
             None
         ))

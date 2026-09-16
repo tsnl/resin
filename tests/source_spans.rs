@@ -9,7 +9,7 @@ use std::path::PathBuf;
 fn build_hir(source: &str) -> Hir {
     let library = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resin");
     let mut loader = Loader::new(library);
-    Hir::build(Source::new("span-test.resin", source), &mut loader, None)
+    support::frontend::analyze(Source::new("span-test.resin", source), &mut loader, None)
 }
 
 fn compile(

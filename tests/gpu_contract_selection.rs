@@ -1,4 +1,6 @@
-use resin_hir::Hir;
+#[allow(dead_code)]
+mod support;
+
 use resin_source::{Loader, Source};
 
 const PIPELINES: &str = r#"
@@ -68,7 +70,7 @@ fn ambiguous_projection_diagnostics_are_independent_of_declaration_and_import_or
                 );
                 loader.set_import(&source, &file, target).unwrap();
             }
-            let analysis = Hir::build(source, &mut loader, None);
+            let analysis = support::frontend::analyze(source, &mut loader, None);
             let errors = analysis.diagnostics();
             assert_eq!(errors.len(), 1, "{errors:?}");
             // Importing moves the call's source span; the diagnostic itself is stable.
@@ -93,7 +95,8 @@ fn unfinished_bridge_completions_use_registered_source_pipeline_names() {
                 "{PIPELINES}\ndef completion(device: Device, commands: Commands) = {{ {receiver}.; }};"
             ),
         );
-        let analysis = Hir::build(source.clone(), &mut Loader::new(Default::default()), None);
+        let analysis =
+            support::frontend::analyze(source.clone(), &mut Loader::new(Default::default()), None);
         let offset = source.text().rfind(".;").unwrap() + 1;
         let completions = analysis.completions(&source, offset);
         let methods = if receiver.eq_ignore_ascii_case("device") {

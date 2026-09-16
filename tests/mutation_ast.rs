@@ -1,8 +1,11 @@
+#[allow(dead_code)]
+mod support;
+
 use resin_ast::{SourceFile, StmtKind, Term, TermKind, format_source};
 use resin_source::prelude::*;
 
 fn parse(src: &str) -> SourceFile {
-    let parsed = resin_ast::build_ast(&resin_cst::build_cst(src, None));
+    let parsed = support::frontend::ast(&support::frontend::cst(src, None));
     assert!(parsed.errors.is_empty(), "{src}\n{:?}", parsed.errors);
     parsed.file
 }

@@ -14,11 +14,14 @@
 //! use resin_codegen::{CModule, SpirvModule};
 //! ```
 
+use resin_executor::{Cancellation, Execution};
 use resin_types::prelude::*;
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::Arc,
 };
+use tempfile::TempDir;
 
 mod c;
 mod error;
@@ -30,22 +33,22 @@ mod spirv;
 // Generated source files and the binary headers they will need
 //
 
-/// Source files ready for native tools. The caller owns the output directory.
-/// Files and metadata remain usable after the verified input is dropped.
-#[derive(Debug)]
+/// Immutable source files ready for native staging. Clones retain the same owned directory.
+/// Files outlive the verified input and are removed when the final project owner drops.
+#[derive(Debug, Clone)]
 pub struct GeneratedProject {
-    directory: PathBuf,
+    directory: Arc<TempDir>,
     build_file: PathBuf,
     program: Option<PathBuf>,
     c_source: Option<PathBuf>,
-    shaders: Vec<GeneratedShader>,
+    shaders: Arc<[GeneratedShader]>,
     name: String,
     entry: Option<String>,
 }
 
 impl GeneratedProject {
     pub fn directory(&self) -> &Path {
-        &self.directory
+        self.directory.path()
     }
 
     /// Ninja dependency graph; `toolchain.ninja` supplies native rules and settings.
@@ -118,34 +121,116 @@ impl GeneratedShader {
     }
 }
 
-/// Generate a source project and its complete build graph before running native tools.
-/// All target lowering succeeds before any files are written.
+/// Generate an owned source project on a bounded worker before running native tools.
+/// The existing temporary parent receives a unique child directory for this generation.
+/// All target lowering succeeds before any files are written or the project is returned.
 /// A requested host entry emits C and its embedded shaders; `None` emits the requested shaders.
-/// The toolchain configures and runs the returned Ninja graph. Optimized SPIR-V, headers, and
-/// executables are planned outputs until then. Paths in the result are absolute.
-/// I/O failure may leave partially written files.
+/// The toolchain configures and runs the returned Ninja graph. Preprocessed C, optimized
+/// SPIR-V, headers, and executables are planned outputs until then. Paths are absolute.
+/// Failure or cancellation releases the unpublished directory. Native tools must stage
+/// these inputs elsewhere rather than changing a retained generated project.
+/// Host projects include `native-inputs.json`: original/captured translation-unit paths,
+/// literal `c_flags` and `preprocessing_flags`, and generated header prerequisites.
+/// The toolchain captures `main.c` as `main.i` and records its bytes in `native-inputs.state`.
+/// Native compilation consumes that captured input without reading headers again.
+/// Shader-only projects have no C input metadata.
 ///
-/// ```compile_fail,E0308
+/// ```compile_fail
 /// let module = resin_lir::Module::default();
-/// resin_codegen::generate(&module, Some("main"), std::path::Path::new("build"));
+/// resin_codegen::generate(std::sync::Arc::new(module), Some("main".into()),
+///     std::path::Path::new("build"), &resin_executor::Execution::default(),
+///     &resin_executor::Cancellation::new());
 /// ```
-pub fn generate(
+pub async fn generate(
+    checked: Arc<resin_lir::VerifiedModule>,
+    host_entry: Option<String>,
+    temporary_parent: &Path,
+    execution: &Execution,
+    cancellation: &Cancellation,
+) -> Result<GeneratedProject, GenerationError> {
+    let temporary_parent = temporary_parent.to_path_buf();
+    execution
+        .run(cancellation, move |cancellation| {
+            let parent = std::path::absolute(temporary_parent)?;
+            let directory = Arc::new(
+                tempfile::Builder::new()
+                    .prefix("resin-codegen-")
+                    .tempdir_in(parent)?,
+            );
+            generate_project(
+                checked.view(),
+                host_entry.as_deref(),
+                directory,
+                cancellation,
+            )
+        })
+        .await?
+}
+
+fn generate_project(
     checked: resin_lir::Verified<'_>,
     host_entry: Option<&str>,
-    directory: &Path,
-) -> Result<GeneratedProject, Error> {
+    directory: Arc<TempDir>,
+    cancellation: &Cancellation,
+) -> Result<GeneratedProject, GenerationError> {
     let project = describe_project(checked.module(), host_entry, directory)?;
+    cancellation.check()?;
     let c = host_entry
         .map(|entry| generate_host(checked, entry))
         .transpose()?;
-    let shaders = project
-        .shaders
-        .iter()
-        .map(|shader| generate_shader(checked, shader))
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut shaders = Vec::with_capacity(project.shaders.len());
+    for shader in project.shaders.iter() {
+        cancellation.check()?;
+        shaders.push(generate_shader(checked, shader)?);
+    }
+    cancellation.check()?;
     let build = build_graph(&project);
-    write_sources(&project, c.as_deref(), &shaders, &build)?;
+    write_sources(&project, c.as_deref(), &shaders, &build, cancellation)?;
     Ok(project)
+}
+
+#[derive(Debug)]
+pub enum GenerationError {
+    Execution { error: resin_executor::Error },
+    Codegen { error: Error },
+}
+
+impl From<resin_executor::Error> for GenerationError {
+    fn from(error: resin_executor::Error) -> Self {
+        Self::Execution { error }
+    }
+}
+
+impl From<Error> for GenerationError {
+    fn from(error: Error) -> Self {
+        Self::Codegen { error }
+    }
+}
+
+impl From<std::io::Error> for GenerationError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Codegen {
+            error: error.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for GenerationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Execution { error } => error.fmt(f),
+            Self::Codegen { error } => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for GenerationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Execution { error } => Some(error),
+            Self::Codegen { error } => Some(error),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -172,26 +257,25 @@ impl From<std::io::Error> for Error {
 fn describe_project(
     module: &resin_lir::Module,
     entry: Option<&str>,
-    directory: &Path,
+    directory: Arc<TempDir>,
 ) -> Result<GeneratedProject, Error> {
     if entry.is_none() && module.shaders.is_empty() {
         return Err(Error("no shader entries were requested".into()));
     }
-    let directory = std::path::absolute(directory)?;
     let shaders = module
         .shaders
         .iter()
         .filter(|(_, shader)| entry.is_none() || shader.embedded)
-        .map(|(&function, shader)| describe_shader(function, &shader.stage, &directory))
+        .map(|(&function, shader)| describe_shader(function, &shader.stage, directory.path()))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(GeneratedProject {
-        build_file: directory.join("build.ninja"),
-        program: entry.map(|_| directory.join(program_filename())),
-        c_source: entry.map(|_| directory.join("main.c")),
+        build_file: directory.path().join("build.ninja"),
+        program: entry.map(|_| directory.path().join(program_filename())),
+        c_source: entry.map(|_| directory.path().join("main.c")),
         name: project_name(module, entry),
         entry: entry.map(str::to_owned),
         directory,
-        shaders,
+        shaders: shaders.into(),
     })
 }
 
@@ -253,21 +337,26 @@ fn write_sources(
     c: Option<&str>,
     shaders: &[Vec<u8>],
     build: &str,
-) -> Result<(), Error> {
-    fs::create_dir_all(&project.directory)?;
+    cancellation: &Cancellation,
+) -> Result<(), GenerationError> {
+    cancellation.check()?;
     if let (Some(path), Some(source)) = (&project.c_source, c) {
         write_source(path, source.as_bytes())?;
+        write_source(
+            &project.directory().join("native-inputs.json"),
+            native_inputs(project).as_bytes(),
+        )?;
     }
     for (shader, source) in project.shaders.iter().zip(shaders) {
+        cancellation.check()?;
         write_source(&shader.unoptimized_spirv, source)?;
     }
-    write_source(&project.build_file, build.as_bytes())
+    cancellation.check()?;
+    write_source(&project.build_file, build.as_bytes())?;
+    Ok(())
 }
 
 fn write_source(path: &Path, source: &[u8]) -> Result<(), Error> {
-    if fs::read(path).is_ok_and(|current| current == source) {
-        return Ok(());
-    }
     fs::write(path, source).map_err(|error| Error(format!("{}: {error}", path.display())))
 }
 
@@ -279,11 +368,24 @@ fn program_filename() -> String {
     format!("program{}", std::env::consts::EXE_SUFFIX)
 }
 
+fn native_inputs(project: &GeneratedProject) -> String {
+    // Every filename is generated from a numeric function identity, requiring no JSON escaping.
+    let prerequisites = project
+        .shaders
+        .iter()
+        .map(|shader| format!("\"{}\"", shader_header(shader.function)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "{{\n  \"translation_units\": [{{\"source\": \"main.c\", \"preprocessed\": \"main.i\"}}],\n  \"c_flags\": [],\n  \"preprocessing_flags\": [],\n  \"generated_prerequisites\": [{prerequisites}]\n}}\n"
+    )
+}
+
 fn build_graph(project: &GeneratedProject) -> String {
     let mut out = String::from(
         "# Native tool paths and platform flags are supplied by the toolchain.\ninclude toolchain.ninja\n\n",
     );
-    for shader in &project.shaders {
+    for shader in project.shaders.iter() {
         shader_rules(&mut out, shader);
     }
     if project.program.is_some() {
@@ -313,7 +415,7 @@ fn host_rule(out: &mut String, shaders: &[GeneratedShader]) {
     use std::fmt::Write;
     write!(
         out,
-        "build {}: compile_program main.c | toolchain.state $runtime_library",
+        "build {}: compile_preprocessed_program main.i | toolchain.state $runtime_library native-inputs.state",
         program_filename()
     )
     .unwrap();
@@ -329,7 +431,7 @@ fn default_target(out: &mut String, project: &GeneratedProject) {
     if project.program.is_some() {
         write!(out, " {}", program_filename()).unwrap();
     } else {
-        for shader in &project.shaders {
+        for shader in project.shaders.iter() {
             write!(out, " {}", shader_header(shader.function)).unwrap();
         }
     }

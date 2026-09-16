@@ -1,4 +1,5 @@
 //! Schemes survive in HIR; requests and concrete function identities belong to LIR.
+mod support;
 use resin_hir::{
     Annotation, Constant, Function, Module, Parameter, Signature, Statement, Term, TermKind, Type,
     TypeParameter, TypeParameterId,
@@ -102,7 +103,7 @@ fn options(limit: usize) -> LoweringOptions {
 #[test]
 fn instances_are_memoized_and_the_exact_allowance_is_admitted() {
     let hir = program(vec![Type::Int32, Type::Bool, Type::Int32, Type::Bool]);
-    let lir = resin_lir::build_lir(&hir, &[], &options(2)).unwrap();
+    let lir = support::build_lir(&hir, &[], &options(2)).unwrap();
     resin_lir::verify(&lir).unwrap();
     assert_eq!(hir.functions.len(), 2);
     assert_eq!(lir.functions.len(), 3);
@@ -117,7 +118,7 @@ fn instances_are_memoized_and_the_exact_allowance_is_admitted() {
         })
         .collect();
     assert_eq!(calls, [1, 2, 1, 2]);
-    let error = resin_lir::build_lir(&hir, &[], &options(1))
+    let error = support::build_lir(&hir, &[], &options(1))
         .unwrap_err()
         .remove(0);
     assert_eq!(
@@ -141,7 +142,7 @@ fn substitution_normalizes_unions_before_memoization() {
         },
         Type::Int32,
     ]);
-    let lir = resin_lir::build_lir(&hir, &[], &options(1)).unwrap();
+    let lir = support::build_lir(&hir, &[], &options(1)).unwrap();
     assert_eq!(lir.functions.len(), 2);
 }
 
@@ -154,7 +155,7 @@ fn growing_recursive_requests_fail_with_a_bounded_application_trace() {
             pointee: Box::new(Type::Parameter { parameter: T }),
         },
     )]));
-    let errors = resin_lir::build_lir(&hir, &[], &options(40)).unwrap_err();
+    let errors = support::build_lir(&hir, &[], &options(40)).unwrap_err();
     assert_eq!(errors.len(), 1);
     let error = &errors[0];
     assert!(matches!(
@@ -175,7 +176,7 @@ fn growing_recursive_requests_fail_with_a_bounded_application_trace() {
 fn recursive_requests_reuse_pending_identities() {
     let mut hir = program(vec![Type::Int32]);
     hir.functions[0].body = Some(block([reference(0, Type::Parameter { parameter: T })]));
-    let lir = resin_lir::build_lir(&hir, &[], &options(1)).unwrap();
+    let lir = support::build_lir(&hir, &[], &options(1)).unwrap();
     resin_lir::verify(&lir).unwrap();
     assert_eq!(lir.functions.len(), 2);
     assert!(
@@ -226,7 +227,7 @@ fn identity_signatures_and_bodies_are_concrete_without_changing_hir() {
         functions: vec![identity, function("main", block([reference]))],
         ..Default::default()
     };
-    let lir = resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default()).unwrap();
+    let lir = support::build_lir(&hir, &[], &resin_lir::LoweringOptions::default()).unwrap();
     resin_lir::verify(&lir).unwrap();
     assert_eq!(lir.functions[1].locals[0].ty, Ty::Int32);
     assert_eq!(lir.functions[1].result, Ty::Int32);
@@ -270,7 +271,7 @@ fn unused_families_do_not_constrain_supported_concrete_operations() {
         ..Default::default()
     };
     assert_eq!(
-        resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
+        support::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
             .unwrap()
             .functions
             .len(),
@@ -286,7 +287,7 @@ fn unused_families_do_not_constrain_supported_concrete_operations() {
             type_args: vec![Type::Bool],
         },
     )]));
-    let error = resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
+    let error = support::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
         .unwrap_err()
         .remove(0);
     assert!(matches!(error.kind, ErrorKind::Type { .. }));
@@ -320,7 +321,7 @@ fn implicit_drop_references_use_concrete_function_identities() {
         }),
     });
     hir.functions.push(drop);
-    let lir = resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default()).unwrap();
+    let lir = support::build_lir(&hir, &[], &resin_lir::LoweringOptions::default()).unwrap();
     resin_lir::verify(&lir).unwrap();
     assert_eq!(lir.types[0].drop_hook(), Some(FunctionId::from_index(1)));
 }
@@ -334,7 +335,7 @@ fn type_expansion_has_a_separate_guard_from_the_function_allowance() {
             pointee: Box::new(Type::Parameter { parameter: T }),
         },
     )]));
-    let error = resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
+    let error = support::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
         .unwrap_err()
         .remove(0);
     assert!(matches!(error.kind, ErrorKind::TypeExpansionLimit { .. }));
@@ -353,7 +354,7 @@ fn exponentially_growing_arguments_hit_the_type_size_guard() {
             fields: vec![field("left"), field("right")],
         },
     )]));
-    let error = resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
+    let error = support::build_lir(&hir, &[], &resin_lir::LoweringOptions::default())
         .unwrap_err()
         .remove(0);
     assert!(matches!(error.kind, ErrorKind::TypeSizeLimit { .. }));
@@ -370,7 +371,7 @@ fn failed_requests_are_memoized_without_publishing_an_incomplete_module() {
             value: Constant::Unit,
         },
     ));
-    let errors = resin_lir::build_lir(&hir, &[], &options(1)).unwrap_err();
+    let errors = support::build_lir(&hir, &[], &options(1)).unwrap_err();
     assert_eq!(errors.len(), 1);
     assert!(matches!(errors[0].kind, ErrorKind::InvalidHir { .. }));
 }
@@ -417,7 +418,7 @@ fn requested_roots_exclude_unused_functions_types_and_drop_hooks() {
         methods: Default::default(),
         drop: Some(FunctionId::from_index(99)),
     });
-    let lir = resin_lir::build_lir(
+    let lir = support::build_lir(
         &hir,
         &[entry("main", 1, resin_lir::Profile::Host)],
         &options(1),
@@ -427,7 +428,7 @@ fn requested_roots_exclude_unused_functions_types_and_drop_hooks() {
     assert_eq!(lir.functions.len(), 2);
     assert!(lir.types.is_empty());
     assert!(
-        resin_lir::build_lir(&hir, &[], &resin_lir::LoweringOptions::default()).is_err(),
+        support::build_lir(&hir, &[], &resin_lir::LoweringOptions::default()).is_err(),
         "whole-module construction still requests all declarations"
     );
 }
@@ -474,7 +475,7 @@ fn explicit_root_arguments_normalize_and_preserve_recursive_nominal_identity() {
     }];
     let mut duplicate = root.clone();
     duplicate.arguments = vec![nominal];
-    let lir = resin_lir::build_lir(&hir, &[root, duplicate], &options(1)).unwrap();
+    let lir = support::build_lir(&hir, &[root, duplicate], &options(1)).unwrap();
     resin_lir::verify(&lir).unwrap();
     assert_eq!(lir.functions.len(), 1);
     assert_eq!(lir.types.len(), 1);
@@ -534,7 +535,7 @@ fn host_and_shader_requests_have_separate_profiles_and_both_count_toward_the_lim
         entry("main", 1, resin_lir::Profile::Host),
         entry("kernel", shader, resin_lir::Profile::Shader),
     ];
-    let lir = resin_lir::build_lir(&hir, &roots, &options(2)).unwrap();
+    let lir = support::build_lir(&hir, &roots, &options(2)).unwrap();
     resin_lir::verify(&lir).unwrap();
     let profiles: Vec<_> = lir
         .functions
@@ -548,7 +549,7 @@ fn host_and_shader_requests_have_separate_profiles_and_both_count_toward_the_lim
     );
     assert_eq!(lir.shaders.len(), 1);
     assert!(lir.shaders.values().all(|shader| !shader.embedded));
-    let error = resin_lir::build_lir(&hir, &roots, &options(1))
+    let error = support::build_lir(&hir, &roots, &options(1))
         .unwrap_err()
         .remove(0);
     assert!(matches!(
@@ -565,7 +566,7 @@ fn host_and_shader_requests_have_separate_profiles_and_both_count_toward_the_lim
 fn requesting_only_a_shader_does_not_create_host_instances_or_exports() {
     let mut hir = program(vec![Type::Bool]);
     let shader = add_shader(&mut hir, block([reference(0, Type::Int32)]));
-    let lir = resin_lir::build_lir(
+    let lir = support::build_lir(
         &hir,
         &[entry("kernel", shader, resin_lir::Profile::Shader)],
         &options(1),
@@ -627,7 +628,7 @@ fn nominal_expansion_is_bounded_across_declaration_boundaries() {
         arguments: vec![],
         definition: TypeId::from_index(0),
     }];
-    let error = resin_lir::build_lir(&hir, &[root], &options(1))
+    let error = support::build_lir(&hir, &[root], &options(1))
         .unwrap_err()
         .remove(0);
     assert!(matches!(error.kind, ErrorKind::TypeExpansionLimit { .. }));
@@ -685,18 +686,18 @@ fn nominal_roots() -> Vec<resin_lir::Entry> {
 fn nominal_arguments_have_identity_without_demanding_their_layout() {
     let mut hir = nominal_program(Type::Unit); // A nominal body must be a record when used.
     let requests = nominal_roots();
-    let lir = resin_lir::build_lir(&hir, &requests, &options(2)).unwrap();
+    let lir = support::build_lir(&hir, &requests, &options(2)).unwrap();
     resin_lir::verify(&lir).unwrap();
     assert_eq!(lir.functions.len(), 2);
     assert!(lir.types.is_empty());
-    let error = resin_lir::build_lir(&hir, &requests, &options(1))
+    let error = support::build_lir(&hir, &requests, &options(1))
         .unwrap_err()
         .remove(0);
     assert!(
         matches!(error.kind, ErrorKind::MonomorphLimit { arguments, .. } if arguments == [std::sync::Arc::from("Node<long>")])
     );
     measure_parameter(&mut hir);
-    assert!(resin_lir::build_lir(&hir, &requests, &options(2)).is_err());
+    assert!(support::build_lir(&hir, &requests, &options(2)).is_err());
 }
 
 #[test]
@@ -716,7 +717,7 @@ fn nominal_instances_substitute_fields_and_close_recursive_edges() {
         ],
     });
     measure_parameter(&mut hir);
-    let lir = resin_lir::build_lir(&hir, &nominal_roots(), &options(2)).unwrap();
+    let lir = support::build_lir(&hir, &nominal_roots(), &options(2)).unwrap();
     resin_lir::verify(&lir).unwrap();
     assert_eq!(lir.types.len(), 2);
     for (index, expected) in [Ty::Int32, Ty::Int64].into_iter().enumerate() {
@@ -757,7 +758,7 @@ fn nominal_hooks_receive_owner_arguments_before_storage_lowering() {
     });
     hir.types[0].drop = Some(FunctionId::from_index(hir.functions.len()));
     hir.functions.push(drop);
-    let lir = resin_lir::build_lir(&hir, &nominal_roots(), &options(2)).unwrap();
+    let lir = support::build_lir(&hir, &nominal_roots(), &options(2)).unwrap();
     resin_lir::verify(&lir).unwrap();
     assert_eq!(lir.functions.len(), 4);
     for (index, definition) in lir.types.iter().enumerate() {
@@ -787,7 +788,7 @@ fn nominal_recursion_with_growing_arguments_reports_a_type_limit() {
         }],
     });
     measure_parameter(&mut hir);
-    let error = resin_lir::build_lir(&hir, &nominal_roots()[..1], &options(1))
+    let error = support::build_lir(&hir, &nominal_roots()[..1], &options(1))
         .unwrap_err()
         .remove(0);
     assert!(
@@ -844,7 +845,7 @@ fn member_derived_unions_normalize_independently_of_layout_discovery_order() {
             },
         ],
     };
-    let lir = resin_lir::build_lir(
+    let lir = support::build_lir(
         &hir,
         &[entry("main", 1, resin_lir::Profile::Host)],
         &options(1),
@@ -882,14 +883,14 @@ fn shader_dependency_order_is_iterative_and_rejects_cycles_with_bounded_notes() 
     }
     let shader = add_shader(&mut hir, block([reference(0)]));
     let roots = [entry("kernel", shader, resin_lir::Profile::Shader)];
-    let lir = resin_lir::build_lir(&hir, &roots, &options(1)).unwrap();
+    let lir = support::build_lir(&hir, &roots, &options(1)).unwrap();
     let checked = resin_lir::VerifiedModule::new(lir).unwrap();
     let root = *checked.view().module().shaders.keys().next().unwrap();
     let order = checked.view().shader_functions(root).unwrap();
     assert_eq!(order.len(), count + 1);
     assert_eq!(order.last(), Some(&root));
     hir.functions[count - 1].body = Some(block([reference(0)]));
-    let error = resin_lir::build_lir(&hir, &roots, &options(1))
+    let error = support::build_lir(&hir, &roots, &options(1))
         .unwrap_err()
         .remove(0);
     assert!(matches!(error.kind, ErrorKind::UnsupportedProfile { .. }));
@@ -900,7 +901,7 @@ fn requested_template(
     function: Function,
     argument: Type,
 ) -> Result<resin_lir::Module, Vec<resin_lir::Error>> {
-    resin_lir::build_lir(
+    support::build_lir(
         &Module {
             functions: vec![function],
             ..Default::default()
@@ -1118,7 +1119,7 @@ fn determining_member_types_normalize_before_instance_memoization() {
         name: "value".into(),
     };
     let hir = program(vec![member, Type::Int32]);
-    let lir = resin_lir::build_lir(&hir, &[], &options(1)).unwrap();
+    let lir = support::build_lir(&hir, &[], &options(1)).unwrap();
     assert_eq!(lir.functions.len(), 2);
 }
 
@@ -1173,7 +1174,7 @@ fn generic_conversions_cannot_bypass_custom_destruction() {
     };
     let mut request = entry("unwrap", 0, resin_lir::Profile::Host);
     request.arguments = vec![owner];
-    let error = resin_lir::build_lir(&hir, &[request], &LoweringOptions::default())
+    let error = support::build_lir(&hir, &[request], &LoweringOptions::default())
         .unwrap_err()
         .remove(0);
     assert!(matches!(
@@ -1250,7 +1251,7 @@ fn method_owner() -> Type {
 fn build_lir_method(hir: &Module) -> Result<resin_lir::Module, Vec<resin_lir::Error>> {
     let mut request = entry("invoke", 0, resin_lir::Profile::Host);
     request.arguments = vec![method_owner()];
-    resin_lir::build_lir(hir, &[request], &options(1))
+    support::build_lir(hir, &[request], &options(1))
 }
 
 #[test]
@@ -1274,7 +1275,7 @@ fn method_results_normalize_before_instance_memoization_without_layout_discovery
             reference(0, Type::Int32),
         ]),
     ));
-    let lir = resin_lir::build_lir(
+    let lir = support::build_lir(
         &hir,
         &[entry("main", 2, resin_lir::Profile::Host)],
         &options(1),

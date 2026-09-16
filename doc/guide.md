@@ -135,7 +135,8 @@ cargo run -- examples/eg001.resin -o dist/
 cargo run -- examples/eg001.resin -o fibonacci
 ```
 
-Without `-o`, Resin builds in `build/<source-name>-<path-and-entry-hash>/debug/` under cwd and immediately runs the executable.
+Without `-o`, Resin uses `build/<source-name>-<name-and-entry-hash>/debug/` under cwd
+for incremental work, then runs an independently owned executable generation.
 Ordinary runs compile generated C with `-O0` for fast iteration. Requesting an executable with
 `-o` uses `-O3` and the sibling `release/` cache. Both variants are retained, so switching between
 them does not force a rebuild. This does not change Cargo's Rust build profile or shader optimization.
@@ -170,7 +171,7 @@ def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> () = {
 ```
 
 The runtime deep-copies the argument and environment arrays and strings before entering Resin.
-`argv[0]` is the executable invocation name (the cached executable when using `resin FILE`),
+`argv[0]` is the executable invocation name (the owned artifact generation when using `resin FILE`),
 `argv[argc]` is null, and `envp` is a null-terminated array of `NAME=value` strings.
 `envp` is frozen at startup: later environment mutations do not change its values or lookups.
 These process-lifetime views are borrowed and must be treated as read-only; Resin's current
@@ -203,12 +204,25 @@ as SPIR-V assembly. Compiler inspection is available through
 and editor queries.
 
 Each source name and entry has a stable directory with separate debug and release
-outputs. Ninja reuses unchanged work and tracks C header dependencies. Generated inputs,
+outputs. Ninja reuses unchanged work. Generated inputs,
 tool settings, runtime files, and captured environment changes invalidate the appropriate
 steps. Successful output files are retained together; failed rebuilds never run the old
-executable. A cache lock protects building, running, and copying. This native build cache
-is separate from compiler analysis. Delete `build/` to clean it, including after linked
-system library changes or changes hidden behind a compiler wrapper.
+executable. A cache lock protects staging and building. Retained executables live in
+owned generations under `build/.artifacts`; running or copying one does not hold that
+lock or stop a later build. The final handle removes its generation, leaving the debug
+and release cache available for reuse. This native build cache is separate from
+compiler analysis. After builds and executions finish, delete `build/` to clean it,
+including after linked system library changes or changes hidden behind a compiler wrapper.
+
+C builds capture preprocessed `.i` files before Ninja decides whether compilation is
+needed. Generated projects explicitly list original and captured C paths, preprocessing
+flags, and generated-header prerequisites in `native-inputs.json`. Capture uses the
+configured compiler options and include environment, so header content changes, newly
+shadowing headers, and optional includes are detected even when timestamps are unchanged.
+Ninja compiles those captured bytes: editing a header after capture affects the next
+build. Unchanged preprocessing does not recompile C. Shader-only graphs do not invoke
+a C compiler. Tool executable contents also contribute to native invalidation; the
+configured compiler installation and linked libraries must stay stable during a build.
 
 Host executables statically link `resin-runtime`; host-only programs do not initialize Vulkan.
 Generated C includes `resin_runtime.h` and its hierarchy from `crates/resin-runtime/include`.
@@ -234,12 +248,24 @@ Build the unified executable with `nix-shell --run 'cargo build -p resin'`.
 The [language server library](../crates/resin-lsp/README.md) ships inside that executable,
 so editor services and program compilation use the same compiler version.
 
-Both the CLI and LSP use `Hir::build`. It consumes immutable named `Source` values
-supplied by a loader and returns HIR and editor facts. `resin-source` handles
-filesystem and standard-library imports; the LSP supplies its current editor buffers
-through its own loader. Each build resolves imports before reusing previous work.
-Executable building is a separate operation. The root Cargo manifest is both the
-`resin` CLI package and the workspace; reusable libraries live under `crates/`.
+The CLI and LSP acquire immutable sources and resolve imports before checking caches.
+They explicitly run async CST parsing, AST construction/assembly, and `Hir::build`,
+which consumes the completed `BuiltProgram` and returns HIR/editor facts. Compiler
+passes receive no loader. `resin-source` supplies async filesystem/library acquisition;
+the LSP also registers its current editor buffers. Native generation/building follows
+separate LIR and verification passes. Reusable libraries live under `crates/`; see the
+[architecture](architecture.md#calling-the-passes) for a complete async example.
+
+The local LSP shares CST/AST caches of 4,096 files each and a HIR cache of 64 graphs.
+All requested values survive capacity overflow with a warning. Retained editor results
+keep their own source versions. The loader currently keeps entries and cached text for
+every path encountered, so those capacities do not bound total LSP memory.
+
+`Execution` defaults to the available logical CPU count (one if unavailable). Each
+native build holds one slot and runs Ninja with `-j 1`. Superseded editor analysis and
+shutdown request cancellation. Queued work stops; already running synchronous parser
+calls may finish before their slots are released. Native cancellation terminates owned
+process trees. Concurrent cache publication and an HTTP server remain future work.
 
 ## Formatting
 

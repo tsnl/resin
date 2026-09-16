@@ -1,18 +1,10 @@
 use resin_hir::Type;
 use resin_source::prelude::*;
 
+mod common;
+
 fn generate(text: &str) -> Result<resin_hir::Module, SourceError> {
-    let source = Source::new("strings", text);
-    let document = resin_cst::build_cst(source.text(), None);
-    let file = resin_ast::build_ast(&document).file;
-    resin_hir::build_hir(&resin_ast::Program {
-        modules: vec![resin_ast::SourceModule {
-            source,
-            file,
-            imports: vec![],
-        }],
-    })
-    .into_module()
+    common::hir_module(text)
 }
 
 fn result(module: &resin_hir::Module, name: &str) -> Type {

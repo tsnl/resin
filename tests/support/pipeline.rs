@@ -10,18 +10,19 @@ fn standalone(file: &resin_ast::SourceFile) -> resin_ast::Program {
     resin_ast::Program {
         modules: vec![resin_ast::SourceModule {
             source: Source::new("test.resin", ""),
-            file: file.clone(),
+            file: Arc::new(file.clone()),
             imports: vec![],
         }],
     }
 }
 
 pub fn generate(file: &resin_ast::SourceFile) -> Result<resin_lir::Module, GenerateError> {
-    let tree = resin_hir::build_hir(&standalone(file))
+    let tree = crate::support::frontend::check_hir(&standalone(file))
         .into_module()
         .map_err(source_to_generate)?;
-    let module = resin_lir::build_lir(&tree, &[], &resin_lir::LoweringOptions::default())
-        .map_err(|mut errors| lowering_error(errors.remove(0)))?;
+    let module =
+        crate::support::frontend::lower(&tree, &[], &resin_lir::LoweringOptions::default())
+            .map_err(|mut errors| lowering_error(errors.remove(0)))?;
     Ok(resin_lir::VerifiedModule::new(module)
         .expect("lowering produces valid LIR")
         .into_module())
@@ -198,7 +199,7 @@ fn lowering_error(error: resin_lir::Error) -> GenerateError {
 
 /// Lower an AST constructed or edited by a test. Unchanged files use `file_module`.
 pub fn generate_program(program: &resin_ast::Program) -> Result<resin_lir::Module, SourceError> {
-    let tree = resin_hir::build_hir(program).into_module()?;
+    let tree = crate::support::frontend::check_hir(program).into_module()?;
     lower_program(&tree, &program.modules.last().expect("entry module").source)
 }
 
@@ -206,7 +207,7 @@ pub fn generate_program(program: &resin_ast::Program) -> Result<resin_lir::Modul
 pub fn source_module(text: &str) -> Result<resin_lir::Module, SourceError> {
     let source = Source::new("test.resin", text);
     let mut loader = resin_source::Loader::new(library_root());
-    let compilation = Hir::build(source.clone(), &mut loader, None);
+    let compilation = crate::support::frontend::analyze(source.clone(), &mut loader, None);
     lower_program(compilation.hir()?, &source)
 }
 
@@ -228,16 +229,15 @@ fn lower_program(
     tree: &resin_hir::Module,
     entry: &Source,
 ) -> Result<resin_lir::Module, SourceError> {
-    let module = resin_lir::build_lir(tree, &[], &resin_lir::LoweringOptions::default()).map_err(
-        |mut errors| {
+    let module = crate::support::frontend::lower(tree, &[], &resin_lir::LoweringOptions::default())
+        .map_err(|mut errors| {
             let error = errors.remove(0);
             SourceError::new(
                 error.source.clone().unwrap_or_else(|| entry.clone()),
                 Some(error.span),
                 error.to_string(),
             )
-        },
-    )?;
+        })?;
     resin_lir::VerifiedModule::new(module)
         .map(|verified| verified.into_module())
         .map_err(|error| SourceError::new(entry.clone(), None, error.to_string()))
@@ -257,13 +257,13 @@ fn build_hir_file(path: &Path) -> Result<Hir, SourceError> {
             error.to_string(),
         )
     })?;
-    Ok(Hir::build(source, &mut loader, None))
+    Ok(crate::support::frontend::analyze(source, &mut loader, None))
 }
 
 pub fn shader_error(source: &str) -> String {
     let source = Source::new("shader-test.resin", source);
     let mut loader = resin_source::Loader::new(library_root());
-    let output = Hir::build(source, &mut loader, None);
+    let output = crate::support::frontend::analyze(source, &mut loader, None);
     match verified_lir(&output, "kernel", resin_lir::Profile::Shader) {
         Err(errors) => errors
             .into_iter()
@@ -272,7 +272,7 @@ pub fn shader_error(source: &str) -> String {
             .join("\n"),
         Ok(lir) => {
             let directory = tempfile::TempDir::new().unwrap();
-            resin_codegen::generate(lir.view(), None, directory.path())
+            crate::support::frontend::generate(lir.view(), None, directory.path())
                 .unwrap_err()
                 .to_string()
         }
@@ -310,7 +310,7 @@ pub fn verified_entries(
     entries: &[resin_lir::Entry],
     options: &resin_lir::LoweringOptions,
 ) -> Result<resin_lir::VerifiedModule, Vec<SourceError>> {
-    let lir = resin_lir::build_lir(hir, entries, options).map_err(|errors| {
+    let lir = crate::support::frontend::lower(hir, entries, options).map_err(|errors| {
         errors
             .into_iter()
             .map(|error| lir_source_error(output, error))

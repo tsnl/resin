@@ -1,5 +1,5 @@
 //! Certify stack and control-flow invariants before target lowering.
-use crate::{Module, ModuleTypes, VerifyError};
+use crate::{Module, ModuleTypes, VerificationError, VerifyError};
 use flow::check_function;
 use resin_types::prelude::*;
 
@@ -13,16 +13,33 @@ mod rules;
 mod table;
 
 pub(super) fn analyze(module: &Module) -> Result<ModuleTypes, VerifyError> {
+    match analyze_cancellable(module, &resin_executor::Cancellation::new()) {
+        Ok(analysis) => Ok(analysis),
+        Err(VerificationError::Invalid { error }) => Err(error),
+        Err(VerificationError::Execution { .. }) => unreachable!("private token is not cancelled"),
+    }
+}
+
+pub(super) fn analyze_cancellable(
+    module: &Module,
+    cancellation: &resin_executor::Cancellation,
+) -> Result<ModuleTypes, VerificationError> {
+    cancellation.check()?;
     module::check(module)?;
-    let functions = module
-        .functions
-        .iter()
-        .enumerate()
-        .map(|(index, function)| check_function(module, FunctionId::from_index(index), function))
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut functions = Vec::with_capacity(module.functions.len());
+    for (index, function) in module.functions.iter().enumerate() {
+        cancellation.check()?;
+        functions.push(check_function(
+            module,
+            FunctionId::from_index(index),
+            function,
+        )?);
+    }
+    cancellation.check()?;
     let types = table::collect(module, &functions);
     let typer = TyperContext::from_definitions(module.types.clone());
     for (index, function) in module.functions.iter().enumerate() {
+        cancellation.check()?;
         crate::profile::function(&typer, FunctionId::from_index(index), function)
             .map_err(crate::profile::Error::verify)?;
         if function.profile == crate::Profile::Shader {
@@ -30,6 +47,7 @@ pub(super) fn analyze(module: &Module) -> Result<ModuleTypes, VerifyError> {
                 .map_err(crate::profile::Error::verify)?;
         }
     }
+    cancellation.check()?;
     let shaders = crate::profile::shaders(module).map_err(crate::profile::Error::verify)?;
     Ok(ModuleTypes {
         functions,

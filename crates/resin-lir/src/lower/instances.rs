@@ -69,24 +69,31 @@ impl<'a> Instances<'a> {
 
     // Whole-module clients explicitly request all ordinary definitions.
     // Production compilation instead supplies exported target roots.
-    pub(super) fn reserve_roots(&mut self) -> Result<(), Error> {
+    pub(super) fn reserve_roots(
+        &mut self,
+        cancellation: &resin_executor::Cancellation,
+    ) -> Result<(), crate::BuildError> {
         for id in self
             .source
             .entries
             .values()
             .chain(self.source.shaders.keys())
         {
+            cancellation.check()?;
             if self.source.functions.get(id.index()).is_none() {
-                return Err(self.error(
-                    ErrorKind::InvalidHir {
-                        message: "entry refers to a missing function".into(),
-                    },
-                    None,
-                    None,
-                ));
+                return Err(self
+                    .error(
+                        ErrorKind::InvalidHir {
+                            message: "entry refers to a missing function".into(),
+                        },
+                        None,
+                        None,
+                    )
+                    .into());
             }
         }
         for (index, function) in self.source.functions.iter().enumerate() {
+            cancellation.check()?;
             if !function.signature.type_params.is_empty()
                 && (function.foreign_header.is_some()
                     || self
@@ -94,13 +101,16 @@ impl<'a> Instances<'a> {
                         .shaders
                         .contains_key(&FunctionId::from_index(index)))
             {
-                return Err(self.error(
-                    ErrorKind::InvalidHir {
-                        message: "foreign and shader declarations require fixed signatures".into(),
-                    },
-                    None,
-                    function.location.clone(),
-                ));
+                return Err(self
+                    .error(
+                        ErrorKind::InvalidHir {
+                            message: "foreign and shader declarations require fixed signatures"
+                                .into(),
+                        },
+                        None,
+                        function.location.clone(),
+                    )
+                    .into());
             }
             if function.signature.type_params.is_empty() {
                 self.request(
@@ -113,22 +123,29 @@ impl<'a> Instances<'a> {
             }
         }
         for (name, &definition) in &self.source.entries {
+            cancellation.check()?;
             if let Some(id) = self.ordinary(definition, Profile::Host) {
                 self.entries.insert(name.clone(), id);
             }
         }
         for (&definition, shader) in &self.source.shaders {
+            cancellation.check()?;
             self.shader(definition, shader.embedded, None, None)?;
         }
         Ok(())
     }
 
-    pub(super) fn reserve_entries(&mut self, entries: &[crate::Entry]) -> Result<(), Error> {
+    pub(super) fn reserve_entries(
+        &mut self,
+        entries: &[crate::Entry],
+        cancellation: &resin_executor::Cancellation,
+    ) -> Result<(), crate::BuildError> {
         // Sorting source requests makes nominal discovery independent of caller order.
         let mut entries: Vec<_> = entries.iter().collect();
         entries.sort();
         entries.dedup();
         for entry in entries {
+            cancellation.check()?;
             let location = self
                 .source
                 .functions
@@ -145,13 +162,15 @@ impl<'a> Instances<'a> {
                 .collect::<Result<Vec<_>, _>>()?;
             let id = if entry.profile == Profile::Shader {
                 if !arguments.is_empty() {
-                    return Err(self.error(
-                        ErrorKind::InvalidHir {
-                            message: "shader entries require fixed signatures".into(),
-                        },
-                        None,
-                        None,
-                    ));
+                    return Err(self
+                        .error(
+                            ErrorKind::InvalidHir {
+                                message: "shader entries require fixed signatures".into(),
+                            },
+                            None,
+                            None,
+                        )
+                        .into());
                 }
                 self.shader(entry.function, false, None, location.clone())?
             } else {
@@ -161,14 +180,16 @@ impl<'a> Instances<'a> {
                 && let Some(previous) = self.entries.insert(entry.name.clone(), id)
                 && previous != id
             {
-                return Err(self.error(
-                    ErrorKind::InvalidHir {
-                        message: format!("conflicting applications for entry {}", entry.name)
-                            .into(),
-                    },
-                    None,
-                    None,
-                ));
+                return Err(self
+                    .error(
+                        ErrorKind::InvalidHir {
+                            message: format!("conflicting applications for entry {}", entry.name)
+                                .into(),
+                        },
+                        None,
+                        None,
+                    )
+                    .into());
             }
         }
         Ok(())
@@ -289,15 +310,22 @@ impl<'a> Instances<'a> {
             .copied()
     }
 
-    pub(super) fn reserve_types(&mut self) -> Result<(), LowerError> {
+    pub(super) fn reserve_types(
+        &mut self,
+        cancellation: &resin_executor::Cancellation,
+    ) -> Result<(), crate::BuildError> {
         // Whole-module clients retain every declaration in source order. Requested
         // programs instead discover nominal declarations through their roots.
         for index in 0..self.source.types.len() {
+            cancellation.check()?;
             if self.source.types[index].type_params.is_empty() {
-                self.reserve_type(TypeId::from_index(index), vec![])?;
+                self.reserve_type(TypeId::from_index(index), vec![])
+                    .map_err(|error| self.lower_error(error, None, None))?;
             }
         }
         self.complete_types()
+            .map_err(|error| self.lower_error(error, None, None))?;
+        Ok(())
     }
 
     fn argument_names(&self, arguments: &[resin_hir::Type]) -> Vec<Arc<str>> {
@@ -538,7 +566,8 @@ impl<'a> Instances<'a> {
     pub(super) fn assemble(
         mut self,
         functions: Vec<LoweredFunction>,
-    ) -> Result<crate::Module, Vec<Error>> {
+        cancellation: &resin_executor::Cancellation,
+    ) -> Result<crate::Module, crate::BuildError> {
         let mut module = crate::Module {
             entries: std::mem::take(&mut self.entries),
             foreign_headers: self.source.foreign_headers.clone(),
@@ -547,6 +576,7 @@ impl<'a> Instances<'a> {
             ..Default::default()
         };
         for (index, lowered) in functions.into_iter().enumerate() {
+            cancellation.check()?;
             let id = FunctionId::from_index(index);
             module.functions.push(lowered.function);
             if let Some(location) = lowered.location {
@@ -582,11 +612,15 @@ impl<'a> Instances<'a> {
         Ok(module)
     }
 
-    pub(super) fn lower(&mut self) -> Result<Vec<LoweredFunction>, Vec<Error>> {
+    pub(super) fn lower(
+        &mut self,
+        cancellation: &resin_executor::Cancellation,
+    ) -> Result<Vec<LoweredFunction>, crate::BuildError> {
         let mut completed = vec![];
         let mut errors = vec![];
         let mut index = 0;
         while index < self.requests.len() {
+            cancellation.check()?;
             let id = FunctionId::from_index(index);
             match self.lower_function(id) {
                 Ok(function) => completed.push(function),
@@ -597,7 +631,7 @@ impl<'a> Instances<'a> {
         if errors.is_empty() {
             Ok(completed)
         } else {
-            Err(errors)
+            Err(crate::BuildError::Diagnostics { errors })
         }
     }
 

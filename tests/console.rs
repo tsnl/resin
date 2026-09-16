@@ -1,12 +1,6 @@
-use tempfile::TempDir;
-#[path = "support/pipeline.rs"]
-mod pipeline;
-#[path = "support/project.rs"]
-mod project;
-#[path = "support/shaders.rs"]
-mod shaders;
-#[path = "support/toolchain.rs"]
-mod toolchain;
+#[allow(dead_code)]
+mod support;
+
 use std::{
     ffi::OsString,
     fs,
@@ -14,6 +8,10 @@ use std::{
     path::PathBuf,
     process::{Command, Output, Stdio},
 };
+use support::pipeline;
+use support::project;
+use support::toolchain;
+use tempfile::TempDir;
 
 struct Program {
     _temp: TempDir,
@@ -37,11 +35,13 @@ impl Program {
         let cc = std::env::var_os("CC")
             .unwrap_or_else(|| OsString::from(resin_toolchain::DEFAULT_C_COMPILER));
         let built = project.build(&toolchain::c(&cc)).unwrap();
-        built
-            .executable(project.generated.program().unwrap().file_name().unwrap())
-            .unwrap()
-            .copy_to(&executable)
-            .unwrap();
+        support::frontend::copy(
+            &built
+                .executable(project.generated.program().unwrap().file_name().unwrap())
+                .unwrap(),
+            &executable,
+        )
+        .unwrap();
         Self {
             _temp: temp,
             executable,

@@ -1,9 +1,8 @@
 use resin_types::prelude::*;
-use tempfile::TempDir;
-#[path = "support/toolchain.rs"]
-mod toolchain;
 use std::{ffi::OsString, process::Command};
 use support::pipeline;
+use support::toolchain;
+use tempfile::TempDir;
 
 mod support;
 use support::module;

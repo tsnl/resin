@@ -1,3 +1,5 @@
+mod common;
+
 use resin_ast::{Program, SourceModule};
 use resin_hir::Type;
 use resin_source::prelude::*;
@@ -10,12 +12,7 @@ fn module(name: &str, text: &str) -> SourceModule {
 }
 
 fn source_module(source: Source) -> SourceModule {
-    let file = resin_ast::build_ast(&resin_cst::build_cst(source.text(), None)).file;
-    SourceModule {
-        source,
-        file,
-        imports: vec![],
-    }
+    common::source_module(source)
 }
 
 #[test]
@@ -26,10 +23,10 @@ fn malformed_dependency_order_returns_diagnostics() {
         let program = Program {
             modules: vec![entry],
         };
-        let analysis = resin_hir::build_hir(&program);
+        let analysis = common::check(program.clone());
         assert!(analysis.module.is_none());
         assert_eq!(analysis.diagnostics.len(), 1);
-        assert!(resin_hir::build_hir(&program).into_module().is_err());
+        assert!(common::check(program.clone()).into_module().is_err());
     }
 }
 
@@ -40,7 +37,12 @@ fn checking_rejects_unresolved_imports() {
         r#"import { "library.resin" }; def main() = {};"#,
     );
     let mut loader = resin_source::Loader::new(std::path::PathBuf::from("."));
-    let analysis = resin_hir::Hir::build(source, &mut loader, None);
+    let (_, analysis) = common::run(common::application::request(
+        &resin_cache::Cache::new(1),
+        source,
+        &mut loader,
+    ))
+    .unwrap();
     assert!(analysis.hir().is_err());
 }
 
@@ -55,7 +57,7 @@ fn resolved_program_infers_through_an_import_and_exposes_only_root_exports() {
         "export { main }; def main() -> _ = { narrow(42) };",
     );
     entry.imports.push((Span { start: 0, end: 0 }, 0));
-    let module = resin_hir::build_hir(&Program {
+    let module = common::check(Program {
         modules: vec![library, entry],
     })
     .into_module()
@@ -69,10 +71,7 @@ fn resolved_program_infers_through_an_import_and_exposes_only_root_exports() {
 fn syntax(sources: &[Source]) -> BTreeMap<Source, Arc<Document>> {
     sources
         .iter()
-        .map(|source| {
-            let document = resin_cst::build_cst(source.text(), None);
-            (source.clone(), Arc::new(document))
-        })
+        .map(|source| (source.clone(), common::syntax(source.text())))
         .collect()
 }
 
@@ -86,7 +85,7 @@ fn analysis_keeps_editor_queries_after_an_unrelated_type_error() {
     let program = Program {
         modules: vec![entry],
     };
-    let analysis = resin_hir::build_hir(&program);
+    let analysis = common::check(program.clone());
     assert!(analysis.module.is_none());
     assert!(!analysis.diagnostics.is_empty());
     let offset = source.rfind("value").unwrap();
@@ -122,8 +121,16 @@ fn analysis_keeps_editor_queries_after_an_unrelated_type_error() {
 
 #[test]
 fn sources_with_equal_names_have_distinct_editor_facts() {
-    let integer = Source::new("memory", "def local(value: int) -> int = { value };");
-    let boolean = Source::new("memory", "def local(value: bool) -> bool = { value };");
+    let integer = Source::with_identity(
+        SourceId::new("integer"),
+        "memory",
+        "def local(value: int) -> int = { value };",
+    );
+    let boolean = Source::with_identity(
+        SourceId::new("boolean"),
+        "memory",
+        "def local(value: bool) -> bool = { value };",
+    );
     let syntax = syntax(&[integer.clone(), boolean.clone()]);
     let program = Program {
         modules: vec![
@@ -131,7 +138,7 @@ fn sources_with_equal_names_have_distinct_editor_facts() {
             source_module(boolean.clone()),
         ],
     };
-    let analysis = resin_hir::build_hir(&program);
+    let analysis = common::check(program.clone());
     assert!(analysis.module.is_some(), "{:?}", analysis.diagnostics);
     for (source, expected) in [(integer, "value: int"), (boolean, "value: bool")] {
         let offset = source.text().rfind("value").unwrap();
@@ -157,7 +164,7 @@ fn revised_source_cannot_borrow_editor_facts_from_its_previous_version() {
     let original = Source::new("memory", "def local(value: int) -> int = { value };");
     let revised = original.with_text("def local(value: bool) -> bool = { value };");
     let syntax = syntax(&[original.clone(), revised.clone()]);
-    let analysis = resin_hir::build_hir(&Program {
+    let analysis = common::check(Program {
         modules: vec![source_module(original.clone())],
     });
     let offset = revised.text().rfind("value").unwrap();
@@ -191,7 +198,7 @@ fn nominal_declarations_retain_method_identities_with_their_type_expressions() {
         "owner.resin",
         "struct Owner { value: int, def read(self: Owner) -> int = { self.value }; def drop(self: Ptr<Owner>) = {}; }; type Alias = Owner;",
     );
-    let hir = resin_hir::build_hir(&Program {
+    let hir = common::check(Program {
         modules: vec![source],
     })
     .into_module()

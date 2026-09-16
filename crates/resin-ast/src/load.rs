@@ -1,143 +1,122 @@
-//! Sources and imports → a program of recovered AST modules.
-use super::{Parsed, Program, SourceModule};
+//! Assemble parsed modules from a frozen source graph; no source acquisition occurs here.
+use crate::{BuiltProgram, ModuleDocument, Program, SourceModule};
 use resin_source::prelude::*;
 use std::{collections::BTreeMap, sync::Arc};
 
-/// One recovered file together with the CST it was built from.
-pub struct ModuleDocument {
-    pub source: Source,
-    pub syntax: Arc<resin_cst::Document>,
-    pub file: crate::SourceFile,
-    pub errors: Vec<(Span, String)>,
-}
-
-impl ModuleDocument {
-    fn build(source: Source, previous: Option<&Self>) -> Self {
-        let syntax = resin_cst::build_cst(
-            source.text(),
-            previous.map(|document| document.syntax.as_ref()),
-        );
-        let Parsed { file, errors } = crate::build_ast(&syntax);
-        Self {
-            source,
-            syntax: Arc::new(syntax),
-            file,
-            errors,
-        }
-    }
-}
-
-/// AST for an entry and its imports, with CST documents and parse diagnostics.
-pub struct BuiltProgram {
-    pub source: Source,
-    pub program: Program,
-    pub documents: BTreeMap<Source, Arc<ModuleDocument>>,
-    pub diagnostics: Vec<SourceError>,
-}
-
-impl BuiltProgram {
-    pub fn graph(&self) -> Vec<(Source, Vec<(Span, usize)>)> {
-        self.program
-            .modules
-            .iter()
-            .map(|module| (module.source.clone(), module.imports.clone()))
-            .collect()
-    }
-
-    pub fn syntax(&self) -> BTreeMap<Source, Arc<resin_cst::Document>> {
-        self.documents
-            .iter()
-            .map(|(source, document)| (source.clone(), document.syntax.clone()))
-            .collect()
-    }
-}
-
-/// Build a program by resolving imports, reusing previous CST documents when the
-/// source version is unchanged.
-pub fn build_program(
-    source: Source,
-    loader: &mut resin_source::Loader,
-    previous: Option<&BTreeMap<Source, Arc<ModuleDocument>>>,
+pub(super) fn assemble(
+    inputs: resin_source::SourceGraph,
+    documents: BTreeMap<Source, Arc<ModuleDocument>>,
+    cancellation: &resin_executor::Cancellation,
 ) -> BuiltProgram {
+    let source = inputs.entry().clone();
     let mut traversal = Traversal {
-        loader,
-        previous,
-        result: Loaded {
-            program: Program {
-                modules: Vec::new(),
-            },
-            errors: Vec::new(),
-            documents: BTreeMap::new(),
+        inputs: &inputs,
+        available: &documents,
+        cancellation,
+        program: Program {
+            modules: Vec::new(),
         },
+        diagnostics: Vec::new(),
+        documents: BTreeMap::new(),
         loaded: BTreeMap::new(),
         active: Vec::new(),
-        versions: BTreeMap::new(),
-        resolutions: BTreeMap::new(),
     };
     if let Err(error) = traversal.visit(source.clone()) {
-        traversal.result.errors.push(error);
+        traversal.diagnostics.push(error);
     }
+    let Traversal {
+        program,
+        diagnostics,
+        documents,
+        ..
+    } = traversal;
     BuiltProgram {
         source,
-        program: traversal.result.program,
-        documents: traversal.result.documents,
-        diagnostics: traversal.result.errors,
+        inputs,
+        program,
+        documents,
+        diagnostics,
     }
-}
-
-struct Loaded {
-    program: Program,
-    errors: Vec<SourceError>,
-    documents: BTreeMap<Source, Arc<ModuleDocument>>,
 }
 
 struct Traversal<'a> {
-    loader: &'a mut resin_source::Loader,
-    previous: Option<&'a BTreeMap<Source, Arc<ModuleDocument>>>,
-    result: Loaded,
+    inputs: &'a resin_source::SourceGraph,
+    available: &'a BTreeMap<Source, Arc<ModuleDocument>>,
+    cancellation: &'a resin_executor::Cancellation,
+    program: Program,
+    diagnostics: Vec<SourceError>,
+    documents: BTreeMap<Source, Arc<ModuleDocument>>,
     loaded: BTreeMap<SourceId, usize>,
     active: Vec<Source>,
-    versions: BTreeMap<SourceId, Source>,
-    resolutions: BTreeMap<(SourceId, String), Result<Source, String>>,
 }
 
 impl Traversal<'_> {
-    fn check_version(&mut self, source: &Source) -> Result<(), SourceError> {
-        if let Some(old) = self.versions.get(&source.id())
-            && old != source
-        {
-            return Err(SourceError::new(
-                source.clone(),
-                None,
-                "loader returned different versions of the same module during one compilation"
-                    .into(),
-            ));
-        }
-        self.versions.insert(source.id(), source.clone());
-        Ok(())
-    }
-
-    fn parse(&self, source: &Source) -> Arc<ModuleDocument> {
-        if let Some(old) = self
-            .previous
-            .and_then(|documents| documents.get(source))
-            .filter(|old| old.source == *source)
-        {
-            return old.clone();
-        }
-        Arc::new(ModuleDocument::build(
-            source.clone(),
-            self.previous.and_then(|documents| {
-                documents
-                    .iter()
-                    .find(|(candidate, _)| candidate.id() == source.id())
-                    .map(|(_, document)| document.as_ref())
-            }),
-        ))
-    }
-
     fn visit(&mut self, source: Source) -> Result<usize, SourceError> {
-        self.check_version(&source)?;
+        // Import depth uses heap storage, not one worker-stack frame per module.
+        let mut pending = vec![self.begin(source)?];
+        while let Some(frame) = pending.last_mut() {
+            // Execution discards cancelled candidates; also stop cached-edge work.
+            if self.cancellation.is_cancelled() {
+                return Err(SourceError::new(
+                    frame.module.source.clone(),
+                    None,
+                    "source assembly cancelled".into(),
+                ));
+            }
+            if let Some(import) = frame.module.file.imports.get(frame.next_import).cloned() {
+                frame.next_import += 1;
+                let source = self.resolve(&frame.module, &import);
+                match source {
+                    Ok(source) if self.loaded.contains_key(&source.id()) => {
+                        frame
+                            .module
+                            .imports
+                            .push((import.span, self.loaded[&source.id()]));
+                    }
+                    source => match source.and_then(|source| self.begin(source)) {
+                        Ok(child) => pending.push(child),
+                        Err(mut error) => {
+                            imported_at(&mut error, &frame.module, import.span);
+                            self.diagnostics.push(error);
+                        }
+                    },
+                }
+                continue;
+            }
+            let completed = pending.pop().unwrap();
+            self.active.pop();
+            let id = self.program.modules.len();
+            self.loaded.insert(completed.module.source.id(), id);
+            self.program.modules.push(completed.module);
+            let Some(parent) = pending.last_mut() else {
+                return Ok(id);
+            };
+            let span = parent.module.file.imports[parent.next_import - 1].span;
+            parent.module.imports.push((span, id));
+            for error in &mut self.diagnostics[completed.diagnostics_start..] {
+                imported_at(error, &parent.module, span);
+            }
+        }
+        unreachable!("the root module completes the traversal")
+    }
+
+    fn resolve(
+        &self,
+        module: &SourceModule,
+        import: &Spanned<Arc<str>>,
+    ) -> Result<Source, SourceError> {
+        self.inputs
+            .resolve(&module.source.id(), &import.val)
+            .cloned()
+            .ok_or_else(|| {
+                module.error(
+                    import.span,
+                    format!("unresolved source import: {}", import.val),
+                )
+            })
+    }
+
+    fn begin(&mut self, source: Source) -> Result<Frame, SourceError> {
         if self.active.iter().any(|active| active.id() == source.id()) {
             let chain = self
                 .active
@@ -152,58 +131,51 @@ impl Traversal<'_> {
                 format!("cyclic source import: {chain}"),
             ));
         }
-        if let Some(&id) = self.loaded.get(&source.id()) {
-            return Ok(id);
-        }
-        let document = self.parse(&source);
-        let mut module = SourceModule {
+        let document = self.document(&source)?;
+        let module = SourceModule {
             source: source.clone(),
             file: document.file.clone(),
             imports: Vec::new(),
         };
-        self.result.errors.extend(
+        let diagnostics_start = self.diagnostics.len();
+        self.diagnostics.extend(
             document
                 .errors
                 .iter()
                 .map(|(span, error)| module.error(*span, error)),
         );
-        self.result.documents.insert(source.clone(), document);
-        self.active.push(source.clone());
-        self.visit_imports(&mut module);
-        self.active.pop();
-        let id = self.result.program.modules.len();
-        self.result.program.modules.push(module);
-        self.loaded.insert(source.id(), id);
-        Ok(id)
+        self.documents.insert(source.clone(), document);
+        self.active.push(source);
+        Ok(Frame {
+            module,
+            next_import: 0,
+            diagnostics_start,
+        })
     }
 
-    fn resolve(&mut self, source: &Source, reference: &str) -> Result<Source, String> {
-        self.resolutions
-            .entry((source.id(), reference.into()))
-            .or_insert_with(|| {
-                self.loader
-                    .load_import(source, reference)
-                    .map_err(|error| error.to_string())
-            })
-            .clone()
-    }
-
-    fn visit_imports(&mut self, module: &mut SourceModule) {
-        for import in &module.file.imports {
-            let start = self.result.errors.len();
-            let imported = self
-                .resolve(&module.source, &import.val)
-                .map_err(|error| module.error(import.span, error))
-                .and_then(|source| self.visit(source));
-            match imported {
-                Ok(id) => module.imports.push((import.span, id)),
-                Err(error) => self.result.errors.push(error),
-            }
-            for error in &mut self.result.errors[start..] {
-                imported_at(error, module, import.span);
-            }
+    fn document(&self, source: &Source) -> Result<Arc<ModuleDocument>, SourceError> {
+        let document = self.available.get(source).ok_or_else(|| {
+            SourceError::new(
+                source.clone(),
+                None,
+                "parsed source was not supplied for this input".into(),
+            )
+        })?;
+        if document.source != *source || document.syntax.source() != source.text() {
+            return Err(SourceError::new(
+                source.clone(),
+                None,
+                "parsed source does not match the selected source contents".into(),
+            ));
         }
+        Ok(document.clone())
     }
+}
+
+struct Frame {
+    module: SourceModule,
+    next_import: usize,
+    diagnostics_start: usize,
 }
 
 fn imported_at(error: &mut SourceError, importer: &SourceModule, span: Span) {

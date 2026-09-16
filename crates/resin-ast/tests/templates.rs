@@ -1,7 +1,9 @@
+mod common;
+
 use resin_ast::{SourceFile, StmtKind, TermKind, TypeKind};
 
 fn parse(text: &str) -> SourceFile {
-    resin_ast::build_ast(&resin_cst::build_cst(text, None)).file
+    common::parse(text).file
 }
 
 #[test]
@@ -107,12 +109,7 @@ fn template_lists_require_named_parameters_and_nonempty_arguments() {
         "extern { \"test.h\": { def native<T>(x: T) -> T; } };",
         "type Empty<> = int;",
     ] {
-        assert!(
-            !resin_ast::build_ast(&resin_cst::build_cst(source, None))
-                .errors
-                .is_empty(),
-            "{source}"
-        );
+        assert!(!common::parse(source).errors.is_empty(), "{source}");
     }
 }
 

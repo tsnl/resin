@@ -1,9 +1,8 @@
 use support::shaders;
 mod support;
-#[path = "support/toolchain.rs"]
-mod toolchain;
 use resin_lir::{BasicBlock, BlockId, Instr, Terminator};
 use resin_types::prelude::*;
+use support::toolchain;
 
 #[test]
 fn a_loop_with_an_always_returning_body_has_a_valid_continue_target() {

@@ -15,11 +15,15 @@ fn build(
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
     let lir =
         support::pipeline::verified_lir(compilation, "main", resin_lir::Profile::Host).unwrap();
-    let project = resin_codegen::generate(lir.view(), Some("main"), directory.path()).unwrap();
-    let built = environment
-        .toolchain(None, None)
-        .build(project.directory(), project.name(), "main", profile)
-        .unwrap();
+    let project = support::frontend::generate(lir.view(), Some("main"), directory.path()).unwrap();
+    let built = support::frontend::build(
+        &environment.toolchain(None, None),
+        project.directory(),
+        project.name(),
+        "main",
+        profile,
+    )
+    .unwrap();
     built
         .executable(project.program().unwrap().file_name().unwrap())
         .unwrap()
@@ -49,20 +53,26 @@ fn compilation_uses_supplied_source_versions_and_explicit_profiles() {
         (CProfile::Release, None, 43, "release"),
     ] {
         let source = loader.source_from_text(&path, format!("export {{ main }}; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = {{ var i = uint(invocation); output.* := i; }}; def main() -> int = {{ var output = 0_ui; kernel({code}_ul, &output); if (output == {code}_ui) {{ {code} }} else {{ 0 }} }};")).unwrap();
-        let compilation = Hir::build(source.clone(), &mut loader, previous.as_ref());
+        let compilation =
+            support::frontend::analyze(source.clone(), &mut loader, previous.as_ref());
         let artifact = build(&compilation, &environment, profile);
-        assert_eq!(
-            artifact.path().parent().unwrap().file_name().unwrap(),
-            directory
-        );
-        assert_eq!(artifact.run().unwrap(), code);
         assert!(
-            compilation.same(&Hir::build(source, &mut loader, Some(&compilation))),
+            fs::read_to_string(artifact.path().parent().unwrap().join("toolchain.ninja"))
+                .unwrap()
+                .contains(if directory == "debug" { "-O0" } else { "-O3" })
+        );
+        assert_eq!(support::frontend::run(&artifact).unwrap(), code);
+        assert!(
+            compilation.same(&support::frontend::analyze(
+                source,
+                &mut loader,
+                Some(&compilation)
+            )),
             "unchanged sources should reuse the completed compilation"
         );
         previous = Some(compilation);
         if let Some(path) = destination {
-            artifact.copy_to(&path).unwrap();
+            support::frontend::copy(&artifact, &path).unwrap();
             assert!(path.is_file());
             fs::remove_file(&path).unwrap();
         }
@@ -82,15 +92,16 @@ fn retained_compilations_build_their_own_source_version_after_later_edits() {
     let mut loader = Loader::new(resin_source::library_root());
     let path = temp.path().join("main.resin");
     fs::write(&path, "export { main }; def main() -> int = { 41 };").unwrap();
-    let first = Hir::build(loader.load_file(&path).unwrap(), &mut loader, None);
+    let first = support::frontend::analyze(loader.load_file(&path).unwrap(), &mut loader, None);
     fs::write(&path, "export { main }; def main() -> int = { 42 };").unwrap();
-    let second = Hir::build(loader.load_file(&path).unwrap(), &mut loader, Some(&first));
+    let second =
+        support::frontend::analyze(loader.load_file(&path).unwrap(), &mut loader, Some(&first));
     assert_eq!(first.source().id(), second.source().id());
     assert_ne!(first.source(), second.source());
     fs::remove_file(path).unwrap();
     for (compilation, code) in [(second, 42), (first, 41)] {
         let artifact = build(&compilation, &environment, CProfile::Debug);
-        assert_eq!(artifact.run().unwrap(), code);
+        assert_eq!(support::frontend::run(&artifact).unwrap(), code);
     }
 }
 
@@ -119,8 +130,7 @@ fn compiler_processes_use_the_supplied_environment_and_working_directory() {
     fs::create_dir(&project).unwrap();
     for tool in ["cc", "spirv_opt"] {
         fs::write(project.join("build.ninja"), format!("include toolchain.ninja\nrule probe\n  command = ${tool}\nbuild output: probe\ndefault output\n")).unwrap();
-        let error = settings
-            .build(&project, "probe", tool, CProfile::Debug)
+        let error = support::frontend::build(&settings, &project, "probe", tool, CProfile::Debug)
             .unwrap_err();
         assert!(error.to_string().contains("chosen:"), "{error}");
         assert!(error.to_string().contains(".ninja-work"), "{error}");

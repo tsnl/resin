@@ -5,5 +5,10 @@ edition = "2024"
 publish = false
 license.workspace = true
 
+[dependencies]
+blake3 = { workspace = true }
+resin-executor = { workspace = true }
+tokio = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }

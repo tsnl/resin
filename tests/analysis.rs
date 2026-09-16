@@ -1,3 +1,6 @@
+#[allow(dead_code)]
+mod support;
+
 use resin_hir::Hir;
 use resin_source::normalize_path;
 use resin_source::prelude::*;
@@ -156,11 +159,11 @@ fn generic_method_editor_snapshots_keep_completed_imported_schemes() {
     loader
         .set_import(&input, "library.resin", original.clone())
         .unwrap();
-    let before = Hir::build(input.clone(), &mut loader, None);
+    let before = support::frontend::analyze(input.clone(), &mut loader, None);
     loader
         .set_import(&input, "library.resin", changed.clone())
         .unwrap();
-    let after = Hir::build(input.clone(), &mut loader, Some(&before));
+    let after = support::frontend::analyze(input.clone(), &mut loader, Some(&before));
     let offset = input.text().find("cell.read").unwrap() + 5;
     for (analysis, library, expected) in [
         (&before, &original, "read: () -> int"),
@@ -288,11 +291,11 @@ fn generic_field_editor_snapshots_keep_original_imported_declarations() {
     loader
         .set_import(&input, "library.resin", original.clone())
         .unwrap();
-    let before = Hir::build(input.clone(), &mut loader, None);
+    let before = support::frontend::analyze(input.clone(), &mut loader, None);
     loader
         .set_import(&input, "library.resin", changed.clone())
         .unwrap();
-    let after = Hir::build(input.clone(), &mut loader, Some(&before));
+    let after = support::frontend::analyze(input.clone(), &mut loader, Some(&before));
     let field = input.text().rfind("value").unwrap();
     for (analysis, library, expected) in [
         (&before, &original, "value: int"),
@@ -446,7 +449,7 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
         let input = loader
             .source_from_text(Path::new("main.resin"), source.clone())
             .unwrap();
-        let analysis = Hir::build(input.clone(), &mut loader, None);
+        let analysis = support::frontend::analyze(input.clone(), &mut loader, None);
         if tail != "buffer." {
             assert!(
                 analysis.diagnostics().is_empty(),
@@ -560,7 +563,7 @@ fn gpu_commands_check_pipeline_stages_and_host_arguments() {
         let input = loader
             .source_from_text(Path::new("main.resin"), source)
             .unwrap();
-        let analysis = Hir::build(input.clone(), &mut loader, None);
+        let analysis = support::frontend::analyze(input.clone(), &mut loader, None);
         assert_eq!(
             analysis.diagnostics().is_empty(),
             valid,
@@ -593,7 +596,7 @@ fn typed_pipeline_calls_show_shader_contracts_in_editor_signatures() {
     let input = loader
         .source_from_text(Path::new("main.resin"), source)
         .unwrap();
-    let analysis = Hir::build(input.clone(), &mut loader, None);
+    let analysis = support::frontend::analyze(input.clone(), &mut loader, None);
     assert!(
         analysis.diagnostics().is_empty(),
         "{:?}",
@@ -1074,7 +1077,7 @@ impl Project {
                     .unwrap();
             }
         }
-        Hir::build(self.source("main.resin"), &mut loader, None)
+        support::frontend::analyze(self.source("main.resin"), &mut loader, None)
     }
     #[track_caller]
     fn checked(&self) -> Hir {
@@ -1739,10 +1742,10 @@ fn checking_rejects_holes_even_when_given_a_recovered_ast() {
         let file = analysis
             .recovered_file(&project.source("main.resin"))
             .unwrap();
-        let error = resin_hir::build_hir(&resin_ast::Program {
+        let error = support::frontend::check_hir(&resin_ast::Program {
             modules: vec![resin_ast::SourceModule {
                 source: project.source("main.resin"),
-                file: file.clone(),
+                file: std::sync::Arc::new(file.clone()),
                 imports: vec![],
             }],
         })
