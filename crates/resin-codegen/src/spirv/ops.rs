@@ -395,6 +395,18 @@ fn builtin(
     let boolean = *ty == Ty::Bool;
     let args: Vec<_> = args.iter().map(|arg| arg.id).collect();
     let op = match (name, args.len()) {
+        ("sqrt" | "sin" | "cos", 1) if float => {
+            let op = match name {
+                "sqrt" => GlslStd450Op::Sqrt,
+                "sin" => GlslStd450Op::Sin,
+                _ => GlslStd450Op::Cos,
+            };
+            let ty = context.ty(result)?;
+            return Ok(context
+                .builder
+                .ext_inst(ty, None, context.glsl, op as u32, [Operand::IdRef(args[0])])
+                .unwrap());
+        }
         ("+", 1) if ty.is_numeric() => return Ok(args[0]),
         ("-", 1) if float => Op::FNegate,
         ("-", 1) if ty.is_integer() => {

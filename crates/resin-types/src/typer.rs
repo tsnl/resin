@@ -15,6 +15,7 @@ pub(super) fn lookup(name: &str, arity: usize) -> Result<BuiltinRule, TypeError>
         "==" | "!=" | "<" | "<=" | ">" | ">=" => (BuiltinRule::Comparison, arity == 2),
         "!" => (BuiltinRule::Boolean, arity == 1),
         "&&" | "||" => (BuiltinRule::Boolean, arity == 2),
+        "sqrt" | "sin" | "cos" => (BuiltinRule::Float, arity == 1),
         "format_bytes" => (BuiltinRule::Format, arity == 3),
         "string_from_bytes" => (BuiltinRule::StringFromBytes, arity == 2),
         _ => {
@@ -191,6 +192,15 @@ pub(super) fn type_builtin_call(
 ) -> Result<BuiltinCall, TypeError> {
     let rule = BuiltinRule::lookup(name, args.len())?;
     let result = match rule {
+        BuiltinRule::Float => {
+            if !matches!(args[0], Ty::Float32 | Ty::Float64) {
+                return Err(TypeError::new(TypeErrorKind::UnsupportedBuiltin {
+                    name: name.into(),
+                    operand: args[0].clone(),
+                }));
+            }
+            args[0].clone()
+        }
         BuiltinRule::Format => {
             byte_parameters(context, args)?;
             context.type_format(&args[2])?
@@ -508,7 +518,7 @@ pub(super) fn shader_builtin_instance(
             "+" | "-" | "*" | "&" | "|" | "^" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||",
             2,
         ) => true,
-        ("/", 2) => operand == Ty::Float32,
+        ("/", 2) | ("sqrt" | "sin" | "cos", 1) => operand == Ty::Float32,
         _ => false,
     };
     if !supported || operand == Ty::Type {

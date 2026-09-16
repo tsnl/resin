@@ -152,6 +152,12 @@ impl FunctionLowering<'_> {
     ) -> Result<(), LowerError> {
         self.gen_arguments(args)?;
         match op {
+            Intrinsic::Sqrt | Intrinsic::Sin | Intrinsic::Cos => {
+                return Err(LowerError::invalid_hir(
+                    self.source_span,
+                    "math intrinsic reached storage lowering without specialization",
+                ));
+            }
             Intrinsic::GpuPointerProjection
             | Intrinsic::GpuSequenceProjection
             | Intrinsic::GpuPipelineType => {
