@@ -1,0 +1,156 @@
+export { Options, parse_options, print_help };
+
+extern {
+	"stdlib.h": {
+		fn strtod(text: Ptr<ubyte>, end: Ptr<Ptr<ubyte>>) -> float64;
+	},
+};
+
+import { "$/process.resin", "$/span.resin", "$/string.resin" };
+
+struct Options {
+	use_gpu: bool,
+	width: uint,
+	height: uint,
+	iterations: int,
+	samples: int,
+	real: float32,
+	imag: float32,
+	span: float32,
+	output: Ptr<ubyte> | None,
+	screenshot: Ptr<ubyte>,
+	help: bool,
+}
+
+fn equals(text: Ref<Span<ubyte>>, expected: str) -> bool {
+	if (text.length != expected.length) {
+		return false;
+	};
+	let mut i = 0_ul;
+	while (i < text.length) {
+		if (text:at(i) != expected:at(i)) {
+			return false;
+		};
+		i = i + 1_ul;
+	};
+	true
+}
+
+fn integer(text: Ref<Span<ubyte>>) -> uint | Err<String> {
+	let mut value = 0_ui;
+	let mut i = 0_ul;
+	if (text.length == 0_ul) {
+		return Err(string_from_str("Expected an integer, got an empty value"));
+	};
+	while (i < text.length) {
+		let byte = text:at(i);
+		if (byte < 48_ub || byte > 57_ub || value > 429496729_ui || (value == 429496729_ui && byte > 53_ub)) {
+			return Err(fmt("Invalid integer: {0}", (text:bytes(),)));
+		};
+		value = value * 10_ui + uint(byte - 48_ub);
+		i = i + 1_ul;
+	};
+	value
+}
+
+fn number(text: Ref<Span<ubyte>>) -> float32 | Err<String> {
+	let mut end = Ptr<ubyte>(0_ul);
+	let value = strtod(text.data, &end);
+	if (ulong(end) == ulong(text.data) || end.* != 0_ub || !(value >= -3.4e38_d && value <= 3.4e38_d)) {
+		return Err(fmt("Invalid finite number: {0}", (text:bytes(),)));
+	};
+	float32(value)
+}
+
+fn parse_options(args: Ref<Span<Ptr<ubyte>>>) -> Options | Err<String> {
+	let mut options = Options {
+		use_gpu = true,
+		width = 960,
+		height = 720,
+		iterations = 256,
+		samples = 4,
+		real = -0.5_f,
+		imag = 0.0_f,
+		span = 3.0_f,
+		output = None,
+		screenshot = "mandelbrot.png".data,
+		help = false,
+	};
+	let mut i = 1_ul;
+	while (i < args.length) {
+		let name = argument(args, i);
+		i = i + 1_ul;
+		if (equals(name, "--help") || equals(name, "-h")) {
+			options.help = true;
+			return options;
+		};
+		if (equals(name, "--cpu") || equals(name, "--gpu")) {
+			options.use_gpu = equals(name, "--gpu");
+			continue;
+		};
+		if (!(equals(name, "--width") || equals(name, "--height") || equals(name, "--iterations") || equals(name, "--samples") || equals(name, "--real") || equals(name, "--imag") || equals(name, "--span") || equals(name, "--output") || equals(name, "--screenshot"))) {
+			return Err(fmt("Unknown option: {0}", (name:bytes(),)));
+		};
+		if (i == args.length) {
+			return Err(fmt("Missing value for {0}", (name:bytes(),)));
+		};
+		let value = argument(args, i);
+		i = i + 1_ul;
+		if (equals(name, "--width")) {
+			options.width = integer(value)?;
+		} else if (equals(name, "--height")) {
+			options.height = integer(value)?;
+		} else if (equals(name, "--iterations")) {
+			let count = integer(value)?;
+			if (count < 32_ui || count > 4096_ui) {
+				return Err(string_from_str("Iterations must be between 32 and 4096"));
+			};
+			options.iterations = int(count);
+		} else if (equals(name, "--samples")) {
+			let count = integer(value)?;
+			if (count != 1_ui && count != 4_ui) {
+				return Err(string_from_str("Samples must be 1 or 4"));
+			};
+			options.samples = int(count);
+		} else if (equals(name, "--real")) {
+			options.real = number(value)?;
+		} else if (equals(name, "--imag")) {
+			options.imag = number(value)?;
+		} else if (equals(name, "--span")) {
+			options.span = number(value)?;
+		} else {
+			if (value.length == 0_ul) {
+				return Err(fmt("Empty path for {0}", (name:bytes(),)));
+			};
+			if (equals(name, "--output")) {
+				options.output = value.data;
+			} else {
+				options.screenshot = value.data;
+			};
+		};
+	};
+	if (options.width == 0_ui || options.width > 8192_ui || options.height == 0_ui || options.height > 8192_ui) {
+		return Err(string_from_str("Width and height must be between 1 and 8192"));
+	};
+	if (options.span < float32(options.height) * 1.0e-6_f || options.span > 8.0_f) {
+		return Err(string_from_str("Span must be between height * 1e-6 and 8 (float32 precision limit)"));
+	};
+	options
+}
+
+fn print_help() {
+	print("Mandelbrot explorer\n\n");
+	print("Usage: resin examples/eg011_mandelbrot.resin -- [options]\n\n");
+	print("  --cpu / --gpu        Solver (default: GPU)\n");
+	print("  --width N           Image/window width, 1-8192 (default: 960)\n");
+	print("  --height N          Image/window height, 1-8192 (default: 720)\n");
+	print("  --iterations N      Iterations per sample, 32-4096 (default: 256)\n");
+	print("  --samples 1|4       Samples per pixel (default: 4, 2x2 refinement)\n");
+	print("  --real X --imag Y   View center (default: -0.5, 0)\n");
+	print("  --span N            Vertical span (default: 3)\n");
+	print("  --output PATH       Write a PNG and exit without opening a window\n");
+	print("  --screenshot PATH   Interactive screenshot path (default: mandelbrot.png)\n");
+	print("  --help / -h         Show this help\n\n");
+	print("Arrows/WASD: pan | scroll/+/-: zoom | [/]: iterations | R/Home: reset | P: screenshot | Esc: quit\n");
+	print("CPU --output mode needs no Vulkan device. Interactive mode uses Vulkan in both solver modes.\n");
+}

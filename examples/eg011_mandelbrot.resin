@@ -1,5 +1,6 @@
 // Mandelbrot explorer. Arrows/WASD pan; scroll or +/- zoom; [/] change
-// the iteration limit; R/Home resets; Escape closes the window.
+// the iteration limit; R/Home resets; P saves a screenshot; Escape closes.
+// Use --help for headless output and view options.
 export { main, test };
 
 import {
@@ -9,10 +10,12 @@ import {
 	"$/gpu.resin",
 	"$/graphics.resin",
 	"$/window.resin",
+	"$/process.resin",
+	"$/image.resin",
+	"$/shared.resin",
+	"$/io.resin",
+	"mandelbrot/options.resin",
 };
-
-// Both modes use the same float32 solver and sampling code.
-const use_gpu = true;
 
 struct Plot {
 	width: uint,
@@ -46,6 +49,10 @@ fn mandelbrot_new(max_iters: int) -> Mandelbrot {
 // Zero means the orbit stayed inside the escape radius for this iteration budget;
 // it is not a proof of membership. Escape requires a magnitude strictly above two.
 fn escape_iterations(self: Ref<Mandelbrot>, c: Complex<float32>) -> int {
+	// Check the first iterate before the interior shortcut can overflow at large coordinates.
+	if (self.max_iters > 0 && c.real * c.real + c.imag * c.imag > 4.0_f) {
+		return 1;
+	};
 	// The main cardioid and period-two bulb are known interiors.
 	let x = c.real - 0.25_f;
 	let y2 = c.imag * c.imag;
@@ -104,13 +111,13 @@ fn solve(self: Ref<Mandelbrot>, plot: Ref<Plot>, x: uint, y: uint, samples: int)
 	Color { r = r * scale, g = g * scale, b = b * scale, a = 1.0_f }
 }
 
-fn solve_cpu(self: Ref<Mandelbrot>, plot: Ref<Plot>, pixels: Ref<GpuSpan<Color>>, samples: int) {
+fn solve_cpu<T>(self: Ref<Mandelbrot>, plot: Ref<Plot>, pixels: Ref<T>, samples: int) {
 	let mut y = 0_ui;
 	while (y < plot.height) {
 		let mut x = 0_ui;
 		while (x < plot.width) {
 			let color = self:solve(plot, x, y, samples);
-			pixels:at(ulong(y) * ulong(plot.width) + ulong(x)):store(color);
+			pixels:store_pixel(ulong(y) * ulong(plot.width) + ulong(x), color);
 			x = x + 1;
 		};
 		y = y + 1;
@@ -161,11 +168,21 @@ fn input(window: Ref<Window>, plot: Ref<Plot>, solver: Ref<Mandelbrot>) -> bool 
 		changed = true;
 	};
 	if (window:key_state(key_right_bracket).pressed && solver.max_iters < 4096) {
-		solver.max_iters = solver.max_iters * 2;
+		let next = solver.max_iters * 2;
+		solver.max_iters = if (next > 4096) {
+			4096
+		} else {
+			next
+		};
 		changed = true;
 	};
 	if (window:key_state(key_left_bracket).pressed && solver.max_iters > 32) {
-		solver.max_iters = solver.max_iters / 2;
+		let next = solver.max_iters / 2;
+		solver.max_iters = if (next < 32) {
+			32
+		} else {
+			next
+		};
 		changed = true;
 	};
 	if (window:key_state(key_r).pressed || window:key_state(key_home).pressed) {
@@ -182,6 +199,7 @@ struct Parameters {
 	plot: Plot,
 	solver: Mandelbrot,
 	samples: int,
+	stride: ulong,
 	pixels: Span<Color>,
 }
 
@@ -189,6 +207,7 @@ struct HostParameters {
 	plot: Plot,
 	solver: Mandelbrot,
 	samples: int,
+	stride: ulong,
 	pixels: GpuSpan<Color>,
 }
 
@@ -207,6 +226,7 @@ fn clone(self: Ref<HostParameters>) -> HostParameters {
 		plot = self.plot:clone(),
 		solver = mandelbrot_new(self.solver.max_iters),
 		samples = self.samples,
+		stride = self.stride,
 		pixels = self.pixels:clone(),
 	}
 }
@@ -225,13 +245,15 @@ fn row_index(index: ulong, width: uint) -> uint {
 }
 
 @compute_shader
-fn compute(index: ulong, root: Ptr<Parameters>) {
-	if (index >= ulong(root.plot.width) * ulong(root.plot.height)) {
-		return;
+fn compute(invocation: ulong, root: Ptr<Parameters>) {
+	// Stride over large images without exceeding Vulkan's workgroup count limit.
+	let mut index = invocation;
+	while (index < ulong(root.plot.width) * ulong(root.plot.height)) {
+		let y = row_index(index, root.plot.width);
+		let x = uint(index - ulong(y) * ulong(root.plot.width));
+		root.pixels:at(index) = root.solver:solve(root.plot, x, y, root.samples);
+		index = index + root.stride;
 	};
-	let y = row_index(index, root.plot.width);
-	let x = uint(index - ulong(y) * ulong(root.plot.width));
-	root.pixels:at(index) = root.solver:solve(root.plot, x, y, root.samples);
 }
 
 @vertex_shader
@@ -291,6 +313,7 @@ fn test() {
 	assert(mandelbrot:escape_iterations(one) == 3);
 	assert(mandelbrot:escape_iterations(two) == 2);
 	assert(mandelbrot:escape_iterations(three) == 1);
+	assert(mandelbrot:escape_iterations(complex(1.0e30_f, 1.0e30_f)) == 1);
 	let limited = mandelbrot_new(1);
 	assert(!limited:escapes_ball(complex(2.0_f, 0.0_f)));
 	let upper = complex(-0.75_f, 0.25_f);
@@ -313,33 +336,114 @@ fn test() {
 	print("Mandelbrot tests passed\n");
 }
 
-fn main() -> () | Err<_> {
-	test();
-	print("Arrows/WASD: pan | scroll or +/-: zoom | [/]: iterations | R: reset | Esc: quit\n");
-	let window = window_new(960, 720, string_from_str("Mandelbrot | arrows: pan | +/-: zoom | [/]: detail | R: reset"))?;
-	let gpu = gpu_new_for_window(window)?;
-	let pipeline = gpu:create_graphics_pipeline(vertex, fragment)?;
+// Host stores have two destinations: the interactive buffer, or headless RGBA bytes.
+fn store_pixel(pixels: Ref<GpuSpan<Color>>, index: ulong, color: Color) {
+	pixels:at(index):store(color);
+}
+
+fn channel(value: float32) -> ubyte {
+	ubyte(value * 255.0_f + 0.5_f)
+}
+
+fn store_pixel(pixels: Ref<Span<ubyte>>, index: ulong, color: Color) {
+	pixels:at(index * 4_ul) = channel(color.r);
+	pixels:at(index * 4_ul + 1_ul) = channel(color.g);
+	pixels:at(index * 4_ul + 2_ul) = channel(color.b);
+	pixels:at(index * 4_ul + 3_ul) = 255_ub;
+}
+
+struct Renderer {
+	gpu: Gpu,
+	graphics: GpuGraphicsPipeline<Parameters, GpuPipelineOwner>,
+	compute: GpuComputePipeline<Parameters, GpuPipelineOwner>,
+	pixels: GpuSpan<Color>,
+	image: GpuImage,
+}
+
+fn renderer_new(gpu: Gpu, width: uint, height: uint) -> Renderer | Err<_> {
+	let graphics = gpu:create_graphics_pipeline(vertex, fragment)?;
 	let compute_pipeline = gpu:create_compute_pipeline(compute)?;
-	let width = 960_ui;
-	let height = 720_ui;
-	let mut pixels = gpu:alloc::<Color>(ulong(width) * ulong(height))?;
-	let mut image = gpu:create_image(width, height)?;
-	let mut plot = plot_new(width, height, 4.0_f / 3.0_f);
-	let mut solver = mandelbrot_new(256);
+	let pixels = gpu:alloc::<Color>(ulong(width) * ulong(height))?;
+	let image = gpu:create_image(width, height)?;
+	Renderer { gpu = gpu, graphics = graphics, compute = compute_pipeline, pixels = pixels, image = image }
+}
+
+fn render(self: Ref<Renderer>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, samples: int, use_gpu: bool) -> () | Err<_> {
+	let count = ulong(plot.width) * ulong(plot.height);
+	let group_size = self.gpu:compute_workgroup_size();
+	let needed = (count + group_size - 1_ul) / group_size;
+	let groups = uint(
+		if (needed > 65535_ul) {
+			65535_ul
+		} else {
+			needed
+		}
+	);
+	let root = HostParameters {
+		plot = plot:clone(),
+		solver = mandelbrot_new(solver.max_iters),
+		samples = samples,
+		stride = ulong(groups) * group_size,
+		pixels = self.pixels:clone(),
+	};
+	if (!use_gpu) {
+		solver:solve_cpu(plot, self.pixels, samples);
+	};
+	let commands = self.gpu:start_command_recording()?;
+	if (use_gpu) {
+		commands:dispatch(self.compute, root:clone(), groups, 1, 1)?;
+	};
+	commands:begin_rendering(self.image, 0.0_f, 0.0_f, 0.0_f, 1.0_f)?;
+	commands:draw(self.graphics, root, 3)?;
+	commands:end_rendering()?;
+	commands:submit()?;
+}
+
+fn save_png(path: Ptr<ubyte>, width: uint, height: uint, pixels: Ref<Span<ubyte>>) -> () | Err<_> {
+	image_data_write_pixels(path, width, height, 4, pixels, 0)?;
+	print(fmt("Saved {0}\n", (c_string(path):bytes(),)));
+}
+
+// Read the displayed image in one transfer, including the currently selected view.
+fn screenshot(renderer: Ref<Renderer>, path: Ptr<ubyte>) -> () | Err<_> {
+	let image_width = renderer.image:width();
+	let image_height = renderer.image:height();
+	let count = ulong(image_width) * ulong(image_height) * 4_ul;
+	let pixels = renderer.gpu:alloc_in::<ubyte>(count, memory_readback)?;
+	let commands = renderer.gpu:start_command_recording()?;
+	commands:copy_image_to_buffer(renderer.image, pixels)?;
+	commands:submit()?;
+	let host = arc_span_alloc::<ubyte>(count, 0_ub)?;
+	pixels:copy_to(host:get());
+	save_png(path, image_width, image_height, host:get())?;
+}
+
+fn headless(options: Ref<Options>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, path: Ptr<ubyte>) -> () | Err<_> {
+	if (options.use_gpu) {
+		let renderer = renderer_new(gpu_new()?, plot.width, plot.height)?;
+		renderer:render(plot, solver, options.samples, true)?;
+		renderer:screenshot(path)?;
+	} else {
+		let pixels = arc_span_alloc::<ubyte>(ulong(plot.width) * ulong(plot.height) * 4_ul, 0_ub)?;
+		solver:solve_cpu(plot, pixels:get(), options.samples);
+		save_png(path, plot.width, plot.height, pixels:get())?;
+	};
+}
+
+fn interactive(options: Ref<Options>, mut plot: Plot, mut solver: Mandelbrot) -> () | Err<_> {
+	print("Arrows/WASD: pan | scroll/+/-: zoom | [/]: iterations | R: reset | P: screenshot | Esc: quit\n");
+	let window = window_new(plot.width, plot.height, string_from_str("Mandelbrot | arrows: pan | +/-: zoom | [/]: detail | P: screenshot"))?;
+	let mut renderer = renderer_new(gpu_new_for_window(window)?, plot.width, plot.height)?;
 	let mut dirty = true;
 	let mut refine = false;
 	while (true) {
-		if (dirty || refine) {
-			window:poll_events()?;
-		} else {
-			window:wait_events(1.0_d / 60.0_d)?;
-		};
+		// Pace held keys even when presentation does not wait for a refresh.
+		window:wait_events(1.0_d / 60.0_d)?;
 		if (window:should_close() || window:key_state(key_escape).pressed) {
 			break;
 		};
 		let size = window:framebuffer_size()?;
 		if (size.0 == 0 || size.1 == 0) {
-			window:wait_events(1.0_d / 60.0_d)?;
 			continue;
 		};
 		if (size.0 != plot.width || size.1 != plot.height) {
@@ -347,8 +451,8 @@ fn main() -> () | Err<_> {
 			plot.height = size.1;
 			plot.aspect = float32(size.0) / float32(size.1);
 			plot:zoom(1.0_f);
-			pixels = gpu:alloc::<Color>(ulong(size.0) * ulong(size.1))?;
-			image = gpu:create_image(size.0, size.1)?;
+			renderer.pixels = renderer.gpu:alloc::<Color>(ulong(size.0) * ulong(size.1))?;
+			renderer.image = renderer.gpu:create_image(size.0, size.1)?;
 			dirty = true;
 		};
 		let previous_limit = solver.max_iters;
@@ -369,36 +473,51 @@ fn main() -> () | Err<_> {
 			);
 			dirty = true;
 		};
+		let capture = window:focused() && window:key_state(key_p).pressed;
 		if (dirty || refine) {
-			// Render one sample while moving, then refine to a 2x2 grid when idle.
-			let samples = if (dirty) {
+			// A screenshot gets the selected quality even while input is changing.
+			let samples = if (dirty && !capture) {
 				1_i
 			} else {
-				4_i
+				options.samples
 			};
-			let root = HostParameters {
-				plot = plot:clone(),
-				solver = mandelbrot_new(solver.max_iters),
-				samples = samples,
-				pixels = pixels:clone(),
-			};
-			if (!use_gpu) {
-				solver:solve_cpu(plot, pixels, samples);
-			};
-			let commands = gpu:start_command_recording()?;
-			if (use_gpu) {
-				let count = ulong(plot.width) * ulong(plot.height);
-				let group_size = gpu:compute_workgroup_size();
-				let groups = uint((count + group_size - 1_ul) / group_size);
-				commands:dispatch(compute_pipeline, root:clone(), groups, 1, 1)?;
-			};
-			commands:begin_rendering(image, 0.0_f, 0.0_f, 0.0_f, 1.0_f)?;
-			commands:draw(pipeline, root, 3)?;
-			commands:end_rendering()?;
-			commands:submit()?;
-			refine = dirty;
+			renderer:render(plot, solver, samples, options.use_gpu)?;
+			refine = dirty && samples != options.samples;
 			dirty = false;
 		};
-		gpu:present(image)?;
+		if (capture) {
+			renderer:screenshot(options.screenshot)?;
+		};
+		renderer.gpu:present(renderer.image)?;
 	};
+}
+
+fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> int | Err<_> {
+	let options = match (parse_options(arguments(argc, argv))) {
+		Options(options) => {
+			options
+		},
+		Err(message) => {
+			io_stderr():write(fmt("{0}\nUse --help for usage.\n", (message:bytes(),)))?;
+			return 2;
+		},
+	};
+	if (options.help) {
+		print_help();
+		return 0;
+	};
+	let mut plot = plot_new(options.width, options.height, float32(options.width) / float32(options.height));
+	plot.center.real = options.real;
+	plot.center.imag = options.imag;
+	plot.span = options.span;
+	let solver = mandelbrot_new(options.iterations);
+	match (options.output) {
+		Ptr<ubyte>(path) => {
+			headless(options, plot, solver, path)?;
+		},
+		None => {
+			interactive(options, plot, solver)?;
+		},
+	};
+	0
 }
