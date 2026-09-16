@@ -22,7 +22,7 @@ pub(super) fn lower(
         });
     }
     let locals = locals(types, function, flow);
-    let statements = lower_region(types, index, function.entry.index(), flow, None)?;
+    let statements = lower_region(types, index, function.entry.index(), flow, None, None)?;
     Ok(CFunction {
         signature,
         body: CBody::Structured { locals, statements },
@@ -93,6 +93,7 @@ fn lower_region(
     mut block_id: usize,
     flow: &FunctionTypes,
     exit_target: Option<ExitTarget>,
+    loop_target: Option<(usize, usize)>,
 ) -> Result<Vec<CStatement>, Error> {
     let function = &types.module.functions[index];
     let mut statements = Vec::new();
@@ -169,15 +170,16 @@ fn lower_region(
         if diverged {
             return Ok(statements);
         }
-        let next = lower_exit(
+        let (exit, next) = lower_exit(
             types,
             index,
             block_id,
             flow,
             stack,
             exit_target,
-            &mut statements,
+            loop_target,
         )?;
+        statements.extend(exit);
         let Some(next) = next else {
             return Ok(statements);
         };
@@ -219,9 +221,26 @@ fn lower_exit(
     flow: &FunctionTypes,
     mut stack: Vec<Slot>,
     exit_target: Option<ExitTarget>,
-    statements: &mut Vec<CStatement>,
-) -> Result<Option<usize>, Error> {
+    loop_target: Option<(usize, usize)>,
+) -> Result<(Vec<CStatement>, Option<usize>), Error> {
+    let mut statements = Vec::new();
     let next = match types.module.functions[index].blocks[block].terminator {
+        Terminator::Break | Terminator::NextIteration => {
+            let (condition, output) = loop_target.expect("verified loop exit");
+            let exiting = matches!(
+                types.module.functions[index].blocks[block].terminator,
+                Terminator::Break
+            );
+            statements.push(CStatement::Text {
+                source: transfer(types, if exiting { output } else { condition }, &stack),
+            });
+            statements.push(if exiting {
+                CStatement::Break
+            } else {
+                CStatement::Continue
+            });
+            None
+        }
         Terminator::Return => {
             statements.push(CStatement::Return {
                 value: stack[0].expr.clone(),
@@ -262,8 +281,16 @@ fn lower_exit(
                 .or(exit_target.filter(|target| matches!(target, ExitTarget::Merge { .. })));
             statements.push(CStatement::If {
                 condition: types.unwrap(&condition.ty, condition.expr),
-                then: enter_region(types, index, then.index(), flow, &stack, target)?,
-                els: enter_region(types, index, els.index(), flow, &stack, target)?,
+                then: enter_region(
+                    types,
+                    index,
+                    then.index(),
+                    flow,
+                    &stack,
+                    target,
+                    loop_target,
+                )?,
+                els: enter_region(types, index, els.index(), flow, &stack, target, loop_target)?,
             });
             next
         }
@@ -286,6 +313,7 @@ fn lower_exit(
                 condition,
                 flow,
                 Some(ExitTarget::LoopTest { body, test: block }),
+                None,
             )?;
             repeated.push(CStatement::If {
                 condition: format!("!r_test{block}"),
@@ -298,6 +326,7 @@ fn lower_exit(
                 body,
                 flow,
                 Some(ExitTarget::Continue { condition }),
+                Some((condition, body)),
             )?);
             statements.push(CStatement::Loop { body: repeated });
             // The condition writes these operands before its bool is tested, so
@@ -318,7 +347,7 @@ fn lower_exit(
             next
         }
     };
-    Ok(next.map(|id| id.index()))
+    Ok((statements, next.map(|id| id.index())))
 }
 
 fn enter_region(
@@ -328,11 +357,19 @@ fn enter_region(
     flow: &FunctionTypes,
     stack: &[Slot],
     target: Option<ExitTarget>,
+    loop_target: Option<(usize, usize)>,
 ) -> Result<Vec<CStatement>, Error> {
     let mut statements = vec![CStatement::Text {
         source: transfer(types, block, stack),
     }];
-    statements.extend(lower_region(types, index, block, flow, target)?);
+    statements.extend(lower_region(
+        types,
+        index,
+        block,
+        flow,
+        target,
+        loop_target,
+    )?);
     Ok(statements)
 }
 

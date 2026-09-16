@@ -38,6 +38,8 @@ pub(super) struct Term {
 
 #[derive(Debug, Clone)]
 pub(super) enum TermKind {
+    Break,
+    Continue,
     Return {
         value: Box<Term>,
     },
@@ -188,7 +190,7 @@ impl Term {
     /// Whether evaluating this tree always leaves the current source path.
     pub(super) fn exits(&self) -> bool {
         match &self.kind {
-            TermKind::Return { .. } => true,
+            TermKind::Return { .. } | TermKind::Break | TermKind::Continue => true,
             TermKind::Block { stmts, tail } => {
                 stmts.iter().any(|stmt| match stmt {
                     Statement::Define { init, .. } => init.exits(),

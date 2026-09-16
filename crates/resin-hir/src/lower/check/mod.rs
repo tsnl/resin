@@ -114,6 +114,7 @@ pub(super) struct CheckedFile {
     pub errors: Vec<GenerateError>,
 }
 struct Checker<'a> {
+    loop_depth: usize,
     typing: Inference<'a>,
     scopes: Scopes,
     errors: Vec<GenerateError>,
@@ -136,6 +137,7 @@ impl<'a> Checker<'a> {
             dependencies: BTreeSet::new(),
             holes: vec![],
             expressions: vec![],
+            loop_depth: 0,
             result: Ty::Unit.into(),
             iota: None,
             initializers: vec![],
@@ -1024,6 +1026,20 @@ impl Expression<'_, '_> {
                     ty: ann.into_tree(),
                 }
             }
+            resin_ast::TermKind::Break | resin_ast::TermKind::Continue => {
+                if self.checker.loop_depth == 0 {
+                    return Err(GenerateError::inference(
+                        span,
+                        "break and continue require a loop body",
+                    ));
+                }
+                equate = Some(Ty::union([]).into());
+                if matches!(term.val, resin_ast::TermKind::Break) {
+                    TermKind::Break
+                } else {
+                    TermKind::Continue
+                }
+            }
             resin_ast::TermKind::Return { value } => {
                 let value = self.child(value, Some(self.checker.result.clone()));
                 equate = Some(Ty::union([]).into());
@@ -1097,9 +1113,12 @@ impl Expression<'_, '_> {
                 }
             }
             resin_ast::TermKind::While { cond, body } => {
+                let depth = std::mem::replace(&mut self.checker.loop_depth, 0);
                 let cond = self.child(cond, None);
+                self.checker.loop_depth = depth + 1;
                 self.constrain((cond.span, Constraint::Boolean(cond.ty.clone())));
                 let body = self.child(body, None);
+                self.checker.loop_depth = depth;
                 equate = Some(Ty::Unit.into());
                 TermKind::While {
                     cond: Box::new(cond),
@@ -1162,8 +1181,11 @@ impl Expression<'_, '_> {
                 let args = args
                     .iter()
                     .map(|arg| {
-                        let expected =
-                            expression_exits(arg).then(|| self.checker.typing.solver.fresh());
+                        let expected = if matches!(name.as_ref(), "&&" | "||" | "assert") {
+                            Some(Ty::Bool.into())
+                        } else {
+                            expression_exits(arg).then(|| self.checker.typing.solver.fresh())
+                        };
                         self.child(arg, expected)
                     })
                     .collect::<Vec<_>>();
@@ -1627,7 +1649,7 @@ fn statement_exits(statement: &resin_ast::Stmt) -> bool {
 fn expression_exits(term: &resin_ast::Term) -> bool {
     use resin_ast::TermKind::*;
     match &term.val {
-        Return { .. } => true,
+        Return { .. } | Break | Continue => true,
         Block { stmts, tail } => stmts.iter().any(statement_exits) || expression_exits(tail),
         If { cond, then, els } => {
             expression_exits(cond) || (expression_exits(then) && expression_exits(els))
@@ -1637,6 +1659,9 @@ fn expression_exits(term: &resin_ast::Term) -> bool {
         }
         While { cond, .. } => expression_exits(cond),
         Call { func, args } => expression_exits(func) || args.iter().any(expression_exits),
+        Builtin { name, args, .. } if matches!(name.as_ref(), "&&" | "||") => {
+            expression_exits(&args[0])
+        }
         Builtin { args, .. } | Array { elems: args } => args.iter().any(expression_exits),
         Record { fields } => fields.iter().any(|(_, value)| expression_exits(value)),
         MethodCall { receiver, args, .. } => {

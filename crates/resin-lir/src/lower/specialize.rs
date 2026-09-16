@@ -919,6 +919,8 @@ impl Specialization<'_, '_> {
             resin_hir::TermKind::Unwrap { value } => concrete::TermKind::Unwrap {
                 value: self.boxed(value)?,
             },
+            resin_hir::TermKind::Break => concrete::TermKind::Break,
+            resin_hir::TermKind::Continue => concrete::TermKind::Continue,
             resin_hir::TermKind::Return { value } => concrete::TermKind::Return {
                 value: self.boxed(value)?,
             },

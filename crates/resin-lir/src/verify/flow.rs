@@ -56,7 +56,7 @@ pub(super) fn check_function(
         results: vec![Vec::new(); function.blocks.len()],
         operand_counts: vec![Vec::new(); function.blocks.len()],
     };
-    checker.visit(entry, Vec::new(), Region::Function)?;
+    checker.visit(entry, Vec::new(), Region::Function, None)?;
     if let Some(block) = checker.entries.iter().position(Option::is_none) {
         return Err(
             Location::basic_block(function_id, BlockId::from_index(block))
@@ -96,6 +96,7 @@ impl Regions<'_> {
         mut id: BlockId,
         mut stack: Vec<Ty>,
         region: Region,
+        loop_stack: Option<&[Ty]>,
     ) -> Result<Option<Vec<Ty>>, VerifyError> {
         loop {
             let location = Location::basic_block(self.function_id, id);
@@ -138,6 +139,13 @@ impl Regions<'_> {
                     }
                     return Ok(Some(stack));
                 }
+                Terminator::Break | Terminator::NextIteration => {
+                    let Some(carried) = loop_stack else {
+                        return Err(location.error(VerifyErrorKind::UnexpectedLoopExit));
+                    };
+                    same_stack(carried, &stack, location)?;
+                    return Ok(None);
+                }
                 Terminator::Return => {
                     if stack.as_slice() != [self.function.result.clone()] {
                         return Err(location.error(VerifyErrorKind::InvalidReturnStack {
@@ -149,8 +157,9 @@ impl Regions<'_> {
                 }
                 Terminator::If { then, els, next } => {
                     self.condition(&mut stack, location)?;
-                    let then_stack = self.visit(then, stack.clone(), Region::Selection)?;
-                    let else_stack = self.visit(els, stack, Region::Selection)?;
+                    let then_stack =
+                        self.visit(then, stack.clone(), Region::Selection, loop_stack)?;
+                    let else_stack = self.visit(els, stack, Region::Selection, loop_stack)?;
                     let output = join(then_stack, else_stack, location)?;
                     (next, output)
                 }
@@ -160,11 +169,13 @@ impl Regions<'_> {
                     next,
                 } => {
                     let mut output = self
-                        .visit(condition, stack.clone(), Region::LoopCondition)?
+                        .visit(condition, stack.clone(), Region::LoopCondition, None)?
                         .ok_or_else(|| location.error(VerifyErrorKind::MissingLoopTest))?;
                     self.condition(&mut output, location)?;
                     same_stack(&stack, &output, location)?;
-                    if let Some(repeated) = self.visit(body, output.clone(), Region::LoopBody)? {
+                    if let Some(repeated) =
+                        self.visit(body, output.clone(), Region::LoopBody, Some(&stack))?
+                    {
                         same_stack(&stack, &repeated, location)?;
                     }
                     (next, Some(output))

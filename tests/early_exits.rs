@@ -78,3 +78,77 @@ fn shader_returns_preserve_structured_selection_and_loops() {
     let project = support::project::Project::new(&module, None).unwrap();
     support::shaders::validate(project.generated.shaders()[0].unoptimized_spirv());
 }
+
+#[test]
+fn loop_exits_target_the_nearest_loop_and_drop_exited_scopes() {
+    succeeds(
+        r#"export { main };
+        struct Resource { trace: Ptr<int>, digit: int,
+            def drop(self: Ptr<Resource>) = { self.trace.* := self.trace.* * 10 + self.digit; };
+        };
+        def main() = {
+            var trace = 0_i;
+            var count = 0;
+            while (true) {
+                var outer = Resource { trace = &trace, digit = 1 };
+                count := count + 1;
+                if (count == 1) { continue; };
+                while (true) {
+                    var inner = Resource { trace = &trace, digit = 2 };
+                    if (count == 2) { break; };
+                    assert(false);
+                };
+                break;
+            };
+            assert(count == 2);
+            assert(trace == 121);
+            var value = 1 + { while (true) { break; }; 2 };
+            assert(value == 3);
+        };"#,
+    );
+}
+
+#[test]
+fn loop_exits_do_not_hide_initialization_errors_or_escape_conditions() {
+    for source in [
+        "def unused() = { break; };",
+        "def unused() = { continue; };",
+        "def unused() = { while ({ break; true }) {}; };",
+    ] {
+        let error = support::pipeline::source_module(source)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("loop body"), "{error}");
+    }
+    let error = support::pipeline::source_module(
+        "def unused() = { var x: int; while (true) { x := 1; break; }; var y = x; };",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("UninitializedValue"), "{error}");
+}
+
+#[test]
+fn shader_loop_exits_preserve_structured_merges() {
+    let module = support::module(
+        "export { kernel }; @compute_shader def kernel(i: ulong, output: Ptr<uint>) = { var n = 0_ui; while (n < 8_ui) { n := n + 1_ui; if (n == 2_ui) { continue; }; while (true) { if (n == 4_ui) { break; }; break; }; if (n > 5_ui) { break; }; output.* := n; }; };",
+    );
+    let project = support::project::Project::new(&module, None).unwrap();
+    support::shaders::validate(project.generated.shaders()[0].unoptimized_spirv());
+}
+
+#[test]
+fn short_circuiting_skips_conditional_exits() {
+    succeeds(
+        r#"export { main };
+        def main() = {
+            var n = 0;
+            while (n < 2) {
+                n := n + 1;
+                false && { continue; false };
+                assert(n > 0);
+            };
+            assert(n == 2);
+        };"#,
+    );
+}

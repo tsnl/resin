@@ -642,7 +642,9 @@ The condition must be boolean and is evaluated before every iteration. The body 
 scope; its result is discarded, and the loop returns `()`. As with other expression statements,
 the trailing semicolon is required unless the loop is the enclosing block's final expression.
 The body may run zero times, so initializing a variable only in the body does not make it
-definitely initialized afterward. `break` and `continue` are not implemented yet.
+definitely initialized afterward. `break;` exits the nearest loop; `continue;` starts its next iteration. Both
+are valid inside a loop body, including nested branches, and destroy exited
+scope owners before transferring control. Loop conditions cannot contain these exits.
 
 ## Generic functions and structs
 

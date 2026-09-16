@@ -173,6 +173,14 @@ impl Completion<'_> {
             typed::TermKind::Unwrap { value } => TermKind::Unwrap {
                 value: self.boxed(value)?,
             },
+            typed::TermKind::Break | typed::TermKind::Continue => {
+                self.reachable = false;
+                if matches!(source.kind, typed::TermKind::Break) {
+                    TermKind::Break
+                } else {
+                    TermKind::Continue
+                }
+            }
             typed::TermKind::Return { value } => {
                 let value = self.boxed(value)?;
                 self.reachable = false;

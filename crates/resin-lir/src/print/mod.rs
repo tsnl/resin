@@ -305,6 +305,8 @@ impl Blocks<'_> {
         match *terminator {
             Terminator::Merge => (symbol("merge"), None),
             Terminator::LoopTest => (symbol("loop-test"), None),
+            Terminator::Break => (symbol("break"), None),
+            Terminator::NextIteration => (symbol("next-iteration"), None),
             Terminator::Continue => (symbol("continue"), None),
             Terminator::Return => (symbol("return"), None),
             Terminator::If { then, els, next } => (
