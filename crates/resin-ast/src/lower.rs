@@ -660,13 +660,17 @@ impl<'a> AstGen<'a> {
                                 },
                                 self.span(variant),
                             )),
+                            "_" => MatchVariant::Wildcard,
                             "ok" => MatchVariant::Ok,
                             "err" => MatchVariant::Err,
                             _ => MatchVariant::Type(self.gen_type(variant)),
                         };
                         MatchArm {
                             variant,
-                            name: arm.child_by_field_name("name").map(|node| self.ident(node)),
+                            name: arm
+                                .child_by_field_name("name")
+                                .filter(|node| self.text(*node) != "_")
+                                .map(|node| self.ident(node)),
                             body: self.gen_body(arm.child_by_field_name("body").unwrap_or(arm)),
                         }
                     })

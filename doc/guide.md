@@ -1318,3 +1318,7 @@ Inherent methods and associated functions are declared [inside their struct](met
 `assert(condition);` evaluates a `bool` once and returns unit. False traps with
 `assertion failed` on the host, or stops the current shader invocation through
 the shader failure path. Assertions remain enabled in optimized builds.
+
+In a `match`, `Variant(_)` ignores the payload. A final `_ => { ... }` arm
+covers all remaining variants. Duplicate, unreachable, and non-final wildcard
+arms are rejected.

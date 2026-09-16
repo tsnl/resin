@@ -263,6 +263,10 @@ impl Specialization<'_, '_> {
 
     fn arm(&mut self, source: &resin_hir::MatchArm) -> Result<concrete::MatchArm, Error> {
         let tag = match &source.tag {
+            resin_hir::Case::Wildcard => {
+                return Err(self
+                    .instance_error("wildcard must be expanded before concrete arm translation"));
+            }
             resin_hir::Case::Ok => Case::Ok,
             resin_hir::Case::Err => Case::Err,
             resin_hir::Case::Type { ty: value } => Case::Type(self.ty(value)?),
@@ -285,7 +289,21 @@ impl Specialization<'_, '_> {
             ty => ty.members().into_iter().map(Case::Type).collect(),
         };
         let mut completed = vec![];
-        for arm in arms {
+        for (index, arm) in arms.iter().enumerate() {
+            if arm.tag == resin_hir::Case::Wildcard {
+                if index + 1 != arms.len() || arm.binding.is_some() || tags.is_empty() {
+                    return Err(self.instance_error(
+                        "wildcard must be the final arm and cover a remaining variant",
+                    ));
+                }
+                let body = self.term(&arm.body)?;
+                completed.extend(tags.drain(..).map(|tag| concrete::MatchArm {
+                    tag,
+                    binding: None,
+                    body: body.clone(),
+                }));
+                continue;
+            }
             let arm = self.arm(arm)?;
             let Some(index) = tags.iter().position(|tag| *tag == arm.tag) else {
                 return Err(

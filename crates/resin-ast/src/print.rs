@@ -210,6 +210,7 @@ fn sexp_term(term: &Term) -> SExp {
             let mut items = vec![sexp_term(value)];
             items.extend(arms.iter().map(|arm| {
                 let variant = match &arm.variant {
+                    MatchVariant::Wildcard => symbol("_"),
                     MatchVariant::Ok => symbol("ok"),
                     MatchVariant::Err => symbol("err"),
                     MatchVariant::Type(ty) => sexp_typespec(ty),

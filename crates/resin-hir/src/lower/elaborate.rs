@@ -953,9 +953,15 @@ impl Completion<'_> {
         let mut after = None;
         let mut seen = vec![];
         let mut checked = vec![];
-        for arm in arms {
+        for (index, arm) in arms.iter().enumerate() {
             let tag = self.pattern(arm, &value_type)?;
-            if !tags.contains(&tag) || seen.contains(&tag) {
+            if arm.wildcard && (index + 1 != arms.len() || seen.len() == tags.len()) {
+                return Err(GenerateError::inference(
+                    arm.body.span,
+                    "wildcard must be the final arm and cover a remaining variant",
+                ));
+            }
+            if !arm.wildcard && (!tags.contains(&tag) || seen.contains(&tag)) {
                 return Err(GenerateError::inference(
                     arm.body.span,
                     "unknown or duplicate match variant",
@@ -978,7 +984,7 @@ impl Completion<'_> {
                 body,
             });
         }
-        if tags.len() != seen.len() || tags.is_empty() {
+        if (!seen.contains(&crate::Case::Wildcard) && tags.len() != seen.len()) || tags.is_empty() {
             return Err(GenerateError::inference(
                 span,
                 "match must cover every variant exactly once",
@@ -994,6 +1000,9 @@ impl Completion<'_> {
 
 impl Completion<'_> {
     fn pattern(&self, arm: &typed::MatchArm, ty: &crate::Type) -> Result<crate::Case> {
+        if arm.wildcard {
+            return Ok(crate::Case::Wildcard);
+        }
         match (&arm.variant, ty) {
             (None, crate::Type::Result { .. }) => Ok(if arm.failure {
                 crate::Case::Err

@@ -273,3 +273,37 @@ fn ir_never_elimination_cannot_consume_an_inhabited_value() {
     m.functions[0].locals[0].ty = Ty::Int32;
     assert!(resin_lir::verify(&m).is_err());
 }
+
+#[test]
+fn wildcard_matches_ignore_payloads_and_cover_remaining_variants() {
+    let source = r#"export { main };
+        struct Failure {};
+        def choose(value: int | bool | None) -> int = {
+            match (value) { int(number) => { number }, _ => { 7 } }
+        };
+        def ignore<T>(value: T) -> int = { match (value) { _ => { 3 } } };
+        def main() = {
+            assert(choose(42_i) == 42);
+            assert(choose(false) == 7);
+            assert(choose(None) == 7);
+            var result: Result<int, Failure> = ok(42);
+            match (result) { ok(_) => {}, err(_) => { assert(false); } };
+            assert(ignore::<int | None>(None) == 3);
+        };"#;
+    let output = support::project::Project::new(&module(source), Some("main"))
+        .unwrap()
+        .run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    rejects(
+        "def f(v: int | None) = { match (v) { _ => {}, None => {} } };",
+        "final arm",
+    );
+    rejects(
+        "def f(v: int | None) = { match (v) { int(_) => {}, None => {}, _ => {} } };",
+        "remaining variant",
+    );
+}
