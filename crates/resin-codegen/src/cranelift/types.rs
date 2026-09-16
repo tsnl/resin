@@ -33,7 +33,7 @@ impl<'a> Types<'a> {
             if matches!(ty, Ty::Foreign { .. }) {
                 continue;
             }
-            let layout = resin_types::host_layout(table, &ty).map_err(failure)?;
+            let layout = resin_types::layout::value(table, &ty).map_err(failure)?;
             if layout.size > u32::MAX as usize {
                 return Err(unsupported("host value exceeds maximum stack slot size"));
             }

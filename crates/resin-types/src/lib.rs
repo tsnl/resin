@@ -882,15 +882,6 @@ pub fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
 // Host/device storage layout
 //
 
-/// Complete 64-bit host storage layout. Unlike [`layout::layout`], this accepts
-/// host-only values. Record offsets follow declaration order; union/Result
-/// offsets are `[tag, payload]`. Nominal values have their body's representation.
-/// Empty arrays reserve one element of physical storage while retaining length zero.
-/// Opaque foreign values have no layout; pointers to them do.
-pub fn host_layout(definitions: &[TypeDef], ty: &Ty) -> Result<layout::Layout, layout::Error> {
-    types::host_layout(definitions, ty)
-}
-
 pub mod layout {
     use crate::{Ty, TypeDef};
 
@@ -916,7 +907,10 @@ pub mod layout {
 
     /// The native value layout on Resin's 64-bit targets, including host-only
     /// scalars, descriptors, empty-value placeholders, and tagged unions.
-    /// Opaque foreign types have no known layout. This does not certify GPU storage.
+    /// Record offsets follow declaration order; nonempty tagged values report tag
+    /// and payload offsets. Empty arrays reserve one physical element. Type values
+    /// use the native 64-bit size_t representation. Opaque foreign types have no
+    /// known layout; pointers to them do. This does not certify GPU storage.
     pub fn value(definitions: &[TypeDef], ty: &Ty) -> Result<Layout, Error> {
         super::types::value_layout(definitions, ty, 0)
     }

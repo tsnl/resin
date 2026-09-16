@@ -62,6 +62,24 @@ fn sizeof_matches_layout_after_generic_specialization() {
 }
 
 #[test]
+fn sizeof_type_values_matches_nested_native_storage_after_specialization() {
+    assert_eq!(
+        result(
+            r#"
+            export { main };
+            def bytes<T>(value: T) -> ulong = { sizeof(T) };
+            def main() -> int = {
+                var value = { before = 0_ub, nested = { tag = int, after = 0_ub }, end = 0_ub };
+                var offset = ulong(&value.end) - ulong(&value.before);
+                if (bytes(int) == 8_ul && bytes(value) == 32_ul && offset == 24_ul) { 42 } else { 1 }
+            };
+            "#
+        ),
+        42
+    );
+}
+
+#[test]
 fn integer_boundaries_float_rounding_and_conversions_are_evaluated_at_declaration() {
     assert_eq!(
         result(
@@ -83,18 +101,15 @@ fn integer_boundaries_float_rounding_and_conversions_are_evaluated_at_declaratio
 
 #[test]
 fn sizeof_matches_native_c_representations() {
-    let directory = tempfile::tempdir().unwrap();
-    let header = directory.path().join("sizes.h");
-    std::fs::write(
-        &header,
-        r#"
+    let native = r#"
         #include <stdint.h>
         #include <stdbool.h>
         #include "resin_runtime.h"
         struct TestRecord { int8_t a; double b; uint16_t c; };
         struct TestStr { uint8_t *data; uint64_t length; };
         struct TestUnion { uint32_t tag; union { int32_t a; int32_t b; } payload; };
-        static inline uint64_t native_size(uint32_t index) {
+        uint64_t native_size(uint32_t index);
+        uint64_t native_size(uint32_t index) {
             const uint64_t sizes[] = {
                 sizeof(bool), sizeof(int8_t), sizeof(uint16_t), sizeof(double),
                 sizeof(struct TestStr), sizeof(uint8_t), sizeof(uint8_t), sizeof(uint32_t),
@@ -104,9 +119,7 @@ fn sizeof_matches_native_c_representations() {
             };
             return sizes[index];
         }
-    "#,
-    )
-    .unwrap();
+    "#;
     let types = [
         "bool",
         "sbyte",
@@ -136,21 +149,27 @@ fn sizeof_matches_native_c_representations() {
         .map(|(i, ty)| format!("bytes_{i} == native_size({i}_ui) && sizeof({ty}) == bytes_{i}"))
         .collect::<Vec<_>>()
         .join(" && ");
-    assert_eq!(
-        result(&format!(
-            r#"
+    let module = support::module(&format!(
+        r#"
         export {{ main }};
-        extern {{ "{}": {{ def native_size(index: uint) -> ulong; }} }};
+        extern {{ "fixture.h": {{ def native_size(index: uint) -> ulong; }} }};
         struct Record {{ a: sbyte, b: float64, c: ushort }};
         struct First {{ value: int }};
         struct Second {{ value: int }};
         struct Failure {{ value: int }};
         {declarations}
         def main() -> int = {{ if ({conditions}) {{ 42 }} else {{ 1 }} }};
-    "#,
-            header.display()
-        )),
-        42
+    "#
+    ));
+    let output = support::project::Project::new(&module, Some("main"))
+        .unwrap()
+        .with_native(native)
+        .run();
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
