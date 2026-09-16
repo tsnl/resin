@@ -17,22 +17,21 @@ const (
 struct WriteError {}
 struct Output {
 	stream: uint,
-	// Writes bytes verbatim and flushes. No formatting or newline is added.
 }
-fn write(self: Ref<Output>, text: str | Span<ubyte> | String) -> (() | Err<WriteError>) {
-	let mut status = match (text) {
-		str(literal) => {
-			resin_stream_write(self.stream, literal.data, literal.length)
-		},
-		Span<ubyte>(bytes) => {
-			resin_stream_write(self.stream, bytes.data, bytes.length)
-		},
-		String(string) => {
-			resin_stream_write(self.stream, string:get().data, string:get().length)
-		},
-	};
+
+// Writes bytes verbatim and flushes. No formatting or newline is added.
+fn write(self: Ref<Output>, text: str) -> () | Err<WriteError> {
+	write(self, bytes(text))
+}
+
+fn write(self: Ref<Output>, text: Ref<String>) -> () | Err<WriteError> {
+	write(self, text:get())
+}
+
+fn write(self: Ref<Output>, text: Ref<Span<ubyte>>) -> () | Err<WriteError> {
+	let status = resin_stream_write(self.stream, text.data, text.length);
 	if (status == 0) {
-		(())
+		()
 	} else {
 		Err(WriteError {})
 	}

@@ -304,6 +304,7 @@ fn implicit_drop_references_use_concrete_function_identities() {
         name: "Owner".into(),
         body: Type::Record { fields: vec![] },
         methods: Default::default(),
+        text_view: None,
         drop: Some(FunctionId::from_index(2)),
     });
     let mut drop = function("drop", unit());
@@ -416,6 +417,7 @@ fn requested_roots_exclude_unused_functions_types_and_drop_hooks() {
             definition: TypeId::from_index(99),
         },
         methods: Default::default(),
+        text_view: None,
         drop: Some(FunctionId::from_index(99)),
     });
     let lir = support::build_lir(
@@ -451,6 +453,7 @@ fn explicit_root_arguments_normalize_and_preserve_recursive_nominal_identity() {
             name: format!("Type{index}").into(),
             body: Type::Record { fields: vec![] },
             methods: Default::default(),
+            text_view: None,
             drop: None,
         })
         .collect();
@@ -609,6 +612,7 @@ fn nominal_expansion_is_bounded_across_declaration_boundaries() {
             type_params: vec![],
             name: format!("Type{index}").into(),
             methods: Default::default(),
+            text_view: None,
             drop: None,
             body: Type::Record {
                 fields: vec![resin_hir::RecordField {
@@ -655,6 +659,7 @@ fn nominal_program(body: Type) -> Module {
         name: "Node".into(),
         body,
         methods: Default::default(),
+        text_view: None,
         drop: None,
     });
     hir
@@ -830,6 +835,7 @@ fn member_derived_unions_normalize_independently_of_layout_discovery_order() {
             name: name.into(),
             body: Type::Record { fields: vec![] },
             methods: Default::default(),
+            text_view: None,
             drop: None,
         })
         .collect();
@@ -1168,6 +1174,7 @@ fn generic_conversions_cannot_bypass_custom_destruction() {
             name: "Owner".into(),
             body: Type::Record { fields: vec![] },
             methods: Default::default(),
+            text_view: None,
             drop: Some(FunctionId::from_index(1)),
         }],
         ..Default::default()
@@ -1235,6 +1242,7 @@ fn dependent_methods() -> Module {
             name: "Owner".into(),
             body: Type::Record { fields: vec![] },
             methods: [("read".into(), FunctionId::from_index(1))].into(),
+            text_view: None,
             drop: None,
         }],
         ..Default::default()

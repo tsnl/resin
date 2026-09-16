@@ -583,17 +583,14 @@ impl<'a> Instances<'a> {
 
     fn text_view(&mut self, id: TypeId, instance: &Nominal) -> Result<(), LowerError> {
         let source = &self.source.types[instance.definition.index()];
-        let name = resin_hir::MethodName::Named {
-            name: "repr_bytes".into(),
-        };
-        let Some(&function) = source.methods.get(&name) else {
+        let Some(function) = source.text_view else {
             return Ok(());
         };
         let signature = &self.source.functions[function.index()].signature;
         let invalid = || {
             LowerError::invalid_hir(
                 signature.result.span,
-                "repr_bytes must take Ptr<Self> and return a borrowed byte view, with no additional type parameters",
+                "repr_bytes must take Ref<Self> and return a borrowed byte view, with no additional type parameters",
             )
         };
         if signature.type_params.len() != instance.arguments.len() || signature.params.len() != 1 {
@@ -602,8 +599,8 @@ impl<'a> Instances<'a> {
         let substitution =
             super::substitute::Substitution::new(&signature.type_params, &instance.arguments)?;
         let receiver = substitution.normalize(&signature.params[0].annotation.ty, self)?;
-        let expected = resin_hir::Type::Pointer {
-            pointee: Box::new(self.nominal_origin(id)),
+        let expected = resin_hir::Type::Reference {
+            referent: Box::new(self.nominal_origin(id)),
         };
         let result = substitution.ty(&signature.result.ty, self)?;
         if receiver != expected || result != Ty::byte_span() {

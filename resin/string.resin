@@ -11,16 +11,12 @@ import { "span.resin", "shared.resin" };
 // Logical bytes exclude the trailing NUL reserved for native string APIs.
 struct String {
 	storage: ArcSpan<ubyte>,
-
-	// A borrowed text view for repr and automatic formatting.
-
-	// Explicit transport for formatting tuple arguments.
 }
 fn string_from_str(text: str) -> String {
 	String { storage = ArcSpan<ubyte> { owner = string_from_bytes(text.data, text.length) } }
 }
 
-fn string_from_bytes(text: Span<ubyte>) -> String {
+fn string_from_bytes(text: Ref<Span<ubyte>>) -> String {
 	String { storage = ArcSpan<ubyte> { owner = string_from_bytes(text.data, text.length) } }
 }
 
@@ -28,45 +24,40 @@ fn get(self: Ref<String>) -> Span<ubyte> {
 	self.storage:get()
 }
 
+// A borrowed text view for repr and automatic formatting.
 fn repr_bytes(self: Ref<String>) -> (Ptr<ubyte>, ulong) {
 	self:bytes()
 }
 
+// Explicit transport for formatting tuple arguments.
 fn bytes(self: Ref<String>) -> (Ptr<ubyte>, ulong) {
-	let mut view = self:get();
+	let view = self:get();
 	(view.data, view.length)
 }
 
-fn fmt<A>(format: str | Span<ubyte> | String, arguments: A) -> String {
-	let mut owner = match (format) {
-		str(text) => {
-			format_bytes(text.data, text.length, arguments)
-		},
-		Span<ubyte>(text) => {
-			format_bytes(text.data, text.length, arguments)
-		},
-		String(text) => {
-			let mut view = text:get();
-			format_bytes(view.data, view.length, arguments)
-		},
-	};
-	String { storage = ArcSpan<ubyte> { owner = owner } }
+fn fmt<A>(format: str, arguments: A) -> String {
+	String { storage = ArcSpan<ubyte> { owner = format_bytes(format.data, format.length, arguments) } }
+}
+
+fn fmt<A>(format: Ref<Span<ubyte>>, arguments: A) -> String {
+	String { storage = ArcSpan<ubyte> { owner = format_bytes(format.data, format.length, arguments) } }
+}
+
+fn fmt<A>(format: Ref<String>, arguments: A) -> String {
+	fmt(format:get(), arguments)
 }
 
 // Writes bytes verbatim, flushes, and adds no newline.
-fn print(text: str | Span<ubyte> | String) {
-	match (text) {
-		str(value) => {
-			resin_print(value.data, value.length)
-		},
-		Span<ubyte>(value) => {
-			resin_print(value.data, value.length)
-		},
-		String(value) => {
-			let mut view = value:get();
-			resin_print(view.data, view.length)
-		},
-	}
+fn print(text: str) {
+	resin_print(text.data, text.length)
+}
+
+fn print(text: Ref<Span<ubyte>>) {
+	resin_print(text.data, text.length)
+}
+
+fn print(text: Ref<String>) {
+	print(text:get())
 }
 
 intrinsic "string_from_bytes" fn string_from_bytes(data: Ptr<ubyte>, length: ulong) -> StrongOwner;

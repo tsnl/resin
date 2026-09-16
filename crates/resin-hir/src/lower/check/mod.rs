@@ -259,7 +259,7 @@ pub(in crate::lower) fn file(
             });
     }
     checker.function_ids = generator.function_bindings.clone();
-    checker.drop_hooks(file, &declarations, &signatures);
+    checker.struct_hooks(file, &declarations, &signatures);
     checker.declare_gpu_contracts(
         &declarations,
         &signatures,
@@ -332,7 +332,7 @@ pub(in crate::lower) fn file(
 }
 
 impl Checker<'_> {
-    fn drop_hooks(
+    fn struct_hooks(
         &mut self,
         file: &SourceFile,
         declarations: &[typed::Declaration],
@@ -340,8 +340,9 @@ impl Checker<'_> {
     ) {
         for declaration in declarations
             .iter()
-            .filter(|declaration| declaration.name.val.as_ref() == "drop")
+            .filter(|declaration| matches!(declaration.name.val.as_ref(), "drop" | "repr_bytes"))
         {
+            let hook = declaration.name.val.as_ref();
             let result = (|| {
                 let signature = signatures[&declaration.id]
                     .clone()
@@ -349,14 +350,22 @@ impl Checker<'_> {
                 let invalid = || {
                     GenerateError::inference(
                         declaration.name.span,
-                        "drop must have signature fn drop<T>(value: Ptr<Owner<T>>) with only the owner's type parameters",
+                        if hook == "drop" {
+                            "drop must have signature fn drop<T>(value: Ptr<Owner<T>>) with only the owner's type parameters"
+                        } else {
+                            "repr_bytes must take Ref<Owner<T>> and return (Ptr<ubyte>, ulong), with only the owner's type parameters"
+                        },
                     )
                 };
                 let [(_, parameter)] = signature.params.as_slice() else {
                     return Err(invalid());
                 };
-                let crate::Type::Pointer { pointee } = &parameter.ty else {
-                    return Err(invalid());
+                let (pointee, result) = match (hook, &parameter.ty) {
+                    ("drop", crate::Type::Pointer { pointee }) => (pointee, crate::Type::Unit),
+                    ("repr_bytes", crate::Type::Reference { referent }) => {
+                        (referent, super::types::ty(&Ty::byte_span()))
+                    }
+                    _ => return Err(invalid()),
                 };
                 let crate::Type::Defined {
                     definition,
@@ -371,7 +380,7 @@ impl Checker<'_> {
                     .nominal_schemes
                     .get(definition)
                     .ok_or_else(invalid)?;
-                if signature.result.ty != crate::Type::Unit
+                if signature.result.ty != result
                     || arguments.len() != owner.type_params.len()
                     || arguments
                         != &signature
@@ -385,23 +394,38 @@ impl Checker<'_> {
                     return Err(invalid());
                 }
                 if !file.stmts.iter().any(|statement| matches!(&statement.val, StmtKind::Struct { name, .. } if name.val == owner.name)) {
-                    return Err(GenerateError::inference(declaration.name.span, "a drop hook must be defined in the same module as its struct"));
+                    return Err(GenerateError::inference(declaration.name.span, format!("a {hook} hook must be defined in the same module as its struct")));
                 }
-                if self
-                    .typing
-                    .typer
-                    .definition(*definition)
-                    .ok()
-                    .is_some_and(|definition| definition.drop_hook().is_some())
-                {
-                    return Err(GenerateError::inference(
-                        declaration.name.span,
-                        "duplicate drop hook for this struct",
-                    ));
+                let function = self.function_ids[&declaration.id];
+                if hook == "drop" {
+                    if self
+                        .typing
+                        .typer
+                        .definition(*definition)
+                        .ok()
+                        .is_some_and(|definition| definition.drop_hook().is_some())
+                    {
+                        return Err(GenerateError::inference(
+                            declaration.name.span,
+                            "duplicate drop hook for this struct",
+                        ));
+                    }
+                    self.typing.typer.define_drop(*definition, function);
+                } else {
+                    let owner = self
+                        .typing
+                        .typer
+                        .nominal_schemes
+                        .get_mut(definition)
+                        .expect("checked nominal owner");
+                    if owner.text_view.is_some() {
+                        return Err(GenerateError::inference(
+                            declaration.name.span,
+                            "duplicate repr_bytes hook for this struct",
+                        ));
+                    }
+                    owner.text_view = Some(function);
                 }
-                self.typing
-                    .typer
-                    .define_drop(*definition, self.function_ids[&declaration.id]);
                 Ok(())
             })();
             self.record(result);

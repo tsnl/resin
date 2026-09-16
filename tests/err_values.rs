@@ -9,9 +9,10 @@ fn error_wrappers_preserve_identity_payloads_and_ownership() {
         fn main()  {
             let mut a: Err<int> = Err(42);
             let mut b = Err(Err("nested"));
-            let mut c: int | Err<String> = boxed(string_from_str("owned"));
-            let mut copy = c;
-            print(fmt("{0} {1} {2} {3}", (a, b, c, copy)));
+            let owned = string_from_str("owned");
+            let c: int | Err<String> = boxed(owned:clone());
+            let moved = c;
+            print(fmt("{0} {1} {2} {3}", (a, b, boxed(owned), moved)));
         }"#,
     );
     let output = support::project::Project::new(&module, Some("main"))

@@ -409,6 +409,7 @@ fn invalid_nominal_type_expressions_report_errors_before_storage_lowering() {
             name: "Invalid".into(),
             body,
             methods: Default::default(),
+            text_view: None,
             drop: None,
         });
         let error = support::build_lir(&tree, &[], &resin_lir::LoweringOptions::default())

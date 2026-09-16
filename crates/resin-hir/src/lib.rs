@@ -277,6 +277,8 @@ pub struct TypeDefinition {
     pub methods: BTreeMap<MethodName, FunctionId>,
     /// A hook whose type parameters are supplied by this nominal application.
     pub drop: Option<FunctionId>,
+    /// A borrowed byte representation, supplied by `repr_bytes(Ref<Self>)`.
+    pub text_view: Option<FunctionId>,
     pub gpu_projection: Option<GpuProjection>,
     pub gpu_pipeline: Option<GpuPipeline>,
 }

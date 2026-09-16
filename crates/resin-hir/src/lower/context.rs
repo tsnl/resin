@@ -137,6 +137,7 @@ impl Context {
                 name,
                 body,
                 methods: BTreeMap::new(),
+                text_view: None,
                 drop: None,
             },
         );

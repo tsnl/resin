@@ -124,7 +124,7 @@ fn embedded_and_explicit_trailing_nuls_are_not_truncated() {
         b"before\0a\0b\0after",
     );
     prints(
-        r#"export { main }; import { "$/string.resin", "$/span.resin" }; fn main() -> ()  { let mut bytes = [ubyte(65), ubyte(0), ubyte(66), ubyte(0)]; print(fmt("{0}", (Span<ubyte> { data = Ptr<ubyte>(&bytes), length = 4_ul }:bytes(),))); }"#,
+        r#"export { main }; import { "$/string.resin", "$/span.resin" }; fn main() -> ()  { let mut buffer = [ubyte(65), ubyte(0), ubyte(66), ubyte(0)]; print(fmt("{0}", (Span<ubyte> { data = Ptr<ubyte>(&buffer), length = 4_ul }:bytes(),))); }"#,
         b"A\0B\0",
     );
 }
@@ -154,7 +154,7 @@ fn aliases_preserve_scalar_printing() {
 #[test]
 fn arguments_evaluate_once_in_source_order_even_when_unused() {
     prints(
-        r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { let mut n = 0; print(fmt("{1} {0} {1}", ((n = n + 1), (n = n + 1), (n = n + 1)))); print(fmt(" {0}", (n,))); }"#,
+        r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { let mut n = 0; print(fmt("{1} {0} {1}", ({ n = n + 1; n }, { n = n + 1; n }, { n = n + 1; n }))); print(fmt(" {0}", (n,))); }"#,
         b"2 1 2 3",
     );
 }
@@ -224,15 +224,15 @@ fn invalid_print_types_are_rejected() {
         ),
         (
             r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print(fmt(1, (2,))); }"#,
-            "destination union",
+            "no overload of `fmt` matches",
         ),
         (
             r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print(fmt("hello")); }"#,
-            "arguments, found",
+            "no overload of `fmt` matches",
         ),
         (
             r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print(fmt("{0}", (1,), (2,))); }"#,
-            "arguments, found",
+            "no overload of `fmt` matches",
         ),
     ] {
         let error = pipeline::source_module(source).unwrap_err().to_string();
@@ -245,7 +245,10 @@ fn shader_print_rejects_host_only_string_types() {
     let error = pipeline::shader_error(
         r#"export { kernel }; import { "$/string.resin", "$/span.resin" }; @compute_shader fn kernel(invocation: ulong, text: Ptr<Span<ubyte>>)  { print(text.*); }"#,
     );
-    assert!(error.contains("shader string"), "{error}");
+    assert!(
+        error.contains("shader cannot call foreign function resin_print"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -346,7 +349,7 @@ fn from_bytes_copies_unterminated_spans_verbatim_and_owns_the_result() {
         type Caption = String;
         fn copied() -> String  {
             let mut source = [65_ub, 0_ub, 66_ub];
-            let mut result = from_bytes(Span<ubyte> { data = Ptr<ubyte>(&source), length = 3_ul });
+            let mut result = string_from_bytes(Span<ubyte> { data = Ptr<ubyte>(&source), length = 3_ul });
             source:at(0_ul) = 90_ub;
             result
         }
@@ -354,7 +357,7 @@ fn from_bytes_copies_unterminated_spans_verbatim_and_owns_the_result() {
             let mut weak = weak_span_empty::<ubyte>();
             {
                 let mut text = copied();
-                let mut alias = text;
+                let alias = text:clone();
                 weak = text.storage:downgrade();
                 text = string_from_str("{0}} braces");
                 print(alias);
@@ -378,8 +381,8 @@ fn from_bytes_copies_unterminated_spans_verbatim_and_owns_the_result() {
 fn byte_spans_print_their_length_including_nuls_and_empty_views() {
     prints(
         r#"export { main }; import { "$/string.resin", "$/span.resin" }; fn main()  {
-            let mut bytes = [65_ub, 0_ub, 66_ub, 67_ub];
-            let mut view = Span<ubyte> { data = &bytes:at(0), length = 3_ul };
+            let mut buffer = [65_ub, 0_ub, 66_ub, 67_ub];
+            let mut view = Span<ubyte> { data = &buffer:at(0), length = 3_ul };
             let mut empty = Span<ubyte> { data = Ptr<ubyte>(0_ul), length = 0_ul };
             print(fmt("[{0}][{1}]", (view:bytes(), empty:bytes())));
         }"#,
@@ -424,15 +427,15 @@ fn literal_byte_views_preserve_storage_while_owned_strings_copy_it() {
         fn view(text: str) -> Span<ubyte>  { bytes(text) }
         fn main() -> int  {
             let mut text = "hé\0";
-            let mut bytes = view(text);
+            let mut buffer = view(text);
             let mut owned = string_from_str(text);
             let mut empty = string_from_str("");
-            if (text.length == 4_ul && bytes.length == text.length &&
-                ulong(bytes.data) == ulong(text.data) && text:at(1_ul) == 195_ub &&
+            if (text.length == 4_ul && buffer.length == text.length &&
+                ulong(buffer.data) == ulong(text.data) && text:at(1_ul) == 195_ub &&
                 ulong(owned:get().data) != ulong(text.data) && owned:get().length == 4_ul &&
                 Ptr<ubyte>(ulong(owned:get().data) + 4_ul).* == 0_ub &&
                 empty:get().length == 0_ul && empty:get().data.* == 0_ub) {
-                print(fmt(view("{0}{1}{2}"), (text, bytes:bytes(), owned:bytes())));
+                print(fmt(view("{0}{1}{2}"), (text, buffer:bytes(), owned:bytes())));
                 0
             } else { 1 }
         }"#,
@@ -445,10 +448,10 @@ fn raw_byte_views_and_owned_strings_preserve_non_utf8() {
     prints(
         r#"export { main }; import { "$/string.resin", "$/span.resin" }; fn main()  {
             let mut data = [255_ub, 0_ub, 254_ub];
-            let mut bytes = Span<ubyte> { data = &data:at(0_ul), length = 3_ul };
-            let mut owned = string_from_bytes(bytes);
+            let mut buffer = Span<ubyte> { data = &data:at(0_ul), length = 3_ul };
+            let mut owned = string_from_bytes(buffer);
             data:at(0_ul) = 65_ub;
-            print(bytes);
+            print(buffer);
             print(fmt("{0}", (owned:bytes(),)));
         }"#,
         b"A\0\xfe\xff\0\xfe",
@@ -509,6 +512,27 @@ fn repr_bytes(self: Bad) -> int  { 1 }
     .unwrap_err()
     .to_string();
     assert!(error.contains("repr_bytes must take"), "{error}");
+}
+
+#[test]
+fn free_generic_text_hooks_format_values_and_print_borrows_owned_strings() {
+    prints(
+        r#"export { main }; import { "$/string.resin" };
+        struct Label<T> { text: str, value: T }
+        fn repr_bytes<T>(value: Ref<Label<T>>) -> (Ptr<ubyte>, ulong) {
+            (value.text.data, value.text.length)
+        }
+        fn main() {
+            let text = string_from_str("again");
+            print(text);
+            print(text);
+            print(fmt(" {0} {1}", (
+                Label<int> { text = "integer", value = 42 },
+                Label<bool> { text = "boolean", value = true },
+            )));
+        }"#,
+        b"againagain integer boolean",
+    );
 }
 
 #[test]
