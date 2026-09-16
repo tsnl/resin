@@ -2147,15 +2147,15 @@ impl Inference<'_> {
                 return Ok(complete);
             }
             Constraint::Ascribe(from, to, literal) => {
-                if let Type::Node(Head::Error, parts) = self.solver.head(to) {
-                    if !matches!(self.solver.head(from), Type::Node(Head::Error, _)) {
-                        return self.solver.coerce(from, &parts[0], span);
-                    }
+                if let Type::Node(Head::Error, parts) = self.solver.head(to)
+                    && !matches!(self.solver.head(from), Type::Node(Head::Error, _))
+                {
+                    return self.solver.coerce(from, &parts[0], span);
                 }
-                if let Type::Node(Head::Error, parts) = self.solver.head(from) {
-                    if !matches!(self.solver.head(to), Type::Node(Head::Error, _)) {
-                        return self.solver.unify(&parts[0], to, span);
-                    }
+                if let Type::Node(Head::Error, parts) = self.solver.head(from)
+                    && !matches!(self.solver.head(to), Type::Node(Head::Error, _))
+                {
+                    return self.solver.unify(&parts[0], to, span);
                 }
                 if matches!(self.solver.head(to), Type::Node(Head::Record(_), _))
                     && let Some(definition) = self.nominal_drop(from)
