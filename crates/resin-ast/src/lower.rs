@@ -628,6 +628,11 @@ impl<'a> AstGen<'a> {
                 span,
             ),
             "unary_type" if self.text(child) == "None" => Spanned::new(TermKind::None, span),
+            "assert_term" => {
+                let condition =
+                    self.gen_term(child.child_by_field_name("condition").unwrap_or(child));
+                self.call_var("assert", vec![condition], span)
+            }
             "boolean" => Spanned::new(
                 TermKind::Bool {
                     value: self.text(child) == "true",

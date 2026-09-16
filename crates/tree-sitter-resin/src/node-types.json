@@ -32,6 +32,22 @@
     }
   },
   {
+    "type": "assert_term",
+    "named": true,
+    "fields": {
+      "condition": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "term",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "assignment_term",
     "named": true,
     "fields": {
@@ -1080,6 +1096,10 @@
       "required": true,
       "types": [
         {
+          "type": "assert_term",
+          "named": true
+        },
+        {
           "type": "boolean",
           "named": true
         },
@@ -1940,6 +1960,10 @@
   },
   {
     "type": "_",
+    "named": false
+  },
+  {
+    "type": "assert",
     "named": false
   },
   {

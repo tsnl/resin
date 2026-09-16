@@ -9,6 +9,12 @@ pub(super) fn builtin(
     args: &[Slot],
     result: &Ty,
 ) -> Result<String, Error> {
+    if name == "assert" {
+        return Ok(format!(
+            "(({}) ? (uint8_t)0 : (resin_fail(\"assertion failed\"), (uint8_t)0))",
+            args[0].expr
+        ));
+    }
     if name == "string_from_bytes" {
         return super::formatting::from_bytes(types, args, result);
     }

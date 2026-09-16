@@ -6,7 +6,7 @@
 
 ; Keep declaration and control keywords in sync with the grammar's reserved words.
 ["export" "import" "extern" "intrinsic" "type" "struct" "def" "var" "const"] @keyword
-["if" "else" "while" "match"] @keyword
+["if" "else" "while" "match" "assert"] @keyword
 
 (function_definition name: (lid) @function)
 (foreign_function name: (lid) @function)

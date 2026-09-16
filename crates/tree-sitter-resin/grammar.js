@@ -117,6 +117,7 @@ export default grammar({
       "var",
       "const",
       "sizeof",
+      "assert",
       "if",
       "else",
       "while",
@@ -446,11 +447,14 @@ export default grammar({
       ),
     unit_term: () => prec.dynamic(1, choice(seq("{", "}"), seq("(", ")"))),
 
+    assert_term: ($) => seq("assert", "(", field("condition", $.term), ")"),
+
     boolean: () => choice("true", "false"),
 
     primary_term: ($) =>
       choice(
         $.sizeof_term,
+        $.assert_term,
         $.constructor_term,
         $.closed_term,
         $.lid,

@@ -976,6 +976,7 @@ fn builtin_hover(document: &resin_cst::Document, token: resin_cst::Node<'_>) -> 
                 | "None"
                 | "true"
                 | "false"
+                | "assert"
                 | "sizeof"
         )
     {
@@ -1220,6 +1221,11 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     (
         "if",
         "if (condition) { value } else { value }",
+        DefinitionKind::Keyword,
+    ),
+    (
+        "assert",
+        "assert(condition) — require a bool; trap on false in every build profile.",
         DefinitionKind::Keyword,
     ),
     ("else", "else { value }", DefinitionKind::Keyword),

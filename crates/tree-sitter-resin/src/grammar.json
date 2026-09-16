@@ -2953,6 +2953,31 @@
         ]
       }
     },
+    "assert_term": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "assert"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "FIELD",
+          "name": "condition",
+          "content": {
+            "type": "SYMBOL",
+            "name": "term"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
     "boolean": {
       "type": "CHOICE",
       "members": [
@@ -2972,6 +2997,10 @@
         {
           "type": "SYMBOL",
           "name": "sizeof_term"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "assert_term"
         },
         {
           "type": "SYMBOL",
@@ -4073,6 +4102,10 @@
       {
         "type": "STRING",
         "value": "sizeof"
+      },
+      {
+        "type": "STRING",
+        "value": "assert"
       },
       {
         "type": "STRING",
