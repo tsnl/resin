@@ -374,7 +374,12 @@ impl<'a> AstGen<'a> {
                 .child_by_field_name("right")
                 .map(|n| self.gen_binary_term(n))
                 .unwrap_or_else(|| self.hole(node));
-            return self.call_var(op_text, vec![left, right], self.span(node));
+            return self.call_var(
+                op_text,
+                self.span(op_node),
+                vec![left, right],
+                self.span(node),
+            );
         }
         self.gen_unary_term(node.child(0).unwrap_or(node))
     }
@@ -397,7 +402,7 @@ impl<'a> AstGen<'a> {
                     self.span(node),
                 );
             }
-            return self.call_var(op_text, vec![operand], self.span(node));
+            return self.call_var(op_text, self.span(op_node), vec![operand], self.span(node));
         }
         self.gen_postfix_term(node.child(0).unwrap_or(node))
     }
@@ -1069,10 +1074,11 @@ impl<'a> AstGen<'a> {
         out
     }
 
-    fn call_var(&self, op_text: &str, args: Vec<Term>, span: Span) -> Term {
+    fn call_var(&self, op_text: &str, name_span: Span, args: Vec<Term>, span: Span) -> Term {
         Spanned::new(
             TermKind::Builtin {
                 name: op_text.into(),
+                name_span,
                 args,
             },
             span,

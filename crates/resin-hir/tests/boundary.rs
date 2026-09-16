@@ -213,10 +213,12 @@ fn nominal_declarations_retain_method_identities_with_their_type_expressions() {
     };
     assert_eq!(fields[0].ty, Type::Int32);
     assert_eq!(
-        hir.functions[owner.methods["read"].index()].name.as_ref(),
+        hir.functions[owner.methods[&"read".into()].index()]
+            .name
+            .as_ref(),
         "Owner.read"
     );
-    assert_eq!(owner.drop, Some(owner.methods["drop"]));
+    assert_eq!(owner.drop, Some(owner.methods[&"drop".into()]));
     assert!(
         !hir.types
             .iter()

@@ -379,10 +379,12 @@ impl<'a> Instances<'a> {
     pub(super) fn method(
         &self,
         receiver: &resin_hir::Type,
-        name: &str,
+        name: &resin_hir::MethodName,
     ) -> Result<(FunctionId, resin_hir::Signature, Vec<resin_hir::Type>), LowerError> {
         let mut owner = receiver;
-        while let resin_hir::Type::Pointer { pointee } = owner {
+        while let resin_hir::MethodName::Named { .. } = name
+            && let resin_hir::Type::Pointer { pointee } = owner
+        {
             owner = pointee;
         }
         let missing = || LowerError {

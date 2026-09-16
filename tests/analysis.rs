@@ -8,6 +8,34 @@ use std::{collections::BTreeMap, path::Path};
 use tempfile::TempDir;
 
 #[test]
+fn operator_symbols_navigate_to_the_selected_overload() {
+    let library = "export { Number }; struct Number<T> { value: T, def __add__(a: Number<T>, b: T) -> T = { a.value + b }; };";
+    let source = "import { \"library.resin\" }; def main() -> int = { Number<int> { value = 40 } + 2 }; def named(value: Number<int>) -> int = { value.__add__(2) };";
+    let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
+    let analysis = project.checked();
+    let input = project.source("main.resin");
+    let offset = source.rfind('+').unwrap();
+    let definition = analysis.definition(&input, offset).unwrap();
+    assert_eq!(definition.source, project.source("library.resin"));
+    assert_eq!(definition.span.start, library.find("__add__").unwrap());
+    assert!(
+        analysis
+            .hover(&input, offset)
+            .unwrap()
+            .text
+            .contains("(Number<int>, int) -> int")
+    );
+    let named = source.find("__add__").unwrap();
+    assert_eq!(analysis.definition(&input, named).unwrap(), definition);
+    assert!(
+        analysis
+            .completions(&input, named + 3)
+            .iter()
+            .any(|item| item.name == "__add__")
+    );
+}
+
+#[test]
 fn exported_constants_have_hover_completion_and_definition() {
     let library = "export { answer }; const ( answer: int = 42; );";
     let source = "import { \"library.resin\" }; def main() -> int = { answer };";

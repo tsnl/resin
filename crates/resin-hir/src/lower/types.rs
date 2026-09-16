@@ -1,6 +1,6 @@
 //! Complete the frontend's solved types as HIR expressions.
 use resin_types::prelude::*;
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
 pub(super) fn ty(source: &Ty) -> crate::Type {
     match source {
@@ -61,7 +61,7 @@ pub(super) fn ty(source: &Ty) -> crate::Type {
 
 pub(super) fn definition(
     source: &TypeDef,
-    methods: BTreeMap<Arc<str>, FunctionId>,
+    methods: BTreeMap<crate::MethodName, FunctionId>,
 ) -> crate::TypeDefinition {
     let TypeDef::Nominal {
         name,

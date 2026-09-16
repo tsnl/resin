@@ -47,11 +47,90 @@ pub struct RecordField {
     pub ty: Type,
 }
 
+/// A nominal namespace key. An operator slot and its dunder name select the
+/// same declaration; unary and binary symbols use distinct dunder methods.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum MethodName {
+    Named { name: Arc<str> },
+    Operator { symbol: Arc<str>, arity: usize },
+}
+
+impl MethodName {
+    /// Return the namespace slot for an overloadable symbol and operand count.
+    /// Short-circuiting, assignment, and address operations have no such slot.
+    pub fn operator(symbol: &str, arity: usize) -> Option<Self> {
+        let supported = OPERATOR_METHODS
+            .iter()
+            .any(|&(_, s, a)| (s, a) == (symbol, arity));
+        supported.then(|| Self::Operator {
+            symbol: symbol.into(),
+            arity,
+        })
+    }
+
+    /// Return the operator slot implemented by a recognized dunder method.
+    pub fn operator_for_method(name: &str) -> Option<Self> {
+        OPERATOR_METHODS
+            .iter()
+            .find_map(|&(method, symbol, arity)| {
+                (method == name).then(|| Self::Operator {
+                    symbol: symbol.into(),
+                    arity,
+                })
+            })
+    }
+}
+
+const OPERATOR_METHODS: &[(&str, &str, usize)] = &[
+    ("__pos__", "+", 1),
+    ("__neg__", "-", 1),
+    ("__invert__", "~", 1),
+    ("__not__", "!", 1),
+    ("__add__", "+", 2),
+    ("__sub__", "-", 2),
+    ("__mul__", "*", 2),
+    ("__truediv__", "/", 2),
+    ("__mod__", "%", 2),
+    ("__lshift__", "<<", 2),
+    ("__rshift__", ">>", 2),
+    ("__and__", "&", 2),
+    ("__or__", "|", 2),
+    ("__xor__", "^", 2),
+    ("__eq__", "==", 2),
+    ("__ne__", "!=", 2),
+    ("__lt__", "<", 2),
+    ("__le__", "<=", 2),
+    ("__gt__", ">", 2),
+    ("__ge__", ">=", 2),
+];
+
+impl From<Arc<str>> for MethodName {
+    fn from(name: Arc<str>) -> Self {
+        Self::Named { name }
+    }
+}
+
+impl From<&str> for MethodName {
+    fn from(name: &str) -> Self {
+        Self::Named { name: name.into() }
+    }
+}
+
+impl fmt::Display for MethodName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Named { name } => write!(f, "{name}"),
+            Self::Operator { symbol, arity } => write!(f, "operator {symbol} ({arity} operands)"),
+        }
+    }
+}
+
 /// A method namespace and application determined by substituting the receiver type.
+/// Operator lookups are associated and have no method-local type arguments.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MethodLookup {
     pub receiver: Type,
-    pub name: Arc<str>,
+    pub name: MethodName,
     /// Completed method-local arguments; owner arguments come from the receiver.
     pub type_args: Vec<Type>,
     /// Associated lookup retains every parameter; instance lookup omits the receiver.
@@ -193,7 +272,7 @@ pub struct TypeDefinition {
     pub type_params: Vec<TypeParameter>,
     pub name: Arc<str>,
     pub body: Type,
-    pub methods: BTreeMap<Arc<str>, FunctionId>,
+    pub methods: BTreeMap<MethodName, FunctionId>,
     /// A hook whose type parameters are supplied by this nominal application.
     pub drop: Option<FunctionId>,
     pub gpu_projection: Option<GpuProjection>,
@@ -1389,6 +1468,9 @@ impl Analysis {
         let names = self.type_names_with(typer);
         let mut members = Vec::new();
         for (name, method) in typer.source_methods_for(*definition) {
+            let MethodName::Named { name } = name else {
+                continue;
+            };
             let substitute = |body: &lower::infer::Type| lower::infer::Type::Apply {
                 body: Box::new(body.clone()),
                 arguments: method

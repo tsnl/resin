@@ -94,5 +94,25 @@ fn match_scrutinees_precede_arms_and_pattern_bindings_start_initialized() {
 #[test]
 fn layout_queries_neither_read_nor_initialize_their_operands() {
     valid("def size() -> ulong = { var value: int; size_of(value) };");
+    valid("def size() -> ulong = { var value = size_of(value); value };");
     uninitialized("def main() -> int = { var value: int; size_of(value := 1); value };");
+}
+
+#[test]
+fn eager_self_reference_is_rejected_before_its_type_is_known() {
+    for expression in [
+        "value + 1",
+        "-value",
+        "&value",
+        "{ var nested = value; nested }",
+    ] {
+        let source = format!("def unused() = {{ var value = {expression}; }};");
+        let error = lower(&source).unwrap_err();
+        assert!(
+            error.diagnostic.contains("EagerRecursion"),
+            "{source}\n{error}"
+        );
+    }
+    valid("def shadow() -> int = { var value = { var value = 42; value }; value };");
+    valid("def size() -> ulong = { size_of({ var value: int = value + 1; 0_i }) };");
 }

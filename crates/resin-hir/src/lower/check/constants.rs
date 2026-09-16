@@ -264,7 +264,7 @@ fn evaluate(term: &crate::Term, context: &Context) -> Result<Value> {
             value: value.clone(),
         }),
         TermKind::Numeric { text } => resin_types::literal::parse(text, &ty).map_err(error),
-        TermKind::Builtin { name, args } => {
+        TermKind::Builtin { name, args, .. } => {
             let operands = args
                 .iter()
                 .map(|arg| evaluate(arg, context))

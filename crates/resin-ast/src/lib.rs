@@ -142,6 +142,7 @@ pub enum TermKind {
     /// Privileged operator syntax; operands are evaluated in source order.
     Builtin {
         name: Arc<str>,
+        name_span: Span,
         args: Vec<Term>,
     },
     Assign {

@@ -41,6 +41,14 @@ fn check(source: &str, expected: &str) {
 }
 
 #[test]
+fn operator_method_names_remain_attached_to_the_parameter_list() {
+    check(
+        "struct A{x:int,def __add__(a:A,b:A)->A={a};def __neg__(a:A)->A={a};def __lshift__(a:A,b:int)->A={a};};",
+        "struct A {\n\tx: int,\n\tdef __add__(a: A, b: A) -> A = {\n\t\ta\n\t};\n\tdef __neg__(a: A) -> A = {\n\t\ta\n\t};\n\tdef __lshift__(a: A, b: int) -> A = {\n\t\ta\n\t};\n};\n",
+    );
+}
+
+#[test]
 fn constant_groups_keep_specifications_and_comments_together() {
     check(
         "const answer:int=42;const(a,b:uint=1<<iota,8<<iota;_,_=iota,iota;c,d:uint=1<<iota,8<<iota;);def f()={const(local=sizeof(int);next=sizeof(int););local};",

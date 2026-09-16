@@ -73,6 +73,8 @@ pub(super) enum TermKind {
         elems: Vec<Term>,
     },
     Builtin {
+        rule: Rule,
+        name_span: Span,
         name: Arc<str>,
         args: Vec<Term>,
     },

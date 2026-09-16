@@ -31,10 +31,18 @@ fn arithmetic_and_literals_remain_polymorphic_and_enclosing_binders_are_preserve
     let TermKind::Block { tail, .. } = &module.functions[0].body.as_ref().unwrap().kind else {
         panic!("block");
     };
-    let TermKind::Builtin { args, .. } = &tail.kind else {
-        panic!("addition");
+    let mut tail = tail.as_ref();
+    while let TermKind::Use { arg } | TermKind::Convert { arg } = &tail.kind {
+        tail = arg;
+    }
+    let TermKind::DependentMethodCall { args, lookup, .. } = &tail.kind else {
+        panic!("addition: {tail:?}");
     };
-    assert_eq!(args[1].ty, module.functions[0].signature.result.ty);
+    assert_eq!(lookup.receiver, module.functions[0].signature.result.ty);
+    assert!(matches!(
+        args[1].ty,
+        Type::FunctionParameter { index: 1, .. }
+    ));
     assert!(matches!(args[1].kind, TermKind::Numeric { .. }));
 }
 

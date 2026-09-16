@@ -372,7 +372,17 @@ impl Specialization<'_, '_> {
             .same(&expected, &signature)
             .map_err(|error| self.typing_error(error))?;
         Ok(concrete::TermKind::Function {
-            function: self.request(method.function, method.arguments)?,
+            function: match method.target {
+                super::substitute::MethodTarget::Source {
+                    function,
+                    arguments,
+                } => self.request(function, arguments)?,
+                super::substitute::MethodTarget::Primitive { .. } => {
+                    return Err(
+                        self.instance_error("primitive operators cannot be referenced as methods")
+                    );
+                }
+            },
         })
     }
 
@@ -424,6 +434,15 @@ impl Specialization<'_, '_> {
         let offset = usize::from(receiver.is_some());
         let mut args: Vec<_> = receiver.into_iter().map(|receiver| *receiver).collect();
         args.extend(self.call_arguments(arguments, &params[offset..])?);
+        let (function, arguments) = match method.target {
+            super::substitute::MethodTarget::Source {
+                function,
+                arguments,
+            } => (function, arguments),
+            super::substitute::MethodTarget::Primitive { symbol } => {
+                return self.completed_builtin(&symbol, args, &expected);
+            }
+        };
         let function = concrete::Term {
             span: self.span,
             ty: Ty::Function {
@@ -431,7 +450,7 @@ impl Specialization<'_, '_> {
                 result: Box::new(result),
             },
             kind: concrete::TermKind::Function {
-                function: self.request(method.function, method.arguments)?,
+                function: self.request(function, arguments)?,
             },
         };
         Ok(concrete::TermKind::Call {
@@ -707,11 +726,21 @@ impl Specialization<'_, '_> {
         args: &[resin_hir::Term],
         expected: &resin_hir::Type,
     ) -> Result<concrete::TermKind, Error> {
-        let params = args
-            .iter()
-            .map(|arg| self.ty(&arg.ty))
-            .collect::<Result<Vec<_>, _>>()?;
         let expected = self.ty(expected)?;
+        let args = args
+            .iter()
+            .map(|arg| self.term(arg))
+            .collect::<Result<Vec<_>, _>>()?;
+        self.completed_builtin(name, args, &expected)
+    }
+
+    fn completed_builtin(
+        &mut self,
+        name: &std::sync::Arc<str>,
+        args: Vec<concrete::Term>,
+        expected: &Ty,
+    ) -> Result<concrete::TermKind, Error> {
+        let params = args.iter().map(|arg| arg.ty.clone()).collect::<Vec<_>>();
         let signature = if self.instances.profile(self.current) == crate::Profile::Shader {
             resin_types::shader::builtin_instance(self.instances.typer(), name, &params)
                 .map_err(|message| self.profile_error(message))?
@@ -729,7 +758,7 @@ impl Specialization<'_, '_> {
         };
         self.instances
             .typer()
-            .same(&expected, &signature.result)
+            .same(expected, &signature.result)
             .map_err(|error| {
                 self.instances.lower_error(
                     super::LowerError::typing(self.span, error),
@@ -737,10 +766,6 @@ impl Specialization<'_, '_> {
                     self.location.clone(),
                 )
             })?;
-        let args = args
-            .iter()
-            .map(|arg| self.term(arg))
-            .collect::<Result<Vec<_>, _>>()?;
         Ok(concrete::TermKind::Builtin {
             name: name.clone(),
             args,

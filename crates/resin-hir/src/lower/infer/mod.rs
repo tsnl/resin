@@ -17,12 +17,23 @@ use std::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Head {
     Atom(Ty),
-    Parameter { id: crate::TypeParameterId },
-    Member { name: Arc<str> },
-    Method { name: Arc<str>, associated: bool },
-    FunctionParameter { index: usize },
+    Parameter {
+        id: crate::TypeParameterId,
+    },
+    Member {
+        name: Arc<str>,
+    },
+    Method {
+        name: crate::MethodName,
+        associated: bool,
+    },
+    FunctionParameter {
+        index: usize,
+    },
     FunctionResult,
-    Nominal { definition: TypeId },
+    Nominal {
+        definition: TypeId,
+    },
     Pointer,
     Reference,
     Value,
@@ -1482,7 +1493,7 @@ impl Inference<'_> {
     fn dependent_method(
         &self,
         receiver: &Type,
-        name: &Arc<str>,
+        name: &crate::MethodName,
         type_args: &Option<Vec<Type>>,
         associated: bool,
     ) -> Option<Type> {
@@ -1527,14 +1538,19 @@ impl Inference<'_> {
         &mut self,
         owner: Rule,
         receiver: &Type,
-        name: &str,
+        name: &crate::MethodName,
         explicit: &Option<Vec<Type>>,
         span: Span,
     ) -> Result<Option<AppliedMethod>> {
         if let Some(application) = self.applications.get(&owner) {
             return Ok(Some(application.clone()));
         }
-        let (definition, mut arguments) = match self.method_receiver(receiver) {
+        let receiver = if matches!(name, crate::MethodName::Operator { .. }) {
+            self.solver.head(receiver)
+        } else {
+            self.method_receiver(receiver)
+        };
+        let (definition, mut arguments) = match receiver {
             Type::Node(Head::Nominal { definition }, arguments) => (definition, arguments),
             Type::Node(Head::Atom(Ty::Defined { definition }), _) => (definition, vec![]),
             _ => return Ok(None),
@@ -1670,6 +1686,65 @@ impl Inference<'_> {
         Ok(complete)
     }
 
+    /// Select a source operator before applying primitive operand relationships.
+    /// Literal variables remain on the primitive path so expected numeric types
+    /// still flow into expressions such as `1 + 2`.
+    fn operator(
+        &mut self,
+        owner: Rule,
+        symbol: &Arc<str>,
+        args: &[Type],
+        out: &Type,
+        span: Span,
+    ) -> Result<Option<bool>> {
+        let Some(name) = crate::MethodName::operator(symbol, args.len()) else {
+            return Ok(None);
+        };
+        let receiver = self.solver.head(&args[0]);
+        match &receiver {
+            Type::Variable(id)
+                if !matches!(
+                    self.solver.variables[*id].class,
+                    Class::Number | Class::Float
+                ) =>
+            {
+                return Ok(Some(false));
+            }
+            Type::Apply { .. } => return Ok(Some(false)),
+            Type::Node(Head::Nominal { .. } | Head::Atom(Ty::Defined { .. }), _) => {
+                let method = self
+                    .method_application(owner, &receiver, &name, &Some(vec![]), span)?
+                    .ok_or_else(|| error(span, format!("type has no {name}")))?;
+                let a = self.arguments(args, &method.params, span)?;
+                let b = self.solver.unify(&method.result, out, span)?;
+                if a && b {
+                    self.methods.insert(owner, method.resolved(None));
+                }
+                return Ok(Some(a && b));
+            }
+            Type::Node(head, _) if head.determining() => {
+                if self.solver.complete(&receiver).is_none() {
+                    return Ok(Some(false));
+                }
+                let signature = Type::Node(
+                    Head::Method {
+                        name,
+                        associated: true,
+                    },
+                    vec![receiver],
+                );
+                let complete = self.dependent_call(&signature, args, out, span)?;
+                if complete {
+                    self.methods
+                        .insert(owner, ResolvedMethod::Dependent { signature });
+                }
+                return Ok(Some(complete));
+            }
+            _ => {}
+        }
+        Ok(None)
+    }
+
     fn constraint(&mut self, owner: Rule, constraint: &Constraint, span: Span) -> Result<bool> {
         match constraint {
             Constraint::Method {
@@ -1740,9 +1815,13 @@ impl Inference<'_> {
                     }
                     return Ok(a && b);
                 }
-                if let Some(application) =
-                    self.method_application(owner, receiver_type, name, type_args, span)?
-                {
+                if let Some(application) = self.method_application(
+                    owner,
+                    receiver_type,
+                    &name.clone().into(),
+                    type_args,
+                    span,
+                )? {
                     let (complete, conversion) = self.check_method_call(
                         constraint,
                         &application.params,
@@ -1779,9 +1858,12 @@ impl Inference<'_> {
                     }
                     return Ok(complete);
                 }
-                if let Some(signature) =
-                    self.dependent_method(receiver_type, name, type_args, *associated)
-                {
+                if let Some(signature) = self.dependent_method(
+                    receiver_type,
+                    &name.clone().into(),
+                    type_args,
+                    *associated,
+                ) {
                     let complete = self.dependent_call(&signature, args, out, span)?;
                     if complete {
                         self.methods
@@ -1837,7 +1919,9 @@ impl Inference<'_> {
                 ) {
                     return Ok(false);
                 }
-                if let Some(signature) = self.dependent_method(receiver, name, type_args, true) {
+                if let Some(signature) =
+                    self.dependent_method(receiver, &name.clone().into(), type_args, true)
+                {
                     let complete = self.solver.coerce(&signature, out, span)?;
                     if complete {
                         self.methods
@@ -1845,8 +1929,13 @@ impl Inference<'_> {
                     }
                     return Ok(complete);
                 }
-                let Some(application) =
-                    self.method_application(owner, receiver, name, type_args, span)?
+                let Some(application) = self.method_application(
+                    owner,
+                    receiver,
+                    &name.clone().into(),
+                    type_args,
+                    span,
+                )?
                 else {
                     return Err(error(
                         span,
@@ -2113,6 +2202,9 @@ impl Inference<'_> {
                 }
             }
             Constraint::Builtin(name, args, out) => {
+                if let Some(complete) = self.operator(owner, name, args, out, span)? {
+                    return Ok(complete);
+                }
                 use resin_types::BuiltinRule;
                 let rule = BuiltinRule::lookup(name, args.len())
                     .map_err(|e| GenerateError::typing(span, e))?;
