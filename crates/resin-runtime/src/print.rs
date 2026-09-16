@@ -10,12 +10,13 @@ const FLOAT32: u32 = 4;
 const FLOAT64: u32 = 5;
 const BYTES: u32 = 6;
 const POINTER: u32 = 7;
+const REPR: u32 = 8;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct ResinPrintBytes {
-    data: *const u8,
-    length: usize,
+    pub(crate) data: *const u8,
+    pub(crate) length: usize,
 }
 
 #[repr(C)]
@@ -25,6 +26,7 @@ pub union ResinPrintData {
     unsigned_value: u64,
     float_value: f64,
     bytes: ResinPrintBytes,
+    repr: super::representation::ResinReprValue,
 }
 
 #[repr(C)]
@@ -74,7 +76,7 @@ pub unsafe extern "C" fn resin_format(
     let format = unsafe { slice(format, length) };
     let args = unsafe { slice(args, count) };
     let parts = parse(format, count).unwrap_or_else(|message| fail(message));
-    if args.iter().any(|arg| arg.kind > POINTER) {
+    if args.iter().any(|arg| arg.kind > REPR) {
         fail("invalid format argument tag");
     }
     let mut bytes = Vec::new();
@@ -94,7 +96,7 @@ pub unsafe extern "C" fn resin_string_from_str(
     owned_bytes(unsafe { slice(data, length) })
 }
 
-fn owned_bytes(bytes: &[u8]) -> *mut crate::shared::ResinArc {
+pub(crate) fn owned_bytes(bytes: &[u8]) -> *mut crate::shared::ResinArc {
     let owner = crate::shared::new_string(bytes.len());
     unsafe {
         let data = crate::shared::resin_arc_data(owner).cast::<u8>();
@@ -183,6 +185,7 @@ unsafe fn render(
                             out.write_all(slice(bytes.data, bytes.length))?;
                         }
                         POINTER => write!(out, "0x{:x}", arg.value.unsigned_value)?,
+                        REPR => super::representation::format(out, arg.value.repr)?,
                         _ => unreachable!(),
                     }
                 }

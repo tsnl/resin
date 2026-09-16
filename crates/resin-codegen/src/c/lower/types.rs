@@ -9,6 +9,7 @@ pub(super) struct Types<'a> {
     pub table: &'a TypeTable,
     pub module: &'a Module,
     literals: Vec<&'a [u8]>,
+    pub representations: std::cell::RefCell<std::collections::BTreeSet<usize>>,
 }
 
 impl<'a> Types<'a> {
@@ -30,6 +31,7 @@ impl<'a> Types<'a> {
         }
         Self {
             literals,
+            representations: Default::default(),
             module,
             table,
         }
@@ -134,6 +136,7 @@ impl<'a> Types<'a> {
                 }
             }
         }
+        out.push_str(&super::representation::declarations(self));
         out
     }
 

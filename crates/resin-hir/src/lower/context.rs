@@ -461,6 +461,7 @@ pub(super) fn primitive_signature(
             vec![element.clone()],
             element.clone(),
         ),
+        ("repr", [value]) => (Intrinsic::Repr, vec![value.clone()], Type::StrongOwner),
         ("format_bytes", [arguments]) => (
             Intrinsic::FormatBytes,
             vec![pointer(Type::UInt8), Type::UInt64, arguments.clone()],

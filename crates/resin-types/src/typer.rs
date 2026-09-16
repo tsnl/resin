@@ -17,6 +17,7 @@ pub(super) fn lookup(name: &str, arity: usize) -> Result<BuiltinRule, TypeError>
         "!" => (BuiltinRule::Boolean, arity == 1),
         "&&" | "||" => (BuiltinRule::Boolean, arity == 2),
         "sqrt" | "sin" | "cos" => (BuiltinRule::Float, arity == 1),
+        "repr" => (BuiltinRule::Repr, arity == 1),
         "format_bytes" => (BuiltinRule::Format, arity == 3),
         "string_from_bytes" => (BuiltinRule::StringFromBytes, arity == 2),
         _ => {
@@ -193,6 +194,7 @@ pub(super) fn type_builtin_call(
 ) -> Result<BuiltinCall, TypeError> {
     let rule = BuiltinRule::lookup(name, args.len())?;
     let result = match rule {
+        BuiltinRule::Repr => Ty::StrongOwner,
         BuiltinRule::Assert => {
             context.as_bool(&args[0])?;
             Ty::Unit
@@ -289,16 +291,6 @@ impl TyperContext {
         for (i, field) in fields.iter().enumerate() {
             if field.name.as_ref() != format!("_{i}") {
                 return Err(invalid());
-            }
-            let ty = &field.ty;
-            if !(ty.is_numeric()
-                || matches!(ty, Ty::Bool | Ty::Unit | Ty::Pointer { .. })
-                || *ty == Ty::Str
-                || format_byte_record(ty))
-            {
-                return Err(TypeError::new(TypeErrorKind::UnformattableType {
-                    found: ty.clone(),
-                }));
             }
         }
         Ok(Ty::StrongOwner)
@@ -509,7 +501,7 @@ pub(super) fn shader_builtin_instance(
     name: &str,
     arguments: &[Ty],
 ) -> Result<BuiltinCall, String> {
-    if matches!(name, "format_bytes" | "string_from_bytes") {
+    if matches!(name, "format_bytes" | "string_from_bytes" | "repr") {
         return Err(format!("{name} is only supported in host programs"));
     }
     let signature =
@@ -575,14 +567,4 @@ fn byte_parameters(context: &TyperContext, args: &[Ty]) -> Result<(), TypeError>
         &args[0],
     )?;
     context.same(&Ty::UInt64, &args[1])
-}
-
-// Formatting transports explicit structural byte views, never inferred nominal layouts.
-fn format_byte_record(ty: &Ty) -> bool {
-    let Ty::Record { fields } = ty else {
-        return false;
-    };
-    matches!(fields.as_slice(), [data, length]
-        if data.name.as_ref() == "data" && data.ty == Ty::Pointer { pointee: Box::new(Ty::UInt8) }
-        && length.name.as_ref() == "length" && length.ty == Ty::UInt64)
 }

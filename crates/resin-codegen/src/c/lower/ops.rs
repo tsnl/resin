@@ -9,6 +9,10 @@ pub(super) fn builtin(
     args: &[Slot],
     result: &Ty,
 ) -> Result<String, Error> {
+    if name == "repr" {
+        let descriptor = super::representation::descriptor(types, &args[0].ty);
+        return Ok(format!("resin_repr(&{descriptor}, &({}))", args[0].expr));
+    }
     if name == "assert" {
         return Ok(format!(
             "(({}) ? (uint8_t)0 : (resin_fail(\"assertion failed\"), (uint8_t)0))",
