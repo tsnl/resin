@@ -449,7 +449,8 @@ export default grammar({
       ),
     unit_term: () => prec.dynamic(1, choice(seq("{", "}"), seq("(", ")"))),
 
-    return_statement: ($) => seq("return", optional(field("value", $.term)), ";"),
+    return_statement: ($) =>
+      seq("return", optional(field("value", $.term)), ";"),
 
     assert_term: ($) => seq("assert", "(", field("condition", $.term), ")"),
 
