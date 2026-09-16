@@ -4,7 +4,7 @@ use super::infer::{ResolvedMethod, Rule, Solver, Type};
 use super::scope::DeclarationId;
 use super::{typed, types};
 use crate::ReceiverConversion;
-use crate::lower::context::{FunctionBody, FunctionDecl};
+use crate::lower::context::FunctionBody;
 use crate::{Arguments, MatchArm, Statement, Term, TermKind};
 use crate::{GenerateError, GenerateErrorKind};
 use resin_source::prelude::*;
@@ -20,13 +20,14 @@ pub(super) struct CompletedBody {
 
 pub(super) fn function(
     source: &typed::Term,
-    parameters: &[Option<DeclarationId>],
+    parameters: impl IntoIterator<Item = (DeclarationId, bool)>,
     solver: &Solver,
     methods: &BTreeMap<Rule, ResolvedMethod>,
     typer: &TyperContext,
     function_bindings: &HashMap<DeclarationId, FunctionId>,
     shaders: &BTreeMap<FunctionId, ShaderEntry>,
 ) -> Result<CompletedBody> {
+    let mutable: BTreeMap<_, _> = parameters.into_iter().collect();
     let mut completion = Completion {
         solver,
         methods,
@@ -34,12 +35,15 @@ pub(super) fn function(
         function_bindings,
         shaders,
         reachable: true,
+        loops: Vec::new(),
         embedded: BTreeSet::new(),
-        initialization: parameters
-            .iter()
-            .flatten()
+        initialization: mutable
+            .keys()
             .map(|id| (*id, Initialization::Initialized))
             .collect(),
+        written: mutable.keys().copied().collect(),
+        mutable,
+        moved: BTreeMap::new(),
     };
     let body = completion.elaborate(source)?;
     Ok(CompletedBody {
@@ -55,7 +59,14 @@ enum Initialization {
     Initialized,
 }
 
+#[derive(Default)]
+struct LoopStates {
+    breaks: Vec<OwnershipState>,
+    continues: Vec<OwnershipState>,
+}
+
 struct Completion<'a> {
+    loops: Vec<LoopStates>,
     reachable: bool,
     solver: &'a Solver,
     methods: &'a BTreeMap<Rule, ResolvedMethod>,
@@ -64,6 +75,9 @@ struct Completion<'a> {
     shaders: &'a BTreeMap<FunctionId, ShaderEntry>,
     embedded: BTreeSet<FunctionId>,
     initialization: BTreeMap<DeclarationId, Initialization>,
+    mutable: BTreeMap<DeclarationId, bool>,
+    written: BTreeSet<DeclarationId>,
+    moved: BTreeMap<DeclarationId, BTreeSet<Vec<std::sync::Arc<str>>>>,
 }
 
 impl Completion<'_> {
@@ -89,24 +103,67 @@ impl Completion<'_> {
     }
 
     fn elaborate(&mut self, source: &typed::Term) -> Result<Term> {
+        let target = self.solver.require_complete(&source.ty, source.span)?;
+        self.elaborate_as(source, target)
+    }
+
+    fn elaborate_as(&mut self, source: &typed::Term, target: crate::Type) -> Result<Term> {
         let term = Term {
             span: source.span,
             ty: self.solver.require_complete(&source.actual, source.span)?,
             kind: self.elaborate_kind(source)?,
         };
-        let target = self.solver.require_complete(&source.ty, source.span)?;
         self.consume(term, target)
     }
 
-    fn consume(&self, term: Term, target: crate::Type) -> Result<Term> {
+    fn consume(&mut self, mut term: Term, target: crate::Type) -> Result<Term> {
+        self.require_available(&term)?;
+        let value_type = match &term.ty {
+            crate::Type::Reference { referent } => referent.as_ref(),
+            ty => ty,
+        }
+        .clone();
+        if matches!(target, crate::Type::Reference { .. }) {
+            if !reference_place(&term) {
+                return Err(GenerateError::inference(
+                    term.span,
+                    "reference binding requires an initialized place, not a temporary value",
+                ));
+            }
+        } else if !value_type.copies_implicitly() && reference_place(&term) {
+            let span = term.span;
+            let ty = term.ty.clone();
+            if let Some((binding, path)) = owned_path(&term) {
+                self.require_movable(&term)?;
+                self.moved.entry(binding).or_default().insert(path);
+                term = Term {
+                    span,
+                    ty,
+                    kind: TermKind::Move {
+                        place: Box::new(term),
+                    },
+                };
+            } else if (self.solver.resolve(&Type::from_hir(&value_type)).is_none()
+                && !matches!(value_type, crate::Type::Defined { .. }))
+                || (self.solver.resolve(&Type::from_hir(&target)).is_none()
+                    && !matches!(target, crate::Type::Defined { .. }))
+            {
+                term = Term {
+                    span,
+                    ty,
+                    kind: TermKind::Read {
+                        place: Box::new(term),
+                    },
+                };
+            } else {
+                return Err(GenerateError::inference(
+                    span,
+                    "cannot move a value through a reference or pointer; replace its contents instead",
+                ));
+            }
+        }
         if term.ty == target {
             return Ok(term);
-        }
-        if matches!(target, crate::Type::Reference { .. }) && !reference_place(&term) {
-            return Err(GenerateError::inference(
-                term.span,
-                "reference binding requires an initialized place, not a temporary value",
-            ));
         }
         Ok(Term {
             span: term.span,
@@ -117,20 +174,72 @@ impl Completion<'_> {
         })
     }
 
+    fn require_movable(&self, term: &Term) -> Result<()> {
+        if let TermKind::Field { base, .. } = &term.kind {
+            if let crate::Type::Defined { definition, .. } = base.ty
+                && self
+                    .typer
+                    .definition(definition)
+                    .ok()
+                    .is_some_and(|definition| definition.drop_hook().is_some())
+            {
+                return Err(GenerateError::inference(
+                    term.span,
+                    "cannot move a field out of a type with a drop hook",
+                ));
+            }
+            self.require_movable(base)?;
+        }
+        Ok(())
+    }
+
+    fn require_available(&self, term: &Term) -> Result<()> {
+        if !self.reachable {
+            return Ok(());
+        }
+        let Some((binding, path)) = owned_path(term) else {
+            return Ok(());
+        };
+        if self.initialization.get(&binding) != Some(&Initialization::Initialized) {
+            return Err(GenerateError::inference(
+                term.span,
+                "use of an uninitialized value",
+            ));
+        }
+        if self.moved.get(&binding).is_some_and(|moved| {
+            moved
+                .iter()
+                .any(|other| path.starts_with(other) || other.starts_with(&path))
+        }) {
+            return Err(GenerateError::inference(term.span, "use of a moved value"));
+        }
+        Ok(())
+    }
+
     fn argument(&mut self, source: &typed::Term, target: &Type) -> Result<Term> {
-        let value = self.elaborate(source)?;
-        self.consume(value, self.solver.require_complete(target, source.span)?)
-    }
-
-    fn ty(&self, source: &typed::Term) -> Result<Ty> {
-        self.solver.require(&source.ty, source.span)
-    }
-
-    fn annotation(&self, source: &typed::Annotation<Type>) -> Result<typed::Annotation> {
-        Ok(typed::Annotation {
-            ty: self.solver.require(&source.ty, source.span)?,
+        let target = self.solver.require_complete(target, source.span)?;
+        let term = Term {
             span: source.span,
-        })
+            ty: self.solver.require_complete(&source.actual, source.span)?,
+            kind: self.elaborate_kind(source)?,
+        };
+        if let crate::Type::Reference { referent } = &target
+            && !reference_place(&term)
+        {
+            let value = self.consume(term, *referent.clone())?;
+            // Only argument passing materializes temporaries. Reference bindings
+            // and results still require a place; storage lowering owns this value
+            // until the enclosing full expression finishes.
+            return Ok(Term {
+                span: source.span,
+                ty: target,
+                kind: TermKind::Adapt {
+                    conversion: crate::ReceiverConversion::Address,
+                    arg: Box::new(value),
+                },
+            });
+        }
+        self.consume(term, target)
     }
 
     fn boxed(&mut self, source: &typed::Term) -> Result<Box<Term>> {
@@ -174,6 +283,15 @@ impl Completion<'_> {
                 value: self.boxed(value)?,
             },
             typed::TermKind::Break | typed::TermKind::Continue => {
+                if self.reachable {
+                    let state = self.state();
+                    let exits = self.loops.last_mut().expect("checked loop exit");
+                    if matches!(source.kind, typed::TermKind::Break) {
+                        exits.breaks.push(state);
+                    } else {
+                        exits.continues.push(state);
+                    }
+                }
                 self.reachable = false;
                 if matches!(source.kind, typed::TermKind::Break) {
                     TermKind::Break
@@ -219,6 +337,9 @@ impl Completion<'_> {
                 name_span,
                 args,
             } => match self.methods.get(rule).cloned() {
+                Some(ResolvedMethod::Operation { signature }) => {
+                    self.operation_call(&signature, args, source.span)?
+                }
                 Some(ResolvedMethod::Dependent { signature }) => TermKind::DependentMethodCall {
                     lookup: self.method_lookup(&signature, source.span)?,
                     receiver: None,
@@ -242,71 +363,18 @@ impl Completion<'_> {
                     &Ident::new(name.clone(), *name_span),
                     args,
                 )?,
-                None => self.builtin(source, name, args)?,
-                _ => unreachable!("operator resolution"),
-            },
-            typed::TermKind::MethodCall {
-                rule,
-                receiver,
-                receiver_type,
-                name,
-                args,
-            } => {
-                let method = self.methods.get(rule).expect("solved method").clone();
-                match method {
-                    ResolvedMethod::Dependent { signature } => TermKind::DependentMethodCall {
-                        lookup: self.method_lookup(&signature, name.span)?,
-                        receiver: receiver
-                            .as_deref()
-                            .map(|receiver| self.boxed(receiver))
-                            .transpose()?,
-                        args: args
-                            .iter()
-                            .enumerate()
-                            .map(|(index, arg)| {
-                                self.argument(
-                                    arg,
-                                    &Type::Node(
-                                        super::infer::Head::FunctionParameter { index },
-                                        vec![signature.clone()],
-                                    ),
-                                )
-                            })
-                            .collect::<Result<_>>()?,
-                    },
-                    ResolvedMethod::GpuPipeline { method } => {
-                        self.source_pipeline(method, receiver.as_deref(), name, args)?
-                    }
-                    ResolvedMethod::Intrinsic {
-                        signature,
-                        receiver_conversion,
-                    } => {
-                        let result = self
-                            .solver
-                            .require_complete(&signature.result, source.span)?;
-                        let kind = self.intrinsic_method(
-                            signature,
-                            receiver_conversion,
-                            receiver.as_deref(),
-                            args,
-                            source.span,
-                        )?;
-                        self.convert_method_result(source, result, kind)?
-                    }
-                    ResolvedMethod::Compiler { declaration } => {
-                        let result = types::ty(&declaration.result);
-                        let kind = self.method(
-                            declaration,
-                            receiver.as_deref(),
-                            &self.annotation(receiver_type)?.ty,
-                            name,
-                            args,
-                        )?;
-                        self.convert_method_result(source, result, kind)?
-                    }
-                    source => self.source_method_call(&source, receiver.as_deref(), name, args)?,
+                Some(ResolvedMethod::Intrinsic { signature, .. }) => {
+                    let result = self
+                        .solver
+                        .require_complete(&signature.result, source.span)?;
+                    let kind = self.intrinsic_method(signature, None, None, args, source.span)?;
+                    self.convert_method_result(source, result, kind)?
                 }
-            }
+                Some(ResolvedMethod::GpuPipeline { method }) => {
+                    self.source_pipeline(method, None, &Ident::new(name.clone(), *name_span), args)?
+                }
+                None => self.builtin(source, name, args)?,
+            },
             typed::TermKind::MethodReference { rule, name } => {
                 match self.methods.get(rule).expect("solved method reference") {
                     ResolvedMethod::Source {
@@ -317,7 +385,7 @@ impl Completion<'_> {
                     ResolvedMethod::Dependent { signature } => TermKind::DependentMethod {
                         lookup: self.method_lookup(signature, name.span)?,
                     },
-                    ResolvedMethod::Compiler { .. }
+                    ResolvedMethod::Operation { .. }
                     | ResolvedMethod::GpuPipeline { .. }
                     | ResolvedMethod::Intrinsic { .. } => {
                         unreachable!("source method reference")
@@ -337,14 +405,22 @@ impl Completion<'_> {
                 arg: self.boxed(arg)?,
             },
             typed::TermKind::Assign { place, value } => self.assign(place, value)?,
-            typed::TermKind::Address { place } => TermKind::Address {
-                place: self.place(place)?,
-            },
+            typed::TermKind::Address { place } => {
+                let place = self.place(place)?;
+                if owned_path(&place).is_some_and(|(_, path)| !path.is_empty()) {
+                    self.require_available(&place)?;
+                }
+                TermKind::Address { place }
+            }
             typed::TermKind::Deref { pointer } => TermKind::Deref {
                 pointer: self.boxed(pointer)?,
             },
             typed::TermKind::Field { base, name } => TermKind::Field {
-                base: self.boxed(base)?,
+                base: if constant_place(base) {
+                    self.boxed(base)?
+                } else {
+                    self.place(base)?
+                },
                 name: name.val.clone(),
             },
         })
@@ -399,35 +475,114 @@ impl Completion<'_> {
                 "a constant has no mutable storage or address",
             ));
         }
-        if let typed::TermKind::Var {
-            declaration,
-            name,
-            type_args,
-        } = &source.kind
-            && !matches!(
-                self.solver.head(&source.actual),
-                Type::Node(super::infer::Head::Reference, _)
-            )
-        {
-            return Ok(Box::new(Term {
-                span: source.span,
-                ty: self.solver.require_complete(&source.ty, source.span)?,
-                kind: self.reference(*declaration, name, type_args, false)?,
-            }));
-        }
-        // Field access and pointer dereference need their base initialized even
-        // when the resulting place will be written rather than read.
-        self.boxed(source)
+        let kind = match &source.kind {
+            typed::TermKind::Var {
+                declaration,
+                name,
+                type_args,
+            } => self.reference(*declaration, name, type_args, false)?,
+            typed::TermKind::Field { base, name } => TermKind::Field {
+                base: self.place(base)?,
+                name: name.val.clone(),
+            },
+            typed::TermKind::Deref { pointer } => TermKind::Deref {
+                pointer: self.boxed(pointer)?,
+            },
+            // Accessing a field or assigning through a returned reference must
+            // preserve its place; consuming it here would read the whole value.
+            _ => self.elaborate_kind(source)?,
+        };
+        let place = Term {
+            span: source.span,
+            ty: self.solver.require_complete(&source.actual, source.span)?,
+            kind,
+        };
+        Ok(Box::new(
+            if let crate::Type::Reference { referent } = &place.ty {
+                Term {
+                    span: source.span,
+                    ty: *referent.clone(),
+                    kind: TermKind::Use {
+                        arg: Box::new(place),
+                    },
+                }
+            } else {
+                place
+            },
+        ))
     }
 
     fn assign(&mut self, place: &typed::Term, value: &typed::Term) -> Result<TermKind> {
         let place = self.place(place)?;
+        let destination = owned_path(&place);
+        if let Some((binding, path)) = &destination {
+            if !self.mutable.get(binding).copied().unwrap_or(false)
+                && (self.written.contains(binding) || !path.is_empty())
+            {
+                return Err(GenerateError::inference(
+                    place.span,
+                    "cannot assign to an immutable binding; declare it with `mut`",
+                ));
+            }
+            if self.moved.get(binding).is_some_and(|moved| {
+                moved
+                    .iter()
+                    .any(|ancestor| path.starts_with(ancestor) && path.len() > ancestor.len())
+            }) {
+                return Err(GenerateError::inference(
+                    place.span,
+                    "initialize the moved value before assigning one of its fields",
+                ));
+            }
+            if !path.is_empty()
+                && self.initialization.get(binding) != Some(&Initialization::Initialized)
+            {
+                return Err(GenerateError::inference(
+                    place.span,
+                    "cannot assign a field of an uninitialized value",
+                ));
+            }
+        }
         let value = self.boxed(value)?;
-        if let TermKind::Local { binding, .. } = place.kind {
+        if let Some((binding, path)) = destination {
+            self.written.insert(binding);
             self.initialization
                 .insert(binding, Initialization::Initialized);
+            self.moved
+                .entry(binding)
+                .or_default()
+                .retain(|moved| !moved.starts_with(&path));
         }
         Ok(TermKind::Assign { place, value })
+    }
+
+    fn state(&self) -> OwnershipState {
+        OwnershipState {
+            initialization: self.initialization.clone(),
+            written: self.written.clone(),
+            moved: self.moved.clone(),
+        }
+    }
+
+    fn restore(&mut self, state: OwnershipState) {
+        self.initialization = state.initialization;
+        self.written = state.written;
+        self.moved = state.moved;
+    }
+
+    fn intersect(&mut self, other: &OwnershipState) {
+        for (binding, state) in &mut self.initialization {
+            if other.initialization.get(binding) != Some(state) {
+                *state = Initialization::Uninitialized;
+            }
+        }
+        self.written.extend(&other.written);
+        for (binding, moved) in &other.moved {
+            self.moved
+                .entry(*binding)
+                .or_default()
+                .extend(moved.iter().cloned());
+        }
     }
 
     fn if_expression(
@@ -437,18 +592,22 @@ impl Completion<'_> {
         els: &typed::Term,
     ) -> Result<TermKind> {
         let cond = self.boxed(cond)?;
-        let before = self.initialization.clone();
+        let before = self.state();
         let reachable = self.reachable;
         let then = self.boxed(then)?;
         let then_reachable = self.reachable;
-        let after_then = std::mem::replace(&mut self.initialization, before);
+        let after_then = {
+            let state = self.state();
+            self.restore(before);
+            state
+        };
         self.reachable = reachable;
         let els = self.boxed(els)?;
         if then_reachable {
             if self.reachable {
-                self.intersect_initialization(&after_then);
+                self.intersect(&after_then);
             } else {
-                self.initialization = after_then;
+                self.restore(after_then);
             }
         }
         self.reachable |= then_reachable;
@@ -456,21 +615,47 @@ impl Completion<'_> {
     }
 
     fn while_expression(&mut self, cond: &typed::Term, body: &typed::Term) -> Result<TermKind> {
-        let cond = self.boxed(cond)?;
-        let after_condition = self.initialization.clone();
+        let entry = self.state();
         let reachable = self.reachable;
-        let body = self.boxed(body)?;
-        self.initialization = after_condition;
-        self.reachable = reachable;
-        Ok(TermKind::While { cond, body })
-    }
-
-    fn intersect_initialization(&mut self, other: &BTreeMap<DeclarationId, Initialization>) {
-        for (binding, state) in &mut self.initialization {
-            if other.get(binding) != Some(state) {
-                *state = Initialization::Uninitialized;
+        loop {
+            let before = self.state();
+            self.reachable = reachable;
+            self.loops.push(LoopStates::default());
+            let condition = self.boxed(cond)?;
+            let exit = self.state();
+            let condition_reachable = self.reachable;
+            let checked_body = self.boxed(body)?;
+            let mut exits = self.loops.pop().expect("current loop");
+            if self.reachable {
+                exits.continues.push(self.state());
+            }
+            self.restore(entry.clone());
+            for backedge in &exits.continues {
+                self.intersect(backedge);
+            }
+            self.restrict_state(&entry);
+            if self.state() == before {
+                self.restore(exit);
+                for exit in &exits.breaks {
+                    self.intersect(exit);
+                }
+                self.restrict_state(&entry);
+                self.reachable = condition_reachable || !exits.breaks.is_empty();
+                return Ok(TermKind::While {
+                    cond: condition,
+                    body: checked_body,
+                });
             }
         }
+    }
+
+    fn restrict_state(&mut self, entry: &OwnershipState) {
+        self.initialization
+            .retain(|binding, _| entry.initialization.contains_key(binding));
+        self.written
+            .retain(|binding| entry.initialization.contains_key(binding));
+        self.moved
+            .retain(|binding, _| entry.initialization.contains_key(binding));
     }
 
     fn number(&self, source: &typed::Term, text: &str) -> Result<TermKind> {
@@ -529,13 +714,13 @@ impl Completion<'_> {
             },
         });
         let cond = self.boxed(&args[0])?;
-        let before_right = self.initialization.clone();
+        let before_right = self.state();
         let reachable = self.reachable;
         let right = self.boxed(&args[1])?;
         if self.reachable {
-            self.intersect_initialization(&before_right);
+            self.intersect(&before_right);
         } else {
-            self.initialization = before_right;
+            self.restore(before_right);
         }
         self.reachable = reachable;
         let (then, els) = if name == "&&" {
@@ -544,6 +729,35 @@ impl Completion<'_> {
             (fixed, right)
         };
         Ok(TermKind::If { cond, then, els })
+    }
+
+    fn operation_call(
+        &mut self,
+        signature: &Type,
+        args: &[typed::Term],
+        span: Span,
+    ) -> Result<TermKind> {
+        let crate::Type::Operation { lookup } = self.solver.require_complete(signature, span)?
+        else {
+            unreachable!("operation query");
+        };
+        let args = args
+            .iter()
+            .enumerate()
+            .map(|(index, arg)| {
+                self.argument(
+                    arg,
+                    &Type::Node(
+                        super::infer::Head::FunctionParameter { index },
+                        vec![signature.clone()],
+                    ),
+                )
+            })
+            .collect::<Result<_>>()?;
+        Ok(TermKind::OperationCall {
+            lookup: *lookup,
+            args,
+        })
     }
 
     fn method_lookup(&self, signature: &Type, span: Span) -> Result<crate::MethodLookup> {
@@ -662,185 +876,70 @@ impl Completion<'_> {
         _name: &Ident,
         arguments: &[typed::Term],
     ) -> Result<TermKind> {
-        if let FunctionBody::GpuPipelineFactory { factory, graphics } = method.body {
-            let receiver_type = self
-                .solver
-                .resolve(&Type::from_hir(&method.params[0]))
-                .expect("fixed native GPU receiver");
-            return self.pipeline_create(receiver, arguments, &[receiver_type], factory, graphics);
-        }
-        let receiver_type = self
-            .solver
-            .resolve(&Type::from_hir(&method.params[0]))
-            .expect("fixed native GPU receiver");
-        let receiver = receiver
-            .map(|value| self.adapt(value, &self.ty(value)?, &receiver_type))
-            .transpose()?;
-        let values = receiver
+        let sources = receiver
             .into_iter()
-            .map(|value| *value)
-            .chain(
-                arguments
-                    .iter()
-                    .map(|value| self.elaborate(value))
-                    .collect::<Result<Vec<_>>>()?,
-            )
-            .collect();
-        let args = Arguments {
-            values,
-            params: method.params,
-        };
+            .chain(arguments.iter())
+            .collect::<Vec<_>>();
+        let values = sources
+            .iter()
+            .zip(&method.params)
+            .map(|(source, parameter)| self.argument(source, &Type::from_hir(parameter)))
+            .collect::<Result<Vec<_>>>()?;
+        if let FunctionBody::GpuPipelineFactory { factory, graphics } = method.body {
+            let stages = if graphics {
+                &["vertex", "fragment"][..]
+            } else {
+                &["compute"][..]
+            };
+            let mut shaders = Vec::new();
+            for (term, stage) in values[1..].iter().zip(stages) {
+                let TermKind::Function { function, .. } = term.kind else {
+                    return Err(GenerateError::inference(
+                        term.span,
+                        "pipeline creation requires direct shader declarations; runtime aliases are unsupported",
+                    ));
+                };
+                let entry = self.shaders.get(&function).ok_or_else(|| {
+                    GenerateError::inference(
+                        term.span,
+                        "pipeline creation requires a decorated shader declaration",
+                    )
+                })?;
+                if entry.stage.as_ref() != *stage {
+                    return Err(GenerateError::inference(
+                        term.span,
+                        format!("pipeline requires a @{stage}_shader declaration"),
+                    ));
+                }
+                self.embedded.insert(function);
+                shaders.push(function);
+            }
+            return Ok(TermKind::GpuPipelineCreate {
+                factory,
+                shaders,
+                args: Arguments {
+                    values: vec![values.into_iter().next().unwrap()],
+                    params: vec![method.params[0].clone()],
+                },
+            });
+        }
         let FunctionBody::GpuPipelineDispatch {
             context,
             allocator,
             record,
         } = method.body
         else {
-            unreachable!("completed pipeline bridge")
+            unreachable!("completed pipeline bridge");
         };
         Ok(TermKind::GpuPipelineDispatch {
             context,
             allocator,
             record,
-            args,
-        })
-    }
-
-    fn method(
-        &mut self,
-        declaration: FunctionDecl,
-        receiver: Option<&typed::Term>,
-        receiver_ty: &Ty,
-        name: &Ident,
-        arguments: &[typed::Term],
-    ) -> Result<TermKind> {
-        if let FunctionBody::GpuPipelineFactory { factory, graphics } = declaration.body {
-            return self.pipeline_create(
-                receiver,
-                arguments,
-                &declaration.params,
-                factory,
-                graphics,
-            );
-        }
-        let receiver = receiver
-            .map(|r| self.adapt(r, receiver_ty, &declaration.params[0]))
-            .transpose()?;
-        let offset = usize::from(receiver.is_some());
-        let values = receiver
-            .into_iter()
-            .map(|term| *term)
-            .chain(
-                arguments
-                    .iter()
-                    .zip(&declaration.params[offset..])
-                    .map(|(arg, param)| self.argument(arg, &param.clone().into()))
-                    .collect::<Result<Vec<_>>>()?,
-            )
-            .collect();
-        let args = Arguments {
-            values,
-            params: declaration.params.iter().map(types::ty).collect(),
-        };
-        Ok(match declaration.body {
-            FunctionBody::GpuPipelineDispatch {
-                context,
-                allocator,
-                record,
-            } => TermKind::GpuPipelineDispatch {
-                context,
-                allocator,
-                record,
-                args,
+            args: Arguments {
+                values,
+                params: method.params,
             },
-            FunctionBody::GpuPipelineFactory { .. } | FunctionBody::GpuPipelineRecord { .. } => {
-                unreachable!("specialized pipeline bridge")
-            }
-            FunctionBody::Defined(function) => {
-                let ty = Ty::Function {
-                    params: declaration.params.clone(),
-                    result: Box::new(declaration.result),
-                };
-                let func = Box::new(Term {
-                    span: name.span,
-                    ty: types::ty(&ty),
-                    kind: TermKind::Function {
-                        function,
-                        type_args: vec![],
-                    },
-                });
-                TermKind::Call {
-                    func,
-                    args: args.values,
-                }
-            }
         })
-    }
-
-    fn pipeline_create(
-        &mut self,
-        receiver: Option<&typed::Term>,
-        arguments: &[typed::Term],
-        params: &[Ty],
-        factory: FunctionId,
-        graphics: bool,
-    ) -> Result<TermKind> {
-        let terms = arguments;
-        let stages = if graphics {
-            &["vertex", "fragment"][..]
-        } else {
-            &["compute"][..]
-        };
-        let mut shaders = Vec::new();
-        for (shader, stage) in terms[usize::from(receiver.is_none())..].iter().zip(stages) {
-            let term = self.elaborate(shader)?;
-            let TermKind::Function { function, .. } = term.kind else {
-                return Err(GenerateError::inference(
-                    shader.span,
-                    "pipeline creation requires direct shader declarations; runtime aliases are unsupported",
-                ));
-            };
-            let entry = self.shaders.get(&function).ok_or_else(|| {
-                GenerateError::inference(
-                    shader.span,
-                    "pipeline creation requires a decorated shader declaration",
-                )
-            })?;
-            if entry.stage.as_ref() != *stage {
-                return Err(GenerateError::inference(
-                    shader.span,
-                    format!("pipeline requires a @{stage}_shader declaration"),
-                ));
-            }
-            self.embedded.insert(function);
-            shaders.push(function);
-        }
-        let owner = if let Some(receiver) = receiver {
-            *self.adapt(receiver, &self.ty(receiver)?, &params[0])?
-        } else {
-            self.elaborate(&terms[0])?
-        };
-        let args = Arguments {
-            values: vec![owner],
-            params: vec![types::ty(&params[0])],
-        };
-        Ok(TermKind::GpuPipelineCreate {
-            factory,
-            shaders,
-            args,
-        })
-    }
-
-    fn adapt(&mut self, source: &typed::Term, from: &Ty, to: &Ty) -> Result<Box<Term>> {
-        let conversion = ReceiverConversion::between(from, to).expect("checked receiver");
-        Ok(Box::new(Term {
-            span: source.span,
-            ty: types::ty(to),
-            kind: TermKind::Adapt {
-                conversion,
-                arg: self.boxed(source)?,
-            },
-        }))
     }
 
     fn call(&mut self, func: &typed::Term, args: &[typed::Term]) -> Result<TermKind> {
@@ -872,6 +971,13 @@ impl Completion<'_> {
             _ => None,
         };
         if let Some((ty, conversion)) = receiver {
+            let base = if conversion == ReceiverConversion::Address {
+                let place = self.place(func)?;
+                self.require_available(&place)?;
+                place
+            } else {
+                self.boxed(func)?
+            };
             let args = Arguments {
                 params: vec![
                     ty.clone(),
@@ -883,7 +989,7 @@ impl Completion<'_> {
                         ty,
                         kind: TermKind::Adapt {
                             conversion,
-                            arg: self.boxed(func)?,
+                            arg: base,
                         },
                     },
                     self.elaborate(&args[0])?,
@@ -918,11 +1024,15 @@ impl Completion<'_> {
             typed::StatementKind::Error(error) => return Err(error.clone()),
             typed::StatementKind::CompileTimeDefinition => return Ok(None),
             typed::StatementKind::Define {
+                mutable,
                 binding,
                 name,
                 init,
             } => {
                 let binding = binding.expect("checked declaration");
+                self.mutable.insert(binding, *mutable);
+                self.moved.remove(&binding);
+                self.written.insert(binding);
                 self.initialization
                     .insert(binding, Initialization::Initializing);
                 let init = self.elaborate(init)?;
@@ -934,7 +1044,15 @@ impl Completion<'_> {
                     init,
                 }
             }
-            typed::StatementKind::Declare { binding, name, ty } => {
+            typed::StatementKind::Declare {
+                mutable,
+                binding,
+                name,
+                ty,
+            } => {
+                self.mutable.insert(*binding, *mutable);
+                self.moved.remove(binding);
+                self.written.remove(binding);
                 if matches!(
                     self.solver.head(&ty.ty),
                     Type::Node(super::infer::Head::Reference, _)
@@ -977,7 +1095,7 @@ impl Completion<'_> {
             ty => vec![crate::Case::Type { ty: ty.clone() }],
         };
         let value = self.boxed(value)?;
-        let before = self.initialization.clone();
+        let before = self.state();
         let reachable = self.reachable;
         let mut after = None;
         let mut seen = vec![];
@@ -1017,18 +1135,21 @@ impl Completion<'_> {
                 ));
             }
             seen.extend(matched);
-            self.initialization = before.clone();
+            self.restore(before.clone());
             self.reachable = reachable;
             if let Some(binding) = arm.binding {
+                self.mutable.insert(binding, arm.mutable);
+                self.moved.remove(&binding);
+                self.written.insert(binding);
                 self.initialization
                     .insert(binding, Initialization::Initialized);
             }
             let body = self.elaborate(&arm.body)?;
             if self.reachable {
                 if let Some(previous) = &after {
-                    self.intersect_initialization(previous);
+                    self.intersect(previous);
                 }
-                after = Some(self.initialization.clone());
+                after = Some(self.state());
             }
             checked.push(MatchArm {
                 tag,
@@ -1043,7 +1164,7 @@ impl Completion<'_> {
             ));
         }
         self.reachable = after.is_some();
-        self.initialization = after.unwrap_or(before);
+        self.restore(after.unwrap_or(before));
         Ok(TermKind::Match {
             value,
             arms: checked,
@@ -1188,7 +1309,7 @@ mod tests {
     };
 
     #[test]
-    fn completion_uses_the_selected_method_after_its_namespace_is_gone() {
+    fn completion_uses_the_selected_operation_after_lookup_is_gone() {
         let span = Span { start: 0, end: 0 };
         let (solver, methods, rule, ty) = {
             let mut context = Context::new();
@@ -1198,13 +1319,16 @@ mod tests {
                 rule,
                 (
                     span,
-                    Constraint::Method {
-                        receiver: Ty::Str.into(),
-                        name: "at".into(),
-                        type_args: None,
-                        args: vec![Ty::UInt64.into()],
-                        out: ty.clone(),
-                        associated: false,
+                    Constraint::Overload {
+                        lookup: super::super::infer::Overload {
+                            name: "at".into(),
+                            candidates: vec![],
+                            primitive: Some("at".into()),
+                            expected: None,
+                            type_args: None,
+                            args: Some(vec![Ty::Str.into(), Ty::UInt64.into()]),
+                            out: ty.clone(),
+                        },
                     },
                 ),
             );
@@ -1215,33 +1339,32 @@ mod tests {
             span,
             actual: ty.clone(),
             ty,
-            kind: typed::TermKind::MethodCall {
+            kind: typed::TermKind::Builtin {
                 rule,
-                receiver: Some(Box::new(typed::Term {
-                    span,
-                    ty: Ty::Str.into(),
-                    actual: Ty::Str.into(),
-                    kind: typed::TermKind::String {
-                        value: "bytes".into(),
+                // Completion consumes the chosen operation, never its spelling.
+                name: "no_such_operation".into(),
+                name_span: span,
+                args: vec![
+                    typed::Term {
+                        span,
+                        ty: Ty::Str.into(),
+                        actual: Ty::Str.into(),
+                        kind: typed::TermKind::String {
+                            value: "bytes".into(),
+                        },
                     },
-                })),
-                receiver_type: typed::Annotation {
-                    span,
-                    ty: Ty::Str.into(),
-                },
-                // Names remain diagnostic metadata; completion must not resolve it again.
-                name: Ident::new("no_such_method".into(), span),
-                args: vec![typed::Term {
-                    span,
-                    ty: Ty::UInt64.into(),
-                    actual: Ty::UInt64.into(),
-                    kind: typed::TermKind::Num { value: "0".into() },
-                }],
+                    typed::Term {
+                        span,
+                        ty: Ty::UInt64.into(),
+                        actual: Ty::UInt64.into(),
+                        kind: typed::TermKind::Num { value: "0".into() },
+                    },
+                ],
             },
         };
         let completed = function(
             &source,
-            &[],
+            [],
             &solver,
             &methods,
             &TyperContext::new(),
@@ -1263,5 +1386,32 @@ mod tests {
             }
         );
         assert!(completed.shaders.is_empty());
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct OwnershipState {
+    initialization: BTreeMap<DeclarationId, Initialization>,
+    written: BTreeSet<DeclarationId>,
+    moved: BTreeMap<DeclarationId, BTreeSet<Vec<std::sync::Arc<str>>>>,
+}
+
+fn owned_path(term: &Term) -> Option<(DeclarationId, Vec<std::sync::Arc<str>>)> {
+    if matches!(term.ty, crate::Type::Reference { .. }) {
+        return None;
+    }
+    match &term.kind {
+        TermKind::Local { binding, .. } => Some((*binding, vec![])),
+        TermKind::Field { base, name }
+            if !matches!(
+                base.ty,
+                crate::Type::Pointer { .. } | crate::Type::Reference { .. }
+            ) =>
+        {
+            let (binding, mut path) = owned_path(base)?;
+            path.push(name.clone());
+            Some((binding, path))
+        }
+        _ => None,
     }
 }

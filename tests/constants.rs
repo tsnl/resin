@@ -19,8 +19,7 @@ fn result(source: &str) -> i32 {
 fn constants_and_iota_execute_with_explicit_initializers_and_fixed_types() {
     assert_eq!(
         result(
-            r#"
-        export { main };
+            r#"export { main };
         const (
             first, second: uint = 1 << iota, 2 << iota;
             _, _ = iota, iota;
@@ -28,13 +27,13 @@ fn constants_and_iota_execute_with_explicit_initializers_and_fixed_types() {
         );
         const reset = iota;
         const answer: int = int(first + second + third + fourth) + 27;
-        def main() -> int = {
+        fn main() -> int  {
             const ( a = iota + 1; b = iota + 1; );
             const half: float32 = 1.0 / 2.0;
             const text = "ok";
             const yes = answer == 42 && half == 0.5_f;
             if (yes && text.length == 2_ul && reset == 0 && a == 1 && b == 2) { answer } else { 1 }
-        };
+        }
     "#
         ),
         42
@@ -45,16 +44,15 @@ fn constants_and_iota_execute_with_explicit_initializers_and_fixed_types() {
 fn sizeof_matches_layout_after_generic_specialization() {
     assert_eq!(
         result(
-            r#"
-        export { main };
-        struct Pair<T> { first: T, second: T };
-        struct Node { next: Ptr<Node>, value: int };
+            r#"export { main };
+        struct Pair<T> { first: T, second: T, }
+        struct Node { next: Ptr<Node>, value: int, }
         const pair_bytes = sizeof(Pair<int>);
         const node_bytes = sizeof(Node);
-        def size<T>() -> ulong = { sizeof(T) };
-        def main() -> int = {
+        fn size<T>() -> ulong  { sizeof(T) }
+        fn main() -> int  {
             if (pair_bytes == 8_ul && pair_bytes == size::<Pair<int>>() && node_bytes == size::<Node>()) { 42 } else { 1 }
-        };
+        }
     "#
         ),
         42
@@ -65,16 +63,15 @@ fn sizeof_matches_layout_after_generic_specialization() {
 fn integer_boundaries_float_rounding_and_conversions_are_evaluated_at_declaration() {
     assert_eq!(
         result(
-            r#"
-        export { main };
+            r#"export { main };
         const maximum = ~0_ul;
         const minimum = -9223372036854775808;
         const rounded = (16777216_f + 1_f) - 16777216_f;
         const truncated = int(4.75_d);
         const shifted = -8 >> 2;
-        def main() -> int = {
+        fn main() -> int  {
             if (maximum == 18446744073709551615_ul && minimum < 0 && rounded == 0_f && truncated == 4 && shifted == -2) { 42 } else { 1 }
-        };
+        }
     "#
         ),
         42
@@ -87,8 +84,7 @@ fn sizeof_matches_native_c_representations() {
     let header = directory.path().join("sizes.h");
     std::fs::write(
         &header,
-        r#"
-        #include <stdint.h>
+        r#"#include <stdint.h>
         #include <stdbool.h>
         #include "resin_runtime.h"
         struct TestRecord { int8_t a; double b; uint16_t c; };
@@ -138,15 +134,14 @@ fn sizeof_matches_native_c_representations() {
         .join(" && ");
     assert_eq!(
         result(&format!(
-            r#"
-        export {{ main }};
-        extern {{ "{}": {{ def native_size(index: uint) -> ulong; }} }};
-        struct Record {{ a: sbyte, b: float64, c: ushort }};
-        struct First {{ value: int }};
-        struct Second {{ value: int }};
-        struct Failure {{ value: int }};
+            r#"export {{ main }};
+        extern {{ "{}": {{ fn native_size(index: uint) -> ulong; }} }};
+        struct Record {{ a: sbyte, b: float64, c: ushort, }}
+        struct First {{ value: int, }}
+        struct Second {{ value: int, }}
+        struct Failure {{ value: int, }}
         {declarations}
-        def main() -> int = {{ if ({conditions}) {{ 42 }} else {{ 1 }} }};
+        fn main() -> int  {{ if ({conditions}) {{ 42 }} else {{ 1 }} }}
     "#,
             header.display()
         )),
@@ -157,15 +152,14 @@ fn sizeof_matches_native_c_representations() {
 #[test]
 fn constants_lower_to_shader_literals_without_runtime_arithmetic() {
     let module = support::module(
-        r#"
-        export { kernel };
+        r#"export { kernel };
         const ( first: uint = 1 << iota; second: uint = 1 << iota; );
         const answer: uint = (first + second) * 14;
-        @compute_shader def kernel(index: ulong, output: Ptr<uint>) = {
+        @compute_shader fn kernel(index: ulong, output: Ptr<uint>)  {
             const bytes = sizeof(float64);
-            var native_bytes = sizeof(float64);
-            output.* := answer;
-        };
+            let mut native_bytes = sizeof(float64);
+            output.* = answer;
+        }
     "#,
     );
     let project = support::project::Project::new(&module, None).unwrap();
@@ -193,13 +187,13 @@ fn boolean_literals_work_in_constants_and_runtime_control_flow() {
             r#"export { main };
         const yes: bool = true;
         const no = false;
-        def invert(value: bool) -> bool = { !value };
-        def main() -> int = {
-            var running = true;
-            var count = 0;
-            while (running) { count := count + 1; running := false; };
+        fn invert(value: bool) -> bool  { !value }
+        fn main() -> int  {
+            let mut running = true;
+            let mut count = 0;
+            while (running) { count = count + 1; running = false; };
             if (yes && !no && invert(false) && count == 1) { 42 } else { 1 }
-        };"#
+        }"#
         ),
         42
     );

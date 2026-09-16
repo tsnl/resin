@@ -193,6 +193,7 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
             "forget-local",
             vec![symbol(fn_names.locals[local.index()].as_ref())],
         ),
+        Instr::OwnerCreate { element } => list("owner-create", vec![sexp_ty(names, element)]),
         Instr::OwnerAllocate { element } => list("owner-allocate", vec![sexp_ty(names, element)]),
         Instr::OwnerData { pointee } => list("owner-data", vec![sexp_ty(names, pointee)]),
         Instr::OwnerLength => symbol("owner-length"),
@@ -233,6 +234,16 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
         Instr::PointerBytes => symbol("pointer-bytes"),
         Instr::AccessDynamic => symbol("access-dynamic"),
         Instr::Load => symbol("load"),
+        Instr::TakeField { local, path } | Instr::SetField { local, path } => list(
+            if matches!(instr, Instr::TakeField { .. }) {
+                "take-field"
+            } else {
+                "set-field"
+            },
+            std::iter::once(symbol(fn_names.locals[local.index()].as_ref()))
+                .chain(path.iter().map(|index| symbol(index.to_string())))
+                .collect(),
+        ),
         Instr::Store => symbol("store"),
         Instr::Replace => symbol("replace"),
         Instr::Discard => symbol("discard"),

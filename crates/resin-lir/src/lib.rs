@@ -162,7 +162,10 @@ pub enum Instr {
     GpuArgumentsDispatch,
     /// `[arguments, commands, count] -> [int]`: record a draw with retained arguments.
     GpuArgumentsDraw,
-    /// `[count, initial] -> [StrongOwner | None]`: allocate initialized element storage.
+    /// `[initial] -> [StrongOwner | None]`: move one value into shared storage.
+    /// Allocation failure destroys the consumed initializer.
+    OwnerCreate { element: Ty },
+    /// `[count, initial] -> [StrongOwner | None]`: allocate repeated, implicitly copyable values.
     /// Installs the concrete element destructor; failed allocations publish no owner.
     OwnerAllocate { element: Ty },
     /// `[Ptr<StrongOwner>] -> [Ptr<T>]`: borrow live payload storage.
@@ -181,8 +184,11 @@ pub enum Instr {
     /// `[] -> []`: clear a local's initialization flag without destroying its value.
     ForgetLocal { local: LocalId },
     /// `[] -> [value]`: transfer an initialized local and clear its initialization flag.
-    /// Used for compiler temporaries; source reads still copy.
     TakeLocal { local: LocalId },
+    /// `[] -> [value]`: transfer a field and disarm cleanup for that part of the local.
+    TakeField { local: LocalId, path: Vec<usize> },
+    /// `[value] -> []`: replace a field, destroying only its still-initialized parts.
+    SetField { local: LocalId, path: Vec<usize> },
     /// `[] -> []`: destroy a local if initialized, then clear its initialization flag.
     DropLocal { local: LocalId },
     /// `[value] -> []`: destroy a local's previous initialized value, then transfer
@@ -224,8 +230,8 @@ pub enum Instr {
     PointerBytes,
     /// `[address] -> [value]`: copy an initialized pointee, retaining managed owners.
     Load,
-    /// `[address, value] -> [value]`: copy into storage, destroying its previous live
-    /// value and marking a tracked local initialized; preserve the input value as result.
+    /// `[address, value] -> [unit]`: copy into storage, destroying its previous live
+    /// value and marking a tracked local initialized; produce unit.
     Store,
     /// `[address, replacement] -> [previous value]`: exchange an initialized pointee
     /// with an owned replacement, transferring both values without copying or destruction.
@@ -617,6 +623,8 @@ pub enum VerifyErrorKind {
     UnsupportedGpuElement { ty: Ty },
     InvalidVariant,
     InvalidDropHook,
+    InvalidCopy { ty: Ty },
+    InvalidOwnedField { local: usize, path: Vec<usize> },
     InvalidTextView,
     InvalidForeignHeader { header: Arc<str> },
     InvalidForeignSignature,

@@ -308,9 +308,9 @@ impl<'a> AstGen<'a> {
             return stmt;
         }
         if let Some(declare) = node.child_by_field_name("declare") {
-            let name = self.ident(declare.child_by_field_name("name").unwrap_or(node));
+            let pattern = self.gen_pattern(declare.child_by_field_name("pattern").unwrap_or(node));
             let ann = self.gen_type(declare.child_by_field_name("ann").unwrap_or(node));
-            return Spanned::new(StmtKind::Declare { name, ann }, self.span(node));
+            return Spanned::new(StmtKind::Declare { pattern, ann }, self.span(node));
         }
         let expr = self.trailing_errors(
             self.gen_term(node.child_by_field_name("expr").unwrap_or(node)),
@@ -336,11 +336,11 @@ impl<'a> AstGen<'a> {
     }
 
     fn gen_term_define(&self, node: Node, span: Span) -> Stmt {
-        let name = self.ident(node.child_by_field_name("name").unwrap_or(node));
+        let pattern = self.gen_pattern(node.child_by_field_name("pattern").unwrap_or(node));
         let init = self.gen_term(node.child_by_field_name("init").unwrap_or(node));
         Spanned::new(
             StmtKind::Define {
-                name,
+                pattern,
                 ann: node
                     .child_by_field_name("ann")
                     .map(|ann| self.gen_type(ann)),
@@ -711,10 +711,10 @@ impl<'a> AstGen<'a> {
                         };
                         MatchArm {
                             variant,
-                            name: arm
-                                .child_by_field_name("name")
+                            pattern: arm
+                                .child_by_field_name("pattern")
                                 .filter(|node| self.text(*node) != "_")
-                                .map(|node| self.ident(node)),
+                                .map(|node| self.gen_pattern(node)),
                             body: self.gen_body(arm.child_by_field_name("body").unwrap_or(arm)),
                         }
                     })
@@ -791,8 +791,9 @@ impl<'a> AstGen<'a> {
         let mut params = Vec::new();
         let mut cursor = node.walk();
         for p in node.children_by_field_name("params", &mut cursor) {
-            let (name, ann) = self.gen_declare(p);
-            params.push((name, ann));
+            let pattern = self.gen_pattern(p.child_by_field_name("pattern").unwrap_or(p));
+            let ann = self.gen_type(p.child_by_field_name("ann").unwrap_or(p));
+            params.push((pattern, ann));
         }
         if let Some(operation) = node.child_by_field_name("operation") {
             return Spanned::new(
@@ -1092,6 +1093,13 @@ impl<'a> AstGen<'a> {
         }
     }
 
+    fn gen_pattern(&self, node: Node) -> BindingPattern {
+        BindingPattern {
+            name: self.ident(node.child_by_field_name("name").unwrap_or(node)),
+            mutable: node.child_by_field_name("mutable").is_some(),
+        }
+    }
+
     fn gen_declare(&self, node: Node) -> (Ident, Type) {
         assert_eq!(node.kind(), "declare");
         let name = self.ident(node.child_by_field_name("name").unwrap_or(node));
@@ -1162,7 +1170,7 @@ mod tests {
 
     #[test]
     fn unexpected_syntax_is_a_parse_error() {
-        let err = parse_err("def main() -> () = { var x = ; };");
+        let err = parse_err("fn main() -> ()  { let mut x = ; }");
         assert!(matches!(
             err.kind,
             AstErrorKind::Unexpected { .. } | AstErrorKind::Missing { .. }

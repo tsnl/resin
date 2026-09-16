@@ -12,7 +12,7 @@ fn rejects(source: &str, message: &str) {
 #[test]
 fn structs_mint_identities_and_aliases_do_not() {
     let m = module(
-        "struct Point { x: int }; type Position = Point; type Number = int; def copy(p: Position) -> Point = { p }; def number(n: Number) -> int = { n };",
+        "struct Point { x: int, } type Position = Point; type Number = int; fn copy(p: Position) -> Point  { p } fn number(n: Number) -> int  { n }",
     );
     assert_eq!(m.types.iter().filter(|d| d.name().is_some()).count(), 1);
     assert_eq!(
@@ -22,16 +22,13 @@ fn structs_mint_identities_and_aliases_do_not() {
         }
     );
     assert_eq!(m.functions[1].result, Ty::Int32);
-    rejects(
-        "struct A {}; struct B {}; def f(a: A) -> B = { a };",
-        "expected",
-    );
+    rejects("struct A {} struct B {} fn f(a: A) -> B  { a }", "expected");
 }
 
 #[test]
 fn unions_are_canonical_and_tags_belong_to_structs() {
     let m = module(
-        "struct A {}; struct B { n: int }; type First = A | B | A; type Second = B | A; def f(v: First) -> Second = { v }; def a() -> First = { A {} };",
+        "struct A {} struct B { n: int, } type First = A | B | A; type Second = B | A; fn f(v: First) -> Second  { v } fn a() -> First  { A {} }",
     );
     assert_eq!(
         m.functions[0].result,
@@ -52,7 +49,7 @@ fn unions_are_canonical_and_tags_belong_to_structs() {
 #[test]
 fn errors_accumulate_across_propagation() {
     let m = module(
-        "struct A {}; struct B {}; def a() -> (int | Err<A>) = { Err(A {}) }; def b() -> (int | Err<B>) = { (2) }; def both() -> (int | Err<_>) = { var x = a()?; var y = b()?; (x + y) };",
+        "struct A {} struct B {} fn a() -> (int | Err<A>)  { Err(A {}) } fn b() -> (int | Err<B>)  { (2) } fn both() -> (int | Err<_>)  { let mut x = a()?; let mut y = b()?; (x + y) }",
     );
     assert_eq!(
         m.functions[2].result,
@@ -68,7 +65,7 @@ fn errors_accumulate_across_propagation() {
 #[test]
 fn nested_error_unions_flatten_and_holes_remain_monomorphic() {
     let m = module(
-        "struct A {}; struct B {}; def nested() -> ((int | Err<_>) | Err<_>) = { ((42)) }; def outer() -> ((Ptr<int> | Err<A>) | Err<B>) = { Err(B {}) };",
+        "struct A {} struct B {} fn nested() -> ((int | Err<_>) | Err<_>)  { ((42)) } fn outer() -> ((Ptr<int> | Err<A>) | Err<B>)  { Err(B {}) }",
     );
     assert_eq!(
         m.functions[0].result,
@@ -89,10 +86,10 @@ fn nested_error_unions_flatten_and_holes_remain_monomorphic() {
 #[test]
 fn result_and_union_matches_are_exhaustive() {
     module(
-        "struct A {}; struct B { n: int }; def f(v: A | B) -> int = { match (v) { A(a) => { 0 }, B(b) => { b.n } } }; def g(v: (int | Err<A>)) -> int = { match (v) { int(n) => { n }, Err(e) => { 0 } } };",
+        "struct A {} struct B { n: int, } fn f(v: A | B) -> int  { match (v) { A(a) => { 0 }, B(b) => { b.n } } } fn g(v: (int | Err<A>)) -> int  { match (v) { int(n) => { n }, Err(e) => { 0 } } }",
     );
     rejects(
-        "struct A {}; struct B {}; def f(v: A | B) -> int = { match (v) { A(a) => { 0 } } };",
+        "struct A {} struct B {} fn f(v: A | B) -> int  { match (v) { A(a) => { 0 } } }",
         "every variant",
     );
 }
@@ -100,14 +97,14 @@ fn result_and_union_matches_are_exhaustive() {
 #[test]
 fn local_result_annotations_collect_errors_from_later_assignments() {
     module(
-        "struct E {}; def f() -> (int | Err<_>) = { var r: (int | Err<_>); r := (1); r := Err(E {}); r };",
+        "struct E {} fn f() -> (int | Err<_>)  { let mut r: (int | Err<_>); r = (1); r = Err(E {}); r }",
     );
 }
 
 #[test]
 fn recursive_error_sets_reach_a_fixed_point() {
     let m = module(
-        "struct A {}; struct B {}; def a(n: int) -> (int | Err<_>) = { if (n == 0) { Err(A {}) } else { (b(n - 1)?) } }; def b(n: int) -> (int | Err<_>) = { if (n == 0) { Err(B {}) } else { (a(n - 1)?) } };",
+        "struct A {} struct B {} fn a(n: int) -> (int | Err<_>)  { if (n == 0) { Err(A {}) } else { (b(n - 1)?) } } fn b(n: int) -> (int | Err<_>)  { if (n == 0) { Err(B {}) } else { (a(n - 1)?) } }",
     );
     let expected = Ty::union_of([
         Ty::Int32,
@@ -123,46 +120,43 @@ fn recursive_error_sets_reach_a_fixed_point() {
 #[test]
 fn mutable_pointers_do_not_widen_and_bad_matches_are_rejected() {
     rejects(
-        "struct A {}; struct B {}; def f(p: Ptr<(int | Err<A>)>) -> Ptr<(int | Err<A | B>)> = { p };",
+        "struct A {} struct B {} fn f(p: Ptr<(int | Err<A>)>) -> Ptr<(int | Err<A | B>)>  { p }",
         "TypeMismatch",
     );
     rejects(
-        "struct A {}; struct B {}; def f(x: A | B) -> int = { match (x) { A(a) => { 0 }, A(b) => { 1 } } };",
+        "struct A {} struct B {} fn f(x: A | B) -> int  { match (x) { A(a) => { 0 }, A(b) => { 1 } } }",
         "duplicate",
     );
     rejects(
-        "struct A {}; def f(x: (int | Err<A>)) -> int = { match (x) { A(a) => { 0 } } };",
+        "struct A {} fn f(x: (int | Err<A>)) -> int  { match (x) { A(a) => { 0 } } }",
         "unknown or duplicate",
     );
     rejects(
-        "struct A {}; struct B {}; def f(x: (int | Err<A>)) -> (int | Err<B>) = { x };",
+        "struct A {} struct B {} fn f(x: (int | Err<A>)) -> (int | Err<B>)  { x }",
         "TypeMismatch",
     );
-    rejects(
-        "struct A {}; def f(x: (int | Err<_>)) = {};",
-        "only allowed",
-    );
+    rejects("struct A {} fn f(x: (int | Err<_>))  {}", "only allowed");
     rejects("type Recursive = Ptr<Recursive>;", "recursive type alias");
 }
 
 #[test]
 fn union_matches_intersect_initialization_and_scope_payloads() {
     module(
-        "struct A {}; struct B {}; def f(x: A | B) -> int = { var n: int; match (x) { A(a) => { n := 1; }, B(b) => { n := 2; } }; n };",
+        "struct A {} struct B {} fn f(x: A | B) -> int  { let mut n: int; match (x) { A(a) => { n = 1; }, B(b) => { n = 2; } }; n }",
     );
     rejects(
-        "struct A {}; struct B {}; def f(x: A | B) -> int = { var n: int; match (x) { A(a) => { n := 1; }, B(b) => { () } }; n };",
+        "struct A {} struct B {} fn f(x: A | B) -> int  { let mut n: int; match (x) { A(a) => { n = 1; }, B(b) => { () } }; n }",
         "UninitializedValue",
     );
     rejects(
-        "struct A {}; def f(x: A) = { match (x) { A(a) => { () } }; a; };",
+        "struct A {} fn f(x: A)  { match (x) { A(a) => { () } }; a; }",
         "UnboundValue",
     );
 }
 
 #[test]
 fn verifier_rejects_invalid_sum_instructions_and_types() {
-    let source = "struct E {}; def f() -> (int | Err<E>) = { Err(E {}) };";
+    let source = "struct E {} fn f() -> (int | Err<E>)  { Err(E {}) }";
     let mut m = module(source);
     m.functions[0].blocks[0].instrs.insert(
         0,
@@ -215,7 +209,7 @@ fn verifier_rejects_invalid_sum_instructions_and_types() {
 fn contextual_tuple_arguments_can_widen_result_errors() {
     for result in ["int", "_"] {
         module(&format!(
-            "struct A {{}}; struct B {{}}; def narrow() -> (int | Err<A>) = {{ (42) }}; def take(r: (int | Err<A | B>), n: int) -> int = {{ n }}; def main() -> {result} = {{ take(narrow(), 1) }};"
+            "struct A {{}} struct B {{}} fn narrow() -> (int | Err<A>)  {{ (42) }} fn take(r: (int | Err<A | B>), n: int) -> int  {{ n }} fn main() -> {result}  {{ take(narrow(), 1) }}"
         ));
     }
 }
@@ -223,17 +217,17 @@ fn contextual_tuple_arguments_can_widen_result_errors() {
 #[test]
 fn old_result_names_are_ordinary_identifiers() {
     module(
-        "type Result<T, E> = T | Err<E>; def ok(value: int) -> int = { value }; def err(value: int) -> int = { value }; def f() -> Result<int, str> = { ok(err(42)) };",
+        "type Result<T, E> = T | Err<E>; fn ok(value: int) -> int  { value } fn err(value: int) -> int  { value } fn f() -> Result<int, str>  { ok(err(42)) }",
     );
     module(
-        "struct Fields { ok: int, err: int }; def f() -> int = { var fields = Fields { ok = 1, err = 2 }; fields.ok + fields.err };",
+        "struct Fields { ok: int, err: int, } fn f() -> int  { let mut fields = Fields { ok = 1, err = 2 }; fields.ok + fields.err }",
     );
 }
 
 #[test]
 fn errors_discovered_through_recursive_payloads_join_before_sets_close() {
     let m = module(
-        "struct B {}; struct E { nested: (int | Err<B>) }; def f(n: int) -> (int | Err<_>) = { match (g(n)) { int(value) => { (value) }, Err(error) => { (error.nested?) } } }; def g(n: int) -> (int | Err<_>) = { if (n > 0) { f(n - 1); () } else { () }; Err(E { nested = Err(B {}) }) };",
+        "struct B {} struct E { nested: (int | Err<B>), } fn f(n: int) -> (int | Err<_>)  { match (g(n)) { int(value) => { (value) }, Err(error) => { (error.nested?) } } } fn g(n: int) -> (int | Err<_>)  { if (n > 0) { f(n - 1); () } else { () }; Err(E { nested = Err(B {}) }) }",
     );
     assert_eq!(
         m.functions[0].result,
@@ -261,21 +255,21 @@ fn errors_discovered_through_recursive_payloads_join_before_sets_close() {
 
 #[test]
 fn propagation_rejects_wrong_types_and_narrower_errors() {
-    rejects("def f() -> int = { 1? };", "Err");
+    rejects("fn f() -> int  { 1? }", "Err");
     rejects(
-        "struct E {}; def f(r: (int | Err<E>)) -> int = { r? };",
+        "struct E {} fn f(r: (int | Err<E>)) -> int  { r? }",
         "containing Err",
     );
     rejects(
-        "struct A {}; struct B {}; def f(r: (int | Err<B>)) -> (int | Err<A>) = { (r?) };",
+        "struct A {} struct B {} fn f(r: (int | Err<B>)) -> (int | Err<A>)  { (r?) }",
         "every propagated error",
     );
-    module("def f() -> (int | Err<bool>) = { (1) };");
+    module("fn f() -> (int | Err<bool>)  { (1) }");
 }
 
 #[test]
 fn ir_never_elimination_cannot_consume_an_inhabited_value() {
-    let mut m = support::module("def impossible(n: Never) -> int = { absurd(n) };");
+    let mut m = support::module("fn impossible(n: Never) -> int  { absurd(n) }");
     assert!(
         m.functions[0]
             .blocks
@@ -290,19 +284,19 @@ fn ir_never_elimination_cannot_consume_an_inhabited_value() {
 #[test]
 fn wildcard_matches_ignore_payloads_and_cover_remaining_variants() {
     let source = r#"export { main };
-        struct Failure {};
-        def choose(value: int | bool | None) -> int = {
+        struct Failure {}
+        fn choose(value: int | bool | None) -> int  {
             match (value) { int(number) => { number }, _ => { 7 } }
-        };
-        def ignore<T>(value: T) -> int = { match (value) { _ => { 3 } } };
-        def main() = {
+        }
+        fn ignore<T>(value: T) -> int  { match (value) { _ => { 3 } } }
+        fn main()  {
             assert(choose(42_i) == 42);
             assert(choose(false) == 7);
             assert(choose(None) == 7);
-            var result: (int | Err<Failure>) = (42);
+            let mut result: (int | Err<Failure>) = (42);
             match (result) { int(_) => {}, Err(_) => { assert(false); } };
             assert(ignore::<int | None>(None) == 3);
-        };"#;
+        }"#;
     let output = support::project::Project::new(&module(source), Some("main"))
         .unwrap()
         .run();
@@ -312,11 +306,11 @@ fn wildcard_matches_ignore_payloads_and_cover_remaining_variants() {
         String::from_utf8_lossy(&output.stderr)
     );
     rejects(
-        "def f(v: int | None) = { match (v) { _ => {}, None => {} } };",
+        "fn f(v: int | None)  { match (v) { _ => {}, None => {} } }",
         "final arm",
     );
     rejects(
-        "def f(v: int | None) = { match (v) { int(_) => {}, None => {}, _ => {} } };",
+        "fn f(v: int | None)  { match (v) { int(_) => {}, None => {}, _ => {} } }",
         "remaining variant",
     );
 }
@@ -324,13 +318,13 @@ fn wildcard_matches_ignore_payloads_and_cover_remaining_variants() {
 #[test]
 fn error_sets_collect_builtin_and_owned_values() {
     let source = r#"export { main }; import { "$/string.resin" };
-        def text() -> (int | Err<str>) = { Err("failed") };
-        def number() -> (int | Err<int>) = { Err(42_i) };
-        def owned() -> (int | Err<String>) = { Err(String.from_str("owned")) };
-        def choose(which: int) -> (int | Err<_>) = {
+        fn text() -> (int | Err<str>)  { Err("failed") }
+        fn number() -> (int | Err<int>)  { Err(42_i) }
+        fn owned() -> (int | Err<String>)  { Err(string_from_str("owned")) }
+        fn choose(which: int) -> (int | Err<_>)  {
             if (which == 0) { (text()?) } else if (which == 1) { (number()?) } else { (owned()?) }
-        };
-        def main() = {
+        }
+        fn main()  {
             match (choose(0)) { int(_) => { assert(false); }, Err(error) => {
                 match (error) { str(text) => { assert(text.length == 6_ul); }, _ => { assert(false); } }
             } };
@@ -338,9 +332,9 @@ fn error_sets_collect_builtin_and_owned_values() {
                 match (error) { int(value) => { assert(value == 42); }, _ => { assert(false); } }
             } };
             match (choose(2)) { int(_) => { assert(false); }, Err(error) => {
-                match (error) { String(text) => { assert(text.get().length == 5_ul); }, _ => { assert(false); } }
+                match (error) { String(text) => { assert(text:get().length == 5_ul); }, _ => { assert(false); } }
             } };
-        };"#;
+        }"#;
     let output = support::project::Project::new(&module(source), Some("main"))
         .unwrap()
         .run();

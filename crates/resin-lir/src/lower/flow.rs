@@ -10,7 +10,7 @@ use super::FunctionLowering;
 impl FunctionLowering<'_> {
     pub(super) fn gen_while(&mut self, cond: &Term, body: &Term) -> Result<Ty, LowerError> {
         if cond.exits() {
-            self.gen_term(cond, Some(&Ty::Bool))?;
+            self.gen_expression(cond, Some(&Ty::Bool))?;
             return Ok(Ty::Unit);
         }
         let height = self.function.stack_len();
@@ -24,7 +24,7 @@ impl FunctionLowering<'_> {
         });
 
         self.switch(condition);
-        self.gen_term(cond, Some(&Ty::Bool))?;
+        self.gen_expression(cond, Some(&Ty::Bool))?;
         self.terminate(Terminator::LoopTest);
 
         self.switch(body_block);

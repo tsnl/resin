@@ -740,7 +740,7 @@ mod tests {
     fn admission_survives_cancellation_until_the_queued_job_is_released() {
         let mut harness = harness();
         let file = uri("resin-protocol-capacity.resin");
-        open(&mut harness.state, &file, "def main() = {}; ");
+        open(&mut harness.state, &file, "fn main()  {} ");
         for id in 0..64 {
             format(&mut harness.state, id, &file);
         }
@@ -786,11 +786,11 @@ mod tests {
     fn a_prepared_reply_is_rechecked_after_later_editor_events() {
         let mut harness = harness();
         let file = uri("resin-protocol-stale.resin");
-        open(&mut harness.state, &file, "def main()={};");
+        open(&mut harness.state, &file, "fn main(){}");
         format(&mut harness.state, 1, &file);
         let job = harness.requests.try_recv().unwrap();
         let freshness = Freshness::document(&job.editor.documents[file.as_str()]);
-        change(&mut harness.state, &file, 2, "def main() = { 42 }; ");
+        change(&mut harness.state, &file, 2, "fn main()  { 42 } ");
         harness
             .replies
             .try_send(PreparedReply {
@@ -842,7 +842,7 @@ mod tests {
     fn reused_wire_id_cannot_receive_the_cancelled_requests_late_reply() {
         let mut harness = harness();
         let file = uri("resin-protocol-reused-id.resin");
-        open(&mut harness.state, &file, "def main() = {}; ");
+        open(&mut harness.state, &file, "fn main()  {} ");
         format(&mut harness.state, 7, &file);
         let old = harness.requests.try_recv().unwrap();
         harness

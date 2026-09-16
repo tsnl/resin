@@ -1,7 +1,7 @@
 ==================
 Empty while
 ==================
-def main() -> () = { while (1 == 0) {}; };
+fn main() -> ()  { while (1 == 0) {}; }
 ---
 
 (source_file
@@ -41,13 +41,13 @@ def main() -> () = { while (1 == 0) {}; };
 ==================
 Nested while and a statement-only body
 ==================
-def main () -> () = {
-    var n = 0;
+fn main () -> ()  {
+    let mut n = 0;
     while (n < 3) {
-        while (n < 2) { n := n + 1; };
-        n := n + 1;
+        while (n < 2) { n = n + 1; };
+        n = n + 1;
     };
-};
+}
 ---
 
 (source_file
@@ -64,7 +64,8 @@ def main () -> () = {
       (statement
         (define
           (local_define
-            (lid)
+            (binding_pattern
+              (lid))
             (term
               (assignment_term
                 (binary_term

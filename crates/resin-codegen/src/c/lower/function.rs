@@ -6,7 +6,7 @@ use std::fmt::Write;
 use crate::Error;
 use resin_lir::{Instr, Terminator};
 
-use super::{Slot, ops, types::Types, value::literal};
+use super::{Slot, ops, ownership, types::Types, value::literal};
 
 pub(super) fn lower(
     types: &Types<'_>,
@@ -58,7 +58,7 @@ fn locals(types: &Types<'_>, function: &resin_lir::Function, flow: &FunctionType
         if local.ty.needs_drop(&types.module.types) {
             writeln!(
                 out,
-                "  bool r_live{i} = {};",
+                "  bool r_live{i} = {}; (void)r_live{i};",
                 if i < function.parameter_count {
                     "true"
                 } else {
@@ -68,6 +68,7 @@ fn locals(types: &Types<'_>, function: &resin_lir::Function, flow: &FunctionType
             .unwrap();
         }
     }
+    ownership::declarations(types, function, &mut out);
     for i in 0..function.parameter_count {
         writeln!(out, "  r_l{i} = r_arg{i};").unwrap();
     }
@@ -453,12 +454,7 @@ fn instruction(
             super::gpu::instruction(types, temp, instr, args, result.unwrap(), out)?
         }
         Instr::ForgetLocal { local } => {
-            if function.locals[local.index()]
-                .ty
-                .needs_drop(&types.module.types)
-            {
-                writeln!(out, "  r_live{} = false;", local.index()).unwrap();
-            }
+            ownership::mark(types, function, *local, &[], false, out);
             return Ok(None);
         }
         Instr::OwnerData { .. } => format!(
@@ -466,8 +462,14 @@ fn instruction(
             types.name(result.unwrap()),
             args[0].expr
         ),
-        Instr::OwnerAllocate { element } => {
-            let owner = allocate_span(types, temp, element, args, out);
+        Instr::OwnerAllocate { element } | Instr::OwnerCreate { element } => {
+            let initial = &args.last().unwrap().expr;
+            let count = if matches!(instr, Instr::OwnerCreate { .. }) {
+                None
+            } else {
+                Some(args[0].expr.as_str())
+            };
+            let owner = allocate_span(types, temp, element, count, initial, out);
             let ty = result.unwrap();
             let present = variant(types, ty, &Case::Type(ty.without_none().unwrap()), &owner);
             let absent = variant(types, ty, &Case::Type(Ty::None), "0");
@@ -497,43 +499,27 @@ fn instruction(
         }
         Instr::WeakEmpty => "NULL".into(),
         Instr::TakeLocal { local } => {
-            if function.locals[local.index()]
-                .ty
-                .needs_drop(&types.module.types)
-            {
-                writeln!(out, "  r_live{} = false;", local.index()).unwrap();
-            }
+            ownership::mark(types, function, *local, &[], false, out);
             format!("r_l{}", local.index())
         }
+        Instr::TakeField { local, path } => {
+            ownership::mark(types, function, *local, path, false, out);
+            ownership::project(types, function, *local, path)
+        }
         Instr::DropLocal { local } => {
-            if !function.locals[local.index()]
-                .ty
-                .needs_drop(&types.module.types)
-            {
-                return Ok(None);
-            }
-            writeln!(out, "  if (r_live{}) {{", local.index()).unwrap();
-            types.drop_value(
-                &function.locals[local.index()].ty,
-                &format!("r_l{}", local.index()),
-                out,
-            );
-            writeln!(out, "    r_live{} = false; }}", local.index()).unwrap();
+            ownership::drop(types, function, *local, &[], out);
+            ownership::mark(types, function, *local, &[], false, out);
             return Ok(None);
         }
-        Instr::SetLocal { local } => {
-            if args[0].ty.needs_drop(&types.module.types) {
-                writeln!(
-                    out,
-                    "  if (r_live{}) r_drop{}(&r_l{});",
-                    local.index(),
-                    types.id(&args[0].ty),
-                    local.index()
-                )
-                .unwrap();
-                writeln!(out, "  r_live{} = true;", local.index()).unwrap();
-            }
-            writeln!(out, "  r_l{} = {};", local.index(), args[0].expr).unwrap();
+        Instr::SetLocal { local } | Instr::SetField { local, .. } => {
+            let path = match instr {
+                Instr::SetField { path, .. } => path.as_slice(),
+                _ => &[],
+            };
+            ownership::drop(types, function, *local, path, out);
+            let target = ownership::project(types, function, *local, path);
+            writeln!(out, "  {target} = {};", args[0].expr).unwrap();
+            ownership::mark(types, function, *local, path, true, out);
             return Ok(None);
         }
         Instr::MakeVariant { ty, tag } => {
@@ -638,10 +624,10 @@ fn instruction(
                 out,
                 "  *({}) = {};",
                 types.unwrap(&args[0].ty, args[0].expr.clone()),
-                types.copy(&args[1].ty, &args[1].expr)
+                args[1].expr
             )
             .unwrap();
-            args[1].expr.clone()
+            "0".into()
         }
         Instr::Discard => {
             types.drop_value(&args[0].ty, &args[0].expr, out);
@@ -834,13 +820,14 @@ fn project(types: &Types<'_>, source: &Slot, index: &str, dynamic: bool) -> Resu
     Ok(if pointer { format!("&({expr})") } else { expr })
 }
 
-// The argument remains owned until every element has received an ordinary copy.
-// Copies cannot fail; allocation completes before any element is initialized.
+// Repeated allocation copies its initializer. Single-value allocation transfers
+// it on success and destroys it on failure; the instruction owns that cleanup.
 fn allocate_span(
     types: &Types<'_>,
     temp: &str,
     element: &Ty,
-    args: &[Slot],
+    repeated_count: Option<&str>,
+    initial: &str,
     out: &mut String,
 ) -> String {
     let owner = format!("{temp}_allocated");
@@ -850,7 +837,7 @@ fn allocate_span(
     } else {
         "NULL".into()
     };
-    let count = &args[0].expr;
+    let count = repeated_count.unwrap_or("1");
     writeln!(out, "  ResinArc *{owner} = resin_arc_span_try_new({count}, sizeof({element_name}), _Alignof({element_name}), {destroy});").unwrap();
     writeln!(out, "  if ({owner}) {{").unwrap();
     writeln!(
@@ -866,10 +853,19 @@ fn allocate_span(
     writeln!(
         out,
         "    for (uint64_t i = 0; i < {temp}_length; ++i) {temp}_data[i] = {};",
-        types.copy(element, &args[1].expr)
+        if repeated_count.is_some() {
+            types.copy(element, initial)
+        } else {
+            initial.into()
+        }
     )
     .unwrap();
     out.push_str("  }\n");
+    if repeated_count.is_none() && element.needs_drop(&types.module.types) {
+        out.push_str("  else {\n");
+        types.drop_value(element, initial, out);
+        out.push_str("  }\n");
+    }
     owner
 }
 

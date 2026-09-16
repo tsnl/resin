@@ -26,7 +26,7 @@ import { "$/gpu.resin", "$/status.resin" };
 - `console.resin`: byte and line input, and shared input-line ownership and printing.
 - `process.resin`: checked argument views and lookups in the frozen startup environment.
 
-Public operations use static and instance methods on the corresponding types; scalar
+Public operations are exported free functions, callable with colon syntax; scalar
 options and control codes are exported constants. Fallible runtime operations return
 `(T | Err<RuntimeError>)`; console operations use their own error sets. Infallible queries
 return values. Resource owners release their native handles automatically.
@@ -46,109 +46,109 @@ Constructors return the new handle, not an integer and an out-parameter:
 export { main };
 import { "$/gpu.resin" };
 
-def main() -> (() | Err<_>) = {
-    var gpu = Gpu.new()?;
-    var data = gpu.alloc::<uint>(64)?;
-    var commands = gpu.start_command_recording()?;
-    commands.submit()?;
-    (())
-};
+fn main() -> (() | Err<_>) {
+	let gpu = gpu_new()?;
+	let data = gpu:alloc::<uint>(64)?;
+	let commands = gpu:start_command_recording()?;
+	commands:submit()?;
+	(())
+}
 ```
 
-Resources use shared owners. Copying a handle retains its allocation, and initialized
+Resources use shared owners. Moving a handle transfers ownership; explicitly cloning it retains another owner, and initialized
 locals release ownership in reverse scope order, including through `?`. GPU views
 retain their allocation and device through indexing and slicing. Use `load`,
 `store`, and `replace` for checked host access.
-`gpu.create(value)?` infers `GpuPtr<T>`; `gpu.alloc::<T>(count)?` allocates
-uninitialized elements. `.read_only()` and `.write_only()` narrow host access.
+`gpu:create(value)?` infers `GpuPtr<T>`; `gpu:alloc::<T>(count)?` allocates
+uninitialized elements. `:read_only()` and `:write_only()` narrow host access.
 
 Pipeline creation accepts decorated shader declarations and preserves their root
-type: `gpu.create_compute_pipeline(kernel)` and
-`gpu.create_graphics_pipeline(vertex, fragment)`. Record work with
-`commands.dispatch(pipeline, arguments, x, y, z)` or
-`commands.draw(pipeline, arguments, count)`; rootless graphics use
-`commands.draw(pipeline, None, count)`. The compiler checks host arguments and
+type: `gpu:create_compute_pipeline(kernel)` and
+`gpu:create_graphics_pipeline(vertex, fragment)`. Record work with
+`commands:dispatch(pipeline, arguments, x, y, z)` or
+`commands:draw(pipeline, arguments, count)`; rootless graphics use
+`commands:draw(pipeline, None, count)`. The compiler checks host arguments and
 projects GPU views to the shader's raw pointers and spans inside recording.
 Recorded allocations reject CPU access until submission or cancellation. Use
-`.copy_to(Span<T>)` for host readback without escaping a raw pointer into GPU memory.
+`:copy_to(Span<T>)` for host readback without escaping a raw pointer into GPU memory.
 See [GPU buffers](../doc/gpu-buffers.md).
 
-Submission consumes a recording even on failure. `commands.submit()` and
-`commands.cancel()` clear the shared native handle before entering C.
+Submission consumes a recording even on failure. `commands:submit()` and
+`commands:cancel()` clear the shared native handle before entering C.
 Aliases observe that cleared state. Dropping an unfinished recording cancels it;
 dropping one already consumed does not cancel it again. Submission waits for GPU work.
 
 | Type | Constructors and operations |
 | --- | --- |
-| `ArcPtr<T>` / `ArcSpan<T>` | `.alloc(initial)` / `.alloc(count, initial)`, `.get()`, `.downgrade()` |
-| `Span<T>` | `.at(index)`, `.slice(start, length)`, numeric `.as_bytes()` |
-| `WeakPtr<T>` / `WeakSpan<T>` | `.empty()`, `.upgrade()` |
-| `Gpu` | `Gpu.new()`, `Gpu.new_at(index)`, `Gpu.new_for_window(window)`, `gpu.compute_workgroup_size()`, `gpu.create_compute_pipeline(kernel)`, `gpu.create_image(...)` |
-| `GpuPtr<T>` | `gpu.create(value)`, `.load()`, `.store(value)`, `.replace(value)`, `.slice(start, length)`, `.read_only()`, `.write_only()` |
-| `GpuSpan<T>` | `gpu.alloc::<T>(count)`, `gpu.alloc_in::<T>(count, memory)`, `.at(index)`, `.slice(start, length)`, `.copy_to(destination)`, `.read_only()`, `.write_only()` |
-| `GpuComputePipeline<Root, Owner>` / `GpuGraphicsPipeline<Root, Owner>` | `gpu.create_compute_pipeline(kernel)`, `gpu.create_graphics_pipeline(vertex, fragment)` |
-| `GpuCommands` | `gpu.start_command_recording()`, `commands.dispatch(pipeline, arguments, x, y, z)`, `commands.draw(pipeline, arguments, count)`, `commands.submit()`, `commands.cancel()` |
-| `Window` | `Window.new(width, height, String.from_str("Resin"))`, `window.poll_events()`, `window.framebuffer_size()`, input and cursor methods |
-| `ImageData` | `ImageData.read_png(path, channels)`, `image.write_png(path)` |
-| `Console` / `InputLine` | `Console.read_byte()`, `Console.read_line()`, `Console.print(line)` |
-| `RuntimeStatus` | `RuntimeStatus.from_code(code)`, `RuntimeStatus.code(error)`, `RuntimeStatus.message(error)` |
+| `ArcPtr<T>` / `ArcSpan<T>` | `arc_ptr_alloc(initial)` / `arc_span_alloc(count, initial)`, `:get()`, `:downgrade()` |
+| `Span<T>` | `:at(index)`, `:slice(start, length)`, numeric `:as_bytes()` |
+| `WeakPtr<T>` / `WeakSpan<T>` | `weak_ptr_empty::<T>()` / `weak_span_empty::<T>()`, `:upgrade()` |
+| `Gpu` | `gpu_new()`, `gpu_new_at(index)`, `gpu_new_for_window(window)`, `gpu:compute_workgroup_size()`, `gpu:create_compute_pipeline(kernel)`, `gpu:create_image(...)` |
+| `GpuPtr<T>` | `gpu:create(value)`, `:load()`, `:store(value)`, `:replace(value)`, `:slice(start, length)`, `:read_only()`, `:write_only()` |
+| `GpuSpan<T>` | `gpu:alloc::<T>(count)`, `gpu:alloc_in::<T>(count, memory)`, `:at(index)`, `:slice(start, length)`, `:copy_to(destination)`, `:read_only()`, `:write_only()` |
+| `GpuComputePipeline<Root, Owner>` / `GpuGraphicsPipeline<Root, Owner>` | `gpu:create_compute_pipeline(kernel)`, `gpu:create_graphics_pipeline(vertex, fragment)` |
+| `GpuCommands` | `gpu:start_command_recording()`, `commands:dispatch(pipeline, arguments, x, y, z)`, `commands:draw(pipeline, arguments, count)`, `commands:submit()`, `commands:cancel()` |
+| `Window` | `window_new(width, height, string_from_str("Resin"))`, `window:poll_events()`, `window:framebuffer_size()`, input and cursor methods |
+| `ImageData` | `image_read_png(path, channels)`, `image:write_png(path)` |
+| `Console` / `InputLine` | `console_read_byte()`, `console_read_line()`, `console_print(line)` |
+| `RuntimeStatus` | `runtime_status_from_code(code)`, `runtime_status_code(error)`, `runtime_status_message(error)` |
 
 Import `$/gpu.resin` for the `int` constants `memory_default`, `memory_gpu`, and
-`memory_readback`, used as `gpu.alloc_in::<uint>(count, memory_readback)`.
+`memory_readback`, used as `gpu:alloc_in::<uint>(count, memory_readback)`.
 Import `$/window.resin` for `key_escape`, `key_w`, `key_space`, and the other GLFW
 key codes, plus `mouse_button_left`, `mouse_button_right`, `mouse_button_middle`,
 and `mouse_button_4` through `mouse_button_8`. Pass these constants directly to
-`window.key_state(key_w)` and `window.mouse_button_state(mouse_button_left)`.
-These replace the former `Memory` methods, `Window.key_escape()`, `Window.keys()`,
-and `Window.mouse_buttons()`; the `KeyCodes` and `MouseButtons` records are removed.
+`window:key_state(key_w)` and `window:mouse_button_state(mouse_button_left)`.
+These replace the former `Memory` methods, `Window:key_escape()`, `Window:keys()`,
+and `Window:mouse_buttons()`; the `KeyCodes` and `MouseButtons` records are removed.
 
-`ImageData.write_pixels(path, width, height, channels, pixels, stride)` accepts a
+`image_write_pixels(path, width, height, channels, pixels, stride)` accepts a
 borrowed `Span<ubyte>`. It checks dimensions, channel count, row stride, and the
 span's capacity before calling the native image writer. A zero stride means packed
 rows; a nonzero stride separates row starts. Storage may end at the last pixel,
 without padding after the final row. Copy GPU output to owned host
-storage with `GpuSpan<T>.copy_to` first, and keep the owner alive through the write.
-The instance method `image.write_png(path)` uses the loaded image's dimensions and pixels.
+storage with `copy_to` first, and keep the owner alive through the write.
+The free operation `image:write_png(path)` uses the loaded image's dimensions and pixels.
 
 Import `$/shared.resin` for
-`ArcSpan<T>.alloc(count, initial) -> (ArcSpan<T> | Err<OutOfMemory>)`. Each element is
-initialized with an ordinary copy of `initial`; the type determines its size.
+`arc_span_alloc::<T>(count, initial) -> (ArcSpan<T> | Err<OutOfMemory>)`. Each element is
+initialized with a copy of `initial`, which must be copyable; the type determines its size.
 Allocation size overflow and allocation failure return `OutOfMemory`. Empty
-sequences are valid. Copies of the returned handle retain its allocation, and the
+sequences are valid. Explicit clones of the returned handle retain its allocation, and the
 last owner destroys the elements in reverse order and frees their storage.
-`owner.get()` borrows a `Span<T>` without retaining the allocation.
+`owner:get()` borrows a `Span<T>` without retaining the allocation.
 
 ```resin
-var host = ArcSpan<uint>.alloc(pixels.length, 0_ui)?;
-pixels.copy_to(host.get());
-ImageData.write_pixels(path.data, width, height, 4, host.get().as_bytes(), 0)?;
+let host = arc_span_alloc::<uint>(pixels.length, 0_ui)?;
+pixels:copy_to(host:get());
+image_write_pixels(path.data, width, height, 4, host:get():as_bytes(), 0)?;
 ```
 
-For numeric elements, `Span<T>.as_bytes()` exposes their in-memory bytes explicitly.
+For numeric elements, `span:as_bytes()` exposes their in-memory bytes explicitly.
 `ArcPtr<T>` owns one value, while `ArcSpan<T>` owns a sequence; `WeakPtr<T>` and
 `WeakSpan<T>` provide the corresponding weak references. A plain `Span<T>` is still
 a borrowed descriptor. `ArcPtr<Span<T>>` shares that descriptor, not its elements.
 
 Some operations return additional information:
 
-- `Gpu.device_count()` returns the count.
+- `gpu_device_count()` returns the count.
 - Pipeline factories return typed shared owners. Dispatch and draw project arguments
   internally, preserving interior byte offsets in GPU views.
-- `ImageData.read_png(path, channels)` returns a shared `ImageData` owner exposing
+- `image_read_png(path, channels)` returns a shared `ImageData` owner exposing
   `width()`, `height()`, `channels()`, and `pixels()` methods. The final owner releases the pixels;
   `channels = 0` requests the file's channel count.
-- `window.framebuffer_size()` returns `(width, height)`.
-  `window.should_close()` and `window.key_pressed(key)` return booleans, not status codes.
-- `gpu.present(image)` returns a boolean: presented or skipped. Native `INCOMPLETE`
+- `window:framebuffer_size()` returns `(width, height)`.
+  `window:should_close()` and `window:key_pressed(key)` return booleans, not status codes.
+- `gpu:present(image)` returns a boolean: presented or skipped. Native `INCOMPLETE`
   becomes a successful skipped frame; poll events and retry. Other failures remain errors.
-- `Gpu.enumerate_devices(infos, count)` still writes into caller-owned storage and returns
+- `gpu_enumerate_devices(infos, count)` still writes into caller-owned storage and returns
   `Incomplete` if truncated. Unlike skipped presentation, incomplete enumeration is an error;
   already-written entries remain available.
 
 `RuntimeError` is the union of `InvalidArgument`, `VulkanUnavailable`, `Unsupported`,
 `OutOfMemory`, `VulkanError`, `IoError`, `Incomplete`, `WindowUnavailable`, and
-`UnknownRuntimeError { code: int }`. `RuntimeStatus.from_code(code)` converts a native status;
-`RuntimeStatus.code(error)` recovers its number and `RuntimeStatus.message(error)` returns
+`UnknownRuntimeError { code: int }`. `runtime_status_from_code(code)` converts a native status;
+`runtime_status_code(error)` recovers its number and `runtime_status_message(error)` returns
 a borrowed, NUL-terminated native message. Unknown codes are preserved, not treated as success.
 Unhandled entry-point errors print their variant name and exit with status 1 after scope cleanup.
 Fallible resource operations return errors for callers to handle or propagate.
@@ -156,7 +156,7 @@ Invalid checked pointer access and the infallible formatting/printing operations
 
 ## Console input
 
-`Console.read_line() -> (InputLine | Err<InputError>)` reads one line from stdin through C's `getchar()`.
+`console_read_line() -> (InputLine | Err<InputError>)` reads one line from stdin through C's `getchar()`.
 The reading loop, buffer growth, newline removal, and ownership handling are written in Resin.
 Small native helpers expose standard-stream operations and integer-width conversions.
 
@@ -164,18 +164,18 @@ Small native helpers expose standard-stream operations and integer-width convers
 export { main };
 import { "$/console.resin", "$/string.resin" };
 
-def main() -> (() | Err<_>) = {
-    print("Name: ");
-    var name = Console.read_line()?;
-    print("Hello, ");
-    Console.print(name)?;
-    print("!\n");
-    (())
-};
+fn main() -> (() | Err<_>) {
+	print("Name: ");
+	let name = console_read_line()?;
+	print("Hello, ");
+	console_print(name)?;
+	print("!\n");
+	(())
+}
 ```
 
 The prompt is a separate `print` call, which flushes before input blocks. Unlike Python's
-optional prompt argument, `Console.read_line()` takes no arguments. LF and CRLF endings are removed;
+optional prompt argument, `console_read_line()` takes no arguments. LF and CRLF endings are removed;
 other bytes, including whitespace, embedded NULs, and a lone CR, are preserved as delivered by
 the C stream. UTF-8 is preserved without decoding or validation. Windows standard streams use
 the CRT's default text mode, including its newline and EOF translations.
@@ -186,27 +186,27 @@ succeed with length zero. EOF before any bytes returns `EndOfInput`; a final non
 variants are `InputReadError` and `InputOutOfMemory`. Failure frees any partial buffer; consumed
 stdin bytes are not restored. Errors remain subject to C's stream error state.
 
-Copying a line retains shared ownership; the final owner frees its allocation. Raw pointers
-into that allocation do not retain it. `Console.print(line)` writes all `length` bytes, adds no
+Moving a line transfers ownership; the final owner frees its allocation. Raw pointers
+into that allocation do not retain it. `console_print(line)` writes all `length` bytes, adds no
 newline, flushes stdout, and returns `(() | Err<InputWriteError>)`. The library function `print` does
 not accept `InputLine` values.
 
-`Console.read_byte() -> (ubyte | Err<EndOfInput | InputReadError>)` reads a single byte, including
+`console_read_byte() -> (ubyte | Err<EndOfInput | InputReadError>)` reads a single byte, including
 NUL and 255, and distinguishes EOF from stream failure. The raw `getchar` binding is private;
 callers never need to interpret its negative sentinel. These console APIs are for host execution.
 
 
-`Io.stdout().write(text)` and `Io.stderr().write(text)` accept `str | Span<ubyte> | String`, write
+`io_stdout():write(text)` and `io_stderr():write(text)` have overloads for `str`, `Ref<Span<ubyte>>`, and `Ref<String>`, write
 bytes verbatim, flush, and return `(() | Err<WriteError>)`. Import `$/io.resin` to use them.
 Use `fmt("n = {0}", (n,))` to construct an owned String before writing or storing it.
 Literals have type `str` over static bytes; formatting results own an `ArcSpan<ubyte>` allocation. Use
 `bytes(literal)` from `$/span.resin` when a raw byte view is needed. An InputLine
-can be passed as `line.get()` while
+can be passed as `line:get()` while
 its owner remains live.
 
-`String.from_str(text)` copies a `str` without formatting. `String.from_bytes(span)` copies
+`string_from_str(text)` copies a `str` without formatting. `string_from_bytes(span)` copies
 arbitrary raw bytes, including non-UTF-8 data and embedded NULs. Both append a NUL outside the
-logical length. `Window.new(width, height, title)` takes an owned String from either constructor
+logical length. `window_new(width, height, title)` borrows a String from either constructor
 or from `fmt`.
 
 `math.resin` exports `sqrt`, `sin`, and `cos` for `float32` and `float64`.

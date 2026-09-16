@@ -92,6 +92,13 @@ pub fn format_source(source: &str) -> Option<String> {
                     })
             }
             ";" => true,
+            "}" => node.parent().is_some_and(|parent| {
+                parent.kind() == "struct_definition"
+                    || parent.kind() == "block_body"
+                        && parent
+                            .parent()
+                            .is_some_and(|item| item.kind() == "function_definition")
+            }),
             "," => {
                 active.last().is_some_and(|g| g.multiline)
                     && node
@@ -150,10 +157,7 @@ fn finish_group(
                 matches!(
                     p.kind(),
                     "block_body" | "chain_term" | "match_term" | "extern_clause" | "foreign_group"
-                ) || (p.kind() == "struct_definition"
-                    && p.children_by_field_name("method", &mut p.walk())
-                        .next()
-                        .is_some())
+                )
             });
     let singleton_tuple = tokens[start].parent().is_some_and(|parent| {
         matches!(parent.kind(), "tuple_term" | "tuple_type")
@@ -210,7 +214,9 @@ fn space_between(left: Node<'_>, right: Node<'_>) -> bool {
     if a == "::" || b == "::" {
         return false;
     }
-    if matches!(a, "(" | "[" | ".") {
+    if matches!(a, "(" | "[" | ".")
+        || a == ":" && left.parent().is_some_and(|p| p.kind() == "method_call")
+    {
         return false;
     }
     let generic_left = generic_delimiter(left);
@@ -228,7 +234,7 @@ fn space_between(left: Node<'_>, right: Node<'_>) -> bool {
     if b == "(" || b == "[" {
         return matches!(
             a,
-            "const" | "if" | "while" | "match" | "else" | "=" | ":=" | "->" | "," | ":"
+            "const" | "if" | "while" | "match" | "else" | "=" | "->" | "," | ":"
         ) || (a == ")" && left.parent().is_some_and(|p| p.kind() == "if_term"))
             || (is_operator(left) && !(a == ">" && generic_left));
     }

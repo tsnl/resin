@@ -369,7 +369,7 @@ mod tests {
     fn source_names_and_text_round_trip_without_path_interpretation() {
         let source = SourceFile {
             name: "../dir%25/module.resin".into(),
-            text: "def main() = { \\\"λ\\\" };\\n".into(),
+            text: "fn main() = { \\\"λ\\\" };\\n".into(),
         };
         assert_eq!(
             serde_json::from_slice::<SourceFile>(&serde_json::to_vec(&source).unwrap()).unwrap(),

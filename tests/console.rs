@@ -67,26 +67,25 @@ impl Program {
 #[test]
 fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
     let program = Program::new(
-        r#"
-        export { main };
+        r#"export { main };
         import { "$/console.resin", "$/string.resin" };
-        def failed(error: InputError) -> (() | Err<InputError>) = { Err(error) };
-        def main() -> (() | Err<_>) = {
-            var reading = 1 == 1;
+        fn failed(error: InputError) -> (() | Err<InputError>)  { Err(error) }
+        fn main() -> (() | Err<_>)  {
+            let mut reading = 1 == 1;
             while (reading) {
-                match (Console.read_line()) {
+                match (console_read_line()) {
                     InputLine(line) => {
 
-                        if (Ptr<ubyte>(ulong(line.get().data) + line.get().length).* != ubyte(0)) {
+                        if (Ptr<ubyte>(ulong(line:get().data) + line:get().length).* != ubyte(0)) {
                             print("missing terminator");
                         } else {};
-                        print(fmt("[{0}:", (line.get().length,)));
-                        Console.print(line)?;
+                        print(fmt("[{0}:", (line:get().length,)));
+                        console_print(line)?;
                         print("]");
                     },
                     Err(error) => {
                         match (error) {
-                            EndOfInput(e) => { reading := 1 == 0; },
+                            EndOfInput(e) => { reading = 1 == 0; },
                             InputReadError(e) => { failed(e)?; },
                             InputOutOfMemory(e) => { failed(e)?; },
                         };
@@ -94,7 +93,7 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
                 };
             };
             (())
-        };
+        }
     "#,
     );
     for (input, expected) in [
@@ -135,13 +134,12 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
 #[test]
 fn byte_input_distinguishes_bytes_from_eof() {
     let program = Program::new(
-        r#"
-        export { main };
+        r#"export { main };
         import { "$/console.resin", "$/string.resin" };
-        def main() -> (int | Err<_>) = {
-            var zero = Console.read_byte()?;
-            var first = Console.read_byte()?;
-            var ended = match (Console.read_byte()) {
+        fn main() -> (int | Err<_>)  {
+            let mut zero = console_read_byte()?;
+            let mut first = console_read_byte()?;
+            let mut ended = match (console_read_byte()) {
                 ubyte(byte) => { 1 == 0 },
                 Err(error) => {
                     match (error) {
@@ -151,7 +149,7 @@ fn byte_input_distinguishes_bytes_from_eof() {
                 },
             };
             (if (zero == ubyte(0) && first == ubyte(255) && ended) { 0 } else { 1 })
-        };
+        }
     "#,
     );
     assert!(program.run(b"\0\xff").status.success());
@@ -186,23 +184,22 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
         .unwrap();
         let header = header.to_string_lossy().replace('\\', "/");
         let source = format!(
-            r#"
-            export {{ main }};
+            r#"export {{ main }};
 
             extern {{
                 "{header}": {{
-                    def console_test_mode() -> int;
-                    def console_test_frees() -> int;
+                    fn console_test_mode() -> int;
+                    fn console_test_frees() -> int;
                 }},
             }};
            import {{ "$/console.resin" }};
-            def exercise() -> int = {{
-                var mode = console_test_mode();
-                match (Console.read_line()) {{
+            fn exercise() -> int  {{
+                let mut mode = console_test_mode();
+                match (console_read_line()) {{
                     InputLine(line) => {{
 
-                        match (Console.print(line)) {{
-                            ()(unit) => {{ if (mode == 6 && line.get().length == ulong(300)) {{ 0 }} else {{ 1 }} }},
+                        match (console_print(line)) {{
+                            ()(unit) => {{ if (mode == 6 && line:get().length == ulong(300)) {{ 0 }} else {{ 1 }} }},
                             Err(error) => {{ if (mode == 4 || mode == 5) {{ 0 }} else {{ 2 }} }},
                         }}
                     }},
@@ -214,12 +211,12 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
                         }}
                     }},
                 }}
-            }};
-            def main() -> int = {{
-                var result = exercise();
-                var expected = if (console_test_mode() == 0) {{ 0 }} else {{ 1 }};
+            }}
+            fn main() -> int  {{
+                let mut result = exercise();
+                let mut expected = if (console_test_mode() == 0) {{ 0 }} else {{ 1 }};
                 if (console_test_frees() != expected) {{ 6 }} else {{ result }}
-            }};"#
+            }}"#
         );
         let path = temp.path().join("main.resin");
         fs::write(&path, source).unwrap();
@@ -245,22 +242,21 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
 #[test]
 fn streams_write_literals_and_owned_strings_verbatim() {
     let program = Program::new(
-        r#"
-        export { main };
+        r#"export { main };
         import { "$/io.resin", "$/string.resin", "$/span.resin" };
-        def literal() -> str = { "static\0bytes" };
-        def main() -> (() | Err<_>) = {
-            var out = Io.stdout();
-            var error = Io.stderr();
-            var text = fmt("n = {0}", (42,));
-            var copy = text;
-            out.write("raw {0}\0")?;
-            out.write(copy)?;
-            out.write(bytes(" bytes"))?;
-            error.write(fmt("error: {0}\n", (text.bytes(),)))?;
-            error.write(literal())?;
+        fn literal() -> str  { "static\0bytes" }
+        fn main() -> (() | Err<_>)  {
+            let mut out = io_stdout();
+            let mut error = io_stderr();
+            let mut text = fmt("n = {0}", (42,));
+            let copy = text:clone();
+            out:write("raw {0}\0")?;
+            out:write(copy)?;
+            out:write(bytes(" bytes"))?;
+            error:write(fmt("error: {0}\n", (text:bytes(),)))?;
+            error:write(literal())?;
             (())
-        };
+        }
     "#,
     );
     let output = program.run(b"");
@@ -272,14 +268,13 @@ fn streams_write_literals_and_owned_strings_verbatim() {
 #[test]
 fn stream_write_failure_propagates_as_a_library_error() {
     let program = Program::new(
-        r#"
-        export { main };
+        r#"export { main };
         import { "$/io.resin", "$/string.resin" };
-        def main() -> (() | Err<_>) = {
-            Output { stream = 99_ui }.write("unwritten")?;
+        fn main() -> (() | Err<_>)  {
+            Output { stream = 99_ui }:write("unwritten")?;
             print("not reached");
             (())
-        };
+        }
     "#,
     );
     let output = program.run(b"");

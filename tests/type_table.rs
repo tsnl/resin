@@ -4,19 +4,18 @@ mod support;
 #[test]
 fn nominal_and_structural_types_share_one_index_space() {
     let module = support::module(
-        r#"
-        struct FieldsValue<T0> { value: T0 };
-struct First { value: int };
-        struct Second { value: int };
+        r#"struct FieldsValue<T0> { value: T0, }
+struct First { value: int, }
+        struct Second { value: int, }
         type Alias = First;
         type Record = FieldsValue<int>;
         type RecordAlias = Record;
         type Optional = int | None;
         type Flattened = None | Optional | int;
-        struct Node { next: Ptr<Node>, value: Optional };
-        def nominal(x: Alias) -> First = { x };
-        def record(x: RecordAlias) -> Record = { x };
-        def optional(x: Flattened) -> Optional = { x };
+        struct Node { next: Ptr<Node>, value: Optional, }
+        fn nominal(x: Alias) -> First  { x }
+        fn record(x: RecordAlias) -> Record  { x }
+        fn optional(x: Flattened) -> Optional  { x }
         "#,
     );
     for (index, ty) in module.types.types().enumerate() {
@@ -65,12 +64,11 @@ struct First { value: int };
 #[test]
 fn both_emitters_use_payload_table_indices_as_union_tags() {
     let mut module = support::module(
-        r#"
-        export { main, kernel };
-        struct HostOnly { unrelated: float64 };
-        def choose(i: uint) -> uint | None = { if (i == 0_ui) { None } else { i } };
-        def main() -> int = { int(choose(42_ui)!) };
-        @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := choose(i)!; };
+        r#"export { main, kernel };
+        struct HostOnly { unrelated: float64, }
+        fn choose(i: uint) -> uint | None  { if (i == 0_ui) { None } else { i } }
+        fn main() -> int  { int(choose(42_ui)!) }
+        @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = choose(i)!; }
         "#,
     );
     let optional = module.functions[0].result.clone();

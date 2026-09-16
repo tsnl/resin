@@ -1,10 +1,9 @@
 ==================
 Shader decorator and function reference
 ==================
-
 @compute_shader
-def kernel(i: uint) -> uint = { i };
-def main() = { var entry = kernel; };
+fn kernel(i: uint) -> uint  { i }
+fn main()  { let mut entry = kernel; }
 
 ---
 
@@ -13,8 +12,9 @@ def main() = { var entry = kernel; };
     (decorator
       (lid))
     (lid)
-    (declare
-      (lid)
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type
@@ -41,7 +41,8 @@ def main() = { var entry = kernel; };
       (statement
         (define
           (local_define
-            (lid)
+            (binding_pattern
+              (lid))
             (term
               (assignment_term
                 (binary_term

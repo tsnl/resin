@@ -212,7 +212,7 @@ fn requests_resolve_relative_paths_from_the_supplied_directory() {
     let mut environment = Environment::capture().unwrap();
     environment.directory = fs::canonicalize(temp.path()).unwrap();
     let source = environment.directory.join("program.resin");
-    fs::write(&source, "export { main }; def main() = {};").unwrap();
+    fs::write(&source, "export { main }; fn main()  {}").unwrap();
     fs::create_dir(environment.directory.join("dist")).unwrap();
     for destination in ["dist", "new/", "output"] {
         let request = request(

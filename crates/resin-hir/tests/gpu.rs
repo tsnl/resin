@@ -9,46 +9,57 @@ fn generate(source: &str) -> Result<Module, resin_source::SourceError> {
 
 #[test]
 fn compute_workgroup_size_is_an_ordinary_source_name() {
-    let error = generate("def size() -> ulong = { compute_workgroup_size };").unwrap_err();
+    let error = generate("fn size() -> ulong  { compute_workgroup_size }").unwrap_err();
     assert!(error.to_string().contains("UnboundValue"), "{error}");
-    generate("def compute_workgroup_size() -> ulong = { 1_ul }; def size() -> ulong = { var compute_workgroup_size = 1_ul; compute_workgroup_size := 2_ul; compute_workgroup_size };").unwrap();
+    generate("fn compute_workgroup_size() -> ulong  { 1_ul } fn size() -> ulong  { let mut compute_workgroup_size = 1_ul; compute_workgroup_size = 2_ul; compute_workgroup_size }").unwrap();
 }
 
 // These names deliberately differ from the library. Contracts are explicit
 // declarations; no compiler type or method is selected from a public spelling.
-const PIPELINES: &str = r#"
-struct Failure {};
-struct DeviceReference<T> { allocation: GpuView };
-struct HostRange<T> { data: Ptr<T>, length: ulong };
-struct DeviceRange<T> { data: DeviceReference<T>, length: ulong };
-intrinsic "gpu_pointer_projection" def pointer_projection<T>(value: DeviceReference<T>) -> Ptr<T>;
-intrinsic "gpu_span_projection" def span_projection<T>(value: DeviceRange<T>) -> HostRange<T>;
-struct ComputeProgram<Root, Owner> { contract: GpuPipelineContract };
-struct GraphicsProgram<Root, Owner> { contract: GpuPipelineContract };
-intrinsic "gpu_compute_pipeline_type" def compute_type<Root, Owner>(contract: GpuPipelineContract) -> ComputeProgram<Root, Owner>;
-intrinsic "gpu_graphics_pipeline_type" def graphics_type<Root, Owner>(contract: GpuPipelineContract) -> GraphicsProgram<Root, Owner>;
+const PIPELINES: &str = r#"struct Failure {}
+struct DeviceReference<T> { allocation: GpuView, }
+struct HostRange<T> { data: Ptr<T>, length: ulong, }
+struct DeviceRange<T> { data: DeviceReference<T>, length: ulong, }
+intrinsic "gpu_pointer_projection" fn pointer_projection<T>(value: DeviceReference<T>) -> Ptr<T>;
+intrinsic "gpu_span_projection" fn span_projection<T>(value: DeviceRange<T>) -> HostRange<T>;
+struct ComputeProgram<Root, Owner> { contract: GpuPipelineContract, }
+struct GraphicsProgram<Root, Owner> { contract: GpuPipelineContract, }
+intrinsic "gpu_compute_pipeline_type" fn compute_type<Root, Owner>(contract: GpuPipelineContract) -> ComputeProgram<Root, Owner>;
+intrinsic "gpu_graphics_pipeline_type" fn graphics_type<Root, Owner>(contract: GpuPipelineContract) -> GraphicsProgram<Root, Owner>;
 struct Device {
-    @gpu_allocator
-    def malloc(self: Device, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | Err<Failure>) = { Err(Failure {}) };
-    @gpu_compute_pipeline
-    def compute(self: Device, code: (Ptr<ubyte>, ulong)) -> (PipelineOwner | Err<Failure>) = { Err(Failure {}) };
-    @gpu_graphics_pipeline
-    def graphics(self: Device, vertex: (Ptr<ubyte>, ulong), fragment: (Ptr<ubyte>, ulong)) -> (PipelineOwner | Err<Failure>) = { Err(Failure {}) };
-};
+    
+    
+    
+}
+@gpu_allocator
+    fn malloc(self: Device, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | Err<Failure>)  { Err(Failure {}) }
+
+@gpu_compute_pipeline
+    fn compute(self: Device, code: (Ptr<ubyte>, ulong)) -> (PipelineOwner | Err<Failure>)  { Err(Failure {}) }
+
+@gpu_graphics_pipeline
+    fn graphics(self: Device, vertex: (Ptr<ubyte>, ulong), fragment: (Ptr<ubyte>, ulong)) -> (PipelineOwner | Err<Failure>)  { Err(Failure {}) }
+
 struct PipelineOwner { owner: StrongOwner,
-    @gpu_pipeline_context
-    def context(self: PipelineOwner) -> Device = { Device {} };
-};
+    
+}
+@gpu_pipeline_context
+    fn context(self: PipelineOwner) -> Device  { Device {} }
+
 struct Commands {
-    @gpu_dispatch
-    def dispatch(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments, x: uint, y: uint, z: uint) -> (() | Err<Failure>) = { (()) };
-    @gpu_draw
-    def draw(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments | None, count: uint) -> (() | Err<Failure>) = { (()) };
-};
-struct HostParams<T> { scale: float32, values: T };
-struct WrongParams<T> { scale: float32, wrong: T };
-struct Params { scale: float32, values: HostRange<int> };
-@compute_shader def kernel(index: ulong, root: Ptr<Params>) = {};
+    
+    
+}
+@gpu_dispatch
+    fn dispatch(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments, x: uint, y: uint, z: uint) -> (() | Err<Failure>)  { (()) }
+
+@gpu_draw
+    fn draw(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments | None, count: uint) -> (() | Err<Failure>)  { (()) }
+
+struct HostParams<T> { scale: float32, values: T, }
+struct WrongParams<T> { scale: float32, wrong: T, }
+struct Params { scale: float32, values: HostRange<int>, }
+@compute_shader fn kernel(index: ulong, root: Ptr<Params>)  {}
 "#;
 
 fn pipelines(source: &str) -> Result<Module, resin_source::SourceError> {
@@ -63,13 +74,12 @@ fn contract_declarations_may_follow_their_users_and_dependencies() {
     let contracts = contracts.into_iter().rev().collect::<Vec<_>>().join("\n");
     let declarations = declarations.join("\n");
     generate(&format!(
-        r#"
-        {declarations}
-        struct FieldsScaleValues<T0, T1> {{ scale: T0, values: T1 }};
-def main(values: DeviceRange<int>) -> (() | Err<Failure>) = {{
-            var pipeline = Device {{}}.compute(kernel)?;
-            Commands {{}}.dispatch(pipeline, FieldsScaleValues<_, _> {{ scale = 2.0, values = values }}, 1, 1, 1)
-        }};
+        r#"{declarations}
+        struct FieldsScaleValues<T0, T1> {{ scale: T0, values: T1, }}
+fn main(values: DeviceRange<int>) -> (() | Err<Failure>) {{
+            let mut pipeline = Device {{}}:compute(kernel)?;
+            Commands {{}}:dispatch(pipeline, FieldsScaleValues<_, _> {{ scale = 2.0, values = values }}, 1, 1, 1)
+        }}
         {contracts}
     "#
     ))
@@ -78,22 +88,23 @@ def main(values: DeviceRange<int>) -> (() | Err<Failure>) = {{
 
 #[test]
 fn former_gpu_type_names_are_ordinary_generic_declarations() {
-    generate(r#"
-        struct GpuPtr<T> { value: T, def new(value: T) -> GpuPtr<T> = { GpuPtr<T> { value = value } }; };
-        struct GpuSpan<T> { value: T };
-        struct GpuComputePipeline<T> { value: T };
-        struct GpuGraphicsPipeline<T> { value: T };
-        def main() -> int = { GpuPtr<int>.new(42).value };
-    "#).unwrap();
+    generate(
+        r#"struct GpuPtr<T> { value: T,  }
+fn gpu_ptr_new<T>(value: T) -> GpuPtr<T>  { GpuPtr<T> { value = value } }
+
+        struct GpuSpan<T> { value: T, }
+        struct GpuComputePipeline<T> { value: T, }
+        struct GpuGraphicsPipeline<T> { value: T, }
+        fn main() -> int  { gpu_ptr_new::<int>(42).value }
+    "#,
+    )
+    .unwrap();
 }
 
 #[test]
 fn allocator_registration_does_not_synthesize_constructor_methods() {
-    let error = pipelines("def main(device: Device) = { device.new(42); };").unwrap_err();
-    assert!(
-        error.to_string().contains("unknown method `new`"),
-        "{error}"
-    );
+    let error = pipelines("fn main(device: Device)  { device:new(42); }").unwrap_err();
+    assert!(error.to_string().contains("UnboundValue"), "{error}");
 }
 
 #[test]
@@ -104,7 +115,7 @@ fn opaque_gpu_views_cannot_be_dereferenced_or_cast_to_raw_addresses() {
         ("ulong(value)", "TypeMismatch"),
         ("value.data", "field access requires a record"),
     ] {
-        let error = generate(&format!("def invalid(value: GpuView) = {{ {body}; }};")).unwrap_err();
+        let error = generate(&format!("fn invalid(value: GpuView)  {{ {body}; }}")).unwrap_err();
         assert!(error.to_string().contains(expected), "{body}: {error}");
     }
 }
@@ -112,12 +123,11 @@ fn opaque_gpu_views_cannot_be_dereferenced_or_cast_to_raw_addresses() {
 #[test]
 fn dispatch_infers_source_host_fields_from_the_pipeline_root() {
     let module = pipelines(
-        r#"
-        struct FieldsScaleValues<T0, T1> { scale: T0, values: T1 };
-def main(values: DeviceRange<int>) -> (() | Err<Failure>) = {
-            var pipeline = Device {}.compute(kernel)?;
-            Commands {}.dispatch(pipeline, FieldsScaleValues<_, _> { scale = 2.0, values = values }, 1, 1, 1)
-        };
+        r#"struct FieldsScaleValues<T0, T1> { scale: T0, values: T1, }
+fn main(values: DeviceRange<int>) -> (() | Err<Failure>)  {
+            let mut pipeline = Device {}:compute(kernel)?;
+            Commands {}:dispatch(pipeline, FieldsScaleValues<_, _> { scale = 2.0, values = values }, 1, 1, 1)
+        }
     "#,
     )
     .unwrap();
@@ -152,14 +162,13 @@ def main(values: DeviceRange<int>) -> (() | Err<Failure>) = {
 
 #[test]
 fn pipeline_types_cross_functions_and_accept_precomputed_arguments() {
-    pipelines(r#"
-        struct FieldsScaleValues<T0, T1> { scale: T0, values: T1 };
-def create(gpu: Device) -> (ComputeProgram<Params, PipelineOwner> | Err<Failure>) = { gpu.compute(kernel) };
-        def dispatch(pipeline: ComputeProgram<Params, PipelineOwner>, values: DeviceRange<int>) -> (() | Err<Failure>) = {
-            var arguments = (pipeline, FieldsScaleValues<_, _> { scale = 1.0_f, values = values }, 1_ui, 1_ui, 1_ui);
-            Commands {}.dispatch(arguments.0, arguments.1, arguments.2, arguments.3, arguments.4)
-        };
-        def associated(gpu: Device) -> _ = { Device.compute(gpu, kernel) };
+    pipelines(r#"struct FieldsScaleValues<T0, T1> { scale: T0, values: T1, }
+fn create(gpu: Device) -> (ComputeProgram<Params, PipelineOwner> | Err<Failure>)  { gpu:compute(kernel) }
+        fn dispatch(pipeline: ComputeProgram<Params, PipelineOwner>, values: DeviceRange<int>) -> (() | Err<Failure>)  {
+            let mut arguments = (pipeline, FieldsScaleValues<_, _> { scale = 1.0_f, values = values }, 1_ui, 1_ui, 1_ui);
+            Commands {}:dispatch(arguments.0, arguments.1, arguments.2, arguments.3, arguments.4)
+        }
+        fn associated(gpu: Device) -> _  { compute(gpu, kernel) }
     "#).unwrap();
 }
 
@@ -167,24 +176,23 @@ def create(gpu: Device) -> (ComputeProgram<Params, PipelineOwner> | Err<Failure>
 fn creation_requires_direct_decorated_shader_declarations() {
     for (expression, expected) in [
         (
-            "gpu.compute((Ptr<ubyte>(0_ul), 0_ul))",
+            "gpu:compute((Ptr<ubyte>(0_ul), 0_ul))",
             "requires decorated shader declarations",
         ),
-        ("gpu.compute(alias)", "requires direct shader declarations"),
+        ("gpu:compute(alias)", "requires direct shader declarations"),
         (
-            "gpu.compute(ordinary)",
+            "gpu:compute(ordinary)",
             "requires a decorated shader declaration",
         ),
         (
-            "gpu.compute(choose())",
+            "gpu:compute(choose())",
             "requires direct shader declarations",
         ),
     ] {
         let error = pipelines(&format!(
-            r#"
-            def ordinary(index: ulong, root: Ptr<Params>) = {{}};
-            def choose() -> (ulong, Ptr<Params>) -> () = {{ kernel }};
-            def main(gpu: Device) -> _ = {{ var alias = kernel; {expression} }};
+            r#"fn ordinary(index: ulong, root: Ptr<Params>)  {{}}
+            fn choose() -> (ulong, Ptr<Params>) -> ()  {{ kernel }}
+            fn main(gpu: Device) -> _  {{ let mut alias = kernel; {expression} }}
         "#
         ))
         .unwrap_err();
@@ -199,26 +207,26 @@ fn creation_requires_direct_decorated_shader_declarations() {
 fn dispatch_rejects_raw_views_wrong_fields_and_incompatible_stages() {
     for (tail, expected) in [
         (
-            "Commands {}.dispatch(pipeline, HostParams<_> { scale = 1.0_f, values = raw }, 1, 1, 1)",
+            "Commands {}:dispatch(pipeline, HostParams<_> { scale = 1.0_f, values = raw }, 1, 1, 1)",
             "incompatible inferred types",
         ),
         (
-            "Commands {}.dispatch(pipeline, WrongParams<_> { scale = 1.0_f, wrong = values }, 1, 1, 1)",
+            "Commands {}:dispatch(pipeline, WrongParams<_> { scale = 1.0_f, wrong = values }, 1, 1, 1)",
             "must match the shader root",
         ),
         (
-            "Commands {}.draw(pipeline, HostParams<_> { scale = 1.0_f, values = values }, 3)",
+            "Commands {}:draw(pipeline, HostParams<_> { scale = 1.0_f, values = values }, 3)",
             "draw requires a graphics pipeline",
         ),
         (
-            "Commands {}.dispatch(pipeline, None, 1, 1, 1)",
+            "Commands {}:dispatch(pipeline, None, 1, 1, 1)",
             "incompatible inferred types",
         ),
     ] {
-        let error = pipelines(&format!("def main(gpu: Device, values: DeviceRange<int>, raw: HostRange<int>) -> _ = {{ var pipeline = gpu.compute(kernel)?; {tail} }};")).unwrap_err();
+        let error = pipelines(&format!("fn main(gpu: Device, values: DeviceRange<int>, raw: HostRange<int>) -> _  {{ let mut pipeline = gpu:compute(kernel)?; {tail} }}")).unwrap_err();
         assert!(error.to_string().contains(expected), "{tail}: {error}");
     }
-    let error = pipelines("def create(gpu: Device) -> (ComputeProgram<int, PipelineOwner> | Err<Failure>) = { gpu.compute(kernel) };").unwrap_err();
+    let error = pipelines("fn create(gpu: Device) -> (ComputeProgram<int, PipelineOwner> | Err<Failure>)  { gpu:compute(kernel) }").unwrap_err();
     assert!(error.to_string().contains("destination union"), "{error}");
 }
 
@@ -226,15 +234,15 @@ fn dispatch_rejects_raw_views_wrong_fields_and_incompatible_stages() {
 fn native_bridges_cannot_escape_through_method_references() {
     for (declaration, expected) in [
         (
-            "def escape(gpu: Device) = { var factory = gpu.compute; };",
+            "fn escape(gpu: Device)  { let mut factory = gpu.compute; }",
             "unknown field `compute`",
         ),
         (
-            "def escape() = { var factory = Device.compute; };",
-            "only source methods can be referenced as function values",
+            "fn escape()  { let mut factory = compute; }",
+            "native bridge references cannot escape",
         ),
         (
-            "def escape(commands: Commands) = { var dispatch = commands.dispatch; };",
+            "fn escape(commands: Commands)  { let mut dispatch = commands.dispatch; }",
             "unknown field `dispatch`",
         ),
     ] {

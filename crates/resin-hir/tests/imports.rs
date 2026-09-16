@@ -22,12 +22,9 @@ fn valid(compilation: &Hir) {
 async fn unchanged_graph_reuses_the_completed_result_after_resolving_imports() {
     let entry = Source::new(
         "entry",
-        "import { \"dependency\" }; def main() -> int = { value() };",
+        "import { \"dependency\" }; fn main() -> int  { value() }",
     );
-    let dependency = Source::new(
-        "dependency",
-        "export { value }; def value() -> int = { 1 };",
-    );
+    let dependency = Source::new("dependency", "export { value }; fn value() -> int  { 1 }");
     let mut loader = Loader::new(resin_source::library_root());
     let cache = Cache::new(16);
     loader
@@ -54,20 +51,20 @@ async fn unchanged_graph_reuses_the_completed_result_after_resolving_imports() {
 async fn changing_a_transitive_source_invalidates_an_unchanged_entry() {
     let entry = Source::new(
         "entry",
-        "import { \"middle\" }; def main() -> int = { value() };",
+        "import { \"middle\" }; fn main() -> int  { value() }",
     );
     let middle = Source::new(
         "middle",
-        "export { value }; import { \"leaf\" }; def value() -> int = { leaf() };",
+        "export { value }; import { \"leaf\" }; fn value() -> int  { leaf() }",
     );
-    let leaf = Source::new("leaf", "export { leaf }; def leaf() -> int = { 1 };");
+    let leaf = Source::new("leaf", "export { leaf }; fn leaf() -> int  { 1 }");
     let mut loader = Loader::new(resin_source::library_root());
     let cache = Cache::new(16);
     loader.set_import(&entry, "middle", middle.clone()).unwrap();
     loader.set_import(&middle, "leaf", leaf.clone()).unwrap();
     let (cache, before) = request(&cache, entry.clone(), &mut loader).await.unwrap();
     valid(&before);
-    let changed = leaf.with_text("export { leaf }; def leaf() -> bool = { 1 == 1 };");
+    let changed = leaf.with_text("export { leaf }; fn leaf() -> bool  { 1 == 1 }");
     loader.set_import(&middle, "leaf", changed.clone()).unwrap();
     let (_, after) = request(&cache, entry.clone(), &mut loader).await.unwrap();
     assert!(!Arc::ptr_eq(&before, &after));
@@ -83,7 +80,7 @@ async fn changing_a_transitive_source_invalidates_an_unchanged_entry() {
 async fn a_missing_transitive_import_recovers_without_notifications() {
     let entry = Source::new("entry", "import { \"middle\" };");
     let middle = Source::new("middle", "import { \"leaf\" };");
-    let leaf = Source::new("leaf", "def leaf() = {};");
+    let leaf = Source::new("leaf", "fn leaf()  {}");
     let mut loader = Loader::new(resin_source::library_root());
     let cache = Cache::new(16);
     loader.set_import(&entry, "middle", middle.clone()).unwrap();
@@ -105,20 +102,20 @@ async fn a_missing_transitive_import_recovers_without_notifications() {
 async fn changed_import_edges_invalidate_cache_even_with_the_same_source_set() {
     let entry = Source::new(
         "entry",
-        "import { \"first\", \"second\" }; def main() -> int = { first() };",
+        "import { \"first\", \"second\" }; fn main() -> int  { first() }",
     );
     let first = Source::new(
         "first",
-        "export { first }; import { \"value\" }; def first() -> int = { value() };",
+        "export { first }; import { \"value\" }; fn first() -> int  { value() }",
     );
     let second = Source::new(
         "second",
-        "export { second }; import { \"value\" }; def second() -> bool = { value() };",
+        "export { second }; import { \"value\" }; fn second() -> bool  { value() }",
     );
-    let integer = Source::new("integer", "export { value }; def value() -> int = { 1 };");
+    let integer = Source::new("integer", "export { value }; fn value() -> int  { 1 }");
     let boolean = Source::new(
         "boolean",
-        "export { value }; def value() -> bool = { 1 == 1 };",
+        "export { value }; fn value() -> bool  { 1 == 1 }",
     );
     let mut loader = Loader::new(resin_source::library_root());
     let cache = Cache::new(16);
@@ -144,8 +141,8 @@ async fn changed_import_edges_invalidate_cache_even_with_the_same_source_set() {
 #[tokio::test]
 async fn inconsistent_versions_of_one_logical_source_are_diagnosed() {
     let entry = Source::new("entry", "import { \"first\", \"second\" };");
-    let first = Source::new("module", "def value() -> int = { 1 };");
-    let second = first.with_text("def value() -> int = { 2 };");
+    let first = Source::new("module", "fn value() -> int  { 1 }");
+    let second = first.with_text("fn value() -> int  { 2 }");
     assert_eq!(first.id(), second.id());
     assert_ne!(first, second);
     let mut loader = Loader::new(resin_source::library_root());
@@ -181,12 +178,12 @@ async fn identical_diagnostic_names_do_not_merge_distinct_sources() {
     let first = Source::with_identity(
         SourceId::new("first"),
         "generated",
-        "def first() -> int = { 1 == 1 };",
+        "fn first() -> int  { 1 == 1 }",
     );
     let second = Source::with_identity(
         SourceId::new("second"),
         "generated",
-        "def second() -> bool = { 1 };",
+        "fn second() -> bool  { 1 }",
     );
     let mut loader = Loader::new(resin_source::library_root());
     let cache = Cache::new(16);
@@ -210,13 +207,12 @@ async fn identical_diagnostic_names_do_not_merge_distinct_sources() {
 async fn retained_compilations_keep_their_own_source_versions_and_editor_queries() {
     let before = Source::new(
         "editor",
-        "def value() -> int = { 1 }; def main() -> int = { value() };",
+        "fn value() -> int  { 1 } fn main() -> int  { value() }",
     );
     let mut loader = Loader::new(resin_source::library_root());
     let cache = Cache::new(16);
     let (cache, old) = request(&cache, before.clone(), &mut loader).await.unwrap();
-    let after =
-        before.with_text("def value() -> bool = { 1 == 1 }; def main() -> bool = { value() };");
+    let after = before.with_text("fn value() -> bool  { 1 == 1 } fn main() -> bool  { value() }");
     let (_, new) = request(&cache, after.clone(), &mut loader).await.unwrap();
     valid(&old);
     valid(&new);
@@ -243,18 +239,18 @@ async fn retained_compilations_keep_their_own_source_versions_and_editor_queries
 async fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
     let source = Source::new(
         "entry",
-        "export { first, second }; def first() -> bool = { (1 == 1) + (1 == 1) }; def second() -> int = { var r = (1,); r + r; 0 };",
+        "export { first, second }; fn first() -> bool { (1 == 1) + (1 == 1) } fn second() -> int { let mut r = (1,); r + r; 0 }",
     );
     let mut loader = Loader::new(resin_source::library_root());
     let cache = Cache::new(16);
     let (cache, lowered) = request(&cache, source.clone(), &mut loader).await.unwrap();
     assert!(lowered.program().is_ok());
     assert!(lowered.hir().is_ok());
-    let typed_source = source.with_text("def main() -> int = { 1 == 2 };");
+    let typed_source = source.with_text("fn main() -> int  { 1 == 2 }");
     let (cache, typed) = request(&cache, typed_source, &mut loader).await.unwrap();
     assert!(typed.program().is_ok());
     assert!(typed.hir().is_err());
-    let parsed_source = source.with_text("def main( = { 1 == 2 };");
+    let parsed_source = source.with_text("fn main( = { 1 == 2 };");
     let (_, parsed) = request(&cache, parsed_source.clone(), &mut loader)
         .await
         .unwrap();
@@ -266,11 +262,11 @@ async fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
 async fn imported_initialization_errors_keep_the_dependency_source_version() {
     let entry = Source::new(
         "entry",
-        "import { \"dependency\" }; def main() -> int = { value() };",
+        "import { \"dependency\" }; fn main() -> int  { value() }",
     );
     let dependency = Source::new(
         "dependency",
-        "export { value }; def value() -> int = { var n: int; n };",
+        "export { value }; fn value() -> int  { let mut n: int; n }",
     );
     let read = dependency.text().rfind("n }").unwrap();
     let mut loader = Loader::new(resin_source::library_root());
@@ -295,7 +291,7 @@ async fn imported_initialization_errors_keep_the_dependency_source_version() {
     let call = entry.text().rfind("value").unwrap();
     assert_eq!(failed.definition(&entry, call).unwrap().source, dependency);
 
-    let repaired = dependency.with_text("export { value }; def value() -> int = { 7 };");
+    let repaired = dependency.with_text("export { value }; fn value() -> int  { 7 }");
     loader.set_import(&entry, "dependency", repaired).unwrap();
     let (_, repaired) = request(&cache, entry, &mut loader).await.unwrap();
     valid(&repaired);
@@ -312,8 +308,8 @@ async fn imported_initialization_errors_keep_the_dependency_source_version() {
 #[tokio::test]
 async fn conflicting_versions_cannot_publish_a_partial_cache_generation() {
     let entry = Source::new("entry", "import { \"first\", \"conflict\", \"original\" };");
-    let original = Source::new("module", "def value() -> int = { 1 };");
-    let conflict = original.with_text("def value() -> int = { 2 };");
+    let original = Source::new("module", "fn value() -> int  { 1 }");
+    let conflict = original.with_text("fn value() -> int  { 2 }");
     let mut loader = Loader::new(resin_source::library_root());
     let cache = Cache::new(16);
     loader

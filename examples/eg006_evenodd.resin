@@ -2,22 +2,22 @@ export { main };
 
 import { "$/string.resin" };
 
-def even(n: int) -> int = {
+fn even(n: int) -> int {
 	if (n == 0) {
 		1
 	} else {
 		odd(n - 1)
 	}
-};
+}
 
-def odd(n: int) -> int = {
+fn odd(n: int) -> int {
 	if (n == 0) {
 		0
 	} else {
 		even(n - 1)
 	}
-};
+}
 
-def main() -> () = {
+fn main() -> () {
 	print(fmt("even(10) = {0}, odd(9) = {1}\n", (even(10), odd(9))));
-};
+}

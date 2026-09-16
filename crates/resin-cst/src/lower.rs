@@ -18,13 +18,44 @@ pub(super) fn recovery(document: &Document) -> Option<Document> {
     }
     let mut closers = vec![];
     unmatched(document.tree.root_node(), &mut closers);
-    if closers.is_empty() || closers.len() > 64 {
+    if closers.len() > 64 {
         return None;
     }
     let mut text = document.text.to_string();
+    let separated = separate_abandoned_fields(document.tree.root_node(), &mut text);
+    if closers.is_empty() && !separated {
+        return None;
+    }
     text.extend(closers.into_iter().rev());
+    let recovered = reparse(text.clone(), None);
+    if !recovered.tree.root_node().has_error() {
+        return Some(recovered);
+    }
     text.push(';');
     Some(reparse(text, None))
+}
+
+fn separate_abandoned_fields(node: Node<'_>, text: &mut String) -> bool {
+    let mut changed = false;
+    if node.kind() == "field_access" && node.has_error() {
+        let dot = node.child(0).filter(|child| child.kind() == ".");
+        let error = node
+            .children(&mut node.walk())
+            .find(|child| child.is_error());
+        if let (Some(dot), Some(error)) = (dot, error)
+            && text[dot.end_byte()..error.start_byte()].contains('\n')
+            && text[error.byte_range()].split_whitespace().next() == Some("let")
+        {
+            // Keep every source offset intact while recovering the following
+            // declaration. The original tree still supplies the syntax error.
+            text.replace_range(dot.byte_range(), ";");
+            changed = true;
+        }
+    }
+    for child in node.children(&mut node.walk()) {
+        changed |= separate_abandoned_fields(child, text);
+    }
+    changed
 }
 
 fn edited_tree(old: &Document, text: &str) -> Tree {

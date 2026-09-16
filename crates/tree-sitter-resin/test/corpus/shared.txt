@@ -1,22 +1,23 @@
 ==================
-Inherent destruction and shared ownership
+Free destruction hooks and shared ownership
 ==================
-
 struct Item { value: int,
-    def drop(self: Ptr<Item>) = {};
-};
+    
+}
+fn drop(self: Ptr<Item>)  {}
 
-def main() = {
-    var owner = ArcPtr<Item>.alloc(Item { value = 42 })?;
-    var weak: WeakPtr<Item>;
-    weak := owner.downgrade();
-    var maybe: ArcPtr<Item> | None;
-    maybe := weak.upgrade();
+
+fn main()  {
+    let mut owner = arc_ptr_alloc::<Item>(Item { value = 42 })?;
+    let mut weak: WeakPtr<Item>;
+    weak = owner:downgrade();
+    let mut maybe: ArcPtr<Item> | None;
+    maybe = weak:upgrade();
     match (maybe) {
-        ArcPtr<Item>(item) => { item.get().value; },
+        ArcPtr<Item>(item) => { item:get().value; },
         None => {},
     };
-};
+}
 
 ---
 
@@ -30,71 +31,72 @@ def main() = {
           (union_type
             (unary_type
               (primary_type
-                (builtin_type)))))))
-    (function_definition
-      (lid)
-      (declare
-        (lid)
-        (type
-          (infix_type
-            (union_type
-              (unary_type
-                (type
-                  (infix_type
-                    (union_type
-                      (unary_type
-                        (primary_type
-                          (uid)))))))))))
-      (block_body)))
+                (builtin_type))))))))
+  (function_definition
+    (lid)
+    (parameter
+      (binding_pattern
+        (lid))
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (type
+                (infix_type
+                  (union_type
+                    (unary_type
+                      (primary_type
+                        (uid)))))))))))
+    (block_body))
   (function_definition
     (lid)
     (block_body
       (statement
         (define
           (local_define
-            (lid)
+            (binding_pattern
+              (lid))
             (term
               (assignment_term
                 (binary_term
                   (unary_term
                     (postfix_term
                       (primary_term
-                        (unary_type
-                          (uid)
-                          (type_arguments
-                            (type
-                              (infix_type
-                                (union_type
-                                  (unary_type
-                                    (primary_type
-                                      (uid)))))))))
-                      (method_call
-                        (lid)
-                        (arguments
-                          (term
-                            (assignment_term
-                              (binary_term
-                                (unary_term
-                                  (postfix_term
-                                    (primary_term
-                                      (constructor_term
-                                        (unary_type
-                                          (primary_type
-                                            (uid)))
-                                        (record_term
-                                          (term_define
-                                            (lid)
-                                            (term
-                                              (assignment_term
-                                                (binary_term
-                                                  (unary_term
-                                                    (postfix_term
-                                                      (primary_term
-                                                        (number))))))))))))))))))
+                        (lid))
+                      (type_application
+                        (type_arguments
+                          (type
+                            (infix_type
+                              (union_type
+                                (unary_type
+                                  (primary_type
+                                    (uid))))))))
+                      (arguments
+                        (term
+                          (assignment_term
+                            (binary_term
+                              (unary_term
+                                (postfix_term
+                                  (primary_term
+                                    (constructor_term
+                                      (unary_type
+                                        (primary_type
+                                          (uid)))
+                                      (record_term
+                                        (term_define
+                                          (lid)
+                                          (term
+                                            (assignment_term
+                                              (binary_term
+                                                (unary_term
+                                                  (postfix_term
+                                                    (primary_term
+                                                      (number)))))))))))))))))
                       (try_suffix)))))))))
       (statement
-        (declare
-          (lid)
+        (parameter
+          (binding_pattern
+            (lid))
           (type
             (infix_type
               (union_type
@@ -125,8 +127,9 @@ def main() = {
                       (lid)
                       (arguments)))))))))
       (statement
-        (declare
-          (lid)
+        (parameter
+          (binding_pattern
+            (lid))
           (type
             (infix_type
               (union_type
@@ -188,7 +191,8 @@ def main() = {
                                         (unary_type
                                           (primary_type
                                             (uid)))))))))))
-                        (lid)
+                        (binding_pattern
+                          (lid))
                         (block_body
                           (statement
                             (term

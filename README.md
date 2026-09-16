@@ -42,19 +42,19 @@ Ordinary helpers can run on the CPU or be called from shaders, within the
 export { main };
 import { "$/string.resin" };
 
-struct Point { x: float32, y: float32 };
+struct Point { x: float32, y: float32, }
 
-def squared_distance(a: Point, b: Point) -> float32 = {
-	var dx = a.x - b.x;
-	var dy = a.y - b.y;
+fn squared_distance(a: Point, b: Point) -> float32  {
+	let mut dx = a.x - b.x;
+	let mut dy = a.y - b.y;
 	dx * dx + dy * dy
-};
+}
 
-def main() = {
-	var a = Point { x = 0, y = 0 };
-	var b = Point { x = 3, y = 4 };
+fn main()  {
+	let mut a = Point { x = 0, y = 0 };
+	let mut b = Point { x = 3, y = 4 };
 	print(fmt("distance squared = {0}\n", (squared_distance(a, b),)));
-};
+}
 ```
 
 Shader entry points use `@compute_shader`, `@vertex_shader`, or `@fragment_shader`;

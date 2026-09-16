@@ -1,7 +1,7 @@
 ==================
 Else if chain with a final else
 ==================
-def f() = { if (a) {} else if (b) {} else if (c) {} else {} };
+fn f()  { if (a) {} else if (b) {} else if (c) {} else {} }
 ---
 
 (source_file
@@ -50,7 +50,7 @@ def f() = { if (a) {} else if (b) {} else if (c) {} else {} };
 ==================
 Else if chain without a final else
 ==================
-def f() = { if (a) {} else if (b) {} };
+fn f()  { if (a) {} else if (b) {} }
 ---
 
 (source_file
@@ -87,7 +87,7 @@ def f() = { if (a) {} else if (b) {} };
 ==================
 Nested conditional keeps its own else
 ==================
-def f() = { if (a) { if (b) {} else if (c) {} else {} } else if (d) {} else {} };
+fn f()  { if (a) { if (b) {} else if (c) {} else {} } else if (d) {} else {} }
 ---
 
 (source_file

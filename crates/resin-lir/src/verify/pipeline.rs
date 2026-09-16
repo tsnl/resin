@@ -152,7 +152,7 @@ fn record_call(
 ) -> Result<Ty, VerifyError> {
     let invalid = || location.error(VerifyErrorKind::InvalidGpuOperation);
     let (context, allocator, record) = bridges;
-    let pipeline = &args[1];
+    let pipeline = args[1].deref_target().unwrap_or(&args[1]);
     let metadata =
         resin_types::gpu_pipeline_contract(&module.types, pipeline).map_err(|_| invalid())?;
     let kind = if draw {
@@ -176,8 +176,17 @@ fn record_call(
         }
     }
     let context = function(module, context, location)?;
+    let owner_parameter = context.locals.first().ok_or_else(invalid)?.ty.clone();
+    expect_type(
+        owner.clone(),
+        owner_parameter
+            .deref_target()
+            .unwrap_or(&owner_parameter)
+            .clone(),
+        location,
+    )?;
     expect_types(
-        std::slice::from_ref(owner),
+        std::slice::from_ref(&owner_parameter),
         &context.locals[..context.parameter_count]
             .iter()
             .map(|local| local.ty.clone())
@@ -190,7 +199,7 @@ fn record_call(
     } else {
         Ty::GpuArguments
     };
-    let mut params = vec![args[0].clone(), owner.clone(), root_arg];
+    let mut params = vec![args[0].clone(), owner_parameter, root_arg];
     for ty in &args[3..] {
         expect_type(Ty::UInt32, ty.clone(), location)?;
         params.push(ty.clone());

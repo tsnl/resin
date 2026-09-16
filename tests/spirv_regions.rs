@@ -8,10 +8,10 @@ use support::toolchain;
 fn a_loop_with_an_always_returning_body_has_a_valid_continue_target() {
     let mut module = support::module(
         "export { kernel };
-        def helper(x: uint) -> uint = { x };
-        @compute_shader def kernel(i: ulong, output: Ptr<uint>) = {
-            output.* := helper(uint(i));
-        };",
+        fn helper(x: uint) -> uint { x }
+        @compute_shader fn kernel(i: ulong, output: Ptr<uint>) {
+            output.* = helper(uint(i));
+        }",
     );
     let helper = module
         .functions
@@ -63,21 +63,21 @@ fn a_loop_with_an_always_returning_body_has_a_valid_continue_target() {
 
 #[test]
 fn elimination_ends_loop_conditions_and_selection_continuations() {
-    let abort = "{ var value: None; value := None; var test: bool; test := value!; test }";
+    let abort = "{ let mut value: None; value = None; let mut test: bool; test = value!; test }";
     let conditions = [
         abort.to_string(),
         format!("if (i == 0_ul) {abort} else {abort}"),
         format!("if (i == 0_ul) {abort} else {{ i < 4_ul }}"),
-        format!("{{ while ({abort}) {{ output.* := 1_ui; }}; i == 0_ul }}"),
-        format!("{{ var test = if (i == 0_ul) {abort} else {abort}; test }}"),
+        format!("{{ while ({abort}) {{ output.* = 1_ui; }}; i == 0_ul }}"),
+        format!("{{ let mut test = if (i == 0_ul) {abort} else {abort}; test }}"),
     ];
     for condition in conditions {
         let module = support::module(&format!(
             "export {{ kernel }};
-            @compute_shader def kernel(i: ulong, output: Ptr<uint>) = {{
-                while ({condition}) {{ output.* := 1_ui; }};
-                output.* := 2_ui;
-            }};"
+            @compute_shader fn kernel(i: ulong, output: Ptr<uint>) {{
+                while ({condition}) {{ output.* = 1_ui; }};
+                output.* = 2_ui;
+            }}"
         ));
         let project = support::project::Project::new(&module, None).unwrap();
         for shader in project.generated.shaders() {

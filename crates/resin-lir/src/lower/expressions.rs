@@ -10,6 +10,7 @@ impl FunctionLowering<'_> {
         let span = term.span;
         let expected = &term.ty;
         match &term.kind {
+            TermKind::Move { place } => return self.gen_move(place),
             TermKind::Constant { value } => self.emit(Instr::Push {
                 value: value.clone(),
             }),
@@ -120,7 +121,12 @@ impl FunctionLowering<'_> {
                 self.gen_declare(*binding, name, ty.clone())
             }
             Statement::Expr { term } => {
+                self.enter_scope();
                 self.gen_term(term, None)?;
+                self.emit(Instr::Discard);
+                self.emit(Instr::Push { value: Value::Unit });
+                self.cleanup(self.owned.len() - 1, &Ty::Unit);
+                self.owned.pop();
                 self.emit(Instr::Discard);
                 Ok(())
             }
@@ -193,6 +199,9 @@ impl FunctionLowering<'_> {
             Intrinsic::Index => self.emit(Instr::AccessDynamic),
             Intrinsic::GpuArgumentsDispatch => self.emit(Instr::GpuArgumentsDispatch),
             Intrinsic::GpuArgumentsDraw => self.emit(Instr::GpuArgumentsDraw),
+            Intrinsic::OwnerCreate => self.emit(Instr::OwnerCreate {
+                element: args.params[0].clone(),
+            }),
             Intrinsic::OwnerAllocate => self.emit(Instr::OwnerAllocate {
                 element: args.params[1].clone(),
             }),

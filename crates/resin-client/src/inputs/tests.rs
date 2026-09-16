@@ -38,18 +38,14 @@ async fn recovering_sources_discover_nested_parent_and_cyclic_user_imports_only(
     let directory = TempDir::new().unwrap();
     let project = directory.path().join("project");
     fs::create_dir_all(project.join("sub")).unwrap();
-    let main = "import { \"sub/child.resin\", \"../shared.resin\", \"$/missing.resin\", \"$/deps/package/api.resin\" }; def main() = { var hole = ; };";
+    let main = "import { \"sub/child.resin\", \"../shared.resin\", \"$/missing.resin\", \"$/deps/package/api.resin\" }; fn main()  { let mut hole = ; }";
     fs::write(project.join("main.resin"), main).unwrap();
     fs::write(
         project.join("sub/child.resin"),
-        "import { \"../main.resin\", \"../../shared.resin\" }; def child() = { 1 };",
+        "import { \"../main.resin\", \"../../shared.resin\" }; fn child()  { 1 }",
     )
     .unwrap();
-    fs::write(
-        directory.path().join("shared.resin"),
-        "def shared() = { 2 };",
-    )
-    .unwrap();
+    fs::write(directory.path().join("shared.resin"), "fn shared()  { 2 }").unwrap();
     let captured = read(&project.join("main.resin")).await;
     assert_eq!(captured.inputs.entry, "main.resin");
     let names: Vec<_> = captured
@@ -79,10 +75,10 @@ async fn aliases_select_one_physical_source_with_two_explicit_edges() {
     let directory = TempDir::new().unwrap();
     fs::write(
         directory.path().join("main.resin"),
-        "import { \"value.resin\", \"alias.resin\" }; def main() = { 0 };",
+        "import { \"value.resin\", \"alias.resin\" }; fn main()  { 0 }",
     )
     .unwrap();
-    fs::write(directory.path().join("value.resin"), "def value() = { 1 };").unwrap();
+    fs::write(directory.path().join("value.resin"), "fn value()  { 1 }").unwrap();
     std::os::unix::fs::symlink("value.resin", directory.path().join("alias.resin")).unwrap();
     let captured = read(&directory.path().join("main.resin")).await;
     assert_eq!(captured.inputs.sources.len(), 2);
@@ -104,12 +100,12 @@ async fn relocated_trees_upload_equal_inputs_with_separate_local_origins() {
         fs::create_dir(&root).unwrap();
         fs::write(
             root.join("main.resin"),
-            "import { \"child.resin\" }; def main() = { value() };",
+            "import { \"child.resin\" }; fn main()  { value() }",
         )
         .unwrap();
         fs::write(
             root.join("child.resin"),
-            "export { value }; def value() = { 1 };",
+            "export { value }; fn value()  { 1 }",
         )
         .unwrap();
     }
@@ -126,7 +122,7 @@ async fn relocated_trees_upload_equal_inputs_with_separate_local_origins() {
 async fn missing_imports_produce_portable_diagnostics_and_repair_on_next_capture() {
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("main.resin");
-    fs::write(&path, "import { \"missing.resin\" }; def main() = { 1 };").unwrap();
+    fs::write(&path, "import { \"missing.resin\" }; fn main()  { 1 }").unwrap();
     let missing = read(&path).await;
     assert_eq!(missing.inputs.acquisition_diagnostics.len(), 1);
     let diagnostic = &missing.inputs.acquisition_diagnostics[0];
@@ -137,11 +133,7 @@ async fn missing_imports_produce_portable_diagnostics_and_repair_on_next_capture
             .message
             .contains(directory.path().to_str().unwrap())
     );
-    fs::write(
-        directory.path().join("missing.resin"),
-        "def helper() = { 1 };",
-    )
-    .unwrap();
+    fs::write(directory.path().join("missing.resin"), "fn helper()  { 1 }").unwrap();
     let repaired = read(&path).await;
     assert!(repaired.inputs.acquisition_diagnostics.is_empty());
     assert_eq!(repaired.inputs.sources.len(), 2);
@@ -153,17 +145,17 @@ async fn captured_editor_snapshot_keeps_old_dependency_text_while_later_edits_an
     let directory = TempDir::new().unwrap();
     let main_path = directory.path().join("main.resin");
     let helper_path = directory.path().join("helper.resin");
-    let main_text = "import { \"helper.resin\" }; def main() = { 1 };";
+    let main_text = "import { \"helper.resin\" }; fn main()  { 1 }";
     fs::write(&main_path, main_text).unwrap();
-    fs::write(&helper_path, "def value() = { 0 };").unwrap();
+    fs::write(&helper_path, "fn value()  { 0 }").unwrap();
     let mut accepted = Loader::new(directory.path().into());
     let entry = accepted.source_from_text(&main_path, main_text).unwrap();
     accepted
-        .source_from_text(&helper_path, "def value() = { 1 };")
+        .source_from_text(&helper_path, "fn value()  { 1 }")
         .unwrap();
     let mut request_loader = accepted.supplied_snapshot();
     accepted
-        .source_from_text(&helper_path, "def value() = { 2 };")
+        .source_from_text(&helper_path, "fn value()  { 2 }")
         .unwrap();
     let captured = capture(
         entry,
@@ -176,17 +168,17 @@ async fn captured_editor_snapshot_keeps_old_dependency_text_while_later_edits_an
     .unwrap();
     assert_eq!(
         captured.origins["helper.resin"].source.text(),
-        "def value() = { 1 };"
+        "fn value()  { 1 }"
     );
     let disk = read(&main_path).await;
     assert_eq!(
         disk.origins["helper.resin"].source.text(),
-        "def value() = { 0 };"
+        "fn value()  { 0 }"
     );
     assert_ne!(captured.inputs, disk.inputs);
     assert_eq!(
         fs::read_to_string(helper_path).unwrap(),
-        "def value() = { 0 };"
+        "fn value()  { 0 }"
     );
 }
 
@@ -196,7 +188,7 @@ async fn non_utf8_source_names_are_lossless_on_the_wire() {
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
     let directory = TempDir::new().unwrap();
     let path = directory.path().join(OsStr::from_bytes(b"main\xff.resin"));
-    fs::write(&path, "def main() = { 1 };").unwrap();
+    fs::write(&path, "fn main()  { 1 }").unwrap();
     let captured = read(&path).await;
     assert_eq!(captured.inputs.entry, "main%FF.resin");
     assert_eq!(captured.origins["main%FF.resin"].path, path);

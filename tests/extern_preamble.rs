@@ -13,7 +13,7 @@ fn empty_header_groups_remain_native_dependencies() {
     )
     .unwrap();
     let source = format!(
-        "export {{ main }}; extern {{ {:?}: {{}} }}; def main() -> int = {{ 42 }};",
+        "export {{ main }}; extern {{ {:?}: {{}} }}; fn main() -> int  {{ 42 }}",
         header.to_string_lossy().replace('\\', "/")
     );
     let module = support::module(&source);
@@ -48,9 +48,9 @@ fn foreign_signatures_use_imported_types_and_keep_module_visibility() {
         directory.path().join("api.resin"),
         format!(
             r#"export {{ call }};
-            extern {{ {:?}: {{ def answer(value: CInt) -> CInt; }}, }};
+            extern {{ {:?}: {{ fn answer(value: CInt) -> CInt; }}, }};
             import {{ "types.resin" }};
-            def call() -> int = {{ answer(35) }};
+            fn call() -> int  {{ answer(35) }}
             "#,
             header.to_string_lossy().replace('\\', "/")
         ),
@@ -59,7 +59,7 @@ fn foreign_signatures_use_imported_types_and_keep_module_visibility() {
     let entry = directory.path().join("main.resin");
     fs::write(
         &entry,
-        "export { main }; import { \"api.resin\" }; def main() -> int = { call() };",
+        "export { main }; import { \"api.resin\" }; fn main() -> int  { call() }",
     )
     .unwrap();
     let module = support::pipeline::file_module(&entry).unwrap();
@@ -70,7 +70,7 @@ fn foreign_signatures_use_imported_types_and_keep_module_visibility() {
 
     fs::write(
         &entry,
-        "export { main }; import { \"api.resin\" }; def main() -> int = { answer(35) };",
+        "export { main }; import { \"api.resin\" }; fn main() -> int  { answer(35) }",
     )
     .unwrap();
     let error = support::pipeline::file_module(&entry).unwrap_err();

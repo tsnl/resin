@@ -79,7 +79,7 @@ fn starts_declaration(node: Node<'_>) -> bool {
         && first_token(node).is_some_and(|token| {
             matches!(
                 token.kind(),
-                "const" | "def" | "type" | "struct" | "intrinsic" | "@"
+                "const" | "fn" | "type" | "struct" | "intrinsic" | "@"
             )
         })
 }

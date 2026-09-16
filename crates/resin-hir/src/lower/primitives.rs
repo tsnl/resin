@@ -54,13 +54,24 @@ pub(super) fn body(function: &mut Function, op: crate::Intrinsic) {
         .map(|(index, parameter)| {
             let binding = index;
             parameter.binding = Some(binding);
-            Term {
+            let place = Term {
                 span: parameter.name.span,
                 ty: parameter.annotation.ty.clone(),
                 kind: TermKind::Local {
                     binding,
                     name: parameter.name.clone(),
                 },
+            };
+            if place.ty.copies_implicitly() {
+                place
+            } else {
+                Term {
+                    span: place.span,
+                    ty: place.ty.clone(),
+                    kind: TermKind::Move {
+                        place: Box::new(place),
+                    },
+                }
             }
         })
         .collect::<Vec<_>>();

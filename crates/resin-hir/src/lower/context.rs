@@ -137,6 +137,7 @@ impl Context {
                 name,
                 body,
                 methods: BTreeMap::new(),
+                text_view: None,
                 drop: None,
             },
         );
@@ -170,6 +171,7 @@ define_id! { pub(crate) struct SourceModuleId(usize); }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SourceOrigin {
+    pub function: bool,
     pub module: SourceModuleId,
     pub span: Span,
 }
@@ -177,6 +179,7 @@ pub(crate) struct SourceOrigin {
 #[derive(Debug, Clone)]
 pub(crate) struct FunctionDecl {
     pub body: FunctionBody,
+    pub source_params: Vec<crate::Type>,
     pub params: Vec<Ty>,
     pub result: Ty,
 }
@@ -184,7 +187,7 @@ pub(crate) struct FunctionDecl {
 /// Ordinary signatures can have a source body or a compiler-provided definition.
 #[derive(Debug, Clone)]
 pub(crate) enum FunctionBody {
-    Defined(FunctionId),
+    Ordinary,
     GpuPipelineFactory {
         factory: FunctionId,
         graphics: bool,
@@ -217,15 +220,35 @@ impl Context {
         self.namespaces.insert(ty, BTreeMap::new());
         ty
     }
-    pub(crate) fn register_function(&mut self, function: FunctionId, params: Vec<Ty>, result: Ty) {
-        self.functions.insert(
-            function,
-            FunctionDecl {
-                body: FunctionBody::Defined(function),
-                params,
-                result,
-            },
-        );
+    pub(crate) fn register_function(
+        &mut self,
+        function: FunctionId,
+        source_params: Vec<crate::Type>,
+        source_result: &crate::Type,
+    ) -> bool {
+        let solver = super::infer::Solver::default();
+        let abi = |ty: &crate::Type| {
+            if let crate::Type::Reference { referent } = ty {
+                solver
+                    .resolve(&super::infer::Type::from_hir(referent))
+                    .map(|pointee| Ty::Pointer {
+                        pointee: Box::new(pointee),
+                    })
+            } else {
+                solver.resolve(&super::infer::Type::from_hir(ty))
+            }
+        };
+        let params = source_params.iter().map(abi).collect::<Option<Vec<_>>>();
+        let (Some(params), Some(result)) = (params, abi(source_result)) else {
+            return false;
+        };
+        self.functions.entry(function).or_insert(FunctionDecl {
+            body: FunctionBody::Ordinary,
+            source_params,
+            params,
+            result,
+        });
+        true
     }
     pub(crate) fn declared_function(&self, function: FunctionId) -> &FunctionDecl {
         &self.functions[&function]
@@ -307,6 +330,30 @@ pub(crate) struct IntrinsicMethod {
     pub op: Intrinsic,
     pub params: Vec<super::infer::Type>,
     pub result: super::infer::Type,
+}
+
+pub(crate) fn is_primitive_operation(name: &str) -> bool {
+    matches!(name, "at" | "replace" | "dispatch_native" | "draw_native")
+}
+
+pub(crate) fn primitive_operation(
+    name: &str,
+    arguments: &[super::infer::Type],
+    solver: &super::infer::Solver,
+) -> Option<IntrinsicMethod> {
+    use super::infer::{Head, Type};
+    let receiver = solver.head(arguments.first()?);
+    let receiver = match receiver {
+        Type::Node(Head::Reference, parts) => solver.head(&parts[0]),
+        other => other,
+    };
+    let (_, mut signature) = intrinsic_methods(&receiver, solver)
+        .into_iter()
+        .find(|(candidate, _)| *candidate == name)?;
+    if signature.op == Intrinsic::Index && matches!(receiver, Type::Node(Head::Array(_), _)) {
+        signature.params[0] = Type::reference(receiver);
+    }
+    Some(signature)
 }
 
 pub(crate) fn intrinsic_methods(
@@ -422,6 +469,11 @@ pub(super) fn primitive_signature(
             Intrinsic::PointerBytes,
             vec![pointer(element.clone()), Type::UInt64],
             super::types::ty(&Ty::byte_span()),
+        ),
+        ("owner_create", [element]) => (
+            Intrinsic::OwnerCreate,
+            vec![element.clone()],
+            optional(Type::StrongOwner),
         ),
         ("owner_allocate", [element]) => (
             Intrinsic::OwnerAllocate,

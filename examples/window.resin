@@ -8,7 +8,7 @@ import {
 };
 
 @vertex_shader
-def vertex(index: int) -> Vertex = {
+fn vertex(index: int) -> Vertex {
 	if (index == 0) {
 		Vertex {
 			position = Position {
@@ -55,34 +55,34 @@ def vertex(index: int) -> Vertex = {
 			},
 		}
 	}
-};
+}
 
 @fragment_shader
-def fragment(color: Color) -> Color = {
+fn fragment(color: Color) -> Color {
 	color
-};
+}
 
-def main() -> (() | Err<_>) = {
-	var title = "Resin triangle";
-	var window = Window.new(640, 480, String.from_str(title))?;
+fn main() -> (() | Err<_>) {
+	let mut title = "Resin triangle";
+	let mut window = window_new(640, 480, string_from_str(title))?;
 
-	var gpu = Gpu.new_for_window(window)?;
+	let mut gpu = gpu_new_for_window(window)?;
 
-	var pipeline = gpu.create_graphics_pipeline(vertex, fragment)?;
+	let mut pipeline = gpu:create_graphics_pipeline(vertex, fragment)?;
 
-	var image = gpu.create_image(640, 480)?;
+	let mut image = gpu:create_image(640, 480)?;
 
-	window.poll_events()?;
-	while (!window.should_close() && !window.key_pressed(key_escape)) {
-		var commands = gpu.start_command_recording()?;
+	window:poll_events()?;
+	while (!window:should_close() && !window:key_pressed(key_escape)) {
+		let mut commands = gpu:start_command_recording()?;
 
-		commands.begin_rendering(image, 0.0, 0.0, 0.0, 1.0)?;
-		commands.draw(pipeline, None, 3)?;
-		commands.end_rendering()?;
-		commands.submit()?;
-		gpu.present(image)?;
-		window.poll_events()?;
+		commands:begin_rendering(image, 0.0, 0.0, 0.0, 1.0)?;
+		commands:draw(pipeline, None, 3)?;
+		commands:end_rendering()?;
+		commands:submit()?;
+		gpu:present(image)?;
+		window:poll_events()?;
 	};
 	print("window demo complete\n");
 	(())
-};
+}

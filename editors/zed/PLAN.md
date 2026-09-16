@@ -32,12 +32,12 @@ per-function incremental checking remains follow-up work. The CLI retains its
 build/run/exit behavior.
 Module analysis follows the declarations-only grammar and needs no exported
 entry; the CLI selects an exported function with `FILE:ENTRY`. Function/type/local
-declarations use `def`/`type`/`var`, and omitted function returns default to unit.
+declarations use `fn`/`type`/`var`, and omitted function returns default to unit.
 
 Earlier automated validation completed on Linux: native protocol tests, compiler
 tests, query capture tests, workspace tests with GPU and shader checks required,
 Clippy in both workspaces, and the WASI build. Coverage includes the current
-`def`/`var`/`type` syntax and omitted unit result annotations. Earlier Zed 1.17.2
+`fn`/`var`/`type` syntax and omitted unit result annotations. Earlier Zed 1.17.2
 smoke tests under Xvfb covered imported/standard-library navigation and unsaved
 editor features; the most recent editor smoke test used grammar pin `79e4a26`.
 

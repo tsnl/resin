@@ -1,19 +1,19 @@
 export { kernel, main };
 import { "$/span.resin" };
-struct Root { count: uint, pixels: Ptr<uint> };
-struct Stop { code: uint };
-struct First {};
-struct Second {};
-struct Third {};
+struct Root { count: uint, pixels: Ptr<uint>, }
+struct Stop { code: uint, }
+struct First {}
+struct Second {}
+struct Third {}
 
-def checked(stop: bool, code: uint) -> (bool | Err<Stop>) = {
+fn checked(stop: bool, code: uint) -> (bool | Err<Stop>)  {
 	if (stop) {
 		Err(Stop { code = code })
 	} else {
 		(1_ui == 1_ui)
 	}
-};
-def tag(index: uint) -> First | Second | Third = {
+}
+fn tag(index: uint) -> First | Second | Third  {
 	if (index == 0_ui) {
 		First {}
 	} else {
@@ -23,22 +23,22 @@ def tag(index: uint) -> First | Second | Third = {
 			Third {}
 		}
 	}
-};
-def evaluate(index: uint) -> (uint | Err<Stop>) = {
-	var limit = if (index == 0_ui) {
+}
+fn evaluate(index: uint) -> (uint | Err<Stop>)  {
+	let mut limit = if (index == 0_ui) {
 		0_ui
 	} else {
 		3_ui
 	};
-	var outer = 0_ui;
-	var total = 0_ui;
+	let mut outer = 0_ui;
+	let mut total = 0_ui;
 	while (outer < limit && checked(index == 1_ui && outer == 1_ui, 11_ui)?) {
-		total := total + {
-			var sum = 0_ui;
-			var inner = 0_ui;
+		total = total + {
+			let mut sum = 0_ui;
+			let mut inner = 0_ui;
 			while (inner <= outer) {
 				checked(index == 2_ui && outer == 1_ui && inner == 0_ui, 22_ui)?;
-				sum := sum + match (tag(inner)) {
+				sum = sum + match (tag(inner)) {
 					First(first) => {
 						1_ui
 					},
@@ -49,20 +49,20 @@ def evaluate(index: uint) -> (uint | Err<Stop>) = {
 						3_ui
 					}
 				};
-				inner := inner + 1_ui;
+				inner = inner + 1_ui;
 			};
 			sum
 		};
-		outer := outer + 1_ui;
+		outer = outer + 1_ui;
 	};
 	(total + index)
-};
+}
 @compute_shader
-def kernel(invocation: ulong, root: Ptr<Root>) = {
-	var index = uint(invocation);
+fn kernel(invocation: ulong, root: Ptr<Root>)  {
+	let mut index = uint(invocation);
 	if (index < root.count) {
-		var output = Span<uint> { data = root.pixels, length = ulong(root.count) };
-		output.at(invocation) := match (evaluate(index)) {
+		let mut output = Span<uint> { data = root.pixels, length = ulong(root.count) };
+		fixture_index(output.data, output.length, invocation).* = match (evaluate(index)) {
 			uint(value) => {
 				value
 			},
@@ -71,18 +71,20 @@ def kernel(invocation: ulong, root: Ptr<Root>) = {
 			}
 		};
 	};
-};
-def main() -> int = {
-	var values = [0_ui, 0_ui, 0_ui, 0_ui];
-	var root = Root { count = 4_ui, pixels = &values.at(0_ul) };
-	var index = 0_ul;
+}
+fn main() -> int  {
+	let mut values = [0_ui, 0_ui, 0_ui, 0_ui];
+	let mut root = Root { count = 4_ui, pixels = &values:at(0_ul) };
+	let mut index = 0_ul;
 	while (index < 4_ul) {
 		kernel(index, &root);
-		index := index + 1_ul;
+		index = index + 1_ul;
 	};
-	if (values.at(0_ul) == 0_ui && values.at(1_ul) == 11_ui && values.at(2_ul) == 22_ui && values.at(3_ul) == 13_ui) {
+	if (values:at(0_ul) == 0_ui && values:at(1_ul) == 11_ui && values:at(2_ul) == 22_ui && values:at(3_ul) == 13_ui) {
 		0
 	} else {
 		1
 	}
-};
+}
+
+intrinsic "pointer_index" fn fixture_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;

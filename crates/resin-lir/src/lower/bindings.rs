@@ -22,7 +22,7 @@ impl FunctionLowering<'_> {
                 ty: init.ty.clone(),
             },
         );
-        self.gen_term(init, None)?;
+        self.gen_expression(init, None)?;
         self.emit(Instr::SetLocal { local });
         Ok(())
     }

@@ -4,13 +4,13 @@ mod support;
 fn math_functions_preserve_float_width_and_use_radians() {
     let module = support::module(
         r#"export { main }; import { "$/math.resin" };
-        def main() -> int = {
-            var root: float32 = sqrt(4.0);
-            var sine = sin(1.5707963267948966_d);
-            var cosine = cos(0.0_f);
-            var invalid = sqrt(-1.0_d);
+        fn main() -> int  {
+            let mut root: float32 = sqrt(4.0);
+            let mut sine = sin(1.5707963267948966_d);
+            let mut cosine = cos(0.0_f);
+            let mut invalid = sqrt(-1.0_d);
             if (root == 2.0_f && sine > 0.999999_d && cosine == 1.0_f && invalid != invalid) { 0 } else { 1 }
-        };"#,
+        }"#,
     );
     let output = support::project::Project::new(&module, Some("main"))
         .unwrap()
@@ -26,7 +26,7 @@ fn math_functions_preserve_float_width_and_use_radians() {
 fn math_rejects_non_float_arguments_during_specialization() {
     for name in ["sqrt", "sin", "cos"] {
         let source = format!(
-            r#"export {{ main }}; import {{ "$/math.resin" }}; def main() = {{ {name}(4); }};"#
+            r#"export {{ main }}; import {{ "$/math.resin" }}; fn main()  {{ {name}(4); }}"#
         );
         let error = support::pipeline::source_module(&source)
             .unwrap_err()
@@ -40,9 +40,9 @@ fn math_rejects_non_float_arguments_during_specialization() {
 fn shader_math_emits_glsl_operations() {
     let module = support::module(
         r#"export { kernel }; import { "$/math.resin" };
-        @compute_shader def kernel(index: ulong, value: Ptr<float32>) = {
-            value.* := sqrt(value.*) + sin(value.*) + cos(value.*);
-        };"#,
+        @compute_shader fn kernel(index: ulong, value: Ptr<float32>)  {
+            value.* = sqrt(value.*) + sin(value.*) + cos(value.*);
+        }"#,
     );
     let project = support::project::Project::new(&module, None).unwrap();
     let path = project.generated.shaders()[0].unoptimized_spirv();

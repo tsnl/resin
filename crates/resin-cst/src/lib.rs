@@ -67,7 +67,7 @@ impl Document {
         preamble::read(self)
     }
 
-    /// Append missing delimiters for editor recovery; original offsets stay valid.
+    /// Recover incomplete editor syntax without shifting original source offsets.
     pub fn recovery(&self) -> Option<Self> {
         lower::recovery(self)
     }

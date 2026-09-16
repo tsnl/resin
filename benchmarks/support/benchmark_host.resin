@@ -2,42 +2,42 @@ export { main };
 
 extern {
 	"benchmark.h": {
-		def benchmark_argument(argc: int, argv: Ptr<Ptr<ubyte>>, index: uint) -> ulong;
-		def benchmark_prepare(input: Ptr<uint>, output: Ptr<uint>, count: uint, seed: uint);
-		def benchmark_clock() -> ulong;
-		def benchmark_report(start: ulong, end: ulong, output: Ptr<uint>, count: uint, measured: int);
+		fn benchmark_argument(argc: int, argv: Ptr<Ptr<ubyte>>, index: uint) -> ulong;
+		fn benchmark_prepare(input: Ptr<uint>, output: Ptr<uint>, count: uint, seed: uint);
+		fn benchmark_clock() -> ulong;
+		fn benchmark_report(start: ulong, end: ulong, output: Ptr<uint>, count: uint, measured: int);
 	},
 };
 
 import { "$/shared.resin", "@WORKLOAD@" };
 
-def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> (() | Err<_>) = {
-	var count = uint(benchmark_argument(argc, argv, 1_ui));
-	var iterations = uint(benchmark_argument(argc, argv, 2_ui));
-	var samples = benchmark_argument(argc, argv, 3_ui);
-	var warmup = benchmark_argument(argc, argv, 4_ui);
-	var seed = uint(benchmark_argument(argc, argv, 5_ui));
-	var input_owner = ArcSpan<uint>.alloc(ulong(count), 0_ui)?;
-	var output_owner = ArcSpan<uint>.alloc(ulong(count), 0_ui)?;
-	var input = input_owner.get().data;
-	var output = output_owner.get().data;
+fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> (() | Err<_>) {
+	let mut count = uint(benchmark_argument(argc, argv, 1_ui));
+	let mut iterations = uint(benchmark_argument(argc, argv, 2_ui));
+	let mut samples = benchmark_argument(argc, argv, 3_ui);
+	let mut warmup = benchmark_argument(argc, argv, 4_ui);
+	let mut seed = uint(benchmark_argument(argc, argv, 5_ui));
+	let mut input_owner = arc_span_alloc::<uint>(ulong(count), 0_ui)?;
+	let mut output_owner = arc_span_alloc::<uint>(ulong(count), 0_ui)?;
+	let mut input = input_owner:get().data;
+	let mut output = output_owner:get().data;
 	benchmark_prepare(input, output, count, seed);
-	var root = Root { count = count, iterations = iterations, input = input, output = output };
-	var index = 0_ul;
+	let mut root = Root { count = count, iterations = iterations, input = input, output = output };
+	let mut index = 0_ul;
 	while (index < warmup) {
-		var start = benchmark_clock();
+		let mut start = benchmark_clock();
 		cpu(&root);
-		var end = benchmark_clock();
+		let mut end = benchmark_clock();
 		benchmark_report(start, end, output, count, 0_i);
-		index := index + 1_ul;
+		index = index + 1_ul;
 	};
-	index := 0_ul;
+	index = 0_ul;
 	while (index < samples) {
-		var start = benchmark_clock();
+		let mut start = benchmark_clock();
 		cpu(&root);
-		var end = benchmark_clock();
+		let mut end = benchmark_clock();
 		benchmark_report(start, end, output, count, 1_i);
-		index := index + 1_ul;
+		index = index + 1_ul;
 	};
 	(())
-};
+}

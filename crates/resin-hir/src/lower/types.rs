@@ -78,6 +78,7 @@ pub(super) fn definition(
         name: name.clone(),
         body: ty(body),
         methods,
+        text_view: None,
         drop: *drop,
     }
 }

@@ -202,7 +202,7 @@ fn explicit_inference_updates_hover_after_edits() {
         (3, "\"text\"", "str"),
     ] {
         let source =
-            format!("def answer() -> _ = {{ var value: _; value := {initializer}; value }};");
+            format!("fn answer() -> _  {{ let mut value: _; value = {initializer}; value }}");
         if version == 1 {
             client.open(&uri, &source);
         } else {
@@ -253,18 +253,18 @@ fn formatting_uses_current_buffers_and_returns_utf16_edits() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let path = temp.path().join("format.resin");
     let file = uri(&path);
-    let disk = "def main() = {};\n";
+    let disk = "fn main() {}\n";
     std::fs::write(&path, disk).unwrap();
     let mut client = Client::start(temp.path(), json!({}));
     // Even clients requesting spaces receive the language's canonical hard tabs.
     let params =
         json!({"textDocument": {"uri": file}, "options": {"tabSize": 2, "insertSpaces": true}});
     client.open(&file, disk);
-    let source = "/* 😀 */def main()={var xs=[1,2,];missing(xs);};\r\n";
+    let source = "/* 😀 */fn main(){let mut xs=[1,2,];missing(xs);}\r\n";
     client.change(&file, 2, source);
     let edits = client.request("textDocument/formatting", params.clone());
     let expected =
-        "/* 😀 */ def main() = {\n\tvar xs = [\n\t\t1,\n\t\t2,\n\t];\n\tmissing(xs);\n};\n";
+        "/* 😀 */ fn main() {\n\tlet mut xs = [\n\t\t1,\n\t\t2,\n\t];\n\tmissing(xs);\n}\n";
     assert_eq!(
         edits[0]["range"]["start"],
         json!({"line": 0, "character": 8})
@@ -273,12 +273,12 @@ fn formatting_uses_current_buffers_and_returns_utf16_edits() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), disk);
 
     client.change(&file, 3, expected);
-    client.change(&file, 2, "def stale( ="); // Older versions must not replace the buffer.
+    client.change(&file, 2, "fn stale( ="); // Older versions must not replace the buffer.
     assert_eq!(
         client.request("textDocument/formatting", params.clone()),
         json!([])
     );
-    client.change(&file, 4, "def main()={var x=;};");
+    client.change(&file, 4, "fn main(){let mut x=;}");
     assert_eq!(
         client.request("textDocument/formatting", params.clone()),
         Value::Null
@@ -292,10 +292,10 @@ fn formatting_uses_current_buffers_and_returns_utf16_edits() {
         ""
     );
     // An edit ending immediately before LF must also replace the preceding CR.
-    client.change(&file, 6, "def main() = {};\r\n");
+    client.change(&file, 6, "fn main() {}\r\n");
     assert_eq!(
         apply(
-            "def main() = {};\r\n",
+            "fn main() {}\r\n",
             &client.request("textDocument/formatting", params.clone())
         ),
         disk
@@ -327,7 +327,7 @@ fn gradient_dot_completion_survives_edits_before_kernel_statements() {
     client.diagnostics(&uri, Some(1), false);
     let positions = [
         original.find("\tif (index").unwrap(),
-        original.find("\n};\n\ndef main").unwrap() + 1,
+        original.find("\n}\n\nfn main").unwrap() + 1,
     ];
     for (index, offset) in positions.into_iter().enumerate() {
         let mut source = original.to_owned();
@@ -374,7 +374,7 @@ fn dot_completion_updates_unsaved_receiver_types_and_uses_utf16_edits() {
     let uri = uri(&temp.path().join("fields.resin"));
     for (version, field, typed) in [(1, "count", ""), (2, "length", "le")] {
         let source = format!(
-            "struct Field {{ {field}: long }}; def main () = {{ var value = Field {{ {field} = 1 }}; /* 😀 */ value.{typed}; }};"
+            "struct Field {{ {field}: long, }} fn main ()  {{ let mut value = Field {{ {field} = 1 }}; /* 😀 */ value.{typed}; }}"
         );
         if version == 1 {
             client.open(&uri, &source);
@@ -404,74 +404,89 @@ fn dot_completion_updates_unsaved_receiver_types_and_uses_utf16_edits() {
 }
 
 #[test]
-fn string_completions_distinguish_literal_views_and_owned_constructors() {
+fn string_completions_distinguish_fields_operations_and_free_constructors() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("strings.resin"));
-    for (version, expression, labels) in [
-        (1, "\"text\".", vec!["data", "length", "at"]),
+    for (version, expression, required, absent) in [
+        (1, "\"text\".", vec!["data", "length"], vec!["at"]),
         (
             2,
-            "String.",
-            vec!["bytes", "from_bytes", "from_str", "get", "repr_bytes"],
+            "\"text\":",
+            vec!["at", "print", "bytes"],
+            vec!["data", "length"],
+        ),
+        (
+            3,
+            "string_",
+            vec!["string_from_bytes", "string_from_str"],
+            vec!["String"],
         ),
     ] {
-        let source = format!("import {{ \"$/string.resin\" }}; def main() = {{ {expression}; }};");
+        let source = format!("import {{ \"$/string.resin\" }}; fn main() {{ {expression}; }}");
         if version == 1 {
             client.open(&uri, &source);
         } else {
             client.change(&uri, version, &source);
         }
         client.diagnostics(&uri, Some(version), true);
-        let column = source.rfind('.').unwrap() as u32 + 1;
+        let column = (source.rfind(expression).unwrap() + expression.len()) as u32;
         let completion = client.request("textDocument/completion", at(&uri, 0, column));
-        let items = completion["items"].as_array().unwrap();
-        let actual: Vec<_> = items
+        let labels: Vec<_> = completion["items"]
+            .as_array()
+            .unwrap()
             .iter()
             .map(|item| item["label"].as_str().unwrap())
             .collect();
-        assert_eq!(actual, labels, "{completion}");
+        for name in required {
+            assert!(labels.contains(&name), "{completion}");
+        }
+        for name in absent {
+            assert!(!labels.contains(&name), "{completion}");
+        }
     }
     client.stop();
 }
 
 #[test]
-fn dot_completion_sorts_fields_before_methods() {
+fn dot_completes_fields_and_colon_completes_visible_operations() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("members.resin"));
-    let source = "struct Record { zebra: int, middle: int,
-def beta(self: Ptr<Record>) = {};
-def alpha(self: Ptr<Record>) = {};
-};
-
-def main() = { var value = Record { zebra = 1, middle = 2 }; value.; };";
-    client.open(&uri, source);
-    client.diagnostics(&uri, Some(1), true);
-    let column = source.lines().last().unwrap().rfind('.').unwrap() as u32 + 1;
-    let completion = client.request("textDocument/completion", at(&uri, 5, column));
-    let items = completion["items"].as_array().unwrap();
-    let labels = |items: &[Value]| {
-        items
-            .iter()
-            .map(|item| item["label"].as_str().unwrap().to_owned())
-            .collect::<Vec<_>>()
-    };
-    let expected = ["middle", "zebra", "alpha", "beta"];
-    assert_eq!(labels(items), expected);
-    assert!(items[..2].iter().all(|item| item["kind"] == 5)); // FIELD
-    assert!(items[2..].iter().all(|item| item["kind"] == 3)); // FUNCTION
-
-    // Clients use sortText instead of the response's array order or labels.
-    let mut sorted = items.clone();
-    sorted.reverse();
-    sorted.sort_by(|a, b| {
-        a["sortText"]
-            .as_str()
-            .unwrap()
-            .cmp(b["sortText"].as_str().unwrap())
-    });
-    assert_eq!(labels(&sorted), expected);
+    for (version, separator, expected, kind) in [
+        (1, ".", vec!["middle", "zebra"], 5),
+        (2, ":", vec!["alpha", "beta"], 3),
+    ] {
+        let source = format!(
+            "struct Record {{ zebra: int, middle: int }}\nfn beta(value: Ref<Record>) {{}}\nfn alpha(value: Ref<Record>) {{}}\nfn main() {{ let value = Record {{ zebra = 1, middle = 2 }}; value{separator}; }}"
+        );
+        if version == 1 {
+            client.open(&uri, &source);
+        } else {
+            client.change(&uri, version, &source);
+        }
+        client.diagnostics(&uri, Some(version), true);
+        let column = source.lines().last().unwrap().rfind(separator).unwrap() as u32 + 1;
+        let completion = client.request("textDocument/completion", at(&uri, 3, column));
+        let items = completion["items"].as_array().unwrap();
+        let labels = |items: &[Value]| {
+            items
+                .iter()
+                .map(|item| item["label"].as_str().unwrap().to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(labels(items), expected);
+        assert!(items.iter().all(|item| item["kind"] == kind));
+        let mut sorted = items.clone();
+        sorted.reverse();
+        sorted.sort_by(|a, b| {
+            a["sortText"]
+                .as_str()
+                .unwrap()
+                .cmp(b["sortText"].as_str().unwrap())
+        });
+        assert_eq!(labels(&sorted), expected);
+    }
     client.stop();
 }
 
@@ -480,7 +495,7 @@ fn unsaved_unicode_buffers_support_features_edits_and_clean_shutdown() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("new.resin"));
-    let source = "def main (argument: int) -> int = {\r\n  // 😀\r\n  var value = argument + 1;\r\n  /* 😀 */ value\r\n};\r\n";
+    let source = "fn main (argument: int) -> int  {\r\n  // 😀\r\n  let mut value = argument + 1;\r\n  /* 😀 */ value\r\n}\r\n";
     client.open(&uri, source);
     client.diagnostics(&uri, Some(1), false);
     let hover = client.request("textDocument/hover", at(&uri, 3, 12));
@@ -495,7 +510,7 @@ fn unsaved_unicode_buffers_support_features_edits_and_clean_shutdown() {
     assert_eq!(definition["uri"], uri);
     assert_eq!(
         definition["range"]["start"],
-        json!({"line": 2, "character": 6})
+        json!({"line": 2, "character": 10})
     );
     let completion = client.request("textDocument/completion", at(&uri, 3, 14));
     let item = completion["items"]
@@ -537,9 +552,13 @@ fn unsaved_unicode_buffers_support_features_edits_and_clean_shutdown() {
         client.request("textDocument/definition", at(&uri, 3, 12)),
         Value::Null
     );
-    client.change(&uri, 3, "def main (argument: int) -> int = { arg");
+    let incomplete = "fn main (argument: int) -> int { arg";
+    client.change(&uri, 3, incomplete);
     client.diagnostics(&uri, Some(3), true);
-    let completion = client.request("textDocument/completion", at(&uri, 0, 37));
+    let completion = client.request(
+        "textDocument/completion",
+        at(&uri, 0, incomplete.len() as u32),
+    );
     assert!(
         completion["items"]
             .as_array()
@@ -562,13 +581,13 @@ fn dependency_overlays_close_and_disk_changes_refresh_consumers() {
     let library = root.join("lib.resin");
     std::fs::write(
         &library,
-        "export { answer }; def answer () -> int = { 1 }; def private () -> int = { 2 };",
+        "export { answer }; fn answer () -> int  { 1 } fn private () -> int  { 2 }",
     )
     .unwrap();
     let mut client = Client::start(root, Value::Null);
     let main_uri = uri(&root.join("main.resin"));
     let lib_uri = uri(&resin_source::normalize_path(&library).unwrap());
-    let source = "import { \"lib.resin\" }; def main () -> int = { answer() };";
+    let source = "import { \"lib.resin\" }; fn main () -> int  { answer() }";
     let column = source.rfind("answer").unwrap() as u32;
     client.open(&main_uri, source);
     client.diagnostics(&main_uri, Some(1), false);
@@ -585,10 +604,7 @@ fn dependency_overlays_close_and_disk_changes_refresh_consumers() {
             .any(|item| item["label"] == "private")
     );
 
-    client.open(
-        &lib_uri,
-        "export { renamed }; def renamed () -> int = { 2 };",
-    );
+    client.open(&lib_uri, "export { renamed }; fn renamed () -> int  { 2 }");
     client.diagnostics(&main_uri, Some(1), true);
     assert_eq!(
         client.request("textDocument/definition", at(&main_uri, 0, column)),
@@ -604,13 +620,13 @@ fn dependency_overlays_close_and_disk_changes_refresh_consumers() {
         lib_uri
     );
 
-    std::fs::write(&library, "export { answer }; def answer () -> int = { + };").unwrap();
+    std::fs::write(&library, "export { answer }; fn answer () -> int  { + }").unwrap();
     client.notify(
         "workspace/didChangeWatchedFiles",
         json!({"changes": [{"uri": lib_uri, "type": 2}]}),
     );
     client.diagnostics(&lib_uri, None, true);
-    std::fs::write(&library, "export { answer }; def answer () -> int = { 3 };").unwrap();
+    std::fs::write(&library, "export { answer }; fn answer () -> int  { 3 }").unwrap();
     client.notify(
         "workspace/didChangeWatchedFiles",
         json!({"changes": [{"uri": lib_uri, "type": 2}]}),
@@ -621,7 +637,7 @@ fn dependency_overlays_close_and_disk_changes_refresh_consumers() {
         hover["contents"]["value"]
             .as_str()
             .unwrap()
-            .contains("def answer () -> int")
+            .contains("fn answer () -> int")
     );
     client.stop();
 }
@@ -635,7 +651,7 @@ fn local_header_creation_and_deletion_refresh_unchanged_editor_inputs() {
     std::fs::create_dir(&include).unwrap();
     let mut client = Client::start(&project, json!({"includeRoots": ["../include"]}));
     let main_uri = uri(&project.join("main.resin"));
-    let source = "extern { \"./fixture\": {} }; def main() = {};";
+    let source = "extern { \"./fixture\": {} }; fn main()  {}";
     client.open(&main_uri, source);
     client.diagnostics(&main_uri, Some(1), true);
     let watchers: Vec<_> = client
@@ -695,16 +711,14 @@ fn managed_library_roots_are_selected_by_server_configuration() {
         std::fs::create_dir_all(library.join("math")).unwrap();
         std::fs::write(
             library.join("math/value.resin"),
-            format!("export {{ {function} }}; def {function}() -> int = {{ 42 }};"),
+            format!("export {{ {function} }}; fn {function}() -> int  {{ 42 }}"),
         )
         .unwrap();
         let mut client = Client::start_with_library_root(&project, Value::Null, Some(&library));
         let uri = uri(&project.join("main.resin"));
         client.open(
             &uri,
-            &format!(
-                "import {{ \"$/math/value.resin\" }}; def main() -> int = {{ {function}() }};"
-            ),
+            &format!("import {{ \"$/math/value.resin\" }}; fn main() -> int  {{ {function}() }}"),
         );
         client.diagnostics(&uri, Some(1), false);
     }
@@ -717,24 +731,24 @@ fn library_root_override_and_rapid_versions_use_the_latest_snapshot() {
     std::fs::create_dir(&library_root).unwrap();
     std::fs::write(
         library_root.join("custom.resin"),
-        "export { standard }; def standard () -> int = { 1 };",
+        "export { standard }; fn standard () -> int  { 1 }",
     )
     .unwrap();
     let mut client = Client::start_with_library_root(temp.path(), Value::Null, Some(&library_root));
     let uri = uri(&temp.path().join("main.resin"));
     client.open(
         &uri,
-        "import { \"$/custom.resin\" }; def main () -> int = { standard() };",
+        "import { \"$/custom.resin\" }; fn main () -> int  { standard() }",
     );
     client.diagnostics(&uri, Some(1), false);
     for version in 2..50 {
         client.change(
             &uri,
             version,
-            &format!("def main () -> int = {{ var value{version} = missing; value{version} }};"),
+            &format!("fn main () -> int  {{ let mut value{version} = missing; value{version} }}"),
         );
     }
-    let final_source = "def main () -> int = { var final = 1; final };";
+    let final_source = "fn main () -> int  { let mut final = 1; final }";
     client.change(&uri, 50, final_source);
     client.diagnostics(&uri, Some(50), false);
     let hover = client.request(
@@ -755,7 +769,7 @@ fn holes_do_not_block_later_features_and_repair_clears_diagnostics() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("holes.resin"));
-    let broken = "struct FieldsCount<T0> { count: T0 }; def main() = { var missing = ; var value = FieldsCount<_> { count = 1 }; value.count; };";
+    let broken = "struct FieldsCount<T0> { count: T0, } fn main()  { let mut missing = ; let mut value = FieldsCount<_> { count = 1 }; value.count; }";
     client.open(&uri, broken);
     client.diagnostics(&uri, Some(1), true);
     let end = broken.rfind("count").unwrap() as u32 + 2;
@@ -774,7 +788,7 @@ fn holes_do_not_block_later_features_and_repair_clears_diagnostics() {
             .unwrap()
             .contains("missing: long")
     );
-    let unknown = "def main() = { var value = ; value.count; };";
+    let unknown = "fn main()  { let mut value = ; value.count; }";
     client.change(&uri, 3, unknown);
     client.diagnostics(&uri, Some(3), true);
     let completion = client.request(
@@ -790,15 +804,15 @@ fn editor_builds_use_disk_and_preserve_dirty_buffers_across_saves() {
     let temp = TempDir::new().unwrap();
     let main_path = temp.path().join("main.resin");
     let helper_path = temp.path().join("helper.resin");
-    let main = "export { main }; import { \"helper.resin\" }; def main() -> int = { value() };";
-    let helper = "export { value }; def value() -> int = { 7 };";
+    let main = "export { main }; import { \"helper.resin\" }; fn main() -> int  { value() }";
+    let helper = "export { value }; fn value() -> int  { 7 }";
     std::fs::write(&main_path, main).unwrap();
     std::fs::write(&helper_path, helper).unwrap();
     let main_uri = uri(&main_path);
     let helper_uri = uri(&helper_path);
     let mut client = Client::start(temp.path(), Value::Null);
     client.open(&main_uri, main);
-    let dirty = "export { value }; def value() -> bool = { 1 == 1 };";
+    let dirty = "export { value }; fn value() -> bool  { 1 == 1 }";
     client.open(&helper_uri, dirty);
     client.diagnostics(&main_uri, Some(1), true);
     let output = temp
@@ -843,7 +857,7 @@ fn editor_builds_use_disk_and_preserve_dirty_buffers_across_saves() {
 fn editor_build_destinations_are_required_and_cannot_replace_inputs() {
     let temp = TempDir::new().unwrap();
     let path = temp.path().join("main.resin");
-    let source = "export { main }; def main() -> int = { 0 };";
+    let source = "export { main }; fn main() -> int  { 0 }";
     std::fs::write(&path, source).unwrap();
     let source_uri = uri(&path);
     let mut client = Client::start(temp.path(), Value::Null);
@@ -871,7 +885,7 @@ fn editor_queries_and_cancellation_stay_responsive_during_native_work() {
     use std::os::unix::fs::PermissionsExt;
     let temp = TempDir::new().unwrap();
     let path = temp.path().join("main.resin");
-    let source = "export { main }; def main() -> int = { 7 };";
+    let source = "export { main }; fn main() -> int  { 7 }";
     std::fs::write(&path, source).unwrap();
     let compiler = temp.path().join("compiler");
     let marker = temp.path().join("compiler-started");
@@ -949,11 +963,11 @@ fn missing_parent_imports_recover_after_creation_deletion_and_alias_changes() {
     let entry = uri(&child.join("main.resin"));
     let library = temp.path().join("lib.resin");
     let library_uri = uri(&library);
-    let source = "import { \"../lib.resin\" }; def main() -> int = { answer() };";
+    let source = "import { \"../lib.resin\" }; fn main() -> int  { answer() }";
     let mut client = Client::start(&child, Value::Null);
     client.open(&entry, source);
     client.diagnostics(&entry, Some(1), true);
-    let library_text = "export { answer }; def answer() -> int = { 7 };";
+    let library_text = "export { answer }; fn answer() -> int  { 7 }";
     std::fs::write(&library, library_text).unwrap();
     client.notify(
         "workspace/didChangeWatchedFiles",
@@ -992,9 +1006,9 @@ fn missing_parent_imports_recover_after_creation_deletion_and_alias_changes() {
 fn saved_editor_revision_is_a_cache_hit_for_an_independent_relocated_cli() {
     let editor_tree = TempDir::new().unwrap();
     let checkout = TempDir::new().unwrap();
-    let main = "export { main }; import { \"helper.resin\" }; def main() -> int = { answer() };";
-    let old = "export { answer }; def answer() -> int = { 3 };";
-    let edited = "export { answer }; def answer() -> int = { 7 };";
+    let main = "export { main }; import { \"helper.resin\" }; fn main() -> int  { answer() }";
+    let old = "export { answer }; fn answer() -> int  { 3 }";
+    let edited = "export { answer }; fn answer() -> int  { 7 }";
     std::fs::write(editor_tree.path().join("main.resin"), main).unwrap();
     std::fs::write(editor_tree.path().join("helper.resin"), old).unwrap();
     let mut client = Client::start(editor_tree.path(), Value::Null);
@@ -1076,9 +1090,9 @@ fn managed_definitions_open_as_readonly_files_and_query_their_managed_identity()
     let project = temp.path().join("project");
     std::fs::create_dir(&library).unwrap();
     std::fs::create_dir(&project).unwrap();
-    let managed = "export { answer }; def answer() -> int = { 42 };";
+    let managed = "export { answer }; fn answer() -> int  { 42 }";
     std::fs::write(library.join("answer.resin"), managed).unwrap();
-    let source = "import { \"$/answer.resin\" }; def main() -> int = { answer() };";
+    let source = "import { \"$/answer.resin\" }; fn main() -> int  { answer() }";
     let mut client = Client::start_with_library_root(&project, Value::Null, Some(&library));
     let main_uri = uri(&project.join("main.resin"));
     client.open(&main_uri, source);
@@ -1105,7 +1119,7 @@ fn managed_definitions_open_as_readonly_files_and_query_their_managed_identity()
         at(
             &managed_uri,
             0,
-            managed.find("def answer").unwrap() as u32 + 4,
+            managed.find("fn answer").unwrap() as u32 + 4,
         ),
     );
     assert!(
@@ -1124,11 +1138,11 @@ fn restarted_service_refreshes_managed_queries_without_an_editor_change() {
     let project = temp.path().join("project");
     std::fs::create_dir(&library).unwrap();
     std::fs::create_dir(&project).unwrap();
-    let first = "export { answer }; def answer() -> int = { 42 };";
-    let second = "export { answer }; def answer() -> bool = { 1 == 1 };";
+    let first = "export { answer }; fn answer() -> int  { 42 }";
+    let second = "export { answer }; fn answer() -> bool  { 1 == 1 }";
     let managed_path = library.join("answer.resin");
     std::fs::write(&managed_path, first).unwrap();
-    let source = "import { \"$/answer.resin\" }; def main() -> int = { answer() };";
+    let source = "import { \"$/answer.resin\" }; fn main() -> int  { answer() }";
     let mut client = Client::start_with_library_root(&project, Value::Null, Some(&library));
     let main_uri = uri(&project.join("main.resin"));
     client.open(&main_uri, source);
@@ -1164,7 +1178,7 @@ fn diagnostic_messages_are_single_line() {
     let temp = TempDir::new().unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let file = uri(&temp.path().join("diagnostic.resin"));
-    client.open(&file, "def main() = { var value: int = \"text\"; };");
+    client.open(&file, "fn main()  { let mut value: int = \"text\"; }");
     let diagnostics = client.diagnostics(&file, Some(1), true);
     for diagnostic in diagnostics.as_array().unwrap() {
         let message = diagnostic["message"].as_str().unwrap();

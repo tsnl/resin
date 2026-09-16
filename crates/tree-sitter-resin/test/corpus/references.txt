@@ -1,13 +1,13 @@
 ==================
 References and initialized binding annotations
 ==================
-def identity<T>(value: Ref<T>) -> Ref<T> = { value };
-def example() -> int = {
-    var value: int = 1;
-    var alias: Ref<_> = identity(value);
-    alias := 42;
+fn identity<T>(value: Ref<T>) -> Ref<T>  { value }
+fn example() -> int  {
+    let mut value: int = 1;
+    let alias: Ref<_> = identity(value);
+    alias = 42;
     value
-};
+}
 ---
 
 (source_file
@@ -15,8 +15,9 @@ def example() -> int = {
     (lid)
     (type_parameters
       (uid))
-    (declare
-      (lid)
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type
@@ -57,7 +58,8 @@ def example() -> int = {
       (statement
         (define
           (local_define
-            (lid)
+            (binding_pattern
+              (lid))
             (type
               (infix_type
                 (union_type
@@ -74,7 +76,8 @@ def example() -> int = {
       (statement
         (define
           (local_define
-            (lid)
+            (binding_pattern
+              (lid))
             (type
               (infix_type
                 (union_type

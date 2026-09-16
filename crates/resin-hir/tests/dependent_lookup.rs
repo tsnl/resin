@@ -3,99 +3,110 @@ use resin_hir::{Term, TermKind, Type};
 mod common;
 use common::hir_module;
 
-fn compile(source: &str) -> Result<resin_hir::Module, resin_source::SourceError> {
-    hir_module(source)
+fn tail(function: &resin_hir::Function) -> &Term {
+    value(function.body.as_ref().unwrap())
 }
 
-fn tail(function: &resin_hir::Function) -> &Term {
-    let TermKind::Block { tail, .. } = &function.body.as_ref().unwrap().kind else {
-        panic!("function block")
-    };
-    tail
+fn value(mut term: &Term) -> &Term {
+    loop {
+        term = match &term.kind {
+            TermKind::Block { tail, .. } => tail,
+            TermKind::Use { arg } | TermKind::Convert { arg } => arg,
+            TermKind::Read { place } | TermKind::Move { place } => place,
+            _ => return term,
+        };
+    }
 }
 
 #[test]
-fn dependent_methods_retain_the_receiver_and_determining_result() {
-    let module = compile("def read<T>(value: T) -> _ = { value.read() };").unwrap();
-    let read = &module.functions[0];
-    let Type::Value { of } = &read.signature.result.ty else {
+fn dependent_operations_retain_visible_candidates_and_determining_result() {
+    let module = hir_module(
+        "struct A {} struct B {} fn read(value: Ref<A>) -> int { 1 } fn read(value: Ref<B>) -> bool { true } fn relay<T>(value: T) -> _ { value:read() }",
+    )
+    .unwrap();
+    let relay = &module.functions[2];
+    let Type::Value { of } = &relay.signature.result.ty else {
         panic!("read dependent result as a value")
     };
     let Type::FunctionResult { function } = of.as_ref() else {
-        panic!("method result relation")
+        panic!("operation result relation")
     };
-    let Type::Method { lookup } = function.as_ref() else {
-        panic!("method type relation")
+    let Type::Operation { lookup } = function.as_ref() else {
+        panic!("operation type relation")
     };
-    assert_eq!(lookup.name, "read".into());
+    assert_eq!(lookup.name.as_ref(), "read");
     assert_eq!(
-        lookup.receiver,
-        Type::Parameter {
-            parameter: read.signature.type_params[0].id
-        }
+        lookup.arguments,
+        [Type::Parameter {
+            parameter: relay.signature.type_params[0].id
+        }]
     );
-    assert!(!lookup.associated);
-    assert!(lookup.type_args.is_empty());
-    let TermKind::Use { arg } = &tail(read).kind else {
-        panic!("read reference result")
-    };
-    assert!(matches!(arg.kind, TermKind::DependentMethodCall { .. }));
-    assert_eq!(module.functions.len(), 1);
+    assert_eq!(lookup.candidates.len(), 2);
+    assert_eq!(
+        module.functions[lookup.candidates[0].index()].name.as_ref(),
+        "read"
+    );
+    assert!(lookup.type_args.is_none());
+    assert!(matches!(tail(relay).kind, TermKind::OperationCall { .. }));
 }
 
 #[test]
-fn dependent_field_and_method_results_compose_without_concrete_declarations() {
-    let module = compile(
-        "def field_method<T>(value: T) -> _ = { value.item.read() }; \
-         def method_field<T>(value: T) -> _ = { value.read().item }; \
-         def method_method<T>(value: T) -> _ = { value.read().next() };",
+fn dependent_fields_and_operation_results_compose() {
+    let module = hir_module(
+        "struct A { item: int } struct B { item: bool }
+         fn read(value: Ref<A>) -> B { B { item = true } }
+         fn read(value: Ref<B>) -> A { A { item = 1 } }
+         fn next(value: Ref<A>) -> int { value.item }
+         fn next(value: Ref<B>) -> bool { value.item }
+         fn field_operation<T>(value: T) -> _ { value.item:read() }
+         fn operation_field<T>(value: T) -> _ { value:read().item }
+         fn operation_operation<T>(value: T) -> _ { value:read():next() }",
     )
     .unwrap();
     assert!(matches!(
-        module.functions[0].signature.result.ty,
+        module.functions[4].signature.result.ty,
         Type::Value { .. }
     ));
     assert!(matches!(
-        module.functions[1].signature.result.ty,
+        module.functions[5].signature.result.ty,
         Type::Member { .. }
     ));
     assert!(matches!(
-        module.functions[2].signature.result.ty,
+        module.functions[6].signature.result.ty,
         Type::Value { .. }
     ));
 }
 
 #[test]
-fn dependent_associated_references_retain_explicit_method_arguments() {
-    let module = compile("def select<T, U>() -> _ = { T.make::<U> };").unwrap();
-    let select = &module.functions[0];
-    let Type::Method { lookup } = &select.signature.result.ty else {
-        panic!("associated method reference")
+fn generic_function_references_retain_explicit_arguments() {
+    let module =
+        hir_module("fn make<U>(value: U) -> U { value } fn select<T, U>() -> _ { make::<U> }")
+            .unwrap();
+    let select = &module.functions[1];
+    let TermKind::Function {
+        function,
+        type_args,
+    } = &tail(select).kind
+    else {
+        panic!("ordinary function reference")
     };
-    assert!(lookup.associated);
-    assert_eq!(lookup.name, "make".into());
+    assert_eq!(module.functions[function.index()].name.as_ref(), "make");
     assert_eq!(
-        lookup.type_args,
-        [Type::Parameter {
+        type_args,
+        &[Type::Parameter {
             parameter: select.signature.type_params[1].id
         }]
     );
-    assert!(matches!(
-        tail(select).kind,
-        TermKind::DependentMethod { .. }
-    ));
+    assert!(matches!(select.signature.result.ty, Type::Function { .. }));
 }
 
 #[test]
 fn dependent_callable_fields_remain_ordinary_calls() {
-    let module = compile("def call<T>(value: T) -> _ = { (value.callback)(41) };").unwrap();
-    let TermKind::Use { arg } = &tail(&module.functions[0]).kind else {
-        panic!("read callable field result")
-    };
-    let TermKind::Call { func, .. } = &arg.kind else {
+    let module = hir_module("fn call<T>(value: T) -> _ { (value.callback)(41) }").unwrap();
+    let TermKind::Call { func, .. } = &tail(&module.functions[0]).kind else {
         panic!("function-valued field call")
     };
-    assert!(matches!(func.kind, TermKind::Field { .. }));
+    assert!(matches!(value(func).kind, TermKind::Field { .. }));
     assert!(matches!(
         module.functions[0].signature.result.ty,
         Type::Value { .. }
@@ -103,12 +114,11 @@ fn dependent_callable_fields_remain_ordinary_calls() {
 }
 
 #[test]
-fn weak_receiver_and_method_variables_are_not_template_parameters() {
-    for source in [
-        "def make<T>() -> T = { 0 }; def main() -> int = { make().read() };",
-        "def read<T>(value: T) -> _ = { value.read::<_>() };",
-    ] {
-        let error = compile(source).unwrap_err();
-        assert!(error.to_string().contains("annotat"), "{source}: {error}");
-    }
+fn unknown_names_and_undetermined_arguments_fail_before_specialization() {
+    let error = hir_module("fn unused<T>(value: T) { value:missing(); }").unwrap_err();
+    assert!(error.to_string().contains("UnboundValue"), "{error}");
+    let error = hir_module(
+        "fn read<T, U>(value: T) -> T { value } fn relay<T>(value: T) -> T { value:read::<T, _>() }",
+    ).unwrap_err();
+    assert!(error.to_string().contains("annotat"), "{error}");
 }

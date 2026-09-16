@@ -167,6 +167,11 @@ impl Specialization<'_, '_> {
     }
 
     fn place(&mut self, source: &resin_hir::Term) -> Result<Box<concrete::Term>, Error> {
+        if let resin_hir::TermKind::Read { place } | resin_hir::TermKind::Move { place } =
+            &source.kind
+        {
+            return self.place(place);
+        }
         let access = match source.kind {
             resin_hir::TermKind::Local { .. }
             | resin_hir::TermKind::Field { .. }
@@ -195,7 +200,12 @@ impl Specialization<'_, '_> {
             Ok(concrete::Term {
                 span: source.span,
                 ty,
-                kind: self.kind(&source.kind, &source.ty)?,
+                kind: match &source.kind {
+                    resin_hir::TermKind::Use { arg } => {
+                        self.reference_use(arg, &source.ty, access)?
+                    }
+                    kind => self.kind(kind, &source.ty)?,
+                },
             })
         })();
         self.span = previous_span;
@@ -225,7 +235,7 @@ impl Specialization<'_, '_> {
             values: source
                 .values
                 .iter()
-                .map(|arg| self.term(arg))
+                .map(|arg| self.call_argument(arg))
                 .collect::<Result<_, _>>()?,
             params: source
                 .params
@@ -415,12 +425,67 @@ impl Specialization<'_, '_> {
                     function,
                     arguments,
                 } => self.request(function, arguments)?,
-                super::substitute::MethodTarget::Primitive { .. } => {
+                super::substitute::MethodTarget::Primitive { .. }
+                | super::substitute::MethodTarget::Intrinsic { .. } => {
                     return Err(
                         self.instance_error("primitive operators cannot be referenced as methods")
                     );
                 }
             },
+        })
+    }
+
+    fn operation_call(
+        &mut self,
+        lookup: &resin_hir::OperationLookup,
+        arguments: &[resin_hir::Term],
+        expected: &resin_hir::Type,
+    ) -> Result<concrete::TermKind, Error> {
+        let operation = self
+            .substitution
+            .operation(lookup, self.instances)
+            .map_err(|error| self.error(error.kind))?;
+        let params = operation
+            .params
+            .iter()
+            .map(|ty| self.ty(ty))
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = self.ty(&operation.result)?;
+        let expected = self.ty(expected)?;
+        self.require_assignable(&result, &expected)?;
+        let args = self.call_arguments(arguments, &params)?;
+        let (function, arguments) = match operation.target {
+            super::substitute::MethodTarget::Intrinsic { op } => {
+                return Ok(concrete::TermKind::Intrinsic {
+                    op,
+                    type_args: vec![],
+                    args: concrete::Arguments {
+                        params,
+                        values: args,
+                    },
+                });
+            }
+            super::substitute::MethodTarget::Source {
+                function,
+                arguments,
+            } => (function, arguments),
+            super::substitute::MethodTarget::Primitive { symbol } => {
+                return self.completed_builtin(&symbol, args, &expected);
+            }
+        };
+        let function = concrete::Term {
+            span: self.span,
+            ty: Ty::Function {
+                params,
+                result: Box::new(result),
+            },
+            kind: concrete::TermKind::Function {
+                function: self.request(function, arguments)?,
+            },
+        };
+        Ok(concrete::TermKind::Call {
+            func: Box::new(function),
+            args,
         })
     }
 
@@ -462,7 +527,7 @@ impl Specialization<'_, '_> {
                     Ok(Box::new(concrete::Term {
                         span: receiver.span,
                         ty: params[0].clone(),
-                        kind: self.reference_use(receiver, &method.params[0])?,
+                        kind: self.reference_use(receiver, &method.params[0], Access::Value)?,
                     }))
                 } else {
                     self.method_receiver(receiver, &params[0])
@@ -473,6 +538,11 @@ impl Specialization<'_, '_> {
         let mut args: Vec<_> = receiver.into_iter().map(|receiver| *receiver).collect();
         args.extend(self.call_arguments(arguments, &params[offset..])?);
         let (function, arguments) = match method.target {
+            super::substitute::MethodTarget::Intrinsic { .. } => {
+                return Err(
+                    self.instance_error("intrinsic operations require free-function lookup")
+                );
+            }
             super::substitute::MethodTarget::Source {
                 function,
                 arguments,
@@ -542,11 +612,31 @@ impl Specialization<'_, '_> {
             .iter()
             .zip(params)
             .map(|(source, param)| {
-                let value = self.term(source)?;
+                let value = self.call_argument(source)?;
                 self.require_assignable(&value.ty, param)?;
                 Ok(value)
             })
             .collect()
+    }
+
+    fn call_argument(&mut self, source: &resin_hir::Term) -> Result<concrete::Term, Error> {
+        // Dependent overload parameters can become references only after
+        // specialization. Apply the same temporary materialization as HIR's
+        // argument completion, without extending local reference bindings.
+        if let resin_hir::TermKind::Use { arg } = &source.kind
+            && let resin_hir::Type::Reference { referent } = self.argument(&source.ty)?
+            && self.argument(&arg.ty)? == *referent
+        {
+            return Ok(concrete::Term {
+                span: source.span,
+                ty: self.ty(&source.ty)?,
+                kind: concrete::TermKind::Adapt {
+                    conversion: concrete::ReceiverConversion::Address,
+                    arg: self.place(arg)?,
+                },
+            });
+        }
+        self.term(source)
     }
 
     fn record(
@@ -686,6 +776,7 @@ impl Specialization<'_, '_> {
         &mut self,
         source: &resin_hir::Term,
         expected: &resin_hir::Type,
+        access: Access,
     ) -> Result<concrete::TermKind, Error> {
         let from = self.argument(&source.ty)?;
         let target = self.argument(expected)?;
@@ -711,6 +802,9 @@ impl Specialization<'_, '_> {
             return Ok(concrete::TermKind::Address { place });
         }
         let value = if let resin_hir::Type::Reference { referent } = from {
+            if access == Access::Value && !referent.copies_implicitly() {
+                return Err(self.instance_error("cannot move a value through a reference or pointer; replace its contents instead"));
+            }
             concrete::Term {
                 span: source.span,
                 ty: self.ty(&referent)?,
@@ -722,7 +816,7 @@ impl Specialization<'_, '_> {
             // Identity uses preserve place access, including opaque managed fields
             // addressed from a shader. Do not introduce a value read here.
             if from == target {
-                return self.kind(&source.kind, &source.ty);
+                return Ok(self.complete_term(source, access)?.kind);
             }
             self.term(source)?
         };
@@ -828,6 +922,14 @@ impl Specialization<'_, '_> {
             .iter()
             .map(|ty| self.ty(ty))
             .collect::<Result<Vec<_>, _>>()?;
+        if op == Intrinsic::OwnerAllocate
+            && parameters.first().is_some_and(|element| {
+                self.argument(element)
+                    .is_ok_and(|element| !element.copies_implicitly())
+            })
+        {
+            return Err(self.instance_error("repeated allocation requires an implicitly copyable element; use single-value allocation to transfer ownership"));
+        }
         if matches!(
             op,
             Intrinsic::GpuViewRange
@@ -898,6 +1000,27 @@ impl Specialization<'_, '_> {
         expected: &resin_hir::Type,
     ) -> Result<concrete::TermKind, Error> {
         Ok(match source {
+            resin_hir::TermKind::OperationCall { lookup, args } => {
+                self.operation_call(lookup, args, expected)?
+            }
+            resin_hir::TermKind::Read { place } => {
+                let source = self.argument(&place.ty)?;
+                let value = self.term(place)?;
+                if !matches!(source, resin_hir::Type::Reference { .. })
+                    && reference_place(&value)
+                    && !value.ty.copies_implicitly()
+                {
+                    return Err(self.instance_error("cannot move a value through a reference or pointer; replace its contents instead"));
+                }
+                // A dependent result can become a fresh owned value instead of
+                // a reference. Such a value transfers directly without copying.
+                // Reference values preserve their address; reference_use checks
+                // copyability only when a consumer requests the referent value.
+                value.kind
+            }
+            resin_hir::TermKind::Move { place } => concrete::TermKind::Move {
+                place: self.place(place)?,
+            },
             resin_hir::TermKind::Constant { value } => concrete::TermKind::Constant {
                 value: self.constant(value)?,
             },
@@ -982,7 +1105,9 @@ impl Specialization<'_, '_> {
                     self.boxed(arg)?
                 },
             },
-            resin_hir::TermKind::Use { arg } => return self.reference_use(arg, expected),
+            resin_hir::TermKind::Use { arg } => {
+                return self.reference_use(arg, expected, Access::Value);
+            }
             resin_hir::TermKind::Convert { arg } => self.conversion(arg, expected)?,
             resin_hir::TermKind::GpuPipelineCreate {
                 factory,
@@ -1005,7 +1130,10 @@ impl Specialization<'_, '_> {
                 let args = self.arguments(args)?;
                 let pipeline = resin_types::gpu_pipeline_contract(
                     self.instances.typer().definitions(),
-                    &args.values[1].ty,
+                    args.values[1]
+                        .ty
+                        .deref_target()
+                        .unwrap_or(&args.values[1].ty),
                 )
                 .map_err(|message| self.instance_error(message))?;
                 let projection = if pipeline.root == Ty::None {

@@ -742,7 +742,7 @@ mod tests {
     #[tokio::test]
     async fn closing_registrations_releases_accepted_text_after_outstanding_snapshots_drop() {
         let temp = TempDir::new().unwrap();
-        let document = document(&temp.path().join("main.resin"), 1, 1, "def main() = {};");
+        let document = document(&temp.path().join("main.resin"), 1, 1, "fn main()  {}");
         let weak_text = Arc::downgrade(&document.text);
         let registered = register_editor(
             empty(temp.path()),
@@ -776,18 +776,18 @@ mod tests {
             let main = temp.path().join("main.resin");
             fs::write(
                 &library,
-                "export { answer }; def answer() -> str = { \"disk\" };",
+                "export { answer }; fn answer() -> str  { \"disk\" }",
             )
             .unwrap();
             std::os::unix::fs::symlink(&library, &alias).unwrap();
-            let supplied = "export { answer }; def answer() -> int = { 7 };";
+            let supplied = "export { answer }; fn answer() -> int  { 7 }";
             let canonical = document(&library, 1, 1, supplied);
             let aliased = document(&alias, 2, 1, supplied);
             let entry = document(
                 &main,
                 3,
                 1,
-                "import { \"lib.resin\" }; def main() -> int = { answer() };",
+                "import { \"lib.resin\" }; fn main() -> int  { answer() }",
             );
             let registered = register_editor(
                 empty(temp.path()),

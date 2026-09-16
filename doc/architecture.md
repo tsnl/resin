@@ -123,11 +123,10 @@ dispatch may remain long when splitting it would obscure the cases.
 Libraries declare compiler operations through explicit intrinsic signatures:
 
 ```resin
-intrinsic "pointer_index" def pointer_at<T>(
+intrinsic "pointer_index" fn pointer_at<T>(
     data: Ptr<T>, length: ulong, index: ulong
 ) -> Ptr<T>;
 ```
-
 The operation string selects a compiler contract; the function name belongs to the
 source module. HIR checks the declared signature against that contract, preserving
 its type binders and source identity. Calls use ordinary import resolution, generic
@@ -153,8 +152,8 @@ without source I/O; imports never execute code.
 HIR construction has three internal steps:
 
 1. Declare names and check expressions into a private tree with inference types.
-2. Solve function dependency groups and retain the selected method declarations.
-3. Complete schemes and solved expressions directly into public HIR.
+2. Solve function dependency groups and retain selected operation declarations.
+3. Complete solved expressions into public HIR while checking initialization and moves.
 
 Value lookup records declaration identities immediately. References, inference
 dependencies, and signature/body records keep those identities through resolution;
@@ -164,32 +163,39 @@ function assembly does not rescan AST declarations. Persistent scopes remain wit
 source construction and editor queries. There is no second private expression tree
 with concrete types: body completion reads the solved types and constructs public
 HIR once. Its inputs include concrete type rules, function identities, shader
-signatures, and method choices; it cannot access lexical scopes or frontend method
-namespaces. The solver is read-only during completion and is dropped before the
-completed file returns to module assembly. Inference retries restore method choices
+signatures, and operation choices; it cannot access lexical scopes. The solver is read-only during completion and is dropped before the
+completed file returns to module assembly. Inference retries restore operation choices
 alongside the solver so failed attempts cannot leak a stale selection.
 
 Each body returns its HIR and referenced shader entries. Assembly marks those
-entries for embedding only after that body completes successfully. Source-known method calls become ordinary calls
-to resolved function IDs with explicit receiver adaptation and argument packing. Dependent
-method calls retain their receiver, name, completed type arguments, and ordinary arguments.
-Compiler-provided methods become intrinsic operations. Short-circuit operators
+entries for embedding only after that body completes successfully. Source-known
+free operations and colon calls become ordinary calls to resolved function IDs.
+Dependent operations retain lexical candidate identities, completed type arguments,
+operand types, and signature relations in `OperationLookup`. Primitive operations
+are selected through the same overload path. Short-circuit operators
 become `If` nodes. Field projections retain member names, numeric literals retain
 text and their determined types, explicit conversions retain their source and destination
 types, and layout queries retain only the queried type. Their operand effects cannot execute. Type aliases
 expand into their targets. Completed nominal declarations retain names, bodies,
-method identities, and destruction hooks in HIR. HIR has no concrete interner;
+destruction hooks, and byte-representation hooks in HIR. HIR has no concrete interner;
 its constants and type expressions use its own language rather than concrete
 storage values and a `resin_types::TypeTable`.
 
 HIR remains a tree: `If`, `While`, blocks, matches, error propagation, places,
-and values retain their structure. Completing each body also establishes definite
-initialization, including unused definitions. Parameters and pattern bindings begin
-initialized; local initializers cannot read or address their own binding. Assignment
-and address acquisition do not read a whole local, while field projections require
-an initialized base. Completion follows runtime evaluation order, intersects branch
-states, and retains only the loop condition's guaranteed effects. Layout queries
-retain no operand effects.
+and values retain their structure. Completing each body establishes definite
+initialization and checked moves, including unused definitions. Parameters and
+pattern bindings begin initialized; local initializers cannot read or address their
+own binding. The completion pass in `resin-hir/src/lower/elaborate.rs` tracks each
+binding's mutability, initialization, and moved field paths. A partial move makes
+overlapping paths unavailable while preserving disjoint fields. Reassignment
+restores the destination; types with custom drop hooks forbid partial moves.
+
+Completion follows runtime evaluation order, intersects reachable branch states,
+and checks loop backedges, `continue`, `break`, and returns. Layout queries retain
+no operand effects. Completed HIR records ownership transfers with `Move` and
+retains generic borrowed reads for concrete checking. Reference argument temporaries
+are materialized until the full-expression boundary. References and raw pointers
+have no static lifetime or aliasing checks.
 
 LIR lowering assigns storage to binding IDs and makes evaluation, ownership cleanup,
 and control flow explicit. It has no source initialization states or branch snapshots;
@@ -213,7 +219,7 @@ and type dependencies enter the worklist. Decorated functions remain host-callab
 shader artifacts and pipeline creation request separate shader instances. C emits
 host instances, while SPIR-V follows the requested shader graph.
 
-Source functions bind named parameters with `def identity<T>(value: T) -> T`.
+Source functions bind named parameters with `fn identity<T>(value: T) -> T`.
 Every declaration reference creates a fresh application, deduced from operands and
 expected results or supplied with `identity::<int>`. Bound parameters remain rigid
 inside the definition; local function values remain monomorphic. A `_` is a weak
@@ -226,40 +232,34 @@ representation used by LIR; constructors constrain field values against the appl
 scheme. Local field-only structs retain enclosing type parameters as implicit
 arguments before their explicitly declared parameters. Imports and aliases keep
 the source nominal identity, and editor facts retain substituted fields without
-materializing their layouts. Methods reuse the owner's binder identities and append
-their own named parameters. Source method namespaces select a declaration by nominal
-origin; HIR construction applies its signature once per call and emits an ordinary
-function application, including receiver adaptation. Method dependencies participate
-in result-inference groups. The completed HIR retains one method body; LIR specializes
-it, and generic drop hooks, with the owner's arguments before the method's arguments.
-When the nominal origin depends on substitution, HIR retains a `MethodLookup`.
-Its `Type::Method` describes the caller-facing function signature: instance calls
-omit the implicit receiver, while associated references retain every parameter.
-`FunctionParameter` and `FunctionResult` project that signature; the same projections
-support calls through dependent function-valued fields. These are determining type
-expressions, not weak inference variables or constraints that infer a receiver.
+materializing their layouts. Free operation signatures bind all their parameters
+explicitly. Every operand and the expected result participate in overload selection;
+a colon receiver is simply the first argument. Imported functions form lexical
+overload sets, while local nonfunction bindings shadow them. Signature substitution
+can reject candidates; function body errors cannot. Multiple viable candidates are
+ambiguous, without declaration-order or concrete-over-generic preference.
 
-LIR resolves these lookups against completed source nominal declarations. It
-substitutes the owner's arguments and explicitly supplied method-local arguments,
-checks the concrete receiver adaptation and arguments, and requests the selected
-function through the existing instance worklist. It does not deduce additional
-method arguments: an unknown namespace requires explicit arguments for those binders.
-Known namespaces continue to support ordinary HIR deduction. Compiler primitive
-method generators remain private to HIR construction; dependent lookup currently
-selects source-declared methods. Lookup and signature expansion share the bounded
-type normalization traversal. Repeated active signature queries report a cycle
-requiring annotation; growing queries have a separate nesting limit of 32. These
-guards bound work within an instance independently of the function-instance limit.
-Failures retain their application trace. Concrete calls and aggregate constructors
-check the substituted signature and shape before storage lowering; fixed argument
-types cannot bypass those checks when a contextual type is a determining query.
+Dependent `OperationLookup` values preserve those candidate identities through HIR.
+LIR substitutes concrete types and deduces candidate signature arguments from the
+recorded relations, then requests the selected function through the instance
+worklist. Caller scopes never add candidates. `FunctionParameter` and
+`FunctionResult` project the selected signature, including calls through dependent
+function-valued fields. These determining expressions do not infer a receiver from
+its desired field type. Literal context is recorded in HIR so concrete primitive
+selection preserves numeric choices.
+
+Lookup and signature expansion share bounded type normalization. Repeated active
+signature queries report a cycle requiring annotation; growing queries have a
+separate nesting limit of 32. These guards bound work independently of the
+function-instance allowance. Failures retain their application trace. Concrete
+calls and constructors check substituted signatures before storage lowering.
 
 Transparent aliases use the same lexical type binders, for example
 `type View<T> = Ptr<T>`. Source scopes retain their completed RHS and named parameters;
 applications expose the substituted structure to ordinary deduction. A local alias
 can capture its enclosing function's parameters without capturing arguments to its
-own binders. Aliases keep the target's nominal origin and method namespace and do
-not generate functions. Definitions resolve in declaration order; references to an
+own binders. Aliases keep the target's nominal origin and do not generate functions or operation
+namespaces. Definitions resolve in declaration order; references to an
 alias while its RHS is being constructed report recursive expansion, even beneath
 a pointer. Expansion has separate HIR limits of 256 levels and 65,536 nodes.
 
@@ -294,7 +294,7 @@ substituting types and selecting supported builtin operations without inference.
 It also selects numeric representations, computes layout constants, resolves field indices,
 and chooses explicit conversion operations. A determining `Type::Member` resolves the type
 of a named field from a substituted receiver; it never deduces a receiver from the field.
-Dependent methods and function-signature projections use the same direction of resolution.
+Dependent operations and function-signature projections use the same direction of resolution.
 Numeric parsing and range checks use the same `resin-types` operation as source construction,
 with an explicit type and no defaults. Concrete conversion rules reject unwrapping custom
 owners before their destruction can be bypassed. Source-known errors remain HIR diagnostics;
@@ -384,7 +384,7 @@ use std::{collections::BTreeMap, sync::Arc};
 async fn main() -> (() | Err<Box<dyn std::error::Error + Send + Sync>>) {
     let execution = Execution::default();
     let cancellation = Cancellation::new();
-    let source = Source::new("example.resin", "export { main }; def main() -> int = { 42 };");
+    let source = Source::new("example.resin", "export { main }; fn main() -> int { 42 }");
     let syntax = Arc::new(resin_cst::build_cst(
         source.text().to_owned(), None, &execution, &cancellation,
     ).await?);

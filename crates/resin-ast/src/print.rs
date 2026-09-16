@@ -115,8 +115,8 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
                 group(
                     params
                         .iter()
-                        .map(|(name, ann)| {
-                            list("param", vec![symbol(name.val.as_ref()), sexp_typespec(ann)])
+                        .map(|(pattern, ann)| {
+                            list("param", vec![sexp_pattern(pattern), sexp_typespec(ann)])
                         })
                         .collect(),
                 ),
@@ -137,8 +137,8 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
                 group(
                     params
                         .iter()
-                        .map(|(name, ann)| {
-                            list("param", vec![symbol(name.val.as_ref()), sexp_typespec(ann)])
+                        .map(|(pattern, ann)| {
+                            list("param", vec![sexp_pattern(pattern), sexp_typespec(ann)])
                         })
                         .collect(),
                 ),
@@ -154,15 +154,15 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
             decorators,
             ..
         } => list_sp(
-            "def",
+            "fn",
             stmt.span,
             vec![
                 declaration_name(name, type_params),
                 group(
                     params
                         .iter()
-                        .map(|(name, ann)| {
-                            list("param", vec![symbol(name.val.as_ref()), sexp_typespec(ann)])
+                        .map(|(pattern, ann)| {
+                            list("param", vec![sexp_pattern(pattern), sexp_typespec(ann)])
                         })
                         .collect(),
                 ),
@@ -177,8 +177,8 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
                 ),
             ],
         ),
-        StmtKind::Define { name, ann, init } => {
-            let mut items = vec![symbol(name.val.as_ref())];
+        StmtKind::Define { pattern, ann, init } => {
+            let mut items = vec![sexp_pattern(pattern)];
             items.extend(ann.iter().map(sexp_typespec));
             items.push(sexp_term(init));
             list_sp("define", stmt.span, items)
@@ -192,10 +192,10 @@ fn sexp_stmt(stmt: &Stmt) -> SExp {
             stmt.span,
             vec![declaration_name(name, type_params), sexp_typespec(init)],
         ),
-        StmtKind::Declare { name, ann } => list_sp(
+        StmtKind::Declare { pattern, ann } => list_sp(
             "declare",
             stmt.span,
-            vec![symbol(name.val.as_ref()), sexp_typespec(ann)],
+            vec![sexp_pattern(pattern), sexp_typespec(ann)],
         ),
         StmtKind::Expr { term } => list_sp("expr", stmt.span, vec![sexp_term(term)]),
     }
@@ -218,7 +218,9 @@ fn sexp_term(term: &Term) -> SExp {
                     "arm",
                     vec![
                         variant,
-                        symbol(arm.name.as_ref().map_or("_", |name| name.val.as_ref())),
+                        arm.pattern
+                            .as_ref()
+                            .map_or_else(|| symbol("_"), sexp_pattern),
                         sexp_term(&arm.body),
                     ],
                 )
@@ -401,4 +403,13 @@ fn type_application(function: SExp, args: &[Type]) -> SExp {
             .chain(args.iter().map(sexp_typespec))
             .collect(),
     )
+}
+
+fn sexp_pattern(pattern: &BindingPattern) -> SExp {
+    let name = symbol(pattern.name.val.as_ref());
+    if pattern.mutable {
+        list("mut", vec![name])
+    } else {
+        name
+    }
 }

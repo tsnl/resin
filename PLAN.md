@@ -98,13 +98,12 @@ import { "$/span.resin" };
 
 def main() -> int = { local_value() };
 ```
-
 ### 0.1 Language and migration
 
 - Permit an omitted or empty top-level `extern` block. Header groups are separated
   by commas, with an optional trailing comma; definitions end with semicolons and
   the outer block ends with `};`. Allow empty header groups.
-- Replace `extern "header.h" def ...;` with `def ...;` inside the corresponding
+- Replace `extern "header.h" fn ...;` with `fn ...;` inside the corresponding
   header group. Preserve standalone `extern type Name;` for opaque foreign types.
 - Grouping associates declarations with a header; it introduces no new namespace.
   Foreign functions remain module declarations with existing explicit export rules,

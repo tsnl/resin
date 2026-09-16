@@ -80,6 +80,14 @@ struct FunctionLowering<'types> {
     loop_scopes: Vec<usize>,
 }
 impl FunctionLowering<'_> {
+    fn gen_expression(&mut self, term: &Term, to: Option<&Ty>) -> Result<Ty, LowerError> {
+        self.enter_scope();
+        let result = self.gen_term(term, to)?;
+        self.cleanup(self.owned.len() - 1, &result);
+        self.owned.pop();
+        Ok(result)
+    }
+
     fn gen_term(&mut self, term: &Term, to: Option<&Ty>) -> Result<Ty, LowerError> {
         if self.function.terminated() {
             return Ok(to.unwrap_or(&term.ty).clone());

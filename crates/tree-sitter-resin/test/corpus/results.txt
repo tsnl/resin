@@ -1,13 +1,13 @@
 ==================
 Structs, aliases, unions, and Err wrappers
 ==================
-struct SomeInt { value: int };
-struct NoneInt {};
+struct SomeInt { value: int, }
+struct NoneInt {}
 type OptionInt = SomeInt | NoneInt;
-def read(value: (int | Err<NoneInt>)) -> (int | Err<_>) = {
-    var n = value?;
+fn read(value: (int | Err<NoneInt>)) -> (int | Err<_>)  {
+    let mut n = value?;
     (n)
-};
+}
 ---
 
 (source_file
@@ -38,8 +38,9 @@ def read(value: (int | Err<NoneInt>)) -> (int | Err<_>) = {
                 (uid))))))))
   (function_definition
     (lid)
-    (declare
-      (lid)
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type
@@ -86,7 +87,8 @@ def read(value: (int | Err<NoneInt>)) -> (int | Err<_>) = {
       (statement
         (define
           (local_define
-            (lid)
+            (binding_pattern
+              (lid))
             (term
               (assignment_term
                 (binary_term
@@ -114,19 +116,20 @@ def read(value: (int | Err<NoneInt>)) -> (int | Err<_>) = {
 ==================
 Match arms and chained propagation
 ==================
-def nested(value: ((int | Err<Never>) | Err<Never>)) -> (int | Err<Never>) = {
+fn nested(value: ((int | Err<Never>) | Err<Never>)) -> (int | Err<Never>)  {
     match (value) {
         int(inner) => { (inner?) },
         Err(error) => { Err(error) },
     }
-};
+}
 ---
 
 (source_file
   (function_definition
     (lid)
-    (declare
-      (lid)
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type
@@ -206,7 +209,8 @@ def nested(value: ((int | Err<Never>) | Err<Never>)) -> (int | Err<Never>) = {
                             (unary_type
                               (primary_type
                                 (builtin_type))))))
-                      (lid)
+                      (binding_pattern
+                        (lid))
                       (block_body
                         (term
                           (assignment_term
@@ -225,7 +229,8 @@ def nested(value: ((int | Err<Never>) | Err<Never>)) -> (int | Err<Never>) = {
                                                     (lid))
                                                   (try_suffix))))))))))))))))
                     (match_arm
-                      (lid)
+                      (binding_pattern
+                        (lid))
                       (block_body
                         (term
                           (assignment_term

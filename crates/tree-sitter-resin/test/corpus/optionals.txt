@@ -2,11 +2,11 @@
 None singleton and ordinary optional unions
 ==================
 type OptionalInt = int | None;
-def choose(value: OptionalInt) -> int = {
+fn choose(value: OptionalInt) -> int  {
     match (value) { int(number) => { number }, None => { 0 } }
-};
-def require(value: OptionalInt) -> int = { value! };
-def empty() -> None = { None };
+}
+fn require(value: OptionalInt) -> int  { value! }
+fn empty() -> None  { None }
 
 ---
 
@@ -26,8 +26,9 @@ def empty() -> None = { None };
                 (builtin_type))))))))
   (function_definition
     (lid)
-    (declare
-      (lid)
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type
@@ -62,7 +63,8 @@ def empty() -> None = { None };
                             (unary_type
                               (primary_type
                                 (builtin_type))))))
-                      (lid)
+                      (binding_pattern
+                        (lid))
                       (block_body
                         (term
                           (assignment_term
@@ -82,8 +84,9 @@ def empty() -> None = { None };
                                     (number))))))))))))))))))
   (function_definition
     (lid)
-    (declare
-      (lid)
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type

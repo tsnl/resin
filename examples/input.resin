@@ -2,12 +2,12 @@ export { main };
 
 import { "$/console.resin", "$/string.resin" };
 
-def main() -> (() | Err<_>) = {
+fn main() -> (() | Err<_>) {
 	print("What is your name? ");
-	var name = Console.read_line()?;
+	let mut name = console_read_line()?;
 
 	print("Hello, ");
-	Console.print(name)?;
+	console_print(name)?;
 	print("!\n");
 	(())
-};
+}

@@ -1,13 +1,21 @@
 ==================
-Operator declarations on generic structs
+Free operators on generic structs
 ==================
 struct Number<T> {
  value: T,
- def __add__(left: Number<T>, right: Number<T>) -> Number<T> = { left };
- def __neg__(value: Number<T>) -> Number<T> = { value };
- def __lshift__(value: Number<T>, shift: int) -> Number<T> = { value };
- def __eq__(left: Number<T>, right: Number<T>) -> bool = { true };
-};
+ 
+ 
+ 
+ 
+}
+fn __add__<T>(left: Number<T>, right: Number<T>) -> Number<T>  { left }
+
+fn __neg__<T>(value: Number<T>) -> Number<T>  { value }
+
+fn __lshift__<T>(value: Number<T>, shift: int) -> Number<T>  { value }
+
+fn __eq__<T>(left: Number<T>, right: Number<T>) -> bool  { true }
+
 
 ---
 
@@ -23,37 +31,14 @@ struct Number<T> {
           (union_type
             (unary_type
               (primary_type
-                (uid)))))))
-    (function_definition
-      (lid)
-      (declare
-        (lid)
-        (type
-          (infix_type
-            (union_type
-              (unary_type
-                (uid)
-                (type_arguments
-                  (type
-                    (infix_type
-                      (union_type
-                        (unary_type
-                          (primary_type
-                            (uid))))))))))))
-      (declare
-        (lid)
-        (type
-          (infix_type
-            (union_type
-              (unary_type
-                (uid)
-                (type_arguments
-                  (type
-                    (infix_type
-                      (union_type
-                        (unary_type
-                          (primary_type
-                            (uid))))))))))))
+                (uid))))))))
+  (function_definition
+    (lid)
+    (type_parameters
+      (uid))
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type
@@ -65,31 +50,10 @@ struct Number<T> {
                     (union_type
                       (unary_type
                         (primary_type
-                          (uid)))))))))))
-      (block_body
-        (term
-          (assignment_term
-            (binary_term
-              (unary_term
-                (postfix_term
-                  (primary_term
-                    (lid)))))))))
-    (function_definition
-      (lid)
-      (declare
-        (lid)
-        (type
-          (infix_type
-            (union_type
-              (unary_type
-                (uid)
-                (type_arguments
-                  (type
-                    (infix_type
-                      (union_type
-                        (unary_type
-                          (primary_type
-                            (uid))))))))))))
+                          (uid))))))))))))
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type
@@ -101,39 +65,34 @@ struct Number<T> {
                     (union_type
                       (unary_type
                         (primary_type
-                          (uid)))))))))))
-      (block_body
-        (term
-          (assignment_term
-            (binary_term
-              (unary_term
-                (postfix_term
-                  (primary_term
-                    (lid)))))))))
-    (function_definition
-      (lid)
-      (declare
-        (lid)
-        (type
-          (infix_type
-            (union_type
-              (unary_type
-                (uid)
-                (type_arguments
-                  (type
-                    (infix_type
-                      (union_type
-                        (unary_type
-                          (primary_type
-                            (uid))))))))))))
-      (declare
-        (lid)
-        (type
-          (infix_type
-            (union_type
-              (unary_type
-                (primary_type
-                  (builtin_type)))))))
+                          (uid))))))))))))
+    (type
+      (infix_type
+        (union_type
+          (unary_type
+            (uid)
+            (type_arguments
+              (type
+                (infix_type
+                  (union_type
+                    (unary_type
+                      (primary_type
+                        (uid)))))))))))
+    (block_body
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (lid)))))))))
+  (function_definition
+    (lid)
+    (type_parameters
+      (uid))
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type
@@ -145,56 +104,120 @@ struct Number<T> {
                     (union_type
                       (unary_type
                         (primary_type
-                          (uid)))))))))))
-      (block_body
-        (term
-          (assignment_term
-            (binary_term
-              (unary_term
-                (postfix_term
-                  (primary_term
-                    (lid)))))))))
-    (function_definition
-      (lid)
-      (declare
-        (lid)
-        (type
-          (infix_type
-            (union_type
-              (unary_type
-                (uid)
-                (type_arguments
-                  (type
-                    (infix_type
-                      (union_type
-                        (unary_type
-                          (primary_type
-                            (uid))))))))))))
-      (declare
-        (lid)
-        (type
-          (infix_type
-            (union_type
-              (unary_type
-                (uid)
-                (type_arguments
-                  (type
-                    (infix_type
-                      (union_type
-                        (unary_type
-                          (primary_type
-                            (uid))))))))))))
+                          (uid))))))))))))
+    (type
+      (infix_type
+        (union_type
+          (unary_type
+            (uid)
+            (type_arguments
+              (type
+                (infix_type
+                  (union_type
+                    (unary_type
+                      (primary_type
+                        (uid)))))))))))
+    (block_body
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (lid)))))))))
+  (function_definition
+    (lid)
+    (type_parameters
+      (uid))
+    (parameter
+      (binding_pattern
+        (lid))
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (uid)
+              (type_arguments
+                (type
+                  (infix_type
+                    (union_type
+                      (unary_type
+                        (primary_type
+                          (uid))))))))))))
+    (parameter
+      (binding_pattern
+        (lid))
       (type
         (infix_type
           (union_type
             (unary_type
               (primary_type
-                (builtin_type))))))
-      (block_body
-        (term
-          (assignment_term
-            (binary_term
-              (unary_term
-                (postfix_term
-                  (primary_term
-                    (boolean)))))))))))
+                (builtin_type)))))))
+    (type
+      (infix_type
+        (union_type
+          (unary_type
+            (uid)
+            (type_arguments
+              (type
+                (infix_type
+                  (union_type
+                    (unary_type
+                      (primary_type
+                        (uid)))))))))))
+    (block_body
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (lid)))))))))
+  (function_definition
+    (lid)
+    (type_parameters
+      (uid))
+    (parameter
+      (binding_pattern
+        (lid))
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (uid)
+              (type_arguments
+                (type
+                  (infix_type
+                    (union_type
+                      (unary_type
+                        (primary_type
+                          (uid))))))))))))
+    (parameter
+      (binding_pattern
+        (lid))
+      (type
+        (infix_type
+          (union_type
+            (unary_type
+              (uid)
+              (type_arguments
+                (type
+                  (infix_type
+                    (union_type
+                      (unary_type
+                        (primary_type
+                          (uid))))))))))))
+    (type
+      (infix_type
+        (union_type
+          (unary_type
+            (primary_type
+              (builtin_type))))))
+    (block_body
+      (term
+        (assignment_term
+          (binary_term
+            (unary_term
+              (postfix_term
+                (primary_term
+                  (boolean))))))))))

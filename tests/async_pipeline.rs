@@ -27,12 +27,12 @@ async fn explicit_snapshot_pipeline_retains_editor_facts_and_owned_codegen() {
     let main = Source::with_identity(
         SourceId::new("package/main.resin"),
         "main.resin",
-        "export { main }; import { \"library.resin\" }; def main() -> int = { answer() };",
+        "export { main }; import { \"library.resin\" }; fn main() -> int  { answer() }",
     );
     let library = Source::with_identity(
         SourceId::new("package/library.resin"),
         "library.resin",
-        "export { answer }; def answer() -> int = { 42 };",
+        "export { answer }; fn answer() -> int  { 42 }",
     );
     let binding = ImportBinding {
         source: main.id(),
@@ -123,7 +123,7 @@ async fn explicit_snapshot_pipeline_retains_editor_facts_and_owned_codegen() {
     assert_eq!(definition.source, fresh_library);
     assert_eq!(
         definition.span.start,
-        library.text().find("def answer").unwrap() + 4
+        library.text().find("fn answer").unwrap() + 3
     );
     let unrelated =
         Source::with_identity(SourceId::new("other/main.resin"), main.name(), main.text());
@@ -184,7 +184,7 @@ async fn cold_and_incremental_successors_match_without_changing_recovery_inputs(
     let cancellation = Cancellation::new();
     let original = Source::new(
         "editor/main.resin",
-        "export { main }; def main() -> int = { 1 };",
+        "export { main }; fn main() -> int  { 1 }",
     );
     let previous = resin_cst::build_cst(original.text(), None, &execution, &cancellation)
         .await
@@ -206,7 +206,7 @@ async fn cold_and_incremental_successors_match_without_changing_recovery_inputs(
     .unwrap();
     let cold_source = Source::with_identity(original.id(), original.name(), edited.text());
     assert_eq!(edited, cold_source);
-    let incomplete = original.with_text("export { main }; def main() -> int = { 42");
+    let incomplete = original.with_text("export { main }; fn main() -> int = { 42");
     let (complete_tree, incomplete_tree) = tokio::join!(
         resin_cst::build_cst(edited.text(), Some(&previous), &execution, &cancellation),
         resin_cst::build_cst(

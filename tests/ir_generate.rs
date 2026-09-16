@@ -8,16 +8,15 @@ use resin_lir::{Instr, Terminator, format_module};
 use resin_types::prelude::*;
 use support::pipeline;
 
-const FIBONACCI: &str = r#"
-export { main };
-def fibonacci(n: int) -> int = {
+const FIBONACCI: &str = r#"export { main };
+fn fibonacci(n: int) -> int  {
     if (n <= 1) { n } else {
-        var f0 = fibonacci(n - 1);
-        var f1 = fibonacci(n - 2);
+        let mut f0 = fibonacci(n - 1);
+        let mut f1 = fibonacci(n - 2);
         f0 + f1
     }
-};
-def main() = { fibonacci(10); };
+}
+fn main()  { fibonacci(10); }
 "#;
 
 fn parse(src: &str) -> resin_ast::SourceFile {
@@ -37,7 +36,7 @@ fn compile_err(src: &str) -> GenerateErrorKind {
 #[test]
 fn while_lowers_to_a_structured_loop_and_returns_unit() {
     let module = compile(
-        "export { main }; def main () -> () = { var i = 0; while (i < 3) { i := i + 1; } };",
+        "export { main }; fn main () -> ()  { let mut i = 0; while (i < 3) { i = i + 1; } }",
     );
     let function = &module.functions[0];
     let condition = function
@@ -64,11 +63,11 @@ fn while_lowers_to_a_structured_loop_and_returns_unit() {
 #[test]
 fn while_does_not_assume_its_body_ran() {
     for source in [
-        "export { main }; def main () -> int = { var x: int; while (1 == 0) { x := 1; }; x };",
-        "export { main }; def main () -> () = { var x: int; while (x < 3) { x := 1; }; };",
-        "export { main }; def main () -> () = { var x: int; while (1 == 0) { x := x + 1; }; };",
-        "export { main }; def main () -> int = { var x: int; while ((1 == 0) && ((x := 1) == 1)) {}; x };",
-        "export { main }; def main () -> int = { var x: int; while (1 == 1) { x := 1; }; x };",
+        "export { main }; fn main () -> int  { let mut x: int; while (1 == 0) { x = 1; }; x }",
+        "export { main }; fn main () -> ()  { let mut x: int; while (x < 3) { x = 1; }; }",
+        "export { main }; fn main () -> ()  { let mut x: int; while (1 == 0) { x = x + 1; }; }",
+        "export { main }; fn main () -> int  { let mut x: int; while ((1 == 0) && ({ x = 1; x } == 1)) {}; x }",
+        "export { main }; fn main () -> int  { let mut x: int; while (1 == 1) { x = 1; }; x }",
     ] {
         assert!(
             matches!(
@@ -78,23 +77,25 @@ fn while_does_not_assume_its_body_ran() {
             "{source}"
         );
     }
-    compile("export { main }; def main () -> int = { var x: int; while ((x := 1) == 0) {}; x };");
+    compile(
+        "export { main }; fn main () -> int  { let mut x: int; while ({ x = 1; x } == 0) {}; x }",
+    );
 }
 
 #[test]
 fn while_requires_a_boolean_condition_and_keeps_body_bindings_local() {
     assert!(matches!(
-        compile_err("export { main }; def main () -> () = { while (1) {} };"),
+        compile_err("export { main }; fn main () -> ()  { while (1) {} }"),
         GenerateErrorKind::Type { kind: _ }
     ));
     assert!(matches!(
         compile_err(
-            "export { main }; def main () -> int = { while (1 == 0) { var inner = 1; }; inner };"
+            "export { main }; fn main () -> int  { while (1 == 0) { let mut inner = 1; }; inner }"
         ),
         GenerateErrorKind::UnboundValue { .. }
     ));
     assert!(matches!(
-        compile_err("export { main }; def main () -> int = { while (1 == 0) { 42 } };"),
+        compile_err("export { main }; fn main () -> int  { while (1 == 0) { 42 } }"),
         GenerateErrorKind::Type {
             kind: TypeErrorKind::TypeMismatch { .. }
         }
@@ -166,7 +167,7 @@ fn recursive_calls_reference_functions_directly() {
 #[test]
 fn eager_recursion_is_rejected() {
     assert!(matches!(
-        compile_err("export { main }; def main() -> () = { var x = x + 1; };"),
+        compile_err("export { main }; fn main() -> ()  { let mut x = x + 1; }"),
         GenerateErrorKind::EagerRecursion { .. }
     ));
 }
@@ -174,7 +175,7 @@ fn eager_recursion_is_rejected() {
 #[test]
 fn recursive_function_result_is_checked() {
     assert!(matches!(
-        compile_err("def f (n: int) -> int = { if (n == 0) { () } else { f(n - 1) } };"),
+        compile_err("fn f (n: int) -> int  { if (n == 0) { () } else { f(n - 1) } }"),
         GenerateErrorKind::Type {
             kind: TypeErrorKind::TypeMismatch { .. }
         }
@@ -184,7 +185,7 @@ fn recursive_function_result_is_checked() {
 #[test]
 fn type_mismatch_is_a_type_error() {
     assert!(matches!(
-        compile_err("export { main }; def main() -> () = { var x = if (1) { 1 } else { 2 }; };"),
+        compile_err("export { main }; fn main() -> ()  { let mut x = if (1) { 1 } else { 2 }; }"),
         GenerateErrorKind::Type {
             kind: TypeErrorKind::ExpectedBoolean { .. }
         }
@@ -193,7 +194,7 @@ fn type_mismatch_is_a_type_error() {
 
 #[test]
 fn linked_list_type_is_finite_through_its_pointer() {
-    let module = compile("struct List { value: int, next: Ptr<List> };");
+    let module = compile("struct List { value: int, next: Ptr<List>, }");
     assert_eq!(
         module.types.iter().filter(|d| d.name().is_some()).count(),
         1
@@ -208,7 +209,7 @@ fn linked_list_type_is_finite_through_its_pointer() {
 #[test]
 fn inline_recursive_type_is_rejected_during_generation() {
     assert!(matches!(
-        compile_err("struct Bad { next: Bad };"),
+        compile_err("struct Bad { next: Bad, }"),
         GenerateErrorKind::Type {
             kind: TypeErrorKind::RecursiveTypeWithoutIndirection { .. }
         }
@@ -218,7 +219,7 @@ fn inline_recursive_type_is_rejected_during_generation() {
 #[test]
 fn function_values_do_not_capture_local_state() {
     let module = compile(
-        "def add (x: int, y: int) -> int = { x + y }; def select () -> (int, int) -> int = { var local = add; local };",
+        "fn add (x: int, y: int) -> int  { x + y } fn select () -> (int, int) -> int  { let mut local = add; local }",
     );
     verify(&module).unwrap();
     assert!(
@@ -233,7 +234,7 @@ fn function_values_do_not_capture_local_state() {
 
 #[test]
 fn assignment_and_deref_store_through_an_address() {
-    let module = compile("def f (p: Ptr<int>) -> int = { p.* := 1; p.* };");
+    let module = compile("fn f (p: Ptr<int>) -> int  { p.* = 1; p.* }");
     verify(&module).unwrap();
     let function = &module.functions[0];
     assert!(function.blocks.iter().any(|block| {
@@ -252,7 +253,7 @@ fn assignment_and_deref_store_through_an_address() {
 
 #[test]
 fn if_joins_then_and_else_values() {
-    let module = compile("def f (c: int) -> int = { if (c == 0) { 1 } else { 2 } };");
+    let module = compile("fn f (c: int) -> int  { if (c == 0) { 1 } else { 2 } }");
     verify(&module).unwrap();
     let function = &module.functions[0];
     assert!(
@@ -267,10 +268,9 @@ fn if_joins_then_and_else_values() {
 #[test]
 fn nominal_ascription_wraps_and_unwraps_one_layer() {
     let module = compile(
-        r#"
-struct Meters { value: int };
-def to_meters (n: int) -> Meters = { Meters { value = n } };
-def from_meters (m: Meters) -> int = { m.value };
+        r#"struct Meters { value: int, }
+fn to_meters (n: int) -> Meters  { Meters { value = n } }
+fn from_meters (m: Meters) -> int  { m.value }
 "#,
     );
     verify(&module).unwrap();
@@ -296,10 +296,9 @@ def from_meters (m: Meters) -> int = { m.value };
 #[test]
 fn field_access_autoderefs_a_named_pointer() {
     let module = compile(
-        r#"
-struct FieldsX<T0> { x: T0 };
+        r#"struct FieldsX<T0> { x: T0, }
 type P = Ptr<FieldsX<int>>;
-def f (p: P) -> int = { p.x };
+fn f (p: P) -> int  { p.x }
 "#,
     );
     verify(&module).unwrap();
@@ -319,9 +318,8 @@ def f (p: P) -> int = { p.x };
 #[test]
 fn named_function_type_can_be_called() {
     let module = compile(
-        r#"
-type Handler = (int) -> int;
-def f (h: Handler, n: int) -> int = { h(n) };
+        r#"type Handler = (int) -> int;
+fn f (h: Handler, n: int) -> int  { h(n) }
 "#,
     );
     verify(&module).unwrap();
@@ -334,12 +332,12 @@ fn nested_nominal_ascription_does_not_skip_a_layer() {
         compile_err(
             r#"export { main };
 
-struct Meters { value: int };
-struct Distance { value: Meters };
+struct Meters { value: int, }
+struct Distance { value: Meters, }
 
-def main() -> () = {
-    var x = Distance (1);
-};"#
+fn main() -> ()  {
+    let mut x = Distance(1);
+}"#
         ),
         GenerateErrorKind::Type {
             kind: TypeErrorKind::TypeMismatch { .. }
@@ -352,13 +350,13 @@ fn nested_nominal_ascription_wraps_the_defining_body() {
     let module = compile(
         r#"export { main };
 
-struct Meters { value: int };
-struct Distance { value: Meters };
+struct Meters { value: int, }
+struct Distance { value: Meters, }
 
-def main() -> () = {
-    var x = Distance { value = Meters { value = 1 } };
-    var y = x.value.value;
-};"#,
+fn main() -> ()  {
+    let mut x = Distance { value = Meters { value = 1 } };
+    let mut y = x.value.value;
+}"#,
     );
     verify(&module).unwrap();
     assert_eq!(
@@ -386,9 +384,8 @@ def main() -> () = {
 #[test]
 fn nominal_record_ascription_wraps_the_representation() {
     let module = compile(
-        r#"
-struct List { value: int, next: Ptr<List> };
-def nil (p: Ptr<List>) -> List = { List { value = 0, next = p } };
+        r#"struct List { value: int, next: Ptr<List>, }
+fn nil (p: Ptr<List>) -> List  { List { value = 0, next = p } }
 "#,
     );
     verify(&module).unwrap();
@@ -417,7 +414,7 @@ def nil (p: Ptr<List>) -> List = { List { value = 0, next = p } };
 #[test]
 fn empty_array_needs_an_element_type() {
     assert!(matches!(
-        compile_err("export { main }; def main() -> () = { var x = []; };"),
+        compile_err("export { main }; fn main() -> ()  { let mut x = []; }"),
         GenerateErrorKind::Type {
             kind: TypeErrorKind::EmptyArrayNeedsElementType
         }
@@ -427,7 +424,7 @@ fn empty_array_needs_an_element_type() {
 #[test]
 fn unbound_value_is_reported() {
     assert!(matches!(
-        compile_err("export { main }; def main() -> () = { var x = y; };"),
+        compile_err("export { main }; fn main() -> ()  { let mut x = y; }"),
         GenerateErrorKind::UnboundValue { .. }
     ));
 }
@@ -437,13 +434,13 @@ fn span_and_literal_locals_are_typed() {
     let module = compile(
         r#"export { main };
 
-struct Span<T> { data: Ptr<T>, length: ulong };
+struct Span<T> { data: Ptr<T>, length: ulong, }
 type Buf = Span<int>;
 
-def main() -> () = {
-    var x = 1;
-    var buf: Buf;
-};"#,
+fn main() -> ()  {
+    let mut x = 1;
+    let mut buf: Buf;
+}"#,
     );
     verify(&module).unwrap();
     let Ty::Defined { definition } = &module.functions[0].locals[1].ty else {
@@ -458,7 +455,7 @@ def main() -> () = {
 
 #[test]
 fn short_circuit_and_compiles() {
-    let module = compile("def f (a: int) -> bool = { (a == 0) && (a == 1) };");
+    let module = compile("fn f (a: int) -> bool  { (a == 0) && (a == 1) }");
     verify(&module).unwrap();
     assert_eq!(module.functions[0].result, Ty::Bool);
 }
@@ -466,25 +463,25 @@ fn short_circuit_and_compiles() {
 #[test]
 fn pointers_cannot_be_used_in_arithmetic_and_indexing_is_explicit() {
     for body in ["p + 1", "p - 1", "p + p", "-p", "~p", "1 + p", "p(0)"] {
-        let source = format!("def bad(p: Ptr<int>) -> Ptr<int> = {{ {body} }};");
+        let source = format!("fn bad(p: Ptr<int>) -> Ptr<int>  {{ {body} }}");
         assert!(generate(&parse(&source)).is_err(), "{source}");
     }
-    for body in ["xs(0).* := 3", "xs(1.5)", "xs(0, 1)"] {
-        let source = format!("def bad() -> int = {{ var xs = [1, 2]; {body} }};");
+    for body in ["xs(0).* = 3", "xs(1.5)", "xs(0, 1)"] {
+        let source = format!("fn bad() -> int  {{ let mut xs = [1, 2]; {body} }}");
         assert!(generate(&parse(&source)).is_err(), "{source}");
     }
-    compile("def explicit(p: Ptr<int>) -> Ptr<int> = { Ptr<int>(ulong(p) + ulong(4)) };");
+    compile("fn explicit(p: Ptr<int>) -> Ptr<int>  { Ptr<int>(ulong(p) + ulong(4)) }");
 }
 
 #[test]
 fn one_armed_if_preserves_conditional_initialization_and_scope() {
     for source in [
-        "def main() -> int = { var x: int; if (1 == 1) { x := 1; }; x };",
-        "def main() -> int = { if (1 == 1) { var x = 1; }; x };",
-        "def main() = { if (1) {} };",
-        "def main() = { if (1 == 1) { 42 } };",
+        "fn main() -> int  { let mut x: int; if (1 == 1) { x = 1; }; x }",
+        "fn main() -> int  { if (1 == 1) { let mut x = 1; }; x }",
+        "fn main()  { if (1) {} }",
+        "fn main()  { if (1 == 1) { 42 } }",
     ] {
         assert!(generate(&parse(source)).is_err(), "{source}");
     }
-    compile("def main() -> int = { var x: int; if ((x := 2) == 2) {}; x };");
+    compile("fn main() -> int  { let mut x: int; if ({ x = 2; x } == 2) {}; x }");
 }

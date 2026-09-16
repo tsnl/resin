@@ -4,18 +4,17 @@ use resin_ast::{StmtKind, TypeKind};
 
 #[test]
 fn header_groups_retain_dependencies_and_flatten_module_declarations() {
-    let source = r#"
-        export { first };
+    let source = r#"export { first };
         extern {
             "empty.h": {},
             "native.h": {
-                def first(value: int) -> int;
-                def second();
+                fn first(value: int) -> int;
+                fn second();
             },
         };
         import { "types.resin" };
         extern type Native;
-        def main() = {};
+        fn main()  {}
     "#;
     let parsed = common::parse(source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
@@ -42,7 +41,7 @@ fn header_groups_retain_dependencies_and_flatten_module_declarations() {
         assert_eq!(header.as_ref(), "native.h");
         assert_eq!(name.val.as_ref(), expected);
         assert_eq!(&source[name.span.start..name.span.end], expected);
-        assert!(source[statement.span.start..statement.span.end].starts_with("def "));
+        assert!(source[statement.span.start..statement.span.end].starts_with("fn "));
     }
     assert!(
         matches!(&file.stmts[1].val, StmtKind::ForeignFunction { result, .. } if matches!(result.val, TypeKind::Unit))
@@ -56,7 +55,7 @@ fn header_groups_retain_dependencies_and_flatten_module_declarations() {
 #[test]
 fn foreign_declarations_survive_unrelated_body_errors() {
     let source =
-        r#"extern { "native.h": { def native() -> int; } }; def broken() = { var x = ; };"#;
+        r#"extern { "native.h": { fn native() -> int; } }; fn broken()  { let mut x = ; }"#;
     let parsed = common::parse(source);
     assert!(!parsed.errors.is_empty());
     assert_eq!(parsed.file.foreign_headers[0].val.as_ref(), "native.h");

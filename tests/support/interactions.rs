@@ -1,8 +1,8 @@
 pub const MARKERS: [&str; 4] = [
     "",
-    "{ var unused = (); };",
-    "var unused: _; unused := 1_ui;",
-    "var unused: (() | Err<Never>); unused := (()); match (unused) { ()(v) => {}, Err(e) => { absurd(e) } };",
+    "{ let mut unused = (); };",
+    "let unused: _; unused = 1_ui;",
+    "let unused: (() | Err<Never>); unused = (()); match (unused) { ()(v) => {}, Err(e) => { absurd(e) } };",
 ];
 
 pub fn variants() -> Vec<String> {
@@ -13,7 +13,7 @@ pub fn variants() -> Vec<String> {
         include_str!("../fixtures/never_elimination.resin"),
     ] {
         for marker in MARKERS {
-            let start = source.find("def kernel(").unwrap();
+            let start = source.find("fn kernel(").unwrap();
             let body = start + source[start..].find('{').unwrap() + 1;
             let mut source = source.to_string();
             source.insert_str(body, marker);

@@ -468,7 +468,7 @@ async fn cancellation_does_not_turn_into_an_acquisition_diagnostic() {
 #[test]
 fn portable_paths_reject_windows_device_names_in_every_component() {
     for name in [
-        "CON", "prn.h", "Aux.def", "nul.bin", "com1", "COM9.h", "lpt1.inc", "LPT9",
+        "CON", "prn.h", "Aux.fn", "nul.bin", "com1", "COM9.h", "lpt1.inc", "LPT9",
     ] {
         assert!(!tree::portable(name), "{name}");
         assert!(!tree::portable(&format!("nested/{name}/api.h")), "{name}");

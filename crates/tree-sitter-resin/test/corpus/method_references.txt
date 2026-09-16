@@ -1,12 +1,12 @@
 ==================
-Associated method references with explicit type arguments
+Free function references with explicit type arguments
 ==================
-def example() = {
-    var first = Cell<int>.select::<ulong>;
-    var second = Factory.create::<Ptr<int>>;
-    Cell<int>.select::<ulong>(7, 42);
-    (Cell<int>.select::<ulong>)(7, 42);
-};
+fn example()  {
+    let mut first = select::<int, ulong>;
+    let mut second = create::<Ptr<int>>;
+    select::<int, ulong>(7, 42);
+    (select::<int, ulong>)(7, 42);
+}
 ---
 
 (source_file
@@ -16,59 +16,53 @@ def example() = {
       (statement
         (define
           (local_define
-            (lid)
+            (binding_pattern
+              (lid))
             (term
               (assignment_term
                 (binary_term
                   (unary_term
                     (postfix_term
                       (primary_term
-                        (unary_type
-                          (uid)
-                          (type_arguments
-                            (type
-                              (infix_type
-                                (union_type
-                                  (unary_type
-                                    (primary_type
-                                      (builtin_type)))))))))
-                      (field_access
-                        (lid)
-                        (type_application
-                          (type_arguments
-                            (type
-                              (infix_type
-                                (union_type
-                                  (unary_type
-                                    (primary_type
-                                      (builtin_type)))))))))))))))))
+                        (lid))
+                      (type_application
+                        (type_arguments
+                          (type
+                            (infix_type
+                              (union_type
+                                (unary_type
+                                  (primary_type
+                                    (builtin_type))))))
+                          (type
+                            (infix_type
+                              (union_type
+                                (unary_type
+                                  (primary_type
+                                    (builtin_type))))))))))))))))
       (statement
         (define
           (local_define
-            (lid)
+            (binding_pattern
+              (lid))
             (term
               (assignment_term
                 (binary_term
                   (unary_term
                     (postfix_term
                       (primary_term
-                        (unary_type
-                          (primary_type
-                            (uid))))
-                      (field_access
-                        (lid)
-                        (type_application
-                          (type_arguments
-                            (type
-                              (infix_type
-                                (union_type
-                                  (unary_type
-                                    (type
-                                      (infix_type
-                                        (union_type
-                                          (unary_type
-                                            (primary_type
-                                              (builtin_type)))))))))))))))))))))
+                        (lid))
+                      (type_application
+                        (type_arguments
+                          (type
+                            (infix_type
+                              (union_type
+                                (unary_type
+                                  (type
+                                    (infix_type
+                                      (union_type
+                                        (unary_type
+                                          (primary_type
+                                            (builtin_type))))))))))))))))))))
       (statement
         (term
           (assignment_term
@@ -76,40 +70,36 @@ def example() = {
               (unary_term
                 (postfix_term
                   (primary_term
-                    (unary_type
-                      (uid)
-                      (type_arguments
-                        (type
-                          (infix_type
-                            (union_type
-                              (unary_type
-                                (primary_type
-                                  (builtin_type)))))))))
-                  (method_call
-                    (lid)
-                    (type_application
-                      (type_arguments
-                        (type
-                          (infix_type
-                            (union_type
-                              (unary_type
-                                (primary_type
-                                  (builtin_type))))))))
-                    (arguments
-                      (term
-                        (assignment_term
-                          (binary_term
-                            (unary_term
-                              (postfix_term
-                                (primary_term
-                                  (number)))))))
-                      (term
-                        (assignment_term
-                          (binary_term
-                            (unary_term
-                              (postfix_term
-                                (primary_term
-                                  (number)))))))))))))))
+                    (lid))
+                  (type_application
+                    (type_arguments
+                      (type
+                        (infix_type
+                          (union_type
+                            (unary_type
+                              (primary_type
+                                (builtin_type))))))
+                      (type
+                        (infix_type
+                          (union_type
+                            (unary_type
+                              (primary_type
+                                (builtin_type))))))))
+                  (arguments
+                    (term
+                      (assignment_term
+                        (binary_term
+                          (unary_term
+                            (postfix_term
+                              (primary_term
+                                (number)))))))
+                    (term
+                      (assignment_term
+                        (binary_term
+                          (unary_term
+                            (postfix_term
+                              (primary_term
+                                (number))))))))))))))
       (statement
         (term
           (assignment_term
@@ -125,25 +115,21 @@ def example() = {
                               (unary_term
                                 (postfix_term
                                   (primary_term
-                                    (unary_type
-                                      (uid)
-                                      (type_arguments
-                                        (type
-                                          (infix_type
-                                            (union_type
-                                              (unary_type
-                                                (primary_type
-                                                  (builtin_type)))))))))
-                                  (field_access
-                                    (lid)
-                                    (type_application
-                                      (type_arguments
-                                        (type
-                                          (infix_type
-                                            (union_type
-                                              (unary_type
-                                                (primary_type
-                                                  (builtin_type)))))))))))))))))
+                                    (lid))
+                                  (type_application
+                                    (type_arguments
+                                      (type
+                                        (infix_type
+                                          (union_type
+                                            (unary_type
+                                              (primary_type
+                                                (builtin_type))))))
+                                      (type
+                                        (infix_type
+                                          (union_type
+                                            (unary_type
+                                              (primary_type
+                                                (builtin_type))))))))))))))))
                   (arguments
                     (term
                       (assignment_term

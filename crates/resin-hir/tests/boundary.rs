@@ -18,7 +18,7 @@ fn source_module(source: Source) -> SourceModule {
 #[test]
 fn malformed_dependency_order_returns_diagnostics() {
     for dependency in [0, 1, usize::MAX] {
-        let mut entry = module("entry.resin", "def main() = {};");
+        let mut entry = module("entry.resin", "fn main()  {}");
         entry.imports.push((Span { start: 0, end: 1 }, dependency));
         let program = Program {
             modules: vec![entry],
@@ -34,7 +34,7 @@ fn malformed_dependency_order_returns_diagnostics() {
 fn checking_rejects_unresolved_imports() {
     let source = Source::new(
         "entry.resin",
-        r#"import { "library.resin" }; def main() = {};"#,
+        r#"import { "library.resin" }; fn main()  {}"#,
     );
     let mut loader = resin_source::Loader::new(std::path::PathBuf::from("."));
     let (_, analysis) = common::run(common::application::request(
@@ -50,11 +50,11 @@ fn checking_rejects_unresolved_imports() {
 fn resolved_program_infers_through_an_import_and_exposes_only_root_exports() {
     let library = module(
         "library.resin",
-        "export { narrow }; def narrow(value: int) -> int = { value };",
+        "export { narrow }; fn narrow(value: int) -> int  { value }",
     );
     let mut entry = module(
         "entry.resin",
-        "export { main }; def main() -> _ = { narrow(42) };",
+        "export { main }; fn main() -> _  { narrow(42) }",
     );
     entry.imports.push((Span { start: 0, end: 0 }, 0));
     let module = common::check(Program {
@@ -78,7 +78,7 @@ fn syntax(sources: &[Source]) -> BTreeMap<Source, Arc<Document>> {
 #[test]
 fn analysis_keeps_editor_queries_after_an_unrelated_type_error() {
     let source =
-        "// é🌲\ndef broken() -> int = { missing() }; def healthy(value: int) -> int = { value };";
+        "// é🌲\nfn broken() -> int  { missing() } fn healthy(value: int) -> int  { value }";
     let entry = module("entry.resin", source);
     let input = entry.source.clone();
     let syntax = syntax(std::slice::from_ref(&input));
@@ -124,12 +124,12 @@ fn sources_with_equal_names_have_distinct_editor_facts() {
     let integer = Source::with_identity(
         SourceId::new("integer"),
         "memory",
-        "def local(value: int) -> int = { value };",
+        "fn local(value: int) -> int  { value }",
     );
     let boolean = Source::with_identity(
         SourceId::new("boolean"),
         "memory",
-        "def local(value: bool) -> bool = { value };",
+        "fn local(value: bool) -> bool  { value }",
     );
     let syntax = syntax(&[integer.clone(), boolean.clone()]);
     let program = Program {
@@ -161,8 +161,8 @@ fn sources_with_equal_names_have_distinct_editor_facts() {
 
 #[test]
 fn revised_source_cannot_borrow_editor_facts_from_its_previous_version() {
-    let original = Source::new("memory", "def local(value: int) -> int = { value };");
-    let revised = original.with_text("def local(value: bool) -> bool = { value };");
+    let original = Source::new("memory", "fn local(value: int) -> int  { value }");
+    let revised = original.with_text("fn local(value: bool) -> bool  { value }");
     let syntax = syntax(&[original.clone(), revised.clone()]);
     let analysis = common::check(Program {
         modules: vec![source_module(original.clone())],
@@ -193,10 +193,10 @@ fn revised_source_cannot_borrow_editor_facts_from_its_previous_version() {
 }
 
 #[test]
-fn nominal_declarations_retain_method_identities_with_their_type_expressions() {
+fn nominal_declarations_retain_fields_and_drop_hooks_while_operations_are_free() {
     let source = module(
         "owner.resin",
-        "struct Owner { value: int, def read(self: Owner) -> int = { self.value }; def drop(self: Ptr<Owner>) = {}; }; type Alias = Owner;",
+        "struct Owner { value: int,   }\nfn read(self: Owner) -> int  { self.value }\n\nfn drop(self: Ptr<Owner>)  {}\n type Alias = Owner;",
     );
     let hir = common::check(Program {
         modules: vec![source],
@@ -212,13 +212,17 @@ fn nominal_declarations_retain_method_identities_with_their_type_expressions() {
         panic!()
     };
     assert_eq!(fields[0].ty, Type::Int32);
+    assert!(owner.methods.is_empty());
+    let read = hir
+        .functions
+        .iter()
+        .find(|function| function.name.as_ref() == "read")
+        .unwrap();
+    assert_eq!(read.signature.result.ty, Type::Int32);
     assert_eq!(
-        hir.functions[owner.methods[&"read".into()].index()]
-            .name
-            .as_ref(),
-        "Owner.read"
+        hir.functions[owner.drop.unwrap().index()].name.as_ref(),
+        "drop"
     );
-    assert_eq!(owner.drop, Some(owner.methods[&"drop".into()]));
     assert!(
         !hir.types
             .iter()

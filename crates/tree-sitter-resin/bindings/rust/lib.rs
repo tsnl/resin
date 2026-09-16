@@ -51,18 +51,41 @@ pub const TAGS_QUERY: &str = include_str!("../../queries/tags.scm");
 #[cfg(test)]
 mod tests {
     #[test]
+    fn struct_fields_are_comma_separated_with_an_optional_trailing_comma() {
+        for source in [
+            "struct Empty {}",
+            "struct Cell<T> { value: T }",
+            "struct Cell<T> { value: T, }",
+            "struct Point<T> { x: T, y: T }",
+            "struct Point<T> { x: T, y: T, }",
+            "struct Nested<T> { pair: (T, T), next: Ptr<Nested<T>> }",
+        ] {
+            assert!(!parse(source).root_node().has_error(), "{source}");
+        }
+        for source in [
+            "struct Point<T> { x: T; y: T; }",
+            "struct Point<T> { x: T y: T }",
+            "struct Point<T> { x: T,, y: T }",
+            "struct Point<T> { x = T, y = T }",
+            "struct Point { fn get() -> int { 0 } }",
+        ] {
+            assert!(parse(source).root_node().has_error(), "{source}");
+        }
+    }
+
+    #[test]
     fn records_require_named_structs() {
         for source in [
             "type Point = { x: int, y: int };",
-            "def value() = { var point = { x = 1, y = 2 }; };",
-            "def value(point: { x: int }) = {};",
+            "fn value()  { let mut point = { x = 1, y = 2 }; }",
+            "fn value(point: { x: int })  {}",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
         }
         for source in [
-            "struct Point { x: int, y: int }; def value() -> Point = { Point { x = 1, y = 2 } };",
-            "def pair() -> (int, bool) = { (1, true) };",
-            "def empty() -> () = {};",
+            "struct Point { x: int, y: int, } fn value() -> Point  { Point { x = 1, y = 2 } }",
+            "fn pair() -> (int, bool)  { (1, true) }",
+            "fn empty() -> ()  {}",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
@@ -79,13 +102,13 @@ mod tests {
         for literal in [
             "1u", "1_u", "1uf", "1_UD", "1_u_i", "1lu", "1_uuL", "0xffuf",
         ] {
-            let source = format!("def main() = {{ var n = {literal}; }};");
+            let source = format!("fn main()  {{ let mut n = {literal}; }}");
             assert!(parse(&source).root_node().has_error(), "{literal}");
         }
         for literal in [
             "1B", "1uB", "1_UB", "1Uh", "1_UI", "1_uL", "1F", "1_D", "0x7f_b", "0xff_UB",
         ] {
-            let source = format!("def main() = {{ var n = {literal}; }};");
+            let source = format!("fn main()  {{ let mut n = {literal}; }}");
             assert!(!parse(&source).root_node().has_error(), "{literal}");
         }
     }
@@ -93,14 +116,14 @@ mod tests {
     #[test]
     fn parses_unit_and_tuple_function_types() {
         for source in [
-            "type F = () -> int; def f () -> int = { 1 }; def main() -> () = { var x = f(); };",
-            "type F = (int, int) -> int; def f (a: int, b: int) -> int = { a + b }; def main() -> () = { var x = f(1, 2); };",
+            "type F = () -> int; fn f () -> int  { 1 } fn main() -> ()  { let mut x = f(); }",
+            "type F = (int, int) -> int; fn f (a: int, b: int) -> int  { a + b } fn main() -> ()  { let mut x = f(1, 2); }",
             "type F = ((int, int), ()) -> ();",
-            "type Unit = (); def main() -> () = { var x = Unit (()); };",
+            "type Unit = (); fn main() -> ()  { let mut x = Unit(()); }",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
-        let tree = parse("def main() -> () = { var x = (()); };");
+        let tree = parse("fn main() -> ()  { let mut x = (()); }");
         let root = tree.root_node();
         let function = root.child_by_field_name("stmt").unwrap();
         let sexp = function.child_by_field_name("body").unwrap().to_sexp();
@@ -111,22 +134,22 @@ mod tests {
     #[test]
     fn records_accept_only_value_members() {
         assert!(
-            parse("def main() -> () = { var x = { T = int }; };")
+            parse("fn main() -> ()  { let mut x = Item { T = int }; }")
                 .root_node()
                 .has_error()
         );
         assert!(
-            parse("def main() -> () = { var x = { a = 1, T = int }; };")
+            parse("fn main() -> ()  { let mut x = Item { a = 1, T = int }; }")
                 .root_node()
                 .has_error()
         );
         assert!(
-            !parse("struct FieldsAB<T0, T1> { a: T0, b: T1 };\ndef main() -> () = { var x = FieldsAB<_, _> { a = 1, b = 2 }; };")
+            !parse("struct FieldsAB<T0, T1> { a: T0, b: T1, }\nfn main() -> ()  { let mut x = FieldsAB<_, _> { a = 1, b = 2 }; }")
                 .root_node()
                 .has_error()
         );
         assert!(
-            !parse("def main() -> () = { var x = { type T = int; T (1) }; };")
+            !parse("fn main() -> ()  { let mut x = { type T = int; T(1) }; }")
                 .root_node()
                 .has_error()
         );
@@ -135,16 +158,16 @@ mod tests {
     #[test]
     fn parses_strings_and_single_element_tuples() {
         for source in [
-            r#"def main() -> () = { print("x = {0}\n", (n,)); };"#,
-            r#"def main() -> () = { var x = "a\"b\\c\t\r\0"; };"#,
-            "def main() -> () = { var x = \"héllo\"; };",
+            r#"fn main() -> ()  { print("x = {0}\n", (n,)); }"#,
+            r#"fn main() -> ()  { let mut x = "a\"b\\c\t\r\0"; }"#,
+            "fn main() -> ()  { let mut x = \"héllo\"; }",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
         for source in [
-            r#"def main() -> () = { var x = "\q"; };"#,
-            "def main() -> () = { var x = \"unterminated; };",
-            "def main() -> () = { var x = \"line\nbreak\"; };",
+            r#"fn main() -> () = { let mut x = "\q"; };"#,
+            "fn main() -> () = { let mut x = \"unterminated; };",
+            "fn main() -> () = { let mut x = \"line\nbreak\"; };",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
         }
@@ -153,21 +176,20 @@ mod tests {
     #[test]
     fn parses_module_items_and_address_of() {
         for source in [
-            "export { Gpu, create }; extern { \"runtime.h\": { def create (gpu: Ptr<Ptr<Gpu>>) -> int; } }; import { \"runtime.resin\" }; extern type Gpu;",
-            "def empty () -> () = {}; def identity (n: int) -> int = { n };",
-            "def main () -> () = { var n = 0; var p = &n; p.* := 1; };",
+            "export { Gpu, create }; extern { \"runtime.h\": { fn create (gpu: Ptr<Ptr<Gpu>>) -> int; } }; import { \"runtime.resin\" }; extern type Gpu;",
+            "fn empty () -> ()  {} fn identity (n: int) -> int  { n }",
+            "fn main () -> ()  { let mut n = 0; let mut p = &n; p.* = 1; }",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
         for source in [
-            "def main() -> () = { var f = (n: int) => n; };",
-            "def outer () -> int = { def inner () -> int = { 1 }; inner() };",
-            "def f (n) = { n };",
-            "def f (n: int) -> int { n };",
-            "def f (n: int): int = { n };",
-            "def f (n: int) -> int = { n }",
-            "def f(n: int) -> int { n }",
-            "def f () -> () = { include \"runtime.resin\"; };",
+            "fn main() -> ()  { let mut f = (n: int) => n; }",
+            "fn outer () -> int = { fn inner() -> int  { 1 } inner() };",
+            "fn f (n)  { n }",
+            "fn f (n: int) -> int { n };",
+            "fn f (n: int): int  { n }",
+            "def f(n: int) -> int = { n };",
+            "fn f () -> ()  { include \"runtime.resin\"; }",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
         }
@@ -187,16 +209,16 @@ mod tests {
             "export {}; export {};",
             "import {}; import {};",
             "import {}; export {};",
-            "def x() -> int = { 1 }; export { x };",
-            "def x() -> int = { 1 }; import {};",
+            "fn x() -> int  { 1 } export { x };",
+            "fn x() -> int  { 1 } import {};",
             "export { \"f\" };",
             "import { foo };",
             "export { f f };",
             "import { \"a\" \"b\" };",
             "export {}",
             "import {}",
-            "def f () -> () = { export {}; };",
-            "def f () -> () = { import {}; };",
+            "fn f () -> ()  { export {}; }",
+            "fn f () -> ()  { import {}; }",
             "include \"legacy.resin\";",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
@@ -206,19 +228,19 @@ mod tests {
     #[test]
     fn source_files_only_contain_declarations() {
         for statement in [
-            "var x = 1;",
-            "var x: int;",
-            "x := 2;",
+            "let x = 1;",
+            "let mut x: int;",
+            "x = 2;",
             "f();",
             "();",
             "while (ready) {};",
         ] {
             assert!(parse(statement).root_node().has_error(), "{statement}");
-            let body = format!("def main() -> () = {{ {statement} }};");
+            let body = format!("fn main() -> ()  {{ {statement} }}");
             assert!(!parse(&body).root_node().has_error(), "{body}");
         }
         assert!(
-            !parse("export { main, demo }; type Item = int; def main() -> () = {}; def demo() -> int = { 42 };")
+            !parse("export { main, demo }; type Item = int; fn main() -> ()  {} fn demo() -> int  { 42 }")
                 .root_node()
                 .has_error()
         );
@@ -227,23 +249,24 @@ mod tests {
     #[test]
     fn keywords_are_reserved_but_intrinsics_remain_identifiers() {
         for keyword in [
-            "export", "import", "extern", "type", "def", "var", "if", "else", "while", "bool",
-            "sbyte", "short", "int", "long", "ubyte", "ushort", "uint", "ulong", "float32",
+            "export", "import", "extern", "type", "fn", "let", "mut", "if", "else", "while",
+            "bool", "sbyte", "short", "int", "long", "ubyte", "ushort", "uint", "ulong", "float32",
             "float64",
         ] {
             for source in [
-                format!("def main() -> () = {{ var {keyword} = 1; }};"),
-                format!("def {keyword} () -> () = {{}};"),
-                format!("def f ({keyword}: int) -> () = {{}};"),
-                format!("type R = {{ {keyword}: int }};"),
-                format!("def main() -> () = {{ var r = {{ {keyword} = 1 }}; }};"),
-                format!("def main() -> () = {{ r.{keyword}; }};"),
+                format!("fn main() -> ()  {{ let mut {keyword} = 1; }}"),
+                format!("fn {keyword} () -> ()  {{}}"),
+                format!("fn f ({keyword}: int) -> ()  {{}}"),
+                format!("struct R {{ {keyword}: int }}"),
+                format!("fn main() -> ()  {{ let mut r = R {{ {keyword} = 1 }}; }}"),
+                format!("fn main() -> ()  {{ r.{keyword}; }}"),
                 format!("export {{ {keyword} }};"),
             ] {
                 assert!(parse(&source).root_node().has_error(), "{source}");
             }
-            let source =
-                format!("def main() -> () = {{ var {keyword}_value = 1; var _{keyword} = 2; }};");
+            let source = format!(
+                "fn main() -> ()  {{ let mut {keyword}_value = 1; let mut _{keyword} = 2; }}"
+            );
             assert!(!parse(&source).root_node().has_error(), "{source}");
         }
         for name in [
@@ -264,12 +287,12 @@ mod tests {
                 assert!(parse(&source).root_node().has_error(), "{source}");
             }
             let source =
-                format!("type {name}Value = int; def main() -> () = {{ type _{name} = int; }};");
+                format!("type {name}Value = int; fn main() -> ()  {{ type _{name} = int; }}");
             assert!(!parse(&source).root_node().has_error(), "{source}");
         }
         for source in [
-            "def main() -> () = { var print = 1; var shader = 2; };",
-            "def print (n: int) -> int = { n }; def shader () -> () = {};",
+            "fn main() -> ()  { let mut print = 1; let mut shader = 2; }",
+            "fn print (n: int) -> int  { n } fn shader () -> ()  {}",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
@@ -279,16 +302,16 @@ mod tests {
     fn type_formers_use_angle_brackets_without_conflicting_with_operators() {
         for source in [
             "type P = Ptr<int>; type Pp = Ptr<Ptr<int>>; type S = Span<Ptr<int>>;",
-            "struct Span<T> { data: Ptr<T>, length: ulong }; struct ArcPtr<T> { owner: StrongOwner }; type GpuSpan<T> = Span<T>;",
+            "struct Span<T> { data: Ptr<T>, length: ulong, } struct ArcPtr<T> { owner: StrongOwner, } type GpuSpan<T> = Span<T>;",
             "type P = GpuSpan<int, int>;",
-            "struct FieldsX<T0> { x: T0 };\ntype G = GpuPtr<int>; type S = GpuSpan<FieldsX<uint>>; type Nested = Ptr<GpuSpan<GpuPtr<int>>>;",
-            "def launch(args: GpuArguments) -> GpuArguments = { args };",
-            "def first(p: GpuSpan<int>) -> GpuPtr<int> = { p.at(0_ul) }; def make() -> GpuPtr<_> = { gpu.create::<int>(3_i) };",
-            "struct FieldsX<T0> { x: T0 };\ntype P = Ptr<()>; type S = Span<(int, int)>; type R = Ptr<FieldsX<int>>; type F = Ptr<(int) -> int>;",
-            "def main() -> () = { var p = Ptr<int>(ulong(0)); var x = ulong(p) > ulong(0); var y = 8 >> 1; var z = 1 < 2; };",
-            "def main() -> () = { var p = Ptr < Ptr < int > > (ulong (0)); };",
-            "def fibonacci(n: int) -> int = { n }; def main() -> () = { var x = fibonacci(2); var y = fibonacci (3); };",
-            "def main() -> () = { var x = Name { value = 1 }; var y = Converter([1, 2]); };",
+            "struct FieldsX<T0> { x: T0, }\ntype G = GpuPtr<int>; type S = GpuSpan<FieldsX<uint>>; type Nested = Ptr<GpuSpan<GpuPtr<int>>>;",
+            "fn launch(args: GpuArguments) -> GpuArguments  { args }",
+            "fn first(p: GpuSpan<int>) -> GpuPtr<int>  { p:at(0_ul) } fn make() -> GpuPtr<_>  { gpu:create::<int>(3_i) }",
+            "struct FieldsX<T0> { x: T0, }\ntype P = Ptr<()>; type S = Span<(int, int)>; type R = Ptr<FieldsX<int>>; type F = Ptr<(int) -> int>;",
+            "fn main() -> ()  { let mut p = Ptr<int>(ulong(0)); let mut x = ulong(p) > ulong(0); let mut y = 8 >> 1; let mut z = 1 < 2; }",
+            "fn main() -> ()  { let mut p = Ptr < Ptr < int > >(ulong(0)); }",
+            "fn fibonacci(n: int) -> int  { n } fn main() -> ()  { let mut x = fibonacci(2); let mut y = fibonacci(3); }",
+            "fn main() -> ()  { let mut x = Name { value = 1 }; let mut y = Converter([1, 2]); }",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
@@ -310,11 +333,11 @@ mod tests {
     #[test]
     fn definition_keywords_belong_to_statements_not_fields_or_parameters() {
         for source in [
-            "struct FieldsXY<T0, T1> { x: T0, y: T1 };\ntype Point = FieldsXY<int, int>; def make(x: int) -> Point = { var y: int; y := x + 1; Point { x = x, y = y } };",
-            "struct FieldsAB<T0, T1> { a: T0, b: T1 };\nstruct FieldsC<T0> { c: T0 };\ndef main() -> () = { var record = FieldsAB<_, _> { a = { var x = 1; x }, b = FieldsC<_> { c = 2 } }; };",
-            "def main() -> () = { type T = int; var x = T(1); var callback = main; };",
-            "extern { \"stdlib.h\": { def abs(n: int) -> int; } };",
-            "def/* comment */main() -> () = { var/* comment */n = 1; };",
+            "struct FieldsXY<T0, T1> { x: T0, y: T1, }\ntype Point = FieldsXY<int, int>; fn make(x: int) -> Point  { let mut y: int; y = x + 1; Point { x = x, y = y } }",
+            "struct FieldsAB<T0, T1> { a: T0, b: T1, }\nstruct FieldsC<T0> { c: T0, }\nfn main() -> ()  { let mut record = FieldsAB<_, _> { a = { let mut x = 1; x }, b = FieldsC<_> { c = 2 } }; }",
+            "fn main() -> ()  { type T = int; let mut x = T(1); let mut callback = main; }",
+            "extern { \"stdlib.h\": { fn abs(n: int) -> int; } };",
+            "fn/* comment */main() -> ()  { let mut/* comment */n = 1; }",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
@@ -322,21 +345,19 @@ mod tests {
             "main() -> () = {};",
             "Point = { x: int };",
             "var Point = { x: int };",
-            "def Point = { x: int };",
+            "fn Point = { x: int };",
             "type point = int;",
-            "def main() -> () = { x = 1; };",
-            "def main() -> () = { x: int; };",
-            "def main() -> () = { T = int; };",
-            "def main() -> () = { var T = int; };",
-            "def main() -> () = { def T = int; };",
-            "def main() -> () = { type x = 1; };",
-            "def main() -> () = { var x := 1; };",
-            "def main() -> () = { def x = 1; };",
+            "fn main() -> ()  { x: int; }",
+            "fn main() -> ()  { let mut T = int; }",
+            "fn main() -> ()  { fn T = int; }",
+            "fn main() -> ()  { type x = 1; }",
+            "fn main() -> ()  { let mut x := 1; }",
+            "fn main() -> ()  { fn x = 1; }",
             "var main() -> () = {};",
-            "def f(var x: int) -> int = { x };",
-            "type R = { var x: int };",
-            "def main() -> () = { var r = { var x = 1 }; };",
-            "def main() -> () = { var r = { x = 1, var y = 2 }; };",
+            "fn f(let mut x: int) -> int  { x }",
+            "type R = { let mut x: int };",
+            "fn main() -> ()  { let mut r = Item { let mut x = 1 }; }",
+            "fn main() -> ()  { let mut r = { x = 1, let mut y = 2 }; }",
             "extern { \"stdlib.h\": { abs(n: int) -> int; } };",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
@@ -346,19 +367,19 @@ mod tests {
     #[test]
     fn function_results_can_be_omitted_but_not_incomplete() {
         for source in [
-            "def empty() = {}; def explicit() -> () = { () };",
-            "def greet(n: int) = { print(\"{0}\", (n,)); };",
-            "def f(n: int) = { n };",
-            "extern { \"stdlib.h\": { def free(p: Ptr<ubyte>); } };",
-            "def apply(f: () -> ()) = { f() };",
+            "fn empty()  {} fn explicit() -> ()  { () }",
+            "fn greet(n: int)  { print(\"{0}\", (n,)); }",
+            "fn f(n: int)  { n }",
+            "extern { \"stdlib.h\": { fn free(p: Ptr<ubyte>); } };",
+            "fn apply(f: () -> ())  { f() }",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
         for source in [
-            "def empty() -> = {};",
-            "extern { \"stdlib.h\": { def free(p: Ptr<ubyte>) ->; } };",
-            "def empty() {};",
-            "def empty() = {}",
+            "fn empty() ->  {}",
+            "extern { \"stdlib.h\": { fn free(p: Ptr<ubyte>) ->; } };",
+            "fn empty() {};",
+            "def empty() = {};",
             "type Callback = (int) ->;",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
@@ -371,20 +392,20 @@ mod tests {
             "",
             "extern {};",
             "extern { \"empty.h\": {} };",
-            "extern { \"first.h\": { def first(); def second(); }, \"empty.h\": {}, };",
-            "export { call }; extern { \"native.h\": { def call(value: Ptr<Handle>); } }; import { \"types.resin\" }; extern type Handle;",
+            "extern { \"first.h\": { fn first(); fn second(); }, \"empty.h\": {}, };",
+            "export { call }; extern { \"native.h\": { fn call(value: Ptr<Handle>); } }; import { \"types.resin\" }; extern type Handle;",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
         for source in [
-            "extern \"native.h\" def call();",
+            "extern \"native.h\" fn call();",
             "import {}; extern {};",
             "extern {}; export {};",
             "extern {}; extern {};",
-            "def main() = {}; extern {};",
-            "extern { \"native.h\" { def call(); } };",
-            "extern { \"native.h\": { def call() = {}; } };",
-            "extern { \"native.h\": { def call(); } \"next.h\": {} };",
+            "fn main()  {} extern {};",
+            "extern { \"native.h\" { fn call(); } };",
+            "extern { \"native.h\": { fn call() = {}; } };",
+            "extern { \"native.h\": { fn call(); } \"next.h\": {} };",
             "extern { \"native.h\": {} }",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");

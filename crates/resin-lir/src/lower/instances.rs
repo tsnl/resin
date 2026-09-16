@@ -378,6 +378,22 @@ impl<'a> Instances<'a> {
         }
     }
 
+    pub(super) fn signature(
+        &self,
+        function: FunctionId,
+    ) -> Result<resin_hir::Signature, LowerError> {
+        self.source
+            .functions
+            .get(function.index())
+            .map(|function| function.signature.clone())
+            .ok_or_else(|| {
+                LowerError::invalid_hir(
+                    Span { start: 0, end: 0 },
+                    "operation refers to a missing declaration",
+                )
+            })
+    }
+
     pub(super) fn method(
         &self,
         receiver: &resin_hir::Type,
@@ -567,17 +583,14 @@ impl<'a> Instances<'a> {
 
     fn text_view(&mut self, id: TypeId, instance: &Nominal) -> Result<(), LowerError> {
         let source = &self.source.types[instance.definition.index()];
-        let name = resin_hir::MethodName::Named {
-            name: "repr_bytes".into(),
-        };
-        let Some(&function) = source.methods.get(&name) else {
+        let Some(function) = source.text_view else {
             return Ok(());
         };
         let signature = &self.source.functions[function.index()].signature;
         let invalid = || {
             LowerError::invalid_hir(
                 signature.result.span,
-                "repr_bytes must take Ptr<Self> and return a borrowed byte view, with no additional type parameters",
+                "repr_bytes must take Ref<Self> and return a borrowed byte view, with no additional type parameters",
             )
         };
         if signature.type_params.len() != instance.arguments.len() || signature.params.len() != 1 {
@@ -586,8 +599,8 @@ impl<'a> Instances<'a> {
         let substitution =
             super::substitute::Substitution::new(&signature.type_params, &instance.arguments)?;
         let receiver = substitution.normalize(&signature.params[0].annotation.ty, self)?;
-        let expected = resin_hir::Type::Pointer {
-            pointee: Box::new(self.nominal_origin(id)),
+        let expected = resin_hir::Type::Reference {
+            referent: Box::new(self.nominal_origin(id)),
         };
         let result = substitution.ty(&signature.result.ty, self)?;
         if receiver != expected || result != Ty::byte_span() {

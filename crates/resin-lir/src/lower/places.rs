@@ -11,19 +11,58 @@ pub(super) enum Operand {
 }
 
 impl FunctionLowering<'_> {
-    pub(super) fn gen_assign(&mut self, place: &Term, value: &Term) -> Result<Ty, LowerError> {
-        let place_ty = self.gen_place(place)?;
-        let Ty::Pointer { pointee } = place_ty else {
-            return Err(LowerError::typing(
+    fn local_path(&self, term: &Term) -> Result<Option<(LocalId, Vec<usize>)>, LowerError> {
+        match &term.kind {
+            TermKind::Local { binding, name } => {
+                Ok(Some((self.resolve_binding(*binding, name)?.local, vec![])))
+            }
+            TermKind::Field { base, access }
+                if !matches!(base.ty, Ty::Pointer { .. })
+                    && !access.steps.iter().any(|step| matches!(step, Conv::Deref)) =>
+            {
+                let Some((local, mut path)) = self.local_path(base)? else {
+                    return Ok(None);
+                };
+                path.push(access.index);
+                Ok(Some((local, path)))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    pub(super) fn gen_move(&mut self, place: &Term) -> Result<Ty, LowerError> {
+        let Some((local, path)) = self.local_path(place)? else {
+            return Err(LowerError::invalid_hir(
                 place.span,
-                TypeError {
-                    kind: TypeErrorKind::ExpectedPointer { found: place_ty },
-                },
+                "move requires an owned local or field",
             ));
         };
-        let ty = self.gen_term(value, Some(&pointee))?;
+        self.emit(if path.is_empty() {
+            Instr::TakeLocal { local }
+        } else {
+            Instr::TakeField { local, path }
+        });
+        Ok(place.ty.clone())
+    }
+
+    pub(super) fn gen_assign(&mut self, place: &Term, value: &Term) -> Result<Ty, LowerError> {
+        if let Some((local, path)) = self.local_path(place)? {
+            self.gen_term(value, Some(&place.ty))?;
+            self.emit(if path.is_empty() {
+                Instr::SetLocal { local }
+            } else {
+                Instr::SetField { local, path }
+            });
+            self.emit(Instr::Push { value: Value::Unit });
+            return Ok(Ty::Unit);
+        }
+        let place_ty = self.gen_place(place)?;
+        let Ty::Pointer { pointee } = place_ty else {
+            unreachable!("place produces a pointer");
+        };
+        self.gen_term(value, Some(&pointee))?;
         self.emit(Instr::Store);
-        Ok(ty)
+        Ok(Ty::Unit)
     }
 
     pub(super) fn gen_field_value(

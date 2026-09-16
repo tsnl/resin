@@ -33,10 +33,10 @@ impl Checkout {
         .unwrap();
         fs::write(
             root.parent().unwrap().join("shared/helper.resin"),
-            "def helper() = {};",
+            "fn helper()  {}",
         )
         .unwrap();
-        fs::write(library_root.join("core.resin"), "def core() = {};").unwrap();
+        fs::write(library_root.join("core.resin"), "fn core()  {}").unwrap();
         let mut loader = Loader::new(library_root);
         let entry = loader.load_file(&root.join("main.resin")).unwrap();
         let helper = loader

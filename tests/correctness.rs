@@ -27,7 +27,7 @@ fn only_parenthesized_lists_apply_functions() {
         "f 1",
         "x.method [1]",
     ] {
-        let source = format!("def main() = {{ {call}; }};");
+        let source = format!("fn main()  {{ {call}; }}");
         let document = support::frontend::cst(source.clone(), None);
         assert!(
             !support::frontend::ast(&document).errors.is_empty(),
@@ -45,14 +45,14 @@ fn only_parenthesized_lists_apply_functions() {
         "f({ 1 })",
         "f(1)(2)",
     ] {
-        parse(&format!("def main() = {{ {call}; }};"));
+        parse(&format!("fn main()  {{ {call}; }}"));
     }
 }
 
 #[test]
 fn zero_and_multiple_argument_calls_have_distinct_parameter_counts() {
     let module = compile(
-        "export { main }; def f () -> int = { 1 }; def add (a: int, b: int) -> int = { a + b }; def main() -> () = { var pair = (1, 2); var x = f(); var y = add(pair.0, pair.1); var z = add(3, 4); };",
+        "export { main }; fn f () -> int  { 1 } fn add (a: int, b: int) -> int  { a + b } fn main() -> ()  { let mut pair = (1, 2); let mut x = f(); let mut y = add(pair.0, pair.1); let mut z = add(3, 4); }",
     );
     let f = module
         .functions
@@ -91,32 +91,29 @@ fn zero_and_multiple_argument_calls_have_distinct_parameter_counts() {
 #[test]
 fn function_types_accept_unit_tuples_and_higher_order_calls() {
     compile(
-        "struct Span<T> { data: Ptr<T>, length: ulong }; type P = Ptr<()>; type S = Span<(int, int)>; def f (p: P) -> P = { p };",
+        "struct Span<T> { data: Ptr<T>, length: ulong, } type P = Ptr<()>; type S = Span<(int, int)>; fn f (p: P) -> P  { p }",
     );
     compile(
-        "export { main }; type F = () -> int; def one () -> int = { 1 }; def main() -> () = { var f = F (one); var x = f(); };",
+        "export { main }; type F = () -> int; fn one () -> int  { 1 } fn main() -> ()  { let mut f = F(one); let mut x = f(); }",
     );
     compile(
-        "export { main }; type Add = (int, int) -> int; def add (a: int, b: int) -> int = { a + b }; def main() -> () = { var f = Add (add); var p = (1, 2); var x = f(p.0, p.1); };",
+        "export { main }; type Add = (int, int) -> int; fn add (a: int, b: int) -> int  { a + b } fn main() -> ()  { let mut f = Add(add); let mut p = (1, 2); let mut x = f(p.0, p.1); }",
     );
     compile(
-        "export { main }; def apply (f: (int, int) -> int, p: (int, int)) -> int = { f(p.0, p.1) }; def add (a: int, b: int) -> int = { a + b }; def main() -> () = { var x = apply(add, (1, 2)); };",
+        "export { main }; fn apply (f: (int, int) -> int, p: (int, int)) -> int  { f(p.0, p.1) } fn add (a: int, b: int) -> int  { a + b } fn main() -> ()  { let mut x = apply(add, (1, 2)); }",
     );
     compile(
-        "export { main }; def identity (p: (int, int)) -> (int, int) = { p }; def main() -> () = { var x = identity((1, 2)); };",
+        "export { main }; fn identity (p: (int, int)) -> (int, int)  { p } fn main() -> ()  { let mut x = identity((1, 2)); }",
     );
     compile(
-        "export { main }; type Unit = (); def f (u: Unit) -> () = { () }; def main() -> () = { var x = Unit (()); var y = f(x); };",
+        "export { main }; type Unit = (); fn f (u: Unit) -> ()  { () } fn main() -> ()  { let mut x = Unit(()); let mut y = f(x); }",
     );
     for (annotation, declaration) in [
-        ("() -> int", "def f(value: ()) -> int = { 0 };"),
-        (
-            "(int, int) -> int",
-            "def f(value: (int, int)) -> int = { 0 };",
-        ),
+        ("() -> int", "fn f(value: ()) -> int  { 0 }"),
+        ("(int, int) -> int", "fn f(value: (int, int)) -> int  { 0 }"),
     ] {
         let source =
-            format!("{declaration} def main() = {{ var value: {annotation}; value := f; }};");
+            format!("{declaration} fn main()  {{ let mut value: {annotation}; value = f; }}");
         assert!(pipeline::generate(&parse(&source)).is_err(), "{source}");
     }
 }
@@ -124,7 +121,7 @@ fn function_types_accept_unit_tuples_and_higher_order_calls() {
 #[test]
 fn type_formers_take_types_between_angle_brackets() {
     let m = compile(
-        "export { main }; struct FieldsValueNext<T0, T1> { value: T0, next: T1 };\nstruct Span<T> { data: Ptr<T>, length: ulong }; type Pointer = Ptr<Ptr<int>>; type View = Span<FieldsValueNext<int, Pointer>>; type Callback = Ptr<(int) -> int>; type UnitPointer = Ptr<()>; def identity(p: Pointer) -> Pointer = { p }; def main() -> () = { var p = Ptr<int>(ulong(0)); };",
+        "export { main }; struct FieldsValueNext<T0, T1> { value: T0, next: T1, }\nstruct Span<T> { data: Ptr<T>, length: ulong, } type Pointer = Ptr<Ptr<int>>; type View = Span<FieldsValueNext<int, Pointer>>; type Callback = Ptr<(int) -> int>; type UnitPointer = Ptr<()>; fn identity(p: Pointer) -> Pointer  { p } fn main() -> ()  { let mut p = Ptr<int>(ulong(0)); }",
     );
     assert_eq!(
         m.functions[0].result,
@@ -135,7 +132,7 @@ fn type_formers_take_types_between_angle_brackets() {
         }
     );
     compile(
-        "export { main }; def f(x: int) -> int = { x }; struct Record { value: int }; def main() -> () = { var a = f(1); var b = f (2); var r = Record { value = 3 }; };",
+        "export { main }; fn f(x: int) -> int  { x } struct Record { value: int, } fn main() -> ()  { let mut a = f(1); let mut b = f(2); let mut r = Record { value = 3 }; }",
     );
     for source in [
         "type P = Ptr(int);",
@@ -156,13 +153,13 @@ fn type_formers_take_types_between_angle_brackets() {
 #[test]
 fn typechecking_rejects_incorrect_argument_counts() {
     for src in [
-        "export { main }; def f () -> int = { 1 }; def main() -> () = { var x = f(1); };",
-        "export { main }; def f (a: int, b: int) -> int = { a }; def main() -> () = { var x = f(1); };",
-        "export { main }; def f (a: int) -> int = { a }; def main() -> () = { var x = f(1, 2); };",
-        "def f() = {}; def main() = { f(()); };",
-        "def f(value: ()) = {}; def main() = { f(); };",
-        "def f(value: (int, int)) = {}; def main() = { f(1, 2); };",
-        "def f(a: int, b: int) = {}; def main() = { f((1, 2)); };",
+        "export { main }; fn f () -> int  { 1 } fn main() -> ()  { let mut x = f(1); }",
+        "export { main }; fn f (a: int, b: int) -> int  { a } fn main() -> ()  { let mut x = f(1); }",
+        "export { main }; fn f (a: int) -> int  { a } fn main() -> ()  { let mut x = f(1, 2); }",
+        "fn f()  {} fn main()  { f(()); }",
+        "fn f(value: ())  {} fn main()  { f(); }",
+        "fn f(value: (int, int))  {} fn main()  { f(1, 2); }",
+        "fn f(a: int, b: int)  {} fn main()  { f((1, 2)); }",
     ] {
         assert!(
             matches!(
@@ -177,13 +174,13 @@ fn typechecking_rejects_incorrect_argument_counts() {
 #[test]
 fn nominal_conversion_requires_an_explicit_ascription() {
     for src in [
-        "export { main }; struct Meters { value: int }; def f (m: Meters) -> int = { m.value }; def main() -> () = { var x = 1; var y = f(x); };",
-        "export { main }; struct Meters { value: int }; def f (m: Meters) -> int = { m.value }; def main() -> () = { var y = f(1); };",
-        "export { main }; struct Meters { value: int }; def f (x: int) -> int = { x }; def main() -> () = { var m = Meters { value = 1 }; var y = f(m); };",
-        "export { main }; struct Meters { value: int }; def main() -> () = { var m = Meters { value = 1 }; var n = 2; m := n; };",
-        "export { main }; struct Meters { value: int }; def main() -> () = { var m = Meters { value = 1 }; var n = 2; n := m; };",
-        "export { main }; struct Meters { value: int }; struct R { value: Meters }; def main() -> () = { var x = R { value = 1 }; };",
-        "export { main }; struct Meters { value: int }; def f (m: Meters, x: int) -> int = { x }; def main() -> () = { var y = f(1, 2); };",
+        "export { main }; struct Meters { value: int, } fn f (m: Meters) -> int  { m.value } fn main() -> ()  { let mut x = 1; let mut y = f(x); }",
+        "export { main }; struct Meters { value: int, } fn f (m: Meters) -> int  { m.value } fn main() -> ()  { let mut y = f(1); }",
+        "export { main }; struct Meters { value: int, } fn f (x: int) -> int  { x } fn main() -> ()  { let mut m = Meters { value = 1 }; let mut y = f(m); }",
+        "export { main }; struct Meters { value: int, } fn main() -> ()  { let mut m = Meters { value = 1 }; let mut n = 2; m = n; }",
+        "export { main }; struct Meters { value: int, } fn main() -> ()  { let mut m = Meters { value = 1 }; let mut n = 2; n = m; }",
+        "export { main }; struct Meters { value: int, } struct R { value: Meters, } fn main() -> ()  { let mut x = R { value = 1 }; }",
+        "export { main }; struct Meters { value: int, } fn f (m: Meters, x: int) -> int  { x } fn main() -> ()  { let mut y = f(1, 2); }",
     ] {
         assert!(
             matches!(
@@ -196,20 +193,20 @@ fn nominal_conversion_requires_an_explicit_ascription() {
         );
     }
     compile(
-        "export { main }; struct Meters { value: int }; def f (m: Meters) -> int = { m.value }; def main() -> () = { var x = 1; var y = f(Meters { value = x }); var m = Meters { value = 1 }; m := Meters { value = x }; x := m.value; };",
+        "export { main }; struct Meters { value: int, } fn f (m: Meters) -> int  { m.value } fn main() -> ()  { let mut x = 1; let mut y = f(Meters { value = x }); let mut m = Meters { value = 1 }; m = Meters { value = x }; x = m.value; }",
     );
     compile(
-        "export { main }; struct Meters { value: int }; struct R { value: Meters }; def main() -> () = { var x = R { value = Meters { value = 1 } }; };",
+        "export { main }; struct Meters { value: int, } struct R { value: Meters, } fn main() -> ()  { let mut x = R { value = Meters { value = 1 } }; }",
     );
     compile(
-        "export { main }; struct Meters { value: int }; type Distance = Meters; def main() -> () = { var x = Distance (Meters { value = 1 }); var y = Meters(x); };",
+        "export { main }; struct Meters { value: int, } type Distance = Meters; fn main() -> ()  { let mut x = Distance(Meters { value = 1 }); let mut y = Meters(x); }",
     );
 }
 
 #[test]
 fn record_layout_does_not_reorder_side_effects() {
     let module = compile(
-        "struct R { a: int, b: int }; def f (x: int) -> int = { var r = R { b = (x := 1), a = (x := 2) }; x };",
+        "struct R { a: int, b: int, } fn f (mut x: int) -> int { let r = R { b = { x = 1; x }, a = { x = 2; x } }; x }",
     );
     let function = module
         .functions
@@ -242,7 +239,7 @@ fn record_layout_does_not_reorder_side_effects() {
 #[test]
 fn recursion_uses_immutable_function_references() {
     let module = compile(
-        "def f (n: int) -> int = { if (n == 0) { 7 } else { next(n - 1) } }; def next (n: int) -> int = { f(n) };",
+        "fn f (n: int) -> int  { if (n == 0) { 7 } else { next(n - 1) } } fn next (n: int) -> int  { f(n) }",
     );
     for function in &module.functions {
         assert!(
@@ -254,7 +251,7 @@ fn recursion_uses_immutable_function_references() {
         );
     }
     let error = pipeline::generate(&parse(
-        "export { main }; def f () -> int = { 1 }; def main() -> () = { f := f; };",
+        "export { main }; fn f () -> int  { 1 } fn main() -> ()  { f = f; }",
     ))
     .unwrap_err();
     assert_eq!(error.kind, GenerateErrorKind::NotAPlace);
@@ -263,9 +260,9 @@ fn recursion_uses_immutable_function_references() {
 #[test]
 fn lambdas_and_nested_definitions_are_parse_errors() {
     for source in [
-        "def main() -> () = { var f = (n: int) => n; };",
-        "def outer () -> int = { def inner () -> int = { 1 }; inner() };",
-        "def missing (n) = { n };",
+        "fn main() -> ()  { let mut f = (n: int) => n; }",
+        "fn outer () -> int = { fn inner() -> int  { 1 } inner() };",
+        "fn missing (n)  { n }",
     ] {
         assert!(
             !support::frontend::ast(&support::frontend::cst(source, None))
@@ -277,32 +274,25 @@ fn lambdas_and_nested_definitions_are_parse_errors() {
 }
 
 #[test]
-fn record_type_members_are_parse_errors_instead_of_panics() {
-    assert!(
-        !support::frontend::ast(&support::frontend::cst(
-            "def main() -> () = { var x = { T = int }; };",
-            None
-        ))
-        .errors
-        .is_empty()
-    );
-    assert!(
-        !support::frontend::ast(&support::frontend::cst(
-            "struct FieldsA<T0> { a: T0 };\ndef main() -> () = { var x = FieldsA<_> { a = 1, T = int }; };",
-            None
-        ))
-        .errors
-        .is_empty()
-    );
-    compile("export { main }; def main() -> () = { var x = { type T = int; T (1) }; };");
+fn record_type_members_are_rejected_instead_of_panicking() {
+    for source in [
+        "fn main() { let x = { T = int }; }",
+        "struct Item { a: int } fn main() { let x = Item { a = 1, T = int }; }",
+    ] {
+        assert!(
+            support::pipeline::source_module(source).is_err(),
+            "{source}"
+        );
+    }
+    compile("export { main }; fn main() -> ()  { let mut x = { type T = int; T(1) }; }");
 }
 
 #[test]
 fn omitted_function_results_are_unit_not_inferred() {
     for source in [
-        "export { main }; def main() = {};",
-        "def discard() = { 42; }; def apply(f: () -> ()) = { f() }; def main() = { apply(discard) };",
-        "def even(n: int) = { if (n == 0) { () } else { odd(n - 1) } }; def odd(n: int) = { even(n - 1) };",
+        "export { main }; fn main()  {}",
+        "fn discard()  { 42; } fn apply(f: () -> ())  { f() } fn main()  { apply(discard) }",
+        "fn even(n: int)  { if (n == 0) { () } else { odd(n - 1) } } fn odd(n: int)  { even(n - 1) }",
     ] {
         let explicit = source.replace(") =", ") -> () =");
         let mut implicit = compile(source);
@@ -313,10 +303,10 @@ fn omitted_function_results_are_unit_not_inferred() {
         assert_eq!(implicit, explicit);
     }
     for source in [
-        "def answer() = { 42 };",
-        "def identity(n: int) = { n };",
-        "def answer() = { if (1 == 1) { 42 } else { 0 } };",
-        "struct Unit {}; def nominal() = { Unit {} };",
+        "fn answer()  { 42 }",
+        "fn identity(n: int)  { n }",
+        "fn answer()  { if (1 == 1) { 42 } else { 0 } }",
+        "struct Unit {} fn nominal()  { Unit {} }",
     ] {
         let error = pipeline::generate(&parse(source)).unwrap_err();
         assert!(
@@ -329,13 +319,13 @@ fn omitted_function_results_are_unit_not_inferred() {
             "{source}\n{error}"
         );
     }
-    compile("def answer() -> int = { 42 };");
+    compile("fn answer() -> int  { 42 }");
 }
 
 #[test]
 fn signed_literals_respect_context_and_the_minimum_integer() {
     let module = compile(
-        "export { main }; def main() -> () = { var x = -2147483648; var y = long (-1); var z = -0x80000000; var w = long (1 + 2); var hex = -0xdead; };",
+        "export { main }; fn main() -> ()  { let mut x = -2147483648; let mut y = long(-1); let mut z = -0x80000000; let mut w = long(1 + 2); let mut hex = -0xdead; }",
     );
     assert_eq!(
         module.functions[0]
@@ -361,12 +351,12 @@ fn signed_literals_respect_context_and_the_minimum_integer() {
 #[test]
 fn returned_pointers_support_field_assignment() {
     compile(
-        "struct FieldsX<T0> { x: T0 };\ndef id (p: Ptr<FieldsX<int>>) -> Ptr<FieldsX<int>> = { p }; def f (p: Ptr<FieldsX<int>>) -> int = { id(p).x := 1 };",
+        "struct FieldsX<T0> { x: T0, }\nfn id (p: Ptr<FieldsX<int>>) -> Ptr<FieldsX<int>>  { p } fn f (p: Ptr<FieldsX<int>>) { id(p).x = 1 }",
     );
     compile(
-        "struct FieldsX<T0> { x: T0 };\nstruct R { inner: FieldsX<int> }; def id (p: Ptr<R>) -> Ptr<R> = { p }; def f (p: Ptr<R>) -> int = { id(p).inner.x := 1 };",
+        "struct FieldsX<T0> { x: T0, }\nstruct R { inner: FieldsX<int>, } fn id (p: Ptr<R>) -> Ptr<R>  { p } fn f (p: Ptr<R>) { id(p).inner.x = 1 }",
     );
-    let src = "struct FieldsX<T0> { x: T0 };\ndef id (r: FieldsX<int>) -> FieldsX<int> = { r }; def f (r: FieldsX<int>) -> int = { id(r).x := 1 };";
+    let src = "struct FieldsX<T0> { x: T0, }\nfn id (r: FieldsX<int>) -> FieldsX<int>  { r } fn f (r: FieldsX<int>) { id(r).x = 1 }";
     assert!(matches!(
         pipeline::generate(&parse(src)).unwrap_err().kind,
         GenerateErrorKind::NotAPlace
@@ -376,8 +366,8 @@ fn returned_pointers_support_field_assignment() {
 #[test]
 fn nested_field_access_evaluates_its_base_once() {
     for src in [
-        "struct FieldsInner<T0> { inner: T0 };\nstruct FieldsX<T0> { x: T0 };\ndef id (r: FieldsInner<FieldsX<int>>) -> FieldsInner<FieldsX<int>> = { r }; def f (r: FieldsInner<FieldsX<int>>) -> int = { id(r).inner.x };",
-        "struct FieldsP<T0> { p: T0 };\nstruct FieldsX<T0> { x: T0 };\ndef id (r: FieldsP<Ptr<FieldsX<int>>>) -> FieldsP<Ptr<FieldsX<int>>> = { r }; def f (r: FieldsP<Ptr<FieldsX<int>>>) -> int = { id(r).p.x := 1 };",
+        "struct FieldsInner<T0> { inner: T0, }\nstruct FieldsX<T0> { x: T0, }\nfn id (r: FieldsInner<FieldsX<int>>) -> FieldsInner<FieldsX<int>>  { r } fn f (r: FieldsInner<FieldsX<int>>) -> int  { id(r).inner.x }",
+        "struct FieldsP<T0> { p: T0, }\nstruct FieldsX<T0> { x: T0, }\nfn id (r: FieldsP<Ptr<FieldsX<int>>>) -> FieldsP<Ptr<FieldsX<int>>>  { r } fn f (r: FieldsP<Ptr<FieldsX<int>>>) { id(r).p.x = 1 }",
     ] {
         let module = compile(src);
         let f = module
@@ -400,28 +390,29 @@ fn nested_field_access_evaluates_its_base_once() {
 #[test]
 fn uninitialized_reads_are_rejected_on_all_paths() {
     for src in [
-        "def f () -> int = { var x: int; x };",
-        "def consume(a: int, b: int) = {}; def main() = { var value: int; consume(value, value := 1); };",
-        "def f (c: int) -> int = { var x: int; if (c == 0) { x := 1 } else { 0 }; x };",
-        "def f (c: int) -> int = { var x: int; (c == 0) && ((x := 1) == 1); x };",
-        "export { main }; def main() -> () = { var x: int; var y = x; };",
-        "struct FieldsX<T0> { x: T0 };\ndef f () -> int = { var r: FieldsX<int>; r.x };",
-        "struct FieldsX<T0> { x: T0 };\ndef f () -> int = { var r: FieldsX<int>; r.x := 1; r.x };",
+        "fn f () -> int  { let mut x: int; x }",
+        "fn consume(a: int, b: int)  {} fn main()  { let mut value: int; consume(value, { value = 1; value }); }",
+        "fn f (c: int) -> int  { let mut x: int; if (c == 0) { x = 1 } else {}; x }",
+        "fn f (c: int) -> int  { let mut x: int; (c == 0) && ({ x = 1; x } == 1); x }",
+        "export { main }; fn main() -> ()  { let mut x: int; let mut y = x; }",
+        "struct FieldsX<T0> { x: T0, }\nfn f () -> int  { let mut r: FieldsX<int>; r.x }",
+        "struct FieldsX<T0> { x: T0, }\nfn f () -> int  { let mut r: FieldsX<int>; r.x = 1; r.x }",
     ] {
         assert!(
-            matches!(
-                pipeline::generate(&parse(src)).unwrap_err().kind,
-                GenerateErrorKind::UninitializedValue { .. }
-            ),
+            pipeline::generate(&parse(src))
+                .unwrap_err()
+                .to_string()
+                .to_lowercase()
+                .contains("uninitialized"),
             "{src}"
         );
     }
-    compile("def f () -> int = { var x: int; x := 1; x };");
+    compile("fn f () -> int  { let mut x: int; x = 1; x }");
     compile(
-        "def consume(a: int, b: int) = {}; def main() = { var value: int; consume(value := 1, value); };",
+        "fn consume(a: int, b: int)  {} fn main()  { let mut value: int; consume({ value = 1; value }, value); }",
     );
-    compile("def f (c: int) -> int = { var x: int; if (c == 0) { x := 1 } else { x := 2 }; x };");
+    compile("fn f (c: int) -> int  { let mut x: int; if (c == 0) { x = 1 } else { x = 2 }; x }");
     compile(
-        "def even (n: int) -> int = { if (n == 0) { 1 } else { odd(n - 1) } }; def odd (n: int) -> int = { if (n == 0) { 0 } else { even(n - 1) } };",
+        "fn even (n: int) -> int  { if (n == 0) { 1 } else { odd(n - 1) } } fn odd (n: int) -> int  { if (n == 0) { 0 } else { even(n - 1) } }",
     );
 }

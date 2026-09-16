@@ -48,7 +48,7 @@ pub(super) struct Signature {
     pub type_params: Vec<crate::TypeParameter>,
     pub declaration: Option<DeclarationId>,
     pub parameters: Vec<Option<DeclarationId>>,
-    pub params: Vec<(Ident, Annotation)>,
+    pub params: Vec<(resin_ast::BindingPattern, Annotation)>,
     pub result: Annotation,
 }
 impl Checker<'_> {
@@ -85,7 +85,7 @@ impl Checker<'_> {
 
     fn signature(
         &mut self,
-        params: &[(Ident, resin_ast::Type)],
+        params: &[(resin_ast::BindingPattern, resin_ast::Type)],
         result: &resin_ast::Type,
         infer: bool,
     ) -> Signature {
@@ -115,6 +115,7 @@ pub(super) struct CheckedFile {
 }
 struct Checker<'a> {
     loop_depth: usize,
+    function_ids: std::collections::HashMap<DeclarationId, FunctionId>,
     typing: Inference<'a>,
     scopes: Scopes,
     errors: Vec<GenerateError>,
@@ -131,6 +132,7 @@ struct Checker<'a> {
 impl<'a> Checker<'a> {
     fn new(typer: &'a mut Context, scopes: Scopes) -> Self {
         Self {
+            function_ids: Default::default(),
             typing: Inference::new(typer),
             scopes,
             errors: vec![],
@@ -196,6 +198,23 @@ impl Checker<'_> {
             return Ok((declaration, ty, vec![]));
         }
         self.dependencies.insert(declaration);
+        if self
+            .function_ids
+            .get(&declaration)
+            .and_then(|id| self.typing.typer.functions.get(id))
+            .is_some_and(|function| {
+                matches!(
+                    function.body,
+                    super::context::FunctionBody::GpuPipelineFactory { .. }
+                        | super::context::FunctionBody::GpuPipelineRecord { .. }
+                )
+            })
+        {
+            return Err(GenerateError::inference(
+                name.span,
+                "GPU pipeline bridges require direct calls; native bridge references cannot escape",
+            ));
+        }
         let parameters = self.scopes.parameters(declaration);
         let (ty, arguments) = self
             .typing
@@ -229,6 +248,18 @@ pub(in crate::lower) fn file(
     let mut checker = Checker::new(&mut generator.typer, scopes);
     checker.module_constants(file);
     let (declarations, mut signatures, sources) = checker.declarations(file, methods);
+    for declaration in &declarations {
+        generator
+            .function_bindings
+            .entry(declaration.id)
+            .or_insert_with(|| {
+                let id = FunctionId::from_index(generator.functions.len());
+                generator.functions.push(None);
+                id
+            });
+    }
+    checker.function_ids = generator.function_bindings.clone();
+    checker.struct_hooks(file, &declarations, &signatures);
     checker.declare_gpu_contracts(
         &declarations,
         &signatures,
@@ -236,6 +267,7 @@ pub(in crate::lower) fn file(
         &mut generator.function_bindings,
         &generator.source,
     );
+    checker.declare_gpu_bridges(&declarations, &signatures);
     let mut bodies = checker.bodies(&mut signatures, sources);
     checker.solve_functions(&signatures, &mut bodies);
     checker.require_holes();
@@ -245,6 +277,7 @@ pub(in crate::lower) fn file(
         &checker.typing.solver,
         checker.typing.typer,
         &checker.typing.methods,
+        &checker.function_ids,
     );
     let Checker {
         mut typing,
@@ -274,7 +307,11 @@ pub(in crate::lower) fn file(
         };
         let completed = super::elaborate::function(
             &body.term,
-            &signature.parameters,
+            signature
+                .parameters
+                .iter()
+                .zip(&signature.params)
+                .filter_map(|(id, (pattern, _))| id.map(|id| (id, pattern.mutable))),
             &solver,
             &methods,
             &generator.typer,
@@ -296,6 +333,148 @@ pub(in crate::lower) fn file(
 }
 
 impl Checker<'_> {
+    fn struct_hooks(
+        &mut self,
+        file: &SourceFile,
+        declarations: &[typed::Declaration],
+        signatures: &Signatures,
+    ) {
+        for declaration in declarations
+            .iter()
+            .filter(|declaration| matches!(declaration.name.val.as_ref(), "drop" | "repr_bytes"))
+        {
+            let hook = declaration.name.val.as_ref();
+            let result = (|| {
+                let signature = signatures[&declaration.id]
+                    .clone()
+                    .resolve(&self.typing.solver)?;
+                let invalid = || {
+                    GenerateError::inference(
+                        declaration.name.span,
+                        if hook == "drop" {
+                            "drop must have signature fn drop<T>(value: Ptr<Owner<T>>) with only the owner's type parameters"
+                        } else {
+                            "repr_bytes must take Ref<Owner<T>> and return (Ptr<ubyte>, ulong), with only the owner's type parameters"
+                        },
+                    )
+                };
+                let [(_, parameter)] = signature.params.as_slice() else {
+                    return Err(invalid());
+                };
+                let (pointee, result) = match (hook, &parameter.ty) {
+                    ("drop", crate::Type::Pointer { pointee }) => (pointee, crate::Type::Unit),
+                    ("repr_bytes", crate::Type::Reference { referent }) => {
+                        (referent, super::types::ty(&Ty::byte_span()))
+                    }
+                    _ => return Err(invalid()),
+                };
+                let crate::Type::Defined {
+                    definition,
+                    arguments,
+                } = pointee.as_ref()
+                else {
+                    return Err(invalid());
+                };
+                let owner = self
+                    .typing
+                    .typer
+                    .nominal_schemes
+                    .get(definition)
+                    .ok_or_else(invalid)?;
+                if signature.result.ty != result
+                    || arguments.len() != owner.type_params.len()
+                    || arguments
+                        != &signature
+                            .type_params
+                            .iter()
+                            .map(|parameter| crate::Type::Parameter {
+                                parameter: parameter.id,
+                            })
+                            .collect::<Vec<_>>()
+                {
+                    return Err(invalid());
+                }
+                if !file.stmts.iter().any(|statement| matches!(&statement.val, StmtKind::Struct { name, .. } if name.val == owner.name)) {
+                    return Err(GenerateError::inference(declaration.name.span, format!("a {hook} hook must be defined in the same module as its struct")));
+                }
+                let function = self.function_ids[&declaration.id];
+                if hook == "drop" {
+                    if self
+                        .typing
+                        .typer
+                        .definition(*definition)
+                        .ok()
+                        .is_some_and(|definition| definition.drop_hook().is_some())
+                    {
+                        return Err(GenerateError::inference(
+                            declaration.name.span,
+                            "duplicate drop hook for this struct",
+                        ));
+                    }
+                    self.typing.typer.define_drop(*definition, function);
+                } else {
+                    let owner = self
+                        .typing
+                        .typer
+                        .nominal_schemes
+                        .get_mut(definition)
+                        .expect("checked nominal owner");
+                    if owner.text_view.is_some() {
+                        return Err(GenerateError::inference(
+                            declaration.name.span,
+                            "duplicate repr_bytes hook for this struct",
+                        ));
+                    }
+                    owner.text_view = Some(function);
+                }
+                Ok(())
+            })();
+            self.record(result);
+        }
+    }
+
+    fn declare_gpu_bridges(
+        &mut self,
+        declarations: &[typed::Declaration],
+        signatures: &Signatures,
+    ) {
+        for declaration in declarations {
+            let typed::DeclarationKind::Function { decorators } = &declaration.kind else {
+                continue;
+            };
+            for decorator in decorators
+                .iter()
+                .filter(|decorator| super::gpu::is_bridge(&decorator.val))
+            {
+                let result = (|| {
+                    let signature = signatures[&declaration.id]
+                        .clone()
+                        .resolve(&self.typing.solver)?;
+                    let function = self.function_ids[&declaration.id];
+                    let params = signature
+                        .params
+                        .iter()
+                        .map(|(_, annotation)| annotation.ty.clone())
+                        .collect();
+                    if !signature.type_params.is_empty()
+                        || !self.typing.typer.register_function(
+                            function,
+                            params,
+                            &signature.result.ty,
+                        )
+                    {
+                        return Err(GenerateError::inference(
+                            decorator.span,
+                            "GPU bridges require a fixed, explicit signature",
+                        ));
+                    }
+                    self.typing.typer.register_bridge(function, decorator)
+                })();
+                self.record(result);
+            }
+        }
+    }
+
     fn declare_gpu_contracts(
         &mut self,
         declarations: &[typed::Declaration],
@@ -601,7 +780,7 @@ impl Checker<'_> {
     fn bind_parameters(&mut self, signature: &mut Signature) {
         for (name, ann) in &signature.params {
             let binding = self
-                .bind(name, ann.ty.clone(), DefinitionKind::Parameter)
+                .bind(&name.name, ann.ty.clone(), DefinitionKind::Parameter)
                 .map_err(|error| self.errors.push(error))
                 .ok();
             signature.parameters.push(binding);
@@ -787,6 +966,130 @@ struct Expression<'p, 'a> {
 }
 
 impl Expression<'_, '_> {
+    fn overload_candidates(&mut self, name: &Ident) -> Vec<super::infer::OverloadCandidate> {
+        self.checker
+            .scopes
+            .lookup_overloads(&name.val)
+            .into_iter()
+            .filter(|(_, _, function)| *function)
+            .filter_map(|(declaration, signature, _)| {
+                let function = self.checker.function_ids.get(&declaration).copied()?;
+                self.checker.dependencies.insert(declaration);
+                Some(super::infer::OverloadCandidate {
+                    function,
+                    declaration,
+                    signature,
+                    parameters: self.checker.scopes.parameters(declaration),
+                })
+            })
+            .collect()
+    }
+
+    fn overload_reference(
+        &mut self,
+        name: &Ident,
+        explicit: Option<Vec<Type>>,
+        out: Type,
+    ) -> Option<TermKind> {
+        let candidates = self.overload_candidates(name);
+        if candidates.len() < 2 {
+            return None;
+        }
+        self.checker
+            .scopes
+            .record_call(name, Ty::Unit.into(), vec![], true, self.rule);
+        self.constrain((
+            name.span,
+            Constraint::Overload {
+                lookup: super::infer::Overload {
+                    name: name.val.clone(),
+                    candidates,
+                    primitive: None,
+                    expected: None,
+                    type_args: explicit,
+                    args: None,
+                    out,
+                },
+            },
+        ));
+        Some(TermKind::MethodReference {
+            rule: self.rule,
+            name: name.clone(),
+        })
+    }
+
+    fn overload_call(
+        &mut self,
+        func: &resin_ast::Term,
+        args: &[resin_ast::Term],
+        out: Type,
+        expected: Option<Type>,
+    ) -> Option<TermKind> {
+        let (name, explicit) = match &func.val {
+            resin_ast::TermKind::Var { name } => (name, None),
+            resin_ast::TermKind::TypeApply { function, args } => {
+                let resin_ast::TermKind::Var { name } = &function.val else {
+                    return None;
+                };
+                (
+                    name,
+                    Some(
+                        args.iter()
+                            .map(|arg| self.annotation(arg, true).ty)
+                            .collect(),
+                    ),
+                )
+            }
+            _ => return None,
+        };
+        if self
+            .checker
+            .scopes
+            .lookup_overloads(&name.val)
+            .iter()
+            .any(|(_, _, function)| !function)
+        {
+            return None;
+        }
+        let candidates = self.overload_candidates(name);
+        let primitive = super::context::is_primitive_operation(&name.val).then(|| name.val.clone());
+        if candidates.is_empty() && primitive.is_none() {
+            return None;
+        }
+        let args = args
+            .iter()
+            .map(|arg| self.child(arg, None))
+            .collect::<Vec<_>>();
+        self.checker.scopes.record_call(
+            name,
+            args.first()
+                .map_or_else(|| Ty::Unit.into(), |arg| arg.ty.clone()),
+            args.iter().map(|arg| arg.ty.clone()).collect(),
+            true,
+            self.rule,
+        );
+        self.constrain((
+            name.span,
+            Constraint::Overload {
+                lookup: super::infer::Overload {
+                    name: name.val.clone(),
+                    candidates,
+                    primitive,
+                    expected,
+                    type_args: explicit,
+                    args: Some(args.iter().map(|arg| arg.ty.clone()).collect()),
+                    out,
+                },
+            },
+        ));
+        Some(TermKind::Builtin {
+            rule: self.rule,
+            name: name.val.clone(),
+            name_span: name.span,
+            args,
+        })
+    }
+
     fn method_reference(
         &mut self,
         receiver_type: typed::Annotation<Type>,
@@ -858,12 +1161,327 @@ impl Expression<'_, '_> {
         checked
     }
 
+    fn builtin(
+        &mut self,
+        name: &Arc<str>,
+        name_span: &Span,
+        args: &[resin_ast::Term],
+        span: Span,
+        out: &Type,
+        expected: &Option<Type>,
+    ) -> TermKind {
+        self.checker
+            .method_dependencies(&crate::MethodName::Operator {
+                symbol: name.clone(),
+                arity: args.len(),
+            });
+        let args = args
+            .iter()
+            .map(|arg| {
+                let expected = if matches!(name.as_ref(), "&&" | "||" | "assert") {
+                    Some(Ty::Bool.into())
+                } else {
+                    expression_exits(arg).then(|| self.checker.typing.solver.fresh())
+                };
+                self.child(arg, expected)
+            })
+            .collect::<Vec<_>>();
+        self.checker.scopes.record_call(
+            &Ident::new(name.clone(), *name_span),
+            args[0].ty.clone(),
+            args.iter().map(|arg| arg.ty.clone()).collect(),
+            true,
+            self.rule,
+        );
+        let dunder = crate::OPERATOR_METHODS
+            .iter()
+            .find(|(_, symbol, arity)| *symbol == name.as_ref() && *arity == args.len())
+            .map(|(method, _, _)| *method);
+        let constraint = if let Some(dunder) = dunder {
+            let candidates = self.overload_candidates(&Ident::new(dunder.into(), *name_span));
+            Constraint::Overload {
+                lookup: super::infer::Overload {
+                    name: name.clone(),
+                    candidates,
+                    primitive: Some(name.clone()),
+                    expected: expected.clone(),
+                    type_args: None,
+                    args: Some(args.iter().map(|arg| arg.ty.clone()).collect()),
+                    out: out.clone(),
+                },
+            }
+        } else {
+            Constraint::Builtin(
+                name.clone(),
+                args.iter().map(|arg| arg.ty.clone()).collect(),
+                out.clone(),
+            )
+        };
+        self.constrain((span, constraint));
+        TermKind::Builtin {
+            rule: self.rule,
+            name_span: *name_span,
+            name: name.clone(),
+            args,
+        }
+    }
+
+    fn call(
+        &mut self,
+        func: &resin_ast::Term,
+        args: &[resin_ast::Term],
+        span: Span,
+        out: &Type,
+        expected: &Option<Type>,
+    ) -> Result<(TermKind, Option<Type>)> {
+        let mut equate = None;
+        let kind = if let resin_ast::TermKind::Var { name } = &func.val
+            && name.val.as_ref() == "absurd"
+        {
+            let arg = single_argument(args, span)?;
+            let arg = self.child(arg, Some(Ty::union([]).into()));
+            TermKind::Absurd { arg: Box::new(arg) }
+        } else if let resin_ast::TermKind::Var { name } = &func.val
+            && matches!(name.val.as_ref(), "size_of" | "align_of")
+        {
+            let arg = single_argument(args, span)?;
+            // Check the operand for typing only. Never execute its effects or read its locals.
+            let ann = if let resin_ast::TermKind::Type { ty } = &arg.val {
+                self.annotation(ty, false)
+            } else {
+                let unevaluated = std::mem::replace(&mut self.checker.unevaluated, true);
+                let term = self.child(arg, None);
+                self.checker.unevaluated = unevaluated;
+                Annotation {
+                    holes: Vec::new(),
+                    ty: term.ty,
+                    span: term.span,
+                }
+            };
+            equate = Some(Ty::UInt64.into());
+            self.constrain((span, Constraint::Layout(ann.ty.clone())));
+            TermKind::Layout {
+                ty: ann.into_tree(),
+                size: name.val.as_ref() == "size_of",
+            }
+        } else if let resin_ast::TermKind::Type { ty } = &func.val
+            && matches!(&ty.val, resin_ast::TypeKind::App { head, .. } if head.val.as_ref() == "Err")
+        {
+            let ann = self.annotation(ty, true);
+            super::eval::reference_type(&self.checker.typing.solver, &ann.ty, false, span)?;
+            let Type::Node(super::infer::Head::Error, parts) =
+                self.checker.typing.solver.head(&ann.ty)
+            else {
+                unreachable!("Err annotation");
+            };
+            let arg = self.child(single_argument(args, span)?, Some(parts[0].clone()));
+            equate = Some(ann.ty.clone());
+            TermKind::Ascribe {
+                ty: ann.into_tree(),
+                arg: Box::new(arg),
+            }
+        } else if let resin_ast::TermKind::Type { ty } = &func.val {
+            let unit = resin_ast::Term {
+                span,
+                val: resin_ast::TermKind::Unit,
+            };
+            let arg = if args.is_empty() {
+                &unit
+            } else {
+                single_argument(args, span)?
+            };
+            let ann = self.annotation(ty, true);
+            super::eval::reference_type(&self.checker.typing.solver, &ann.ty, false, span)?;
+            let arg = {
+                let literal = matches!(arg.val, resin_ast::TermKind::Num { .. })
+                    || matches!(&arg.val, resin_ast::TermKind::Builtin { name, args, .. } if matches!(name.as_ref(), "+" | "-") && matches!(args.as_slice(), [resin_ast::Term { val: resin_ast::TermKind::Num { .. }, .. }]));
+                let arg = self.child(arg, None);
+                self.constrain((
+                    span,
+                    Constraint::Ascribe(arg.ty.clone(), ann.ty.clone(), literal),
+                ));
+                arg
+            };
+            equate = Some(ann.ty.clone());
+            TermKind::Ascribe {
+                ty: ann.into_tree(),
+                arg: Box::new(arg),
+            }
+        } else if let Some(call) = self.overload_call(func, args, out.clone(), expected.clone()) {
+            call
+        } else {
+            let func = self.child(func, None);
+            let args = args
+                .iter()
+                .map(|arg| self.child(arg, None))
+                .collect::<Vec<_>>();
+            self.constrain((
+                span,
+                Constraint::Call(
+                    func.ty.clone(),
+                    args.iter().map(|arg| arg.ty.clone()).collect(),
+                    out.clone(),
+                ),
+            ));
+            TermKind::Call {
+                func: Box::new(func),
+                args,
+            }
+        };
+        Ok((kind, equate))
+    }
+
+    fn type_application(
+        &mut self,
+        func: &resin_ast::Term,
+        type_args: &[resin_ast::Type],
+        span: Span,
+        out: Type,
+    ) -> Result<(TermKind, Option<Type>)> {
+        let mut equate = None;
+        let arguments: Vec<_> = type_args
+            .iter()
+            .map(|ann| self.annotation(ann, true).ty)
+            .collect();
+        for argument in &arguments {
+            super::eval::reference_type(&self.checker.typing.solver, argument, false, span)?;
+        }
+        let kind = match &func.val {
+            resin_ast::TermKind::Var { name } => {
+                if let Some(reference) =
+                    self.overload_reference(name, Some(arguments.clone()), out.clone())
+                {
+                    reference
+                } else {
+                    let (declaration, ty, type_args) = self.checker.value(name, Some(arguments))?;
+                    equate = Some(ty);
+                    TermKind::Var {
+                        declaration,
+                        name: name.clone(),
+                        type_args,
+                    }
+                }
+            }
+            resin_ast::TermKind::Field { base, name } => {
+                let base = self.child(base, None);
+                let TermKind::Type { ty } = base.kind else {
+                    return Err(GenerateError::inference(
+                        span,
+                        "method references require a type receiver",
+                    ));
+                };
+                self.method_reference(ty, name, Some(arguments), out.clone())
+            }
+            _ => {
+                return Err(GenerateError::inference(
+                    span,
+                    "type arguments require a function declaration",
+                ));
+            }
+        };
+        Ok((kind, equate))
+    }
+
+    fn match_expression(
+        &mut self,
+        value: &resin_ast::Term,
+        arms: &[resin_ast::MatchArm],
+        out: &Type,
+    ) -> TermKind {
+        let input = self.child(value, None);
+        let mut checked = vec![];
+        for arm in arms {
+            self.checker.scopes.push_at(arm.body.span);
+            let payload = self.checker.typing.solver.fresh();
+            let (variant, pattern) = match &arm.variant {
+                resin_ast::MatchVariant::Wildcard => (None, Pattern::Error),
+                resin_ast::MatchVariant::Error => (None, Pattern::Error),
+                resin_ast::MatchVariant::Type(ty) => {
+                    let ann = self.annotation(ty, false);
+                    let ty = ann.ty.clone();
+                    (Some(ann.into_tree()), Pattern::Type(ty))
+                }
+            };
+            if !matches!(arm.variant, resin_ast::MatchVariant::Wildcard) {
+                self.constrain((
+                    arm.body.span,
+                    Constraint::Variant(input.ty.clone(), pattern, payload.clone()),
+                ));
+            }
+            let binding = arm.pattern.as_ref().and_then(|pattern| {
+                self.checker
+                    .bind(&pattern.name, payload, DefinitionKind::Variable)
+                    .map_err(|error| self.checker.errors.push(error))
+                    .ok()
+            });
+            let body = self.child(&arm.body, Some(out.clone()));
+            checked.push(MatchArm {
+                error: matches!(arm.variant, resin_ast::MatchVariant::Error),
+                wildcard: matches!(arm.variant, resin_ast::MatchVariant::Wildcard),
+                mutable: arm.pattern.as_ref().is_some_and(|pattern| pattern.mutable),
+                binding,
+                variant,
+                body,
+            });
+            self.checker.scopes.pop();
+        }
+        TermKind::Match {
+            value: Box::new(input),
+            arms: checked,
+        }
+    }
+
+    fn receiver_call(
+        &mut self,
+        receiver: &resin_ast::Term,
+        name: &Ident,
+        type_args: &[resin_ast::Type],
+        args: &[resin_ast::Term],
+        span: Span,
+        context: (Option<Type>, Type),
+    ) -> Result<Term> {
+        let (expected, out) = context;
+        let mut func = resin_ast::Term {
+            span: name.span,
+            val: resin_ast::TermKind::Var { name: name.clone() },
+        };
+        if !type_args.is_empty() {
+            func = resin_ast::Term {
+                span: name.span,
+                val: resin_ast::TermKind::TypeApply {
+                    function: Box::new(func),
+                    args: type_args.to_vec(),
+                },
+            };
+        }
+        let args = std::iter::once(receiver.clone())
+            .chain(args.iter().cloned())
+            .collect();
+        let call = resin_ast::Term {
+            span,
+            val: resin_ast::TermKind::Call {
+                func: Box::new(func),
+                args,
+            },
+        };
+        self.term_inner(&call, expected, out)
+    }
+
     fn term_inner(
         &mut self,
         term: &resin_ast::Term,
         expected: Option<Type>,
         out: Type,
     ) -> Result<Term> {
+        if let resin_ast::TermKind::MethodCall {
+            receiver,
+            name,
+            type_args,
+            args,
+        } = &term.val
+        {
+            return self.receiver_call(receiver, name, type_args, args, term.span, (expected, out));
+        }
         let propagate = matches!(
             term.val,
             resin_ast::TermKind::If { .. }
@@ -960,6 +1578,8 @@ impl Expression<'_, '_> {
                 } else if let Some(value) = self.checker.scopes.constant(&name.val) {
                     equate = Some(Type::from_hir(&value.ty));
                     TermKind::Constant { value }
+                } else if let Some(reference) = self.overload_reference(name, None, out.clone()) {
+                    reference
                 } else {
                     let (declaration, ty, type_args) = self.checker.value(name, None)?;
                     equate = Some(ty);
@@ -970,50 +1590,10 @@ impl Expression<'_, '_> {
                     }
                 }
             }
-            resin_ast::TermKind::TypeApply {
-                function: func,
-                args: type_args,
-            } => {
-                let arguments: Vec<_> = type_args
-                    .iter()
-                    .map(|ann| self.annotation(ann, true).ty)
-                    .collect();
-                for argument in &arguments {
-                    super::eval::reference_type(
-                        &self.checker.typing.solver,
-                        argument,
-                        false,
-                        span,
-                    )?;
-                }
-                match &func.val {
-                    resin_ast::TermKind::Var { name } => {
-                        let (declaration, ty, type_args) =
-                            self.checker.value(name, Some(arguments))?;
-                        equate = Some(ty);
-                        TermKind::Var {
-                            declaration,
-                            name: name.clone(),
-                            type_args,
-                        }
-                    }
-                    resin_ast::TermKind::Field { base, name } => {
-                        let base = self.child(base, None);
-                        let TermKind::Type { ty } = base.kind else {
-                            return Err(GenerateError::inference(
-                                span,
-                                "method references require a type receiver",
-                            ));
-                        };
-                        self.method_reference(ty, name, Some(arguments), out.clone())
-                    }
-                    _ => {
-                        return Err(GenerateError::inference(
-                            span,
-                            "type arguments require a function declaration",
-                        ));
-                    }
-                }
+            resin_ast::TermKind::TypeApply { function, args } => {
+                let (kind, result) = self.type_application(function, args, span, out.clone())?;
+                equate = result;
+                kind
             }
             resin_ast::TermKind::Type { ty } => {
                 let ann = self.annotation(ty, true);
@@ -1051,48 +1631,7 @@ impl Expression<'_, '_> {
                     value: Box::new(input),
                 }
             }
-            resin_ast::TermKind::Match { value, arms } => {
-                let input = self.child(value, None);
-                let mut checked = vec![];
-                for arm in arms {
-                    self.checker.scopes.push_at(arm.body.span);
-                    let payload = self.checker.typing.solver.fresh();
-                    let (variant, pattern) = match &arm.variant {
-                        resin_ast::MatchVariant::Wildcard => (None, Pattern::Error),
-                        resin_ast::MatchVariant::Error => (None, Pattern::Error),
-                        resin_ast::MatchVariant::Type(ty) => {
-                            let ann = self.annotation(ty, false);
-                            let ty = ann.ty.clone();
-                            (Some(ann.into_tree()), Pattern::Type(ty))
-                        }
-                    };
-                    if !matches!(arm.variant, resin_ast::MatchVariant::Wildcard) {
-                        self.constrain((
-                            arm.body.span,
-                            Constraint::Variant(input.ty.clone(), pattern, payload.clone()),
-                        ));
-                    }
-                    let binding = arm.name.as_ref().and_then(|name| {
-                        self.checker
-                            .bind(name, payload, DefinitionKind::Variable)
-                            .map_err(|error| self.checker.errors.push(error))
-                            .ok()
-                    });
-                    let body = self.child(&arm.body, Some(out.clone()));
-                    checked.push(MatchArm {
-                        error: matches!(arm.variant, resin_ast::MatchVariant::Error),
-                        wildcard: matches!(arm.variant, resin_ast::MatchVariant::Wildcard),
-                        binding,
-                        variant,
-                        body,
-                    });
-                    self.checker.scopes.pop();
-                }
-                TermKind::Match {
-                    value: Box::new(input),
-                    arms: checked,
-                }
-            }
+            resin_ast::TermKind::Match { value, arms } => self.match_expression(value, arms, &out),
             resin_ast::TermKind::If { cond, then, els } => {
                 let cond = self.child(cond, None);
                 self.constrain((cond.span, Constraint::Boolean(cond.ty.clone())));
@@ -1164,208 +1703,17 @@ impl Expression<'_, '_> {
                 name,
                 name_span,
                 args,
-            } => {
-                self.checker
-                    .method_dependencies(&crate::MethodName::Operator {
-                        symbol: name.clone(),
-                        arity: args.len(),
-                    });
-                let args = args
-                    .iter()
-                    .map(|arg| {
-                        let expected = if matches!(name.as_ref(), "&&" | "||" | "assert") {
-                            Some(Ty::Bool.into())
-                        } else {
-                            expression_exits(arg).then(|| self.checker.typing.solver.fresh())
-                        };
-                        self.child(arg, expected)
-                    })
-                    .collect::<Vec<_>>();
-                self.checker.scopes.record_call(
-                    &Ident::new(name.clone(), *name_span),
-                    args[0].ty.clone(),
-                    args.iter().map(|arg| arg.ty.clone()).collect(),
-                    true,
-                    self.rule,
-                );
-                self.constrain((
-                    span,
-                    Constraint::Builtin(
-                        name.clone(),
-                        args.iter().map(|arg| arg.ty.clone()).collect(),
-                        out.clone(),
-                    ),
-                ));
-                TermKind::Builtin {
-                    rule: self.rule,
-                    name_span: *name_span,
-                    name: name.clone(),
-                    args,
-                }
-            }
-            resin_ast::TermKind::MethodCall {
-                receiver,
-                name,
-                type_args,
-                args,
-            } => {
-                let arguments: Vec<_> = type_args
-                    .iter()
-                    .map(|ann| self.annotation(ann, true).ty)
-                    .collect();
-                for argument in &arguments {
-                    super::eval::reference_type(
-                        &self.checker.typing.solver,
-                        argument,
-                        false,
-                        span,
-                    )?;
-                }
-                let type_args = (!arguments.is_empty()).then_some(arguments);
-                self.checker.method_dependencies(&name.val.clone().into());
-                let (receiver, annotation, receiver_type, associated) =
-                    if let resin_ast::TermKind::Type { ty } = &receiver.val {
-                        let annotation = self.annotation(ty, false);
-                        let ty = annotation.ty.clone();
-                        (None, Some(annotation), ty, true)
-                    } else {
-                        let receiver = self.child(receiver, None);
-                        let ty = receiver.ty.clone();
-                        (Some(receiver), None, ty, false)
-                    };
-                self.checker
-                    .scopes
-                    .record_members(name.span, receiver_type.clone(), associated);
-                let args = args
-                    .iter()
-                    .map(|arg| self.child(arg, None))
-                    .collect::<Vec<_>>();
-                self.checker.scopes.record_call(
-                    name,
-                    receiver_type.clone(),
-                    args.iter().map(|arg| arg.ty.clone()).collect(),
-                    associated,
-                    self.rule,
-                );
-                let constraint = Constraint::Method {
-                    receiver: receiver_type.clone(),
-                    name: name.val.clone(),
-                    type_args,
-                    args: args.iter().map(|arg| arg.ty.clone()).collect(),
-                    out: out.clone(),
-                    associated,
-                };
-                self.constrain((span, constraint));
-                TermKind::MethodCall {
-                    rule: self.rule,
-                    receiver: receiver.map(Box::new),
-                    receiver_type: annotation.map(Annotation::into_tree).unwrap_or(
-                        typed::Annotation {
-                            ty: receiver_type,
-                            span,
-                        },
-                    ),
-                    name: name.clone(),
-                    args,
-                }
-            }
+            } => self.builtin(name, name_span, args, span, &out, &expected),
+            resin_ast::TermKind::MethodCall { .. } => unreachable!("receiver call was desugared"),
             resin_ast::TermKind::Call { func, args } => {
-                if let resin_ast::TermKind::Var { name } = &func.val
-                    && name.val.as_ref() == "absurd"
-                {
-                    let arg = single_argument(args, span)?;
-                    let arg = self.child(arg, Some(Ty::union([]).into()));
-                    TermKind::Absurd { arg: Box::new(arg) }
-                } else if let resin_ast::TermKind::Var { name } = &func.val
-                    && matches!(name.val.as_ref(), "size_of" | "align_of")
-                {
-                    let arg = single_argument(args, span)?;
-                    // Check the operand for typing only. Never execute its effects or read its locals.
-                    let ann = if let resin_ast::TermKind::Type { ty } = &arg.val {
-                        self.annotation(ty, false)
-                    } else {
-                        let unevaluated = std::mem::replace(&mut self.checker.unevaluated, true);
-                        let term = self.child(arg, None);
-                        self.checker.unevaluated = unevaluated;
-                        Annotation {
-                            holes: Vec::new(),
-                            ty: term.ty,
-                            span: term.span,
-                        }
-                    };
-                    equate = Some(Ty::UInt64.into());
-                    self.constrain((span, Constraint::Layout(ann.ty.clone())));
-                    TermKind::Layout {
-                        ty: ann.into_tree(),
-                        size: name.val.as_ref() == "size_of",
-                    }
-                } else if let resin_ast::TermKind::Type { ty } = &func.val
-                    && matches!(&ty.val, resin_ast::TypeKind::App { head, .. } if head.val.as_ref() == "Err")
-                {
-                    let ann = self.annotation(ty, true);
-                    super::eval::reference_type(&self.checker.typing.solver, &ann.ty, false, span)?;
-                    let Type::Node(super::infer::Head::Error, parts) =
-                        self.checker.typing.solver.head(&ann.ty)
-                    else {
-                        unreachable!("Err annotation");
-                    };
-                    let arg = self.child(single_argument(args, span)?, Some(parts[0].clone()));
-                    equate = Some(ann.ty.clone());
-                    TermKind::Ascribe {
-                        ty: ann.into_tree(),
-                        arg: Box::new(arg),
-                    }
-                } else if let resin_ast::TermKind::Type { ty } = &func.val {
-                    let unit = resin_ast::Term {
-                        span,
-                        val: resin_ast::TermKind::Unit,
-                    };
-                    let arg = if args.is_empty() {
-                        &unit
-                    } else {
-                        single_argument(args, span)?
-                    };
-                    let ann = self.annotation(ty, true);
-                    super::eval::reference_type(&self.checker.typing.solver, &ann.ty, false, span)?;
-                    let arg = {
-                        let literal = matches!(arg.val, resin_ast::TermKind::Num { .. })
-                            || matches!(&arg.val, resin_ast::TermKind::Builtin { name, args, .. } if matches!(name.as_ref(), "+" | "-") && matches!(args.as_slice(), [resin_ast::Term { val: resin_ast::TermKind::Num { .. }, .. }]));
-                        let arg = self.child(arg, None);
-                        self.constrain((
-                            span,
-                            Constraint::Ascribe(arg.ty.clone(), ann.ty.clone(), literal),
-                        ));
-                        arg
-                    };
-                    equate = Some(ann.ty.clone());
-                    TermKind::Ascribe {
-                        ty: ann.into_tree(),
-                        arg: Box::new(arg),
-                    }
-                } else {
-                    let func = self.child(func, None);
-                    let args = args
-                        .iter()
-                        .map(|arg| self.child(arg, None))
-                        .collect::<Vec<_>>();
-                    self.constrain((
-                        span,
-                        Constraint::Call(
-                            func.ty.clone(),
-                            args.iter().map(|arg| arg.ty.clone()).collect(),
-                            out.clone(),
-                        ),
-                    ));
-                    TermKind::Call {
-                        func: Box::new(func),
-                        args,
-                    }
-                }
+                let (kind, result) = self.call(func, args, span, &out, &expected)?;
+                equate = result;
+                kind
             }
             resin_ast::TermKind::Assign { place, value } => {
                 let place = self.child(place, None);
                 let value = self.child(value, Some(place.ty.clone()));
-                equate = Some(place.ty.clone());
+                equate = Some(Type::from(Ty::Unit));
                 TermKind::Assign {
                     place: Box::new(place),
                     value: Box::new(value),
@@ -1437,7 +1785,8 @@ impl Expression<'_, '_> {
             Ok(statement) => statement,
             Err(error) => {
                 match &stmt.val {
-                    StmtKind::Declare { name, .. } => {
+                    StmtKind::Declare { pattern, .. } => {
+                        let name = &pattern.name;
                         let _ = self
                             .checker
                             .bind(name, Type::Invalid, DefinitionKind::Variable);
@@ -1461,7 +1810,8 @@ impl Expression<'_, '_> {
                 self.checker.local_constants(specs)?;
                 StatementKind::CompileTimeDefinition
             }
-            StmtKind::Define { name, ann, init } => {
+            StmtKind::Define { pattern, ann, init } => {
+                let name = &pattern.name;
                 let ty = if let Some(ann) = ann {
                     self.annotation(ann, true).ty
                 } else {
@@ -1488,17 +1838,20 @@ impl Expression<'_, '_> {
                     self.checker.scopes.set_inferred(binding, binding_type);
                 }
                 StatementKind::Define {
+                    mutable: pattern.mutable,
                     binding,
                     name: name.clone(),
                     init,
                 }
             }
-            StmtKind::Declare { name, ann } => {
+            StmtKind::Declare { pattern, ann } => {
+                let name = &pattern.name;
                 let ann = self.annotation(ann, true);
                 let binding = self
                     .checker
                     .bind(name, ann.ty.clone(), DefinitionKind::Variable)?;
                 StatementKind::Declare {
+                    mutable: pattern.mutable,
                     binding,
                     name: name.clone(),
                     ty: ann.into_tree(),

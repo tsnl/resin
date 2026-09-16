@@ -11,6 +11,7 @@ mod formatting;
 mod function;
 mod gpu;
 mod ops;
+mod ownership;
 mod pipeline;
 mod projection;
 mod representation;

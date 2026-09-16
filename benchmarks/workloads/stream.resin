@@ -2,22 +2,29 @@ export { Root, kernel, cpu };
 
 import { "$/span.resin" };
 
-struct Root { count: uint, iterations: uint, input: Ptr<uint>, output: Ptr<uint> };
+intrinsic "pointer_index" fn device_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;
+
+struct Root {
+	count: uint,
+	iterations: uint,
+	input: Ptr<uint>,
+	output: Ptr<uint>,
+}
 
 // One read and one write per lane, with little arithmetic between them.
 @compute_shader
-def kernel(index: ulong, root: Ptr<Root>) = {
+fn kernel(index: ulong, root: Ptr<Root>) {
 	if (index < ulong(root.count)) {
-		var input = Span<uint> { data = root.input, length = ulong(root.count) };
-		var output = Span<uint> { data = root.output, length = ulong(root.count) };
-		output.at(index) := input.at(index) * 1664525_ui + uint(index);
+		let mut input = Span<uint> { data = root.input, length = ulong(root.count) };
+		let mut output = Span<uint> { data = root.output, length = ulong(root.count) };
+		device_index(output.data, output.length, index).* = device_index(input.data, input.length, index).* * 1664525_ui + uint(index);
 	};
-};
+}
 
-def cpu(root: Ptr<Root>) = {
-	var index = 0_ul;
+fn cpu(root: Ptr<Root>) {
+	let mut index = 0_ul;
 	while (index < ulong(root.count)) {
 		kernel(index, root);
-		index := index + 1_ul;
+		index = index + 1_ul;
 	};
-};
+}
