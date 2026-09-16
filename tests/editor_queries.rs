@@ -111,7 +111,7 @@ fn declaration_keywords_are_visible_in_outlines_and_struct_textobjects() {
 
 #[test]
 fn reserved_words_have_highlight_rules() {
-    let source = "export { f }; import { \"x.resin\" }; extern type Handle; struct S { value: int }; type T = S; def f() -> Result<(), Never> = { var x: Span<Ptr<ubyte>>; free(x); while (0 < 1) { if (0 == 1) { () } else { () }; }; match (value) { ok(v) => { ok(v) }, err(e) => { err(e) } } };";
+    let source = "export { f }; import { \"x.resin\" }; extern type Handle; struct S { value: int }; type T = S; def f() -> (() | Err<Never>) = { var x: Span<Ptr<ubyte>>; free(x); while (0 < 1) { if (0 == 1) { () } else { () }; }; match (value) { ()(v) => { (v) }, Err(e) => { Err(e) } } };";
     let highlighted = captures(ZED_QUERIES[0].1, source);
     for word in [
         "export", "import", "extern", "type", "struct", "def", "var", "if", "else", "while",
@@ -126,15 +126,14 @@ fn reserved_words_have_highlight_rules() {
 
 #[test]
 fn result_syntax_is_highlighted_and_structs_have_outlines() {
-    let source = "struct Broken { code: int }; def fail() -> Result<int, Never> = { match (value) { ok(n) => { ok(n?) }, err(error) => { err(error) } } };";
+    let source = "struct Broken { code: int }; def fail() -> (int | Err<Never>) = { match (value) { int(n) => { (n?) }, Err(error) => { Err(error) } } };";
     let captured = captures(ZED_QUERIES[0].1, source);
     for (kind, text) in [
         ("keyword", "struct"),
         ("keyword", "match"),
-        ("type.builtin", "Result"),
+        ("type.builtin", "Err"),
         ("type.builtin", "Never"),
         ("operator", "?"),
-        ("function.builtin", "ok"),
         ("variable.parameter", "error"),
     ] {
         assert!(

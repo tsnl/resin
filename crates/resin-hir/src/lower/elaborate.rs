@@ -333,10 +333,6 @@ impl Completion<'_> {
                     self.symbolic_ascription(&target, arg)?
                 }
             }
-            typed::TermKind::Result { failure, arg } => TermKind::Result {
-                failure: *failure,
-                arg: self.boxed(arg)?,
-            },
             typed::TermKind::Absurd { arg } => TermKind::Absurd {
                 arg: self.boxed(arg)?,
             },
@@ -973,7 +969,6 @@ impl Completion<'_> {
     ) -> Result<TermKind> {
         let value_type = self.solver.require_complete(&value.ty, value.span)?;
         let tags = match &value_type {
-            crate::Type::Result { .. } => vec![crate::Case::Ok, crate::Case::Err],
             crate::Type::Union { variants } => variants
                 .iter()
                 .cloned()
@@ -1080,12 +1075,7 @@ impl Completion<'_> {
         }
 
         match (&arm.variant, ty) {
-            (None, crate::Type::Result { .. }) => Ok(if arm.failure {
-                crate::Case::Err
-            } else {
-                crate::Case::Ok
-            }),
-            (Some(ann), ty) if !matches!(ty, crate::Type::Result { .. }) => {
+            (Some(ann), _) => {
                 let ty = self.solver.require_complete(&ann.ty, ann.span)?;
                 if matches!(ty, crate::Type::Union { .. }) {
                     return Err(GenerateError::inference(

@@ -18,7 +18,7 @@ struct WriteError {};
 struct Output {
 	stream: uint,
 	// Writes bytes verbatim and flushes. No formatting or newline is added.
-	def write(self: Output, text: str | Span<ubyte> | String) -> Result<(), WriteError> = {
+	def write(self: Output, text: str | Span<ubyte> | String) -> (() | Err<WriteError>) = {
 		var status = match (text) {
 			str(literal) => {
 				resin_stream_write(self.stream, literal.data, literal.length)
@@ -31,9 +31,9 @@ struct Output {
 			},
 		};
 		if (status == 0) {
-			ok(())
+			(())
 		} else {
-			err(WriteError {})
+			Err(WriteError {})
 		}
 	};
 };

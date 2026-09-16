@@ -461,10 +461,10 @@ fn weak_upgrade_recovery_distinguishes_wrapper_and_payload_members() {
 
 #[test]
 fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
-    for tail in ["ok(()) };", "buffer."] {
+    for tail in ["(()) };", "buffer."] {
         let source = format!(
             r#"import {{ "$/gpu.resin" }};
-            def f() -> Result<(), _> = {{
+            def f() -> (() | Err<_>) = {{
                 var gpu = Gpu.new()?;
                 var bytes = gpu.alloc_in::<ubyte>(4_ul, memory_default)?;
                 var commands = gpu.start_command_recording()?;
@@ -486,8 +486,8 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
             );
         }
         for (method, result) in [
-            ("alloc_in", "-> Result<GpuSpan<ubyte>,"),
-            ("start_command_recording", "-> Result<GpuCommands,"),
+            ("alloc_in", "-> GpuSpan<ubyte> | Err<"),
+            ("start_command_recording", "GpuCommands | Err<"),
         ] {
             let call = source.find(&format!(".{method}")).unwrap() + 1;
             let definition = analysis
@@ -579,12 +579,12 @@ fn gpu_commands_check_pipeline_stages_and_host_arguments() {
             }};
             @fragment_shader
             def fragment(color: Color) -> Color = {{ color }};
-            def f(commands: GpuCommands, gpu: Gpu, buffer: GpuPtr<int>, bytes: GpuPtr<ubyte>, pointer: Ptr<int>) -> Result<(), _> = {{
+            def f(commands: GpuCommands, gpu: Gpu, buffer: GpuPtr<int>, bytes: GpuPtr<ubyte>, pointer: Ptr<int>) -> (() | Err<_>) = {{
                 var compute = gpu.create_compute_pipeline(kernel)?;
                 var graphics = gpu.create_graphics_pipeline(vertex, fragment)?;
                 var empty = gpu.create_graphics_pipeline(rootless, fragment)?;
                 commands.{call}?;
-                ok(())
+                (())
             }};"#
         );
         let mut loader = resin_source::Loader::new(resin_source::library_root());
@@ -615,10 +615,10 @@ fn typed_pipeline_calls_show_shader_contracts_in_editor_signatures() {
         struct Root { values: Span<int>, scale: int };
         @compute_shader
         def kernel(index: ulong, root: Ptr<Root>) = {};
-        def f(gpu: Gpu, commands: GpuCommands, values: GpuSpan<int>) -> Result<(), _> = {
+        def f(gpu: Gpu, commands: GpuCommands, values: GpuSpan<int>) -> (() | Err<_>) = {
             var pipeline = gpu.create_compute_pipeline(kernel)?;
             commands.dispatch(pipeline, { values = values, scale = 2 }, 1, 1, 1)?;
-            ok(())
+            (())
         };"#;
     let mut loader = resin_source::Loader::new(resin_source::library_root());
     let input = loader
@@ -843,7 +843,7 @@ fn shared_receiver_completion_and_navigation_include_ordinary_drop_methods() {
 
 #[test]
 fn inferred_errors_and_match_payloads_have_editor_types() {
-    let source = "struct Broken { code: int }; def fail() -> Result<int, _> = { err(Broken { code = 7 }) }; def main() = { var result = fail(); match (result) { ok(value) => { value; }, err(error) => { error.code; } }; };";
+    let source = "struct Broken { code: int }; def fail() -> (int | Err<_>) = { Err(Broken { code = 7 }) }; def main() = { var result = fail(); match (result) { int(value) => { value; }, Err(error) => { error.code; } }; };";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.checked();
     let input = project.source("main.resin");
@@ -852,7 +852,7 @@ fn inferred_errors_and_match_payloads_have_editor_types() {
             .hover(&input, source.find("match (result").unwrap() + 7)
             .unwrap()
             .text,
-        "result: Result<int, Broken>"
+        "result: int | Err<Broken>"
     );
     assert_eq!(
         analysis
@@ -870,7 +870,7 @@ fn inferred_errors_and_match_payloads_have_editor_types() {
     let origin = analysis
         .definition(&input, source.find("error.code").unwrap())
         .unwrap();
-    assert_eq!(origin.span.start, source.find("err(error)").unwrap() + 4);
+    assert_eq!(origin.span.start, source.find("Err(error)").unwrap() + 4);
     assert!(
         analysis
             .completions(&input, source.find("var result").unwrap())
@@ -1637,8 +1637,8 @@ fn unrelated_errors_preserve_expression_types_and_field_completion() {
         ("var value = float32(42);", "float32"),
         ("var unused: int; var value = size_of(unused);", "ulong"),
         (
-            "var value: Result<int, Never>; value := ok(42);",
-            "Result<int, Never>",
+            "var value: (int | Err<Never>); value := (42);",
+            "int | Err<Never>",
         ),
     ] {
         for broken in ["", "def broken() = { missing; };"] {
@@ -1841,7 +1841,7 @@ fn failed_children_invalidate_composites_without_hiding_later_bindings() {
     for expression in [
         "if (1 == 1) { missing } else { 42 }",
         "[missing, 42]",
-        "ok(missing)",
+        "(missing)",
         "place := missing",
     ] {
         let source = format!(
@@ -1970,12 +1970,7 @@ fn callers_cannot_resurrect_failed_result_inference() {
             "int",
             "alias: ?",
         ),
-        (
-            "Result<int, _>",
-            "missing",
-            "Result<int, Never>",
-            "alias: ?",
-        ),
+        ("(int | Err<_>)", "missing", "int | Err<Never>", "alias: ?"),
         ("int", "missing", "int", "alias: () -> int"),
     ] {
         let source = format!(

@@ -945,14 +945,6 @@
             "named": false
           },
           {
-            "type": "err",
-            "named": false
-          },
-          {
-            "type": "ok",
-            "named": false
-          },
-          {
             "type": "type",
             "named": true
           }
@@ -1740,16 +1732,6 @@
           }
         ]
       },
-      "error": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "type",
-            "named": true
-          }
-        ]
-      },
       "former": {
         "multiple": false,
         "required": false,
@@ -1768,16 +1750,6 @@
           },
           {
             "type": "uid",
-            "named": true
-          }
-        ]
-      },
-      "value": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "type",
             "named": true
           }
         ]
@@ -2016,10 +1988,6 @@
     "named": false
   },
   {
-    "type": "Result",
-    "named": false
-  },
-  {
     "type": "StrongOwner",
     "named": false
   },
@@ -2077,10 +2045,6 @@
     "named": false
   },
   {
-    "type": "err",
-    "named": false
-  },
-  {
     "type": "export",
     "named": false
   },
@@ -2131,10 +2095,6 @@
   {
     "type": "number",
     "named": true
-  },
-  {
-    "type": "ok",
-    "named": false
   },
   {
     "type": "pointer_deref",

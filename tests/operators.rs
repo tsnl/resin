@@ -197,7 +197,7 @@ fn operator_copies_and_results_use_ordinary_owner_cleanup() {
             def __add__(a: Value, b: Value) -> Value = { Value { owner = a.owner, value = a.value + b.value } };
         };
         def add<T>(a: T, b: T) -> _ = { a + b };
-        def main() -> Result<int, _> = {
+        def main() -> int | Err<_> = {
             var drops = 0_i;
             var answer = 0_i;
             {
@@ -207,7 +207,7 @@ fn operator_copies_and_results_use_ordinary_owner_cleanup() {
                 var result = add(value, value);
                 if (drops == 0) { answer := result.value; };
             };
-            ok(if (drops == 1) { answer } else { 1 })
+            if (drops == 1) { answer } else { 1 }
         };
     "#);
     assert_eq!(
@@ -237,8 +237,8 @@ fn dependent_operator_errors_report_the_requested_instantiation() {
             "{declaration} def relay<T>(value: T) -> int = {{ {expression} }}; def main() = {{ relay(Value {{}}); }};"
         );
         let hir = support::hir(&source);
-        let errors =
-            support::frontend::lower(&hir, &[], &resin_lir::LoweringOptions::default()).unwrap_err();
+        let errors = support::frontend::lower(&hir, &[], &resin_lir::LoweringOptions::default())
+            .unwrap_err();
         let error = &errors[0];
         assert!(error.to_string().contains(expected), "{source}\n{error}");
         assert!(

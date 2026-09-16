@@ -314,7 +314,7 @@ fn widen(context: &mut Context<'_>, from: &Ty, to: &Ty, value: Word) -> Result<W
     if let (Ty::Error { payload: source }, Ty::Error { payload: target }) = (from, to) {
         return widen(context, source, target, value);
     }
-    if !matches!(from, Ty::Union { .. } | Ty::Result { .. })
+    if !matches!(from, Ty::Union { .. })
         && let Ty::Union { variants } = to
         && let Some(target) = variants
             .iter()
@@ -353,7 +353,7 @@ fn select(
     let fields: Option<Vec<Ty>> = match context.shape(ty) {
         Ty::Record { fields } => Some(fields.iter().map(|field| field.ty.clone()).collect()),
         Ty::Array { element, length } => Some(vec![element.as_ref().clone(); *length]),
-        Ty::Union { .. } | Ty::Result { .. } => Some(
+        Ty::Union { .. } => Some(
             std::iter::once(Ty::UInt32)
                 .chain(ty.payloads().unwrap().into_iter().map(|(_, ty)| ty))
                 .collect(),

@@ -71,13 +71,13 @@ fn source_shared_elements_drop_in_reverse_and_unwind_on_allocation_failure() {
                 if (self.digit != 0) { self.trace.* := self.trace.* * 10 + self.digit; };
             };
         };
-        def fail(trace: Ptr<int>) -> Result<(), OutOfMemory> = {
+        def fail(trace: Ptr<int>) -> (() | Err<OutOfMemory>) = {
             var owner = ArcPtr<Item>.alloc(Item { trace = trace, digit = 0 })?;
             owner.get().digit := 4;
             ArcSpan<ulong>.alloc(0xffffffffffffffff_ul, 0_ul)?;
-            ok(())
+            (())
         };
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             var trace = 0;
             {
                 var items = ArcSpan<Item>.alloc(3, Item { trace = &trace, digit = 0 })?;
@@ -85,8 +85,8 @@ fn source_shared_elements_drop_in_reverse_and_unwind_on_allocation_failure() {
                 items.get().at(1).digit := 2;
                 items.get().at(2).digit := 3;
             };
-            var failed = match (fail(&trace)) { ok(value) => { 1 == 0 }, err(error) => { 1 == 1 } };
-            ok(if (failed && trace == 3214) { 0 } else { 1 })
+            var failed = match (fail(&trace)) { ()(value) => { 1 == 0 }, Err(error) => { 1 == 1 } };
+            (if (failed && trace == 3214) { 0 } else { 1 })
         };
     "#,
         "",
@@ -104,7 +104,7 @@ fn source_owned_wrappers_retain_payloads_and_borrow_temporary_receivers() {
                 if (self.digit != 0) { self.trace.* := self.trace.* * 10 + self.digit; };
             };
         };
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             var trace = 0;
             var weak = WeakPtr<Item>.empty();
             var valid = 1 == 1;
@@ -125,9 +125,9 @@ fn source_owned_wrappers_retain_payloads_and_borrow_temporary_receivers() {
             valid := valid && trace == 7;
             valid := valid && match (weak.upgrade()) { ArcPtr<Item>(live) => { 1 == 0 }, None => { 1 == 1 } };
             valid := valid && match (ArcSpan<uint>.alloc(0xffffffffffffffff_ul, 0_ui)) {
-                ok(owner) => { 1 == 0 }, err(error) => { 1 == 1 },
+                ArcSpan<uint>(owner) => { 1 == 0 }, Err(error) => { 1 == 1 },
             };
-            ok(if (valid) { 0 } else { 1 })
+            (if (valid) { 0 } else { 1 })
         };
     "#,
         "",
@@ -141,7 +141,7 @@ fn source_owners_allocate_initialized_typed_storage_and_reports_overflow() {
         export { main };
         import { "$/shared.resin", "$/span.resin", "$/status.resin" };
         struct Empty {};
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             var weak = WeakSpan<uint>.empty();
             var valid = 1 == 1;
             {
@@ -169,13 +169,13 @@ fn source_owners_allocate_initialized_typed_storage_and_reports_overflow() {
             valid := valid && empty.get().length == 0_ul;
             var empty_elements = ArcSpan<Empty>.alloc(19, Empty {})?;
             valid := valid && empty_elements.get().length == 19_ul;
-            var failure: Result<ArcSpan<uint>, OutOfMemory>;
+            var failure: (ArcSpan<uint> | Err<OutOfMemory>);
             failure := ArcSpan<uint>.alloc(0xffffffffffffffff_ul, 0_ui);
             var failed = match (failure) {
-                ok(memory) => { 1 == 0 },
-                err(error) => { 1 == 1 },
+                ArcSpan<uint>(memory) => { 1 == 0 },
+                Err(error) => { 1 == 1 },
             };
-            ok(if (valid && expired && failed) { 0 } else { 1 })
+            (if (valid && expired && failed) { 0 } else { 1 })
         };
         "#,
         "",
@@ -187,9 +187,9 @@ fn source_owners_allocate_initialized_typed_storage_and_reports_overflow() {
         r#"
         export { main };
         import { "$/shared.resin" };
-        def main() -> Result<(), _> = {
+        def main() -> (() | Err<_>) = {
             ArcSpan<uint>.alloc(0xffffffffffffffff_ul, 0_ui)?;
-            ok(())
+            (())
         };
         "#,
         "",
@@ -213,33 +213,33 @@ fn owned_spans_release_managed_elements_on_success_and_error() {
             digit: int,
             def drop(self: Ptr<Item>) = { if (self.digit != 0) { self.trace.* := self.trace.* * 10 + self.digit; }; };
         };
-        def item(trace: Ptr<int>, digit: int) -> Result<ArcPtr<Item>, _> = {
+        def item(trace: Ptr<int>, digit: int) -> (ArcPtr<Item> | Err<_>) = {
             var owner = ArcPtr<Item>.alloc(Item { trace = trace, digit = 0 })?;
             owner.get().digit := digit;
-            ok(owner)
+            (owner)
         };
-        def work(trace: Ptr<int>, fail: bool) -> Result<(), _> = {
+        def work(trace: Ptr<int>, fail: bool) -> (() | Err<_>) = {
             var values = ArcSpan<ArcPtr<Item>>.alloc(2, item(trace, 1)?)?;
             values.get().at(1) := item(trace, 2)?;
             var alias = values;
-            if (fail) { err(Failed {}) } else { ok(()) }
+            if (fail) { Err(Failed {}) } else { (()) }
         };
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             var trace = 0;
             work(&trace, 1 == 0)?;
             var valid = trace == 21;
             trace := 0;
             var failed = match (work(&trace, 1 == 1)) {
-                ok(value) => { 1 == 0 },
-                err(error) => { 1 == 1 },
+                ()(value) => { 1 == 0 },
+                Err(error) => { 1 == 1 },
             };
             valid := valid && failed && trace == 21;
             trace := 0;
             var rejected = match (ArcSpan<ArcPtr<Item>>.alloc(0xffffffffffffffff_ul, item(&trace, 3)?)) {
-                ok(values) => { 1 == 0 },
-                err(error) => { 1 == 1 },
+                ArcSpan<ArcPtr<Item>>(values) => { 1 == 0 },
+                Err(error) => { 1 == 1 },
             };
-            ok(if (valid && rejected && trace == 3) { 0 } else { 1 })
+            (if (valid && rejected && trace == 3) { 0 } else { 1 })
         };
         "#,
         "",
@@ -254,11 +254,11 @@ fn generic_owned_span_methods_preserve_lifetimes_and_widened_results() {
         export { main };
         import { "$/shared.resin", "$/span.resin", "$/status.resin" };
         struct Other {};
-        def allocate<T>(count: ulong, initial: T) -> Result<ArcSpan<T>, OutOfMemory | Other> = {
+        def allocate<T>(count: ulong, initial: T) -> (ArcSpan<T> | Err<OutOfMemory | Other>) = {
             ArcSpan<T>.alloc(count, initial)
         };
         def optional<T>(count: ulong, initial: T) -> ArcSpan<T> | None = {
-            match (ArcSpan<T>.alloc(count, initial)) { ok(owner) => { owner }, err(error) => { None } }
+            match (ArcSpan<T>.alloc(count, initial)) { ArcSpan<T>(owner) => { owner }, Err(error) => { None } }
         };
         def borrowed<T>(owner: Ptr<ArcSpan<T>>) -> Span<T> = { owner.get() };
         def weaken<T>(owner: ArcSpan<T>) -> WeakSpan<T> = { owner.downgrade() };
@@ -267,7 +267,7 @@ fn generic_owned_span_methods_preserve_lifetimes_and_widened_results() {
             var owner = optional(1, initial)!;
             owner.get().at(0)
         };
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             var weak = WeakSpan<uint>.empty();
             var valid = 1 == 1;
             {
@@ -291,15 +291,15 @@ fn generic_owned_span_methods_preserve_lifetimes_and_widened_results() {
                 Other(other) => { 1 == 0 },
             };
             valid := valid && match (allocate(0xffffffffffffffff_ul, 0_ui)) {
-                ok(owner) => { 1 == 0 },
-                err(error) => {
+                ArcSpan<uint>(owner) => { 1 == 0 },
+                Err(error) => {
                     match (error) {
                         OutOfMemory(error) => { 1 == 1 },
                         Other(other) => { 1 == 0 },
                     }
                 },
             };
-            ok(if (valid) { 0 } else { 1 })
+            (if (valid) { 0 } else { 1 })
         };
         "#,
         "",
@@ -312,7 +312,7 @@ fn borrowed_span_slices_preserve_aliases_and_accept_empty_null_views() {
     let output = run(
         r#"
         export { main }; import { "$/shared.resin", "$/span.resin" };
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             var values = ArcSpan<uint>.alloc(4, 0_ui)?;
             var view = values.get();
             var middle = view.slice(1, 2);
@@ -325,7 +325,7 @@ fn borrowed_span_slices_preserve_aliases_and_accept_empty_null_views() {
             var null_view = Span<uint> { data = Ptr<uint>(0_ul), length = 0_ul };
             var empty = null_view.slice(0, 0);
             valid := valid && empty.length == 0_ul && ulong(empty.data) == 0_ul;
-            ok(if (valid) { 0 } else { 1 })
+            (if (valid) { 0 } else { 1 })
         };
         "#,
         "",
@@ -415,7 +415,7 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
                 .unwrap_or_else(|| panic!("missing source function {qualified}"));
             assert!(function.foreign_header.is_none(), "{name}");
             assert!(
-                matches!(function.signature.result.ty, resin_hir::Type::Result { .. }),
+                matches!(function.signature.result.ty, resin_hir::Type::Union { .. }),
                 "{name}"
             );
             checked += 1;
@@ -436,21 +436,21 @@ fn native_statuses_become_named_errors_and_keep_unknown_codes() {
             },
         };
        import { "$/status.resin" };
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             RuntimeStatus.from_code(0)?;
             var code = -1;
             var valid = 1 == 1;
             while (code <= 9) {
                 var actual = match (RuntimeStatus.from_code(code)) {
-                    ok(value) => { 0 },
-                    err(error) => { RuntimeStatus.code(error) },
+                    ()(value) => { 0 },
+                    Err(error) => { RuntimeStatus.code(error) },
                 };
                 valid := valid && actual == code;
                 code := code + 1;
             };
             var message = "io error";
             valid := valid && strcmp(RuntimeStatus.message(IoError {}), message.data) == 0;
-            ok(if (valid) { 0 } else { 1 })
+            (if (valid) { 0 } else { 1 })
         };"#,
         "",
     );
@@ -469,7 +469,7 @@ fn native_statuses_become_named_errors_and_keep_unknown_codes() {
     ] {
         let output = run(
             &format!(
-                "export {{ main }}; import {{ \"$/status.resin\" }}; def main() -> Result<(), _> = {{ RuntimeStatus.from_code({code}) }};"
+                "export {{ main }}; import {{ \"$/status.resin\" }}; def main() -> (() | Err<_>) = {{ RuntimeStatus.from_code({code}) }};"
             ),
             "",
         );
@@ -486,7 +486,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
         r#"
         export { main };
         import { "$/image.resin", "$/span.resin", "$/status.resin" };
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             var path = "pixel.png";
             var pixels = [ubyte(1), ubyte(2), ubyte(3), ubyte(255)];
             ImageData.write_pixels(path.data, 1, 1, 4, Span<ubyte> { data = &pixels.at(0), length = 4_ul }, 0)?;
@@ -495,7 +495,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
             var copy_path = "copy.png";
             alias.write_png(copy_path.data)?;
             var copied = ImageData.read_png(copy_path.data, 0)?;
-            ok(if (copied.width() == image.width() && copied.height() == image.height() && copied.pixels().data.* == image.pixels().data.*
+            (if (copied.width() == image.width() && copied.height() == image.height() && copied.pixels().data.* == image.pixels().data.*
                 && image.width() == uint(1) && image.height() == uint(1) && image.channels() == uint(4)
                 && image.pixels().data.* == ubyte(1) && Ptr<ubyte>(ulong(image.pixels().data) + ulong(3)).* == ubyte(255)) { 0 } else { 1 })
         };
@@ -509,7 +509,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     ] {
         let output = run(
             &format!(
-                "export {{ main }}; import {{ \"$/image.resin\", \"$/span.resin\", \"$/string.resin\" }}; struct Cleanup {{ def drop(self: Ptr<Cleanup>) = {{ print(fmt(\"cleanup\\n\", ())); }}; }};  def main() -> Result<(), _> = {{ var path = \"missing/pixel.png\"; var pixels = [0_ub, 0_ub, 0_ub, 0_ub]; var cleanup = Cleanup {{}}; {call}; ok(()) }};"
+                "export {{ main }}; import {{ \"$/image.resin\", \"$/span.resin\", \"$/string.resin\" }}; struct Cleanup {{ def drop(self: Ptr<Cleanup>) = {{ print(fmt(\"cleanup\\n\", ())); }}; }};  def main() -> (() | Err<_>) = {{ var path = \"missing/pixel.png\"; var pixels = [0_ub, 0_ub, 0_ub, 0_ub]; var cleanup = Cleanup {{}}; {call}; (()) }};"
             ),
             "",
         );
@@ -540,8 +540,8 @@ fn png_pixel_views_check_dimensions_padding_and_storage_before_native_access() {
                     var pixels = [0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub];
                     var bytes = Span<ubyte> {{ data = &pixels.at(0), length = {length}_ul }};
                     match (ImageData.write_pixels("missing/pixel.png".data, {width}, {height}, {channels}, bytes, {stride})) {{
-                        ok(value) => {{ 1 }},
-                        err(error) => {{ if (RuntimeStatus.code(error) == 1) {{ 0 }} else {{ 1 }} }},
+                        ()(value) => {{ 1 }},
+                        Err(error) => {{ if (RuntimeStatus.code(error) == 1) {{ 0 }} else {{ 1 }} }},
                     }}
                 }};
                 "#
@@ -555,7 +555,7 @@ fn png_pixel_views_check_dimensions_padding_and_storage_before_native_access() {
         r#"
         export { main };
         import { "$/image.resin", "$/span.resin" };
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             var pixels = [1_ub, 2_ub, 3_ub, 255_ub, 99_ub, 4_ub, 5_ub, 6_ub, 255_ub];
             var bytes = Span<ubyte> { data = &pixels.at(0), length = 9_ul };
             ImageData.write_pixels("padded.png".data, 1, 2, 4, bytes, 5)?;
@@ -563,7 +563,7 @@ fn png_pixel_views_check_dimensions_padding_and_storage_before_native_access() {
             var loaded = image.pixels();
             ImageData.write_pixels("single.png".data, 1, 1, 4, bytes.slice(0, 4), 0xffffffffffffffff_ul)?;
             var single = ImageData.read_png("single.png".data, 0)?;
-            ok(if (loaded.at(0) == 1_ub && loaded.at(4) == 4_ub
+            (if (loaded.at(0) == 1_ub && loaded.at(4) == 4_ub
                 && single.height() == 1_ui && single.pixels().at(3) == 255_ub) { 0 } else { 1 })
         };
         "#,
@@ -595,7 +595,7 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
         };
         @fragment_shader
         def fragment(color: Color) -> Color = { color };
-        def work() -> Result<(), _> = {
+        def work() -> (() | Err<_>) = {
             var gpu = Gpu.new()?;
 
             var allocation = gpu.malloc(16, 8, memory_default)?;
@@ -605,15 +605,15 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
             var pipeline = gpu.create_graphics_pipeline(vertex, fragment)?;
             commands.draw(pipeline, None, 3)?;
             commands.submit()?;
-            ok(())
+            (())
         };
         def main() = {
             var mode = 0;
             while (mode < 6) {
                 test_mode(mode);
                 var result = match (work()) {
-                    ok(value) => { 0 },
-                    err(error) => { RuntimeStatus.code(error) },
+                    ()(value) => { 0 },
+                    Err(error) => { RuntimeStatus.code(error) },
                 };
                 test_verify(result);
                 mode := mode + 1;
@@ -704,14 +704,14 @@ fn presentation_distinguishes_skipped_frames_from_errors_without_opening_windows
         r#"
         export { main };
         import { "$/gpu.resin", "$/window.resin", "$/status.resin" };
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             var gpu = Gpu.new()?;
             var image = gpu.create_image(1_ui, 1_ui)?;
-            var first = match (gpu.present(image)) { ok(shown) => { shown }, err(e) => { 1 == 0 } };
-            var second = match (gpu.present(image)) { ok(shown) => { !shown }, err(e) => { 1 == 0 } };
-            var third = match (gpu.present(image)) { ok(shown) => { 0 }, err(e) => { RuntimeStatus.code(e) } };
-            var fourth = match (gpu.present(image)) { ok(shown) => { 0 }, err(e) => { RuntimeStatus.code(e) } };
-            ok(if (first && second && third == 5 && fourth == 99) { 0 } else { 1 })
+            var first = match (gpu.present(image)) { bool(shown) => { shown }, Err(e) => { 1 == 0 } };
+            var second = match (gpu.present(image)) { bool(shown) => { !shown }, Err(e) => { 1 == 0 } };
+            var third = match (gpu.present(image)) { bool(shown) => { 0 }, Err(e) => { RuntimeStatus.code(e) } };
+            var fourth = match (gpu.present(image)) { bool(shown) => { 0 }, Err(e) => { RuntimeStatus.code(e) } };
+            (if (first && second && third == 5 && fourth == 99) { 0 } else { 1 })
         };
         "#,
         r#"
@@ -744,20 +744,20 @@ fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
         def valid_size(width: uint, height: uint) -> bool = {
             width == uint(640) && height == uint(480)
         };
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             var window = Window.new(1_ui, 1_ui, String.from_str("queries"))?;
             var count = Gpu.device_count()?;
             var size = window.framebuffer_size()?;
             var incomplete = match (Gpu.enumerate_devices(Ptr<ResinGpuDeviceInfo>(ulong(0)), 0)) {
-                ok(value) => { 0 },
-                err(error) => { RuntimeStatus.code(error) },
+                ()(value) => { 0 },
+                Err(error) => { RuntimeStatus.code(error) },
             };
             var valid = !window.should_close() && window.key_pressed(key_escape);
             window.set_should_close(1 == 1)?;
             valid := valid && window.should_close();
             window.set_should_close(1 == 0)?;
             valid := valid && !window.should_close();
-            ok(if (valid && count == uint(2)
+            (if (valid && count == uint(2)
                 && valid_size(size.0, size.1) && incomplete == 7) { 0 } else { 1 })
         };
         "#,
@@ -811,10 +811,10 @@ fn byte_input_reports_stream_errors_instead_of_eof() {
             def drop(self: Ptr<Cleanup>) = { print("cleanup\n"); };
         };
 
-        def main() -> Result<(), _> = {
+        def main() -> (() | Err<_>) = {
             var cleanup = Cleanup {};
             Console.read_byte()?;
-            ok(())
+            (())
         };
         "#,
         r#"
@@ -856,7 +856,7 @@ fn typed_pipeline_factories_embed_shaders_and_keep_shared_ownership() {
         @fragment_shader
         def fragment(color: Color) -> Color = { color };
         def copy_pipeline(value: GpuComputePipeline<int, GpuPipelineOwner>) -> GpuComputePipeline<int, GpuPipelineOwner> = { value };
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             var gpu = Gpu.new()?;
             {
                 var compute = gpu.create_compute_pipeline(kernel)?;
@@ -866,13 +866,13 @@ fn typed_pipeline_factories_embed_shaders_and_keep_shared_ownership() {
             };
             test_fail();
             var compute_code = match (gpu.create_compute_pipeline(kernel)) {
-                ok(pipeline) => { 0 }, err(error) => { RuntimeStatus.code(error) },
+                GpuComputePipeline<int, GpuPipelineOwner>(pipeline) => { 0 }, Err(error) => { RuntimeStatus.code(error) },
             };
             var graphics_code = match (gpu.create_graphics_pipeline(vertex, fragment)) {
-                ok(pipeline) => { 0 }, err(error) => { RuntimeStatus.code(error) },
+                GpuGraphicsPipeline<None, GpuPipelineOwner>(pipeline) => { 0 }, Err(error) => { RuntimeStatus.code(error) },
             };
             test_finished();
-            ok(if (compute_code == 5 && graphics_code == 5) { 0 } else { 1 })
+            (if (compute_code == 5 && graphics_code == 5) { 0 } else { 1 })
         };"#,
         r#"
         #include <resin_runtime.h>
@@ -929,7 +929,7 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
         export { main };
         import { "$/window.resin", "$/string.resin" };
         def coordinates(point: (float64, float64)) -> bool = { point.0 == 12.5_d && point.1 == -3.25_d };
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             var window = Window.new(16_ui, 16_ui, String.from_str("input snapshot"))?;
             var key = window.key_state(key_w);
             var mouse = window.mouse_button_state(mouse_button_left);
@@ -939,7 +939,7 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
             valid := valid && window.focused() && key_escape == 256 && key_f25 == 314;
             window.capture_cursor(1 == 1)?;
             window.capture_cursor(1 == 0)?;
-            ok(if (valid) { 0 } else { 1 })
+            (if (valid) { 0 } else { 1 })
         };
         "#,
         r#"
@@ -994,11 +994,11 @@ fn gpu_views_do_not_expose_unowned_address_conversions() {
             &path,
             format!(
                 r#"export {{ main }}; import {{ "$/gpu.resin" }};
-            def main() -> Result<(), _> = {{
+            def main() -> (() | Err<_>) = {{
                 var gpu = Gpu.new()?;
                 var value = gpu.create(42_i)?;
                 {expression};
-                ok(())
+                (())
             }};"#
             ),
         )
@@ -1036,7 +1036,7 @@ fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
         };
         @fragment_shader
         def fragment(color: Color) -> Color = { color };
-        def main() -> Result<(), _> = {
+        def main() -> (() | Err<_>) = {
             var gpu = Gpu.new()?;
             var mode = 0;
             while (mode < 4) {
@@ -1055,8 +1055,8 @@ fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
                     test_recorded();
                     if (mode < 2) {
                         var code = match (alias.submit()) {
-                            ok(value) => { 0 },
-                            err(error) => { RuntimeStatus.code(error) },
+                            ()(value) => { 0 },
+                            Err(error) => { RuntimeStatus.code(error) },
                         };
                         test_code(code);
                     } else if (mode == 2) {
@@ -1067,7 +1067,7 @@ fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
                 test_finished();
                 mode := mode + 1;
             };
-            ok(())
+            (())
         };"#,
         r#"
         #include <resin_runtime.h>
@@ -1148,7 +1148,7 @@ fn window_constructor_accepts_owned_titles_until_the_native_call_returns() {
             },
         };
        import { "$/window.resin", "$/shared.resin", "$/string.resin" };
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             var weak = WeakSpan<ubyte>.empty();
             {
                 var title = String.from_str("named {0}");
@@ -1161,7 +1161,7 @@ fn window_constructor_accepts_owned_titles_until_the_native_call_returns() {
                 None => { 1 == 1 },
                 ArcSpan<ubyte>(live) => { 1 == 0 },
             };
-            ok(if (released && window_counts() == 22) { 0 } else { 1 })
+            (if (released && window_counts() == 22) { 0 } else { 1 })
         };"#,
         r#"
         #include <resin_runtime.h>

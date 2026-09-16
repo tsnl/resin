@@ -118,7 +118,7 @@ fn sizeof_matches_native_c_representations() {
         "Never",
         "Record",
         "First | Second",
-        "Result<int, Failure>",
+        "(int | Err<Failure>)",
         "GpuView",
         "GpuPipelineContract",
         "GpuArguments",

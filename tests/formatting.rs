@@ -103,12 +103,12 @@ fn pointer_dereference_stays_attached_to_its_operand() {
 #[test]
 fn structs_results_and_match() {
     check(
-        "struct Empty{};struct Item{x:int,};type Errors=Empty|Item;def run()->Result<_,_>={cleanup();(cleanup());{cleanup();};var value=read() ?;match(value){ok(v)=>{v},err(e)=>{0},}};",
-        "struct Empty {};\nstruct Item {\n\tx: int,\n};\ntype Errors = Empty | Item;\ndef run() -> Result<_, _> = {\n\tcleanup();\n\t(cleanup());\n\t{\n\t\tcleanup();\n\t};\n\tvar value = read()?;\n\tmatch (value) {\n\t\tok(v) => {\n\t\t\tv\n\t\t},\n\t\terr(e) => {\n\t\t\t0\n\t\t},\n\t}\n};\n",
+        "struct Empty{};struct Item{x:int,};type Errors=Empty|Item;def run()->(_ | Err<_>)={cleanup();(cleanup());{cleanup();};var value=read() ?;match(value){int(v)=>{v},Err(e)=>{0},}};",
+        "struct Empty {};\nstruct Item {\n\tx: int,\n};\ntype Errors = Empty | Item;\ndef run() -> (_ | Err<_>) = {\n\tcleanup();\n\t(cleanup());\n\t{\n\t\tcleanup();\n\t};\n\tvar value = read()?;\n\tmatch (value) {\n\t\tint(v) => {\n\t\t\tv\n\t\t},\n\t\tErr(e) => {\n\t\t\t0\n\t\t},\n\t}\n};\n",
     );
     check(
-        "def main()={if(true)(1)else(0);match(x){ok(v)=>{},err(e)=>{}};[f(),g()];};",
-        "def main() = {\n\tif (true) (1) else (0);\n\tmatch (x) {\n\t\tok(v) => {},\n\t\terr(e) => {}\n\t};\n\t[f(), g()];\n};\n",
+        "def main()={if(true)(1)else(0);match(x){int(v)=>{},Err(e)=>{}};[f(),g()];};",
+        "def main() = {\n\tif (true) (1) else (0);\n\tmatch (x) {\n\t\tint(v) => {},\n\t\tErr(e) => {}\n\t};\n\t[f(), g()];\n};\n",
     );
 }
 
@@ -143,7 +143,7 @@ fn comments_at_every_token_boundary_preserve_syntax() {
             }
         }
     }
-    let source = "export {main}; extern {\"x.h\": {def ext(x: int);}}; import {\"missing.resin\"}; struct T {x: Ptr<int>, y: (int,)}; def main(a: int) -> Result<_, Never> = { f(); var p = & &a; var x = f([1, 2,], {x = 3})?; while (x < 3) { x := x + 1; }; match (x) { ok(v) => { if (v == 3) { v } else { -v } }, err(e) => { 0 } } };";
+    let source = "export {main}; extern {\"x.h\": {def ext(x: int);}}; import {\"missing.resin\"}; struct T {x: Ptr<int>, y: (int,)}; def main(a: int) -> (_ | Err<Never>) = { f(); var p = & &a; var x = f([1, 2,], {x = 3})?; while (x < 3) { x := x + 1; }; match (x) { int(v) => { if (v == 3) { v } else { -v } }, Err(e) => { 0 } } };";
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_resin::LANGUAGE.into())

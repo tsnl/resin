@@ -105,10 +105,6 @@ pub(super) enum TermKind {
         ty: Annotation<Type>,
         arg: Box<Term>,
     },
-    Result {
-        failure: bool,
-        arg: Box<Term>,
-    },
     Absurd {
         arg: Box<Term>,
     },
@@ -144,7 +140,6 @@ pub(super) struct MatchArm {
     pub error: bool,
     pub wildcard: bool,
     pub variant: Option<Annotation<Type>>,
-    pub failure: bool,
     pub binding: Option<DeclarationId>,
     pub body: Term,
 }

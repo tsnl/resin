@@ -15,33 +15,33 @@ struct Allocation {
 	};
 };
 
-def allocate() -> Result<Allocation, OutOfMemory> = {
-	ok(Allocation { data = ArcSpan<int>.alloc(1, 0_i)? })
+def allocate() -> (Allocation | Err<OutOfMemory>) = {
+	(Allocation { data = ArcSpan<int>.alloc(1, 0_i)? })
 };
 
-def fail_if(fail: bool) -> Result<(), Failed> = {
+def fail_if(fail: bool) -> (() | Err<Failed>) = {
 	if (fail) {
-		err(Failed {})
+		Err(Failed {})
 	} else {
-		ok(())
+		(())
 	}
 };
 
-def work(fail: bool) -> Result<int, _> = {
+def work(fail: bool) -> (int | Err<_>) = {
 	var value = allocate()?;
 	var data = value.get();
 	data.at(0) := 42;
 	fail_if(fail)?;
-	ok(data.at(0))
+	(data.at(0))
 };
 
-def main() -> Result<(), _> = {
+def main() -> (() | Err<_>) = {
 	var answer = work(1 == 0)?;
 	print(fmt("answer = {0}\n", (answer,)));
-	ok(())
+	(())
 };
 
-def failure() -> Result<(), _> = {
+def failure() -> (() | Err<_>) = {
 	work(1 == 1)?;
-	ok(())
+	(())
 };

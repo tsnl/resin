@@ -53,10 +53,6 @@ pub(super) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), D
                 check_references(definitions, variant)?;
             }
         }
-        Ty::Result { value, error } => {
-            check_references(definitions, value)?;
-            check_references(definitions, error)?;
-        }
         Ty::Defined { definition } => {
             if get(definitions, *definition)?.name().is_none() {
                 return Err(DefinitionError::NonRecord(*definition));
@@ -100,10 +96,6 @@ fn check_inline(
             for variant in variants {
                 check_inline(definitions, variant, active)?;
             }
-        }
-        Ty::Result { value, error } => {
-            check_inline(definitions, value, active)?;
-            check_inline(definitions, error, active)?;
         }
         Ty::Defined { definition } => {
             if active.contains(definition) {
@@ -199,9 +191,6 @@ pub(super) fn needs_drop(ty: &Ty, definitions: &[TypeDef]) -> bool {
         Ty::Record { fields } => fields.iter().any(|f| f.ty.needs_drop(definitions)),
         Ty::Array { element, .. } => element.needs_drop(definitions),
         Ty::Error { payload } => payload.needs_drop(definitions),
-        Ty::Result { value, error } => {
-            value.needs_drop(definitions) || error.needs_drop(definitions)
-        }
         Ty::Union { variants } => variants.iter().any(|member| member.needs_drop(definitions)),
         _ => false,
     }
@@ -228,10 +217,6 @@ pub(super) fn gpu_element(ty: &Ty, definitions: &[TypeDef]) -> bool {
 
 pub(super) fn payloads(ty: &Ty) -> Option<Vec<(Case, Ty)>> {
     match ty {
-        Ty::Result { value, error } => Some(vec![
-            (Case::Ok, *value.clone()),
-            (Case::Err, *error.clone()),
-        ]),
         Ty::Union { variants } => Some(
             variants
                 .iter()
@@ -267,16 +252,6 @@ pub(super) fn widens_to(ty: &Ty, to: &Ty) -> bool {
         return true;
     }
     match (ty, to) {
-        (
-            Ty::Result {
-                value: av,
-                error: ae,
-            },
-            Ty::Result {
-                value: bv,
-                error: be,
-            },
-        ) => av == bv && ae.widens_to(be),
         (Ty::Error { payload: source }, Ty::Error { payload: target }) => source.widens_to(target),
         _ => ty.members().iter().all(|source| to.members().iter().any(|target|
             source == target || matches!((source, target), (Ty::Error { payload: a }, Ty::Error { payload: b }) if a.widens_to(b))
@@ -363,11 +338,6 @@ impl TypeTable {
             Ty::Error { payload } => {
                 self.intern(payload);
             }
-            Ty::Result { value, error } => {
-                self.intern(value);
-                self.intern(error);
-                self.intern(&Ty::UInt32);
-            }
             Ty::Pointer { pointee } => {
                 self.intern(pointee);
             }
@@ -407,11 +377,6 @@ pub(super) fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
                 .join(" | ")
         }
         Ty::Error { payload } => format!("Err<{}>", format_type(payload, definitions)),
-        Ty::Result { value, error } => format!(
-            "Result<{}, {}>",
-            format_type(value, definitions),
-            format_type(error, definitions)
-        ),
         Ty::Type => "type".into(),
         Ty::Unit => "()".into(),
         Ty::None => "None".into(),
@@ -616,7 +581,6 @@ pub(super) fn value_layout(
             value_tagged(variants.iter().map(child).collect::<Result<Vec<_>, _>>()?)
         }
         Ty::Error { payload } => child(payload),
-        Ty::Result { value, error } => value_tagged(vec![child(value)?, child(error)?]),
         _ => Err(layout::Error(format!(
             "type {ty:?} has no known value layout"
         ))),

@@ -23,7 +23,7 @@ easier to reuse:
 - **Portability across backends.** Vulkan today, with Metal and eventually WebGPU
   as future directions. The aim is to carry useful libraries across graphics APIs.
 - **A language you enjoy using every day.** Type inference, methods, operator
-  overloading, `Result` and `?`, automatic resource cleanup, C interop, a formatter,
+  overloading, `Err` and `?`, automatic resource cleanup, C interop, a formatter,
   and editor support make room for application code and tools alongside the
   graphics work. Systems programming should feel direct, ergonomic, and fun.
 

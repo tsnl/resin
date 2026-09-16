@@ -2,12 +2,12 @@ export { main };
 
 import { "$/console.resin", "$/string.resin" };
 
-def main() -> Result<(), _> = {
+def main() -> (() | Err<_>) = {
 	print("What is your name? ");
 	var name = Console.read_line()?;
 
 	print("Hello, ");
 	Console.print(name)?;
 	print("!\n");
-	ok(())
+	(())
 };

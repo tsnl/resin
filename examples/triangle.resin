@@ -57,7 +57,7 @@ def fragment(color: Color) -> Color = {
 	color
 };
 
-def main() -> Result<(), _> = {
+def main() -> (() | Err<_>) = {
 	var gpu = Gpu.new()?;
 
 	var pipeline = gpu.create_graphics_pipeline(vertex, fragment)?;
@@ -79,5 +79,5 @@ def main() -> Result<(), _> = {
 	pixels.copy_to(host.get());
 	ImageData.write_pixels(path.data, 256, 256, 4, host.get(), 0)?;
 	print("wrote triangle.png\n");
-	ok(())
+	(())
 };

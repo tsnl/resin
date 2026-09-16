@@ -127,14 +127,14 @@ pub enum Instr {
     /// `[view, length, commands, image] -> [int]`: record an image copy retaining its allocation.
     GpuViewCopyImage,
 
-    /// `[gpu] -> [Result<Pipeline, E>]`: create the registered source pipeline
+    /// `[gpu] -> [Pipeline | Err<E>]`: create the registered source pipeline
     /// from the declared compute shader, retaining its root type and factory owner.
     GpuComputePipeline {
         pipeline: Ty,
         factory: FunctionId,
         shader: FunctionId,
     },
-    /// `[gpu] -> [Result<Pipeline, E>]`: create the registered source pipeline
+    /// `[gpu] -> [Pipeline | Err<E>]`: create the registered source pipeline
     /// from compatible vertex and fragment declarations. Rootless stages use None.
     GpuGraphicsPipeline {
         pipeline: Ty,
@@ -142,7 +142,7 @@ pub enum Instr {
         vertex: FunctionId,
         fragment: FunctionId,
     },
-    /// `[commands, pipeline, host root, x, y, z] -> [Result<(), E>]`: project
+    /// `[commands, pipeline, host root, x, y, z] -> [() | Err<E>]`: project
     /// checked arguments and pass them with the pipeline owner to the recording function.
     GpuDispatch {
         projection: resin_types::GpuProjectionPlan,
@@ -150,7 +150,7 @@ pub enum Instr {
         allocator: FunctionId,
         record: FunctionId,
     },
-    /// `[commands, pipeline, host root or None, count] -> [Result<(), E>]`.
+    /// `[commands, pipeline, host root or None, count] -> [() | Err<E>]`.
     /// Rootless graphics performs no allocation or projection.
     GpuDraw {
         projection: Option<resin_types::GpuProjectionPlan>,
@@ -197,7 +197,7 @@ pub enum Instr {
     ExcludeNone,
     /// `[variant] -> [payload]`: transfer the active payload, trapping on a different tag.
     VariantPayload { tag: Case },
-    /// `[value] -> [widened value]`: transfer union/Result payloads into the wider type.
+    /// `[value] -> [widened value]`: transfer union/Err payloads into the wider type.
     Widen { ty: Ty },
     /// `[pointer or ulong] -> [cast value]`: reinterpret a pointer or its integer address.
     /// Host-only: shader pointer representation belongs to the backend.

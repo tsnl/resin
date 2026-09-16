@@ -64,15 +64,13 @@ fn bridge_body(
         return matches!(params.as_slice(), [Ty::Defined { .. }])
             .then_some(FunctionBody::Defined(function));
     }
-    let Ty::Result { value, .. } = &declaration.result else {
-        return None;
-    };
+    let (value, _) = declaration.result.fallible_parts()?;
     let bytes = Ty::byte_span();
     match name {
         "gpu_compute_pipeline" | "gpu_graphics_pipeline" => {
             let graphics = name == "gpu_graphics_pipeline";
             let count = if graphics { 2 } else { 1 };
-            (matches!(**value, Ty::Defined { .. })
+            (matches!(*value, Ty::Defined { .. })
                 && params.len() == count + 1
                 && params[1..].iter().all(|ty| *ty == bytes))
             .then_some(FunctionBody::GpuPipelineFactory {
@@ -92,7 +90,7 @@ fn bridge_body(
             } else {
                 vec![root, Ty::UInt32, Ty::UInt32, Ty::UInt32]
             };
-            (**value == Ty::Unit
+            (*value == Ty::Unit
                 && matches!(params.get(1), Some(Ty::Defined { .. }))
                 && params.get(2..) == Some(tail.as_slice()))
             .then_some(FunctionBody::GpuPipelineRecord {
@@ -122,9 +120,7 @@ impl Context {
         } else {
             String::new()
         };
-        let Ty::Result { value, error } = &method.result else {
-            return None;
-        };
+        let (value, error) = method.result.fallible_parts()?;
         match method.body {
             FunctionBody::GpuPipelineFactory { graphics, .. } => {
                 let (_, pipeline) = self.source_pipeline_type(graphics)?;
@@ -135,7 +131,7 @@ impl Context {
                     "shader: @compute_shader"
                 };
                 Some(format!(
-                    "({receiver}{shaders}) -> Result<{kind}<T, {}>, {}>",
+                    "({receiver}{shaders}) -> ({kind}<T, {}> | Err<{}>)",
                     label(value),
                     label(error)
                 ))
@@ -225,13 +221,10 @@ impl Context {
             }
         }
         let native = self.declared_function(factory);
-        let Ty::Result {
-            value: owner,
-            error,
-        } = &native.result
-        else {
-            unreachable!()
-        };
+        let (owner, error) = native
+            .result
+            .fallible_parts()
+            .expect("validated pipeline factory");
         let (definition, _) = self
             .source_pipeline_type(graphics)
             .ok_or("no source pipeline type is registered for this shader stage")?;
@@ -244,9 +237,13 @@ impl Context {
         Ok(PipelineMethod {
             body: native.body.clone(),
             params,
-            result: Type::Result {
-                value: Box::new(value),
-                error: Box::new(super::types::ty(error)),
+            result: Type::Union {
+                variants: vec![
+                    value,
+                    Type::Error {
+                        payload: Box::new(super::types::ty(error)),
+                    },
+                ],
             },
         })
     }
@@ -313,10 +310,11 @@ impl Context {
         let allocator = self
             .gpu_allocator(&getter.result)
             .ok_or("pipeline context requires a registered GPU allocator")?;
-        let Ty::Result { error, .. } = &native.result else {
-            unreachable!()
-        };
-        if **error != self.gpu_error(allocator) {
+        let (_, error) = native
+            .result
+            .fallible_parts()
+            .expect("validated pipeline record");
+        if *error != self.gpu_error(allocator) {
             return Err(
                 "pipeline recording and GPU allocation must use the same error type".into(),
             );

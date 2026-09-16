@@ -59,30 +59,30 @@ struct InputOutOfMemory {};
 struct InputWriteError {};
 type InputError = EndOfInput | InputReadError | InputOutOfMemory;
 
-def resize_input(memory: Ptr<ubyte>, capacity: ulong) -> Result<Ptr<ubyte>, InputOutOfMemory> = {
+def resize_input(memory: Ptr<ubyte>, capacity: ulong) -> (Ptr<ubyte> | Err<InputOutOfMemory>) = {
 	var resized = realloc(memory, capacity);
 	if (ulong(resized) == 0_ul) {
-		err(InputOutOfMemory {})
+		Err(InputOutOfMemory {})
 	} else {
-		ok(resized)
+		(resized)
 	}
 };
 
-def check_input_end(byte: int, length: ulong) -> Result<(), EndOfInput | InputReadError> = {
+def check_input_end(byte: int, length: ulong) -> (() | Err<EndOfInput | InputReadError>) = {
 	if (byte < 0 && resin_stdin_error() != 0) {
-		err(InputReadError {})
+		Err(InputReadError {})
 	} else {
 		if (byte < 0 && length == 0_ul) {
-			err(EndOfInput {})
+			Err(EndOfInput {})
 		} else {
-			ok(())
+			(())
 		}
 	}
 };
 
 struct Console {
 	// Writes every byte (including embedded NULs), flushes, and adds no newline.
-	def print(line: InputLine) -> Result<(), InputWriteError> = {
+	def print(line: InputLine) -> (() | Err<InputWriteError>) = {
 		var bytes = line.get();
 		var index = 0_ul;
 		var written = 0;
@@ -92,27 +92,27 @@ struct Console {
 		};
 		var flushed = resin_stdout_flush();
 		if (written < 0 || flushed != 0) {
-			err(InputWriteError {})
+			Err(InputWriteError {})
 		} else {
-			ok(())
+			(())
 		}
 	};
 
-	def read_byte() -> Result<ubyte, EndOfInput | InputReadError> = {
+	def read_byte() -> (ubyte | Err<EndOfInput | InputReadError>) = {
 		var byte = getchar();
 		check_input_end(byte, 0_ul)?;
-		ok(resin_console_byte(byte))
+		(resin_console_byte(byte))
 	};
 	// Reads bytes through LF or EOF; only CR immediately before LF is stripped.
-	def read_line() -> Result<InputLine, InputError> = {
+	def read_line() -> (InputLine | Err<InputError>) = {
 		var owner = match (ArcPtr<InputLineOwner>.alloc(InputLineOwner { data = Ptr<ubyte>(0_ul), length = 0_ul })) {
-			ok(value) => {
-				ok(value)
+			ArcPtr<InputLineOwner>(value) => {
+				(value)
 			},
-			err(error) => {
-				err(InputOutOfMemory {})
+			Err(error) => {
+				return Err(InputOutOfMemory {});
 			},
-		}?;
+		};
 		var storage = owner.get();
 		storage.data := resize_input(Ptr<ubyte>(0_ul), initial_input_capacity)?;
 		storage.length := initial_input_capacity;
@@ -121,11 +121,11 @@ struct Console {
 		while (byte >= 0 && byte != line_feed) {
 			if (length == storage.length - 1_ul) {
 				// Reserve the terminator and reject growth that would wrap.
-				var grown: Result<ulong, InputOutOfMemory>;
+				var grown: (ulong | Err<InputOutOfMemory>);
 				grown := if (storage.length > max_input_capacity / 2_ul) {
-					err(InputOutOfMemory {})
+					Err(InputOutOfMemory {})
 				} else {
-					ok(storage.length * 2_ul)
+					(storage.length * 2_ul)
 				};
 				var capacity = grown?;
 				storage.data := resize_input(storage.data, capacity)?;
@@ -143,6 +143,6 @@ struct Console {
 		};
 		Span<ubyte> { data = storage.data, length = storage.length }.at(length) := 0_ub;
 		storage.length := length;
-		ok(InputLine { owner = owner })
+		(InputLine { owner = owner })
 	};
 };

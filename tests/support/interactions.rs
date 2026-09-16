@@ -2,7 +2,7 @@ pub const MARKERS: [&str; 4] = [
     "",
     "{ var unused = (); };",
     "var unused: _; unused := 1_ui;",
-    "var unused: Result<(), Never>; unused := ok(()); match (unused) { ok(v) => {}, err(e) => { absurd(e) } };",
+    "var unused: (() | Err<Never>); unused := (()); match (unused) { ()(v) => {}, Err(e) => { absurd(e) } };",
 ];
 
 pub fn variants() -> Vec<String> {

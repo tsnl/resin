@@ -148,11 +148,11 @@ fn generic_drop_hooks_run_on_result_propagation() {
                 self.trace.* := self.trace.* * 10 + size_of(T);
             };
         };
-        def fail() -> Result<(), Failed> = { err(Failed {}) };
-        def work<T>(trace: Ptr<ulong>, value: T) -> Result<(), _> = {
+        def fail() -> (() | Err<Failed>) = { Err(Failed {}) };
+        def work<T>(trace: Ptr<ulong>, value: T) -> (() | Err<_>) = {
             var local = Tracked<T> { trace = trace, value = value };
             fail()?;
-            ok(())
+            (())
         };
         def main() -> int = {
             var trace = 0_ul;

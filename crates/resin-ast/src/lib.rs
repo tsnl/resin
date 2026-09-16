@@ -53,10 +53,6 @@ pub enum TypeKind {
         head: Ident,
         args: Vec<Type>,
     },
-    Result {
-        value: Box<Type>,
-        error: Box<Type>,
-    },
     Union {
         left: Box<Type>,
         right: Box<Type>,
@@ -185,8 +181,6 @@ pub struct MatchArm {
 pub enum MatchVariant {
     Error,
     Wildcard,
-    Ok,
-    Err,
     Type(Type),
 }
 

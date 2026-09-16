@@ -38,7 +38,7 @@ struct ImageData {
 		Span<ubyte> { data = data.pixels, length = ulong(data.width) * ulong(data.height) * ulong(data.channels) }
 	};
 
-	def read_png(path: Ptr<ubyte>, channels: uint) -> Result<ImageData, RuntimeError> = {
+	def read_png(path: Ptr<ubyte>, channels: uint) -> (ImageData | Err<RuntimeError>) = {
 		var owner = ArcPtr<ImageDataOwner>.alloc(
 			ImageDataOwner {
 				width = 0_ui,
@@ -49,14 +49,12 @@ struct ImageData {
 		)?;
 		var data = owner.get();
 		RuntimeStatus.from_code(resin_image_read_png(path, channels, &data.width, &data.height, &data.channels, &data.pixels))?;
-		ok(ImageData { owner = owner })
+		(ImageData { owner = owner })
 	};
-	def write_pixels(path: Ptr<ubyte>, width: uint, height: uint, channels: uint, pixels: Span<ubyte>, stride: ulong) -> Result<(), RuntimeError> = {
+	def write_pixels(path: Ptr<ubyte>, width: uint, height: uint, channels: uint, pixels: Span<ubyte>, stride: ulong) -> (() | Err<RuntimeError>) = {
 		if (width == 0_ui || height == 0_ui || channels == 0_ui || channels > 4_ui) {
-			err(InvalidArgument {})
-		} else {
-			ok(())
-		}?;
+			return Err(InvalidArgument {});
+		};
 		var row_bytes = ulong(width) * ulong(channels);
 		var row_stride = if (stride == 0_ul) {
 			row_bytes
@@ -66,13 +64,13 @@ struct ImageData {
 		// Check the final row's pixels without requiring unused trailing padding.
 		// Subtraction and division avoid overflowing the strided image extent.
 		if (row_stride < row_bytes || pixels.length < row_bytes || ulong(height - 1_ui) > (pixels.length - row_bytes) / row_stride) {
-			err(InvalidArgument {})
+			Err(InvalidArgument {})
 		} else {
 			RuntimeStatus.from_code(resin_image_write_png(path, width, height, channels, pixels.data, row_stride))
 		}
 	};
 
-	def write_png(self: Ptr<ImageData>, path: Ptr<ubyte>) -> Result<(), RuntimeError> = {
+	def write_png(self: Ptr<ImageData>, path: Ptr<ubyte>) -> (() | Err<RuntimeError>) = {
 		RuntimeStatus.from_code(resin_image_write_png(path, self.width(), self.height(), self.channels(), self.pixels().data, 0_ul))
 	};
 };

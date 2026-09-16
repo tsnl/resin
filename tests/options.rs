@@ -84,11 +84,11 @@ fn none_elimination_preserves_all_other_union_members() {
 fn result_cases_remain_distinct_inside_optional_unions() {
     let output = run(r#"
         struct Item { number: int };
-        type Outcome = Result<Item, Item>;
-        def make(fail: bool) -> Outcome = { if (fail) { err(Item { number = 2 }) } else { ok(Item { number = 40 }) } };
+        type Outcome = (Item | Err<Item>);
+        def make(fail: bool) -> Outcome = { if (fail) { Err(Item { number = 2 }) } else { (Item { number = 40 }) } };
         def optional(fail: bool) -> Outcome | None = { make(fail) };
         def read(o: Outcome | None) -> int = {
-            match (o!) { ok(item) => { item.number }, err(item) => { item.number } }
+            match (o!) { Item(item) => { item.number }, Err(item) => { item.number } }
         };
         def main() -> int = { if (read(optional(1 == 1)) + read(optional(1 == 0)) == 42) { 0 } else { 1 } };
     "#);
@@ -173,9 +173,9 @@ fn unwrapping_none_traps_before_following_side_effects() {
 fn optional_patterns_and_unwrap_are_checked() {
     for source in [
         "def f(value: int | None) -> int = { match (value) { int(n) => { n } } };",
-        "def f(value: int | None) -> int = { match (value) { ok(n) => { n }, None => { 0 } } };",
+        "def f(value: int | None) -> int = { match (value) { bool(n) => { n }, None => { 0 } } };",
         "def f(value: int) -> int = { value! };",
-        "struct E {}; def f(r: Result<int, E>) -> int = { r! };",
+        "struct E {}; def f(r: (int | Err<E>)) -> int = { r! };",
         "struct A {}; struct B {}; def f(o: Ptr<A> | None) -> Ptr<A | B> = { o! };",
         "struct Span<T> { data: Ptr<T>, length: ulong }; def f(o: Span<int> | None) -> Span<int | None> = { o! };",
         "def f(x: int | None) = { match (x) { int(n) => {}, None => {}, None => {} } };",

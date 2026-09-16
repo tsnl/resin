@@ -70,12 +70,12 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
         r#"
         export { main };
         import { "$/console.resin", "$/string.resin" };
-        def failed(error: InputError) -> Result<(), InputError> = { err(error) };
-        def main() -> Result<(), _> = {
+        def failed(error: InputError) -> (() | Err<InputError>) = { Err(error) };
+        def main() -> (() | Err<_>) = {
             var reading = 1 == 1;
             while (reading) {
                 match (Console.read_line()) {
-                    ok(line) => {
+                    InputLine(line) => {
 
                         if (Ptr<ubyte>(ulong(line.get().data) + line.get().length).* != ubyte(0)) {
                             print("missing terminator");
@@ -84,7 +84,7 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
                         Console.print(line)?;
                         print("]");
                     },
-                    err(error) => {
+                    Err(error) => {
                         match (error) {
                             EndOfInput(e) => { reading := 1 == 0; },
                             InputReadError(e) => { failed(e)?; },
@@ -93,7 +93,7 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
                     },
                 };
             };
-            ok(())
+            (())
         };
     "#,
     );
@@ -138,19 +138,19 @@ fn byte_input_distinguishes_bytes_from_eof() {
         r#"
         export { main };
         import { "$/console.resin", "$/string.resin" };
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             var zero = Console.read_byte()?;
             var first = Console.read_byte()?;
             var ended = match (Console.read_byte()) {
-                ok(byte) => { 1 == 0 },
-                err(error) => {
+                ubyte(byte) => { 1 == 0 },
+                Err(error) => {
                     match (error) {
                         EndOfInput(e) => { 1 == 1 },
                         InputReadError(e) => { 1 == 0 },
                     }
                 },
             };
-            ok(if (zero == ubyte(0) && first == ubyte(255) && ended) { 0 } else { 1 })
+            (if (zero == ubyte(0) && first == ubyte(255) && ended) { 0 } else { 1 })
         };
     "#,
     );
@@ -199,14 +199,14 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
             def exercise() -> int = {{
                 var mode = console_test_mode();
                 match (Console.read_line()) {{
-                    ok(line) => {{
+                    InputLine(line) => {{
 
                         match (Console.print(line)) {{
-                            ok(unit) => {{ if (mode == 6 && line.get().length == ulong(300)) {{ 0 }} else {{ 1 }} }},
-                            err(error) => {{ if (mode == 4 || mode == 5) {{ 0 }} else {{ 2 }} }},
+                            ()(unit) => {{ if (mode == 6 && line.get().length == ulong(300)) {{ 0 }} else {{ 1 }} }},
+                            Err(error) => {{ if (mode == 4 || mode == 5) {{ 0 }} else {{ 2 }} }},
                         }}
                     }},
-                    err(error) => {{
+                    Err(error) => {{
                         match (error) {{
                             EndOfInput(e) => {{ 3 }},
                             InputReadError(e) => {{ if (mode == 2 || mode == 3) {{ 0 }} else {{ 4 }} }},
@@ -249,7 +249,7 @@ fn streams_write_literals_and_owned_strings_verbatim() {
         export { main };
         import { "$/io.resin", "$/string.resin", "$/span.resin" };
         def literal() -> str = { "static\0bytes" };
-        def main() -> Result<(), _> = {
+        def main() -> (() | Err<_>) = {
             var out = Io.stdout();
             var error = Io.stderr();
             var text = fmt("n = {0}", (42,));
@@ -259,7 +259,7 @@ fn streams_write_literals_and_owned_strings_verbatim() {
             out.write(bytes(" bytes"))?;
             error.write(fmt("error: {0}\n", (text.bytes(),)))?;
             error.write(literal())?;
-            ok(())
+            (())
         };
     "#,
     );
@@ -275,10 +275,10 @@ fn stream_write_failure_propagates_as_a_library_error() {
         r#"
         export { main };
         import { "$/io.resin", "$/string.resin" };
-        def main() -> Result<(), _> = {
+        def main() -> (() | Err<_>) = {
             Output { stream = 99_ui }.write("unwritten")?;
             print("not reached");
-            ok(())
+            (())
         };
     "#,
     );

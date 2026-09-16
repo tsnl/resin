@@ -81,7 +81,7 @@ impl Types<'_> {
                     )
                     .unwrap();
                 }
-                Ty::Union { .. } | Ty::Result { .. } => {
+                Ty::Union { .. } => {
                     out.push_str("  switch (p->tag) {\n");
                     for (case, payload) in ty.payloads().unwrap() {
                         let tag = self.tag(&case);
@@ -123,7 +123,7 @@ impl Types<'_> {
             Ty::Array { element, length } if element.needs_drop(&self.module.types) => {
                 writeln!(out, "  for (size_t i = 0; i < {length}; ++i) ({value}).items[i] = r_copy{}(({value}).items[i]);", self.id(element)).unwrap();
             }
-            Ty::Union { .. } | Ty::Result { .. } => {
+            Ty::Union { .. } => {
                 writeln!(out, "  switch (({value}).tag) {{").unwrap();
                 for (case, payload) in ty.payloads().unwrap() {
                     let tag = self.tag(&case);

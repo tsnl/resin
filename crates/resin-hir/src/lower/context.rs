@@ -256,10 +256,11 @@ impl Context {
     }
 
     pub(crate) fn gpu_error(&self, allocator: FunctionId) -> Ty {
-        let Ty::Result { error, .. } = &self.functions[&allocator].result else {
-            unreachable!("validated GPU allocator")
-        };
-        *error.clone()
+        let (_, error) = self.functions[&allocator]
+            .result
+            .fallible_parts()
+            .expect("validated GPU allocator");
+        error.clone()
     }
 
     pub(crate) fn method(&self, ty: &Ty, name: &str) -> Option<FunctionDecl> {

@@ -59,12 +59,12 @@ fn generic_identity_preserves_shared_ownership() {
         export { main };
         import { "$/shared.resin" };
         def identity<T>(value: T) -> T = { value };
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             var copy = {
                 var owner = ArcPtr<int>.alloc(42)?;
                 identity(owner)
             };
-            ok(copy.get().*)
+            (copy.get().*)
         };
     "#);
     assert_eq!(
@@ -81,16 +81,16 @@ fn generic_results_propagate_union_errors_and_match_payloads() {
         export { main };
         struct A {};
         struct B {};
-        def propagate<T, E>(input: Result<T, E>) -> Result<_, _> = { ok(input?) };
-        def recover<T, E>(input: Result<T, E>, fallback: T) -> T = {
-            match (input) { ok(value) => { value }, err(error) => { fallback } }
+        def propagate<T, E>(input: (T | Err<E>)) -> (_ | Err<_>) = { (input?) };
+        def recover<T, E>(input: (T | Err<E>), fallback: T) -> T = {
+            match (input) { T(value) => { value }, Err(error) => { fallback } }
         };
-        def combine<T, E, F>(a: Result<T, E>, b: Result<T, F>) -> Result<T, _> = {
-            a?; ok(b?)
+        def combine<T, E, F>(a: (T | Err<E>), b: (T | Err<F>)) -> (T | Err<_>) = {
+            a?; (b?)
         };
         def main() -> int = {
-            var first = Result<int, A>(ok(7));
-            var second = Result<int, B>(err(B {}));
+            var first = (int | Err<A>)((7));
+            var second = (int | Err<B>)(Err(B {}));
             recover(propagate(first), 0) + recover(combine(first, second), 35)
         };
     "#);

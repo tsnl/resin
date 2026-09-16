@@ -91,12 +91,16 @@ fn create(
         call(factory, &args)
     )
     .unwrap();
-    let Ty::Result {
-        value: pipeline, ..
-    } = result
-    else {
-        unreachable!("pipeline result")
-    };
+    let (pipeline, error) = result.fallible_parts().expect("pipeline result");
+    let (owner, _) = function
+        .result
+        .fallible_parts()
+        .expect("pipeline factory result");
+    let factory_ok = types.tag(&Case::Type(owner.clone()));
+    let ok = types.tag(&Case::Type(pipeline.clone()));
+    let err = types.tag(&Case::Type(Ty::Error {
+        payload: Box::new(error.clone()),
+    }));
     let metadata = resin_types::gpu_pipeline_contract(&types.module.types, pipeline)
         .expect("verified source pipeline contract");
     let token = format!(
@@ -104,26 +108,21 @@ fn create(
         owner_handle(
             types,
             &metadata.owner,
-            &format!("{name}_factory.payload.v0")
+            &format!("{name}_factory.payload.v{factory_ok}")
         ),
         types.id(&metadata.root),
         types.id(&metadata.owner),
         pipeline_kind(metadata.kind)
     );
+    writeln!(out, "  {} {name}_result = {{0}};", types.name(result)).unwrap();
     writeln!(
         out,
-        "  {} {name}_result = {{ .tag = {name}_factory.tag }};",
-        types.name(result)
+        "  if ({name}_factory.tag == {factory_ok}u) {{ {name}_result.tag = {ok}u; {name}_result.payload.v{ok}.value.f0 = {token}; }}"
     )
     .unwrap();
     writeln!(
         out,
-        "  if ({name}_factory.tag == 0u) {{ {name}_result.payload.v0.value.f0 = {token}; }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "  else {{ {name}_result.payload.v1 = {name}_factory.payload.v1; }}"
+        "  else {{ {name}_result.tag = {err}u; {name}_result.payload.v{err} = {name}_factory.payload.v{err}; }}"
     )
     .unwrap();
     Ok(format!("{name}_result"))
@@ -171,13 +170,13 @@ fn record(
         call(context, &[types.copy(owner, &native_owner)])
     )
     .unwrap();
-    let Ty::Result { error, .. } = result else {
-        unreachable!("verified recording result");
+    let (_, error) = result.fallible_parts().expect("verified recording result");
+    let error = Ty::Error {
+        payload: Box::new(error.clone()),
     };
-    let projection_result = Ty::Result {
-        value: Box::new(Ty::GpuArguments),
-        error: error.clone(),
-    };
+    let ok = types.tag(&Case::Type(Ty::GpuArguments));
+    let err = types.tag(&Case::Type(error.clone()));
+    let projection_result = Ty::union_of([Ty::GpuArguments, error]);
     let projected = super::projection::project(
         types,
         &format!("{name}_projected"),
@@ -189,7 +188,7 @@ fn record(
     )?;
     types.drop_value(gpu_type, &gpu.expr, out);
     writeln!(out, "  {} {name}_result = {{0}};", types.name(result)).unwrap();
-    writeln!(out, "  if ({projected}.tag == 0u) {{").unwrap();
+    writeln!(out, "  if ({projected}.tag == {ok}u) {{").unwrap();
     writeln!(
         out,
         "    {name}_result = {};",
@@ -199,14 +198,14 @@ fn record(
             args,
             owner,
             &native_owner,
-            Some(&format!("{projected}.payload.v0")),
+            Some(&format!("{projected}.payload.v{ok}")),
             draw
         )
     )
     .unwrap();
     writeln!(
         out,
-        "  }} else {{ {name}_result.tag = 1u; {name}_result.payload.v1 = {projected}.payload.v1; }}"
+        "  }} else {{ {name}_result.tag = {err}u; {name}_result.payload.v{err} = {projected}.payload.v{err}; }}"
     )
     .unwrap();
     Ok(format!("{name}_result"))

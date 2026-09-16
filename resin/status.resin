@@ -32,51 +32,35 @@ struct UnknownRuntimeError { code: int };
 type RuntimeError = InvalidArgument | VulkanUnavailable | Unsupported | OutOfMemory | VulkanError | IoError | Incomplete | WindowUnavailable | UnknownRuntimeError;
 
 struct RuntimeStatus {
-	def from_code(code: int) -> Result<(), RuntimeError> = {
+	def from_code(code: int) -> (() | Err<RuntimeError>) = {
 		if (code == status_invalid_argument) {
-			err(InvalidArgument {})
-		} else {
-			ok(())
-		}?;
+			return Err(InvalidArgument {});
+		};
 		if (code == status_vulkan_unavailable) {
-			err(VulkanUnavailable {})
-		} else {
-			ok(())
-		}?;
+			return Err(VulkanUnavailable {});
+		};
 		if (code == status_unsupported) {
-			err(Unsupported {})
-		} else {
-			ok(())
-		}?;
+			return Err(Unsupported {});
+		};
 		if (code == status_out_of_memory) {
-			err(OutOfMemory {})
-		} else {
-			ok(())
-		}?;
+			return Err(OutOfMemory {});
+		};
 		if (code == status_vulkan_error) {
-			err(VulkanError {})
-		} else {
-			ok(())
-		}?;
+			return Err(VulkanError {});
+		};
 		if (code == status_io_error) {
-			err(IoError {})
-		} else {
-			ok(())
-		}?;
+			return Err(IoError {});
+		};
 		if (code == status_incomplete) {
-			err(Incomplete {})
-		} else {
-			ok(())
-		}?;
+			return Err(Incomplete {});
+		};
 		if (code == status_window_unavailable) {
-			err(WindowUnavailable {})
-		} else {
-			ok(())
-		}?;
+			return Err(WindowUnavailable {});
+		};
 		if (code == status_success) {
-			ok(())
+			(())
 		} else {
-			err(UnknownRuntimeError { code = code })
+			Err(UnknownRuntimeError { code = code })
 		}
 	};
 	def code(error: RuntimeError) -> int = {

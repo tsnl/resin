@@ -38,14 +38,16 @@ pub(super) fn collect(module: &Module, analysis: &[FunctionTypes]) -> TypeTable 
                     ..
                 } = instr
                 {
-                    let Ty::Result { error, .. } = &module.functions[allocator.index()].result
-                    else {
-                        unreachable!("verified pipeline allocator");
-                    };
-                    table.intern(&Ty::Result {
-                        value: Box::new(Ty::GpuArguments),
-                        error: error.clone(),
-                    });
+                    let (_, error) = module.functions[allocator.index()]
+                        .result
+                        .fallible_parts()
+                        .expect("verified pipeline allocator");
+                    table.intern(&Ty::union_of([
+                        Ty::GpuArguments,
+                        Ty::Error {
+                            payload: Box::new(error.clone()),
+                        },
+                    ]));
                 }
                 if let Instr::GpuViewRange { element } = instr {
                     table.intern(element);

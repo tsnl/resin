@@ -28,14 +28,14 @@ import { "$/gpu.resin", "$/status.resin" };
 
 Public operations use static and instance methods on the corresponding types; scalar
 options and control codes are exported constants. Fallible runtime operations return
-`Result<T, RuntimeError>`; console operations use their own error sets. Infallible queries
+`(T | Err<RuntimeError>)`; console operations use their own error sets. Infallible queries
 return values. Resource owners release their native handles automatically.
 Native declarations stay private. The C ABI remains unchecked: callers
 must uphold pointer validity, lifetimes, and buffer sizes. Importing a module does not
 re-export its dependencies. Import `$/status.resin` to name or match errors; inferred
-`Result<(), _>` callers do not need that import.
+`(() | Err<_>)` callers do not need that import.
 Modules under `internal/` support these wrappers and are not part of the public library API.
-`ok` and `err` are compiler builtins; `fmt` and `print` are ordinary exports of
+`Err(value)` constructs an error wrapper; `fmt` and `print` are ordinary exports of
 `string.resin`. Shader entries use
 `@compute_shader`, `@vertex_shader`, or `@fragment_shader`. Pass these declarations
 directly to GPU pipeline creation; compiled representations are handled internally.
@@ -46,12 +46,12 @@ Constructors return the new handle, not an integer and an out-parameter:
 export { main };
 import { "$/gpu.resin" };
 
-def main() -> Result<(), _> = {
+def main() -> (() | Err<_>) = {
     var gpu = Gpu.new()?;
     var data = gpu.alloc::<uint>(64)?;
     var commands = gpu.start_command_recording()?;
     commands.submit()?;
-    ok(())
+    (())
 };
 ```
 
@@ -111,7 +111,7 @@ storage with `GpuSpan<T>.copy_to` first, and keep the owner alive through the wr
 The instance method `image.write_png(path)` uses the loaded image's dimensions and pixels.
 
 Import `$/shared.resin` for
-`ArcSpan<T>.alloc(count, initial) -> Result<ArcSpan<T>, OutOfMemory>`. Each element is
+`ArcSpan<T>.alloc(count, initial) -> (ArcSpan<T> | Err<OutOfMemory>)`. Each element is
 initialized with an ordinary copy of `initial`; the type determines its size.
 Allocation size overflow and allocation failure return `OutOfMemory`. Empty
 sequences are valid. Copies of the returned handle retain its allocation, and the
@@ -156,7 +156,7 @@ Invalid checked pointer access and the infallible formatting/printing operations
 
 ## Console input
 
-`Console.read_line() -> Result<InputLine, InputError>` reads one line from stdin through C's `getchar()`.
+`Console.read_line() -> (InputLine | Err<InputError>)` reads one line from stdin through C's `getchar()`.
 The reading loop, buffer growth, newline removal, and ownership handling are written in Resin.
 Small native helpers expose standard-stream operations and integer-width conversions.
 
@@ -164,13 +164,13 @@ Small native helpers expose standard-stream operations and integer-width convers
 export { main };
 import { "$/console.resin", "$/string.resin" };
 
-def main() -> Result<(), _> = {
+def main() -> (() | Err<_>) = {
     print("Name: ");
     var name = Console.read_line()?;
     print("Hello, ");
     Console.print(name)?;
     print("!\n");
-    ok(())
+    (())
 };
 ```
 
@@ -188,16 +188,16 @@ stdin bytes are not restored. Errors remain subject to C's stream error state.
 
 Copying a line retains shared ownership; the final owner frees its allocation. Raw pointers
 into that allocation do not retain it. `Console.print(line)` writes all `length` bytes, adds no
-newline, flushes stdout, and returns `Result<(), InputWriteError>`. The library function `print` does
+newline, flushes stdout, and returns `(() | Err<InputWriteError>)`. The library function `print` does
 not accept `InputLine` values.
 
-`Console.read_byte() -> Result<ubyte, EndOfInput | InputReadError>` reads a single byte, including
+`Console.read_byte() -> (ubyte | Err<EndOfInput | InputReadError>)` reads a single byte, including
 NUL and 255, and distinguishes EOF from stream failure. The raw `getchar` binding is private;
 callers never need to interpret its negative sentinel. These console APIs are for host execution.
 
 
 `Io.stdout().write(text)` and `Io.stderr().write(text)` accept `str | Span<ubyte> | String`, write
-bytes verbatim, flush, and return `Result<(), WriteError>`. Import `$/io.resin` to use them.
+bytes verbatim, flush, and return `(() | Err<WriteError>)`. Import `$/io.resin` to use them.
 Use `fmt("n = {0}", (n,))` to construct an owned String before writing or storing it.
 Literals have type `str` over static bytes; formatting results own an `ArcSpan<ubyte>` allocation. Use
 `bytes(literal)` from `$/span.resin` when a raw byte view is needed. An InputLine

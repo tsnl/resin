@@ -108,21 +108,32 @@ fn applications_do_not_generalize_local_storage_or_discard_explicit_arity() {
 
 #[test]
 fn result_payloads_and_error_sets_retain_bound_parameters() {
-    let module = compile("def propagate<T, E>(input: Result<T, E>) -> Result<_, _> = { ok(input?) }; def recover<T, E>(input: Result<T, E>, fallback: T) -> T = { match (input) { ok(value) => { value }, err(error) => { fallback } } }; def combine<T, E, F>(a: Result<T, E>, b: Result<T, F>) -> Result<T, _> = { a?; ok(b?) };").unwrap();
+    let module = compile("def propagate<T, E>(input: (T | Err<E>)) -> (_ | Err<_>) = { (input?) }; def recover<T, E>(input: (T | Err<E>), fallback: T) -> T = { match (input) { T(value) => { value }, Err(error) => { fallback } } }; def combine<T, E, F>(a: (T | Err<E>), b: (T | Err<F>)) -> (T | Err<_>) = { a?; (b?) };").unwrap();
     let signature = &module.functions[0].signature;
     assert_eq!(
         signature.result.ty,
-        Type::Result {
-            value: Box::new(Type::Parameter {
-                parameter: signature.type_params[0].id
-            }),
-            error: Box::new(Type::Parameter {
-                parameter: signature.type_params[1].id
-            }),
+        Type::Union {
+            variants: vec![
+                Type::Parameter {
+                    parameter: signature.type_params[0].id
+                },
+                Type::Error {
+                    payload: Box::new(Type::Parameter {
+                        parameter: signature.type_params[1].id
+                    })
+                }
+            ]
         }
     );
-    let Type::Result { error, .. } = &module.functions[2].signature.result.ty else {
-        panic!("result")
+    let Type::Union { variants } = &module.functions[2].signature.result.ty else {
+        panic!("union")
     };
+    let error = variants
+        .iter()
+        .find_map(|ty| match ty {
+            Type::Error { payload } => Some(payload),
+            _ => None,
+        })
+        .unwrap();
     assert!(matches!(error.as_ref(), Type::Union { variants } if variants.len() == 2));
 }

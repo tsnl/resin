@@ -5,10 +5,12 @@ fn owner() -> Ty {
     Ty::StrongOwner
 }
 fn result(value: Ty) -> Ty {
-    Ty::Result {
-        value: Box::new(value),
-        error: Box::new(Ty::union([])),
-    }
+    Ty::union_of([
+        value,
+        Ty::Error {
+            payload: Box::new(Ty::union([])),
+        },
+    ])
 }
 fn pipeline() -> Ty {
     Ty::Defined {

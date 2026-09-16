@@ -142,14 +142,14 @@ fn dependent_receiver_adaptation_preserves_mutation_and_evaluation_order() {
             receiver(trace, value).get().add(argument(trace))
         };
         def read<T>(value: T) -> _ = { value.read() };
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             var trace = 0_i;
             var local = Counter { value = 37 };
             var shared = ArcPtr<Counter>.alloc(Counter { value = 6 })?;
             add(&trace, &local);
             add_owned(&trace, shared);
             print(fmt("{0} {1} {2}", (trace, read(&local), read(shared.get()))));
-            ok(0)
+            (0)
         };
     "#);
     assert!(

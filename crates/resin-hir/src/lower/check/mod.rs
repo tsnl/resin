@@ -836,10 +836,6 @@ impl Expression<'_, '_> {
         self.checker.typing.constrain(self.rule, constraint);
     }
 
-    fn result_parts(&mut self, ty: &Type, span: Span) -> Result<(Type, Type)> {
-        self.checker.typing.result_parts(self.rule, ty, span)
-    }
-
     fn check(&mut self, term: &resin_ast::Term, expected: Option<Type>, out: Type) -> Term {
         let context = self.checker.scopes.capture();
         let checked = self.term_inner(term, expected, out.clone());
@@ -1050,17 +1046,7 @@ impl Expression<'_, '_> {
             resin_ast::TermKind::Try { value } => {
                 let input = self.child(value, None);
                 let result = self.checker.result.clone();
-                if matches!(
-                    self.checker.typing.solver.head(&input.ty),
-                    Type::Node(super::infer::Head::Result, _)
-                ) {
-                    let (value, errors) = self.result_parts(&input.ty, span)?;
-                    let (_, target_errors) = self.result_parts(&result, span)?;
-                    self.constrain((span, Constraint::Errors(errors, target_errors)));
-                    equate = Some(value);
-                } else {
-                    self.constrain((span, Constraint::Try(input.ty.clone(), out.clone(), result)));
-                }
+                self.constrain((span, Constraint::Try(input.ty.clone(), out.clone(), result)));
                 TermKind::Try {
                     value: Box::new(input),
                 }
@@ -1072,9 +1058,7 @@ impl Expression<'_, '_> {
                     self.checker.scopes.push_at(arm.body.span);
                     let payload = self.checker.typing.solver.fresh();
                     let (variant, pattern) = match &arm.variant {
-                        resin_ast::MatchVariant::Wildcard => (None, Pattern::Ok),
-                        resin_ast::MatchVariant::Ok => (None, Pattern::Ok),
-                        resin_ast::MatchVariant::Err => (None, Pattern::Err),
+                        resin_ast::MatchVariant::Wildcard => (None, Pattern::Error),
                         resin_ast::MatchVariant::Error => (None, Pattern::Error),
                         resin_ast::MatchVariant::Type(ty) => {
                             let ann = self.annotation(ty, false);
@@ -1100,7 +1084,6 @@ impl Expression<'_, '_> {
                         wildcard: matches!(arm.variant, resin_ast::MatchVariant::Wildcard),
                         binding,
                         variant,
-                        failure: matches!(arm.variant, resin_ast::MatchVariant::Err),
                         body,
                     });
                     self.checker.scopes.pop();
@@ -1315,20 +1298,6 @@ impl Expression<'_, '_> {
                     TermKind::Layout {
                         ty: ann.into_tree(),
                         size: name.val.as_ref() == "size_of",
-                    }
-                } else if let resin_ast::TermKind::Var { name } = &func.val
-                    && matches!(name.val.as_ref(), "ok" | "err")
-                {
-                    let arg = single_argument(args, span)?;
-                    let (value, errors) = self.result_parts(&out, span)?;
-                    let failure = name.val.as_ref() == "err";
-                    let arg = self.child(arg, if failure { None } else { Some(value) });
-                    if failure {
-                        self.constrain((span, Constraint::Errors(arg.ty.clone(), errors)));
-                    }
-                    TermKind::Result {
-                        failure,
-                        arg: Box::new(arg),
                     }
                 } else if let resin_ast::TermKind::Type { ty } = &func.val
                     && matches!(&ty.val, resin_ast::TypeKind::App { head, .. } if head.val.as_ref() == "Err")

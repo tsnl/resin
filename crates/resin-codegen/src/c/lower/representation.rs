@@ -24,7 +24,7 @@ pub(super) fn descriptor(types: &Types<'_>, ty: &Ty) -> String {
                     descriptor(types, &field.ty);
                 }
             }
-            Ty::Union { .. } | Ty::Result { .. } => {
+            Ty::Union { .. } => {
                 for (_, payload) in ty.payloads().unwrap() {
                     descriptor(types, &payload);
                 }
@@ -122,17 +122,12 @@ pub(super) fn declarations(types: &Types<'_>) -> String {
                         "RECORD"
                     }
                 }
-                Ty::Union { .. } | Ty::Result { .. } => {
+                Ty::Union { .. } => {
                     for (case, payload) in ty.payloads().unwrap() {
                         let tag = types.tag(&case);
-                        let label = match case {
-                            Case::Ok => "ok",
-                            Case::Err => "err",
-                            _ => "",
-                        };
                         fields.push(field(
                             types,
-                            label,
+                            "",
                             &payload,
                             format!("offsetof({name}, payload.v{tag})"),
                             tag,

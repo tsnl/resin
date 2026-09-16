@@ -15,8 +15,12 @@ pub(super) fn project(
 ) -> Result<String, Error> {
     let root = &plan.target;
     let allocate = &types.module.functions[allocator.index()];
-    let ok = types.tag(&Case::Ok);
-    let err = types.tag(&Case::Err);
+    let (_, error) = result.fallible_parts().expect("verified projection result");
+    let allocated = types.tag(&Case::Type(Ty::GpuView));
+    let ok = types.tag(&Case::Type(Ty::GpuArguments));
+    let err = types.tag(&Case::Type(Ty::Error {
+        payload: Box::new(error.clone()),
+    }));
     let root_name = types.name(root);
     writeln!(out, "  {} {name}_result = {{0}};", types.name(result)).unwrap();
     writeln!(
@@ -27,15 +31,15 @@ pub(super) fn project(
         types.copy(&args[0].ty, &args[0].expr)
     )
     .unwrap();
-    writeln!(out, "  if ({name}_allocation.tag == {ok}u) {{").unwrap();
+    writeln!(out, "  if ({name}_allocation.tag == {allocated}u) {{").unwrap();
     // An allocator is source code: validate the returned view against the
     // requested root, even if its body ignored the byte count or alignment.
-    writeln!(out, "    ResinGpuPtr {name}_root_view = resin_gpu_ptr_offset({name}_allocation.payload.v{ok}, 0, sizeof({root_name}), _Alignof({root_name}));").unwrap();
+    writeln!(out, "    ResinGpuPtr {name}_root_view = resin_gpu_ptr_offset({name}_allocation.payload.v{allocated}, 0, sizeof({root_name}), _Alignof({root_name}));").unwrap();
     writeln!(out, "    (void)resin_gpu_ptr_host({name}_root_view, sizeof({root_name}), _Alignof({root_name}), 3u);").unwrap();
-    writeln!(out, "    ResinArc *{name}_projection = resin_gpu_projection_new({name}_allocation.payload.v{ok});").unwrap();
+    writeln!(out, "    ResinArc *{name}_projection = resin_gpu_projection_new({name}_allocation.payload.v{allocated});").unwrap();
     writeln!(
         out,
-        "    resin_arc_release({name}_allocation.payload.v{ok}.owner);"
+        "    resin_arc_release({name}_allocation.payload.v{allocated}.owner);"
     )
     .unwrap();
     writeln!(

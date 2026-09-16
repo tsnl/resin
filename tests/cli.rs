@@ -137,7 +137,7 @@ fn omitted_unit_returns_run_and_reject_non_unit_tails() {
 #[test]
 fn destruction_runs_when_native_status_propagates_to_the_entry() {
     let output = cli(
-        "export { main }; import { \"$/string.resin\", \"$/status.resin\" }; struct Cleanup { def drop(self: Ptr<Cleanup>) = { print(fmt(\"cleanup\\n\", ())); }; };  def main() -> Result<(), _> = { RuntimeStatus.from_code(0)?; var cleanup = Cleanup {}; RuntimeStatus.from_code(8)?; ok(()) };",
+        "export { main }; import { \"$/string.resin\", \"$/status.resin\" }; struct Cleanup { def drop(self: Ptr<Cleanup>) = { print(fmt(\"cleanup\\n\", ())); }; };  def main() -> (() | Err<_>) = { RuntimeStatus.from_code(0)?; var cleanup = Cleanup {}; RuntimeStatus.from_code(8)?; (()) };",
         &[],
     );
     assert_eq!(output.status.code(), Some(1));
@@ -602,13 +602,13 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
             }
         };
         @fragment_shader def fragment(color: Color) -> Color = { color };
-        def main() -> Result<(), _> = {
+        def main() -> (() | Err<_>) = {
             if (0 == 1) {
                 var gpu = Gpu.new()?;
                 gpu.create_compute_pipeline(kernel)?;
                 gpu.create_graphics_pipeline(vertex, fragment)?;
             };
-            ok(())
+            (())
         };
     "#).unwrap();
     let destination = temp
@@ -793,7 +793,7 @@ fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
             }},
         }};
         import {{ "$/string.resin", "$/process.resin", "$/span.resin" }};
-        def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> Result<int, _> = {{
+        def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> (int | Err<_>) = {{
             var name = "RESIN_SNAPSHOT_TEST";
             var empty = "RESIN_SNAPSHOT_EMPTY";
             var missing = "RESIN_SNAPSHOT_MISSING";
@@ -801,11 +801,11 @@ fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
             var status = mutate_environment();
             var after = environment_get(envp, name.data)?;
             var live = c_string(getenv(name.data));
-            var absent = match (environment_get(envp, missing.data)) {{ ok(value) => {{ 1 == 0 }}, err(error) => {{ 1 == 1 }} }};
+            var absent = match (environment_get(envp, missing.data)) {{ Span<ubyte>(value) => {{ 1 == 0 }}, Err(error) => {{ 1 == 1 }} }};
             var env = environment(envp);
             var with_sentinel = Span<Ptr<ubyte>> {{ data = envp, length = env.length + 1_ul }};
             print(fmt("{{0}}/{{1}}/{{2}}\n", (before.bytes(), after.bytes(), live.bytes())));
-            ok(if (status == 0 && absent && environment_get(envp, empty.data)?.length == 0_ul
+            (if (status == 0 && absent && environment_get(envp, empty.data)?.length == 0_ul
                 && env.length >= 2_ul && ulong(with_sentinel.at(env.length)) == 0_ul) {{ 0 }} else {{ 1 }})
         }};"#)).unwrap();
     let output = service
@@ -859,8 +859,8 @@ fn process_entry_signatures_results_and_argument_bounds_are_checked() {
     }
     for (result, body, code) in [
         ("()", "{}", 0),
-        ("Result<int, E>", "ok(7)", 7),
-        ("Result<(), E>", "err(E {})", 1),
+        ("(int | Err<E>)", "(7)", 7),
+        ("(() | Err<E>)", "Err(E {})", 1),
     ] {
         let source = format!(
             "export {{ main }}; struct E {{}}; def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> {result} = {{ {body} }};"

@@ -6,11 +6,11 @@ struct First {};
 struct Second {};
 struct Third {};
 
-def checked(stop: bool, code: uint) -> Result<bool, Stop> = {
+def checked(stop: bool, code: uint) -> (bool | Err<Stop>) = {
 	if (stop) {
-		err(Stop { code = code })
+		Err(Stop { code = code })
 	} else {
-		ok(1_ui == 1_ui)
+		(1_ui == 1_ui)
 	}
 };
 def tag(index: uint) -> First | Second | Third = {
@@ -24,7 +24,7 @@ def tag(index: uint) -> First | Second | Third = {
 		}
 	}
 };
-def evaluate(index: uint) -> Result<uint, Stop> = {
+def evaluate(index: uint) -> (uint | Err<Stop>) = {
 	var limit = if (index == 0_ui) {
 		0_ui
 	} else {
@@ -55,7 +55,7 @@ def evaluate(index: uint) -> Result<uint, Stop> = {
 		};
 		outer := outer + 1_ui;
 	};
-	ok(total + index)
+	(total + index)
 };
 @compute_shader
 def kernel(invocation: ulong, root: Ptr<Root>) = {
@@ -63,10 +63,10 @@ def kernel(invocation: ulong, root: Ptr<Root>) = {
 	if (index < root.count) {
 		var output = Span<uint> { data = root.pixels, length = ulong(root.count) };
 		output.at(invocation) := match (evaluate(index)) {
-			ok(value) => {
+			uint(value) => {
 				value
 			},
-			err(error) => {
+			Err(error) => {
 				error.code
 			}
 		};

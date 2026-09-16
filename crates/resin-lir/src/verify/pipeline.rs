@@ -121,11 +121,7 @@ fn create(
             .collect::<Vec<_>>(),
         location,
     )?;
-    let Ty::Result {
-        value: owner,
-        error,
-    } = &factory.result
-    else {
+    let Some((owner, error)) = factory.result.fallible_parts() else {
         return Err(invalid());
     };
     let metadata =
@@ -135,13 +131,15 @@ fn create(
     } else {
         resin_types::GpuPipelineKind::Graphics
     };
-    if metadata.root != root || metadata.owner != **owner || metadata.kind != kind {
+    if metadata.root != root || metadata.owner != *owner || metadata.kind != kind {
         return Err(invalid());
     }
-    Ok(Ty::Result {
-        value: Box::new(pipeline.clone()),
-        error: error.clone(),
-    })
+    Ok(Ty::union_of([
+        pipeline.clone(),
+        Ty::Error {
+            payload: Box::new(error.clone()),
+        },
+    ]))
 }
 
 fn record_call(
@@ -205,14 +203,14 @@ fn record_call(
             .collect::<Vec<_>>(),
         location,
     )?;
-    let Ty::Result { value, error } = &record.result else {
+    let Some((value, error)) = record.result.fallible_parts() else {
         return Err(invalid());
     };
-    expect_type(Ty::Unit, *value.clone(), location)?;
+    expect_type(Ty::Unit, value.clone(), location)?;
     match (root == &Ty::None, allocator) {
         (true, None) => {}
         (false, Some(allocator)) => expect_type(
-            *error.clone(),
+            error.clone(),
             allocation_error(module, allocator, &context.result, location)?,
             location,
         )?,

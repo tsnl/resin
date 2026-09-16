@@ -363,10 +363,6 @@ fn layout_type(ty: &crate::Type, context: &Context, span: Span, depth: usize) ->
         crate::Type::Error { payload } => Ty::Error {
             payload: Box::new(child(payload)?),
         },
-        crate::Type::Result { value, error } => Ty::Result {
-            value: Box::new(child(value)?),
-            error: Box::new(child(error)?),
-        },
         _ => concrete(ty, span)?,
     })
 }

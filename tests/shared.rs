@@ -14,7 +14,7 @@ def optional_resource(trace: Ptr<int>, digit: int) -> Resource | None = { Resour
 def shared_resource(trace: Ptr<int>, digit: int) -> ArcPtr<Resource> = {
     var optional: ArcPtr<Resource> | None;
     optional := match (ArcPtr<Resource>.alloc(Resource { trace = trace, digit = 0 })) {
-        ok(value) => { value }, err(error) => { None },
+        ArcPtr<Resource>(value) => { value }, Err(error) => { None },
     };
     var owner = optional!;
     owner.get().digit := digit;
@@ -112,19 +112,19 @@ fn shared_assignment_branches_release_every_owner() {
 fn assignment_propagation_tracks_success_and_error_cleanup() {
     run(r#"
     struct Failed {};
-    def acquire(trace: Ptr<int>, fail: bool) -> Result<ArcPtr<Resource>, Failed> = {
-        if (fail) { err(Failed {}) } else { ok(shared_resource(trace, 2)) }
+    def acquire(trace: Ptr<int>, fail: bool) -> (ArcPtr<Resource> | Err<Failed>) = {
+        if (fail) { Err(Failed {}) } else { (shared_resource(trace, 2)) }
     };
-    def work(trace: Ptr<int>, fail: bool) -> Result<(), Failed> = {
+    def work(trace: Ptr<int>, fail: bool) -> (() | Err<Failed>) = {
         var first = shared_resource(trace, 1);
         var pending: ArcPtr<Resource>;
         pending := acquire(trace, fail)?;
-        ok(())
+        (())
     };
     def main() -> int = {
         var trace = 0;
-        var succeeded = match (work(&trace, 1 == 0)) { ok(n) => { 1 == 1 }, err(e) => { 1 == 0 } };
-        var failed = match (work(&trace, 1 == 1)) { ok(n) => { 1 == 0 }, err(e) => { 1 == 1 } };
+        var succeeded = match (work(&trace, 1 == 0)) { ()(n) => { 1 == 1 }, Err(e) => { 1 == 0 } };
+        var failed = match (work(&trace, 1 == 1)) { ()(n) => { 1 == 0 }, Err(e) => { 1 == 1 } };
         if (succeeded && failed && trace == 211) { 0 } else { 1 }
     };
     "#);
@@ -186,11 +186,11 @@ fn generic_record_initializers_preserve_layout_and_cleanup_on_partial_failure() 
     run(r#"
     struct Pair<T> { first: T, second: T };
     struct Failed {};
-    def ready(fail: bool) -> Result<(), Failed> = {
-        if (fail) { err(Failed {}) } else { ok(()) }
+    def ready(fail: bool) -> (() | Err<Failed>) = {
+        if (fail) { Err(Failed {}) } else { (()) }
     };
-    def build<T>(create: (Ptr<int>, int) -> T, trace: Ptr<int>, fail: bool) -> Result<Pair<T>, Failed> = {
-        ok(Pair<T> {
+    def build<T>(create: (Ptr<int>, int) -> T, trace: Ptr<int>, fail: bool) -> (Pair<T> | Err<Failed>) = {
+        (Pair<T> {
             second = create(trace, 2),
             first = {
                 ready(fail)?;
@@ -201,13 +201,13 @@ fn generic_record_initializers_preserve_layout_and_cleanup_on_partial_failure() 
     def main() -> int = {
         var trace = 0;
         var ordered = match (build(shared_resource, &trace, 1 == 0)) {
-            ok(pair) => { pair.first.get().digit == 1 && pair.second.get().digit == 2 },
-            err(error) => { 1 == 0 },
+            Pair<ArcPtr<Resource>>(pair) => { pair.first.get().digit == 1 && pair.second.get().digit == 2 },
+            Err(error) => { 1 == 0 },
         };
         var destroyed = trace == 21;
         var failed = match (build(shared_resource, &trace, 1 == 1)) {
-            ok(pair) => { 1 == 0 },
-            err(error) => { 1 == 1 },
+            Pair<ArcPtr<Resource>>(pair) => { 1 == 0 },
+            Err(error) => { 1 == 1 },
         };
         if (ordered && destroyed && failed && trace == 212) { 0 } else { 1 }
     };
@@ -279,16 +279,16 @@ fn native_wrapper_can_transfer_a_handle_by_disarming_the_source() {
 fn early_errors_destroy_only_acquired_owners() {
     run(r#"
     struct Failed {};
-    def fail() -> Result<int, Failed> = { err(Failed {}) };
-    def work(trace: Ptr<int>) -> Result<Resource, Failed> = {
+    def fail() -> (int | Err<Failed>) = { Err(Failed {}) };
+    def work(trace: Ptr<int>) -> (Resource | Err<Failed>) = {
         var first = Resource.make(trace, 1);
         var second = Resource.make(trace, 2);
         var unused = fail()?;
-        ok(Resource.make(trace, 3))
+        (Resource.make(trace, 3))
     };
     def main() -> int = {
         var trace = 0;
-        var failed = match (work(&trace)) { ok(owner) => { 1 == 0 }, err(error) => { 1 == 1 } };
+        var failed = match (work(&trace)) { Resource(owner) => { 1 == 0 }, Err(error) => { 1 == 1 } };
         if (failed && trace == 21) { 0 } else { 1 }
     };
     "#);
@@ -389,7 +389,7 @@ fn weak_cycles_and_nested_pointer_handle_access() {
         var weak = {
             var optional: ArcPtr<Node> | None;
             optional := match (ArcPtr<Node>.alloc(Node { trace = &trace, live = 1 == 0, parent = WeakPtr<Node>.empty() })) {
-                ok(value) => { value }, err(error) => { None },
+                ArcPtr<Node>(value) => { value }, Err(error) => { None },
             };
             var node = optional!;
             node.get().live := 1 == 1;
@@ -415,7 +415,7 @@ fn source_allocation_copies_shared_initializers_without_cloning_payloads() {
             {
                 var optional: ArcPtr<ArcPtr<Resource>> | None;
                 optional := match (ArcPtr<ArcPtr<Resource>>.alloc(original)) {
-                    ok(value) => { value }, err(error) => { None },
+                    ArcPtr<ArcPtr<Resource>>(value) => { value }, Err(error) => { None },
                 };
                 var nested = optional!;
                 if (nested.get().get().digit != 1 || trace != 0) { trace := 9; };
@@ -518,38 +518,38 @@ fn temporary_single_and_sequence_owners_live_until_scope_exit_and_error_cleanup(
                 if (self.digit != 0_i) { self.trace.* := self.trace.* * 10_i + self.digit; };
             };
         };
-        def single(trace: Ptr<int>) -> Result<ArcPtr<Marker>, OutOfMemory> = {
+        def single(trace: Ptr<int>) -> (ArcPtr<Marker> | Err<OutOfMemory>) = {
             var owner = ArcPtr<Marker>.alloc(Marker { trace = trace, digit = 0_i })?;
             owner.get().digit := 3_i;
-            ok(owner)
+            (owner)
         };
-        def sequence(trace: Ptr<int>) -> Result<ArcSpan<Marker>, OutOfMemory> = {
+        def sequence(trace: Ptr<int>) -> (ArcSpan<Marker> | Err<OutOfMemory>) = {
             var owner = ArcSpan<Marker>.alloc(2_ul, Marker { trace = trace, digit = 0_i })?;
             owner.get().at(0_ul).digit := 1_i;
             owner.get().at(1_ul).digit := 2_i;
-            ok(owner)
+            (owner)
         };
-        def stop_if(fail: bool) -> Result<(), Stop> = {
-            if (fail) { err(Stop {}) } else { ok(()) }
+        def stop_if(fail: bool) -> (() | Err<Stop>) = {
+            if (fail) { Err(Stop {}) } else { (()) }
         };
-        def read(trace: Ptr<int>, fail: bool) -> Result<int, _> = {
+        def read(trace: Ptr<int>, fail: bool) -> (int | Err<_>) = {
             var pointer = single(trace)?.get();
             var span = sequence(trace)?.get();
             // Observe destruction directly: freed bytes could retain old values.
             if (trace.* != 0_i) { trace.* := 1000_i; };
             stop_if(fail)?;
-            ok(pointer.digit + span.at(0_ul).digit + span.at(1_ul).digit)
+            (pointer.digit + span.at(0_ul).digit + span.at(1_ul).digit)
         };
-        def main() -> Result<int, _> = {
+        def main() -> (int | Err<_>) = {
             var trace = 0_i;
             var value = read(&trace, 1 == 0)?;
             var valid = value == 6_i && trace == 213_i;
             trace := 0_i;
             var stopped = match (read(&trace, 1 == 1)) {
-                ok(value) => { 1 == 0 },
-                err(error) => { match (error) { Stop(stop) => { 1 == 1 }, OutOfMemory(error) => { 1 == 0 } } },
+                int(value) => { 1 == 0 },
+                Err(error) => { match (error) { Stop(stop) => { 1 == 1 }, OutOfMemory(error) => { 1 == 0 } } },
             };
-            ok(if (valid && stopped && trace == 213_i) { 0_i } else { 1_i })
+            (if (valid && stopped && trace == 213_i) { 0_i } else { 1_i })
         };
     "#;
     let output = support::project::Project::new(&support::module(source), Some("main"))
@@ -607,10 +607,10 @@ fn pointer_replace_transfers_managed_values_and_leaves_ordinary_names_available(
 fn loop_condition_and_body_errors_preserve_scope_cleanup() {
     run(r#"
     struct Stopped { code: uint };
-    def check(stop: bool) -> Result<(), Stopped> = {
-        if (stop) { err(Stopped { code = 7_ui }) } else { ok(()) }
+    def check(stop: bool) -> (() | Err<Stopped>) = {
+        if (stop) { Err(Stopped { code = 7_ui }) } else { (()) }
     };
-    def exercise(trace: Ptr<int>, mode: int) -> Result<int, Stopped> = {
+    def exercise(trace: Ptr<int>, mode: int) -> (int | Err<Stopped>) = {
         var owner = Resource.make(trace, 1);
         var index = 0;
         while ({
@@ -622,15 +622,15 @@ fn loop_condition_and_body_errors_preserve_scope_cleanup() {
             check(mode == 1)?;
             index := index + 1;
         };
-        ok(trace.*)
+        (trace.*)
     };
     def main() -> int = {
         var condition_trace = 0;
         var body_trace = 0;
         var normal_trace = 0;
-        var a = match (exercise(&condition_trace, 0)) { ok(v) => { 0_ui }, err(e) => { e.code } };
-        var b = match (exercise(&body_trace, 1)) { ok(v) => { 0_ui }, err(e) => { e.code } };
-        var c = match (exercise(&normal_trace, 2)) { ok(v) => { v }, err(e) => { 0 } };
+        var a = match (exercise(&condition_trace, 0)) { int(v) => { 0_ui }, Err(e) => { e.code } };
+        var b = match (exercise(&body_trace, 1)) { int(v) => { 0_ui }, Err(e) => { e.code } };
+        var c = match (exercise(&normal_trace, 2)) { int(v) => { v }, Err(e) => { 0 } };
         if (a == 7_ui && b == 7_ui && c == 232 &&
             condition_trace == 21 && body_trace == 231 && normal_trace == 2321) { 0 } else { 1 }
     };

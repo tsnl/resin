@@ -333,10 +333,6 @@ impl Substitution {
             resin_hir::Type::Error { payload } => resin_hir::Type::Error {
                 payload: Box::new(self.normalize_at(payload, depth + 1, state, instances)?),
             },
-            resin_hir::Type::Result { value, error } => resin_hir::Type::Result {
-                value: Box::new(self.normalize_at(value, depth + 1, state, instances)?),
-                error: Box::new(self.normalize_at(error, depth + 1, state, instances)?),
-            },
             resin_hir::Type::Array { element, length } => resin_hir::Type::Array {
                 element: Box::new(self.normalize_at(element, depth + 1, state, instances)?),
                 length: *length,
@@ -427,14 +423,6 @@ fn materialize(
         resin_hir::Type::Error { payload } => Ty::Error {
             payload: Box::new(materialize(payload, instances)?),
         },
-        resin_hir::Type::Result { value, error } => {
-            let value = materialize(value, instances)?;
-            let error = materialize(error, instances)?;
-            Ty::Result {
-                value: Box::new(value),
-                error: Box::new(error),
-            }
-        }
         resin_hir::Type::Array { element, length } => Ty::Array {
             element: Box::new(materialize(element, instances)?),
             length: *length,
@@ -493,10 +481,6 @@ fn expression(source: &Ty, instances: &super::instances::Instances<'_>) -> resin
         },
         Ty::Error { payload } => resin_hir::Type::Error {
             payload: Box::new(expression(payload, instances)),
-        },
-        Ty::Result { value, error } => resin_hir::Type::Result {
-            value: Box::new(expression(value, instances)),
-            error: Box::new(expression(error, instances)),
         },
         Ty::Array { element, length } => resin_hir::Type::Array {
             element: Box::new(expression(element, instances)),
@@ -582,10 +566,6 @@ fn check_size(
             check_size(result, depth + 1, remaining)?;
         }
         resin_hir::Type::Error { payload } => check_size(payload, depth + 1, remaining)?,
-        resin_hir::Type::Result { value, error } => {
-            check_size(value, depth + 1, remaining)?;
-            check_size(error, depth + 1, remaining)?;
-        }
         resin_hir::Type::Array { element, .. } => check_size(element, depth + 1, remaining)?,
         resin_hir::Type::Record { fields } => {
             for field in fields {

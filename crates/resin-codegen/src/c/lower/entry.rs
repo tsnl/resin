@@ -12,15 +12,14 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
         if argc.ty == Ty::Int32 && string_array(&argv.ty) && string_array(&envp.ty));
     if function.foreign.is_some()
         || !(parameters.is_empty() || process_inputs)
-        || (!matches!(function.result, Ty::Result { .. })
-            && !function
-                .result
-                .members()
-                .iter()
-                .all(|ty| matches!(ty, Ty::Unit | Ty::Int32 | Ty::Error { .. })))
+        || !function
+            .result
+            .members()
+            .iter()
+            .all(|ty| matches!(ty, Ty::Unit | Ty::Int32 | Ty::Error { .. }))
     {
         return Err(Error(format!(
-            "entry function `{entry}` must be a Resin function, take () or (int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>), and return int, (), or Result of either"
+            "entry function `{entry}` must be a Resin function, take () or (int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>), and return int, (), or a union of those with Err<E>"
         )));
     }
     let setup = if process_inputs {
@@ -66,26 +65,6 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
         }
         out.push_str("  resin_fail(\"invalid entry result tag\"); return 1;\n");
         return Ok(out);
-    }
-    if let Ty::Result { value, error } = &function.result {
-        if !matches!(value.as_ref(), Ty::Unit | Ty::Int32) {
-            return Err(Error(
-                "Result entry points must have an int or () success type".into(),
-            ));
-        }
-        let descriptor = super::representation::descriptor(types, error);
-        let success = if value.as_ref() == &Ty::Unit {
-            "0"
-        } else {
-            "r_result.payload.v0"
-        };
-        let mut cleanup = String::new();
-        types.drop_value(&function.result, "r_result", &mut cleanup);
-        return Ok(format!(
-            "{setup}  {} r_result = r_fn{}({argument});\n  if (r_result.tag == 1u) {{ resin_report_error(&{descriptor}, &r_result.payload.v1); {cleanup} return 1; }}\n  return {success};\n",
-            types.name(&function.result),
-            id.index()
-        ));
     }
     Ok(if function.result == Ty::Unit {
         format!("{setup}  r_fn{}({argument});\n  return 0;\n", id.index())

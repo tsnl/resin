@@ -211,8 +211,6 @@ fn sexp_term(term: &Term) -> SExp {
             items.extend(arms.iter().map(|arm| {
                 let variant = match &arm.variant {
                     MatchVariant::Wildcard => symbol("_"),
-                    MatchVariant::Ok => symbol("ok"),
-                    MatchVariant::Err => symbol("err"),
                     MatchVariant::Error => symbol("Err"),
                     MatchVariant::Type(ty) => sexp_typespec(ty),
                 };
@@ -313,11 +311,6 @@ fn sexp_typespec(ts: &Type) -> SExp {
             "union-type",
             ts.span,
             vec![sexp_typespec(left), sexp_typespec(right)],
-        ),
-        TypeKind::Result { value, error } => list_sp(
-            "result-type",
-            ts.span,
-            vec![sexp_typespec(value), sexp_typespec(error)],
         ),
         TypeKind::Hole => list_sp("type-hole", ts.span, vec![]),
         TypeKind::Infer => list_sp("infer-type", ts.span, vec![]),

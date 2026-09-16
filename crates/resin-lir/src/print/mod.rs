@@ -392,9 +392,6 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
                 .collect(),
         ),
         Ty::Error { payload } => list("Err", vec![sexp_ty(names, payload)]),
-        Ty::Result { value, error } => {
-            list("result", vec![sexp_ty(names, value), sexp_ty(names, error)])
-        }
         Ty::Type => symbol("type"),
         Ty::Unit => symbol("unit"),
         Ty::None => symbol("None"),
@@ -469,8 +466,6 @@ fn symbol(s: impl Into<String>) -> SExp {
 
 fn sexp_case(names: &Names, case: &Case) -> SExp {
     match case {
-        Case::Ok => symbol("ok"),
-        Case::Err => symbol("err"),
         Case::Type(ty) => sexp_ty(names, ty),
     }
 }

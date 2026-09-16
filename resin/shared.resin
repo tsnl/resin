@@ -8,13 +8,13 @@ import { "status.resin", "span.resin" };
 // resource payloads, allocate an inert value and initialize through get().
 struct ArcPtr<T> {
 	owner: StrongOwner,
-	def alloc(initial: T) -> Result<ArcPtr<T>, OutOfMemory> = {
+	def alloc(initial: T) -> (ArcPtr<T> | Err<OutOfMemory>) = {
 		match (owner_allocate(1_ul, initial)) {
 			StrongOwner(owner) => {
-				ok(ArcPtr<T> { owner = owner })
+				(ArcPtr<T> { owner = owner })
 			},
 			None => {
-				err(OutOfMemory {})
+				Err(OutOfMemory {})
 			},
 		}
 	};
@@ -28,13 +28,13 @@ struct ArcPtr<T> {
 
 struct ArcSpan<T> {
 	owner: StrongOwner,
-	def alloc(count: ulong, initial: T) -> Result<ArcSpan<T>, OutOfMemory> = {
+	def alloc(count: ulong, initial: T) -> (ArcSpan<T> | Err<OutOfMemory>) = {
 		match (owner_allocate(count, initial)) {
 			StrongOwner(owner) => {
-				ok(ArcSpan<T> { owner = owner })
+				(ArcSpan<T> { owner = owner })
 			},
 			None => {
-				err(OutOfMemory {})
+				Err(OutOfMemory {})
 			},
 		}
 	};

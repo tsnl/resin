@@ -182,7 +182,7 @@ method identities, and destruction hooks in HIR. HIR has no concrete interner;
 its constants and type expressions use its own language rather than concrete
 storage values and a `resin_types::TypeTable`.
 
-HIR remains a tree: `If`, `While`, blocks, matches, Result propagation, places,
+HIR remains a tree: `If`, `While`, blocks, matches, error propagation, places,
 and values retain their structure. Completing each body also establishes definite
 initialization, including unused definitions. Parameters and pattern bindings begin
 initialized; local initializers cannot read or address their own binding. Assignment
@@ -265,7 +265,7 @@ a pointer. Expansion has separate HIR limits of 256 levels and 65,536 nodes.
 
 Persistent scopes store completed HIR schemes for imports, navigation, and hover.
 HIR keeps one body per source definition, including symbolic literals, arithmetic,
-fields, casts, layouts, and Result payloads. Error holes accumulate unions of symbolic
+fields, casts, layouts, and Err payloads. Error holes accumulate unions of symbolic
 contributors; applications substitute the current contributors until the dependency
 group reaches a fixed point. Only then do unseeded error sets become `Never`.
 Concrete operation support and determining field types are resolved during LIR
@@ -381,7 +381,7 @@ use resin_source::{Source, SourceGraph};
 use std::{collections::BTreeMap, sync::Arc};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn main() -> (() | Err<Box<dyn std::error::Error + Send + Sync>>) {
     let execution = Execution::default();
     let cancellation = Cancellation::new();
     let source = Source::new("example.resin", "export { main }; def main() -> int = { 42 };");

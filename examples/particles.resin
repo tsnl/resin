@@ -279,7 +279,7 @@ def apply_camera(camera: Camera, params: Ptr<HostParams>) = {
 	params.zoom := camera.zoom;
 };
 
-def main() -> Result<(), _> = {
+def main() -> (() | Err<_>) = {
 	var count = 1000000_ui;
 	var title = "Resin | 1,000,000 particles | Drag: orbit | Scroll: zoom | Home: reset view | Space: pause | R: reseed | Esc: quit";
 	var window = Window.new(1280, 800, String.from_str(title))?;
@@ -375,5 +375,5 @@ def main() -> Result<(), _> = {
 		window.poll_events()?;
 	};
 	print("particles demo complete\n");
-	ok(())
+	(())
 };

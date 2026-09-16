@@ -218,10 +218,6 @@ pub enum Type {
     Error {
         payload: Box<Type>,
     },
-    Result {
-        value: Box<Type>,
-        error: Box<Type>,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -307,8 +303,6 @@ pub enum Case {
     },
     /// Final arm covering any remaining variants after specialization. No binding.
     Wildcard,
-    Ok,
-    Err,
     Type {
         ty: Type,
     },
@@ -479,10 +473,6 @@ pub enum TermKind {
         allocator: Option<FunctionId>,
         record: FunctionId,
         args: Arguments,
-    },
-    Result {
-        failure: bool,
-        arg: Box<Term>,
     },
     Absurd {
         arg: Box<Term>,
@@ -988,7 +978,6 @@ fn builtin_hover(document: &resin_cst::Document, token: resin_cst::Node<'_>) -> 
                 | "GpuPipelineContract"
                 | "GpuView"
                 | "GpuArguments"
-                | "Result"
                 | "Err"
                 | "None"
                 | "true"
@@ -1133,11 +1122,6 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
         DefinitionKind::Type,
     ),
     (
-        "Result",
-        "Result<T, E> — success or a typed error; postfix ? propagates errors.",
-        DefinitionKind::Type,
-    ),
-    (
         "Err",
         "Err<E> wraps an error payload; construct it with Err(value).",
         DefinitionKind::Type,
@@ -1146,16 +1130,6 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
         "Never",
         "Never — the empty union, with no possible values.",
         DefinitionKind::Type,
-    ),
-    (
-        "ok",
-        "ok(value) — construct a successful Result.",
-        DefinitionKind::Function,
-    ),
-    (
-        "err",
-        "err(error) — construct a failed Result.",
-        DefinitionKind::Function,
     ),
     (
         "struct",
