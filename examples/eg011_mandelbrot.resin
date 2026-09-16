@@ -92,17 +92,17 @@ struct Mandelbrot {
 		var mandelbrot = Mandelbrot.new(128);
 
 		if (mandelbrot.escapes_ball(Complex.zero())) {
-			err(TestError { message = "c=0 should never escape" })
+			err(TestError { message = String.from_str("c=0 should never escape") })
 		} else if (mandelbrot.escapes_ball(Complex.new(-1.0, 0.0))) {
-			err("c=-1 should never escape")
+			err(TestError { message = String.from_str("c=-1 should never escape") })
 		} else if (mandelbrot.escapes_ball(Complex.new(-2.0, 0.0))) {
-			err("c=-2 should never escape")
+			err(TestError { message = String.from_str("c=-2 should never escape") })
 		} else if (mandelbrot.escapes_ball(Complex.new(0.0, 1.0))) {
-			err("c=i should never escape")
+			err(TestError { message = String.from_str("c=i should never escape") })
 		} else if (!mandelbrot.escapes_ball(Complex.new(1.0, 0.0))) {
-			err("c=1 should escape")
+			err(TestError { message = String.from_str("c=1 should escape") })
 		} else if (!mandelbrot.escapes_ball(Complex.new(2.0, 0.0))) {
-			err("c=2 should escape")
+			err(TestError { message = String.from_str("c=2 should escape") })
 		} else {
 			ok(())
 		}
