@@ -27,7 +27,7 @@ fn dependent_methods_retain_the_receiver_and_determining_result() {
     let Type::Method { lookup } = function.as_ref() else {
         panic!("method type relation")
     };
-    assert_eq!(lookup.name.as_ref(), "read");
+    assert_eq!(lookup.name, "read".into());
     assert_eq!(
         lookup.receiver,
         Type::Parameter {
@@ -73,7 +73,7 @@ fn dependent_associated_references_retain_explicit_method_arguments() {
         panic!("associated method reference")
     };
     assert!(lookup.associated);
-    assert_eq!(lookup.name.as_ref(), "make");
+    assert_eq!(lookup.name, "make".into());
     assert_eq!(
         lookup.type_args,
         [Type::Parameter {

@@ -600,6 +600,29 @@ impl Generator {
         let definition = method.owner;
         self.typer.method_owners.insert(declaration, definition);
         scopes.record_method_definition(definition, declaration);
+        let short = name.val.rsplit('.').next().unwrap();
+        if let Some(crate::MethodName::Operator { arity, .. }) =
+            crate::MethodName::operator_for_method(short)
+        {
+            if params.len() != arity {
+                return Err(GenerateError::inference(
+                    name.span,
+                    "operator has an invalid number of operands",
+                ));
+            }
+            if !type_params.is_empty() {
+                return Err(GenerateError::inference(
+                    name.span,
+                    "operator methods inherit their owner's type parameters and cannot declare additional ones",
+                ));
+            }
+            if !decorators.is_empty() {
+                return Err(GenerateError::inference(
+                    name.span,
+                    "operator methods cannot have shader or GPU bridge decorators",
+                ));
+            }
+        }
         if decorators
             .iter()
             .any(|decorator| !gpu::is_bridge(&decorator.val))
@@ -692,8 +715,39 @@ impl Generator {
         function: FunctionId,
     ) -> Result<(), GenerateError> {
         let short = name.val.rsplit('.').next().unwrap();
+        let operator = crate::MethodName::operator_for_method(short);
+        if let Some(crate::MethodName::Operator { symbol, arity }) = &operator {
+            let signature = &self.function(function).signature;
+            let expected = crate::Type::Defined {
+                definition: owner,
+                arguments: self.typer.nominal_schemes[&owner]
+                    .type_params
+                    .iter()
+                    .map(|p| crate::Type::Parameter { parameter: p.id })
+                    .collect(),
+            };
+            if signature.params.len() != *arity
+                || signature.params.first().map(|p| &p.annotation.ty) != Some(&expected)
+            {
+                return Err(GenerateError::inference(
+                    name.span,
+                    "an operator's first operand must be its owning struct by value",
+                ));
+            }
+            if matches!(symbol.as_ref(), "!" | "==" | "!=" | "<" | "<=" | ">" | ">=")
+                && signature.result.ty != crate::Type::Bool
+            {
+                return Err(GenerateError::inference(
+                    name.span,
+                    "comparison and logical-not operators must return bool",
+                ));
+            }
+        }
         if !self.typer.define_method(owner, short.into(), function) {
             return Err(GenerateError::inference(name.span, "duplicate method"));
+        }
+        if let Some(operator) = operator {
+            self.typer.define_method(owner, operator, function);
         }
         if short == "drop" {
             self.register_drop(owner, name, function)?;

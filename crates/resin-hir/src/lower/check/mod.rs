@@ -122,6 +122,10 @@ struct Checker<'a> {
     expressions: Vec<(Span, Type)>,
     result: Type,
     iota: Option<usize>,
+    // Eager self-reference is invalid independently of operator inference.
+    // Layout operands are checked for types only and do not access storage.
+    initializers: Vec<DeclarationId>,
+    unevaluated: bool,
 }
 impl<'a> Checker<'a> {
     fn new(typer: &'a mut Context, scopes: Scopes) -> Self {
@@ -134,6 +138,8 @@ impl<'a> Checker<'a> {
             expressions: vec![],
             result: Ty::Unit.into(),
             iota: None,
+            initializers: vec![],
+            unevaluated: false,
         }
     }
 }
@@ -170,6 +176,14 @@ impl Checker<'_> {
                         name: name.val.clone(),
                     },
                 })?;
+        if !self.unevaluated && self.initializers.contains(&declaration) {
+            return Err(GenerateError {
+                span: name.span,
+                kind: GenerateErrorKind::EagerRecursion {
+                    name: name.val.clone(),
+                },
+            });
+        }
         if !function {
             if explicit.is_some() {
                 return Err(GenerateError::inference(
@@ -446,8 +460,9 @@ impl Checker<'_> {
         if let Some(owner) = owner
             && matches!(stmt, StmtKind::Function { decorators, .. } if decorators.is_empty())
         {
-            self.typing.typer.source_methods.insert(
-                (owner, name.val.rsplit('.').next().unwrap().into()),
+            self.typing.typer.define_source_method(
+                owner,
+                name.val.rsplit('.').next().unwrap(),
                 super::context::SourceMethod {
                     declaration: id,
                     type_params: signature.type_params[owner_parameters.len()..].to_vec(),
@@ -507,7 +522,7 @@ impl Checker<'_> {
         }
     }
 
-    fn method_dependencies(&mut self, name: &str) {
+    fn method_dependencies(&mut self, name: &crate::MethodName) {
         // Receiver ownership may depend on an earlier call's inferred result.
         // Include same-name candidates until solving selects the nominal owner.
         self.dependencies.extend(
@@ -515,7 +530,7 @@ impl Checker<'_> {
                 .typer
                 .source_methods
                 .iter()
-                .filter(|((_, candidate), _)| candidate.as_ref() == name)
+                .filter(|((_, candidate), _)| candidate == name)
                 .map(|(_, method)| method.declaration),
         );
     }
@@ -777,7 +792,7 @@ impl Expression<'_, '_> {
         type_args: Option<Vec<Type>>,
         out: Type,
     ) -> TermKind {
-        self.checker.method_dependencies(&name.val);
+        self.checker.method_dependencies(&name.val.clone().into());
         self.checker
             .scopes
             .record_members(name.span, receiver_type.ty.clone(), true);
@@ -1115,11 +1130,27 @@ impl Expression<'_, '_> {
                 equate = Some(Type::Node(Head::Array(elems.len()), vec![element]));
                 TermKind::Array { elems }
             }
-            resin_ast::TermKind::Builtin { name, args } => {
+            resin_ast::TermKind::Builtin {
+                name,
+                name_span,
+                args,
+            } => {
+                self.checker
+                    .method_dependencies(&crate::MethodName::Operator {
+                        symbol: name.clone(),
+                        arity: args.len(),
+                    });
                 let args = args
                     .iter()
                     .map(|arg| self.child(arg, None))
                     .collect::<Vec<_>>();
+                self.checker.scopes.record_call(
+                    &Ident::new(name.clone(), *name_span),
+                    args[0].ty.clone(),
+                    args.iter().map(|arg| arg.ty.clone()).collect(),
+                    true,
+                    self.rule,
+                );
                 self.constrain((
                     span,
                     Constraint::Builtin(
@@ -1129,6 +1160,8 @@ impl Expression<'_, '_> {
                     ),
                 ));
                 TermKind::Builtin {
+                    rule: self.rule,
+                    name_span: *name_span,
                     name: name.clone(),
                     args,
                 }
@@ -1152,7 +1185,7 @@ impl Expression<'_, '_> {
                     )?;
                 }
                 let type_args = (!arguments.is_empty()).then_some(arguments);
-                self.checker.method_dependencies(&name.val);
+                self.checker.method_dependencies(&name.val.clone().into());
                 let (receiver, annotation, receiver_type, associated) =
                     if let resin_ast::TermKind::Type { ty } = &receiver.val {
                         let annotation = self.annotation(ty, false);
@@ -1214,7 +1247,9 @@ impl Expression<'_, '_> {
                     let ann = if let resin_ast::TermKind::Type { ty } = &arg.val {
                         self.annotation(ty, false)
                     } else {
+                        let unevaluated = std::mem::replace(&mut self.checker.unevaluated, true);
                         let term = self.child(arg, None);
+                        self.checker.unevaluated = unevaluated;
                         Annotation {
                             holes: Vec::new(),
                             ty: term.ty,
@@ -1255,7 +1290,7 @@ impl Expression<'_, '_> {
                     super::eval::reference_type(&self.checker.typing.solver, &ann.ty, false, span)?;
                     let arg = {
                         let literal = matches!(arg.val, resin_ast::TermKind::Num { .. })
-                            || matches!(&arg.val, resin_ast::TermKind::Builtin { name, args } if matches!(name.as_ref(), "+" | "-") && matches!(args.as_slice(), [resin_ast::Term { val: resin_ast::TermKind::Num { .. }, .. }]));
+                            || matches!(&arg.val, resin_ast::TermKind::Builtin { name, args, .. } if matches!(name.as_ref(), "+" | "-") && matches!(args.as_slice(), [resin_ast::Term { val: resin_ast::TermKind::Num { .. }, .. }]));
                         let arg = self.child(arg, None);
                         self.constrain((
                             span,
@@ -1389,7 +1424,13 @@ impl Expression<'_, '_> {
                     .bind(name, ty.clone(), DefinitionKind::Variable)
                     .map_err(|error| self.checker.errors.push(error))
                     .ok();
+                if let Some(binding) = binding {
+                    self.checker.initializers.push(binding);
+                }
                 let init = self.child(init, Some(ty));
+                if binding.is_some() {
+                    self.checker.initializers.pop();
+                }
                 if let Some(binding) = binding {
                     let binding_type = if ann.is_some() {
                         init.ty.clone()

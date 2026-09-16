@@ -277,7 +277,7 @@ fn sexp_term(term: &Term) -> SExp {
             term.span,
             vec![sexp_term(func), group(args.iter().map(sexp_term).collect())],
         ),
-        TermKind::Builtin { name, args } => list_sp(
+        TermKind::Builtin { name, args, .. } => list_sp(
             "builtin",
             term.span,
             vec![

@@ -195,7 +195,38 @@ impl Completion<'_> {
                     .map(|e| self.elaborate(e))
                     .collect::<Result<_>>()?,
             },
-            typed::TermKind::Builtin { name, args } => self.builtin(source, name, args)?,
+            typed::TermKind::Builtin {
+                rule,
+                name,
+                name_span,
+                args,
+            } => match self.methods.get(rule).cloned() {
+                Some(ResolvedMethod::Dependent { signature }) => TermKind::DependentMethodCall {
+                    lookup: self.method_lookup(&signature, source.span)?,
+                    receiver: None,
+                    args: args
+                        .iter()
+                        .enumerate()
+                        .map(|(index, arg)| {
+                            self.argument(
+                                arg,
+                                &Type::Node(
+                                    super::infer::Head::FunctionParameter { index },
+                                    vec![signature.clone()],
+                                ),
+                            )
+                        })
+                        .collect::<Result<_>>()?,
+                },
+                Some(method @ ResolvedMethod::Source { .. }) => self.source_method_call(
+                    &method,
+                    None,
+                    &Ident::new(name.clone(), *name_span),
+                    args,
+                )?,
+                None => self.builtin(source, name, args)?,
+                _ => unreachable!("operator resolution"),
+            },
             typed::TermKind::MethodCall {
                 rule,
                 receiver,

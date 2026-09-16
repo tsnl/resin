@@ -11,23 +11,33 @@ pub(super) fn token(document: &Document, offset: usize) -> Option<Node<'_>> {
             .root_node()
             .descendant_for_byte_range(at, at)?;
         if contains(span(node), offset)
-            && matches!(
-                node.kind(),
-                "lid"
-                    | "tuple_index"
-                    | "uid"
-                    | "builtin_type"
-                    | "string"
-                    | "comment"
-                    | "Ptr"
-                    | "Ref"
-                    | "sizeof"
-            )
+            && (operator(node)
+                || matches!(
+                    node.kind(),
+                    "lid"
+                        | "tuple_index"
+                        | "uid"
+                        | "builtin_type"
+                        | "string"
+                        | "comment"
+                        | "Ptr"
+                        | "Ref"
+                        | "sizeof"
+                ))
         {
             return Some(node);
         }
     }
     None
+}
+
+fn operator(node: Node<'_>) -> bool {
+    node.parent().is_some_and(|parent| {
+        matches!(parent.kind(), "binary_term" | "unary_term")
+            && parent
+                .child_by_field_name("operator")
+                .is_some_and(|operator| operator.id() == node.id())
+    })
 }
 
 pub(super) fn reference(node: Node<'_>) -> bool {

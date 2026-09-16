@@ -12,23 +12,35 @@ use std::{
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Context {
     pub(super) typer: TyperContext,
-    pub(super) namespaces: BTreeMap<TypeId, BTreeMap<Arc<str>, FunctionId>>,
+    pub(super) namespaces: BTreeMap<TypeId, BTreeMap<crate::MethodName, FunctionId>>,
     pub(super) nominal_schemes: BTreeMap<TypeId, crate::TypeDefinition>,
     pub(super) method_owners: BTreeMap<super::scope::DeclarationId, TypeId>,
-    pub(super) source_methods: BTreeMap<(TypeId, Arc<str>), SourceMethod>,
+    pub(super) source_methods: BTreeMap<(TypeId, crate::MethodName), SourceMethod>,
     pub(super) functions: BTreeMap<FunctionId, FunctionDecl>,
     pub(super) gpu_allocators: BTreeMap<TypeId, FunctionId>,
     pub(super) gpu_pipeline_contexts: BTreeMap<TypeId, FunctionId>,
 }
 impl Context {
-    pub(crate) fn source_method(&self, owner: TypeId, name: &str) -> Option<&SourceMethod> {
-        self.source_methods.get(&(owner, name.into()))
+    pub(super) fn define_source_method(&mut self, owner: TypeId, name: &str, method: SourceMethod) {
+        if let Some(operator) = crate::MethodName::operator_for_method(name) {
+            self.source_methods
+                .insert((owner, operator), method.clone());
+        }
+        self.source_methods.insert((owner, name.into()), method);
+    }
+
+    pub(crate) fn source_method(
+        &self,
+        owner: TypeId,
+        name: &crate::MethodName,
+    ) -> Option<&SourceMethod> {
+        self.source_methods.get(&(owner, name.clone()))
     }
 
     pub(crate) fn source_methods_for(
         &self,
         owner: TypeId,
-    ) -> impl Iterator<Item = (&Arc<str>, &SourceMethod)> {
+    ) -> impl Iterator<Item = (&crate::MethodName, &SourceMethod)> {
         self.source_methods
             .iter()
             .filter_map(move |((definition, name), method)| {
@@ -221,7 +233,7 @@ impl Context {
     pub(crate) fn define_method(
         &mut self,
         ty: TypeId,
-        name: Arc<str>,
+        name: crate::MethodName,
         function: FunctionId,
     ) -> bool {
         match self
@@ -263,7 +275,9 @@ impl Context {
             .and_then(|id| self.namespaces.get(&id))
         {
             for (name, id) in namespace {
-                if let Some(function) = self.functions.get(id) {
+                if let crate::MethodName::Named { name } = name
+                    && let Some(function) = self.functions.get(id)
+                {
                     methods.push((name.clone(), function.clone()));
                 }
             }

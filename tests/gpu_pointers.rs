@@ -248,6 +248,42 @@ fn projected_scalar_and_span_arguments_dispatch_and_allow_readback_after_submit(
 }
 
 #[test]
+fn generic_operator_overloads_execute_on_the_gpu() {
+    let source = r#"
+        export { main };
+        import { "$/gpu.resin", "$/span.resin" };
+        struct Cell<T> { value: T,
+            def __add__(a: Cell<T>, b: Cell<T>) -> Cell<T> = { Cell<T> { value = a.value + b.value } };
+        };
+        struct Parameters { values: Span<Cell<uint>> };
+        def add<T>(a: T, b: T) -> _ = { a + b };
+        @compute_shader def kernel(index: ulong, root: Ptr<Parameters>) = {
+            if (index < root.values.length) {
+                var cell: Ref<Cell<uint>> = root.values.at(index);
+                cell := add(cell, Cell<uint> { value = 40 });
+            };
+        };
+        def main() -> Result<int, _> = {
+            var gpu = Gpu.new()?;
+            var values = gpu.alloc::<Cell<uint>>(3)?;
+            var index = 0_ul;
+            while (index < values.length) {
+                values.at(index).store(Cell<uint> { value = uint(index) });
+                index := index + 1;
+            };
+            var pipeline = gpu.create_compute_pipeline(kernel)?;
+            var commands = gpu.start_command_recording()?;
+            commands.dispatch(pipeline, { values = values }, 1_ui, 1_ui, 1_ui)?;
+            commands.submit()?;
+            ok(if (values.at(0).load().value == 40 && values.at(1).load().value == 41
+                && values.at(2).load().value == 42) { 0 } else { 1 })
+        };
+    "#;
+    let Some(output) = run(source) else { return };
+    success(&output);
+}
+
+#[test]
 fn source_sequences_project_offsets_and_retain_resources_through_submit() {
     let Some(output) = run(r#"
         export { main };

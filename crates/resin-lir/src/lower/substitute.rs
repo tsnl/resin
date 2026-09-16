@@ -28,10 +28,19 @@ pub(super) struct Substitution {
 }
 
 pub(super) struct ResolvedMethod {
-    pub(super) function: FunctionId,
-    pub(super) arguments: Vec<resin_hir::Type>,
+    pub(super) target: MethodTarget,
     pub(super) params: Vec<resin_hir::Type>,
     pub(super) result: resin_hir::Type,
+}
+
+pub(super) enum MethodTarget {
+    Source {
+        function: FunctionId,
+        arguments: Vec<resin_hir::Type>,
+    },
+    Primitive {
+        symbol: std::sync::Arc<str>,
+    },
 }
 
 impl Substitution {
@@ -87,7 +96,40 @@ impl Substitution {
         instances: &mut super::instances::Instances<'_>,
     ) -> Result<ResolvedMethod, super::LowerError> {
         consume_node(depth, &mut state.remaining)?;
+        if let resin_hir::MethodName::Operator { symbol, arity } = &lookup.name
+            && (resin_hir::MethodName::operator(symbol, *arity).is_none()
+                || !lookup.associated
+                || !lookup.type_args.is_empty())
+        {
+            return Err(super::LowerError::invalid_hir(
+                Span { start: 0, end: 0 },
+                "operator lookup requires a supported symbol and arity, all operands, and no method type arguments",
+            ));
+        }
         let receiver = self.normalize_at(&lookup.receiver, depth + 1, state, instances)?;
+        if let resin_hir::MethodName::Operator { symbol, arity } = &lookup.name
+            && !matches!(receiver, resin_hir::Type::Defined { .. })
+        {
+            let ty = materialize(&receiver, instances)?;
+            let call = instances
+                .typer()
+                .type_builtin_call(symbol, &vec![ty; *arity])
+                .map_err(|error| super::LowerError::typing(Span { start: 0, end: 0 }, error))?;
+            // Primitive arithmetic preserves its operand type. Comparisons and
+            // logical not produce bool; neither relationship needs inference.
+            let result = if call.result == Ty::Bool {
+                resin_hir::Type::Bool
+            } else {
+                receiver.clone()
+            };
+            return Ok(ResolvedMethod {
+                target: MethodTarget::Primitive {
+                    symbol: symbol.clone(),
+                },
+                params: vec![receiver; *arity],
+                result,
+            });
+        }
         let (function, signature, mut arguments) = instances.method(&receiver, &lookup.name)?;
         let count = signature
             .type_params
@@ -163,8 +205,10 @@ impl Substitution {
             let result =
                 substitution.normalize_at(&signature.result.ty, depth + 1, state, instances)?;
             Ok(ResolvedMethod {
-                function,
-                arguments,
+                target: MethodTarget::Source {
+                    function,
+                    arguments,
+                },
                 params,
                 result,
             })

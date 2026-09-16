@@ -15,7 +15,7 @@ fn method_schemes_keep_owner_binders_before_additional_method_binders() {
         .iter()
         .find(|definition| definition.name.as_ref() == "Cell")
         .unwrap();
-    let method_id = owner.methods["choose"];
+    let method_id = owner.methods[&"choose".into()];
     let method = &module.functions[method_id.index()];
     assert_eq!(method.signature.type_params.len(), 2);
     assert_eq!(method.signature.type_params[0].id, owner.type_params[0].id);
@@ -57,7 +57,7 @@ fn different_owner_applications_retain_one_polymorphic_method_body() {
         .iter()
         .find(|definition| definition.name.as_ref() == "Cell")
         .unwrap();
-    let method = &module.functions[owner.methods["read"].index()];
+    let method = &module.functions[owner.methods[&"read".into()].index()];
     assert_eq!(method.signature.type_params.len(), 1);
     assert_eq!(
         method.signature.result.ty,
@@ -102,7 +102,7 @@ fn drop_hooks_bind_only_their_owner_parameters() {
         .find(|definition| definition.name.as_ref() == "Cell")
         .unwrap();
     let drop = &module.functions[owner.drop.unwrap().index()];
-    assert_eq!(owner.drop, Some(owner.methods["drop"]));
+    assert_eq!(owner.drop, Some(owner.methods[&"drop".into()]));
     assert_eq!(drop.signature.type_params.len(), 1);
     assert_eq!(drop.signature.type_params[0].id, owner.type_params[0].id);
     assert_eq!(drop.signature.result.ty, Type::Unit);
