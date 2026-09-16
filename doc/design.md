@@ -1,5 +1,9 @@
 # Resin design
 
+The [browser-first WebGPU migration plan](webgpu-plan.md) proposes a portable
+backend, struct-derived resource bindings, and software ray queries alongside
+the existing Vulkan backend. It describes planned work, not current behavior.
+
 The [reference specification](references.md) describes `Ref<T>`, fixed reference
 bindings, and reference-returning indexing.
 
