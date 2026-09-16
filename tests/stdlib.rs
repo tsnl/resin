@@ -381,6 +381,7 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
                 "gpu_submit" => "submit",
                 "gpu_cancel_command_buffer" => "cancel",
                 "window_poll_events" => "poll_events",
+                "window_wait_events" => "wait_events",
                 "window_should_close" => "should_close",
                 "window_set_should_close" => "set_should_close",
                 "window_framebuffer_size" => "framebuffer_size",
