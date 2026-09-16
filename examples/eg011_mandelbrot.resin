@@ -11,6 +11,8 @@
 // - Assert, something useful for writing tests
 // - No 'true' or 'false'
 // - Can't use a string as an error type
+// - Unhandled error: Error-- the entry point error should be printed/repr-ed.
+// - `match` expression does not admit holes (_). Result is a weird special case.
 
 export { main };
 
@@ -66,6 +68,10 @@ struct Plot {
 	width: uint,
 	height: uint,
 
+	def new(data: Span<Complex>, width: uint, height: uint) -> Plot = {
+		Plot { data = data, width = width, height = height }
+	};
+
 	def at(self: Plot, x: uint, y: uint) -> Ref<Complex> = {
 		self.data.at(ulong(y * self.width + x))
 	};
@@ -88,31 +94,43 @@ struct Mandelbrot {
 		a.magnitude_squared() > 4.0
 	};
 
-	def test() -> Result<(), TestError> = {
+	def test() -> Result<(), Error> = {
 		var mandelbrot = Mandelbrot.new(128);
 
 		if (mandelbrot.escapes_ball(Complex.zero())) {
-			err(TestError { message = "c=0 should never escape" })
+			err(Error { message = "c=0 should never escape" })
 		} else if (mandelbrot.escapes_ball(Complex.new(-1.0, 0.0))) {
-			err("c=-1 should never escape")
+			err(Error { message = "c=-1 should never escape" })
 		} else if (mandelbrot.escapes_ball(Complex.new(-2.0, 0.0))) {
-			err("c=-2 should never escape")
+			err(Error { message = "c=-2 should never escape" })
 		} else if (mandelbrot.escapes_ball(Complex.new(0.0, 1.0))) {
-			err("c=i should never escape")
+			err(Error { message = "c=i should never escape" })
 		} else if (!mandelbrot.escapes_ball(Complex.new(1.0, 0.0))) {
-			err("c=1 should escape")
+			err(Error { message = "c=1 should escape" })
 		} else if (!mandelbrot.escapes_ball(Complex.new(2.0, 0.0))) {
-			err("c=2 should escape")
+			err(Error { message = "c=2 should escape" })
 		} else {
+			print("Mandelbrot tests passed\n");
 			ok(())
 		}
 	};
 };
 
-struct TestError {
-	message: String,
+struct Error {
+	message: str,
+};
+
+def main_inner() -> Result<(), Error> = {
+	Mandelbrot.test()?;
+	print("Hello, world\n");
+	ok(())
 };
 
 def main() = {
-	print("Hello, world\n");
+	match (main_inner()) {
+		ok(value) => {},
+		err(e) => {
+			print(fmt("ERROR: {0}", (e.message,)));
+		}
+	}
 };
