@@ -578,6 +578,16 @@ pub(super) fn primitive_signature(
             ],
             Type::Unit,
         ),
+        ("gpu_view_copy_from", [element]) => (
+            Intrinsic::GpuViewCopyFrom,
+            vec![
+                Type::GpuView,
+                Type::UInt64,
+                pointer(element.clone()),
+                Type::UInt64,
+            ],
+            Type::Unit,
+        ),
         ("gpu_view_copy_image", []) => (
             Intrinsic::GpuViewCopyImage,
             vec![

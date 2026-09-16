@@ -1,12 +1,6 @@
 export { Options, parse_options, print_help };
 
-extern {
-	"stdlib.h": {
-		fn strtod(text: Ptr<ubyte>, end: Ptr<Ptr<ubyte>>) -> float64;
-	},
-};
-
-import { "$/process.resin", "$/span.resin", "$/string.resin" };
+import { "$/argparse.resin", "$/span.resin", "$/string.resin" };
 
 struct Options {
 	use_gpu: bool,
@@ -17,49 +11,10 @@ struct Options {
 	real: float32,
 	imag: float32,
 	span: float32,
+	// Paths borrow the immutable, NUL-terminated process argument snapshot.
 	output: Ptr<ubyte> | None,
 	screenshot: Ptr<ubyte>,
 	help: bool,
-}
-
-fn equals(text: Ref<Span<ubyte>>, expected: str) -> bool {
-	if (text.length != expected.length) {
-		return false;
-	};
-	let mut i = 0_ul;
-	while (i < text.length) {
-		if (text:at(i) != expected:at(i)) {
-			return false;
-		};
-		i = i + 1_ul;
-	};
-	true
-}
-
-fn integer(text: Ref<Span<ubyte>>) -> uint | Err<String> {
-	let mut value = 0_ui;
-	let mut i = 0_ul;
-	if (text.length == 0_ul) {
-		return Err(string_from_str("Expected an integer, got an empty value"));
-	};
-	while (i < text.length) {
-		let byte = text:at(i);
-		if (byte < 48_ub || byte > 57_ub || value > 429496729_ui || (value == 429496729_ui && byte > 53_ub)) {
-			return Err(fmt("Invalid integer: {0}", (text:bytes(),)));
-		};
-		value = value * 10_ui + uint(byte - 48_ub);
-		i = i + 1_ul;
-	};
-	value
-}
-
-fn number(text: Ref<Span<ubyte>>) -> float32 | Err<String> {
-	let mut end = Ptr<ubyte>(0_ul);
-	let value = strtod(text.data, &end);
-	if (ulong(end) == ulong(text.data) || end.* != 0_ub || !(value >= -3.4e38_d && value <= 3.4e38_d)) {
-		return Err(fmt("Invalid finite number: {0}", (text:bytes(),)));
-	};
-	float32(value)
 }
 
 fn parse_options(args: Ref<Span<Ptr<ubyte>>>) -> Options | Err<String> {
@@ -76,53 +31,52 @@ fn parse_options(args: Ref<Span<Ptr<ubyte>>>) -> Options | Err<String> {
 		screenshot = "mandelbrot.png".data,
 		help = false,
 	};
-	let mut i = 1_ul;
-	while (i < args.length) {
-		let name = argument(args, i);
-		i = i + 1_ul;
-		if (equals(name, "--help") || equals(name, "-h")) {
+	let parser = argparse(args, "--help|-h --cpu --gpu --width= --height= --iterations= --samples= --real= --imag= --span= --output= --screenshot=");
+	while (true) {
+		let item = match (parser:next()?) {
+			Argument(item) => {
+				item
+			},
+			None => {
+				break;
+			},
+		};
+		if (item:named("--help")) {
 			options.help = true;
 			return options;
 		};
-		if (equals(name, "--cpu") || equals(name, "--gpu")) {
-			options.use_gpu = equals(name, "--gpu");
+		if (item:named("--cpu") || item:named("--gpu")) {
+			options.use_gpu = item:named("--gpu");
 			continue;
 		};
-		if (!(equals(name, "--width") || equals(name, "--height") || equals(name, "--iterations") || equals(name, "--samples") || equals(name, "--real") || equals(name, "--imag") || equals(name, "--span") || equals(name, "--output") || equals(name, "--screenshot"))) {
-			return Err(fmt("Unknown option: {0}", (name:bytes(),)));
-		};
-		if (i == args.length) {
-			return Err(fmt("Missing value for {0}", (name:bytes(),)));
-		};
-		let value = argument(args, i);
-		i = i + 1_ul;
-		if (equals(name, "--width")) {
-			options.width = integer(value)?;
-		} else if (equals(name, "--height")) {
-			options.height = integer(value)?;
-		} else if (equals(name, "--iterations")) {
-			let count = integer(value)?;
+		let value: Ref<Span<ubyte>> = item.value;
+		if (item:named("--width")) {
+			options.width = argument_integer(value)?;
+		} else if (item:named("--height")) {
+			options.height = argument_integer(value)?;
+		} else if (item:named("--iterations")) {
+			let count = argument_integer(value)?;
 			if (count < 32_ui || count > 4096_ui) {
 				return Err(string_from_str("Iterations must be between 32 and 4096"));
 			};
 			options.iterations = int(count);
-		} else if (equals(name, "--samples")) {
-			let count = integer(value)?;
-			if (count != 1_ui && count != 4_ui) {
-				return Err(string_from_str("Samples must be 1 or 4"));
+		} else if (item:named("--samples")) {
+			let count = argument_integer(value)?;
+			if (count < 1_ui || count > 16_ui) {
+				return Err(string_from_str("Samples must be between 1 and 16"));
 			};
 			options.samples = int(count);
-		} else if (equals(name, "--real")) {
-			options.real = number(value)?;
-		} else if (equals(name, "--imag")) {
-			options.imag = number(value)?;
-		} else if (equals(name, "--span")) {
-			options.span = number(value)?;
+		} else if (item:named("--real")) {
+			options.real = argument_number(value)?;
+		} else if (item:named("--imag")) {
+			options.imag = argument_number(value)?;
+		} else if (item:named("--span")) {
+			options.span = argument_number(value)?;
 		} else {
 			if (value.length == 0_ul) {
-				return Err(fmt("Empty path for {0}", (name:bytes(),)));
+				return Err(fmt("Empty path for {0}", (item.name:bytes(),)));
 			};
-			if (equals(name, "--output")) {
+			if (item:named("--output")) {
 				options.output = value.data;
 			} else {
 				options.screenshot = value.data;
@@ -145,7 +99,7 @@ fn print_help() {
 	print("  --width N           Image/window width, 1-8192 (default: 960)\n");
 	print("  --height N          Image/window height, 1-8192 (default: 720)\n");
 	print("  --iterations N      Iterations per sample, 32-4096 (default: 256)\n");
-	print("  --samples 1|4       Samples per pixel (default: 4, 2x2 refinement)\n");
+	print("  --samples N         Halton samples per pixel, 1-16 (default: 4)\n");
 	print("  --real X --imag Y   View center (default: -0.5, 0)\n");
 	print("  --span N            Vertical span (default: 3)\n");
 	print("  --output PATH       Write a PNG and exit without opening a window\n");

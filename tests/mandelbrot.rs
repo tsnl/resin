@@ -75,64 +75,52 @@ fn explorer_builds_and_can_render_resize_and_close_in_both_modes() {
 }
 
 #[test]
-fn compute_matches_cpu_for_single_and_four_samples() {
+fn compute_matches_cpu_for_halton_prefixes_and_partial_tiles() {
     let mut source = std::fs::read_to_string(example())
         .unwrap()
         .replace("export { main, test };", "export { main, test, compare };");
     source.push_str(
         r#"
-        fn close(actual: float32, expected: float32) {
-            assert(actual - expected < 0.0001_f && expected - actual < 0.0001_f);
-        }
         fn compare() -> () | Err<_> {
             let gpu = gpu_new()?;
             let pipeline = gpu:create_compute_pipeline(compute)?;
-            // A non-square image and a partially filled final workgroup.
-            let plot = plot_new(37, 19, 37.0_f / 19.0_f);
+            // Non-square, partial right/bottom tiles and an incomplete workgroup.
+            let plot = plot_new(37, 19);
             let solver = mandelbrot_new(32);
-            let count = ulong(plot.width) * ulong(plot.height);
-            let pixels = gpu:alloc::<Color>(count + 1_ul)?;
-            pixels:at(count):store(Color { r = -1.0_f, g = -2.0_f, b = -3.0_f, a = -4.0_f });
+            let count = ulong(plot.width) * ulong(plot.height) * 4_ul;
+            let pixels = gpu:alloc::<ubyte>(count + 1_ul)?;
+            let tiles = upload(gpu, tiles_new(plot.width, plot.height)?:get())?;
+            let lut = halton_samples();
+            let positions = upload(gpu, Span<Sample> { data = &lut:at(0_ul), length = 16_ul })?;
             let group_size = gpu:compute_workgroup_size();
-            let groups = 2_ui;
             let mut samples = 1_i;
-            while (samples <= 4) {
-                let root = HostParameters {
-                    plot = plot:clone(), solver = mandelbrot_new(solver.max_iters),
-                    samples = samples, stride = ulong(groups) * group_size, pixels = pixels:clone(),
-                };
+            while (samples <= 16) {
+                pixels:at(count):store(123_ub);
                 let commands = gpu:start_command_recording()?;
-                commands:dispatch(pipeline, root, groups, 1, 1)?;
-                commands:submit()?;
-                let mut y = 0_ui;
-                while (y < plot.height) {
-                    let mut x = 0_ui;
-                    while (x < plot.width) {
-                        let actual = pixels:at(ulong(y) * ulong(plot.width) + ulong(x)):load();
-                        let expected = solver:solve(plot, x, y, samples);
-                        close(actual.r, expected.r);
-                        close(actual.g, expected.g);
-                        close(actual.b, expected.b);
-                        close(actual.a, expected.a);
-                        x = x + 1;
-                    };
-                    y = y + 1;
+                // Two explicit slices exercise batch-local invocation indices.
+                let first = HostParameters {
+                    plot = plot:clone(), solver = mandelbrot_new(solver.max_iters),
+                    samples = positions:slice(0_ul, ulong(samples)), tiles = tiles:slice(0_ul, 7_ul), pixels = pixels:clone(),
                 };
-                let sentinel = pixels:at(count):load();
-                assert(sentinel.r == -1.0_f && sentinel.g == -2.0_f);
-                assert(sentinel.b == -3.0_f && sentinel.a == -4.0_f);
-                samples = samples + 3;
+                let second = HostParameters {
+                    plot = plot:clone(), solver = mandelbrot_new(solver.max_iters),
+                    samples = positions:slice(0_ul, ulong(samples)), tiles = tiles:slice(7_ul, tiles.length - 7_ul), pixels = pixels:clone(),
+                };
+                commands:dispatch(pipeline, first, uint((7_ul + group_size - 1_ul) / group_size), 1, 1)?;
+                commands:dispatch(pipeline, second, uint((tiles.length - 7_ul + group_size - 1_ul) / group_size), 1, 1)?;
+                commands:submit()?;
+                let actual = arc_span_alloc::<ubyte>(count + 1_ul, 0_ub)?;
+                pixels:copy_to(actual:get());
+                let expected = host_image(plot, solver, samples)?;
+                let mut i = 0_ul;
+                while (i < count) {
+                    let difference = int(actual:get():at(i)) - int(expected:get():at(i));
+                    assert(difference >= -1 && difference <= 1);
+                    i = i + 1_ul;
+                };
+                assert(actual:get():at(count) == 123_ub);
+                samples = samples + 1;
             };
-            // These four subpixels escape after 2, 1, 2, and 1 iterations.
-            let mut edge = plot_new(1, 1, 1.0_f);
-            edge.center.real = 2.0_f;
-            edge.span = 2.0_f;
-            let averaged = solver:solve(edge, 0, 0, 4);
-            let first = palette(1);
-            let second = palette(2);
-            close(averaged.r, (first.r + second.r) * 0.5_f);
-            close(averaged.g, (first.g + second.g) * 0.5_f);
-            close(averaged.b, (first.b + second.b) * 0.5_f);
         }
     "#,
     );
@@ -172,7 +160,8 @@ fn cli_validates_options_and_writes_headless_pngs() {
         vec!["--height", "-1"],
         vec!["--iterations", "31"],
         vec!["--iterations", "4097"],
-        vec!["--samples", "2"],
+        vec!["--samples", "17"],
+        vec!["--samples", "0"],
         vec!["--real", "NaN"],
         vec!["--imag", "inf"],
         vec!["--real", "1.2junk"],
@@ -187,7 +176,7 @@ fn cli_validates_options_and_writes_headless_pngs() {
         assert!(String::from_utf8_lossy(&output.stderr).contains("Use --help"));
     }
     let mut images = Vec::new();
-    for samples in ["1", "4"] {
+    for samples in ["1", "4", "16"] {
         let path = directory.path().join(format!("cpu {samples}.png"));
         let output = cpu_command()
             .args([
@@ -273,7 +262,7 @@ fn cli_validates_options_and_writes_headless_pngs() {
         return;
     }
     let _gpu = resin_runtime::testing::lock_gpu();
-    for (index, samples) in ["1", "4"].into_iter().enumerate() {
+    for (index, samples) in ["1", "4", "16"].into_iter().enumerate() {
         let path = directory.path().join(format!("gpu {samples}.png"));
         let output = Command::new(executable.path())
             .env_remove("DISPLAY")

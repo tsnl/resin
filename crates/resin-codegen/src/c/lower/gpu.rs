@@ -84,6 +84,20 @@ pub(super) fn instruction(
             writeln!(out, "  if ({bytes}) memmove({}, resin_gpu_ptr_host({}, {bytes}, _Alignof({}), 1u), {bytes});", args[2].expr, args[0].expr, types.name(pointee)).unwrap();
             Ok("0".into())
         }
+        Instr::GpuViewCopyFrom => {
+            let Ty::Pointer { pointee } = &args[2].ty else {
+                unreachable!("verified GPU copy")
+            };
+            let bytes = checked_bytes(types, pointee, &args[3].expr, name, out);
+            writeln!(
+                out,
+                "  if ({} < {}) resin_fail(\"GPU copy destination is too short\");",
+                args[1].expr, args[3].expr
+            )
+            .unwrap();
+            writeln!(out, "  if ({bytes}) memmove(resin_gpu_ptr_host({}, {bytes}, _Alignof({}), 2u), {}, {bytes});", args[0].expr, types.name(pointee), args[2].expr).unwrap();
+            Ok("0".into())
+        }
         Instr::GpuViewCopyImage => Ok(format!(
             "resin_gpu_copy_image_to_span((ResinCommandBuffer *){}, (ResinImage *){}, (ResinGpuSpan){{ .data = {}, .length = {} }})",
             args[2].expr, args[3].expr, args[0].expr, args[1].expr

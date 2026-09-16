@@ -155,6 +155,7 @@ fn lower_region(
                     | Instr::GpuViewStore
                     | Instr::GpuViewReplace
                     | Instr::GpuViewCopyTo
+                    | Instr::GpuViewCopyFrom
                     | Instr::GpuViewCopyImage
                     | Instr::GpuComputePipeline { .. }
                     | Instr::GpuGraphicsPipeline { .. }
@@ -444,6 +445,7 @@ fn instruction(
         | Instr::GpuViewStore
         | Instr::GpuViewReplace
         | Instr::GpuViewCopyTo
+        | Instr::GpuViewCopyFrom
         | Instr::GpuViewCopyImage
         | Instr::GpuComputePipeline { .. }
         | Instr::GpuGraphicsPipeline { .. }
@@ -762,12 +764,9 @@ fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
             &widen(types, from, target, value),
         );
     }
-    let initializer = if matches!(to, Ty::Defined { .. }) {
-        ".value = {0}"
-    } else {
-        "0"
-    };
-    let mut expression = format!("({}){{ {initializer} }}", types.name(to));
+    // Initialize the whole object. A partial `.value = {0}` initializer causes
+    // missing-braces diagnostics for nominal records with nested aggregates.
+    let mut expression = format!("({}){{ 0 }}", types.name(to));
     for (case, payload) in from.payloads().unwrap_or_default().into_iter().rev() {
         let target = to.payload(&case).map(|ty| (case.clone(), ty)).or_else(|| {
             to.payloads()?

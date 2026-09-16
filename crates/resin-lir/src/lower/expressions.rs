@@ -181,6 +181,7 @@ impl FunctionLowering<'_> {
             Intrinsic::GpuViewStore => self.emit(Instr::GpuViewStore),
             Intrinsic::GpuViewReplace => self.emit(Instr::GpuViewReplace),
             Intrinsic::GpuViewCopyTo => self.emit(Instr::GpuViewCopyTo),
+            Intrinsic::GpuViewCopyFrom => self.emit(Instr::GpuViewCopyFrom),
             Intrinsic::GpuViewCopyImage => self.emit(Instr::GpuViewCopyImage),
             Intrinsic::FormatBytes => self.emit(Instr::CallBuiltin {
                 name: "format_bytes".into(),

@@ -124,6 +124,8 @@ pub enum Instr {
     GpuViewReplace,
     /// `[view, count, destination: Ptr<T>, destination_length] -> [unit]`: check and copy readable elements.
     GpuViewCopyTo,
+    /// `[view, capacity, source: Ptr<T>, count] -> [unit]`: check and copy into writable elements.
+    GpuViewCopyFrom,
     /// `[view, length, commands, image] -> [int]`: record an image copy retaining its allocation.
     GpuViewCopyImage,
 

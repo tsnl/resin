@@ -74,9 +74,10 @@ pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
         Instr::GpuViewRestrict | Instr::GpuViewStore | Instr::GpuViewReplace => {
             StackEffect { pops: 2, pushes: 1 }
         }
-        Instr::GpuViewOffset | Instr::GpuViewCopyTo | Instr::GpuViewCopyImage => {
-            StackEffect { pops: 4, pushes: 1 }
-        }
+        Instr::GpuViewOffset
+        | Instr::GpuViewCopyTo
+        | Instr::GpuViewCopyFrom
+        | Instr::GpuViewCopyImage => StackEffect { pops: 4, pushes: 1 },
         Instr::GpuViewAllocate => StackEffect { pops: 5, pushes: 1 },
 
         Instr::WeakEmpty

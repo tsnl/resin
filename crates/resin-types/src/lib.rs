@@ -476,6 +476,7 @@ pub enum Intrinsic {
     GpuViewStore,
     GpuViewReplace,
     GpuViewCopyTo,
+    GpuViewCopyFrom,
     GpuViewCopyImage,
 
     PointerIndex,

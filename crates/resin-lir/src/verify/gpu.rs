@@ -66,7 +66,7 @@ pub(super) fn check(
                 args[1].clone()
             }
         }
-        Instr::GpuViewCopyTo => {
+        Instr::GpuViewCopyTo | Instr::GpuViewCopyFrom => {
             expect_type(Ty::GpuView, args[0].clone(), location)?;
             expect_type(Ty::UInt64, args[1].clone(), location)?;
             expect_type(Ty::UInt64, args[3].clone(), location)?;

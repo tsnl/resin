@@ -202,6 +202,33 @@ all platforms; an empty value succeeds with length zero. It never reads live OS 
 See `examples/process.resin` for looking up a selected variable without dumping the environment.
 Program arguments apply only to run mode; `-o` builds the executable to invoke separately.
 
+`$/argparse.resin` provides a streaming option parser. Its small specification lists
+space-separated spellings, with `|` for aliases and a trailing `=` for a required value:
+
+```resin
+let parser = argparse(arguments(argc, argv), "--help|-h --count= --output|-o=");
+while (true) {
+    let option = match (parser:next()?) {
+        Argument(option) => { option },
+        None => { break; },
+    };
+    if (option:named("--count")) {
+        let count = argument_integer(option.value)?;
+        print(fmt("Count: {0}\n", (count,)));
+    };
+};
+```
+
+The parser accepts `--count 12` and `--count=12`, returns canonical names for aliases,
+and yields repeated options in command-line order. Unknown options, missing values,
+and values attached to flags return `Err<String>`. It supports options only, without
+positional arguments or bundled short flags. A separate value may start with `-`,
+including negative numbers and filenames. Flags have an empty value view.
+`argument_integer` checks unsigned 32-bit range; `argument_number` parses finite
+float32 values from bounded bytes. Returned views borrow the process argument snapshot
+and the literal specification. Applications handle defaults, ranges, and help text.
+
+
 With `-o PATH` (or `--output PATH`, also accepted as `--out PATH`), Resin builds and copies the executable without running it.
 A successful build and copy returns status 0, independently of the program's eventual exit status.
 An existing directory or trailing separator receives the source name (or `source-entry` for a
@@ -1139,7 +1166,9 @@ Host `GpuPtr` and `GpuSpan` operations retain their allocation, including indexi
 and slicing. `load`, `store`, and `replace` access elements on the host.
 `:read_only()` and `:write_only()` narrow per-view
 access permissions. Host accesses check bounds, alignment, mapping, permissions,
-and pending recorded GPU use. `:copy_to(Span<T>)` copies into caller-owned host
+and pending recorded GPU use. `:copy_from(Span<T>)` uploads a bounded host span into the beginning of a writable,
+host-visible GPU span; its source length must fit the destination.
+`:copy_to(Span<T>)` copies into caller-owned host
 memory. GPU views cannot be converted to raw `Ptr` values; the compiler's shader
 projection is the host-to-device address conversion boundary. GPU buffer elements
 must have a shared layout without pointers, spans, owners, or drop hooks.
@@ -1266,8 +1295,17 @@ directly into swapchain images and multiple frames in flight are not implemented
 
 Run `resin examples/eg011_mandelbrot.resin` with the compiler service running.
 The default GPU mode solves pixels in a compute shader; `--cpu` runs the same solver
-in a CPU loop. Both paths share the orbit, palette, and sampling code, using
-`Complex<float32>` from `$/math.resin`. A fullscreen triangle displays the color buffer.
+by calling that exact `compute` entry in a CPU loop. Each invocation handles one
+explicit 8×8 tile, clipped at image edges. Tile origins are prepared on the host;
+large dispatches use batches of tile descriptors within Vulkan's workgroup limit.
+Orbit iteration, palette evaluation, and color blending are separate functions,
+using `Complex<float32>` from `$/math.resin`.
+
+Both interactive paths produce the same RGBA8 GPU buffer: CPU mode uploads its
+completed bytes once with `:copy_from`, and GPU mode writes directly. A fullscreen
+triangle presents that buffer through the same pipeline. The example groups pipeline
+setup, uploads, dispatch, presentation, and readback in its GPU helpers section.
+Headless CPU mode writes its host bytes directly, without GPU setup.
 Pass example options after Resin's `--` separator:
 
 ```sh
@@ -1282,11 +1320,13 @@ a Vulkan device; CPU output needs neither a display nor a Vulkan device. Interac
 mode uses Vulkan for presentation with either solver. `--screenshot PATH` sets the
 interactive screenshot filename, defaulting to `mandelbrot.png`; saving replaces that file.
 `--width`/`--height` accept 1–8192, `--iterations` accepts 32–4096, and `--samples`
-accepts 1 or 4. `--real`, `--imag`, and `--span` set the initial view.
+accepts 1–16. `--real`, `--imag`, and `--span` set the initial view.
 
 The image matches the window's framebuffer resolution and preserves the complex plane's
 aspect ratio when resized. Moving uses one sample per pixel; when input stops, a second
-pass averages four subpixel colors on a 2×2 grid (`--samples 1` disables refinement).
+pass blends the selected number of subpixel colors (default four; `--samples 1`
+disables refinement). Samples use prefixes of a fixed 16-point Halton lookup table,
+with radical inverses in bases 2 and 3.
 Headless output and screenshots use the selected sample count immediately.
 The default budget is 256 iterations
 per sample, with early escape and shortcuts for the main cardioid and period-two bulb.
