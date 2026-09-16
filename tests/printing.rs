@@ -478,3 +478,14 @@ fn raw_byte_views_and_owned_strings_preserve_non_utf8() {
         b"A\0\xfe\xff\0\xfe",
     );
 }
+
+#[test]
+fn invalid_specialized_format_arguments_produce_source_errors() {
+    let source = r#"export { main }; import { "$/string.resin" };
+        def text() -> String = { fmt("{0}+i{1}", (40, 85)) };
+        def main() = { print(fmt("{0}\n", (text(),))); };"#;
+    let error = pipeline::source_module(source).unwrap_err().to_string();
+    assert!(error.contains("UnformattableType"), "{error}");
+    assert!(!error.contains("invalid IR"), "{error}");
+    assert!(error.contains("string.resin"), "{error}");
+}

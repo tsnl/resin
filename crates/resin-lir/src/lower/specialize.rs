@@ -809,6 +809,17 @@ impl Specialization<'_, '_> {
             }
         }
         let args = self.arguments(args)?;
+        let builtin = match op {
+            Intrinsic::FormatBytes => Some("format_bytes"),
+            Intrinsic::StringFromBytes => Some("string_from_bytes"),
+            _ => None,
+        };
+        if let Some(name) = builtin {
+            self.instances
+                .typer()
+                .builtin_instance(name, &args.params)
+                .map_err(|error| self.typing_error(error))?;
+        }
         if op == Intrinsic::PointerBytes
             && !matches!(args.params.first(), Some(Ty::Pointer { pointee }) if pointee.is_numeric())
         {
