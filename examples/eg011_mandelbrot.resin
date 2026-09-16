@@ -1,136 +1,273 @@
-// Feedback
-// - Compiler errors are abysmal, printouts could be much nicer
-// - `def` syntax is unnecessarily convoluted, just match Rust: no `=` please, or at least better errors.
-// - `-1.0` is not a valid numeric literal?
-// - Why do we still support `{x: T, y: T}` syntax? Can we drop this? And similarly drop anonymous struct values?
-// - No tests mechanism?
-// - Invalid `print()` call does not seem to generate a type error. How to format?
-// - Compiler bug
-// - Sqrt builtin/Math library with Sqrt, sin, cos support
-// - Break/Continue statements in loops, Return statements
-// - Assert, something useful for writing tests
-// - No 'true' or 'false'
-// - Can't use a string as an error type
-// - Unhandled error: Error-- the entry point error should be printed/repr-ed.
-// - `match` expression does not admit holes (_). Result is a weird special case.
+// Mandelbrot explorer. Arrows/WASD pan; scroll or +/- zoom; [/] change
+// the iteration limit; R/Home resets; Escape closes the window.
+export { main, test };
 
-export { main };
-
-import { "$/string.resin", "$/span.resin" };
-
-struct Complex {
-	real: float32,
-	imag: float32,
-
-	def mul(self: Complex, other: Complex) -> Complex = {
-		// (a + bi) (c + di)
-		// = ac + adi + bci - bd
-		// = (ac - bd) + i(ad + bc)
-		Complex {
-			real = self.real * other.real - self.imag * other.imag,
-			imag = self.real * other.imag + self.imag * other.real,
-		}
-	};
-
-	def squared(self: Complex) -> Complex = {
-		self.mul(self)
-	};
-
-	def magnitude_squared(self: Complex) -> float32 = {
-		self.real * self.real + self.imag * self.imag
-	};
-
-	def add(self: Complex, other: Complex) -> Complex = {
-		Complex {
-			real = self.real + other.real,
-			imag = self.imag + other.imag,
-		}
-	};
-
-	def new(real: float32, imag: float32) -> Complex = {
-		Complex {
-			real = real,
-			imag = imag,
-		}
-	};
-
-	def zero() -> Complex = {
-		Complex.new(0.0, 0.0)
-	};
-
-	def string(self: Complex) -> String = {
-		fmt("{0}+i{1}", (self.real, self.imag))
-	};
+import {
+	"$/math.resin",
+	"$/string.resin",
+	"$/span.resin",
+	"$/shared.resin",
+	"$/gpu.resin",
+	"$/graphics.resin",
+	"$/window.resin",
 };
 
 struct Plot {
-	data: Span<Complex>,
-	width: uint,
-	height: uint,
+	data: Span<Complex<float64>>;
+	width: uint;
+	height: uint;
+}
 
-	def new(data: Span<Complex>, width: uint, height: uint) -> Plot = {
-		Plot { data = data, width = width, height = height }
-	};
+fn plot_new(data: Span<Complex<float64>>, width: uint, height: uint) -> Plot {
+	Plot { data = data, width = width, height = height }
+}
 
-	def at(self: Plot, x: uint, y: uint) -> Ref<Complex> = {
-		self.data.at(ulong(y * self.width + x))
+fn at(self: Ref<Plot>, x: uint, y: uint) -> Ref<Complex<float64>> {
+	self.data:at(ulong(y) * ulong(self.width) + ulong(x))
+}
+
+struct View {
+	center: Complex<float64>;
+	height: float64;
+	aspect: float64;
+}
+
+fn default_view(aspect: float64) -> View {
+	View { center = complex(-0.5_d, 0.0_d), height = 3.0_d, aspect = aspect }
+}
+
+fn populate(self: Ref<Plot>, view: Ref<View>) {
+	let mut y = 0_ui;
+	while (y < self.height) {
+		let imag = view.center.imag + (0.5_d - (float64(y) + 0.5_d) / float64(self.height)) * view.height;
+		let mut x = 0_ui;
+		while (x < self.width) {
+			let real = view.center.real + ((float64(x) + 0.5_d) / float64(self.width) - 0.5_d) * view.height * view.aspect;
+			self:at(x, y) = complex(real, imag);
+			x = x + 1;
+		};
+		y = y + 1;
 	};
-};
+}
 
 struct Mandelbrot {
-	max_iters: int,
+	max_iters: int;
+}
 
-	def new(max_iters: int) -> Mandelbrot = {
-		Mandelbrot { max_iters = max_iters }
-	};
+fn mandelbrot_new(max_iters: int) -> Mandelbrot {
+	Mandelbrot { max_iters = max_iters }
+}
 
-	def escapes_ball(self: Mandelbrot, c: Complex) -> bool = {
-		var n = 0;
-		var a = Complex.zero();
-		while (n < self.max_iters && a.magnitude_squared() <= 4.0) {
-			n := n + 1;
-			a := a.squared().add(c);
+// Zero means the orbit stayed inside the escape radius for this iteration budget;
+// it is not a proof of membership. Equality at radius two is still bounded.
+fn escape_iterations(self: Ref<Mandelbrot>, c: Ref<Complex<float64>>) -> int {
+	let mut n = 0_i;
+	let mut a = complex(0.0_d, 0.0_d);
+	while (n < self.max_iters) {
+		let square = a:squared();
+		a = square:add(c);
+		n = n + 1;
+		if (a:magnitude_squared() > 4.0_d) {
+			return n;
 		};
-		a.magnitude_squared() > 4.0
 	};
+	0
+}
 
-	def test() -> Result<(), Error> = {
-		var mandelbrot = Mandelbrot.new(128);
+fn escapes_ball(self: Ref<Mandelbrot>, c: Ref<Complex<float64>>) -> bool {
+	self:escape_iterations(c) != 0
+}
 
-		if (mandelbrot.escapes_ball(Complex.zero())) {
-			err(Error { message = "c=0 should never escape" })
-		} else if (mandelbrot.escapes_ball(Complex.new(-1.0, 0.0))) {
-			err(Error { message = "c=-1 should never escape" })
-		} else if (mandelbrot.escapes_ball(Complex.new(-2.0, 0.0))) {
-			err(Error { message = "c=-2 should never escape" })
-		} else if (mandelbrot.escapes_ball(Complex.new(0.0, 1.0))) {
-			err(Error { message = "c=i should never escape" })
-		} else if (!mandelbrot.escapes_ball(Complex.new(1.0, 0.0))) {
-			err(Error { message = "c=1 should escape" })
-		} else if (!mandelbrot.escapes_ball(Complex.new(2.0, 0.0))) {
-			err(Error { message = "c=2 should escape" })
-		} else {
-			print("Mandelbrot tests passed\n");
-			ok(())
-		}
+fn solve(self: Ref<Mandelbrot>, plot: Ref<Plot>, iterations: Ref<GpuSpan<uint>>) {
+	let mut y = 0_ui;
+	while (y < plot.height) {
+		let mut x = 0_ui;
+		while (x < plot.width) {
+			let count = self:escape_iterations(plot:at(x, y));
+			iterations:at(ulong(y) * ulong(plot.width) + ulong(x)):store(uint(count));
+			x = x + 1;
+		};
+		y = y + 1;
 	};
-};
+}
 
-struct Error {
-	message: str,
-};
+fn zoom(view: Ref<View>, factor: float64) {
+	let next = view.height * factor;
+	if (next >= 1.0e-12_d && next <= 8.0_d) {
+		view.height = next;
+	};
+}
 
-def main_inner() -> Result<(), Error> = {
-	Mandelbrot.test()?;
-	print("Hello, world\n");
-	ok(())
-};
+fn input(window: Ref<Window>, view: Ref<View>, solver: Ref<Mandelbrot>) -> bool {
+	if (!window:focused()) {
+		return false;
+	};
+	let mut changed = false;
+	let step = view.height * 0.06_d;
+	if (window:key_pressed(key_left) || window:key_pressed(key_a)) {
+		view.center.real = view.center.real - step;
+		changed = true;
+	};
+	if (window:key_pressed(key_right) || window:key_pressed(key_d)) {
+		view.center.real = view.center.real + step;
+		changed = true;
+	};
+	if (window:key_pressed(key_up) || window:key_pressed(key_w)) {
+		view.center.imag = view.center.imag + step;
+		changed = true;
+	};
+	if (window:key_pressed(key_down) || window:key_pressed(key_s)) {
+		view.center.imag = view.center.imag - step;
+		changed = true;
+	};
+	if (window:key_pressed(key_equal)) {
+		view:zoom(0.85_d);
+		changed = true;
+	};
+	if (window:key_pressed(key_minus)) {
+		view:zoom(1.0_d / 0.85_d);
+		changed = true;
+	};
+	if (window:key_state(key_right_bracket).pressed && solver.max_iters < 4096) {
+		solver.max_iters = solver.max_iters * 2;
+		changed = true;
+	};
+	if (window:key_state(key_left_bracket).pressed && solver.max_iters > 32) {
+		solver.max_iters = solver.max_iters / 2;
+		changed = true;
+	};
+	if (window:key_state(key_r).pressed || window:key_state(key_home).pressed) {
+		view.center.real = -0.5_d;
+		view.center.imag = 0.0_d;
+		view.height = 3.0_d;
+		solver.max_iters = 256;
+		changed = true;
+	};
+	changed
+}
 
-def main() = {
-	match (main_inner()) {
-		ok(value) => {},
-		err(e) => {
-			print(fmt("ERROR: {0}", (e.message,)));
-		}
+// The CPU solves the grid. A fullscreen triangle colors the iteration counts.
+struct Pixels {
+	iterations: Span<uint>;
+	width: uint;
+	height: uint;
+}
+
+struct HostPixels {
+	iterations: GpuSpan<uint>;
+	width: uint;
+	height: uint;
+}
+
+@vertex_shader
+fn vertex(index: int) -> Vertex {
+	let x = if (index == 1) {
+		3.0_f
+	} else {
+		-1.0_f
+	};
+	let y = if (index == 2) {
+		3.0_f
+	} else {
+		-1.0_f
+	};
+	Vertex {
+		position = Position { x = x, y = y, z = 0.0_f, w = 1.0_f },
+		color = Color { r = (x + 1.0_f) * 0.5_f, g = (y + 1.0_f) * 0.5_f, b = 0.0_f, a = 1.0_f },
 	}
-};
+}
+
+@fragment_shader
+fn fragment(uv: Color, root: Ptr<Pixels>) -> Color {
+	let x = uint(uv.r * float32(root.width));
+	let y = uint(uv.g * float32(root.height));
+	let count = root.iterations:at(ulong(y) * ulong(root.width) + ulong(x));
+	if (count == 0) {
+		return Color { r = 0.0_f, g = 0.0_f, b = 0.0_f, a = 1.0_f };
+	};
+	let t = float32(count) * 0.12_f;
+	Color {
+		r = 0.5_f + 0.5_f * cos(t + 0.0_f),
+		g = 0.5_f + 0.5_f * cos(t + 2.0_f),
+		b = 0.5_f + 0.5_f * cos(t + 4.0_f),
+		a = 1.0_f,
+	}
+}
+
+fn test() {
+	let mandelbrot = mandelbrot_new(128);
+	let zero = complex(0.0_d, 0.0_d);
+	let minus_one = complex(-1.0_d, 0.0_d);
+	let minus_two = complex(-2.0_d, 0.0_d);
+	let i = complex(0.0_d, 1.0_d);
+	let one = complex(1.0_d, 0.0_d);
+	let two = complex(2.0_d, 0.0_d);
+	let three = complex(3.0_d, 0.0_d);
+	assert(!mandelbrot:escapes_ball(zero));
+	assert(!mandelbrot:escapes_ball(minus_one));
+	assert(!mandelbrot:escapes_ball(minus_two));
+	assert(!mandelbrot:escapes_ball(i));
+	assert(mandelbrot:escape_iterations(one) == 3);
+	assert(mandelbrot:escape_iterations(two) == 2);
+	assert(mandelbrot:escape_iterations(three) == 1);
+	print("Mandelbrot tests passed\n");
+}
+
+fn main() -> () | Err<_> {
+	test();
+	print("Arrows/WASD: pan | scroll or +/-: zoom | [/]: iterations | R: reset | Esc: quit\n");
+	let window = window_new(960, 720, string_from_str("Resin Mandelbrot"))?;
+	let gpu = gpu_new_for_window(window)?;
+	let pipeline = gpu:create_graphics_pipeline(vertex, fragment)?;
+	// Solve at half the initial window resolution, then scale when presenting.
+	let width = 480_ui;
+	let height = 360_ui;
+	let coordinates = arc_span_alloc(ulong(width) * ulong(height), complex(0.0_d, 0.0_d))?;
+	let plot = plot_new(coordinates:get(), width, height);
+	let iterations = gpu:alloc::<uint>(ulong(width) * ulong(height))?;
+	let pixels = HostPixels { iterations = iterations, width = width, height = height };
+	let image = gpu:create_image(width, height)?;
+	let mut view = default_view(4.0_d / 3.0_d);
+	let mut solver = mandelbrot_new(256);
+	let mut dirty = true;
+	while (true) {
+		window:poll_events()?;
+		if (window:should_close() || window:key_pressed(key_escape)) {
+			break;
+		};
+		let size = window:framebuffer_size()?;
+		if (size.0 == 0 || size.1 == 0) {
+			continue;
+		};
+		let aspect = float64(size.0) / float64(size.1);
+		if (aspect != view.aspect) {
+			view.aspect = aspect;
+			dirty = true;
+		};
+		if (input(window, view, solver)) {
+			dirty = true;
+		};
+		let scroll = window:scroll_delta()?;
+		if (window:focused() && scroll.1 != 0.0_d) {
+			view:zoom(
+				if (scroll.1 > 0.0_d) {
+					0.8_d
+				} else {
+					1.25_d
+				}
+			);
+			dirty = true;
+		};
+		if (dirty) {
+			plot:populate(view);
+			solver:solve(plot, pixels.iterations);
+			let commands = gpu:start_command_recording()?;
+			commands:begin_rendering(image, 0.0_f, 0.0_f, 0.0_f, 1.0_f)?;
+			commands:draw(pipeline, pixels, 3)?;
+			commands:end_rendering()?;
+			commands:submit()?;
+			dirty = false;
+		};
+		gpu:present(image)?;
+	};
+}

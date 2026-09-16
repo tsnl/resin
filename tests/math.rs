@@ -1,6 +1,47 @@
 mod support;
 
 #[test]
+fn complex_arithmetic_borrows_operands_and_preserves_float_width() {
+    let module = support::module(
+        r#"export { main }; import { "$/math.resin" };
+        fn main() {
+            let a = complex(3.0_f, 4.0_f);
+            let b = complex(1.0_f, -2.0_f);
+            let sum = a:add(b);
+            assert(sum.real == 4.0_f && sum.imag == 2.0_f);
+            let product = a:mul(b);
+            assert(product.real == 11.0_f && product.imag == -2.0_f);
+            let square = a:squared();
+            assert(square.real == -7.0_f && square.imag == 24.0_f);
+            assert(a:magnitude_squared() == 25.0_f);
+            let i = complex(0.0_d, 1.0_d);
+            let minus_one: Complex<float64> = i:squared();
+            assert(minus_one.real == -1.0_d && minus_one.imag == 0.0_d);
+            assert(i:magnitude_squared() == 1.0_d);
+        }"#,
+    );
+    let output = support::project::Project::new(&module, Some("main"))
+        .unwrap()
+        .run();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
+fn complex_arithmetic_accepts_device_storage_in_shaders() {
+    let module = support::module(
+        r#"export { kernel }; import { "$/math.resin" };
+        @compute_shader fn kernel(index: ulong, value: Ptr<Complex<float32>>) {
+            let norm = value.*:magnitude_squared();
+            let square = value.*:squared();
+            value.real = square.real + norm;
+            value.imag = square.imag;
+        }"#,
+    );
+    let project = support::project::Project::new(&module, None).unwrap();
+    support::shaders::validate(project.generated.shaders()[0].unoptimized_spirv());
+}
+
+#[test]
 fn math_functions_preserve_float_width_and_use_radians() {
     let module = support::module(
         r#"export { main }; import { "$/math.resin" };
