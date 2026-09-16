@@ -111,6 +111,11 @@ Incomplete declarations retain useful editor facts where possible. Hovers show
 resolved types, including inferred results, nominal error unions, and match-arm
 bindings. Managed definitions are materialized as immutable read-only local files
 for ordinary file navigation; their server identities stay in the `$/` namespace.
+The LSP retains those mirror files and their source text until the editor session
+ends, including mirrors from earlier managed snapshots. This is a client navigation
+limitation: published file URIs can be opened later, and the protocol provides no
+notification that those links have been discarded. Compiler cache eviction does not
+release these mirrors.
 
 Formatting, acquisition, line indexing, and response preparation run off the stdio
 receiver. Semantic work uses bounded HTTP requests. Superseded work sends explicit
@@ -166,7 +171,11 @@ execution environment are never uploaded.
   synthetic identifiers. Unrecoverable declarations, unresolved imports, and
   unknown receiver types can still prevent suggestions. Automatic imports are
   not implemented.
-- The editor is asked to watch `**/*.resin` if it supports dynamic registration.
+- The editor is asked to watch workspace files and configured header include roots
+  if it supports dynamic registration. Arbitrary header filenames, including
+  extensionless files, must invalidate captured inputs when created, changed, or deleted.
+  Configure an include root for headers outside the workspace so their directories
+  receive file notifications too.
   Without file notifications, external changes to closed dependencies are
   discovered when a later edit or save schedules analysis.
 - Complete accepted editor states are coalesced; each open/reopen has its own

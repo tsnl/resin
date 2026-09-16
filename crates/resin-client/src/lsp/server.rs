@@ -30,7 +30,14 @@ pub(crate) fn run(project: PathBuf, include_roots: Vec<PathBuf>) -> Result<i32> 
     let client = runtime.block_on(crate::interp::connect())?;
     let mirrors = Arc::new(super::mirrors::Mirrors::new()?);
     let (connection, io) = Connection::stdio();
-    let outcome = serve(connection, project, include_roots, client, mirrors);
+    let outcome = serve(
+        connection,
+        project,
+        include_roots,
+        client,
+        mirrors,
+        &runtime,
+    );
     io.join()?;
     outcome
 }
@@ -41,6 +48,7 @@ fn serve(
     mut include_roots: Vec<PathBuf>,
     client: crate::Client,
     mirrors: Arc<super::mirrors::Mirrors>,
+    runtime: &tokio::runtime::Runtime,
 ) -> Result<i32> {
     let (id, params) = connection.initialize_start()?;
     let params: lsp_types::InitializeParams = serde_json::from_value(params)?;
@@ -57,33 +65,38 @@ fn serve(
             .into_iter()
             .map(|path| project.join(path)),
     );
-    let config = WorkerConfig {
-        client,
-        include_roots,
-        mirrors,
-    };
     connection.initialize_finish(
         id,
         json!({"capabilities": capabilities(), "serverInfo": {
             "name": "resin-lsp", "version": env!("CARGO_PKG_VERSION")
         }}),
     )?;
-    if params
+    let watching = params
         .capabilities
         .workspace
         .as_ref()
-        .and_then(|w| w.did_change_watched_files.as_ref())
-        .and_then(|w| w.dynamic_registration)
-        == Some(true)
-    {
+        .and_then(|w| w.did_change_watched_files.as_ref());
+    if watching.is_some_and(|watching| watching.dynamic_registration == Some(true)) {
+        let roots = include_roots.clone();
+        let relative =
+            watching.is_some_and(|watching| watching.relative_pattern_support == Some(true));
+        let watchers =
+            runtime.block_on(client.execution.run(&Cancellation::new(), move |_| {
+                file_watchers(&roots, relative)
+            }))??;
         connection.sender.send(Message::Request(Request::new(
             "resin-file-watchers".to_owned().into(),
             "client/registerCapability".into(),
             json!({"registrations": [{"id": "resin-files",
             "method": "workspace/didChangeWatchedFiles", "registerOptions": {
-            "watchers": [{"globPattern": "**/*.resin", "kind": 7}]}}]}),
+            "watchers": watchers}}]}),
         )))?;
     }
+    let config = WorkerConfig {
+        client,
+        include_roots,
+        mirrors,
+    };
     let editor = Arc::new(EditorSnapshot {
         revision: 0,
         registrations: 0,
@@ -106,6 +119,50 @@ fn serve(
     drop(state);
     worker.join().map_err(|_| "compiler coordinator panicked")?;
     outcome
+}
+
+fn file_watchers(include_roots: &[PathBuf], relative_patterns: bool) -> Result<Vec<Value>> {
+    // Header bundles include arbitrary filenames and transitive inputs. Watching
+    // only .resin or .h would miss extensionless files and newly shadowing headers.
+    let mut watchers = vec![json!({"globPattern": "**/*", "kind": 7})];
+    for root in include_roots {
+        let root = resin_source::normalize_path(root)?;
+        let uri = url::Url::from_directory_path(root)
+            .map_err(|_| "header include roots must be absolute directories")?;
+        let pattern = if relative_patterns {
+            json!({"baseUri": uri.as_str(), "pattern": "**/*"})
+        } else {
+            let path = uri
+                .to_file_path()
+                .map_err(|_| "invalid header include root")?;
+            json!(recursive_glob(&path))
+        };
+        let watcher = json!({"globPattern": pattern, "kind": 7});
+        if !watchers.contains(&watcher) {
+            watchers.push(watcher);
+        }
+    }
+    Ok(watchers)
+}
+
+fn recursive_glob(path: &std::path::Path) -> String {
+    let mut pattern = String::new();
+    for character in path.to_string_lossy().chars() {
+        match character {
+            '\\' if cfg!(windows) => pattern.push('/'),
+            '*' | '?' | '[' | ']' | '{' | '}' => {
+                pattern.push('[');
+                pattern.push(character);
+                pattern.push(']');
+            }
+            _ => pattern.push(character),
+        }
+    }
+    if !pattern.ends_with('/') {
+        pattern.push('/');
+    }
+    pattern.push_str("**/*");
+    pattern
 }
 
 fn capabilities() -> lsp_types::ServerCapabilities {
@@ -614,6 +671,28 @@ mod tests {
             Message::Response(response) => response,
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn include_root_watchers_support_external_directories_and_literal_glob_characters() {
+        let root = std::env::temp_dir().join("native[2]").join("{headers}?");
+        let roots = vec![root.clone(), root.clone()];
+        let relative = file_watchers(&roots, true).unwrap();
+        assert_eq!(relative.len(), 2);
+        assert_eq!(relative[0]["globPattern"], "**/*");
+        assert_eq!(relative[1]["globPattern"]["pattern"], "**/*");
+        let base =
+            url::Url::parse(relative[1]["globPattern"]["baseUri"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            base,
+            url::Url::from_directory_path(resin_source::normalize_path(&root).unwrap()).unwrap()
+        );
+        let absolute = file_watchers(&roots, false).unwrap();
+        let pattern = absolute[1]["globPattern"].as_str().unwrap();
+        assert!(
+            pattern.ends_with("native[[]2[]]/[{]headers[}][?]/**/*"),
+            "{pattern}"
+        );
     }
 
     #[test]

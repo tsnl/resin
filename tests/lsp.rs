@@ -20,6 +20,7 @@ struct Client {
     input: ChildStdin,
     output: Receiver<Message>,
     inbox: VecDeque<Message>,
+    registrations: Vec<Value>,
     next_id: i32,
 }
 
@@ -73,6 +74,7 @@ impl Client {
             input,
             output,
             inbox: VecDeque::new(),
+            registrations: Vec::new(),
             next_id: 1,
         };
         let initialize = client.request(
@@ -137,6 +139,7 @@ impl Client {
                 .expect("timed out waiting for LSP message");
             if let Message::Request(request) = message {
                 assert_eq!(request.method, "client/registerCapability");
+                self.registrations.push(request.params.clone());
                 self.send(Message::Response(Response::new_ok(request.id, Value::Null)));
                 continue;
             }
@@ -615,6 +618,65 @@ fn dependency_overlays_close_and_disk_changes_refresh_consumers() {
             .unwrap()
             .contains("def answer () -> int")
     );
+    client.stop();
+}
+
+#[test]
+fn local_header_creation_and_deletion_refresh_unchanged_editor_inputs() {
+    let temp = TempDir::new().unwrap();
+    let project = temp.path().join("project");
+    let include = temp.path().join("include");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::create_dir(&include).unwrap();
+    let mut client = Client::start(&project, json!({"includeRoots": ["../include"]}));
+    let main_uri = uri(&project.join("main.resin"));
+    let source = "extern { \"./fixture\": {} }; def main() = {};";
+    client.open(&main_uri, source);
+    client.diagnostics(&main_uri, Some(1), true);
+    let watchers: Vec<_> = client
+        .registrations
+        .iter()
+        .flat_map(|registration| registration["registrations"].as_array().unwrap())
+        .flat_map(|registration| {
+            registration["registerOptions"]["watchers"]
+                .as_array()
+                .unwrap()
+        })
+        .collect();
+    assert!(
+        watchers
+            .iter()
+            .any(|watcher| watcher["globPattern"] == "**/*")
+    );
+    let watched_include = url::Url::from_directory_path(std::fs::canonicalize(&include).unwrap())
+        .unwrap()
+        .to_file_path()
+        .unwrap();
+    let include_pattern = watched_include
+        .join("**")
+        .join("*")
+        .to_string_lossy()
+        .replace('\\', "/");
+    assert!(
+        watchers
+            .iter()
+            .any(|watcher| watcher["globPattern"] == include_pattern)
+    );
+
+    for header in [project.join("fixture"), include.join("fixture")] {
+        std::fs::write(&header, "/* complete local header */\n").unwrap();
+        client.notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": uri(&header), "type": 1}]}),
+        );
+        client.diagnostics(&main_uri, Some(1), false);
+        std::fs::remove_file(&header).unwrap();
+        client.notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": uri(&header), "type": 3}]}),
+        );
+        client.diagnostics(&main_uri, Some(1), true);
+    }
     client.stop();
 }
 
