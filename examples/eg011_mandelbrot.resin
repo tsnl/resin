@@ -241,7 +241,7 @@ fn main() -> () | Err<_> {
 	let mut dirty = true;
 	while (true) {
 		window:wait_events(1.0_d / 60.0_d)?;
-		if (window:should_close() || window:key_pressed(key_escape)) {
+		if (window:should_close() || window:key_state(key_escape).pressed) {
 			break;
 		};
 		let size = window:framebuffer_size()?;
