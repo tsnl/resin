@@ -77,7 +77,7 @@ When the receiver's namespace is unknown, extra method parameters must be suppli
 explicitly; omitting `::<...>` supplies zero extra arguments. HIR completes inference
 before specialization, which performs no deduction. Primitive compiler-provided
 methods still require a source-known receiver shape. Operations requiring a known
-pointer or Result shape may need a result annotation before `.*` or `?` can be used.
+pointer or error-union shape may need a result annotation before `.*` or `?` can be used.
 
 ## Operator overloading
 

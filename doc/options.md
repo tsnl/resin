@@ -43,10 +43,10 @@ Postfix operations compose from left to right: `optional_record!.field` excludes
 `None` before selecting a field. Prefix `!` still negates a Boolean. A second
 postfix `!` is invalid once no `None` remains.
 
-`Result<T, E>` retains distinct `ok` and `err` cases even when `T` and `E` overlap.
-It can be a member of a union, such as `Result<int, Error> | None`; `!` on that
-union removes only `None`, leaving the Result intact. Use `?` or `match` to handle
-the Result. Postfix `!` on a bare Result is not supported in this change.
+`T | Err<E>` distinguishes success from failure even when `T` and `E` overlap:
+`int` and `Err<int>` are different types. In `int | Err<E> | None`, postfix `!`
+removes only `None`; postfix `?` propagates only `Err` and preserves `None`.
+Use `match` to handle either explicitly. Both use the same ordinary union tags.
 
 Every nominal, primitive, and structural type is interned in one module-wide
 vector of type definitions. A type's ID is its index in that vector; an ordinary
@@ -59,5 +59,4 @@ For example, `int` has the same tag in
 preserves that tag. A union type has a table entry, but is never itself a payload:
 `(int | None) | bool` is flattened to `int | None | bool` before lowering.
 Numeric tag values are local to the compiled program; they are not a stable
-serialization format or ABI between separate builds. Results have a separate
-tag domain for success and failure.
+serialization format or ABI between separate builds. `Err<E>` has its own type ID, like every other union member.

@@ -762,7 +762,7 @@ fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
         let payload = widen(types, source, target, &format!("({value}).value"));
         return format!("({}){{ .value = {payload} }}", types.name(to));
     }
-    if !matches!(from, Ty::Union { .. } | Ty::Result { .. })
+    if !matches!(from, Ty::Union { .. })
         && let Ty::Union { variants } = to
         && let Some(target) = variants
             .iter()

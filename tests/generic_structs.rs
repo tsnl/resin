@@ -146,14 +146,14 @@ fn generic_nominal_error_types_keep_result_payloads() {
     let output = run(r#"
         export { main };
         struct Failure<T> { value: T };
-        def fail<T>(value: T) -> Result<T, Failure<T>> = {
-            err(Failure<T> { value = value })
+        def fail<T>(value: T) -> (T | Err<Failure<T>>) = {
+            Err(Failure<T> { value = value })
         };
-        def relay<T>(value: T) -> Result<T, _> = { ok(fail(value)?) };
+        def relay<T>(value: T) -> (T | Err<_>) = { (fail(value)?) };
         def main() -> int = {
             match (relay(42_i)) {
-                ok(value) => { 0 },
-                err(error) => { error.value }
+                int(value) => { 0 },
+                Err(error) => { error.value }
             }
         };
     "#);
@@ -327,7 +327,7 @@ fn nongeneric_wrappers_copy_shared_generic_storage_and_destroy_it_once() {
                 var optional: ArcPtr<Cell<Resource>> | None;
                 optional := match (ArcPtr<Cell<Resource>>.alloc(Cell<Resource> {
                     value = Resource { trace = &trace, answer = 0 }
-                })) { ok(value) => { value }, err(error) => { None } };
+                })) { ArcPtr<Cell<Resource>>(value) => { value }, Err(error) => { None } };
                 var owner = optional!;
                 owner.get().value.answer := 42;
                 var first = Envelope { owner = owner };

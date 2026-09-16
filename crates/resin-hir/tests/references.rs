@@ -46,7 +46,7 @@ fn references_cannot_be_hidden_in_value_storage_or_generic_arguments() {
         "type R = Ref<int>; struct Invalid { value: R };",
         "def invalid(value: Ptr<Ref<int>>) = {};",
         "def invalid(value: Ref<Ref<int>>) = {};",
-        "def invalid(value: Result<Ref<int>, None>) = {};",
+        "def invalid(value: (Ref<int> | Err<None>)) = {};",
         "def invalid(value: Ref<int> | None) = {};",
         "struct Cell<T> { value: T }; def invalid(value: Cell<Ref<int>>) = {};",
         "def identity<T>(value: T) -> T = { value }; def invalid() = { var x = 1_i; identity::<Ref<int>>(x); };",

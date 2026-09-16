@@ -318,7 +318,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `WeakSpan<T>` observe host ownership, and `GpuPtr<T>` / `GpuSpan<T>` retain GPU
   ownership. All are ordinary value types; there are no unsized payload types.
   `ArcPtr<Span<T>>` owns a descriptor, while `ArcSpan<T>` owns its elements.
-  `ArcSpan<T>.alloc(count, initial)` returns `Result<ArcSpan<T>, OutOfMemory>`, checks
+  `ArcSpan<T>.alloc(count, initial)` returns `(ArcSpan<T> | Err<OutOfMemory>)`, checks
   allocation arithmetic, and initializes every element using ordinary copying.
   Final release destroys elements in reverse order. `get()` borrows a `Span<T>`;
   `ArcPtr<T>.alloc(initial)` allocates one initialized value. Both are ordinary
@@ -421,17 +421,17 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Type IDs index one canonical table of nominal, primitive, and structural definitions;
   host and shader emission share it. Union tags are the active payload's table index.
   `None` is a builtin singleton type and value; `T | None` expresses optionality. Postfix `!`
-  removes `None` or traps, preserving the other members; it does not unwrap Results.
-  `Result<T, E>` is first-class; `ok`/`err` construct it, exhaustive `match` handles it, and postfix
+  removes `None` or traps, preserving the other members; it preserves `Err` members.
+  `T | Err<E>` is an ordinary union; success values are plain and `Err(value)` wraps errors. Exhaustive `match` handles it, and postfix
   `?` returns early on error. Error holes collect the least union of propagated errors (`Never`
-  if empty). Keep mutable pointers invariant; implicit widening only copies union/Result values.
+  if empty). Keep mutable pointers invariant; implicit widening only copies union/Err values.
 - Initialized owners are destroyed in reverse scope order on normal exit and `?`;
   preserve returned values before cleanup. Chain expressions with no tail yield unit.
-  Standard-library wrappers return Results and keep integer-status C declarations private;
+  Standard-library wrappers return error unions and keep integer-status C declarations private;
   public operations use static and instance methods on resource types. `RuntimeError` is a union of named status errors.
   Standard-library resource handles now retain shared owners and clean up automatically;
   do not register manual native destruction for them. `commands.submit()` and `commands.cancel()`
-  clear the shared native handle; presentation returns `ok(false)` for skipped frames.
+  clear the shared native handle; presentation returns `(false)` for skipped frames.
   Reference counting and custom destruction are host-only; shader consumption of
   managed values is rejected.
 - Always commit and push completed changes to a task branch and open a pull request,

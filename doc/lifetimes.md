@@ -91,7 +91,7 @@ reassignment destroys the previous initialized destination.
 | `WeakPtr<T>`, `WeakSpan<T>` | Retain weak ownership bookkeeping |
 | Struct or tuple | Recursively copy its fields |
 | Array | Recursively copy its elements |
-| `Result`, union | Recursively copy the active payload |
+| `Err`, union | Recursively copy the active payload |
 
 `Ptr<ArcPtr<T>>` points to an ArcPtr handle; `Ptr<T>` points to a `T`. Neither `Ptr<T>`
 nor `Span<T>` owns or destroys its pointee. Copying an ArcPtr never copies its pointee.
@@ -109,7 +109,7 @@ view.at(0) := 42_ui;
 var bytes = view.as_bytes();        // Span<ubyte>
 ```
 
-`ArcSpan<T>.alloc(count, initial)` returns `Result<ArcSpan<T>, OutOfMemory>`. It checks
+`ArcSpan<T>.alloc(count, initial)` returns `(ArcSpan<T> | Err<OutOfMemory>)`. It checks
 allocation arithmetic and ownership bookkeeping, copies `initial` into each
 element, and returns only after all elements are initialized. Empty allocations
 are valid, and a zero-sized element still contributes to the logical count.
@@ -143,7 +143,7 @@ access to the elements.
 
 ## Construction and methods
 
-`ArcPtr<T>.alloc(initial)` returns `Result<ArcPtr<T>, OutOfMemory>`. It is an
+`ArcPtr<T>.alloc(initial)` returns `(ArcPtr<T> | Err<OutOfMemory>)`. It is an
 ordinary generic source method and copies its initializer into shared storage.
 Returning its named parameter still performs the language's ordinary copy.
 It does not transfer exclusive ownership of a raw native handle.
@@ -155,10 +155,10 @@ handle through `get()`. Their destructor must tolerate that inert state:
 import { "$/shared.resin" };
 
 struct Resource { handle: Ptr<ubyte>,
-    def make() -> Result<ArcPtr<Resource>, _> = {
+    def make() -> (ArcPtr<Resource> | Err<_>) = {
         var owner = ArcPtr<Resource>.alloc(Resource { handle = Ptr<ubyte>(0_ul) })?;
         owner.get().handle := acquire_native_handle();
-        ok(owner)
+        (owner)
     };
     def address(self: Ptr<Resource>) -> Ptr<ubyte> = { self.handle };
     def drop(self: Ptr<Resource>) = {

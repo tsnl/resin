@@ -294,3 +294,38 @@ fn generic_functions_infer_plain_values_and_error_parameters() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn propagation_and_union_conversions_preserve_success_inference() {
+    let module = module(
+        r#"export { main };
+        def number() -> int | Err<str> = { 42 };
+        def inferred() -> _ = { number()?; 42_i };
+        def main() -> () | Err<_> = {
+            var explicit = (int | Err<str>)(7);
+            assert((explicit?) == 7);
+            assert(inferred()? == 42);
+        };"#,
+    );
+    assert_eq!(
+        module
+            .functions
+            .iter()
+            .find(|function| function.name.as_deref() == Some("inferred"))
+            .unwrap()
+            .result,
+        resin_types::Ty::union_of([
+            resin_types::Ty::Int32,
+            resin_types::Ty::Error {
+                payload: Box::new(resin_types::Ty::Str)
+            },
+        ])
+    );
+    assert!(
+        support::project::Project::new(&module, Some("main"))
+            .unwrap()
+            .run()
+            .status
+            .success()
+    );
+}

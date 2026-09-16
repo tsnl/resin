@@ -118,10 +118,6 @@ pub(super) enum TermKind {
         record: FunctionId,
         args: Arguments,
     },
-    Result {
-        failure: bool,
-        arg: Box<Term>,
-    },
     Absurd {
         arg: Box<Term>,
     },
@@ -215,8 +211,7 @@ impl Term {
             TermKind::Unwrap { value } | TermKind::Try { value } => value.exits(),
             TermKind::Adapt { arg, .. }
             | TermKind::Convert { arg, .. }
-            | TermKind::Absurd { arg }
-            | TermKind::Result { arg, .. } => arg.exits(),
+            | TermKind::Absurd { arg } => arg.exits(),
             TermKind::Address { place } => place.exits(),
             TermKind::Deref { pointer } => pointer.exits(),
             TermKind::Field { base, .. } => base.exits(),

@@ -2,7 +2,7 @@
 (uid) @type
 (builtin_type) @type.builtin
 (inferred_type) @type.builtin
-["Ptr" "Ref" "Result" "Err" "None"] @type.builtin
+["Ptr" "Ref" "Err" "None"] @type.builtin
 
 ; Keep declaration and control keywords in sync with the grammar's reserved words.
 ["export" "import" "extern" "intrinsic" "type" "struct" "def" "var" "const"] @keyword
@@ -19,7 +19,7 @@
 (intrinsic_function params: (declare name: (lid) @variable.parameter))
 (postfix_term prefix: (primary_term (lid) @function) . suffix: (arguments))
 ((primary_term (lid) @function.builtin)
-  (#any-of? @function.builtin "ok" "err" "sizeof"))
+  (#any-of? @function.builtin "sizeof"))
 
 (field_access name: (lid) @property)
 (field_access name: (tuple_index) @property)
@@ -28,7 +28,6 @@
 (record_type field: (declare name: (lid) @property))
 (struct_definition fields: (declare name: (lid) @property))
 (match_arm name: (lid) @variable.parameter)
-["ok" "err"] @function.builtin
 
 (pointer_deref) @operator
 (try_suffix) @operator

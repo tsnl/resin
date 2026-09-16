@@ -11,7 +11,7 @@ extern {
 
 import { "$/shared.resin", "@WORKLOAD@" };
 
-def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> Result<(), _> = {
+def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> (() | Err<_>) = {
 	var count = uint(benchmark_argument(argc, argv, 1_ui));
 	var iterations = uint(benchmark_argument(argc, argv, 2_ui));
 	var samples = benchmark_argument(argc, argv, 3_ui);
@@ -39,5 +39,5 @@ def main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> Result<(), 
 		benchmark_report(start, end, output, count, 1_i);
 		index := index + 1_ul;
 	};
-	ok(())
+	(())
 };

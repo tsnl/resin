@@ -272,26 +272,17 @@ pub enum Ty {
     Error {
         payload: Box<Ty>,
     },
-    Result {
-        value: Box<Ty>,
-        error: Box<Ty>,
-    },
 }
 
-/// Result cases are tagged independently of their payload type. Ordinary union
-/// cases use the index of their payload type in the module's type table.
+/// Union cases use their payload type's canonical index in the module type table.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Case {
-    Ok,
-    Err,
     Type(Ty),
 }
 
 impl Case {
     pub fn tag(&self, types: &TypeTable) -> u32 {
         match self {
-            Self::Ok => 0,
-            Self::Err => 1,
             Self::Type(ty) => types.id(ty).expect("verified union member").tag(),
         }
     }
@@ -322,16 +313,30 @@ impl Ty {
 
     pub fn payload(&self, case: &Case) -> Option<Ty> {
         match (self, case) {
-            (Self::Result { value, .. }, Case::Ok) => Some(*value.clone()),
-            (Self::Result { error, .. }, Case::Err) => Some(*error.clone()),
             (_, Case::Type(ty)) if self.members().contains(ty) => Some(ty.clone()),
             _ => None,
         }
     }
 
-    /// Nominal variants used by Result error-set inference.
+    /// Nominal members of a union, if every member is nominal.
     pub fn variants(&self) -> Option<Vec<TypeId>> {
         types::variants(self)
+    }
+
+    /// Inspect the ordinary two-member union `T | Err<E>`.
+    /// Returns the success type and the unwrapped error payload type.
+    pub fn fallible_parts(&self) -> Option<(&Ty, &Ty)> {
+        let Self::Union { variants } = self else {
+            return None;
+        };
+        match variants.as_slice() {
+            [Self::Error { payload }, value] | [value, Self::Error { payload }]
+                if !matches!(value, Self::Error { .. }) =>
+            {
+                Some((value, payload))
+            }
+            _ => None,
+        }
     }
 
     pub fn members(&self) -> Vec<Ty> {

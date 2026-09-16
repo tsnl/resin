@@ -1,12 +1,12 @@
 export { kernel, main };
-def infallible(n: uint, p: Ptr<uint>) -> Result<uint, Never> = {
-    var r: Result<uint, Never>; r := ok(n);
+def infallible(n: uint, p: Ptr<uint>) -> (uint | Err<Never>) = {
+    var r: (uint | Err<Never>); r := (n);
     var saved = r?;
     p.* := p.* + 1_ui;
-    ok(saved)
+    (saved)
 };
-def unwrap(r: Result<uint, Never>) -> uint = {
-    match (r) { ok(n) => { n }, err(impossible) => { absurd(impossible) } }
+def unwrap(r: (uint | Err<Never>)) -> uint = {
+    match (r) { uint(n) => { n }, Err(impossible) => { absurd(impossible) } }
 };
 @compute_shader def kernel(i: ulong, p: Ptr<uint>) = {
     if (i == 0_ul) {

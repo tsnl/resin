@@ -430,7 +430,7 @@ fn shader_declarations_preserve_the_entry_files_export_scope() {
         ),
         (
             "main.resin",
-            "export { kernel, main }; import { \"left.resin\", \"right.resin\", \"$/gpu.resin\" }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); left(i, output); right(i, output); }; def main() -> Result<(), _> = { if (0 == 1) { Gpu.new()?.create_compute_pipeline(kernel)?; }; ok(()) };",
+            "export { kernel, main }; import { \"left.resin\", \"right.resin\", \"$/gpu.resin\" }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); left(i, output); right(i, output); }; def main() -> (() | Err<_>) = { if (0 == 1) { Gpu.new()?.create_compute_pipeline(kernel)?; }; (()) };",
         ),
     ]);
     let module = project.compile().unwrap();
@@ -475,7 +475,7 @@ fn shader_declarations_preserve_the_entry_files_export_scope() {
 fn standard_library_imports_work_outside_the_repository() {
     let project = Project::new(&[(
         "main.resin",
-        "export { main }; import { \"$/status.resin\", \"$/graphics.resin\", \"$/image.resin\" }; def main() -> Result<int, _> = { RuntimeStatus.from_code(0)?; ok(RuntimeStatus.code(Incomplete {}) + 35) };",
+        "export { main }; import { \"$/status.resin\", \"$/graphics.resin\", \"$/image.resin\" }; def main() -> (int | Err<_>) = { RuntimeStatus.from_code(0)?; (RuntimeStatus.code(Incomplete {}) + 35) };",
     )]);
     assert_eq!(project.run().status.code(), Some(42));
     Project::new(&[(
@@ -660,7 +660,7 @@ fn functions_cannot_capture_another_functions_locals() {
 #[test]
 fn shader_objects_can_reference_private_helpers() {
     let module = support::module(
-        "export { main }; import { \"$/gpu.resin\" }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() -> Result<(), _> = { if (0 == 1) { Gpu.new()?.create_compute_pipeline(kernel)?; }; ok(()) };",
+        "export { main }; import { \"$/gpu.resin\" }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { i }; }; def main() -> (() | Err<_>) = { if (0 == 1) { Gpu.new()?.create_compute_pipeline(kernel)?; }; (()) };",
     );
     assert!(!module.entries.contains_key("kernel"));
     assert!(

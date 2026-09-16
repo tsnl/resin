@@ -294,9 +294,6 @@ impl Printer {
                     self.arguments(args),
                 ],
             ),
-            TermKind::Result { failure, arg } => {
-                list(if *failure { "err" } else { "ok" }, vec![self.term(arg)])
-            }
             TermKind::Absurd { arg } => list("absurd", vec![self.term(arg)]),
             TermKind::Assign { place, value } => {
                 list("assign", vec![self.term(place), self.term(value)])
@@ -320,8 +317,6 @@ impl Printer {
         let tag = match &arm.tag {
             Case::Error { .. } => atom("Err"),
             Case::Wildcard => atom("_"),
-            Case::Ok => atom("ok"),
-            Case::Err => atom("err"),
             Case::Type { ty } => self.ty(ty),
         };
         list(
@@ -396,9 +391,6 @@ impl TypeNames {
                     .join(" | ")
             }
             Type::Error { payload } => format!("Err<{}>", self.format(payload)),
-            Type::Result { value, error } => {
-                format!("Result<{}, {}>", self.format(value), self.format(error))
-            }
             Type::Type => "type".into(),
             Type::Unit => "()".into(),
             Type::None => "None".into(),

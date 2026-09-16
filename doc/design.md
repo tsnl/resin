@@ -21,7 +21,7 @@ argument, whose function type is `((A, B)) -> R`. Likewise, `f()` supplies no ar
 while `f(())` supplies one unit value. Calls evaluate the callee, then each argument in
 source order. Tuples retain positional record fields in IR; argument lists remain separate.
 Calls and assignments preserve nominal identity; explicit `T(value)` ascriptions
-wrap or unwrap one nominal record layer. Union and Result values may widen their variant sets,
+wrap or unwrap one nominal record layer. Union and Err values may widen their variant sets,
 but mutable pointers remain invariant. Record initializers evaluate fields in source order before
 assembling them in the type's layout order.
 
@@ -35,9 +35,10 @@ on every control-flow path. An aggregate must be initialized as a whole before i
 accessed. Record initializers keep bare `name = value` fields; parameters and record type fields
 keep bare `name: Type` declarations. Files have no runtime globals or initialization phase.
 
-Unions are canonical sets of nominal structs, with program-local u32 tags independent of union
-membership. `Result<T, E>` is first-class, including nested Results. `ok` and `err` construct its
-branches; exhaustive `match` expressions bind payloads, and postfix `?` returns errors early.
+Unions are canonical sets of value types, with program-local u32 tags independent of
+union membership. `T | Err<E>` combines a plain success value with an error wrapper.
+`Err(error)` constructs a wrapper; exhaustive `match` expressions bind payloads,
+and postfix `?` returns error wrappers early while yielding the other members.
 An inferred error set is the least union of errors propagated by a dependency group, or `Never`
 when empty.
 

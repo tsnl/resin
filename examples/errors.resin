@@ -6,31 +6,31 @@ struct DivideByZero {};
 struct NegativeInput { value: int };
 type Number = int;
 
-def divide(n: Number, d: Number) -> Result<Number, DivideByZero> = {
+def divide(n: Number, d: Number) -> (Number | Err<DivideByZero>) = {
 	if (d == 0) {
-		err(DivideByZero {})
+		Err(DivideByZero {})
 	} else {
-		ok(n / d)
+		(n / d)
 	}
 };
 
-def calculate(n: int) -> Result<int, _> = {
+def calculate(n: int) -> (int | Err<_>) = {
 	if (n < 0) {
-		err(NegativeInput { value = n })
+		Err(NegativeInput { value = n })
 	} else {
-		ok(divide(n, 2)?)
+		(divide(n, 2)?)
 	}
 };
 
-def main() -> Result<(), _> = {
+def main() -> (() | Err<_>) = {
 	RuntimeStatus.from_code(0)?;
 	var answer = calculate(84)?;
 	print(fmt("answer = {0}\n", (answer,)));
 	match (calculate(-1)) {
-		ok(value) => {
+		int(value) => {
 			print(fmt("unexpected success: {0}\n", (value,)))
 		},
-		err(error) => {
+		Err(error) => {
 			match (error) {
 				DivideByZero(zero) => {
 					print("division by zero\n")
@@ -41,10 +41,10 @@ def main() -> Result<(), _> = {
 			}
 		},
 	};
-	ok(())
+	(())
 };
 
-def failure() -> Result<(), _> = {
+def failure() -> (() | Err<_>) = {
 	divide(1, 0)?;
-	ok(())
+	(())
 };

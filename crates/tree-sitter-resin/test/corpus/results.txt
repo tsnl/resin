@@ -4,9 +4,9 @@ Structs, aliases, unions, and Results
 struct SomeInt { value: int };
 struct NoneInt {};
 type OptionInt = SomeInt | NoneInt;
-def read(value: Result<int, NoneInt>) -> Result<int, _> = {
+def read(value: (int | Err<NoneInt>)) -> (int | Err<_>) = {
     var n = value?;
-    ok(n)
+    (n)
 };
 ---
 
@@ -44,34 +44,44 @@ def read(value: Result<int, NoneInt>) -> Result<int, _> = {
         (infix_type
           (union_type
             (unary_type
-              (type
-                (infix_type
-                  (union_type
-                    (unary_type
-                      (primary_type
-                        (builtin_type))))))
-              (type
-                (infix_type
-                  (union_type
-                    (unary_type
-                      (primary_type
-                        (uid)))))))))))
+              (primary_type
+                (closed_type
+                  (paren_type
+                    (type
+                      (infix_type
+                        (union_type
+                          (union_type
+                            (unary_type
+                              (primary_type
+                                (builtin_type))))
+                          (unary_type
+                            (type
+                              (infix_type
+                                (union_type
+                                  (unary_type
+                                    (primary_type
+                                      (uid))))))))))))))))))
     (type
       (infix_type
         (union_type
           (unary_type
-            (type
-              (infix_type
-                (union_type
-                  (unary_type
-                    (primary_type
-                      (builtin_type))))))
-            (type
-              (infix_type
-                (union_type
-                  (unary_type
-                    (primary_type
-                      (inferred_type))))))))))
+            (primary_type
+              (closed_type
+                (paren_type
+                  (type
+                    (infix_type
+                      (union_type
+                        (union_type
+                          (unary_type
+                            (primary_type
+                              (builtin_type))))
+                        (unary_type
+                          (type
+                            (infix_type
+                              (union_type
+                                (unary_type
+                                  (primary_type
+                                    (inferred_type)))))))))))))))))
     (block_body
       (statement
         (define
@@ -91,23 +101,23 @@ def read(value: Result<int, NoneInt>) -> Result<int, _> = {
             (unary_term
               (postfix_term
                 (primary_term
-                  (lid))
-                (arguments
-                  (term
-                    (assignment_term
-                      (binary_term
-                        (unary_term
-                          (postfix_term
-                            (primary_term
-                              (lid))))))))))))))))
+                  (closed_term
+                    (paren_term
+                      (term
+                        (assignment_term
+                          (binary_term
+                            (unary_term
+                              (postfix_term
+                                (primary_term
+                                  (lid))))))))))))))))))
 
 ==================
 Match arms and chained propagation
 ==================
-def nested(value: Result<Result<int, Never>, Never>) -> Result<int, Never> = {
+def nested(value: ((int | Err<Never>) | Err<Never>)) -> (int | Err<Never>) = {
     match (value) {
-        ok(inner) => { ok(inner?) },
-        err(error) => { err(error) },
+        int(inner) => { (inner?) },
+        Err(error) => { Err(error) },
     }
 };
 ---
@@ -121,44 +131,59 @@ def nested(value: Result<Result<int, Never>, Never>) -> Result<int, Never> = {
         (infix_type
           (union_type
             (unary_type
-              (type
-                (infix_type
-                  (union_type
-                    (unary_type
-                      (type
-                        (infix_type
+              (primary_type
+                (closed_type
+                  (paren_type
+                    (type
+                      (infix_type
+                        (union_type
                           (union_type
                             (unary_type
                               (primary_type
-                                (builtin_type))))))
-                      (type
-                        (infix_type
-                          (union_type
-                            (unary_type
-                              (primary_type
-                                (builtin_type))))))))))
-              (type
-                (infix_type
-                  (union_type
-                    (unary_type
-                      (primary_type
-                        (builtin_type)))))))))))
+                                (closed_type
+                                  (paren_type
+                                    (type
+                                      (infix_type
+                                        (union_type
+                                          (union_type
+                                            (unary_type
+                                              (primary_type
+                                                (builtin_type))))
+                                          (unary_type
+                                            (type
+                                              (infix_type
+                                                (union_type
+                                                  (unary_type
+                                                    (primary_type
+                                                      (builtin_type)))))))))))))))
+                          (unary_type
+                            (type
+                              (infix_type
+                                (union_type
+                                  (unary_type
+                                    (primary_type
+                                      (builtin_type))))))))))))))))))
     (type
       (infix_type
         (union_type
           (unary_type
-            (type
-              (infix_type
-                (union_type
-                  (unary_type
-                    (primary_type
-                      (builtin_type))))))
-            (type
-              (infix_type
-                (union_type
-                  (unary_type
-                    (primary_type
-                      (builtin_type))))))))))
+            (primary_type
+              (closed_type
+                (paren_type
+                  (type
+                    (infix_type
+                      (union_type
+                        (union_type
+                          (unary_type
+                            (primary_type
+                              (builtin_type))))
+                        (unary_type
+                          (type
+                            (infix_type
+                              (union_type
+                                (unary_type
+                                  (primary_type
+                                    (builtin_type)))))))))))))))))
     (block_body
       (term
         (assignment_term
@@ -175,6 +200,12 @@ def nested(value: Result<Result<int, Never>, Never>) -> Result<int, Never> = {
                               (primary_term
                                 (lid)))))))
                     (match_arm
+                      (type
+                        (infix_type
+                          (union_type
+                            (unary_type
+                              (primary_type
+                                (builtin_type))))))
                       (lid)
                       (block_body
                         (term
@@ -183,16 +214,16 @@ def nested(value: Result<Result<int, Never>, Never>) -> Result<int, Never> = {
                               (unary_term
                                 (postfix_term
                                   (primary_term
-                                    (lid))
-                                  (arguments
-                                    (term
-                                      (assignment_term
-                                        (binary_term
-                                          (unary_term
-                                            (postfix_term
-                                              (primary_term
-                                                (lid))
-                                              (try_suffix))))))))))))))
+                                    (closed_term
+                                      (paren_term
+                                        (term
+                                          (assignment_term
+                                            (binary_term
+                                              (unary_term
+                                                (postfix_term
+                                                  (primary_term
+                                                    (lid))
+                                                  (try_suffix))))))))))))))))
                     (match_arm
                       (lid)
                       (block_body
@@ -202,12 +233,11 @@ def nested(value: Result<Result<int, Never>, Never>) -> Result<int, Never> = {
                               (unary_term
                                 (postfix_term
                                   (primary_term
-                                    (lid))
-                                  (arguments
-                                    (term
-                                      (assignment_term
-                                        (binary_term
-                                          (unary_term
-                                            (postfix_term
-                                              (primary_term
-                                                (lid)))))))))))))))))))))))))
+                                    (error_term
+                                      (term
+                                        (assignment_term
+                                          (binary_term
+                                            (unary_term
+                                              (postfix_term
+                                                (primary_term
+                                                  (lid))))))))))))))))))))))))))

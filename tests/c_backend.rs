@@ -68,7 +68,7 @@ fn array_value_projections_copy_the_element_and_destroy_the_container() {
             def make(trace: Ptr<int>, digit: int) -> ArcPtr<Resource> = {
                 var optional: ArcPtr<Resource> | None;
                 optional := match (ArcPtr<Resource>.alloc(Resource { trace = trace, digit = 0 })) {
-                    ok(value) => { value }, err(error) => { None },
+                    ArcPtr<Resource>(value) => { value }, Err(error) => { None },
                 };
                 var owner = optional!;
                 owner.get().digit := digit;
@@ -163,27 +163,27 @@ fn runs(source: &str, code: i32) {
 #[test]
 fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
     runs(
-        "export { main }; struct E {}; def fail() -> Result<int, E> = { err(E {}) }; def sum(a: int, b: int, c: int) -> int = { a + b + c }; def main() -> Result<int, E> = { ok(sum(1, fail()?, 3)) };",
+        "export { main }; struct E {}; def fail() -> (int | Err<E>) = { Err(E {}) }; def sum(a: int, b: int, c: int) -> int = { a + b + c }; def main() -> (int | Err<E>) = { (sum(1, fail()?, 3)) };",
         1,
     );
     runs(
-        "export { main }; struct Bad { code: int }; def fail(counter: Ptr<int>) -> Result<int, Bad> = { counter.* := counter.* + 1; err(Bad { code = 7 }) }; def work(counter: Ptr<int>) -> Result<int, Bad> = { ok((counter.* := counter.* + 10) + fail(counter)? + (counter.* := 1000)) }; def main() -> int = { var count = 0; var result = work(&count); match (result) { ok(n) => { 99 }, err(e) => { count + e.code } } };",
+        "export { main }; struct Bad { code: int }; def fail(counter: Ptr<int>) -> (int | Err<Bad>) = { counter.* := counter.* + 1; Err(Bad { code = 7 }) }; def work(counter: Ptr<int>) -> (int | Err<Bad>) = { ((counter.* := counter.* + 10) + fail(counter)? + (counter.* := 1000)) }; def main() -> int = { var count = 0; var result = work(&count); match (result) { int(n) => { 99 }, Err(e) => { count + e.code } } };",
         18,
     );
     runs(
-        "export { main }; struct A {}; struct B { n: int }; struct C {}; def small() -> Result<int, B> = { err(B { n = 42 }) }; def broad() -> Result<int, A | B | C> = { small() }; def main() -> int = { match (broad()) { ok(n) => { n }, err(e) => { match (e) { C(c) => { 3 }, B(b) => { b.n }, A(a) => { 1 } } } } };",
+        "export { main }; struct A {}; struct B { n: int }; struct C {}; def small() -> (int | Err<B>) = { Err(B { n = 42 }) }; def broad() -> (int | Err<A | B | C>) = { small() }; def main() -> int = { match (broad()) { int(n) => { n }, Err(e) => { match (e) { C(c) => { 3 }, B(b) => { b.n }, A(a) => { 1 } } } } };",
         42,
     );
     runs(
-        "export { main }; def nested() -> Result<Result<int, _>, _> = { ok(ok(42)) }; def main() -> Result<int, _> = { var inner = nested()?; ok(inner?) };",
+        "export { main }; struct Inner { value: int | Err<Never> }; def nested() -> Inner | Err<Never> = { Inner { value = 42 } }; def main() -> int | Err<_> = { var inner = nested()?; inner.value? };",
         42,
     );
     runs(
-        "export { main }; struct E {}; def main() -> Result<(), E> = { ok(()) };",
+        "export { main }; struct E {}; def main() -> (() | Err<E>) = { (()) };",
         0,
     );
     let output = run_module(&module(
-        "export { main }; struct Broken {}; def main() -> Result<(), Broken> = { err(Broken {}) };",
+        "export { main }; struct Broken {}; def main() -> (() | Err<Broken>) = { Err(Broken {}) };",
     ));
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(
@@ -191,7 +191,7 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
         "unhandled error: Broken\n"
     );
     let mut m = module(
-        "export { main }; struct Broken {}; def main() -> Result<(), Broken> = { err(Broken {}) };",
+        "export { main }; struct Broken {}; def main() -> (() | Err<Broken>) = { Err(Broken {}) };",
     );
     let mut definitions = m.types.to_vec();
     let TypeDef::Nominal { name, .. } = definitions
@@ -415,7 +415,7 @@ fn expression_cleanup_preserves_scope_order_on_failure_and_success() {
             def make(trace: Ptr<int>, digit: int) -> ArcPtr<Resource> = {
                 var optional: ArcPtr<Resource> | None;
                 optional := match (ArcPtr<Resource>.alloc(Resource { trace = trace, digit = 0 })) {
-                    ok(value) => { value }, err(error) => { None },
+                    ArcPtr<Resource>(value) => { value }, Err(error) => { None },
                 };
                 var owner = optional!;
                 owner.get().digit := digit;
@@ -423,13 +423,13 @@ fn expression_cleanup_preserves_scope_order_on_failure_and_success() {
             };
             def consume(a: ArcPtr<Resource>, b: ArcPtr<Resource>) = {};
             def last(a: ArcPtr<Resource>, b: ArcPtr<Resource>, c: ArcPtr<Resource>) -> ArcPtr<Resource> = { c };
-            def fail() -> Result<ArcPtr<Resource>, Failed> = { err(Failed {}) };
-            def succeed(trace: Ptr<int>) -> Result<ArcPtr<Resource>, Failed> = { ok(make(trace, 5)) };
-            def owned_error(trace: Ptr<int>) -> Result<ArcPtr<Resource>, OwnedFailed> = { err(OwnedFailed { value = make(trace, 5) }) };
+            def fail() -> (ArcPtr<Resource> | Err<Failed>) = { Err(Failed {}) };
+            def succeed(trace: Ptr<int>) -> (ArcPtr<Resource> | Err<Failed>) = { (make(trace, 5)) };
+            def owned_error(trace: Ptr<int>) -> (ArcPtr<Resource> | Err<OwnedFailed>) = { Err(OwnedFailed { value = make(trace, 5) }) };
         "#;
         let source = format!(
             "{declarations}
-            def attempt(trace: Ptr<int>) -> Result<(), _> = {{ {call}; ok(()) }};
+            def attempt(trace: Ptr<int>) -> () | Err<_> = {{ {call}; () }};
             def main() -> int = {{
                 var trace = 0;
                 attempt(&trace);
@@ -983,20 +983,20 @@ fn dedicated_cleanup_bindings_retain_acquisitions_on_both_exits() {
                 def drop(self: Ptr<Capture>) = {{ self.trace.* := self.trace.* * 10 + self.resource.*; }};
             }};
 
-            def work(trace: Ptr<int>, fail: bool) -> Result<(), E> = {{
+            def work(trace: Ptr<int>, fail: bool) -> (() | Err<E>) = {{
                 var resource = 1;
                 var captured = resource;
                 var first = Capture {{ resource = &captured, trace = trace }};
                 var second = Capture {{ resource = &resource, trace = trace }};
                 resource := 2;
                 {{ var captured = 9; }};
-                var result: Result<(), E>; result := if (fail) {{ err(E {{}}) }} else {{ ok(()) }};
+                var result: (() | Err<E>); result := if (fail) {{ Err(E {{}}) }} else {{ (()) }};
                 result?;
-                ok(())
+                (())
             }};
             def main() -> int = {{
                 var trace = 0;
-                match (work(&trace, {fail})) {{ ok(v) => {{}}, err(e) => {{}} }};
+                match (work(&trace, {fail})) {{ ()(v) => {{}}, Err(e) => {{}} }};
                 if (trace == 21) {{ 0 }} else {{ 1 }}
             }};
         "#
@@ -1136,12 +1136,12 @@ fn structured_loops_propagate_errors_from_conditions_and_nested_bodies() {
 #[test]
 fn sequential_conditionals_and_error_propagation_keep_constant_nesting() {
     let mut source = String::from(
-        "export { main }; struct Failed {}; def step() -> Result<(), Failed> = { ok(()) }; def main() -> Result<int, Failed> = { var value = 0; ",
+        "export { main }; struct Failed {}; def step() -> (() | Err<Failed>) = { (()) }; def main() -> (int | Err<Failed>) = { var value = 0; ",
     );
     for _ in 0..512 {
         source.push_str("if (value == 0) { value := 1; } else { value := 0; }; step()?; ");
     }
-    source.push_str("ok(value) };");
+    source.push_str("(value) };");
     let project = support::project::Project::new(&module(&source), Some("main")).unwrap();
     let c = fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
     assert!(

@@ -15,15 +15,21 @@ extern type Handle;
 ---
 
 (source_file
-  (export_clause (lid))
+  (export_clause
+    (lid))
   (extern_clause
     (foreign_group
       (string)
-      (foreign_function (lid))
-      (foreign_function (lid)))
-    (foreign_group (string)))
-  (import_clause (string))
-  (foreign_type (uid)))
+      (foreign_function
+        (lid))
+      (foreign_function
+        (lid)))
+    (foreign_group
+      (string)))
+  (import_clause
+    (string))
+  (foreign_type
+    (uid)))
 
 ==================
 Empty preamble clauses

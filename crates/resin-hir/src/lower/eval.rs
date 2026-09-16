@@ -108,12 +108,6 @@ impl Decoder<'_> {
                 }
                 Type::record(fields)
             }
-            TypeKind::Result { value, error } => {
-                let value = self.ty(value, infer)?;
-                let error = self.ty(error, infer)?;
-                self.solver.errors(&error, ann.span)?;
-                Type::result(value, error)
-            }
             TypeKind::Union { left, right } => {
                 let left = self.ty(left, infer)?;
                 let right = self.ty(right, infer)?;

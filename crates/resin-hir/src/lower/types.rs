@@ -39,10 +39,6 @@ pub(super) fn ty(source: &Ty) -> crate::Type {
         Ty::Error { payload } => crate::Type::Error {
             payload: Box::new(ty(payload)),
         },
-        Ty::Result { value, error } => crate::Type::Result {
-            value: Box::new(ty(value)),
-            error: Box::new(ty(error)),
-        },
         Ty::Array { element, length } => crate::Type::Array {
             element: Box::new(ty(element)),
             length: *length,

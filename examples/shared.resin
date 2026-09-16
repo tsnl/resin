@@ -14,7 +14,7 @@ struct Tracked {
 	};
 };
 
-def main() -> Result<(), _> = {
+def main() -> (() | Err<_>) = {
 	var weak = {
 		// Allocate an inert payload, then initialize it through the borrowed pointer.
 		var shared = ArcPtr<Tracked>.alloc(Tracked { value = 0 })?;
@@ -31,5 +31,5 @@ def main() -> Result<(), _> = {
 			print("expired\n");
 		},
 	};
-	ok(())
+	(())
 };

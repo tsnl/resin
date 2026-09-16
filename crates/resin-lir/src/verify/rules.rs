@@ -52,10 +52,6 @@ pub(super) fn check_value(
                     visit(table, member, location, seen)?;
                 }
             }
-            Ty::Result { value, error } => {
-                visit(table, value, location, seen)?;
-                visit(table, error, location, seen)?;
-            }
             Ty::Foreign { .. } => {
                 return Err(location.error(VerifyErrorKind::OpaqueValue { ty: ty.clone() }));
             }

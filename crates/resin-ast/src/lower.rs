@@ -706,8 +706,6 @@ impl<'a> AstGen<'a> {
                                 self.span(variant),
                             )),
                             "_" => MatchVariant::Wildcard,
-                            "ok" => MatchVariant::Ok,
-                            "err" => MatchVariant::Err,
                             "Err" => MatchVariant::Error,
                             _ => MatchVariant::Type(self.gen_type(variant)),
                         };
@@ -1029,17 +1027,6 @@ impl<'a> AstGen<'a> {
     fn gen_unary_type(&self, node: Node) -> Type {
         if node.kind() != "unary_type" || node.is_missing() || node.is_error() {
             return Spanned::new(TypeKind::Hole, self.span(node));
-        }
-        if let Some(value) = node.child_by_field_name("value") {
-            return Spanned::new(
-                TypeKind::Result {
-                    value: Box::new(self.gen_type(value)),
-                    error: Box::new(
-                        self.gen_type(node.child_by_field_name("error").unwrap_or(node)),
-                    ),
-                },
-                self.span(node),
-            );
         }
         if let Some(former) = node.child_by_field_name("former") {
             let head = self.ident(former);

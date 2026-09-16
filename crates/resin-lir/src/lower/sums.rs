@@ -29,90 +29,12 @@ impl FunctionLowering<'_> {
         Ok(to.clone())
     }
 
-    pub(super) fn gen_result(
-        &mut self,
-        span: Span,
-        failure: bool,
-        arg: &Term,
-        expected: &Ty,
-    ) -> Result<Ty, LowerError> {
-        let ty @ Ty::Result {
-            value,
-            error: errors,
-        } = expected
-        else {
-            return Err(LowerError::invalid_hir(
-                span,
-                "cannot infer Result; annotate its value and error types",
-            ));
-        };
-        self.gen_term(arg, Some(if failure { errors } else { value }))?;
-        self.emit(Instr::MakeVariant {
-            ty: ty.clone(),
-            tag: if failure { Case::Err } else { Case::Ok },
-        });
-        Ok(ty.clone())
-    }
-
     pub(super) fn gen_try(&mut self, span: Span, term: &Term) -> Result<Ty, LowerError> {
         let ty = self.gen_term(term, None)?;
         if self.function.terminated() {
             return Ok(ty);
         }
-        if !matches!(ty, Ty::Result { .. }) {
-            return self.gen_try_union(span, ty);
-        }
-        let Ty::Result {
-            value,
-            error: errors,
-        } = &ty
-        else {
-            return Err(LowerError::invalid_hir(
-                span,
-                "postfix ? requires a Result value",
-            ));
-        };
-        let result = self.function.result_type().clone();
-        let Ty::Result { error: target, .. } = &result else {
-            return Err(LowerError::invalid_hir(
-                span,
-                "postfix ? requires a Result return type",
-            ));
-        };
-        if !errors.widens_to(target) {
-            return Err(LowerError::invalid_hir(
-                span,
-                "the return type does not include every propagated error",
-            ));
-        }
-        let saved = self.save_top(&ty);
-        self.emit(Instr::LocalAddress { local: saved });
-        self.emit(Instr::IsVariant { tag: Case::Ok });
-        let height = self.function.stack_len() - 1;
-        let success = self.new_block("try.ok", height, 0);
-        let failure = self.new_block("try.err", height, 0);
-        let next = self.new_block("try.next", height, 1);
-        self.terminate(Terminator::If {
-            then: success,
-            els: failure,
-            next: Some(next),
-        });
-        self.switch(failure);
-        self.emit(Instr::TakeLocal { local: saved });
-        self.emit(Instr::VariantPayload { tag: Case::Err });
-        self.coerce(span, *errors.clone(), target)?;
-        self.emit(Instr::MakeVariant {
-            ty: result.clone(),
-            tag: Case::Err,
-        });
-        self.cleanup(0, &result);
-        self.terminate(Terminator::Return);
-        self.switch(success);
-        self.emit(Instr::TakeLocal { local: saved });
-        self.emit(Instr::VariantPayload { tag: Case::Ok });
-        self.terminate(Terminator::Merge);
-        self.switch(next);
-        Ok(*value.clone())
+        self.gen_try_union(span, ty)
     }
 
     fn gen_try_union(&mut self, span: Span, ty: Ty) -> Result<Ty, LowerError> {

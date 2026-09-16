@@ -128,11 +128,11 @@ pub(super) fn allocation_error(
             .collect::<Vec<_>>(),
         location,
     )?;
-    let Ty::Result { value, error } = &function.result else {
+    let Some((value, error)) = function.result.fallible_parts() else {
         return Err(invalid());
     };
-    expect_type(Ty::GpuView, *value.clone(), location)?;
-    Ok(*error.clone())
+    expect_type(Ty::GpuView, value.clone(), location)?;
+    Ok(error.clone())
 }
 
 fn gpu_element(module: &Module, ty: &Ty, location: Location) -> Result<(), VerifyError> {

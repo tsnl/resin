@@ -267,8 +267,6 @@ impl Specialization<'_, '_> {
                 return Err(self
                     .instance_error("wildcard must be expanded before concrete arm translation"));
             }
-            resin_hir::Case::Ok => Case::Ok,
-            resin_hir::Case::Err => Case::Err,
             resin_hir::Case::Type { ty: value } => Case::Type(self.ty(value)?),
         };
         Ok(concrete::MatchArm {
@@ -285,10 +283,7 @@ impl Specialization<'_, '_> {
         arms: &[resin_hir::MatchArm],
     ) -> Result<concrete::TermKind, Error> {
         let value = self.boxed(value)?;
-        let mut tags = match &value.ty {
-            Ty::Result { .. } => vec![Case::Ok, Case::Err],
-            ty => ty.members().into_iter().map(Case::Type).collect(),
-        };
+        let mut tags: Vec<_> = value.ty.members().into_iter().map(Case::Type).collect();
         let mut completed = vec![];
         for (index, arm) in arms.iter().enumerate() {
             if let resin_hir::Case::Error { payload } = &arm.tag {
@@ -1033,10 +1028,6 @@ impl Specialization<'_, '_> {
                     args,
                 }
             }
-            resin_hir::TermKind::Result { failure, arg } => concrete::TermKind::Result {
-                failure: *failure,
-                arg: self.boxed(arg)?,
-            },
             resin_hir::TermKind::Absurd { arg } => concrete::TermKind::Absurd {
                 arg: self.boxed(arg)?,
             },

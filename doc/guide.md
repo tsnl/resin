@@ -160,7 +160,7 @@ Runs inherit cwd and standard streams; Resin returns the program's exit status.
 Use `FILE:ENTRY` to select an exported function; omitting `:ENTRY` selects `main`.
 A file can export several entry points. Host entries take either `()` or
 `(int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>)` for `argc`, `argv`, and `envp`, and return
-`int`, `()`, or a Result with either success type;
+`int`, `()`, or a union of those types with `Err<E>`;
 `main` is just the default name, not special syntax.
 Execution begins at the selected function. It must be explicitly exported by the entry file,
 including when re-exporting an imported function. Missing or private entries are errors.
@@ -197,7 +197,7 @@ Windows converts its native wide inputs to UTF-8, replacing unpaired UTF-16 surr
 `$/process.resin` provides `arguments(argc, argv)` and `environment(envp)` as pointer spans,
 `argument(args, index)` as a checked byte-span view, and `c_string(pointer)` for a valid
 NUL-terminated string. `environment_get(envp, name)` takes a NUL-terminated name and returns
-`Result<Span<ubyte>, EnvironmentVariableNotFound>`. Lookup is exact and case-sensitive on
+`(Span<ubyte> | Err<EnvironmentVariableNotFound>)`. Lookup is exact and case-sensitive on
 all platforms; an empty value succeeds with length zero. It never reads live OS state.
 See `examples/process.resin` for looking up a selected variable without dumping the environment.
 Program arguments apply only to run mode; `-o` builds the executable to invoke separately.
@@ -488,34 +488,38 @@ struct DivideByZero {};
 struct NegativeInput { value: int };
 type CalculationError = DivideByZero | NegativeInput;
 
-def divide(n: int, d: int) -> Result<int, DivideByZero> = {
-    if (d == 0) { err(DivideByZero {}) } else { ok(n / d) }
+def divide(n: int, d: int) -> (int | Err<DivideByZero>) = {
+    if (d == 0) { Err(DivideByZero {}) } else { (n / d) }
 };
 
-def calculate(n: int) -> Result<int, _> = {
-    if (n < 0) { err(NegativeInput { value = n }) }
-    else { ok(divide(n, 2)?) }
+def calculate(n: int) -> (int | Err<_>) = {
+    if (n < 0) { Err(NegativeInput { value = n }) }
+    else { (divide(n, 2)?) }
 };
 ```
 
-`Result<T, E>` is an ordinary value type: it can be stored, passed, returned, and
-nested. `ok(value)` and `err(error)` use the surrounding Result type. Errors are
-structs or unions of structs. An inferred error slot collects the least union of
-errors that can escape, including through recursive calls. With no errors it becomes
-`Never`. Nested holes work too: `Result<Result<int, _>, _>`.
-Ambiguous success types still need an annotation; `err(Error {})` alone cannot say
-what success would contain.
+`T | Err<E>` is an ordinary union. Return a plain `T` for success and `Err(error)`
+for failure. Error payloads may be any value type, including `str`, owned `String`,
+numbers, and user-defined structs. `Err<E>` is itself a value type; `Err(value)`
+infers its payload type from the value and context. `Err<Err<int>>` nests wrappers,
+whereas nested unions flatten and duplicate members collapse.
 
-Postfix `?` evaluates a Result once, unwraps success, or immediately returns its
-error. The enclosing function must return a Result whose error set includes that
-error. Union values and Result errors can widen by value; pointers remain invariant.
+An inferred payload `Err<_>` collects the least union of errors that can escape,
+including through recursive calls. With no errors it becomes `Err<Never>`.
+Success holes remain monomorphic and need a determining value or annotation.
+
+Postfix `?` evaluates its operand once. If the active member is an `Err`, it
+returns that wrapper immediately; otherwise it yields the remaining value.
+It preserves all non-error members, so `(int | str | Err<E>)?` yields `int | str`.
+The enclosing result must include every propagated error. Copied unions and error
+payloads may widen; mutable pointers remain invariant.
 Handle failures with exhaustive, duplicate-free matches:
 
 ```resin
-def describe(result: Result<int, CalculationError>) = {
+def describe(result: (int | Err<CalculationError>)) = {
     match (result) {
-        ok(value) => { print(fmt("value = {0}\n", (value,))) },
-        err(error) => {
+        int(value) => { print(fmt("value = {0}\n", (value,))) },
+        Err(error) => {
             match (error) {
                 DivideByZero(zero) => { print("division by zero\n") },
                 NegativeInput(negative) => { print(fmt("negative: {0}\n", (negative.value,))) },
@@ -525,19 +529,19 @@ def describe(result: Result<int, CalculationError>) = {
 };
 ```
 
-Host entry points can return `Result<(), E>` or `Result<int, E>`; an unhandled
-error prints its struct name and exits with status 1. Run `cargo run -- examples/errors.resin`
+Host entry points can return `(() | Err<E>)` or `(int | Err<E>)`; an unhandled
+error prints its payload value and exits with status 1. Run `cargo run -- examples/errors.resin`
 or `cargo run -- examples/errors.resin:failure` to try both paths.
-Helpers using Result and match also compile to SPIR-V. C uses a tag and a union of
+Helpers using `Err` and `match` also compile to SPIR-V. C uses a tag and a union of
 payloads; shader values use a tag and separate payload fields.
 Shared host/device buffer layouts for tagged values are not yet supported.
 
 The standard library's `RuntimeStatus.from_code(code)` converts native status integers to
-`Result<(), RuntimeError>`. `RuntimeError` is a union of named errors such as
+`(() | Err<RuntimeError>)`. `RuntimeError` is a union of named errors such as
 `InvalidArgument`, `OutOfMemory`, and `IoError`; `UnknownRuntimeError { code }`
 preserves unrecognized codes. `RuntimeStatus.code(error)` and `RuntimeStatus.message(error)`
 recover the native code and C diagnostic string. Standard-library operations already
-return Results, so callers normally use `Gpu.new()?` rather than converting statuses.
+return error unions, so callers normally use `Gpu.new()?` rather than converting statuses.
 Standard-library resources release themselves on scope exit, including early returns
 through `?`. Copies retain shared ownership.
 
@@ -767,13 +771,13 @@ preserve embedded NULs and treat braces as ordinary bytes.
 export { main };
 import { "$/io.resin", "$/string.resin" };
 
-def main() -> Result<(), _> = {
+def main() -> (() | Err<_>) = {
     var n = 42;
     var message = fmt("n = {0}\n", (n,));
     Io.stdout().write(message)?;
     Io.stderr().write(fmt("diagnostic: {0}", (message.bytes(),)))?;
     print("done\n");
-    ok(())
+    (())
 };
 ```
 
@@ -789,7 +793,7 @@ is written. Formatting itself performs no output.
 
 `Io.stdout()` and `Io.stderr()` return ordinary library `Output` values. Their `write` method
 accepts `str | Span<ubyte> | String`, writes bytes verbatim, flushes, adds no newline, and returns
-`Result<(), WriteError>`. The library function `print(text)` is a stdout shorthand returning unit;
+`(() | Err<WriteError>)`. The library function `print(text)` is a stdout shorthand returning unit;
 it terminates on an output error. Neither writer interprets braces. Both `fmt` and `print`
 are ordinary source functions and host-only.
 
@@ -808,13 +812,13 @@ before reading:
 export { main };
 import { "$/string.resin", "$/console.resin" };
 
-def main() -> Result<(), _> = {
+def main() -> (() | Err<_>) = {
     print("Name: ");
     var name = Console.read_line()?;
     print("Hello, ");
     Console.print(name)?;
     print("!\n");
-    ok(())
+    (())
 };
 ```
 
@@ -850,11 +854,10 @@ functions within one file remain supported.
 
 Syntax keywords (`export`, `import`, `extern`, `type`, `struct`, `def`, `var`, `const`, `sizeof`, `if`,
 `else`, `while`, and `match`), primitive type names, `Never`, and
-`Ptr`, `Result`, `None`, and the opaque compiler handle types are reserved,
+`Ptr`, `Err`, `None`, and the opaque compiler handle types are reserved,
 including in parameters and field names. Wrapper names such as `Span`, `ArcPtr`,
 and `GpuSpan` are ordinary source type names.
-Names such as `if_value` are ordinary identifiers. `ok`, `err`,
-`size_of`, `align_of`, `iota`, and `absurd` are unshadowable compiler builtins, not syntax
+Names such as `if_value` are ordinary identifiers. `size_of`, `align_of`, `iota`, and `absurd` are unshadowable compiler builtins, not syntax
 keywords: definitions and parameters cannot use those names, but record fields can.
 
 Imports beginning with `$/` resolve from the service's frozen [`resin/`](../resin/) library root,
@@ -890,10 +893,10 @@ Run `cargo run -- examples/eg009_imports.resin` for an explicitly owned counter,
 export { main };
 import { "$/gpu.resin", "$/string.resin" };
 
-def main() -> Result<(), _> = {
+def main() -> (() | Err<_>) = {
     var gpu = Gpu.new()?;
     print("GPU ready\n");
-    ok(())
+    (())
 };
 ```
 
@@ -919,10 +922,10 @@ struct GpuOwner { handle: Ptr<ResinGpu>,
     };
 };
 struct Gpu { owner: ArcPtr<GpuOwner>,
-    def new() -> Result<Gpu, RuntimeError> = {
+    def new() -> (Gpu | Err<RuntimeError>) = {
         var owner = ArcPtr<GpuOwner>.alloc(GpuOwner { handle = Ptr<ResinGpu>(0_ul) })?;
         RuntimeStatus.from_code(resin_gpu_create(&owner.get().handle))?;
-        ok(Gpu { owner = owner })
+        (Gpu { owner = owner })
     };
 };
 
@@ -1010,10 +1013,10 @@ import { "$/gpu.resin" };
 
 @compute_shader
 def kernel(index: ulong, output: Ptr<ulong>) = { output.* := index; };
-def main() -> Result<(), _> = {
+def main() -> (() | Err<_>) = {
     var gpu = Gpu.new()?;
     var pipeline = gpu.create_compute_pipeline(kernel)?;
-    ok(())
+    (())
 };
 ```
 
@@ -1194,7 +1197,7 @@ until their own poll. Edges and scroll reset on the next poll of that window, an
 queries read the same snapshot. `window.scroll_delta()` returns accumulated horizontal/vertical
 scroll offsets (positive vertical scroll is up). `window.cursor_position()` returns coordinates
 in window content units, with a top-left origin and positive y downward, independently of
-framebuffer scaling. Both return `Result<(float64, float64), RuntimeError>`.
+framebuffer scaling. Both return `((float64, float64) | Err<RuntimeError>)`.
 
 `window.focused()` reports keyboard focus. `window.capture_cursor(capture)` hides and
 captures the cursor for camera controls when `capture` is true, with unbounded virtual
@@ -1208,13 +1211,13 @@ Windowing is an ordinary runtime API, exposed by `resin_runtime/window.h` and
 - `Window.new(width, height, title: String)` returns a shared window owner; use `String.from_str("Resin")` for a literal title. `window.poll_events()` processes
   GLFW events. Close state, framebuffer size, resizing, and GLFW key codes
   are available through the corresponding window methods. Predicates return `bool`;
-  fallible operations return Results, including framebuffer size as `(width, height)`.
+  fallible operations return error unions, including framebuffer size as `(width, height)`.
 - `Gpu.new_for_window(window)` selects a graphics/compute/present-capable GPU for a window.
   The existing GPU constructors stay headless. There is one GPU per window; multiple
   windows can each have their own GPU.
 - `gpu.present(image)` blits an already-submitted `GpuImage` to the window, scaling to
   its framebuffer with FIFO presentation. Swapchains are recreated after resize.
-  Its `Result<bool, RuntimeError>` is `ok(true)` when presented and `ok(false)` when
+  Its `(bool | Err<RuntimeError>)` is `(true)` when presented and `(false)` when
   skipped (minimized, timed out, or out of date): poll events and retry. Other failures propagate.
 
 Create, use, and release windows and their GPUs on the process main thread. Shared
@@ -1278,7 +1281,7 @@ produces signed infinity; results below the smallest normal float32 magnitude be
 signed zero. NaNs remain NaNs without a payload guarantee. Signed zero is preserved.
 C traps abort the process; shader traps stop that invocation and propagate failure
 through helper calls. Traps do not unwind automatic cleanup.
-A shader trap is not a host-visible Result error, and earlier writes remain visible.
+A shader trap is not a host-visible Err value, and earlier writes remain visible.
 
 The shared shader profile supports `ubyte`, `int`, `uint`, `ulong`, and `float32` conversions.
 Other numeric types remain available on the host and are diagnosed when reached by a
@@ -1292,18 +1295,18 @@ Pointer reinterpretation and nominal record ascription remain separate IR operat
 `absurd(value)` consumes a value of `Never` and has no returning execution path.
 Its result type comes from its context; annotate the enclosing result or binding
 if that type cannot otherwise be inferred. An inhabited struct or union is rejected.
-For example, an infallible Result can be unwrapped without inventing an error value:
+For example, an infallible error union can be unwrapped without inventing an error value:
 
 ```resin
-def unwrap(r: Result<int, Never>) -> int = {
-    match (r) { ok(n) => { n }, err(impossible) => { absurd(impossible) } }
+def unwrap(r: (int | Err<Never>)) -> int = {
+    match (r) { int(n) => { n }, Err(impossible) => { absurd(impossible) } }
 };
 ```
 
 The IR explicitly marks elimination as divergent. Its continuation type is only for
 checking unreachable code; neither backend constructs a value of that type. C aborts
 and shaders stop the invocation if invalid external memory somehow supplies a `Never`.
-This defensive trap does not unwind cleanup. Reachable `ok` and `?` paths retain normal
+This defensive trap does not unwind cleanup. Reachable success and `?` paths retain normal
 scope destruction. Matches over inhabited variants still require exhaustive, unique arms.
 
 [`T | None`](options.md) supports direct widening, exhaustive matching,

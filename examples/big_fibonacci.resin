@@ -40,15 +40,15 @@ def fast_fibonacci(n: ulong) -> ulong = {
 	}
 };
 
-def compare_fibonacci(index: ulong, slow: ulong, fast: ulong) -> Result<(), FibonacciMismatch> = {
+def compare_fibonacci(index: ulong, slow: ulong, fast: ulong) -> (() | Err<FibonacciMismatch>) = {
 	if (slow == fast) {
-		ok(())
+		(())
 	} else {
-		err(FibonacciMismatch { index = index, slow = slow, fast = fast })
+		Err(FibonacciMismatch { index = index, slow = slow, fast = fast })
 	}
 };
 
-def test_fibonacci(n: ulong) -> Result<(), _> = {
+def test_fibonacci(n: ulong) -> (() | Err<_>) = {
 	var i = ulong(0);
 	while (i < n) {
 		var slow_f = fibonacci(i);
@@ -57,13 +57,13 @@ def test_fibonacci(n: ulong) -> Result<(), _> = {
 		compare_fibonacci(i, slow_f, fast_f)?;
 		i := i + 1;
 	};
-	ok(())
+	(())
 };
 
-def main() -> Result<(), _> = {
+def main() -> (() | Err<_>) = {
 	test_fibonacci(30)?;
 
 	var n = ulong(100);
 	print(fmt("fibonacci({0}) = {1}\n", (n, fast_fibonacci(n))));
-	ok(())
+	(())
 };

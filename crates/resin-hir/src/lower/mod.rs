@@ -688,15 +688,14 @@ impl Generator {
         let receiver_matches = params
             .first()
             .is_some_and(|receiver| self.typer.receiver_definition(receiver) == Some(owner));
-        let result_matches =
-            matches!(&declaration.result, Ty::Result { value, .. } if **value == Ty::GpuView);
+        let result_matches = matches!(declaration.result.fallible_parts(), Some((Ty::GpuView, _)));
         if !receiver_matches
             || params.get(1..) != Some(&[Ty::UInt64, Ty::UInt64, Ty::Int32][..])
             || !result_matches
         {
             return Err(GenerateError::inference(
                 name.span,
-                "@gpu_allocator requires (self, bytes: ulong, alignment: ulong, memory: int) -> Result<GpuView, E>",
+                "@gpu_allocator requires (self, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | Err<E>)",
             ));
         }
         if self.typer.gpu_allocators.insert(owner, function).is_some() {

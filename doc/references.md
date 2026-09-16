@@ -39,7 +39,7 @@ reference := 2;               // Update value. copy remains 1.
 A reference binding cannot be rebound. Passing a place to a `Ref<T>` parameter
 binds to that place without copying its contents. Passing a reference onward binds
 to the same place. A `T` parameter instead receives an ordinary value copy.
-Reference referent types must match exactly; they cannot widen unions or Results.
+Reference referent types must match exactly; they cannot widen unions or error payloads.
 
 A reference needs an initializer, and known local storage must be initialized
 before it can be bound. Literal values, arithmetic results, and calls returning
@@ -117,7 +117,7 @@ calls, stored bindings, or return values. This feature does not add another shad
 calling convention or relax shader pointer-cast restrictions.
 
 References are currently limited to bindings and function signatures. Direct
-reference fields, array elements, union variants, Result payloads, nested
+reference fields, array elements, union variants, Err payloads, nested
 references, `Ptr<Ref<T>>`, and reference-valued generic arguments are rejected.
 Function values with reference parameters or results can still be stored in
 aggregates. Transparent aliases preserve these restrictions. Foreign declarations

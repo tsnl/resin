@@ -197,7 +197,7 @@ fn operator_copies_and_results_use_ordinary_owner_cleanup() {
             def __add__(a: Value, b: Value) -> Value = { Value { owner = a.owner, value = a.value + b.value } };
         };
         def add<T>(a: T, b: T) -> _ = { a + b };
-        def main() -> Result<int, _> = {
+        def main() -> int | Err<_> = {
             var drops = 0_i;
             var answer = 0_i;
             {
@@ -207,7 +207,7 @@ fn operator_copies_and_results_use_ordinary_owner_cleanup() {
                 var result = add(value, value);
                 if (drops == 0) { answer := result.value; };
             };
-            ok(if (drops == 1) { answer } else { 1 })
+            if (drops == 1) { answer } else { 1 }
         };
     "#);
     assert_eq!(

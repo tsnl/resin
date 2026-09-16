@@ -487,8 +487,8 @@ fn repr_renders_fields_arrays_tuples_and_active_union_payloads() {
 fn entry_errors_display_owned_payload_contents() {
     let output = run(r#"export { main }; import { "$/string.resin" };
         struct Problem { message: String, code: int };
-        def main() -> Result<(), Problem> = {
-            err(Problem { message = String.from_str("bad input"), code = 7 })
+        def main() -> (() | Err<Problem>) = {
+            Err(Problem { message = String.from_str("bad input"), code = 7 })
         };"#);
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(

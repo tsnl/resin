@@ -168,9 +168,9 @@ fn source_drop_hooks_reject_gpu_elements_before_and_after_importing() {
     ] {
         let use_site = format!(
             r#"
-            def invalid(gpu: Gpu) -> Result<(), _> = {{
+            def invalid(gpu: Gpu) -> (() | Err<_>) = {{
                 gpu.alloc::<{owner}>(0_ul)?;
-                ok(())
+                (())
             }};
             "#
         );
@@ -209,7 +209,7 @@ fn source_gpu_library_resolves_generic_allocation_and_explicit_access() {
         export { main };
         import { "$/gpu.resin", "$/span.resin" };
         struct Pair { left: int, right: int };
-        def main() -> Result<(), _> = {
+        def main() -> (() | Err<_>) = {
             var gpu = Gpu.new()?;
             var scalar = gpu.create(Pair { left = 1_i, right = 2_i })?;
             var value = scalar.load();
@@ -223,7 +223,7 @@ fn source_gpu_library_resolves_generic_allocation_and_explicit_access() {
             var output = [0_i, 0_i];
             tail.read_only().copy_to(Span<int> { data = &output.at(0_ul), length = 2_ul });
             var readback = gpu.alloc_in::<ubyte>(64_ul, memory_readback)?;
-            ok(())
+            (())
         };
     "#,
     );

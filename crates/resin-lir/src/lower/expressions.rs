@@ -52,20 +52,15 @@ impl FunctionLowering<'_> {
                 args,
             } => {
                 self.gen_arguments(args)?;
-                let Ty::Result {
-                    value: pipeline, ..
-                } = expected
-                else {
-                    unreachable!("pipeline creation result")
-                };
+                let (pipeline, _) = expected.fallible_parts().expect("pipeline creation result");
                 self.emit(match shaders.as_slice() {
                     [shader] => Instr::GpuComputePipeline {
-                        pipeline: *pipeline.clone(),
+                        pipeline: pipeline.clone(),
                         factory: *factory,
                         shader: *shader,
                     },
                     [vertex, fragment] => Instr::GpuGraphicsPipeline {
-                        pipeline: *pipeline.clone(),
+                        pipeline: pipeline.clone(),
                         factory: *factory,
                         vertex: *vertex,
                         fragment: *fragment,
@@ -96,9 +91,6 @@ impl FunctionLowering<'_> {
                         record: *record,
                     }
                 });
-            }
-            TermKind::Result { failure, arg } => {
-                return self.gen_result(span, *failure, arg, expected);
             }
             TermKind::Absurd { arg } => {
                 self.gen_term(arg, Some(&Ty::union([])))?;

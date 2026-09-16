@@ -34,11 +34,11 @@ def argument(args: Span<Ptr<ubyte>>, index: ulong) -> Span<ubyte> = {
 
 // Exact case-sensitive name lookup in the frozen snapshot, including on Windows.
 // A present empty value succeeds with length zero; absence is a distinct error.
-def environment_get(envp: Ptr<Ptr<ubyte>>, name: Ptr<ubyte>) -> Result<Span<ubyte>, EnvironmentVariableNotFound> = {
+def environment_get(envp: Ptr<Ptr<ubyte>>, name: Ptr<ubyte>) -> (Span<ubyte> | Err<EnvironmentVariableNotFound>) = {
 	var value = resin_environment_get(envp, name);
 	if (ulong(value) == 0_ul) {
-		err(EnvironmentVariableNotFound {})
+		Err(EnvironmentVariableNotFound {})
 	} else {
-		ok(c_string(value))
+		(c_string(value))
 	}
 };

@@ -29,11 +29,11 @@ intrinsic "gpu_compute_pipeline_type" def compute_type<Root, Owner>(contract: Gp
 intrinsic "gpu_graphics_pipeline_type" def graphics_type<Root, Owner>(contract: GpuPipelineContract) -> GraphicsProgram<Root, Owner>;
 struct Device {
     @gpu_allocator
-    def malloc(self: Device, bytes: ulong, alignment: ulong, memory: int) -> Result<GpuView, Failure> = { err(Failure {}) };
+    def malloc(self: Device, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | Err<Failure>) = { Err(Failure {}) };
     @gpu_compute_pipeline
-    def compute(self: Device, code: { data: Ptr<ubyte>, length: ulong }) -> Result<PipelineOwner, Failure> = { err(Failure {}) };
+    def compute(self: Device, code: { data: Ptr<ubyte>, length: ulong }) -> (PipelineOwner | Err<Failure>) = { Err(Failure {}) };
     @gpu_graphics_pipeline
-    def graphics(self: Device, vertex: { data: Ptr<ubyte>, length: ulong }, fragment: { data: Ptr<ubyte>, length: ulong }) -> Result<PipelineOwner, Failure> = { err(Failure {}) };
+    def graphics(self: Device, vertex: { data: Ptr<ubyte>, length: ulong }, fragment: { data: Ptr<ubyte>, length: ulong }) -> (PipelineOwner | Err<Failure>) = { Err(Failure {}) };
 };
 struct PipelineOwner { owner: StrongOwner,
     @gpu_pipeline_context
@@ -41,9 +41,9 @@ struct PipelineOwner { owner: StrongOwner,
 };
 struct Commands {
     @gpu_dispatch
-    def dispatch(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments, x: uint, y: uint, z: uint) -> Result<(), Failure> = { ok(()) };
+    def dispatch(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments, x: uint, y: uint, z: uint) -> (() | Err<Failure>) = { (()) };
     @gpu_draw
-    def draw(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments | None, count: uint) -> Result<(), Failure> = { ok(()) };
+    def draw(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments | None, count: uint) -> (() | Err<Failure>) = { (()) };
 };
 struct Params { scale: float32, values: HostRange<int> };
 @compute_shader def kernel(index: ulong, root: Ptr<Params>) = {};
@@ -63,7 +63,7 @@ fn contract_declarations_may_follow_their_users_and_dependencies() {
     generate(&format!(
         r#"
         {declarations}
-        def main(values: DeviceRange<int>) -> Result<(), Failure> = {{
+        def main(values: DeviceRange<int>) -> (() | Err<Failure>) = {{
             var pipeline = Device {{}}.compute(kernel)?;
             Commands {{}}.dispatch(pipeline, {{ scale = 2.0, values = values }}, 1, 1, 1)
         }};
@@ -110,7 +110,7 @@ fn opaque_gpu_views_cannot_be_dereferenced_or_cast_to_raw_addresses() {
 fn dispatch_infers_source_host_fields_from_the_pipeline_root() {
     let module = pipelines(
         r#"
-        def main(values: DeviceRange<int>) -> Result<(), Failure> = {
+        def main(values: DeviceRange<int>) -> (() | Err<Failure>) = {
             var pipeline = Device {}.compute(kernel)?;
             Commands {}.dispatch(pipeline, { scale = 2.0, values = values }, 1, 1, 1)
         };
@@ -146,8 +146,8 @@ fn dispatch_infers_source_host_fields_from_the_pipeline_root() {
 #[test]
 fn pipeline_types_cross_functions_and_accept_precomputed_arguments() {
     pipelines(r#"
-        def create(gpu: Device) -> Result<ComputeProgram<Params, PipelineOwner>, Failure> = { gpu.compute(kernel) };
-        def dispatch(pipeline: ComputeProgram<Params, PipelineOwner>, values: DeviceRange<int>) -> Result<(), Failure> = {
+        def create(gpu: Device) -> (ComputeProgram<Params, PipelineOwner> | Err<Failure>) = { gpu.compute(kernel) };
+        def dispatch(pipeline: ComputeProgram<Params, PipelineOwner>, values: DeviceRange<int>) -> (() | Err<Failure>) = {
             var arguments = (pipeline, { scale = 1.0_f, values = values }, 1_ui, 1_ui, 1_ui);
             Commands {}.dispatch(arguments.0, arguments.1, arguments.2, arguments.3, arguments.4)
         };
@@ -210,8 +210,8 @@ fn dispatch_rejects_raw_views_wrong_fields_and_incompatible_stages() {
         let error = pipelines(&format!("def main(gpu: Device, values: DeviceRange<int>, raw: HostRange<int>) -> _ = {{ var pipeline = gpu.compute(kernel)?; {tail} }};")).unwrap_err();
         assert!(error.to_string().contains(expected), "{tail}: {error}");
     }
-    let error = pipelines("def create(gpu: Device) -> Result<ComputeProgram<int, PipelineOwner>, Failure> = { gpu.compute(kernel) };").unwrap_err();
-    assert!(error.to_string().contains("TypeMismatch"), "{error}");
+    let error = pipelines("def create(gpu: Device) -> (ComputeProgram<int, PipelineOwner> | Err<Failure>) = { gpu.compute(kernel) };").unwrap_err();
+    assert!(error.to_string().contains("destination union"), "{error}");
 }
 
 #[test]

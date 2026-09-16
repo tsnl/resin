@@ -157,7 +157,7 @@ impl<'a> Types<'a> {
         }
         emitted[self.id(ty)] = true;
         let body = match ty {
-            Ty::Union { .. } | Ty::Result { .. } => {
+            Ty::Union { .. } => {
                 let mut fields = String::new();
                 for (case, payload) in ty.payloads().unwrap() {
                     let tag = self.tag(&case);

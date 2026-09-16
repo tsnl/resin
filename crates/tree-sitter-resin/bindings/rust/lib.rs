@@ -231,7 +231,7 @@ mod tests {
         for name in [
             "Ptr",
             "Ref",
-            "Result",
+            "Err",
             "GpuArguments",
             "StrongOwner",
             "WeakOwner",

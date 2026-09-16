@@ -173,7 +173,7 @@ fn graphics_output_guards_follow_the_emitted_entry_fallibility() {
 #[test]
 fn shader_helpers_can_propagate_and_handle_results() {
     let m = module(
-        "export { kernel }; struct Bad { index: uint }; def checked(i: uint) -> Result<uint, Bad> = { if (i == uint(0)) { err(Bad { index = i }) } else { ok(i) } }; def helper(i: uint) -> Result<uint, _> = { var value = checked(i)?; ok(value + uint(1)) }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { match (helper(i)) { ok(value) => { value }, err(error) => { error.index } } }; };",
+        "export { kernel }; struct Bad { index: uint }; def checked(i: uint) -> (uint | Err<Bad>) = { if (i == uint(0)) { Err(Bad { index = i }) } else { (i) } }; def helper(i: uint) -> (uint | Err<_>) = { var value = checked(i)?; (value + uint(1)) }; @compute_shader def kernel(invocation: ulong, output: Ptr<uint>) = { var i = uint(invocation); output.* := { match (helper(i)) { uint(value) => { value }, Err(error) => { error.index } } }; };",
     );
     let project = support::project::Project::new(&m, None).unwrap();
     if let Some(frontend) = shaders::optimizer() {
@@ -602,14 +602,14 @@ fn structured_loop_conditions_and_early_returns_compile_to_spirv() {
 #[test]
 fn sequential_conditionals_and_error_propagation_preserve_structured_control() {
     let mut source = String::from(
-        "export { kernel }; struct Failed {}; def step() -> Result<(), Failed> = { ok(()) }; def helper(value: uint) -> Result<uint, Failed> = { var result = value; ",
+        "export { kernel }; struct Failed {}; def step() -> (() | Err<Failed>) = { (()) }; def helper(value: uint) -> (uint | Err<Failed>) = { var result = value; ",
     );
     for _ in 0..512 {
         source.push_str(
             "if (result == 0_ui) { result := 1_ui; } else { result := 0_ui; }; step()?; ",
         );
     }
-    source.push_str("ok(result) }; @compute_shader def kernel(i: ulong, output: Ptr<uint>) = { output.* := match (helper(uint(i))) { ok(value) => { value }, err(error) => { 99_ui } }; };");
+    source.push_str("(result) }; @compute_shader def kernel(i: ulong, output: Ptr<uint>) = { output.* := match (helper(uint(i))) { uint(value) => { value }, Err(error) => { 99_ui } }; };");
     let project = support::project::Project::new(&module(&source), None).unwrap();
     let source = std::fs::read(project.generated.shaders()[0].unoptimized_spirv()).unwrap();
     assert_eq!(

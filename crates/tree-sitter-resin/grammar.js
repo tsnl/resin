@@ -69,7 +69,7 @@ const BUILTIN_TYPES = [
   "GpuPipelineContract",
 ];
 
-const TYPE_FORMERS = ["Ptr", "Ref", "Result", "Err"];
+const TYPE_FORMERS = ["Ptr", "Ref", "Err"];
 
 /**
  * Tree-sitter reserves words for only one token; uppercase names need an exclusion too.
@@ -494,7 +494,7 @@ export default grammar({
       seq(
         choice(
           seq(
-            field("variant", choice($.type, "ok", "err", "Err")),
+            field("variant", choice($.type, "Err")),
             "(",
             field("name", choice($.lid, "_")),
             ")",
@@ -555,14 +555,6 @@ export default grammar({
           field("former", choice("Ptr", "Ref", "Err")),
           "<",
           field("arg", $.type),
-          ">",
-        ),
-        seq(
-          "Result",
-          "<",
-          field("value", $.type),
-          ",",
-          field("error", $.type),
           ">",
         ),
         $.primary_type,

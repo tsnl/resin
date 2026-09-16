@@ -11,11 +11,11 @@ intrinsic "gpu_compute_pipeline_type" def compute_type<R, O>(token: GpuPipelineC
 intrinsic "gpu_graphics_pipeline_type" def graphics_type<R, O>(token: GpuPipelineContract) -> GraphicsProgram<R, O>;
 struct Device {
     @gpu_allocator
-    def allocate(self: Device, bytes: ulong, alignment: ulong, memory: int) -> Result<GpuView, Failure> = { err(Failure {}) };
+    def allocate(self: Device, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | Err<Failure>) = { Err(Failure {}) };
     @gpu_compute_pipeline
-    def compute(self: Device, code: {data: Ptr<ubyte>, length: ulong}) -> Result<PipelineOwner, Failure> = { err(Failure {}) };
+    def compute(self: Device, code: {data: Ptr<ubyte>, length: ulong}) -> (PipelineOwner | Err<Failure>) = { Err(Failure {}) };
     @gpu_graphics_pipeline
-    def graphics(self: Device, vertex: {data: Ptr<ubyte>, length: ulong}, fragment: {data: Ptr<ubyte>, length: ulong}) -> Result<PipelineOwner, Failure> = { err(Failure {}) };
+    def graphics(self: Device, vertex: {data: Ptr<ubyte>, length: ulong}, fragment: {data: Ptr<ubyte>, length: ulong}) -> (PipelineOwner | Err<Failure>) = { Err(Failure {}) };
 };
 struct PipelineOwner { owner: StrongOwner,
     @gpu_pipeline_context
@@ -23,15 +23,15 @@ struct PipelineOwner { owner: StrongOwner,
 };
 struct Commands {
     @gpu_dispatch
-    def dispatch(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments, x: uint, y: uint, z: uint) -> Result<(), Failure> = { ok(()) };
+    def dispatch(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments, x: uint, y: uint, z: uint) -> (() | Err<Failure>) = { (()) };
     @gpu_draw
-    def draw(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments | None, count: uint) -> Result<(), Failure> = { ok(()) };
+    def draw(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments | None, count: uint) -> (() | Err<Failure>) = { (()) };
 };
 struct Params { value: Ptr<int> };
 "#;
 
 const USE_PROJECTION: &str = r#"
-def record(commands: Commands, pipeline: ComputeProgram<Params, PipelineOwner>, value: Alpha<int>) -> Result<(), Failure> = {
+def record(commands: Commands, pipeline: ComputeProgram<Params, PipelineOwner>, value: Alpha<int>) -> (() | Err<Failure>) = {
     commands.dispatch(pipeline, {value = value}, 1, 1, 1)
 };
 "#;

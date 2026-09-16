@@ -557,7 +557,6 @@ pub(super) fn shader_value_type(definitions: &[TypeDef], ty: &Ty) -> Result<(), 
             Ty::Defined { definition } => pending.push(crate::definition_body(definitions, *definition).map_err(|error| error.to_string())?),
             Ty::Union { variants } => pending.extend(variants),
             Ty::Error { payload } => pending.push(payload),
-            Ty::Result { value, error } => pending.extend([value.as_ref(), error.as_ref()]),
             _ => return Err(format!("shader profile does not support type {ty:?}")),
         }
     }
