@@ -257,6 +257,7 @@ fn generic_operator_overloads_execute_on_the_gpu() {
             def __add__(a: Cell<T>, b: Cell<T>) -> Cell<T> = { Cell<T> { value = a.value + b.value } };
         };
         struct Parameters { values: Span<Cell<uint>> };
+        struct HostParameters { values: GpuSpan<Cell<uint>> };
         def add<T>(a: T, b: T) -> _ = { a + b };
         @compute_shader def kernel(index: ulong, root: Ptr<Parameters>) = {
             if (index < root.values.length) {
@@ -274,7 +275,7 @@ fn generic_operator_overloads_execute_on_the_gpu() {
             };
             var pipeline = gpu.create_compute_pipeline(kernel)?;
             var commands = gpu.start_command_recording()?;
-            commands.dispatch(pipeline, { values = values }, 1_ui, 1_ui, 1_ui)?;
+            commands.dispatch(pipeline, HostParameters { values = values }, 1_ui, 1_ui, 1_ui)?;
             commands.submit()?;
             if (values.at(0).load().value == 40 && values.at(1).load().value == 41
                 && values.at(2).load().value == 42) { 0 } else { 1 }
