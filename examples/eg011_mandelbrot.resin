@@ -235,7 +235,6 @@ fn main() -> () | Err<_> {
 	let width = 480_ui;
 	let height = 360_ui;
 	let iterations = gpu:alloc::<uint>(ulong(width) * ulong(height))?;
-	let pixels = HostPixels { iterations = iterations, width = width, height = height };
 	let image = gpu:create_image(width, height)?;
 	let mut plot = plot_new(width, height, 4.0_d / 3.0_d);
 	let mut solver = mandelbrot_new(256);
@@ -273,7 +272,8 @@ fn main() -> () | Err<_> {
 			dirty = true;
 		};
 		if (dirty) {
-			solver:solve(plot, pixels.iterations);
+			solver:solve(plot, iterations);
+			let pixels = HostPixels { iterations = iterations:clone(), width = width, height = height };
 			let commands = gpu:start_command_recording()?;
 			commands:begin_rendering(image, 0.0_f, 0.0_f, 0.0_f, 1.0_f)?;
 			commands:draw(pipeline, pixels, 3)?;
