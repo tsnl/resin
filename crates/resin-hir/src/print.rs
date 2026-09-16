@@ -208,6 +208,7 @@ impl Printer {
             TermKind::If { cond, then, els } => {
                 list("if", vec![self.term(cond), self.term(then), self.term(els)])
             }
+            TermKind::Return { value } => list("return", vec![self.term(value)]),
             TermKind::While { cond, body } => list("while", vec![self.term(cond), self.term(body)]),
             TermKind::Block { stmts, tail } => list(
                 "block",

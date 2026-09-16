@@ -9,6 +9,9 @@ use super::ValueBinding;
 
 impl FunctionLowering<'_> {
     pub(super) fn coerce(&mut self, span: Span, from: Ty, to: &Ty) -> Result<Ty, LowerError> {
+        if self.function.terminated() {
+            return Ok(to.clone());
+        }
         if &from != to {
             if !from.widens_to(to) {
                 return self
@@ -53,6 +56,9 @@ impl FunctionLowering<'_> {
 
     pub(super) fn gen_try(&mut self, span: Span, term: &Term) -> Result<Ty, LowerError> {
         let ty = self.gen_term(term, None)?;
+        if self.function.terminated() {
+            return Ok(ty);
+        }
         let Ty::Result {
             value,
             error: errors,
@@ -113,10 +119,14 @@ impl FunctionLowering<'_> {
         expected: &Ty,
     ) -> Result<Ty, LowerError> {
         let ty = self.gen_term(term, None)?;
+        if self.function.terminated() {
+            return Ok(expected.clone());
+        }
         let saved = self.save_top(&ty);
         let mut result = Some(expected.clone());
         let height = self.function.stack_len();
-        let join = (arms.len() > 1).then(|| self.new_block("match.join", height, 1));
+        let join = (arms.len() > 1 && arms.iter().any(|arm| !arm.body.exits()))
+            .then(|| self.new_block("match.join", height, 1));
         for (i, arm) in arms.iter().enumerate() {
             let tag = &arm.tag;
             let next = if i + 1 < arms.len() {

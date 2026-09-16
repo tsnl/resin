@@ -21,6 +21,7 @@ impl FunctionLowering<'_> {
                 self.gen_term(value, None)?;
                 self.emit(Instr::ExcludeNone);
             }
+            TermKind::Return { value } => return self.gen_return(value, expected),
             TermKind::Try { value } => return self.gen_try(span, value),
             TermKind::Match { value, arms } => return self.gen_match(value, arms, expected),
             TermKind::If { cond, then, els } => return self.gen_if(cond, then, els, expected),

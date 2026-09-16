@@ -118,6 +118,7 @@ export default grammar({
       "const",
       "sizeof",
       "assert",
+      "return",
       "if",
       "else",
       "while",
@@ -245,6 +246,7 @@ export default grammar({
 
     statement: ($) =>
       choice(
+        field("return", $.return_statement),
         field("constant", $.const_declaration),
         field("struct", $.struct_definition),
         seq(field("define", $.define), ";"),
@@ -446,6 +448,9 @@ export default grammar({
         "}",
       ),
     unit_term: () => prec.dynamic(1, choice(seq("{", "}"), seq("(", ")"))),
+
+    return_statement: ($) =>
+      seq("return", optional(field("value", $.term)), ";"),
 
     assert_term: ($) => seq("assert", "(", field("condition", $.term), ")"),
 

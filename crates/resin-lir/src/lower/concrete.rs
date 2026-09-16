@@ -38,6 +38,9 @@ pub(super) struct Term {
 
 #[derive(Debug, Clone)]
 pub(super) enum TermKind {
+    Return {
+        value: Box<Term>,
+    },
     Constant {
         value: Value,
     },
@@ -179,4 +182,41 @@ pub(super) enum ReceiverConversion {
     Value,
     Address,
     Load,
+}
+
+impl Term {
+    /// Whether evaluating this tree always leaves the current source path.
+    pub(super) fn exits(&self) -> bool {
+        match &self.kind {
+            TermKind::Return { .. } => true,
+            TermKind::Block { stmts, tail } => {
+                stmts.iter().any(|stmt| match stmt {
+                    Statement::Define { init, .. } => init.exits(),
+                    Statement::Expr { term } => term.exits(),
+                    Statement::Declare { .. } => false,
+                }) || tail.exits()
+            }
+            TermKind::If { cond, then, els } => cond.exits() || (then.exits() && els.exits()),
+            TermKind::Match { value, arms } => {
+                value.exits() || arms.iter().all(|arm| arm.body.exits())
+            }
+            TermKind::While { cond, .. } => cond.exits(),
+            TermKind::Call { func, args } => func.exits() || args.iter().any(Term::exits),
+            TermKind::Builtin { args, .. } | TermKind::Array { elems: args } => {
+                args.iter().any(Term::exits)
+            }
+            TermKind::Intrinsic { args, .. } => args.values.iter().any(Term::exits),
+            TermKind::Record { fields } => fields.iter().any(|field| field.value.exits()),
+            TermKind::Assign { place, value } => place.exits() || value.exits(),
+            TermKind::Unwrap { value } | TermKind::Try { value } => value.exits(),
+            TermKind::Adapt { arg, .. }
+            | TermKind::Convert { arg, .. }
+            | TermKind::Absurd { arg }
+            | TermKind::Result { arg, .. } => arg.exits(),
+            TermKind::Address { place } => place.exits(),
+            TermKind::Deref { pointer } => pointer.exits(),
+            TermKind::Field { base, .. } => base.exits(),
+            _ => false,
+        }
+    }
 }
