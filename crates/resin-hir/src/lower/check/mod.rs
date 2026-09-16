@@ -1181,7 +1181,7 @@ impl Expression<'_, '_> {
                 let args = args
                     .iter()
                     .map(|arg| {
-                        let expected = if matches!(name.as_ref(), "!" | "&&" | "||" | "assert") {
+                        let expected = if matches!(name.as_ref(), "&&" | "||" | "assert") {
                             Some(Ty::Bool.into())
                         } else {
                             expression_exits(arg).then(|| self.checker.typing.solver.fresh())
@@ -1659,7 +1659,7 @@ fn expression_exits(term: &resin_ast::Term) -> bool {
         }
         While { cond, .. } => expression_exits(cond),
         Call { func, args } => expression_exits(func) || args.iter().any(expression_exits),
-        Builtin { name, args } if matches!(name.as_ref(), "&&" | "||") => {
+        Builtin { name, args, .. } if matches!(name.as_ref(), "&&" | "||") => {
             expression_exits(&args[0])
         }
         Builtin { args, .. } | Array { elems: args } => args.iter().any(expression_exits),
