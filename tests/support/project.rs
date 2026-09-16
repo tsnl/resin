@@ -20,6 +20,7 @@ pub struct Project {
     entry: Option<String>,
     directory: TempDir,
     native: String,
+    bindings: BTreeMap<String, String>,
 }
 
 impl std::fmt::Debug for Project {
@@ -135,12 +136,23 @@ impl Project {
             entry: entry.map(str::to_owned),
             directory,
             native: String::new(),
+            bindings: BTreeMap::new(),
         })
     }
 
-    /// Include explicit native test shims before the ordinary header declarations.
+    /// Compile handwritten C fixture definitions into a separately linked object.
     pub fn with_native(mut self, native: impl Into<String>) -> Self {
         self.native = native.into();
+        self
+    }
+
+    /// Bind a source declaration or compiler runtime import to a fixture symbol.
+    pub fn with_bindings(mut self, bindings: &[(&str, &str)]) -> Self {
+        self.bindings.extend(
+            bindings
+                .iter()
+                .map(|(name, symbol)| ((*name).into(), (*symbol).into())),
+        );
         self
     }
 
@@ -180,16 +192,29 @@ impl Project {
                 let foreign = self.foreign_inputs(&mut inputs)?;
                 let mut objects = Vec::new();
                 if !foreign.includes.is_empty() || !foreign.functions.is_empty() {
+                    let analysis = tools
+                        .analyze_foreign(
+                            Arc::new(foreign.clone()),
+                            directory.path(),
+                            execution,
+                            &cancellation,
+                        )
+                        .await?;
+                    for symbol in inputs.foreign.values_mut() {
+                        *symbol = analysis
+                            .declarations()
+                            .iter()
+                            .find(|declaration| declaration.name == symbol.as_ref())
+                            .ok_or("missing analyzed fixture declaration")?
+                            .symbol
+                            .clone()
+                            .into();
+                    }
+                }
+                if !self.native.is_empty() {
                     objects.push(
-                        tools
-                            .compile_foreign(
-                                Arc::new(foreign),
-                                directory.path(),
-                                execution,
-                                &cancellation,
-                            )
-                            .await?
-                            .bytes(),
+                        self.compile_fixture(tools, &foreign, execution, &cancellation)
+                            .await?,
                     );
                 }
                 let object = resin_codegen::generate_native(
@@ -226,11 +251,50 @@ impl Project {
         })
     }
 
+    async fn compile_fixture(
+        &self,
+        tools: &resin_toolchain::Toolchain,
+        foreign: &resin_toolchain::ForeignInputs,
+        execution: &resin_executor::Execution,
+        cancellation: &Cancellation,
+    ) -> Result<Arc<[u8]>, Error> {
+        let directory = TempDir::new()?;
+        for (name, bytes) in &foreign.files {
+            let path = directory.path().join(name.as_ref());
+            fs::create_dir_all(path.parent().unwrap())?;
+            fs::write(path, bytes)?;
+        }
+        fs::write(directory.path().join("fixture.c"), &self.native)?;
+        let includes = foreign
+            .include_directories
+            .iter()
+            .map(|path| format!(" -I {path}"))
+            .collect::<String>();
+        let pic = if cfg!(windows) { "" } else { " -fPIC" };
+        fs::write(
+            directory.path().join("build.ninja"),
+            format!(
+                "include toolchain.ninja\nrule fixture\n  command = $cc $cflags{pic} -I .{includes} -c $in -o $out\nbuild fixture.o: fixture fixture.c\ndefault fixture.o\n"
+            ),
+        )?;
+        let built = tools
+            .build(
+                directory.path(),
+                &directory.path().to_string_lossy(),
+                "fixture",
+                resin_toolchain::CProfile::Release,
+                execution,
+                cancellation,
+            )
+            .await?;
+        Ok(fs::read(built.path("fixture.o"))?.into())
+    }
+
     fn foreign_inputs(
         &self,
         bindings: &mut resin_codegen::NativeInputs,
     ) -> Result<resin_toolchain::ForeignInputs, Error> {
-        use resin_toolchain::{ForeignFunction, ForeignInputs, ForeignScalar};
+        use resin_toolchain::{ForeignFunction, ForeignInputs};
         let module = self.checked.view().module();
         let mut inputs = ForeignInputs::default();
         if !module.foreign_headers.is_empty() || !self.native.is_empty() {
@@ -244,36 +308,12 @@ impl Project {
                 .insert("fixture.h".into(), self.native.as_bytes().into());
             inputs.includes.push("fixture.h".into());
             inputs.includes.push("resin_runtime.h".into());
-            // This intrinsic is called directly by native code. Existing allocation
-            // failure fixtures replace it with a header macro, just like source externs.
-            let symbol = "resin_test_gpu_ptr_allocate";
-            bindings
-                .runtime
-                .insert("resin_gpu_ptr_allocate".into(), symbol.into());
-            let word = ForeignScalar::Integer {
-                bits: 64,
-                signed: false,
-            };
-            inputs.functions.push(ForeignFunction {
-                symbol: symbol.into(),
-                name: "resin_gpu_ptr_allocate".into(),
-                params: vec![
-                    ForeignScalar::Pointer,
-                    ForeignScalar::Pointer,
-                    word.clone(),
-                    word,
-                    ForeignScalar::Integer {
-                        bits: 32,
-                        signed: true,
-                    },
-                    ForeignScalar::Pointer,
-                ],
-                result: ForeignScalar::Integer {
-                    bits: 32,
-                    signed: true,
-                },
-            });
         }
+        bindings.runtime.extend(
+            self.bindings
+                .iter()
+                .map(|(name, symbol)| (Arc::from(name.as_str()), Arc::from(symbol.as_str()))),
+        );
         let mut roots = BTreeMap::<PathBuf, String>::new();
         for header in &module.foreign_headers {
             let path = Path::new(header.spelling.as_ref());
@@ -301,13 +341,17 @@ impl Project {
             let Some(foreign) = &function.foreign else {
                 continue;
             };
-            let symbol = format!("resin_test_foreign_{index}");
+            let name = function.name.as_ref().unwrap();
+            let symbol = self
+                .bindings
+                .get(name.as_ref())
+                .map_or(name.as_ref(), String::as_str)
+                .to_owned();
             bindings
                 .foreign
                 .insert(FunctionId::from_index(index), symbol.clone().into());
             inputs.functions.push(ForeignFunction {
-                symbol,
-                name: function.name.as_ref().unwrap().to_string(),
+                name: symbol,
                 params: foreign
                     .params
                     .iter()

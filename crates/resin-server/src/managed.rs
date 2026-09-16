@@ -381,13 +381,9 @@ mod tests {
         let repository = directory.path().join("repository");
         std::fs::create_dir_all(repository.join("src")).unwrap();
         std::fs::create_dir(repository.join("include")).unwrap();
-        let text = "export { answer }; extern { \"native.h\": { def native_answer() -> int; } }; def answer() -> int = { native_answer() };\n";
+        let text = "export { answer }; extern { \"native.h\": { def abs(value: int) -> int; } }; def answer() -> int = { abs(-19) };\n";
         std::fs::write(repository.join("src/value.resin"), text).unwrap();
-        std::fs::write(
-            repository.join("include/native.h"),
-            "static inline int native_answer(void) { return 19; }\n",
-        )
-        .unwrap();
+        std::fs::write(repository.join("include/native.h"), "int abs(int value);\n").unwrap();
         git(&repository, &["init", "--quiet"]);
         git(&repository, &["add", "."]);
         git(
@@ -456,7 +452,7 @@ mod tests {
         assert!(
             std::str::from_utf8(&server.managed.headers["package/sample/0"]["native.h"])
                 .unwrap()
-                .contains("return 19")
+                .contains("int abs(int value)")
         );
         let invalid = Dependency {
             commit: "main".into(),

@@ -30,6 +30,12 @@ starting the next. Record evidence in [the validation log](doc/compiler-service-
 - The server supplies standard/builtin libraries, fetches configured dependencies,
   and runs native tools. Clients upload user sources and local header directory
   bundles, receive artifacts, and execute programs locally.
+- Cranelift emits host objects. C interoperability analyzes captured headers with
+  libclang, validates exact supported scalar ABI signatures, and links directly to
+  external symbols. Cache completed `ForeignAnalysis`; reject macro-only functions,
+  static-inline functions, and ABI mismatches. Do not generate C adapters or compile
+  header implementations. Native preprocessing and handwritten C fixture builds remain
+  toolchain operations.
 
 ### Final repository layout
 
@@ -190,7 +196,8 @@ Rust's map hashing, whose encoding is not a portable persistence contract.
 | CST / per-file AST | Source identity and relevant parser/lowering options; content alone is sufficient only for payloads independent of source origins. |
 | HIR / editor facts | Entry source, complete resolved source graph and import edges, library/dependency identities, semantic options. |
 | LIR / verified LIR | HIR identity, canonical selected entry set, Host/Shader profile, lowering limits/options, verification contract. |
-| Generated files | Verified LIR, generation options, target/ABI, declared native header bindings. |
+| Foreign analysis | Declared functions/signatures, complete header bundles, ordered include bindings/roots, target ABI, runtime/dependency headers, Clang/libclang identities. |
+| Native object / shader bytes | Verified LIR, generation options, target/ABI, validated foreign symbols and optimized embedded shader bytes where required. |
 | Native artifact | Generated inputs, complete header bundle contents and include-search bindings/order, runtime/dependency/toolchain identities, target and build settings. |
 
 Keys include every input affecting that value, including compiler version where
@@ -507,11 +514,14 @@ and run the C preprocessor on the server.
   profile, and relevant build settings. Advertise server capabilities and reject
   unsupported targets; remote compilation alone does not provide cross-compilation.
 - Server handlers call compiler passes, publish caches, and invoke code generation,
-  Clang interoperability adapters, native linking, and SPIR-V tools. Keep pass order visible in build/query handlers.
+  libclang header analysis, direct native symbol linking, and SPIR-V tools. Keep pass
+  order visible in build/query handlers. Foreign analysis returns immutable declaration
+  facts and validated signatures; it creates no C object. Reject unavailable declarations,
+  macro-only/static-inline functions, and ABI mismatches before generating foreign calls.
   Preserve the existing toolchain library for native operations, without adding
   a reusable compiler orchestration wrapper.
-- Resolve the native embedding helper explicitly when running as `resin-server`;
-  do not assume its executable supports the root CLI's existing `--embed` mode.
+- Embed optimized shader bytes directly in native objects with their exact length
+  and required alignment; server builds do not need a CLI embedding subprocess.
 - Return diagnostics, artifact metadata, and one output file over HTTP initially.
   Downloads retain artifact ownership and publish locally only after completion;
   failed downloads cannot replace a valid output.

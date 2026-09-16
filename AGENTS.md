@@ -18,7 +18,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   including unused definitions. Follow runtime evaluation order and intersect branch
   states there; LIR storage lowering has no source initialization states or branch snapshots.
   LIR describes storage, cleanup, stack operations, and structured control-flow regions.
-  If/Loop children form a tree; retain this structure through C and SPIR-V emission.
+  If/Loop children form a tree; retain this structure through native and SPIR-V emission.
   Selection arms end in Merge, loop conditions in LoopTest, and loop bodies in Continue;
   keep these distinct and reject exits that do not match their region.
   Keep LIR verification in private `crates/resin-lir/src/verify/` modules, with the
@@ -254,11 +254,16 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Cranelift is the sole Resin host backend; C remains an interoperability language.
   HIR and LIR retain source-scoped `ForeignHeader` values even for empty extern groups.
   Never bind includes by basename alone. Preserve ordered include roots and whole-bundle
-  contents in adapter keys, and protect the compiler-injected runtime ABI include.
-  The server explicitly caches foreign adapters, shaders, optimized shader bytes,
-  native objects, and executable generations. `resin-toolchain` preprocesses captured
-  C adapters with Clang, inspects the same bytes with libclang, and compiles those bytes.
-  It optimizes SPIR-V with `spirv-opt` and links native objects with the runtime archive.
+  contents in foreign-analysis keys, and protect the compiler-injected runtime ABI include.
+  The server explicitly caches immutable `ForeignAnalysis`, shaders, optimized shader
+  bytes, native objects, and executable generations. `resin-toolchain` preprocesses
+  captured headers with Clang and uses libclang to validate actual declarations,
+  external linkage, and the exact supported scalar C ABI. Reject macro-only and
+  static-inline functions, unsupported calling conventions, and signature mismatches.
+  Foreign calls link directly to native symbols; do not generate or compile C adapters.
+  The toolchain optimizes SPIR-V with `spirv-opt` and links native objects with the
+  runtime archive and configured native libraries. Handwritten C fixture builds remain
+  separate test operations.
   Cranelift embeds optimized shader bytes directly with alignment and exact length.
   Inspect cached intermediates or immutable `Hir` results; do not add CLI inspection modes.
   Toolchain APIs consume explicit settings. Retained `Executable` handles share an
@@ -343,7 +348,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   accept `str`, `Span<ubyte>`, and `String` and write bytes verbatim. Use `.data` when
   passing literal storage to C. Ordinary byte arrays contain exactly their declared
   elements, without a sentinel; nested array stride follows the packed shared layout.
-  Empty C byte arrays reserve a placeholder byte that is outside the logical array.
+  Empty host byte arrays reserve a placeholder byte outside the logical array.
   Device-backed byte arrays and spans use 8-bit storage; shader literals need an addressable
   constant-storage implementation and are currently rejected explicitly.
 - Numeric suffixes are case insensitive: `b/h/i/l` select signed 8/16/32/64-bit integers,

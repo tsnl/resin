@@ -1,7 +1,7 @@
-//! Capture and compile C call adapters; Resin computation never enters this translation.
+//! Validate external C declarations from captured headers without compiling C objects.
 use crate::{
-    Error, ForeignFunction, ForeignInputs, ForeignObject, ForeignScalar, Settings, files, headers,
-    platform, process,
+    Error, ForeignAnalysis, ForeignInputs, ForeignScalar, Settings, files, headers, platform,
+    process,
 };
 use resin_executor::{Cancellation, Execution};
 use std::{
@@ -14,16 +14,16 @@ use tokio::{fs, io::AsyncWriteExt};
 
 mod clang;
 
-pub(super) async fn compile(
+pub(super) async fn analyze(
     inputs: Arc<ForeignInputs>,
     temporary: &Path,
     settings: &Settings,
     execution: &Execution,
     cancellation: &Cancellation,
-) -> Result<ForeignObject, Error> {
+) -> Result<ForeignAnalysis, Error> {
     let source_inputs = inputs.clone();
     let source = execution
-        .run(cancellation, move |_| wrapper(&source_inputs))
+        .run(cancellation, move |_| translation_unit(&source_inputs))
         .await??;
     let permit = execution.acquire(cancellation).await?;
     fs::create_dir_all(temporary).await?;
@@ -53,27 +53,8 @@ pub(super) async fn compile(
             clang::inspect(&library, &captured, &functions, &parse_root, cancellation)
         })
         .await??;
-    let _permit = execution.acquire(cancellation).await?;
-    let mut command = settings.command(&settings.clang)?;
-    command
-        .current_dir(directory.path())
-        .args(platform::C_FLAGS)
-        .args([
-            "-std=c11",
-            "-O2",
-            "-Wno-gnu-line-marker",
-            "-c",
-            "foreign.i",
-            "-o",
-            "foreign.o",
-        ]);
-    #[cfg(not(windows))]
-    command.arg("-fPIC");
-    process::run(command, "C interoperability compilation", cancellation).await?;
-    let bytes = fs::read(directory.path().join("foreign.o")).await?;
     cancellation.check()?;
-    Ok(ForeignObject {
-        bytes: bytes.into(),
+    Ok(ForeignAnalysis {
         declarations: declarations.into(),
         includes: includes.into(),
         diagnostics: diagnostics.into(),
@@ -130,24 +111,27 @@ pub(super) fn library(settings: &Settings) -> Result<PathBuf, Error> {
     ))
 }
 
-fn wrapper(inputs: &ForeignInputs) -> Result<String, Error> {
-    let mut names = BTreeSet::new();
+fn translation_unit(inputs: &ForeignInputs) -> Result<String, Error> {
     let mut text = String::new();
     for include in &inputs.includes {
         relative(include)?;
         text.push_str(&format!("#include \"{include}\"\n"));
     }
     for function in &inputs.functions {
-        if !identifier(&function.symbol)
-            || !identifier(&function.name)
-            || !names.insert(&function.symbol)
-        {
+        if !identifier(&function.name) {
             return Err(Error::new(
-                "foreign function names must be C identifiers and wrapper symbols must be unique"
-                    .into(),
+                "foreign function names must be C identifiers".into(),
             ));
         }
-        text.push_str(&function_wrapper(function)?);
+        for parameter in &function.params {
+            if *parameter == ForeignScalar::Void {
+                return Err(Error::new(
+                    "a foreign parameter cannot have void type".into(),
+                ));
+            }
+            validate_scalar(parameter)?;
+        }
+        validate_scalar(&function.result)?;
     }
     let mut aliases = BTreeMap::new();
     for path in inputs
@@ -176,86 +160,20 @@ fn wrapper(inputs: &ForeignInputs) -> Result<String, Error> {
     Ok(text)
 }
 
-fn function_wrapper(function: &ForeignFunction) -> Result<String, Error> {
-    let params = function
-        .params
-        .iter()
-        .enumerate()
-        .map(|(index, ty)| {
-            if *ty == ForeignScalar::Void {
-                return Err(Error::new(
-                    "a foreign parameter cannot have void type".into(),
-                ));
-            }
-            Ok(format!("{} a{index}", scalar(ty)?))
-        })
-        .collect::<Result<Vec<_>, Error>>()?;
-    let params = if params.is_empty() {
-        "void".into()
-    } else {
-        params.join(", ")
-    };
-    let args = (0..function.params.len())
-        .map(|index| format!("a{index}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let result = scalar(&function.result)?;
-    let body = if function.result == ForeignScalar::Void {
-        format!("(void){}({args});", function.name)
-    } else {
-        format!("return ({result}){}({args});", function.name)
-    };
-    Ok(format!(
-        "{result} {}({params}) {{ {body} }}\n",
-        function.symbol
-    ))
-}
-
-fn scalar(ty: &ForeignScalar) -> Result<&'static str, Error> {
-    Ok(match ty {
-        ForeignScalar::Void => "void",
-        ForeignScalar::Bool => "_Bool",
-        ForeignScalar::Pointer => "void *",
-        ForeignScalar::Integer {
-            bits: 8,
-            signed: true,
-        } => "signed char",
-        ForeignScalar::Integer {
-            bits: 8,
-            signed: false,
-        } => "unsigned char",
-        ForeignScalar::Integer {
-            bits: 16,
-            signed: true,
-        } => "short",
-        ForeignScalar::Integer {
-            bits: 16,
-            signed: false,
-        } => "unsigned short",
-        ForeignScalar::Integer {
-            bits: 32,
-            signed: true,
-        } => "int",
-        ForeignScalar::Integer {
-            bits: 32,
-            signed: false,
-        } => "unsigned int",
-        ForeignScalar::Integer {
-            bits: 64,
-            signed: true,
-        } => "long long",
-        ForeignScalar::Integer {
-            bits: 64,
-            signed: false,
-        } => "unsigned long long",
-        ForeignScalar::Float { bits: 32 } => "float",
-        ForeignScalar::Float { bits: 64 } => "double",
-        _ => {
-            return Err(Error::new(
-                "unsupported scalar width at the C interoperability boundary".into(),
-            ));
+fn validate_scalar(ty: &ForeignScalar) -> Result<(), Error> {
+    match ty {
+        ForeignScalar::Void
+        | ForeignScalar::Bool
+        | ForeignScalar::Pointer
+        | ForeignScalar::Integer {
+            bits: 8 | 16 | 32 | 64,
+            ..
         }
-    })
+        | ForeignScalar::Float { bits: 32 | 64 } => Ok(()),
+        _ => Err(Error::new(
+            "unsupported scalar width at the C interoperability boundary".into(),
+        )),
+    }
 }
 
 fn identifier(text: &str) -> bool {
@@ -283,10 +201,10 @@ fn relative(text: &str) -> Result<(), Error> {
     }
     if matches!(
         text.to_ascii_lowercase().as_str(),
-        "foreign.c" | "foreign.i" | "foreign.d" | "foreign.o"
+        "foreign.c" | "foreign.i" | "foreign.d"
     ) {
         return Err(Error::new(
-            "foreign header path collides with an adapter output".into(),
+            "foreign header path collides with a header-analysis input or output".into(),
         ));
     }
     Ok(())

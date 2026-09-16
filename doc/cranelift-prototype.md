@@ -2,7 +2,8 @@
 
 > Historical record: this document describes the scalar prototype in PR #212.
 > The current server uses the full Cranelift backend; C header interoperability
-> uses cached Clang adapters. See [architecture](architecture.md#calling-the-passes).
+> uses cached libclang analysis and direct native symbols. See
+> [architecture](architecture.md#calling-the-passes).
 
 The server can emit host object code directly with Cranelift. Select it when
 starting the service:

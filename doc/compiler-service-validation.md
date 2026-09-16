@@ -1,5 +1,9 @@
 # Compiler service implementation validation
 
+This is the historical validation record for Phases 0–3. Native backend and C
+interoperability details below describe those revisions; see the current
+[architecture](architecture.md#calling-the-passes) for Cranelift and direct symbol linking.
+
 ## Phase 0 — grouped extern preamble
 
 Validated on Linux using `shell.nix`, Rust 1.96.0, 24 CPU threads, and an NVIDIA

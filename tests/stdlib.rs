@@ -9,13 +9,18 @@ use support::toolchain;
 use tempfile::TempDir;
 
 fn run(source: &str, native: &str) -> std::process::Output {
+    run_bound(source, native, &[])
+}
+
+fn run_bound(source: &str, native: &str, bindings: &[(&str, &str)]) -> std::process::Output {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let path = temp.path().join("main.resin");
     fs::write(&path, source).unwrap();
     let module = pipeline::file_module(&path).unwrap_or_else(|error| panic!("{error}"));
     let project = project::Project::new(&module, Some("main"))
         .unwrap()
-        .with_native(native);
+        .with_native(native)
+        .with_bindings(bindings);
     let cc = std::env::var_os("CC").unwrap_or_else(|| resin_toolchain::DEFAULT_C_COMPILER.into());
     let built = project.build(&toolchain::c(&cc)).unwrap();
     let executable = built
@@ -578,7 +583,7 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
     if shaders::optimizer().is_none() {
         return;
     }
-    let output = run(
+    let output = run_bound(
         r#"
         export { main };
 
@@ -624,27 +629,33 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
         #include <resin_runtime.h>
         #include <assert.h>
         static int mode, cleanup;
-        static void test_mode(int value) { mode = value; cleanup = 0; }
-        static void test_verify(int code) {
+        void test_mode(int value);
+        void test_mode(int value) { mode = value; cleanup = 0; }
+        void test_verify(int code);
+        void test_verify(int code) {
             const int codes[] = {RESIN_STATUS_UNSUPPORTED, RESIN_STATUS_OUT_OF_MEMORY,
                 RESIN_STATUS_VULKAN_ERROR, RESIN_STATUS_INVALID_ARGUMENT, RESIN_STATUS_VULKAN_ERROR, 0};
             const int cleanups[] = {0, 1, 21, 321, 421, 421};
             assert(code == codes[mode]);
             assert(cleanup == cleanups[mode]);
         }
-        static ResinStatus mock_create(ResinGpu **out) {
+        ResinStatus mock_create(ResinGpu **out);
+        ResinStatus mock_create(ResinGpu **out) {
             *out = mode == 0 ? NULL : (ResinGpu *)(uintptr_t)1;
             return mode == 0 ? RESIN_STATUS_UNSUPPORTED : RESIN_STATUS_SUCCESS;
         }
-        static void mock_destroy(ResinGpu *gpu) {
+        void mock_destroy(ResinGpu *gpu);
+        void mock_destroy(ResinGpu *gpu) {
             assert(gpu == (ResinGpu *)(uintptr_t)1);
             cleanup = cleanup * 10 + 1;
         }
-        static void mock_free(void *payload) {
+        void mock_free(void *payload);
+        void mock_free(void *payload) {
             cleanup = cleanup * 10 + 2;
             resin_arc_release(*(ResinArc **)payload);
         }
-        static ResinStatus mock_malloc(ResinGpu *gpu, ResinArc *gpu_owner, size_t bytes, size_t align, int32_t memory, ResinGpuPtr *out) {
+        ResinStatus mock_malloc(ResinGpu *gpu, ResinArc *gpu_owner, size_t bytes, size_t align, int32_t memory, ResinGpuPtr *out);
+        ResinStatus mock_malloc(ResinGpu *gpu, ResinArc *gpu_owner, size_t bytes, size_t align, int32_t memory, ResinGpuPtr *out) {
             assert(gpu == (ResinGpu *)(uintptr_t)1 && bytes == 16 && align == 8 && memory == RESIN_MEMORY_DEFAULT);
             *out = (ResinGpuPtr){0};
             if (mode == 1) return RESIN_STATUS_OUT_OF_MEMORY;
@@ -654,54 +665,63 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
             out->access = RESIN_GPU_ACCESS_READ | RESIN_GPU_ACCESS_WRITE;
             return RESIN_STATUS_SUCCESS;
         }
-        static ResinStatus mock_record(ResinGpu *gpu, ResinCommandBuffer **out) {
+        ResinStatus mock_record(ResinGpu *gpu, ResinCommandBuffer **out);
+        ResinStatus mock_record(ResinGpu *gpu, ResinCommandBuffer **out) {
             assert(gpu == (ResinGpu *)(uintptr_t)1);
             *out = mode == 2 ? NULL : (ResinCommandBuffer *)(uintptr_t)3;
             return mode == 2 ? RESIN_STATUS_VULKAN_ERROR : RESIN_STATUS_SUCCESS;
         }
-        static ResinStatus mock_graphics(ResinGpu *gpu, const uint8_t *vertex, size_t vertex_length, const uint8_t *fragment, size_t fragment_length, ResinPipeline **out) {
+        ResinStatus mock_graphics(ResinGpu *gpu, const uint8_t *vertex, size_t vertex_length, const uint8_t *fragment, size_t fragment_length, ResinPipeline **out);
+        ResinStatus mock_graphics(ResinGpu *gpu, const uint8_t *vertex, size_t vertex_length, const uint8_t *fragment, size_t fragment_length, ResinPipeline **out) {
             assert(gpu == (ResinGpu *)(uintptr_t)1 && vertex && fragment && vertex_length > 20 && fragment_length > 20);
             *out = NULL;
             return RESIN_STATUS_SUCCESS;
         }
-        static ResinStatus mock_draw(ResinCommandBuffer *commands, ResinDeviceAddress root, uint32_t count) {
+        ResinStatus mock_draw(ResinCommandBuffer *commands, ResinDeviceAddress root, uint32_t count);
+        ResinStatus mock_draw(ResinCommandBuffer *commands, ResinDeviceAddress root, uint32_t count) {
             assert(commands == (ResinCommandBuffer *)(uintptr_t)3 && root == 0 && count == 3);
             return RESIN_STATUS_SUCCESS;
         }
-        static ResinStatus mock_pipeline(ResinCommandBuffer *commands, const ResinPipeline *pipeline) {
+        ResinStatus mock_pipeline(ResinCommandBuffer *commands, const ResinPipeline *pipeline);
+        ResinStatus mock_pipeline(ResinCommandBuffer *commands, const ResinPipeline *pipeline) {
             assert(commands == (ResinCommandBuffer *)(uintptr_t)3 && pipeline == NULL);
             return mode == 3 ? RESIN_STATUS_INVALID_ARGUMENT : RESIN_STATUS_SUCCESS;
         }
-        static void mock_cancel(ResinGpu *gpu, ResinCommandBuffer *commands) {
+        void mock_cancel(ResinGpu *gpu, ResinCommandBuffer *commands);
+        void mock_cancel(ResinGpu *gpu, ResinCommandBuffer *commands) {
             assert(gpu == (ResinGpu *)(uintptr_t)1);
             if (commands) {
                 assert(cleanup == 0);
                 cleanup = 3;
             }
         }
-        static ResinStatus mock_submit(ResinGpu *gpu, ResinCommandBuffer *commands) {
+        ResinStatus mock_submit(ResinGpu *gpu, ResinCommandBuffer *commands);
+        ResinStatus mock_submit(ResinGpu *gpu, ResinCommandBuffer *commands) {
             assert(gpu == (ResinGpu *)(uintptr_t)1);
             assert(commands == (ResinCommandBuffer *)(uintptr_t)3);
             cleanup = 4;
             return mode == 4 ? RESIN_STATUS_VULKAN_ERROR : RESIN_STATUS_SUCCESS;
         }
-        #define resin_gpu_create mock_create
-        #define resin_gpu_destroy mock_destroy
-        #define resin_gpu_ptr_allocate mock_malloc
-        #define resin_gpu_start_command_recording mock_record
-        #define resin_gpu_create_graphics_pipeline mock_graphics
-        #define resin_gpu_draw mock_draw
-        #define resin_gpu_set_pipeline mock_pipeline
-        #define resin_gpu_cancel_command_buffer mock_cancel
-        #define resin_gpu_submit mock_submit
+
         "#,
+        &[
+            ("resin_gpu_create", "mock_create"),
+            ("resin_gpu_destroy", "mock_destroy"),
+            ("resin_gpu_ptr_allocate", "mock_malloc"),
+            ("resin_gpu_start_command_recording", "mock_record"),
+            ("resin_gpu_create_graphics_pipeline", "mock_graphics"),
+            ("resin_gpu_draw", "mock_draw"),
+            ("resin_gpu_set_pipeline", "mock_pipeline"),
+            ("resin_gpu_cancel_command_buffer", "mock_cancel"),
+            ("resin_gpu_submit", "mock_submit"),
+        ],
     );
     success(&output);
 }
 
 #[test]
 fn presentation_distinguishes_skipped_frames_from_errors_without_opening_windows() {
-    let output = run(
+    let output = run_bound(
         r#"
         export { main };
         import { "$/gpu.resin", "$/window.resin", "$/status.resin" };
@@ -718,27 +738,35 @@ fn presentation_distinguishes_skipped_frames_from_errors_without_opening_windows
         r#"
         #include <resin_runtime.h>
         #include <assert.h>
-        static ResinStatus mock_create(ResinGpu **out) { *out = NULL; return RESIN_STATUS_SUCCESS; }
-        #define resin_gpu_create mock_create
-        static ResinStatus mock_image(ResinGpu *gpu, uint32_t width, uint32_t height, ResinImage **out) {
+        ResinStatus mock_create(ResinGpu **out);
+        ResinStatus mock_create(ResinGpu **out) { *out = NULL; return RESIN_STATUS_SUCCESS; }
+
+        ResinStatus mock_image(ResinGpu *gpu, uint32_t width, uint32_t height, ResinImage **out);
+        ResinStatus mock_image(ResinGpu *gpu, uint32_t width, uint32_t height, ResinImage **out) {
             assert(gpu == NULL && width == 1 && height == 1); *out = NULL; return RESIN_STATUS_SUCCESS;
         }
-        #define resin_gpu_create_image mock_image
-        static ResinStatus mock_present(ResinGpu *gpu, ResinImage *image) {
+
+        ResinStatus mock_present(ResinGpu *gpu, ResinImage *image);
+        ResinStatus mock_present(ResinGpu *gpu, ResinImage *image) {
             assert(gpu == NULL && image == NULL);
             static int call;
             const ResinStatus codes[] = {RESIN_STATUS_SUCCESS, RESIN_STATUS_INCOMPLETE, RESIN_STATUS_VULKAN_ERROR, (ResinStatus)99};
             return codes[call++];
         }
-        #define resin_gpu_present mock_present
+
         "#,
+        &[
+            ("resin_gpu_create", "mock_create"),
+            ("resin_gpu_create_image", "mock_image"),
+            ("resin_gpu_present", "mock_present"),
+        ],
     );
     success(&output);
 }
 
 #[test]
 fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
-    let output = run(
+    let output = run_bound(
         r#"
         export { main };
         import { "$/gpu.resin", "$/window.resin", "$/status.resin", "$/string.resin" };
@@ -765,46 +793,57 @@ fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
         r#"
         #include <resin_runtime.h>
         #include <assert.h>
-        static ResinStatus mock_window(uint32_t width, uint32_t height, const char *title, ResinWindow **out) {
+        ResinStatus mock_window(uint32_t width, uint32_t height, const char *title, ResinWindow **out);
+        ResinStatus mock_window(uint32_t width, uint32_t height, const char *title, ResinWindow **out) {
             assert(width == 1 && height == 1 && title); *out = NULL; return RESIN_STATUS_SUCCESS;
         }
-        #define resin_window_create mock_window
+
         static int closed;
-        static ResinStatus mock_count(uint32_t *out) { *out = 2; return RESIN_STATUS_SUCCESS; }
-        static ResinStatus mock_size(const ResinWindow *window, uint32_t *width, uint32_t *height) {
+        ResinStatus mock_count(uint32_t *out);
+        ResinStatus mock_count(uint32_t *out) { *out = 2; return RESIN_STATUS_SUCCESS; }
+        ResinStatus mock_size(const ResinWindow *window, uint32_t *width, uint32_t *height);
+        ResinStatus mock_size(const ResinWindow *window, uint32_t *width, uint32_t *height) {
             assert(window == NULL);
             *width = 640;
             *height = 480;
             return RESIN_STATUS_SUCCESS;
         }
-        static ResinStatus mock_enumerate(ResinGpuDeviceInfo *infos, uint32_t count) {
+        ResinStatus mock_enumerate(ResinGpuDeviceInfo *infos, uint32_t count);
+        ResinStatus mock_enumerate(ResinGpuDeviceInfo *infos, uint32_t count) {
             assert(infos == NULL && count == 0);
             return RESIN_STATUS_INCOMPLETE;
         }
-        static int mock_close(const ResinWindow *window) { assert(window == NULL); return closed; }
-        static ResinStatus mock_set_close(const ResinWindow *window, int close) {
+        int mock_close(const ResinWindow *window);
+        int mock_close(const ResinWindow *window) { assert(window == NULL); return closed; }
+        ResinStatus mock_set_close(const ResinWindow *window, int close);
+        ResinStatus mock_set_close(const ResinWindow *window, int close) {
             assert(window == NULL && (close == 0 || close == 1));
             closed = close;
             return RESIN_STATUS_SUCCESS;
         }
-        static int mock_key(const ResinWindow *window, int key) {
+        int mock_key(const ResinWindow *window, int key);
+        int mock_key(const ResinWindow *window, int key) {
             assert(window == NULL && key == RESIN_KEY_ESCAPE);
             return 1;
         }
-        #define resin_gpu_device_count mock_count
-        #define resin_window_framebuffer_size mock_size
-        #define resin_gpu_enumerate_devices mock_enumerate
-        #define resin_window_should_close mock_close
-        #define resin_window_set_should_close mock_set_close
-        #define resin_window_key_pressed mock_key
+
         "#,
+        &[
+            ("resin_window_create", "mock_window"),
+            ("resin_gpu_device_count", "mock_count"),
+            ("resin_window_framebuffer_size", "mock_size"),
+            ("resin_gpu_enumerate_devices", "mock_enumerate"),
+            ("resin_window_should_close", "mock_close"),
+            ("resin_window_set_should_close", "mock_set_close"),
+            ("resin_window_key_pressed", "mock_key"),
+        ],
     );
     success(&output);
 }
 
 #[test]
 fn byte_input_reports_stream_errors_instead_of_eof() {
-    let output = run(
+    let output = run_bound(
         r#"
         export { main };
         import { "$/console.resin", "$/string.resin" };
@@ -820,11 +859,17 @@ fn byte_input_reports_stream_errors_instead_of_eof() {
         "#,
         r#"
         #include <resin_runtime.h>
-        static int mock_getchar(void) { return EOF; }
-        static int mock_error(void) { return 1; }
-        #define getchar mock_getchar
-        #define resin_stdin_error mock_error
+        #include <stdio.h>
+        int mock_getchar(void);
+        int mock_getchar(void) { return EOF; }
+        int mock_error(void);
+        int mock_error(void) { return 1; }
+
         "#,
+        &[
+            ("getchar", "mock_getchar"),
+            ("resin_stdin_error", "mock_error"),
+        ],
     );
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(output.stdout, b"cleanup\n");
@@ -836,7 +881,7 @@ fn typed_pipeline_factories_embed_shaders_and_keep_shared_ownership() {
     if shaders::optimizer().is_none() {
         return;
     }
-    let output = run(
+    let output = run_bound(
         r#"
         export { main };
 
@@ -878,20 +923,25 @@ fn typed_pipeline_factories_embed_shaders_and_keep_shared_ownership() {
         r#"
         #include <resin_runtime.h>
         #include <assert.h>
-        static ResinStatus mock_create(ResinGpu **out) { *out = NULL; return RESIN_STATUS_SUCCESS; }
-        #define resin_gpu_create mock_create
+        ResinStatus mock_create(ResinGpu **out);
+        ResinStatus mock_create(ResinGpu **out) { *out = NULL; return RESIN_STATUS_SUCCESS; }
+
         #include <string.h>
         static unsigned created, freed;
         static int failing;
-        static void test_fail(void) { failing = 1; }
-        static void check_shader(const uint8_t *data, size_t length) {
+        void test_fail(void);
+        void test_fail(void) { failing = 1; }
+        void check_shader(const uint8_t *data, size_t length);
+        void check_shader(const uint8_t *data, size_t length) {
             uint32_t magic;
             assert(data && length > 20 && length % 4 == 0);
             memcpy(&magic, data, sizeof(magic));
             assert(magic == 0x07230203);
         }
-        static void test_finished(void) { assert(created == 3 && freed == 3); }
-        static ResinStatus mock_compute(ResinGpu *gpu, const uint8_t *data, size_t length, ResinPipeline **out) {
+        void test_finished(void);
+        void test_finished(void) { assert(created == 3 && freed == 3); }
+        ResinStatus mock_compute(ResinGpu *gpu, const uint8_t *data, size_t length, ResinPipeline **out);
+        ResinStatus mock_compute(ResinGpu *gpu, const uint8_t *data, size_t length, ResinPipeline **out) {
             assert(!gpu);
             check_shader(data, length);
             if (failing) return RESIN_STATUS_VULKAN_ERROR;
@@ -900,7 +950,8 @@ fn typed_pipeline_factories_embed_shaders_and_keep_shared_ownership() {
             *out = (ResinPipeline *)(uintptr_t)1;
             return RESIN_STATUS_SUCCESS;
         }
-        static ResinStatus mock_graphics(ResinGpu *gpu, const uint8_t *vertex, size_t vertex_length, const uint8_t *fragment, size_t fragment_length, ResinPipeline **out) {
+        ResinStatus mock_graphics(ResinGpu *gpu, const uint8_t *vertex, size_t vertex_length, const uint8_t *fragment, size_t fragment_length, ResinPipeline **out);
+        ResinStatus mock_graphics(ResinGpu *gpu, const uint8_t *vertex, size_t vertex_length, const uint8_t *fragment, size_t fragment_length, ResinPipeline **out) {
             assert(!gpu);
             check_shader(vertex, vertex_length);
             check_shader(fragment, fragment_length);
@@ -910,22 +961,27 @@ fn typed_pipeline_factories_embed_shaders_and_keep_shared_ownership() {
             *out = (ResinPipeline *)(uintptr_t)2;
             return RESIN_STATUS_SUCCESS;
         }
-        static void mock_free_pipeline(ResinGpu *gpu, ResinPipeline *pipeline) {
+        void mock_free_pipeline(ResinGpu *gpu, ResinPipeline *pipeline);
+        void mock_free_pipeline(ResinGpu *gpu, ResinPipeline *pipeline) {
             assert(!gpu && ((uintptr_t)pipeline == 1 || (uintptr_t)pipeline == 2));
             assert(!(freed & (uintptr_t)pipeline));
             freed |= (uintptr_t)pipeline;
         }
-        #define resin_gpu_free_pipeline mock_free_pipeline
-        #define resin_gpu_create_compute_pipeline mock_compute
-        #define resin_gpu_create_graphics_pipeline mock_graphics
+
     "#,
+        &[
+            ("resin_gpu_create", "mock_create"),
+            ("resin_gpu_free_pipeline", "mock_free_pipeline"),
+            ("resin_gpu_create_compute_pipeline", "mock_compute"),
+            ("resin_gpu_create_graphics_pipeline", "mock_graphics"),
+        ],
     );
     success(&output);
 }
 
 #[test]
 fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
-    let output = run(
+    let output = run_bound(
         r#"
         export { main };
         import { "$/window.resin", "$/string.resin" };
@@ -946,34 +1002,44 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
         r#"
         #include <resin_runtime.h>
         #include <assert.h>
-        static ResinStatus mock_window_create(uint32_t width, uint32_t height, const char *title, ResinWindow **out) {
+        ResinStatus mock_window_create(uint32_t width, uint32_t height, const char *title, ResinWindow **out);
+        ResinStatus mock_window_create(uint32_t width, uint32_t height, const char *title, ResinWindow **out) {
             assert(width == 16 && height == 16 && title);
             *out = NULL;
             return RESIN_STATUS_SUCCESS;
         }
-        #define resin_window_create mock_window_create
-        static uint32_t mock_key_state(const ResinWindow *window, int key) {
+
+        uint32_t mock_key_state(const ResinWindow *window, int key);
+        uint32_t mock_key_state(const ResinWindow *window, int key) {
             assert(window == NULL && key == 87);
             return RESIN_INPUT_PRESSED | RESIN_INPUT_RELEASED;
         }
-        static uint32_t mock_mouse_state(const ResinWindow *window, int button) {
+        uint32_t mock_mouse_state(const ResinWindow *window, int button);
+        uint32_t mock_mouse_state(const ResinWindow *window, int button) {
             assert(window == NULL && button == 0);
             return RESIN_INPUT_DOWN | RESIN_INPUT_PRESSED;
         }
-        static ResinStatus mock_coordinates(const ResinWindow *window, double *x, double *y) {
+        ResinStatus mock_coordinates(const ResinWindow *window, double *x, double *y);
+        ResinStatus mock_coordinates(const ResinWindow *window, double *x, double *y) {
             assert(window == NULL); *x = 12.5; *y = -3.25; return RESIN_STATUS_SUCCESS;
         }
-        static int mock_focus(const ResinWindow *window) { assert(window == NULL); return 1; }
-        static ResinStatus mock_capture(const ResinWindow *window, int capture) {
+        int mock_focus(const ResinWindow *window);
+        int mock_focus(const ResinWindow *window) { assert(window == NULL); return 1; }
+        ResinStatus mock_capture(const ResinWindow *window, int capture);
+        ResinStatus mock_capture(const ResinWindow *window, int capture) {
             static int call; assert(window == NULL && capture == (call++ == 0)); return RESIN_STATUS_SUCCESS;
         }
-        #define resin_window_key_state mock_key_state
-        #define resin_window_mouse_button_state mock_mouse_state
-        #define resin_window_cursor_position mock_coordinates
-        #define resin_window_scroll_delta mock_coordinates
-        #define resin_window_focused mock_focus
-        #define resin_window_capture_cursor mock_capture
+
         "#,
+        &[
+            ("resin_window_create", "mock_window_create"),
+            ("resin_window_key_state", "mock_key_state"),
+            ("resin_window_mouse_button_state", "mock_mouse_state"),
+            ("resin_window_cursor_position", "mock_coordinates"),
+            ("resin_window_scroll_delta", "mock_coordinates"),
+            ("resin_window_focused", "mock_focus"),
+            ("resin_window_capture_cursor", "mock_capture"),
+        ],
     );
     success(&output);
 }
@@ -1016,7 +1082,7 @@ fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
     if shaders::optimizer().is_none() {
         return;
     }
-    let output = run(
+    let output = run_bound(
         r#"
         export { main };
 
@@ -1073,73 +1139,95 @@ fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
         r#"
         #include <resin_runtime.h>
         #include <assert.h>
-        static ResinStatus mock_create(ResinGpu **out) { *out = NULL; return RESIN_STATUS_SUCCESS; }
-        #define resin_gpu_create mock_create
-        static ResinStatus mock_image(ResinGpu *gpu, uint32_t width, uint32_t height, ResinImage **out) {
+        ResinStatus mock_create(ResinGpu **out);
+        ResinStatus mock_create(ResinGpu **out) { *out = NULL; return RESIN_STATUS_SUCCESS; }
+
+        ResinStatus mock_image(ResinGpu *gpu, uint32_t width, uint32_t height, ResinImage **out);
+        ResinStatus mock_image(ResinGpu *gpu, uint32_t width, uint32_t height, ResinImage **out) {
             assert(gpu == NULL && width == 1 && height == 1); *out = (ResinImage *)(uintptr_t)2; return RESIN_STATUS_SUCCESS;
         }
-        #define resin_gpu_create_image mock_image
+
         static int mode, freed, completed, drawn;
-        static void test_mode(int value) { mode = value; freed = completed = drawn = 0; }
-        static void test_recorded(void) { assert(freed == 0 && completed == 0 && drawn == 1); }
-        static void test_code(int code) { assert(code == (mode == 0 ? RESIN_STATUS_SUCCESS : RESIN_STATUS_VULKAN_ERROR)); }
-        static void test_completed(void) {
+        void test_mode(int value);
+        void test_mode(int value) { mode = value; freed = completed = drawn = 0; }
+        void test_recorded(void);
+        void test_recorded(void) { assert(freed == 0 && completed == 0 && drawn == 1); }
+        void test_code(int code);
+        void test_code(int code) { assert(code == (mode == 0 ? RESIN_STATUS_SUCCESS : RESIN_STATUS_VULKAN_ERROR)); }
+        void test_completed(void);
+        void test_completed(void) {
             assert(freed == (mode == 3 ? 0 : 3));
             assert(completed == (mode == 3 ? 0 : 1));
         }
-        static void test_finished(void) { assert(freed == 3 && completed == 1); }
-        static ResinStatus mock_record(ResinGpu *gpu, ResinCommandBuffer **out) {
+        void test_finished(void);
+        void test_finished(void) { assert(freed == 3 && completed == 1); }
+        ResinStatus mock_record(ResinGpu *gpu, ResinCommandBuffer **out);
+        ResinStatus mock_record(ResinGpu *gpu, ResinCommandBuffer **out) {
             assert(gpu == NULL); *out = (ResinCommandBuffer *)(uintptr_t)3; return RESIN_STATUS_SUCCESS;
         }
-        static ResinStatus mock_graphics(ResinGpu *gpu, const uint8_t *vertex, size_t vertex_length, const uint8_t *fragment, size_t fragment_length, ResinPipeline **out) {
+        ResinStatus mock_graphics(ResinGpu *gpu, const uint8_t *vertex, size_t vertex_length, const uint8_t *fragment, size_t fragment_length, ResinPipeline **out);
+        ResinStatus mock_graphics(ResinGpu *gpu, const uint8_t *vertex, size_t vertex_length, const uint8_t *fragment, size_t fragment_length, ResinPipeline **out) {
             assert(!gpu && vertex && fragment && vertex_length > 20 && fragment_length > 20);
             *out = (ResinPipeline *)(uintptr_t)1;
             return RESIN_STATUS_SUCCESS;
         }
-        static ResinStatus mock_pipeline(ResinCommandBuffer *commands, const ResinPipeline *pipeline) {
+        ResinStatus mock_pipeline(ResinCommandBuffer *commands, const ResinPipeline *pipeline);
+        ResinStatus mock_pipeline(ResinCommandBuffer *commands, const ResinPipeline *pipeline) {
             assert((uintptr_t)commands == 3 && (uintptr_t)pipeline == 1); return RESIN_STATUS_SUCCESS;
         }
-        static ResinStatus mock_begin(ResinCommandBuffer *commands, ResinImage *image, float r, float g, float b, float a) {
+        ResinStatus mock_begin(ResinCommandBuffer *commands, ResinImage *image, float r, float g, float b, float a);
+        ResinStatus mock_begin(ResinCommandBuffer *commands, ResinImage *image, float r, float g, float b, float a) {
             assert((uintptr_t)commands == 3 && (uintptr_t)image == 2);
             assert(r == 0 && g == 0 && b == 0 && a == 1); return RESIN_STATUS_SUCCESS;
         }
-        static ResinStatus mock_end(ResinCommandBuffer *commands) { assert((uintptr_t)commands == 3); return RESIN_STATUS_SUCCESS; }
-        static ResinStatus mock_draw(ResinCommandBuffer *commands, ResinDeviceAddress root, uint32_t count) {
+        ResinStatus mock_end(ResinCommandBuffer *commands);
+        ResinStatus mock_end(ResinCommandBuffer *commands) { assert((uintptr_t)commands == 3); return RESIN_STATUS_SUCCESS; }
+        ResinStatus mock_draw(ResinCommandBuffer *commands, ResinDeviceAddress root, uint32_t count);
+        ResinStatus mock_draw(ResinCommandBuffer *commands, ResinDeviceAddress root, uint32_t count) {
             assert((uintptr_t)commands == 3 && root == 0 && count == 7 && freed == 0 && drawn++ == 0);
             return RESIN_STATUS_SUCCESS;
         }
-        static ResinStatus mock_submit(ResinGpu *gpu, ResinCommandBuffer *commands) {
+        ResinStatus mock_submit(ResinGpu *gpu, ResinCommandBuffer *commands);
+        ResinStatus mock_submit(ResinGpu *gpu, ResinCommandBuffer *commands) {
             assert(gpu == NULL && (uintptr_t)commands == 3 && mode < 2 && freed == 0 && completed++ == 0);
             return mode == 0 ? RESIN_STATUS_SUCCESS : RESIN_STATUS_VULKAN_ERROR;
         }
-        static void mock_cancel(ResinGpu *gpu, ResinCommandBuffer *commands) {
+        void mock_cancel(ResinGpu *gpu, ResinCommandBuffer *commands);
+        void mock_cancel(ResinGpu *gpu, ResinCommandBuffer *commands) {
             assert(gpu == NULL); if (!commands) return;
             assert((uintptr_t)commands == 3 && mode >= 2 && freed == 0 && completed++ == 0);
         }
-        static void mock_free_pipeline(ResinGpu *gpu, ResinPipeline *pipeline) {
+        void mock_free_pipeline(ResinGpu *gpu, ResinPipeline *pipeline);
+        void mock_free_pipeline(ResinGpu *gpu, ResinPipeline *pipeline) {
             assert(gpu == NULL && completed == 1 && (uintptr_t)pipeline == 1 && !(freed & 1)); freed |= 1;
         }
-        static void mock_free_image(ResinGpu *gpu, ResinImage *image) {
+        void mock_free_image(ResinGpu *gpu, ResinImage *image);
+        void mock_free_image(ResinGpu *gpu, ResinImage *image) {
             assert(gpu == NULL && completed == 1 && (uintptr_t)image == 2 && !(freed & 2)); freed |= 2;
         }
-        #define resin_gpu_start_command_recording mock_record
-        #define resin_gpu_create_graphics_pipeline mock_graphics
-        #define resin_gpu_set_pipeline mock_pipeline
-        #define resin_gpu_begin_rendering mock_begin
-        #define resin_gpu_end_rendering mock_end
-        #define resin_gpu_draw mock_draw
-        #define resin_gpu_submit mock_submit
-        #define resin_gpu_cancel_command_buffer mock_cancel
-        #define resin_gpu_free_pipeline mock_free_pipeline
-        #define resin_gpu_free_image mock_free_image
+
         "#,
+        &[
+            ("resin_gpu_create", "mock_create"),
+            ("resin_gpu_create_image", "mock_image"),
+            ("resin_gpu_start_command_recording", "mock_record"),
+            ("resin_gpu_create_graphics_pipeline", "mock_graphics"),
+            ("resin_gpu_set_pipeline", "mock_pipeline"),
+            ("resin_gpu_begin_rendering", "mock_begin"),
+            ("resin_gpu_end_rendering", "mock_end"),
+            ("resin_gpu_draw", "mock_draw"),
+            ("resin_gpu_submit", "mock_submit"),
+            ("resin_gpu_cancel_command_buffer", "mock_cancel"),
+            ("resin_gpu_free_pipeline", "mock_free_pipeline"),
+            ("resin_gpu_free_image", "mock_free_image"),
+        ],
     );
     success(&output);
 }
 
 #[test]
 fn window_constructor_accepts_owned_titles_until_the_native_call_returns() {
-    let output = run(
+    let output = run_bound(
         r#"
         export { main };
 
@@ -1169,20 +1257,26 @@ fn window_constructor_accepts_owned_titles_until_the_native_call_returns() {
         #include <assert.h>
         #include <string.h>
         static int created, destroyed;
-        static ResinStatus mock_window_create(uint32_t width, uint32_t height, const char *title, ResinWindow **out) {
+        ResinStatus mock_window_create(uint32_t width, uint32_t height, const char *title, ResinWindow **out);
+        ResinStatus mock_window_create(uint32_t width, uint32_t height, const char *title, ResinWindow **out) {
             assert(width == 32 && height == 24);
             assert(strcmp(title, created == 0 ? "named {0}" : "temporary") == 0);
             *out = (ResinWindow *)(uintptr_t)++created;
             return RESIN_STATUS_SUCCESS;
         }
-        static void mock_window_destroy(ResinWindow *window) {
+        void mock_window_destroy(ResinWindow *window);
+        void mock_window_destroy(ResinWindow *window) {
             assert(window != NULL);
             ++destroyed;
         }
-        static int window_counts(void) { return created * 10 + destroyed; }
-        #define resin_window_create mock_window_create
-        #define resin_window_destroy mock_window_destroy
+        int window_counts(void);
+        int window_counts(void) { return created * 10 + destroyed; }
+
         "#,
+        &[
+            ("resin_window_create", "mock_window_create"),
+            ("resin_window_destroy", "mock_window_destroy"),
+        ],
     );
     success(&output);
     assert_eq!(output.stdout, b"named {0}");

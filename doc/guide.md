@@ -107,7 +107,8 @@ Commit grammar changes and generated files together in this repository.
 
 The service compiles Resin directly to native objects with Cranelift. It needs Clang
 (`CLANG`, default `clang`) and libclang (`LIBCLANG_PATH` when not discoverable) for
-C header inspection and cached interoperability adapters. The linker driver is selected
+C header inspection and cached foreign analysis. Foreign calls use directly linkable
+C symbols with validated scalar/pointer signatures. The linker driver is selected
 with `CC` or server `--cc` (default `cc` on Unix, `clang` on Windows MSVC).
 Shader builds use `spirv-opt` from [SPIR-V Tools](https://github.com/KhronosGroup/SPIRV-Tools),
 selected with `SPIRV_OPT` or server `--spirv-opt`. Required tools report errors when used;
@@ -214,7 +215,8 @@ extension for Windows executable filenames.
 
 Compilation happens on the selected service: explicit CST → AST → HIR → LIR →
 verified LIR → Cranelift/SPIR-V passes produce immutable object and shader bytes.
-The service optimizes shaders, compiles cached C adapters, and links native objects. Compiler libraries remain independently
+The service analyzes foreign headers, optimizes shaders, and links native objects.
+Compiler libraries remain independently
 usable; see the [architecture](architecture.md#calling-the-passes) for their async APIs.
 The client checks the returned target, revision, filename, length, and BLAKE3 digest
 before replacing any output. Failed or cancelled downloads preserve an existing file.
@@ -224,8 +226,8 @@ completed executable generations live under `--temporary`, with independent life
 cache heads are shared across callers; equivalent logical sources and import graphs
 can reuse editor analysis when a separate CLI later builds the same saved bytes.
 Header directory contents and native settings participate in native invalidation.
-C compilation consumes captured `.i` bytes, so later header changes affect the next
-build. The configured compiler installation and linked libraries must stay stable
+Libclang analyzes captured `.i` bytes, so later header changes affect the next
+build. Header analysis produces immutable declaration facts, without compiling C objects. The configured compiler installation and linked libraries must stay stable
 during a build. See [service ownership and configuration](compiler-service.md).
 
 Host executables statically link `resin-runtime`; host-only programs do not initialize
@@ -475,7 +477,7 @@ foreign signatures remain fully explicit. Unresolved or infinitely recursive
 inferred types are errors; `_` is not a wildcard, unit, or a dynamic type.
 
 Omitting a function result annotation still means unit; inference is opt-in.
-Types are fully resolved before IR generation, so C and SPIR-V share the same
+Types are fully resolved before IR generation, so native and SPIR-V code share the same
 inference behavior. Run `cargo run -- examples/inference.resin` for an example.
 
 ## Unions and errors
@@ -532,8 +534,8 @@ def describe(result: Result<int, CalculationError>) = {
 Host entry points can return `Result<(), E>` or `Result<int, E>`; an unhandled
 error prints its struct name and exits with status 1. Run `cargo run -- examples/errors.resin`
 or `cargo run -- examples/errors.resin:failure` to try both paths.
-Helpers using Result and match also compile to SPIR-V. C uses a tag and a union of
-payloads; shader values use a tag and separate payload fields.
+Helpers using Result and match also compile to SPIR-V. Host values use a tag and
+overlapping payload storage; shader values use a tag and separate payload fields.
 Shared host/device buffer layouts for tagged values are not yet supported.
 
 The standard library's `RuntimeStatus.from_code(code)` converts native status integers to
@@ -921,13 +923,24 @@ uploaded as immutable bundles; their transitive includes must remain within thos
 bundles or configured service toolchain roots. See [C header directories](compiler-service.md#c-header-directories).
 Use forward slashes in header paths, including Windows paths such as `C:/SDK/include/api.h`.
 
-The prototype targets 64-bit hosts. Foreign functions accept scalar/pointer parameters and return a scalar, pointer, or unit.
-The wrapper forwards each Resin parameter as a separate C argument. Opaque `extern type`
-declarations name C structs and may only be used behind pointers; aggregates by value,
-variadic calls, and C callbacks are not supported yet.
+Foreign functions target 64-bit hosts and link directly to external C symbols.
+Libclang validates the actual header declaration against each Resin signature:
+parameter count, calling convention, integer width and signedness, floating-point
+width, boolean representation, pointers, and scalar/pointer/void results must match.
+For example, declare C `int` as Resin `int`; convert a Resin `ubyte` argument with
+`int(byte)` before the call. Declaring the parameter itself as `ubyte` is an ABI
+mismatch, even when C would allow an implicit conversion in a C call expression.
 
-This is an unchecked C boundary: declarations must match the header's ABI, and callers own
-pointer validity, lifetimes, buffer lengths, and synchronization. `&place` takes an address;
+A declaration needs an externally linkable implementation in a linked native library.
+Macro-only functions and `static inline` definitions are rejected. The service does
+not generate C adapters or compile implementations from uploaded headers. Opaque
+`extern type` declarations name C structs and may only appear behind pointers;
+aggregates by value, variadic calls, C callbacks, and unsupported calling conventions
+are rejected.
+
+ABI checking does not establish pointer validity, lifetimes, buffer lengths, or
+synchronization; those remain the caller's responsibility. Pointer pointee qualifiers
+and opaque names do not establish memory safety. `&place` takes an address;
 `pointer.*` dereferences it. On the host, explicit casts allow pointer-to-pointer and
 pointer-to-`ulong` roundtrips. There is no borrow checker; addresses of locals must not outlive their storage.
 Pointer arithmetic is forbidden. Use array or span indexing, or explicitly convert a pointer
@@ -1008,8 +1021,9 @@ requires no shader optimizer. There is no `.spirv` property; inspect artifacts i
 cache instead. The current Vulkan implementation's private C ABI uses pointer/length pairs.
 
 Resin lowers the entry and its reachable named helpers directly to SPIR-V. The toolchain runs
-`spirv-opt -O --target-env=vulkan1.3` and embeds the optimized binary in generated C headers.
-Shader objects are deduplicated and retained with their generated project;
+`spirv-opt -O --target-env=vulkan1.3`; Cranelift embeds the optimized binary directly
+in the native object with its exact byte length and alignment. Shader bytes are
+deduplicated and retained in server caches;
 imported helper changes invalidate them. Copied executables need the Vulkan loader/device,
 but neither Resin, source files, nor `spirv-opt` at runtime.
 
@@ -1074,7 +1088,8 @@ Device pointers support loads, stores, record fields, typed indexing, and passin
 ordinary helpers. Pointer reinterpretation and pointer/integer conversions are host-only. Shared storage supports `ubyte`, `int`, `uint`, `long`, `float32`, `ulong`, pointers, nonempty
 records, arrays, spans, and nominal wrappers. Scalars align to their size; records align to their largest
 member, with member and trailing padding. This matches C and Vulkan's base alignment rules without requiring
-scalar-block-layout support. Generated C asserts sizes, alignments, and member offsets.
+scalar-block-layout support. `resin-types` supplies shared sizes, alignments, and
+member offsets to both backends.
 Spans occupy 16 bytes (address and length) with alignment 8; arrays retain their element alignment.
 Storage containing booleans, unit, or other numeric widths is rejected for now.
 
@@ -1214,7 +1229,7 @@ An ordinary `ubyte` array contains exactly its N declared bytes, with alignment 
 stride N when nested in another array. Host and device layouts agree. Whole-array copies
 copy those elements without an extra sentinel; embedded zeros remain ordinary data.
 `size_of([1_ub, 2_ub])` is 2, and `size_of([[1_ub, 2_ub], [3_ub, 4_ub]])` is 4.
-Empty arrays reserve a C storage placeholder for portability; it is not an accessible
+Empty arrays reserve a host storage placeholder; it is not an accessible
 array element, and empty arrays have no shared host/device layout.
 
 For C calls, explicitly cast byte-array storage to `Ptr<ubyte>` and pass its logical
@@ -1225,7 +1240,7 @@ copies raw bytes and appends that terminator outside the logical length.
 ### Shared size and alignment
 
 `size_of(T)` and `align_of(T)` return `ulong` constants for the shared host/device
-layout of a concrete type. They use the same layout rules as C assertions and SPIR-V
+layout of a concrete type. They use the same layout rules as native and SPIR-V
 storage emission. Scalars in the shared profile, padded/nested records, pointers,
 spans, and nonempty arrays are supported; unsupported layouts produce a source error.
 For an inferred array type, `size_of(array_expression)` queries its type. Expression
@@ -1250,7 +1265,7 @@ Integer-to-float and float narrowing use round-to-nearest, ties-to-even in the n
 floating-point environment. Float32-to-float64 is exact. Float64-to-float32 overflow
 produces signed infinity; results below the smallest normal float32 magnitude become
 signed zero. NaNs remain NaNs without a payload guarantee. Signed zero is preserved.
-C traps abort the process; shader traps stop that invocation and propagate failure
+Host traps terminate the process; shader traps stop that invocation and propagate failure
 through helper calls. Traps do not unwind automatic cleanup.
 A shader trap is not a host-visible Result error, and earlier writes remain visible.
 
@@ -1275,7 +1290,7 @@ def unwrap(r: Result<int, Never>) -> int = {
 ```
 
 The IR explicitly marks elimination as divergent. Its continuation type is only for
-checking unreachable code; neither backend constructs a value of that type. C aborts
+checking unreachable code; neither backend constructs a value of that type. Host code aborts
 and shaders stop the invocation if invalid external memory somehow supplies a `Never`.
 This defensive trap does not unwind cleanup. Reachable `ok` and `?` paths retain normal
 scope destruction. Matches over inhabited variants still require exhaustive, unique arms.

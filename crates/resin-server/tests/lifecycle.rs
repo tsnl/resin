@@ -99,42 +99,17 @@ impl Drop for Service {
     }
 }
 
-fn bundle(path: &str, text: &str) -> HeaderBundle {
-    let mut hash = blake3::Hasher::new();
-    hash.update(b"resin-header-bundle-v1\0");
-    for bytes in [path.as_bytes(), text.as_bytes()] {
-        hash.update(&(bytes.len() as u64).to_le_bytes());
-        hash.update(bytes);
-    }
-    HeaderBundle {
-        id: hash.finalize().to_hex().to_string(),
-        files: vec![BundleFile {
-            path: path.into(),
-            contents_base64: base64::engine::general_purpose::STANDARD.encode(text),
-        }],
-    }
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unread_artifact_stream_survives_eviction_of_its_generation() {
     let service = Service::start(TempDir::new().unwrap(), None).await;
     let client = reqwest::Client::new();
-    let mut inputs = service.inputs("large.resin", "export { main }; extern { \"large.h\": { def retained_value() -> int; } }; def main() -> int = { retained_value() };");
-    // A tiny header creates a file larger than socket/HTTP buffering. The client
-    // deliberately leaves its body unread while a different generation is built.
-    let large = bundle(
-        "large.h",
-        "static volatile unsigned char retained_bytes[32 * 1024 * 1024] = {7};\nstatic inline int retained_value(void) { return retained_bytes[0]; }\n",
+    // A retained Resin literal makes the executable larger than socket/HTTP
+    // buffering. Leave its response unread while another generation is built.
+    let source = format!(
+        "export {{ main }}; def main() -> int = {{ var text = \"{}\"; int(text.at(0_ul)) - 113_i }};",
+        "x".repeat(32 * 1024 * 1024)
     );
-    inputs.headers.bindings.push(HeaderBinding {
-        source: "large.resin".into(),
-        spelling: "large.h".into(),
-        target: HeaderTarget::Uploaded {
-            bundle: large.id.clone(),
-            path: "large.h".into(),
-        },
-    });
-    inputs.headers.bundles.push(large);
+    let inputs = service.inputs("large.resin", &source);
     let request = service.build(inputs);
     let response = tokio::time::timeout(
         Duration::from_secs(30),

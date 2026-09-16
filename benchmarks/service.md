@@ -107,8 +107,8 @@ Do not compare these optimized HTTP timings directly with the earlier unoptimize
 compiler-only measurements in [the implementation validation record](../doc/compiler-service-validation.md).
 
 Current cache reuse is per-file for CST/AST and per complete source graph for HIR.
-A source edit therefore still rebuilds whole-graph semantic analysis. Warm builds validate captured native input and tool identities, then reuse C adapters,
-shader bytes, objects, and executables when their keys match. Artifact hashing and
+A source edit therefore still rebuilds whole-graph semantic analysis. Warm builds validate captured native input and tool identities, then reuse foreign
+analysis, shader bytes, objects, and executables when their keys match. Artifact hashing and
 download still occur on each request. Cache capacities count entries, and retained generations
 can keep dependencies alive after eviction from the current cache.
 
@@ -155,6 +155,9 @@ incrementality and native validation/artifact retention before changing the wire
 protocol to carry CSTs.
 
 ## Full Cranelift backend — 2026-09-15
+
+This recorded run predates direct C symbol linking. Its C interoperability path used
+cached adapters; the fixtures below contain no C imports, so that path was not timed.
 
 [Raw samples](results/service-cranelift-full-linux-2026-09-15.json) record the full
 Cranelift host backend at `85bcda18`, using the same machine, development shell,

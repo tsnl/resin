@@ -16,8 +16,9 @@ package names. Each language crate owns its representation and the translation t
 produces it. Applications acquire imports through the concrete `resin_source::Loader`
 and pass immutable `SourceGraph` values to `resin_ast::build_program`. `resin-source` owns
 immutable text and standard-library resolution; `resin-types` owns concrete types and
-representation rules. Neither depends on a compiler phase. `resin-toolchain` parses and compiles C interoperability adapters, optimizes shaders,
-links native objects, and retains artifacts without depending on compiler
+representation rules. Neither depends on a compiler phase. `resin-toolchain` analyzes
+C headers and validates foreign signatures, optimizes shaders, links native objects,
+and retains artifacts without depending on compiler
 or type crates. Server analysis/build handlers each sequence their compiler passes
 explicitly and share immutable cache heads. `resin-protocol` contains only wire data;
 `resin-client` acquires local sources/header bundles and renders remote diagnostics
@@ -45,9 +46,10 @@ flowchart LR
     spirv --> optimized[spirv-opt]
     verified --> native[Cranelift: native object]
     optimized --> native
-    headers[C header snapshots] --> interop[Clang + libclang: C adapters]
+    headers[C header snapshots] --> interop[Clang + libclang: foreign analysis]
     native --> link[Native linker]
-    interop --> link
+    interop --> native
+    libraries[Native libraries] --> link
     link --> executable[Executable]
 ```
 
@@ -198,7 +200,7 @@ and control flow explicit. It has no source initialization states or branch snap
 runtime flags still protect partially initialized managed storage during cleanup. A LIR function's
 `parameter_count` identifies its initial locals as parameters in declaration order. Zero-argument
 functions reserve no parameter local; a tuple parameter occupies one local. Calls transfer separate
-operands to those locals, and C and SPIR-V emission preserve the parameter list. Each `Instr`
+operands to those locals, and native and SPIR-V emission preserve the parameter list. Each `Instr`
 documents its consumed operands and produced values.
 
 Lowering records how many locals exist when each operand is produced, so cleanup can
@@ -364,7 +366,9 @@ operations, and C-ABI entry wrapper. Scalar values remain SSA operands; aggregat
 values use independently owned stack snapshots. Structured LIR branches and loops
 become explicit control-flow blocks, with copies on incoming and outgoing edges to
 preserve parallel transfers. Ownership callbacks retain and destroy completed types.
-Small C-ABI bridges connect source foreign declarations to cached adapter symbols.
+Foreign calls use validated C ABI signatures and refer directly to native symbols.
+Cranelift handles the difference between Resin's internal signature and the C ABI,
+including unit results and narrow-integer extension rules.
 
 SPIR-V lowering resolves reachable functions, checks device restrictions, and emits
 binary instructions with `rspirv`. It preserves structured selection and loop regions
@@ -447,7 +451,7 @@ and their dependencies; an empty entry list requests every ordinary root. Verifi
 is a separate async `VerifiedModule::build` operation.
 
 Codegen receives `Arc<VerifiedModule>` and explicit immutable inputs. `generate_native`
-accepts an entry, optimization level, C adapter symbols, and optimized shader bytes.
+accepts an entry, optimization level, validated foreign symbols, and optimized shader bytes.
 It returns shared platform object bytes with a C-ABI `main`. `generate_spirv` emits
 one requested shader as shared bytes. Neither pass reads source or header files or
 runs external tools. Cranelift lowers all host language operations directly, including
@@ -461,22 +465,29 @@ header bundles and ordered include roots, including unused files that might affe
 conditional includes. The managed runtime header binding cannot be replaced by a
 user include root.
 
-`Toolchain::compile_foreign` receives captured file bytes, ordered includes and
-include roots, and scalar/pointer adapter signatures. Clang preprocesses the small
-adapter translation unit; libclang reads that exact captured input to inspect and
-validate declarations. Clang compiles the same bytes into an object. Static inline
-functions and macros remain usable because each adapter calls them inside their C
-translation unit. This C compilation contains interoperability code only; Resin
-functions are compiled by Cranelift. Adapter objects can be reused across Resin body
-edits. All metadata returned from libclang is owned Rust data.
+`Toolchain::analyze_foreign` receives captured file bytes, ordered includes and
+include roots, and the requested scalar/pointer signatures. Clang preprocesses the
+headers; libclang reads that exact captured input and validates each actual function
+declaration's external linkage, calling convention, parameter count, and scalar ABI.
+Integer widths and signedness, floating-point widths, booleans, pointers, and void
+results must match the supported C representation. Missing declarations, macro-only
+functions, static-inline functions, variadic signatures, and unsupported ABI types
+produce diagnostics.
+
+The immutable `ForeignAnalysis` contains owned declaration facts and direct symbol
+bindings; it contains no object bytes. Analysis can be reused across Resin body edits.
+Cranelift emits the foreign calls and the native linker resolves their symbols from
+linked libraries. Header implementations are not compiled, and no C adapters are
+generated. Native library implementations must already be available to the linker.
+Handwritten C fixtures use a separate test toolchain operation.
 
 Native dependency reports validate includes against staged files and configured SDK
 roots. This is input ownership validation; native tools still execute under the service
 account. Operators control process and network isolation. Tool settings and SDK inputs
 belong to the service, and no build request selects a local executable or compiler flag.
 
-Cache validation hashes tool contents separately for foreign adapters, shader
-optimization, and linking. Header compilation hashes the selected Clang executable,
+Cache validation hashes tool contents separately for foreign analysis, shader
+optimization, and linking. Header analysis hashes the selected Clang executable,
 the actual libclang shared library, runtime headers, and explicit header search
 roots. Linking hashes its driver, runtime archive, and explicit library roots.
 Unneeded stages do not inspect their tools. Implicit SDK installations must remain
@@ -556,8 +567,9 @@ capacities are not a hard byte or process-memory bound.
 `resin-executor::Execution` defaults to `available_parallelism()` logical CPUs,
 falling back to one; callers can supply an explicit nonzero job count. CPU passes run
 on bounded workers, including synchronous Tree-sitter calls. Async orchestration does
-not consume a worker slot. One native build reserves one slot and invokes Ninja with
-`-j 1`, coordinating compiler and native concurrency through the same bound.
+not consume a worker slot. Native preprocessing, shader optimization, and linking
+each reserve a slot for their process; libclang analysis uses a bounded CPU worker.
+Handwritten fixture builds reserve a slot and invoke Ninja with `-j 1`.
 
 A shared `Cancellation` stops queued work and is checked during longer passes. A
 started synchronous foreign call may have to finish; its permit remains occupied
@@ -567,8 +579,8 @@ cancellation do not enter semantic cache keys.
 
 Native operations retain a supervisor task on caller-future abandonment, cancel its
 process tree, and keep staging ownership through cleanup. Awaited cancellation waits
-for that cleanup. Unix commands run in private sessions containing Ninja's separate
-compiler process groups; Windows assigns suspended children to kill-on-close jobs
+for that cleanup. Unix commands run in private sessions containing their child
+process groups; Windows assigns suspended children to kill-on-close jobs
 before resuming them. Runtime shutdown also terminates owned trees and reaps the
 direct children before releasing native ownership. A cancelled build returns no
 partial artifact handle. Atomic executable copying leaves no partially copied target.

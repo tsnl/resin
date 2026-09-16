@@ -164,32 +164,32 @@ fn cached_programs_track_foreign_headers() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("source.resin");
     let header = temp.path().join("value header.h");
-    fs::write(&header, "static inline int value(void) { return 41; }\n").unwrap();
+    fs::write(&header, "int value(int number) __asm__(\"abs\");\n").unwrap();
     fs::write(&input, format!(
-        "export {{ main }}; extern {{ \"{}\": {{ def value() -> int; }} }}; def main() -> int = {{ value() }};",
+        "export {{ main }}; extern {{ \"{}\": {{ def value(number: int) -> int; }} }}; def main() -> int = {{ value(65) }};",
         header.to_string_lossy().replace('\\', "/")
     )).unwrap();
     assert_eq!(
         invoke_with(&service, temp.path(), &input, &[])
             .status
             .code(),
-        Some(41)
+        Some(65)
     );
     let cold = service.server.counters();
     assert_eq!(
         invoke_with(&service, temp.path(), &input, &[])
             .status
             .code(),
-        Some(41)
+        Some(65)
     );
     assert_eq!(service.server.counters(), cold);
 
-    fs::write(header, "static inline int value(void) { return 42; }\n").unwrap();
+    fs::write(header, "int value(int number) __asm__(\"tolower\");\n").unwrap();
     assert_eq!(
         invoke_with(&service, temp.path(), &input, &[])
             .status
             .code(),
-        Some(42)
+        Some(97)
     );
     let edited = service.server.counters();
     assert_eq!(edited.hir_builds, cold.hir_builds);
@@ -730,23 +730,18 @@ fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
     let service = Service::new();
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let header = temp.path().join("mutate_environment.h");
-    fs::write(
-        &header,
-        r#"
-        #include <stdlib.h>
-        #ifndef _WIN32
-        extern int setenv(const char *, const char *, int);
-        #endif
-        static inline int mutate_environment(void) {
-        #ifdef _WIN32
-            return _putenv_s("RESIN_SNAPSHOT_TEST", "after");
-        #else
-            return setenv("RESIN_SNAPSHOT_TEST", "after", 1);
-        #endif
-        }
-    "#,
-    )
-    .unwrap();
+    fs::write(&header, "#include <stdlib.h>\n#ifndef _WIN32\nextern int setenv(const char *, const char *, int);\n#endif\n").unwrap();
+    let (declaration, mutate) = if cfg!(windows) {
+        (
+            "def _putenv_s(name: Ptr<ubyte>, value: Ptr<ubyte>) -> int;",
+            "_putenv_s(name.data, \"after\".data)",
+        )
+    } else {
+        (
+            "def setenv(name: Ptr<ubyte>, value: Ptr<ubyte>, overwrite: int) -> int;",
+            "setenv(name.data, \"after\".data, 1)",
+        )
+    };
     let input = temp.path().join("environment.resin");
     let header_path = header.to_string_lossy().replace('\\', "/");
     fs::write(&input, format!(r#"
@@ -754,7 +749,7 @@ fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
 
         extern {{
             "{header_path}": {{
-                def mutate_environment() -> int;
+                {declaration}
             }},
             "stdlib.h": {{
                 def getenv(name: Ptr<ubyte>) -> Ptr<ubyte>;
@@ -766,7 +761,7 @@ fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
             var empty = "RESIN_SNAPSHOT_EMPTY";
             var missing = "RESIN_SNAPSHOT_MISSING";
             var before = environment_get(envp, name.data)?;
-            var status = mutate_environment();
+            var status = {mutate};
             var after = environment_get(envp, name.data)?;
             var live = c_string(getenv(name.data));
             var absent = match (environment_get(envp, missing.data)) {{ ok(value) => {{ 1 == 0 }}, err(error) => {{ 1 == 1 }} }};

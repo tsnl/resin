@@ -26,8 +26,13 @@ struct Clang {
     cursor: unsafe extern "C" fn(CXTranslationUnit) -> CXCursor,
     visit: unsafe extern "C" fn(CXCursor, CXCursorVisitor, CXClientData) -> c_uint,
     spelling: unsafe extern "C" fn(CXCursor) -> CXString,
+    mangling: unsafe extern "C" fn(CXCursor) -> CXString,
+    linkage: unsafe extern "C" fn(CXCursor) -> CXLinkageKind,
+    definition: unsafe extern "C" fn(CXCursor) -> c_uint,
     cursor_type: unsafe extern "C" fn(CXCursor) -> CXType,
     canonical_type: unsafe extern "C" fn(CXType) -> CXType,
+    type_declaration: unsafe extern "C" fn(CXType) -> CXCursor,
+    enum_integer_type: unsafe extern "C" fn(CXCursor) -> CXType,
     type_spelling: unsafe extern "C" fn(CXType) -> CXString,
     result_type: unsafe extern "C" fn(CXType) -> CXType,
     argument_type: unsafe extern "C" fn(CXType, c_uint) -> CXType,
@@ -63,8 +68,15 @@ impl Clang {
                     .map_err(error)?,
                 visit: *library.get(b"clang_visitChildren\0").map_err(error)?,
                 spelling: *library.get(b"clang_getCursorSpelling\0").map_err(error)?,
+                mangling: *library.get(b"clang_Cursor_getMangling\0").map_err(error)?,
+                linkage: *library.get(b"clang_getCursorLinkage\0").map_err(error)?,
+                definition: *library.get(b"clang_isCursorDefinition\0").map_err(error)?,
                 cursor_type: *library.get(b"clang_getCursorType\0").map_err(error)?,
                 canonical_type: *library.get(b"clang_getCanonicalType\0").map_err(error)?,
+                type_declaration: *library.get(b"clang_getTypeDeclaration\0").map_err(error)?,
+                enum_integer_type: *library
+                    .get(b"clang_getEnumDeclIntegerType\0")
+                    .map_err(error)?,
                 type_spelling: *library.get(b"clang_getTypeSpelling\0").map_err(error)?,
                 result_type: *library.get(b"clang_getResultType\0").map_err(error)?,
                 argument_type: *library.get(b"clang_getArgType\0").map_err(error)?,
@@ -191,7 +203,7 @@ pub(super) fn inspect(
 
 struct Context<'a> {
     clang: &'a Clang,
-    functions: BTreeMap<String, CXCursor>,
+    functions: BTreeMap<String, Vec<CXCursor>>,
 }
 extern "C" fn collect_functions(
     cursor: CXCursor,
@@ -202,7 +214,7 @@ extern "C" fn collect_functions(
         let context = &mut *data.cast::<Context<'_>>();
         if cursor.kind == CXCursor_FunctionDecl {
             let name = context.clang.text((context.clang.spelling)(cursor));
-            context.functions.insert(name, cursor);
+            context.functions.entry(name).or_default().push(cursor);
         }
     }
     CXChildVisit_Continue
@@ -235,14 +247,35 @@ unsafe fn diagnostics(
 
 unsafe fn declaration(
     clang: &Clang,
-    declarations: &BTreeMap<String, CXCursor>,
+    declarations: &BTreeMap<String, Vec<CXCursor>>,
     function: &ForeignFunction,
 ) -> Result<ForeignDeclaration, Error> {
     unsafe {
-        let wrapper = declarations
-            .get(&function.symbol)
-            .ok_or_else(|| error("header changed a requested wrapper declaration"))?;
-        let ty = (clang.cursor_type)(*wrapper);
+        let declarations = declarations.get(&function.name).ok_or_else(|| {
+            error(format!(
+                "no C function declaration for {}; macro-only names cannot be linked directly",
+                function.name
+            ))
+        })?;
+        let cursor = *declarations.last().expect("collected declaration");
+        let ty = (clang.cursor_type)(cursor);
+        // A header body is not a link contract: its object is never compiled here.
+        // Preserve explicit external prototypes even when libc later supplies an
+        // inline definition of the same function in the captured translation unit.
+        if (clang.linkage)(cursor) != CXLinkage_External
+            || !declarations.iter().any(|cursor| {
+                (clang.linkage)(*cursor) == CXLinkage_External
+                    && (clang.definition)(*cursor) == 0
+                    && (clang.inlined)(*cursor) == 0
+            })
+        {
+            return Err(error(format!(
+                "{} needs an external non-inline C function prototype; static and inline-only definitions cannot be linked directly",
+                function.name
+            )));
+        }
+        // A later redeclaration may add an asm label. Resolve the final declaration
+        // so the native import uses Clang's actual symbol, never just its source name.
         let params = (clang.argument_count)(ty);
         if !platform_calling_convention((clang.calling_convention)(ty))
             || (clang.variadic)(ty) != 0
@@ -253,23 +286,36 @@ unsafe fn declaration(
             })
         {
             return Err(error(format!(
-                "header changed the scalar ABI of wrapper {}",
-                function.symbol
+                "C declaration {} does not match the requested scalar ABI: {}",
+                function.name,
+                clang.text((clang.type_spelling)(ty))
             )));
         }
-        let declaration = declarations.get(&function.name);
+        let symbol = import_symbol(&clang.text((clang.mangling)(cursor)))?;
         Ok(ForeignDeclaration {
             name: function.name.clone(),
-            symbol: function.symbol.clone(),
-            c_signature: declaration.map(|cursor| {
-                clang.text((clang.type_spelling)((clang.canonical_type)((clang
-                    .cursor_type)(
-                    *cursor
-                ))))
-            }),
-            inline: declaration.is_some_and(|cursor| (clang.inlined)(*cursor) != 0),
+            symbol,
+            c_signature: clang.text((clang.type_spelling)((clang.canonical_type)(ty))),
         })
     }
+}
+
+fn import_symbol(mangled: &str) -> Result<String, Error> {
+    // CIndex returns the object-file spelling, while native emitters apply the
+    // platform global prefix themselves. Explicit asm labels omit that prefix;
+    // an unprefixed Mach-O label cannot be represented by this import contract.
+    let symbol = if cfg!(target_os = "macos") {
+        mangled.strip_prefix('_').ok_or_else(|| {
+            error("explicit C symbol without the Mach-O underscore prefix is unsupported")
+        })?
+    } else {
+        mangled
+    };
+    if symbol.is_empty() || !symbol.is_ascii() || symbol.bytes().any(|byte| byte.is_ascii_control())
+    {
+        return Err(error("C declaration has an unsupported linker symbol name"));
+    }
+    Ok(symbol.into())
 }
 
 fn platform_calling_convention(convention: CXCallingConv) -> bool {
@@ -283,7 +329,10 @@ fn platform_calling_convention(convention: CXCallingConv) -> bool {
 
 unsafe fn matches_scalar(clang: &Clang, ty: CXType, expected: &ForeignScalar) -> bool {
     unsafe {
-        let ty = (clang.canonical_type)(ty);
+        let mut ty = (clang.canonical_type)(ty);
+        if ty.kind == CXType_Enum {
+            ty = (clang.enum_integer_type)((clang.type_declaration)(ty));
+        }
         match expected {
             ForeignScalar::Void => ty.kind == CXType_Void,
             ForeignScalar::Bool => ty.kind == CXType_Bool && (clang.size)(ty) == 1,
@@ -292,6 +341,7 @@ unsafe fn matches_scalar(clang: &Clang, ty: CXType, expected: &ForeignScalar) ->
                 (clang.size)(ty) * 8 == i64::from(*bits)
                     && if *signed {
                         [
+                            CXType_Char_S,
                             CXType_SChar,
                             CXType_Short,
                             CXType_Int,
@@ -301,6 +351,7 @@ unsafe fn matches_scalar(clang: &Clang, ty: CXType, expected: &ForeignScalar) ->
                         .contains(&ty.kind)
                     } else {
                         [
+                            CXType_Char_U,
                             CXType_UChar,
                             CXType_UShort,
                             CXType_UInt,

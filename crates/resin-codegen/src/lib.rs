@@ -58,20 +58,21 @@ impl NativeObject {
 }
 
 /// Completed external bindings and shader binaries consumed by host generation.
-/// The application resolves C adapters and optimizes shaders before constructing these inputs.
+/// The application validates C declarations, resolves their link symbols, and
+/// optimizes shaders before constructing these inputs.
 /// `foreign` must bind every host foreign function present in the verified module;
 /// `shaders` must contain every shader marked `embedded` by LIR construction.
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NativeInputs {
     pub foreign: BTreeMap<FunctionId, Arc<str>>,
     pub shaders: BTreeMap<FunctionId, Arc<[u8]>>,
-    /// Optional runtime ABI symbol substitutions, useful for native fixture adapters.
+    /// Optional runtime ABI symbol substitutions, useful for native test fixtures.
     pub runtime: BTreeMap<Arc<str>, Arc<str>>,
 }
 
 /// Emit a native object on a bounded worker without running external tools.
 /// Verified host functions use the platform baseline ISA and C ABI entry point.
-/// Aggregate layout, ownership, runtime operations, and foreign adapters are lowered
+/// Aggregate layout, ownership, runtime operations, and foreign calls are lowered
 /// directly; linking the returned object and its referenced runtime remains separate.
 ///
 /// ```compile_fail,E0308

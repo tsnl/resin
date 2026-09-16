@@ -22,7 +22,11 @@ fn error(source: &str) -> String {
 fn foreign_functions_forward_separate_c_arguments() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let header = temp.path().join("foreign.h");
-    fs::write(&header, "static inline int answer(void) { return 42; }\nstatic inline void assign(int *out, int value) { *out = value; }\n").unwrap();
+    fs::write(
+        &header,
+        "int answer(void);\nvoid assign(int *out, int value);\n",
+    )
+    .unwrap();
     let source = format!(
         r#"export {{ main }};
 
@@ -45,7 +49,10 @@ fn foreign_functions_forward_separate_c_arguments() {
         }};"#,
         header = header.to_string_lossy().replace('\\', "/")
     );
-    let output = run(&source);
+    let output = support::project::Project::new(&module(&source), Some("main"))
+        .unwrap()
+        .with_native("int answer(void); void assign(int *out, int value);\nint answer(void) { return 42; }\nvoid assign(int *out, int value) { *out = value; }\n")
+        .run();
     assert_eq!(
         output.status.code(),
         Some(42),

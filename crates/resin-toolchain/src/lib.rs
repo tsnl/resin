@@ -123,7 +123,7 @@ pub struct CTranslationUnit {
 //
 
 /// Scalar C boundary types. Integer widths are 8, 16, 32, or 64; floats are 32 or 64.
-/// Void is permitted only as a function result. Pointers cross this boundary as void*.
+/// Void is permitted only as a function result. Pointee types do not affect pointer ABI.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ForeignScalar {
     Void,
@@ -133,12 +133,11 @@ pub enum ForeignScalar {
     Pointer,
 }
 
-/// One C call wrapper: `symbol` is the exported adapter and `name` is its C callee.
-/// Both names must be C identifiers. The adapter applies ordinary C argument/result
-/// conversions, including calls to function-like macros and static inline functions.
+/// A requested C function declaration and its exact scalar ABI. `name` must be a C
+/// identifier. Only externally linked, nonvariadic functions with the host C calling
+/// convention are supported; macros and inline-only definitions are not link contracts.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ForeignFunction {
-    pub symbol: String,
     pub name: String,
     pub params: Vec<ForeignScalar>,
     pub result: ForeignScalar,
@@ -155,30 +154,28 @@ pub struct ForeignInputs {
     pub functions: Vec<ForeignFunction>,
 }
 
-/// Owned header declaration facts. Macros may have no corresponding C declaration.
+/// A validated external declaration. `symbol` is the linker import name before the
+/// platform's global symbol prefix, suitable for a native object emitter.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForeignDeclaration {
     pub name: String,
     pub symbol: String,
-    pub c_signature: Option<String>,
-    pub inline: bool,
+    pub c_signature: String,
 }
 
-/// Completed adapters plus metadata extracted from the same captured preprocessed C.
+/// Completed declaration metadata extracted from captured preprocessed C headers.
+/// No C function bodies or objects are generated. The linker resolves these symbols
+/// from its configured libraries; analysis cannot prove their implementations exist.
 /// Cache identity belongs to the caller and must include the inputs and captured Clang
 /// installation/settings. Keep the installed SDK and compiler stable while reusing it.
 #[derive(Clone, Debug)]
-pub struct ForeignObject {
-    bytes: Arc<[u8]>,
+pub struct ForeignAnalysis {
     declarations: Arc<[ForeignDeclaration]>,
     includes: Arc<[String]>,
     diagnostics: Arc<[String]>,
 }
 
-impl ForeignObject {
-    pub fn bytes(&self) -> Arc<[u8]> {
-        self.bytes.clone()
-    }
+impl ForeignAnalysis {
     pub fn declarations(&self) -> &[ForeignDeclaration] {
         &self.declarations
     }
@@ -226,24 +223,24 @@ impl Toolchain {
         .await
     }
 
-    /// Compile only scalar C interoperability adapters. CLANG selects the compiler;
-    /// LIBCLANG_PATH selects its CIndex library (file or directory). No Ninja graph or
-    /// Resin program is generated. Parsing/compilation consume the same captured bytes;
-    /// cancellation owns and reaps native work before removing temporary inputs.
-    pub async fn compile_foreign(
+    /// Preprocess captured headers and validate directly linkable C declarations.
+    /// CLANG selects the preprocessor; LIBCLANG_PATH selects its CIndex library
+    /// (file or directory). No C object is compiled. Cancellation owns and reaps
+    /// native work before removing temporary inputs; returned metadata owns its data.
+    pub async fn analyze_foreign(
         &self,
         inputs: Arc<ForeignInputs>,
         temporary: &Path,
         execution: &Execution,
         cancellation: &Cancellation,
-    ) -> Result<ForeignObject, Error> {
+    ) -> Result<ForeignAnalysis, Error> {
         let (temporary, settings, execution) = (
             temporary.to_path_buf(),
             self.settings.clone(),
             execution.clone(),
         );
         process::supervise(cancellation, move |cancellation| async move {
-            interop::compile(inputs, &temporary, &settings, &execution, &cancellation).await
+            interop::analyze(inputs, &temporary, &settings, &execution, &cancellation).await
         })
         .await
     }

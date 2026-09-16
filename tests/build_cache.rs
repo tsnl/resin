@@ -16,20 +16,16 @@ use support::{service::Service, shaders};
 const WRAPPER: &str = "#!/bin/sh\nfor arg in \"$@\"; do if [ \"$arg\" = -E ]; then exec \"$RESIN_TEST_COMPILER\" \"$@\"; fi; done\nprintf 'compile\\n' >> \"$RESIN_TEST_COUNT\"\nprintf '%s\\n' \"$*\" >> \"$RESIN_TEST_FLAGS\"\nexec \"$RESIN_TEST_COMPILER\" \"$@\"\n";
 
 #[test]
-fn foreign_header_changes_rebuild_including_nested_dependencies() {
+fn foreign_header_changes_reanalyze_including_nested_dependencies() {
     let project = Project::new();
     let header = project.input.parent().unwrap().join("foreign.h");
     let nested = project.input.parent().unwrap().join("value.h");
-    fs::write(&nested, "#define VALUE 41\n").unwrap();
-    fs::write(
-        &header,
-        "#include \"value.h\"\nstatic inline int value(void) { return VALUE; }\n",
-    )
-    .unwrap();
+    fs::write(&nested, "int abs(int value);\n").unwrap();
+    fs::write(&header, "#include \"value.h\"\n").unwrap();
     fs::write(
         &project.input,
         format!(
-            "export {{ main }}; extern {{ \"{}\": {{ def value () -> int; }} }}; import {{ \"$/string.resin\" }}; def main() -> () = {{ print(fmt(\"{{0}}\", (value(),))); }};",
+            "export {{ main }}; extern {{ \"{}\": {{ def abs(value: int) -> int; }} }}; import {{ \"$/string.resin\" }}; def main() -> () = {{ print(fmt(\"{{0}}\", (abs(-41),))); }};",
             header.display()
         ),
     )
@@ -37,15 +33,29 @@ fn foreign_header_changes_rebuild_including_nested_dependencies() {
     printed(&project.run(), b"41");
     printed(&project.run(), b"41");
     assert_eq!(project.calls(), 1);
-    fs::write(&nested, "#define VALUE 42\n").unwrap();
-    printed(&project.run(), b"42");
-    assert_eq!(project.calls(), 2);
+    let analyzed = project.service.server.counters().foreign_builds;
+    fs::write(&nested, "int abs(int value); // changed declaration text\n").unwrap();
+    printed(&project.run(), b"41");
+    assert_eq!(
+        project.service.server.counters().foreign_builds,
+        analyzed + 1
+    );
+    assert_eq!(project.calls(), 1);
+    fs::write(&nested, "unsigned int abs(unsigned int value);\n").unwrap();
+    let output = project.run();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        project.calls(),
+        1,
+        "an incompatible header cannot reuse the executable"
+    );
     fs::remove_file(nested).unwrap();
     let output = project.run();
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
-    // Preprocessing detects the missing header before another compilation.
-    assert_eq!(project.calls(), 2);
+    // Preprocessing detects the missing header before another link.
+    assert_eq!(project.calls(), 1);
     fs::write(
         &project.input,
         "export { main }; import { \"$/string.resin\" }; def main() -> () = { print(\"no header\"); };",
@@ -53,7 +63,7 @@ fn foreign_header_changes_rebuild_including_nested_dependencies() {
     .unwrap();
     printed(&project.run(), b"no header");
     printed(&project.run(), b"no header");
-    assert_eq!(project.calls(), 3);
+    assert_eq!(project.calls(), 2);
 }
 
 #[test]
@@ -478,7 +488,7 @@ fn runtime_headers_and_archive_changes_invalidate_the_cache() {
     assert_eq!(
         project.calls(),
         1,
-        "a header comment leaves adapter bytes unchanged"
+        "a header comment leaves the validated C bindings unchanged"
     );
 
     fs::write(&library, "not a library").unwrap();

@@ -1,4 +1,4 @@
-//! Bridge Resin's scalar calling convention to the explicit C adapter ABI.
+//! Bridge Resin's scalar calling convention to the platform C ABI.
 use super::{failure, types::Types, unsupported};
 use crate::{Error, GenerationError};
 use cranelift_codegen::ir::{self, InstBuilder};
@@ -18,6 +18,11 @@ pub(super) fn define(
     cancellation: &Cancellation,
 ) -> Result<(), GenerationError> {
     cancellation.check()?;
+    if symbol == "main" {
+        return Err(
+            unsupported("foreign symbol `main` conflicts with the native startup entry").into(),
+        );
+    }
     let input = &checked.module().functions[index];
     let parameters = input.locals[..input.parameter_count]
         .iter()
@@ -32,7 +37,7 @@ pub(super) fn define(
             .returns
             .push(parameter_abi(types.shape(&input.result))?);
     }
-    let adapter = module
+    let callee = module
         .declare_function(symbol, Linkage::Import, &native)
         .map_err(failure)?;
     let mut context = module.make_context();
@@ -43,8 +48,8 @@ pub(super) fn define(
     builder.append_block_params_for_function_params(block);
     builder.switch_to_block(block);
     let args = builder.block_params(block).to_vec();
-    let adapter = module.declare_func_in_func(adapter, builder.func);
-    let call = builder.ins().call(adapter, &args);
+    let callee = module.declare_func_in_func(callee, builder.func);
+    let call = builder.ins().call(callee, &args);
     let result = if matches!(types.shape(&input.result), Ty::Unit) {
         builder.ins().iconst(ir::types::I8, 0)
     } else {
@@ -73,7 +78,7 @@ fn parameter_abi(ty: &Ty) -> Result<ir::AbiParam, Error> {
         Ty::Float64 => ir::types::F64,
         _ => {
             return Err(unsupported(format!(
-                "foreign adapter requires a scalar C type, found {ty:?}"
+                "foreign call requires a scalar C type, found {ty:?}"
             )));
         }
     };

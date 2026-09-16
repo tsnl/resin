@@ -621,15 +621,13 @@ mod tests {
         );
         for (side, number) in [("left", 7), ("right", 8)] {
             let name = format!("{side}/module.resin");
-            full.sources.push(SourceFile { name: name.clone(), text: format!("export {{ {side} }}; extern {{ \"same.h\": {{ def native_{side}() -> int; }} }}; def {side}() -> int = {{ native_{side}() }};") });
+            full.sources.push(SourceFile { name: name.clone(), text: format!("export {{ {side} }}; extern {{ \"same.h\": {{ def abs(value: int) -> int; }} }}; def {side}() -> int = {{ abs(-{number}) }};") });
             full.imports.push(resin_protocol::ImportBinding {
                 importer: "main.resin".into(),
                 reference: name.clone(),
                 target: name.clone(),
             });
-            let header = format!(
-                "#include \"nested/{side}.inc\"\nstatic inline int native_{side}(void) {{ return {side}_value; }}\n"
-            );
+            let header = format!("#include \"nested/{side}.inc\"\nint abs(int value);\n");
             let nested = format!("enum {{ {side}_value = {number} }};\n");
             let bundle = bundle(&[
                 ("same.h", &header),
@@ -713,8 +711,9 @@ mod tests {
         assert_eq!(server.counters().hir_builds, counts.hir_builds);
         assert_eq!(
             server.counters().native_object_builds,
-            counts.native_object_builds + 1
+            counts.native_object_builds
         );
+        assert_eq!(server.counters().foreign_builds, counts.foreign_builds + 1);
         assert_eq!(
             tokio::process::Command::new(next.executable.path())
                 .status()

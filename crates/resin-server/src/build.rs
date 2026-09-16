@@ -294,9 +294,9 @@ async fn build_native(
     .map_err(compilation)?;
     let crate::foreign::Prepared {
         inputs: foreign_inputs,
-        bindings: foreign,
+        bindings,
     } = crate::foreign::prepare(verified.view().module(), &headers)?;
-    let foreign_object =
+    let foreign_analysis =
         if foreign_inputs.functions.is_empty() && foreign_inputs.includes.is_empty() {
             None
         } else {
@@ -322,7 +322,7 @@ async fn build_native(
                         server
                             .config
                             .tools
-                            .compile_foreign(
+                            .analyze_foreign(
                                 key.inputs,
                                 &server.config.temporary,
                                 &server.execution,
@@ -337,9 +337,23 @@ async fn build_native(
                 .await
                 .map_err(compilation)?
                 .remove(&key)
-                .expect("selected foreign object"),
+                .expect("selected foreign analysis"),
             )
         };
+    let symbols = foreign_analysis
+        .iter()
+        .flat_map(|analysis| analysis.declarations())
+        .map(|declaration| {
+            (
+                declaration.name.as_str(),
+                Arc::<str>::from(declaration.symbol.as_str()),
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let foreign = bindings
+        .into_iter()
+        .map(|(function, name)| (function, symbols[name.as_ref()].clone()))
+        .collect();
     let inputs = Arc::new(resin_codegen::NativeInputs {
         foreign,
         shaders: shaders
@@ -395,10 +409,7 @@ async fn build_native(
     .map_err(compilation)?
     .remove(&key)
     .expect("selected native object");
-    let mut objects = vec![object.shared_bytes()];
-    if let Some(foreign) = foreign_object {
-        objects.push(foreign.bytes());
-    }
+    let objects = vec![object.shared_bytes()];
     let tools = server
         .config
         .tools

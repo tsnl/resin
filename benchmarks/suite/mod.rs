@@ -223,7 +223,7 @@ fn metadata(target: Target, config: &Config) -> Value {
         "cpu": cpu_name(),
         "logical_cpus": std::thread::available_parallelism().map(usize::from).ok(),
         "rustc": command_text("rustc", &["--version"]),
-        "native_profile": "release (-O3 C, -O SPIR-V, Vulkan 1.3)",
+        "native_profile": "Cranelift Speed, -O3 native fixtures, -O SPIR-V, Vulkan 1.3",
         "input_seed": 2891336453_u32,
         "cc": cc,
         "spirv_opt": spirv_opt,
@@ -332,18 +332,17 @@ fn build(
                     let Some(declaration) = &function.foreign else {
                         continue;
                     };
-                    let symbol = format!("benchmark_foreign_{index}");
+                    let symbol = function
+                        .name
+                        .as_ref()
+                        .ok_or("unnamed foreign function")?
+                        .to_string();
                     native.foreign.insert(
                         resin_types::FunctionId::from_index(index),
                         symbol.clone().into(),
                     );
                     foreign.functions.push(resin_toolchain::ForeignFunction {
-                        symbol,
-                        name: function
-                            .name
-                            .as_ref()
-                            .ok_or("unnamed foreign function")?
-                            .to_string(),
+                        name: symbol,
                         params: declaration
                             .params
                             .iter()
@@ -354,17 +353,44 @@ fn build(
                 }
                 let mut objects = Vec::new();
                 if !foreign.functions.is_empty() {
-                    objects.push(
-                        tools
-                            .compile_foreign(
-                                Arc::new(foreign),
-                                temporary.path(),
-                                &execution,
-                                &cancellation,
-                            )
-                            .await?
-                            .bytes(),
-                    );
+                    let analysis = tools
+                        .analyze_foreign(
+                            Arc::new(foreign),
+                            temporary.path(),
+                            &execution,
+                            &cancellation,
+                        )
+                        .await?;
+                    for symbol in native.foreign.values_mut() {
+                        *symbol = analysis
+                            .declarations()
+                            .iter()
+                            .find(|declaration| declaration.name == symbol.as_ref())
+                            .ok_or("missing analyzed benchmark declaration")?
+                            .symbol
+                            .clone()
+                            .into();
+                    }
+                }
+                for (index, (_, source)) in extra_files.iter().enumerate() {
+                    // This is handwritten benchmark support code, independent of Resin output.
+                    let fixture = tempfile::tempdir()?;
+                    fs::write(fixture.path().join("benchmark.c"), source)?;
+                    let pic = if cfg!(windows) { "" } else { " -fPIC" };
+                    fs::write(fixture.path().join("build.ninja"), format!(
+                        "include toolchain.ninja\nrule fixture\n  command = $cc $cflags{pic} -c $in -o $out\nbuild benchmark.o: fixture benchmark.c\ndefault benchmark.o\n"
+                    ))?;
+                    let built = tools
+                        .build(
+                            fixture.path(),
+                            &fixture.path().to_string_lossy(),
+                            &format!("benchmark-{index}"),
+                            resin_toolchain::CProfile::Release,
+                            &execution,
+                            &cancellation,
+                        )
+                        .await?;
+                    objects.push(fs::read(built.path("benchmark.o"))?.into());
                 }
                 let object = resin_codegen::generate_native(
                     lir,

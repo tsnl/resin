@@ -34,11 +34,7 @@ fn empty_header_groups_remain_native_dependencies() {
 fn foreign_signatures_use_imported_types_and_keep_module_visibility() {
     let directory = TempDir::new().unwrap();
     let header = directory.path().join("api.h");
-    fs::write(
-        &header,
-        "static inline int answer(int value) { return value + 7; }\n",
-    )
-    .unwrap();
+    fs::write(&header, "int answer(int value);\n").unwrap();
     fs::write(
         directory.path().join("types.resin"),
         "export { CInt }; type CInt = int;",
@@ -65,6 +61,7 @@ fn foreign_signatures_use_imported_types_and_keep_module_visibility() {
     let module = support::pipeline::file_module(&entry).unwrap();
     let output = support::project::Project::new(&module, Some("main"))
         .unwrap()
+        .with_native("int answer(int value);\nint answer(int value) { return value + 7; }\n")
         .run();
     assert_eq!(output.status.code(), Some(42));
 

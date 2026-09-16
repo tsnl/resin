@@ -353,7 +353,7 @@ async fn explicit_headers_remain_source_dependencies_without_codegen_filesystem_
 }
 
 #[tokio::test]
-async fn source_scoped_foreign_bindings_keep_distinct_adapter_symbols() {
+async fn foreign_bindings_use_the_supplied_link_symbols() {
     let mut module = module();
     module.shaders.clear();
     module.functions.truncate(1);
@@ -395,16 +395,16 @@ async fn source_scoped_foreign_bindings_keep_distinct_adapter_symbols() {
     );
     let inputs = NativeInputs {
         foreign: [
-            (FunctionId::from_index(1), "left_bound_adapter".into()),
-            (FunctionId::from_index(2), "right_bound_adapter".into()),
+            (FunctionId::from_index(1), "left_native_symbol".into()),
+            (FunctionId::from_index(2), "right_native_symbol".into()),
         ]
         .into(),
         ..Default::default()
     };
     let object = native(&checked, "main", inputs).await.unwrap();
     for symbol in [
-        b"left_bound_adapter".as_slice(),
-        b"right_bound_adapter".as_slice(),
+        b"left_native_symbol".as_slice(),
+        b"right_native_symbol".as_slice(),
     ] {
         assert!(
             object

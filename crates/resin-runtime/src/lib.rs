@@ -14,6 +14,7 @@
 compile_error!("resin-runtime requires 64-bit Linux, macOS, or Windows");
 
 mod allocator;
+mod console;
 mod gpu;
 mod gpu_view;
 mod host;
@@ -113,6 +114,22 @@ pub use window::ffi::{
 };
 
 pub type ResinDeviceAddress = u64;
+
+//
+// C console streams
+//
+
+/// Return the error indicator of the C stdin stream used by `getchar`.
+#[unsafe(no_mangle)]
+pub extern "C" fn resin_stdin_error() -> i32 {
+    unsafe { libc::ferror(console::stdin()) }
+}
+
+/// Flush the C stdout stream used by `putchar`; returns zero on success.
+#[unsafe(no_mangle)]
+pub extern "C" fn resin_stdout_flush() -> i32 {
+    unsafe { libc::fflush(console::stdout()) }
+}
 
 //
 // Owning GPU views

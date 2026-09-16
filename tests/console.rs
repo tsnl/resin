@@ -222,7 +222,15 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
         // The shim is the first captured include for the foreign adapters.
         let project = project::Project::new(&module, Some("main"))
             .unwrap()
-            .with_native(native);
+            .with_native(native)
+            .with_bindings(&[
+                ("getchar", "console_test_getchar"),
+                ("realloc", "console_test_realloc"),
+                ("free", "console_test_free"),
+                ("resin_stdin_error", "console_test_error"),
+                ("putchar", "console_test_putchar"),
+                ("resin_stdout_flush", "console_test_flush"),
+            ]);
         let output = Program::compile(temp, &project).run(b"");
         assert!(
             output.status.success(),

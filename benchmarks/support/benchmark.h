@@ -25,7 +25,8 @@ static void benchmark_fail(const char *message) {
     exit(EXIT_FAILURE);
 }
 
-static uint64_t benchmark_argument(int32_t argc, uint8_t **argv, uint32_t index) {
+uint64_t benchmark_argument(int32_t argc, uint8_t **argv, uint32_t index);
+uint64_t benchmark_argument(int32_t argc, uint8_t **argv, uint32_t index) {
     if (argc != 6 || index >= (uint32_t)argc) {
         benchmark_fail("expected count, iterations, samples, warmup, and seed");
     }
@@ -39,7 +40,8 @@ static uint64_t benchmark_argument(int32_t argc, uint8_t **argv, uint32_t index)
     return value;
 }
 
-static void benchmark_prepare(uint32_t *input, uint32_t *output, uint32_t count, uint32_t seed) {
+void benchmark_prepare(uint32_t *input, uint32_t *output, uint32_t count, uint32_t seed);
+void benchmark_prepare(uint32_t *input, uint32_t *output, uint32_t count, uint32_t seed) {
     for (uint32_t index = 0; index < count; index++) {
         input[index] = index * UINT32_C(747796405) + seed;
         output[index] = UINT32_C(0xdeadbeef);
@@ -48,7 +50,8 @@ static void benchmark_prepare(uint32_t *input, uint32_t *output, uint32_t count,
 
 // Fences keep the compiler from moving input reads or output writes across either
 // timer call. Checksums make every output observable, outside the measured region.
-static uint64_t benchmark_clock(void) {
+uint64_t benchmark_clock(void);
+uint64_t benchmark_clock(void) {
     atomic_signal_fence(memory_order_seq_cst);
 #if defined(_WIN32)
     LARGE_INTEGER time;
@@ -82,7 +85,8 @@ static double benchmark_seconds(uint64_t start, uint64_t end) {
 #endif
 }
 
-static void benchmark_report(uint64_t start, uint64_t end, uint32_t *output, uint32_t count, int32_t measured) {
+void benchmark_report(uint64_t start, uint64_t end, uint32_t *output, uint32_t count, int32_t measured);
+void benchmark_report(uint64_t start, uint64_t end, uint32_t *output, uint32_t count, int32_t measured) {
     uint64_t checksum = UINT64_C(14695981039346656037);
     for (uint32_t index = 0; index < count; index++) {
         checksum = (checksum ^ output[index]) * UINT64_C(1099511628211);

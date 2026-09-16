@@ -38,6 +38,12 @@ runtime libraries/device on the **client** that runs the downloaded program.
 Keep the service runtime archive and library/header installation from the same build.
 Cranelift embeds optimized shader bytes directly in native objects. The client has no native tool flags.
 
+Foreign calls require a directly linkable C function whose header declaration matches
+Resin's supported scalar/pointer ABI. The service caches libclang's completed header
+analysis and emits direct symbol references. Macro-only and static-inline functions
+are rejected; headers do not supply compiled implementations. The linker must already
+have the required native library. Server builds generate no C adapters.
+
 ## Inputs and identity
 
 The client fully parses each reachable user file with the existing CST parser and
@@ -91,8 +97,8 @@ can each declare `"api.h"` with different contents. Empty extern groups still se
 headers. Absolute direct header names are resolved/uploaded on the client. All
 bundle files and ordered roots enter native cache keys, including currently unused
 files. The compiler-injected runtime ABI header uses an explicit protected binding.
-Native preprocessing records and validates actual dependency paths before compiling
-captured `.i` bytes; missing or escaping transitive headers cannot produce artifacts
+Native preprocessing records and validates actual dependency paths before libclang
+analyzes captured `.i` bytes; missing or escaping transitive headers cannot produce artifacts
 by borrowing unrelated server files. This check is not an operating-system filesystem
 sandbox: preprocessing runs with service-account permissions. Operators choose the
 container/service isolation and access policy for their callers.
@@ -114,7 +120,7 @@ Default capacities are **entries**, not bytes:
 | Input handles | 64 |
 | Source / CST / AST, each | 4096 |
 | HIR / verified LIR, each | 64 |
-| Foreign adapters / raw shaders / optimized shaders / native objects / executables, each | 32 |
+| Foreign analysis / raw shaders / optimized shaders / native objects / executables, each | 32 |
 | Simultaneously admitted HTTP requests | 64 |
 
 `resin-server --cache-capacity N` overrides every cache; `--requests N` sets positive
@@ -122,7 +128,7 @@ request admission. Embedding applications may set individual `Config.capacities`
 Active requests and streamed downloads retain selected outputs after head eviction;
 final owners release temporary directories. Cancellation propagates to bounded CPU
 work and native process trees. SIGINT/SIGTERM drain service work. The server retains
-immutable C adapters, shaders, native objects, and executables in separate caches;
+immutable foreign analysis, shaders, native objects, and executables in separate caches;
 `--temporary` owns native staging and artifacts, and `--storage` owns pinned dependency checkouts.
 
 ## Wire contract

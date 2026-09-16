@@ -249,9 +249,10 @@ produces HIR and editor facts. Applications use the concrete `resin_source::Load
 to obtain imports and assign logical source names before parsing and AST assembly.
 The loader knows file references, supplied buffers, and explicit source bindings;
 compiler passes receive only frozen inputs. Applications reuse results through
-immutable caches keyed by those complete inputs. Codegen takes verified LIR, and the
-independent toolchain builds the generated directory through Ninja. The CLI connects
-these completed results.
+immutable caches keyed by those complete inputs. Codegen takes verified LIR and
+returns native objects and shader bytes. The independent toolchain analyzes foreign
+headers, optimizes shaders, and links objects. Server handlers connect these completed
+results; the CLI submits immutable inputs and receives artifacts.
 
 Keeping related state together helps explain ownership. `Hir` declares retained
 products beside its queries. A `lib.rs` can be long because related state and code

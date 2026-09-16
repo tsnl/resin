@@ -1,7 +1,7 @@
 use super::{failure, scalar_type, unsupported};
 use crate::{Error, NativeInputs};
 use cranelift_codegen::ir;
-use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module};
+use cranelift_module::{DataDescription, DataId, FuncId, Module};
 use cranelift_object::ObjectModule;
 use resin_types::prelude::*;
 use std::collections::BTreeMap;
@@ -43,12 +43,11 @@ impl<'a> Types<'a> {
         let mut signature = module.make_signature();
         signature.params.push(ir::AbiParam::new(ir::types::I64));
         for ty in table.types().filter(|ty| ty.needs_drop(table)) {
-            let id = table.id(&ty).unwrap().index();
             let retain = module
-                .declare_function(&format!("resin_retain_{id}"), Linkage::Local, &signature)
+                .declare_anonymous_function(&signature)
                 .map_err(failure)?;
             let drop = module
-                .declare_function(&format!("resin_drop_{id}"), Linkage::Local, &signature)
+                .declare_anonymous_function(&signature)
                 .map_err(failure)?;
             lifecycle.insert(ty, Lifecycle { retain, drop });
         }

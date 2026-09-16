@@ -6,7 +6,7 @@ use cranelift_codegen::{
     ir,
     settings::{self, Configurable},
 };
-use cranelift_module::{Linkage, Module};
+use cranelift_module::Module;
 use cranelift_object::{ObjectBuilder, ObjectModule};
 use resin_executor::Cancellation;
 use resin_lir::Verified;
@@ -45,6 +45,7 @@ pub(super) fn generate(
     let types = types::Types::new(checked, &mut module, inputs)?;
     let reachable = reachable(source, &types)?;
     let mut functions = vec![None; source.functions.len()];
+    // Internal functions do not occupy the namespace used by imported C symbols.
     for &index in &reachable {
         let input = &source.functions[index];
         let signature = types.signature(
@@ -57,7 +58,7 @@ pub(super) fn generate(
         );
         functions[index] = Some(
             module
-                .declare_function(&format!("resin_native_{index}"), Linkage::Local, &signature)
+                .declare_anonymous_function(&signature)
                 .map_err(failure)?,
         );
     }
@@ -69,7 +70,7 @@ pub(super) fn generate(
                 .foreign
                 .get(&FunctionId::from_index(index))
                 .ok_or_else(|| {
-                    unsupported(format!("missing foreign adapter for function {index}"))
+                    unsupported(format!("missing linked C symbol for function {index}"))
                 })?;
             foreign::define(
                 &mut module,

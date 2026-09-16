@@ -1,4 +1,4 @@
-//! Translate completed LIR foreign declarations into independently reusable C adapters.
+//! Collect the C declarations that completed LIR requires from captured headers.
 use crate::{
     headers::{NativeHeaders, NativeInclude},
     http::failure,
@@ -30,15 +30,13 @@ pub(crate) fn prepare(
         let Some(foreign) = &function.foreign else {
             continue;
         };
-        let header = include(headers, &foreign.header)?;
-        includes.insert(header.clone());
+        includes.insert(include(headers, &foreign.header)?);
         let name = function
             .name
             .as_ref()
             .ok_or_else(|| invalid("foreign function has no C name"))?
             .to_string();
-        let mut adapter = ForeignFunction {
-            symbol: String::new(),
+        let declaration = ForeignFunction {
             name,
             params: foreign
                 .params
@@ -47,18 +45,19 @@ pub(crate) fn prepare(
                 .collect::<Result<_, _>>()?,
             result: scalar(&function.result)?,
         };
-        let mut hash = blake3::Hasher::new();
-        hash.update(b"resin-foreign-adapter-v1\0");
-        for text in [header, format!("{adapter:?}")] {
-            hash.update(&(text.len() as u64).to_le_bytes());
-            hash.update(text.as_bytes());
-        }
-        adapter.symbol = format!("resin_foreign_{}", hash.finalize().to_hex());
         bindings.insert(
             FunctionId::from_index(index),
-            Arc::from(adapter.symbol.as_str()),
+            Arc::from(declaration.name.as_str()),
         );
-        functions.insert(adapter.symbol.clone(), adapter);
+        if functions
+            .insert(declaration.name.clone(), declaration.clone())
+            .is_some_and(|prior| prior != declaration)
+        {
+            return Err(invalid(format!(
+                "conflicting Resin signatures for C symbol `{}`",
+                declaration.name
+            )));
+        }
     }
     Ok(Prepared {
         inputs: Arc::new(ForeignInputs {

@@ -12,7 +12,7 @@ pub(crate) struct Caches {
     pub ast: ArcSwap<Cache<resin_source::Source, resin_ast::ModuleDocument>>,
     pub hir: ArcSwap<Cache<resin_source::SourceGraph, resin_hir::Hir>>,
     pub verified: ArcSwap<Cache<resin_lir::LirKey, resin_lir::VerifiedModule>>,
-    pub foreign: ArcSwap<Cache<ForeignKey, resin_toolchain::ForeignObject>>,
+    pub foreign: ArcSwap<Cache<ForeignKey, resin_toolchain::ForeignAnalysis>>,
     pub shaders: ArcSwap<Cache<ShaderKey, Arc<[u8]>>>,
     pub optimized: ArcSwap<Cache<ToolBytesKey, Arc<[u8]>>>,
     pub native: ArcSwap<Cache<NativeKey, resin_codegen::NativeObject>>,
