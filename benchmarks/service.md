@@ -153,3 +153,40 @@ is below one millisecond for this fixture, while the complete unchanged build st
 costs hundreds of milliseconds. These results support investigating semantic
 incrementality and native validation/artifact retention before changing the wire
 protocol to carry CSTs.
+
+## Full Cranelift backend — 2026-09-15
+
+[Raw samples](results/service-cranelift-full-linux-2026-09-15.json) record the full
+Cranelift host backend at `85bcda18`, using the same machine, development shell,
+release profiles, fixtures, and default build sample counts as the
+[earlier C-backend run](results/service-cranelift-c-linux-2026-09-15.json). Both
+backends link the runtime and download executables of approximately 6.1 MiB.
+The earlier scalar prototype's 16 KiB executables are not this comparison's baseline.
+
+```sh
+nix-shell --run 'cargo build --locked --release -p resin -p resin-server'
+nix-shell --run 'python3 benchmarks/service.py --suite build --label full-cranelift-host --output build/service-cranelift-full'
+```
+
+Median elapsed times include client startup, source acquisition, HTTP requests,
+native work, and executable download:
+
+| Fixture | Build | Earlier C backend | Full Cranelift backend |
+| --- | --- | ---: | ---: |
+| One file | Cold | 333.134 ms | 279.368 ms |
+| One file | Unchanged | 241.658 ms | 73.904 ms |
+| One file | Edited | 375.468 ms | 262.355 ms |
+| 17 files | Cold | 498.147 ms | 373.704 ms |
+| 17 files | Unchanged | 310.972 ms | 87.673 ms |
+| 17 files | Edited | 532.369 ms | 338.435 ms |
+
+Each fixture has three cold, 24 unchanged, and 15 edited samples. These are separate
+runs, with scheduling and filesystem variance; they are not a controlled estimate
+of Cranelift code generation alone. The change also separates tool-content validation
+by operation, so a program without C imports does not read the Clang installation,
+and unchanged native results reuse retained executables. That validation improvement
+contributes to the warm-build reduction.
+
+These scalar fixtures contain no C imports or shaders. They do not measure header
+adapter latency, GPU compilation, or the execution speed of generated programs.
+For those workloads, use the native behavior tests and [CPU/GPU suite](README.md).
