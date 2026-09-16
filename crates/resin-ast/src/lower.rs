@@ -656,6 +656,23 @@ impl<'a> AstGen<'a> {
                 span,
             ),
             "unary_type" if self.text(child) == "None" => Spanned::new(TermKind::None, span),
+            "error_term" => {
+                let value = self.gen_term(child.child_by_field_name("value").unwrap_or(child));
+                let ty = Spanned::new(
+                    TypeKind::App {
+                        head: Spanned::new("Err".into(), span),
+                        args: vec![Spanned::new(TypeKind::Infer, span)],
+                    },
+                    span,
+                );
+                Spanned::new(
+                    TermKind::Call {
+                        func: Box::new(Spanned::new(TermKind::Type { ty }, span)),
+                        args: vec![value],
+                    },
+                    span,
+                )
+            }
             "assert_term" => {
                 let condition =
                     self.gen_term(child.child_by_field_name("condition").unwrap_or(child));
@@ -1133,7 +1150,7 @@ impl<'a> AstGen<'a> {
         let text = if node.is_missing()
             || !matches!(
                 node.kind(),
-                "lid" | "tuple_index" | "uid" | "builtin_type" | "Ptr" | "Ref"
+                "lid" | "tuple_index" | "uid" | "builtin_type" | "Ptr" | "Ref" | "Err"
             ) {
             ""
         } else {

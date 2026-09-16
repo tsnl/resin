@@ -1321,6 +1321,22 @@ impl Expression<'_, '_> {
                         failure,
                         arg: Box::new(arg),
                     }
+                } else if let resin_ast::TermKind::Type { ty } = &func.val
+                    && matches!(&ty.val, resin_ast::TypeKind::App { head, .. } if head.val.as_ref() == "Err")
+                {
+                    let ann = self.annotation(ty, true);
+                    super::eval::reference_type(&self.checker.typing.solver, &ann.ty, false, span)?;
+                    let Type::Node(super::infer::Head::Error, parts) =
+                        self.checker.typing.solver.head(&ann.ty)
+                    else {
+                        unreachable!("Err annotation");
+                    };
+                    let arg = self.child(single_argument(args, span)?, Some(parts[0].clone()));
+                    equate = Some(ann.ty.clone());
+                    TermKind::Ascribe {
+                        ty: ann.into_tree(),
+                        arg: Box::new(arg),
+                    }
                 } else if let resin_ast::TermKind::Type { ty } = &func.val {
                     let unit = resin_ast::Term {
                         span,

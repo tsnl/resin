@@ -36,6 +36,9 @@ pub(super) fn ty(source: &Ty) -> crate::Type {
             params: params.iter().map(ty).collect(),
             result: Box::new(ty(result)),
         },
+        Ty::Error { payload } => crate::Type::Error {
+            payload: Box::new(ty(payload)),
+        },
         Ty::Result { value, error } => crate::Type::Result {
             value: Box::new(ty(value)),
             error: Box::new(ty(error)),

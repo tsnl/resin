@@ -323,3 +323,11 @@ fn reference_types_and_initialized_binding_annotations() {
         "def identity<T>(value: Ref<T>) -> Ref<T> = {\n\tvalue\n};\ndef main() = {\n\tvar value: int = 1;\n\tvar alias: Ref<_> = identity(value);\n\talias := 2;\n};\n",
     );
 }
+
+#[test]
+fn error_constructors_and_type_arguments_preserve_syntax() {
+    let source = "def f() -> Err<str> = { Err(\"failure\") };";
+    let formatted = format_source(source).unwrap();
+    assert_eq!(syntax(source), syntax(&formatted));
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}

@@ -391,6 +391,7 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
                 .map(|member| sexp_ty(names, member))
                 .collect(),
         ),
+        Ty::Error { payload } => list("Err", vec![sexp_ty(names, payload)]),
         Ty::Result { value, error } => {
             list("result", vec![sexp_ty(names, value), sexp_ty(names, error)])
         }

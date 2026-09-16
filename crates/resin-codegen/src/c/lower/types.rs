@@ -175,6 +175,10 @@ impl<'a> Types<'a> {
                 self.definition(body, emitted, out);
                 format!("{} value;", self.name(body))
             }
+            Ty::Error { payload } => {
+                self.definition(payload, emitted, out);
+                format!("{} value;", self.name(payload))
+            }
             Ty::Array { element, length } => {
                 self.definition(element, emitted, out);
                 let capacity = (*length).max(1);

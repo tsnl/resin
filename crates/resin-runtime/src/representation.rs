@@ -28,6 +28,7 @@ const TUPLE: u32 = 18;
 const RECORD: u32 = 19;
 const UNION: u32 = 20;
 const TEXT: u32 = 21;
+const ERROR: u32 = 22;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -213,6 +214,12 @@ unsafe fn value_at(
                 Ok(())
             }
             TEXT => quoted(out, text(ty, data)),
+            ERROR => {
+                out.write_all(b"Err(")?;
+                let field = &fields(ty)[0];
+                value_at(out, &*field.ty, data.add(field.offset), depth + 1)?;
+                out.write_all(b")")
+            }
             _ => fail("invalid representation kind"),
         }
     }

@@ -308,6 +308,10 @@ pub(super) fn ascription(
 ) -> Result<Option<Vec<Conv>>, TypeError> {
     let step = if from == to {
         return Ok(Some(Vec::new()));
+    } else if matches!(to, Ty::Error { payload } if payload.as_ref() == from) {
+        Conv::WrapError
+    } else if matches!(from, Ty::Error { payload } if payload.as_ref() == to) {
+        Conv::UnwrapError
     } else if from.view_record().as_ref() == Some(to) {
         Conv::ViewRecord
     } else if let Ty::Defined { definition } = to
@@ -552,6 +556,7 @@ pub(super) fn shader_value_type(definitions: &[TypeDef], ty: &Ty) -> Result<(), 
             Ty::Record { fields } => pending.extend(fields.iter().map(|field| &field.ty)),
             Ty::Defined { definition } => pending.push(crate::definition_body(definitions, *definition).map_err(|error| error.to_string())?),
             Ty::Union { variants } => pending.extend(variants),
+            Ty::Error { payload } => pending.push(payload),
             Ty::Result { value, error } => pending.extend([value.as_ref(), error.as_ref()]),
             _ => return Err(format!("shader profile does not support type {ty:?}")),
         }

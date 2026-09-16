@@ -394,6 +394,7 @@ impl TypeNames {
                     .collect::<Vec<_>>()
                     .join(" | ")
             }
+            Type::Error { payload } => format!("Err<{}>", self.format(payload)),
             Type::Result { value, error } => {
                 format!("Result<{}, {}>", self.format(value), self.format(error))
             }

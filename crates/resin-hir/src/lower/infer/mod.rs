@@ -42,6 +42,7 @@ pub(crate) enum Head {
     // Result first, followed by the parameter types in declaration order.
     Function,
     Result,
+    Error,
     Union,
 }
 
@@ -186,6 +187,9 @@ impl Type {
                 params.iter().map(Self::from_hir).collect(),
                 Self::from_hir(result),
             ),
+            crate::Type::Error { payload } => {
+                Self::Node(Head::Error, vec![Self::from_hir(payload)])
+            }
             crate::Type::Result { value, error } => Self::Node(
                 Head::Result,
                 vec![Self::from_hir(value), Self::from_hir(error)],
@@ -230,6 +234,7 @@ impl From<Ty> for Type {
                 params.into_iter().map(Self::from).collect(),
                 (*result).into(),
             ),
+            Ty::Error { payload } => Self::Node(Head::Error, vec![(*payload).into()]),
             Ty::Result { value, error } => Self::result((*value).into(), (*error).into()),
             atom => Self::Node(Head::Atom(atom), vec![]),
         }
@@ -285,6 +290,9 @@ impl Head {
             Self::Function => Ty::Function {
                 result: Box::new(children.next().unwrap()),
                 params: children.collect(),
+            },
+            Self::Error => Ty::Error {
+                payload: Box::new(children.next().unwrap()),
             },
             Self::Result => Ty::Result {
                 value: Box::new(children.next().unwrap()),
@@ -367,6 +375,9 @@ impl Head {
             Self::Function => crate::Type::Function {
                 result: Box::new(children.next().unwrap()),
                 params: children.collect(),
+            },
+            Self::Error => crate::Type::Error {
+                payload: Box::new(children.next().unwrap()),
             },
             Self::Result => crate::Type::Result {
                 value: Box::new(children.next().unwrap()),
@@ -640,6 +651,20 @@ impl Solver {
                 Ok(self.include(&a[1], &b[1], span)? && value)
             }
             (_, Type::Node(Head::Atom(target @ Ty::Union { .. }), _)) => {
+                // An Err constructor can receive its payload's context from the
+                // sole Err member without guessing among unrelated union members.
+                if matches!(self.head(from), Type::Node(Head::Error, _))
+                    && self.complete(from).is_none()
+                {
+                    let errors: Vec<_> = target
+                        .members()
+                        .into_iter()
+                        .filter(|ty| matches!(ty, Ty::Error { .. }))
+                        .collect();
+                    if let [error] = errors.as_slice() {
+                        self.unify(from, &error.clone().into(), span)?;
+                    }
+                }
                 // Literal context may select one numeric member, but pointers and
                 // other mutable storage remain invariant inside union members.
                 if let Type::Variable(id) = self.head(from) {
@@ -2122,6 +2147,16 @@ impl Inference<'_> {
                 return Ok(complete);
             }
             Constraint::Ascribe(from, to, literal) => {
+                if let Type::Node(Head::Error, parts) = self.solver.head(to)
+                    && !matches!(self.solver.head(from), Type::Node(Head::Error, _))
+                {
+                    return self.solver.coerce(from, &parts[0], span);
+                }
+                if let Type::Node(Head::Error, parts) = self.solver.head(from)
+                    && !matches!(self.solver.head(to), Type::Node(Head::Error, _))
+                {
+                    return self.solver.unify(&parts[0], to, span);
+                }
                 if matches!(self.solver.head(to), Type::Node(Head::Record(_), _))
                     && let Some(definition) = self.nominal_drop(from)
                 {

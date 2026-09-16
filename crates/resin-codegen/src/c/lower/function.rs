@@ -649,6 +649,8 @@ fn instruction(
         Instr::Ascribe { ty } => {
             if ty == &args[0].ty {
                 args[0].expr.clone()
+            } else if matches!(ty, Ty::Error { payload } if payload.as_ref() == &args[0].ty) {
+                format!("({}){{ .value = {} }}", types.name(ty), args[0].expr)
             } else if is_view_conversion(&args[0].ty, ty) {
                 format!(
                     "({}){{ ({}).f0, ({}).f1 }}",
