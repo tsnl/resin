@@ -6,10 +6,15 @@
 // - No tests mechanism?
 // - Invalid `print()` call does not seem to generate a type error. How to format?
 // - Compiler bug
+// - Sqrt builtin/Math library with Sqrt, sin, cos support
+// - Break/Continue statements in loops, Return statements
+// - Assert, something useful for writing tests
+// - No 'true' or 'false'
+// - Can't use a string as an error type
 
 export { main };
 
-import { "$/string.resin" };
+import { "$/string.resin", "$/span.resin" };
 
 struct Complex {
 	real: float32,
@@ -29,6 +34,10 @@ struct Complex {
 		self.mul(self)
 	};
 
+	def magnitude_squared(self: Complex) -> float32 = {
+		self.real * self.real + self.imag * self.imag
+	};
+
 	def add(self: Complex, other: Complex) -> Complex = {
 		Complex {
 			real = self.real + other.real,
@@ -36,19 +45,74 @@ struct Complex {
 		}
 	};
 
+	def new(real: float32, imag: float32) -> Complex = {
+		Complex {
+			real = real,
+			imag = imag,
+		}
+	};
+
+	def zero() -> Complex = {
+		Complex.new(0.0, 0.0)
+	};
+
 	def string(self: Complex) -> String = {
 		fmt("{0}+i{1}", (self.real, self.imag))
 	};
+};
 
-	def test() = {
-		var c1 = Complex { real=1.0, imag=2.0 };
-		var c2 = Complex { real=42.0, imag=1.0 };
-		var cp = c1.mul(c2);
-		print(fmt("{0}\n", (cp.string(),)));
+struct Plot {
+	data: Span<Complex>,
+	width: uint,
+	height: uint,
+
+	def at(self: Plot, x: uint, y: uint) -> Ref<Complex> = {
+		self.data.at(ulong(y * self.width + x))
 	};
+};
+
+struct Mandelbrot {
+	max_iters: int,
+
+	def new(max_iters: int) -> Mandelbrot = {
+		Mandelbrot { max_iters = max_iters }
+	};
+
+	def escapes_ball(self: Mandelbrot, c: Complex) -> bool = {
+		var n = 0;
+		var a = Complex.zero();
+		while (n < self.max_iters && a.magnitude_squared() <= 4.0) {
+			n := n + 1;
+			a := a.squared().add(c);
+		};
+		a.magnitude_squared() > 4.0
+	};
+
+	def test() -> Result<(), TestError> = {
+		var mandelbrot = Mandelbrot.new(128);
+
+		if (mandelbrot.escapes_ball(Complex.zero())) {
+			err(TestError { message = "c=0 should never escape" })
+		} else if (mandelbrot.escapes_ball(Complex.new(-1.0, 0.0))) {
+			err("c=-1 should never escape")
+		} else if (mandelbrot.escapes_ball(Complex.new(-2.0, 0.0))) {
+			err("c=-2 should never escape")
+		} else if (mandelbrot.escapes_ball(Complex.new(0.0, 1.0))) {
+			err("c=i should never escape")
+		} else if (!mandelbrot.escapes_ball(Complex.new(1.0, 0.0))) {
+			err("c=1 should escape")
+		} else if (!mandelbrot.escapes_ball(Complex.new(2.0, 0.0))) {
+			err("c=2 should escape")
+		} else {
+			ok(())
+		}
+	};
+};
+
+struct TestError {
+	message: String,
 };
 
 def main() = {
 	print("Hello, world\n");
-	Complex.test();
 };
