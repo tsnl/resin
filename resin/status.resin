@@ -12,6 +12,8 @@ export {
 	RuntimeStatus,
 };
 
+import { "internal/status_codes.resin" };
+
 struct InvalidArgument {};
 struct VulkanUnavailable {};
 struct Unsupported {};
@@ -25,47 +27,47 @@ type RuntimeError = InvalidArgument | VulkanUnavailable | Unsupported | OutOfMem
 
 struct RuntimeStatus {
 	def from_code(code: int) -> Result<(), RuntimeError> = {
-		if (code == 1) {
+		if (code == status_invalid_argument) {
 			err(InvalidArgument {})
 		} else {
 			ok(())
 		}?;
-		if (code == 2) {
+		if (code == status_vulkan_unavailable) {
 			err(VulkanUnavailable {})
 		} else {
 			ok(())
 		}?;
-		if (code == 3) {
+		if (code == status_unsupported) {
 			err(Unsupported {})
 		} else {
 			ok(())
 		}?;
-		if (code == 4) {
+		if (code == status_out_of_memory) {
 			err(OutOfMemory {})
 		} else {
 			ok(())
 		}?;
-		if (code == 5) {
+		if (code == status_vulkan_error) {
 			err(VulkanError {})
 		} else {
 			ok(())
 		}?;
-		if (code == 6) {
+		if (code == status_io_error) {
 			err(IoError {})
 		} else {
 			ok(())
 		}?;
-		if (code == 7) {
+		if (code == status_incomplete) {
 			err(Incomplete {})
 		} else {
 			ok(())
 		}?;
-		if (code == 8) {
+		if (code == status_window_unavailable) {
 			err(WindowUnavailable {})
 		} else {
 			ok(())
 		}?;
-		if (code == 0) {
+		if (code == status_success) {
 			ok(())
 		} else {
 			err(UnknownRuntimeError { code = code })
@@ -74,28 +76,28 @@ struct RuntimeStatus {
 	def code(error: RuntimeError) -> int = {
 		match (error) {
 			InvalidArgument(error) => {
-				1
+				status_invalid_argument
 			},
 			VulkanUnavailable(error) => {
-				2
+				status_vulkan_unavailable
 			},
 			Unsupported(error) => {
-				3
+				status_unsupported
 			},
 			OutOfMemory(error) => {
-				4
+				status_out_of_memory
 			},
 			VulkanError(error) => {
-				5
+				status_vulkan_error
 			},
 			IoError(error) => {
-				6
+				status_io_error
 			},
 			Incomplete(error) => {
-				7
+				status_incomplete
 			},
 			WindowUnavailable(error) => {
-				8
+				status_window_unavailable
 			},
 			UnknownRuntimeError(error) => {
 				error.code

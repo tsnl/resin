@@ -73,7 +73,7 @@ def main() -> Result<(), _> = {
 	var image = gpu.create_image(640, 480)?;
 
 	window.poll_events()?;
-	while (!window.should_close() && !window.key_pressed(Window.key_escape())) {
+	while (!window.should_close() && !window.key_pressed(key_escape)) {
 		var commands = gpu.start_command_recording()?;
 
 		commands.begin_rendering(image, 0.0, 0.0, 0.0, 1.0)?;

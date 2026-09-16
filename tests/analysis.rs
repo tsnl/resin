@@ -435,7 +435,7 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
             r#"import {{ "$/gpu.resin" }};
             def f() -> Result<(), _> = {{
                 var gpu = Gpu.new()?;
-                var bytes = gpu.alloc_in::<ubyte>(4_ul, Memory.default())?;
+                var bytes = gpu.alloc_in::<ubyte>(4_ul, memory_default)?;
                 var commands = gpu.start_command_recording()?;
                 var buffer = gpu.alloc::<int>(4)?;
                 buffer.at(0).store(42);
