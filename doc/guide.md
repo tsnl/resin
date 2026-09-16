@@ -636,6 +636,8 @@ def main() -> () = {
 };
 ```
 
+`true` and `false` are literals of type `bool`.
+
 The condition must be boolean and is evaluated before every iteration. The body has its own
 scope; its result is discarded, and the loop returns `()`. As with other expression statements,
 the trailing semicolon is required unless the loop is the enclosing block's final expression.

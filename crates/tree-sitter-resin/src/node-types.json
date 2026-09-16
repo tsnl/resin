@@ -208,6 +208,11 @@
     }
   },
   {
+    "type": "boolean",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "builtin_type",
     "named": true,
     "fields": {}
@@ -1074,6 +1079,10 @@
       "multiple": false,
       "required": true,
       "types": [
+        {
+          "type": "boolean",
+          "named": true
+        },
         {
           "type": "closed_term",
           "named": true
@@ -1967,6 +1976,10 @@
     "named": false
   },
   {
+    "type": "false",
+    "named": false
+  },
+  {
     "type": "float32",
     "named": false
   },
@@ -2036,6 +2049,10 @@
   },
   {
     "type": "struct",
+    "named": false
+  },
+  {
+    "type": "true",
     "named": false
   },
   {

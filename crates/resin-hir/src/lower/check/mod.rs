@@ -920,6 +920,10 @@ impl Expression<'_, '_> {
                 equate = Some(Ty::Unit.into());
                 TermKind::Unit
             }
+            resin_ast::TermKind::Bool { value } => {
+                equate = Some(Ty::Bool.into());
+                TermKind::Bool { value: *value }
+            }
             resin_ast::TermKind::None => {
                 equate = Some(Ty::None.into());
                 TermKind::None

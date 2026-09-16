@@ -42,7 +42,10 @@ fn initializers(specs: &[ConstSpec]) -> Result<Vec<Initializer<'_>>> {
 // are rejected even in an unselected branch of a short-circuit expression.
 fn references<'a>(term: &'a resin_ast::Term, names: &mut Vec<&'a Ident>) -> Result<()> {
     match &term.val {
-        AstTerm::Num { .. } | AstTerm::String { .. } | AstTerm::SizeOf { .. } => Ok(()),
+        AstTerm::Bool { .. }
+        | AstTerm::Num { .. }
+        | AstTerm::String { .. }
+        | AstTerm::SizeOf { .. } => Ok(()),
         AstTerm::Var { name } => {
             names.push(name);
             Ok(())

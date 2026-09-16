@@ -197,4 +197,4 @@ struct Number<T> {
               (unary_term
                 (postfix_term
                   (primary_term
-                    (lid)))))))))))
+                    (boolean)))))))))))

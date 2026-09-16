@@ -48,3 +48,5 @@
 (type_parameters "<" @punctuation.bracket ">" @punctuation.bracket)
 (type_arguments "<" @punctuation.bracket ">" @punctuation.bracket)
 (postfix_term prefix: (primary_term (lid) @function) . suffix: (type_application))
+
+(boolean) @constant.builtin

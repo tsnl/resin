@@ -29,6 +29,9 @@ pub(super) enum TermKind {
     Error(GenerateError),
     Unit,
     None,
+    Bool {
+        value: bool,
+    },
     Num {
         value: Arc<str>,
     },
