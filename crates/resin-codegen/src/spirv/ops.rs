@@ -316,15 +316,13 @@ fn widen(context: &mut Context<'_>, from: &Ty, to: &Ty, value: Word) -> Result<W
     }
     if !matches!(from, Ty::Union { .. } | Ty::Result { .. })
         && let Ty::Union { variants } = to
-    {
-        if let Some(target) = variants
+        && let Some(target) = variants
             .iter()
             .find(|ty| *ty == from)
             .or_else(|| variants.iter().find(|ty| from.widens_to(ty)))
-        {
-            let value = widen(context, from, target, value)?;
-            return variant(context, to, &Case::Type(target.clone()), value);
-        }
+    {
+        let value = widen(context, from, target, value)?;
+        return variant(context, to, &Case::Type(target.clone()), value);
     }
     let mut widened = context.zero(to)?;
     for (case, source) in from.payloads().unwrap_or_default() {

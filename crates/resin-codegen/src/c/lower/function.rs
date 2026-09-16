@@ -764,19 +764,17 @@ fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
     }
     if !matches!(from, Ty::Union { .. } | Ty::Result { .. })
         && let Ty::Union { variants } = to
-    {
-        if let Some(target) = variants
+        && let Some(target) = variants
             .iter()
             .find(|ty| *ty == from)
             .or_else(|| variants.iter().find(|ty| from.widens_to(ty)))
-        {
-            return variant(
-                types,
-                to,
-                &Case::Type(target.clone()),
-                &widen(types, from, target, value),
-            );
-        }
+    {
+        return variant(
+            types,
+            to,
+            &Case::Type(target.clone()),
+            &widen(types, from, target, value),
+        );
     }
     let initializer = if matches!(to, Ty::Defined { .. }) {
         ".value = {0}"
