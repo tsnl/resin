@@ -2056,6 +2056,9 @@ impl Inference<'_> {
             }
             Constraint::Try(input, out, result) => {
                 if let Type::Node(Head::Result, parts) = self.solver.head(input) {
+                    if self.solver.invalid(result) {
+                        return self.solver.unify(out, &parts[0], span);
+                    }
                     let (_, target) = self.result_parts(owner, result, span)?;
                     let value = self.solver.unify(out, &parts[0], span)?;
                     return Ok(self.solver.include(&parts[1], &target, span)? && value);
@@ -2075,6 +2078,9 @@ impl Inference<'_> {
                 }
                 if errors.is_empty() {
                     return Err(error(span, "postfix ? requires a type containing Err"));
+                }
+                if self.solver.invalid(result) {
+                    return self.solver.unify(out, &self.solver.union(values), span);
                 }
                 let mut complete = self.solver.unify(out, &self.solver.union(values), span)?;
                 for error in errors {
