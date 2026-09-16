@@ -116,6 +116,11 @@ impl Settings {
             return Ok(());
         }
         let temporary = files::temporary(directory).await?;
+        let roots = if inputs.restrict_header_paths {
+            Some(crate::headers::allowed_roots(self, directory, cancellation).await?)
+        } else {
+            None
+        };
         let path = temporary.path().join("native-inputs.state");
         let mut output = fs::File::create(&path).await?;
         output.write_all(b"resin-native-inputs-v2\0").await?;
@@ -131,6 +136,12 @@ impl Settings {
             // Keep line markers: they preserve system-header diagnostic classification
             // when the compiler subsequently reads this already-preprocessed unit.
             command.args(["-E", "-x", "c"]);
+            let dependencies = temporary.path().join("dependencies.d");
+            if roots.is_some() {
+                command
+                    .args(["-MD", "-MT", "resin-input", "-MF"])
+                    .arg(&dependencies);
+            }
             let source = if unit.source.as_os_str().as_encoded_bytes().starts_with(b"-") {
                 Path::new(".").join(&unit.source)
             } else {
@@ -144,6 +155,9 @@ impl Settings {
                 crate::process::preprocess(command, &mut captured_file, cancellation).await?;
             captured_file.flush().await?;
             drop(captured_file);
+            if let Some(roots) = &roots {
+                crate::headers::validate(&dependencies, directory, roots, cancellation).await?;
+            }
             for path in [&unit.source, &unit.preprocessed] {
                 let name = path.to_str().expect("JSON paths are UTF-8").as_bytes();
                 output.write_u64_le(name.len() as u64).await?;

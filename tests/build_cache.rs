@@ -6,20 +6,20 @@ mod support;
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Output, Stdio},
 };
 use tempfile::TempDir;
 
-use support::shaders;
+use support::{service::Service, shaders};
 
 const WRAPPER: &str = "#!/bin/sh\nfor arg in \"$@\"; do if [ \"$arg\" = -E ]; then exec \"$RESIN_TEST_COMPILER\" \"$@\"; fi; done\nprintf 'compile\\n' >> \"$RESIN_TEST_COUNT\"\nprintf '%s\\n' \"$*\" >> \"$RESIN_TEST_FLAGS\"\nexec \"$RESIN_TEST_COMPILER\" \"$@\"\n";
 
 #[test]
 fn foreign_header_changes_rebuild_including_nested_dependencies() {
     let project = Project::new();
-    let header = project.temp.path().join("foreign.h");
-    let nested = project.temp.path().join("value.h");
+    let header = project.input.parent().unwrap().join("foreign.h");
+    let nested = project.input.parent().unwrap().join("value.h");
     fs::write(&nested, "#define VALUE 41\n").unwrap();
     fs::write(
         &header,
@@ -61,12 +61,12 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
     let Some(spirv_opt) = shaders::optimizer() else {
         return;
     };
-    let project = Project::new();
+    let mut project = Project::new();
     let shader_compiler = project.temp.path().join("shader-compiler");
     let count = project.temp.path().join("shader-calls");
     fs::write(&shader_compiler, "#!/bin/sh\nprintf 'compile\\n' >> \"$RESIN_TEST_SHADER_COUNT\"\nexec \"$RESIN_TEST_SHADER_COMPILER\" \"$@\"\n").unwrap();
     fs::set_permissions(&shader_compiler, fs::Permissions::from_mode(0o755)).unwrap();
-    let helper = project.temp.path().join("helper.resin");
+    let helper = project.input.parent().unwrap().join("helper.resin");
     fs::write(
         &helper,
         "export { pixel }; def pixel (i: uint) -> uint = { i + uint (1) };",
@@ -90,16 +90,14 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
         "#,
     )
     .unwrap();
-    let run = || {
-        project
-            .command()
-            .arg("--spirv-opt")
-            .arg(&shader_compiler)
-            .env("RESIN_TEST_SHADER_COUNT", &count)
-            .env("RESIN_TEST_SHADER_COMPILER", &spirv_opt)
-            .output()
-            .unwrap()
-    };
+    project.configure(|_, environment| {
+        environment.variables.extend([
+            ("SPIRV_OPT".into(), shader_compiler.clone().into()),
+            ("RESIN_TEST_SHADER_COUNT".into(), count.clone().into()),
+            ("RESIN_TEST_SHADER_COMPILER".into(), spirv_opt),
+        ]);
+    });
+    let run = || project.run();
     let calls = || fs::read_to_string(&count).unwrap().lines().count();
     printed(&run(), b"true");
     printed(&run(), b"true");
@@ -134,6 +132,7 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
 }
 
 struct Project {
+    service: Service,
     temp: TempDir,
     input: PathBuf,
     compiler: PathBuf,
@@ -142,7 +141,8 @@ struct Project {
 impl Project {
     fn new() -> Self {
         let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
-        let input = temp.path().join("main.resin");
+        fs::create_dir(temp.path().join("sources")).unwrap();
+        let input = temp.path().join("sources/main.resin");
         let compiler = temp.path().join("compiler");
         fs::write(
             &input,
@@ -151,26 +151,44 @@ impl Project {
         .unwrap();
         fs::write(&compiler, WRAPPER).unwrap();
         fs::set_permissions(&compiler, fs::Permissions::from_mode(0o755)).unwrap();
+        let service = Self::service(temp.path(), &compiler, |_, _| {});
         Self {
+            service,
             temp,
             input,
             compiler,
         }
     }
 
+    fn service(
+        directory: &Path,
+        compiler: &Path,
+        configure: impl FnOnce(&mut resin_server::Config, &mut resin_toolchain::Environment),
+    ) -> Service {
+        Service::configured(|config, environment| {
+            environment.variables.extend([
+                ("CC".into(), compiler.as_os_str().to_owned()),
+                ("RESIN_TEST_COUNT".into(), directory.join("calls").into()),
+                ("RESIN_TEST_FLAGS".into(), directory.join("flags").into()),
+                (
+                    "RESIN_TEST_COMPILER".into(),
+                    std::env::var_os("CC").unwrap_or_else(|| "cc".into()),
+                ),
+            ]);
+            configure(config, environment);
+        })
+    }
+
+    fn configure(
+        &mut self,
+        configure: impl FnOnce(&mut resin_server::Config, &mut resin_toolchain::Environment),
+    ) {
+        self.service = Self::service(self.temp.path(), &self.compiler, configure);
+    }
+
     fn command(&self) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_resin"));
-        command
-            .current_dir(self.temp.path())
-            .arg(&self.input)
-            .arg("--cc")
-            .arg(&self.compiler)
-            .env("RESIN_TEST_COUNT", self.temp.path().join("calls"))
-            .env("RESIN_TEST_FLAGS", self.temp.path().join("flags"))
-            .env(
-                "RESIN_TEST_COMPILER",
-                std::env::var_os("CC").unwrap_or_else(|| "cc".into()),
-            );
+        let mut command = self.service.command();
+        command.current_dir(self.temp.path()).arg(&self.input);
         command
     }
 
@@ -190,7 +208,7 @@ impl Project {
     }
 
     fn profile_executable(&self, profile: &str) -> PathBuf {
-        let directories: Vec<_> = fs::read_dir(self.temp.path().join("build"))
+        let directories: Vec<_> = fs::read_dir(self.service.directory.path().join("build"))
             .unwrap()
             .map(|entry| entry.unwrap().path())
             .filter(|path| path.file_name().unwrap() != ".artifacts")
@@ -213,10 +231,12 @@ fn printed(output: &Output, text: &[u8]) {
 fn unchanged_programs_reuse_the_executable_and_still_run() {
     let project = Project::new();
     printed(&project.run(), b"first");
+    let cold = project.service.server.counters();
     let executable = project.executable();
     let modified = fs::metadata(&executable).unwrap().modified().unwrap();
     printed(&project.run(), b"first");
     assert_eq!(project.calls(), 1);
+    assert_eq!(project.service.server.counters(), cold);
     assert_eq!(
         fs::metadata(&executable).unwrap().modified().unwrap(),
         modified
@@ -228,6 +248,15 @@ fn unchanged_programs_reuse_the_executable_and_still_run() {
     .unwrap();
     printed(&project.run(), b"first");
     assert_eq!(project.calls(), 1);
+    assert_eq!(
+        project.service.server.counters().syntax_builds,
+        cold.syntax_builds + 1
+    );
+    assert_eq!(
+        project.service.server.counters().hir_builds,
+        cold.hir_builds + 1
+    );
+    assert!(!project.temp.path().join("build").exists());
 }
 
 #[test]
@@ -255,8 +284,10 @@ fn entry_points_have_separate_reusable_artifacts() {
         printed(&project.run(), expected);
     }
     assert_eq!(project.calls(), 2);
+    assert_eq!(project.service.server.counters().hir_builds, 1);
+    assert_eq!(project.service.server.counters().verified_builds, 2);
     assert_eq!(
-        fs::read_dir(project.temp.path().join("build"))
+        fs::read_dir(project.service.directory.path().join("build"))
             .unwrap()
             .filter(|entry| entry.as_ref().unwrap().file_name() != ".artifacts")
             .count(),
@@ -323,7 +354,7 @@ fn executable_output_optimizes_and_both_profiles_stay_cached() {
 }
 
 #[test]
-fn generated_c_is_retained_alongside_the_executable() {
+fn generated_c_and_native_artifacts_stay_on_the_server() {
     let project = Project::new();
     printed(&project.run(), b"first");
     let source = project.executable().parent().unwrap().join("main.c");
@@ -333,6 +364,8 @@ fn generated_c_is_retained_alongside_the_executable() {
             .contains("int main(int r_argc, char **r_argv)")
     );
     assert_eq!(project.calls(), 1);
+    assert!(!project.temp.path().join("build").exists());
+    assert!(!project.temp.path().join("main.c").exists());
 }
 
 #[test]
@@ -395,7 +428,7 @@ fn changed_source_rebuilds_in_the_same_directory() {
 }
 
 #[test]
-fn compiler_and_environment_changes_invalidate_the_cache() {
+fn server_compiler_changes_invalidate_while_client_environment_is_ignored() {
     let project = Project::new();
     printed(&project.run(), b"first");
     fs::write(&project.compiler, format!("{WRAPPER}# changed wrapper\n")).unwrap();
@@ -405,7 +438,7 @@ fn compiler_and_environment_changes_invalidate_the_cache() {
         &project.command().env("CFLAGS", "changed").output().unwrap(),
         b"first",
     );
-    assert_eq!(project.calls(), 3);
+    assert_eq!(project.calls(), 2);
 }
 
 #[test]
@@ -420,6 +453,7 @@ fn compiler_symlinks_preserve_the_invocation_name() {
     fs::write(&project.compiler, wrapper).unwrap();
     std::os::unix::fs::symlink(&project.compiler, &alias).unwrap();
     project.compiler = alias;
+    project.configure(|_, _| {});
     printed(&project.run(), b"first");
     printed(&project.run(), b"first");
     assert_eq!(project.calls(), 1);
@@ -427,7 +461,7 @@ fn compiler_symlinks_preserve_the_invocation_name() {
 
 #[test]
 fn runtime_headers_and_archive_changes_invalidate_the_cache() {
-    let project = Project::new();
+    let mut project = Project::new();
     let include = project.temp.path().join("include");
     fs::create_dir_all(include.join("resin_runtime")).unwrap();
     fs::copy(
@@ -452,14 +486,13 @@ fn runtime_headers_and_archive_changes_invalidate_the_cache() {
         .unwrap()
         .join("libresin_runtime.a");
     fs::copy(&original, &library).unwrap();
-    let run = || {
-        project
-            .command()
-            .env("RESIN_RUNTIME_INCLUDE", &include)
-            .env("RESIN_RUNTIME_LIB", &library)
-            .output()
-            .unwrap()
-    };
+    project.configure(|_, environment| {
+        environment.variables.extend([
+            ("RESIN_RUNTIME_INCLUDE".into(), include.clone().into()),
+            ("RESIN_RUNTIME_LIB".into(), library.clone().into()),
+        ]);
+    });
+    let run = || project.run();
     printed(&run(), b"first");
     printed(&run(), b"first");
     assert_eq!(project.calls(), 1);
@@ -552,7 +585,12 @@ fn concurrent_runs_share_one_build() {
 
 #[test]
 fn all_spirv_is_generated_before_shader_or_c_compilers_run() {
-    let project = Project::new();
+    let mut project = Project::new();
+    project.configure(|_, environment| {
+        environment
+            .variables
+            .insert("SPIRV_OPT".into(), "/missing/spirv-opt".into());
+    });
     fs::write(
         &project.input,
         r#"
@@ -571,11 +609,7 @@ fn all_spirv_is_generated_before_shader_or_c_compilers_run() {
     "#,
     )
     .unwrap();
-    let output = project
-        .command()
-        .args(["--spirv-opt", "/missing/spirv-opt"])
-        .output()
-        .unwrap();
+    let output = project.run();
     assert!(!output.status.success());
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("unsupported shader builtin"),

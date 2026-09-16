@@ -1,3 +1,6 @@
+#[allow(dead_code)]
+mod support;
+
 use crossbeam_channel::{Receiver, unbounded};
 use lsp_server::{Message, Notification, Request, Response};
 use serde_json::{Value, json};
@@ -12,10 +15,12 @@ use std::{
 use tempfile::TempDir;
 
 struct Client {
+    service: support::service::Service,
     child: Child,
     input: ChildStdin,
     output: Receiver<Message>,
     inbox: VecDeque<Message>,
+    registrations: Vec<Value>,
     next_id: i32,
 }
 
@@ -34,7 +39,17 @@ impl Client {
         library_root: Option<&Path>,
         compiler: Option<&Path>,
     ) -> Self {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_resin"));
+        let service = support::service::Service::configured(|config, environment| {
+            if let Some(library_root) = library_root {
+                config.library_root = root.parent().unwrap().join(library_root);
+            }
+            if let Some(compiler) = compiler {
+                environment
+                    .variables
+                    .insert("CC".into(), compiler.as_os_str().to_owned());
+            }
+        });
+        let mut command = service.command();
         command
             .arg("--lsp")
             .arg(root)
@@ -42,12 +57,6 @@ impl Client {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
-        if let Some(library_root) = library_root {
-            command.env("RESIN_LIBRARY_ROOT", library_root);
-        }
-        if let Some(compiler) = compiler {
-            command.env("CC", compiler);
-        }
         let mut child = command.spawn().unwrap();
         let input = child.stdin.take().unwrap();
         let mut stdout = BufReader::new(child.stdout.take().unwrap());
@@ -60,10 +69,12 @@ impl Client {
             }
         });
         let mut client = Self {
+            service,
             child,
             input,
             output,
             inbox: VecDeque::new(),
+            registrations: Vec::new(),
             next_id: 1,
         };
         let initialize = client.request(
@@ -128,6 +139,7 @@ impl Client {
                 .expect("timed out waiting for LSP message");
             if let Message::Request(request) = message {
                 assert_eq!(request.method, "client/registerCapability");
+                self.registrations.push(request.params.clone());
                 self.send(Message::Response(Response::new_ok(request.id, Value::Null)));
                 continue;
             }
@@ -610,27 +622,78 @@ fn dependency_overlays_close_and_disk_changes_refresh_consumers() {
 }
 
 #[test]
-fn library_root_options_override_the_environment_with_separate_relative_bases() {
+fn local_header_creation_and_deletion_refresh_unchanged_editor_inputs() {
     let temp = TempDir::new().unwrap();
     let project = temp.path().join("project");
-    for (root, function) in [
-        (temp.path(), "environment_value"),
-        (project.as_path(), "option_value"),
-    ] {
-        let library = root.join("libraries/math/value.resin");
-        std::fs::create_dir_all(library.parent().unwrap()).unwrap();
+    let include = temp.path().join("include");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::create_dir(&include).unwrap();
+    let mut client = Client::start(&project, json!({"includeRoots": ["../include"]}));
+    let main_uri = uri(&project.join("main.resin"));
+    let source = "extern { \"./fixture\": {} }; def main() = {};";
+    client.open(&main_uri, source);
+    client.diagnostics(&main_uri, Some(1), true);
+    let watchers: Vec<_> = client
+        .registrations
+        .iter()
+        .flat_map(|registration| registration["registrations"].as_array().unwrap())
+        .flat_map(|registration| {
+            registration["registerOptions"]["watchers"]
+                .as_array()
+                .unwrap()
+        })
+        .collect();
+    assert!(
+        watchers
+            .iter()
+            .any(|watcher| watcher["globPattern"] == "**/*")
+    );
+    let watched_include = url::Url::from_directory_path(std::fs::canonicalize(&include).unwrap())
+        .unwrap()
+        .to_file_path()
+        .unwrap();
+    let include_pattern = watched_include
+        .join("**")
+        .join("*")
+        .to_string_lossy()
+        .replace('\\', "/");
+    assert!(
+        watchers
+            .iter()
+            .any(|watcher| watcher["globPattern"] == include_pattern)
+    );
+
+    for header in [project.join("fixture"), include.join("fixture")] {
+        std::fs::write(&header, "/* complete local header */\n").unwrap();
+        client.notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": uri(&header), "type": 1}]}),
+        );
+        client.diagnostics(&main_uri, Some(1), false);
+        std::fs::remove_file(&header).unwrap();
+        client.notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": uri(&header), "type": 3}]}),
+        );
+        client.diagnostics(&main_uri, Some(1), true);
+    }
+    client.stop();
+}
+
+#[test]
+fn managed_library_roots_are_selected_by_server_configuration() {
+    let temp = TempDir::new().unwrap();
+    let project = temp.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    for (directory, function) in [("first", "first_value"), ("second", "second_value")] {
+        let library = temp.path().join(directory);
+        std::fs::create_dir_all(library.join("math")).unwrap();
         std::fs::write(
-            &library,
+            library.join("math/value.resin"),
             format!("export {{ {function} }}; def {function}() -> int = {{ 42 }};"),
         )
         .unwrap();
-    }
-    for (options, function) in [
-        (Value::Null, "environment_value"),
-        (json!({"libraryRoot": "libraries"}), "option_value"),
-    ] {
-        let mut client =
-            Client::start_with_library_root(&project, options, Some(Path::new("libraries")));
+        let mut client = Client::start_with_library_root(&project, Value::Null, Some(&library));
         let uri = uri(&project.join("main.resin"));
         client.open(
             &uri,
@@ -652,7 +715,7 @@ fn library_root_override_and_rapid_versions_use_the_latest_snapshot() {
         "export { standard }; def standard () -> int = { 1 };",
     )
     .unwrap();
-    let mut client = Client::start(temp.path(), json!({"libraryRoot": "standard"}));
+    let mut client = Client::start_with_library_root(temp.path(), Value::Null, Some(&library_root));
     let uri = uri(&temp.path().join("main.resin"));
     client.open(
         &uri,
@@ -917,5 +980,176 @@ fn missing_parent_imports_recover_after_creation_deletion_and_alias_changes() {
         at(&entry, 0, changed.find("answer()").unwrap() as u32),
     );
     assert_eq!(definition["uri"], library_uri);
+    client.stop();
+}
+
+#[test]
+fn saved_editor_revision_is_a_cache_hit_for_an_independent_relocated_cli() {
+    let editor_tree = TempDir::new().unwrap();
+    let checkout = TempDir::new().unwrap();
+    let main = "export { main }; import { \"helper.resin\" }; def main() -> int = { answer() };";
+    let old = "export { answer }; def answer() -> int = { 3 };";
+    let edited = "export { answer }; def answer() -> int = { 7 };";
+    std::fs::write(editor_tree.path().join("main.resin"), main).unwrap();
+    std::fs::write(editor_tree.path().join("helper.resin"), old).unwrap();
+    let mut client = Client::start(editor_tree.path(), Value::Null);
+    let main_uri = uri(&editor_tree.path().join("main.resin"));
+    let helper_uri = uri(&editor_tree.path().join("helper.resin"));
+    client.open(&helper_uri, edited);
+    client.open(&main_uri, main);
+    client.diagnostics(&helper_uri, Some(1), false);
+    client.diagnostics(&main_uri, Some(1), false);
+    let before = client.service.server.counters();
+    // Save exactly the editor bytes, then independently capture a relocated checkout.
+    std::fs::write(editor_tree.path().join("helper.resin"), edited).unwrap();
+    std::fs::write(checkout.path().join("main.resin"), main).unwrap();
+    std::fs::write(checkout.path().join("helper.resin"), edited).unwrap();
+    let output = client
+        .service
+        .command()
+        .current_dir(checkout.path())
+        .arg("main.resin")
+        .arg("-o")
+        .arg("program")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        Command::new(checkout.path().join("program"))
+            .status()
+            .unwrap()
+            .code(),
+        Some(7)
+    );
+    let shared = client.service.server.counters();
+    assert_eq!(
+        (
+            shared.source_builds,
+            shared.syntax_builds,
+            shared.ast_builds,
+            shared.hir_builds
+        ),
+        (
+            before.source_builds,
+            before.syntax_builds,
+            before.ast_builds,
+            before.hir_builds
+        )
+    );
+    assert!(shared.verified_builds > before.verified_builds);
+    // A different disk revision selects one new file and one new root analysis.
+    std::fs::write(checkout.path().join("helper.resin"), old).unwrap();
+    let output = client
+        .service
+        .command()
+        .current_dir(checkout.path())
+        .arg("main.resin")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let different = client.service.server.counters();
+    assert_eq!(different.source_builds, shared.source_builds + 1);
+    assert_eq!(different.syntax_builds, shared.syntax_builds + 1);
+    assert_eq!(different.ast_builds, shared.ast_builds + 1);
+    assert_eq!(different.hir_builds, shared.hir_builds + 1);
+    client.stop();
+}
+
+#[test]
+fn managed_definitions_open_as_readonly_files_and_query_their_managed_identity() {
+    let temp = TempDir::new().unwrap();
+    let library = temp.path().join("library");
+    let project = temp.path().join("project");
+    std::fs::create_dir(&library).unwrap();
+    std::fs::create_dir(&project).unwrap();
+    let managed = "export { answer }; def answer() -> int = { 42 };";
+    std::fs::write(library.join("answer.resin"), managed).unwrap();
+    let source = "import { \"$/answer.resin\" }; def main() -> int = { answer() };";
+    let mut client = Client::start_with_library_root(&project, Value::Null, Some(&library));
+    let main_uri = uri(&project.join("main.resin"));
+    client.open(&main_uri, source);
+    client.diagnostics(&main_uri, Some(1), false);
+    let definition = client.request(
+        "textDocument/definition",
+        at(&main_uri, 0, source.rfind("answer()").unwrap() as u32),
+    );
+    let managed_uri = definition["uri"]
+        .as_str()
+        .expect("managed definition file URI")
+        .to_owned();
+    let path = url::Url::parse(&managed_uri)
+        .unwrap()
+        .to_file_path()
+        .unwrap();
+    assert_ne!(path, library.join("answer.resin"));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), managed);
+    assert!(std::fs::metadata(&path).unwrap().permissions().readonly());
+    client.open(&managed_uri, managed);
+    client.diagnostics(&managed_uri, Some(1), false);
+    let hover = client.request(
+        "textDocument/hover",
+        at(
+            &managed_uri,
+            0,
+            managed.find("def answer").unwrap() as u32 + 4,
+        ),
+    );
+    assert!(
+        hover["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("answer")
+    );
+    client.stop();
+}
+
+#[test]
+fn restarted_service_refreshes_managed_queries_without_an_editor_change() {
+    let temp = TempDir::new().unwrap();
+    let library = temp.path().join("library");
+    let project = temp.path().join("project");
+    std::fs::create_dir(&library).unwrap();
+    std::fs::create_dir(&project).unwrap();
+    let first = "export { answer }; def answer() -> int = { 42 };";
+    let second = "export { answer }; def answer() -> bool = { 1 == 1 };";
+    let managed_path = library.join("answer.resin");
+    std::fs::write(&managed_path, first).unwrap();
+    let source = "import { \"$/answer.resin\" }; def main() -> int = { answer() };";
+    let mut client = Client::start_with_library_root(&project, Value::Null, Some(&library));
+    let main_uri = uri(&project.join("main.resin"));
+    client.open(&main_uri, source);
+    client.diagnostics(&main_uri, Some(1), false);
+    let position = source.rfind("answer()").unwrap() as u32;
+    let definition = client.request("textDocument/definition", at(&main_uri, 0, position));
+    let old_uri = definition["uri"].as_str().unwrap().to_owned();
+    let old_path = url::Url::parse(&old_uri).unwrap().to_file_path().unwrap();
+    assert_eq!(std::fs::read_to_string(&old_path).unwrap(), first);
+
+    std::fs::write(&managed_path, second).unwrap();
+    client
+        .service
+        .restart(|config, _| config.library_root = library.clone());
+    let hover = client.request("textDocument/hover", at(&main_uri, 0, position));
+    assert!(hover.to_string().contains("bool"), "{hover}");
+    client.diagnostics(&main_uri, Some(1), true);
+    let definition = client.request("textDocument/definition", at(&main_uri, 0, position));
+    let new_uri = definition["uri"].as_str().unwrap();
+    assert_ne!(new_uri, old_uri);
+    let new_path = url::Url::parse(new_uri).unwrap().to_file_path().unwrap();
+    assert_eq!(std::fs::read_to_string(new_path).unwrap(), second);
+    assert_eq!(std::fs::read_to_string(old_path).unwrap(), first);
+    assert!(
+        !project.join("main.resin").exists(),
+        "unsaved editor source stays in memory"
+    );
     client.stop();
 }

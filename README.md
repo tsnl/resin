@@ -69,10 +69,23 @@ From a checkout on Linux or macOS, use the development shell:
 
 ```sh
 nix-shell
+cargo build -p resin -p resin-server -p resin-runtime
+./target/debug/resin-server --listen 127.0.0.1:7412
+```
+
+In a second development shell, select that service explicitly:
+
+```sh
+export RESIN_SERVER=http://127.0.0.1:7412
 cargo run -- examples/eg001.resin
 ```
 
-With a compatible Vulkan GPU and a desktop display, try the particle demo:
+The service compiles uploaded sources; `resin` downloads and runs the executable
+locally. Build/run and editor sessions require `RESIN_SERVER`; formatting stays local.
+See the [compiler service guide](doc/compiler-service.md) for configuration, native
+tool requirements, pinned dependencies, Docker, and manual systemd setup.
+
+With a compatible Vulkan GPU and a desktop display on the client, try the particle demo:
 
 ```sh
 cargo run -- examples/particles.resin
@@ -84,8 +97,10 @@ building executables, and GPU programming. [Zed](editors/zed/README.md) and
 navigation, and formatting.
 
 The compiler phases are reusable async Rust libraries with immutable source graphs,
-completed-result caches, and bounded execution. The CLI and stdio LSP call the phases
-explicitly. Native build outputs retain independent lifetimes across later builds.
+completed-result caches, and bounded execution. The HTTP server sequences the phases
+explicitly and shares results across independent CLI and editor callers. The client owns
+local source capture, formatting, stdio LSP, and execution of verified downloads.
+Native build outputs retain independent lifetimes across later builds.
 See the [compiler architecture](doc/architecture.md) for APIs and ownership guarantees,
 and the [repository tour](TOUR.md) for the code layout.
 

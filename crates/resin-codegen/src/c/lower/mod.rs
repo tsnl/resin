@@ -23,7 +23,11 @@ struct Slot {
     live: Option<String>,
 }
 
-pub fn generate(checked: Verified<'_>, entry: &str) -> Result<crate::c::CModule, Error> {
+pub fn generate(
+    checked: Verified<'_>,
+    entry: &str,
+    headers: &crate::NativeHeaders,
+) -> Result<crate::c::CModule, Error> {
     let module = checked.module();
     let analysis = checked.analysis();
     let types = Types::new(module, &analysis.types);
@@ -35,8 +39,9 @@ pub fn generate(checked: Verified<'_>, entry: &str) -> Result<crate::c::CModule,
         .filter(|(i, _)| module.functions[*i].profile == resin_lir::Profile::Host)
         .map(|(i, flow)| function::lower(&types, i, flow))
         .collect::<Result<_, _>>()?;
+    let (includes, native_includes) = includes(module, headers);
     Ok(crate::c::CModule {
-        includes: includes(module),
+        includes,
         assertions: host_assertions(),
         declarations: types.declarations(),
         local_includes: module
@@ -44,6 +49,7 @@ pub fn generate(checked: Verified<'_>, entry: &str) -> Result<crate::c::CModule,
             .iter()
             .filter(|(_, shader)| shader.embedded)
             .map(|(&function, _)| crate::shader_header(function))
+            .chain(native_includes)
             .collect(),
         prototypes: (0..module.functions.len())
             .filter(|&i| module.functions[i].profile == resin_lir::Profile::Host)
@@ -55,33 +61,47 @@ pub fn generate(checked: Verified<'_>, entry: &str) -> Result<crate::c::CModule,
     })
 }
 
-fn includes(module: &Module) -> Vec<String> {
-    let mut headers: Vec<String> = [
-        "resin_runtime.h",
-        "stddef.h",
-        "stdio.h",
-        "stdlib.h",
-        "math.h",
-        "float.h",
-        "string.h",
+fn includes(module: &Module, bindings: &crate::NativeHeaders) -> (Vec<String>, Vec<String>) {
+    let mut system = [
+        "stddef.h", "stdio.h", "stdlib.h", "math.h", "float.h", "string.h",
     ]
     .into_iter()
     .map(String::from)
-    .collect();
-    let foreign: std::collections::BTreeSet<_> = module
-        .foreign_headers
-        .iter()
-        .map(ToString::to_string)
-        .chain(
-            module
-                .functions
-                .iter()
-                .filter(|f| f.profile == resin_lir::Profile::Host)
-                .filter_map(|f| f.foreign.as_ref().map(|f| f.header.to_string())),
-        )
-        .collect();
-    headers.extend(foreign);
-    headers
+    .collect::<Vec<_>>();
+    let mut staged = Vec::new();
+    let runtime = bindings
+        .runtime
+        .clone()
+        .unwrap_or_else(|| crate::NativeInclude::System {
+            spelling: "resin_runtime.h".into(),
+        });
+    let foreign = module.foreign_headers.iter().chain(
+        module
+            .functions
+            .iter()
+            .filter(|function| function.profile == resin_lir::Profile::Host)
+            .filter_map(|function| function.foreign.as_ref().map(|foreign| &foreign.header)),
+    );
+    let includes = std::iter::once(runtime).chain(foreign.map(|header| {
+        bindings
+            .bindings
+            .get(header)
+            .cloned()
+            .unwrap_or_else(|| crate::NativeInclude::System {
+                spelling: header.spelling.clone(),
+            })
+    }));
+    for include in includes {
+        match include {
+            crate::NativeInclude::System { spelling } => system.push(spelling.to_string()),
+            crate::NativeInclude::Staged { path } => staged.push(path.to_string()),
+        }
+    }
+    system.sort();
+    system.dedup();
+    staged.sort();
+    staged.dedup();
+    (system, staged)
 }
 
 fn host_assertions() -> Vec<(String, String)> {

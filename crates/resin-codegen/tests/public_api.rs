@@ -13,6 +13,7 @@ async fn generate(
     resin_codegen::generate(
         checked.clone(),
         entry.map(str::to_owned),
+        Arc::new(resin_codegen::NativeHeaders::default()),
         parent,
         &resin_executor::Execution::default(),
         &resin_executor::Cancellation::new(),
@@ -75,7 +76,10 @@ fn embedded_module() -> Module {
 async fn declared_headers_are_emitted_without_foreign_function_references() {
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut module = module();
-    module.foreign_headers.insert("standalone/header.h".into());
+    module.foreign_headers.insert(resin_lir::ForeignHeader {
+        source: SourceId::new("native.resin"),
+        spelling: "standalone/header.h".into(),
+    });
     assert!(
         module
             .functions
@@ -265,6 +269,7 @@ async fn build_graph_orders_shader_optimization_embedding_and_c_compilation() {
         serde_json::json!({
             "translation_units": [{ "source": "main.c", "preprocessed": "main.i" }],
             "c_flags": [],
+            "restrict_header_paths": false,
             "preprocessing_flags": [],
             "generated_prerequisites": ["shader_1.h"],
         })
@@ -302,6 +307,7 @@ async fn parallel_generations_and_retained_clones_own_independent_files() {
         resin_codegen::generate(
             checked.clone(),
             Some("main".into()),
+            Arc::new(resin_codegen::NativeHeaders::default()),
             parent.path(),
             &execution,
             &cancellation,
@@ -342,6 +348,7 @@ async fn cancellation_while_queued_creates_no_generation_directory() {
     let mut future = Box::pin(resin_codegen::generate(
         Arc::new(VerifiedModule::new(module()).unwrap()),
         Some("main".into()),
+        Arc::new(resin_codegen::NativeHeaders::default()),
         parent.path(),
         &execution,
         &cancellation,
@@ -358,4 +365,135 @@ async fn cancellation_while_queued_creates_no_generation_directory() {
     drop(permit);
     execution.wait_idle().await;
     assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0);
+}
+
+#[tokio::test]
+async fn supplied_native_files_and_source_scoped_bindings_are_owned_and_complete() {
+    use resin_codegen::{NativeHeaders, NativeInclude};
+    let mut module = module();
+    let left = resin_lir::ForeignHeader {
+        source: SourceId::new("left.resin"),
+        spelling: "same.h".into(),
+    };
+    let right = resin_lir::ForeignHeader {
+        source: SourceId::new("right.resin"),
+        spelling: "same.h".into(),
+    };
+    module.foreign_headers.extend([left.clone(), right.clone()]);
+    let checked = Arc::new(VerifiedModule::new(module).unwrap());
+    let headers = Arc::new(NativeHeaders {
+        files: [
+            (
+                "native/left/same.h".into(),
+                Arc::<[u8]>::from(b"/* left */\n".as_slice()),
+            ),
+            (
+                "native/right/same.h".into(),
+                Arc::<[u8]>::from(b"/* right */\n".as_slice()),
+            ),
+        ]
+        .into(),
+        bindings: [
+            (
+                left,
+                NativeInclude::Staged {
+                    path: "native/left/same.h".into(),
+                },
+            ),
+            (
+                right,
+                NativeInclude::Staged {
+                    path: "native/right/same.h".into(),
+                },
+            ),
+        ]
+        .into(),
+        include_directories: vec!["native/left".into(), "native/right".into()],
+        runtime: None,
+    });
+    let parent = TempDir::new().unwrap();
+    let generated = resin_codegen::generate(
+        checked,
+        Some("main".into()),
+        headers.clone(),
+        parent.path(),
+        &resin_executor::Execution::default(),
+        &resin_executor::Cancellation::new(),
+    )
+    .await
+    .unwrap();
+    drop(headers);
+    let c = fs::read_to_string(generated.c_source().unwrap()).unwrap();
+    assert!(c.contains("#include \"native/left/same.h\""));
+    assert!(c.contains("#include \"native/right/same.h\""));
+    assert_eq!(
+        fs::read(generated.directory().join("native/left/same.h")).unwrap(),
+        b"/* left */\n"
+    );
+    let metadata: serde_json::Value = serde_json::from_slice(
+        &fs::read(generated.directory().join("native-inputs.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        metadata["preprocessing_flags"],
+        serde_json::json!(["-Inative/left", "-Inative/right"])
+    );
+}
+
+#[tokio::test]
+async fn unsafe_native_paths_fail_before_publishing_a_generation() {
+    use resin_codegen::NativeHeaders;
+    for path in [
+        "../escape.h",
+        "main.c",
+        "native/../escape.h",
+        "native/C:/escape.h",
+        "native/NUL.h",
+        "native/folder/CoM9.data",
+    ] {
+        let parent = TempDir::new().unwrap();
+        let headers = Arc::new(NativeHeaders {
+            files: [(path.into(), Arc::<[u8]>::from(b"".as_slice()))].into(),
+            ..Default::default()
+        });
+        let result = resin_codegen::generate(
+            Arc::new(VerifiedModule::new(module()).unwrap()),
+            Some("main".into()),
+            headers,
+            parent.path(),
+            &resin_executor::Execution::default(),
+            &resin_executor::Cancellation::new(),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0);
+    }
+}
+
+#[tokio::test]
+async fn native_file_and_directory_case_aliases_are_rejected() {
+    for paths in [
+        ["native/left.h", "native/LEFT.h"],
+        ["native/A/x.h", "native/a/y.h"],
+    ] {
+        let parent = TempDir::new().unwrap();
+        let headers = Arc::new(resin_codegen::NativeHeaders {
+            files: paths
+                .into_iter()
+                .map(|path| (path.into(), Arc::<[u8]>::from(b"".as_slice())))
+                .collect(),
+            ..Default::default()
+        });
+        let result = resin_codegen::generate(
+            Arc::new(VerifiedModule::new(module()).unwrap()),
+            Some("main".into()),
+            headers,
+            parent.path(),
+            &resin_executor::Execution::default(),
+            &resin_executor::Cancellation::new(),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0);
+    }
 }

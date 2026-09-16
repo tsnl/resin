@@ -1,4 +1,5 @@
 //! Concrete expressions consumed by storage lowering, one function at a time.
+use crate::Foreign;
 use resin_hir::BindingId;
 use resin_source::prelude::*;
 use resin_types::prelude::*;
