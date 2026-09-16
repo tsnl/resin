@@ -1153,3 +1153,18 @@ fn restarted_service_refreshes_managed_queries_without_an_editor_change() {
     );
     client.stop();
 }
+
+#[test]
+fn diagnostic_messages_are_single_line() {
+    let temp = TempDir::new().unwrap();
+    let mut client = Client::start(temp.path(), Value::Null);
+    let file = uri(&temp.path().join("diagnostic.resin"));
+    client.open(&file, "def main() = { var value: int = \"text\"; };");
+    let diagnostics = client.diagnostics(&file, Some(1), true);
+    for diagnostic in diagnostics.as_array().unwrap() {
+        let message = diagnostic["message"].as_str().unwrap();
+        assert!(!message.contains(['\n', '\r']), "{message}");
+        assert!(!message.is_empty());
+    }
+    client.stop();
+}
