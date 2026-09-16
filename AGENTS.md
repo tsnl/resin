@@ -292,6 +292,15 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   same declaration lookup, argument checking, and editor analysis as source methods;
   register their signatures and intrinsic operations in `crates/resin-hir/src/lower/context.rs`.
   HIR construction recognizes `drop` as a hook; direct calls remain ordinary calls.
+- Structs overload operators with dunder methods such as `__add__`, `__neg__`, and
+  `__eq__`. Binary dispatch uses the left operand; unary dispatch uses its operand.
+  The first parameter is the owning struct by value. Operators inherit owner type
+  parameters and cannot add method-local binders. Comparisons and `__not__` return
+  `bool`; other operands and results may differ. Dunder methods remain callable
+  and referenceable by name. HIR retains explicit operator namespace keys and
+  dependent signature queries; specialization selects primitives or ordinary source
+  calls before storage lowering. Keep evaluation order and ordinary copying/cleanup.
+  See `doc/methods.md` for the complete mapping and reserved behavior.
 - Libraries declare low-level compiler operations with `intrinsic "operation" def name<T>(...) -> Type;`.
   Validate each signature against an explicit primitive contract during HIR construction.
   Intrinsic functions use ordinary module lookup and generic calls; retain their source

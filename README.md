@@ -22,10 +22,10 @@ easier to reuse:
   Share the functions and data types, then choose where the work runs.
 - **Portability across backends.** Vulkan today, with Metal and eventually WebGPU
   as future directions. The aim is to carry useful libraries across graphics APIs.
-- **A language you enjoy using every day.** Type inference, methods, `Result` and
-  `?`, automatic resource cleanup, C interop, a formatter, and editor support make
-  room for application code and tools alongside the graphics work. Systems
-  programming should feel direct, ergonomic, and fun.
+- **A language you enjoy using every day.** Type inference, methods, operator
+  overloading, `Result` and `?`, automatic resource cleanup, C interop, a formatter,
+  and editor support make room for application code and tools alongside the
+  graphics work. Systems programming should feel direct, ergonomic, and fun.
 
 Resin is early and evolving. CPU compilation and Vulkan compute and rendering work
 today; the middleware ecosystem above is a goal, and native Metal and WebGPU
