@@ -345,6 +345,13 @@ impl Completion<'_> {
                     &Ident::new(name.clone(), *name_span),
                     args,
                 )?,
+                Some(ResolvedMethod::Intrinsic { signature, .. }) => {
+                    let result = self
+                        .solver
+                        .require_complete(&signature.result, source.span)?;
+                    let kind = self.intrinsic_method(signature, None, None, args, source.span)?;
+                    self.convert_method_result(source, result, kind)?
+                }
                 None => self.builtin(source, name, args)?,
                 _ => unreachable!("operator resolution"),
             },

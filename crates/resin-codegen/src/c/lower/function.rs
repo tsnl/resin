@@ -462,8 +462,14 @@ fn instruction(
             types.name(result.unwrap()),
             args[0].expr
         ),
-        Instr::OwnerAllocate { element } => {
-            let owner = allocate_span(types, temp, element, args, out);
+        Instr::OwnerAllocate { element } | Instr::OwnerCreate { element } => {
+            let initial = &args.last().unwrap().expr;
+            let count = if matches!(instr, Instr::OwnerCreate { .. }) {
+                None
+            } else {
+                Some(args[0].expr.as_str())
+            };
+            let owner = allocate_span(types, temp, element, count, initial, out);
             let ty = result.unwrap();
             let present = variant(types, ty, &Case::Type(ty.without_none().unwrap()), &owner);
             let absent = variant(types, ty, &Case::Type(Ty::None), "0");
@@ -814,13 +820,14 @@ fn project(types: &Types<'_>, source: &Slot, index: &str, dynamic: bool) -> Resu
     Ok(if pointer { format!("&({expr})") } else { expr })
 }
 
-// The argument remains owned until every element has received an ordinary copy.
-// Copies cannot fail; allocation completes before any element is initialized.
+// Repeated allocation copies its initializer. Single-value allocation transfers
+// it on success and destroys it on failure; the instruction owns that cleanup.
 fn allocate_span(
     types: &Types<'_>,
     temp: &str,
     element: &Ty,
-    args: &[Slot],
+    repeated_count: Option<&str>,
+    initial: &str,
     out: &mut String,
 ) -> String {
     let owner = format!("{temp}_allocated");
@@ -830,7 +837,7 @@ fn allocate_span(
     } else {
         "NULL".into()
     };
-    let count = &args[0].expr;
+    let count = repeated_count.unwrap_or("1");
     writeln!(out, "  ResinArc *{owner} = resin_arc_span_try_new({count}, sizeof({element_name}), _Alignof({element_name}), {destroy});").unwrap();
     writeln!(out, "  if ({owner}) {{").unwrap();
     writeln!(
@@ -846,10 +853,19 @@ fn allocate_span(
     writeln!(
         out,
         "    for (uint64_t i = 0; i < {temp}_length; ++i) {temp}_data[i] = {};",
-        types.copy(element, &args[1].expr)
+        if repeated_count.is_some() {
+            types.copy(element, initial)
+        } else {
+            initial.into()
+        }
     )
     .unwrap();
     out.push_str("  }\n");
+    if repeated_count.is_none() && element.needs_drop(&types.module.types) {
+        out.push_str("  else {\n");
+        types.drop_value(element, initial, out);
+        out.push_str("  }\n");
+    }
     owner
 }
 

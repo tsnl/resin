@@ -43,6 +43,9 @@ pub(super) enum MethodTarget {
     Primitive {
         symbol: std::sync::Arc<str>,
     },
+    Intrinsic {
+        op: Intrinsic,
+    },
 }
 
 impl Substitution {
@@ -218,6 +221,18 @@ impl Substitution {
                 }
             }
             if let Some(symbol) = &lookup.primitive {
+                if explicit.is_none()
+                    && let Some(candidate) = primitive_operation(symbol, &args)
+                {
+                    let compatible = candidate.params.iter().zip(&args).all(|(param, arg)| {
+                        let param = value_type(param);
+                        let arg = value_type(arg);
+                        matches!((materialize(arg, instances), materialize(param, instances)), (Ok(arg), Ok(param)) if arg.widens_to(&param))
+                    });
+                    if compatible {
+                        matches.push(candidate);
+                    }
+                }
                 let types = args
                     .iter()
                     .map(|arg| materialize(value_type(arg), instances))
@@ -867,4 +882,65 @@ fn match_parameter(
         | Type::Union { .. } => true,
         _ => pattern == value,
     }
+}
+
+fn primitive_operation(name: &str, arguments: &[resin_hir::Type]) -> Option<ResolvedMethod> {
+    use resin_hir::Type;
+    let first = value_type(arguments.first()?);
+    let (op, params, result) = match (name, first) {
+        ("replace", Type::Pointer { pointee }) => (
+            Intrinsic::Replace,
+            vec![first.clone(), *pointee.clone()],
+            *pointee.clone(),
+        ),
+        ("at", Type::Array { element, .. }) => (
+            Intrinsic::Index,
+            vec![
+                Type::Reference {
+                    referent: Box::new(first.clone()),
+                },
+                Type::UInt64,
+            ],
+            Type::Reference {
+                referent: element.clone(),
+            },
+        ),
+        ("at", Type::Str) => (
+            Intrinsic::Index,
+            vec![Type::Str, Type::UInt64],
+            Type::Reference {
+                referent: Box::new(Type::UInt8),
+            },
+        ),
+        ("dispatch_native", Type::GpuArguments) => (
+            Intrinsic::GpuArgumentsDispatch,
+            vec![
+                Type::GpuArguments,
+                Type::Pointer {
+                    pointee: Box::new(Type::UInt8),
+                },
+                Type::UInt32,
+                Type::UInt32,
+                Type::UInt32,
+            ],
+            Type::Int32,
+        ),
+        ("draw_native", Type::GpuArguments) => (
+            Intrinsic::GpuArgumentsDraw,
+            vec![
+                Type::GpuArguments,
+                Type::Pointer {
+                    pointee: Box::new(Type::UInt8),
+                },
+                Type::UInt32,
+            ],
+            Type::Int32,
+        ),
+        _ => return None,
+    };
+    (params.len() == arguments.len()).then_some(ResolvedMethod {
+        target: MethodTarget::Intrinsic { op },
+        params,
+        result,
+    })
 }

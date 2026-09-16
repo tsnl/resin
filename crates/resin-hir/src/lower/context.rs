@@ -310,6 +310,30 @@ pub(crate) struct IntrinsicMethod {
     pub result: super::infer::Type,
 }
 
+pub(crate) fn is_primitive_operation(name: &str) -> bool {
+    matches!(name, "at" | "replace" | "dispatch_native" | "draw_native")
+}
+
+pub(crate) fn primitive_operation(
+    name: &str,
+    arguments: &[super::infer::Type],
+    solver: &super::infer::Solver,
+) -> Option<IntrinsicMethod> {
+    use super::infer::{Head, Type};
+    let receiver = solver.head(arguments.first()?);
+    let receiver = match receiver {
+        Type::Node(Head::Reference, parts) => solver.head(&parts[0]),
+        other => other,
+    };
+    let (_, mut signature) = intrinsic_methods(&receiver, solver)
+        .into_iter()
+        .find(|(candidate, _)| *candidate == name)?;
+    if signature.op == Intrinsic::Index && matches!(receiver, Type::Node(Head::Array(_), _)) {
+        signature.params[0] = Type::reference(receiver);
+    }
+    Some(signature)
+}
+
 pub(crate) fn intrinsic_methods(
     receiver: &super::infer::Type,
     solver: &super::infer::Solver,
@@ -423,6 +447,11 @@ pub(super) fn primitive_signature(
             Intrinsic::PointerBytes,
             vec![pointer(element.clone()), Type::UInt64],
             super::types::ty(&Ty::byte_span()),
+        ),
+        ("owner_create", [element]) => (
+            Intrinsic::OwnerCreate,
+            vec![element.clone()],
+            optional(Type::StrongOwner),
         ),
         ("owner_allocate", [element]) => (
             Intrinsic::OwnerAllocate,

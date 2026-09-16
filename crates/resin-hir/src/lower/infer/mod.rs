@@ -1927,6 +1927,7 @@ impl Inference<'_> {
         let args = args.as_deref();
         if candidates.is_empty()
             && let (Some(symbol), Some(args)) = (primitive, args)
+            && !super::context::is_primitive_operation(symbol)
         {
             return self.constraint(
                 owner,
@@ -1998,29 +1999,29 @@ impl Inference<'_> {
                 Ok(application)
             })();
             if let Ok(application) = matched {
-                viable.push((Some(application), self.solver.clone(), true));
+                viable.push((Some(application), None, self.solver.clone(), true));
             }
         }
         self.solver = baseline.clone();
-        if let (Some(symbol), Some(args)) = (primitive, args)
-            && let Ok(complete) = self.constraint(
-                owner,
-                &Constraint::Builtin(symbol.clone(), args.to_vec(), out.clone()),
-                span,
-            )
+        if primitive.is_some()
+            && args.is_some()
+            && let Ok((operation, complete)) = self.primitive_overload(owner, lookup, span)
         {
             let context = expected
                 .as_ref()
                 .map_or(Ok(true), |expected| self.solver.coerce(out, expected, span));
             if let Ok(context) = context {
-                viable.push((None, self.solver.clone(), complete && context));
+                viable.push((None, operation, self.solver.clone(), complete && context));
             }
         }
         self.solver = baseline;
         if viable.len() == 1 {
-            let (application, solver, complete) = viable.pop().unwrap();
+            let (application, operation, solver, complete) = viable.pop().unwrap();
             self.solver = solver;
             let Some(application) = application else {
+                if complete && let Some(operation) = operation {
+                    self.methods.insert(owner, operation);
+                }
                 return Ok(complete);
             };
             self.applications.insert(owner, application.clone());
@@ -2043,6 +2044,41 @@ impl Inference<'_> {
                     viable.len()
                 )
             },
+        ))
+    }
+
+    fn primitive_overload(
+        &mut self,
+        owner: Rule,
+        lookup: &Overload,
+        span: Span,
+    ) -> Result<(Option<ResolvedMethod>, bool)> {
+        let name = lookup.primitive.as_ref().expect("primitive candidate");
+        let args = lookup.args.as_ref().expect("primitive operands");
+        if !super::context::is_primitive_operation(name) {
+            let complete = self.constraint(
+                owner,
+                &Constraint::Builtin(name.clone(), args.clone(), lookup.out.clone()),
+                span,
+            )?;
+            return Ok((None, complete));
+        }
+        if lookup.type_args.is_some() {
+            return Err(error(
+                span,
+                "primitive operations infer their type arguments",
+            ));
+        }
+        let signature = super::context::primitive_operation(name, args, &self.solver)
+            .ok_or_else(|| error(span, "no primitive operation matches these operands"))?;
+        let arguments = self.arguments(args, &signature.params, span)?;
+        let result = self.solver.unify(&signature.result, &lookup.out, span)?;
+        Ok((
+            Some(ResolvedMethod::Intrinsic {
+                signature,
+                receiver_conversion: None,
+            }),
+            arguments && result,
         ))
     }
 

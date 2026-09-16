@@ -949,7 +949,8 @@ impl Expression<'_, '_> {
             _ => return None,
         };
         let candidates = self.overload_candidates(name);
-        if candidates.len() < 2 {
+        let primitive = super::context::is_primitive_operation(&name.val).then(|| name.val.clone());
+        if candidates.len() < 2 && primitive.is_none() {
             return None;
         }
         let args = args
@@ -962,7 +963,7 @@ impl Expression<'_, '_> {
                 lookup: super::infer::Overload {
                     name: name.val.clone(),
                     candidates,
-                    primitive: None,
+                    primitive,
                     expected,
                     type_args: explicit,
                     args: Some(args.iter().map(|arg| arg.ty.clone()).collect()),
@@ -1061,7 +1062,6 @@ impl Expression<'_, '_> {
             type_args,
             args,
         } = &term.val
-            && !self.checker.scopes.lookup_overloads(&name.val).is_empty()
         {
             let mut func = resin_ast::Term {
                 span: name.span,

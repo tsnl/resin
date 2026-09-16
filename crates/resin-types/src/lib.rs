@@ -289,6 +289,19 @@ impl Case {
 }
 
 impl Ty {
+    /// Nominal values move. Primitive values and structural aggregates of
+    /// implicitly copyable values may be duplicated by a value read.
+    pub fn copies_implicitly(&self) -> bool {
+        match self {
+            Self::Defined { .. } => false,
+            Self::Array { element, .. } => element.copies_implicitly(),
+            Self::Record { fields } => fields.iter().all(|field| field.ty.copies_implicitly()),
+            Self::Union { variants } => variants.iter().all(Self::copies_implicitly),
+            Self::Error { payload } => payload.copies_implicitly(),
+            _ => true,
+        }
+    }
+
     /// The payload addressed by a primitive pointer. Source owners require explicit access.
     pub fn deref_target(&self) -> Option<&Ty> {
         match self {
@@ -468,6 +481,7 @@ pub enum Intrinsic {
     PointerIndex,
     PointerRange,
     PointerBytes,
+    OwnerCreate,
     OwnerAllocate,
     OwnerData,
     OwnerLength,

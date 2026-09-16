@@ -194,6 +194,9 @@ impl FunctionLowering<'_> {
             Intrinsic::Index => self.emit(Instr::AccessDynamic),
             Intrinsic::GpuArgumentsDispatch => self.emit(Instr::GpuArgumentsDispatch),
             Intrinsic::GpuArgumentsDraw => self.emit(Instr::GpuArgumentsDraw),
+            Intrinsic::OwnerCreate => self.emit(Instr::OwnerCreate {
+                element: args.params[0].clone(),
+            }),
             Intrinsic::OwnerAllocate => self.emit(Instr::OwnerAllocate {
                 element: args.params[1].clone(),
             }),

@@ -106,6 +106,7 @@ pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
         }
         Instr::GpuDispatch { .. } => StackEffect { pops: 6, pushes: 1 },
         Instr::GpuDraw { .. } | Instr::PointerRange => StackEffect { pops: 4, pushes: 1 },
+        Instr::OwnerCreate { .. } => StackEffect { pops: 1, pushes: 1 },
         Instr::PointerBytes | Instr::OwnerAllocate { .. } => StackEffect { pops: 2, pushes: 1 },
         Instr::PointerIndex | Instr::GpuArgumentsDraw => StackEffect { pops: 3, pushes: 1 },
         Instr::GpuArgumentsDispatch => StackEffect { pops: 5, pushes: 1 },

@@ -134,12 +134,12 @@ mod tests {
     #[test]
     fn records_accept_only_value_members() {
         assert!(
-            parse("fn main() -> ()  { let mut x = { T = int }; }")
+            parse("fn main() -> ()  { let mut x = Item { T = int }; }")
                 .root_node()
                 .has_error()
         );
         assert!(
-            parse("fn main() -> ()  { let mut x = { a = 1, T = int }; }")
+            parse("fn main() -> ()  { let mut x = Item { a = 1, T = int }; }")
                 .root_node()
                 .has_error()
         );
@@ -188,8 +188,7 @@ mod tests {
             "fn f (n)  { n }",
             "fn f (n: int) -> int { n };",
             "fn f (n: int): int  { n }",
-            "fn f (n: int) -> int  { n }",
-            "fn f(n: int) -> int { n }",
+            "def f(n: int) -> int = { n };",
             "fn f () -> ()  { include \"runtime.resin\"; }",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
@@ -229,9 +228,9 @@ mod tests {
     #[test]
     fn source_files_only_contain_declarations() {
         for statement in [
-            "var x = 1;",
-            "var x: int;",
-            "x := 2;",
+            "let x = 1;",
+            "let mut x: int;",
+            "x = 2;",
             "f();",
             "();",
             "while (ready) {};",
@@ -250,16 +249,16 @@ mod tests {
     #[test]
     fn keywords_are_reserved_but_intrinsics_remain_identifiers() {
         for keyword in [
-            "export", "import", "extern", "type", "fn", "var", "if", "else", "while", "bool",
-            "sbyte", "short", "int", "long", "ubyte", "ushort", "uint", "ulong", "float32",
+            "export", "import", "extern", "type", "fn", "let", "mut", "if", "else", "while",
+            "bool", "sbyte", "short", "int", "long", "ubyte", "ushort", "uint", "ulong", "float32",
             "float64",
         ] {
             for source in [
                 format!("fn main() -> ()  {{ let mut {keyword} = 1; }}"),
                 format!("fn {keyword} () -> ()  {{}}"),
                 format!("fn f ({keyword}: int) -> ()  {{}}"),
-                format!("type R = {{ {keyword}: int }};"),
-                format!("fn main() -> ()  {{ let mut r = {{ {keyword} = 1 }}; }}"),
+                format!("struct R {{ {keyword}: int }}"),
+                format!("fn main() -> ()  {{ let mut r = R {{ {keyword} = 1 }}; }}"),
                 format!("fn main() -> ()  {{ r.{keyword}; }}"),
                 format!("export {{ {keyword} }};"),
             ] {
@@ -335,7 +334,7 @@ mod tests {
     fn definition_keywords_belong_to_statements_not_fields_or_parameters() {
         for source in [
             "struct FieldsXY<T0, T1> { x: T0, y: T1, }\ntype Point = FieldsXY<int, int>; fn make(x: int) -> Point  { let mut y: int; y = x + 1; Point { x = x, y = y } }",
-            "struct FieldsAB<T0, T1> { a: T0, b: T1, }\nstruct FieldsC<T0> { c: T0; }\nfn main() -> ()  { let mut record = FieldsAB<_, _> { a = { let mut x = 1; x }, b = FieldsC<_> { c = 2 } }; }",
+            "struct FieldsAB<T0, T1> { a: T0, b: T1, }\nstruct FieldsC<T0> { c: T0, }\nfn main() -> ()  { let mut record = FieldsAB<_, _> { a = { let mut x = 1; x }, b = FieldsC<_> { c = 2 } }; }",
             "fn main() -> ()  { type T = int; let mut x = T(1); let mut callback = main; }",
             "extern { \"stdlib.h\": { fn abs(n: int) -> int; } };",
             "fn/* comment */main() -> ()  { let mut/* comment */n = 1; }",
@@ -348,9 +347,7 @@ mod tests {
             "var Point = { x: int };",
             "fn Point = { x: int };",
             "type point = int;",
-            "fn main() -> ()  { x = 1; }",
             "fn main() -> ()  { x: int; }",
-            "fn main() -> ()  { T = int; }",
             "fn main() -> ()  { let mut T = int; }",
             "fn main() -> ()  { fn T = int; }",
             "fn main() -> ()  { type x = 1; }",
@@ -359,7 +356,7 @@ mod tests {
             "var main() -> () = {};",
             "fn f(let mut x: int) -> int  { x }",
             "type R = { let mut x: int };",
-            "fn main() -> ()  { let mut r = { let mut x = 1 }; }",
+            "fn main() -> ()  { let mut r = Item { let mut x = 1 }; }",
             "fn main() -> ()  { let mut r = { x = 1, let mut y = 2 }; }",
             "extern { \"stdlib.h\": { abs(n: int) -> int; } };",
         ] {
@@ -382,7 +379,7 @@ mod tests {
             "fn empty() ->  {}",
             "extern { \"stdlib.h\": { fn free(p: Ptr<ubyte>) ->; } };",
             "fn empty() {};",
-            "fn empty()  {}",
+            "def empty() = {};",
             "type Callback = (int) ->;",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");

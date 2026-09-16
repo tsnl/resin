@@ -420,7 +420,8 @@ impl Specialization<'_, '_> {
                     function,
                     arguments,
                 } => self.request(function, arguments)?,
-                super::substitute::MethodTarget::Primitive { .. } => {
+                super::substitute::MethodTarget::Primitive { .. }
+                | super::substitute::MethodTarget::Intrinsic { .. } => {
                     return Err(
                         self.instance_error("primitive operators cannot be referenced as methods")
                     );
@@ -449,6 +450,16 @@ impl Specialization<'_, '_> {
         self.require_assignable(&result, &expected)?;
         let args = self.call_arguments(arguments, &params)?;
         let (function, arguments) = match operation.target {
+            super::substitute::MethodTarget::Intrinsic { op } => {
+                return Ok(concrete::TermKind::Intrinsic {
+                    op,
+                    type_args: vec![],
+                    args: concrete::Arguments {
+                        params,
+                        values: args,
+                    },
+                });
+            }
             super::substitute::MethodTarget::Source {
                 function,
                 arguments,
@@ -522,6 +533,11 @@ impl Specialization<'_, '_> {
         let mut args: Vec<_> = receiver.into_iter().map(|receiver| *receiver).collect();
         args.extend(self.call_arguments(arguments, &params[offset..])?);
         let (function, arguments) = match method.target {
+            super::substitute::MethodTarget::Intrinsic { .. } => {
+                return Err(
+                    self.instance_error("intrinsic operations require free-function lookup")
+                );
+            }
             super::substitute::MethodTarget::Source {
                 function,
                 arguments,
@@ -877,6 +893,14 @@ impl Specialization<'_, '_> {
             .iter()
             .map(|ty| self.ty(ty))
             .collect::<Result<Vec<_>, _>>()?;
+        if op == Intrinsic::OwnerAllocate
+            && parameters.first().is_some_and(|element| {
+                self.argument(element)
+                    .is_ok_and(|element| !element.copies_implicitly())
+            })
+        {
+            return Err(self.instance_error("repeated allocation requires an implicitly copyable element; use single-value allocation to transfer ownership"));
+        }
         if matches!(
             op,
             Intrinsic::GpuViewRange

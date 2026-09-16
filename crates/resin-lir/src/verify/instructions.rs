@@ -54,8 +54,29 @@ pub(super) fn check_instr(
                 })?
                 .ty
                 .clone();
+            let invalid = || {
+                location.error(VerifyErrorKind::InvalidOwnedField {
+                    local: local.index(),
+                    path: path.clone(),
+                })
+            };
+            if path.is_empty() {
+                return Err(invalid());
+            }
             for index in path {
-                ty = project_static(&module.types, ty, *index, location)?;
+                if matches!(instr, Instr::TakeField { .. })
+                    && let Ty::Defined { definition } = ty
+                    && module
+                        .types
+                        .get(definition.index())
+                        .is_some_and(|definition| definition.drop_hook().is_some())
+                {
+                    return Err(invalid());
+                }
+                let Ty::Record { fields } = shape(&module.types, ty, location)? else {
+                    return Err(invalid());
+                };
+                ty = fields.get(*index).ok_or_else(invalid)?.ty.clone();
             }
             if matches!(instr, Instr::TakeField { .. }) {
                 stack.push(ty);
@@ -64,9 +85,20 @@ pub(super) fn check_instr(
             }
         }
         Instr::WeakEmpty => stack.push(Ty::WeakOwner),
+        Instr::OwnerCreate { element } => {
+            check_type(&module.types, element, location)?;
+            super::rules::check_value(&module.types, element, location)?;
+            expect_type(element.clone(), pop_one(stack, location)?, location)?;
+            stack.push(Ty::union_of([Ty::StrongOwner, Ty::None]));
+        }
         Instr::OwnerAllocate { element } => {
             check_type(&module.types, element, location)?;
             super::rules::check_value(&module.types, element, location)?;
+            if !element.copies_implicitly() {
+                return Err(location.error(VerifyErrorKind::InvalidCopy {
+                    ty: element.clone(),
+                }));
+            }
             let values = pop(stack, 2, location)?;
             expect_types(&[Ty::UInt64, element.clone()], &values, location)?;
             stack.push(Ty::union_of([Ty::StrongOwner, Ty::None]));

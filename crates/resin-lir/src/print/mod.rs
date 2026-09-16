@@ -193,6 +193,7 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
             "forget-local",
             vec![symbol(fn_names.locals[local.index()].as_ref())],
         ),
+        Instr::OwnerCreate { element } => list("owner-create", vec![sexp_ty(names, element)]),
         Instr::OwnerAllocate { element } => list("owner-allocate", vec![sexp_ty(names, element)]),
         Instr::OwnerData { pointee } => list("owner-data", vec![sexp_ty(names, pointee)]),
         Instr::OwnerLength => symbol("owner-length"),

@@ -1,16 +1,15 @@
-export { ArcPtr, ArcSpan, WeakPtr, WeakSpan, arc_ptr_alloc, get, downgrade, arc_span_alloc, weak_ptr_empty, upgrade, weak_span_empty };
+export { ArcPtr, ArcSpan, WeakPtr, WeakSpan, arc_ptr_alloc, get, downgrade, arc_span_alloc, weak_ptr_empty, upgrade, weak_span_empty, clone };
 
 import { "status.resin", "span.resin" };
 
-// The opaque handles retain on ordinary copies and release on destruction.
-// Generic wrappers associate a payload type with those handles in source code.
-// Allocation copies its initializer with the ordinary value rules. For native
-// resource payloads, allocate an inert value and initialize through get().
+// Single-value allocation transfers ownership into the shared allocation.
+// Repeated allocation requires implicitly copyable elements. Explicit clone
+// operations retain the allocation; borrowed views do not extend its lifetime.
 struct ArcPtr<T> {
 	owner: StrongOwner,
 }
 fn arc_ptr_alloc<T>(initial: T) -> (ArcPtr<T> | Err<OutOfMemory>) {
-	match (owner_allocate(1_ul, initial)) {
+	match (owner_create(initial)) {
 		StrongOwner(owner) => {
 			(ArcPtr<T> { owner = owner })
 		},
@@ -86,9 +85,26 @@ fn upgrade<T>(self: Ref<WeakSpan<T>>) -> ArcSpan<T> | None {
 	}
 }
 
+intrinsic "owner_create" fn owner_create<T>(initial: T) -> StrongOwner | None;
 intrinsic "owner_allocate" fn owner_allocate<T>(count: ulong, initial: T) -> StrongOwner | None;
 intrinsic "owner_data" fn owner_data<T>(owner: Ptr<StrongOwner>) -> Ptr<T>;
 intrinsic "owner_length" fn owner_length(owner: Ptr<StrongOwner>) -> ulong;
 intrinsic "owner_downgrade" fn owner_downgrade(owner: Ptr<StrongOwner>) -> WeakOwner;
 intrinsic "owner_upgrade" fn owner_upgrade(owner: Ptr<WeakOwner>) -> StrongOwner | None;
 intrinsic "weak_empty" fn weak_empty() -> WeakOwner;
+
+fn clone<T>(value: Ref<ArcPtr<T>>) -> ArcPtr<T> {
+    ArcPtr<T> { owner = value.owner }
+}
+
+fn clone<T>(value: Ref<ArcSpan<T>>) -> ArcSpan<T> {
+    ArcSpan<T> { owner = value.owner }
+}
+
+fn clone<T>(value: Ref<WeakPtr<T>>) -> WeakPtr<T> {
+    WeakPtr<T> { owner = value.owner }
+}
+
+fn clone<T>(value: Ref<WeakSpan<T>>) -> WeakSpan<T> {
+    WeakSpan<T> { owner = value.owner }
+}

@@ -162,7 +162,10 @@ pub enum Instr {
     GpuArgumentsDispatch,
     /// `[arguments, commands, count] -> [int]`: record a draw with retained arguments.
     GpuArgumentsDraw,
-    /// `[count, initial] -> [StrongOwner | None]`: allocate initialized element storage.
+    /// `[initial] -> [StrongOwner | None]`: move one value into shared storage.
+    /// Allocation failure destroys the consumed initializer.
+    OwnerCreate { element: Ty },
+    /// `[count, initial] -> [StrongOwner | None]`: allocate repeated, implicitly copyable values.
     /// Installs the concrete element destructor; failed allocations publish no owner.
     OwnerAllocate { element: Ty },
     /// `[Ptr<StrongOwner>] -> [Ptr<T>]`: borrow live payload storage.
@@ -620,6 +623,8 @@ pub enum VerifyErrorKind {
     UnsupportedGpuElement { ty: Ty },
     InvalidVariant,
     InvalidDropHook,
+    InvalidCopy { ty: Ty },
+    InvalidOwnedField { local: usize, path: Vec<usize> },
     InvalidTextView,
     InvalidForeignHeader { header: Arc<str> },
     InvalidForeignSignature,

@@ -1,6 +1,37 @@
 mod support;
 
 #[test]
+fn primitive_operations_and_source_overloads_share_free_call_resolution() {
+    let source = r#"
+        export { main };
+        struct Item { value: int }
+        fn at(value: Ref<Item>, index: ulong) -> Ref<int> { value.value }
+        fn first<T>(value: Ref<T>) -> _ { value:at(0_ul) }
+        fn main() -> int {
+            let mut values = [19_i, 23_i];
+            let mut item = Item { value = 42 };
+            at(values, 0_ul) = 20_i;
+            values:at(1_ul) = 22_i;
+            at(item, 0_ul) = first(values) + values:at(1_ul);
+            let old = replace(&item.value, 0_i);
+            assert(old == 42 && item.value == 0);
+            assert(first(values) == 20);
+            0
+        }
+    "#;
+    let module = support::module(source);
+    let output = support::project::Project::new(&module, Some("main"))
+        .unwrap()
+        .run();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn generic_relations_and_operators_select_visible_signatures() {
     let source = r#"
         export { main };
