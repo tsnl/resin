@@ -263,7 +263,7 @@ fn generic_operator_overloads_execute_on_the_gpu() {
                 cell := add(cell, Cell<uint> { value = 40 });
             };
         };
-        def main() -> Result<int, _> = {
+        def main() -> int | Err<_> = {
             var gpu = Gpu.new()?;
             var values = gpu.alloc::<Cell<uint>>(3)?;
             var index = 0_ul;
@@ -275,8 +275,8 @@ fn generic_operator_overloads_execute_on_the_gpu() {
             var commands = gpu.start_command_recording()?;
             commands.dispatch(pipeline, { values = values }, 1_ui, 1_ui, 1_ui)?;
             commands.submit()?;
-            ok(if (values.at(0).load().value == 40 && values.at(1).load().value == 41
-                && values.at(2).load().value == 42) { 0 } else { 1 })
+            if (values.at(0).load().value == 40 && values.at(1).load().value == 41
+                && values.at(2).load().value == 42) { 0 } else { 1 }
         };
     "#;
     let Some(output) = run(source) else { return };
