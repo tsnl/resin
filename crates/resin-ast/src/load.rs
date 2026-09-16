@@ -52,14 +52,71 @@ struct Traversal<'a> {
 
 impl Traversal<'_> {
     fn visit(&mut self, source: Source) -> Result<usize, SourceError> {
-        // Execution discards the candidate after cancellation. Stop graph work promptly.
-        if self.cancellation.is_cancelled() {
-            return Err(SourceError::new(
-                source,
-                None,
-                "source assembly cancelled".into(),
-            ));
+        // Import depth uses heap storage, not one worker-stack frame per module.
+        let mut pending = vec![self.begin(source)?];
+        while let Some(frame) = pending.last_mut() {
+            // Execution discards cancelled candidates; also stop cached-edge work.
+            if self.cancellation.is_cancelled() {
+                return Err(SourceError::new(
+                    frame.module.source.clone(),
+                    None,
+                    "source assembly cancelled".into(),
+                ));
+            }
+            if let Some(import) = frame.module.file.imports.get(frame.next_import).cloned() {
+                frame.next_import += 1;
+                let source = self.resolve(&frame.module, &import);
+                match source {
+                    Ok(source) if self.loaded.contains_key(&source.id()) => {
+                        frame
+                            .module
+                            .imports
+                            .push((import.span, self.loaded[&source.id()]));
+                    }
+                    source => match source.and_then(|source| self.begin(source)) {
+                        Ok(child) => pending.push(child),
+                        Err(mut error) => {
+                            imported_at(&mut error, &frame.module, import.span);
+                            self.diagnostics.push(error);
+                        }
+                    },
+                }
+                continue;
+            }
+            let completed = pending.pop().unwrap();
+            self.active.pop();
+            let id = self.program.modules.len();
+            self.loaded.insert(completed.module.source.id(), id);
+            self.program.modules.push(completed.module);
+            let Some(parent) = pending.last_mut() else {
+                return Ok(id);
+            };
+            let span = parent.module.file.imports[parent.next_import - 1].span;
+            parent.module.imports.push((span, id));
+            for error in &mut self.diagnostics[completed.diagnostics_start..] {
+                imported_at(error, &parent.module, span);
+            }
         }
+        unreachable!("the root module completes the traversal")
+    }
+
+    fn resolve(
+        &self,
+        module: &SourceModule,
+        import: &Spanned<Arc<str>>,
+    ) -> Result<Source, SourceError> {
+        self.inputs
+            .resolve(&module.source.id(), &import.val)
+            .cloned()
+            .ok_or_else(|| {
+                module.error(
+                    import.span,
+                    format!("unresolved source import: {}", import.val),
+                )
+            })
+    }
+
+    fn begin(&mut self, source: Source) -> Result<Frame, SourceError> {
         if self.active.iter().any(|active| active.id() == source.id()) {
             let chain = self
                 .active
@@ -74,15 +131,13 @@ impl Traversal<'_> {
                 format!("cyclic source import: {chain}"),
             ));
         }
-        if let Some(&id) = self.loaded.get(&source.id()) {
-            return Ok(id);
-        }
         let document = self.document(&source)?;
-        let mut module = SourceModule {
+        let module = SourceModule {
             source: source.clone(),
             file: document.file.clone(),
             imports: Vec::new(),
         };
+        let diagnostics_start = self.diagnostics.len();
         self.diagnostics.extend(
             document
                 .errors
@@ -90,13 +145,12 @@ impl Traversal<'_> {
                 .map(|(span, error)| module.error(*span, error)),
         );
         self.documents.insert(source.clone(), document);
-        self.active.push(source.clone());
-        self.visit_imports(&mut module);
-        self.active.pop();
-        let id = self.program.modules.len();
-        self.program.modules.push(module);
-        self.loaded.insert(source.id(), id);
-        Ok(id)
+        self.active.push(source);
+        Ok(Frame {
+            module,
+            next_import: 0,
+            diagnostics_start,
+        })
     }
 
     fn document(&self, source: &Source) -> Result<Arc<ModuleDocument>, SourceError> {
@@ -116,30 +170,12 @@ impl Traversal<'_> {
         }
         Ok(document.clone())
     }
+}
 
-    fn visit_imports(&mut self, module: &mut SourceModule) {
-        for import in &module.file.imports {
-            let start = self.diagnostics.len();
-            let imported = self
-                .inputs
-                .resolve(&module.source.id(), &import.val)
-                .cloned()
-                .ok_or_else(|| {
-                    module.error(
-                        import.span,
-                        format!("unresolved source import: {}", import.val),
-                    )
-                })
-                .and_then(|source| self.visit(source));
-            match imported {
-                Ok(id) => module.imports.push((import.span, id)),
-                Err(error) => self.diagnostics.push(error),
-            }
-            for error in &mut self.diagnostics[start..] {
-                imported_at(error, module, import.span);
-            }
-        }
-    }
+struct Frame {
+    module: SourceModule,
+    next_import: usize,
+    diagnostics_start: usize,
 }
 
 fn imported_at(error: &mut SourceError, importer: &SourceModule, span: Span) {
