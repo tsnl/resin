@@ -41,6 +41,10 @@ pub(super) fn builtin(
         return Err(unsupported());
     }
     let expr = match (name, values.as_slice()) {
+        ("sqrt" | "sin" | "cos", [a]) if matches!(ty, Ty::Float32 | Ty::Float64) => {
+            let suffix = if ty == &Ty::Float32 { "f" } else { "" };
+            format!("{name}{suffix}({a})")
+        }
         ("!", [a]) if ty == &Ty::Bool => format!("!({a})"),
         ("&&" | "||", [a, b]) if ty == &Ty::Bool => format!("({a}) {name} ({b})"),
         ("==" | "!=", [a, b])

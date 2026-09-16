@@ -809,6 +809,27 @@ impl Specialization<'_, '_> {
             }
         }
         let args = self.arguments(args)?;
+        let math = match op {
+            Intrinsic::Sqrt => Some("sqrt"),
+            Intrinsic::Sin => Some("sin"),
+            Intrinsic::Cos => Some("cos"),
+            _ => None,
+        };
+        if let Some(name) = math {
+            if self.instances.profile(self.current) == crate::Profile::Shader {
+                resin_types::shader::builtin_instance(self.instances.typer(), name, &args.params)
+                    .map_err(|message| self.profile_error(message))?;
+            } else {
+                self.instances
+                    .typer()
+                    .builtin_instance(name, &args.params)
+                    .map_err(|error| self.typing_error(error))?;
+            }
+            return Ok(concrete::TermKind::Builtin {
+                name: name.into(),
+                args: args.values,
+            });
+        }
         let builtin = match op {
             Intrinsic::FormatBytes => Some("format_bytes"),
             Intrinsic::StringFromBytes => Some("string_from_bytes"),

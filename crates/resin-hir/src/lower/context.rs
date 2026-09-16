@@ -452,6 +452,15 @@ pub(super) fn primitive_signature(
             vec![pointer(Type::UInt8), Type::UInt64],
             Type::StrongOwner,
         ),
+        ("sqrt" | "sin" | "cos", [element]) => (
+            match operation {
+                "sqrt" => Intrinsic::Sqrt,
+                "sin" => Intrinsic::Sin,
+                _ => Intrinsic::Cos,
+            },
+            vec![element.clone()],
+            element.clone(),
+        ),
         ("format_bytes", [arguments]) => (
             Intrinsic::FormatBytes,
             vec![pointer(Type::UInt8), Type::UInt64, arguments.clone()],

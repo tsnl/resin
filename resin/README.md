@@ -208,3 +208,6 @@ its owner remains live.
 arbitrary raw bytes, including non-UTF-8 data and embedded NULs. Both append a NUL outside the
 logical length. `Window.new(width, height, title)` takes an owned String from either constructor
 or from `fmt`.
+
+`math.resin` exports `sqrt`, `sin`, and `cos` for `float32` and `float64`.
+Angles are radians. Shader calls use `float32`. Negative square roots produce NaN.
