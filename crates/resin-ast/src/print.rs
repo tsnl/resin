@@ -256,6 +256,7 @@ fn sexp_term(term: &Term) -> SExp {
             items.push(sexp_term(tail));
             list_sp("block", term.span, items)
         }
+        TermKind::Bool { value } => symbol(value.to_string()),
         TermKind::None => symbol("None"),
         TermKind::Unit => list_sp("unit", term.span, vec![]),
         TermKind::MethodCall {

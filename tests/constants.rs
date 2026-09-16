@@ -185,3 +185,22 @@ fn constants_lower_to_shader_literals_without_runtime_arithmetic() {
     }
     support::shaders::validate(shader);
 }
+
+#[test]
+fn boolean_literals_work_in_constants_and_runtime_control_flow() {
+    assert_eq!(
+        result(
+            r#"export { main };
+        const yes: bool = true;
+        const no = false;
+        def invert(value: bool) -> bool = { !value };
+        def main() -> int = {
+            var running = true;
+            var count = 0;
+            while (running) { count := count + 1; running := false; };
+            if (yes && !no && invert(false) && count == 1) { 42 } else { 1 }
+        };"#
+        ),
+        42
+    );
+}

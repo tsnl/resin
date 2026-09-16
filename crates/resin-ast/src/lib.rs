@@ -125,6 +125,9 @@ pub enum TermKind {
     },
     Unit,
     None,
+    Bool {
+        value: bool,
+    },
     MethodCall {
         receiver: Box<Term>,
         name: Ident,

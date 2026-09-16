@@ -145,6 +145,9 @@ impl Completion<'_> {
             typed::TermKind::Unit => TermKind::Constant {
                 value: crate::Constant::Unit,
             },
+            typed::TermKind::Bool { value } => TermKind::Constant {
+                value: crate::Constant::Bool { value: *value },
+            },
             typed::TermKind::None => TermKind::Constant {
                 value: crate::Constant::None,
             },

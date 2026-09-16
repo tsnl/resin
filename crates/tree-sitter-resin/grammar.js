@@ -121,6 +121,8 @@ export default grammar({
       "else",
       "while",
       "match",
+      "true",
+      "false",
       ...BUILTIN_TYPES,
       ...TYPE_FORMERS,
     ],
@@ -444,6 +446,8 @@ export default grammar({
       ),
     unit_term: () => prec.dynamic(1, choice(seq("{", "}"), seq("(", ")"))),
 
+    boolean: () => choice("true", "false"),
+
     primary_term: ($) =>
       choice(
         $.sizeof_term,
@@ -451,6 +455,7 @@ export default grammar({
         $.closed_term,
         $.lid,
         $.number,
+        $.boolean,
         $.string,
         $.if_term,
         $.while_term,

@@ -974,6 +974,8 @@ fn builtin_hover(document: &resin_cst::Document, token: resin_cst::Node<'_>) -> 
                 | "GpuArguments"
                 | "Result"
                 | "None"
+                | "true"
+                | "false"
                 | "sizeof"
         )
     {
@@ -1147,6 +1149,8 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
         "None — singleton value and type; T | None permits absence, postfix ! excludes it or traps.",
         DefinitionKind::Type,
     ),
+    ("true", "true — boolean literal", DefinitionKind::Keyword),
+    ("false", "false — boolean literal", DefinitionKind::Keyword),
     ("bool", "bool", DefinitionKind::Type),
     (
         "sbyte",

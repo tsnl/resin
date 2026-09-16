@@ -628,6 +628,12 @@ impl<'a> AstGen<'a> {
                 span,
             ),
             "unary_type" if self.text(child) == "None" => Spanned::new(TermKind::None, span),
+            "boolean" => Spanned::new(
+                TermKind::Bool {
+                    value: self.text(child) == "true",
+                },
+                span,
+            ),
             "number" => Spanned::new(
                 TermKind::Num {
                     value: self.text(child).into(),
