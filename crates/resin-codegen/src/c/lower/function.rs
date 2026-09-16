@@ -170,7 +170,7 @@ fn lower_region(
         if diverged {
             return Ok(statements);
         }
-        let next = lower_exit(
+        let (exit, next) = lower_exit(
             types,
             index,
             block_id,
@@ -178,8 +178,8 @@ fn lower_region(
             stack,
             exit_target,
             loop_target,
-            &mut statements,
         )?;
+        statements.extend(exit);
         let Some(next) = next else {
             return Ok(statements);
         };
@@ -222,8 +222,8 @@ fn lower_exit(
     mut stack: Vec<Slot>,
     exit_target: Option<ExitTarget>,
     loop_target: Option<(usize, usize)>,
-    statements: &mut Vec<CStatement>,
-) -> Result<Option<usize>, Error> {
+) -> Result<(Vec<CStatement>, Option<usize>), Error> {
+    let mut statements = Vec::new();
     let next = match types.module.functions[index].blocks[block].terminator {
         Terminator::Break | Terminator::NextIteration => {
             let (condition, output) = loop_target.expect("verified loop exit");
@@ -347,7 +347,7 @@ fn lower_exit(
             next
         }
     };
-    Ok(next.map(|id| id.index()))
+    Ok((statements, next.map(|id| id.index())))
 }
 
 fn enter_region(

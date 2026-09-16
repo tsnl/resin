@@ -22,7 +22,10 @@ fn assertions_require_boolean_conditions_even_in_unused_functions() {
     let error = support::pipeline::source_module("def unused() = { assert(1); };")
         .unwrap_err()
         .to_string();
-    assert!(error.contains("ExpectedBoolean"), "{error}");
+    assert!(
+        error.contains("TypeMismatch") && error.contains("expected: Bool"),
+        "{error}"
+    );
 }
 
 #[test]
