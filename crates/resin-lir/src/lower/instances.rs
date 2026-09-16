@@ -567,7 +567,10 @@ impl<'a> Instances<'a> {
 
     fn text_view(&mut self, id: TypeId, instance: &Nominal) -> Result<(), LowerError> {
         let source = &self.source.types[instance.definition.index()];
-        let Some(&function) = source.methods.get("repr_bytes") else {
+        let name = resin_hir::MethodName::Named {
+            name: "repr_bytes".into(),
+        };
+        let Some(&function) = source.methods.get(&name) else {
             return Ok(());
         };
         let signature = &self.source.functions[function.index()].signature;
