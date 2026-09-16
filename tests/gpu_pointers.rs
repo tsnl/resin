@@ -653,7 +653,9 @@ fn gpu_view_primitives_preserve_access_bounds_and_alignment_checks() {
             {VIEW_PRIMITIVES}
             fn main() -> (int | Err<_>)  {{
                 let mut view = allocate_ints(2)?;
-                let mut result = [0_i, 0_i];
+                // Keep the host source valid when testing a three-element copy
+                // against the shorter GPU allocation.
+                let mut result = [0_i, 0_i, 0_i];
                 {operation}(0)
             }}
         "#
