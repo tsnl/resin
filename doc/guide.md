@@ -1355,3 +1355,16 @@ is a host operation and limits nested output to 128 levels.
 `Err(value)` or an explicit payload type such as `Err<int>(7)`. Wrappers copy and
 destroy their payload normally, have distinct type identities in unions, and
 may be nested. `repr(Err("message"))` produces `Err("message")`.
+
+Fallible functions return ordinary unions such as `int | Err<str>`. Return a
+plain `int` on success and `Err("message")` on failure. Postfix `?` returns any
+`Err` member immediately, after cleaning up the exited scopes; its value type
+is the union of all remaining members. The enclosing function must admit every
+propagated error. An `Err<_>` result hole collects the least union of error
+payloads, using `Never` if none occur. Mutable pointers remain invariant.
+
+Handle failures with `match (operation()) { int(value) => { ... }, Err(error) =>
+{ ... } }`. `Err(error)` covers all error wrapper members and binds the union
+of their payloads; `Err(_)` discards those payloads. A final `_ => { ... }` can
+handle any remaining members. Explicit `Err<E>(value)` type patterns bind the
+wrapper itself, like other explicit type patterns.

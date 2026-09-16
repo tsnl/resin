@@ -311,14 +311,34 @@ fn widen(context: &mut Context<'_>, from: &Ty, to: &Ty, value: Word) -> Result<W
     if matches!(to, Ty::Union { variants } if variants.contains(from)) {
         return variant(context, to, &Case::Type(from.clone()), value);
     }
+    if let (Ty::Error { payload: source }, Ty::Error { payload: target }) = (from, to) {
+        return widen(context, source, target, value);
+    }
+    if !matches!(from, Ty::Union { .. } | Ty::Result { .. })
+        && let Ty::Union { variants } = to
+    {
+        if let Some(target) = variants
+            .iter()
+            .find(|ty| *ty == from)
+            .or_else(|| variants.iter().find(|ty| from.widens_to(ty)))
+        {
+            let value = widen(context, from, target, value)?;
+            return variant(context, to, &Case::Type(target.clone()), value);
+        }
+    }
     let mut widened = context.zero(to)?;
     for (case, source) in from.payloads().unwrap_or_default() {
-        let Some(target) = to.payload(&case) else {
+        let target = to.payload(&case).map(|ty| (case.clone(), ty)).or_else(|| {
+            to.payloads()?
+                .into_iter()
+                .find(|(_, target)| source.widens_to(target))
+        });
+        let Some((target_case, target)) = target else {
             continue;
         };
         let data = payload(context, from, &case, value)?;
         let data = widen(context, &source, &target, data)?;
-        let constructed = variant(context, to, &case, data)?;
+        let constructed = variant(context, to, &target_case, data)?;
         let test = is_variant(context, from, &case, value)?;
         widened = select(context, to, test, constructed, widened)?;
     }

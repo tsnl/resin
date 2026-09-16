@@ -1049,11 +1049,18 @@ impl Expression<'_, '_> {
             }
             resin_ast::TermKind::Try { value } => {
                 let input = self.child(value, None);
-                let (value, errors) = self.result_parts(&input.ty, span)?;
                 let result = self.checker.result.clone();
-                let (_, target_errors) = self.result_parts(&result, span)?;
-                self.constrain((span, Constraint::Errors(errors, target_errors)));
-                equate = Some(value);
+                if matches!(
+                    self.checker.typing.solver.head(&input.ty),
+                    Type::Node(super::infer::Head::Result, _)
+                ) {
+                    let (value, errors) = self.result_parts(&input.ty, span)?;
+                    let (_, target_errors) = self.result_parts(&result, span)?;
+                    self.constrain((span, Constraint::Errors(errors, target_errors)));
+                    equate = Some(value);
+                } else {
+                    self.constrain((span, Constraint::Try(input.ty.clone(), out.clone(), result)));
+                }
                 TermKind::Try {
                     value: Box::new(input),
                 }
@@ -1068,6 +1075,7 @@ impl Expression<'_, '_> {
                         resin_ast::MatchVariant::Wildcard => (None, Pattern::Ok),
                         resin_ast::MatchVariant::Ok => (None, Pattern::Ok),
                         resin_ast::MatchVariant::Err => (None, Pattern::Err),
+                        resin_ast::MatchVariant::Error => (None, Pattern::Error),
                         resin_ast::MatchVariant::Type(ty) => {
                             let ann = self.annotation(ty, false);
                             let ty = ann.ty.clone();
@@ -1088,6 +1096,7 @@ impl Expression<'_, '_> {
                     });
                     let body = self.child(&arm.body, Some(out.clone()));
                     checked.push(MatchArm {
+                        error: matches!(arm.variant, resin_ast::MatchVariant::Error),
                         wildcard: matches!(arm.variant, resin_ast::MatchVariant::Wildcard),
                         binding,
                         variant,

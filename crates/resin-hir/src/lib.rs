@@ -301,6 +301,10 @@ pub struct GpuProjection {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Case {
+    /// Every Err member, binding the union of their unwrapped payloads.
+    Error {
+        payload: Type,
+    },
     /// Final arm covering any remaining variants after specialization. No binding.
     Wildcard,
     Ok,

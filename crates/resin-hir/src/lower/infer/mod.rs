@@ -533,6 +533,9 @@ impl Solver {
                         .collect()
                 }))
             }
+            // A value read of an unresolved recursive call is an inclusion edge,
+            // not a new payload variant. Preserve the error set's fixed point.
+            Type::Node(Head::Value, parts) => self.error_members(&parts[0], span),
             Type::Node(Head::Atom(ty), _) => {
                 Ok(Some(ty.members().into_iter().map(Type::from).collect()))
             }
@@ -605,18 +608,28 @@ impl Solver {
         }
     }
 
-    fn known_union_members(&self, ty: &Type) -> Option<Vec<Type>> {
+    fn union_parts(&self, ty: &Type) -> Vec<Type> {
         let mut pending = vec![ty.clone()];
         let mut members = vec![];
         while let Some(ty) = pending.pop() {
             match self.head(&ty) {
                 Type::Node(Head::Union, children) => pending.extend(children.into_iter().rev()),
                 Type::Node(Head::Atom(ty @ Ty::Union { .. }), _) => {
-                    pending.extend(ty.members().into_iter().rev().map(Type::from));
+                    pending.extend(ty.members().into_iter().rev().map(Type::from))
                 }
-                Type::Invalid | Type::Variable(_) | Type::Apply { .. } => return None,
-                Type::Node(head, _) if head.determining() => return None,
                 ty => members.push(ty),
+            }
+        }
+        members
+    }
+
+    fn known_union_members(&self, ty: &Type) -> Option<Vec<Type>> {
+        let members = self.union_parts(ty);
+        for member in &members {
+            match member {
+                Type::Invalid | Type::Variable(_) | Type::Apply { .. } => return None,
+                Type::Node(head, _) if head.projection() => return None,
+                _ => {}
             }
         }
         Some(members)
@@ -630,6 +643,17 @@ impl Solver {
             return self.unify(&value, &parts[0], span);
         }
         let from = &value;
+        if let Type::Variable(id) = self.head(to)
+            && self.variables[id].class == Class::Errors
+        {
+            return self.include(from, to, span);
+        }
+        if let Type::Node(Head::Error, source) = self.head(from)
+            && let Some(target) = self.error_target(to)
+        {
+            return self.coerce(&source[0], &target, span);
+        }
+        self.union_context(from, to, span)?;
         if matches!(self.head(to), Type::Node(Head::Union, _)) {
             if let Some(target) = self.resolve(to) {
                 return self.coerce(from, &target.into(), span);
@@ -651,41 +675,6 @@ impl Solver {
                 Ok(self.include(&a[1], &b[1], span)? && value)
             }
             (_, Type::Node(Head::Atom(target @ Ty::Union { .. }), _)) => {
-                // An Err constructor can receive its payload's context from the
-                // sole Err member without guessing among unrelated union members.
-                if matches!(self.head(from), Type::Node(Head::Error, _))
-                    && self.complete(from).is_none()
-                {
-                    let errors: Vec<_> = target
-                        .members()
-                        .into_iter()
-                        .filter(|ty| matches!(ty, Ty::Error { .. }))
-                        .collect();
-                    if let [error] = errors.as_slice() {
-                        self.unify(from, &error.clone().into(), span)?;
-                    }
-                }
-                // Literal context may select one numeric member, but pointers and
-                // other mutable storage remain invariant inside union members.
-                if let Type::Variable(id) = self.head(from) {
-                    let class = self.variables[id].class;
-                    if matches!(class, Class::Number | Class::Float) {
-                        let candidates: Vec<_> = target
-                            .members()
-                            .into_iter()
-                            .filter(|ty| {
-                                if class == Class::Float {
-                                    matches!(ty, Ty::Float32 | Ty::Float64)
-                                } else {
-                                    ty.is_numeric()
-                                }
-                            })
-                            .collect();
-                        if let [ty] = candidates.as_slice() {
-                            self.unify(from, &ty.clone().into(), span)?;
-                        }
-                    }
-                }
                 let Some(source) = self.resolve(from) else {
                     return Ok(self.complete(from).is_some());
                 };
@@ -708,6 +697,92 @@ impl Solver {
             }
             _ => self.unify(from, to, span),
         }
+    }
+
+    fn error_target(&self, to: &Type) -> Option<Type> {
+        match self.head(to) {
+            Type::Node(Head::Error, target) => Some(target[0].clone()),
+            _ => {
+                let members = self.union_parts(to);
+                let errors: Vec<_> = members
+                    .into_iter()
+                    .filter_map(|member| match self.head(&member) {
+                        Type::Node(Head::Error, parts) => Some(parts[0].clone()),
+                        _ => None,
+                    })
+                    .collect();
+                if errors.len() == 1 {
+                    errors.into_iter().next()
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn union_context(&mut self, from: &Type, to: &Type, span: Span) -> Result<()> {
+        let members = self.union_parts(to);
+        self.infer_success_hole(from, &members, span)?;
+        if let Type::Variable(id) = self.head(from) {
+            let class = self.variables[id].class;
+            if matches!(class, Class::Number | Class::Float) {
+                let candidates: Vec<_> = members
+                    .iter()
+                    .filter_map(|member| self.resolve(member))
+                    .filter(|ty| {
+                        if class == Class::Float {
+                            matches!(ty, Ty::Float32 | Ty::Float64)
+                        } else {
+                            ty.is_numeric()
+                        }
+                    })
+                    .collect();
+                if let [candidate] = candidates.as_slice() {
+                    self.unify(from, &candidate.clone().into(), span)?;
+                }
+            }
+        }
+        if members
+            .iter()
+            .any(|member| matches!(self.head(member), Type::Node(Head::Error, _)))
+            && let Some(source) = self.known_union_members(from)
+            && source.len() > 1
+        {
+            for member in source {
+                if matches!(self.head(&member), Type::Node(Head::Error, _)) {
+                    self.coerce(&member, to, span)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn infer_success_hole(&mut self, from: &Type, target: &[Type], span: Span) -> Result<()> {
+        if !target
+            .iter()
+            .any(|ty| matches!(self.head(ty), Type::Node(Head::Error, _)))
+        {
+            return Ok(());
+        }
+        let successes: Vec<_> = target
+            .iter()
+            .filter(|ty| !matches!(self.head(ty), Type::Node(Head::Error, _)))
+            .collect();
+        let [success] = successes.as_slice() else {
+            return Ok(());
+        };
+        if !matches!(self.head(success), Type::Variable(_)) {
+            return Ok(());
+        }
+        let values: Vec<_> = self
+            .union_parts(from)
+            .into_iter()
+            .filter(|ty| !matches!(self.head(ty), Type::Node(Head::Error, _)))
+            .collect();
+        if !values.is_empty() {
+            self.unify(success, &self.union(values), span)?;
+        }
+        Ok(())
     }
 
     fn variables_in(&self, roots: &[Type]) -> Vec<usize> {
@@ -1246,6 +1321,7 @@ pub(crate) enum Constraint {
     Depends(Type),
     Coerce(Type, Type),
     ExcludeNone(Type, Type),
+    Try(Type, Type, Type),
     Layout(Type),
     SizeOf(Type),
     Errors(Type, Type),
@@ -1276,6 +1352,7 @@ pub(crate) enum Constraint {
 
 #[derive(Clone)]
 pub(crate) enum Pattern {
+    Error,
     Ok,
     Err,
     Type(Type),
@@ -1977,6 +2054,34 @@ impl Inference<'_> {
                 };
                 layout.map_err(|e| error(span, e.to_string()))?;
             }
+            Constraint::Try(input, out, result) => {
+                if let Type::Node(Head::Result, parts) = self.solver.head(input) {
+                    let (_, target) = self.result_parts(owner, result, span)?;
+                    let value = self.solver.unify(out, &parts[0], span)?;
+                    return Ok(self.solver.include(&parts[1], &target, span)? && value);
+                }
+
+                let Some(members) = self.solver.known_union_members(input) else {
+                    return Ok(false);
+                };
+                let mut values = vec![];
+                let mut errors = vec![];
+                for member in members {
+                    if matches!(self.solver.head(&member), Type::Node(Head::Error, _)) {
+                        errors.push(member);
+                    } else {
+                        values.push(member);
+                    }
+                }
+                if errors.is_empty() {
+                    return Err(error(span, "postfix ? requires a type containing Err"));
+                }
+                let mut complete = self.solver.unify(out, &self.solver.union(values), span)?;
+                for error in errors {
+                    complete &= self.solver.coerce(&error, result, span)?;
+                }
+                return Ok(complete);
+            }
             Constraint::ExcludeNone(input, out) => {
                 let Some(members) = self.solver.known_union_members(input) else {
                     return Ok(false);
@@ -2012,6 +2117,22 @@ impl Inference<'_> {
                 }
                 (Type::Node(Head::Result, parts), Pattern::Err) => {
                     return self.solver.unify(out, &parts[1], span);
+                }
+                (_, Pattern::Error) => {
+                    let Some(members) = self.solver.known_union_members(input) else {
+                        return Ok(false);
+                    };
+                    let payloads: Vec<_> = members
+                        .into_iter()
+                        .filter_map(|member| match self.solver.head(&member) {
+                            Type::Node(Head::Error, parts) => Some(parts[0].clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    if payloads.is_empty() {
+                        return Err(error(span, "Err pattern requires an error member"));
+                    }
+                    return self.solver.unify(out, &self.solver.union(payloads), span);
                 }
                 (_, Pattern::Type(ty)) => return self.solver.unify(out, ty, span),
                 _ => return Err(error(span, "match pattern does not belong to this type")),
@@ -2288,6 +2409,7 @@ impl Constraint {
             | Self::ExcludeNone(from, _)
             | Self::Equal(from, _)
             | Self::Coerce(from, _)
+            | Self::Try(from, _, _)
             | Self::Errors(from, _)
             | Self::Layout(from)
             | Self::SizeOf(from)

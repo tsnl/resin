@@ -35,7 +35,7 @@ fn error_wrappers_cannot_hide_reference_payloads() {
             .unwrap_err()
             .to_string();
     assert!(
-        error.contains("Ref") || error.contains("reference"),
+        error.contains("Ref") || error.contains("reference") || error.contains("value types"),
         "{error}"
     );
 }
@@ -76,4 +76,221 @@ fn shaders_preserve_error_wrapper_identity() {
     );
     let project = support::project::Project::new(&module, None).unwrap();
     support::shaders::validate(project.generated.shaders()[0].unoptimized_spirv());
+}
+
+#[test]
+fn plain_success_values_and_builtin_errors_propagate() {
+    let module = module(
+        r#"export { main }; import { "$/string.resin" };
+        def read(fail: bool) -> int | Err<str> = { if (fail) { Err("bad input") } else { 42 } };
+        def work(fail: bool) -> int | Err<_> = { read(fail)? + 1 };
+        def main() -> int | Err<_> = {
+            assert(work(false)? == 43);
+            match (work(true)) {
+                int(_) => { Err("unexpected success") },
+                Err(message) => { print(message); 0 },
+            }
+        };"#,
+    );
+    let output = support::project::Project::new(&module, Some("main"))
+        .unwrap()
+        .run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"bad input");
+}
+
+#[test]
+fn propagated_errors_widen_payloads_and_preserve_owned_values() {
+    let module = module(
+        r#"export { main }; import { "$/string.resin" };
+        def failure() -> int | Err<String> = { Err(String.from_str("owned")) };
+        def wider() -> int | Err<str | String> = { failure()? };
+        def main() -> int = { match (wider()) {
+            int(value) => { value },
+            Err(error) => { print(repr(error)); 0 },
+        } };"#,
+    );
+    let output = support::project::Project::new(&module, Some("main"))
+        .unwrap()
+        .run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"\"owned\"");
+}
+
+#[test]
+fn entry_point_reports_propagated_error_values() {
+    let module = module(
+        r#"export { main };
+        def failure() -> int | Err<str> = { Err("broken") };
+        def main() -> int | Err<_> = { failure()? };"#,
+    );
+    let output = support::project::Project::new(&module, Some("main"))
+        .unwrap()
+        .run();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stderr, b"unhandled error: \"broken\"\n");
+}
+
+#[test]
+fn inferred_errors_collect_across_plain_returns_and_propagation() {
+    let module = module(
+        r#"export { main }; import { "$/string.resin" };
+        def a() -> int | Err<str> = { Err("text") };
+        def b() -> int | Err<int> = { Err(7) };
+        def choose(flag: bool) -> int | Err<_> = { if (flag) { a() } else { b() } };
+        def pass(flag: bool) -> int | Err<_> = { choose(flag)? };
+        def main() -> int = { match (pass(false)) {
+            int(value) => { value },
+            Err(error) => { print(repr(error)); 0 },
+        } };"#,
+    );
+    let output = support::project::Project::new(&module, Some("main"))
+        .unwrap()
+        .run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"7");
+}
+
+#[test]
+fn question_mark_preserves_success_unions_and_destroys_exited_scopes() {
+    let module = module(
+        r#"export { main };
+        struct Resource { trace: Ptr<int>, digit: int,
+            def drop(self: Ptr<Resource>) = { self.trace.* := self.trace.* * 10 + self.digit; };
+        };
+        def fail() -> int | Err<str> = { Err("failure") };
+        def work(trace: Ptr<int>) -> int | Err<str> = {
+            var first = Resource { trace = trace, digit = 1 };
+            { var second = Resource { trace = trace, digit = 2 }; fail()?; };
+            0
+        };
+        def choice() -> int | str | Err<str> = { "value" };
+        def main() -> int | Err<str> = {
+            var trace = 0_i;
+            match (work(&trace)) { int(_) => { assert(false); }, Err(_) => {} };
+            assert(trace == 21);
+            var value = choice()?;
+            match (value) { int(_) => { 1 }, str(_) => { 0 } }
+        };"#,
+    );
+    let output = support::project::Project::new(&module, Some("main"))
+        .unwrap()
+        .run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn one_error_pattern_handles_distinct_error_wrapper_members() {
+    let module = module(
+        r#"export { main }; import { "$/string.resin" };
+        def choice() -> int | Err<str> | Err<int> = { Err<int>(7) };
+        def main() = { match (choice()) {
+            Err(value) => { print(repr(value)) },
+            int(_) => {},
+        } };"#,
+    );
+    let output = support::project::Project::new(&module, Some("main"))
+        .unwrap()
+        .run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"7");
+}
+
+#[test]
+fn shaders_propagate_and_widen_error_payloads() {
+    let module = module(
+        r#"export { kernel };
+        def failure() -> int | Err<int> = { Err(7) };
+        def wider() -> int | Err<int | float32> = { failure()? };
+        @compute_shader def kernel(index: ulong, output: Ptr<int>) = {
+            match (wider()) {
+                int(value) => { output.* := value; },
+                Err(value) => { match (value) { int(code) => { output.* := code; }, float32(_) => {} } },
+            }
+        };"#,
+    );
+    let project = support::project::Project::new(&module, None).unwrap();
+    support::shaders::validate(project.generated.shaders()[0].unoptimized_spirv());
+}
+
+#[test]
+fn propagation_checks_every_error_and_keeps_mutable_pointers_invariant() {
+    for source in [
+        "def fail() -> int | Err<str> = { Err(\"x\") }; def wrong() -> int = { fail()? };",
+        "def fail() -> int | Err<str> = { Err(\"x\") }; def wrong() -> int | Err<int> = { fail()? };",
+        "def wrong(value: Ptr<Err<str>>) -> Ptr<Err<str | int>> = { value };",
+        "def wrong(value: int) = { match (value) { Err(_) => {} } };",
+        "def wrong(value: int | Err<str>) = { match (value) { Err(_) => {}, Err(_) => {}, int(_) => {} } };",
+    ] {
+        assert!(pipeline::source_module(source).is_err(), "{source}");
+    }
+}
+
+#[test]
+fn error_only_paths_and_recursive_error_sets_complete() {
+    let module = module(
+        r#"export { main }; import { "$/string.resin" };
+        def a(n: int) -> int | Err<_> = { if (n == 0) { Err(7_i) } else { b(n - 1)? } };
+        def b(n: int) -> int | Err<_> = { if (n == 0) { Err("text") } else { a(n - 1)? } };
+        def always() -> Err<str> = { Err("always") };
+        def only() -> Err<str> = { always()? };
+        def main() = {
+            match (a(1)) { int(_) => {}, Err(value) => { print(repr(value)) } };
+            match (only()) { Err(value) => { print(value) } };
+        };"#,
+    );
+    let project = support::project::Project::new(&module, Some("main")).unwrap();
+    let output = project.run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"\"text\"always");
+}
+
+#[test]
+fn generic_functions_infer_plain_values_and_error_parameters() {
+    let module = module(
+        r#"export { main };
+        def propagate<T, E>(value: T | Err<E>) -> _ | Err<_> = { value? };
+        def recover<T, E>(value: T | Err<E>, fallback: T) -> T = {
+            match (value) { T(value) => { value }, Err(_) => { fallback } }
+        };
+        def combine<T, E, F>(a: T | Err<E>, b: T | Err<F>) -> T | Err<_> = { a?; b? };
+        def main() = {
+            var first: int | Err<str> = 7;
+            var second: int | Err<int> = Err(9);
+            assert(recover(propagate(first), 0_i) == 7);
+            assert(recover(combine(first, second), 35_i) == 35);
+        };"#,
+    );
+    let output = support::project::Project::new(&module, Some("main"))
+        .unwrap()
+        .run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

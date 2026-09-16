@@ -183,6 +183,7 @@ pub struct MatchArm {
 
 #[derive(Debug, Clone)]
 pub enum MatchVariant {
+    Error,
     Wildcard,
     Ok,
     Err,

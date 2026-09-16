@@ -213,6 +213,7 @@ fn sexp_term(term: &Term) -> SExp {
                     MatchVariant::Wildcard => symbol("_"),
                     MatchVariant::Ok => symbol("ok"),
                     MatchVariant::Err => symbol("err"),
+                    MatchVariant::Error => symbol("Err"),
                     MatchVariant::Type(ty) => sexp_typespec(ty),
                 };
                 list(

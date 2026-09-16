@@ -933,6 +933,10 @@
         "required": true,
         "types": [
           {
+            "type": "Err",
+            "named": false
+          },
+          {
             "type": "None",
             "named": false
           },

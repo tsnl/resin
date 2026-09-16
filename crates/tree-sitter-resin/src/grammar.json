@@ -3295,6 +3295,10 @@
                       {
                         "type": "STRING",
                         "value": "err"
+                      },
+                      {
+                        "type": "STRING",
+                        "value": "Err"
                       }
                     ]
                   }

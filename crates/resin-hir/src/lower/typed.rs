@@ -141,6 +141,7 @@ pub(super) struct Annotation<T = Ty> {
 
 #[derive(Debug, Clone)]
 pub(super) struct MatchArm {
+    pub error: bool,
     pub wildcard: bool,
     pub variant: Option<Annotation<Type>>,
     pub failure: bool,

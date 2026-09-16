@@ -12,7 +12,12 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
         if argc.ty == Ty::Int32 && string_array(&argv.ty) && string_array(&envp.ty));
     if function.foreign.is_some()
         || !(parameters.is_empty() || process_inputs)
-        || !matches!(function.result, Ty::Unit | Ty::Int32 | Ty::Result { .. })
+        || (!matches!(function.result, Ty::Result { .. })
+            && !function
+                .result
+                .members()
+                .iter()
+                .all(|ty| matches!(ty, Ty::Unit | Ty::Int32 | Ty::Error { .. })))
     {
         return Err(Error(format!(
             "entry function `{entry}` must be a Resin function, take () or (int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>), and return int, (), or Result of either"
@@ -28,6 +33,40 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
     } else {
         ""
     };
+    if matches!(function.result, Ty::Union { .. } | Ty::Error { .. }) {
+        let mut out = format!(
+            "{setup}  {} r_result = r_fn{}({argument});\n",
+            types.name(&function.result),
+            id.index()
+        );
+        let mut cleanup = String::new();
+        types.drop_value(&function.result, "r_result", &mut cleanup);
+        for member in function.result.members() {
+            let value = if matches!(function.result, Ty::Union { .. }) {
+                out.push_str(&format!(
+                    "  if (r_result.tag == {}u) {{\n",
+                    types.id(&member)
+                ));
+                format!("r_result.payload.v{}", types.id(&member))
+            } else {
+                out.push_str("  {\n");
+                "r_result".into()
+            };
+            match member {
+                Ty::Error { payload } => {
+                    let descriptor = super::representation::descriptor(types, &payload);
+                    out.push_str(&format!("    resin_report_error(&{descriptor}, &({value}).value);\n{cleanup}    return 1;\n"));
+                }
+                Ty::Unit => out.push_str(&format!("{cleanup}    return 0;\n")),
+                _ => out.push_str(&format!(
+                    "    int code = {value};\n{cleanup}    return code;\n"
+                )),
+            }
+            out.push_str("  }\n");
+        }
+        out.push_str("  resin_fail(\"invalid entry result tag\"); return 1;\n");
+        return Ok(out);
+    }
     if let Ty::Result { value, error } = &function.result {
         if !matches!(value.as_ref(), Ty::Unit | Ty::Int32) {
             return Err(Error(
