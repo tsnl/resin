@@ -29,8 +29,12 @@ mode at 640 × 480 with 256 iterations and one sample per pixel. The build scrip
 starts an isolated loopback compiler service on a free port, then stops it and
 removes its temporary files. This needs the normal native build tools, including
 SPIR-V Tools because the application also contains shaders; it needs no GPU or display.
-The PNG is embedded directly in the introductory HTML, keeping the site portable.
+The PNG is embedded at the top of the Mandelbrot tutorial, keeping the site portable.
 A failed render fails the book build.
+
+The fisheye tutorial uses the checked-in `doc/assets/ray-tracing.png`, rendered by
+`examples/eg013_ray_tracing.resin`; book builds need no ray tracing hardware.
+The first-program illustration shows the console output checked by its test.
 
 ## Generated library reference
 
@@ -48,13 +52,16 @@ changes to refresh generated API text.
 
 ## Executable examples
 
-Tutorial excerpts use mdBook `include` anchors in complete `.resin` files.
-Edit those files, format them, then rebuild the book. Avoid copying source into
-Markdown. Run:
+Each tutorial is one page: a title, an example image, and one mdBook `include`
+of the entire `.resin` file. Put run commands and explanations in source comments,
+beside the code they explain. Keep examples readable as standalone programs;
+keep detailed API contracts in the reference chapters. Edit the source, format
+it, then rebuild the book. Avoid copying code into Markdown. Run:
 
 ```sh
 cargo test --test tutorial
 cargo test --all-features --test mandelbrot --test spirv_execution
+cargo test --features gpu --test ray_tracing
 ```
 
 The first suite compiles and executes the CPU checkpoints, checks their PNG output,

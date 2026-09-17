@@ -86,9 +86,8 @@ encoded = subprocess.check_output([
     str(target / "debug" / ("resin-server" + suffix)),
 ], cwd=root, text=True).strip()
 illustration = (f'<img src="data:image/png;base64,{encoded}" '
-                'alt="Mandelbrot set rendered by the explorer" width="640" height="480">\n\n'
-                '*Rendered by this checkout during the book build: CPU, 640 × 480, '
-                '256 iterations, one sample at each pixel center.*')
+                'alt="Mandelbrot set rendered by the explorer on the CPU at 640 × 480, '
+                '256 iterations, one sample per pixel" width="640" height="480">')
 
 library_chapters(book["items"])
 chapters(book["items"])

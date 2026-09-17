@@ -176,4 +176,4 @@ For background on the graphics API direction, see Sebastian Aaltonen’s
 [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api).
 
 For triangle acceleration structures and ray-generation/miss/closest-hit stages,
-see [Ray tracing pipelines](ray-tracing.md).
+see [Ray tracing pipelines](ray-tracing-pipelines.md).

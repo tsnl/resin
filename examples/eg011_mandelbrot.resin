@@ -1,6 +1,20 @@
-// Mandelbrot explorer. Arrows/WASD pan; scroll or +/- zoom; [/] change
-// the iteration limit; R/Home resets; P saves a screenshot; Escape closes.
-// Use --help for headless output and view options.
+// Build a Mandelbrot explorer
+//
+// Evaluate a complex recurrence at every pixel, color the escape counts, and
+// either save a PNG or explore the image in a window. CPU and GPU execution
+// share the same ordinary functions; only their launch and storage differ.
+//
+// With the compiler service running and RESIN_SERVER set (see Getting started):
+//   cargo run -- examples/eg011_mandelbrot.resin -- --cpu --output mandelbrot.png
+//   cargo run -- examples/eg011_mandelbrot.resin -- --gpu
+//   cargo run -- examples/eg011_mandelbrot.resin:test
+// The first command needs no GPU or display; the second opens a Vulkan window.
+// The third checks known orbits and pixel bounds on the CPU. Program options
+// follow the extra -- separator; use --help for dimensions and view settings.
+//
+// In the window: arrows/WASD pan, scroll or +/- zoom, [/] change the iteration
+// budget, R/Home resets, P saves a screenshot, and Escape closes.
+// Read in order: coordinates and math, pixels, GPU resources, input, then CLI.
 export { main, test };
 
 import {
@@ -14,13 +28,16 @@ import {
 	"$/image.resin",
 	"$/shared.resin",
 	"$/stdio.resin",
-	"mandelbrot/options.resin",
+	"$/argparse.resin",
 };
 
 //
 // Image coordinates and the Mandelbrot recurrence
 //
 
+// A viewport maps image coordinates to the complex plane. span is its vertical
+// extent; using height to scale both axes preserves the image's aspect ratio.
+// The initial center (-0.5, 0) and span 3 show the familiar whole set.
 struct Plot {
 	width: u32,
 	height: u32,
@@ -49,8 +66,15 @@ fn mandelbrot_new(max_iters: i32) -> Mandelbrot {
 	Mandelbrot { max_iters = max_iters }
 }
 
-// Zero means the orbit stayed inside the escape radius for this iteration budget;
-// it is not a proof of membership. Escape requires a magnitude strictly above two.
+// Each pixel supplies a fixed complex c. Starting at z = 0, repeat z = z*z + c.
+// The Mandelbrot set consists of c values whose orbits stay bounded forever.
+// We can only test a finite budget: return the first escape iteration, or zero
+// if none was found. A black pixel is therefore not a proof of membership.
+//
+// Escape requires |z| > 2; compare the squared magnitude to 4 to avoid a square
+// root. The inequality must be strict: c = -2 gives 0, -2, 2, 2, ... and stays.
+// By comparison c = 1 gives 0, 1, 2, 5, ... and escapes after three updates.
+// The same original c is added each time; neighboring pixels have their own orbits.
 fn escape_iterations(self: Mandelbrot, c: Complex<f32>) -> i32 {
 	// Check the first iterate before the interior shortcut can overflow at large coordinates.
 	if (self.max_iters > 0 && c:magnitude_squared() > 4.0) {
@@ -66,7 +90,8 @@ fn escape_iterations(self: Mandelbrot, c: Complex<f32>) -> i32 {
 	let mut n: i32 = 0;
 	let mut a: Complex<f32> = complex(0.0, 0.0);
 	while (n < self.max_iters) {
-		// Value operations compose the same way on host and shader.
+		// x:f(y) means f(x, y): these free functions return new complex values.
+		// f32 fields copy, while let mut allows a and n to be reassigned.
 		a = a:squared():add(c);
 		n = n + 1;
 		if (a:magnitude_squared() > 4.0) {
@@ -99,9 +124,13 @@ fn palette(count: i32) -> Color {
 	}
 }
 
+// One invocation handles up to 32 neighboring pixels. This is a work partition
+// chosen by the application, not a claim that it is optimal for every GPU.
 const pixels_per_segment: u32 = 32;
 
-// ANCHOR: parameters
+// One record shape serves both targets. Span<u8> borrows pixels for evaluation;
+// GpuSpan<u8> retains device storage when the host records a GPU launch. Dispatch
+// checks and projects that owning handle to the span expected by the shader.
 struct Parameters<Buffer> {
 	plot: Plot,
 	solver: Mandelbrot,
@@ -109,9 +138,10 @@ struct Parameters<Buffer> {
 	segment_count: u64,
 	pixels: Buffer,
 }
-// ANCHOR_END: parameters
 
 fn evaluate_pixel(root: Ref<Parameters<Span<u8>>>, x: u32, y: u32) -> Color {
+	// Sample once at the pixel center. Iteration and coloring remain separate so
+	// changing the palette does not change which coordinates escape.
 	let c = root.plot:at(f32(x) + 0.5, f32(y) + 0.5);
 	palette(root.solver:escape_iterations(c))
 }
@@ -121,6 +151,8 @@ fn channel(value: f32) -> u8 {
 }
 
 fn store_pixel(pixels: Span<u8>, index: u64, color: Color) {
+	// A span borrows a pointer and length. at_mut grants writable access to an
+	// element; four consecutive bytes hold red, green, blue, and opaque alpha.
 	pixels:at_mut(index * 4) = channel(color.r);
 	pixels:at_mut(index * 4 + 1) = channel(color.g);
 	pixels:at_mut(index * 4 + 2) = channel(color.b);
@@ -129,7 +161,8 @@ fn store_pixel(pixels: Span<u8>, index: u64, color: Color) {
 
 // Each segment owns up to 32 adjacent pixels in one row. Integer division and
 // remainder recover its origin; the last segment stops at the right edge.
-// ANCHOR: evaluate_segment
+// GPU dispatch rounds up to whole workgroups, so surplus invocations return.
+// Valid segments write disjoint bytes and need no synchronization with each other.
 fn evaluate_segment(segment_index: u64, root: Ref<Parameters<Span<u8>>>) {
 	if (segment_index >= root.segment_count) {
 		return;
@@ -144,7 +177,6 @@ fn evaluate_segment(segment_index: u64, root: Ref<Parameters<Span<u8>>>) {
 		x = x + 1;
 	};
 }
-// ANCHOR_END: evaluate_segment
 
 fn segments_per_row(plot: Plot) -> u64 {
 	(u64(plot.width) + u64(pixels_per_segment) - 1) / u64(pixels_per_segment)
@@ -154,8 +186,8 @@ fn segment_count(plot: Plot) -> u64 {
 	plot:segments_per_row() * u64(plot.height)
 }
 
-// CPU execution calls the same evaluator as the shader wrapper.
-// ANCHOR: dispatch_host
+// CPU execution calls the same evaluator as the shader wrapper below. Ordinary
+// helpers need no shader annotation; the compiler specializes them for each target.
 fn dispatch_host(root: Ref<Parameters<Span<u8>>>) {
 	let mut segment: u64 = 0;
 	while (segment < root.segment_count) {
@@ -163,8 +195,11 @@ fn dispatch_host(root: Ref<Parameters<Span<u8>>>) {
 		segment = segment + 1;
 	};
 }
-// ANCHOR_END: dispatch_host
 
+// ArcSpan owns the host allocation. get() borrows a Span without retaining it,
+// so keep pixels alive until evaluation finishes, then return its owning handle.
+// T | Err<_> is a success/error union; ? returns an error early and otherwise
+// yields T. Scope cleanup releases owners on both normal and error exits.
 fn host_image(plot: Plot, solver: Mandelbrot) -> ArcSpan<u8> | Err<_> {
 	let pixels = arc_span_alloc::<u8>(u64(plot.width) * u64(plot.height) * 4, 0)?;
 	let root = Parameters<_> { plot = plot, solver = solver, start_segment = 0, segment_count = plot:segment_count(), pixels = pixels:get() };
@@ -176,13 +211,16 @@ fn host_image(plot: Plot, solver: Mandelbrot) -> ArcSpan<u8> | Err<_> {
 // GPU execution and presentation helpers
 //
 
-// ANCHOR: compute
+// The compute entry receives a global X invocation index and a root pointer.
+// Dereferencing root gives a place the evaluator can borrow through Ref.
+// Ref permits access without promising an address; Ptr explicitly carries one.
 @compute_shader
 fn compute(segment_index: u64, root: Ptr<Parameters<Span<u8>>>) {
 	evaluate_segment(segment_index, root.*);
 }
-// ANCHOR_END: compute
 
+// Draw one oversized triangle covering the screen, with no vertex buffer.
+// Its interpolated red/green channels carry image coordinates to fragment.
 @vertex_shader
 fn vertex(index: i32) -> Vertex {
 	let x: f32 = if (index == 1) {
@@ -203,6 +241,7 @@ fn vertex(index: i32) -> Vertex {
 
 @fragment_shader
 fn fragment(uv: Color, root: Ptr<Parameters<Span<u8>>>) -> Color {
+	// Read the computed byte buffer back as normalized display colors.
 	let x = u32(uv.r * f32(root.plot.width));
 	let y = u32(uv.g * f32(root.plot.height));
 	let index = (u64(y) * u64(root.plot.width) + u64(x)) * 4;
@@ -214,6 +253,9 @@ fn fragment(uv: Color, root: Ptr<Parameters<Span<u8>>>) -> Color {
 	}
 }
 
+// Group the GPU resources that survive between frames. Both CPU and GPU solvers
+// feed pixels; the graphics pipeline displays it in image for presentation or PNG.
+// Owners release their resources automatically when the renderer leaves scope.
 struct Renderer {
 	gpu: Gpu,
 	graphics: GpuGraphicsPipeline<Parameters<Span<u8>>, GpuPipelineOwner>,
@@ -231,15 +273,20 @@ fn renderer_new(gpu: Gpu, width: u32, height: u32) -> Renderer | Err<_> {
 }
 
 fn resize(self: RefMut<Renderer>, width: u32, height: u32) -> () | Err<_> {
+	// Replace size-dependent storage while retaining the existing pipelines.
 	self.pixels = self.gpu:alloc::<u8>(u64(width) * u64(height) * 4)?;
 	self.image = self.gpu:create_image(width, height)?;
 }
 
 fn parameters(self: Ref<Renderer>, plot: Plot, solver: Mandelbrot, start: u64, count: u64) -> Parameters<GpuSpan<u8>> {
+	// Copying a GPU owner retains its allocation for these launch arguments.
 	Parameters<_> { plot = plot, solver = solver, start_segment = start, segment_count = count, pixels = self.pixels }
 }
 
 fn dispatch_gpu(self: Ref<Renderer>, commands: Ref<GpuCommands>, plot: Plot, solver: Mandelbrot) -> () | Err<_> {
+	// compute_workgroup_size tells us how many invocations each group launches.
+	// Round each batch up to groups; cap it at the portable 65,535 X-group limit.
+	// start_segment lets large images continue in the next batch without overlap.
 	let group_size = self.gpu:compute_workgroup_size();
 	let capacity = 65535 * group_size;
 	let total = plot:segment_count();
@@ -257,7 +304,9 @@ fn dispatch_gpu(self: Ref<Renderer>, commands: Ref<GpuCommands>, plot: Plot, sol
 	};
 }
 
-// ANCHOR: render
+// Interactive CPU rendering uploads its result; GPU rendering writes the device
+// buffer directly. Both then draw through the same graphics pipeline. Include
+// that upload if comparing interactive latency rather than solver throughput.
 fn render(self: Ref<Renderer>, plot: Plot, solver: Mandelbrot, use_gpu: bool) -> () | Err<_> {
 	if (!use_gpu) {
 		let image = host_image(plot, solver)?;
@@ -272,10 +321,12 @@ fn render(self: Ref<Renderer>, plot: Plot, solver: Mandelbrot, use_gpu: bool) ->
 	commands:begin_rendering(self.image, 0.0, 0.0, 0.0, 1.0)?;
 	commands:draw(self.graphics, self:parameters(plot, solver, 0, plot:segment_count()), 3)?;
 	commands:end_rendering()?;
+	// Submission waits for completion, making later readback or presentation safe.
 	commands:submit()?;
 }
-// ANCHOR_END: render
 
+// Four channels select RGBA; zero stride means tightly packed rows. The C-style
+// filename points to NUL-terminated bytes (a literal exposes these through .data).
 fn save_png(path: Ptr<u8>, width: u32, height: u32, pixels: Span<u8>) -> () | Err<_> {
 	image_data_write_pixels(path, width, height, 4, pixels, 0)?;
 	let filename = c_string(path);
@@ -284,7 +335,8 @@ fn save_png(path: Ptr<u8>, width: u32, height: u32, pixels: Span<u8>) -> () | Er
 }
 
 // Read the displayed image in one transfer, including the currently selected view.
-// ANCHOR: screenshot
+// Copy the presentation image into a GPU readback buffer, wait, then copy into
+// host-owned bytes for PNG I/O. Keep the host owner alive while saving its span.
 fn screenshot(renderer: Ref<Renderer>, path: Ptr<u8>) -> () | Err<_> {
 	let image_width = renderer.image:width();
 	let image_height = renderer.image:height();
@@ -298,7 +350,6 @@ fn screenshot(renderer: Ref<Renderer>, path: Ptr<u8>) -> () | Err<_> {
 	pixels:copy_to(host:get());
 	save_png(path, image_width, image_height, view)?;
 }
-// ANCHOR_END: screenshot
 
 //
 // Application and input
@@ -306,6 +357,8 @@ fn screenshot(renderer: Ref<Renderer>, path: Ptr<u8>) -> () | Err<_> {
 
 fn zoom(plot: RefMut<Plot>, factor: f32) {
 	// Keep neighboring pixels distinguishable with f32 coordinates.
+	// This clamp helps in the usual view; it is no guarantee for arbitrary centers.
+	// More iterations cannot recover precision once adjacent coordinates round alike.
 	let minimum = f32(plot.height) * 1.0e-6;
 	let next = plot.span * factor;
 	plot.span = if (next < minimum) {
@@ -318,6 +371,8 @@ fn zoom(plot: RefMut<Plot>, factor: f32) {
 }
 
 fn input(window: Ref<Window>, plot: RefMut<Plot>, solver: RefMut<Mandelbrot>) -> bool {
+	// Return whether the view changed, so the event loop can avoid solving an
+	// unchanged image. RefMut allows updating the caller's plot and iteration budget.
 	if (!window:focused()) {
 		return false;
 	};
@@ -348,6 +403,7 @@ fn input(window: Ref<Window>, plot: RefMut<Plot>, solver: RefMut<Mandelbrot>) ->
 		changed = true;
 	};
 	if (window:key_state(key_right_bracket).pressed && solver.max_iters < 4096) {
+		// Brackets and reset act on press transitions; panning/zooming repeat while held.
 		let next = solver.max_iters * 2;
 		solver.max_iters = if (next > 4096) {
 			4096
@@ -376,6 +432,7 @@ fn input(window: Ref<Window>, plot: RefMut<Plot>, solver: RefMut<Mandelbrot>) ->
 }
 
 fn headless(options: Ref<Options>, plot: Plot, solver: Mandelbrot, path: Ptr<u8>) -> () | Err<_> {
+	// --output avoids the window. The CPU branch also avoids GPU creation entirely.
 	if (options.use_gpu) {
 		let renderer = renderer_new(gpu_new()?, plot.width, plot.height)?;
 		renderer:render(plot, solver, true)?;
@@ -400,10 +457,12 @@ fn interactive(options: Ref<Options>, mut plot: Plot, mut solver: Mandelbrot) ->
 			break;
 		};
 		let size = window:framebuffer_size()?;
+		// A minimized window can have no pixels. Wait for a usable size again.
 		if (size.0 == 0 || size.1 == 0) {
 			continue;
 		};
 		if (size.0 != plot.width || size.1 != plot.height) {
+			// Framebuffer dimensions, rather than logical window size, determine storage.
 			plot.width = size.0;
 			plot.height = size.1;
 			plot:zoom(1.0);
@@ -431,6 +490,7 @@ fn interactive(options: Ref<Options>, mut plot: Plot, mut solver: Mandelbrot) ->
 		};
 		let capture = window:focused() && window:key_state(key_p).pressed;
 		if (dirty) {
+			// Re-evaluate only after a view, size, or iteration change; present every frame.
 			renderer:render(plot, solver, options.use_gpu)?;
 			dirty = false;
 		};
@@ -441,10 +501,16 @@ fn interactive(options: Ref<Options>, mut plot: Plot, mut solver: Mandelbrot) ->
 	};
 }
 
-// ANCHOR: main
+//
+// Select an execution mode from validated options
+//
+
+// Startup arguments are an immutable snapshot borrowed until process exit.
+// arguments includes the executable at index zero; argparse skips that element.
 fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> i32 | Err<_> {
 	let args = arguments(argc, argv);
 	let options = match (parse_options(args)) {
+		// match narrows a union to its actual member in each arm.
 		Options(options) => {
 			options
 		},
@@ -465,6 +531,7 @@ fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> i32 | Err<_> {
 	plot.span = options.span;
 	let solver = mandelbrot_new(options.iterations);
 	match (options.output) {
+		// A path requests headless output; None opens the interactive explorer.
 		Ptr<u8>(path) => {
 			headless(options, plot, solver, path)?;
 		},
@@ -474,13 +541,123 @@ fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> i32 | Err<_> {
 	};
 	0
 }
-// ANCHOR_END: main
+
+//
+// Parse options once, before rendering
+//
+
+// Keep validated dimensions, camera settings, and mode together. Output paths
+// borrow the process argument snapshot, which stays alive through main.
+struct Options {
+	use_gpu: bool,
+	width: u32,
+	height: u32,
+	iterations: i32,
+	real: f32,
+	imag: f32,
+	span: f32,
+	// Paths borrow the immutable, NUL-terminated process argument snapshot.
+	output: Ptr<u8> | None,
+	screenshot: Ptr<u8>,
+	help: bool,
+}
+
+// The parser handles option names and values. We convert numbers and validate
+// ranges here so rendering can assume nonzero dimensions and a sensible span.
+fn parse_options(args: Ref<Span<Ptr<u8>>>) -> Options | Err<_> {
+	let mut options = Options {
+		use_gpu = true,
+		width = 960,
+		height = 720,
+		iterations = 256,
+		real = f32(-0.5),
+		imag = f32(0.0),
+		span = f32(3.0),
+		output = None,
+		screenshot = "mandelbrot.png".data,
+		help = false,
+	};
+	// A | separates aliases; trailing = means the option takes a value.
+	let mut parser = argparse(args, "--help|-h --cpu --gpu --width= --height= --iterations= --real= --imag= --span= --output= --screenshot=");
+	while (true) {
+		let item = match (parser:next()?) {
+			Argument(item) => {
+				item
+			},
+			None => {
+				break;
+			},
+		};
+		if (item:named("--help")) {
+			options.help = true;
+			return options;
+		};
+		if (item:named("--cpu") || item:named("--gpu")) {
+			options.use_gpu = item:named("--gpu");
+			continue;
+		};
+		// Borrow the option value without copying its bytes. Numeric conversion
+		// helpers return errors for invalid text, overflow, and non-finite numbers.
+		let value: Ref<Span<u8>> = item.value;
+		if (item:named("--width")) {
+			options.width = argument_integer(value)?;
+		} else if (item:named("--height")) {
+			options.height = argument_integer(value)?;
+		} else if (item:named("--iterations")) {
+			let count = argument_integer(value)?;
+			if (count < u32(32) || count > u32(4096)) {
+				return Err(string_from_str("Iterations must be between 32 and 4096"));
+			};
+			options.iterations = i32(count);
+		} else if (item:named("--real")) {
+			options.real = argument_number(value)?;
+		} else if (item:named("--imag")) {
+			options.imag = argument_number(value)?;
+		} else if (item:named("--span")) {
+			options.span = argument_number(value)?;
+		} else {
+			if (value.length == u64(0)) {
+				return Err(fmt("Empty path for {0}", (item.name:bytes(),)));
+			};
+			if (item:named("--output")) {
+				options.output = value.data;
+			} else {
+				options.screenshot = value.data;
+			};
+		};
+	};
+	if (options.width == u32(0) || options.width > u32(8192) || options.height == u32(0) || options.height > u32(8192)) {
+		return Err(string_from_str("Width and height must be between 1 and 8192"));
+	};
+	if (options.span < f32(options.height) * f32(1.0e-6) || options.span > f32(8.0)) {
+		return Err(string_from_str("Span must be between height * 1e-6 and 8 (f32 precision limit)"));
+	};
+	options
+}
+
+fn print_help() {
+	print("Mandelbrot explorer\n\n");
+	print("Usage: resin examples/eg011_mandelbrot.resin -- [options]\n\n");
+	print("  --cpu / --gpu        Solver (default: GPU)\n");
+	print("  --width N           Image/window width, 1-8192 (default: 960)\n");
+	print("  --height N          Image/window height, 1-8192 (default: 720)\n");
+	print("  --iterations N      Iterations per pixel, 32-4096 (default: 256)\n");
+	print("  --real X --imag Y   View center (default: -0.5, 0)\n");
+	print("  --span N            Vertical span (default: 3)\n");
+	print("  --output PATH       Write a PNG and exit without opening a window\n");
+	print("  --screenshot PATH   Interactive screenshot path (default: mandelbrot.png)\n");
+	print("  --help / -h         Show this help\n\n");
+	print("Arrows/WASD: pan | scroll/+/-: zoom | [/]: iterations | R/Home: reset | P: screenshot | Esc: quit\n");
+	print("CPU --output mode needs no Vulkan device. Interactive mode uses Vulkan in both solver modes.\n");
+}
 
 //
 // CPU checks of the shared algorithm
 //
 
 fn test() -> () | Err<_> {
+	// Fixed points, cycles, and boundary points catch off-by-one escape tests.
+	// Counts for c = 1, 2, 3 must be 3, 2, 1; surviving the budget returns zero.
 	let mandelbrot = mandelbrot_new(128);
 	let zero: Complex<f32> = complex(0.0, 0.0);
 	let minus_one: Complex<f32> = complex(-1.0, 0.0);
@@ -527,3 +704,8 @@ fn test() -> () | Err<_> {
 	assert(pixels:get():at(3) == 255 && pixels:get():at(4) == 123);
 	print("Mandelbrot tests passed\n");
 }
+
+// Try changing the palette first, then add multiple subpixel samples and average
+// their colors. Keep CPU and GPU on the same evaluator when experimenting.
+// Floating-point differences can vary escape counts near the boundary; the
+// integration tests compare rendered bytes with a small tolerance.

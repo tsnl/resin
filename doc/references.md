@@ -128,6 +128,28 @@ Read-only permissions apply to the referent itself, not transitively to separate
 pointed-to storage. Likewise, `Span<T>:at_mut()` reads the span descriptor through
 `Ref<Span<T>>` and returns writable access through its stored `Ptr<T>`.
 
+## References do not grant pointers
+
+Both of these complete programs are rejected:
+
+```resin,compile_fail
+fn address(value: Ref<i32>) -> Ptr<i32> {
+    &value
+}
+```
+
+```resin,compile_fail
+fn needs_pointer(value: Ptr<i32>) {}
+fn caller(value: Ref<i32>) {
+    needs_pointer(value);
+}
+```
+
+No call-site convenience, cast, specialization, or LIR conversion silently turns
+`Ref<T>` into `Ptr<T>`. The compiler verifies the distinction before code emission.
+A helper that needs a pointer must say so in its signature. Reading an *existing*
+pointer value through `Ref<Ptr<T>>` is allowed; that reads the stored capability.
+
 ## Indexing and representation
 
 Arrays, `Span<T>`, and `str` support `items:at(index)` returning `Ref<T>` (or

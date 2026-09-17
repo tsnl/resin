@@ -29,7 +29,7 @@ fn known_orbits_pixel_coordinates_and_zoom_limits() {
 #[test]
 fn explorer_builds_and_can_render_resize_and_close_in_both_modes() {
     let original = std::fs::read_to_string(example()).unwrap();
-    let source = original.replace(
+    let source = original.replacen(
         "while (true) {",
         r#"
         let mut frames: i32 = 0;
@@ -39,6 +39,7 @@ fn explorer_builds_and_can_render_resize_and_close_in_both_modes() {
             if (frames == 4) { window:set_size(800, 500)?; };
             if (frames == 6) { window:set_should_close(true)?; };
     "#,
+        1,
     );
     assert_ne!(source, original, "instrument the interactive loop");
     for mode in ["--gpu", "--cpu"] {
@@ -363,12 +364,6 @@ fn build_example(
     let directory = tempfile::TempDir::new().unwrap();
     let path = directory.path().join("mandelbrot.resin");
     std::fs::write(&path, source).unwrap();
-    std::fs::create_dir(directory.path().join("mandelbrot")).unwrap();
-    std::fs::copy(
-        example().parent().unwrap().join("mandelbrot/options.resin"),
-        directory.path().join("mandelbrot/options.resin"),
-    )
-    .unwrap();
     let module =
         support::pipeline::host_entry(&path, entry).unwrap_or_else(|error| panic!("{error}"));
     let project = support::project::Project::new(&module, Some(entry)).unwrap();

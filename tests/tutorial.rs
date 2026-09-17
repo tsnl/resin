@@ -47,7 +47,7 @@ fn image_checkpoints_write_opaque_pngs_without_a_gpu() {
 
 #[test]
 fn tutorial_reference_rejections_remain_language_errors() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("doc/tutorial/gpu.md");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("doc/references.md");
     let chapter = std::fs::read_to_string(path).unwrap();
     let mut count = 0;
     for snippet in chapter.split("```resin,compile_fail\n").skip(1) {
