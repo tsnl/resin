@@ -1042,6 +1042,19 @@ fn primitive_operation(name: &str, arguments: &[resin_hir::Type]) -> Option<Reso
                 }
             },
         ),
+        ("trace_rays_native", Type::GpuArguments) => (
+            Intrinsic::GpuArgumentsTraceRays,
+            vec![
+                Type::GpuArguments,
+                Type::Pointer {
+                    pointee: Box::new(Type::UInt8),
+                },
+                Type::UInt32,
+                Type::UInt32,
+                Type::UInt32,
+            ],
+            Type::Int32,
+        ),
         ("dispatch_native", Type::GpuArguments) => (
             Intrinsic::GpuArgumentsDispatch,
             vec![

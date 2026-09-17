@@ -14,7 +14,9 @@ pub(super) fn define(
 ) -> Result<bool, GenerateError> {
     if matches!(
         operation,
-        "gpu_compute_pipeline_type" | "gpu_graphics_pipeline_type"
+        "gpu_compute_pipeline_type"
+            | "gpu_graphics_pipeline_type"
+            | "gpu_ray_tracing_pipeline_type"
     ) {
         return pipeline(context, function, declaration, operation);
     }
@@ -208,7 +210,9 @@ fn pipeline(
     if fields.len() != 1 || fields[0].ty != Type::GpuPipelineContract {
         return Err(invalid());
     }
-    let kind = if operation == "gpu_compute_pipeline_type" {
+    let kind = if operation == "gpu_ray_tracing_pipeline_type" {
+        resin_types::GpuPipelineKind::RayTracing
+    } else if operation == "gpu_compute_pipeline_type" {
         resin_types::GpuPipelineKind::Compute
     } else {
         resin_types::GpuPipelineKind::Graphics

@@ -1,5 +1,15 @@
-// This is one complete file. Export an entry point and import the functions it uses.
+// Your first Resin program
+//
+// With the compiler service running and RESIN_SERVER set (see Getting started):
+//   cargo run -- examples/tutorial/basics.resin
+// Expected output:
+//   counter = 42, sum = 55: ready
+//
+// Read from top to bottom: define a value, write functions that operate on it,
+// then assemble them in main. This program runs on the CPU and needs no GPU.
+// Export the entry point; other declarations stay private to this file.
 export { main };
+// Each file is a module. $/ selects the standard library; imports expose exports.
 import { "$/stdio.resin", "$/string.resin" };
 
 // A struct names a type; its fields use name: Type. i32 is a signed 32-bit integer.
@@ -9,6 +19,8 @@ struct Counter {
 
 // Functions live beside their types. Ref reads the caller's value; RefMut permits mutation.
 // This operation changes the counter; the name makes that mutation explicit.
+// References borrow storage without retaining it or checking its lifetime.
+// The caller must keep the counter alive for the duration of the call.
 fn increment(counter: RefMut<Counter>, amount: i32) {
 	counter.value = counter.value + amount;
 }
@@ -36,6 +48,7 @@ fn sum_to(limit: i32) -> i32 {
 // No result annotation means unit, (). A semicolon discards an expression's result.
 fn main() {
 	// Initializers use field = value; a dot selects a field.
+	// mut lets increment borrow this local with writable access.
 	let mut counter = Counter { value = 40 };
 	increment(counter, 1);
 	// Uniform function call syntax (UFCS): x:f(y) means f(x, y).
@@ -54,3 +67,6 @@ fn main() {
 	// print borrows this named local. Ref arguments require an existing place.
 	print(text);
 }
+
+// Try changing the limit or increment and predict which assertions will fail.
+// For the full contracts, see the manual's Functions and References chapters.

@@ -63,6 +63,7 @@ impl Variables {
             workgroup_size: None,
         };
         match interface {
+            Interface::RayGeneration { .. } | Interface::RayHit { .. } => unreachable!("ray entry"),
             Interface::Compute { .. } => {
                 let uint = context.ty(&Ty::UInt32)?;
                 // The runtime's compute ABI specializes ID 0 for the selected GPU.
@@ -168,6 +169,7 @@ impl Variables {
         interface: &Interface,
     ) -> Result<Vec<Word>, Error> {
         let input = match interface {
+            Interface::RayGeneration { .. } | Interface::RayHit { .. } => unreachable!("ray entry"),
             Interface::Compute { .. } => self.compute_index(context)?,
             Interface::Vertex { index, .. } => {
                 let ty = context.ty(index)?;
@@ -300,6 +302,7 @@ impl Variables {
             None
         };
         match interface {
+            Interface::RayGeneration { .. } | Interface::RayHit { .. } => unreachable!("ray entry"),
             Interface::Vertex {
                 position, color, ..
             } => {
@@ -357,6 +360,7 @@ impl Variables {
 
 fn declare_entry(context: &mut Context<'_>, entry: Word, stage: Stage, variables: &Variables) {
     let model = match stage {
+        Stage::RayGeneration | Stage::Miss | Stage::ClosestHit => unreachable!("ray entry"),
         Stage::Compute => ExecutionModel::GLCompute,
         Stage::Vertex => ExecutionModel::Vertex,
         Stage::Fragment => ExecutionModel::Fragment,
@@ -379,6 +383,6 @@ fn declare_entry(context: &mut Context<'_>, entry: Word, stage: Stage, variables
                 .builder
                 .execution_mode(entry, ExecutionMode::OriginUpperLeft, [])
         }
-        Stage::Vertex => {}
+        Stage::Vertex | Stage::RayGeneration | Stage::Miss | Stage::ClosestHit => {}
     }
 }

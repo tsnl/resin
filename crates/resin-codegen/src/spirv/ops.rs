@@ -22,6 +22,8 @@ pub(super) fn instruction(
     arrays: &HashMap<Ty, Word>,
 ) -> Result<Option<Slot>, Error> {
     let id = match instr {
+        Instr::TraceRay { payload } => super::ray::trace(context, args, payload)?,
+        Instr::RayHitInfo => super::ray::hit_info(context, result.unwrap())?,
         Instr::ForgetLocal { .. } | Instr::Discard => return Ok(None),
         Instr::TakeLocal { local } => load(context, result.unwrap(), locals[local.index()])?,
         Instr::TakeField { local, path } | Instr::SetField { local, path } => {

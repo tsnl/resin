@@ -14,6 +14,21 @@ pub(super) fn instruction(
     out: &mut String,
 ) -> Result<String, Error> {
     match instr {
+        Instr::GpuRayTracingPipeline {
+            factory,
+            ray_generation,
+            miss,
+            closest_hit,
+            ..
+        } => create(
+            types,
+            name,
+            *factory,
+            &[*ray_generation, *miss, *closest_hit],
+            &args[0],
+            result,
+            out,
+        ),
         Instr::GpuComputePipeline {
             factory, shader, ..
         } => create(types, name, *factory, &[*shader], &args[0], result, out),
@@ -284,6 +299,7 @@ fn owner_argument(
 
 fn pipeline_kind(kind: resin_types::GpuPipelineKind) -> u32 {
     match kind {
+        resin_types::GpuPipelineKind::RayTracing => 2,
         resin_types::GpuPipelineKind::Compute => 0,
         resin_types::GpuPipelineKind::Graphics => 1,
     }

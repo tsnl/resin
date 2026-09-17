@@ -9,6 +9,7 @@ mod calls;
 mod entry;
 mod function;
 mod ops;
+mod ray;
 mod symbols;
 mod types;
 
@@ -23,6 +24,7 @@ pub(super) fn generate(
         .shader_functions(entry)
         .ok_or_else(|| Error::unsupported("shader entry was not requested".into()))?;
     let mut context = Context::new(module, &analysis.types, &analysis.functions);
+    ray::declare(&mut context, entry, stage, reachable)?;
     for &function in reachable {
         let index = function.index();
         register_function_types(&mut context, index, &analysis.functions[index])?;
@@ -47,7 +49,11 @@ pub(super) fn generate(
             .fallibility
             .insert(context.functions[index], may_fail);
     }
-    entry::lower(&mut context, entry, stage)?;
+    if context.ray.is_some() {
+        ray::entry(&mut context, entry, stage)?;
+    } else {
+        entry::lower(&mut context, entry, stage)?;
+    }
     Ok(context
         .builder
         .module()
@@ -60,6 +66,7 @@ pub(super) fn generate(
 /// All IDs and types belong to one shader module. Local borrows retain their
 /// root and projection path; ordinary pointer values are u64 device addresses.
 struct Context<'a> {
+    ray: Option<ray::Interface>,
     builder: Builder,
     module: &'a resin_lir::Module,
     table: &'a TypeTable,
@@ -101,6 +108,7 @@ impl<'a> Context<'a> {
         builder.name(failed, "failed");
         let functions = module.functions.iter().map(|_| builder.id()).collect();
         Self {
+            ray: None,
             builder,
             module,
             table,

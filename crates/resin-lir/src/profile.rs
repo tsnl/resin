@@ -94,6 +94,8 @@ pub(crate) fn expression_type(typer: &TyperContext, ty: &Ty) -> Result<(), Strin
 
 fn instruction(typer: &TyperContext, op: &Instr) -> Result<(), String> {
     match op {
+        Instr::TraceRay { payload } => resin_types::shader::ray_payload(typer.definitions(), payload),
+        Instr::RayHitInfo => Ok(()),
         Instr::CallBuiltin { name, params, result } => {
             let signature = resin_types::shader::builtin_instance(typer, name, params)?;
             typer.same(&signature.result, result).map_err(|error| error.to_string())
@@ -111,8 +113,8 @@ fn instruction(typer: &TyperContext, op: &Instr) -> Result<(), String> {
         Instr::OwnerData { .. } | Instr::OwnerLength | Instr::OwnerAllocate { .. } | Instr::OwnerCreate { .. } | Instr::OwnerDowngrade | Instr::OwnerUpgrade
         | Instr::WeakEmpty | Instr::DropLocal { .. } => Err("shader cannot consume managed values: reference counting and destruction are host-only".into()),
         Instr::GpuViewAllocate | Instr::GpuViewRange { .. } | Instr::GpuViewOffset | Instr::GpuViewRestrict | Instr::GpuViewLoad { .. } | Instr::GpuViewStore | Instr::GpuViewReplace | Instr::GpuViewCopyTo | Instr::GpuViewCopyFrom | Instr::GpuViewCopyImage
-        | Instr::GpuComputePipeline { .. } | Instr::GpuGraphicsPipeline { .. }
-        | Instr::GpuDispatch { .. } | Instr::GpuDraw { .. } | Instr::GpuArgumentsDispatch
+        | Instr::GpuRayTracingPipeline { .. } | Instr::GpuComputePipeline { .. } | Instr::GpuGraphicsPipeline { .. }
+        | Instr::GpuDispatch { .. } | Instr::GpuDraw { .. } | Instr::GpuArgumentsTraceRays | Instr::GpuArgumentsDispatch
         | Instr::GpuArgumentsDraw
         | Instr::PointerBytes | Instr::PointerRange => {
             Err(format!("shader profile does not support {op:?}"))
@@ -198,6 +200,21 @@ pub(crate) fn shaders(module: &Module) -> Result<BTreeMap<FunctionId, Vec<Functi
                 states[id.index()] = Visit::Complete;
                 order.push(*id);
                 pending.pop();
+            }
+        }
+        let stage = module.shaders[&root].stage.as_ref();
+        for &id in &order {
+            for block in &module.functions[id.index()].blocks {
+                for instruction in &block.instrs {
+                    let allowed = match instruction {
+                        Instr::TraceRay { .. } => stage == "ray_generation",
+                        Instr::RayHitInfo => stage == "closest_hit",
+                        _ => true,
+                    };
+                    if !allowed {
+                        return Err(Error { function: id, instruction: None, message: "ray operation is not available in this shader stage (nested tracing is unsupported)".into() });
+                    }
+                }
             }
         }
         result.insert(root, order);

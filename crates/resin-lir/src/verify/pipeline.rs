@@ -17,6 +17,20 @@ pub(super) fn check(
 ) -> Result<(), VerifyError> {
     let args = pop(stack, super::stack_effect(instr).pops, location)?;
     let result = match instr {
+        Instr::GpuRayTracingPipeline {
+            pipeline,
+            factory,
+            ray_generation,
+            miss,
+            closest_hit,
+        } => create(
+            module,
+            pipeline,
+            *factory,
+            &[*ray_generation, *miss, *closest_hit],
+            &args[0],
+            location,
+        )?,
         Instr::GpuComputePipeline {
             pipeline,
             factory,
@@ -36,18 +50,24 @@ pub(super) fn check(
             location,
         )?,
         Instr::GpuDispatch {
+            kind,
             projection,
             context,
             allocator,
             record,
-        } => record_call(
-            module,
-            (*context, Some(*allocator), *record),
-            &args,
-            Some(projection),
-            false,
-            location,
-        )?,
+        } => {
+            if *kind == resin_types::GpuPipelineKind::Graphics {
+                return Err(location.error(VerifyErrorKind::InvalidGpuOperation));
+            }
+            record_call(
+                module,
+                (*context, Some(*allocator), *record),
+                &args,
+                Some(projection),
+                *kind,
+                location,
+            )?
+        }
         Instr::GpuDraw {
             projection,
             context,
@@ -58,7 +78,7 @@ pub(super) fn check(
             (*context, *allocator, *record),
             &args,
             projection.as_ref(),
-            true,
+            resin_types::GpuPipelineKind::Graphics,
             location,
         )?,
         _ => unreachable!("pipeline instruction dispatch"),
@@ -110,6 +130,21 @@ fn create(
             .collect::<Vec<_>>(),
     )
     .map_err(|_| invalid())?;
+    if shaders.len() == 3 {
+        let payload = &stages[1].0[0];
+        let graph = crate::profile::shaders(module).map_err(|_| invalid())?;
+        for id in &graph[&shaders[0]] {
+            for block in &module.functions[id.index()].blocks {
+                for instruction in &block.instrs {
+                    if let Instr::TraceRay { payload: actual } = instruction
+                        && actual != payload
+                    {
+                        return Err(invalid());
+                    }
+                }
+            }
+        }
+    }
     let factory = function(module, factory, location)?;
     let mut params = vec![gpu.clone()];
     params.extend(shaders.iter().map(|_| Ty::byte_span()));
@@ -126,7 +161,9 @@ fn create(
     };
     let metadata =
         resin_types::gpu_pipeline_contract(&module.types, pipeline).map_err(|_| invalid())?;
-    let kind = if shaders.len() == 1 {
+    let kind = if shaders.len() == 3 {
+        resin_types::GpuPipelineKind::RayTracing
+    } else if shaders.len() == 1 {
         resin_types::GpuPipelineKind::Compute
     } else {
         resin_types::GpuPipelineKind::Graphics
@@ -147,7 +184,7 @@ fn record_call(
     bridges: (FunctionId, Option<FunctionId>, FunctionId),
     args: &[Ty],
     projection: Option<&resin_types::GpuProjectionPlan>,
-    draw: bool,
+    kind: resin_types::GpuPipelineKind,
     location: Location,
 ) -> Result<Ty, VerifyError> {
     let invalid = || location.error(VerifyErrorKind::InvalidGpuOperation);
@@ -155,11 +192,7 @@ fn record_call(
     let pipeline = args[1].deref_target().unwrap_or(&args[1]);
     let metadata =
         resin_types::gpu_pipeline_contract(&module.types, pipeline).map_err(|_| invalid())?;
-    let kind = if draw {
-        resin_types::GpuPipelineKind::Graphics
-    } else {
-        resin_types::GpuPipelineKind::Compute
-    };
+    let draw = kind == resin_types::GpuPipelineKind::Graphics;
     if metadata.kind != kind {
         return Err(invalid());
     }

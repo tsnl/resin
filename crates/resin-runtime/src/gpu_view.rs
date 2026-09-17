@@ -340,6 +340,30 @@ unsafe fn projected_root(
     Ok(owner.allocation.device_pointer() + projection.root.offset as u64)
 }
 
+pub(crate) unsafe fn projected_trace_rays(
+    commands: *mut ResinCommandBuffer,
+    projection: *mut ResinArc,
+    group_count_x: u32,
+    group_count_y: u32,
+    group_count_z: u32,
+) -> ResinStatus {
+    let Some(commands) = (unsafe { commands.as_mut() }) else {
+        return ResinStatus::InvalidArgument;
+    };
+    if projection.is_null() {
+        return ResinStatus::InvalidArgument;
+    }
+    let value = unsafe { projection_owner(projection) };
+    let result = unsafe { projected_root(commands, value) }.and_then(|root| unsafe {
+        commands.trace_rays(root, group_count_x, group_count_y, group_count_z)
+    });
+    if let Err(status) = result {
+        return status;
+    }
+    commands.retain_gpu_use(unsafe { GpuUse::projection(projection, value) });
+    ResinStatus::Success
+}
+
 pub(crate) unsafe fn projected_dispatch(
     commands: *mut ResinCommandBuffer,
     projection: *mut ResinArc,

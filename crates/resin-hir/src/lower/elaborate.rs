@@ -957,8 +957,10 @@ impl Completion<'_> {
             .zip(&method.params)
             .map(|(source, parameter)| self.argument(source, &Type::from_hir(parameter)))
             .collect::<Result<Vec<_>>>()?;
-        if let FunctionBody::GpuPipelineFactory { factory, graphics } = method.body {
-            let stages = if graphics {
+        if let FunctionBody::GpuPipelineFactory { factory, kind } = method.body {
+            let stages = if kind == resin_types::GpuPipelineKind::RayTracing {
+                &["ray_generation", "miss", "closest_hit"][..]
+            } else if kind == resin_types::GpuPipelineKind::Graphics {
                 &["vertex", "fragment"][..]
             } else {
                 &["compute"][..]

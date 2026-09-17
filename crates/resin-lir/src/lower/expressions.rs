@@ -55,6 +55,13 @@ impl FunctionLowering<'_> {
                 self.gen_arguments(args)?;
                 let (pipeline, _) = expected.fallible_parts().expect("pipeline creation result");
                 self.emit(match shaders.as_slice() {
+                    [ray_generation, miss, closest_hit] => Instr::GpuRayTracingPipeline {
+                        pipeline: pipeline.clone(),
+                        factory: *factory,
+                        ray_generation: *ray_generation,
+                        miss: *miss,
+                        closest_hit: *closest_hit,
+                    },
                     [shader] => Instr::GpuComputePipeline {
                         pipeline: pipeline.clone(),
                         factory: *factory,
@@ -79,6 +86,15 @@ impl FunctionLowering<'_> {
                 self.gen_arguments(args)?;
                 self.emit(if args.values.len() == 6 {
                     Instr::GpuDispatch {
+                        kind: resin_types::gpu_pipeline_contract(
+                            self.typer.definitions(),
+                            args.values[1]
+                                .ty
+                                .deref_target()
+                                .unwrap_or(&args.values[1].ty),
+                        )
+                        .expect("pipeline contract")
+                        .kind,
                         projection: projection.clone().expect("compute projection"),
                         context: *context,
                         allocator: allocator.expect("compute root"),
@@ -209,6 +225,11 @@ impl FunctionLowering<'_> {
                     }
                 }
             }
+            Intrinsic::TraceRay => self.emit(Instr::TraceRay {
+                payload: result.clone(),
+            }),
+            Intrinsic::RayHitInfo => self.emit(Instr::RayHitInfo),
+            Intrinsic::GpuArgumentsTraceRays => self.emit(Instr::GpuArgumentsTraceRays),
             Intrinsic::GpuArgumentsDispatch => self.emit(Instr::GpuArgumentsDispatch),
             Intrinsic::GpuArgumentsDraw => self.emit(Instr::GpuArgumentsDraw),
             Intrinsic::OwnerCreate => self.emit(Instr::OwnerCreate {

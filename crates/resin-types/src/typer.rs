@@ -362,6 +362,17 @@ pub(super) fn validate_shader(
     let input_shape = shader_shape(typer, input)?;
     let result = shader_shape(typer, result)?;
     let interface = match stage {
+        "ray_generation" if root && input_shape == Ty::UInt64 && result == Ty::Unit => {
+            Some(shader::Interface::RayGeneration {
+                index: input.clone(),
+            })
+        }
+        "miss" | "closest_hit" if root && input_shape == result => {
+            ray_payload(typer.definitions(), input)?;
+            Some(shader::Interface::RayHit {
+                payload: input.clone(),
+            })
+        }
         "compute" if root && input_shape == Ty::UInt64 && result == Ty::Unit => {
             Some(shader::Interface::Compute {
                 index: input.clone(),
@@ -425,6 +436,23 @@ pub(super) fn pipeline_root(
 ) -> Result<Ty, String> {
     let root =
         match stages {
+            [
+                (generation, result, "ray_generation"),
+                (miss, miss_result, "miss"),
+                (hit, hit_result, "closest_hit"),
+            ] => {
+                validate_shader(typer, generation, result, false, "ray_generation")?;
+                validate_shader(typer, miss, miss_result, false, "miss")?;
+                validate_shader(typer, hit, hit_result, false, "closest_hit")?;
+                if miss[0] != hit[0] || miss[0] != **miss_result || hit[0] != **hit_result {
+                    return Err("ray shaders must use the same payload type".into());
+                }
+                let root = shader_root(generation)?;
+                if shader_root(miss)? != root || shader_root(hit)? != root {
+                    return Err("ray shaders must use the same root type".into());
+                }
+                Some(root)
+            }
             [(parameter, result, "compute")] => {
                 validate_shader(typer, parameter, result, false, "compute")?;
                 Some(shader_root(parameter)?)
@@ -574,4 +602,25 @@ fn byte_parameters(context: &TyperContext, args: &[Ty]) -> Result<(), TypeError>
         &args[0],
     )?;
     context.same(&Ty::UInt64, &args[1])
+}
+
+// Payloads have an explicit value ABI: no pointers, owners, unions, or recursive storage.
+pub(super) fn ray_payload(definitions: &[TypeDef], ty: &Ty) -> Result<(), String> {
+    match ty {
+        Ty::UInt32 | Ty::Int32 | Ty::Float32 => Ok(()),
+        Ty::Record { fields } => {
+            for field in fields {
+                ray_payload(definitions, &field.ty)?;
+            }
+            Ok(())
+        }
+        Ty::Array { element, .. } => ray_payload(definitions, element),
+        Ty::Defined { definition } => ray_payload(
+            definitions,
+            super::definition_body(definitions, *definition).map_err(|e| e.to_string())?,
+        ),
+        _ => Err(
+            "ray payloads require f32/i32/u32 values, arrays, or records of those values".into(),
+        ),
+    }
 }

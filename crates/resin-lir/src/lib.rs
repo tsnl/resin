@@ -129,8 +129,16 @@ pub enum Instr {
     /// `[view, length, commands, image] -> [int]`: record an image copy retaining its allocation.
     GpuViewCopyImage,
 
-    /// `[gpu] -> [Pipeline | Err<E>]`: create the registered source pipeline
-    /// from the declared compute shader, retaining its root type and factory owner.
+    /// `[scene] -> [Pipeline | Err<E>]`: link ray-generation, miss, and closest-hit
+    /// declarations with a common root and payload, retaining the factory owner.
+    GpuRayTracingPipeline {
+        pipeline: Ty,
+        factory: FunctionId,
+        ray_generation: FunctionId,
+        miss: FunctionId,
+        closest_hit: FunctionId,
+    },
+    /// `[gpu] -> [Pipeline | Err<E>]`: create a compute pipeline with its typed root.
     GpuComputePipeline {
         pipeline: Ty,
         factory: FunctionId,
@@ -147,6 +155,7 @@ pub enum Instr {
     /// `[commands, pipeline, host root, x, y, z] -> [() | Err<E>]`: project
     /// checked arguments and pass them with the pipeline owner to the recording function.
     GpuDispatch {
+        kind: resin_types::GpuPipelineKind,
         projection: resin_types::GpuProjectionPlan,
         context: FunctionId,
         allocator: FunctionId,
@@ -160,7 +169,14 @@ pub enum Instr {
         allocator: Option<FunctionId>,
         record: FunctionId,
     },
-    /// `[arguments, commands, x, y, z] -> [int]`: record a dispatch with retained arguments.
+    /// `[ox, oy, oz, dx, dy, dz, minimum, maximum, payload] -> [payload]`.
+    /// Trace opaque triangles and return the closest-hit or miss result.
+    TraceRay { payload: Ty },
+    /// Closest-hit distance, primitive index, instance custom index, and barycentrics.
+    RayHitInfo,
+    /// `[arguments, commands, x, y, z] -> [int]`: trace rays with retained arguments.
+    GpuArgumentsTraceRays,
+    /// `[arguments, commands, x, y, z] -> [int]`: dispatch compute with retained arguments.
     GpuArgumentsDispatch,
     /// `[arguments, commands, count] -> [int]`: record a draw with retained arguments.
     GpuArgumentsDraw,

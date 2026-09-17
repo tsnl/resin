@@ -1,8 +1,8 @@
 # PNG images
 
 Import `$/image.resin` for host PNG input and output. The
-[Mandelbrot image checkpoint](tutorial/image.md) is a complete example that writes
-an owned pixel buffer to disk without GPU execution.
+[Mandelbrot explorer](tutorial/index.md) writes an owned pixel buffer to disk
+without GPU execution when run with `--cpu --output mandelbrot.png`.
 
 ## Read an image
 

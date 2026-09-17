@@ -5,6 +5,7 @@ use ash::{Device, vk};
 use super::{COLOR_FORMAT, ResinGpu, ResinStatus, vk_status};
 
 pub struct ResinPipeline {
+    pub(super) ray: Option<super::ray::Dispatch>,
     pub(super) device: Device,
     pub(super) handle: vk::Pipeline,
     pub(super) bind_point: vk::PipelineBindPoint,
@@ -107,6 +108,7 @@ impl ResinPipeline {
     ) -> Result<Self, ResinStatus> {
         match result {
             Ok(pipelines) => Ok(Self {
+                ray: None,
                 device: device.clone(),
                 handle: pipelines[0],
                 bind_point,
@@ -127,20 +129,23 @@ impl Drop for ResinPipeline {
     }
 }
 
-struct ShaderModule<'a> {
+pub(super) struct ShaderModule<'a> {
     device: &'a Device,
     handle: vk::ShaderModule,
 }
 
 impl<'a> ShaderModule<'a> {
-    fn create(device: &'a Device, bytes: &[u8]) -> Result<Self, ResinStatus> {
+    pub(super) fn create(device: &'a Device, bytes: &[u8]) -> Result<Self, ResinStatus> {
         let words = spirv_words(bytes)?;
         let info = vk::ShaderModuleCreateInfo::default().code(&words);
         let handle = unsafe { device.create_shader_module(&info, None) }.map_err(vk_status)?;
         Ok(Self { device, handle })
     }
 
-    fn stage(&self, stage: vk::ShaderStageFlags) -> vk::PipelineShaderStageCreateInfo<'_> {
+    pub(super) fn stage(
+        &self,
+        stage: vk::ShaderStageFlags,
+    ) -> vk::PipelineShaderStageCreateInfo<'_> {
         vk::PipelineShaderStageCreateInfo::default()
             .stage(stage)
             .module(self.handle)

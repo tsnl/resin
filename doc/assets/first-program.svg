@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="140" viewBox="0 0 640 140" role="img" aria-labelledby="title description">
+  <title id="title">Your first Resin program</title>
+  <desc id="description">Console output: counter = 42, sum = 55: ready</desc>
+  <rect width="640" height="140" rx="6" fill="#171e29"/>
+  <text x="28" y="42" fill="#9faec2" font-family="monospace" font-size="14">examples/tutorial/basics.resin</text>
+  <text x="28" y="92" fill="#e5edf7" font-family="monospace" font-size="21">counter = 42, sum = 55: ready</text>
+</svg>

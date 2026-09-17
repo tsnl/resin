@@ -82,8 +82,8 @@ cargo run -- examples/particles.resin
 ```
 
 Read the [Resin Manual](doc/index.md) for setup, language and library references,
-and GPU programming. The [Mandelbrot tutorial](doc/tutorial/index.md) builds from
-one orbit to a shared CPU/GPU explorer. Preview the searchable manual locally with
+and GPU programming. The [Mandelbrot tutorial](doc/tutorial/index.md) is a complete
+CPU/GPU explorer with the explanations in its source comments. Preview the searchable manual locally with
 `mdbook serve --open`. [Zed](doc/zed.md) and
 [Helix](doc/helix.md) support includes diagnostics, completion,
 navigation, and formatting.

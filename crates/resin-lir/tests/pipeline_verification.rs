@@ -164,6 +164,7 @@ fn recording() -> Module {
             value: Value::UInt32 { value: 1 },
         },
         Instr::GpuDispatch {
+            kind: resin_types::GpuPipelineKind::Compute,
             projection: projection(),
             context: id(3),
             allocator: id(4),
@@ -212,6 +213,7 @@ fn recording_checks_arguments_context_and_allocator_together() {
     assert!(resin_lir::verify(&bad_context).is_err());
     let mut bad_allocator = module;
     bad_allocator.functions[0].blocks[0].instrs[6] = Instr::GpuDispatch {
+        kind: resin_types::GpuPipelineKind::Compute,
         projection: projection(),
         context: id(3),
         allocator: id(500),

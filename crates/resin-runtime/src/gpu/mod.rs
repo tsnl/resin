@@ -3,6 +3,7 @@
 mod device;
 mod pipeline;
 mod present;
+pub(super) mod ray;
 
 pub use pipeline::ResinPipeline;
 
@@ -53,10 +54,11 @@ pub struct ResinGpuDeviceInfo {
 
 const DEFAULT_ALIGNMENT: usize = 16;
 const HEAP_BLOCK_BYTES: usize = 16 * 1024 * 1024;
-const PUSH_CONSTANT_SIZE: u32 = 8;
+const PUSH_CONSTANT_SIZE: u32 = 16;
 const COLOR_FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;
 
 pub struct ResinGpu {
+    ray: Option<ray::Device>,
     _entry: Entry,
     instance: Instance,
     device: Device,
@@ -107,6 +109,7 @@ pub struct ResinImage {
 }
 
 pub struct ResinCommandBuffer {
+    ray: Option<ray::Dispatch>,
     device: Device,
     push_layout: vk::PipelineLayout,
     pool: vk::CommandPool,
@@ -261,7 +264,11 @@ impl ResinGpu {
                 surface,
             )
         });
+        let ray = created
+            .ray_tracing
+            .then(|| ray::Device::new(&created.instance, &created.device, created.physical));
         Ok(Self {
+            ray,
             _entry: created.entry,
             instance: created.instance,
             device: created.device,
@@ -617,6 +624,7 @@ impl ResinGpu {
             return Err(vk_status(err));
         }
         Ok(ResinCommandBuffer {
+            ray: None,
             device: self.device.clone(),
             push_layout: self.push_layout,
             pool: self.command_pool,
@@ -822,6 +830,7 @@ impl ResinCommandBuffer {
             self.device
                 .cmd_bind_pipeline(self.handle, pipeline.bind_point, pipeline.handle);
         }
+        self.ray = pipeline.ray.clone();
         self.graphics = graphics;
         self.pipeline_bound = true;
         Ok(())
@@ -1006,7 +1015,7 @@ impl ResinCommandBuffer {
         group_count_y: u32,
         group_count_z: u32,
     ) -> Result<(), ResinStatus> {
-        if !self.pipeline_bound || self.graphics || self.rendering {
+        if !self.pipeline_bound || self.graphics || self.rendering || self.ray.is_some() {
             return Err(ResinStatus::InvalidArgument);
         }
         cmd_memory_barrier(&self.device, self.handle);
@@ -1033,9 +1042,7 @@ impl ResinCommandBuffer {
 
 fn root_range() -> vk::PushConstantRange {
     vk::PushConstantRange {
-        stage_flags: vk::ShaderStageFlags::COMPUTE
-            | vk::ShaderStageFlags::VERTEX
-            | vk::ShaderStageFlags::FRAGMENT,
+        stage_flags: vk::ShaderStageFlags::ALL,
         offset: 0,
         size: PUSH_CONSTANT_SIZE,
     }
