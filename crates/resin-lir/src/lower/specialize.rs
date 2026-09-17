@@ -998,6 +998,11 @@ impl Specialization<'_, '_> {
         ) {
             return Err(self.instance_error("GPU projection and pipeline type declarations are contracts for dispatch and draw; they cannot be called directly"));
         }
+        if matches!(op, Intrinsic::TraceRay | Intrinsic::RayHitInfo)
+            && self.instances.profile(self.current) != crate::Profile::Shader
+        {
+            return Err(self.instance_error("ray operations require shader execution"));
+        }
         let type_args = parameters
             .iter()
             .map(|ty| self.ty(ty))

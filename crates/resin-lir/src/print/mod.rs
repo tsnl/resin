@@ -173,12 +173,17 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
             ],
         ),
         Instr::GpuDispatch {
+            kind,
             context,
             allocator,
             record,
             ..
         } => list(
-            "gpu-dispatch",
+            if *kind == resin_types::GpuPipelineKind::RayTracing {
+                "gpu-trace-rays"
+            } else {
+                "gpu-dispatch"
+            },
             vec![
                 symbol(names.functions[context.index()].as_ref()),
                 symbol(names.functions[allocator.index()].as_ref()),

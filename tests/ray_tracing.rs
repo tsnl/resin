@@ -24,7 +24,8 @@ fn main() -> i32 | Err<_> {
         let scene = gpu:create_ray_scene(Span<f32> { data = vertices:get():lea(0), length = 9 }, Span<f32> { data = transform:get():lea(0), length = 12 })?;
         let pipeline = scene:create_ray_tracing_pipeline(generation, miss, closest)?;
         let commands = gpu:start_command_recording()?;
-        commands:trace_rays(pipeline, f32(0.0), 1, 1, 1)?;
+        let retained = pipeline:clone();
+        commands:trace_rays(retained, f32(0.0), 1, 1, 1)?;
         commands:cancel();
     };
     0
@@ -48,7 +49,7 @@ fn triangle_pipeline_generates_valid_spirv_and_native_bridges() {
 }
 
 #[test]
-fn nested_tracing_and_hit_queries_in_other_stages_are_rejected() {
+fn nested_tracing_and_hit_data_in_other_stages_are_rejected() {
     for source in [
         SOURCE.replace("let info = ray_hit_info();", "let nested = trace_ray(f32(0), f32(0), f32(0), f32(0), f32(0), f32(1), f32(0), f32(10), payload); let info = ray_hit_info();"),
         SOURCE.replace("let hit = trace_ray", "let invalid = ray_hit_info(); let hit = trace_ray"),
@@ -170,5 +171,26 @@ fn hardware_triangle_hits_misses_and_instance_transforms() {
             resin_gpu_free_pipeline(&mut gpu, pipeline);
         }
         gpu.free(&output);
+    }
+}
+
+#[cfg(feature = "gpu")]
+#[test]
+fn source_example_projects_and_retains_output_through_submission() {
+    let _lock = resin_runtime::testing::lock_gpu();
+    let module = support::pipeline::host_entry(
+        std::path::Path::new("examples/eg013_ray_tracing.resin"),
+        "main",
+    )
+    .unwrap();
+    let project = support::project::Project::new(&module, Some("main")).unwrap();
+    let output = project.run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    if std::env::var("RESIN_REQUIRE_RAY_TRACING").as_deref() == Ok("1") {
+        assert!(String::from_utf8_lossy(&output.stdout).contains("Triangle hit at distance 1."));
     }
 }

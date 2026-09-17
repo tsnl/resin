@@ -1,0 +1,46 @@
+//! Trace one triangle through a depth-one Vulkan ray tracing pipeline.
+export { main };
+import { "$/gpu.resin", "$/shared.resin", "$/span.resin", "$/stdio.resin" };
+
+struct Parameters<Output> {
+	output: Output,
+}
+struct Hit {
+	distance: f32,
+}
+
+@ray_generation_shader
+fn generation(index: u64, root: Ptr<Parameters<Ptr<f32>>>) {
+	let hit = trace_ray(f32(0), f32(0), f32(-1), f32(0), f32(0), f32(1), f32(0), f32(100), Hit { distance = f32(0) });
+	root.output.* = hit.distance;
+}
+
+@miss_shader
+fn miss(initial: Hit, root: Ptr<Parameters<Ptr<f32>>>) -> Hit {
+	Hit { distance = f32(-1) }
+}
+
+@closest_hit_shader
+fn closest(initial: Hit, root: Ptr<Parameters<Ptr<f32>>>) -> Hit {
+	Hit { distance = ray_hit_info().0 }
+}
+
+fn main() -> i32 | Err<_> {
+	let gpu = gpu_new()?;
+	if (!gpu:supports_ray_tracing()) {
+		print("Ray tracing pipelines are unavailable on this GPU.\n");
+		return 0;
+	};
+	// Three tightly packed float3 vertices, followed by a row-major affine 3x4 transform.
+	let vertices = arc_ptr_alloc([f32(-1), f32(-1), f32(0), f32(1), f32(-1), f32(0), f32(0), f32(1), f32(0)])?;
+	let transform = arc_ptr_alloc([f32(1), f32(0), f32(0), f32(0), f32(0), f32(1), f32(0), f32(0), f32(0), f32(0), f32(1), f32(0)])?;
+	let scene = gpu:create_ray_scene(Span<f32> { data = vertices:get():lea(0), length = 9 }, Span<f32> { data = transform:get():lea(0), length = 12 })?;
+	let pipeline = scene:create_ray_tracing_pipeline(generation, miss, closest)?;
+	let output = gpu:create(f32(0))?;
+	let commands = gpu:start_command_recording()?;
+	commands:trace_rays(pipeline, Parameters<GpuPtr<f32>> { output = output:clone() }, 1, 1, 1)?;
+	commands:submit()?;
+	assert(output:load() == f32(1));
+	print("Triangle hit at distance 1.\n");
+	0
+}

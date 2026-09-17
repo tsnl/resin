@@ -55,14 +55,19 @@ pub(super) fn check(
             context,
             allocator,
             record,
-        } => record_call(
-            module,
-            (*context, Some(*allocator), *record),
-            &args,
-            Some(projection),
-            *kind,
-            location,
-        )?,
+        } => {
+            if *kind == resin_types::GpuPipelineKind::Graphics {
+                return Err(location.error(VerifyErrorKind::InvalidGpuOperation));
+            }
+            record_call(
+                module,
+                (*context, Some(*allocator), *record),
+                &args,
+                Some(projection),
+                *kind,
+                location,
+            )?
+        }
         Instr::GpuDraw {
             projection,
             context,
@@ -131,10 +136,10 @@ fn create(
         for id in &graph[&shaders[0]] {
             for block in &module.functions[id.index()].blocks {
                 for instruction in &block.instrs {
-                    if let Instr::TraceRay { payload: actual } = instruction {
-                        if actual != payload {
-                            return Err(invalid());
-                        }
+                    if let Instr::TraceRay { payload: actual } = instruction
+                        && actual != payload
+                    {
+                        return Err(invalid());
                     }
                 }
             }

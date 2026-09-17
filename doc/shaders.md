@@ -174,3 +174,6 @@ fit that profile too. The emitted byte profile additionally enables supported `s
 
 For background on the graphics API direction, see Sebastian Aaltonen’s
 [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api).
+
+For triangle acceleration structures and ray-generation/miss/closest-hit stages,
+see [Ray tracing pipelines](ray-tracing.md).

@@ -28,6 +28,7 @@
   - [Strings and console I/O](strings.md)
   - [PNG images](images.md)
   - [Shaders and graphics](shaders.md)
+  - [Ray tracing pipelines](ray-tracing.md)
   - [GPU buffers](gpu-buffers.md)
   - [Windows and presentation](windowing.md)
 - [Tools and diagnostics](tools.md)

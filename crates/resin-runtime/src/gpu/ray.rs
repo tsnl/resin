@@ -67,6 +67,9 @@ impl Buffer {
         usage: vk::BufferUsageFlags,
         host: bool,
     ) -> Result<Self, ResinStatus> {
+        if gpu.max_buffer_size != 0 && bytes as u64 > gpu.max_buffer_size {
+            return Err(ResinStatus::OutOfMemory);
+        }
         let info = vk::BufferCreateInfo::default()
             .size(bytes.max(1) as u64)
             .usage(usage | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS);
@@ -182,6 +185,9 @@ impl ResinGpu {
             || transforms.len() / 12 > 0x1000000
             || vertices.iter().chain(transforms).any(|x| !x.is_finite())
         {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        if transforms.chunks_exact(12).any(|m| !invertible(m)) {
             return Err(ResinStatus::InvalidArgument);
         }
         let input = Buffer::new(
@@ -512,4 +518,13 @@ fn align(value: u64, alignment: u64) -> Result<u64, ResinStatus> {
 }
 unsafe fn bytes<T>(values: &[T]) -> &[u8] {
     unsafe { slice::from_raw_parts(values.as_ptr().cast(), std::mem::size_of_val(values)) }
+}
+
+// Vulkan requires an invertible instance transform. Compute in f64 to avoid
+// overflowing intermediate products for otherwise finite f32 input matrices.
+fn invertible(matrix: &[f32]) -> bool {
+    let m: [f64; 12] = std::array::from_fn(|i| f64::from(matrix[i]));
+    let determinant = m[0] * (m[5] * m[10] - m[6] * m[9]) - m[1] * (m[4] * m[10] - m[6] * m[8])
+        + m[2] * (m[4] * m[9] - m[5] * m[8]);
+    determinant != 0.0
 }

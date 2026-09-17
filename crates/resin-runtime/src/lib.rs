@@ -1359,6 +1359,10 @@ void main() {
 
 mod representation;
 
+//
+// Ray tracing
+//
+
 /// An immutable triangle mesh and its affine instances. The GPU must outlive it.
 /// Pipelines retain the native scene independently of this handle.
 pub struct ResinRayScene {

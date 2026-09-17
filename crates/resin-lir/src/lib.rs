@@ -113,15 +113,11 @@ pub enum Instr {
     /// `[view, byte_offset, bytes, alignment] -> [view]`: validate range/alignment and transfer its owner.
     GpuViewOffset,
     /// `[view, capacity, start, length] -> [view]`: check an element range and transfer its owner.
-    GpuViewRange {
-        element: Ty,
-    },
+    GpuViewRange { element: Ty },
     /// `[view, access_mask] -> [view]`: remove permissions and transfer its owner.
     GpuViewRestrict,
     /// `[view] -> [element]`: copy plain storage after checking read access.
-    GpuViewLoad {
-        element: Ty,
-    },
+    GpuViewLoad { element: Ty },
     /// `[view, element] -> [unit]`: copy plain storage after checking write access.
     GpuViewStore,
     /// `[view, element] -> [element]`: exchange plain storage after checking read/write access.
@@ -133,8 +129,8 @@ pub enum Instr {
     /// `[view, length, commands, image] -> [int]`: record an image copy retaining its allocation.
     GpuViewCopyImage,
 
-    /// `[gpu] -> [Pipeline | Err<E>]`: create the registered source pipeline
-    /// from the declared compute shader, retaining its root type and factory owner.
+    /// `[scene] -> [Pipeline | Err<E>]`: link ray-generation, miss, and closest-hit
+    /// declarations with a common root and payload, retaining the factory owner.
     GpuRayTracingPipeline {
         pipeline: Ty,
         factory: FunctionId,
@@ -142,6 +138,7 @@ pub enum Instr {
         miss: FunctionId,
         closest_hit: FunctionId,
     },
+    /// `[gpu] -> [Pipeline | Err<E>]`: create a compute pipeline with its typed root.
     GpuComputePipeline {
         pipeline: Ty,
         factory: FunctionId,
@@ -172,31 +169,25 @@ pub enum Instr {
         allocator: Option<FunctionId>,
         record: FunctionId,
     },
-    /// `[arguments, commands, x, y, z] -> [int]`: record a dispatch with retained arguments.
-    /// Trace opaque triangles, returning the payload written by closest-hit or miss.
-    TraceRay {
-        payload: Ty,
-    },
+    /// `[ox, oy, oz, dx, dy, dz, minimum, maximum, payload] -> [payload]`.
+    /// Trace opaque triangles and return the closest-hit or miss result.
+    TraceRay { payload: Ty },
     /// Closest-hit distance, primitive index, instance custom index, and barycentrics.
     RayHitInfo,
+    /// `[arguments, commands, x, y, z] -> [int]`: trace rays with retained arguments.
     GpuArgumentsTraceRays,
+    /// `[arguments, commands, x, y, z] -> [int]`: dispatch compute with retained arguments.
     GpuArgumentsDispatch,
     /// `[arguments, commands, count] -> [int]`: record a draw with retained arguments.
     GpuArgumentsDraw,
     /// `[initial] -> [StrongOwner | None]`: move one value into shared storage.
     /// Allocation failure destroys the consumed initializer.
-    OwnerCreate {
-        element: Ty,
-    },
+    OwnerCreate { element: Ty },
     /// `[count, initial] -> [StrongOwner | None]`: allocate repeated, implicitly copyable values.
     /// Installs the concrete element destructor; failed allocations publish no owner.
-    OwnerAllocate {
-        element: Ty,
-    },
+    OwnerAllocate { element: Ty },
     /// `[Ref<StrongOwner>] -> [Ptr<T>]`: borrow live payload storage.
-    OwnerData {
-        pointee: Ty,
-    },
+    OwnerData { pointee: Ty },
     /// `[Ref<StrongOwner>] -> [ulong]`: read the immutable element count.
     OwnerLength,
     /// `[Ref<StrongOwner>] -> [WeakOwner]`: acquire a weak reference.
@@ -209,65 +200,36 @@ pub enum Instr {
     /// Lowering must disarm its previous owner, typically with `ForgetLocal`.
     TransferLoad,
     /// `[] -> []`: clear a local's initialization flag without destroying its value.
-    ForgetLocal {
-        local: LocalId,
-    },
+    ForgetLocal { local: LocalId },
     /// `[] -> [value]`: transfer an initialized local and clear its initialization flag.
-    TakeLocal {
-        local: LocalId,
-    },
+    TakeLocal { local: LocalId },
     /// `[] -> [value]`: transfer a field and disarm cleanup for that part of the local.
-    TakeField {
-        local: LocalId,
-        path: Vec<usize>,
-    },
+    TakeField { local: LocalId, path: Vec<usize> },
     /// `[value] -> []`: replace a field, destroying only its still-initialized parts.
-    SetField {
-        local: LocalId,
-        path: Vec<usize>,
-    },
+    SetField { local: LocalId, path: Vec<usize> },
     /// `[] -> []`: destroy a local if initialized, then clear its initialization flag.
-    DropLocal {
-        local: LocalId,
-    },
+    DropLocal { local: LocalId },
     /// `[value] -> []`: destroy a local's previous initialized value, then transfer
     /// the new value into the local and mark it initialized.
-    SetLocal {
-        local: LocalId,
-    },
+    SetLocal { local: LocalId },
     /// `[payload] -> [variant]`: transfer a payload into case `tag` of type `ty`.
-    MakeVariant {
-        ty: Ty,
-        tag: Case,
-    },
+    MakeVariant { ty: Ty, tag: Case },
     /// `[variant or address] -> [bool]`: test the active case; destroy a value operand
     /// after testing, or borrow the pointee when given an address.
-    IsVariant {
-        tag: Case,
-    },
+    IsVariant { tag: Case },
     /// `[T | None] -> [T]`: transfer the remaining value, trapping if its case is `None`.
     ExcludeNone,
     /// `[variant] -> [payload]`: transfer the active payload, trapping on a different tag.
-    VariantPayload {
-        tag: Case,
-    },
+    VariantPayload { tag: Case },
     /// `[value] -> [widened value]`: transfer union/Err payloads into the wider type.
-    Widen {
-        ty: Ty,
-    },
+    Widen { ty: Ty },
     /// `[pointer or ulong] -> [cast value]`: reinterpret a pointer or its integer address.
     /// Host-only: shader pointer representation belongs to the backend.
-    PointerCast {
-        ty: Ty,
-    },
+    PointerCast { ty: Ty },
     /// `[] -> [value]`: materialize an immediate; byte literals borrow static storage.
-    Push {
-        value: Value,
-    },
+    Push { value: Value },
     /// `[] -> [RefMut<T>]`: borrow a local's storage without reading or initializing it.
-    LocalRef {
-        local: LocalId,
-    },
+    LocalRef { local: LocalId },
     /// `[Ptr<T>] -> [RefMut<T>]`: borrow a pointee, discarding pointer capabilities.
     Borrow,
     /// `[RefMut<T>] -> [Ref<T>]`: relinquish write permission on this reference.
@@ -275,9 +237,7 @@ pub enum Instr {
     ReadOnly,
     /// `[aggregate or address] -> [child or address]`: project by declaration index.
     /// A value operand copies the child and destroys the aggregate; raw addresses borrow.
-    AccessStatic {
-        index: usize,
-    },
+    AccessStatic { index: usize },
     /// `[base, index] -> [element or address]`: index an array, array address, or `str`.
     /// Array addresses and string literals produce borrowed element addresses;
     /// array values copy the element and destroy the consumed array.
@@ -301,39 +261,24 @@ pub enum Instr {
     Replace,
     /// `[value] -> [ascribed value]`: preserve ownership while changing its type view.
     /// Types must match, differ by one nominal layer, or expose a `str` byte view.
-    Ascribe {
-        ty: Ty,
-    },
+    Ascribe { ty: Ty },
     /// `[number] -> [converted number]`: convert explicitly, trapping on integer overflow.
-    NumericCast {
-        ty: Ty,
-    },
+    NumericCast { ty: Ty },
     /// `[Never] -> [result]` for type checking only: consume Never and terminate execution.
     /// `result` describes the unreachable continuation; no runtime value is constructed.
-    Eliminate {
-        result: Ty,
-    },
+    Eliminate { result: Ty },
     /// `[value] -> []`: destroy the value.
     Discard,
     /// `[field_0, ..., field_n] -> [record]`: transfer fields in declaration order.
-    MakeRecord {
-        fields: Vec<Arc<str>>,
-    },
+    MakeRecord { fields: Vec<Arc<str>> },
     /// `[element_0, ..., element_n] -> [array]`: transfer elements in order.
     /// The explicit element type permits an empty array.
-    MakeArray {
-        elements: usize,
-        element: Ty,
-    },
+    MakeArray { elements: usize, element: Ty },
     /// `[] -> [function]`: materialize a callable reference to the given function.
-    Function {
-        function: FunctionId,
-    },
+    Function { function: FunctionId },
     /// `[function, argument_0, ..., argument_n] -> [result]`: transfer arguments
     /// into the callee's parameter locals, then transfer its returned value.
-    Call {
-        arguments: usize,
-    },
+    Call { arguments: usize },
     /// `[argument_0, ..., argument_n] -> [result]`: invoke the checked builtin signature.
     /// The builtin borrows its operands, then they are destroyed.
     CallBuiltin {

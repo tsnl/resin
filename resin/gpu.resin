@@ -5,10 +5,10 @@ export { GpuRayScene, GpuRayTracingPipeline, create_ray_scene, create_ray_tracin
 
 extern {
 	"resin_runtime.h": {
-        fn resin_gpu_supports_ray_tracing(gpu: Ptr<ResinGpu>) -> u32;
-        fn resin_gpu_create_ray_scene(gpu: Ptr<ResinGpu>, vertices: Ptr<f32>, vertex_count: u32, transforms: Ptr<f32>, instance_count: u32, scene: Ptr<Ptr<ResinRayScene>>) -> i32;
-        fn resin_gpu_free_ray_scene(scene: Ptr<ResinRayScene>);
-        fn resin_gpu_create_ray_pipeline(gpu: Ptr<ResinGpu>, scene: Ptr<ResinRayScene>, generation: Ptr<u8>, generation_length: u64, miss: Ptr<u8>, miss_length: u64, hit: Ptr<u8>, hit_length: u64, pipeline: Ptr<Ptr<ResinPipeline>>) -> i32;
+		fn resin_gpu_supports_ray_tracing(gpu: Ptr<ResinGpu>) -> u32;
+		fn resin_gpu_create_ray_scene(gpu: Ptr<ResinGpu>, vertices: Ptr<f32>, vertex_count: u32, transforms: Ptr<f32>, instance_count: u32, scene: Ptr<Ptr<ResinRayScene>>) -> i32;
+		fn resin_gpu_free_ray_scene(scene: Ptr<ResinRayScene>);
+		fn resin_gpu_create_ray_pipeline(gpu: Ptr<ResinGpu>, scene: Ptr<ResinRayScene>, generation: Ptr<u8>, generation_length: u64, miss: Ptr<u8>, miss_length: u64, hit: Ptr<u8>, hit_length: u64, pipeline: Ptr<Ptr<ResinPipeline>>) -> i32;
 		fn resin_gpu_device_count(count: Ptr<u32>) -> i32;
 		fn resin_gpu_enumerate_devices(infos: Ptr<ResinGpuDeviceInfo>, count: u32) -> i32;
 		fn resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> i32;
@@ -419,48 +419,60 @@ fn clone<Root, Owner>(value: Ref<GpuGraphicsPipeline<Root, Owner>>) -> GpuGraphi
 
 // Opaque triangles, one mesh, and row-major affine instances. Builds finish before returning.
 struct RaySceneOwner {
-    handle: Ptr<ResinRayScene>,
-    gpu: Gpu,
+	handle: Ptr<ResinRayScene>,
+	gpu: Gpu,
 }
 fn drop(self: RefMut<RaySceneOwner>) {
-    resin_gpu_free_ray_scene(self.handle);
+	resin_gpu_free_ray_scene(self.handle);
 }
 struct GpuRayScene {
-    owner: ArcPtr<RaySceneOwner>,
+	owner: ArcPtr<RaySceneOwner>,
 }
 struct GpuRayTracingPipeline<Root, Owner> {
-    contract: GpuPipelineContract,
+	contract: GpuPipelineContract,
 }
 intrinsic "gpu_ray_tracing_pipeline_type" fn ray_tracing_type<Root, Owner>(contract: GpuPipelineContract) -> GpuRayTracingPipeline<Root, Owner>;
 
+/// Whether this GPU enables Vulkan ray tracing pipelines and acceleration structures.
 fn supports_ray_tracing(self: Ref<Gpu>) -> bool {
-    resin_gpu_supports_ray_tracing(self:native()) != 0
+	resin_gpu_supports_ray_tracing(self:native()) != 0
 }
 
+/// Copy non-indexed XYZ triangles and affine 3x4 instance transforms; wait for the builds.
 fn create_ray_scene(self: Ref<Gpu>, vertices: Span<f32>, transforms: Span<f32>) -> (GpuRayScene | Err<RuntimeError>) {
-    if (vertices.length == 0 || vertices.length % 9 != 0 || vertices.length / 3 > 4294967295 || transforms.length == 0 || transforms.length % 12 != 0 || transforms.length / 12 > 16777216) {
-        return Err(InvalidArgument {});
-    };
-    let owner = arc_ptr_alloc(RaySceneOwner { handle = Ptr<ResinRayScene>(u64(0)), gpu = self:clone() })?;
-    runtime_status_from_code(resin_gpu_create_ray_scene(self:native(), vertices.data, u32(vertices.length / 3), transforms.data, u32(transforms.length / 12), &owner:get().handle))?;
-    GpuRayScene { owner = owner }
+	if (vertices.length == 0 || vertices.length % 9 != 0 || vertices.length / 3 > 4294967295 || transforms.length == 0 || transforms.length % 12 != 0 || transforms.length / 12 > 16777216) {
+		return Err(InvalidArgument {});
+	};
+	let owner = arc_ptr_alloc(RaySceneOwner { handle = Ptr<ResinRayScene>(u64(0)), gpu = self:clone() })?;
+	runtime_status_from_code(resin_gpu_create_ray_scene(self:native(), vertices.data, u32(vertices.length / 3), transforms.data, u32(transforms.length / 12), &owner:get().handle))?;
+	GpuRayScene { owner = owner }
 }
 
+/// Link direct ray-generation, miss, and closest-hit declarations; retain the scene.
 @gpu_ray_tracing_pipeline
 fn create_ray_tracing_pipeline(self: Ref<GpuRayScene>, generation: (Ptr<u8>, u64), miss: (Ptr<u8>, u64), hit: (Ptr<u8>, u64)) -> (GpuPipelineOwner | Err<RuntimeError>) {
-    let owner = arc_ptr_alloc(PipelineOwner { handle = Ptr<ResinPipeline>(u64(0)), gpu = self.owner:get().gpu:clone() })?;
-    runtime_status_from_code(resin_gpu_create_ray_pipeline(self.owner:get().gpu:native(), self.owner:get().handle, generation.0, generation.1, miss.0, miss.1, hit.0, hit.1, &owner:get().handle))?;
-    GpuPipelineOwner { owner = owner }
+	let owner = arc_ptr_alloc(PipelineOwner { handle = Ptr<ResinPipeline>(u64(0)), gpu = self.owner:get().gpu:clone() })?;
+	runtime_status_from_code(resin_gpu_create_ray_pipeline(self.owner:get().gpu:native(), self.owner:get().handle, generation.0, generation.1, miss.0, miss.1, hit.0, hit.1, &owner:get().handle))?;
+	GpuPipelineOwner { owner = owner }
 }
 
+/// Record a ray launch with typed, retained root arguments. Dimensions count rays.
 @gpu_trace_rays
 fn trace_rays(self: Ref<GpuCommands>, pipeline: Ref<GpuPipelineOwner>, root: GpuArguments, x: u32, y: u32, z: u32) -> (() | Err<RuntimeError>) {
-    self.owner:get():retain(pipeline:clone(), None)?;
-    runtime_status_from_code(resin_gpu_set_pipeline(self:native(), pipeline:native()))?;
-    runtime_status_from_code(root:trace_rays_native(Ptr<u8>(self:native()), x, y, z))
+	self.owner:get():retain(pipeline:clone(), None)?;
+	runtime_status_from_code(resin_gpu_set_pipeline(self:native(), pipeline:native()))?;
+	runtime_status_from_code(root:trace_rays_native(Ptr<u8>(self:native()), x, y, z))
 }
 
-// Ray-generation only. Direction need not be normalized; min/max are ray parameters.
+/// Ray-generation only. Direction need not be normalized; min/max are ray parameters.
 intrinsic "trace_ray" fn trace_ray<Payload>(ox: f32, oy: f32, oz: f32, dx: f32, dy: f32, dz: f32, minimum: f32, maximum: f32, initial: Payload) -> Payload;
-// Closest-hit only: distance parameter, primitive index, instance index, barycentric u/v.
+/// Closest-hit only: distance parameter, primitive index, instance index, barycentric u/v.
 intrinsic "ray_hit_info" fn ray_hit_info() -> (f32, u32, u32, f32, f32);
+
+fn clone(value: Ref<GpuRayScene>) -> GpuRayScene {
+	GpuRayScene { owner = value.owner:clone() }
+}
+
+fn clone<Root, Owner>(value: Ref<GpuRayTracingPipeline<Root, Owner>>) -> GpuRayTracingPipeline<Root, Owner> {
+	GpuRayTracingPipeline<Root, Owner> { contract = value.contract }
+}

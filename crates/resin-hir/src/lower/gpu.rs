@@ -205,13 +205,13 @@ impl Context {
             FunctionBody::GpuPipelineFactory { kind, .. } => {
                 let (_, pipeline) = self.source_pipeline_type(kind)?;
                 let label_kind = &pipeline.name;
-                let shaders = if kind == resin_types::GpuPipelineKind::Graphics {
-                    "vertex: @vertex_shader, fragment: @fragment_shader"
-                } else {
-                    if kind == resin_types::GpuPipelineKind::RayTracing {
+                let shaders = match kind {
+                    resin_types::GpuPipelineKind::Compute => "shader: @compute_shader",
+                    resin_types::GpuPipelineKind::Graphics => {
+                        "vertex: @vertex_shader, fragment: @fragment_shader"
+                    }
+                    resin_types::GpuPipelineKind::RayTracing => {
                         "ray_generation: @ray_generation_shader, miss: @miss_shader, closest_hit: @closest_hit_shader"
-                    } else {
-                        "shader: @compute_shader"
                     }
                 };
                 Some(format!(
@@ -300,11 +300,33 @@ impl Context {
             };
             if let Some(Type::Pointer { pointee }) = params.get(1) {
                 if root != Type::None && root != **pointee {
-                    return Err("vertex and fragment shaders must use the same root type".into());
+                    return Err("pipeline shaders must use the same root type".into());
                 }
                 root = *pointee.clone();
             } else if kind != resin_types::GpuPipelineKind::Graphics {
-                return Err("compute shader root parameter must be a pointer".into());
+                return Err("shader root parameter must be a pointer".into());
+            }
+        }
+        if kind == resin_types::GpuPipelineKind::RayTracing {
+            let Type::Function {
+                params: miss,
+                result: miss_result,
+            } = &shaders[1]
+            else {
+                unreachable!()
+            };
+            let Type::Function {
+                params: hit,
+                result: hit_result,
+            } = &shaders[2]
+            else {
+                unreachable!()
+            };
+            if miss.first() != hit.first()
+                || miss.first() != Some(miss_result.as_ref())
+                || hit.first() != Some(hit_result.as_ref())
+            {
+                return Err("ray shaders must use the same payload type".into());
             }
         }
         let native = self.declared_function(factory);
@@ -361,12 +383,13 @@ impl Context {
             .gpu_pipeline
             .as_ref()
             .ok_or("recording requires a registered source pipeline type")?;
-        let expected_kind = kind;
-        if metadata.kind != expected_kind {
-            return Err(if kind == resin_types::GpuPipelineKind::Graphics {
-                "draw requires a graphics pipeline"
-            } else {
-                "dispatch requires a compute pipeline"
+        if metadata.kind != kind {
+            return Err(match kind {
+                resin_types::GpuPipelineKind::Compute => "dispatch requires a compute pipeline",
+                resin_types::GpuPipelineKind::Graphics => "draw requires a graphics pipeline",
+                resin_types::GpuPipelineKind::RayTracing => {
+                    "trace_rays requires a ray tracing pipeline"
+                }
             }
             .into());
         }
