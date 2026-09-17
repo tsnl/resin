@@ -105,6 +105,7 @@ pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
         | Instr::NumericCast { .. }
         | Instr::PointerCast { .. } => StackEffect { pops: 1, pushes: 1 },
         Instr::GpuRayTracingPipeline { .. }
+        | Instr::Workgroup { .. }
         | Instr::GpuComputePipeline { .. }
         | Instr::GpuGraphicsPipeline { .. } => StackEffect { pops: 1, pushes: 1 },
         Instr::GpuDispatch { .. } => StackEffect { pops: 6, pushes: 1 },

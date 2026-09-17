@@ -1,0 +1,16 @@
+//! Explicit cooperative state for compute shaders and a one-lane host reference run.
+export { Workgroup, sync, lane_index, lane_count };
+
+/// A borrowed mutable state. A compute entry's optional third parameter lives in
+/// workgroup storage; an ordinary host call borrows a caller-supplied local.
+type Workgroup<T> = RefMut<T>;
+
+/// All lanes must reach the same barrier in the same order. Publishes shared
+/// state and device-pointer writes to the group. A no-op in one-lane host calls.
+intrinsic "workgroup_sync" fn sync<T>(group: Workgroup<T>) -> ();
+
+/// This lane's index within its group, or zero on the host.
+intrinsic "workgroup_lane_index" fn lane_index<T>(group: Workgroup<T>) -> u64;
+
+/// The group's physical lane count, or one on the host.
+intrinsic "workgroup_lane_count" fn lane_count<T>(group: Workgroup<T>) -> u64;

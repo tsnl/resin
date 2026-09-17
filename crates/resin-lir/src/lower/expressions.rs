@@ -172,6 +172,7 @@ impl FunctionLowering<'_> {
     ) -> Result<(), LowerError> {
         self.gen_arguments(args)?;
         match op {
+            Intrinsic::Workgroup { operation } => self.emit(Instr::Workgroup { operation }),
             Intrinsic::Repr | Intrinsic::Sqrt | Intrinsic::Sin | Intrinsic::Cos => {
                 return Err(LowerError::invalid_hir(
                     self.source_span,

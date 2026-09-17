@@ -107,6 +107,9 @@ impl Function {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instr {
+    /// `[RefMut<T>] -> [unit/u64]`: synchronize or query lane index/count. Host
+    /// execution has one lane; GPU operands must originate in Workgroup storage.
+    Workgroup { operation: WorkgroupOperation },
     /// `[native_gpu, strong_owner, bytes, alignment, memory] -> [{value: GpuView | None, status: int}]`.
     /// Allocation retains the device owner. All operands are consumed.
     GpuViewAllocate,
@@ -648,6 +651,7 @@ pub enum VerifyLocation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerifyErrorKind {
+    InvalidWorkgroupOperation,
     InvalidGpuOperation,
     UnsupportedGpuElement { ty: Ty },
     InvalidVariant,

@@ -96,6 +96,7 @@ fn instruction(typer: &TyperContext, op: &Instr) -> Result<(), String> {
     match op {
         Instr::TraceRay { payload } => resin_types::shader::ray_payload(typer.definitions(), payload),
         Instr::RayHitInfo => Ok(()),
+        Instr::Workgroup { .. } => Ok(()),
         Instr::CallBuiltin { name, params, result } => {
             let signature = resin_types::shader::builtin_instance(typer, name, params)?;
             typer.same(&signature.result, result).map_err(|error| error.to_string())

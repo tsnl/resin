@@ -15,6 +15,13 @@ pub(super) fn check_instr(
     location: Location,
 ) -> Result<(), VerifyError> {
     match instr {
+        Instr::Workgroup { operation } => {
+            let argument = pop_one(stack, location)?;
+            if !matches!(argument, Ty::Reference { mutable: true, .. }) {
+                return Err(location.error(VerifyErrorKind::InvalidWorkgroupOperation));
+            }
+            stack.push(operation.result());
+        }
         Instr::TraceRay { payload } => {
             if function.profile != crate::Profile::Shader {
                 return Err(location.error(VerifyErrorKind::InvalidGpuOperation));

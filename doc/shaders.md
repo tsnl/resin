@@ -70,6 +70,10 @@ fn kernel(index: u64, root: Ptr<Params>) -> ()  {
 ```
 The entry interfaces are:
 
+The [workgroup interface](workgroups.md) additionally permits a third
+`Workgroup<State>` parameter on compute entries, exposing shared state and an
+explicit barrier while preserving the per-invocation convention below.
+
 - Compute takes `(u64, Ptr<T>)` and returns `()`. Call `gpu:compute_workgroup_size()`
   to get the `u64` number of invocations per workgroup for that `Gpu`. The runtime
   selects it from the device's reported default subgroup size, bounded by its workgroup

@@ -24,6 +24,9 @@ pub(super) fn instruction(
     let id = match instr {
         Instr::TraceRay { payload } => super::ray::trace(context, args, payload)?,
         Instr::RayHitInfo => super::ray::hit_info(context, result.unwrap())?,
+        Instr::Workgroup { operation } => {
+            super::workgroup::operation(context, *operation, &args[0])?
+        }
         Instr::ForgetLocal { .. } | Instr::Discard => return Ok(None),
         Instr::TakeLocal { local } => load(context, result.unwrap(), locals[local.index()])?,
         Instr::TakeField { local, path } | Instr::SetField { local, path } => {
@@ -40,6 +43,7 @@ pub(super) fn instruction(
                 id: locals[local.index()],
                 local: Some(LocalAddress {
                     root: locals[local.index()],
+                    storage: StorageClass::Function,
                     root_type: function.locals[local.index()].ty.clone(),
                     indices: path
                         .iter()
@@ -68,6 +72,7 @@ pub(super) fn instruction(
                 id: locals[local.index()],
                 local: Some(LocalAddress {
                     root: locals[local.index()],
+                    storage: StorageClass::Function,
                     root_type: function.locals[local.index()].ty.clone(),
                     indices: vec![],
                 }),
@@ -81,6 +86,11 @@ pub(super) fn instruction(
         }
         Instr::Function { function } => context.functions[function.index()],
         Instr::Call { .. } => {
+            if context.requires_workgroup.contains(&args[0].id) {
+                return Err(Error::unsupported(
+                    "workgroup helpers require the compute entry's shared state reference".into(),
+                ));
+            }
             let ty = context.ty(result.unwrap())?;
             context
                 .builder
@@ -187,7 +197,7 @@ fn local_pointer(
     if local.indices.is_empty() {
         return Ok(local.root);
     }
-    let ty = context.pointer_type(StorageClass::Function, pointee)?;
+    let ty = context.pointer_type(local.storage, pointee)?;
     let indices: Vec<_> = local
         .indices
         .iter()
@@ -317,6 +327,7 @@ fn index(
             context.builder.store(scratch, base.id, None, []).unwrap();
             let local = LocalAddress {
                 root: scratch,
+                storage: StorageClass::Function,
                 root_type: base.ty.clone(),
                 indices: vec![LocalIndex::Dynamic {
                     id: index.id,

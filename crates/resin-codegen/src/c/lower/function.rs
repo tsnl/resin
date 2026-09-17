@@ -696,6 +696,11 @@ fn instruction(
             )
         }
         Instr::AccessStatic { index } => project(types, &args[0], &index.to_string(), false)?,
+        Instr::Workgroup { operation } => match operation {
+            WorkgroupOperation::Sync => format!("((void)({}), 0)", args[0].expr),
+            WorkgroupOperation::LaneIndex => format!("((void)({}), UINT64_C(0))", args[0].expr),
+            WorkgroupOperation::LaneCount => format!("((void)({}), UINT64_C(1))", args[0].expr),
+        },
         Instr::PointerRange => pointer_range(args, out),
         Instr::PointerBytes => pointer_bytes(types, args, result.unwrap(), out),
         Instr::PointerIndex => format!(

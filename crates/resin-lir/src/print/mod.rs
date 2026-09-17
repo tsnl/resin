@@ -253,6 +253,7 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
         Instr::AccessStatic { index } => list("access-static", vec![symbol(index.to_string())]),
         Instr::Borrow => symbol("borrow"),
         Instr::ReadOnly => symbol("read-only"),
+        Instr::Workgroup { operation } => list("workgroup", vec![symbol(format!("{operation:?}"))]),
         Instr::PointerIndex => symbol("pointer-index"),
         Instr::PointerRange => symbol("pointer-range"),
         Instr::PointerBytes => symbol("pointer-bytes"),
