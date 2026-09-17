@@ -46,14 +46,14 @@ A few language choices explain much of the implementation:
 - `A | B` is a structural union of value types. `T | Err<E>` represents a
   successful `T` or an error wrapper constructed with `Err(value)`; postfix `?`
   propagates errors. `T | None` represents optional values, handled with `match` or `!`.
-- Named structs move; primitives and aggregates containing only copyable values
+- Structs without drop hooks and aggregates containing only copyable values
   copy. HIR checks moves and definite initialization. Structs contain fields only;
   ordinary free functions supply operations, called directly or through UFCS colon
   syntax. A free `drop(value: RefMut<T>)` function supplies a destruction hook.
 - `ArcPtr<T>` shares single values, and `ArcSpan<T>` shares fixed-length sequences.
   Weak owners observe them without keeping their payloads alive.
   `arc_span_alloc(count, initial)?` allocates initialized owned elements;
-  `owner:get()` borrows a span and `owner:clone()` explicitly retains ownership.
+  `owner:get()` borrows a span; value copies and `owner:clone()` retain ownership.
   Cleanup releases initialized owners in reverse scope order, including through `?`.
 - Files have private scopes and explicit exports. Imports expose only exported
   names, and never execute code. There are no runtime global variables.

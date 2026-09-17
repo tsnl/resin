@@ -8,6 +8,7 @@ comments at this manual's revision; each page also links to its source.
 | --- | --- | --- |
 | [`$/math.resin`](../resin/math.resin) | `Complex<T>`, `complex`, `add`, `mul`, `squared`, `magnitude_squared`, `sqrt`, `sin`, `cos` | Arithmetic helpers borrow inputs. Shader transcendental operations currently use `f32`. |
 | [`$/span.resin`](../resin/span.resin) | `Span<T>`, `at`, `lea`, `slice`, `bytes`, `as_bytes` | Borrowed pointer/length view; keep the backing storage alive. CPU and shader indexing have different bounds-check behavior. |
+| [`$/ownership.resin`](../resin/ownership.resin) | `PhantomBox` | Marker field for move-only values; owns no allocation. |
 | [`$/shared.resin`](../resin/shared.resin) | `arc_ptr_alloc`, `arc_span_alloc`, `get`, `clone`, `downgrade`, `upgrade` | Host allocation and ownership; borrowed views do not retain an owner. |
 | [`$/string.resin`](../resin/string.resin) | `String`, `string_from_str`, `string_from_bytes`, `fmt`, `repr` | Host allocation and formatting; `str` is a distinct primitive literal view. |
 | [`$/stdio.resin`](../resin/stdio.resin) | `print`, `io_stdout`, `io_stderr`, `write`, `console_read_byte`, `console_read_line`, `console_print` | Host input and output; stream operations expose error unions and input distinguishes EOF. |

@@ -180,6 +180,32 @@ mod definition_tests {
 // Structural type operations
 //
 
+pub(super) fn copies_implicitly(ty: &Ty, definitions: &[TypeDef]) -> bool {
+    let mut pending = vec![ty];
+    let mut visited = std::collections::BTreeSet::new();
+    while let Some(ty) = pending.pop() {
+        match ty {
+            Ty::Defined { definition } if visited.insert(*definition) => {
+                let Some(definition) = definitions.get(definition.index()) else {
+                    return false;
+                };
+                if definition.drop_hook().is_some() {
+                    return false;
+                }
+                let Some(body) = definition.body() else {
+                    return false;
+                };
+                pending.push(body);
+            }
+            Ty::Record { fields } => pending.extend(fields.iter().map(|field| &field.ty)),
+            Ty::Array { element, .. } | Ty::Error { payload: element } => pending.push(element),
+            Ty::Union { variants } => pending.extend(variants),
+            _ => {}
+        }
+    }
+    true
+}
+
 pub(super) fn needs_drop(ty: &Ty, definitions: &[TypeDef]) -> bool {
     match ty {
         Ty::StrongOwner

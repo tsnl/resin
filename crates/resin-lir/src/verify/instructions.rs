@@ -95,7 +95,7 @@ pub(super) fn check_instr(
         Instr::OwnerAllocate { element } => {
             check_type(&module.types, element, location)?;
             super::rules::check_value(&module.types, element, location)?;
-            if !element.copies_implicitly() {
+            if !element.copies_implicitly(&module.types) {
                 return Err(location.error(VerifyErrorKind::InvalidCopy {
                     ty: element.clone(),
                 }));
@@ -312,6 +312,9 @@ pub(super) fn check_instr(
             else {
                 return Err(location.error(VerifyErrorKind::ExpectedPointer { found: address }));
             };
+            if matches!(instr, Instr::Load) && !pointee.copies_implicitly(&module.types) {
+                return Err(location.error(VerifyErrorKind::InvalidCopy { ty: *pointee }));
+            }
             stack.push(*pointee);
         }
         Instr::Store | Instr::Replace => {

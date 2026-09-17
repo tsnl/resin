@@ -81,7 +81,7 @@ fn main() -> (() | Err<_>) {
 ```
 
 The result is a shared `InputLine` owner; `line:get()` borrows its `Span<u8>`
-view. Explicit clones retain the allocation; the final owner frees it. Raw pointers
+view. Value copies and explicit clones retain the allocation; the final owner frees it. Raw pointers
 and spans do not keep it alive. The allocation has a trailing NUL outside `length`.
 Empty lines succeed, EOF before any bytes returns `EndOfInput`, and a final nonempty
 line without a newline succeeds. Read and allocation failures return `InputReadError`

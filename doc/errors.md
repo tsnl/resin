@@ -144,7 +144,7 @@ preserves unrecognized codes. `runtime_status_code(error)` and `runtime_status_m
 recover the native code and C diagnostic string. Standard-library operations already
 return error unions, so callers normally use `gpu_new()?` rather than converting statuses.
 Standard-library resources release themselves on scope exit, including early returns
-through `?`. Explicit clones retain shared ownership.
+through `?`. Value copies and explicit clones retain shared ownership.
 
 See [Ownership and cleanup](lifetimes.md) for copying, moves, and destruction.
 

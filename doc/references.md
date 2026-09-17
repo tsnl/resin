@@ -110,8 +110,8 @@ reference to a local that has left scope, or using a reference after its owner
 is moved or destroyed can leave a dangling alias. Callers must keep storage alive,
 and initialized; writes also require writable backing storage. String literal storage is read-only.
 
-Use `ArcPtr<T>` or `ArcSpan<T>` when a value must retain shared ownership. Explicit
-`owner:clone()` creates another owning handle. A raw reference or pointer obtained
+Use `ArcPtr<T>` or `ArcSpan<T>` when a value must retain shared ownership. Copying an owner creates another retaining handle;
+`owner:clone()` also remains available. A raw reference or pointer obtained
 from an Arc still does not retain it; keep an owning handle alive during access.
 Atomic reference counts do not synchronize writes to the payload.
 

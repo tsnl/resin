@@ -83,6 +83,54 @@ impl Context {
             .collect()
     }
 
+    /// Copyability follows stored fields, not nominal identity or unused type arguments.
+    /// `None` means substitution must decide. A known move-only field wins even
+    /// when other fields have unresolved types.
+    pub(super) fn copyability(&self, ty: &crate::Type) -> Option<bool> {
+        let mut copyable = Some(true);
+        let solver = super::infer::Solver::default();
+        let mut pending = vec![(ty.clone(), 0)];
+        let mut visited = std::collections::BTreeSet::new();
+        while let Some((ty, depth)) = pending.pop() {
+            match &ty {
+                crate::Type::Defined { definition, .. } if visited.insert(ty.clone()) => {
+                    if depth >= 256
+                        || visited.len() > 65_536
+                        || self
+                            .definition(*definition)
+                            .ok()
+                            .is_none_or(|d| d.drop_hook().is_some())
+                    {
+                        return Some(false);
+                    }
+                    let Some(body) = self
+                        .nominal_body(&super::infer::Type::from_hir(&ty), &solver)
+                        .and_then(|body| solver.complete(&body))
+                    else {
+                        return Some(false);
+                    };
+                    pending.push((body, depth + 1));
+                }
+                crate::Type::Array { element, .. } | crate::Type::Error { payload: element } => {
+                    pending.push((element.as_ref().clone(), depth));
+                }
+                crate::Type::Record { fields } => {
+                    pending.extend(fields.iter().map(|field| (field.ty.clone(), depth)));
+                }
+                crate::Type::Union { variants } => {
+                    pending.extend(variants.iter().cloned().map(|ty| (ty, depth)));
+                }
+                crate::Type::Parameter { .. }
+                | crate::Type::Member { .. }
+                | crate::Type::FunctionParameter { .. }
+                | crate::Type::FunctionResult { .. }
+                | crate::Type::Value { .. } => copyable = None,
+                _ => {}
+            }
+        }
+        copyable
+    }
+
     pub(crate) fn nominal_body(
         &self,
         source: &super::infer::Type,

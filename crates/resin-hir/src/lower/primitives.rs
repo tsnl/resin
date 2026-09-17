@@ -63,16 +63,14 @@ pub(super) fn body(function: &mut Function, op: crate::Intrinsic) {
                     mutable: false,
                 },
             };
-            if place.ty.copies_implicitly() {
-                place
-            } else {
-                Term {
-                    span: place.span,
-                    ty: place.ty.clone(),
-                    kind: TermKind::Move {
-                        place: Box::new(place),
-                    },
-                }
+            // An intrinsic uses each owned parameter once. Transfer that parameter
+            // into the operation; copying the caller's argument is decided at its call.
+            Term {
+                span: place.span,
+                ty: place.ty.clone(),
+                kind: TermKind::Move {
+                    place: Box::new(place),
+                },
             }
         })
         .collect::<Vec<_>>();

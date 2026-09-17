@@ -294,17 +294,10 @@ impl Case {
 }
 
 impl Ty {
-    /// Nominal values move. Primitive values and structural aggregates of
-    /// implicitly copyable values may be duplicated by a value read.
-    pub fn copies_implicitly(&self) -> bool {
-        match self {
-            Self::Defined { .. } => false,
-            Self::Array { element, .. } => element.copies_implicitly(),
-            Self::Record { fields } => fields.iter().all(|field| field.ty.copies_implicitly()),
-            Self::Union { variants } => variants.iter().all(Self::copies_implicitly),
-            Self::Error { payload } => payload.copies_implicitly(),
-            _ => true,
-        }
+    /// Value reads copy fields recursively and retain managed handles. A nominal
+    /// drop hook or a noncopyable field makes the enclosing value move-only.
+    pub fn copies_implicitly(&self, definitions: &[TypeDef]) -> bool {
+        types::copies_implicitly(self, definitions)
     }
 
     /// The value accessed through a pointer or reference. This query grants no pointer capability.

@@ -1,24 +1,46 @@
 # Ownership, moves, and lifetimes
 
-Resin uses checked ownership moves without a borrow checker. Named structs own
-their fields and move when passed, assigned, returned, or placed in an aggregate.
-Primitive values copy, as do tuples, arrays, unions, and `Err` payloads composed
-entirely of copyable types. A struct remains noncopyable even if its fields copy.
-User-defined `Copy`/`Clone` interfaces are deferred. Library `clone` functions are
-ordinary visible overloads.
+Resin copies ordinary values by default and checks ownership moves for move-only
+values. A struct copies when all its stored fields copy and it has no custom
+`drop` hook. The same rule propagates through tuples, arrays, unions, and `Err`
+payloads. A noncopyable field makes its enclosing value move-only.
+
+Copying creates a separate value; it does not duplicate pointed-to storage.
+Copying an Arc handle retains the same allocation with an additional reference
+count. This is broader than Rust's `Copy`, whose copies cannot run retain logic.
+There is no user-defined `Copy` hook. Library `clone` functions remain ordinary
+visible overloads for explicitly duplicating move-only values or requesting a
+library-specific copy.
 
 ```resin
 struct Item { value: i32 }
-fn consume(item: Item) -> i32 {
+fn read(item: Item) -> i32 {
 	item.value
 }
 fn example() -> i32 {
-	let item = Item { value = 42 };
-	let transferred = item;
-	// item is moved and cannot be read again.
-	consume(transferred)
+	let item = Item { value = 21 };
+	let mut copied = item;
+	copied.value = 7;
+	read(item) + item.value // 42; passing item did not consume it.
 }
 ```
+
+To opt out of copying without implementing cleanup, include `PhantomBox` from
+`$/ownership.resin`. This ordinary library marker owns no allocation; its empty
+drop hook makes it noncopyable, and the field rule does the rest:
+
+```resin
+import { "$/ownership.resin" };
+struct Ticket { serial: u64, ownership: PhantomBox }
+fn example() {
+	let ticket = Ticket { serial = 1, ownership = PhantomBox {} };
+	let transferred = ticket;
+	// ticket is moved and cannot be read again.
+}
+```
+
+A struct with a custom drop hook is already move-only. It needs no marker.
+`Ptr<T>` remains a copyable, nonowning pointer; it does not allocate or free `T`.
 
 `let` bindings are immutable unless their identifier has `mut`. Moving an
 immutable value is allowed. An uninitialized immutable binding may be initialized
@@ -41,8 +63,13 @@ again. Fields cannot be moved out of a struct with a custom drop hook.
 At branches, a value must be available on every reachable incoming path. Loop
 backedges and `continue` paths must restore values needed on another iteration;
 `break` and early returns contribute only to their reachable destinations.
-Generic bodies retain operation and type relations until specialization. Named
-structs and unconstrained type parameters cannot assume implicit copying.
+Generic bodies retain operation and type relations until specialization.
+Unconstrained type parameters cannot assume implicit copying inside a generic
+body: consuming `T` still moves it there. A known wrapper such as `ArcPtr<T>`
+can copy for every `T`, because its stored owner handle copies. A `Cell<T>` with
+a stored `T` field copies only when that field is known to copy. `Ref<T>` allows
+generic code to borrow repeatedly; reading its value is checked for copyability
+after specialization.
 
 Completed HIR records moves explicitly. LIR specialization resolves concrete
 operations and rejects noncopyable reads through pointers or references. Storage
@@ -96,9 +123,8 @@ owns a descriptor; `ArcSpan<T>` owns its elements. There are no unsized payloads
 import { "$/shared.resin", "$/status.resin" };
 fn example() -> i32 | Err<OutOfMemory> {
 	let owner = arc_ptr_alloc(i32(42))?;
-	let retained = owner:clone(); // Retain the same allocation explicitly.
-	let moved = owner; // Transfer this handle; owner is now unavailable.
-	retained:get().* + moved:get().*
+	let retained = owner; // Retain the same allocation automatically.
+	owner:get().* + retained:get().*
 }
 ```
 
@@ -108,8 +134,8 @@ repeats a copyable initializer, checks allocation arithmetic, and returns only w
 all elements are initialized. Move-only initializers cannot be repeated. Empty
 allocations are valid. Final release destroys elements in reverse order.
 
-`get` borrows raw access without retaining ownership. `clone` retains another
-strong handle; `downgrade` creates a weak handle; `upgrade` returns a retained strong
+`get` borrows raw access without retaining ownership. An ordinary value copy
+retains another strong handle, as does an explicit `clone`; `downgrade` creates a weak handle; `upgrade` returns a retained strong
 handle or `None`. The final strong release destroys the payload, while remaining
 weak handles retain only bookkeeping. Strong cycles require weak links. Atomic
 reference counting does not synchronize payload access or validate raw aliases.
@@ -126,8 +152,8 @@ the stored handle.
 Locals are destroyed in reverse scope order. Moves transfer responsibility to the
 destination and suppress cleanup of the moved source. Returned values survive
 cleanup. Discarded owned results are destroyed, and `?` cleans up acquired owners
-and pending expression values on its early-return path. Borrowed argument
-temporaries are destroyed at the full-expression boundary. Traps, aborts, and
+and pending expression values on its early-return path. Reference arguments require explicit places; the compiler does not extend
+temporary lifetimes. Traps, aborts, and
 process termination do not unwind destructors.
 
 Native wrappers can own raw handles safely under these move rules, or use Arc
@@ -152,7 +178,7 @@ shader's raw pointer/span representation, retaining all referenced allocations.
 
 `Gpu`, `GpuPtr<T>`, `GpuSpan<T>`, `GpuImage`, `GpuComputePipeline<Root, Owner>`,
 `GpuGraphicsPipeline<Root, Owner>`, `GpuCommands`, `Window`, `InputLine`,
-and `ImageData` use shared owners. Moving them transfers ownership; explicit `clone` operations retain another handle. GPU resources
+and `ImageData` use shared owners. Copying them retains their shared owners. Explicit `clone` operations remain available. GPU resources
 retain their device; a presentation device retains its window. Recorded pipelines,
 images, copy buffers, and shader root buffers remain owned until synchronous
 submission, cancellation, or destruction of the unfinished recording. Submit/cancel

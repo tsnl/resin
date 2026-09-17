@@ -23,7 +23,7 @@ pub(super) fn function(
     parameters: impl IntoIterator<Item = (DeclarationId, bool)>,
     solver: &Solver,
     methods: &BTreeMap<Rule, ResolvedMethod>,
-    typer: &TyperContext,
+    typer: &super::context::Context,
     function_bindings: &HashMap<DeclarationId, FunctionId>,
     shaders: &BTreeMap<FunctionId, ShaderEntry>,
 ) -> Result<CompletedBody> {
@@ -70,7 +70,7 @@ struct Completion<'a> {
     reachable: bool,
     solver: &'a Solver,
     methods: &'a BTreeMap<Rule, ResolvedMethod>,
-    typer: &'a TyperContext,
+    typer: &'a super::context::Context,
     function_bindings: &'a HashMap<DeclarationId, FunctionId>,
     shaders: &'a BTreeMap<FunctionId, ShaderEntry>,
     embedded: BTreeSet<FunctionId>,
@@ -128,7 +128,7 @@ impl Completion<'_> {
             if mutable {
                 require_mutable_place(&term)?;
             }
-        } else if !value_type.copies_implicitly() && reference_place(&term) {
+        } else if self.typer.copyability(&value_type) != Some(true) && reference_place(&term) {
             let span = term.span;
             let ty = term.ty.clone();
             if let Some((binding, path)) = owned_path(&term) {
@@ -141,8 +141,7 @@ impl Completion<'_> {
                         place: Box::new(term),
                     },
                 };
-            } else if (self.solver.resolve(&Type::from_hir(&value_type)).is_none()
-                && !matches!(value_type, crate::Type::Defined { .. }))
+            } else if self.typer.copyability(&value_type).is_none()
                 || (self.solver.resolve(&Type::from_hir(&target)).is_none()
                     && !matches!(target, crate::Type::Defined { .. }))
             {
@@ -1475,7 +1474,7 @@ mod tests {
             [],
             &solver,
             &methods,
-            &TyperContext::new(),
+            &super::super::context::Context::new(),
             &HashMap::new(),
             &BTreeMap::new(),
         )
