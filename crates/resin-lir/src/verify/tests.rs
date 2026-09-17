@@ -579,11 +579,36 @@ fn loads_copy_plain_structs_but_cannot_duplicate_custom_owners() {
     module.types = vec![definition].into();
     assert_eq!(
         verify(&module).unwrap_err().kind,
-        VerifyErrorKind::InvalidCopy { ty: nominal }
+        VerifyErrorKind::InvalidCopy {
+            ty: nominal.clone()
+        }
     );
     module.functions[0].blocks[0].instrs = vec![Instr::TakeLocal {
         local: LocalId::from_index(0),
     }];
+    verify(&module).unwrap();
+    module.functions[0].locals[0].ty = Ty::Record {
+        fields: vec![RecordField {
+            name: "owner".into(),
+            ty: nominal.clone(),
+        }],
+    };
+    module.functions[0].blocks[0]
+        .instrs
+        .push(Instr::AccessStatic { index: 0 });
+    assert_eq!(
+        verify(&module).unwrap_err().kind,
+        VerifyErrorKind::InvalidCopy {
+            ty: nominal.clone()
+        }
+    );
+    module.functions[0].result = Ty::Reference {
+        mutable: true,
+        referent: Box::new(nominal),
+    };
+    module.functions[0].blocks[0].instrs[0] = Instr::LocalRef {
+        local: LocalId::from_index(0),
+    };
     verify(&module).unwrap();
 }
 

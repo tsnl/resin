@@ -150,3 +150,26 @@ fn phantom_box_propagates_move_only_ownership_without_a_struct_annotation() {
     "#,
     );
 }
+
+#[test]
+fn extracting_a_move_only_field_from_a_temporary_transfers_its_cleanup() {
+    succeeds(
+        r#"export { main }; import { "$/shared.resin" };
+        struct Resource { drops: Ptr<i32> }
+        fn drop(value: RefMut<Resource>) { value.drops.* = value.drops.* + 1; }
+        struct Pair { first: Resource, second: Resource }
+        fn make(drops: Ptr<i32>) -> Pair {
+            Pair { first = Resource { drops = drops }, second = Resource { drops = drops } }
+        }
+        fn main() -> i32 | Err<_> {
+            let drops = arc_ptr_alloc(i32(0))?;
+            {
+                let kept = make(drops:get()).first;
+                assert(drops:get().* == 1);
+            };
+            assert(drops:get().* == 2);
+            0
+        }
+    "#,
+    );
+}

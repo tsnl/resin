@@ -172,3 +172,11 @@ fn structs_copy_by_stored_fields_including_generic_and_unused_arguments() {
         "moved",
     );
 }
+
+#[test]
+fn temporary_structs_with_drop_hooks_cannot_surrender_owned_fields() {
+    rejects(
+        "struct Item {} fn drop(value: RefMut<Item>) {} struct Owner { item: Item } fn drop(value: RefMut<Owner>) {} fn make() -> Owner { Owner { item = Item {} } } fn f() { let item = make().item; }",
+        "cannot move a field out of a type with a drop hook",
+    );
+}

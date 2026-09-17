@@ -128,10 +128,14 @@ impl Completion<'_> {
             if mutable {
                 require_mutable_place(&term)?;
             }
-        } else if self.typer.copyability(&value_type) != Some(true) && reference_place(&term) {
+        } else if let copyability = self.typer.copyability(&value_type)
+            && copyability != Some(true)
+        {
             let span = term.span;
             let ty = term.ty.clone();
-            if let Some((binding, path)) = owned_path(&term) {
+            if !reference_place(&term) {
+                self.require_movable(&term)?;
+            } else if let Some((binding, path)) = owned_path(&term) {
                 self.require_movable(&term)?;
                 self.moved.entry(binding).or_default().insert(path);
                 term = Term {
@@ -141,7 +145,7 @@ impl Completion<'_> {
                         place: Box::new(term),
                     },
                 };
-            } else if self.typer.copyability(&value_type).is_none()
+            } else if copyability.is_none()
                 || (self.solver.resolve(&Type::from_hir(&target)).is_none()
                     && !matches!(target, crate::Type::Defined { .. }))
             {

@@ -220,6 +220,17 @@ impl FunctionLowering<'_> {
             self.emit_value_conv(&access.steps[..last_deref]);
             is_place = true;
         }
+        if !is_place && !access.ty.copies_implicitly(self.typer.definitions()) {
+            // An owned temporary transfers the selected field. Disarm that field
+            // before destroying its siblings, just as for an explicit local move.
+            let local = self.save_top(&base_ty);
+            self.emit(Instr::TakeField {
+                local,
+                path: vec![access.index],
+            });
+            self.emit(Instr::DropLocal { local });
+            return Ok(Operand::Value(access.ty.clone()));
+        }
         // AccessStatic projects nominal layouts itself. Preserve the value's
         // nominal type so consuming a temporary invokes its destruction hook.
         self.emit(Instr::AccessStatic {

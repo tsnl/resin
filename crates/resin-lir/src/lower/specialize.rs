@@ -890,10 +890,19 @@ impl Specialization<'_, '_> {
             .typer()
             .same(&expected, &access.ty)
             .map_err(|error| self.typing_error(error))?;
-        Ok(concrete::TermKind::Field {
-            base: self.place(base)?,
-            access,
-        })
+        let base = self.place(base)?;
+        if !reference_place(&base)
+            && !access
+                .ty
+                .copies_implicitly(self.instances.typer().definitions())
+            && let Ty::Defined { definition } = &base.ty
+            && self.instances.typer().definitions()[definition.index()]
+                .drop_hook()
+                .is_some()
+        {
+            return Err(self.instance_error("cannot move a field out of a type with a drop hook"));
+        }
+        Ok(concrete::TermKind::Field { base, access })
     }
 
     fn builtin(
