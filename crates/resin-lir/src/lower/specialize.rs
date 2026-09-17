@@ -832,6 +832,38 @@ impl Specialization<'_, '_> {
         }
     }
 
+    // Generic operation results acquire their final reference contract here.
+    // Check before Ref and Ptr share the host pointer representation.
+    fn require_addressable(&mut self, source: &resin_hir::Term) -> Result<(), Error> {
+        if matches!(
+            self.argument(&source.ty)?,
+            resin_hir::Type::Reference { .. }
+        ) {
+            return Err(self.instance_error(
+                "cannot take the address of a Ref; accept or return a Ptr when an address is required",
+            ));
+        }
+        match &source.kind {
+            resin_hir::TermKind::Local { .. } => Err(self.instance_error(
+                "cannot take the address of a local value; borrow it with Ref or use explicitly allocated storage",
+            )),
+            resin_hir::TermKind::Use { arg } => self.require_addressable(arg),
+            resin_hir::TermKind::Field { base, .. } => {
+                let ty = self.argument(&base.ty)?;
+                let ty = match &ty {
+                    resin_hir::Type::Reference { referent } => referent.as_ref(),
+                    ty => ty,
+                };
+                if matches!(ty, resin_hir::Type::Pointer { .. }) {
+                    Ok(())
+                } else {
+                    self.require_addressable(base)
+                }
+            }
+            _ => Ok(()),
+        }
+    }
+
     fn field(
         &mut self,
         base: &resin_hir::Term,
@@ -1164,9 +1196,12 @@ impl Specialization<'_, '_> {
                 place: self.place(place)?,
                 value: self.boxed(value)?,
             },
-            resin_hir::TermKind::Address { place } => concrete::TermKind::Address {
-                place: self.place(place)?,
-            },
+            resin_hir::TermKind::Address { place } => {
+                self.require_addressable(place)?;
+                concrete::TermKind::Address {
+                    place: self.place(place)?,
+                }
+            }
             resin_hir::TermKind::Deref { pointer } => concrete::TermKind::Deref {
                 pointer: self.boxed(pointer)?,
             },

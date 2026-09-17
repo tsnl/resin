@@ -34,12 +34,12 @@ fn template_fields_and_layout_follow_each_nominal_argument() {
         import { "$/string.resin" };
         struct Small { value: int, }
         struct Large { padding: ulong, value: uint, }
-        fn read<T>(value: Ptr<T>) -> _  { value.value }
+        fn read<T>(value: Ref<T>) -> _  { value.value }
         fn measure<T>() -> ulong  { size_of(T) }
         fn main() -> int  {
             let mut small = Small { value = 42 };
             let mut large = Large { padding = 3, value = 7 };
-            print(fmt("{0} {1} {2} {3}", (read(&small), read(&large), measure::<Small>(), measure::<Large>())));
+            print(fmt("{0} {1} {2} {3}", (read(small), read(large), measure::<Small>(), measure::<Large>())));
             0
         }
     "#);
@@ -163,7 +163,7 @@ fn source_recursion_memoizes_instances_and_respects_the_configured_limit() {
     assert_eq!(module.functions.len(), 2);
     let source = resin_source::Source::new(
         "growing.resin",
-        "export { main }; fn grow<T>(value: T)  { grow(&value) } fn main()  { grow(1); }",
+        "export { main }; fn grow<T>(value: T)  { grow((value,)) } fn main()  { grow(1); }",
     );
     let mut loader = resin_source::Loader::new(resin_source::library_root());
     let output = support::frontend::analyze(source, &mut loader, None);

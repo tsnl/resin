@@ -325,7 +325,7 @@ fn shader_addresses_cannot_hide_unsupported_layouts_or_escape_locals() {
     for (source, expected) in [
         (
             "export { kernel }; fn read(p: Ptr<uint>) -> uint  { p.* } @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); let mut local = i; output.* = read(&local); }",
-            "shader-local addresses cannot escape",
+            "cannot take the address of a local value",
         ),
         (
             "export { kernel }; struct Data { flag: bool, } @compute_shader fn kernel (invocation: ulong, root: Ptr<Data>) -> ()  { let mut i = uint(invocation); () }",
@@ -337,14 +337,14 @@ fn shader_addresses_cannot_hide_unsupported_layouts_or_escape_locals() {
         ),
         (
             "export { kernel }; @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { let mut x = i; let mut p = &x; p.* }; }",
-            "shader-local addresses cannot escape",
+            "cannot take the address of a local value",
         ),
         (
             "export { kernel }; @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { let mut x = i; ulong(&x); i }; }",
-            "shader pointer casts are unsupported",
+            "cannot take the address of a local value",
         ),
         (
-            "export { kernel }; fn helper (i: uint) -> Ptr<uint>  { let mut x = i; &x } @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { helper(i).* }; }",
+            "export { kernel }; fn helper (i: uint) -> Ref<uint>  { let mut x = i; x } @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { helper(i) }; }",
             "cannot return a local address",
         ),
     ] {
@@ -357,7 +357,7 @@ fn shader_addresses_cannot_hide_unsupported_layouts_or_escape_locals() {
 fn unsupported_shader_features_are_diagnosed() {
     for (source, expected) in [
         (
-            "export { kernel }; @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { helper(i) }; } fn helper (i: uint) -> uint  { let mut output = 0_ui; kernel(ulong(i), &output); output }",
+            "export { kernel }; @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { helper(i, output) }; } fn helper (i: uint, output: Ptr<uint>) -> uint  { kernel(ulong(i), output); output.* }",
             "recursive shader call graph",
         ),
         (
@@ -432,11 +432,11 @@ fn compound_control_flow_compiles_to_spirv() {
 fn imported_backend_errors_retain_expression_origins() {
     let helper = Source::new(
         "helper.resin",
-        "export { helper }; fn helper(n: uint) -> Ptr<uint>  { let mut value = n; &value }",
+        "export { helper }; fn helper(n: uint) -> Ref<uint>  { let mut value = n; value }",
     );
     let entry = Source::new(
         "main.resin",
-        "export { kernel }; import { \"helper.resin\" }; @compute_shader fn kernel(invocation: ulong, p: Ptr<uint>)  { p.* = helper(uint(invocation)).*; }",
+        "export { kernel }; import { \"helper.resin\" }; @compute_shader fn kernel(invocation: ulong, p: Ptr<uint>)  { p.* = helper(uint(invocation)); }",
     );
     let mut loader = resin_source::Loader::new(Default::default());
     loader
@@ -451,7 +451,7 @@ fn imported_backend_errors_retain_expression_origins() {
         .instructions
         .values()
         .filter(|o| {
-            o.source == helper && o.source.text().get(o.span.start..o.span.end) == Some("&value")
+            o.source == helper && o.source.text().get(o.span.start..o.span.end) == Some("value")
         })
         .collect();
     assert!(
@@ -628,4 +628,24 @@ fn module(source: &str) -> resin_lir::Module {
     support::module(&format!(
         r#"{source} intrinsic "pointer_index" fn device_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;"#
     ))
+}
+
+#[test]
+fn local_reference_specialization_bounds_nested_emission() {
+    let mut source = String::from("export { kernel }; ");
+    for index in 0..130 {
+        source.push_str(&format!(
+            "fn helper_{index}(value: Ref<uint>) {{ helper_{}(value); }} ",
+            index + 1
+        ));
+    }
+    source.push_str("fn helper_130(value: Ref<uint>) { value = 42_ui; } ");
+    source.push_str("@compute_shader fn kernel(index: ulong, output: Ptr<uint>) { let value = 0_ui; helper_0(value); output.* = value; }");
+    let error = pipeline::shader_error(&source);
+    assert!(
+        error
+            .to_string()
+            .contains("local-reference specialization limit"),
+        "{error}"
+    );
 }

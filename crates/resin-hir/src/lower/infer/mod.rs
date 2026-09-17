@@ -1894,8 +1894,18 @@ impl Inference<'_> {
             // receiver shape is still unknown (for example record.values).
             return Ok(false);
         }
+        // Nominal receivers cannot acquire a builtin indexing operation when
+        // their type arguments specialize. A sole source overload can determine
+        // its result now, including the pointer returned by Span<T>:lea.
+        let nominal_receiver = args.and_then(|args| args.first()).is_some_and(|arg| {
+            let receiver = self.solver.head(&Type::value(arg.clone()));
+            matches!(
+                receiver,
+                Type::Node(Head::Nominal { .. } | Head::Atom(Ty::Defined { .. }), _)
+            )
+        });
         if let [candidate] = candidates.as_slice()
-            && primitive.is_none()
+            && (primitive.is_none() || nominal_receiver)
             && !self
                 .typer
                 .functions

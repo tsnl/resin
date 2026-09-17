@@ -167,10 +167,12 @@ fn inferred_errors_collect_across_plain_returns_and_propagation() {
 fn question_mark_preserves_success_unions_and_destroys_exited_scopes() {
     let module = module(
         r#"export { main };
+import { "$/shared.resin" };
+
         struct Resource { trace: Ptr<int>, digit: int,
             
         }
-fn drop(self: Ptr<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
+fn drop(self: Ref<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
 
         fn fail() -> int | Err<str>  { Err("failure") }
         fn work(trace: Ptr<int>) -> int | Err<str>  {
@@ -179,9 +181,9 @@ fn drop(self: Ptr<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
             0
         }
         fn choice() -> int | str | Err<str>  { "value" }
-        fn main() -> int | Err<str>  {
-            let mut trace = 0_i;
-            match (work(&trace)) { int(_) => { assert(false); }, Err(_) => {} };
+        fn main() -> int | Err<_> {
+            let trace_owner = arc_ptr_alloc(0_i)?; let trace: Ref<_> = trace_owner:get().*;
+            match (work(trace_owner:get())) { int(_) => { assert(false); }, Err(_) => {} };
             assert(trace == 21);
             let mut value = choice()?;
             match (value) { int(_) => { 1 }, str(_) => { 0 } }

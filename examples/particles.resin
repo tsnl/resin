@@ -9,6 +9,7 @@ extern {
 };
 
 import {
+	"$/shared.resin",
 	"$/span.resin",
 	"$/string.resin",
 	"$/gpu.resin",
@@ -236,16 +237,16 @@ fn fragment(color: Color) -> Color {
 }
 
 // Host-only xorshift32: reproducible random positions and independent velocities.
-fn random(state: Ptr<uint>) -> float32 {
-	let mut x = state.*;
+fn random(state: Ref<uint>) -> float32 {
+	let mut x = state;
 	x = x ^ (x << 13_ui);
 	x = x ^ (x >> 17_ui);
 	x = x ^ (x << 5_ui);
-	state.* = x;
+	state = x;
 	float32(x & 0xffffff_ui) / 16777216.0_f
 }
 
-fn random_particle(state: Ptr<uint>) -> Particle {
+fn random_particle(state: Ref<uint>) -> Particle {
 	Particle {
 		x = random(state) * 48.0_f - 24.0_f,
 		y = random(state) * 60.0_f - 30.0_f,
@@ -260,7 +261,7 @@ fn initialize(particles: Ref<GpuSpan<Particle>>, seed: uint) {
 	let mut state = seed | 1_ui;
 	let mut index = 0_ul;
 	while (index < particles.length) {
-		particles:at(index):store(random_particle(&state));
+		particles:at(index):store(random_particle(state));
 		index = index + 1_ul;
 	};
 }
@@ -293,14 +294,14 @@ fn clamp(value: float32, low: float32, high: float32) -> float32 {
 	}
 }
 
-fn move_camera(camera: Ptr<Camera>, dx: float64, dy: float64, scroll: float64) {
+fn move_camera(camera: Ref<Camera>, dx: float64, dy: float64, scroll: float64) {
 	camera.yaw = camera.yaw + float32(dx) * 0.006_f;
 	// Stop short of the poles so dragging never flips the view upside down.
 	camera.pitch = clamp(camera.pitch + float32(dy) * 0.006_f, -1.4_f, 1.4_f);
 	camera.zoom = clamp(camera.zoom * expf(clamp(float32(scroll), -20.0_f, 20.0_f) * 0.12_f), 0.35_f, 3.0_f);
 }
 
-fn apply_camera<P>(camera: Ref<Camera>, params: Ptr<P>) {
+fn apply_camera<P>(camera: Ref<Camera>, params: Ref<P>) {
 	params.yaw_cos = cosf(camera.yaw);
 	params.yaw_sin = sinf(camera.yaw);
 	params.pitch_cos = cosf(camera.pitch);
@@ -369,9 +370,9 @@ fn main() -> (() | Err<_>) {
 			};
 			// A fresh press/focus starts a drag without jumping from the old cursor position.
 			if (dragging && was_dragging && !left.pressed) {
-				move_camera(&camera, cursor.x - previous_cursor.x, cursor.y - previous_cursor.y, 0.0_d);
+				move_camera(camera, cursor.x - previous_cursor.x, cursor.y - previous_cursor.y, 0.0_d);
 			};
-			move_camera(&camera, 0.0_d, 0.0_d, scroll.y);
+			move_camera(camera, 0.0_d, 0.0_d, scroll.y);
 			if (window:key_state(key_home).pressed) {
 				camera = default_camera();
 				automatic = 1 == 1;
@@ -379,7 +380,7 @@ fn main() -> (() | Err<_>) {
 		};
 		previous_cursor = cursor;
 		was_dragging = dragging;
-		apply_camera(camera, &params);
+		apply_camera(camera, params);
 		let mut root = HostParams {
 			dt = params.dt,
 			yaw_cos = params.yaw_cos,

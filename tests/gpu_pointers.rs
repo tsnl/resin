@@ -97,8 +97,8 @@ fn inferred_values_and_slices_keep_their_allocation_and_gpu_alive() {
             number:store(number:load() + 1_i);
             member:store(member:load() + 2_i);
             tail:at(0_ul):store(24_i);
-            let mut copied = [0_i, 0_i, 0_i];
-            values:read_only():copy_to(Span<int> { data = &copied:at(0_ul), length = 3_ul });
+            let copied_owner = arc_ptr_alloc([0_i, 0_i, 0_i])?; let copied: Ref<_> = copied_owner:get().*;
+            values:read_only():copy_to(Span<int> { data = copied_owner:get():lea(0_ul), length = 3_ul });
             (if (number:load() == 43_i && member:load() == 7_i && copied:at(0_ul) == 11_i
                 && copied:at(1_ul) == 24_i && copied:at(2_ul) == 13_i && tail.length == 2_ul) { 0 } else { 1 })
         }
@@ -125,14 +125,14 @@ fn read(self: Ref<Item>) -> int  { self.value }
             let mut gpu = gpu_new()?;
             let mut pointer = gpu:create(Outer { item = Item { value = 40_i } })?;
             let mut owner = arc_ptr_alloc::<GpuPtr<Outer>>(pointer:clone())?;
-            let mut indirect = &owner;
-            let mut item = indirect.*:get().*:load();
+            let indirect: Ref<_> = owner;
+            let mut item = indirect:get().*:load();
             item.item:increment();
-            let previous = indirect.*:get().*:replace(item);
+            let previous = indirect:get().*:replace(item);
             item = pointer:load();
             item.item.value = item.item:read() + previous.item.value - 39_i;
             pointer:store(item);
-            (indirect.*:get().*:clone())
+            (indirect:get().*:clone())
         }
         fn main() -> (int | Err<_>)  {
             let mut result = field()?;
@@ -206,7 +206,7 @@ fn allocator_library(bytes: &str, value: &str) -> String {
 }
 
 const COMPUTE: &str = r#"export { main };
-    import { "$/gpu.resin", "$/status.resin", "$/span.resin" };
+    import { "$/gpu.resin", "$/status.resin", "$/span.resin", "$/shared.resin" };
     struct FieldsIncrementValues<T0, T1> { increment: T0, values: T1, }
 struct Parameters { increment: uint, values: Span<uint>, }
 fn clone<A, B>(value: Ref<FieldsIncrementValues<A, B>>) -> FieldsIncrementValues<A, B> {
@@ -239,8 +239,8 @@ fn projected_scalar_and_span_arguments_dispatch_and_allow_readback_after_submit(
         let mut again = gpu:start_command_recording()?;
         again:dispatch(pipeline, arguments:clone(), 1_ui, 1_ui, 1_ui)?;
         again:submit()?;
-        let mut result = [0_ui, 0_ui, 0_ui, 0_ui];
-        values:copy_to(Span<uint> { data = &result:at(0_ul), length = 4_ul });
+        let result_owner = arc_ptr_alloc([0_ui, 0_ui, 0_ui, 0_ui])?; let result: Ref<_> = result_owner:get().*;
+        values:copy_to(Span<uint> { data = result_owner:get():lea(0_ul), length = 4_ul });
         (if (result:at(0_ul) == 0_ui && result:at(1_ul) == 11_ui
             && result:at(2_ul) == 12_ui && result:at(3_ul) == 3_ui) { 0 } else { 1 })
     "#,
@@ -372,7 +372,7 @@ fn recorded_gpu_work_denies_cpu_access_through_all_aliases() {
     for access in [
         "let mut value = values:at(0_ul):load();",
         "values:at(0_ul):store(7_ui);",
-        "let source = [7_ui]; values:copy_from(Span<uint> { data = &source:at(0_ul), length = 1_ul });",
+        "let source = arc_ptr_alloc([7_ui])?; values:copy_from(Span<uint> { data = source:get():lea(0_ul), length = 1_ul });",
     ] {
         let source = COMPUTE.replace(
             "ACTION",
@@ -448,14 +448,14 @@ struct Parameters { value: Ptr<long>, values: Span<long>, increment: long, }
         }
         fn main() -> (int | Err<_>)  {
             let mut gpu = gpu_new()?;
-            let mut calls = 0_i;
+            let calls_owner = arc_ptr_alloc(0_i)?; let calls: Ref<_> = calls_owner:get().*;
             let mut value = gpu:create(-42)?;
-            let mut allocation_request = allocation(gpu:clone(), &calls);
+            let mut allocation_request = allocation(gpu:clone(), calls_owner:get());
             let mut values = allocation_request.0:alloc::<long>(allocation_request.1)?;
             values:at(0_ul):store(0_l);
             let mut pipeline = gpu:create_compute_pipeline(kernel)?;
             let mut commands = gpu:start_command_recording()?;
-            let mut launch_request = launch(pipeline, value:clone(), values:clone(), &calls);
+            let mut launch_request = launch(pipeline, value:clone(), values:clone(), calls_owner:get());
             commands:dispatch(launch_request.0, launch_request.1, launch_request.2, launch_request.3, launch_request.4)?;
             commands:submit()?;
             (if (calls == 2_i && value:load() == 49_l && values:at(0_ul):load() == 98_l) { 0 } else { 1 })
@@ -603,7 +603,7 @@ fn write<T>(self: Ref<DeviceScalar<T>>, value: T)  { store(self.view, value); }
 fn gpu_view_primitives_keep_owners_offsets_and_typed_source_methods() {
     let source = format!(
         r#"export {{ main }};
-        import {{ "$/gpu.resin", "$/status.resin" }};
+        import {{ "$/shared.resin", "$/gpu.resin", "$/status.resin" }};
         {VIEW_PRIMITIVES}
         fn main() -> (int | Err<_>)  {{
             let mut original = allocate_ints(3)?;
@@ -613,8 +613,8 @@ fn gpu_view_primitives_keep_owners_offsets_and_typed_source_methods() {
             second:write(11);
             let mut previous = replace(offset(original, 4, 4, 4), 42_i);
             store(offset(original, 8, 4, 4), 19_i);
-            let mut copied = [0_i, 0_i, 0_i];
-            copy_to(restrict(original, 1), 3, &copied:at(0), 3);
+            let copied_owner = arc_ptr_alloc([0_i, 0_i, 0_i])?; let copied: Ref<_> = copied_owner:get().*;
+            copy_to(restrict(original, 1), 3, copied_owner:get():lea(0), 3);
             (if (first:read() == 7 && second:read() == 42 && previous == 11 && copied:at(2) == 19) {{ 0 }} else {{ 1 }})
         }}
     "#
@@ -639,23 +639,26 @@ fn gpu_view_primitives_preserve_access_bounds_and_alignment_checks() {
         ),
         ("let mut value = offset(view, 1, 4, 4);", "misaligned"),
         ("let mut value = offset(view, 8, 4, 4);", "out of bounds"),
-        ("copy_to(view, 2, &result:at(0), 1);", "too short"),
-        ("copy_from(view, 1, &result:at(0), 2);", "too short"),
+        ("copy_to(view, 2, result:get():lea(0), 1);", "too short"),
+        ("copy_from(view, 1, result:get():lea(0), 2);", "too short"),
         (
-            "copy_from(restrict(view, 1), 2, &result:at(0), 2);",
+            "copy_from(restrict(view, 1), 2, result:get():lea(0), 2);",
             "permission",
         ),
-        ("copy_from(view, 3, &result:at(0), 3);", "out of bounds"),
+        (
+            "copy_from(view, 3, result:get():lea(0), 3);",
+            "out of bounds",
+        ),
     ] {
         let source = format!(
             r#"export {{ main }};
-            import {{ "$/gpu.resin", "$/status.resin" }};
+            import {{ "$/gpu.resin", "$/status.resin", "$/shared.resin" }};
             {VIEW_PRIMITIVES}
             fn main() -> (int | Err<_>)  {{
                 let mut view = allocate_ints(2)?;
                 // Keep the host source valid when testing a three-element copy
                 // against the shorter GPU allocation.
-                let mut result = [0_i, 0_i, 0_i];
+                let result = arc_ptr_alloc([0_i, 0_i, 0_i])?;
                 {operation}(0)
             }}
         "#
@@ -758,16 +761,16 @@ fn gpu_sequences_reject_out_of_bounds_indices_and_overflowing_ranges() {
 #[test]
 fn host_upload_copies_only_the_source_length_into_a_gpu_slice() {
     let Some(output) = run(r#"export { main };
-        import { "$/gpu.resin", "$/span.resin" };
+        import { "$/shared.resin", "$/gpu.resin", "$/span.resin" };
         fn main() -> () | Err<_> {
             let gpu = gpu_new()?;
             let values = gpu:alloc::<uint>(5_ul)?;
-            let initial = [10_ui, 20_ui, 30_ui, 40_ui, 50_ui];
-            values:copy_from(Span<uint> { data = &initial:at(0_ul), length = 5_ul });
-            let patch = [7_ui, 8_ui];
-            values:slice(1_ul, 3_ul):write_only():copy_from(Span<uint> { data = &patch:at(0_ul), length = 2_ul });
-            let result = [0_ui, 0_ui, 0_ui, 0_ui, 0_ui];
-            values:copy_to(Span<uint> { data = &result:at(0_ul), length = 5_ul });
+            let initial_owner = arc_ptr_alloc([10_ui, 20_ui, 30_ui, 40_ui, 50_ui])?; let initial: Ref<_> = initial_owner:get().*;
+            values:copy_from(Span<uint> { data = initial_owner:get():lea(0_ul), length = 5_ul });
+            let patch_owner = arc_ptr_alloc([7_ui, 8_ui])?; let patch: Ref<_> = patch_owner:get().*;
+            values:slice(1_ul, 3_ul):write_only():copy_from(Span<uint> { data = patch_owner:get():lea(0_ul), length = 2_ul });
+            let result_owner = arc_ptr_alloc([0_ui, 0_ui, 0_ui, 0_ui, 0_ui])?; let result: Ref<_> = result_owner:get().*;
+            values:copy_to(Span<uint> { data = result_owner:get():lea(0_ul), length = 5_ul });
             assert(result:at(0_ul) == 10_ui && result:at(1_ul) == 7_ui && result:at(2_ul) == 8_ui);
             assert(result:at(3_ul) == 40_ui && result:at(4_ul) == 50_ui);
         }

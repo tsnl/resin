@@ -4,7 +4,7 @@ struct Counter {
 	value: int,
 }
 
-fn next(counter: Ptr<Counter>) -> int {
+fn next(counter: Ref<Counter>) -> int {
 	counter.value = counter.value + 1;
 	counter.value
 }

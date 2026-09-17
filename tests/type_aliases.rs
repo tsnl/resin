@@ -4,6 +4,8 @@ mod support;
 fn generic_aliases_borrow_storage_and_resolve_free_operations() {
     let module = support::module(
         r#"export { main };
+import { "$/shared.resin" };
+
         struct FieldsDataLength<T0, T1> { data: T0, length: T1, }
 type View<T> = FieldsDataLength<Ptr<T>, ulong>;
         struct Item { value: int,
@@ -13,9 +15,9 @@ fn read(self: Ref<Item>) -> int  { self.value }
 
         type Renamed<T> = Item;
         fn first<T>(view: View<T>) -> Ref<T>  { view.data.* }
-        fn main() -> int  {
-            let mut item = Renamed<bool> { value = 42 };
-            first(View<Item> { data = &item, length = 1 }):read()
+        fn main() -> int | Err<_> {
+            let item_owner = arc_ptr_alloc(Renamed<bool> { value = 42 })?; let item: Ref<_> = item_owner:get().*;
+            first(View<Item> { data = item_owner:get(), length = 1 }):read()
         }
     "#,
     );

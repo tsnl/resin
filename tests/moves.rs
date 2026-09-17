@@ -44,8 +44,10 @@ fn dependent_reads_distinguish_references_from_fresh_owned_results() {
 fn reference_arguments_keep_temporaries_until_the_full_expression_finishes() {
     let source = r#"
         export { main };
+import { "$/shared.resin" };
+
         struct Item { trace: Ptr<int>, digit: int }
-        fn drop(value: Ptr<Item>) { value.trace.* = value.trace.* * 10 + value.digit; }
+        fn drop(value: Ref<Item>) { value.trace.* = value.trace.* * 10 + value.digit; }
         fn borrow<T>(value: Ref<T>) -> Ref<T> { value }
         fn digit(value: Ref<Item>) -> int { assert(value.trace.* == 0); value.digit }
         fn observe(a: Ref<Item>, b: Ref<Item>) -> int {
@@ -61,22 +63,22 @@ fn reference_arguments_keep_temporaries_until_the_full_expression_finishes() {
         fn early(trace: Ptr<int>) -> int | Err<None> {
             observe(Item { trace = trace, digit = 3 }, Item { trace = trace, digit = fail()? })
         }
-        fn main() -> int {
-            let mut trace = 0_i;
-            let result = observe(Item { trace = &trace, digit = 1 }:borrow(), Item { trace = &trace, digit = 2 });
+        fn main() -> int | Err<_> {
+            let trace_owner = arc_ptr_alloc(0_i)?; let trace: Ref<_> = trace_owner:get().*;
+            let result = observe(Item { trace = trace_owner:get(), digit = 1 }:borrow(), Item { trace = trace_owner:get(), digit = 2 });
             assert(result == 3 && trace == 21);
             trace = 0;
-            assert(Item { trace = &trace, digit = 4 }:digit() == 4 && trace == 0);
+            assert(Item { trace = trace_owner:get(), digit = 4 }:digit() == 4 && trace == 0);
             assert(trace == 4);
             trace = 0;
-            match (early(&trace)) { int(_) => {}, Err(_) => {} };
+            match (early(trace_owner:get())) { int(_) => {}, Err(_) => {} };
             assert(trace == 3);
             trace = 0;
-            assert(forwarded(Item { trace = &trace, digit = 5 }) == 5);
+            assert(forwarded(Item { trace = trace_owner:get(), digit = 5 }) == 5);
             assert(trace == 5);
             trace = 0;
             let mut iteration = 0_i;
-            while (condition(Item { trace = &trace, digit = 6 }, iteration)) {
+            while (condition(Item { trace = trace_owner:get(), digit = 6 }, iteration)) {
                 assert(trace == 6 || trace == 66);
             };
             assert(trace == 666 && iteration == 3);
@@ -101,11 +103,11 @@ fn arc_allocation_moves_payloads_and_explicit_clones_keep_them_alive() {
         export { main };
         import { "$/shared.resin", "$/status.resin" };
         struct Item { trace: Ptr<int>, value: int }
-        fn drop(value: Ptr<Item>) { value.trace.* = value.trace.* + 1; }
+        fn drop(value: Ref<Item>) { value.trace.* = value.trace.* + 1; }
         fn main() -> int | Err<OutOfMemory> {
-            let mut trace: int = 0;
+            let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<int> = trace_owner:get().*;
             {
-                let original = arc_ptr_alloc(Item { trace = &trace, value = 42 })?;
+                let original = arc_ptr_alloc(Item { trace = trace_owner:get(), value = 42 })?;
                 assert(trace == 0);
                 let retained = original:clone();
                 let weak = original:downgrade();
@@ -153,18 +155,20 @@ fn repeated_allocation_rejects_move_only_elements() {
 #[test]
 fn moves_and_partial_replacements_destroy_each_value_once() {
     let source = r#"export { main };
+import { "$/shared.resin" };
+
         struct Item { trace: Ptr<int>, digit: int,
             
         }
-fn drop(value: Ptr<Item>) { value.trace.* = value.trace.* * 10 + value.digit; }
+fn drop(value: Ref<Item>) { value.trace.* = value.trace.* * 10 + value.digit; }
 
         struct Pair { a: Item, b: Item, }
-        fn main() -> int {
-            let mut trace: int = 0;
+        fn main() -> int | Err<_> {
+            let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<int> = trace_owner:get().*;
             {
-                let mut pair = Pair { a= Item { trace= &trace, digit= 1 }, b= Item { trace= &trace, digit= 2 } };
+                let mut pair = Pair { a= Item { trace= trace_owner:get(), digit= 1 }, b= Item { trace= trace_owner:get(), digit= 2 } };
                 let saved = pair.a;
-                pair.a = Item { trace= &trace, digit= 3 };
+                pair.a = Item { trace= trace_owner:get(), digit= 3 };
                 let moved = pair;
             };
             if (trace == 231) { 0 } else { 1 }
@@ -185,16 +189,18 @@ fn drop(value: Ptr<Item>) { value.trace.* = value.trace.* * 10 + value.digit; }
 #[test]
 fn returned_error_payloads_keep_exactly_one_owner() {
     let source = r#"export { main };
+import { "$/shared.resin" };
+
         struct Item { trace: Ptr<int>, }
-        fn drop(value: Ptr<Item>) { value.trace.* = value.trace.* + 1; }
+        fn drop(value: Ref<Item>) { value.trace.* = value.trace.* + 1; }
         fn route(value: Item, failed: bool) -> Item | Err<Item> {
             if (failed) { return Err(value); };
             value
         }
-        fn main() -> int {
-            let mut trace: int = 0;
+        fn main() -> int | Err<_> {
+            let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<int> = trace_owner:get().*;
             {
-                let result = route(Item { trace = &trace }, true);
+                let result = route(Item { trace = trace_owner:get() }, true);
                 match (result) {
                     Err(error) => { let moved = error; },
                     Item(value) => { let moved = value; },

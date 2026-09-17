@@ -13,11 +13,13 @@ fn run(source: &str) -> Output {
 
 #[test]
 fn optional_values_match_and_unwrap_once() {
-    let output = run(r#"struct Item { number: int, }
+    let output = run(r#"
+import { "$/shared.resin" };
+struct Item { number: int, }
         fn make(calls: Ptr<int>) -> Item | None  { calls.* = calls.* + 1; Item { number = 41 } }
-        fn main() -> int  {
-            let mut calls = 0;
-            let mut number = make(&calls)!.number + 1;
+        fn main() -> int | Err<_> {
+            let calls_owner = arc_ptr_alloc(0)?; let calls: Ref<_> = calls_owner:get().*;
+            let mut number = make(calls_owner:get())!.number + 1;
             let mut empty: int | None; empty = None;
             let mut absent = match (empty) { int(n) => { 1 == 0 }, None => { 1 == 1 } };
             let mut condition: bool | None; condition = 1 == 0;
@@ -99,7 +101,9 @@ fn result_cases_remain_distinct_inside_optional_unions() {
 
 #[test]
 fn structural_members_keep_their_identity_across_union_widening() {
-    let output = run(r#"struct FieldsNumber<T0> { number: T0, }
+    let output = run(r#"
+import { "$/shared.resin" };
+struct FieldsNumber<T0> { number: T0, }
 type Callback = (int) -> int;
         type Record = FieldsNumber<int>;
         fn increment(n: int) -> int  { n + 1 }
@@ -110,9 +114,9 @@ type Callback = (int) -> int;
                 None => { 0 }, Record(r) => { r.number }, Callback(f) => { f(19) }, Ptr<int>(p) => { p.* }
             }
         }
-        fn main() -> int  {
-            let mut n = 22;
-            if (read(widen(select(&n, 1 == 1))) + read(widen(select(&n, 1 == 0))) == 42) { 0 } else { 1 }
+        fn main() -> int | Err<_> {
+            let n_owner = arc_ptr_alloc(22)?; let n: Ref<_> = n_owner:get().*;
+            if (read(widen(select(n_owner:get(), 1 == 1))) + read(widen(select(n_owner:get(), 1 == 0))) == 42) { 0 } else { 1 }
         }
     "#);
     assert_eq!(
@@ -125,7 +129,9 @@ type Callback = (int) -> int;
 
 #[test]
 fn all_value_producers_widen_at_the_consumer() {
-    let output = run(r#"struct FieldsNumber<T0> { number: T0, }
+    let output = run(r#"
+import { "$/shared.resin" };
+struct FieldsNumber<T0> { number: T0, }
 type Record = FieldsNumber<uint>;
         fn record() -> Record | None  { FieldsNumber<_> { number = 42_ui } }
         fn field(r: Record) -> uint | None  { r.number }
@@ -133,9 +139,9 @@ type Record = FieldsNumber<uint>;
         fn literal() -> uint | None  { 42 }
         fn operator(n: uint) -> uint | None  { n + 1_ui }
         fn compare(n: uint) -> bool | None  { n == 42_ui }
-        fn main() -> int  {
-            let mut n = record()!.number;
-            if (field(record()!)! == literal()! && load(&n)! == operator(41_ui)! && compare(n)!) { 0 } else { 1 }
+        fn main() -> int | Err<_> {
+            let n_owner = arc_ptr_alloc(record()!.number)?; let n: Ref<_> = n_owner:get().*;
+            if (field(record()!)! == literal()! && load(n_owner:get())! == operator(41_ui)! && compare(n)!) { 0 } else { 1 }
         }
     "#);
     assert_eq!(

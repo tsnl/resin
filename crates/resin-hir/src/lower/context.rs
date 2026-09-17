@@ -333,7 +333,10 @@ pub(crate) struct IntrinsicMethod {
 }
 
 pub(crate) fn is_primitive_operation(name: &str) -> bool {
-    matches!(name, "at" | "replace" | "dispatch_native" | "draw_native")
+    matches!(
+        name,
+        "at" | "lea" | "replace" | "dispatch_native" | "draw_native"
+    )
 }
 
 pub(crate) fn primitive_operation(
@@ -362,6 +365,7 @@ pub(crate) fn intrinsic_methods(
 ) -> Vec<(&'static str, IntrinsicMethod)> {
     use super::infer::{Head, Type};
     let receiver = solver.head(receiver);
+    let pointer_receiver = matches!(receiver, Type::Node(Head::Pointer, _));
     let mut methods = Vec::new();
     if let Type::Node(Head::Pointer, parts) = &receiver {
         methods.push((
@@ -420,10 +424,20 @@ pub(crate) fn intrinsic_methods(
             "at",
             IntrinsicMethod {
                 op: Intrinsic::Index,
-                params: vec![receiver, Ty::UInt64.into()],
-                result: Type::reference(element),
+                params: vec![receiver.clone(), Ty::UInt64.into()],
+                result: Type::reference(element.clone()),
             },
         ));
+        if pointer_receiver || matches!(base, Type::Node(Head::Atom(Ty::Str), _)) {
+            methods.push((
+                "lea",
+                IntrinsicMethod {
+                    op: Intrinsic::Index,
+                    params: vec![receiver, Ty::UInt64.into()],
+                    result: Type::pointer(element),
+                },
+            ));
+        }
     }
     methods
 }
@@ -436,6 +450,9 @@ pub(super) fn primitive_signature(
     use crate::{Intrinsic, RecordField, Type};
     let pointer = |pointee: Type| Type::Pointer {
         pointee: Box::new(pointee),
+    };
+    let reference = |referent: Type| Type::Reference {
+        referent: Box::new(referent),
     };
     let optional = |ty| Type::Union {
         variants: vec![Type::None, ty],
@@ -482,22 +499,22 @@ pub(super) fn primitive_signature(
         ),
         ("owner_data", [element]) => (
             Intrinsic::OwnerData,
-            vec![pointer(Type::StrongOwner)],
+            vec![reference(Type::StrongOwner)],
             pointer(element.clone()),
         ),
         ("owner_length", []) => (
             Intrinsic::OwnerLength,
-            vec![pointer(Type::StrongOwner)],
+            vec![reference(Type::StrongOwner)],
             Type::UInt64,
         ),
         ("owner_downgrade", []) => (
             Intrinsic::OwnerDowngrade,
-            vec![pointer(Type::StrongOwner)],
+            vec![reference(Type::StrongOwner)],
             Type::WeakOwner,
         ),
         ("owner_upgrade", []) => (
             Intrinsic::OwnerUpgrade,
-            vec![pointer(Type::WeakOwner)],
+            vec![reference(Type::WeakOwner)],
             optional(Type::StrongOwner),
         ),
         ("string_from_bytes", []) => (

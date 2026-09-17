@@ -157,12 +157,12 @@ fn read(self: Ptr<Counter>) -> int  { self.value }
         }
         fn relay_read<T>(value: T) -> _  { value:read() }
         fn main() -> (int | Err<_>)  {
-            let mut trace = 0_i;
-            let mut local = Counter { value = 37 };
+            let trace_owner = arc_ptr_alloc(0_i)?; let trace: Ref<_> = trace_owner:get().*;
+            let local_owner = arc_ptr_alloc(Counter { value = 37 })?; let local: Ref<_> = local_owner:get().*;
             let mut shared = arc_ptr_alloc::<Counter>(Counter { value = 6 })?;
-            add(&trace, &local);
-            add_owned(&trace, shared:clone());
-            print(fmt("{0} {1} {2}", (trace, relay_read(&local), relay_read(shared:get()))));
+            add(trace_owner:get(), local_owner:get());
+            add_owned(trace_owner:get(), shared:clone());
+            print(fmt("{0} {1} {2}", (trace, relay_read(local_owner:get()), relay_read(shared:get()))));
             (0)
         }
     "#);
@@ -318,7 +318,7 @@ fn growing_dependent_method_applications_obey_the_function_limit() {
     let tree = hir(r#"struct Grow<T> { value: T,
             
         }
-fn grow<T>(self: Grow<T>)  { step(Grow<Ptr<T>> { value = &self.value }); }
+fn grow<T>(self: Grow<T>)  { step(Grow<(T,)> { value = (self.value,) }); }
 
         fn step<T>(value: T)  { value:grow(); }
         fn main()  { step(Grow<int> { value = 1 }); }

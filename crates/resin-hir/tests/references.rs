@@ -85,3 +85,51 @@ fn reference_parameters_accept_temporary_arguments() {
         hir_module(source).unwrap_or_else(|error| panic!("{source}\n{error}"));
     }
 }
+
+#[test]
+fn reference_contracts_do_not_grant_addresses() {
+    for source in [
+        "fn invalid(value: Ref<int>) -> Ptr<int> { &value }",
+        "fn invalid<T>(value: Ref<T>) -> Ptr<T> { &value }",
+        "struct Cell { value: int } fn invalid(cell: Ref<Cell>) -> Ptr<int> { &cell.value }",
+        "struct Cell { value: int } struct Outer { cell: Cell } fn invalid(value: Ref<Outer>) -> Ptr<int> { &value.cell.value }",
+        "fn identity(value: Ref<int>) -> Ref<int> { value } fn invalid(pointer: Ptr<int>) -> Ptr<int> { &identity(pointer.*) }",
+        "fn invalid(pointer: Ptr<int>) -> Ptr<int> { let reference: Ref<int> = pointer.*; &reference }",
+    ] {
+        let error = hir_module(source).unwrap_err();
+        assert!(
+            error
+                .diagnostic
+                .contains("cannot take the address of a Ref"),
+            "{source}\n{error}"
+        );
+    }
+}
+
+#[test]
+fn reading_a_pointer_through_a_reference_preserves_pointer_access() {
+    for source in [
+        "fn address(pointer: Ref<Ptr<int>>) -> Ptr<int> { &pointer.* }",
+        "struct Cell { value: int } fn address(pointer: Ref<Ptr<Cell>>) -> Ptr<int> { &pointer.value }",
+        "struct Cell { value: int } struct Handle { pointer: Ptr<Cell> } fn address(handle: Ref<Handle>) -> Ptr<int> { &handle.pointer.value }",
+    ] {
+        hir_module(source).unwrap_or_else(|error| panic!("{source}\n{error}"));
+    }
+}
+
+#[test]
+fn local_storage_has_no_pointer_capability() {
+    for source in [
+        "fn invalid() { let value = 1_i; &value; }",
+        "struct Cell { value: int } fn invalid() { let cell = Cell { value = 1 }; &cell.value; }",
+        "fn invalid() { let values = [1_i, 2_i]; &values:at(0_ul); }",
+        "fn invalid() { let values = [1_i, 2_i]; values:lea(0_ul); }",
+        "fn invalid() { let values = [1_i]; let alias: Ref<_> = values; alias:lea(0_ul); }",
+        "struct Cell { value: int } fn drop(cell: Ptr<Cell>) {}",
+    ] {
+        assert!(
+            hir_module(source).is_err(),
+            "accepted local address: {source}"
+        );
+    }
+}

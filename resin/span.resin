@@ -1,4 +1,4 @@
-export { Span, bytes, at, slice, as_bytes, clone };
+export { Span, bytes, at, lea, slice, as_bytes, clone };
 
 // Borrowed storage. The caller keeps the allocation alive throughout each access.
 struct Span<T> {
@@ -8,7 +8,11 @@ struct Span<T> {
 	// Primitive byte transport for formatting and native interfaces.
 }
 fn at<T>(self: Ref<Span<T>>, index: ulong) -> Ref<T> {
-	pointer_index(self.data, self.length, index).*
+	self:lea(index).*
+}
+
+fn lea<T>(self: Ref<Span<T>>, index: ulong) -> Ptr<T> {
+	pointer_index(self.data, self.length, index)
 }
 
 fn slice<T>(self: Ref<Span<T>>, start: ulong, length: ulong) -> Span<T> {

@@ -35,12 +35,14 @@ fn foreign_functions_forward_separate_c_arguments() {
                 fn abs (n: int) -> int;
             }},
         }};
+import {{ "$/shared.resin" }};
+
 
         fn call (f: () -> int) -> int  {{ f() }}
-        fn main () -> int  {{
-            let mut value = 0;
+        fn main () -> int | Err<_> {{
+            let value_owner = arc_ptr_alloc(0)?; let value: Ref<_> = value_owner:get().*;
             let mut set = assign;
-            set(&value, call(answer));
+            set(value_owner:get(), call(answer));
             abs(-value)
         }}"#,
         header = header.to_string_lossy().replace('\\', "/")
@@ -57,16 +59,18 @@ fn foreign_functions_forward_separate_c_arguments() {
 #[test]
 fn pointers_roundtrip_and_address_expressions_evaluate_once() {
     let output = run(r#"export { main };
+import { "$/shared.resin" };
+
 
         struct FieldsValue<T0> { value: T0, }
 fn identity(p: Ptr<FieldsValue<int>>, calls: Ptr<int>) -> Ptr<FieldsValue<int>>  {
             calls.* = calls.* + 1;
             p
         }
-        fn main () -> int  {
-            let mut calls = 0;
-            let mut record = FieldsValue<_> { value = 1 };
-            let mut pointer = &identity(&record, &calls).value;
+        fn main () -> int | Err<_> {
+            let calls_owner = arc_ptr_alloc(0)?; let calls: Ref<_> = calls_owner:get().*;
+            let record_owner = arc_ptr_alloc(FieldsValue<_> { value = 1 })?; let record: Ref<_> = record_owner:get().*;
+            let mut pointer = &identity(record_owner:get(), calls_owner:get()).value;
             let mut copy = Ptr<int>(ulong(pointer));
             copy.* = 41;
             record.value + calls

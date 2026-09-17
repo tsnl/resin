@@ -1,6 +1,6 @@
 export { main };
 
-import { "$/string.resin" };
+import { "$/string.resin", "$/shared.resin" };
 
 fn fibonacci(n: int) -> _ {
 	if (n <= 1) {
@@ -10,10 +10,10 @@ fn fibonacci(n: int) -> _ {
 	}
 }
 
-fn main() {
+fn main() -> () | Err<_> {
 	let mut n: _;
 	let mut pointer: Ptr<_>;
-	n = fibonacci(10);
-	pointer = &n;
+	n = arc_ptr_alloc(fibonacci(10))?;
+	pointer = n:get();
 	print(fmt("fibonacci(10) = {0}\n", (pointer.*,)));
 }

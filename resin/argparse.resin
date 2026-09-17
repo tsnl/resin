@@ -12,7 +12,7 @@ extern {
 	},
 };
 
-import { "process.resin", "span.resin", "string.resin" };
+import { "process.resin", "span.resin", "string.resin", "shared.resin" };
 
 struct ArgParser {
 	args: Span<Ptr<ubyte>>,
@@ -136,12 +136,12 @@ fn argument_integer(text: Ref<Span<ubyte>>) -> uint | Err<String> {
 }
 
 // Copy exactly the bounded view before calling C; embedded NULs/trailing bytes fail.
-fn argument_number(text: Ref<Span<ubyte>>) -> float32 | Err<String> {
+fn argument_number(text: Ref<Span<ubyte>>) -> float32 | Err<_> {
 	let terminated = string_from_bytes(text);
 	let data = terminated:get().data;
-	let mut end = Ptr<ubyte>(0_ul);
-	let value = strtod(data, &end);
-	if (text.length == 0_ul || ulong(end) - ulong(data) != text.length || !(value >= -3.4e38_d && value <= 3.4e38_d)) {
+	let end = arc_ptr_alloc(Ptr<ubyte>(0_ul))?;
+	let value = strtod(data, end:get());
+	if (text.length == 0_ul || ulong(end:get().*) - ulong(data) != text.length || !(value >= -3.4e38_d && value <= 3.4e38_d)) {
 		return Err(fmt("Invalid finite number: {0}", (text:bytes(),)));
 	};
 	float32(value)

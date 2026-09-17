@@ -9,7 +9,7 @@ fn read(self: Ptr<Tracked>) -> int {
 	self.value
 }
 
-fn drop(self: Ptr<Tracked>) {
+fn drop(self: Ref<Tracked>) {
 	if (self.value != 0_i) {
 		print(fmt("released {0}\n", (self.value,)));
 	};

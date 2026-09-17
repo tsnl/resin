@@ -295,7 +295,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   body errors never provide overload fallback. Source-known calls become ordinary HIR calls;
   dependent calls retain lexical candidate IDs for specialization before storage lowering.
   Compiler-provided operations use the same argument checking and editor analysis path.
-  HIR registers free `drop(Ptr<T>)` and `repr_bytes(Ref<T>)` hooks with their owning
+  HIR registers free `drop(Ref<T>)` and `repr_bytes(Ref<T>)` hooks with their owning
   nominal declaration; direct calls remain ordinary calls.
 - Libraries declare low-level compiler operations with `intrinsic "operation" fn name<T>(...) -> Type;`.
   Validate each signature against an explicit primitive contract during HIR construction.
@@ -396,7 +396,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Arrays, `Span<T>`, and `str` provide indexing with `items:at(index)`, returning `Ref<T>`
   (`Ref<ubyte>` for `str`);
   its index parameter is `ulong`, with explicit conversions for other integer types.
-  Use `items:at(index)` to read or write, and `&items:at(index)` for a pointer.
+  Use `items:at(index)` to read or write. Pointers to arrays, spans, and `str`
+  also support `items:lea(index)` returning an element pointer. Local array values
+  and references to arrays have no `lea` operation.
   Arrays retain the earlier `items(index)` spelling;
   source spans use `:at(index)`.
   Bounds checking is not part of the indexing contract. Host indexing diagnoses invalid indices;
@@ -404,12 +406,16 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Places remain a compiler expression category. Source `Ref<T>` bindings and function
   results expose a fixed, nonowning alias to initialized storage. Unannotated locals and
   plain result holes infer value types; `let alias: Ref<T> = place;` retains the alias.
-  Assignment writes its referent even through an immutable reference binding; `&alias`
-  yields `Ptr<T>`. Ref parameters accept temporary arguments alive through the full
+  Assignment writes its referent even through an immutable reference binding.
+  Locals, their inline fields, and `Ref` referents cannot have their addresses taken.
+  A pointer dereference and its field projections remain addressable. Parameters and
+  results retain their Ref/Ptr contract through generic specialization. Ref parameters accept temporary arguments alive through the full
   expression; escaping aliases do not retain them. HIR retains reference use;
   specialization translates it to address/read operations and the existing pointer ABI.
   Reject direct reference aggregate payloads, nested references, and reference-valued
-  generic arguments. Shader-local addresses retain their existing escape restrictions.
+  generic arguments. Shader-local references can cross helper calls using Function
+  storage pointers plus projection paths; returning or merging distinct local
+  references remains unsupported.
   Spans have `data` and `length` fields. Pointer arithmetic
   is forbidden; explicit pointer/`ulong` casts permit low-level byte arithmetic on the host.
   Shader pointer casts (including pointer reinterpretation) are rejected during LIR construction

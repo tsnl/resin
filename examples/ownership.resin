@@ -11,7 +11,7 @@ fn get(self: Ref<Allocation>) -> Span<int> {
 	self.data:get()
 }
 
-fn drop(self: Ptr<Allocation>) {
+fn drop(self: Ref<Allocation>) {
 	// The owned elements are released automatically after this hook.
 	print("releasing allocation\n");
 }

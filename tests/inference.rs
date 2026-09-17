@@ -72,14 +72,14 @@ fn holes_compose_inside_pointers_spans_records_and_functions() {
 fn later_assignments_resolve_local_holes() {
     assert_eq!(
         result(
-            "fn answer() -> _  { let mut n: _; let mut p: Ptr<_>; p = &n; n = 42; p.* }",
+            "fn answer() -> _  { let mut n: _; let mut copied: _; n = 42; copied = n; copied }",
             "answer"
         ),
         Ty::Int64
     );
     assert_eq!(
         result(
-            "fn answer() -> _  { let mut n = 42; let mut p = Ptr<_>(&n); p.* }",
+            "fn answer() -> _  { let mut n = 42; let reference: Ref<_> = n; reference }",
             "answer"
         ),
         Ty::Int64
@@ -129,7 +129,7 @@ fn casts_do_not_choose_an_unrelated_nominal_type_for_a_hole() {
 fn numeric_choices_are_delayed_until_context_is_known() {
     assert_eq!(
         result(
-            "fn wide() -> _  { let mut n = 1; let mut p: Ptr<ulong>; p = &n; n }",
+            "fn wide() -> _  { let mut n = 1; let p: Ref<ulong> = n; n }",
             "wide"
         ),
         Ty::UInt64
@@ -353,7 +353,7 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
         "let mut unused: _; unused = 1;",
     ] {
         let source = format!(
-            "fn consume(p: Ptr<ubyte>)  {{}} fn main()  {{ {marker} let mut value = 0; consume(&value); }}"
+            "fn consume(p: Ref<ubyte>)  {{}} fn main()  {{ {marker} let mut value = 0; consume(value); }}"
         );
         let module = pipeline::generate(&parse(&source)).unwrap();
         let value = module
@@ -365,7 +365,7 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
         assert_eq!(value.ty, Ty::UInt8, "{source}");
 
         let source = format!(
-            "fn consume(p: Ptr<ubyte>)  {{}} fn main()  {{ {marker} let mut value = 0_i; consume(&value); }}"
+            "fn consume(p: Ref<ubyte>)  {{}} fn main()  {{ {marker} let mut value = 0_i; consume(value); }}"
         );
         let error = pipeline::generate(&parse(&source)).unwrap_err();
         assert!(
@@ -379,7 +379,7 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
         );
 
         let source = format!(
-            "import {{ \"$/span.resin\" }}; fn main() -> int  {{ {marker} let mut values = [10, 20]; let mut data = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }}; data:at(1) }}"
+            "import {{ \"$/span.resin\" }}; fn main() -> int  {{ {marker} let mut values = [10, 20]; let data: Ref<_> = values; data:at(1) }}"
         );
         pipeline::source_module(&source).unwrap();
     }
@@ -388,9 +388,9 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
 #[test]
 fn pointer_reinterpretation_does_not_narrow_source_storage() {
     for bindings in [
-        "let mut n = 300; let mut bytes = Ptr<ubyte>(&n);",
-        "let mut n: _; n = 300; let mut bytes = Ptr<ubyte>(&n);",
-        "let mut n: int; n = 300; let mut source: Ptr<int>; source = &n; let mut bytes = Ptr<ubyte>(source);",
+        "let mut n = Ptr<long>(300_ul); let mut bytes = Ptr<ubyte>(n);",
+        "let mut n: _; n = Ptr<long>(300_ul); let mut bytes = Ptr<ubyte>(n);",
+        "let mut n: Ptr<int>; n = Ptr<int>(300_ul); let mut source: Ptr<int>; source = n; let mut bytes = Ptr<ubyte>(source);",
     ] {
         for marker in ["", "{ let mut unused = (); };"] {
             let source = format!("export {{ main }}; fn main()  {{ {bindings} {marker} }}");
@@ -403,10 +403,12 @@ fn pointer_reinterpretation_does_not_narrow_source_storage() {
                 .unwrap();
             assert_eq!(
                 n.ty,
-                if bindings.contains("let mut n: int") {
-                    Ty::Int32
-                } else {
-                    Ty::Int64
+                Ty::Pointer {
+                    pointee: Box::new(if bindings.contains("let mut n: Ptr<int>") {
+                        Ty::Int32
+                    } else {
+                        Ty::Int64
+                    })
                 },
                 "{source}"
             );
@@ -540,8 +542,8 @@ fn nested_record_annotations_reject_duplicate_field_names() {
 #[test]
 fn numeric_defaults_stay_with_their_dependency_group() {
     let plain = "fn plain() -> _  { 1 }";
-    let wide = "fn wide() -> _  { let mut n = 1; let mut p: Ptr<ulong>; p = &n; n }";
-    let fraction = "fn fraction() -> _  { let mut n = 1.5; let mut p: Ptr<float32>; p = &n; n }";
+    let wide = "fn wide() -> _  { let mut n = 1; let p: Ref<ulong> = n; n }";
+    let fraction = "fn fraction() -> _  { let mut n = 1.5; let p: Ref<float32> = n; n }";
     let caller = "fn caller() -> _  { wide() }";
     for declarations in [
         [plain, wide, fraction, caller],
@@ -672,7 +674,7 @@ fn unsuffixed_numbers_infer_from_uses_and_fall_back_to_64_bits() {
         }
         for literal in literals {
             for body in [
-                format!("let mut n = {literal}; let mut p: Ptr<{name}>; p = &n; n"),
+                format!("let mut n = {literal}; let p: Ref<{name}> = n; n"),
                 format!("let mut n = {literal}; take(n)"),
                 format!("let mut n = {literal}; n + take(1)"),
                 format!("let mut n = {literal}; take(1) + n"),

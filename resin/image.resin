@@ -16,7 +16,7 @@ struct ImageDataOwner {
 	channels: uint,
 	pixels: Ptr<ubyte>,
 }
-fn drop(self: Ptr<ImageDataOwner>) {
+fn drop(self: Ref<ImageDataOwner>) {
 	if (ulong(self.pixels) != 0_ul) {
 		resin_image_free(self.pixels);
 	};

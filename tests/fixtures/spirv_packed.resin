@@ -1,12 +1,29 @@
 export { kernel };
 import { "$/span.resin" };
 
-struct Bytes3 { a: ubyte, b: ubyte, c: ubyte, }
-struct Rows { first: Bytes3, second: Bytes3, }
-struct Sample { lead: ubyte, rows: Rows, marker: uint, wide: ulong, tail: ubyte, }
-struct Root { count: ulong, inputs: Ptr<Sample>, outputs: Ptr<Sample>, }
+struct Bytes3 {
+	a: ubyte,
+	b: ubyte,
+	c: ubyte,
+}
+struct Rows {
+	first: Bytes3,
+	second: Bytes3,
+}
+struct Sample {
+	lead: ubyte,
+	rows: Rows,
+	marker: uint,
+	wide: ulong,
+	tail: ubyte,
+}
+struct Root {
+	count: ulong,
+	inputs: Ptr<Sample>,
+	outputs: Ptr<Sample>,
+}
 
-fn update(output: Ptr<Sample>, index: ulong)  {
+fn update(output: Ptr<Sample>, index: ulong) {
 	let mut row = if ((index & 1_ul) == 0_ul) {
 		&output.rows.first
 	} else {
@@ -17,9 +34,9 @@ fn update(output: Ptr<Sample>, index: ulong)  {
 	output.* = Sample {
 		lead = previous.lead,
 		rows = Rows {
-            first = copy_bytes(previous.rows.first),
-            second = copy_bytes(previous.rows.second),
-        },
+			first = copy_bytes(previous.rows.first),
+			second = copy_bytes(previous.rows.second),
+		},
 		marker = previous.marker + 1_ui,
 		wide = previous.wide + 4294967297_ul,
 		tail = previous.tail,
@@ -27,16 +44,18 @@ fn update(output: Ptr<Sample>, index: ulong)  {
 }
 
 @compute_shader
-fn kernel(index: ulong, root: Ptr<Root>)  {
+fn kernel(index: ulong, root: Ptr<Root>) {
 	if (index < root.count) {
 		let mut inputs = Span<Sample> { data = root.inputs, length = root.count };
 		let mut outputs = Span<Sample> { data = root.outputs, length = root.count };
-		let mut output: Ref<_> = fixture_index(outputs.data, outputs.length, index).*;
+		let output = outputs:lea(index);
 		let input: Ref<Sample> = fixture_index(inputs.data, inputs.length, index).*;
-        output = Sample { lead = input.lead, rows = Rows { first = copy_bytes(input.rows.first), second = copy_bytes(input.rows.second) }, marker = input.marker, wide = input.wide, tail = input.tail };
-		update(&output, index);
+		output.* = Sample { lead = input.lead, rows = Rows { first = copy_bytes(input.rows.first), second = copy_bytes(input.rows.second) }, marker = input.marker, wide = input.wide, tail = input.tail };
+		update(output, index);
 	};
 }
 
-fn copy_bytes(value: Ref<Bytes3>) -> Bytes3 { Bytes3 { a = value.a, b = value.b, c = value.c } }
+fn copy_bytes(value: Ref<Bytes3>) -> Bytes3 {
+	Bytes3 { a = value.a, b = value.b, c = value.c }
+}
 intrinsic "pointer_index" fn fixture_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;

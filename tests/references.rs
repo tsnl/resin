@@ -26,13 +26,31 @@ fn reference_calls_preserve_aliases_while_value_bindings_copy() {
             let mut x: int = 1;
             let mut reference: Ref<_> = identity(x);
             let mut copied = reference;
-            let mut address = &reference;
             identity(x) = 7;
-            observe(reference, address.*) + copied + x
+            observe(reference, x) + copied + x
         }
     "#
         ),
         41
+    );
+}
+
+#[test]
+fn dependent_reference_results_cannot_be_turned_into_pointers() {
+    let error = support::pipeline::source_module(
+        r#"export { main };
+        struct Cell { value: int }
+        fn get(cell: Ref<Cell>) -> Ref<int> { cell.value }
+        fn address<T>(cell: Ref<T>) -> Ptr<int> { &cell:get() }
+        fn main() { let cell = Cell { value = 1 }; address(cell); }
+        "#,
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("cannot take the address of a Ref"),
+        "{error}"
     );
 }
 
@@ -110,11 +128,13 @@ fn references_to_pointer_slots_are_fixed_aliases() {
     assert_eq!(
         result(
             r#"export { main };
-        fn main() -> int  {
-            let mut a = 1_i; let mut b = 2_i;
-            let mut pointer = &a;
+import { "$/shared.resin" };
+
+        fn main() -> int | Err<_> {
+            let a_owner = arc_ptr_alloc(1_i)?; let a: Ref<_> = a_owner:get().*; let b_owner = arc_ptr_alloc(2_i)?; let b: Ref<_> = b_owner:get().*;
+            let mut pointer = a_owner:get();
             let mut slot: Ref<Ptr<int>> = pointer;
-            slot = &b;
+            slot = b_owner:get();
             slot.* = 41;
             a + pointer.*
         }
@@ -129,21 +149,23 @@ fn references_borrow_managed_storage_and_replacements_destroy_the_old_value() {
     assert_eq!(
         result(
             r#"export { main };
+import { "$/shared.resin" };
+
         struct Resource { drops: Ptr<int>,
             
         }
-fn drop(self: Ptr<Resource>)  { self.drops.* = self.drops.* + 1; }
+fn drop(self: Ref<Resource>)  { self.drops.* = self.drops.* + 1; }
 
         fn identity(value: Ref<Resource>) -> Ref<Resource>  { value }
-        fn main() -> int  {
-            let mut drops = 0_i;
+        fn main() -> int | Err<_> {
+            let drops_owner = arc_ptr_alloc(0_i)?; let drops: Ref<_> = drops_owner:get().*;
             {
-                let mut resource = Resource { drops = &drops };
+                let mut resource = Resource { drops = drops_owner:get() };
                 {
                     let mut reference: Ref<Resource> = identity(resource);
                     { let borrowed: Ref<Resource> = reference; };
                     if (drops != 0_i) { drops = 90; };
-                    reference = Resource { drops = &drops };
+                    reference = Resource { drops = drops_owner:get() };
                 };
                 if (drops != 1_i) { drops = 90; };
             };
@@ -184,20 +206,13 @@ fn take(self: Ref<Cell>, value: Ref<int>)  {}
 }
 
 #[test]
-fn shader_references_keep_existing_local_address_restrictions() {
-    for (source, diagnostic) in [
-        (
-            "export { kernel }; fn read(value: Ref<uint>) -> uint  { value } @compute_shader fn kernel(i: ulong, output: Ptr<uint>)  { let mut local = 1_ui; output.* = read(local); }",
-            "shader-local addresses cannot escape",
-        ),
-        (
-            "export { kernel }; fn local() -> Ref<uint>  { let mut value = 1_ui; value } @compute_shader fn kernel(i: ulong, output: Ptr<uint>)  { output.* = local(); }",
-            "cannot return a local address",
-        ),
-    ] {
-        let error = support::pipeline::shader_error(source);
-        assert!(error.to_string().contains(diagnostic), "{error}");
-    }
+fn shaders_cannot_return_references_to_their_own_locals() {
+    let source = "export { kernel }; fn local() -> Ref<uint> { let mut value = 1_ui; value } @compute_shader fn kernel(i: ulong, output: Ptr<uint>) { output.* = local(); }";
+    let error = support::pipeline::shader_error(source);
+    assert!(
+        error.to_string().contains("cannot return a local address"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -220,4 +235,38 @@ fn stored_function_signatures_preserve_reference_parameters_and_results() {
         ),
         42
     );
+}
+
+#[test]
+fn specialization_keeps_pointer_field_access_and_rejects_local_field_addresses() {
+    assert_eq!(
+        result(
+            r#"export { main }; import { "$/shared.resin" };
+        struct Cell { value: int }
+        fn address<T>(value: T) -> Ptr<int> { &value.value }
+        fn borrowed<T>(value: Ref<T>) -> Ptr<int> { &value.value }
+        fn main() -> int | Err<_> {
+            let owner = arc_ptr_alloc(Cell { value = 1 })?;
+            address(owner:get()).* = 20;
+            borrowed(owner:get()).* = 42;
+            owner:get().value
+        }
+    "#
+        ),
+        42
+    );
+    for parameter in ["T", "Ref<T>"] {
+        let error = support::pipeline::source_module(&format!(
+            r#"export {{ main }};
+            struct Cell {{ value: int }}
+            fn address<T>(value: {parameter}) -> Ptr<int> {{ &value.value }}
+            fn main() {{ let cell = Cell {{ value = 1 }}; address(cell); }}
+        "#
+        ))
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("cannot take the address"),
+            "{error}"
+        );
+    }
 }

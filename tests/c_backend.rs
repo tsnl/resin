@@ -61,7 +61,7 @@ fn array_value_projections_copy_the_element_and_destroy_the_container() {
             struct Resource { trace: Ptr<int>, digit: int,
                 
             }
-fn drop(self: Ptr<Resource>)  {
+fn drop(self: Ref<Resource>)  {
                     if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; };
                 }
 
@@ -168,7 +168,7 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
         1,
     );
     runs(
-        "export { main }; struct Bad { code: int, } fn fail(counter: Ptr<int>) -> (int | Err<Bad>)  { counter.* = counter.* + 1; Err(Bad { code = 7 }) } fn work(counter: Ptr<int>) -> (int | Err<Bad>)  { ({ counter.* = counter.* + 10; counter.* } + fail(counter)? + { counter.* = 1000; counter.* }) } fn main() -> int  { let mut count = 0; let mut result = work(&count); match (result) { int(n) => { 99 }, Err(e) => { count + e.code } } }",
+        "export { main };\nimport { \"$/shared.resin\" };\n struct Bad { code: int, } fn fail(counter: Ptr<int>) -> (int | Err<Bad>)  { counter.* = counter.* + 1; Err(Bad { code = 7 }) } fn work(counter: Ptr<int>) -> (int | Err<Bad>)  { ({ counter.* = counter.* + 10; counter.* } + fail(counter)? + { counter.* = 1000; counter.* }) } fn main() -> int | Err<_> { let count_owner = arc_ptr_alloc(0)?; let count: Ref<_> = count_owner:get().*; let mut result = work(count_owner:get()); match (result) { int(n) => { 99 }, Err(e) => { count + e.code } } }",
         18,
     );
     runs(
@@ -214,11 +214,11 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
 #[test]
 fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
     runs(
-        "export { main }; fn main() -> _  { let mut n: _; let mut p: Ptr<_>; n = 40_i; p = &n; p.* = p.* + 2; p.* }",
+        "export { main }; fn main() -> _  { let mut n: _; n = 40_i; let p: Ref<_> = n; p = p + 2; p }",
         42,
     );
     runs(
-        "export { main }; fn wide() -> _  { let mut n = 4294967297; let mut p: Ptr<ulong>; p = &n; p.* } fn main() -> int  { if (wide() == ulong(4294967297)) { 0 } else { 1 } }",
+        "export { main }; fn wide() -> _  { let mut n = 4294967297; let p: Ref<ulong> = n; p } fn main() -> int  { if (wide() == ulong(4294967297)) { 0 } else { 1 } }",
         0,
     );
     runs(
@@ -234,7 +234,7 @@ fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
 #[test]
 fn array_and_span_indexing_use_element_sizes() {
     runs(
-        "export { main }; import { \"$/span.resin\" }; fn main () -> int  { let mut values = [10, 20, 30]; let mut p = Span<int> { data = Ptr<int>(&values), length = ulong(3) }; p:at(1) = 7; let mut end = p:at(2); p:at(1) + values(0) + end }",
+        "export { main }; import { \"$/shared.resin\", \"$/span.resin\" }; fn main () -> int | Err<_> { let values_owner = arc_ptr_alloc([10, 20, 30])?; let values: Ref<_> = values_owner:get().*; let mut p = Span<int> { data = Ptr<int>(values_owner:get()), length = ulong(3) }; p:at(1) = 7; let mut end = p:at(2); p:at(1) + values(0) + end }",
         47,
     );
     runs(
@@ -367,12 +367,14 @@ fn calls_take_lists_and_tuples_are_explicit_values() {
 fn arguments_are_evaluated_left_to_right_after_the_callee() {
     runs(
         r#"export { main };
+import { "$/shared.resin" };
+
         fn mark(trace: Ptr<int>, digit: int) -> int  { trace.* = trace.* * 10 + digit; trace.* }
         fn consume(a: int, b: int)  {}
         fn callee(trace: Ptr<int>) -> (int, int) -> ()  { mark(trace, 1); consume }
-        fn main() -> int  {
-            let mut trace = 0;
-            callee(&trace)(mark(&trace, 2), mark(&trace, 3));
+        fn main() -> int | Err<_> {
+            let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+            callee(trace_owner:get())(mark(trace_owner:get(), 2), mark(trace_owner:get(), 3));
             trace
         }
     "#,
@@ -412,7 +414,7 @@ fn expression_cleanup_preserves_scope_order_on_failure_and_success() {
                 
                 
             }
-fn drop(self: Ptr<Resource>)  { if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; }; }
+fn drop(self: Ref<Resource>)  { if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; }; }
 
 fn accept(self: Ptr<Resource>, other: ArcPtr<Resource>) -> ArcPtr<Resource>  { other }
 
@@ -438,10 +440,10 @@ fn truth(self: Ptr<Resource>) -> bool  { 1 == 1 }
         let source = format!(
             "{declarations}
             fn attempt(trace: Ptr<int>) -> () | Err<_> {{ {call}; () }}
-            fn main() -> int {{
-                let mut trace = 0;
-                attempt(&trace);
-                if (trace == {expected}) {{ 0 }} else {{ 1 }}
+            fn main() -> int | Err<_> {{
+                let trace = arc_ptr_alloc(0_i)?;
+                attempt(trace:get());
+                if (trace:get().* == {expected}) {{ 0 }} else {{ 1 }}
             }}"
         );
         runs(&source, 0);
@@ -452,10 +454,12 @@ fn truth(self: Ptr<Resource>) -> bool  { 1 == 1 }
 fn tuple_projection_preserves_places_and_nested_values() {
     runs(
         r#"export { main };
-        fn main() -> int  {
-            let mut pair = ((1, 2), 3);
+import { "$/shared.resin" };
+
+        fn main() -> int | Err<_> {
+            let pair_owner = arc_ptr_alloc(((1, 2), 3))?; let pair: Ref<_> = pair_owner:get().*;
             pair.0.1 = 20;
-            let mut pointer = &pair.1;
+            let mut pointer = &pair_owner:get().1;
             pointer.* = 21;
             pair.0.0 + pair.0.1 + pair.1
         }
@@ -715,15 +719,15 @@ fn array_addresses_and_dynamic_bounds_are_executable() {
 fn indexing_addresses_evaluate_receiver_and_index_once() {
     runs(
         r#"export { main };
-        import { "$/span.resin" };
+        import { "$/shared.resin", "$/span.resin" };
         fn view(p: Ptr<int>, calls: Ptr<int>) -> Span<int>  {
             calls.* = calls.* + 1;
             Span<int> { data = p, length = ulong(3) }
         }
         fn index(calls: Ptr<int>) -> int  { calls.* = calls.* + 1; 1 }
-        fn main() -> int  {
-            let mut values = [10_i, 20, 30]; let mut calls = 0;
-            let mut p: Ptr<int>; p = &view(Ptr<int>(&values), &calls):at(ulong(index(&calls)));
+        fn main() -> int | Err<_> {
+            let values_owner = arc_ptr_alloc([10_i, 20, 30])?; let values: Ref<_> = values_owner:get().*; let calls_owner = arc_ptr_alloc(0)?; let calls: Ref<_> = calls_owner:get().*;
+            let mut p: Ptr<int>; p = view(Ptr<int>(values_owner:get()), calls_owner:get()):lea(ulong(index(calls_owner:get())));
             p.* = 42;
             let mut copied = values;
             copied(0) = 9;
@@ -738,7 +742,7 @@ fn indexing_addresses_evaluate_receiver_and_index_once() {
 fn at_indexing_borrows_array_places_and_supports_field_receivers() {
     runs(
         r#"export { main };
-        import { "$/span.resin" };
+        import { "$/shared.resin", "$/span.resin" };
         struct FieldsValues<T0> { values: T0, }
 struct Holder { values: Span<int>, }
         fn view(p: Ptr<int>, calls: Ptr<int>) -> Holder  {
@@ -747,13 +751,13 @@ struct Holder { values: Span<int>, }
         }
         fn index(calls: Ptr<int>) -> int  { calls.* = calls.* + 1; 1 }
         fn element(s: Span<int>, i: ulong) -> Ref<int>  { s:at(i) }
-        fn main() -> int  {
-            let mut values = [10_i, 20, 30]; let mut calls = 0;
-            let mut p: Ref<int> = view(Ptr<int>(&values), &calls).values:at(ulong(index(&calls)));
+        fn main() -> int | Err<_> {
+            let values_owner = arc_ptr_alloc([10_i, 20, 30])?; let values: Ref<_> = values_owner:get().*; let calls_owner = arc_ptr_alloc(0)?; let calls: Ref<_> = calls_owner:get().*;
+            let mut p: Ref<int> = view(Ptr<int>(values_owner:get()), calls_owner:get()).values:at(ulong(index(calls_owner:get())));
             p = 42;
             let mut record = FieldsValues<_> { values = [3, 4] };
             record.values:at(0) = 8;
-            let mut holder = view(Ptr<int>(&values), &calls);
+            let mut holder = view(Ptr<int>(values_owner:get()), calls_owner:get());
             element(holder.values, 0) = 11;
             let mut temporary = [7, 8]:at(1);
             if (calls == 3 && values:at(1) == 42 && values:at(0) == 11 && record.values:at(0) == 8 && temporary == 8) { 0 } else { 1 }
@@ -774,11 +778,11 @@ fn at_indexing_checks_bounds_before_later_effects() {
                         fn puts(text: Ptr<ubyte>) -> int;
                     }},
                 }};
-                import {{ "$/span.resin" }};
+                import {{ "$/shared.resin", "$/span.resin" }};
                 struct FieldsValues<T0> {{ values: T0, }}
-fn main() -> int  {{
-                    let mut values = [1, 2];
-                    let mut holder = FieldsValues<_> {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }};
+fn main() -> int | Err<_> {{
+                    let values_owner = arc_ptr_alloc([1, 2])?; let values: Ref<_> = values_owner:get().*;
+                    let mut holder = FieldsValues<_> {{ values = Span<int> {{ data = Ptr<int>(values_owner:get()), length = 2_ul }} }};
                     {receiver}:at({index}) = 9;
                     puts("after".data); 0
                 }}"#
@@ -795,7 +799,7 @@ fn array_and_span_indexing_fail_before_out_of_bounds_access() {
     for source in [
         "export { main }; fn main() -> int  { let mut xs = [1, 2]; xs(-1) }",
         "export { main }; fn main() -> int  { let mut xs = [1, 2]; xs(2) = 9; 0 }",
-        "export { main }; import { \"$/span.resin\" }; fn main() -> int  { let mut xs = [1, 2]; let mut s = Span<int> { data = Ptr<int>(&xs), length = ulong(2) }; s:at(18446744073709551615_ul) }",
+        "export { main }; import { \"$/shared.resin\", \"$/span.resin\" }; fn main() -> int | Err<_> { let xs_owner = arc_ptr_alloc([1, 2])?; let xs: Ref<_> = xs_owner:get().*; let mut s = Span<int> { data = Ptr<int>(xs_owner:get()), length = ulong(2) }; s:at(18446744073709551615_ul) }",
         "export { main }; import { \"$/span.resin\" }; fn main() -> int  { let mut s = Span<int> { data = Ptr<int>(ulong(0)), length = ulong(0) }; s:at(0) }",
     ] {
         let output = run_module(&module(source));
@@ -812,9 +816,11 @@ fn array_and_span_indexing_fail_before_out_of_bounds_access() {
 fn decorated_functions_and_their_helpers_remain_host_callable() {
     runs(
         r#"export { main };
+import { "$/shared.resin" };
+
         fn twice(i: uint) -> uint  { i * uint(2) }
         @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { twice(i) }; }
-        fn main() -> int  { let mut f = kernel; let mut output = 0_ui; f(21_ul, &output); if (output == 42_ui) { 0 } else { 1 } }
+        fn main() -> int | Err<_> { let mut f = kernel; let output_owner = arc_ptr_alloc(0_ui)?; let output: Ref<_> = output_owner:get().*; f(21_ul, output_owner:get()); if (output == 42_ui) { 0 } else { 1 } }
     "#,
         0,
     );
@@ -827,23 +833,25 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
     let file = std::sync::Arc::make_mut(&mut program.modules.last_mut().unwrap().file);
     file.stmts.retain(|s| !matches!(&s.val, resin_ast::StmtKind::Function { name, .. } if name.val.as_ref() == "main"));
     // Exercise random particle generation, camera math, and the shader bodies on
-    // stack-backed storage. GPU initialization stores these same generated values.
-    file.stmts.extend(support::parse(r#"fn main() -> int  {
-            let mut state = 12345_ui | 1_ui;
-            let mut particle = random_particle(&state);
-            let mut particles = Span<Particle> { data = &particle, length = 1_ul };
-            let mut first = particle;
+    // host allocations. GPU initialization stores these same generated values.
+    file.stmts.extend(support::parse(r#"
+import { "$/shared.resin" };
+fn main() -> int | Err<_> {
+            let state_owner = arc_ptr_alloc(12345_ui | 1_ui)?; let state: Ref<_> = state_owner:get().*;
+            let particle_owner = arc_ptr_alloc(random_particle(state))?; let particle: Ref<_> = particle_owner:get().*;
+            let mut particles = Span<Particle> { data = particle_owner:get(), length = 1_ul };
+            let first = Particle { x = particle.x, y = particle.y, z = particle.z, vx = particle.vx, vy = particle.vy, vz = particle.vz };
             state = 12345_ui | 1_ui;
-            particle = random_particle(&state);
+            particle = random_particle(state);
             let mut valid = particle.x == first.x && particle.vz == first.vz;
             state = 54321_ui | 1_ui;
-            particle = random_particle(&state);
+            particle = random_particle(state);
             valid = valid && particle.x != first.x && particle.vx != first.vx;
             valid = valid && particle.x >= -24_f && particle.x < 24_f && particle.y >= -30_f && particle.y < 30_f && particle.z >= 0_f && particle.z < 50_f && particle.vx >= -6_f && particle.vx < 6_f && particle.vy >= -6_f && particle.vy < 6_f && particle.vz >= -6_f && particle.vz < 6_f;
-            let mut params = Params { dt = 0.005_f, yaw_cos = 1_f, yaw_sin = 0_f, pitch_cos = 1_f, pitch_sin = 0_f, zoom = 1_f, aspect = 0.625_f, radius = 0.0012_f, particles = particles };
+            let params_owner = arc_ptr_alloc(Params { dt = 0.005_f, yaw_cos = 1_f, yaw_sin = 0_f, pitch_cos = 1_f, pitch_sin = 0_f, zoom = 1_f, aspect = 0.625_f, radius = 0.0012_f, particles = particles })?; let params: Ref<_> = params_owner:get().*;
             let mut steps = 0;
             while (steps < 2000) {
-                kernel(0_ul, &params);
+                kernel(0_ul, params_owner:get());
                 valid = valid && particle.x > -100_f && particle.x < 100_f && particle.y > -100_f && particle.y < 100_f && particle.z > -100_f && particle.z < 100_f;
                 steps = steps + 1;
             };
@@ -854,36 +862,36 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
                 index = index + 1;
             };
             particle = Particle { x = 0_f, y = -20_f, z = 25_f, vx = 0_f, vy = 0_f, vz = 0_f };
-            let mut near = vertex(0, &params);
-            let mut near_rim = vertex(1, &params);
+            let mut near = vertex(0, params_owner:get());
+            let mut near_rim = vertex(1, params_owner:get());
             particle.y = 20_f;
-            let mut far = vertex(0, &params);
-            let mut far_rim = vertex(1, &params);
+            let mut far = vertex(0, params_owner:get());
+            let mut far_rim = vertex(1, params_owner:get());
             valid = valid && fragment(near.color).b > fragment(far.color:clone()).b;
             valid = valid && near_rim.position.x - near.position.x > far_rim.position.x - far.position.x;
             // Camera controls change the projection without changing the simulation.
-            let mut camera = Camera { yaw = 0_f, pitch = 0_f, zoom = 1_f };
-            apply_camera(camera, &params);
-            let mut before = vertex(1, &params);
+            let camera_owner = arc_ptr_alloc(Camera { yaw = 0_f, pitch = 0_f, zoom = 1_f })?; let camera: Ref<_> = camera_owner:get().*;
+            apply_camera(camera, params);
+            let mut before = vertex(1, params_owner:get());
             camera.zoom = 2_f;
-            apply_camera(camera, &params);
-            let mut zoomed = vertex(1, &params);
+            apply_camera(camera, params);
+            let mut zoomed = vertex(1, params_owner:get());
             valid = valid && zoomed.position.x == before.position.x * 2_f;
-            move_camera(&camera, 100_d, 50_d, 0_d);
-            apply_camera(camera, &params);
-            let mut orbited = vertex(0, &params);
+            move_camera(camera, 100_d, 50_d, 0_d);
+            apply_camera(camera, params);
+            let mut orbited = vertex(0, params_owner:get());
             valid = valid && orbited.position.x > 0_f && orbited.position.y < 0_f;
             let mut yaw_length = params.yaw_cos * params.yaw_cos + params.yaw_sin * params.yaw_sin;
             let mut pitch_length = params.pitch_cos * params.pitch_cos + params.pitch_sin * params.pitch_sin;
             valid = valid && yaw_length > 0.999_f && yaw_length < 1.001_f && pitch_length > 0.999_f && pitch_length < 1.001_f;
-            move_camera(&camera, 0_d, 1000000_d, 1000000_d);
+            move_camera(camera, 0_d, 1000000_d, 1000000_d);
             valid = valid && camera.pitch == 1.4_f && camera.zoom == 3_f;
-            move_camera(&camera, 0_d, -1000000_d, -1000000_d);
+            move_camera(camera, 0_d, -1000000_d, -1000000_d);
             valid = valid && camera.pitch == -1.4_f && camera.zoom == 0.35_f;
             camera = default_camera();
-            move_camera(&camera, 0_d, 0_d, 0.5_d);
+            move_camera(camera, 0_d, 0_d, 0.5_d);
             valid = valid && camera.zoom > 1_f && camera.zoom < 1.1_f;
-            move_camera(&camera, 0_d, 0_d, -0.5_d);
+            move_camera(camera, 0_d, 0_d, -0.5_d);
             valid = valid && camera.zoom > 0.999_f && camera.zoom < 1.001_f;
             let mut color = fragment(far.color);
             if (valid && particle.x != first.x && color.r >= 0_f && color.r <= 1_f && color.b >= 0_f && color.b <= 1_f) { 0 } else { 1 }
@@ -919,6 +927,8 @@ fn suffixed_literals_execute_with_their_selected_widths() {
 fn else_if_chains_select_one_branch_and_short_circuit_conditions() {
     runs(
         r#"export { main };
+import { "$/shared.resin" };
+
     fn condition(calls: Ptr<int>, value: int, expected: int) -> bool  {
         calls.* = calls.* + 1;
         value == expected
@@ -929,12 +939,12 @@ fn else_if_chains_select_one_branch_and_short_circuit_conditions() {
         else if (condition(calls, value, 2)) { 30 }
         else { 40 }
     }
-    fn main() -> int  {
-        let mut calls = 0;
-        let mut a = classify(0, &calls);
-        let mut b = classify(1, &calls);
-        let mut c = classify(2, &calls);
-        let mut d = classify(3, &calls);
+    fn main() -> int | Err<_> {
+        let calls_owner = arc_ptr_alloc(0)?; let calls: Ref<_> = calls_owner:get().*;
+        let mut a = classify(0, calls_owner:get());
+        let mut b = classify(1, calls_owner:get());
+        let mut c = classify(2, calls_owner:get());
+        let mut d = classify(3, calls_owner:get());
         let mut value = 0;
         if (1 == 0) { value = 100; } else if (1 == 1) { value = value + 1; };
         if (1 == 0) { value = 100; } else if (1 == 0) { value = 100; };
@@ -948,16 +958,18 @@ fn else_if_chains_select_one_branch_and_short_circuit_conditions() {
 fn one_armed_if_evaluates_once_and_runs_branch_cleanup() {
     runs(
         r#"export { main };
+import { "$/shared.resin" };
+
     struct Add { value: Ptr<int>,
         
     }
-fn drop(self: Ptr<Add>)  { self.value.* = self.value.* + 10; }
+fn drop(self: Ref<Add>)  { self.value.* = self.value.* + 10; }
 
 
     fn condition(calls: Ptr<int>) -> bool  { calls.* = calls.* + 1; 1 == 1 }
-    fn main() -> int  {
-        let mut calls = 0; let mut value = 0;
-        if (condition(&calls)) { let mut cleanup = Add { value = &value }; value = value + 1; };
+    fn main() -> int | Err<_> {
+        let calls_owner = arc_ptr_alloc(0)?; let calls: Ref<_> = calls_owner:get().*; let value_owner = arc_ptr_alloc(0)?; let value: Ref<_> = value_owner:get().*;
+        if (condition(calls_owner:get())) { let mut cleanup = Add { value = value_owner:get() }; value = value + 1; };
         if (1 == 0) { value = 100; };
         if (1 == 1) { if (1 == 0) { value = 100; } else { value = value + 1; }; };
         if (calls == 1 && value == 12) { 0 } else { 1 }
@@ -972,27 +984,29 @@ fn dedicated_cleanup_bindings_retain_acquisitions_on_both_exits() {
         runs(
             &format!(
                 r#"export {{ main }};
+import {{ "$/shared.resin" }};
+
             struct E {{}}
             struct Capture {{ resource: Ptr<int>, trace: Ptr<int>,
                 
             }}
-fn drop(self: Ptr<Capture>)  {{ self.trace.* = self.trace.* * 10 + self.resource.*; }}
+fn drop(self: Ref<Capture>)  {{ self.trace.* = self.trace.* * 10 + self.resource.*; }}
 
 
-            fn work(trace: Ptr<int>, fail: bool) -> (() | Err<E>)  {{
-                let mut resource = 1;
-                let mut captured = resource;
-                let mut first = Capture {{ resource = &captured, trace = trace }};
-                let mut second = Capture {{ resource = &resource, trace = trace }};
-                resource = 2;
+            fn work(trace: Ptr<int>, fail: bool) -> () | Err<_> {{
+                let resource = arc_ptr_alloc(1_i)?;
+                let captured = arc_ptr_alloc(resource:get().*)?;
+                let mut first = Capture {{ resource = captured:get(), trace = trace }};
+                let mut second = Capture {{ resource = resource:get(), trace = trace }};
+                resource:get().* = 2;
                 {{ let mut captured = 9; }};
                 let mut result: (() | Err<E>); result = if (fail) {{ Err(E {{}}) }} else {{ (()) }};
                 result?;
                 (())
             }}
-            fn main() -> int  {{
-                let mut trace = 0;
-                match (work(&trace, {fail})) {{ ()(v) => {{}}, Err(e) => {{}} }};
+            fn main() -> int | Err<_> {{
+                let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+                match (work(trace_owner:get(), {fail})) {{ ()(v) => {{}}, Err(e) => {{}} }};
                 if (trace == 21) {{ 0 }} else {{ 1 }}
             }}
         "#
@@ -1006,18 +1020,20 @@ fn drop(self: Ptr<Capture>)  {{ self.trace.* = self.trace.* * 10 + self.resource
 fn byte_arrays_have_packed_storage_and_nested_stride() {
     runs(
         r#"export { main };
+import { "$/shared.resin" };
+
         struct FieldsBytesTail<T0, T1> { bytes: T0, tail: T1, }
-fn main() -> int  {
+fn main() -> int | Err<_> {
             let mut binary = [65_ub, 66_ub];
             let mut copied = binary;
-            let mut nested = [[1_ub, 2_ub], [3_ub, 4_ub]];
+            let nested_owner = arc_ptr_alloc([[1_ub, 2_ub], [3_ub, 4_ub]])?; let nested: Ref<_> = nested_owner:get().*;
             let mut embedded = [65_ub, 0_ub, 66_ub];
-            let mut record = FieldsBytesTail<_, _> { bytes = copied, tail = 255_ub };
+            let record_owner = arc_ptr_alloc(FieldsBytesTail<_, _> { bytes = copied, tail = 255_ub })?; let record: Ref<_> = record_owner:get().*;
             binary:at(0) = 90_ub;
             if (size_of(binary) == 2_ul && align_of(binary) == 1_ul &&
                 size_of(nested) == 4_ul && size_of(embedded) == 3_ul &&
-                ulong(&nested:at(1)) - ulong(&nested:at(0)) == 2_ul &&
-                size_of(record) == 3_ul && ulong(&record.tail) - ulong(&record.bytes) == 2_ul &&
+                ulong(nested_owner:get():lea(1)) - ulong(nested_owner:get():lea(0)) == 2_ul &&
+                size_of(record) == 3_ul && ulong(&record_owner:get().tail) - ulong(&record_owner:get().bytes) == 2_ul &&
                 copied:at(0) == 65_ub && copied:at(1) == 66_ub &&
                 record.tail == 255_ub && embedded:at(1) == 0_ub) { 0 } else { 1 }
         }
@@ -1098,7 +1114,7 @@ fn interacting_features_execute_equivalently_on_cpu() {
     for marker in interactions::MARKERS {
         runs(
             &format!(
-                "export {{ main }}; fn main() -> int  {{ let mut n = 300; let mut bytes = Ptr<ubyte>(&n); {marker} n - 300 }}"
+                "export {{ main }};\nimport {{ \"$/shared.resin\" }};\n fn main() -> int | Err<_> {{ let n_owner = arc_ptr_alloc(300)?; let n: Ref<_> = n_owner:get().*; let mut bytes = Ptr<ubyte>(n_owner:get()); {marker} n - 300 }}"
             ),
             0,
         );
@@ -1108,7 +1124,7 @@ fn interacting_features_execute_equivalently_on_cpu() {
 #[test]
 fn compute_entry_preserves_ulong_indices_on_the_host() {
     runs(
-        "export { main }; @compute_shader fn kernel(index: ulong, output: Ptr<ulong>)  { output.* = index; } fn main() -> int  { let mut output = 0_ul; kernel(4294967297_ul, &output); if (output == 4294967297_ul) { 0 } else { 1 } }",
+        "export { main };\nimport { \"$/shared.resin\" };\n @compute_shader fn kernel(index: ulong, output: Ptr<ulong>)  { output.* = index; } fn main() -> int | Err<_> { let output_owner = arc_ptr_alloc(0_ul)?; let output: Ref<_> = output_owner:get().*; kernel(4294967297_ul, output_owner:get()); if (output == 4294967297_ul) { 0 } else { 1 } }",
         0,
     );
 }

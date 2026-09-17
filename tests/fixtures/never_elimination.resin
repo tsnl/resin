@@ -1,17 +1,37 @@
 export { kernel, main };
-fn infallible(n: uint, p: Ptr<uint>) -> (uint | Err<Never>)  {
-    let mut r: (uint | Err<Never>); r = (n);
-    let mut saved = r?;
-    p.* = p.* + 1_ui;
-    (saved)
+import { "$/shared.resin" };
+
+fn infallible(n: uint, p: Ptr<uint>) -> (uint | Err<Never>) {
+	let mut r: (uint | Err<Never>);
+	r = (n);
+	let mut saved = r?;
+	p.* = p.* + 1_ui;
+	(saved)
 }
-fn unwrap(r: (uint | Err<Never>)) -> uint  {
-    match (r) { uint(n) => { n }, Err(impossible) => { absurd(impossible) } }
+fn unwrap(r: (uint | Err<Never>)) -> uint {
+	match (r) {
+		uint(n) => {
+			n
+		},
+		Err(impossible) => {
+			absurd(impossible)
+		}
+	}
 }
-@compute_shader fn kernel(i: ulong, p: Ptr<uint>)  {
-    if (i == 0_ul) {
-        let mut n = unwrap(infallible(41_ui, p));
-        p.* = p.* + n;
-    };
+@compute_shader
+fn kernel(i: ulong, p: Ptr<uint>) {
+	if (i == 0_ul) {
+		let mut n = unwrap(infallible(41_ui, p));
+		p.* = p.* + n;
+	};
 }
-fn main() -> int  { let mut result = 0_ui; kernel(0_ul, &result); if (result == 42_ui) { 0 } else { 1 } }
+fn main() -> int | Err<_> {
+	let result_owner = arc_ptr_alloc(0_ui)?;
+	let result: Ref<_> = result_owner:get().*;
+	kernel(0_ul, result_owner:get());
+	if (result == 42_ui) {
+		0
+	} else {
+		1
+	}
+}

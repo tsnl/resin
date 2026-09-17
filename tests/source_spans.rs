@@ -37,10 +37,12 @@ fn generic_pointer_index_preserves_stride_mutation_and_host_bounds_diagnostics()
     for (position, succeeds) in [(1, true), (3, false)] {
         let source = format!(
             r#"export {{ main }};
+import {{ "$/shared.resin" }};
+
             {INDEX}
-            fn main() -> int  {{
-                let mut values = [3_ul, 7_ul, 11_ul];
-                index(&values:at(0), 3, {position}).* = 42_ul;
+            fn main() -> int | Err<_> {{
+                let values_owner = arc_ptr_alloc([3_ul, 7_ul, 11_ul])?; let values: Ref<_> = values_owner:get().*;
+                index(values_owner:get():lea(0), 3, {position}).* = 42_ul;
                 if (values:at(1) == 42_ul) {{ 0 }} else {{ 1 }}
             }}
         "#
@@ -63,10 +65,10 @@ fn generic_pointer_index_preserves_stride_mutation_and_host_bounds_diagnostics()
 #[test]
 fn source_methods_preserve_element_stride_aliasing_and_explicit_literal_borrows() {
     let output = run(r#"export { main };
-        import { "$/span.resin" };
-        fn main() -> int  {
-            let mut values = [3_ul, 7_ul, 11_ul];
-            let mut view = Span<ulong> { data = &values:at(0), length = 3_ul };
+        import { "$/shared.resin", "$/span.resin" };
+        fn main() -> int | Err<_> {
+            let values_owner = arc_ptr_alloc([3_ul, 7_ul, 11_ul])?; let values: Ref<_> = values_owner:get().*;
+            let mut view = Span<ulong> { data = values_owner:get():lea(0), length = 3_ul };
             let mut alias = view:slice(1, 2);
             alias:at(0) = 42_ul;
             let mut raw = alias:as_bytes();
@@ -85,10 +87,10 @@ fn source_methods_preserve_element_stride_aliasing_and_explicit_literal_borrows(
 #[test]
 fn empty_slices_allow_one_past_the_end_without_advancing_null() {
     let output = run(r#"export { main };
-        import { "$/span.resin" };
-        fn main() -> int  {
-            let mut values = [1_ui, 2_ui];
-            let mut view = Span<uint> { data = &values:at(0), length = 2_ul };
+        import { "$/shared.resin", "$/span.resin" };
+        fn main() -> int | Err<_> {
+            let values_owner = arc_ptr_alloc([1_ui, 2_ui])?; let values: Ref<_> = values_owner:get().*;
+            let mut view = Span<uint> { data = values_owner:get():lea(0), length = 2_ul };
             let mut end = view:slice(2, 0);
             let mut empty = Span<uint> { data = Ptr<uint>(0_ul), length = 0_ul }:slice(0, 0);
             if (end.length == 0_ul && ulong(end.data) == ulong(view.data) + 2_ul * size_of(uint)
@@ -106,7 +108,7 @@ fn empty_slices_allow_one_past_the_end_without_advancing_null() {
 fn primitive_boundaries_report_invalid_ranges_indices_and_byte_counts() {
     for (storage, cases) in [
         (
-            "let mut values = [1_ul, 2_ul, 3_ul]; let mut view = Span<ulong> { data = &values:at(0), length = 3_ul };",
+            "let values = arc_ptr_alloc([1_ul, 2_ul, 3_ul])?; let mut view = Span<ulong> { data = values:get():lea(0), length = 3_ul };",
             [
                 ("view:at(3)", "index"),
                 ("view:slice(2, 2)", "slice out of bounds"),
@@ -138,8 +140,8 @@ fn primitive_boundaries_report_invalid_ranges_indices_and_byte_counts() {
     ] {
         for (expression, message) in cases {
             let source = format!(
-                r#"export {{ main }}; import {{ "$/span.resin", "$/string.resin" }};
-                fn main()  {{
+                r#"export {{ main }}; import {{ "$/span.resin", "$/string.resin", "$/shared.resin" }};
+                fn main() -> () | Err<_> {{
                     {storage}
                     {expression};
                     print("unreachable");
@@ -161,11 +163,11 @@ fn primitive_boundaries_report_invalid_ranges_indices_and_byte_counts() {
 fn byte_views_reject_nonnumeric_elements_after_specialization() {
     let compilation = compile(
         r#"export { main };
-        import { "$/span.resin" };
+        import { "$/shared.resin", "$/span.resin" };
         struct Entry { value: uint, }
-        fn main()  {
-            let mut entry = Entry { value = 1_ui };
-            Span<Entry> { data = &entry, length = 1_ul }:as_bytes();
+        fn main() -> () | Err<_> {
+            let entry_owner = arc_ptr_alloc(Entry { value = 1_ui })?; let entry: Ref<_> = entry_owner:get().*;
+            Span<Entry> { data = entry_owner:get(), length = 1_ul }:as_bytes();
         }
     "#,
         "main",
@@ -216,29 +218,28 @@ fn shader_local_addresses_cannot_become_physical_pointer_index_operands() {
         "kernel",
         Profile::Shader,
     );
-    let module = compilation.unwrap().into_module();
-    let error = support::project::Project::new(&module, None).unwrap_err();
+    let errors = compilation.err().unwrap();
     assert!(
-        error
+        errors.iter().any(|error| error
             .to_string()
-            .contains("shader-local addresses cannot escape"),
-        "{error}"
+            .contains("cannot take the address of a Ref")),
+        "{errors:?}"
     );
 }
 
 #[test]
 fn reference_returning_index_wrappers_preserve_nested_places() {
     let output = run(r#"export { main };
-    import { "$/span.resin" };
+    import { "$/shared.resin", "$/span.resin" };
     struct Payload { value: int, }
     struct Entry { nested: Payload, }
     fn entry_at(items: Ref<Span<Entry>>, index: ulong) -> Ref<Entry>  { items:at(index) }
-    fn main() -> int  {
-        let mut items = [Entry { nested = Payload { value = 1 } }, Entry { nested = Payload { value = 2 } }];
-        let mut span = Span<Entry> { data = Ptr<Entry>(&items), length = 2_ul };
+    fn main() -> int | Err<_> {
+        let items_owner = arc_ptr_alloc([Entry { nested = Payload { value = 1 } }, Entry { nested = Payload { value = 2 } }])?; let items: Ref<_> = items_owner:get().*;
+        let mut span = Span<Entry> { data = Ptr<Entry>(items_owner:get()), length = 2_ul };
         entry_at(span, 1_ul).nested.value = 42;
-        let mut p = &entry_at(span, 1_ul).nested.value;
-        p.* = p.* + 1;
+        let p: Ref<int> = entry_at(span, 1_ul).nested.value;
+        p = p + 1;
         let mut copied = Payload { value = entry_at(span, 1_ul).nested.value };
         copied.value = 99;
         if (items(1).nested.value == 43 && copied.value == 99 && items(0).nested.value == 1) { 0 } else { 1 }

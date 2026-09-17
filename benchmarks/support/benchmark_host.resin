@@ -22,11 +22,11 @@ fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> (() | Err<_>
 	let mut input = input_owner:get().data;
 	let mut output = output_owner:get().data;
 	benchmark_prepare(input, output, count, seed);
-	let mut root = Root { count = count, iterations = iterations, input = input, output = output };
+	let root = arc_ptr_alloc(Root { count = count, iterations = iterations, input = input, output = output })?;
 	let mut index = 0_ul;
 	while (index < warmup) {
 		let mut start = benchmark_clock();
-		cpu(&root);
+		cpu(root:get());
 		let mut end = benchmark_clock();
 		benchmark_report(start, end, output, count, 0_i);
 		index = index + 1_ul;
@@ -34,7 +34,7 @@ fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> (() | Err<_>
 	index = 0_ul;
 	while (index < samples) {
 		let mut start = benchmark_clock();
-		cpu(&root);
+		cpu(root:get());
 		let mut end = benchmark_clock();
 		benchmark_report(start, end, output, count, 1_i);
 		index = index + 1_ul;

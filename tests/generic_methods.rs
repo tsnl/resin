@@ -122,6 +122,8 @@ fn choose<T, U>(self: Ref<Cell<T>>, value: U, depth: int) -> _  {
 #[test]
 fn generic_drop_hooks_use_each_owner_argument_and_reverse_scope_order() {
     let output = run(r#"export { main };
+import { "$/shared.resin" };
+
         struct Tracked<T> { trace: Ptr<ulong>, value: T,
             
             
@@ -133,15 +135,15 @@ fn tracked_make<T>(trace: Ptr<ulong>, value: T) -> Tracked<T>  {
 
 fn read<T>(self: Ref<Tracked<T>>) -> T  { self.value }
 
-fn drop<T>(self: Ptr<Tracked<T>>)  {
+fn drop<T>(self: Ref<Tracked<T>>)  {
                 self.trace.* = self.trace.* * 10 + size_of(T);
             }
 
-        fn main() -> int  {
-            let mut trace = 0_ul;
+        fn main() -> int | Err<_> {
+            let trace_owner = arc_ptr_alloc(0_ul)?; let trace: Ref<_> = trace_owner:get().*;
             {
-                let mut first = tracked_make::<int>(&trace, 7);
-                let mut second = tracked_make::<ulong>(&trace, 35);
+                let mut first = tracked_make::<int>(trace_owner:get(), 7);
+                let mut second = tracked_make::<ulong>(trace_owner:get(), 35);
                 if (first:read() != 7 || second:read() != 35) { trace = 100; };
             };
             int(trace)
@@ -158,11 +160,13 @@ fn drop<T>(self: Ptr<Tracked<T>>)  {
 #[test]
 fn generic_drop_hooks_run_on_result_propagation() {
     let output = run(r#"export { main };
+import { "$/shared.resin" };
+
         struct Failed {}
         struct Tracked<T> { trace: Ptr<ulong>, value: T,
             
         }
-fn drop<T>(self: Ptr<Tracked<T>>)  {
+fn drop<T>(self: Ref<Tracked<T>>)  {
                 self.trace.* = self.trace.* * 10 + size_of(T);
             }
 
@@ -172,10 +176,10 @@ fn drop<T>(self: Ptr<Tracked<T>>)  {
             fail()?;
             (())
         }
-        fn main() -> int  {
-            let mut trace = 0_ul;
-            work(&trace, 1_i);
-            work(&trace, 1_ub);
+        fn main() -> int | Err<_> {
+            let trace_owner = arc_ptr_alloc(0_ul)?; let trace: Ref<_> = trace_owner:get().*;
+            work(trace_owner:get(), 1_i);
+            work(trace_owner:get(), 1_ub);
             int(trace)
         }
     "#);

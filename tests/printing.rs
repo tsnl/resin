@@ -124,7 +124,7 @@ fn embedded_and_explicit_trailing_nuls_are_not_truncated() {
         b"before\0a\0b\0after",
     );
     prints(
-        r#"export { main }; import { "$/string.resin", "$/span.resin" }; fn main() -> ()  { let mut buffer = [ubyte(65), ubyte(0), ubyte(66), ubyte(0)]; print(fmt("{0}", (Span<ubyte> { data = Ptr<ubyte>(&buffer), length = 4_ul }:bytes(),))); }"#,
+        r#"export { main }; import { "$/shared.resin", "$/string.resin", "$/span.resin" }; fn main() -> () | Err<_> { let buffer_owner = arc_ptr_alloc([ubyte(65), ubyte(0), ubyte(66), ubyte(0)])?; let buffer: Ref<_> = buffer_owner:get().*; print(fmt("{0}", (Span<ubyte> { data = Ptr<ubyte>(buffer_owner:get()), length = 4_ul }:bytes(),))); }"#,
         b"A\0B\0",
     );
 }
@@ -347,16 +347,16 @@ fn from_bytes_copies_unterminated_spans_verbatim_and_owns_the_result() {
     prints(
         r#"export { main }; import { "$/string.resin", "$/span.resin", "$/shared.resin" };
         type Caption = String;
-        fn copied() -> String  {
-            let mut source = [65_ub, 0_ub, 66_ub];
-            let mut result = string_from_bytes(Span<ubyte> { data = Ptr<ubyte>(&source), length = 3_ul });
-            source:at(0_ul) = 90_ub;
+        fn copied() -> String | Err<_> {
+            let source = arc_ptr_alloc([65_ub, 0_ub, 66_ub])?;
+            let mut result = string_from_bytes(Span<ubyte> { data = source:get():lea(0_ul), length = 3_ul });
+            source:get():at(0_ul) = 90_ub;
             result
         }
-        fn main() -> int  {
+        fn main() -> int | Err<_> {
             let mut weak = weak_span_empty::<ubyte>();
             {
-                let mut text = copied();
+                let mut text = copied()?;
                 let alias = text:clone();
                 weak = text.storage:downgrade();
                 text = string_from_str("{0}} braces");
@@ -380,9 +380,9 @@ fn from_bytes_copies_unterminated_spans_verbatim_and_owns_the_result() {
 #[test]
 fn byte_spans_print_their_length_including_nuls_and_empty_views() {
     prints(
-        r#"export { main }; import { "$/string.resin", "$/span.resin" }; fn main()  {
-            let mut buffer = [65_ub, 0_ub, 66_ub, 67_ub];
-            let mut view = Span<ubyte> { data = &buffer:at(0), length = 3_ul };
+        r#"export { main }; import { "$/shared.resin", "$/string.resin", "$/span.resin" }; fn main() -> () | Err<_> {
+            let buffer_owner = arc_ptr_alloc([65_ub, 0_ub, 66_ub, 67_ub])?; let buffer: Ref<_> = buffer_owner:get().*;
+            let mut view = Span<ubyte> { data = buffer_owner:get():lea(0), length = 3_ul };
             let mut empty = Span<ubyte> { data = Ptr<ubyte>(0_ul), length = 0_ul };
             print(fmt("[{0}][{1}]", (view:bytes(), empty:bytes())));
         }"#,
@@ -446,9 +446,9 @@ fn literal_byte_views_preserve_storage_while_owned_strings_copy_it() {
 #[test]
 fn raw_byte_views_and_owned_strings_preserve_non_utf8() {
     prints(
-        r#"export { main }; import { "$/string.resin", "$/span.resin" }; fn main()  {
-            let mut data = [255_ub, 0_ub, 254_ub];
-            let mut buffer = Span<ubyte> { data = &data:at(0_ul), length = 3_ul };
+        r#"export { main }; import { "$/shared.resin", "$/string.resin", "$/span.resin" }; fn main() -> () | Err<_> {
+            let data_owner = arc_ptr_alloc([255_ub, 0_ub, 254_ub])?; let data: Ref<_> = data_owner:get().*;
+            let mut buffer = Span<ubyte> { data = data_owner:get():lea(0_ul), length = 3_ul };
             let mut owned = string_from_bytes(buffer);
             data:at(0_ul) = 65_ub;
             print(buffer);

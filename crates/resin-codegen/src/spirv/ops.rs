@@ -18,6 +18,7 @@ pub(super) fn instruction(
     args: &[Slot],
     result: Option<&Ty>,
     locals: &[Word],
+    function: &resin_lir::Function,
     arrays: &HashMap<Ty, Word>,
 ) -> Result<Option<Slot>, Error> {
     let id = match instr {
@@ -36,6 +37,7 @@ pub(super) fn instruction(
                 id: locals[local.index()],
                 local: Some(LocalAddress {
                     root: locals[local.index()],
+                    root_type: function.locals[local.index()].ty.clone(),
                     indices: path
                         .iter()
                         .map(|index| LocalIndex::Static {
@@ -63,6 +65,7 @@ pub(super) fn instruction(
                 id: locals[local.index()],
                 local: Some(LocalAddress {
                     root: locals[local.index()],
+                    root_type: function.locals[local.index()].ty.clone(),
                     indices: vec![],
                 }),
             }));
@@ -173,7 +176,7 @@ fn local_pointer(
         .iter()
         .map(|index| match index {
             LocalIndex::Static { index } => context.constant_u32(*index),
-            LocalIndex::Dynamic { id } => *id,
+            LocalIndex::Dynamic { id, .. } => *id,
         })
         .collect();
     Ok(context
@@ -260,7 +263,10 @@ fn index(
     arrays: &HashMap<Ty, Word>,
 ) -> Result<Slot, Error> {
     if let Some(mut local) = base.local.clone() {
-        local.indices.push(LocalIndex::Dynamic { id: index.id });
+        local.indices.push(LocalIndex::Dynamic {
+            id: index.id,
+            ty: index.ty.clone(),
+        });
         return Ok(Slot {
             ty: result.clone(),
             id: local.root,
@@ -279,7 +285,11 @@ fn index(
             context.builder.store(scratch, base.id, None, []).unwrap();
             let local = LocalAddress {
                 root: scratch,
-                indices: vec![LocalIndex::Dynamic { id: index.id }],
+                root_type: base.ty.clone(),
+                indices: vec![LocalIndex::Dynamic {
+                    id: index.id,
+                    ty: index.ty.clone(),
+                }],
             };
             let pointer = local_pointer(context, result, &local)?;
             return Ok(Slot::value(result.clone(), load(context, result, pointer)?));

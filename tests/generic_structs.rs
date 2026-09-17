@@ -32,15 +32,17 @@ fn constructors_and_nominal_arguments_infer_function_parameters() {
 #[test]
 fn pointers_to_generic_records_preserve_field_places() {
     let output = run(r#"export { main };
+import { "$/shared.resin" };
+
         struct Cell<T> { value: T, }
         fn replace<T>(cell: Ptr<Cell<T>>, value: T) -> T  {
             let mut previous = cell.value;
             cell.value = value;
             previous
         }
-        fn main() -> int  {
-            let mut cell = Cell<int> { value = 7 };
-            let mut previous = replace(&cell, 35);
+        fn main() -> int | Err<_> {
+            let cell_owner = arc_ptr_alloc(Cell<int> { value = 7 })?; let cell: Ref<_> = cell_owner:get().*;
+            let mut previous = replace(cell_owner:get(), 35);
             previous + cell.value
         }
     "#);
@@ -93,16 +95,16 @@ fn nongeneric_wrapper_layout_queries_wait_for_nominal_specialization() {
 #[test]
 fn array_and_span_index_calls_preserve_generic_field_places() {
     let output = run(r#"export { main };
-        import { "$/span.resin" };
+        import { "$/shared.resin", "$/span.resin" };
         struct Cell<T> { value: T, }
         fn copy_through_array<T>(value: T) -> T  {
             let mut cells = [Cell<T> { value = value }];
             cells(0_ul).value
         }
-        fn main() -> int  {
-            let mut cells = [Cell<int> { value = 7 }, Cell<int> { value = 35 }];
+        fn main() -> int | Err<_> {
+            let cells_owner = arc_ptr_alloc([Cell<int> { value = 7 }, Cell<int> { value = 35 }])?; let cells: Ref<_> = cells_owner:get().*;
             let mut view = Span<Cell<int>> {
-                data = Ptr<Cell<int>>(&cells), length = 2
+                data = Ptr<Cell<int>>(cells_owner:get()), length = 2
             };
             cells(0_ul).value = copy_through_array(cells(0_ul).value) + view:at(1_ul).value;
             cells(0_ul).value
@@ -119,12 +121,14 @@ fn array_and_span_index_calls_preserve_generic_field_places() {
 #[test]
 fn recursive_generic_pointers_reuse_their_concrete_identity() {
     let output = run(r#"export { main };
+import { "$/shared.resin" };
+
         struct Node<T> { value: T, next: Ptr<Node<T>>, }
         fn read<T>(node: Ptr<Node<T>>) -> T  { node.value }
-        fn main() -> int  {
-            let mut tail = Node<int> { value = 35, next = Ptr<Node<int>>(0_ul) };
-            let mut head = Node<int> { value = 7, next = &tail };
-            read(&head) + read(head.next)
+        fn main() -> int | Err<_> {
+            let tail_owner = arc_ptr_alloc(Node<int> { value = 35, next = Ptr<Node<int>>(0_ul) })?; let tail: Ref<_> = tail_owner:get().*;
+            let head_owner = arc_ptr_alloc(Node<int> { value = 7, next = tail_owner:get() })?; let head: Ref<_> = head_owner:get().*;
+            read(head_owner:get()) + read(head.next)
         }
     "#);
     assert_eq!(
@@ -307,16 +311,16 @@ fn nongeneric_wrappers_copy_shared_generic_storage_and_destroy_it_once() {
         struct Resource { trace: Ptr<int>, answer: int,
             
         }
-fn drop(self: Ptr<Resource>)  { if (self.answer != 0) { self.trace.* = self.trace.* + 1; }; }
+fn drop(self: Ref<Resource>)  { if (self.answer != 0) { self.trace.* = self.trace.* + 1; }; }
 
         struct Cell<T> { value: T, }
         struct Envelope { owner: ArcPtr<Cell<Resource>>, }
-        fn main() -> int  {
-            let mut trace = 0_i;
+        fn main() -> int | Err<_> {
+            let trace_owner = arc_ptr_alloc(0_i)?; let trace: Ref<_> = trace_owner:get().*;
             {
                 let mut optional: ArcPtr<Cell<Resource>> | None;
                 optional = match (arc_ptr_alloc::<Cell<Resource>>(Cell<Resource> {
-                    value = Resource { trace = &trace, answer = 0 }
+                    value = Resource { trace = trace_owner:get(), answer = 0 }
                 })) { ArcPtr<Cell<Resource>>(value) => { value }, Err(error) => { None } };
                 let mut owner = optional!;
                 owner:get().value.answer = 42;

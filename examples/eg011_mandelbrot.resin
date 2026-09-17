@@ -53,7 +53,7 @@ fn mandelbrot_new(max_iters: int) -> Mandelbrot {
 // it is not a proof of membership. Escape requires a magnitude strictly above two.
 fn escape_iterations(self: Ref<Mandelbrot>, c: Complex<float32>) -> int {
 	// Check the first iterate before the interior shortcut can overflow at large coordinates.
-	if (self.max_iters > 0 && c.real * c.real + c.imag * c.imag > 4.0_f) {
+	if (self.max_iters > 0 && c:magnitude_squared() > 4.0_f) {
 		return 1;
 	};
 	// The main cardioid and period-two bulb are known interiors.
@@ -66,12 +66,10 @@ fn escape_iterations(self: Ref<Mandelbrot>, c: Complex<float32>) -> int {
 	let mut n = 0_i;
 	let mut a = complex(0.0_f, 0.0_f);
 	while (n < self.max_iters) {
-		// z = z*z + c, with arithmetic on values shared by host and shader.
-		let real = a.real * a.real - a.imag * a.imag + c.real;
-		a.imag = 2.0_f * a.real * a.imag + c.imag;
-		a.real = real;
+		// The same Complex helpers borrow local values on host and shader.
+		a = a:squared():add(c);
 		n = n + 1;
-		if (a.real * a.real + a.imag * a.imag > 4.0_f) {
+		if (a:magnitude_squared() > 4.0_f) {
 			return n;
 		};
 	};
@@ -146,7 +144,7 @@ struct Parameters {
 	pixels: Span<ubyte>,
 }
 
-fn evaluate_pixel(root: Ptr<Parameters>, x: uint, y: uint) -> Color {
+fn evaluate_pixel(root: Ref<Parameters>, x: uint, y: uint) -> Color {
 	let mut color = Color { r = 0.0_f, g = 0.0_f, b = 0.0_f, a = 1.0_f };
 	let mut i = 0_ul;
 	while (i < root.samples.length) {
@@ -172,7 +170,7 @@ fn store_pixel(pixels: Ref<Span<ubyte>>, index: ulong, color: Color) {
 
 // Each segment owns up to 32 adjacent pixels in one row. Segment origins come
 // from segments_new; the final segment in each row stops at the right edge.
-fn evaluate_segment(segment_index: ulong, root: Ptr<Parameters>) {
+fn evaluate_segment(segment_index: ulong, root: Ref<Parameters>) {
 	if (segment_index >= root.segments.length) {
 		return;
 	};
@@ -207,7 +205,7 @@ fn clone(self: Ref<Plot>) -> Plot {
 }
 
 // CPU execution calls the same evaluator as the shader wrapper.
-fn dispatch_host(root: Ptr<Parameters>) {
+fn dispatch_host(root: Ref<Parameters>) {
 	let mut segment = 0_ul;
 	while (segment < root.segments.length) {
 		evaluate_segment(segment, root);
@@ -218,9 +216,9 @@ fn dispatch_host(root: Ptr<Parameters>) {
 fn host_image(plot: Ref<Plot>, solver: Ref<Mandelbrot>, samples: int) -> ArcSpan<ubyte> | Err<_> {
 	let pixels = arc_span_alloc::<ubyte>(ulong(plot.width) * ulong(plot.height) * 4_ul, 0_ub)?;
 	let segments = segments_new(plot.width, plot.height)?;
-	let lut = halton_samples();
-	let root = Parameters { plot = plot:clone(), solver = mandelbrot_new(solver.max_iters), samples = Span<Sample> { data = &lut:at(0_ul), length = ulong(samples) }, segments = segments:get(), pixels = pixels:get() };
-	dispatch_host(&root);
+	let lut = arc_ptr_alloc(halton_samples())?;
+	let root = Parameters { plot = plot:clone(), solver = mandelbrot_new(solver.max_iters), samples = Span<Sample> { data = lut:get():lea(0_ul), length = ulong(samples) }, segments = segments:get(), pixels = pixels:get() };
+	dispatch_host(root);
 	pixels
 }
 
@@ -238,7 +236,7 @@ struct HostParameters {
 
 @compute_shader
 fn compute(segment_index: ulong, root: Ptr<Parameters>) {
-	evaluate_segment(segment_index, root);
+	evaluate_segment(segment_index, root.*);
 }
 
 @vertex_shader
@@ -291,8 +289,8 @@ fn upload<T>(gpu: Ref<Gpu>, source: Ref<Span<T>>) -> GpuSpan<T> | Err<_> {
 fn renderer_new(gpu: Gpu, width: uint, height: uint) -> Renderer | Err<_> {
 	let graphics = gpu:create_graphics_pipeline(vertex, fragment)?;
 	let compute_pipeline = gpu:create_compute_pipeline(compute)?;
-	let lut = halton_samples();
-	let samples = upload(gpu, Span<Sample> { data = &lut:at(0_ul), length = 16_ul })?;
+	let lut = arc_ptr_alloc(halton_samples())?;
+	let samples = upload(gpu, Span<Sample> { data = lut:get():lea(0_ul), length = 16_ul })?;
 	let segments = upload(gpu, segments_new(width, height)?:get())?;
 	let pixels = gpu:alloc::<ubyte>(ulong(width) * ulong(height) * 4_ul)?;
 	let image = gpu:create_image(width, height)?;
@@ -511,7 +509,7 @@ fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> int | Err<_>
 			options
 		},
 		Err(message) => {
-			io_stderr():write(fmt("{0}\nUse --help for usage.\n", (message:bytes(),)))?;
+			io_stderr():write(fmt("{0}\nUse --help for usage.\n", (message,)))?;
 			return 2;
 		},
 	};
@@ -539,7 +537,7 @@ fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> int | Err<_>
 // CPU checks of the shared algorithm
 //
 
-fn test() {
+fn test() -> () | Err<_> {
 	let mandelbrot = mandelbrot_new(128);
 	let zero = complex(0.0_f, 0.0_f);
 	let minus_one = complex(-1.0_f, 0.0_f);
@@ -572,10 +570,10 @@ fn test() {
 	assert(plot.span == 8.0_f);
 	plot:zoom(1.0e-15_f);
 	assert(plot.span == 2.0e-6_f);
-	let lut = halton_samples();
+	let lut = arc_ptr_alloc(halton_samples())?;
 	let mut sample = 1_ul;
 	while (sample <= 16_ul) {
-		let point = lut:at(sample - 1_ul);
+		let point = lut:get():at(sample - 1_ul);
 		assert(point.0 == radical_inverse(sample, 2_ul));
 		assert(point.1 - radical_inverse(sample, 3_ul) < 0.000001_f);
 		assert(radical_inverse(sample, 3_ul) - point.1 < 0.000001_f);
@@ -585,17 +583,17 @@ fn test() {
 	let mut edge = plot_new(1, 1);
 	edge.center.real = 2.0_f;
 	edge.span = 2.0_f;
-	let pixels = [0_ub, 0_ub, 0_ub, 0_ub, 123_ub];
-	let segments = [(0_ui, 0_ui)];
-	let root = Parameters { plot = edge, solver = mandelbrot_new(32), samples = Span<Sample> { data = &lut:at(0_ul), length = 4_ul }, segments = Span<SegmentOrigin> { data = &segments:at(0_ul), length = 1_ul }, pixels = Span<ubyte> { data = &pixels:at(0_ul), length = 4_ul } };
-	dispatch_host(&root);
-	evaluate_segment(1_ul, &root);
+	let pixels = arc_ptr_alloc([0_ub, 0_ub, 0_ub, 0_ub, 123_ub])?;
+	let segments = arc_ptr_alloc([(0_ui, 0_ui)])?;
+	let root = Parameters { plot = edge, solver = mandelbrot_new(32), samples = Span<Sample> { data = lut:get():lea(0_ul), length = 4_ul }, segments = Span<SegmentOrigin> { data = segments:get():lea(0_ul), length = 1_ul }, pixels = Span<ubyte> { data = pixels:get():lea(0_ul), length = 4_ul } };
+	dispatch_host(root);
+	evaluate_segment(1_ul, root);
 	let first = palette(1);
 	let second = palette(2);
-	assert(pixels:at(0_ul) == channel((first.r + second.r) * 0.5_f));
-	assert(pixels:at(1_ul) == channel((first.g + second.g) * 0.5_f));
-	assert(pixels:at(2_ul) == channel((first.b + second.b) * 0.5_f));
-	assert(pixels:at(3_ul) == 255_ub && pixels:at(4_ul) == 123_ub);
+	assert(pixels:get():at(0_ul) == channel((first.r + second.r) * 0.5_f));
+	assert(pixels:get():at(1_ul) == channel((first.g + second.g) * 0.5_f));
+	assert(pixels:get():at(2_ul) == channel((first.b + second.b) * 0.5_f));
+	assert(pixels:get():at(3_ul) == 255_ub && pixels:get():at(4_ul) == 123_ub);
 	print("Mandelbrot tests passed\n");
 }
 

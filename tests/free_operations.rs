@@ -4,16 +4,18 @@ mod support;
 fn primitive_operations_and_source_overloads_share_free_call_resolution() {
     let source = r#"
         export { main };
+import { "$/shared.resin" };
+
         struct Item { value: int }
         fn at(value: Ref<Item>, index: ulong) -> Ref<int> { value.value }
         fn first<T>(value: Ref<T>) -> _ { value:at(0_ul) }
-        fn main() -> int {
+        fn main() -> int | Err<_> {
             let mut values = [19_i, 23_i];
-            let mut item = Item { value = 42 };
+            let item_owner = arc_ptr_alloc(Item { value = 42 })?; let item: Ref<_> = item_owner:get().*;
             at(values, 0_ul) = 20_i;
             values:at(1_ul) = 22_i;
             at(item, 0_ul) = first(values) + values:at(1_ul);
-            let old = replace(&item.value, 0_i);
+            let old = replace(&item_owner:get().value, 0_i);
             assert(old == 42 && item.value == 0);
             assert(first(values) == 20);
             0

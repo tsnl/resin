@@ -143,10 +143,11 @@ expressions do not execute source operator functions.
 Arrays and `str` have primitive `at` operations; `Span<T>` supplies an ordinary
 free overload from `$/span.resin`. `items:at(index)` takes a `ulong` and returns
 `Ref<T>` (`Ref<ubyte>` for `str`). Write an element with `items:at(index) = value`
-or obtain its address with `&items:at(index)`. Arrays also retain `items(index)`.
+and obtain a pointer with `items:lea(index)` on a pointer to an array, a span,
+or `str`. Local arrays support `at` only. Arrays also retain `items(index)`.
 Host indexing checks the declared length; shader indexing is unchecked.
 
-A free `fn drop(value: Ptr<Item>) { ... }` declared with its nominal type supplies
+A free `fn drop(value: Ref<Item>) { ... }` declared with its nominal type supplies
 its destruction hook. A generic hook binds the owner's parameters. Direct calls
 remain ordinary calls; see [ownership and cleanup](lifetimes.md).
 

@@ -5,6 +5,7 @@ use crate::Error;
 use resin_types::prelude::*;
 use rspirv::{binary::Assemble, dr::Builder, spirv::*};
 
+mod calls;
 mod entry;
 mod function;
 mod ops;
@@ -21,18 +22,21 @@ pub(super) fn generate(
     let reachable = checked
         .shader_functions(entry)
         .ok_or_else(|| Error("shader entry was not requested".into()))?;
-    let mut context = Context::new(module, &analysis.types);
+    let mut context = Context::new(module, &analysis.types, &analysis.functions);
     for &function in reachable {
         let index = function.index();
         register_function_types(&mut context, index, &analysis.functions[index])?;
     }
     for &function in reachable {
         let index = function.index();
+        let id = context.functions[index];
         let may_fail = function::lower(
             &mut context,
             &module.functions[index],
             &analysis.functions[index],
             index,
+            id,
+            &[],
         )?;
         context
             .fallibility
@@ -48,13 +52,16 @@ pub(super) fn generate(
         .collect())
 }
 
-/// All IDs and types belong to one shader module. LIR pointers are u64 device
-/// addresses; Function-storage pointers never escape the function that owns them.
+/// All IDs and types belong to one shader module. Local borrows retain their
+/// root and projection path; ordinary pointer values are u64 device addresses.
 struct Context<'a> {
     builder: Builder,
     module: &'a resin_lir::Module,
     table: &'a TypeTable,
     functions: Vec<Word>,
+    analysis: &'a [resin_lir::FunctionTypes],
+    local_functions: HashMap<calls::Signature, Word>,
+    local_call_depth: usize,
     // Emission completes each callee before its callers. Absence is not infallibility.
     fallibility: HashMap<Word, bool>,
     failed: Word,
@@ -67,7 +74,11 @@ struct Context<'a> {
 }
 
 impl<'a> Context<'a> {
-    fn new(module: &'a resin_lir::Module, table: &'a TypeTable) -> Self {
+    fn new(
+        module: &'a resin_lir::Module,
+        table: &'a TypeTable,
+        analysis: &'a [resin_lir::FunctionTypes],
+    ) -> Self {
         let mut builder = Builder::new();
         builder.set_version(1, 6);
         builder.capability(Capability::Shader);
@@ -89,6 +100,9 @@ impl<'a> Context<'a> {
             module,
             table,
             functions,
+            analysis,
+            local_functions: HashMap::new(),
+            local_call_depth: 0,
             fallibility: HashMap::new(),
             failed,
             glsl,

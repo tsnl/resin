@@ -73,9 +73,8 @@ fn lir_lowering_needs_only_the_resolved_tree() {
         fn narrow(n: int) -> int  { n }
         fn main() -> _  {
             let mut item = 42;
-            let mut pointer: Ptr<_>;
-            pointer = &item;
-            narrow(pointer.*)
+            let reference: Ref<_> = item;
+            narrow(reference)
         }
     "#);
     assert_eq!(

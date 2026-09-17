@@ -106,7 +106,7 @@ fn recursive_method_results_complete_against_their_own_rigid_binders() {
 #[test]
 fn drop_hooks_bind_only_their_owner_parameters() {
     let module =
-        compile("struct Cell<T> { value: T,  }\nfn drop<T>(self: Ptr<Cell<T>>)  {}\n").unwrap();
+        compile("struct Cell<T> { value: T,  }\nfn drop<T>(self: Ref<Cell<T>>)  {}\n").unwrap();
     let owner = module
         .types
         .iter()
@@ -117,10 +117,10 @@ fn drop_hooks_bind_only_their_owner_parameters() {
     assert_eq!(drop.signature.type_params.len(), 1);
     assert_ne!(drop.signature.type_params[0].id, owner.type_params[0].id);
     assert_eq!(drop.signature.result.ty, Type::Unit);
-    let Type::Pointer { pointee } = &drop.signature.params[0].annotation.ty else {
-        panic!("drop pointer")
+    let Type::Reference { referent } = &drop.signature.params[0].annotation.ty else {
+        panic!("drop reference")
     };
-    let Type::Defined { arguments, .. } = pointee.as_ref() else {
+    let Type::Defined { arguments, .. } = referent.as_ref() else {
         panic!("owner")
     };
     assert_eq!(
@@ -147,9 +147,9 @@ fn explicit_operation_arguments_match_the_complete_signature() {
 fn invalid_method_binders_and_destructor_signatures_are_definition_errors() {
     for source in [
         "struct Cell<T> { value: T,  }\nfn choose<T, U, U>(self: Cell<T>, value: U) -> U  { value }\n",
-        "struct Cell<T> { value: T,  }\nfn drop<T, U>(self: Ptr<Cell<T>>)  {}\n",
-        "struct Cell<T> { value: T,  }\nfn drop<T>(self: Ptr<Cell<int>>)  {}\n",
-        "struct Cell<T> { value: T,  }\nfn drop<T>(self: Ptr<Cell<T>>) -> int  { 0 }\n",
+        "struct Cell<T> { value: T,  }\nfn drop<T, U>(self: Ref<Cell<T>>)  {}\n",
+        "struct Cell<T> { value: T,  }\nfn drop<T>(self: Ref<Cell<int>>)  {}\n",
+        "struct Cell<T> { value: T,  }\nfn drop<T>(self: Ref<Cell<T>>) -> int  { 0 }\n",
         "struct Cell<T> { value: T,  }\nfn choose<T, U>(self: Cell<T>, value: U) -> U  { value }\n fn escaped(value: U)  {}",
     ] {
         assert!(compile(source).is_err(), "{source}");
@@ -195,11 +195,11 @@ fn rejects_local_and_imported_owner(declaration: &str, use_site: &str, expected:
 fn source_drop_hooks_reject_structural_unwrapping_before_and_after_importing() {
     for (declaration, owner) in [
         (
-            "struct Managed { _0: int,  }\nfn drop(self: Ptr<Managed>)  {}\n",
+            "struct Managed { _0: int,  }\nfn drop(self: Ref<Managed>)  {}\n",
             "Managed",
         ),
         (
-            "struct Managed<T> { _0: T,  }\nfn drop<T>(self: Ptr<Managed<T>>)  {}\n",
+            "struct Managed<T> { _0: T,  }\nfn drop<T>(self: Ref<Managed<T>>)  {}\n",
             "Managed<int>",
         ),
     ] {

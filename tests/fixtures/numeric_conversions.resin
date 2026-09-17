@@ -1,12 +1,30 @@
 export { kernel, main };
-fn convert(i: uint) -> uint  {
-    let mut f = float32(i);
-    let mut wide = ulong(i);
-    let mut round = 16777217_ui;
-    let mut negative = -1.9_f;
-    if (int(negative) == -1_i && float32(round) == 16777216.0_f && uint(wide) == i) {
-        uint(f + 42.75_f)
-    } else { 99_ui }
+import { "$/shared.resin" };
+
+fn convert(i: uint) -> uint {
+	let mut f = float32(i);
+	let mut wide = ulong(i);
+	let mut round = 16777217_ui;
+	let mut negative = -1.9_f;
+	if (int(negative) == -1_i && float32(round) == 16777216.0_f && uint(wide) == i) {
+		uint(f + 42.75_f)
+	} else {
+		99_ui
+	}
 }
-@compute_shader fn kernel(i: ulong, p: Ptr<uint>)  { if (i == 0_ul) { p.* = convert(uint(i)); }; }
-fn main() -> int  { let mut result = 0_ui; kernel(0_ul, &result); if (result == 42_ui) { 0 } else { 1 } }
+@compute_shader
+fn kernel(i: ulong, p: Ptr<uint>) {
+	if (i == 0_ul) {
+		p.* = convert(uint(i));
+	};
+}
+fn main() -> int | Err<_> {
+	let result_owner = arc_ptr_alloc(0_ui)?;
+	let result: Ref<_> = result_owner:get().*;
+	kernel(0_ul, result_owner:get());
+	if (result == 42_ui) {
+		0
+	} else {
+		1
+	}
+}

@@ -213,7 +213,7 @@ extern type ResinWindow;
 struct WindowOwner {
 	handle: Ptr<ResinWindow>,
 }
-fn drop(self: Ptr<WindowOwner>) {
+fn drop(self: Ref<WindowOwner>) {
 	if (ulong(self.handle) != 0_ul) {
 		resin_window_destroy(self.handle);
 	};
@@ -258,10 +258,10 @@ fn set_should_close(self: Ref<Window>, close: bool) -> (() | Err<RuntimeError>) 
 }
 
 fn framebuffer_size(self: Ref<Window>) -> ((uint, uint) | Err<RuntimeError>) {
-	let mut width = uint(0);
-	let mut height = uint(0);
-	runtime_status_from_code(resin_window_framebuffer_size(self:native(), &width, &height))?;
-	((width, height))
+	let output = arc_ptr_alloc((0_ui, 0_ui))?;
+	let values = output:get();
+	runtime_status_from_code(resin_window_framebuffer_size(self:native(), &values.0, &values.1))?;
+	((values.0, values.1))
 }
 
 fn set_size(self: Ref<Window>, width: uint, height: uint) -> (() | Err<RuntimeError>) {
@@ -281,17 +281,17 @@ fn mouse_button_state(self: Ref<Window>, button: int) -> ButtonState {
 }
 
 fn cursor_position(self: Ref<Window>) -> ((float64, float64) | Err<RuntimeError>) {
-	let mut x = 0.0_d;
-	let mut y = 0.0_d;
-	runtime_status_from_code(resin_window_cursor_position(self:native(), &x, &y))?;
-	((x, y))
+	let output = arc_ptr_alloc((0.0_d, 0.0_d))?;
+	let values = output:get();
+	runtime_status_from_code(resin_window_cursor_position(self:native(), &values.0, &values.1))?;
+	((values.0, values.1))
 }
 
 fn scroll_delta(self: Ref<Window>) -> ((float64, float64) | Err<RuntimeError>) {
-	let mut x = 0.0_d;
-	let mut y = 0.0_d;
-	runtime_status_from_code(resin_window_scroll_delta(self:native(), &x, &y))?;
-	((x, y))
+	let output = arc_ptr_alloc((0.0_d, 0.0_d))?;
+	let values = output:get();
+	runtime_status_from_code(resin_window_scroll_delta(self:native(), &values.0, &values.1))?;
+	((values.0, values.1))
 }
 
 fn focused(self: Ref<Window>) -> bool {

@@ -37,6 +37,9 @@ fn execute<I: Copy, O: Copy>(source: &str, inputs: &[I], sentinel: O) -> Option<
         r#"{source} intrinsic "pointer_index" fn device_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;"#
     ));
     let project = support::project::Project::new(&module, None).unwrap();
+    for shader in project.generated.shaders() {
+        shaders::validate(shader.unoptimized_spirv());
+    }
     let built = project.build(&toolchain::spirv(&optimizer)).unwrap();
     let shader = &project.generated.shaders()[0];
     let bytes = fs::read(built.path(shader.spirv().file_name().unwrap())).unwrap();
@@ -82,6 +85,44 @@ fn execute<I: Copy, O: Copy>(source: &str, inputs: &[I], sentinel: O) -> Option<
                 .to_vec(),
         )
     }
+}
+
+#[test]
+fn local_reference_helpers_preserve_aliases_fields_and_dynamic_elements() {
+    let source = r#"
+        export { kernel };
+        struct Root { count: ulong, inputs: Ptr<uint>, outputs: Ptr<uint> }
+        struct Pair { first: uint, second: uint }
+        fn add_both(left: Ref<uint>, right: Ref<uint>, amount: uint) {
+            left = left + amount;
+            right = right + left;
+        }
+        fn increment(value: Ref<uint>, amount: uint) {
+            let alias: Ref<uint> = value;
+            add_both(value, alias, amount);
+        }
+        @compute_shader
+        fn kernel(index: ulong, root: Ptr<Root>) {
+            if (index >= root.count) { return; };
+            let input = device_index(root.inputs, root.count, index).*;
+            let mut pair = Pair { first = input, second = 100_ui };
+            increment(pair.first, 1_ui);
+            let mut values = [10_ui, 20_ui];
+            increment(values:at(index & 1_ul), 3_ui);
+            let output = device_index(root.outputs, root.count, index);
+            output.* = pair.first + pair.second + values:at(0_ul) + values:at(1_ul);
+            increment(output.*, 4_ui);
+        }
+    "#;
+    let inputs = (0..65).collect::<Vec<u32>>();
+    let Some(actual) = execute(source, &inputs, u32::MAX) else {
+        return;
+    };
+    for (index, input) in inputs.iter().enumerate() {
+        let array_sum = if index % 2 == 0 { 26 + 20 } else { 10 + 46 };
+        assert_eq!(actual[index], 2 * (2 * (input + 1) + 100 + array_sum + 4));
+    }
+    assert_eq!(actual[inputs.len()], u32::MAX);
 }
 
 #[test]
@@ -312,4 +353,43 @@ fn an_unconditionally_failing_nested_loop_condition_stops_before_caller_stores()
         return;
     };
     assert_eq!(actual, vec![sentinel; 66]);
+}
+
+#[test]
+fn local_reference_calls_in_loops_propagate_failure_and_evaluate_indices_once() {
+    let source = r#"export { kernel };
+        struct Root { count: ulong, inputs: Ptr<uint>, outputs: Ptr<uint> }
+        fn position(calls: Ref<uint>, index: ulong) -> ulong { calls = calls + 1; index }
+        fn increment(value: Ref<uint>, fail: bool) {
+            assert(!fail);
+            value = value + 1;
+        }
+        @compute_shader fn kernel(index: ulong, root: Ptr<Root>) {
+            if (index >= root.count) { return; };
+            let values = [10_ui, 20_ui];
+            let calls = 0_ui;
+            let mut step = 0_ui;
+            while (step < 3_ui) {
+                let selected: Ref<uint> = values:at(position(calls, index & 1_ul));
+                increment(selected, index == 1_ul && step == 1_ui);
+                step = step + 1;
+            };
+            assert(calls == 3_ui);
+            device_index(root.outputs, root.count, index).* = values:at(0_ul) + values:at(1_ul);
+        }
+    "#;
+    let sentinel = u32::MAX;
+    let Some(actual) = execute(source, &[0_u32; 65], sentinel) else {
+        return;
+    };
+    for (index, value) in actual.iter().enumerate() {
+        assert_eq!(
+            *value,
+            if index == 1 || index == 65 {
+                sentinel
+            } else {
+                33
+            }
+        );
+    }
 }

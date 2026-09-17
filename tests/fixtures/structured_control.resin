@@ -1,19 +1,24 @@
 export { kernel, main };
-import { "$/span.resin" };
-struct Root { count: uint, pixels: Ptr<uint>, }
-struct Stop { code: uint, }
+import { "$/shared.resin", "$/span.resin" };
+struct Root {
+	count: uint,
+	pixels: Ptr<uint>,
+}
+struct Stop {
+	code: uint,
+}
 struct First {}
 struct Second {}
 struct Third {}
 
-fn checked(stop: bool, code: uint) -> (bool | Err<Stop>)  {
+fn checked(stop: bool, code: uint) -> (bool | Err<Stop>) {
 	if (stop) {
 		Err(Stop { code = code })
 	} else {
 		(1_ui == 1_ui)
 	}
 }
-fn tag(index: uint) -> First | Second | Third  {
+fn tag(index: uint) -> First | Second | Third {
 	if (index == 0_ui) {
 		First {}
 	} else {
@@ -24,7 +29,7 @@ fn tag(index: uint) -> First | Second | Third  {
 		}
 	}
 }
-fn evaluate(index: uint) -> (uint | Err<Stop>)  {
+fn evaluate(index: uint) -> (uint | Err<Stop>) {
 	let mut limit = if (index == 0_ui) {
 		0_ui
 	} else {
@@ -58,7 +63,7 @@ fn evaluate(index: uint) -> (uint | Err<Stop>)  {
 	(total + index)
 }
 @compute_shader
-fn kernel(invocation: ulong, root: Ptr<Root>)  {
+fn kernel(invocation: ulong, root: Ptr<Root>) {
 	let mut index = uint(invocation);
 	if (index < root.count) {
 		let mut output = Span<uint> { data = root.pixels, length = ulong(root.count) };
@@ -72,12 +77,14 @@ fn kernel(invocation: ulong, root: Ptr<Root>)  {
 		};
 	};
 }
-fn main() -> int  {
-	let mut values = [0_ui, 0_ui, 0_ui, 0_ui];
-	let mut root = Root { count = 4_ui, pixels = &values:at(0_ul) };
+fn main() -> int | Err<_> {
+	let values_owner = arc_ptr_alloc([0_ui, 0_ui, 0_ui, 0_ui])?;
+	let values: Ref<_> = values_owner:get().*;
+	let root_owner = arc_ptr_alloc(Root { count = 4_ui, pixels = values_owner:get():lea(0_ul) })?;
+	let root: Ref<_> = root_owner:get().*;
 	let mut index = 0_ul;
 	while (index < 4_ul) {
-		kernel(index, &root);
+		kernel(index, root_owner:get());
 		index = index + 1_ul;
 	};
 	if (values:at(0_ul) == 0_ui && values:at(1_ul) == 11_ui && values:at(2_ul) == 22_ui && values:at(3_ul) == 13_ui) {

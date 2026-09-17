@@ -162,7 +162,7 @@ fn reexports_keep_binding_identity_through_diamond_imports() {
     let project = Project::new(&[
         (
             "base.resin",
-            "export { Number, make }; struct Number { value: int, } fn make(counter: Ptr<int>) -> Number  { counter.* = counter.* + 1; Number { value = 42 } }",
+            "export { Number, make }; struct Number { value: int, } fn make(counter: Ref<int>) -> Number  { counter = counter + 1; Number { value = 42 } }",
         ),
         (
             "left.resin",
@@ -174,7 +174,7 @@ fn reexports_keep_binding_identity_through_diamond_imports() {
         ),
         (
             "main.resin",
-            "export { main }; import { \"left.resin\", \"right.resin\", \"./base.resin\" }; fn main() -> int  { let mut counter = 0; let mut n = make(&counter); n.value + counter - 1 }",
+            "export { main }; import { \"left.resin\", \"right.resin\", \"./base.resin\" }; fn main() -> int  { let mut counter = 0; let mut n = make(counter); n.value + counter - 1 }",
         ),
     ]);
     assert_eq!(project.run().status.code(), Some(42));
@@ -696,11 +696,11 @@ fn read(self: Ref<Counter>) -> int  { self.value }
         ("counter.resin", source),
         (
             "main.resin",
-            r#"export { main }; import { "counter.resin" };
-            fn main() -> int  {
-                let mut c = counter_new(30);
+            r#"export { main }; import { "$/shared.resin", "counter.resin" };
+            fn main() -> int | Err<_> {
+                let c_owner = arc_ptr_alloc(counter_new(30))?; let c: Ref<_> = c_owner:get().*;
                 c:add(5, 7);
-                let mut p = &c;
+                let mut p = c_owner:get();
                 if (p.*:read() == 42 && c:read() == 42) { 0 } else { 1 }
             }
         "#,

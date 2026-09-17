@@ -35,15 +35,15 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
     let _lock = lock_gpu();
     let Some(mut gpu) = gpu() else { return };
     let module = module(
-        r#"export { kernel, main }; import { "$/span.resin" };
+        r#"export { kernel, main }; import { "$/span.resin", "$/shared.resin" };
 
         struct Data { marker: uint, wide: ulong, amount: float32, }
         struct Payload { tag: uint, data: Data, end: uint, }
         struct Params { count: uint, values: Ptr<Payload>, tail: float32, }
         fn at (values: Ptr<Payload>, index: uint) -> Ref<Payload>  { device_index(values, 67_ul, ulong(index)).* }
-        fn bump (p: Ptr<Payload>, index: uint) -> ()  {
-            let old: Ref<Payload> = p.*;
-            p.* = Payload {
+        fn bump (p: Ref<Payload>, index: uint) -> ()  {
+            let old: Ref<Payload> = p;
+            p = Payload {
                 tag = old.tag + uint(1),
                 data = Data { marker = index, wide = old.data.wide + ulong(4294967297), amount = old.data.amount + float32(0.5) },
                 end = old.end + uint(2)
@@ -52,14 +52,16 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
         @compute_shader fn kernel (invocation: ulong, root: Ptr<Params>) -> ()  { let mut index = uint(invocation);
             if (index < root.count) {
                 let mut p: Ref<Payload> = at(root.values, index);
-                bump(&p, index)
+                bump(p, index)
             } else { () }
         }
-        fn main () -> int  {
-            let mut value = Payload { tag = uint(10), data = Data { marker = uint(99), wide = ulong(7), amount = float32(1.25) }, end = uint(20) };
-            let mut root = Params { count = uint(1), values = &value, tail = float32(0.75) };
-            kernel(0_ul, &root);
-            kernel(1_ul, &root);
+        fn main () -> int | Err<_> {
+            let value_owner = arc_ptr_alloc(Payload { tag = uint(10), data = Data { marker = uint(99), wide = ulong(7), amount = float32(1.25) }, end = uint(20) })?;
+            let value = value_owner:get();
+            let root_owner = arc_ptr_alloc(Params { count = uint(1), values = value, tail = float32(0.75) })?;
+            let root = root_owner:get();
+            kernel(0_ul, root);
+            kernel(1_ul, root);
             if (value.tag == uint(11) && value.data.marker == uint(0) && value.data.wide == ulong(4294967304) && value.data.amount == float32(1.75) && value.end == uint(22) && root.tail == float32(0.75)) { 0 } else { 1 }
         }
     "#,
@@ -539,7 +541,7 @@ fn at_indexing_mutates_shader_arrays_and_span_fields() {
 struct Root { count: uint, pixels: Ptr<uint>, }
         fn read(i: uint) -> uint  {
             let mut values = [10_ui, 20_ui];
-            let mut previous = (&values:at(0_ul)):replace(i);
+            let previous = values:at(0_ul); values:at(0_ul) = i;
             values:at(ulong(i & 1_ui)) + values:at(ulong(i & 1_ui)) + previous - 10_ui
         }
         @compute_shader fn kernel(invocation: ulong, root: Ptr<Root>)  { let mut i = uint(invocation);

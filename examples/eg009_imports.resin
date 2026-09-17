@@ -4,11 +4,11 @@ import { "$/string.resin", "lib/counter.resin" };
 
 fn main() -> () {
 	let mut counter = Counter { value = 0 };
-	print(fmt("counter: {0}, {1}\n", (next(&counter), next(&counter))));
+	print(fmt("counter: {0}, {1}\n", (next(counter), next(counter))));
 }
 
 fn independent() -> () {
 	let mut first = Counter { value = 0 };
 	let mut second = Counter { value = 100 };
-	print(fmt("independent counters: {0}, {1}, {2}\n", (next(&first), next(&second), next(&first))));
+	print(fmt("independent counters: {0}, {1}, {2}\n", (next(first), next(second), next(first))));
 }

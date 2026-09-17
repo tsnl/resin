@@ -130,7 +130,7 @@ struct GpuOwner {
 	handle: Ptr<ResinGpu>,
 	window: Window | None,
 }
-fn drop(self: Ptr<GpuOwner>) {
+fn drop(self: Ref<GpuOwner>) {
 	if (ulong(self.handle) != 0_ul) {
 		resin_gpu_destroy(self.handle);
 	};
@@ -148,9 +148,9 @@ fn compute_workgroup_size(self: Ref<Gpu>) -> ulong {
 }
 
 fn gpu_device_count() -> (uint | Err<RuntimeError>) {
-	let mut count = 0_ui;
-	runtime_status_from_code(resin_gpu_device_count(&count))?;
-	(count)
+	let count = arc_ptr_alloc(0_ui)?;
+	runtime_status_from_code(resin_gpu_device_count(count:get()))?;
+	count:get().*
 }
 
 fn gpu_enumerate_devices(infos: Ptr<ResinGpuDeviceInfo>, count: uint) -> (() | Err<RuntimeError>) {
@@ -241,7 +241,7 @@ struct ImageOwner {
 	handle: Ptr<ResinImage>,
 	gpu: Gpu,
 }
-fn drop(self: Ptr<ImageOwner>) {
+fn drop(self: Ref<ImageOwner>) {
 	if (ulong(self.handle) != 0_ul) {
 		resin_gpu_free_image(self.gpu:native(), self.handle);
 	};
@@ -266,7 +266,7 @@ struct PipelineOwner {
 	handle: Ptr<ResinPipeline>,
 	gpu: Gpu,
 }
-fn drop(self: Ptr<PipelineOwner>) {
+fn drop(self: Ref<PipelineOwner>) {
 	if (ulong(self.handle) != 0_ul) {
 		resin_gpu_free_pipeline(self.gpu:native(), self.handle);
 	};
@@ -296,13 +296,13 @@ struct CommandsOwner {
 	gpu: Gpu,
 	retained: ArcPtr<RecordedResources> | None,
 }
-fn drop(self: Ptr<CommandsOwner>) {
+fn drop(self: Ref<CommandsOwner>) {
 	if (ulong(self.handle) != 0_ul) {
 		resin_gpu_cancel_command_buffer(self.gpu:native(), self.handle);
 	};
 }
 
-fn retain(self: Ref<CommandsOwner>, pipeline: GpuPipelineOwner | None, image: GpuImage | None) -> (() | Err<OutOfMemory>) {
+fn retain(self: Ptr<CommandsOwner>, pipeline: GpuPipelineOwner | None, image: GpuImage | None) -> (() | Err<OutOfMemory>) {
 	let node = arc_ptr_alloc::<RecordedResources>(RecordedResources { pipeline = pipeline, image = image, previous = None })?;
 	node:get().previous = replace(&self.retained, None);
 	self.retained = node;
@@ -318,13 +318,13 @@ fn native(self: Ref<GpuCommands>) -> Ptr<ResinCommandBuffer> {
 
 @gpu_dispatch
 fn dispatch(self: Ref<GpuCommands>, pipeline: Ref<GpuPipelineOwner>, root: GpuArguments, x: uint, y: uint, z: uint) -> (() | Err<RuntimeError>) {
-	self.owner:get().*:retain(pipeline:clone(), None)?;
+	self.owner:get():retain(pipeline:clone(), None)?;
 	runtime_status_from_code(resin_gpu_set_pipeline(self:native(), pipeline:native()))?;
 	runtime_status_from_code(root:dispatch_native(Ptr<ubyte>(self:native()), x, y, z))
 }
 
 fn begin_rendering(self: Ref<GpuCommands>, image: Ref<GpuImage>, r: float32, g: float32, b: float32, a: float32) -> (() | Err<RuntimeError>) {
-	self.owner:get().*:retain(None, image:clone())?;
+	self.owner:get():retain(None, image:clone())?;
 	runtime_status_from_code(resin_gpu_begin_rendering(self:native(), image:native(), r, g, b, a))
 }
 
@@ -334,7 +334,7 @@ fn end_rendering(self: Ref<GpuCommands>) -> (() | Err<RuntimeError>) {
 
 @gpu_draw
 fn draw(self: Ref<GpuCommands>, pipeline: Ref<GpuPipelineOwner>, root: GpuArguments | None, count: uint) -> (() | Err<RuntimeError>) {
-	self.owner:get().*:retain(pipeline:clone(), None)?;
+	self.owner:get():retain(pipeline:clone(), None)?;
 	runtime_status_from_code(resin_gpu_set_pipeline(self:native(), pipeline:native()))?;
 	match (root) {
 		GpuArguments(arguments) => {
@@ -347,7 +347,7 @@ fn draw(self: Ref<GpuCommands>, pipeline: Ref<GpuPipelineOwner>, root: GpuArgume
 }
 
 fn copy_image_to_buffer(self: Ref<GpuCommands>, image: Ref<GpuImage>, buffer: Ref<GpuSpan<ubyte>>) -> (() | Err<RuntimeError>) {
-	self.owner:get().*:retain(None, image:clone())?;
+	self.owner:get():retain(None, image:clone())?;
 	runtime_status_from_code(gpu_view_copy_image(buffer.data.view, buffer.length, Ptr<ubyte>(self:native()), Ptr<ubyte>(image:native())))
 }
 

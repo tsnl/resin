@@ -174,7 +174,7 @@ fn unused_source_initialization_errors_still_prevent_compilation() {
 fn demanded_nominals_retain_field_conversions_and_real_drop_identities() {
     let source = Source::new(
         "entry",
-        "export { main }; struct Unused {} struct Owner { n: int,  }\nfn drop(self: Ptr<Owner>)  {}\n fn main() -> int  { let mut owner = Owner { n = 42 }; owner.n }",
+        "export { main }; struct Unused {} struct Owner { n: int,  }\nfn drop(self: Ref<Owner>)  {}\n fn main() -> int  { let mut owner = Owner { n = 42 }; owner.n }",
     );
     let output = support::frontend::analyze(source, &mut loader(), None);
     let module = module(&output, &[host("main")]);

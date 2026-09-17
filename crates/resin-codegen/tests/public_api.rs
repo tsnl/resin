@@ -221,11 +221,13 @@ async fn lowering_failure_leaves_existing_outputs_untouched() {
         0..0,
         [
             Instr::LocalAddress {
-                local: LocalId::from_index(2),
-            },
-            Instr::SetLocal {
                 local: LocalId::from_index(3),
             },
+            Instr::LocalAddress {
+                local: LocalId::from_index(2),
+            },
+            Instr::Store,
+            Instr::Discard,
         ],
     );
     let checked = Arc::new(VerifiedModule::new(bad).unwrap());

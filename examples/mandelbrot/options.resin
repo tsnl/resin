@@ -17,7 +17,7 @@ struct Options {
 	help: bool,
 }
 
-fn parse_options(args: Ref<Span<Ptr<ubyte>>>) -> Options | Err<String> {
+fn parse_options(args: Ref<Span<Ptr<ubyte>>>) -> Options | Err<_> {
 	let mut options = Options {
 		use_gpu = true,
 		width = 960,

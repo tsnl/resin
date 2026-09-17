@@ -8,13 +8,14 @@ use rspirv::spirv::Word;
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct LocalAddress {
     pub root: Word,
+    pub root_type: Ty,
     pub indices: Vec<LocalIndex>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum LocalIndex {
     Static { index: u32 },
-    Dynamic { id: Word },
+    Dynamic { id: Word, ty: Ty },
 }
 
 #[derive(Clone, Debug, PartialEq)]

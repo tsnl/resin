@@ -407,8 +407,17 @@ impl Completion<'_> {
             typed::TermKind::Assign { place, value } => self.assign(place, value)?,
             typed::TermKind::Address { place } => {
                 let place = self.place(place)?;
-                if owned_path(&place).is_some_and(|(_, path)| !path.is_empty()) {
-                    self.require_available(&place)?;
+                if reference_borrow(&place) {
+                    return Err(GenerateError::inference(
+                        source.span,
+                        "cannot take the address of a Ref; accept or return a Ptr when an address is required",
+                    ));
+                }
+                if local_address(&place) {
+                    return Err(GenerateError::inference(
+                        source.span,
+                        "cannot take the address of a local value; borrow it with Ref or use explicitly allocated storage",
+                    ));
                 }
                 TermKind::Address { place }
             }
@@ -1295,6 +1304,51 @@ fn reference_place(term: &Term) -> bool {
         TermKind::Use { arg } => reference_place(arg),
         TermKind::Field { base, .. } => {
             reference_place(base) || matches!(base.ty, crate::Type::Pointer { .. })
+        }
+        _ => false,
+    }
+}
+
+// A dependent field receiver might specialize to a pointer. Its address contract
+// is checked again during specialization, before references lose their distinction.
+fn known_value_receiver(ty: &crate::Type) -> bool {
+    use crate::Type;
+    !matches!(
+        ty,
+        Type::Pointer { .. }
+            | Type::Parameter { .. }
+            | Type::Member { .. }
+            | Type::Operation { .. }
+            | Type::Method { .. }
+            | Type::FunctionParameter { .. }
+            | Type::FunctionResult { .. }
+            | Type::Value { .. }
+    )
+}
+
+fn local_address(term: &Term) -> bool {
+    match &term.kind {
+        TermKind::Local { .. } => !matches!(term.ty, crate::Type::Reference { .. }),
+        TermKind::Use { arg } => local_address(arg),
+        TermKind::Field { base, .. } => known_value_receiver(&base.ty) && local_address(base),
+        _ => false,
+    }
+}
+
+// A reference grants access to its referent, but not its address. Dereferencing
+// a pointer read through a reference starts a new, independently addressable place.
+fn reference_borrow(term: &Term) -> bool {
+    if matches!(term.ty, crate::Type::Reference { .. }) {
+        return true;
+    }
+    match &term.kind {
+        TermKind::Use { arg } => reference_borrow(arg),
+        TermKind::Field { base, .. } => {
+            let ty = match &base.ty {
+                crate::Type::Reference { referent } => referent.as_ref(),
+                ty => ty,
+            };
+            known_value_receiver(ty) && reference_borrow(base)
         }
         _ => false,
     }

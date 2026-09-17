@@ -87,12 +87,12 @@ fn a_segment_writes_only_its_own_row_range() {
             let segments = segments_new(plot.width, plot.height)?;
             let count = ulong(plot.width) * ulong(plot.height) * 4_ul;
             let pixels = arc_span_alloc::<ubyte>(count + 1_ul, 123_ub)?;
-            let lut = halton_samples();
+            let lut = arc_ptr_alloc(halton_samples())?;
             let root = Parameters { plot = plot:clone(), solver = mandelbrot_new(32),
-                samples = Span<Sample> { data = &lut:at(0_ul), length = 1_ul },
+                samples = Span<Sample> { data = lut:get():lea(0_ul), length = 1_ul },
                 segments = segments:get(), pixels = pixels:get():slice(0_ul, count) };
             assert(segments:get().length == 4_ul);
-            evaluate_segment(0_ul, &root);
+            evaluate_segment(0_ul, root);
             let mut i = 0_ul;
             while (i < 32_ul) {
                 assert(pixels:get():at(i * 4_ul + 3_ul) == 255_ub);
@@ -103,7 +103,7 @@ fn a_segment_writes_only_its_own_row_range() {
                 assert(pixels:get():at(i) == 123_ub);
                 i = i + 1_ul;
             };
-            evaluate_segment(1_ul, &root);
+            evaluate_segment(1_ul, root);
             i = 32_ul;
             while (i < 35_ul) {
                 assert(pixels:get():at(i * 4_ul + 3_ul) == 255_ub);
@@ -114,8 +114,8 @@ fn a_segment_writes_only_its_own_row_range() {
                 assert(pixels:get():at(i) == 123_ub);
                 i = i + 1_ul;
             };
-            dispatch_host(&root);
-            evaluate_segment(4_ul, &root);
+            dispatch_host(root);
+            evaluate_segment(4_ul, root);
             i = 0_ul;
             while (i < 70_ul) {
                 assert(pixels:get():at(i * 4_ul + 3_ul) == 255_ub);
@@ -150,8 +150,8 @@ fn compute_matches_cpu_for_halton_prefixes_and_partial_segments() {
             let count = ulong(plot.width) * ulong(plot.height) * 4_ul;
             let pixels = gpu:alloc::<ubyte>(count + 1_ul)?;
             let segments = upload(gpu, segments_new(plot.width, plot.height)?:get())?;
-            let lut = halton_samples();
-            let positions = upload(gpu, Span<Sample> { data = &lut:at(0_ul), length = 16_ul })?;
+            let lut = arc_ptr_alloc(halton_samples())?;
+            let positions = upload(gpu, Span<Sample> { data = lut:get():lea(0_ul), length = 16_ul })?;
             let group_size = gpu:compute_workgroup_size();
             let mut samples = 1_i;
             while (samples <= 16) {

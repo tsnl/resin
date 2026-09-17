@@ -424,7 +424,7 @@ fn tuple_members_and_function_hovers_use_source_syntax() {
 #[test]
 fn imported_generic_aliases_keep_binder_navigation_and_concrete_hover() {
     let library = "export { View }; type View<T> = Ptr<T>;";
-    let source = "import { \"library.resin\" }; fn use_view<T>(view: View<T>) -> T  { view.* } fn main() -> int  { let mut value = 42; let mut pointer: View<int>; pointer = &value; use_view(pointer) }";
+    let source = "import { \"library.resin\" }; fn use_view<T>(view: View<T>) -> T  { view.* } fn main() -> int  { let mut value = 42; let mut pointer: View<int>; pointer = View<int>(0_ul); use_view(pointer) }";
     let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
     let analysis = project.checked();
     let input = project.source("main.resin");
@@ -786,7 +786,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
     for receiver in ["values", "holder.values"] {
         for tail in ["", " values:;", " holder.values:;", " holder.values:at(; "] {
             let source = format!(
-                "import {{ \"$/span.resin\" }}; struct FieldsValues<T0> {{ values: T0, }}\nfn main()  {{ let mut values = [1_i, 2_i]; let mut holder = FieldsValues<_> {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }}; {receiver}:at(0) = 3;{tail} }}"
+                "import {{ \"$/span.resin\" }}; struct FieldsValues<T0> {{ values: T0, }}\nfn main()  {{ let mut values = [1_i, 2_i]; let mut holder = FieldsValues<_> {{ values = Span<int> {{ data = Ptr<int>(0_ul), length = 2_ul }} }}; {receiver}:at(0) = 3;{tail} }}"
             );
             let project = Project::new(&[("main.resin", &source)]);
             let analysis = project.build_hir();
@@ -827,10 +827,10 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
 
 #[test]
 fn shared_receiver_completion_and_navigation_include_ordinary_drop_methods() {
-    let library = "export { Counter , drop, read }; struct Counter { count: int,   }\nfn drop(self: Ptr<Counter>)  {}\n\nfn read(self: Ptr<Counter>) -> int  { self.count }\n ";
-    for tail in ["", "c:get():;"] {
+    let library = "export { Counter , drop, read }; struct Counter { count: int,   }\nfn drop(self: Ref<Counter>)  {}\n\nfn read(self: Ref<Counter>) -> int  { self.count }\n ";
+    for tail in ["", "c:get().*:;"] {
         let source = format!(
-            "import {{ \"lib.resin\", \"$/shared.resin\" }}; fn f(c: ArcPtr<Counter>)  {{ c:get():read(); {tail} }}"
+            "import {{ \"lib.resin\", \"$/shared.resin\" }}; fn f(c: ArcPtr<Counter>)  {{ c:get().*:read(); {tail} }}"
         );
         let project = Project::new(&[("main.resin", &source), ("lib.resin", library)]);
         let analysis = project.build_hir();
@@ -1774,7 +1774,7 @@ fn editor_analysis_tolerates_truncation_and_deleted_tokens() {
         "export { main }; struct Point { x: int, } fn main(arg: Ptr<Point>)  { let mut value = arg.x + 1; print(fmt(\"{}\", value)); }",
         "struct FieldsLeftRight<T0, T1> { left: T0, right: T1, }\nfn main(arg: int) -> int  { let mut pair = FieldsLeftRight<_, _> { left = arg, right = 1 }; if (arg == 0) (pair.left) else (pair.right) }",
         "fn main()  { let mut values = [1, 2]; while (1 == 1) { let mut missing: Ptr<int>; }; }",
-        "struct Cleanup { value: Ptr<int>,  }\nfn drop(self: Ptr<Cleanup>)  { self.value.* = 42; }\n  fn main()  { let mut n = 0; let mut cleanup = Cleanup { value = &n }; }",
+        "struct Cleanup { value: Ptr<int>,  }\nfn drop(self: Ref<Cleanup>)  { self.value.* = 42; }\n  fn main()  { let mut n = 0; let mut cleanup = Cleanup { value = &n }; }",
         "struct Item { value: int, } fn main()  { let mut owner = ArcPtr<Item> { value = 42 }; let mut weak = owner:downgrade(); match (weak:upgrade()) { ArcPtr<Item>(item) => { item.value; }, None => {} }; }",
     ] {
         for end in 0..=source.len() {
@@ -2221,4 +2221,35 @@ fn imported_intrinsics_keep_generic_navigation_and_declaration_signatures() {
     let origin = analysis.definition(&input, offset).unwrap();
     assert_eq!(origin.source, project.source("library.resin"));
     assert_eq!(origin.span.start, library.find("fn at").unwrap() + 3);
+}
+
+#[test]
+fn lea_completion_requires_addressable_element_storage() {
+    let source = r#"import { "$/shared.resin", "$/span.resin" };
+        fn main() -> () | Err<_> {
+            let values = [1_i, 2_i];
+            let owner = arc_ptr_alloc(values)?;
+            let pointer = owner:get();
+            values:at(0_ul);
+            pointer:lea(0_ul);
+        }
+    "#;
+    let project = Project::new(&[("main.resin", source)]);
+    let analysis = project.checked();
+    let input = project.source("main.resin");
+    for (receiver, available) in [("values:at", false), ("pointer:lea", true)] {
+        let offset = source.find(receiver).unwrap() + receiver.find(':').unwrap() + 1;
+        assert_eq!(
+            analysis
+                .completions(&input, offset)
+                .iter()
+                .any(|item| item.name == "lea"),
+            available
+        );
+    }
+    let offset = source.find("pointer:lea").unwrap() + "pointer:".len();
+    assert_eq!(
+        analysis.hover(&input, offset).unwrap().text,
+        "lea: (Ptr<[int; 2]>, ulong) -> Ptr<int>"
+    );
 }

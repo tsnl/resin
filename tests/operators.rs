@@ -88,6 +88,8 @@ fn __eq__<T>(a: Ref<Vector<T>>, b: Ref<Vector<T>>) -> bool  { a.x == b.x && a.y 
 #[test]
 fn operator_operands_are_evaluated_once_in_order_and_reference_values_are_read() {
     let output = run(r#"export { main };
+import { "$/shared.resin" };
+
         struct Number { value: int,
             
             
@@ -100,9 +102,9 @@ fn __sub__(a: Ref<Number>, b: int) -> int  { a.value - b }
             state.* = state.* * 10 + digit;
             Number { value = digit }
         }
-        fn main() -> int  {
-            let mut state = 0_i;
-            let mut total = next(&state, 1) + next(&state, 2);
+        fn main() -> int | Err<_> {
+            let state_owner = arc_ptr_alloc(0_i)?; let state: Ref<_> = state_owner:get().*;
+            let mut total = next(state_owner:get(), 1) + next(state_owner:get(), 2);
             let mut alias: Ref<Number> = total;
             if (state == 12 && alias.value == 3) { alias - -39 } else { 1 }
         }
@@ -246,7 +248,7 @@ fn operator_borrows_and_results_use_ordinary_owner_cleanup() {
         struct Payload { drops: Ptr<int>,
             
         }
-fn drop(self: Ptr<Payload>)  { self.drops.* = self.drops.* + 1; }
+fn drop(self: Ref<Payload>)  { self.drops.* = self.drops.* + 1; }
 
         struct Value { owner: ArcPtr<Payload>, value: int,
             
@@ -255,10 +257,10 @@ fn __add__(a: Ref<Value>, b: Ref<Value>) -> Value  { Value { owner = a.owner:clo
 
         fn add<T>(a: Ref<T>, b: Ref<T>) -> _  { a + b }
         fn main() -> int | Err<_>  {
-            let mut drops = 0_i;
+            let drops_owner = arc_ptr_alloc(0_i)?; let drops: Ref<_> = drops_owner:get().*;
             let mut answer = 0_i;
             {
-                let mut owner = arc_ptr_alloc::<Payload>(Payload { drops = &drops })?;
+                let mut owner = arc_ptr_alloc::<Payload>(Payload { drops = drops_owner:get() })?;
                 drops = 0;
                 let mut value = Value { owner = owner, value = 21 };
                 let mut result = add(value, value);

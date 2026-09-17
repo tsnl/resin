@@ -28,7 +28,7 @@ struct InputLineOwner {
 	data: Ptr<ubyte>,
 	length: ulong,
 }
-fn drop(self: Ptr<InputLineOwner>) {
+fn drop(self: Ref<InputLineOwner>) {
 	if (ulong(self.data) != 0_ul) {
 		free(self.data);
 	};

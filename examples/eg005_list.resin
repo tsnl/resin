@@ -1,6 +1,6 @@
 export { main };
 
-import { "$/string.resin" };
+import { "$/string.resin", "$/shared.resin" };
 
 struct List {
 	value: int,
@@ -23,8 +23,8 @@ fn at(p: Ptr<List>) -> int {
 	p.value
 }
 
-fn main() -> () {
-	let mut tail = cons(2, Ptr<List>(ulong(0)));
-	let mut head = cons(1, &tail);
+fn main() -> () | Err<_> {
+	let tail = arc_ptr_alloc(cons(2, Ptr<List>(ulong(0))))?;
+	let mut head = cons(1, tail:get());
 	print(fmt("list = {0}, {1}\n", (car(head), at(cdr(head)))));
 }

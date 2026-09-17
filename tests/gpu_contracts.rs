@@ -153,11 +153,11 @@ fn pipeline_type_contracts_reject_invalid_storage_and_direct_calls() {
 fn source_drop_hooks_reject_gpu_elements_before_and_after_importing() {
     for (declaration, owner) in [
         (
-            "struct Managed { value: int,  }\nfn drop(self: Ptr<Managed>)  {}\n",
+            "struct Managed { value: int,  }\nfn drop(self: Ref<Managed>)  {}\n",
             "Managed",
         ),
         (
-            "struct Managed<T> { value: T,  }\nfn drop<T>(self: Ptr<Managed<T>>)  {}\n",
+            "struct Managed<T> { value: T,  }\nfn drop<T>(self: Ref<Managed<T>>)  {}\n",
             "Managed<int>",
         ),
     ] {
@@ -200,7 +200,7 @@ fn source_gpu_library_resolves_generic_allocation_and_explicit_access() {
     let source = Source::new(
         "gpu-library.resin",
         r#"export { main };
-        import { "$/gpu.resin", "$/span.resin" };
+        import { "$/shared.resin", "$/gpu.resin", "$/span.resin" };
         struct Pair { left: int, right: int, }
         fn main() -> (() | Err<_>)  {
             let mut gpu = gpu_new()?;
@@ -213,8 +213,8 @@ fn source_gpu_library_resolves_generic_allocation_and_explicit_access() {
             values:at(1_ul):store(7_i);
             let mut tail = values:slice(1_ul, 2_ul);
             let mut alias = tail.data:slice(1_ul, 1_ul);
-            let mut output = [0_i, 0_i];
-            tail:read_only():copy_to(Span<int> { data = &output:at(0_ul), length = 2_ul });
+            let output_owner = arc_ptr_alloc([0_i, 0_i])?; let output: Ref<_> = output_owner:get().*;
+            tail:read_only():copy_to(Span<int> { data = output_owner:get():lea(0_ul), length = 2_ul });
             let mut readback = gpu:alloc_in::<ubyte>(64_ul, memory_readback)?;
             (())
         }

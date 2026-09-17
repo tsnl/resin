@@ -18,7 +18,7 @@ fn check(source: &str, generator: &mut Generator) -> CheckedFile {
 fn checking_resolves_types_in_earlier_expressions_and_annotations() {
     let mut generator = Generator::new();
     let checked = check(
-        "fn narrow(n: int) -> int  { n }\nfn value() -> _  {\nlet mut item = 42;\nlet mut pointer: Ptr<_>;\npointer = &item;\nnarrow(pointer.*)\n}",
+        "fn narrow(n: int) -> int  { n }\nfn value() -> _  {\nlet mut item = 42;\nlet mut copied: _;\ncopied = item;\nnarrow(copied)\n}",
         &mut generator,
     );
     assert!(checked.errors.is_empty(), "{:?}", checked.errors);
@@ -39,12 +39,7 @@ fn checking_resolves_types_in_earlier_expressions_and_annotations() {
     let Statement::Declare { ty, .. } = &stmts[1] else {
         panic!()
     };
-    assert_eq!(
-        ty.ty,
-        crate::Type::Pointer {
-            pointee: Box::new(crate::Type::Int32)
-        }
-    );
+    assert_eq!(ty.ty, crate::Type::Int32);
 }
 
 #[test]

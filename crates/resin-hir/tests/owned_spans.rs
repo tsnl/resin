@@ -11,13 +11,13 @@ fn generate(source: &str) -> Result<resin_hir::Module, resin_source::SourceError
 fn owner_operations_keep_generic_payloads_in_ordinary_signatures() {
     let module = generate(
         r#"intrinsic "owner_allocate" fn allocate<T>(count: ulong, initial: T) -> StrongOwner | None;
-        intrinsic "owner_data" fn data<T>(owner: Ptr<StrongOwner>) -> Ptr<T>;
+        intrinsic "owner_data" fn data<T>(owner: Ref<StrongOwner>) -> Ptr<T>;
         struct Shared<T> { owner: StrongOwner,
             
         }
-fn get<T>(self: Ptr<Shared<T>>) -> Ptr<T>  { data::<T>(&self.owner) }
+fn get<T>(self: Ref<Shared<T>>) -> Ptr<T>  { data::<T>(self.owner) }
 
-        fn borrow<T>(value: Ptr<Shared<T>>) -> Ptr<T>  { value:get() }
+        fn borrow<T>(value: Ref<Shared<T>>) -> Ptr<T>  { value:get() }
     "#,
     )
     .unwrap();

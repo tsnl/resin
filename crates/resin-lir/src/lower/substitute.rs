@@ -958,11 +958,37 @@ fn primitive_operation(name: &str, arguments: &[resin_hir::Type]) -> Option<Reso
                 referent: element.clone(),
             },
         ),
-        ("at", Type::Str) => (
+        ("at" | "lea", Type::Pointer { pointee })
+            if matches!(pointee.as_ref(), Type::Array { .. }) =>
+        {
+            let Type::Array { element, .. } = pointee.as_ref() else {
+                unreachable!()
+            };
+            (
+                Intrinsic::Index,
+                vec![first.clone(), Type::UInt64],
+                if name == "lea" {
+                    Type::Pointer {
+                        pointee: element.clone(),
+                    }
+                } else {
+                    Type::Reference {
+                        referent: element.clone(),
+                    }
+                },
+            )
+        }
+        ("at" | "lea", Type::Str) => (
             Intrinsic::Index,
             vec![Type::Str, Type::UInt64],
-            Type::Reference {
-                referent: Box::new(Type::UInt8),
+            if name == "lea" {
+                Type::Pointer {
+                    pointee: Box::new(Type::UInt8),
+                }
+            } else {
+                Type::Reference {
+                    referent: Box::new(Type::UInt8),
+                }
             },
         ),
         ("dispatch_native", Type::GpuArguments) => (
