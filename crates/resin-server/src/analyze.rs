@@ -188,9 +188,14 @@ fn query_result(hir: &resin_hir::Hir, query: Query) -> Result<QueryResult, Failu
         Query::Hover { .. } => {
             let hover = hir.hover(source, offset);
             QueryResult::Hover {
-                markdown: hover
-                    .as_ref()
-                    .map(|hover| format!("```resin\n{}\n```", hover.text)),
+                markdown: hover.as_ref().map(|hover| {
+                    let mut markdown = format!("```resin\n{}\n```", hover.text);
+                    if !hover.documentation.is_empty() {
+                        markdown.push_str("\n\n");
+                        markdown.push_str(&hover.documentation);
+                    }
+                    markdown
+                }),
                 span: hover.map(|hover| span(source, hover.span)),
             }
         }

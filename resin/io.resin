@@ -1,3 +1,5 @@
+//! Fallible writes to the host standard output and error streams.
+
 export { Io, Output, WriteError, write, io_stdout, io_stderr };
 
 extern {

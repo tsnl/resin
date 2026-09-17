@@ -1187,3 +1187,28 @@ fn diagnostic_messages_are_single_line() {
     }
     client.stop();
 }
+
+#[test]
+fn doc_comment_hover_keeps_markdown_separate_from_the_signature_and_tracks_edits() {
+    let temp = TempDir::new().unwrap();
+    let mut client = Client::start(temp.path(), Value::Null);
+    let uri = uri(&temp.path().join("docs.resin"));
+    for (version, wording) in [(1, "Original"), (2, "Updated")] {
+        let source = format!(
+            "/// {wording} **Markdown**.\nfn read(value: int) -> int {{ value }}\nfn main() -> int {{ read(42) }}\n"
+        );
+        if version == 1 {
+            client.open(&uri, &source);
+        } else {
+            client.change(&uri, version, &source);
+        }
+        client.diagnostics(&uri, Some(version), false);
+        let hover = client.request("textDocument/hover", at(&uri, 2, 19));
+        let markdown = hover["contents"]["value"].as_str().unwrap();
+        assert!(
+            markdown.contains(&format!("```\n\n{wording} **Markdown**.")),
+            "{markdown}"
+        );
+    }
+    client.stop();
+}

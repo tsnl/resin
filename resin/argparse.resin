@@ -1,3 +1,6 @@
+//! Streaming command-line parsing with aliases and required values.
+//! A specification such as `"--help|-h --count="` describes accepted options.
+
 // Streaming option parser. The specification lists spellings separated by spaces:
 // "--help|-h --verbose|-v --output|-o= --count=". A trailing '=' requires a value.
 // Values accept '--count 12' or '--count=12'; aliases return the first spelling.

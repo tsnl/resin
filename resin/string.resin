@@ -1,3 +1,6 @@
+//! Owned strings, formatting, printing, and value representations.
+//! These operations run on the host.
+
 export { String, fmt, print, repr, string_from_str, string_from_bytes, get, repr_bytes, bytes, clone };
 
 extern {

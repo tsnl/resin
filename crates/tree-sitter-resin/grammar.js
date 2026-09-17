@@ -609,14 +609,33 @@ export default grammar({
         ),
       ),
 
-    comment: () =>
+    doc_comment: () =>
       token(
-        choice(
-          seq("//", new RustRegex(".*")),
-          seq("/*", new RustRegex("[^*]*\\*+([^/*][^*]*\\*+)*"), "/"),
+        prec(
+          2,
+          choice(
+            seq("///", new RustRegex(".*")),
+            seq("//!", new RustRegex(".*")),
+            seq("/**", new RustRegex("[^*]*\\*+([^/*][^*]*\\*+)*"), "/"),
+            seq("/*!", new RustRegex("[^*]*\\*+([^/*][^*]*\\*+)*"), "/"),
+          ),
         ),
+      ),
+
+    comment: () =>
+      choice(
+        token(seq("//", new RustRegex(".*"))),
+        token(prec(3, seq("////", new RustRegex(".*")))),
+        token(seq("/*", new RustRegex("[^*]*\\*+([^/*][^*]*\\*+)*"), "/")),
+        token(
+          prec(
+            3,
+            seq("/***", new RustRegex("[^*]*\\*+([^/*][^*]*\\*+)*"), "/"),
+          ),
+        ),
+        token(prec(3, choice("/**/", "/***/"))),
       ),
   },
 
-  extras: ($) => [new RustRegex("\\s"), $.comment],
+  extras: ($) => [new RustRegex("\\s"), $.comment, $.doc_comment],
 });

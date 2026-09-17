@@ -1,3 +1,6 @@
+//! Complex arithmetic and scalar mathematical functions.
+//! Angles are radians. Shader transcendental functions use `float32`.
+
 export { sqrt, sin, cos, Complex, complex, add, mul, squared, magnitude_squared };
 
 // Host: float32 and float64. Shaders: float32. Angles are in radians.
@@ -5,11 +8,13 @@ intrinsic "sqrt" fn sqrt<T>(value: T) -> T;
 intrinsic "sin" fn sin<T>(value: T) -> T;
 intrinsic "cos" fn cos<T>(value: T) -> T;
 
+/// A complex number with real and imaginary components.
 struct Complex<T> {
 	real: T,
 	imag: T,
 }
 
+/// Construct a complex value without allocation.
 fn complex<T>(real: T, imag: T) -> Complex<T> {
 	Complex<T> { real = real, imag = imag }
 }
@@ -26,10 +31,12 @@ fn mul<T>(left: Ref<Complex<T>>, right: Ref<Complex<T>>) -> Complex<T> {
 	)
 }
 
+/// Compute the square of a complex value, borrowing the operand.
 fn squared<T>(value: Ref<Complex<T>>) -> Complex<T> {
 	mul(value, value)
 }
 
+/// Compute `real² + imag²` without taking a square root.
 fn magnitude_squared<T>(value: Ref<Complex<T>>) -> T {
 	value.real * value.real + value.imag * value.imag
 }

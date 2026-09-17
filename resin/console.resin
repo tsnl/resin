@@ -1,3 +1,5 @@
+//! Host byte and line input, with explicit end-of-input and I/O errors.
+
 export { Console, InputLine, InputError, EndOfInput, InputReadError, InputOutOfMemory, InputWriteError, get, bytes, console_print, console_read_byte, console_read_line };
 
 extern {

@@ -1,3 +1,5 @@
+//! Named runtime errors and conversion from native status codes.
+
 export { RuntimeError, InvalidArgument, VulkanUnavailable, Unsupported, OutOfMemory, VulkanError, IoError, Incomplete, WindowUnavailable, UnknownRuntimeError, RuntimeStatus, runtime_status_from_code, runtime_status_code, runtime_status_message };
 
 extern {

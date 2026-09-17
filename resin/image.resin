@@ -1,3 +1,5 @@
+//! PNG image input and output using bounded byte views.
+
 export { ImageData, width, height, channels, pixels, image_data_read_png, image_data_write_pixels, write_png, clone };
 
 extern {

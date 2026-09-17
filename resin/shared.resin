@@ -1,3 +1,6 @@
+//! Explicit shared and weak ownership of host allocations.
+//! Use `clone` to retain ownership and `get` to borrow access.
+
 export { ArcPtr, ArcSpan, WeakPtr, WeakSpan, arc_ptr_alloc, get, downgrade, arc_span_alloc, weak_ptr_empty, upgrade, weak_span_empty, clone };
 
 import { "status.resin", "span.resin" };
@@ -8,6 +11,8 @@ import { "status.resin", "span.resin" };
 struct ArcPtr<T> {
 	owner: StrongOwner,
 }
+/// Allocate one value and transfer it into shared host ownership.
+/// Returns `Err<OutOfMemory>` if allocation fails.
 fn arc_ptr_alloc<T>(initial: T) -> (ArcPtr<T> | Err<OutOfMemory>) {
 	match (owner_create(initial)) {
 		StrongOwner(owner) => {
@@ -30,6 +35,8 @@ fn downgrade<T>(self: Ref<ArcPtr<T>>) -> WeakPtr<T> {
 struct ArcSpan<T> {
 	owner: StrongOwner,
 }
+/// Allocate `count` elements initialized by copying `initial`.
+/// Rejects overflowing allocation sizes and reports allocation failure.
 fn arc_span_alloc<T>(count: ulong, initial: T) -> (ArcSpan<T> | Err<OutOfMemory>) {
 	match (owner_allocate(count, initial)) {
 		StrongOwner(owner) => {

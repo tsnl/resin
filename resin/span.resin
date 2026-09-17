@@ -1,16 +1,23 @@
+//! Borrowed views of contiguous elements.
+//! Keep the backing storage alive; a span does not retain its owner.
+
 export { Span, bytes, at, lea, slice, as_bytes, clone };
 
 // Borrowed storage. The caller keeps the allocation alive throughout each access.
+/// A nonowning pointer and element count. Bounds are checked on the host.
+/// Shader accesses are unchecked; keep indices within the declared length.
 struct Span<T> {
 	data: Ptr<T>,
 	length: ulong,
 
 	// Primitive byte transport for formatting and native interfaces.
 }
+/// Borrow the element at `index` without granting an address.
 fn at<T>(self: Ref<Span<T>>, index: ulong) -> Ref<T> {
 	self:lea(index).*
 }
 
+/// Obtain a pointer to an element of the already pointer-backed span.
 fn lea<T>(self: Ref<Span<T>>, index: ulong) -> Ptr<T> {
 	pointer_index(self.data, self.length, index)
 }
@@ -32,6 +39,7 @@ fn bytes<T>(self: Ref<Span<T>>) -> (Ptr<ubyte>, ulong) {
 }
 
 // Literal length excludes the NUL terminator; borrowing never copies the bytes.
+/// Borrow the bytes of a string literal, excluding its NUL terminator.
 fn bytes(text: str) -> Span<ubyte> {
 	Span<ubyte> { data = text.data, length = text.length }
 }

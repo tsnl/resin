@@ -464,3 +464,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `crates/tree-sitter-resin/` with `tree-sitter generate --js-runtime native`.
 - The Tree-sitter grammar, generated parser, and Rust bindings live in `crates/tree-sitter-resin/`
   as ordinary files in this repository. Commit grammar changes and regenerated files together.
+- Documentation uses `///` / `/** ... */` for the following declaration or field,
+  and leading `//!` / `/*! ... */` for a file module. CST associates Markdown with
+  exact declaration-name spans; AST retains it for HIR/editor consumers. Diagnose
+  misplaced comments. Documentation does not enter executable HIR/LIR. The local
+  `resin --doc FILE [-o MARKDOWN]` command uses syntax-only exported signatures and
+  needs no compiler service; do not add compiler-phase dependencies to the client.

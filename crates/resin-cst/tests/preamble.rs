@@ -40,6 +40,7 @@ async fn unrelated_body_errors_do_not_invalidate_dependency_declarations() {
         "const broken = ;",
         "const unfinished =",
         "extern type Handle; fn main()  { missing( }",
+        "fn main() { missing( } extern type Handle;",
     ] {
         let document = parse(format!("{prefix}{body}"), None).await;
         assert!(document.tree().root_node().has_error(), "{body}");

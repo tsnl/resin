@@ -5,3 +5,5 @@
 (comment)+ @comment.around
 
 (intrinsic_function) @function.around
+
+(doc_comment) @comment.around

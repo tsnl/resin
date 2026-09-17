@@ -34,6 +34,17 @@ fn format(sexp: SExp) -> String {
 
 fn sexp_source(file: &SourceFile) -> SExp {
     let mut items = Vec::new();
+    if !file.module_documentation.is_empty() {
+        items.push(list(
+            "module-doc",
+            vec![string(file.module_documentation.as_ref())],
+        ));
+    }
+    items.extend(
+        file.documentation
+            .iter()
+            .map(|doc| list_sp("doc", doc.span, vec![string(doc.val.as_ref())])),
+    );
     if !file.exports.is_empty() {
         items.push(list(
             "export",

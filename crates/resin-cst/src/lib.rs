@@ -11,6 +11,7 @@
 use resin_executor::{Cancellation, Execution};
 use resin_source::prelude::*;
 use std::sync::Arc;
+mod documentation;
 mod lower;
 mod preamble;
 mod print;
@@ -33,6 +34,26 @@ pub struct Preamble {
     pub imports: Vec<Spanned<Arc<str>>>,
     pub headers: Vec<Spanned<Arc<str>>>,
     pub diagnostics: Vec<Spanned<String>>,
+}
+
+/// Syntax documentation for one module. Spans belong to this exact source.
+#[derive(Debug, Clone, Default)]
+pub struct Documentation {
+    pub module: String,
+    pub declarations: Vec<DeclarationDocumentation>,
+    pub diagnostics: Vec<Spanned<String>>,
+}
+
+/// Includes undocumented and private declarations for editor lookup.
+#[derive(Debug, Clone)]
+pub struct DeclarationDocumentation {
+    pub name: Spanned<String>,
+    pub span: Span,
+    pub signature: String,
+    pub markdown: String,
+    pub exported: bool,
+    /// Containing struct for fields; other declarations have no field owner.
+    pub field_owner: Option<Span>,
 }
 
 /// Parse on a bounded worker, reusing an earlier tree without changing its document.
@@ -65,6 +86,12 @@ impl Document {
     /// Read imports and foreign headers without requiring valid function bodies.
     pub fn preamble(&self) -> Preamble {
         preamble::read(self)
+    }
+
+    /// Read Markdown and declaration signatures without resolving names.
+    /// Misplaced doc comments produce diagnostics rather than being discarded.
+    pub fn documentation(&self) -> Documentation {
+        documentation::read(self)
     }
 
     /// Recover incomplete editor syntax without shifting original source offsets.

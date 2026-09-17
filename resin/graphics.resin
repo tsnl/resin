@@ -1,3 +1,5 @@
+//! Value types shared by graphics shader inputs and outputs.
+
 export { Position, Color, Vertex };
 
 struct Position {

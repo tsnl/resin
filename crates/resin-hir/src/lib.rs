@@ -652,7 +652,22 @@ impl Hir {
         self.semantics.definition(&self.syntax, source, offset)
     }
     pub fn hover(&self, source: &Source, offset: usize) -> Option<Hover> {
-        self.semantics.hover(&self.syntax, source, offset)
+        let mut hover = self.semantics.hover(&self.syntax, source, offset)?;
+        if let Some(origin) = self.definition(source, offset)
+            && let Some(document) = self.inputs.documents.get(&origin.source)
+        {
+            hover.documentation = if origin.span == (Span { start: 0, end: 0 }) {
+                document.file.module_documentation.to_string()
+            } else {
+                document
+                    .file
+                    .documentation
+                    .iter()
+                    .find(|doc| doc.span == origin.span)
+                    .map_or_else(String::new, |doc| doc.val.to_string())
+            };
+        }
+        Some(hover)
     }
     pub fn completions(&self, source: &Source, offset: usize) -> Vec<Completion> {
         self.semantics.completions(&self.syntax, source, offset)
@@ -709,6 +724,8 @@ impl CheckedProgram {
 pub struct Hover {
     pub span: Span,
     pub text: String,
+    /// Declaration Markdown, separate from the Resin signature.
+    pub documentation: String,
 }
 
 #[derive(Debug, Clone)]
@@ -747,6 +764,7 @@ impl Analysis {
         Some(Hover {
             span: resin_cst::span(token),
             text,
+            documentation: String::new(),
         })
     }
 

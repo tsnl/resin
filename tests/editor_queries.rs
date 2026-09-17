@@ -340,3 +340,16 @@ fn helix_queries_capture_highlights_indentation_and_textobjects() {
             .any(|(kind, text)| kind == "function.inside" && text.contains("cell.value"))
     );
 }
+
+#[test]
+fn documentation_comments_have_a_distinct_highlight() {
+    let source =
+        "//! Module.\n/// Item.\nstruct Item { /** Field. */ value: int }\n//// Ordinary.\n";
+    for queries in [ZED_QUERIES, HELIX_QUERIES] {
+        let captured = captures(queries[0].1, source);
+        for comment in ["//! Module.", "/// Item.", "/** Field. */"] {
+            assert!(captured.contains(&("comment.documentation".into(), comment.into())));
+        }
+        assert!(captured.contains(&("comment".into(), "//// Ordinary.".into())));
+    }
+}

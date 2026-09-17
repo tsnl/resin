@@ -47,6 +47,56 @@ fn collect(document: &Document, length: usize, result: &mut Preamble, errors: bo
             diagnostics(child, length, &mut result.diagnostics);
         }
     }
+    if errors
+        && root.has_error()
+        && result.diagnostics.is_empty()
+        && let Some(body) = root
+            .children(&mut root.walk())
+            .find(|node| starts_declaration(*node))
+    {
+        misplaced_tokens(
+            document,
+            root,
+            body.start_byte(),
+            &mut 0,
+            &mut result.diagnostics,
+        );
+    }
+}
+
+// Recovery can absorb a late clause into the preceding function's body. Concrete
+// delimiters still distinguish its top-level keyword from an error inside a body.
+fn misplaced_tokens(
+    document: &Document,
+    node: Node<'_>,
+    body_start: usize,
+    depth: &mut usize,
+    errors: &mut Vec<Spanned<String>>,
+) {
+    if matches!(
+        node.kind(),
+        "comment" | "doc_comment" | "string" | "foreign_type"
+    ) || node.is_missing()
+    {
+        return;
+    }
+    if node.child_count() != 0 {
+        for child in node.children(&mut node.walk()) {
+            misplaced_tokens(document, child, body_start, depth, errors);
+        }
+        return;
+    }
+    match document.node_text(node) {
+        "(" | "[" | "{" => *depth += 1,
+        ")" | "]" | "}" => *depth = depth.saturating_sub(1),
+        "export" | "extern" | "import" if *depth == 0 && node.start_byte() > body_start => {
+            errors.push(Spanned::new(
+                "source preamble must precede declarations".into(),
+                span(node),
+            ));
+        }
+        _ => {}
+    }
 }
 
 fn is_preamble_clause(document: &Document, node: Node<'_>) -> bool {
@@ -85,7 +135,7 @@ fn starts_declaration(node: Node<'_>) -> bool {
 }
 
 fn first_token(node: Node<'_>) -> Option<Node<'_>> {
-    if node.kind() == "comment" || node.is_missing() {
+    if matches!(node.kind(), "comment" | "doc_comment") || node.is_missing() {
         return None;
     }
     if node.child_count() == 0 {

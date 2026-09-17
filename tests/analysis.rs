@@ -2253,3 +2253,26 @@ fn lea_completion_requires_addressable_element_storage() {
         "lea: (Ptr<[int; 2]>, ulong) -> Ptr<int>"
     );
 }
+
+#[test]
+fn imported_declarations_fields_and_colon_calls_keep_documentation() {
+    let library = "//! Library docs.\nexport { Item, read };\n/// An item.\nstruct Item {\n/// Its value.\nvalue: int, }\n/// Read **without moving**.\nfn read(item: Ref<Item>) -> int { item.value }";
+    let source = "import { \"library.resin\" }; fn main() -> int { let item = Item { value = 42 }; item:read() + item.value }";
+    let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
+    let hir = project.build_hir();
+    hir.hir().unwrap();
+    let input = project.source("main.resin");
+    for (needle, expected) in [
+        ("Item {", "An item."),
+        ("read()", "Read **without moving**."),
+        ("value }", "Its value."),
+    ] {
+        let hover = hir.hover(&input, source.rfind(needle).unwrap()).unwrap();
+        assert_eq!(hover.documentation, expected, "{needle}: {hover:?}");
+    }
+    let library_source = project.source("library.resin");
+    let declaration = hir
+        .hover(&library_source, library.find("fn read").unwrap() + 3)
+        .unwrap();
+    assert_eq!(declaration.documentation, "Read **without moving**.");
+}

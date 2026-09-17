@@ -1,3 +1,6 @@
+//! GPU ownership, typed pipelines, allocations, and command recording.
+//! Submission waits for recorded work; borrowed shader views do not own host resources.
+
 export { Gpu, GpuPtr, GpuSpan, GpuComputePipeline, GpuGraphicsPipeline, GpuImage, GpuPipelineOwner, GpuCommands, memory_default, memory_gpu, memory_readback, ResinGpu, ResinGpuDeviceInfo, ResinImage, ResinPipeline, ResinCommandBuffer, load, store, replace, slice, read_only, write_only, at, copy_to, copy_from, native, compute_workgroup_size, gpu_device_count, gpu_enumerate_devices, gpu_new, gpu_new_at, gpu_new_for_window, create, alloc, alloc_in, malloc, create_compute_pipeline, create_graphics_pipeline, create_image, start_command_recording, present, width, height, context, dispatch, begin_rendering, end_rendering, draw, copy_image_to_buffer, submit, cancel, clone };
 
 extern {

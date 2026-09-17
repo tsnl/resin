@@ -20,6 +20,7 @@ pub(super) fn token(document: &Document, offset: usize) -> Option<Node<'_>> {
                         | "builtin_type"
                         | "string"
                         | "comment"
+                        | "doc_comment"
                         | "Ptr"
                         | "Ref"
                         | "sizeof"
