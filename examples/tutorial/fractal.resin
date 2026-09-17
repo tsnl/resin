@@ -1,0 +1,117 @@
+// Small CPU checkpoints for the manual. The complete CPU/GPU explorer is eg011_mandelbrot.resin.
+export { escape_iterations, render };
+import { "$/math.resin", "$/span.resin", "$/shared.resin" };
+
+// ANCHOR: orbit
+fn escape_iterations(c: Complex<float32>, limit: int) -> int {
+	let mut z = complex(0.0_f, 0.0_f);
+	let mut n = 0_i;
+	while (n < limit) {
+		z = z:squared():add(c);
+		n = n + 1;
+		if (z:magnitude_squared() > 4.0_f) {
+			return n;
+		};
+	};
+	0
+}
+// ANCHOR_END: orbit
+
+struct Color { r: float32, g: float32, b: float32, a: float32 }
+
+// ANCHOR: palette
+fn palette(count: int) -> Color {
+	if (count == 0) {
+		return Color { r = 0.0_f, g = 0.0_f, b = 0.0_f, a = 1.0_f };
+	};
+	// Repeating blue-to-gold bands; reserve black for bounded orbits.
+	let t = float32((count & 63) + 1) / 65.0_f;
+	let u = 1.0_f - t;
+	Color {
+		r = 9.0_f * u * t * t * t,
+		g = 15.0_f * u * u * t * t,
+		b = 8.5_f * u * u * u * t,
+		a = 1.0_f,
+	}
+}
+// ANCHOR_END: palette
+
+// ANCHOR: blend
+fn blend(accumulated: Color, sample: Color, weight: float32) -> Color {
+	Color {
+		r = accumulated.r + (sample.r - accumulated.r) * weight,
+		g = accumulated.g + (sample.g - accumulated.g) * weight,
+		b = accumulated.b + (sample.b - accumulated.b) * weight,
+		a = 1.0_f,
+	}
+}
+// ANCHOR_END: blend
+
+// ANCHOR: halton_samples
+fn halton_samples() -> _ {
+	[
+		(0.5_f, 1.0_f / 3.0_f),
+		(0.25_f, 2.0_f / 3.0_f),
+		(0.75_f, 1.0_f / 9.0_f),
+		(0.125_f, 4.0_f / 9.0_f),
+		(0.625_f, 7.0_f / 9.0_f),
+		(0.375_f, 2.0_f / 9.0_f),
+		(0.875_f, 5.0_f / 9.0_f),
+		(0.0625_f, 8.0_f / 9.0_f),
+		(0.5625_f, 1.0_f / 27.0_f),
+		(0.3125_f, 10.0_f / 27.0_f),
+		(0.8125_f, 19.0_f / 27.0_f),
+		(0.1875_f, 4.0_f / 27.0_f),
+		(0.6875_f, 13.0_f / 27.0_f),
+		(0.4375_f, 22.0_f / 27.0_f),
+		(0.9375_f, 7.0_f / 27.0_f),
+		(0.03125_f, 16.0_f / 27.0_f),
+	]
+}
+// ANCHOR_END: halton_samples
+
+// ANCHOR: coordinates
+fn coordinate(x: float32, y: float32, width: uint, height: uint) -> Complex<float32> {
+	let scale = 3.0_f / float32(height);
+	complex(-0.5_f + (x - 0.5_f * float32(width)) * scale, (0.5_f * float32(height) - y) * scale)
+}
+// ANCHOR_END: coordinates
+
+// ANCHOR: pixel
+fn evaluate_pixel(x: uint, y: uint, width: uint, height: uint, samples: int) -> Color {
+	let offsets = halton_samples();
+	let mut color = Color { r = 0.0_f, g = 0.0_f, b = 0.0_f, a = 1.0_f };
+	let mut i = 0_i;
+	while (i < samples) {
+		let offset = offsets:at(ulong(i));
+		let c = coordinate(float32(x) + offset.0, float32(y) + offset.1, width, height);
+		color = blend(color, palette(escape_iterations(c, 256)), 1.0_f / float32(i + 1));
+		i = i + 1;
+	};
+	color
+}
+// ANCHOR_END: pixel
+
+// ANCHOR: render
+fn render(width: uint, height: uint, samples: int) -> ArcSpan<ubyte> | Err<_> {
+	assert(width > 0_ui && height > 0_ui);
+	assert(samples >= 1 && samples <= 16);
+	let pixels = arc_span_alloc::<ubyte>(ulong(width) * ulong(height) * 4_ul, 0_ub)?;
+	let view = pixels:get();
+	let mut y = 0_ui;
+	while (y < height) {
+		let mut x = 0_ui;
+		while (x < width) {
+			let color = evaluate_pixel(x, y, width, height, samples);
+			let index = (ulong(y) * ulong(width) + ulong(x)) * 4_ul;
+			view:at(index) = ubyte(color.r * 255.0_f + 0.5_f);
+			view:at(index + 1_ul) = ubyte(color.g * 255.0_f + 0.5_f);
+			view:at(index + 2_ul) = ubyte(color.b * 255.0_f + 0.5_f);
+			view:at(index + 3_ul) = 255_ub;
+			x = x + 1;
+		};
+		y = y + 1;
+	};
+	pixels
+}
+// ANCHOR_END: render

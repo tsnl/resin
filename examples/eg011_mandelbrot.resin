@@ -128,6 +128,7 @@ fn store_pixel(pixels: Ref<Span<u8>>, index: u64, color: Color) {
 
 // Each segment owns up to 32 adjacent pixels in one row. Segment origins come
 // from segments_new; the final segment in each row stops at the right edge.
+// ANCHOR: evaluate_segment
 fn evaluate_segment(segment_index: u64, root: Ref<Parameters>) {
 	if (segment_index >= root.segments.length) {
 		return;
@@ -139,6 +140,7 @@ fn evaluate_segment(segment_index: u64, root: Ref<Parameters>) {
 		x = x + 1;
 	};
 }
+// ANCHOR_END: evaluate_segment
 
 // Explicit origins avoid shader integer division and make dispatch batches simple.
 fn segments_new(width: u32, height: u32) -> ArcSpan<SegmentOrigin> | Err<_> {
@@ -164,6 +166,7 @@ fn clone(self: Ref<Plot>) -> Plot {
 }
 
 // CPU execution calls the same evaluator as the shader wrapper.
+// ANCHOR: dispatch_host
 fn dispatch_host(root: Ref<Parameters>) {
 	let mut segment: u64 = 0;
 	while (segment < root.segments.length) {
@@ -171,6 +174,7 @@ fn dispatch_host(root: Ref<Parameters>) {
 		segment = segment + 1;
 	};
 }
+// ANCHOR_END: dispatch_host
 
 fn host_image(plot: Ref<Plot>, solver: Ref<Mandelbrot>) -> ArcSpan<u8> | Err<_> {
 	let pixels = arc_span_alloc::<u8>(u64(plot.width) * u64(plot.height) * 4, 0)?;
@@ -191,10 +195,12 @@ struct HostParameters {
 	pixels: GpuSpan<u8>,
 }
 
+// ANCHOR: compute
 @compute_shader
 fn compute(segment_index: u64, root: Ptr<Parameters>) {
 	evaluate_segment(segment_index, root.*);
 }
+// ANCHOR_END: compute
 
 @vertex_shader
 fn vertex(index: i32) -> Vertex {
@@ -282,6 +288,7 @@ fn dispatch_gpu(self: Ref<Renderer>, commands: Ref<GpuCommands>, plot: Ref<Plot>
 	};
 }
 
+// ANCHOR: render
 fn render(self: Ref<Renderer>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, use_gpu: bool) -> () | Err<_> {
 	if (!use_gpu) {
 		let image = host_image(plot, solver)?;
@@ -298,6 +305,7 @@ fn render(self: Ref<Renderer>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, use_gpu
 	commands:end_rendering()?;
 	commands:submit()?;
 }
+// ANCHOR_END: render
 
 fn save_png(path: Ptr<u8>, width: u32, height: u32, pixels: Ref<Span<u8>>) -> () | Err<_> {
 	image_data_write_pixels(path, width, height, 4, pixels, 0)?;
@@ -307,6 +315,7 @@ fn save_png(path: Ptr<u8>, width: u32, height: u32, pixels: Ref<Span<u8>>) -> ()
 }
 
 // Read the displayed image in one transfer, including the currently selected view.
+// ANCHOR: screenshot
 fn screenshot(renderer: Ref<Renderer>, path: Ptr<u8>) -> () | Err<_> {
 	let image_width = renderer.image:width();
 	let image_height = renderer.image:height();
@@ -320,6 +329,7 @@ fn screenshot(renderer: Ref<Renderer>, path: Ptr<u8>) -> () | Err<_> {
 	pixels:copy_to(host:get());
 	save_png(path, image_width, image_height, view)?;
 }
+// ANCHOR_END: screenshot
 
 //
 // Application and input
@@ -462,6 +472,7 @@ fn interactive(options: Ref<Options>, mut plot: Plot, mut solver: Mandelbrot) ->
 	};
 }
 
+// ANCHOR: main
 fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> i32 | Err<_> {
 	let args = arguments(argc, argv);
 	let options = match (parse_options(args)) {
@@ -494,6 +505,7 @@ fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> i32 | Err<_> {
 	};
 	0
 }
+// ANCHOR_END: main
 
 //
 // CPU checks of the shared algorithm

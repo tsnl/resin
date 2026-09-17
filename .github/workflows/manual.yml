@@ -1,0 +1,53 @@
+name: Manual
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'book.toml'
+      - 'doc/**'
+      - 'examples/**'
+      - 'resin/**'
+      - 'scripts/manual.py'
+      - 'scripts/check-manual.py'
+      - '.github/workflows/manual.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'book.toml'
+      - 'doc/**'
+      - 'examples/**'
+      - 'resin/**'
+      - 'scripts/manual.py'
+      - 'scripts/check-manual.py'
+      - '.github/workflows/manual.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manual-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install mdBook
+        uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2
+        with:
+          tool: mdbook@0.5.4
+      - name: Build the manual
+        run: mdbook build
+      - name: Check links and assets
+        run: python3 scripts/check-manual.py
+      - name: Upload the manual
+        uses: actions/upload-artifact@v4
+        with:
+          name: resin-manual
+          path: target/manual
+          retention-days: 7

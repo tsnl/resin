@@ -31,12 +31,12 @@ Resin is early and evolving. CPU compilation and Vulkan compute and rendering wo
 today; the middleware ecosystem above is a goal, and native Metal and WebGPU
 backends are not implemented. Host builds target 64-bit Linux, macOS, and Windows
 and run without Vulkan or a GPU. GPU programs need a compatible
-[Vulkan device](doc/guide.md#gpu-requirements); macOS GPU compatibility is still limited.
+[Vulkan device](doc/shaders.md#gpu-requirements); macOS GPU compatibility is still limited.
 
 ## One language for the whole program
 
 Ordinary helpers can run on the CPU or be called from shaders, within the
-[supported shader subset](doc/guide.md#shaders-and-graphics):
+[supported shader subset](doc/shaders.md#shaders-and-graphics):
 
 ```resin
 export { main };
@@ -91,8 +91,10 @@ With a compatible Vulkan GPU and a desktop display on the client, try the partic
 cargo run -- examples/particles.resin
 ```
 
-See the [guide](doc/guide.md) for setup, Windows instructions, language features,
-building executables, and GPU programming. [Zed](editors/zed/README.md) and
+Read the [Resin Manual](doc/index.md) for setup, language and library references,
+and GPU programming. The [Mandelbrot tutorial](doc/tutorial/index.md) builds from
+one orbit to a shared CPU/GPU explorer. Preview the searchable manual locally with
+`nix-shell --run 'mdbook serve --open'`. [Zed](editors/zed/README.md) and
 [Helix](editors/helix/README.md) support includes diagnostics, completion,
 navigation, and formatting.
 

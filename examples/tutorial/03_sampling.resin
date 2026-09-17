@@ -1,0 +1,9 @@
+export { main };
+import { "fractal.resin", "$/image.resin", "$/shared.resin" };
+
+// ANCHOR: image
+fn main() -> () | Err<_> {
+	let pixels = render(320_ui, 240_ui, 16)?;
+	image_data_write_pixels("mandelbrot-16.png".data, 320_ui, 240_ui, 4_ui, pixels:get(), 0_ul)?;
+}
+// ANCHOR_END: image

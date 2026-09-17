@@ -1,0 +1,5 @@
+/* Keep prose readable while leaving enough room for ordinary systems code. */
+:root { --content-max-width: 850px; }
+.content main { line-height: 1.65; }
+.content pre { line-height: 1.45; }
+.content img { border-radius: 6px; }

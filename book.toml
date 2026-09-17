@@ -1,0 +1,22 @@
+[book]
+title = "The Resin Manual"
+authors = ["Resin contributors"]
+language = "en"
+src = "doc"
+
+[build]
+build-dir = "target/manual"
+
+[output.html]
+git-repository-url = "https://github.com/tsnl/resin"
+edit-url-template = "https://github.com/tsnl/resin/edit/main/doc/{path}"
+mathjax-support = true
+additional-css = ["doc/theme/resin.css"]
+additional-js = ["doc/theme/resin.js"]
+
+[output.html.playground]
+runnable = false
+
+[preprocessor.source-links]
+command = "python3 scripts/manual.py"
+after = ["links"]
