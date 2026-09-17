@@ -52,9 +52,9 @@ and the image radius `r = sqrt(px*px + py*py)`.
 We use the radially symmetric, four-coefficient Kannala–Brandt form, with equal
 focal lengths and zero skew. The forward model maps incident angle θ to radius:
 
-\[
+\\[
 D(\theta) = \theta(1 + k_1\theta^2 + k_2\theta^4 + k_3\theta^6 + k_4\theta^8).
-\]
+\\]
 
 This convention is also used in [OpenCV's fisheye model](https://docs.opencv.org/4.13.0/db/d58/group__calib3d__fisheye.html);
 see [Kannala and Brandt's original paper](https://users.aalto.fi/~kannalj1/calibration/Kannala_Brandt_calibration.pdf)
