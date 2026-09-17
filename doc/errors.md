@@ -10,14 +10,14 @@ a struct can refer to itself through a pointer, but aliases cannot introduce cyc
 ## Optional values
 
 `None` is a builtin singleton: it names both a type and its only value. An optional
-integer is the ordinary structural union `int | None`. Any integer widens into that
+integer is the ordinary structural union `i32 | None`. Any integer widens into that
 union directly; `None` represents absence.
 
 ```resin
-type OptionalInt = int | None;
+type OptionalInt = i32 | None;
 
-fn choose(value: OptionalInt) -> int  {
-    match (value) { int(number) => { number }, None => { 0 } }
+fn choose(value: OptionalInt) -> i32  {
+    match (value) { i32(number) => { number }, None => { 0 } }
 }
 ```
 
@@ -27,20 +27,20 @@ There is no user-defined singleton declaration syntax yet.
 
 Union members may be primitive, nominal, or structural types. Aliases are
 transparent, nesting flattens, and repeated members collapse: `OptionalInt | None`
-is the same type as `int | None`. A union does not distinguish two occurrences of
+is the same type as `i32 | None`. A union does not distinguish two occurrences of
 `None`; use a wrapper struct if those cases need different meanings.
 
 Postfix `!` removes `None` from the operand's possible types:
 
 ```resin
-fn require_number(value: int | None) -> int  { value! }
-fn require_choice(value: int | bool | None) -> int | bool  { value! }
+fn require_number(value: i32 | None) -> i32  { value! }
+fn require_choice(value: i32 | bool | None) -> i32 | bool  { value! }
 ```
 
 The operand is evaluated once. If it is `None`, the host traps with
 `cannot unwrap None`. Otherwise the value keeps its member type; the result can
 then widen into a larger union at its consumer. Mutable pointer and Span element
-types remain invariant: `Ptr<int> | None` does not become `Ptr<int | None>`.
+types remain invariant: `Ptr<i32> | None` does not become `Ptr<i32 | None>`.
 
 In a shader, failure stops the invocation and propagates through shader callers,
 preserving prior writes, as for numeric-conversion traps. This does not
@@ -53,7 +53,7 @@ Postfix operations compose from left to right: `optional_record!.field` excludes
 postfix `!` is invalid once no `None` remains.
 
 `T | Err<E>` distinguishes success from failure even when `T` and `E` overlap:
-`int` and `Err<int>` are different types. In `int | Err<E> | None`, postfix `!`
+`i32` and `Err<i32>` are different types. In `i32 | Err<E> | None`, postfix `!`
 removes only `None`; postfix `?` propagates only `Err` and preserves `None`.
 Use `match` to handle either explicitly. Both use the same ordinary union tags.
 
@@ -63,20 +63,20 @@ union's u32 tag is exactly its active payload's type ID. The host and GPU use th
 same table. Aliases share their underlying type's entry, while separate nominal
 structs retain distinct entries even when their fields are identical.
 
-For example, `int` has the same tag in
-`int | None` and `int | bool | None`, on both the host and the GPU. Widening
+For example, `i32` has the same tag in
+`i32 | None` and `i32 | bool | None`, on both the host and the GPU. Widening
 preserves that tag. A union type has a table entry, but is never itself a payload:
-`(int | None) | bool` is flattened to `int | None | bool` before lowering.
+`(i32 | None) | bool` is flattened to `i32 | None | bool` before lowering.
 Numeric tag values are local to the compiled program; they are not a stable
 serialization format or ABI between separate builds. `Err<E>` has its own type ID, like every other union member.
 ## Errors and propagation
 
 ```resin
 struct DivideByZero {}
-struct NegativeInput { value: int }
+struct NegativeInput { value: i32 }
 type CalculationError = DivideByZero | NegativeInput;
 
-fn divide(n: int, d: int) -> (int | Err<DivideByZero>) {
+fn divide(n: i32, d: i32) -> (i32 | Err<DivideByZero>) {
 	if (d == 0) {
 		Err(DivideByZero {})
 	} else {
@@ -84,7 +84,7 @@ fn divide(n: int, d: int) -> (int | Err<DivideByZero>) {
 	}
 }
 
-fn calculate(n: int) -> (int | Err<_>) {
+fn calculate(n: i32) -> (i32 | Err<_>) {
 	if (n < 0) {
 		Err(NegativeInput { value = n })
 	} else {
@@ -96,7 +96,7 @@ fn calculate(n: int) -> (int | Err<_>) {
 `T | Err<E>` is an ordinary union. Return a plain `T` for success and `Err(error)`
 for failure. Error payloads may be any value type, including `str`, owned `String`,
 numbers, and user-defined structs. `Err<E>` is itself a value type; `Err(value)`
-infers its payload type from the value and context. `Err<Err<int>>` nests wrappers,
+infers its payload type from the value and context. `Err<Err<i32>>` nests wrappers,
 whereas nested unions flatten and duplicate members collapse.
 
 An inferred payload `Err<_>` collects the least union of errors that can escape,
@@ -105,26 +105,32 @@ Success holes remain monomorphic and need a determining value or annotation.
 
 Postfix `?` evaluates its operand once. If the active member is an `Err`, it
 returns that wrapper immediately; otherwise it yields the remaining value.
-It preserves all non-error members, so `(int | str | Err<E>)?` yields `int | str`.
+It preserves all non-error members, so `(i32 | str | Err<E>)?` yields `i32 | str`.
 The enclosing result must include every propagated error. Union and error values
 may widen while preserving their ownership transfer; mutable pointers remain invariant.
 Handle failures with exhaustive, duplicate-free matches:
 
 ```resin
-fn describe(result: (int | Err<CalculationError>))  {
+fn describe(result: (i32 | Err<CalculationError>))  {
     match (result) {
-        int(value) => { print(fmt("value = {0}\n", (value,))) },
+        i32(value) => {
+            let text = fmt("value = {0}\n", (value,));
+            print(text);
+        },
         Err(error) => {
             match (error) {
                 DivideByZero(zero) => { print("division by zero\n") },
-                NegativeInput(negative) => { print(fmt("negative: {0}\n", (negative.value,))) },
+                NegativeInput(negative) => {
+                    let text = fmt("negative: {0}\n", (negative.value,));
+                    print(text);
+                },
             }
         },
     }
 }
 ```
 
-Host entry points can return `(() | Err<E>)` or `(int | Err<E>)`; an unhandled
+Host entry points can return `(() | Err<E>)` or `(i32 | Err<E>)`; an unhandled
 error prints its payload value and exits with status 1. Run `cargo run -- examples/errors.resin`
 or `cargo run -- examples/errors.resin:failure` to try both paths.
 Helpers using `Err` and `match` also compile to SPIR-V. C uses a tag and a union of

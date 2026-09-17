@@ -9,7 +9,7 @@ clauses appear in that order before declarations. Each clause may appear only on
 export { answer };
 import { "helpers.resin", "$/status.resin" };
 
-fn answer() -> int  { helper() }
+fn answer() -> i32  { helper() }
 ```
 Imports bring only the dependency's exported names into the file's flat namespace. Without
 an export clause (or with `export {}`), everything is private. An exported function can use
@@ -48,22 +48,22 @@ to those modules. Public operations are exported free functions, including const
 - `$/image.resin`: PNG reading and writing.
 - `$/status.resin`: Native status conversion functions and the `RuntimeError` union and its variants.
 - `$/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
-- `$/io.resin`: `io_stdout():write(text)` and `io_stderr():write(text)`.
+- `$/stdio.resin`: `io_stdout():write(text)` and `io_stderr():write(text)`.
 - `$/span.resin`: borrowed `Span<T>` and `bytes(text)` for literal byte views.
 - `$/shared.resin`: `arc_ptr_alloc::<T>(initial)?`, `arc_span_alloc::<T>(count, initial)?`, and weak owners.
 - `$/string.resin`: owned `String`, `string_from_str`, `string_from_bytes`, `fmt`, and `print`.
-- `$/console.resin`: `console_read_byte()`, `console_read_line()`, and shared `InputLine` owners with `console_print(line)`.
+- `$/stdio.resin`: `console_read_byte()`, `console_read_line()`, and shared `InputLine` owners with `console_print(line)`.
 
 Pass decorated shader declarations directly to GPU pipeline creation. Compiled shader
 representations belong to code generation and the runtime; functions expose no bytecode property.
-GPU memory modes are exported `int` constants: `memory_default`, `memory_gpu`, and
-`memory_readback`. Pass them directly, for example `gpu:alloc_in::<uint>(count, memory_readback)`.
+GPU memory modes are exported `i32` constants: `memory_default`, `memory_gpu`, and
+`memory_readback`. Pass them directly, for example `gpu:alloc_in::<u32>(count, memory_readback)`.
 Run `cargo run -- examples/eg009_imports.resin` for an explicitly owned counter, or append
 `:independent` to run a second entry that uses two independent counters.
 
 ```resin
 export { main };
-import { "$/gpu.resin", "$/string.resin" };
+import { "$/gpu.resin", "$/string.resin", "$/stdio.resin" };
 
 fn main() -> (() | Err<_>) {
 	let gpu = gpu_new()?;

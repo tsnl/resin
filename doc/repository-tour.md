@@ -58,7 +58,7 @@ A few language choices explain much of the implementation:
 - Files have private scopes and explicit exports. Imports expose only exported
   names, and never execute code. There are no runtime global variables.
 - Entry points are ordinary exported functions. `main` is only the default
-  name; host entries take no arguments or the argc, argv, and envp parameters, and return unit, `int`,
+  name; host entries take no arguments or the argc, argv, and envp parameters, and return unit, `i32`,
   or either success type in a union with `Err<E>`.
 
 [examples/eg009_imports.resin](../examples/eg009_imports.resin) and
@@ -71,7 +71,7 @@ cargo run -- examples/eg009_imports.resin:independent
 
 For a host-only standard-library example, read
 [examples/input.resin](../examples/input.resin) alongside
-[resin/console.resin](../resin/console.resin). The module builds a growing line
+[resin/stdio.resin](../resin/stdio.resin). The module builds a growing line
 buffer on top of C's `getchar`, returns typed errors, and wraps successful lines
 in shared owners. Scope cleanup releases them automatically.
 
@@ -152,7 +152,7 @@ errors. It needs no `RESIN_SERVER`, imports, semantic analysis, or entry point:
 cargo run -- --format --check examples
 ```
 
-The formatter preserves comments and strings, normalizes numeric suffixes and
+The formatter preserves comments and strings, preserves numeric spelling and
 whitespace, indents with hard tabs, and refuses to modify invalid syntax.
 
 ### Read each language, then its incoming pass

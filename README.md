@@ -42,9 +42,9 @@ Ordinary helpers can run on the CPU or be called from shaders, within the
 export { main };
 import { "$/string.resin" };
 
-struct Point { x: float32, y: float32, }
+struct Point { x: f32, y: f32, }
 
-fn squared_distance(a: Point, b: Point) -> float32  {
+fn squared_distance(a: Point, b: Point) -> f32  {
 	let mut dx = a.x - b.x;
 	let mut dy = a.y - b.y;
 	dx * dx + dy * dy

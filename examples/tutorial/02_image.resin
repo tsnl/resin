@@ -3,7 +3,8 @@ import { "fractal.resin", "$/image.resin", "$/shared.resin" };
 
 // ANCHOR: image
 fn main() -> () | Err<_> {
-	let pixels = render(320_ui, 240_ui, 1)?;
-	image_data_write_pixels("mandelbrot-1.png".data, 320_ui, 240_ui, 4_ui, pixels:get(), 0_ul)?;
+	let pixels = render(320, 240)?;
+	let view = pixels:get();
+	image_data_write_pixels("mandelbrot.png".data, 320, 240, 4, view, 0)?;
 }
 // ANCHOR_END: image

@@ -4,9 +4,9 @@
 
 ```resin
 export { main };
-import { "$/string.resin" };
+import { "$/string.resin", "$/stdio.resin" };
 
-fn fibonacci(n: int) -> int {
+fn fibonacci(n: i32) -> i32 {
 	if (n <= 1) {
 		n
 	} else {
@@ -15,7 +15,8 @@ fn fibonacci(n: int) -> int {
 }
 
 fn main() {
-	print(fmt("fibonacci(10) = {0}\n", (fibonacci(10),)));
+	let text = fmt("fibonacci(10) = {0}\n", (fibonacci(10),));
+	print(text);
 }
 ```
 Functions use `fn` and are top-level, immutable definitions. Parameter types are explicit;
@@ -29,8 +30,8 @@ be stored, passed, and returned on the host.
 
 Functions take a sequence of arguments enclosed in parentheses. `add(1, 2)` passes two
 arguments; `add(pair)` passes one value and requires a function with one parameter.
-Function types list their parameters before the arrow: `(int, int) -> int` takes two integers,
-while `((int, int)) -> int` takes one tuple. `f()` has no arguments; `f(())` passes one unit
+Function types list their parameters before the arrow: `(i32, i32) -> i32` takes two integers,
+while `((i32, i32)) -> i32` takes one tuple. `f()` has no arguments; `f(())` passes one unit
 value. A trailing comma, as in `f(value,)`, does not create a tuple. Use `f((value,))` to pass
 a singleton tuple. Access tuple members by index: `pair.0`, `pair.1`. Calls evaluate the
 callee first, followed by arguments from left to right.
@@ -39,13 +40,13 @@ Files contain only function, foreign, type, and constant declarations, after the
 There are no global variables or executable top-level statements. Values and mutable state
 belong inside functions and are passed explicitly to helpers by value, reference, or pointer.
 Local bindings use `let name = value;`, or `let name: Type;` to reserve uninitialized storage.
-Use `let mut name = value;` for direct reassignment. Assignment uses `name = value` and returns unit. `struct Point { x: int, y: int }` creates a nominal type;
+Use `let mut name = value;` for direct reassignment. Assignment uses `name = value` and returns unit. `struct Point { x: i32, y: i32 }` creates a nominal type;
 `type Position = Point;` is a transparent alias for that same type. Only `struct` creates
 a new nominal identity. Construct values with `Point { x = 1, y = 2 }`.
 Record initializers keep bare `name = value`
 fields, and parameters and struct fields keep bare `name: Type` declarations.
-Type formers use angle brackets: `Ptr<int>`, `Span<float32>`, and `Ptr<Ptr<int>>`.
-Calls and conversions require parentheses: `fibonacci(n)`, `int(n)`, and `process([1, 2])`.
+Type formers use angle brackets: `Ptr<i32>`, `Span<f32>`, and `Ptr<Ptr<i32>>`.
+Calls and conversions require parentheses: `fibonacci(n)`, `i32(n)`, and `process([1, 2])`.
 `process [1, 2]` and `process { value }` are not calls. Nominal record construction retains
 its dedicated `Name { field = value }` syntax. Anonymous record types and values
 are not supported; use a named `struct` or a tuple.
@@ -58,15 +59,15 @@ exported independently of the types they use. There are no method namespaces,
 inheritance, user-defined traits, or implicit `self` parameters.
 
 ```resin
-struct Counter { value: int }
-fn read(counter: Ref<Counter>) -> int {
+struct Counter { value: i32 }
+fn read(counter: Ref<Counter>) -> i32 {
 	counter.value
 }
 fn increment(counter: Ref<Counter>) {
 	counter.value = counter.value + 1;
 }
 
-fn example() -> int {
+fn example() -> i32 {
 	let counter = Counter { value = 41 };
 	counter:increment();
 	counter:read()
@@ -82,8 +83,8 @@ assignment to the binding, not access through an alias. See [references](referen
 A dot selects a field: `(value.callback)(argument)` calls a function stored in a
 field. A colon selects a visible function: `value:callback(argument)` passes the
 value as its first argument. Colon calls do not search a type-owned namespace.
-A temporary can bind to a reference parameter and stays alive through the full
-expression, including when a call returns a reference used by another call.
+Reference arguments require initialized places. Give a computed value a named local
+before borrowing it; the compiler does not extend temporary lifetimes for calls.
 
 ## Constants and `iota`
 
@@ -93,12 +94,12 @@ Module constants can be exported and may refer to later constants; cycles are er
 Local constants become visible after their specification, and can shadow outer names.
 
 ```resin
-const answer: int = 40 + 2;
+const answer: i32 = 40 + 2;
 const (
-	read: uint = 1 << iota; // 1
-	write: uint = 1 << iota; // 2
+	read: u32 = 1 << iota; // 1
+	write: u32 = 1 << iota; // 2
 	_ = iota; // Skip index 2.
-	execute: uint = 1 << iota; // 8
+	execute: u32 = 1 << iota; // 8
 );
 const reset = iota; // 0, with type long.
 ```
@@ -107,11 +108,11 @@ const reset = iota; // 0, with type long.
 including discarded `_` specifications. Every specification requires an explicit
 `= expression`, including later rows in a group and discarded names. Each row supplies
 its own expression list and optional type annotation. A specification can bind multiple
-names, such as `a, b: uint = iota, iota + 10;`; their counts must match. Resin requires
+names, such as `a, b: u32 = iota, iota + 10;`; their counts must match. Resin requires
 semicolons and uses `: Type` annotations and lowercase value names.
 
-Constants use Resin's fixed-width types. An annotation or numeric suffix selects a type;
-otherwise numeric inference finishes at the declaration, defaulting to `long` or `float64`.
+Constants use Resin's fixed-width types. An annotation or explicit type application selects a type;
+otherwise numeric inference finishes at the declaration, defaulting to `i64` or `f64`.
 Later uses do not change that type. Arithmetic, comparisons, logical and bitwise operators,
 numeric conversions, constant references, and type layout queries are allowed. Function calls
 and aggregate initializers are not constant expressions. Integer overflow, zero divisors,
@@ -120,13 +121,13 @@ including in unused declarations. Floating-point operations round at their decla
 
 ## Type sizes
 
-`sizeof(Type)` returns the native value size in bytes as `ulong`, including padding:
+`sizeof(Type)` returns the native value size in bytes as `u64`, including padding:
 
 ```resin
 struct Pair<T> { first: T, second: T }
-const pair_bytes = sizeof(Pair<int>); // 8
-const real_bytes = sizeof(float64); // 8
-fn size<T>() -> ulong {
+const pair_bytes = sizeof(Pair<i32>); // 8
+const real_bytes = sizeof(f64); // 8
+fn size<T>() -> u64 {
 	sizeof(T)
 }
 ```
@@ -140,32 +141,33 @@ layout contract. `sizeof` does not imply that a type supports GPU storage.
 
 ## Numeric literals
 
-Numeric suffixes are case insensitive and fix the literal's primitive type. Prefix an
-integer width with `u` for unsigned values. The formatter writes lowercase suffixes with
-an underscore separator; the separator is optional in source except for hexadecimal `b`.
+Numeric literals have no suffixes. They get their types from context, including
+later assignments and uses. An annotation or explicit type application selects a
+width when context is insufficient:
 
-| Suffix | Type | Example |
-| --- | --- | --- |
-| `b` / `ub` | `sbyte` / `ubyte` (8 bits) | `-128_b`, `255_ub` |
-| `h` / `uh` | `short` / `ushort` (16 bits) | `-32768_h`, `65535_uh` |
-| `i` / `ui` | `int` / `uint` (32 bits) | `42_i`, `42_ui` |
-| `l` / `ul` | `long` / `ulong` (64 bits) | `42_l`, `42_ul` |
-| `f` / `d` | `float32` / `float64` | `1.5_f`, `1e3_d` |
+```resin
+fn example() {
+    let count: u32 = 42;
+    let step: f32 = 0.5;
+    let precise = f64(0.5);
+    assert(count == 42 && step == 0.5 && precise == 0.5);
+}
+```
 
-These widths are the same on every target. For example, `42UI`, `42uI`, and `42_ui`
-all mean the same thing, and format as `42_ui`. Uppercase `42L` now means signed `long`;
-use `42_ul` for unsigned `ulong`.
+| Primitive types | Meaning |
+| --- | --- |
+| `i8`, `i16`, `i32`, `i64` | Signed integers with the named bit width |
+| `u8`, `u16`, `u32`, `u64` | Unsigned integers with the named bit width |
+| `f32`, `f64` | 32-bit and 64-bit floating-point values |
 
-Unsuffixed literals take their type from context, including later assignments and uses.
-Integer notation can infer any numeric type; decimal-point and exponent notation infer
-floating-point types. Unconstrained integers default to `long`, and floats to `float64`.
-A suffixed literal cannot be retyped by an annotation or ascription. Out-of-range literals
-are errors, including negative unsigned literals and floating-point overflow. Integer
-suffixes require integer notation. Hexadecimal literals accept integer suffixes, such as
-`0xffff_ffff_ui` and `0xff_ub`. A signed byte suffix needs its separator (`0x7f_b`);
-otherwise `b/B` remains a hex digit. Hex `d/D/f/F` always remain digits.
-Use an explicit supported width for otherwise unconstrained shader literals, such as
-`let mut step = 0_i;`: the shader profile supports `ubyte`, `int`, `uint`, `ulong`, and `float32`.
+Widths are the same on every target. Integer notation can infer any numeric type;
+decimal-point and exponent notation infer floating-point types. Unconstrained
+integers default to `i64`, and floats to `f64`. Out-of-range literals are errors,
+including negative unsigned values and floating-point overflow.
+
+Underscores group digits: `1_000` and `0xffff_ffff`. In hexadecimal notation,
+`a` through `f` are always digits. Use a supported type for otherwise unconstrained
+shader literals: the shader profile supports `u8`, `i32`, `u32`, `u64`, and `f32`.
 
 ## Conditionals
 
@@ -176,8 +178,8 @@ branch is evaluated.
 An `if` without `else` has an implicit unit branch, so its body must also yield unit:
 
 ```resin
-if (count > 0_ul) {
-    count = count - 1_ul;
+if (count > u64(0)) {
+    count = count - u64(1);
 };
 ```
 
@@ -191,7 +193,7 @@ assignments made only inside that body do not establish definite initialization 
 
 ```resin
 export { main };
-import { "$/string.resin" };
+import { "$/string.resin", "$/stdio.resin" };
 
 fn main() -> () {
 	let mut n = 1;
@@ -200,7 +202,8 @@ fn main() -> () {
 		sum = sum + n;
 		n = n + 1;
 	};
-	print(fmt("sum = {0}\n", (sum,)));
+	let text = fmt("sum = {0}\n", (sum,));
+	print(text);
 }
 ```
 

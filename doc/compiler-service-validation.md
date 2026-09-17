@@ -292,7 +292,7 @@ strict wire data. Build and analyze handlers visibly sequence their compiler pas
   independently selected by the explicit build contract.
 - **Restart and editor correctness:** full/delta clients recover when a service
   restarts, including unchanged managed snapshots. The no-edit LSP restart test
-  changes a managed function from `int` to `bool`; the unchanged user buffer gets
+  changes a managed function from `i32` to `bool`; the unchanged user buffer gets
   fresh hover, diagnostics, and a new definition mirror. Older mirror bytes remain
   unchanged. Response validation rejects mismatched query kinds, invalid spans,
   and completion edits targeting a different document.

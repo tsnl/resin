@@ -8,13 +8,12 @@ on:
       - 'doc/**'
       - 'examples/**'
       - 'resin/**'
-      - 'crates/resin-client/**'
-      - 'crates/resin-cst/**'
-      - 'crates/tree-sitter-resin/**'
+      - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'scripts/manual.py'
       - 'scripts/check-manual.py'
+      - 'scripts/render-mandelbrot.py'
       - '.github/workflows/manual.yml'
   push:
     branches: [main]
@@ -23,13 +22,12 @@ on:
       - 'doc/**'
       - 'examples/**'
       - 'resin/**'
-      - 'crates/resin-client/**'
-      - 'crates/resin-cst/**'
-      - 'crates/tree-sitter-resin/**'
+      - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'scripts/manual.py'
       - 'scripts/check-manual.py'
+      - 'scripts/render-mandelbrot.py'
       - '.github/workflows/manual.yml'
   workflow_dispatch:
 
@@ -44,9 +42,13 @@ jobs:
   build:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libwayland-dev libxkbcommon-dev wayland-protocols spirv-tools
       - name: Install mdBook
         uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2
         with:

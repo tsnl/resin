@@ -5,14 +5,14 @@ selects a single applicable signature. **SFINAE** means “substitution failure 
 not an error”: if substituting the call's types makes a candidate signature
 inapplicable, that candidate is removed from consideration.
 
-For example, a generic `choose<T>(left: T, right: T)` cannot accept an `int` and a
+For example, a generic `choose<T>(left: T, right: T)` cannot accept an `i32` and a
 `bool` together: they cannot both determine the same `T`. A separate
-`choose(left: int, right: bool)` can remain applicable:
+`choose(left: i32, right: bool)` can remain applicable:
 
 ```resin
 fn choose<T>(left: T, right: T) -> T { left }
-fn choose(left: int, right: bool) -> int { if (right) { left } else { 0 } }
-fn example() -> int { choose(42_i, true) }
+fn choose(left: i32, right: bool) -> i32 { if (right) { left } else { 0 } }
+fn example() -> i32 { choose(i32(42), true) }
 ```
 
 If no candidate remains, the call fails; if several remain, it is ambiguous. There
@@ -33,18 +33,18 @@ one. Failed signature substitution removes a candidate; errors in a selected
 function's body remain errors and do not trigger fallback to another overload.
 
 ```resin
-fn combine(left: int, right: int) -> int {
+fn combine(left: i32, right: i32) -> i32 {
 	left + right
 }
-fn combine(left: int, right: bool) -> int {
+fn combine(left: i32, right: bool) -> i32 {
 	if (right) {
 		left
 	} else {
 		0
 	}
 }
-fn example() -> int {
-	20_i:combine(22_i) + combine(0_i, false)
+fn example() -> i32 {
+	i32(20):combine(i32(22)) + combine(i32(0), false)
 }
 ```
 
@@ -64,9 +64,9 @@ fn take<T>(cell: Cell<T>) -> T {
 fn replace_with<T, U>(cell: Cell<T>, value: U) -> Cell<U> {
 	Cell<U> { value = value }
 }
-fn example() -> int {
-	let cell = Cell<ulong> { value = 7 };
-	cell:replace_with::<ulong, int>(42):take()
+fn example() -> i32 {
+	let cell = Cell<u64> { value = 7 };
+	cell:replace_with::<u64, i32>(42):take()
 }
 ```
 
@@ -84,11 +84,11 @@ Operators use visible functions with Python-style names. Both operands participa
 in resolution, so relations need not belong to either operand's type.
 
 ```resin
-struct Vec2 { x: int, y: int }
+struct Vec2 { x: i32, y: i32 }
 fn __add__(left: Ref<Vec2>, right: Ref<Vec2>) -> Vec2 {
 	Vec2 { x = left.x + right.x, y = left.y + right.y }
 }
-fn __mul__(scale: int, value: Ref<Vec2>) -> Vec2 {
+fn __mul__(scale: i32, value: Ref<Vec2>) -> Vec2 {
 	Vec2 { x = scale * value.x, y = scale * value.y }
 }
 ```

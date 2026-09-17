@@ -10,16 +10,16 @@ to transfer a value from explicitly addressable storage.
 import { "$/span.resin", "$/shared.resin" };
 
 fn first<T>(items: Ref<Span<T>>) -> Ref<T> {
-	items:at(0_ul)
+	items:at(u64(0))
 }
-fn increment(value: Ref<int>) {
+fn increment(value: Ref<i32>) {
 	value = value + 1;
 }
 
-fn example() -> int | Err<_> {
-	let items = arc_ptr_alloc([10_i, 20_i])?;
-	let view = Span<int> { data = items:get():lea(0_ul), length = 2_ul };
-	let reference: Ref<int> = first(view);
+fn example() -> i32 | Err<_> {
+	let items = arc_ptr_alloc([i32(10), i32(20)])?;
+	let view = Span<i32> { data = items:get():lea(u64(0)), length = u64(2) };
+	let reference: Ref<i32> = first(view);
 	increment(reference);
 	first(view) = 42;
 	reference
@@ -33,7 +33,7 @@ permits direct reassignment. An explicit `Ref<T>` annotation retains an alias;
 unannotated locals and plain `_` holes infer value types.
 
 ```resin
-let mut value = 1_i;
+let mut value: i32 = 1;
 let reference: Ref<_> = value;
 let copied = reference; // int copies; copied remains 1.
 reference = 2;          // Writes value through the alias.
@@ -49,24 +49,26 @@ exactly; they cannot widen unions or error payloads. `value:operation(args)` is
 exactly `operation(value, args)`, including its argument rules. Receiver names
 have no special meaning and structs contain only fields.
 
-A function argument may also be a temporary value. The compiler materializes its
-storage and destroys it at the end of the full expression: a binding initializer,
-expression statement, block tail, or loop condition. Nested calls share that
-expression's temporary lifetime, and early exits clean up acquired temporaries.
+Reference arguments require initialized places: named locals, fields of places,
+pointer dereferences, or expressions that already return `Ref<T>`. A temporary
+value cannot bind to a reference parameter. Give it a local first:
 
 ```resin
-struct Item { value: int }
-fn read(item: Ref<Item>) -> int {
-	item.value
+struct Item { value: i32 }
+fn read(item: Ref<Item>) -> i32 {
+    item.value
 }
-fn example() -> int {
-	Item { value = 42 }:read()
+fn example() -> i32 {
+    let item = Item { value = 42 };
+    item:read()
 }
 ```
 
-This argument rule does not extend local reference initializers. An explicit
-`let reference: Ref<T> = expression;` still requires an initialized place, as does
-a reference-returning function body. Branches can select places:
+The same rule applies to receivers, overloaded operators, generic calls,
+reference initializers, and reference-returning function bodies. For example,
+`print(fmt(...))` needs a named formatted string before `print` can borrow it.
+The compiler does not create hidden storage to extend an argument's lifetime.
+Branches can select places:
 
 ```resin
 fn choose<T>(left: Ref<T>, right: Ref<T>, flag: bool) -> Ref<T> {
@@ -88,7 +90,7 @@ It may mutate the dying value but cannot turn a local value into a pointer.
 
 References neither retain shared owners nor destroy their referents. They do not
 track lifetimes or prevent aliasing. Returning a reference to a local, storing a
-reference returned from a borrowed temporary, or using a reference after its owner
+reference to a local that has left scope, or using a reference after its owner
 is moved or destroyed can leave a dangling alias. Callers must keep storage alive,
 initialized, and writable. String literal storage is read-only.
 
@@ -109,7 +111,7 @@ addressable storage; `Ref<Ptr<T>>` does not remove the stored pointer’s capabi
 ## Indexing and representation
 
 Arrays, `Span<T>`, and `str` support `items:at(index)` returning `Ref<T>` (or
-`Ref<ubyte>` for `str`). The index is `ulong`; receivers and indices evaluate once.
+`Ref<u8>` for `str`). The index is `u64`; receivers and indices evaluate once.
 Use `items:at(i) = value` to write. `:lea(i)` returns an element pointer for
 pointers to arrays, `Span<T>`, and `str`; it is unavailable on local array values
 and references to arrays. Thus an allocated array can produce pointers without

@@ -60,7 +60,7 @@ Resin has a fixed source style:
   Your editor controls how wide tabs appear.
 - Trailing commas are preserved and force one item per line in parameter lists,
   calls, tuples, arrays, records, struct fields, imports, and exports, except singleton
-  tuples such as `(x,)` and `(int,)`. Singleton tuples and lists without trailing commas
+  tuples such as `(x,)` and `(i32,)`. Singleton tuples and lists without trailing commas
   collapse unless comments or nested multiline constructs require breaks.
 - Nonempty blocks and match arm lists use multiple lines. Operators, declarations, and separators
   receive consistent spacing; no automatic line-length wrapping is performed.

@@ -3,13 +3,14 @@ export { escape_iterations, render };
 import { "$/math.resin", "$/span.resin", "$/shared.resin" };
 
 // ANCHOR: orbit
-fn escape_iterations(c: Complex<float32>, limit: int) -> int {
-	let mut z = complex(0.0_f, 0.0_f);
-	let mut n = 0_i;
+fn escape_iterations(c: Complex<f32>, limit: i32) -> i32 {
+	let mut z: Complex<f32> = complex(0.0, 0.0);
+	let mut n: i32 = 0;
 	while (n < limit) {
-		z = z:squared():add(c);
+		let square = z:squared();
+		z = square:add(c);
 		n = n + 1;
-		if (z:magnitude_squared() > 4.0_f) {
+		if (z:magnitude_squared() > 4.0) {
 			return n;
 		};
 	};
@@ -17,97 +18,54 @@ fn escape_iterations(c: Complex<float32>, limit: int) -> int {
 }
 // ANCHOR_END: orbit
 
-struct Color { r: float32, g: float32, b: float32, a: float32 }
+struct Color { r: f32, g: f32, b: f32, a: f32 }
 
 // ANCHOR: palette
-fn palette(count: int) -> Color {
+fn palette(count: i32) -> Color {
 	if (count == 0) {
-		return Color { r = 0.0_f, g = 0.0_f, b = 0.0_f, a = 1.0_f };
+		return Color { r = 0.0, g = 0.0, b = 0.0, a = 1.0 };
 	};
 	// Repeating blue-to-gold bands; reserve black for bounded orbits.
-	let t = float32((count & 63) + 1) / 65.0_f;
-	let u = 1.0_f - t;
+	let t = f32((count & 63) + 1) / 65.0;
+	let u = 1.0 - t;
 	Color {
-		r = 9.0_f * u * t * t * t,
-		g = 15.0_f * u * u * t * t,
-		b = 8.5_f * u * u * u * t,
-		a = 1.0_f,
+		r = 9.0 * u * t * t * t,
+		g = 15.0 * u * u * t * t,
+		b = 8.5 * u * u * u * t,
+		a = 1.0,
 	}
 }
 // ANCHOR_END: palette
 
-// ANCHOR: blend
-fn blend(accumulated: Color, sample: Color, weight: float32) -> Color {
-	Color {
-		r = accumulated.r + (sample.r - accumulated.r) * weight,
-		g = accumulated.g + (sample.g - accumulated.g) * weight,
-		b = accumulated.b + (sample.b - accumulated.b) * weight,
-		a = 1.0_f,
-	}
-}
-// ANCHOR_END: blend
-
-// ANCHOR: halton_samples
-fn halton_samples() -> _ {
-	[
-		(0.5_f, 1.0_f / 3.0_f),
-		(0.25_f, 2.0_f / 3.0_f),
-		(0.75_f, 1.0_f / 9.0_f),
-		(0.125_f, 4.0_f / 9.0_f),
-		(0.625_f, 7.0_f / 9.0_f),
-		(0.375_f, 2.0_f / 9.0_f),
-		(0.875_f, 5.0_f / 9.0_f),
-		(0.0625_f, 8.0_f / 9.0_f),
-		(0.5625_f, 1.0_f / 27.0_f),
-		(0.3125_f, 10.0_f / 27.0_f),
-		(0.8125_f, 19.0_f / 27.0_f),
-		(0.1875_f, 4.0_f / 27.0_f),
-		(0.6875_f, 13.0_f / 27.0_f),
-		(0.4375_f, 22.0_f / 27.0_f),
-		(0.9375_f, 7.0_f / 27.0_f),
-		(0.03125_f, 16.0_f / 27.0_f),
-	]
-}
-// ANCHOR_END: halton_samples
-
 // ANCHOR: coordinates
-fn coordinate(x: float32, y: float32, width: uint, height: uint) -> Complex<float32> {
-	let scale = 3.0_f / float32(height);
-	complex(-0.5_f + (x - 0.5_f * float32(width)) * scale, (0.5_f * float32(height) - y) * scale)
+fn coordinate(x: f32, y: f32, width: u32, height: u32) -> Complex<f32> {
+	let scale = 3.0 / f32(height);
+	complex(-0.5 + (x - 0.5 * f32(width)) * scale, (0.5 * f32(height) - y) * scale)
 }
 // ANCHOR_END: coordinates
 
 // ANCHOR: pixel
-fn evaluate_pixel(x: uint, y: uint, width: uint, height: uint, samples: int) -> Color {
-	let offsets = halton_samples();
-	let mut color = Color { r = 0.0_f, g = 0.0_f, b = 0.0_f, a = 1.0_f };
-	let mut i = 0_i;
-	while (i < samples) {
-		let offset = offsets:at(ulong(i));
-		let c = coordinate(float32(x) + offset.0, float32(y) + offset.1, width, height);
-		color = blend(color, palette(escape_iterations(c, 256)), 1.0_f / float32(i + 1));
-		i = i + 1;
-	};
-	color
+fn evaluate_pixel(x: u32, y: u32, width: u32, height: u32) -> Color {
+	let c = coordinate(f32(x) + 0.5, f32(y) + 0.5, width, height);
+	palette(escape_iterations(c, 256))
 }
 // ANCHOR_END: pixel
 
 // ANCHOR: render
-fn render(width: uint, height: uint, samples: int) -> ArcSpan<ubyte> | Err<_> {
-	assert(width > 0_ui && height > 0_ui);
-	assert(samples >= 1 && samples <= 16);
-	let pixels = arc_span_alloc::<ubyte>(ulong(width) * ulong(height) * 4_ul, 0_ub)?;
+fn render(width: u32, height: u32) -> ArcSpan<u8> | Err<_> {
+	assert(width > 0 && height > 0);
+	let pixels = arc_span_alloc::<u8>(u64(width) * u64(height) * 4, 0)?;
 	let view = pixels:get();
-	let mut y = 0_ui;
+	let mut y: u32 = 0;
 	while (y < height) {
-		let mut x = 0_ui;
+		let mut x: u32 = 0;
 		while (x < width) {
-			let color = evaluate_pixel(x, y, width, height, samples);
-			let index = (ulong(y) * ulong(width) + ulong(x)) * 4_ul;
-			view:at(index) = ubyte(color.r * 255.0_f + 0.5_f);
-			view:at(index + 1_ul) = ubyte(color.g * 255.0_f + 0.5_f);
-			view:at(index + 2_ul) = ubyte(color.b * 255.0_f + 0.5_f);
-			view:at(index + 3_ul) = 255_ub;
+			let color = evaluate_pixel(x, y, width, height);
+			let index = (u64(y) * u64(width) + u64(x)) * 4;
+			view:at(index) = u8(color.r * 255.0 + 0.5);
+			view:at(index + 1) = u8(color.g * 255.0 + 0.5);
+			view:at(index + 2) = u8(color.b * 255.0 + 0.5);
+			view:at(index + 3) = 255;
 			x = x + 1;
 		};
 		y = y + 1;

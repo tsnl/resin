@@ -7,20 +7,20 @@ one type for the whole function body.
 ## Local values and contextual literals
 
 ```resin
-fn twice(value: int) -> int { value + value }
-fn example() -> int {
+fn twice(value: i32) -> i32 { value + value }
+fn example() -> i32 {
     let initial = 21;
     let answer = twice(initial);
     answer
 }
 ```
 
-The call requires an `int`, so `initial`'s unsuffixed literal is typed as `int`.
+The call requires an `i32`, so `initial`'s literal is typed as `i32`.
 Constraints can come from later assignments or uses, not just an initializer.
-Write `let initial: int = 21;` or `let initial = 21_i;` to state that choice directly.
+Write `let initial: i32 = 21;` or `let initial = i32(21);` to state that choice directly.
 
-Unconstrained integer literals default to `long`, and floating-point literals to
-`float64`, after contextual constraints are considered. A suffix fixes the type;
+Unconstrained integer literals default to `i64`, and floating-point literals to
+`f64`, after contextual constraints are considered. An explicit type application fixes the type;
 it cannot be silently changed to make a call fit. This is contextual literal typing,
 not an implicit conversion of an existing numeric value.
 
@@ -28,13 +28,13 @@ not an implicit conversion of an existing numeric value.
 
 ```resin
 fn identity<T>(value: T) -> T { value }
-fn example() -> int {
-    let value: int = identity(42);
-    identity::<int>(value)
+fn example() -> i32 {
+    let value: i32 = identity(42);
+    identity::<i32>(value)
 }
 ```
 
-The first call determines `T = int` from the operand and expected result. The
+The first call determines `T = i32` from the operand and expected result. The
 second supplies that type explicitly. Generic arguments can be determined from the
 whole signature, including the result. A definition's named `T` remains one rigid
 parameter while checking that definition; inference does not independently choose
@@ -54,9 +54,9 @@ Write `_` to request a concrete type inferred from the surrounding code:
 
 ```resin
 export { main };
-import { "$/string.resin" };
+import { "$/string.resin", "$/stdio.resin" };
 
-fn next(n: int) -> _ {
+fn next(n: i32) -> _ {
 	n + 1
 }
 
@@ -64,12 +64,13 @@ fn main() {
 	let mut value: _;
 	value = next(41);
 	let reference: Ref<_> = value;
-	print(fmt("value = {0}\n", (reference,)));
+	let text = fmt("value = {0}\n", (reference,));
+	print(text);
 }
 ```
 Holes can nest inside local annotations, local type ascriptions, function results,
 and explicit type applications: `Ptr<Ptr<_>>`, `Span<_>`, `(_, Ptr<_>)`,
-`(int) -> _`, and `identity::<_>(42_i)`. Each `_` is an independent, weak inference
+`(i32) -> _`, and `identity::<_>(i32(42))`. Each `_` is an independent, weak inference
 variable. It may resolve to an enclosing named type parameter, but never creates
 a new generic parameter.
 

@@ -22,13 +22,6 @@ def library_chapters(items):
         if chapter is None:
             continue
         if chapter.get("source_path") == "library.md":
-            tool = os.environ.get("RESIN_DOC_TOOL")
-            if tool is None:
-                subprocess.run(["cargo", "build", "--quiet", "--locked", "-p", "resin"], cwd=root, check=True)
-                target = Path(os.environ.get("CARGO_TARGET_DIR", root / "target"))
-                if not target.is_absolute():
-                    target = root / target
-                tool = str(target / "debug" / ("resin.exe" if os.name == "nt" else "resin"))
             for index, module in enumerate(sorted((root / "resin").glob("*.resin")), 1):
                 chapter["content"] = chapter["content"].replace(
                     f"(../resin/{module.name})", f"(api/{module.stem}.md)")
@@ -69,9 +62,33 @@ def chapters(sections):
                 url += "#" + anchor
             return f"[{match.group(1)}]({url})"
 
+        if chapter.get("source_path") == "tutorial/index.md":
+            chapter["content"] = chapter["content"].replace("<!-- MANDELBROT_IMAGE -->", illustration)
         chapter["content"] = re.sub(r"(?<!!)\[([^\]]+)\]\(([^\s)]+)\)", link, chapter["content"])
         chapters(chapter["sub_items"])
 
+
+# The build owns an isolated compiler service only while producing the illustration.
+# The finished static site has no service dependency.
+target = Path(os.environ.get("CARGO_TARGET_DIR", root / "target"))
+if not target.is_absolute():
+    target = root / target
+suffix = ".exe" if os.name == "nt" else ""
+tool = os.environ.get("RESIN_DOC_TOOL", str(target / "debug" / ("resin" + suffix)))
+packages = ["resin-server", "resin-runtime"]
+if "RESIN_DOC_TOOL" not in os.environ:
+    packages.append("resin")
+subprocess.run(["cargo", "build", "--quiet", "--locked",
+                *[arg for package in packages for arg in ("-p", package)]],
+               cwd=root, stdout=sys.stderr, check=True)
+encoded = subprocess.check_output([
+    sys.executable, str(root / "scripts/render-mandelbrot.py"), str(root), tool,
+    str(target / "debug" / ("resin-server" + suffix)),
+], cwd=root, text=True).strip()
+illustration = (f'<img src="data:image/png;base64,{encoded}" '
+                'alt="Mandelbrot set rendered by the explorer" width="640" height="480">\n\n'
+                '*Rendered by this checkout during the book build: CPU, 640 × 480, '
+                '256 iterations, one sample at each pixel center.*')
 
 library_chapters(book["items"])
 chapters(book["items"])

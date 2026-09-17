@@ -124,7 +124,7 @@ Libraries declare compiler operations through explicit intrinsic signatures:
 
 ```resin
 intrinsic "pointer_index" fn pointer_at<T>(
-    data: Ptr<T>, length: ulong, index: ulong
+    data: Ptr<T>, length: u64, index: u64
 ) -> Ptr<T>;
 ```
 The operation string selects a compiler contract; the function name belongs to the
@@ -193,8 +193,8 @@ restores the destination; types with custom drop hooks forbid partial moves.
 Completion follows runtime evaluation order, intersects reachable branch states,
 and checks loop backedges, `continue`, `break`, and returns. Layout queries retain
 no operand effects. Completed HIR records ownership transfers with `Move` and
-retains generic borrowed reads for concrete checking. Reference argument temporaries
-are materialized until the full-expression boundary. References and raw pointers
+retains generic borrowed reads for concrete checking. Reference arguments
+require places, checked again after dependent signatures specialize. References and raw pointers
 have no static lifetime or aliasing checks.
 
 LIR lowering assigns storage to binding IDs and makes evaluation, ownership cleanup,
@@ -221,7 +221,7 @@ host instances, while SPIR-V follows the requested shader graph.
 
 Source functions bind named parameters with `fn identity<T>(value: T) -> T`.
 Every declaration reference creates a fresh application, deduced from operands and
-expected results or supplied with `identity::<int>`. Bound parameters remain rigid
+expected results or supplied with `identity::<i32>`. Bound parameters remain rigid
 inside the definition; local function values remain monomorphic. A `_` is a weak
 monomorphic variable and can unify with an enclosing named parameter. Applications
 retain substitutions around unresolved definition variables, so recursive dependency
@@ -278,7 +278,7 @@ Only a signature, value, field, layout query, or other operation that uses the t
 materializes its concrete representation. An unused type argument therefore does
 not request its fields or drop hook. Member-derived arguments restore source
 origins and canonical union order before memoization. Concrete names and diagnostic
-arguments retain names such as `Node<int>` instead of private catalog indices.
+arguments retain names such as `Node<i32>` instead of private catalog indices.
 
 `resin_lir::build_lir` accepts closed HIR applications and constructs their target
 program. An empty entry list requests all ordinary functions and nongeneric nominal

@@ -7,7 +7,7 @@ check statuses before returning out-parameter values. For example:
 export { Gpu, gpu_new };
 extern {
 	"resin_runtime.h": {
-		fn resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
+		fn resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> i32;
 		fn resin_gpu_destroy(gpu: Ptr<ResinGpu>);
 	},
 };
@@ -16,13 +16,13 @@ import { "$/status.resin", "$/shared.resin" };
 extern type ResinGpu;
 struct GpuOwner { handle: Ptr<ResinGpu> }
 fn drop(owner: Ref<GpuOwner>) {
-	if (ulong(owner.handle) != 0_ul) {
+	if (u64(owner.handle) != u64(0)) {
 		resin_gpu_destroy(owner.handle);
 	};
 }
 struct Gpu { owner: ArcPtr<GpuOwner> }
 fn gpu_new() -> Gpu | Err<RuntimeError> {
-	let owner = arc_ptr_alloc(GpuOwner { handle = Ptr<ResinGpu>(0_ul) })?;
+	let owner = arc_ptr_alloc(GpuOwner { handle = Ptr<ResinGpu>(u64(0)) })?;
 	runtime_status_from_code(resin_gpu_create(&owner:get().handle))?;
 	Gpu { owner = owner }
 }
@@ -55,33 +55,34 @@ This is an unchecked C boundary: declarations must match the header's ABI, and c
 pointer validity, lifetimes, buffer lengths, and synchronization. `&place` takes an address only for storage reached through a pointer;
 locals and `Ref` referents cannot expose their addresses.
 `pointer.*` dereferences it. On the host, explicit casts allow pointer-to-pointer and
-pointer-to-`ulong` roundtrips. There is no borrow checker; borrowed pointers and references must not outlive their storage.
+pointer-to-`u64` roundtrips. There is no borrow checker; borrowed pointers and references must not outlive their storage.
 Pointer arithmetic is forbidden. Use array or span indexing, or explicitly convert a pointer
-into `ulong`, perform **byte** arithmetic, and convert back when low-level address manipulation
+into `u64`, perform **byte** arithmetic, and convert back when low-level address manipulation
 is necessary on the host. Shaders reject pointer casts; use typed pointers and indexing.
 Host pointer casts and all raw pointer dereferences remain unchecked.
 
-Arrays, spans, and `str` use `:at(index)` for indexing and return `Ref<T>` (`Ref<ubyte>` for `str`).
-The index parameter is `ulong` (unsigned 64-bit); unsuffixed literals infer this type, while
-other integer values need an explicit conversion, such as `:at(ulong(i))`:
+Arrays, spans, and `str` use `:at(index)` for indexing and return `Ref<T>` (`Ref<u8>` for `str`).
+The index parameter is `u64` (unsigned 64-bit); unsuffixed literals infer this type, while
+other integer values need an explicit conversion, such as `:at(u64(i))`:
 
 ```resin
-let values = arc_ptr_alloc([10_i, 20, 30])?;
+let values = arc_ptr_alloc([i32(10), 20, 30])?;
 values:get():at(1) = 42;
-let view = Span<int> { data = values:get():lea(0), length = 3_ul };
+let view = Span<i32> { data = values:get():lea(0), length = u64(3) };
 let element = view:at(1);
-print(fmt("{0}\n", (element,)));
+let text = fmt("{0}\n", (element,));
+print(text);
 ```
 Import `$/shared.resin` and `$/span.resin` for this allocated view.
 `:lea(index)` returns a pointer for pointers to arrays, spans, and `str`.
 Local arrays support `:at(index)` but cannot produce element pointers.
 
-Use `let element: Ref<int> = view:at(1);` to retain an alias instead of copying the
+Use `let element: Ref<i32> = view:at(1);` to retain an alias instead of copying the
 value. Reference parameters and results expose the same place semantics in user
 functions; see [references](references.md) for binding, lifetime, and migration rules.
 
 Arrays retain the original `values(index)` spelling; source spans use `:at(index)`. `Span<T>` has `data: Ptr<T>`
-and `length: ulong` fields. Host indexing checks
+and `length: u64` fields. Host indexing checks
 the array or span length and terminates with a diagnostic for negative or out-of-range indices,
 before forming an element address. This failure does not unwind automatic cleanup.
 Shader array and span indexing is unchecked: callers must keep indices within valid storage;

@@ -24,33 +24,20 @@ fn orbit_checkpoint_checks_escape_counts_and_the_boundary() {
 #[test]
 fn image_checkpoints_write_opaque_pngs_without_a_gpu() {
     let directory = tempfile::TempDir::new().unwrap();
-    let mut images = Vec::new();
-    for (program, image_name) in [
-        ("02_image.resin", "mandelbrot-1.png"),
-        ("03_sampling.resin", "mandelbrot-16.png"),
-    ] {
-        let (_project, executable) = checkpoint(program);
-        let output = Command::new(executable.path())
-            .current_dir(directory.path())
-            .env_remove("DISPLAY")
-            .env_remove("WAYLAND_DISPLAY")
-            .env("VK_DRIVER_FILES", directory.path().join("no-driver.json"))
-            .env("VK_ICD_FILENAMES", directory.path().join("no-driver.json"))
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{program}: {output:?}");
-        let image = resin_runtime::image_read_png(directory.path().join(image_name), 4).unwrap();
-        assert_eq!((image.width, image.height), (320, 240));
-        assert!(image.pixels.chunks_exact(4).all(|pixel| pixel[3] == 255));
-        assert!(
-            image
-                .pixels
-                .chunks_exact(4)
-                .any(|pixel| pixel[..3] != [0, 0, 0])
-        );
-        images.push(image);
-    }
-    assert_ne!(images[0].pixels, images[1].pixels);
+    let (_project, executable) = checkpoint("02_image.resin");
+    let output = Command::new(executable.path())
+        .current_dir(directory.path())
+        .env_remove("DISPLAY")
+        .env_remove("WAYLAND_DISPLAY")
+        .env("VK_DRIVER_FILES", directory.path().join("no-driver.json"))
+        .env("VK_ICD_FILENAMES", directory.path().join("no-driver.json"))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let image = resin_runtime::image_read_png(directory.path().join("mandelbrot.png"), 4).unwrap();
+    assert_eq!((image.width, image.height), (320, 240));
+    assert!(image.pixels.chunks_exact(4).all(|pixel| pixel[3] == 255));
+    assert!(image.pixels.chunks_exact(4).any(|pixel| pixel[..3] != [0, 0, 0]));
 }
 
 #[test]
@@ -78,16 +65,10 @@ fn tutorial_reference_rejections_remain_language_errors() {
 
 #[test]
 fn introductory_checkpoints_teach_values_functions_and_ufcs() {
-    for (program, expected) in [
-        ("basics/hello.resin", "Hello, Resin!\n"),
-        ("basics/functions.resin", "answer = 42, doubled = 84\n"),
-        ("basics/counter.resin", "counter = 42, sum = 55: ready\n"),
-    ] {
-        let (_project, executable) = checkpoint(program);
-        let output = Command::new(executable.path()).output().unwrap();
-        assert!(output.status.success(), "{program}: {output:?}");
-        assert_eq!(String::from_utf8(output.stdout).unwrap(), expected);
-    }
+    let (_project, executable) = checkpoint("basics.resin");
+    let output = Command::new(executable.path()).output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(output.stdout, b"counter = 42, sum = 55: ready\n");
 }
 
 #[test]

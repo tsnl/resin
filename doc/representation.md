@@ -4,14 +4,14 @@
 
 ### Byte-array storage
 
-An ordinary `ubyte` array contains exactly its N declared bytes, with alignment 1 and
+An ordinary `u8` array contains exactly its N declared bytes, with alignment 1 and
 stride N when nested in another array. Host and device layouts agree. Whole-array copies
 copy those elements without an extra sentinel; embedded zeros remain ordinary data.
-`size_of([1_ub, 2_ub])` is 2, and `size_of([[1_ub, 2_ub], [3_ub, 4_ub]])` is 4.
+`size_of([u8(1), u8(2)])` is 2, and `size_of([[u8(1), u8(2)], [u8(3), u8(4)]])` is 4.
 Empty arrays reserve a C storage placeholder for portability; it is not an accessible
 array element, and empty arrays have no shared host/device layout.
 
-For C calls, obtain an element pointer with `:lea(0_ul)` on a pointer to an
+For C calls, obtain an element pointer with `:lea(u64(0))` on a pointer to an
 allocated, nonempty byte array, and pass its logical length. An inline local array
 cannot expose its address; use explicitly allocated storage when a C API needs a
 pointer. Raw arrays and spans do not promise NUL termination. Use a `str` literal's `.data`
@@ -20,7 +20,7 @@ copies raw bytes and appends that terminator outside the logical length.
 
 ### Shared size and alignment
 
-`size_of(T)` and `align_of(T)` return `ulong` constants for the shared host/device
+`size_of(T)` and `align_of(T)` return `u64` constants for the shared host/device
 layout of a concrete type. They use the same layout rules as C assertions and SPIR-V
 storage emission. Scalars in the shared profile, padded/nested records, pointers,
 spans, and nonempty arrays are supported; unsupported layouts produce a source error.
@@ -32,7 +32,7 @@ booleans, function values, and other types outside the shared profile are reject
 Use `gpu:create(value)?` to allocate and initialize one GPU element, with its type
 inferred from the value or result context. `gpu:alloc::<T>(count)?` allocates
 uninitialized elements and checks the multiplication of count by element size.
-The byte allocator `gpu:alloc_in::<ubyte>(bytes, memory)?` returns `GpuSpan<ubyte>`.
+The byte allocator `gpu:alloc_in::<u8>(bytes, memory)?` returns `GpuSpan<u8>`.
 
 ### Explicit numeric conversions
 
@@ -43,17 +43,17 @@ toward zero, then range-check; NaNs, infinities, and out-of-range results trap. 
 exclusive power-of-two upper bounds, including for 64-bit integer destinations.
 
 Integer-to-float and float narrowing use round-to-nearest, ties-to-even in the normal
-floating-point environment. Float32-to-float64 is exact. Float64-to-float32 overflow
-produces signed infinity; results below the smallest normal float32 magnitude become
+floating-point environment. Float32-to-f64 is exact. Float64-to-f32 overflow
+produces signed infinity; results below the smallest normal f32 magnitude become
 signed zero. NaNs remain NaNs without a payload guarantee. Signed zero is preserved.
 C traps abort the process; shader traps stop that invocation and propagate failure
 through helper calls. Traps do not unwind automatic cleanup.
 A shader trap is not a host-visible Err value, and earlier writes remain visible.
 
-The shared shader profile supports `ubyte`, `int`, `uint`, `ulong`, and `float32` conversions.
+The shared shader profile supports `u8`, `i32`, `u32`, `u64`, and `f32` conversions.
 Other numeric types remain available on the host and are diagnosed when reached by a
-shader. There are no implicit numeric conversions. `float32(1)` still contextually types
-a direct unsuffixed literal; suffixes fix source literal types. A conversion of a local
+shader. There are no implicit numeric conversions. `f32(1)` still contextually types
+a direct numeric literal. A conversion of a local
 value does not narrow that local's storage merely because of the destination type.
 Pointer reinterpretation and nominal record ascription remain separate IR operations.
 
@@ -65,9 +65,9 @@ if that type cannot otherwise be inferred. An inhabited struct or union is rejec
 For example, an infallible error union can be unwrapped without inventing an error value:
 
 ```resin
-fn unwrap(r: (int | Err<Never>)) -> int {
+fn unwrap(r: (i32 | Err<Never>)) -> i32 {
 	match (r) {
-		int(n) => {
+		i32(n) => {
 			n
 		},
 		Err(impossible) => {

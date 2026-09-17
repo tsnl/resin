@@ -27,7 +27,7 @@ the GPU dispatch assigns one element to each invocation.
 | --- | --- | ---: | ---: |
 | `branch_heavy` | Integer recurrence with a data-dependent branch inside a loop | 262,144 | 128 |
 | `arithmetic` | Integer recurrence with a loop and no data-dependent branch | 262,144 | 128 |
-| `stream` | Read a `uint`, multiply and add, then write a `uint` | 4,000,000 | 1 |
+| `stream` | Read a `u32`, multiply and add, then write a `u32` | 4,000,000 | 1 |
 
 `branch_heavy` preserves the synthetic shader used to compare structured LIR with
 the previous control-flow dispatcher. It stresses control flow and should not be
@@ -39,7 +39,7 @@ outside the current suite.
 All arithmetic uses wrapping unsigned 32-bit integers. Counts and iteration limits
 arrive through runtime parameters, and outputs are consumed by correctness checks.
 The harness checks a hash of every CPU output against an independent Rust scalar
-reference using an FNV-style hash over `uint` values. GPU outputs are compared element by element with that reference
+reference using an FNV-style hash over `u32` values. GPU outputs are compared element by element with that reference
 before and after measurement. A mismatch fails the run.
 
 ## Selecting work and recording results
@@ -101,9 +101,9 @@ quiet during measurement.
 ## Adding a workload
 
 1. Add a dedicated Resin module under `workloads/`, exporting `Root`, `kernel`, and
-   `cpu`. Preserve the common root layout: `count: uint`, `iterations: uint`,
-   `input: Ptr<uint>`, and `output: Ptr<uint>`. The decorated compute `kernel`
-   takes `(index: ulong, root: Ptr<Root>)`; `cpu` takes `Ptr<Root>` and invokes the
+   `cpu`. Preserve the common root layout: `count: u32`, `iterations: u32`,
+   `input: Ptr<u32>`, and `output: Ptr<u32>`. The decorated compute `kernel`
+   takes `(index: u64, root: Ptr<Root>)`; `cpu` takes `Ptr<Root>` and invokes the
    same kernel for each element. Check the index against `count` before access.
 2. Add the name to the CLI allowlist and `WORKLOADS` in [suite/mod.rs](../benchmarks/suite/mod.rs), setting
    its default count and iteration count; implement its independent scalar reference

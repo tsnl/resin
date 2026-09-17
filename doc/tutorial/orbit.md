@@ -14,16 +14,16 @@ structure near the boundary and cost more work.
 
 ## Read the Resin
 
-`Complex<float32>` comes from [`$/math.resin`](../../resin/math.resin). `let mut`
-permits reassignment; `let` alone binds an immutable value. The suffix `_f` chooses
-`float32`, and `_i` chooses `int`. Without the suffixes, unconstrained floats and
-integers default to `float64` and `long` respectively.
+`Complex<f32>` comes from [`$/math.resin`](../../resin/math.resin). `let mut`
+permits reassignment; `let` alone binds an immutable value. Numeric literals get
+their types from context; an unconstrained integer defaults to `i64`, and a float
+to `f64`. The `Complex<f32>` annotation chooses the recurrence's precision.
 
-`z:squared():add(c)` uses free functions through method notation:
-`add(squared(z), c)`. The math helpers take `Ref<Complex<T>>` parameters, so they
-can read local complex values without moving them. The intermediate result is a
-temporary that lasts through the expression. These calls do not create a
-user-visible pointer to `z`. See [references](../references.md) for the contract.
+`square:add(c)` uses a free function through UFCS: it means `add(square, c)`.
+The math helpers borrow `Ref<Complex<T>>` operands and return new values; they
+leave the inputs unchanged. Ref arguments require initialized places, so the
+square is bound to a local before the next call. No user-visible pointer is
+created. See [references](../references.md) for the contract.
 
 A function's final expression supplies its result without `return`; `return n`
 exits early. `assert(condition)` is a language construct. Booleans are `true` and

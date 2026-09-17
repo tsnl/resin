@@ -56,24 +56,24 @@ In another terminal at the repository root, tell the client where the service is
 
 ```sh
 export RESIN_SERVER=http://127.0.0.1:7412
-cargo run -- examples/tutorial/basics/hello.resin
+cargo run -- examples/tutorial/basics.resin
 ```
 
 In PowerShell, use `$env:RESIN_SERVER = "http://127.0.0.1:7412"` for that first line.
 `cargo run` runs the Resin CLI from this checkout. The CLI uploads the source,
 downloads the compiled executable, and runs it locally with your working directory,
-arguments, and environment. You should see `Hello, Resin!`.
+arguments, and environment. You should see `counter = 42, sum = 55: ready`.
 
 ## Build an executable
 
 To save an optimized executable instead of immediately running a debug build:
 
 ```sh
-cargo run -- examples/tutorial/basics/hello.resin -o hello
-./hello
+cargo run -- examples/tutorial/basics.resin -o counter
+./counter
 ```
 
-On Windows use `-o hello.exe`, then `./hello.exe`. Once built, the executable does
+On Windows use `-o counter.exe`, then `./counter.exe`. Once built, the executable does
 not contact the compiler service. [Tools](tools.md) explains entry selection,
 program arguments after `--`, formatting, and editor setup. Formatting and source
 documentation generation are local operations and do not need `RESIN_SERVER`.

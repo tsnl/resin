@@ -18,7 +18,7 @@ export { main };
 import { "$/gpu.resin" };
 
 @compute_shader
-fn kernel(index: ulong, output: Ptr<ulong>) {
+fn kernel(index: u64, output: Ptr<u64>) {
 	output.* = index;
 }
 fn main() -> (() | Err<_>) {
@@ -57,12 +57,12 @@ the pipeline and projects GPU views internally. Shader entries keep a typed poin
 as their second parameter:
 
 ```resin
-struct Params { values: Span<float32>, scale: float32 }
+struct Params { values: Span<f32>, scale: f32 }
 
 @compute_shader
-fn kernel(index: ulong, root: Ptr<Params>) -> ()  {
+fn kernel(index: u64, root: Ptr<Params>) -> ()  {
     if (index < root.values.length) {
-        let mut p: Ref<float32> = root.values:at(index);
+        let mut p: Ref<f32> = root.values:at(index);
         p = p * root.scale;
         ()
     } else { () }
@@ -70,17 +70,17 @@ fn kernel(index: ulong, root: Ptr<Params>) -> ()  {
 ```
 The entry interfaces are:
 
-- Compute takes `(ulong, Ptr<T>)` and returns `()`. Call `gpu:compute_workgroup_size()`
-  to get the `ulong` number of invocations per workgroup for that `Gpu`. The runtime
+- Compute takes `(u64, Ptr<T>)` and returns `()`. Call `gpu:compute_workgroup_size()`
+  to get the `u64` number of invocations per workgroup for that `Gpu`. The runtime
   selects it from the device's reported default subgroup size, bounded by its workgroup
   limits, and specializes each compute pipeline to match. The value stays fixed for
   that GPU's lifetime. With `let mut workgroup_size = gpu:compute_workgroup_size();`, compute
-  dispatch groups with `uint((count + workgroup_size - 1_ul) / workgroup_size)`.
+  dispatch groups with `u32((count + workgroup_size - u64(1)) / workgroup_size)`.
   The index is the global X invocation index. Dispatch only in X (`y = z = 1`) and guard
   any excess invocations in the function, as above.
-- Vertex takes an `int` vertex index, optionally paired with `Ptr<T>`, and returns
+- Vertex takes an `i32` vertex index, optionally paired with `Ptr<T>`, and returns
   `Vertex` with `position: Position` and `color: Color` fields.
-  Position has `float32` fields `x, y, z, w`; Color has `r, g, b, a`, in those orders.
+  Position has `f32` fields `x, y, z, w`; Color has `r, g, b, a`, in those orders.
 - Fragment takes Color, optionally paired with `Ptr<T>`, and returns Color.
 
 Allocate typed GPU storage with `gpu:create(value)?` (an inferred `GpuPtr<T>`) or
@@ -88,16 +88,16 @@ Allocate typed GPU storage with `gpu:create(value)?` (an inferred `GpuPtr<T>`) o
 and `Span<T>` fields with `GpuPtr<T>` and `GpuSpan<T>` values:
 
 ```resin
-let values = gpu:alloc::<float32>(1024)?;
-let mut index = 0_ul;
+let values = gpu:alloc::<f32>(1024)?;
+let mut index: u64 = 0;
 while (index < values.length) {
-    values:at(index):store(1.0_f);
-    index = index + 1_ul;
+    values:at(index):store(f32(1.0));
+    index = index + u64(1);
 };
-struct HostParams { values: GpuSpan<float32>, scale: float32 }
+struct HostParams { values: GpuSpan<f32>, scale: f32 }
 let pipeline = gpu:create_compute_pipeline(kernel)?;
 let commands = gpu:start_command_recording()?;
-commands:dispatch(pipeline, HostParams { values = values, scale = 2.0_f }, 16, 1, 1)?;
+commands:dispatch(pipeline, HostParams { values = values, scale = f32(2.0) }, 16, 1, 1)?;
 commands:submit()?;
 ```
 
@@ -108,7 +108,7 @@ through synchronous submission or cancellation. They must belong to the recordin
 GPU. See [GPU buffers](gpu-buffers.md).
 
 Device pointers support loads, stores, record fields, typed indexing, and passing to
-ordinary helpers. Pointer reinterpretation and pointer/integer conversions are host-only. Shared storage supports `ubyte`, `int`, `uint`, `long`, `float32`, `ulong`, pointers, nonempty
+ordinary helpers. Pointer reinterpretation and pointer/integer conversions are host-only. Shared storage supports `u8`, `i32`, `u32`, `i64`, `f32`, `u64`, pointers, nonempty
 records, arrays, spans, and nominal wrappers. Scalars align to their size; records align to their largest
 member, with member and trailing padding. This matches C and Vulkan's base alignment rules without requiring
 scalar-block-layout support. Generated C asserts sizes, alignments, and member offsets.
@@ -126,7 +126,7 @@ memory. GPU views cannot be converted to raw `Ptr` values; the compiler's shader
 projection is the host-to-device address conversion boundary. GPU buffer elements
 must have a shared layout without pointers, spans, owners, or drop hooks.
 
-Shader bodies support `ubyte`, 32-bit numbers, `long`, `ulong`, booleans, records, nominal types, local mutation,
+Shader bodies support `u8`, 32-bit numbers, `i64`, `u64`, booleans, records, nominal types, local mutation,
 branches, loops, and direct calls to named Resin helpers. Foreign calls, recursion,
 indirect calls, and integer division/remainder/shifts are rejected. Arrays and spans support
 unchecked `:at()` indexing. Local addresses

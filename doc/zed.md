@@ -92,7 +92,7 @@ save, add these [language settings](https://zed.dev/docs/configuring-languages):
 The formatter always indents with hard tabs; `hard_tabs` also makes ordinary editor
 indentation use tabs. `tab_size` controls their display width. A trailing comma
 forces a list onto multiple lines and is preserved, except for singleton tuples such as
-`(x,)` and `(int,)`. Comments and nested multiline content can still force breaks. Comments stay intact, and
+`(x,)` and `(i32,)`. Comments and nested multiline content can still force breaks. Comments stay intact, and
 multiple blank lines collapse to one. See the [formatting rules](editor-client.md#formatting)
 for details. Incomplete syntax is left unchanged until repaired.
 

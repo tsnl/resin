@@ -18,8 +18,8 @@ not change Cargo's Rust profile or shader optimization.
 Runs inherit cwd and standard streams; Resin returns the program's exit status.
 Use `FILE:ENTRY` to select an exported function; omitting `:ENTRY` selects `main`.
 A file can export several entry points. Host entries take either `()` or
-`(int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>)` for `argc`, `argv`, and `envp`, and return
-`int`, `()`, or a union of those types with `Err<E>`;
+`(i32, Ptr<Ptr<u8>>, Ptr<Ptr<u8>>)` for `argc`, `argv`, and `envp`, and return
+`i32`, `()`, or a union of those types with `Err<E>`;
 `main` is just the default name, not special syntax.
 Execution begins at the selected function. It must be explicitly exported by the entry file,
 including when re-exporting an imported function. Missing or private entries are errors.
@@ -33,14 +33,16 @@ The exported entry may use the conventional three-argument form:
 
 ```resin
 export { main };
-import { "$/string.resin", "$/process.resin", "$/span.resin" };
+import { "$/string.resin", "$/stdio.resin", "$/process.resin", "$/span.resin" };
 
-fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> () {
+fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> () {
 	let args = arguments(argc, argv);
-	let mut index = 1_ul;
+	let mut index: u64 = 1;
 	while (index < args.length) {
-		print(fmt("{0}\n", (argument(args, index):bytes(),)));
-		index = index + 1_ul;
+		let argument = argument(args, index);
+		let text = fmt("{0}\n", (argument:bytes(),));
+		print(text);
+		index = index + u64(1);
 	};
 }
 ```
@@ -56,7 +58,7 @@ Windows converts its native wide inputs to UTF-8, replacing unpaired UTF-16 surr
 `$/process.resin` provides `arguments(argc, argv)` and `environment(envp)` as pointer spans,
 `argument(args, index)` as a checked byte-span view, and `c_string(pointer)` for a valid
 NUL-terminated string. `environment_get(envp, name)` takes a NUL-terminated name and returns
-`(Span<ubyte> | Err<EnvironmentVariableNotFound>)`. Lookup is exact and case-sensitive on
+`(Span<u8> | Err<EnvironmentVariableNotFound>)`. Lookup is exact and case-sensitive on
 all platforms; an empty value succeeds with length zero. It never reads live OS state.
 See `examples/process.resin` for looking up a selected variable without dumping the environment.
 Program arguments apply only to run mode; `-o` builds the executable to invoke separately.
@@ -65,7 +67,8 @@ Program arguments apply only to run mode; `-o` builds the executable to invoke s
 space-separated spellings, with `|` for aliases and a trailing `=` for a required value:
 
 ```resin
-let parser = argparse(arguments(argc, argv), "--help|-h --count= --output|-o=");
+let args = arguments(argc, argv);
+let parser = argparse(args, "--help|-h --count= --output|-o=");
 while (true) {
     let option = match (parser:next()?) {
         Argument(option) => { option },
@@ -73,7 +76,8 @@ while (true) {
     };
     if (option:named("--count")) {
         let count = argument_integer(option.value)?;
-        print(fmt("Count: {0}\n", (count,)));
+        let text = fmt("Count: {0}\n", (count,));
+        print(text);
     };
 };
 ```
@@ -84,7 +88,7 @@ and values attached to flags return `Err<String>`. It supports options only, wit
 positional arguments or bundled short flags. A separate value may start with `-`,
 including negative numbers and filenames. Flags have an empty value view.
 `argument_integer` checks unsigned 32-bit range; `argument_number` parses finite
-float32 values from bounded bytes. Returned views borrow the process argument snapshot
+f32 values from bounded bytes. Returned views borrow the process argument snapshot
 and the literal specification. Applications handle defaults, ranges, and help text.
 
 
@@ -178,7 +182,7 @@ unchanged; other selected files are still processed. Formatting needs no imports
 entry point, type checking, service connection, shader compiler, or GPU execution.
 
 Indentation uses hard tabs. Trailing commas are preserved and, except in singleton tuples
-such as `(x,)` and `(int,)`, force multiline
+such as `(x,)` and `(i32,)`, force multiline
 lists; add one to keep long calls or records readable. Comments and literal
 contents are preserved, and repeated blank lines collapse to one. Keep one blank
 line between example functions and between logical sections inside a function.

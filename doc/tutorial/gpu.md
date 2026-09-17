@@ -1,8 +1,8 @@
-# 4. Run the solver on the GPU
+# 3. Run the solver on the GPU
 
 The small checkpoints have established the algorithm. Now open the
 [complete explorer](../../examples/eg011_mandelbrot.resin). It adds a configurable
-`Plot` and `Mandelbrot`, interior shortcuts, a shared sample table, and a work
+`Plot` and `Mandelbrot`, interior shortcuts, and a work
 partition usable by both CPU and GPU. Its sections put the math first, GPU helpers
 second, and the application last.
 
@@ -41,7 +41,7 @@ The CPU entry calls exactly that same evaluator:
 {{#include ../../examples/eg011_mandelbrot.resin:dispatch_host}}
 ```
 
-Both eventually call `evaluate_pixel`, `escape_iterations`, `palette`, and `blend`.
+Both eventually call `evaluate_pixel`, `escape_iterations`, and `palette`.
 There is no second `solve_cpu` to keep synchronized. The compiler specializes
 ordinary helpers for the selected execution target. Calls remain source-level
 calls; the helpers need no shader annotation.
@@ -56,14 +56,14 @@ permission to take an address either.
 Both of these complete examples are rejected:
 
 ```resin,compile_fail
-fn address(value: Ref<int>) -> Ptr<int> {
+fn address(value: Ref<i32>) -> Ptr<i32> {
     &value
 }
 ```
 
 ```resin,compile_fail
-fn needs_pointer(value: Ptr<int>) {}
-fn caller(value: Ref<int>) {
+fn needs_pointer(value: Ptr<i32>) {}
+fn caller(value: Ref<i32>) {
     needs_pointer(value);
 }
 ```
@@ -80,13 +80,12 @@ For indexing, choose access or an address explicitly:
 | Local array or a reference to an array | `Ref<T>` | Unavailable |
 | a pointer to an array | `Ref<T>` | `Ptr<T>` |
 | `Span<T>` | `Ref<T>` | `Ptr<T>` |
-| `str` | `Ref<ubyte>` | `Ptr<ubyte>` to read-only literal bytes |
+| `str` | `Ref<u8>` | `Ptr<u8>` to read-only literal bytes |
 
-For example, `arc_ptr_alloc(halton_samples())?` owns the table on the heap;
-`lut:get()` returns a pointer to that array, so `lut:get():lea(0_ul)` can initialize
-the data field of a borrowed span. The same operation on the tutorial's inline
-local `offsets` array is unavailable. See [references](../references.md) for
-lifetime responsibilities and the complete indexing rules.
+A pointer to an array already grants access to addressable storage, so `:lea`
+can produce an element pointer. A local array does not grant that capability.
+A span carries a pointer to its elements, regardless of where the descriptor lives.
+See [references](../references.md) for the complete indexing rules.
 
 ## Allocation and target limits
 
@@ -103,7 +102,7 @@ references from helpers and selecting distinct local referents across branches
 are unsupported. Those are [target diagnostics](../diagnostics.md), separate from
 the language-wide prohibition on converting references to pointers.
 
-This example uses `float32` on both targets. Deep zooms lose distinguishable
+This example uses `f32` on both targets. Deep zooms lose distinguishable
 coordinates; a higher iteration budget cannot repair that. CPU/GPU results can
 also differ slightly due to floating-point arithmetic. The tests compare their
 rendered bytes with a tolerance of one, rather than requiring bit-identical output.
@@ -111,8 +110,8 @@ rendered bytes with a tolerance of one, rather than requiring bit-identical outp
 Try the complete application without a window:
 
 ```sh
-cargo run -- examples/eg011_mandelbrot.resin -- --gpu --width 640 --height 480 --samples 4 --output gpu.png
-cargo run -- examples/eg011_mandelbrot.resin -- --cpu --width 640 --height 480 --samples 4 --output cpu.png
+cargo run -- examples/eg011_mandelbrot.resin -- --gpu --width 640 --height 480 --output gpu.png
+cargo run -- examples/eg011_mandelbrot.resin -- --cpu --width 640 --height 480 --output cpu.png
 ```
 
 GPU mode needs the runtime's Vulkan features. CPU headless mode needs no Vulkan

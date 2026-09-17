@@ -37,7 +37,7 @@ speed depends on rendering throughput. Its decorated shader functions, ordinary 
 shared data definitions live alongside the host code in the same file. Initialization accepts
 a host `Span<Particle>`; the shaders use the same allocation's device address.
 
-Input is available through `$/window.resin`. Exported `int` constants name GLFW key codes
+Input is available through `$/window.resin`. Exported `i32` constants name GLFW key codes
 (`key_w`, `key_space`, `key_left_shift`, `key_escape`) and the eight mouse buttons
 (`mouse_button_left`, `mouse_button_right`, `mouse_button_middle`, `mouse_button_4` through `mouse_button_8`).
 After polling, `window:key_state(key_w)` and
@@ -51,7 +51,7 @@ until their own poll. Edges and scroll reset on the next poll of that window, an
 queries read the same snapshot. `window:scroll_delta()` returns accumulated horizontal/vertical
 scroll offsets (positive vertical scroll is up). `window:cursor_position()` returns coordinates
 in window content units, with a top-left origin and positive y downward, independently of
-framebuffer scaling. Both return `((float64, float64) | Err<RuntimeError>)`.
+framebuffer scaling. Both return `((f64, f64) | Err<RuntimeError>)`.
 
 `window:focused()` reports keyboard focus. `window:capture_cursor(capture)` hides and
 captures the cursor for camera controls when `capture` is true, with unbounded virtual
@@ -99,7 +99,7 @@ are prepared on the host; large dispatches use batches of descriptors within
 Vulkan's workgroup limit. `pixels_per_segment` controls the chunk size. Pixels are
 independent, so this grouping is a scheduling choice, not an algorithm requirement.
 Orbit iteration, palette evaluation, and color blending are separate functions,
-using `Complex<float32>` from `$/math.resin`.
+using `Complex<f32>` from `$/math.resin`.
 
 Both interactive paths produce the same RGBA8 GPU buffer: CPU mode uploads its
 completed bytes once with `:copy_from`, and GPU mode writes directly. A fullscreen
@@ -119,20 +119,15 @@ resin examples/eg011_mandelbrot.resin -- --cpu --output detail.png --real -0.743
 a Vulkan device; CPU output needs neither a display nor a Vulkan device. Interactive
 mode uses Vulkan for presentation with either solver. `--screenshot PATH` sets the
 interactive screenshot filename, defaulting to `mandelbrot.png`; saving replaces that file.
-`--width`/`--height` accept 1–8192, `--iterations` accepts 32–4096, and `--samples`
-accepts 1–16. `--real`, `--imag`, and `--span` set the initial view.
+`--width`/`--height` accept 1–8192 and `--iterations` accepts 32–4096.
+`--real`, `--imag`, and `--span` set the initial view.
 
-The image matches the window's framebuffer resolution and preserves the complex plane's
-aspect ratio when resized. Moving uses one sample per pixel; when input stops, a second
-pass blends the selected number of subpixel colors (default four; `--samples 1`
-disables refinement). Samples use prefixes of a fixed 16-point Halton lookup table,
-with radical inverses in bases 2 and 3.
-Headless output and screenshots use the selected sample count immediately.
-The default budget is 256 iterations
-per sample, with early escape and shortcuts for the main cardioid and period-two bulb.
-The image is recomputed only after a change or for that refinement pass.
-Zoom stops at a vertical span of `framebuffer_height * 1e-6` to leave room for subpixel
-offsets with float32 coordinates near the Mandelbrot set.
+The image matches the window's framebuffer resolution and preserves the complex
+plane's aspect ratio when resized. Each pixel evaluates its center once. The
+default budget is 256 iterations per pixel, with early escape and shortcuts for
+the main cardioid and period-two bulb. The image is recomputed only after a change.
+Zoom stops at a vertical span of `framebuffer_height * 1e-6` to keep neighboring
+pixels distinguishable with f32 coordinates near the Mandelbrot set.
 
 - **Arrows / WASD:** pan.
 - **Scroll / + / −:** zoom around the center.

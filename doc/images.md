@@ -12,14 +12,14 @@ A zero channel count preserves the file's channel count; one through four reques
 that number of output channels.
 
 `image:width()`, `image:height()`, and `image:channels()` return dimensions.
-`image:pixels()` borrows a packed `Span<ubyte>`. Keep the image owner alive while
+`image:pixels()` borrows a packed `Span<u8>`. Keep the image owner alive while
 using that view. `image:clone()` retains shared ownership; the final owner releases
 the pixels. `image:write_png(path)` writes its dimensions and pixels to a PNG.
 
 ## Write a pixel buffer
 
 `image_data_write_pixels(path, width, height, channels, pixels, stride)` accepts
-a borrowed `Span<ubyte>`. It validates dimensions, channel count, row stride, and
+a borrowed `Span<u8>`. It validates dimensions, channel count, row stride, and
 capacity before entering the native writer. Channels must be between one and four.
 A zero stride requests packed rows; a nonzero stride is the byte distance between
 row starts and must accommodate one whole row.

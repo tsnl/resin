@@ -1,0 +1,56 @@
+// This is one complete file. Export an entry point and import the functions it uses.
+export { main };
+import { "$/stdio.resin", "$/string.resin" };
+
+// A struct names a type; its fields use name: Type. i32 is a signed 32-bit integer.
+struct Counter {
+	value: i32,
+}
+
+// Functions live beside their types. Ref borrows the caller's existing value.
+// This operation changes the counter; the name makes that mutation explicit.
+fn increment(counter: Ref<Counter>, amount: i32) {
+	counter.value = counter.value + amount;
+}
+
+// -> declares the result type. The final expression supplies the result.
+fn read(counter: Ref<Counter>) -> i32 {
+	counter.value
+}
+
+fn sum_to(limit: i32) -> i32 {
+	// return exits early. Comparisons produce bool; literals are true and false.
+	if (limit <= 0) {
+		return 0;
+	};
+	// let binds a value; mut allows reassignment. Other literals infer their types.
+	let mut total: i32 = 0;
+	let mut next: i32 = 1;
+	while (next <= limit) {
+		total = total + next;
+		next = next + 1;
+	};
+	total
+}
+
+// No result annotation means unit, (). A semicolon discards an expression's result.
+fn main() {
+	// Initializers use field = value; a dot selects a field.
+	let counter = Counter { value = 40 };
+	increment(counter, 1);
+	// Uniform function call syntax (UFCS): x:f(y) means f(x, y).
+	counter:increment(1);
+	assert(read(counter) == counter:read());
+	assert(counter:read() == 42 && sum_to(10) == 55);
+
+	// if is an expression: both branches produce the same type, here str.
+	let description = if (counter:read() == 42) {
+		"ready"
+	} else {
+		"waiting"
+	};
+	// fmt takes a format and one tuple of arguments, returning an owned String.
+	let text = fmt("counter = {0}, sum = {1}: {2}\n", (counter:read(), sum_to(10), description));
+	// print borrows this named local. Ref arguments require an existing place.
+	print(text);
+}
