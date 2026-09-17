@@ -600,7 +600,7 @@ impl<'a> Instances<'a> {
             super::substitute::Substitution::new(&signature.type_params, &instance.arguments)?;
         let receiver = substitution.normalize(&signature.params[0].annotation.ty, self)?;
         let expected = resin_hir::Type::Reference {
-            mutable: true,
+            mutable: false,
             referent: Box::new(self.nominal_origin(id)),
         };
         let result = substitution.ty(&signature.result.ty, self)?;

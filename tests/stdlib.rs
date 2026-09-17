@@ -42,7 +42,7 @@ fn slice_lea_returns_pointers_and_evaluates_the_index_once() {
     success(&run(
         r#"export { main };
         import { "$/span.resin", "$/shared.resin" };
-        fn index(calls: Ref<i32>) -> u64 { calls = calls + 1; u64(1) }
+        fn index(calls: RefMut<i32>) -> u64 { calls = calls + 1; u64(1) }
         fn first<T>(items: Ref<Span<T>>) -> Ptr<T> { items:lea(u64(0)) }
         fn main() -> () | Err<_> {
             let owner = arc_span_alloc::<i32>(u64(3), i32(0))?;
@@ -55,7 +55,7 @@ fn slice_lea_returns_pointers_and_evaluates_the_index_once() {
             let array = arc_ptr_alloc([[i32(1), i32(2)], [i32(3), i32(4)]])?;
             let row = array:get():lea(u64(1));
             row:lea(u64(0)).* = 42;
-            let reference: Ref<i32> = row:at(u64(1));
+            let reference: RefMut<i32> = row:at_mut(u64(1));
             reference = 19;
             assert(array:get():at(u64(1)):at(u64(0)) == 42 && row:at(u64(1)) == 19);
 

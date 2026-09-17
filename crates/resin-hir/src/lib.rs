@@ -187,7 +187,7 @@ pub enum Type {
     Pointer {
         pointee: Box<Type>,
     },
-    /// A fixed, nonowning binding to a place containing the referent.
+    /// A fixed, nonowning binding: read-only `Ref` or writable, aliasable `RefMut`.
     Reference {
         mutable: bool,
         referent: Box<Type>,

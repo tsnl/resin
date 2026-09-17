@@ -20,7 +20,8 @@ Expected output: `counter = 42, sum = 55: ready`.
 and `$/string.resin` supplies owned strings and formatting. Each file is a module;
 imports make its exported names available.
 
-The `counter` binding needs no `mut` because `increment` writes through a reference.
+The `counter` binding needs `mut` because `increment` requires `RefMut<Counter>`.
+`read` only needs `Ref<Counter>` and can also borrow immutable locals.
 References neither retain ownership nor check lifetimes; keep the borrowed value
 alive. The [reference chapter](../references.md) explains that contract.
 

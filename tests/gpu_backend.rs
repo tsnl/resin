@@ -40,8 +40,8 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
         struct Data { marker: u32, wide: u64, amount: f32, }
         struct Payload { tag: u32, data: Data, end: u32, }
         struct Params { count: u32, values: Ptr<Payload>, tail: f32, }
-        fn at (values: Ptr<Payload>, index: u32) -> Ref<Payload>  { device_index(values, u64(67), u64(index)).* }
-        fn bump (p: Ref<Payload>, index: u32) -> ()  {
+        fn at (values: Ptr<Payload>, index: u32) -> RefMut<Payload>  { device_index(values, u64(67), u64(index)).* }
+        fn bump (p: RefMut<Payload>, index: u32) -> ()  {
             let old: Ref<Payload> = p;
             p = Payload {
                 tag = old.tag + u32(1),
@@ -51,7 +51,7 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
         }
         @compute_shader fn kernel (invocation: u64, root: Ptr<Params>) -> ()  { let mut index = u32(invocation);
             if (index < root.count) {
-                let mut p: Ref<Payload> = at(root.values, index);
+                let p: RefMut<Payload> = at(root.values, index);
                 bump(p, index)
             } else { () }
         }

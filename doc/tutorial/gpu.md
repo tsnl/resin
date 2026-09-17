@@ -73,14 +73,15 @@ No call-site convenience, cast, specialization, or LIR conversion silently turns
 A helper that needs a pointer must say so in its signature. Reading an *existing*
 pointer value through `Ref<Ptr<T>>` is allowed; that reads the stored capability.
 
-For indexing, choose access or an address explicitly:
+`RefMut<T>` permits writes and can weaken to `Ref<T>`. Neither kind grants an
+address or exclusive access. For indexing, choose the required access explicitly:
 
-| Receiver | `:at(i)` | `:lea(i)` |
-| --- | --- | --- |
-| Local array or a reference to an array | `Ref<T>` | Unavailable |
-| a pointer to an array | `Ref<T>` | `Ptr<T>` |
-| `Span<T>` | `Ref<T>` | `Ptr<T>` |
-| `str` | `Ref<u8>` | `Ptr<u8>` to read-only literal bytes |
+| Receiver | `:at(i)` | `:at_mut(i)` | `:lea(i)` |
+| --- | --- | --- | --- |
+| Array place | `Ref<T>` | `RefMut<T>` if writable | Unavailable |
+| Pointer to an array | `Ref<T>` | `RefMut<T>` | `Ptr<T>` |
+| `Span<T>` | `Ref<T>` | `RefMut<T>` | `Ptr<T>` |
+| `str` | `Ref<u8>` | Unavailable | `Ptr<u8>` to read-only literal bytes |
 
 A pointer to an array already grants access to addressable storage, so `:lea`
 can produce an element pointer. A local array does not grant that capability.

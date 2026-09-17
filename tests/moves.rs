@@ -55,7 +55,7 @@ import { "$/shared.resin" };
             a.digit + b.digit
         }
         fn forwarded<T>(value: T) -> i32 { value:digit() }
-        fn condition(value: Ref<Item>, iteration: Ref<i32>) -> bool {
+        fn condition(value: Ref<Item>, iteration: RefMut<i32>) -> bool {
             iteration = iteration + 1;
             iteration <= 2
         }
@@ -66,7 +66,7 @@ import { "$/shared.resin" };
             observe(first, second)
         }
         fn main() -> i32 | Err<_> {
-            let trace_owner = arc_ptr_alloc(i32(0))?; let trace: Ref<_> = trace_owner:get().*;
+            let trace_owner = arc_ptr_alloc(i32(0))?; let trace: RefMut<_> = trace_owner:get().*;
             {
                 let first = Item { trace = trace_owner:get(), digit = 1 };
                 let second = Item { trace = trace_owner:get(), digit = 2 };

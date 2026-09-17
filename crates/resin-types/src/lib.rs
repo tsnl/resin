@@ -246,7 +246,7 @@ pub enum Ty {
     Pointer {
         pointee: Box<Ty>,
     },
-    /// A borrowed place. Never convertible to a pointer, even when its storage is addressable.
+    /// A borrowed place: `Ref` when read-only, `RefMut` when mutable. Neither grants a pointer.
     Reference {
         mutable: bool,
         referent: Box<Ty>,

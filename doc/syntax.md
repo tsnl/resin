@@ -76,9 +76,9 @@ fn example() -> i32 {
 
 `counter:read()` calls `read(counter)`. The receiver is the first ordinary
 argument, and its parameter can have any name. A `Ref<T>` parameter borrows
-storage; a value parameter moves a noncopyable argument. References permit
-unchecked mutation even through an immutable binding; `mut` controls direct
-assignment to the binding, not access through an alias. See [references](references.md).
+read-only storage; a value parameter moves a noncopyable argument. `RefMut<T>`
+permits mutation and requires a mutable place. Writable references remain
+aliasable and can weaken to `Ref<T>`; neither reference kind grants an address. See [references](references.md).
 
 A dot selects a field: `(value.callback)(argument)` calls a function stored in a
 field. A colon selects a visible function: `value:callback(argument)` passes the

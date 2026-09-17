@@ -233,12 +233,12 @@ fn reference_returning_index_wrappers_preserve_nested_places() {
     import { "$/shared.resin", "$/span.resin" };
     struct Payload { value: i32, }
     struct Entry { nested: Payload, }
-    fn entry_at(items: Ref<Span<Entry>>, index: u64) -> Ref<Entry>  { items:at(index) }
+    fn entry_at(items: Ref<Span<Entry>>, index: u64) -> RefMut<Entry>  { items:at_mut(index) }
     fn main() -> i32 | Err<_> {
         let items_owner = arc_ptr_alloc([Entry { nested = Payload { value = 1 } }, Entry { nested = Payload { value = 2 } }])?; let items: Ref<_> = items_owner:get().*;
         let mut span = Span<Entry> { data = Ptr<Entry>(items_owner:get()), length = u64(2) };
         entry_at(span, u64(1)).nested.value = 42;
-        let p: Ref<i32> = entry_at(span, u64(1)).nested.value;
+        let p: RefMut<i32> = entry_at(span, u64(1)).nested.value;
         p = p + 1;
         let mut copied = Payload { value = entry_at(span, u64(1)).nested.value };
         copied.value = 99;
