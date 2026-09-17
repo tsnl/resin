@@ -28,7 +28,7 @@
   - [Shaders and graphics](shaders.md)
   - [Ray tracing pipelines](ray-tracing-pipelines.md)
   - [Explicit workgroups (prototype)](workgroups.md)
-  - [Arris renderer and SVGF](renderer.md)
+  - [Rendering primitives and SVGF](renderer.md)
   - [GPU buffers](gpu-buffers.md)
   - [Windows and presentation](windowing.md)
 - [Tools and diagnostics](tools.md)

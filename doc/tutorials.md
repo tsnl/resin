@@ -10,7 +10,7 @@ to build the tools, start the compiler service, and set `RESIN_SERVER`.
 | [Ray tracing with a fisheye camera](ray-tracing.md) | A PNG of triangles viewed through a Kannala–Brandt lens | Primary rays, ray tracing pipelines, payloads, instancing, and GPU readback |
 | [Discard fragments](discard-fragments.md) | An alpha-masked checkerboard over a gradient | Optional fragment outputs, discard, and sampling an alpha buffer |
 
-| [Render a glTF scene with Arris](arris.md) | A headless glTF + HDRI renderer with PNG and EXR output | Raster visibility, secondary ray lighting, reusable GPU resources, and standalone SVGF |
+| [Render a glTF scene with Arris](arris.md) | A headless glTF + HDRI renderer with PNG and EXR output | Compose visibility, BSDF/environment sampling, secondary tracing, and standalone SVGF |
 
 The first program and the Mandelbrot explorer's headless CPU mode need no GPU.
 The explorer's GPU mode requires a compatible Vulkan device; its interactive

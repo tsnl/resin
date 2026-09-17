@@ -4,11 +4,13 @@
 export { random, BsdfSample, bsdf_sample, bsdf_value, bsdf_pdf, power_heuristic };
 import { "scene.resin", "../linalg.resin", "../math.resin" };
 const pi: f32 = 3.141592653589793;
+/// Advance caller-owned RNG state and return a sample in [0, 1).
 fn random(state: RefMut<u32>) -> f32 {
 	state = state * 747796405 + 2891336453;
 	let word = ((state >> ((state >> 28) + 4)) ^ state) * 277803737;
 	f32(((word >> 22) ^ word) >> 8) * (1 / f32(16777216))
 }
+/// MIS weight for two nonnegative directional PDFs (power heuristic, beta = 2).
 fn power_heuristic(a: f32, b: f32) -> f32 {
 	let aa = a * a;
 	let bb = b * b;
@@ -60,6 +62,9 @@ fn fresnel(surface: Surface, vh: f32) -> Vec3 {
 fn specular_probability(surface: Surface) -> f32 {
 	0.5 + 0.5 * surface.metallic
 }
+/// Evaluate scattering without the cosine factor. Directions point away from the
+/// surface and are normalized in world space. Orient the surface toward outgoing;
+/// roughness must be in [0.04, 1] and metallic in [0, 1].
 fn bsdf_value(surface: Surface, outgoing: Vec3, incoming: Vec3) -> Vec3 {
 	let nv = dot(surface.normal, outgoing);
 	let nl = dot(surface.normal, incoming);
@@ -73,6 +78,7 @@ fn bsdf_value(surface: Surface, outgoing: Vec3, incoming: Vec3) -> Vec3 {
 	let diffuse = mul(mul(sub(vec3(1, 1, 1), f), surface.albedo), (1 - surface.metallic) / pi);
 	add(diffuse, specular)
 }
+/// Directional density per steradian for the same mixture used by bsdf_sample.
 fn bsdf_pdf(surface: Surface, outgoing: Vec3, incoming: Vec3) -> f32 {
 	let nv = dot(surface.normal, outgoing);
 	let nl = dot(surface.normal, incoming);
@@ -84,7 +90,10 @@ fn bsdf_pdf(surface: Surface, outgoing: Vec3, incoming: Vec3) -> f32 {
 	let p = specular_probability(surface);
 	p * distribution(a, max(0, dot(surface.normal, h))) * masking(a, nv) / (4 * nv) + (1 - p) * nl / pi
 }
+/// weight is BSDF * max(0, N dot direction) / PDF; zero terminates a path.
 struct BsdfSample { direction: Vec3, weight: Vec3, pdf: f32 }
+/// Sample using three independent uniform values in [0, 1). See bsdf_value for
+/// the surface/direction contract. This operation traces no rays.
 fn bsdf_sample(surface: Surface, outgoing: Vec3, choose: f32, u: f32, v: f32) -> BsdfSample {
 	let a = alpha(surface);
 	let view = local(surface.normal, outgoing);

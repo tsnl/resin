@@ -1,0 +1,103 @@
+//! Equirectangular environment evaluation and importance sampling, independent of
+//! geometry, cameras, tracing, and denoising. Shaders can use caller-owned buffers.
+export { Environment, ShaderEnvironment, DeviceEnvironment, environment, environment_value, environment_pdf, environment_sample, DirectionSample };
+import { "scene.resin", "../gpu.resin", "../image.resin", "../linalg.resin", "../math.resin", "../span.resin", "../shared.resin", "../status.resin" };
+
+/// Pixels are linear RGBA; cdf has width*height+1 normalized prefix sums from 0 to
+/// 1. Rows cover latitude from +Y to -Y. Yaw is radians, tint is a linear RGB scale.
+/// Custom buffers must have positive dimensions, finite nonnegative pixels, and a
+/// nondecreasing CDF. GPU records project to borrowed shader spans at dispatch.
+struct Environment<P, C> { pixels: P, cdf: C, width: u32, height: u32, yaw: f32, tint: Vec3 }
+type ShaderEnvironment = Environment<Span<Vec4>, Span<f32>>;
+type DeviceEnvironment = Environment<GpuSpan<Vec4>, GpuSpan<f32>>;
+/// Build a luminance × solid-angle CDF. Sampling within a texel is uniform in
+/// solid angle, including polar rows. A black map falls back to a uniform sphere.
+fn environment(gpu: Ref<Gpu>, image: Ref<FloatImageData>) -> DeviceEnvironment | Err<RuntimeError> {
+	let w = image:width();
+	let h = image:height();
+	let values = image:pixels();
+	let count = u64(w) * u64(h);
+	let colors = arc_span_alloc(count, vec4(0, 0, 0, 1))?;
+	let weights = arc_span_alloc(count + 1, f32(0))?;
+	let color_data = colors:get();
+	let cdf_data = weights:get();
+	let mut sum: f32 = 0;
+	let mut i: u64 = 0;
+	while (i < count) {
+		let rgb = vec4(max(values:at(i * 4), 0), max(values:at(i * 4 + 1), 0), max(values:at(i * 4 + 2), 0), 1);
+		color_data:at_mut(i) = rgb;
+		sum = sum + luminance(xyz(rgb)) * solid_angle(w, h, u32(i / u64(w)));
+		cdf_data:at_mut(i + 1) = sum;
+		i = i + 1;
+	};
+	if (!(sum >= 0) || sum > 1000000000000000000000000000000) {
+		return Err(InvalidArgument {});
+	};
+	i = 0;
+	if (sum == 0) {
+		while (i < count) {
+			sum = sum + solid_angle(w, h, u32(i / u64(w)));
+			cdf_data:at_mut(i + 1) = sum;
+			i = i + 1;
+		};
+	};
+	i = 1;
+	while (i <= count) {
+		cdf_data:at_mut(i) = cdf_data:at(i) / sum;
+		i = i + 1;
+	};
+	cdf_data:at_mut(count) = 1;
+	DeviceEnvironment { pixels = upload(gpu, color_data)?, cdf = upload(gpu, cdf_data)?, width = w, height = h, yaw = 0, tint = vec3(1, 1, 1) }
+}
+const pi: f32 = 3.141592653589793;
+fn solid_angle(w: u32, h: u32, y: u32) -> f32 {
+	(4 * pi / f32(w)) * sin(pi * (f32(y) + 0.5) / f32(h)) * sin(pi / (2 * f32(h)))
+}
+fn environment_uv(env: ShaderEnvironment, direction: Vec3) -> Vec2 {
+	let phi = (
+		if (abs(direction.x) + abs(direction.z) > 0.00000001) {
+			atan2(direction.z, direction.x)
+		} else {
+			f32(0)
+		}
+	) - env.yaw;
+	let u = phi / (2 * pi);
+	vec2(u - floor(u), acos(clamp(direction.y, -1, 1)) / pi)
+}
+/// Evaluate a normalized world direction; RGB is linear radiance.
+fn environment_value(env: ShaderEnvironment, direction: Vec3) -> Vec3 {
+	let uv = environment_uv(env, direction);
+	let x = min(floor(uv.x * f32(env.width)), f32(env.width - 1));
+	let y = min(floor(uv.y * f32(env.height)), f32(env.height - 1));
+	mul(xyz(env.pixels:at(u64(y) * u64(env.width) + u64(x))), env.tint)
+}
+/// Directional sampling density per steradian, including pixel solid angle.
+fn environment_pdf(env: ShaderEnvironment, direction: Vec3) -> f32 {
+	let uv = environment_uv(env, direction);
+	let y = u32(min(floor(uv.y * f32(env.height)), f32(env.height - 1)));
+	let i = u64(y) * u64(env.width) + u64(min(floor(uv.x * f32(env.width)), f32(env.width - 1)));
+	(env.cdf:at(i + 1) - env.cdf:at(i)) / solid_angle(env.width, env.height, y)
+}
+struct DirectionSample { direction: Vec3, pdf: f32 }
+/// Sample a direction from three independent uniform values in [0, 1).
+/// The returned PDF uses the same distribution as environment_pdf.
+fn environment_sample(env: ShaderEnvironment, choose: f32, u: f32, v: f32) -> DirectionSample {
+	let mut low: u64 = 0;
+	let mut high = u64(env.width) * u64(env.height);
+	while (low + 1 < high) {
+		let middle = (low + high) / 2;
+		if (env.cdf:at(middle) <= choose) {
+			low = middle;
+		} else {
+			high = middle;
+		};
+	};
+	let x = u32(low % u64(env.width));
+	let y = u32(low / u64(env.width));
+	let phi = 2 * pi * (f32(x) + u) / f32(env.width) + env.yaw;
+	let top = cos(pi * f32(y) / f32(env.height));
+	let bottom = cos(pi * f32(y + 1) / f32(env.height));
+	let cosine = top + (bottom - top) * v;
+	let sine = sqrt(max(0, 1 - cosine * cosine));
+	DirectionSample { direction = vec3(cos(phi) * sine, cosine, sin(phi) * sine), pdf = (env.cdf:at(low + 1) - env.cdf:at(low)) / solid_angle(env.width, env.height, y) }
+}

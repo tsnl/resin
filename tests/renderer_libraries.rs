@@ -167,28 +167,62 @@ fn headless_gltf_hdri_render_is_finite_and_has_visible_geometry() {
     if !available_gpu(true) {
         return;
     }
-    let source = r#"export { main }; import { "$/renderer.resin", "$/gltf.resin", "$/image.resin", "$/gpu.resin", "$/linalg.resin", "$/shared.resin", "$/span.resin" };
-    fn main() -> () | Err<_> {
-        let gpu=gpu_new()?; let asset=gltf_load("examples/assets/arris/scene.gltf".data)?; let image=image_data_read_hdr("examples/assets/arris/studio.hdr".data)?;
-        let resources=resource_pack(gpu,asset)?; let sky=environment(gpu,image)?;
-        let mut renderer=renderer_create(gpu,resources,sky,64,48,Quality { samples_per_frame=4,max_bounces=3,denoise=true })?;
-        let view=camera(look_at(vec3(3,2.2,4.5),vec3(0,0.65,0),vec3(0,1,0)),f32(64)/48);
-        let first=renderer:render(view)?; let second=renderer:render(view)?;
-        let host=arc_span_alloc(3072,vec4(0,0,0,0))?; second.radiance:copy_to(host:get()); let values=host:get();
-        let guide_host=arc_span_alloc(3072,vec4(0,0,0,0))?; second.positions:copy_to(guide_host:get()); let guides=guide_host:get();
-        let mut i: u64=0; let mut visible: u32=0; let mut total: f32=0;
-        while (i < 3072) { let v=values:at(i); assert(v.x >= 0 && v.y >= 0 && v.z >= 0 && v.x < 10000 && v.y < 10000 && v.z < 10000); total=total+v.x+v.y+v.z; if (guides:at(i).w > 0) { visible=visible+1; }; i=i+1; };
-        assert(visible > 500 && visible < 2800 && total > 100);
-        renderer:reset(); let restarted=renderer:render(view)?;
-    }"#;
+    // Run the actual tutorial composition at a small size; do not duplicate its
+    // integrator in a test-only renderer. Readback assertions are inserted at the
+    // application's output boundary, where the guides and HDR buffers are ready.
+    let source = include_str!("../examples/arris.resin")
+        .replace("let width: u32 = 640;", "let width: u32 = 64;")
+        .replace("let height: u32 = 480;", "let height: u32 = 48;")
+        .replace("frame < 16", "frame < 3")
+        .replace("frame == 15", "frame == 2")
+        .replace(
+            "save_images(width, height, pixels, filtered)?;",
+            r#"
+            let host = arc_span_alloc(count, vec4(0,0,0,0))?;
+            positions:copy_to(host:get()); let guides = host:get();
+            let mut visible: u32 = 0; let mut i: u64 = 0;
+            while (i < count) { if (guides:at(i).w > 0) { visible=visible+1; }; i=i+1; };
+            assert(visible > 500 && visible < 2800);
+            save_images(width, height, pixels, filtered)?;
+        "#,
+        );
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("render.resin");
     std::fs::write(&path, source).unwrap();
     let module =
         support::pipeline::host_entry(&path, "main").unwrap_or_else(|error| panic!("{error}"));
-    let output = support::project::Project::new(&module, Some("main"))
-        .unwrap()
-        .run();
+    let project = support::project::Project::new(&module, Some("main")).unwrap();
+    let executable = project.build_executable();
+    let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/assets/arris");
+    let output = std::process::Command::new(executable.path())
+        .arg(assets.join("scene.gltf"))
+        .arg(assets.join("studio.hdr"))
+        .current_dir(directory.path())
+        .output()
+        .unwrap();
+    assert_valid_output(&output);
+    let image = resin_runtime::image_read_exr(directory.path().join("arris.exr")).unwrap();
+    assert_eq!((image.width, image.height), (64, 48));
+    assert!(
+        image
+            .pixels
+            .iter()
+            .all(|v| v.is_finite() && *v >= 0.0 && *v < 10000.0)
+    );
+    assert!(image.pixels.chunks_exact(4).all(|rgba| rgba[3] == 1.0));
+    assert!(
+        image
+            .pixels
+            .chunks_exact(4)
+            .map(|rgba| rgba[0] + rgba[1] + rgba[2])
+            .sum::<f32>()
+            > 100.0
+    );
+    assert!(directory.path().join("arris.png").metadata().unwrap().len() > 100);
+}
+
+#[cfg(feature = "gpu")]
+fn assert_valid_output(output: &std::process::Output) {
     assert!(
         output.status.success(),
         "{}\n{}",
@@ -257,7 +291,7 @@ fn standalone_svgf_reduces_noise_preserves_background_and_resets() {
 
 #[test]
 fn importance_sampling_matches_pdfs_and_white_furnace_energy() {
-    let source = r#"export { main }; import { "$/renderer/brdf.resin", "$/renderer/scene.resin", "$/linalg.resin", "$/shared.resin", "$/span.resin" };
+    let source = r#"export { main }; import { "$/renderer/brdf.resin", "$/renderer/scene.resin", "$/renderer/environment.resin", "$/linalg.resin", "$/shared.resin", "$/span.resin" };
     fn main() -> () | Err<_> {
         let surface=Surface { position=vec3(0,0,0),geometric=vec3(0,0,1),normal=vec3(0,0,1),albedo=vec3(1,1,1),emission=vec3(0,0,0),metallic=0,roughness=0.5,alpha=1,cutoff=0.5,flags=0 };
         let mut state: u32=17; let mut sum=vec3(0,0,0); let mut i: u32=0;
@@ -293,4 +327,109 @@ fn importance_sampling_matches_pdfs_and_white_furnace_energy() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+#[cfg(feature = "gpu")]
+fn visibility_and_display_compose_without_ray_tracing() {
+    let _lock = resin_runtime::testing::lock_gpu();
+    if !available_gpu(false) {
+        return;
+    }
+    let source = r#"export { main };
+    import { "$/renderer.resin", "$/gltf.resin", "$/gpu.resin", "$/linalg.resin", "$/shared.resin", "$/span.resin" };
+    fn main() -> () | Err<_> {
+        let gpu=gpu_new()?;
+        let asset=gltf_load("examples/assets/arris/scene.gltf".data)?;
+        let scene=upload_scene(gpu,asset)?;
+        let config=gpu:graphics_config(image_rgba32f,true);
+        let raster=config:create_graphics_pipeline(primary_vertex,primary_fragment)?;
+        let mapping=gpu:create_compute_pipeline(tone_map)?;
+        let attachment=gpu:create_image(64,48,image_rgba32f)?;
+        let depth=gpu:create_image(64,48,image_depth32)?;
+        let visibility=gpu:alloc::<Vec4>(3072)?;
+        let view=camera(look_at(vec3(3,2.2,4.5),vec3(0,0.65,0),vec3(0,1,0)),f32(64)/48);
+        let projection=mul(perspective(view.focal_length,view.sensor_size,view.near,view.far),inverse_rigid(view.transform));
+        let root=RasterRoot<DeviceScene> { scene=scene,view_projection=projection,eye=vec3(3,2.2,4.5) };
+        // A caller supplies its own HDR input/output, with no camera or renderer.
+        let linear=gpu:alloc::<Vec4>(1)?; let pixel=linear:at(0); pixel:store(vec4(1,3,0,7));
+        let display=gpu:alloc::<u8>(4)?;
+        let tone=ToneRoot<GpuSpan<Vec4>,GpuSpan<u8>> { input=linear:clone(),pixels=display:clone(),count=1,exposure=1,gamma=1 };
+        let commands=gpu:start_command_recording()?;
+        commands:begin_rendering(attachment,depth,0,0,0,0)?;
+        commands:draw(raster,root,u32(scene.vertices.length))?;
+        commands:end_rendering()?;
+        commands:copy_image_to_buffer(attachment,visibility)?;
+        commands:dispatch(mapping,tone,1,1,1)?;
+        commands:submit()?;
+        let host=arc_span_alloc(3072,vec4(0,0,0,0))?; visibility:copy_to(host:get()); let values=host:get();
+        let mut visible: u32=0; let mut i: u64=0;
+        while (i < 3072) { if (values:at(i).x > 0) { visible=visible+1; }; i=i+1; };
+        assert(visible > 500 && visible < 2800);
+        let bytes=arc_span_alloc(4,u8(0))?; display:copy_to(bytes:get()); let rgba=bytes:get();
+        assert(rgba:at(0) == 128 && rgba:at(1) == 191 && rgba:at(2) == 0 && rgba:at(3) == 255);
+        assert(pixel:load().y == 3 && pixel:load().w == 7);
+    }"#;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("raster.resin");
+    std::fs::write(&path, source).unwrap();
+    let module =
+        support::pipeline::host_entry(&path, "main").unwrap_or_else(|error| panic!("{error}"));
+    let project = support::project::Project::new(&module, Some("main")).unwrap();
+    // Vertex, fragment, and display compute only: importing the public module
+    // does not force the application to create any RT shaders or acceleration.
+    assert_eq!(project.generated.shaders().len(), 3);
+    assert_valid_output(&project.run());
+}
+
+#[test]
+#[cfg(feature = "gpu")]
+fn custom_ray_root_uses_caller_buffers_and_bounded_alpha_traversal() {
+    let _lock = resin_runtime::testing::lock_gpu();
+    if !available_gpu(true) {
+        return;
+    }
+    let source = r#"export { main };
+    import { "$/renderer.resin", "$/gltf.resin", "$/gpu.resin", "$/linalg.resin", "$/shared.resin", "$/span.resin" };
+    struct Probe<S,O> { scene: S, distances: O }
+    type ShaderProbe=Probe<ShaderScene,Span<f32>>;
+    @miss_shader fn miss(initial: Hit,root: Ptr<ShaderProbe>) -> Hit { miss_hit() }
+    @closest_hit_shader fn closest(initial: Hit,root: Ptr<ShaderProbe>) -> Hit { closest_hit() }
+    @ray_generation_shader fn probe(index: u64,root: Ptr<ShaderProbe>) {
+        let maximum: f32=if (index == 0) { 0.5 } else { if (index == 1) { 1.5 } else { 3 } };
+        let minimum: f32=if (index == 3) { 2.1 } else { 0 };
+        let mut state: u32=17;
+        let hit=trace_surface(root.scene,vec3(0,0,0),vec3(0,0,1),minimum,maximum,state);
+        root.distances:at_mut(index)=if (hit.triangle == ~u32(0)) { f32(-1) } else { hit.distance };
+    }
+    fn main() -> () | Err<_> {
+        let gpu=gpu_new()?;
+        // Construct two triangles without a GltfScene or file loader. Near is
+        // fully MASK-rejected; far is opaque and must only occlude long rays.
+        let vertices_host=arc_span_alloc(6,GltfVertex { position=vec3(0,0,0),normal=vec3(0,0,1),uv=vec2(0,0),tangent=vec4(1,0,0,1),color=vec4(1,1,1,1),material=0 })?;
+        let mesh=vertices_host:get(); let mut i: u64=0;
+        while (i < 6) {
+            mesh:at_mut(i).position=vec3(if (i%3 == 0) { f32(-1) } else { if (i%3 == 1) { f32(1) } else { f32(0) } },if (i%3 == 2) { f32(1) } else { f32(-1) },f32(i/3)+1);
+            mesh:at_mut(i).material=u32(i/3); i=i+1;
+        };
+        let materials_host=arc_span_alloc(2,GltfMaterial { albedo=vec4(1,1,1,1),emissive=vec3(0,0,0),metallic=0,roughness=1,albedo_texture=~u32(0),metallic_roughness_texture=~u32(0),emissive_texture=~u32(0),normal_texture=~u32(0),normal_scale=1,alpha_cutoff=0.5,flags=4 })?;
+        let surfaces=materials_host:get(); surfaces:at_mut(0).albedo.w=0; surfaces:at_mut(0).flags=5;
+        let scene=DeviceScene { vertices=upload(gpu,mesh)?,materials=upload(gpu,surfaces)?,textures=gpu:alloc::<GltfTexture>(1)?,pixels=gpu:alloc::<u8>(4)? };
+        let acceleration=scene_acceleration(gpu,mesh)?;
+        let tracing=acceleration:create_ray_tracing_pipeline(probe,miss,closest)?;
+        let distances=gpu:alloc::<f32>(4)?;
+        let root=Probe<DeviceScene,GpuSpan<f32>> { scene=scene,distances=distances:clone() };
+        let commands=gpu:start_command_recording()?;
+        commands:trace_rays(tracing,root,4,1,1)?; commands:submit()?;
+        let host=arc_span_alloc(4,f32(0))?; distances:copy_to(host:get()); let values=host:get();
+        assert(values:at(0) == -1 && values:at(1) == -1 && abs(values:at(2)-2) < 0.0001 && values:at(3) == -1);
+    }"#;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("probe.resin");
+    std::fs::write(&path, source).unwrap();
+    let module =
+        support::pipeline::host_entry(&path, "main").unwrap_or_else(|error| panic!("{error}"));
+    let project = support::project::Project::new(&module, Some("main")).unwrap();
+    assert_eq!(project.generated.shaders().len(), 3);
+    assert_valid_output(&project.run());
 }

@@ -25,7 +25,7 @@ for complete usage examples. `$/` resolves from the compiler service's configure
 library root (`RESIN_LIBRARY_ROOT` or `--library-root`); ordinary imports resolve
 relative to the importing file.
 
-The [Arris renderer and SVGF guide](renderer.md) introduces
+The [Rendering primitives and SVGF guide](renderer.md) introduces
 [`$/renderer.resin`](../resin/renderer.resin),
 [`$/svgf.resin`](../resin/svgf.resin),
 [`$/gltf.resin`](../resin/gltf.resin), and

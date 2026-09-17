@@ -1,73 +1,115 @@
-# Arris renderer and SVGF
+# Rendering primitives and SVGF
 
-`$/renderer.resin` ports the static, headless rendering path of
-[Arris main-v1](https://github.com/tsnl/enlighten/tree/archive/main-v1) to Resin.
-The port follows the architecture at upstream commit
-`4b8b32e7c82520fc397806977df8789bdbb8e39d`; the shaders are expressed as Resin
-functions and use RT pipelines. The [complete example](arris.md) loads a glTF scene and an HDR environment and
-writes both a tone-mapped PNG and a linear OpenEXR image.
+`$/renderer.resin` exposes reusable rendering operations ported from
+[Arris main-v1](https://github.com/tsnl/enlighten/tree/archive/main-v1).
+Your program owns the buffers, pipelines, integrator, and pass schedule. The
+[Arris tutorial](arris.md) composes these pieces into a headless glTF + HDRI
+renderer; its entire frame loop and path integrator are in the example file.
 
-## Persistent resources and frames
+## Choose the pieces
 
-Create a GPU, load a `GltfScene`, and call `resource_pack(gpu, scene)` once.
-The resulting `ResourcePack` owns uploaded geometry, material/texture tables, and
-an acceleration structure. `environment(gpu, image)` uploads a floating-point
-lat-long environment and builds its sampling distribution. Set its `yaw` in
-radians and linear RGB `tint` before constructing the renderer.
-
-`renderer_create(gpu, resources, environment, width, height, quality)` returns a
-`Renderer`. The camera follows Arris's focal-length/sensor-size model. Its
-row-major camera-to-world transform looks along local −Z; `look_at` constructs a
-rigid transform. `camera(transform, aspect)` supplies sensible defaults. Camera
-exposure is a linear multiplier and gamma affects only the PNG/display buffer.
-
-`renderer:render(camera)` waits for GPU completion and returns a `RenderFrame`:
-
-| Field | GPU contents |
+| Primitive | Inputs and result |
 | --- | --- |
-| `radiance` | Linear HDR `GpuSpan<Vec4>`; RGB is radiance, W is filter variance when denoising |
-| `positions` | World XYZ and stable triangle ID + 1; W = 0 means background |
-| `normals` | Unit shading normal XYZ; W = 0 means background |
-| `pixels` | Packed RGBA8 after exposure, Reinhard tone mapping, and gamma |
+| `upload_scene` | A loaded glTF scene → GPU vertex, material, texture, and pixel tables |
+| `scene_acceleration` | A CPU world-space triangle list → a static RT acceleration structure |
+| `primary_vertex`, `primary_fragment` | Scene tables and view projection → depth-tested triangle IDs and barycentrics |
+| `surface_at`, `accepts_surface` | Triangle ID and barycentrics → interpolated surface and MASK acceptance |
+| `trace_surface` | Scene tables, ray origin/direction, distance bounds, and RNG → closest accepted hit or miss |
+| `bsdf_value`, `bsdf_pdf`, `bsdf_sample` | Surface and directions/random samples → scattering value, PDF, or weighted direction |
+| `environment_value`, `environment_pdf`, `environment_sample` | HDR environment and direction/random samples → radiance, PDF, or sampled direction |
+| `tone_map` | Caller-owned linear HDR input and RGBA8 output → exposure, Reinhard mapping, and gamma |
+| `svgf_create`, `filter`, `reset` | Independent temporal denoising over GPU radiance/position/normal buffers |
 
-Handles retain their allocations. The next render reuses those allocations, so
-copy the data to preserve a frame. `frame:write_png(path)` and
-`frame:write_exr(path)` read back the appropriate buffer; EXR writes alpha = 1.
-Pipeline inputs and outputs use ordinary GPU spans, so downstream compute work
-can consume the buffers without CPU readback.
+The umbrella import re-exports scene, environment, and BSDF operations. These can
+also be imported individually from `$/renderer/scene.resin`,
+`$/renderer/environment.resin`, and `$/renderer/brdf.resin`. glTF loading, image
+codecs, and SVGF remain separate libraries. Importing the renderer module does
+not require creating an RT pipeline: raster and tone mapping work on their own.
 
-`Renderer` and `Svgf` are move-only: accidental copies cannot alias mutable history.
-Keep one renderer per camera history. Recreate it to change resolution.
-`renderer:reset()` discards temporal history and restarts the random sequence.
-Use it after a camera cut or scene/lighting change; ordinary camera movement is
-reprojected. Rendering is synchronous, matching Resin's current command API.
+## Data and ownership
 
-## Rendering passes
+`DeviceScene` is a plain record of retained GPU spans: `vertices`, `materials`,
+`textures`, and `pixels`. `upload_scene(gpu, asset)` is a convenience for uploading
+loader output. You can construct the record directly from your own GPU buffers;
+no `GltfScene`, file loader, renderer object, or denoiser is required. The shader
+view is `ShaderScene`, using borrowed spans with the same glTF table layout.
+Material indices, texture indices, and packed byte offsets must stay in bounds.
 
-1. Rasterize triangles into a floating-point visibility attachment and a depth
-   attachment. Visibility stores a triangle ID and perspective-correct
-   barycentrics. `MASK` pixels below their texture alpha cutoff return `None`;
-   discarded fragments do not write depth. Single-sided backfaces are discarded.
-2. Reconstruct each visible surface in a ray-generation shader. Diffuse cosine
-   sampling and GGX visible-normal sampling share a mixture PDF. Environment
-   next-event samples use a luminance × solid-angle distribution, shadow rays,
-   and multiple importance sampling. Secondary intersections interpolate glTF
-   textures, normals, tangents, colors, and metallic/roughness parameters.
-   Russian roulette starts after three scatters.
-3. Optionally run SVGF on the linear HDR result, then tone map into the display
-   buffer. Environment/background pixels bypass spatial filtering.
+Acceleration construction is separate from uploading those tables.
+`scene_acceleration(gpu, vertices)` builds one static triangle list with one
+identity instance. `trace_surface` and `surface_at` require its triangle order and
+world positions to match the shader vertex table. The current acceleration
+builder takes a CPU vertex span; GPU-only construction and refits remain future
+work. Callers can already supply GPU material, texture, and shader-output buffers.
 
-All traversal uses a ray tracing pipeline with recursion depth one. The
-ray-generation shader traces sequentially; closest-hit returns distance,
-triangle ID, and barycentrics. Secondary alpha rejection advances traversal
-without consuming a scattering bounce. There are no ray queries. The source
-library depends on Resin's pipeline abstraction; a future Metal backend would
-need to implement that abstraction, as discussed in [ray tracing pipelines](ray-tracing-pipelines.md).
+`environment(gpu, image)` uploads a linear HDR map and builds a luminance ×
+solid-angle CDF. The returned `DeviceEnvironment` exposes `pixels`, `cdf`,
+`width`, `height`, `yaw` in radians, and linear RGB `tint`. It can likewise be
+constructed from caller-owned GPU buffers. The CDF must have `width*height+1`
+nondecreasing entries, beginning at zero and ending at one. Shader evaluation and
+sampling use `ShaderEnvironment`; they do not trace rays or choose a light path.
 
-`Quality` controls `samples_per_frame`, `max_bounces`, and `denoise`. Disable
-denoising and increase the sample count for an unfiltered reference image.
-Frames use independent samples; with denoising off, each result is that frame's
-sample average, not a progressive accumulation of previous frames.
+`Camera` only describes projection: a rigid camera-to-world `transform`,
+`focal_length`, `sensor_size`, `near`, and `far`. It looks down local −Z;
+`look_at` constructs the transform and `camera(transform, aspect)` supplies
+pinhole defaults. Use positive aspect, focal and sensor sizes, and
+`0 < near < far`. Exposure and gamma belong to the separate tone-mapping pass.
+
+## Compose the GPU work
+
+Create the pipelines you need, allocate their inputs and outputs, then record
+ordinary GPU commands. The tutorial's frame schedule is explicit:
+
+```text
+commands:begin_rendering(visibility_image, depth_image, 0, 0, 0, 0)?;
+commands:draw(raster, raster_root, vertex_count)?;
+commands:end_rendering()?;
+commands:copy_image_to_buffer(visibility_image, visibility)?;
+commands:trace_rays(tracing, trace_root, width, height, 1)?;
+commands:submit()?;
+
+let filtered = denoiser:filter(radiance, positions, normals, view_projection)?;
+// Dispatch tone_map into a caller-owned RGBA8 buffer, or consume filtered HDR directly.
+```
+
+`RasterRoot<DeviceScene>` carries scene tables, a view-projection matrix, and the
+eye position. The supplied visibility shaders target RGBA32F with D32 LESS depth
+testing. Clear to zero; visible pixels contain `(triangle + 1, u, v, 1)`, and zero
+means background. Alpha-tested `MASK` fragments and single-sided backfaces are
+discarded before depth commits. You can replace these shaders or consume their
+visibility buffer from your own compute or ray-generation entry.
+
+The example defines its own `TraceRoot` and ray-generation shader. Small local
+miss/closest-hit entries return the library's `miss_hit()` and `closest_hit()`
+payloads. `trace_surface(scene, origin, direction, minimum, maximum, rng)` traces
+sequentially within that interval and skips rejected alpha/backface hits. Use a
+normalized direction and finite nonnegative distance bounds; a miss has
+`triangle == ~u32(0)`. Finite bounds support point-light shadow segments as well
+as indirect paths. Rejected intersections do not spend a scattering bounce.
+
+The BSDF combines Lambert diffuse and GGX visible-normal sampling. Directions
+are normalized world-space directions pointing away from the surface; orient a
+surface toward the outgoing direction with `orient_surface`. The sample's
+`weight` already includes BSDF × cosine / PDF. Environment and BSDF PDFs are per
+steradian, so callers can combine them with `power_heuristic` for MIS. The
+example chooses next-event lighting, bounce limits, and Russian roulette; these
+policies live in its integrator and can be changed independently of the library.
+
+All traversal uses RT pipelines with recursion depth one, with sequential traces
+from ray generation. There are no ray queries. This remains compatible with a
+future Metal implementation of Resin's pipeline abstraction, discussed in
+[ray tracing pipelines](ray-tracing-pipelines.md).
+
+`ToneRoot` accepts caller-owned input/output spans, a pixel count, exposure, and
+gamma. Dispatch enough invocations for that count, keep input and output storage
+distinct, and provide at least `count` linear RGBA values and `4*count` output
+bytes. Exposure is nonnegative and gamma is positive. Tone mapping leaves the HDR
+input intact. PNG/EXR readback is ordinary image-library code in the example.
+
+Command submission currently waits for GPU completion. GPU spans retain their
+allocations, but writing a buffer changes what all its handles observe; cloning
+is not a frame snapshot. The example chooses to reuse buffers on each frame.
+With SVGF skipped, each frame is that frame's independent sample average.
 
 ## Standalone SVGF middleware
 
@@ -116,8 +158,10 @@ are encountered by secondary rays but are not directly importance sampled.
 stochastic alpha coverage; this is coverage transparency, not dielectric
 refraction or a transmission BSDF. `MASK` is binary at every bounce.
 
-Geometry and the acceleration structure are static after upload. Rebuild a
-resource pack to change them. The visibility encoding supports fewer than
+The acceleration builder currently accepts CPU triangles and creates static
+geometry. Rebuild it when vertex positions change, keeping the shader vertex table
+and acceleration geometry in the same order. Material and lighting buffers can be
+replaced independently; invalidate any temporal history after such edits. The visibility encoding supports fewer than
 2²⁴ triangles, and the image must fit one 65,535-group compute launch at the
 selected GPU's workgroup width. Host loaders work without Vulkan; rendering
 requires Resin's Vulkan baseline plus ray tracing pipeline support.
