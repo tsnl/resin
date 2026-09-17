@@ -1,4 +1,4 @@
-# 1. Follow one orbit
+# Follow one orbit
 
 The [theory chapter](theory.md) established the recurrence and strict escape test.
 Now implement that test: return the first escape iteration, or zero when no escape

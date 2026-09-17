@@ -1,4 +1,4 @@
-# 3. Run the solver on the GPU
+# Run the solver on the GPU
 
 The small checkpoints have established the algorithm. Now open the
 [complete explorer](../../examples/eg011_mandelbrot.resin). It adds a configurable

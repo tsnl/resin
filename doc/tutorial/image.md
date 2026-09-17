@@ -1,4 +1,4 @@
-# 2. Draw an image
+# Draw an image
 
 Each pixel represents a small region in the complex plane. Use its center:
 map that position to `c`, find the escape count, and choose a color. An image

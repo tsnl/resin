@@ -1,4 +1,4 @@
-# 4. Explore interactively
+# Explore interactively
 
 Run the complete explorer on a machine with a compatible Vulkan device and display:
 

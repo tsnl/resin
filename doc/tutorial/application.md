@@ -1,4 +1,4 @@
-# 5. Finish the application
+# Finish the application
 
 A useful explorer should also produce an image without opening a window and make
 its rendering parameters reproducible. The [options module](../../examples/mandelbrot/options.resin)
