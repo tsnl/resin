@@ -181,17 +181,37 @@ fn dependent_callbacks_borrow_without_requiring_copy() {
 
 #[test]
 fn dependent_field_reads_respect_pointer_and_drop_boundaries() {
-    rejects(
-        r#"import { "$/shared.resin" };
-        struct Item {} fn drop(value: RefMut<Item>) {}
-        struct Cell { value: Item }
-        fn field<T>(value: T) -> _ { value.value }
-        fn main() -> () | Err<_> {
-            let owner = arc_ptr_alloc(Cell { value = Item {} })?;
+    for expression in ["value.value", "identity(value).value"] {
+        rejects(
+            &format!(
+                r#"import {{ "$/shared.resin" }};
+        struct Item {{}} fn drop(value: RefMut<Item>) {{}}
+        struct Cell {{ value: Item }}
+        fn identity<T>(value: T) -> T {{ value }}
+        fn field<T>(value: T) -> _ {{ {expression} }}
+        fn main() -> () | Err<_> {{
+            let owner = arc_ptr_alloc(Cell {{ value = Item {{}} }})?;
             field(owner:get());
+        }}
+    "#
+            ),
+            "cannot move a value through a reference or pointer",
+        );
+    }
+    succeeds(
+        r#"export { main }; import { "$/shared.resin" };
+        struct Item { drops: Ptr<i32> }
+        fn drop(value: RefMut<Item>) { value.drops.* = value.drops.* + 1; }
+        struct Cell<T> { value: T }
+        fn identity<T>(value: T) -> T { value }
+        fn field<T>(value: T) -> _ { identity(value).value }
+        fn main() -> i32 | Err<_> {
+            let drops = arc_ptr_alloc(i32(0))?;
+            { let kept = field(Cell<Item> { value = Item { drops = drops:get() } }); assert(drops:get().* == 0); };
+            assert(drops:get().* == 1);
+            0
         }
     "#,
-        "cannot move a value through a reference or pointer",
     );
     for (generic, message) in [
         ("fn field<T>(value: T) -> _ { value.value }", "drop hook"),

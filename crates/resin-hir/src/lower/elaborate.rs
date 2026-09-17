@@ -1428,7 +1428,9 @@ fn reference_place(term: &Term) -> bool {
         TermKind::Local { .. } | TermKind::Deref { .. } => true,
         TermKind::Use { arg } => reference_place(arg),
         TermKind::Field { base, .. } => {
-            reference_place(base) || matches!(base.ty, crate::Type::Pointer { .. })
+            // Even a temporary generic receiver can become a pointer. Keep its
+            // field read conditional until specialization determines ownership.
+            reference_place(base) || !known_value_receiver(&base.ty)
         }
         _ => false,
     }
