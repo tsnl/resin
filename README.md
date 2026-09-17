@@ -1,14 +1,15 @@
 # Resin
 
-**CUDA for Vulkan.**
+**A language for a heterogeneous future.**
 
-Resin is a low-level systems programming language for host CPUs and GPUs. Write
-ordinary functions, share them between application code and shaders, and build
-reusable graphics and compute libraries.
+Resin is a low-level systems programming language for host CPUs and GPUs, designed
+for graphics, machine learning, simulation, and more. Write application code and
+GPU kernels in one language, share functions and data types between them, and
+build reusable libraries for both.
 
-Data layout, pointers, memory allocation, and GPU dispatch stay explicit. Resin
-gives you the control to implement the algorithms and kernels that higher-level
-tools call into.
+GPU compute and rendering run on Vulkan. Data layout, pointers, memory allocation,
+and GPU dispatch stay explicit. Resin gives you the control to implement the
+algorithms and kernels that higher-level tools call into.
 
 ## Why Resin?
 
