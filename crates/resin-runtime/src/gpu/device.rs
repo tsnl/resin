@@ -379,6 +379,7 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
         || vulkan13.synchronization2 != vk::TRUE
         || vulkan13.maintenance4 != vk::TRUE
         || vulkan13.dynamic_rendering != vk::TRUE
+        || vulkan13.shader_terminate_invocation != vk::TRUE
         || maintenance8.maintenance8 != vk::TRUE
     {
         return None;
@@ -423,6 +424,7 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
         vulkan13: vk::PhysicalDeviceVulkan13Features::default()
             .synchronization2(true)
             .maintenance4(true)
+            .shader_terminate_invocation(true)
             .dynamic_rendering(true),
         memory_priority: vk::PhysicalDeviceMemoryPriorityFeaturesEXT::default()
             .memory_priority(memory_priority_enabled),

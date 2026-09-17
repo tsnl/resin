@@ -1,0 +1,102 @@
+// Discard fragments
+//
+// Draw a blue gradient, then an orange checkerboard. Transparent squares return
+// None from the fragment shader and leave the earlier drawing untouched.
+// This is binary alpha masking, like glTF's MASK mode: surviving pixels are
+// opaque. Blended translucency needs a different rendering strategy.
+//
+// With the compiler service running and RESIN_SERVER set (see Getting started):
+//   cargo run -- examples/discard_fragments.resin
+// This writes discard-fragments.png at 512 x 512. It needs a Vulkan GPU but no window.
+export { main };
+import { "$/gpu.resin", "$/graphics.resin", "$/image.resin", "$/shared.resin", "$/span.resin" };
+
+// One oversized triangle covers the image without a seam. The current graphics
+// interface interpolates Color; use its r/g channels as texture coordinates.
+// At each visible pixel these coordinates lie strictly between zero and one.
+@vertex_shader
+fn fullscreen(index: i32) -> Vertex {
+	let x: f32 = if (index == 1) {
+		3
+	} else {
+		-1
+	};
+	let y: f32 = if (index == 2) {
+		3
+	} else {
+		-1
+	};
+	Vertex {
+		position = Position { x = x, y = y, z = 0, w = 1 },
+		color = Color { r = (x + 1) * 0.5, g = (y + 1) * 0.5, b = 0, a = 1 },
+	}
+}
+
+@fragment_shader
+fn background(uv: Color) -> Color {
+	Color { r = 0.05, g = 0.15 + 0.25 * uv.g, b = 0.3 + 0.4 * uv.r, a = 1 }
+}
+
+// Store an 8 x 8 alpha image in a byte buffer. This example samples it manually
+// with nearest-neighbor lookup; Resin does not expose sampled-image objects yet.
+// The host owns a GpuSpan<u8>; recording projects it to a shader Span<u8> and
+// retains its allocation until submission finishes.
+struct Mask<Alpha> {
+	alpha: Alpha,
+	cutoff: f32,
+}
+
+@fragment_shader
+fn masked(uv: Color, mask: Ptr<Mask<Span<u8>>>) -> Color | None {
+	let x = u64(uv.r * 8);
+	let y = u64(uv.g * 8);
+	let alpha = f32(mask.alpha:at(y * 8 + x)) / 255;
+	if (alpha < mask.cutoff) {
+		None
+	} else {
+		Color { r = 1, g = 0.45 + 0.25 * uv.g, b = 0.08, a = 1 }
+	}
+}
+
+// None discards the whole fragment only when returned from the shader entry.
+// Helpers can return, match, or recover optional values normally. Returning a
+// Color with a = 0 still writes color: alpha alone does not request discard.
+// Discard also does not undo any buffer writes made before the return.
+// Future depth/stencil attachments must preserve this zero-coverage behavior;
+// the current graphics API has one color attachment and no depth/stencil test.
+
+fn main() -> () | Err<_> {
+	let gpu = gpu_new()?;
+	let opaque = gpu:create_graphics_pipeline(fullscreen, background)?;
+	let cutout = gpu:create_graphics_pipeline(fullscreen, masked)?;
+	let alpha = gpu:alloc::<u8>(64)?;
+	let mut index: u64 = 0;
+	while (index < alpha.length) {
+		let white = (index / 8 + index % 8) % 2 == 0;
+		let pixel = alpha:at(index);
+		pixel:store(
+			if (white) {
+				u8(255)
+			} else {
+				u8(0)
+			}
+		);
+		index = index + 1;
+	};
+	let image = gpu:create_image(512, 512)?;
+	let pixels = gpu:alloc::<u8>(512 * 512 * 4)?;
+	let commands = gpu:start_command_recording()?;
+	commands:begin_rendering(image, 0, 0, 0, 1)?;
+	commands:draw(opaque, None, 3)?;
+	commands:draw(cutout, Mask<GpuSpan<u8>> { alpha = alpha, cutoff = 0.5 }, 3)?;
+	commands:end_rendering()?;
+	commands:copy_image_to_buffer(image, pixels)?;
+	commands:submit()?;
+
+	// Submission waits for the GPU, so mapped pixel reads are now safe.
+	let host = arc_span_alloc::<u8>(pixels.length, u8(0))?;
+	pixels:copy_to(host:get());
+	let view = host:get();
+	image_data_write_pixels("discard-fragments.png".data, 512, 512, 4, view, 0)?;
+	(())
+}

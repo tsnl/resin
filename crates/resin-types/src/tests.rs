@@ -695,6 +695,78 @@ fn graphics_pipeline_roots_and_varyings_keep_nominal_type_identity() {
 }
 
 #[test]
+fn fragment_outputs_allow_exactly_color_or_optional_color() {
+    let mut context = TyperContext::new();
+    let (color, other_color, vertex) = shader_graphics_types(&mut context);
+    let parameters = shader_parameter(color.clone(), Ty::UInt32);
+    let optional = Ty::union_of([other_color.clone(), Ty::None]);
+    assert!(matches!(
+        shader::validate(&context, &parameters, &optional, false, "fragment").unwrap(),
+        shader::Interface::Fragment { output, may_discard: true, root: true, .. }
+            if output == other_color
+    ));
+    assert_eq!(
+        shader::pipeline_root(
+            &context,
+            &[
+                (&[Ty::Int32], &vertex, "vertex"),
+                (&parameters, &optional, "fragment"),
+            ]
+        )
+        .unwrap(),
+        Ty::UInt32
+    );
+    for result in [
+        Ty::None,
+        Ty::union_of([color.clone(), Ty::UInt32]),
+        Ty::union_of([color.clone(), Ty::None, Ty::UInt32]),
+        Ty::union_of([Ty::UInt32, Ty::None]),
+        Ty::union_of([record(Ty::Float32), Ty::None]),
+        Ty::union_of([
+            color.clone(),
+            Ty::Error {
+                payload: Box::new(Ty::Unit),
+            },
+        ]),
+    ] {
+        assert!(
+            shader::validate(&context, &parameters, &result, false, "fragment").is_err(),
+            "{result:?}"
+        );
+    }
+    assert!(
+        shader::validate(
+            &context,
+            std::slice::from_ref(&optional),
+            &color,
+            false,
+            "fragment"
+        )
+        .is_err()
+    );
+    assert!(
+        shader::validate(
+            &context,
+            &[Ty::Int32],
+            &Ty::union_of([vertex, Ty::None]),
+            false,
+            "vertex"
+        )
+        .is_err()
+    );
+    assert!(
+        shader::validate(
+            &context,
+            &shader_parameter(Ty::UInt64, Ty::UInt32),
+            &Ty::union_of([Ty::Unit, Ty::None]),
+            false,
+            "compute"
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn references_preserve_access_without_pointer_conversions_or_shared_layout() {
     let reference = Ty::Reference {
         mutable: false,

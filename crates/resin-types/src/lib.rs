@@ -1031,6 +1031,10 @@ pub mod shader {
         Fragment {
             color: Ty,
             root: bool,
+            /// The color record written when the fragment survives.
+            output: Ty,
+            /// The entry returns `output | None`; None discards the whole fragment.
+            may_discard: bool,
         },
     }
 
