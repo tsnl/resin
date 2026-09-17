@@ -1,4 +1,4 @@
-//! Reproducible Phase 1 measurements, with correctness assertions on actual pass reuse.
+//! Cache measurements retain correctness assertions on pass reuse and ownership.
 use resin_cache::Cache;
 use resin_executor::{Cancellation, Execution};
 use resin_source::{ImportBinding, Source, SourceGraph};
@@ -153,14 +153,13 @@ impl Retained {
     }
 }
 
-fn fixture(changed: bool) -> SourceGraph {
-    let count = 16;
+fn fixture(changed: bool, count: usize, helpers: usize) -> SourceGraph {
     let mut sources = Vec::new();
     for index in 0..count {
         let value = if changed && index == 0 { 43 } else { 42 };
         let mut text =
             format!("export {{ value_{index} }}; fn value_{index}() -> i32  {{ {value} }}\n");
-        for helper in 0..64 {
+        for helper in 0..helpers {
             text.push_str(&format!(
                 "fn helper_{helper}(value: i32) -> i32  {{ value + {helper} }}\n"
             ));
@@ -198,53 +197,66 @@ fn counts(values: &[AtomicUsize; 4]) -> [usize; 4] {
     std::array::from_fn(|index| values[index].load(Ordering::Relaxed))
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn cold_warm_edit_cache_measurements() -> Result<()> {
+pub async fn frontend(files: usize, helpers: usize) -> Result<serde_json::Value> {
     let execution = Execution::default();
     let cancellation = Cancellation::new();
     let built = std::array::from_fn(|_| AtomicUsize::new(0));
     let started = Instant::now();
     let first = Retained::new()
-        .update(fixture(false), &built, &execution, &cancellation)
+        .update(
+            fixture(false, files, helpers),
+            &built,
+            &execution,
+            &cancellation,
+        )
         .await?;
     let cold = started.elapsed();
-    assert_eq!(counts(&built), [17, 17, 1, 1]);
+    assert_eq!(counts(&built), [files + 1, files + 1, 1, 1]);
     let memory_cold = resident_kib();
     let started = Instant::now();
     let warm = first
-        .update(fixture(false), &built, &execution, &cancellation)
+        .update(
+            fixture(false, files, helpers),
+            &built,
+            &execution,
+            &cancellation,
+        )
         .await?;
     let unchanged = started.elapsed();
-    assert_eq!(counts(&built), [17, 17, 1, 1]);
-    let original = first.hir.get(&fixture(false)).unwrap();
+    assert_eq!(counts(&built), [files + 1, files + 1, 1, 1]);
+    let original = first.hir.get(&fixture(false, files, helpers)).unwrap();
     assert!(Arc::ptr_eq(
         original,
-        warm.hir.get(&fixture(false)).unwrap()
+        warm.hir.get(&fixture(false, files, helpers)).unwrap()
     ));
     let started = Instant::now();
     let edited = warm
-        .update(fixture(true), &built, &execution, &cancellation)
+        .update(
+            fixture(true, files, helpers),
+            &built,
+            &execution,
+            &cancellation,
+        )
         .await?;
     let edit = started.elapsed();
-    assert_eq!(counts(&built), [18, 18, 2, 2]);
+    assert_eq!(counts(&built), [files + 2, files + 2, 2, 2]);
     assert!(original.hir().is_ok());
-    assert_eq!(first.syntax.len(), 17);
-    assert_eq!(edited.syntax.len(), 18);
-    println!(
-        "phase1 frontend: jobs={}, sources=17, declarations=1041, cold_us={}, warm_us={}, edit_us={}, builds={:?}, rss_cold_kib={:?}, rss_retained_kib={:?}",
-        execution.jobs(),
-        cold.as_micros(),
-        unchanged.as_micros(),
-        edit.as_micros(),
-        counts(&built),
-        memory_cold,
-        resident_kib()
-    );
-    Ok(())
+    assert_eq!(first.syntax.len(), files + 1);
+    assert_eq!(edited.syntax.len(), files + 2);
+    Ok(serde_json::json!({
+        "jobs": execution.jobs(),
+        "sources": files + 1,
+        "declarations": files * (helpers + 1) + 1,
+        "cold_ms": cold.as_secs_f64() * 1000.0,
+        "warm_ms": unchanged.as_secs_f64() * 1000.0,
+        "edit_ms": edit.as_secs_f64() * 1000.0,
+        "builds": counts(&built),
+        "rss_cold_kib": memory_cold,
+        "rss_retained_kib": resident_kib(),
+    }))
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn map_copy_rebase_and_retained_memory_measurements() -> Result<()> {
+async fn maps() -> Result<serde_json::Value> {
     let execution = Execution::default();
     let cancellation = Cancellation::new();
     let before = resident_kib();
@@ -283,18 +295,17 @@ async fn map_copy_rebase_and_retained_memory_measurements() -> Result<()> {
     assert!(weak.upgrade().is_some());
     drop(original);
     assert!(weak.upgrade().is_none());
-    println!(
-        "phase1 maps: entries=10000, payload_bytes=10240000, mean_clone_us={}, mean_hit_update_us={}, rss_before_kib={:?}, rss_allocated_kib={:?}",
-        copy.as_micros() / 100,
-        rebase.as_micros() / 10,
-        before,
-        allocated
-    );
-    Ok(())
+    Ok(serde_json::json!({
+        "entries": 10000,
+        "payload_bytes": 10240000,
+        "mean_clone_ms": copy.as_secs_f64() * 1000.0 / 100.0,
+        "mean_hit_update_ms": rebase.as_secs_f64() * 1000.0 / 10.0,
+        "rss_before_kib": before,
+        "rss_allocated_kib": allocated,
+    }))
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn execution_overlap_and_cancellation_measurements() -> Result<()> {
+async fn execution_overlap() -> Result<serde_json::Value> {
     let execution = Execution::new(NonZeroUsize::new(4).unwrap());
     let cancellation = Cancellation::new();
     let active = Arc::new(AtomicUsize::new(0));
@@ -332,13 +343,11 @@ async fn execution_overlap_and_cancellation_measurements() -> Result<()> {
     let (result, cancelled) = tokio::join!(work, cancel);
     assert_eq!(result, Err(resin_executor::Error::Cancelled));
     execution.wait_idle().await;
-    println!(
-        "phase1 execution: peak_jobs={}, four_40ms_cpu_jobs_us={}, cancel_and_drain_us={}",
-        peak.load(Ordering::SeqCst),
-        parallel.as_micros(),
-        cancelled.elapsed().as_micros()
-    );
-    Ok(())
+    Ok(serde_json::json!({
+        "peak_jobs": peak.load(Ordering::SeqCst),
+        "four_40ms_cpu_jobs_ms": parallel.as_secs_f64() * 1000.0,
+        "cancel_and_drain_ms": cancelled.elapsed().as_secs_f64() * 1000.0,
+    }))
 }
 
 fn resident_kib() -> Option<usize> {
@@ -356,4 +365,12 @@ fn resident_kib() -> Option<usize> {
 
 async fn unexpected_miss(_: u32) -> std::result::Result<Arc<[u8; 1024]>, std::convert::Infallible> {
     panic!("all keys are retained hits")
+}
+
+pub async fn measure() -> Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "frontend": frontend(16, 64).await?,
+        "maps": maps().await?,
+        "execution": execution_overlap().await?,
+    }))
 }

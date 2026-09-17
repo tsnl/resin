@@ -42,15 +42,16 @@ fn explorer_builds_and_can_render_resize_and_close_in_both_modes() {
         1,
     );
     assert_ne!(source, original, "instrument the interactive loop");
+    let source = source.replace(
+        "if (frames == 6)",
+        "if (frames == 5) { renderer:screenshot(options.screenshot)?; }; if (frames == 6)",
+    );
+    let (_project, executable) = build_example(&source, "main");
     for mode in ["--gpu", "--cpu"] {
         let output = tempfile::TempDir::new().unwrap();
         let path = output.path().join("screenshot with spaces.png");
-        let source = source.replace(
-            "if (frames == 6)",
-            "if (frames == 5) { renderer:screenshot(options.screenshot)?; }; if (frames == 6)",
-        );
         if run_example(
-            &source,
+            &executable,
             "main",
             true,
             &[
@@ -182,7 +183,8 @@ fn compute_matches_cpu_for_partial_segments() {
         }
     "#,
     );
-    run_example(&source, "compare", false, &[]);
+    let (_project, executable) = build_example(&source, "compare");
+    run_example(&executable, "compare", false, &[]);
 }
 
 #[test]
@@ -371,8 +373,12 @@ fn build_example(
     (project, executable)
 }
 
-fn run_example(source: &str, entry: &str, needs_window: bool, args: &[&str]) -> bool {
-    let (_project, executable) = build_example(source, entry);
+fn run_example(
+    executable: &resin_toolchain::Executable,
+    entry: &str,
+    needs_window: bool,
+    args: &[&str],
+) -> bool {
     let display = !cfg!(target_os = "linux")
         || ["DISPLAY", "WAYLAND_DISPLAY"]
             .iter()

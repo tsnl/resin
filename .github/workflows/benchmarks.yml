@@ -1,0 +1,68 @@
+name: Compiler benchmarks
+
+on:
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compiler-benchmarks-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  compiler:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CARGO_INCREMENTAL: 0
+      RESIN_REQUIRE_SPIRV_TOOLS: 1
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libwayland-dev libxkbcommon-dev wayland-protocols spirv-tools
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: compiler-benchmarks
+          cache-bin: false
+      - name: Record compiler and tool versions
+        run: |
+          mkdir -p benchmark-results
+          git show --no-patch --format=fuller HEAD > benchmark-results/environment.txt
+          rustc --version >> benchmark-results/environment.txt
+          cc --version >> benchmark-results/environment.txt
+          ninja --version >> benchmark-results/environment.txt
+          spirv-opt --version >> benchmark-results/environment.txt
+          spirv-val --version >> benchmark-results/environment.txt
+          lscpu >> benchmark-results/environment.txt
+      - name: Build compiler and native runtime
+        run: cargo build --workspace --release --locked
+      - name: Measure compiler and cache workloads
+        run: cargo bench --bench compiler --locked -- --samples 5 --warmup 1 > benchmark-results/compiler.json
+      - name: Summarize measurements
+        run: |
+          python3 - <<'PY'
+          import json, os, statistics
+          with open('benchmark-results/compiler.json') as source:
+              results = json.load(source)
+          rows = [(name, [sum(sample.values()) for sample in results[name]]) for name in ('c', 'spirv')]
+          rows += [(f'cache {phase}', [sample['frontend'][f'{phase}_ms'] for sample in results['cache']]) for phase in ('cold', 'warm', 'edit')]
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('Compiler benchmarks: 512 branch pairs, 5 samples after 1 warmup.\n\n')
+              summary.write('| Workload | Median (ms) |\n| --- | ---: |\n')
+              for name, values in rows:
+                  summary.write(f'| {name} | {statistics.median(values):.3f} |\n')
+              summary.write('\nIndividual timings, cache memory measurements, commit and tool versions are in the artifact. Hosted-runner timings are observations, not pass/fail thresholds.\n')
+          PY
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiler-benchmarks-${{ github.run_id }}-${{ github.run_attempt }}
+          path: benchmark-results/
+          retention-days: 30
