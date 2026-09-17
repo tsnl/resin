@@ -701,15 +701,9 @@ fn integer_division(
         return emit(context, op, ty, args);
     }
     let divisor = signed_divisor(context, ty, bits, args)?;
-    let quotient = emit(context, Op::SDiv, ty, &[args[0], divisor])?;
-    if name == "/" {
-        return Ok(quotient);
-    }
-    // Vulkan requires maintenance8 for SRem with negative operands. Derive
-    // the remainder from truncating division instead, including MIN % -1.
-    // https://docs.vulkan.org/spec/latest/appendices/spirvenv.html
-    let product = emit(context, Op::IMul, ty, &[quotient, divisor])?;
-    emit(context, Op::ISub, ty, &[args[0], product])
+    // The runtime requires maintenance8, which defines SRem for negative operands.
+    let op = if name == "/" { Op::SDiv } else { Op::SRem };
+    emit(context, op, ty, &[args[0], divisor])
 }
 
 // SPIR-V signed division is undefined for MIN / -1. Replacing that divisor

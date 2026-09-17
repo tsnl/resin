@@ -164,6 +164,10 @@ triangle lists, one sample, and no blending or depth/stencil testing.
 
 A Vulkan 1.3 device must support graphics and compute, buffer device addresses, 64-bit shader
 integers, timeline semaphores, synchronization2, dynamic rendering, and maintenance4.
+`VK_KHR_maintenance8` and its `maintenance8` feature are also required and enabled
+when creating the device. This makes signed shader remainder well-defined for
+negative operands. Devices missing the extension or feature are reported as
+unsuitable; GPU creation returns `unsupported` if no suitable device is available.
 Shader objects, map_memory2, maintenance5, and maintenance6 are not required. Optional memory-priority and pageable-memory features are enabled when supported.
 Shader capabilities are limited to the profile Resin emits; externally supplied SPIR-V must
 fit that profile too. The emitted byte profile additionally enables supported `storageBuffer8BitAccess` and `shaderInt8` features.

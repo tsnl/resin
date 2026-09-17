@@ -58,7 +58,8 @@ The service never starts automatically and the client has no local compiler fall
 Windows emitted C uses the GNU-style `clang` driver with the MSVC ABI, not `cl` or `clang-cl`.
 MinGW and cross-compiling Resin programs are not tested. macOS enables Vulkan portability
 enumeration and the portability-subset extension when available, but does not relax the runtime's
-Vulkan 1.3 feature requirements. Some MoltenVK devices and presentation paths may still report
+Vulkan 1.3 and maintenance8 [feature requirements](shaders.md#gpu-requirements).
+Some MoltenVK devices and presentation paths may still report
 `unsupported`; macOS build support is not a promise that every GPU demo works.
 Native CI builds and tests the compiler, runtime, and language server without opening windows.
 Pull requests and pushes to `main` run on Linux; manually dispatching the `Build` workflow
