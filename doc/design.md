@@ -8,10 +8,9 @@ The [ownership specification](lifetimes.md) describes `ArcPtr<T>`, `ArcSpan<T>`,
 automatic destruction, and checked ownership moves.
 
 Resin is a deliberately small systems programming language in the spirit of C and Go.
-Data layout, mutation, pointers, control flow, and cost stay visible. Passing,
-assigning, or returning an owned value transfers it. Primitive values and structural
-aggregates of copyable values copy; named structs move. Shared handles are cloned
-explicitly when another owner is needed. Raw pointers, references, and spans remain
+Data layout, mutation, pointers, control flow, and cost stay visible. Value reads copy primitives and aggregates, including named structs, when all
+stored fields copy. Shared-handle copies retain their owner. A custom drop hook or
+a noncopyable field makes a struct move-only; consuming it transfers ownership. Raw pointers, references, and spans remain
 nonowning, with unchecked lifetimes and aliasing; there is no borrow checker.
 Separate value and
 type namespaces keep definitions simple, including recursion through pointers.
@@ -56,7 +55,7 @@ Process termination and traps do not unwind scopes.
 
 Host code uses source `GpuPtr<T>` and `GpuSpan<T>` wrappers over opaque `GpuView`
 primitives, carrying an allocation
-owner, byte offset, and access permissions. Explicit clones and interior views retain the
+owner, byte offset, and access permissions. Value copies, explicit clones, and interior views retain the
 owner. Checked host operations enforce bounds, alignment, mapping state, permissions,
 and exclusion while a command recording can use the allocation. Views cannot be
 cast to ordinary pointers or constructed from raw addresses.

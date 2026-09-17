@@ -5,6 +5,7 @@ fn dependent_reads_distinguish_references_from_fresh_owned_results() {
     let error = support::pipeline::source_module(
         r#"
         struct Item { value: i32 }
+        fn drop(value: RefMut<Item>) {}
         fn copy<T>(value: Ref<T>) -> T { value }
         fn main() { let original = Item { value = 42 }; let duplicate = copy(original); }
     "#,
@@ -150,6 +151,7 @@ fn repeated_allocation_rejects_move_only_elements() {
         export { main };
         import { "$/shared.resin", "$/status.resin" };
         struct Item { value: i32 }
+        fn drop(value: RefMut<Item>) {}
         fn main() -> () | Err<OutOfMemory> {
             let values = arc_span_alloc(u64(2), Item { value = 42 })?;
         }

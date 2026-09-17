@@ -1,7 +1,7 @@
 # GPU pointers, spans, and shader arguments
 
 `GpuPtr<T>` owns a view into a GPU allocation. `GpuSpan<T>` adds an element count.
-Explicit clones, indexed pointers, and slices retain the allocation and its GPU. Both are
+Value copies, explicit clones, indexed pointers, and slices retain the allocation and its GPU. Both are
 ordinary generic source structs over an opaque `GpuView` primitive. Neither
 exposes a raw host pointer or a device-address query. Import `$/gpu.resin` for
 these wrappers and device operations. Shader roots using borrowed `Span<T>` also
@@ -88,7 +88,7 @@ the same root type when both have a root parameter. Rootless graphics pipelines 
 `None` as their root type and accept `commands:draw(pipeline, None, count)`.
 
 Pipeline wrappers move by value and retain another shared native owner when
-explicitly cloned. Pipeline and command parameters borrow their wrappers. Explicit parameter types can name `GpuPipelineOwner`, exported
+copied. Pipeline and command parameters borrow their wrappers. Explicit parameter types can name `GpuPipelineOwner`, exported
 by the GPU module. Each wrapper stores an opaque `GpuPipelineContract` containing
 the originating root type, owner type, and shader stage. Dispatch and draw validate
 that contract before projecting arguments. Changing a wrapper annotation cannot
@@ -116,7 +116,7 @@ pointer's element type. Use typed indexing for buffer access.
 
 `commands:dispatch(pipeline, arguments, x, y, z)` and
 `commands:draw(pipeline, arguments, count)` bind the supplied pipeline and project
-its checked host arguments. Host records can be explicitly cloned or reconstructed for compatible pipelines,
+its checked host arguments. Copyable host records can be copied or reconstructed for compatible pipelines,
 as in [particles](../examples/particles.resin); each recording creates its own root.
 
 Successful recording retains the root and its referenced allocations through

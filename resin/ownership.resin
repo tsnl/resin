@@ -1,0 +1,10 @@
+//! Explicitly opt a value out of implicit copying.
+
+export { PhantomBox };
+
+/// A field of this type makes its enclosing struct move-only.
+/// It owns no allocation. Its empty drop hook prevents implicit copying;
+/// ordinary field propagation carries that restriction to enclosing types.
+struct PhantomBox {}
+
+fn drop(value: RefMut<PhantomBox>) {}

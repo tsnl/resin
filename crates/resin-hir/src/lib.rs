@@ -1922,23 +1922,3 @@ pub struct OperationLookup {
     /// in `arguments` retain the numeric fallback chosen during HIR construction.
     pub literal_arguments: Vec<usize>,
 }
-
-impl Type {
-    /// Primitive values and recursively copyable structural aggregates may be read repeatedly.
-    /// Nominal structs and unconstrained type parameters transfer ownership.
-    pub fn copies_implicitly(&self) -> bool {
-        match self {
-            Self::Defined { .. }
-            | Self::Parameter { .. }
-            | Self::Member { .. }
-            | Self::FunctionParameter { .. }
-            | Self::FunctionResult { .. }
-            | Self::Value { .. } => false,
-            Self::Array { element, .. } => element.copies_implicitly(),
-            Self::Record { fields } => fields.iter().all(|field| field.ty.copies_implicitly()),
-            Self::Union { variants } => variants.iter().all(Self::copies_implicitly),
-            Self::Error { payload } => payload.copies_implicitly(),
-            _ => true,
-        }
-    }
-}

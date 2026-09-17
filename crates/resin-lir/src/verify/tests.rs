@@ -545,6 +545,74 @@ fn destruction_hooks_require_the_nominal_reference_signature() {
 }
 
 #[test]
+fn loads_copy_plain_structs_but_cannot_duplicate_custom_owners() {
+    let nominal = Ty::Defined {
+        definition: TypeId::from_index(0),
+    };
+    let mut module = expression_module(
+        nominal.clone(),
+        nominal.clone(),
+        vec![
+            Instr::LocalRef {
+                local: LocalId::from_index(0),
+            },
+            Instr::Load,
+        ],
+    );
+    module.types = vec![TypeDef::new("Resource", record())].into();
+    verify(&module).unwrap();
+    let hook = expression_module(
+        Ty::Reference {
+            mutable: true,
+            referent: Box::new(nominal.clone()),
+        },
+        Ty::Unit,
+        vec![Instr::Push { value: Value::Unit }],
+    )
+    .functions
+    .remove(0);
+    module.functions.push(hook);
+    let mut definition = module.types[0].clone();
+    if let TypeDef::Nominal { drop, .. } = &mut definition {
+        *drop = Some(FunctionId::from_index(1));
+    }
+    module.types = vec![definition].into();
+    assert_eq!(
+        verify(&module).unwrap_err().kind,
+        VerifyErrorKind::InvalidCopy {
+            ty: nominal.clone()
+        }
+    );
+    module.functions[0].blocks[0].instrs = vec![Instr::TakeLocal {
+        local: LocalId::from_index(0),
+    }];
+    verify(&module).unwrap();
+    module.functions[0].locals[0].ty = Ty::Record {
+        fields: vec![RecordField {
+            name: "owner".into(),
+            ty: nominal.clone(),
+        }],
+    };
+    module.functions[0].blocks[0]
+        .instrs
+        .push(Instr::AccessStatic { index: 0 });
+    assert_eq!(
+        verify(&module).unwrap_err().kind,
+        VerifyErrorKind::InvalidCopy {
+            ty: nominal.clone()
+        }
+    );
+    module.functions[0].result = Ty::Reference {
+        mutable: true,
+        referent: Box::new(nominal),
+    };
+    module.functions[0].blocks[0].instrs[0] = Instr::LocalRef {
+        local: LocalId::from_index(0),
+    };
+    verify(&module).unwrap();
+}
+
+#[test]
 fn string_immediates_have_a_distinct_type() {
     let literal = Instr::Push {
         value: Value::Str {

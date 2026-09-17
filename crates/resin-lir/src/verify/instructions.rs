@@ -95,7 +95,7 @@ pub(super) fn check_instr(
         Instr::OwnerAllocate { element } => {
             check_type(&module.types, element, location)?;
             super::rules::check_value(&module.types, element, location)?;
-            if !element.copies_implicitly() {
+            if !element.copies_implicitly(&module.types) {
                 return Err(location.error(VerifyErrorKind::InvalidCopy {
                     ty: element.clone(),
                 }));
@@ -261,7 +261,11 @@ pub(super) fn check_instr(
         }
         Instr::AccessStatic { index } => {
             let source = pop_one(stack, location)?;
-            stack.push(project_static(&module.types, source, *index, location)?);
+            let field = project_static(&module.types, source, *index, location)?;
+            if !field.copies_implicitly(&module.types) {
+                return Err(location.error(VerifyErrorKind::InvalidCopy { ty: field }));
+            }
+            stack.push(field);
         }
         Instr::PointerBytes => {
             let args = pop(stack, 2, location)?;
@@ -300,7 +304,11 @@ pub(super) fn check_instr(
                 return Err(location.error(VerifyErrorKind::ExpectedInteger { found: index }));
             }
             let source = pop_one(stack, location)?;
-            stack.push(project_dynamic(&module.types, source, location)?);
+            let element = project_dynamic(&module.types, source, location)?;
+            if !element.copies_implicitly(&module.types) {
+                return Err(location.error(VerifyErrorKind::InvalidCopy { ty: element }));
+            }
+            stack.push(element);
         }
         Instr::Load | Instr::TransferLoad => {
             let address = pop_one(stack, location)?;
@@ -312,6 +320,9 @@ pub(super) fn check_instr(
             else {
                 return Err(location.error(VerifyErrorKind::ExpectedPointer { found: address }));
             };
+            if matches!(instr, Instr::Load) && !pointee.copies_implicitly(&module.types) {
+                return Err(location.error(VerifyErrorKind::InvalidCopy { ty: *pointee }));
+            }
             stack.push(*pointee);
         }
         Instr::Store | Instr::Replace => {

@@ -810,7 +810,11 @@ impl Specialization<'_, '_> {
             return Ok(concrete::TermKind::Borrow { place });
         }
         let value = if let resin_hir::Type::Reference { referent, .. } = from {
-            if access == Access::Value && !referent.copies_implicitly() {
+            if access == Access::Value
+                && !self
+                    .ty(&referent)?
+                    .copies_implicitly(self.instances.typer().definitions())
+            {
                 return Err(self.instance_error("cannot move a value through a reference or pointer; replace its contents instead"));
             }
             concrete::Term {
@@ -886,10 +890,19 @@ impl Specialization<'_, '_> {
             .typer()
             .same(&expected, &access.ty)
             .map_err(|error| self.typing_error(error))?;
-        Ok(concrete::TermKind::Field {
-            base: self.place(base)?,
-            access,
-        })
+        let base = self.place(base)?;
+        if !reference_place(&base)
+            && !access
+                .ty
+                .copies_implicitly(self.instances.typer().definitions())
+            && let Ty::Defined { definition } = &base.ty
+            && self.instances.typer().definitions()[definition.index()]
+                .drop_hook()
+                .is_some()
+        {
+            return Err(self.instance_error("cannot move a field out of a type with a drop hook"));
+        }
+        Ok(concrete::TermKind::Field { base, access })
     }
 
     fn builtin(
@@ -963,9 +976,8 @@ impl Specialization<'_, '_> {
             .map(|ty| self.ty(ty))
             .collect::<Result<Vec<_>, _>>()?;
         if op == Intrinsic::OwnerAllocate
-            && parameters.first().is_some_and(|element| {
-                self.argument(element)
-                    .is_ok_and(|element| !element.copies_implicitly())
+            && type_args.first().is_some_and(|element| {
+                !element.copies_implicitly(self.instances.typer().definitions())
             })
         {
             return Err(self.instance_error("repeated allocation requires an implicitly copyable element; use single-value allocation to transfer ownership"));
@@ -1049,7 +1061,9 @@ impl Specialization<'_, '_> {
                 let value = self.term(place)?;
                 if !matches!(source, resin_hir::Type::Reference { .. })
                     && reference_place(&value)
-                    && !value.ty.copies_implicitly()
+                    && !value
+                        .ty
+                        .copies_implicitly(self.instances.typer().definitions())
                 {
                     return Err(self.instance_error("cannot move a value through a reference or pointer; replace its contents instead"));
                 }

@@ -1,13 +1,13 @@
-//! Explicit shared and weak ownership of host allocations.
-//! Use `clone` to retain ownership and `get` to borrow access.
+//! Shared and weak ownership of host allocations.
+//! Value copies retain ownership; `get` borrows access without retaining it.
 
 export { ArcPtr, ArcSpan, WeakPtr, WeakSpan, arc_ptr_alloc, get, downgrade, arc_span_alloc, weak_ptr_empty, upgrade, weak_span_empty, clone };
 
 import { "status.resin", "span.resin" };
 
 // Single-value allocation transfers ownership into the shared allocation.
-// Repeated allocation requires implicitly copyable elements. Explicit clone
-// operations retain the allocation; borrowed views do not extend its lifetime.
+// Repeated allocation requires implicitly copyable elements. Copying a shared
+// handle retains the allocation; borrowed views do not extend its lifetime.
 struct ArcPtr<T> {
 	owner: StrongOwner,
 }

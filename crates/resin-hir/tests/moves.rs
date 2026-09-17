@@ -10,23 +10,27 @@ fn rejects(source: &str, message: &str) {
 }
 
 #[test]
-fn values_move_and_primitives_copy() {
+fn owners_with_drop_hooks_move_and_primitives_copy() {
     accepts("fn f(value: i32) -> i32 { value + value }");
     rejects(
-        "struct Item {} fn f(value: Item) { let other = value; value; }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f(value: Item) { let other = value; value; }",
         "moved",
     );
-    accepts("struct Item {} fn f(mut value: Item) { let other = value; value = Item {}; value; }");
+    accepts(
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f(mut value: Item) { let other = value; value = Item {}; value; }",
+    );
 }
 
 #[test]
 fn widening_copyable_values_does_not_move_them() {
     accepts(
-        "struct Item {} fn f(value: i32) -> i32 | Item { let widened: i32 | Item = value; value }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f(value: i32) -> i32 | Item { let widened: i32 | Item = value; value }",
     );
-    accepts("struct Item {} fn f(value: Ref<i32>) -> i32 | Item { value }");
+    accepts(
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f(value: Ref<i32>) -> i32 | Item { value }",
+    );
     rejects(
-        "struct Item {} fn f(value: Ref<Item>) -> i32 | Item { value }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f(value: Ref<Item>) -> i32 | Item { value }",
         "reference",
     );
 }
@@ -49,7 +53,7 @@ fn assignment_requires_mut_and_returns_unit() {
         "immutable",
     );
     rejects(
-        "struct Item {} fn f() { let value = Item {}; let moved = value; value = Item {}; }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f() { let value = Item {}; let moved = value; value = Item {}; }",
         "immutable",
     );
     rejects(
@@ -72,29 +76,29 @@ fn match_binders_are_immutable_unless_marked_mut() {
 #[test]
 fn field_moves_preserve_siblings_and_block_whole_reads() {
     accepts(
-        "struct Item {} struct Pair { a: Item, b: Item, } fn f(value: Pair) { let a = value.a; let b = value.b; }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} struct Pair { a: Item, b: Item, } fn f(value: Pair) { let a = value.a; let b = value.b; }",
     );
     rejects(
-        "struct Item {} struct Pair { a: Item, b: Item, } fn f(value: Pair) { let a = value.a; value; }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} struct Pair { a: Item, b: Item, } fn f(value: Pair) { let a = value.a; value; }",
         "moved",
     );
     accepts(
-        "struct Item {} struct Pair { a: Item, b: Item, } fn f(mut value: Pair) { let a = value.a; value.a = Item {}; value; }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} struct Pair { a: Item, b: Item, } fn f(mut value: Pair) { let a = value.a; value.a = Item {}; value; }",
     );
 }
 
 #[test]
 fn branches_and_loop_backedges_check_moves() {
     rejects(
-        "struct Item {} fn f(value: Item, flag: bool) { if (flag) { let other = value; }; value; }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f(value: Item, flag: bool) { if (flag) { let other = value; }; value; }",
         "moved",
     );
     rejects(
-        "struct Item {} fn f(value: Item, flag: bool) { while (flag) { let other = value; }; }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f(value: Item, flag: bool) { while (flag) { let other = value; }; }",
         "moved",
     );
     accepts(
-        "struct Item {} fn f(mut value: Item, flag: bool) { while (flag) { let other = value; value = Item {}; }; value; }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f(mut value: Item, flag: bool) { while (flag) { let other = value; value = Item {}; }; value; }",
     );
 }
 
@@ -104,7 +108,7 @@ fn references_do_not_consume_their_referents() {
         "struct Item { value: i32, } fn inspect(value: Ref<Item>) -> i32 { value.value } fn f(value: Item) -> i32 { inspect(value) + inspect(value) }",
     );
     rejects(
-        "struct Item {} fn f(value: Ref<Item>) -> Item { value }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f(value: Ref<Item>) -> Item { value }",
         "reference",
     );
 }
@@ -112,36 +116,67 @@ fn references_do_not_consume_their_referents() {
 #[test]
 fn early_exits_join_ownership_only_on_reachable_paths() {
     accepts(
-        "struct Item {} fn f(value: Item, flag: bool) -> Item { if (flag) { return value; }; value }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f(value: Item, flag: bool) -> Item { if (flag) { return value; }; value }",
     );
     accepts(
-        "struct Item {} fn f(value: Item, flag: bool) -> Item { while (flag) { return value; }; value }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f(value: Item, flag: bool) -> Item { while (flag) { return value; }; value }",
     );
     rejects(
-        "struct Item {} fn f(value: Item, flag: bool) { while (flag) { let other = value; break; }; value; }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f(value: Item, flag: bool) { while (flag) { let other = value; break; }; value; }",
         "moved",
     );
     rejects(
-        "struct Item {} fn f(value: Item, flag: bool) { while (flag) { let other = value; continue; }; }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f(value: Item, flag: bool) { while (flag) { let other = value; continue; }; }",
         "moved",
     );
     accepts(
-        "struct Item {} fn f(mut value: Item, flag: bool) { while (flag) { let other = value; value = Item {}; continue; }; value; }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f(mut value: Item, flag: bool) { while (flag) { let other = value; value = Item {}; continue; }; value; }",
     );
 }
 
 #[test]
 fn error_union_payloads_preserve_move_rules() {
     accepts(
-        "struct Item {} fn f(value: Item, flag: bool) -> Item | Err<Item> { if (flag) { return Err(value); }; value }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f(value: Item, flag: bool) -> Item | Err<Item> { if (flag) { return Err(value); }; value }",
     );
     rejects(
-        "struct Item {} fn f(value: Item) { let error = Err(value); value; }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f(value: Item) { let error = Err(value); value; }",
         "moved",
     );
     rejects(
-        "struct Item {} fn f(value: Err<Item>) { let other = value; value; }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} fn f(value: Err<Item>) { let other = value; value; }",
         "moved",
     );
     accepts("fn f(value: Err<i32>) { let other = value; value; }");
+}
+
+#[test]
+fn structs_copy_by_stored_fields_including_generic_and_unused_arguments() {
+    accepts(
+        "struct Item { value: i32 } fn f(value: Item) -> i32 { let copy = value; value.value + copy.value }",
+    );
+    accepts("struct Item { value: i32 } fn f(value: Ref<Item>) -> Item { value }");
+    accepts(
+        "struct Cell<T> { value: T } fn f(value: Cell<Cell<i32>>) { let copied = value; value; }",
+    );
+    accepts(
+        "struct Item {} fn drop(value: RefMut<Item>) {} struct View<T> { data: Ptr<T> } fn f(value: View<Item>) { let copied = value; value; }",
+    );
+    accepts("struct Token<T> {} fn f<T>(value: Token<T>) { let copied = value; value; }");
+    rejects(
+        "struct Item {} fn drop(value: RefMut<Item>) {} struct Cell<T> { value: T } fn f(value: Cell<Item>) { let moved = value; value; }",
+        "moved",
+    );
+    rejects(
+        "struct Cell<T> { value: T } fn f<T>(value: Cell<T>) { let moved = value; value; }",
+        "moved",
+    );
+}
+
+#[test]
+fn temporary_structs_with_drop_hooks_cannot_surrender_owned_fields() {
+    rejects(
+        "struct Item {} fn drop(value: RefMut<Item>) {} struct Owner { item: Item } fn drop(value: RefMut<Owner>) {} fn make() -> Owner { Owner { item = Item {} } } fn f() { let item = make().item; }",
+        "cannot move a field out of a type with a drop hook",
+    );
 }

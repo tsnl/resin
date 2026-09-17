@@ -302,15 +302,17 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Intrinsic functions use ordinary module lookup and generic calls; retain their source
   identity. Specialize operations before storage lowering and verify concrete operands
   independently. Do not recognize library wrappers by their public type names.
-- Named structs move by default; primitives and structural aggregates whose contents
-  all copy are implicitly copyable. Ownership completion in HIR checks initialization,
+- Structs copy by default when all stored fields copy and there is no custom drop
+  hook. Noncopyable fields propagate move-only ownership through enclosing aggregates.
+  Shared and weak handle copies retain ownership. `PhantomBox` in `$/ownership.resin`
+  opts out through an empty drop hook. Ownership completion in HIR checks initialization,
   partial moves, immutable assignment, branch joins, and loop exits/backedges, including
   unused definitions. Moving an immutable owner is allowed. Completed HIR makes moves
   explicit; LIR specializes borrowed reads and emits transfer/cleanup operations.
   References and raw pointers retain unchecked lifetimes and aliasing. `Ref` is read-only,
   while `RefMut` permits writes without exclusivity; there is
   no borrow checker. `pointer:replace(replacement)` transfers a referent while leaving
-  initialized storage. Shared owners require explicit visible `clone` operations.
+  initialized storage. Shared owners copy by retaining their allocation; explicit `clone` operations remain available.
   `ICopy`/`IClone`, traits, effects, and general function CTFE remain deferred.
   See `doc/lifetimes.md` for lifecycle rules.
 - Pointer families distinguish one value from a sequence: `Ptr<T>` / `Span<T>` are
