@@ -6,7 +6,7 @@ explain workflows involving several modules:
 - [Strings and console I/O](strings.md): literals, owned strings, formatting, and streams.
 - [PNG images](images.md): image ownership, channels, row strides, and pixel buffers.
 - [Shaders and graphics](shaders.md): entry points, pipelines, and device requirements.
-- [Ray tracing pipelines](ray-tracing.md): triangle scenes, typed payloads, and ray dispatch.
+- [Ray tracing pipelines](ray-tracing.md): a primary-ray fisheye renderer, triangle scenes, and typed payloads.
 - [GPU buffers](gpu-buffers.md): ownership, access, uploads, and readback.
 - [Windows and presentation](windowing.md): event handling, input, resize, and images.
 

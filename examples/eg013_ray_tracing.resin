@@ -1,29 +1,108 @@
-//! Trace one triangle through a depth-one Vulkan ray tracing pipeline.
+//! Primary rays through a Kannala–Brandt fisheye camera; writes ray-tracing.png.
 export { main };
-import { "$/gpu.resin", "$/shared.resin", "$/span.resin", "$/stdio.resin" };
+import { "$/gpu.resin", "$/image.resin", "$/math.resin", "$/shared.resin", "$/span.resin", "$/stdio.resin" };
 
-struct Parameters<Output> {
-	output: Output,
+// ANCHOR: camera
+struct Fisheye {
+	focal: f32,
+	k1: f32,
+	k2: f32,
+	k3: f32,
+	k4: f32,
 }
-struct Hit {
-	distance: f32,
+fn example_camera() -> Fisheye {
+	Fisheye { focal = 230, k1 = 0.05, k2 = 0.005, k3 = 0.0005, k4 = 0.00005 }
 }
 
+// Invert r = theta * (1 + k1*theta^2 + ... + k4*theta^8).
+// Five Newton steps suffice for this camera's coefficients and image extent.
+fn incident_angle(camera: Fisheye, radius: f32) -> f32 {
+	let mut theta = radius;
+	let mut step = 0;
+	while (step < 5) {
+		let t2 = theta * theta;
+		let radial = 1 + t2 * (camera.k1 + t2 * (camera.k2 + t2 * (camera.k3 + t2 * camera.k4)));
+		let slope = 1 + t2 * (3 * camera.k1 + t2 * (5 * camera.k2 + t2 * (7 * camera.k3 + t2 * 9 * camera.k4)));
+		theta = theta - (theta * radial - radius) / slope;
+		step = step + 1;
+	};
+	theta
+}
+
+// x/y are pixel offsets from the image center, with positive y pointing up.
+fn direction(camera: Fisheye, x: f32, y: f32) -> (f32, f32, f32) {
+	let px = x / camera.focal;
+	let py = y / camera.focal;
+	let radius = sqrt(px * px + py * py);
+	if (radius < f32(0.000001)) {
+		return(f32(0), f32(0), f32(1));
+	};
+	let theta = incident_angle(camera, radius);
+	let scale = sin(theta) / radius;
+	(px * scale, py * scale, cos(theta))
+}
+// ANCHOR_END: camera
+
+// ANCHOR: parameters
+struct Parameters<Pixels> {
+	width: u32,
+	height: u32,
+	camera: Fisheye,
+	pixels: Pixels,
+}
+struct Color {
+	r: f32,
+	g: f32,
+	b: f32,
+}
+// ANCHOR_END: parameters
+
+fn channel(value: f32) -> u8 {
+	if (value < 0) {
+		return 0;
+	};
+	if (value > 1) {
+		return 255;
+	};
+	u8(value * 255)
+}
+fn write_pixel(pixels: Ref<Span<u8>>, index: u64, color: Color) {
+	pixels:at_mut(index * 4) = channel(color.r);
+	pixels:at_mut(index * 4 + 1) = channel(color.g);
+	pixels:at_mut(index * 4 + 2) = channel(color.b);
+	pixels:at_mut(index * 4 + 3) = 255;
+}
+
+// ANCHOR: shaders
 @ray_generation_shader
-fn generation(index: u64, root: Ptr<Parameters<Ptr<f32>>>) {
-	let hit = trace_ray(f32(0), f32(0), f32(-1), f32(0), f32(0), f32(1), f32(0), f32(100), Hit { distance = f32(0) });
-	root.output.* = hit.distance;
+fn generation(index: u64, root: Ptr<Parameters<Span<u8>>>) {
+	let x = f32(index % u64(root.width)) + 0.5 - f32(root.width) * 0.5;
+	let y = f32(root.height) * 0.5 - (f32(index / u64(root.width)) + 0.5);
+	let ray = direction(root.camera, x, y);
+	let color = trace_ray(f32(0), f32(0), f32(0), ray.0, ray.1, ray.2, f32(0), f32(100), Color { r = 0, g = 0, b = 0 });
+	write_pixel(root.pixels, index, color);
 }
 
 @miss_shader
-fn miss(initial: Hit, root: Ptr<Parameters<Ptr<f32>>>) -> Hit {
-	Hit { distance = f32(-1) }
+fn miss(initial: Color, root: Ptr<Parameters<Span<u8>>>) -> Color {
+	Color { r = 0.04, g = 0.06, b = 0.1 }
 }
 
 @closest_hit_shader
-fn closest(initial: Hit, root: Ptr<Parameters<Ptr<f32>>>) -> Hit {
-	Hit { distance = ray_hit_info().0 }
+fn closest(initial: Color, root: Ptr<Parameters<Span<u8>>>) -> Color {
+	let hit = ray_hit_info();
+	Color { r = 1 - hit.3 - hit.4, g = hit.3, b = hit.4 }
 }
+// ANCHOR_END: shaders
+
+// ANCHOR: scene
+fn triangle_scene(gpu: Ref<Gpu>) -> GpuRayScene | Err<_> {
+	let vertices = arc_ptr_alloc([f32(-1), -1, 0, 1, -1, 0, 0, 1, 0])?;
+	// Three row-major affine 3x4 transforms: x = -3, 0, 3 and z = 2.
+	let transforms = arc_ptr_alloc([f32(1), 0, 0, -3, 0, 1, 0, 0, 0, 0, 1, 2, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 2, 1, 0, 0, 3, 0, 1, 0, 0, 0, 0, 1, 2])?;
+	gpu:create_ray_scene(Span<f32> { data = vertices:get():lea(0), length = 9 }, Span<f32> { data = transforms:get():lea(0), length = 36 })
+}
+// ANCHOR_END: scene
 
 fn main() -> i32 | Err<_> {
 	let gpu = gpu_new()?;
@@ -31,16 +110,23 @@ fn main() -> i32 | Err<_> {
 		print("Ray tracing pipelines are unavailable on this GPU.\n");
 		return 0;
 	};
-	// Three tightly packed float3 vertices, followed by a row-major affine 3x4 transform.
-	let vertices = arc_ptr_alloc([f32(-1), f32(-1), f32(0), f32(1), f32(-1), f32(0), f32(0), f32(1), f32(0)])?;
-	let transform = arc_ptr_alloc([f32(1), f32(0), f32(0), f32(0), f32(0), f32(1), f32(0), f32(0), f32(0), f32(0), f32(1), f32(0)])?;
-	let scene = gpu:create_ray_scene(Span<f32> { data = vertices:get():lea(0), length = 9 }, Span<f32> { data = transform:get():lea(0), length = 12 })?;
+	// ANCHOR: render
+	let scene = triangle_scene(gpu)?;
 	let pipeline = scene:create_ray_tracing_pipeline(generation, miss, closest)?;
-	let output = gpu:create(f32(0))?;
+	let width: u32 = 640;
+	let height: u32 = 480;
+	let count = u64(width) * u64(height) * 4;
+	let pixels = gpu:alloc::<u8>(count)?;
+	let root = Parameters<GpuSpan<u8>> { width = width, height = height, camera = example_camera(), pixels = pixels:clone() };
 	let commands = gpu:start_command_recording()?;
-	commands:trace_rays(pipeline, Parameters<GpuPtr<f32>> { output = output:clone() }, 1, 1, 1)?;
+	commands:trace_rays(pipeline, root, width, height, 1)?;
 	commands:submit()?;
-	assert(output:load() == f32(1));
-	print("Triangle hit at distance 1.\n");
+
+	let host = arc_span_alloc(count, u8(0))?;
+	pixels:copy_to(host:get());
+	let bytes = host:get();
+	image_data_write_pixels("ray-tracing.png".data, width, height, 4, bytes, 0)?;
+	// ANCHOR_END: render
+	print("wrote ray-tracing.png\n");
 	0
 }
