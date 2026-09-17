@@ -1,7 +1,7 @@
 mod support;
 
 #[test]
-fn complex_arithmetic_borrows_operands_and_preserves_float_width() {
+fn complex_value_arithmetic_composes_and_preserves_float_width() {
     let module = support::module(
         r#"export { main }; import { "$/math.resin" };
         fn main() {
@@ -16,6 +16,10 @@ fn complex_arithmetic_borrows_operands_and_preserves_float_width() {
             assert(a:magnitude_squared() == f32(25.0));
             assert(a.real == f32(3.0) && a.imag == f32(4.0));
             assert(b.real == f32(1.0) && b.imag == f32(-2.0));
+            let chained = a:squared():add(b);
+            assert(chained.real == f32(-6.0) && chained.imag == f32(22.0));
+            let direct = complex(f64(0.0), f64(1.0)):squared();
+            assert(direct.real == f64(-1.0));
             let i = complex(f64(0.0), f64(1.0));
             let minus_one: Complex<f64> = i:squared();
             assert(minus_one.real == f64(-1.0) && minus_one.imag == f64(0.0));

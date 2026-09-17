@@ -44,8 +44,27 @@ pub(super) fn function(
         written: mutable.keys().copied().collect(),
         mutable,
         moved: BTreeMap::new(),
+        copy_requirements: BTreeMap::new(),
     };
-    let body = completion.elaborate(source)?;
+    let mut body = completion.elaborate(source)?;
+    if !completion.copy_requirements.is_empty() {
+        body = Term {
+            span: body.span,
+            ty: body.ty.clone(),
+            kind: TermKind::RequireCopy {
+                requirements: completion
+                    .copy_requirements
+                    .into_iter()
+                    .map(|((source, target), span)| crate::CopyRequirement {
+                        source,
+                        target,
+                        span,
+                    })
+                    .collect(),
+                body: Box::new(body),
+            },
+        };
+    }
     Ok(CompletedBody {
         body,
         shaders: completion.embedded,
@@ -77,7 +96,8 @@ struct Completion<'a> {
     initialization: BTreeMap<DeclarationId, Initialization>,
     mutable: BTreeMap<DeclarationId, bool>,
     written: BTreeSet<DeclarationId>,
-    moved: BTreeMap<DeclarationId, BTreeSet<Vec<std::sync::Arc<str>>>>,
+    moved: BTreeMap<DeclarationId, BTreeSet<MovedPlace>>,
+    copy_requirements: BTreeMap<(crate::Type, crate::Type), Span>,
 }
 
 impl Completion<'_> {
@@ -134,17 +154,24 @@ impl Completion<'_> {
             let span = term.span;
             let ty = term.ty.clone();
             if !reference_place(&term) {
-                self.require_movable(&term)?;
+                self.require_movable(&term, &value_type, &target)?;
             } else if let Some((binding, path)) = owned_path(&term) {
-                self.require_movable(&term)?;
-                self.moved.entry(binding).or_default().insert(path);
-                term = Term {
-                    span,
-                    ty,
-                    kind: TermKind::Move {
+                self.require_movable(&term, &value_type, &target)?;
+                self.moved.entry(binding).or_default().insert(MovedPlace {
+                    path,
+                    source: value_type,
+                    target: target.clone(),
+                });
+                let kind = if copyability.is_none() || may_borrow(&target) {
+                    TermKind::ReadOwned {
                         place: Box::new(term),
-                    },
+                    }
+                } else {
+                    TermKind::Move {
+                        place: Box::new(term),
+                    }
                 };
+                term = Term { span, ty, kind };
             } else if copyability.is_none()
                 || (self.solver.resolve(&Type::from_hir(&target)).is_none()
                     && !matches!(target, crate::Type::Defined { .. }))
@@ -175,26 +202,50 @@ impl Completion<'_> {
         })
     }
 
-    fn require_movable(&self, term: &Term) -> Result<()> {
-        if let TermKind::Field { base, .. } = &term.kind {
+    fn require_copy(
+        &mut self,
+        source: &crate::Type,
+        target: &crate::Type,
+        span: Span,
+        message: &str,
+    ) -> Result<()> {
+        if self.typer.copyability(source) == Some(false) && !may_borrow(target) {
+            return Err(GenerateError::inference(span, message));
+        }
+        self.copy_requirements
+            .entry((source.clone(), target.clone()))
+            .or_insert(span);
+        Ok(())
+    }
+
+    fn require_movable(
+        &mut self,
+        term: &Term,
+        value_type: &crate::Type,
+        target: &crate::Type,
+    ) -> Result<()> {
+        let mut receiver = term;
+        while let TermKind::Field { base, .. } = &receiver.kind {
             if let crate::Type::Defined { definition, .. } = base.ty
                 && self
                     .typer
                     .definition(definition)
                     .ok()
-                    .is_some_and(|definition| definition.drop_hook().is_some())
+                    .is_some_and(|d| d.drop_hook().is_some())
             {
-                return Err(GenerateError::inference(
+                return self.require_copy(
+                    value_type,
+                    target,
                     term.span,
                     "cannot move a field out of a type with a drop hook",
-                ));
+                );
             }
-            self.require_movable(base)?;
+            receiver = base;
         }
         Ok(())
     }
 
-    fn require_available(&self, term: &Term) -> Result<()> {
+    fn require_available(&mut self, term: &Term) -> Result<()> {
         if !self.reachable {
             return Ok(());
         }
@@ -207,12 +258,21 @@ impl Completion<'_> {
                 "use of an uninitialized value",
             ));
         }
-        if self.moved.get(&binding).is_some_and(|moved| {
-            moved
-                .iter()
-                .any(|other| path.starts_with(other) || other.starts_with(&path))
-        }) {
-            return Err(GenerateError::inference(term.span, "use of a moved value"));
+        let overlapping = self
+            .moved
+            .get(&binding)
+            .into_iter()
+            .flatten()
+            .filter(|other| path.starts_with(&other.path) || other.path.starts_with(&path))
+            .cloned()
+            .collect::<Vec<_>>();
+        for moved in overlapping {
+            self.require_copy(
+                &moved.source,
+                &moved.target,
+                term.span,
+                "use of a moved value",
+            )?;
         }
         Ok(())
     }
@@ -528,15 +588,23 @@ impl Completion<'_> {
                     "cannot assign to an immutable binding; declare it with `mut`",
                 ));
             }
-            if self.moved.get(binding).is_some_and(|moved| {
-                moved
-                    .iter()
-                    .any(|ancestor| path.starts_with(ancestor) && path.len() > ancestor.len())
-            }) {
-                return Err(GenerateError::inference(
+            let ancestors = self
+                .moved
+                .get(binding)
+                .into_iter()
+                .flatten()
+                .filter(|ancestor| {
+                    path.starts_with(&ancestor.path) && path.len() > ancestor.path.len()
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            for moved in ancestors {
+                self.require_copy(
+                    &moved.source,
+                    &moved.target,
                     place.span,
                     "initialize the moved value before assigning one of its fields",
-                ));
+                )?;
             }
             if !path.is_empty()
                 && self.initialization.get(binding) != Some(&Initialization::Initialized)
@@ -555,7 +623,7 @@ impl Completion<'_> {
             self.moved
                 .entry(binding)
                 .or_default()
-                .retain(|moved| !moved.starts_with(&path));
+                .retain(|moved| !moved.path.starts_with(&path));
         }
         Ok(TermKind::Assign { place, value })
     }
@@ -1501,11 +1569,29 @@ mod tests {
     }
 }
 
+// A prior value use only consumes storage if its selected target is a value
+// and the source cannot copy. Keep both types through joins and loop backedges.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct MovedPlace {
+    path: Vec<std::sync::Arc<str>>,
+    source: crate::Type,
+    target: crate::Type,
+}
+
+fn may_borrow(ty: &crate::Type) -> bool {
+    matches!(
+        ty,
+        crate::Type::FunctionParameter { .. }
+            | crate::Type::FunctionResult { .. }
+            | crate::Type::Member { .. }
+    )
+}
+
 #[derive(Clone, PartialEq, Eq)]
 struct OwnershipState {
     initialization: BTreeMap<DeclarationId, Initialization>,
     written: BTreeSet<DeclarationId>,
-    moved: BTreeMap<DeclarationId, BTreeSet<Vec<std::sync::Arc<str>>>>,
+    moved: BTreeMap<DeclarationId, BTreeSet<MovedPlace>>,
 }
 
 fn owned_path(term: &Term) -> Option<(DeclarationId, Vec<std::sync::Arc<str>>)> {

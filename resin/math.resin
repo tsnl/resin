@@ -20,12 +20,12 @@ fn complex<T>(real: T, imag: T) -> Complex<T> {
 }
 
 /// Return the sum, leaving both operands unchanged.
-fn add<T>(left: Ref<Complex<T>>, right: Ref<Complex<T>>) -> Complex<T> {
+fn add<T>(left: Complex<T>, right: Complex<T>) -> Complex<T> {
 	complex(left.real + right.real, left.imag + right.imag)
 }
 
 /// Return the product, leaving both operands unchanged.
-fn mul<T>(left: Ref<Complex<T>>, right: Ref<Complex<T>>) -> Complex<T> {
+fn mul<T>(left: Complex<T>, right: Complex<T>) -> Complex<T> {
 	// (a + bi)(c + di) = (ac - bd) + i(ad + bc).
 	complex(
 		left.real * right.real - left.imag * right.imag,
@@ -34,11 +34,11 @@ fn mul<T>(left: Ref<Complex<T>>, right: Ref<Complex<T>>) -> Complex<T> {
 }
 
 /// Return the square, leaving the operand unchanged.
-fn squared<T>(value: Ref<Complex<T>>) -> Complex<T> {
+fn squared<T>(value: Complex<T>) -> Complex<T> {
 	mul(value, value)
 }
 
 /// Compute `real² + imag²` without changing the operand or taking a square root.
-fn magnitude_squared<T>(value: Ref<Complex<T>>) -> T {
+fn magnitude_squared<T>(value: Complex<T>) -> T {
 	value.real * value.real + value.imag * value.imag
 }
