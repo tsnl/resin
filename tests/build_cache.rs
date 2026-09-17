@@ -120,7 +120,7 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
     assert_eq!(project.calls(), 3);
     fs::write(
         &helper,
-        "export { pixel }; fn pixel (i: u32) -> u32  { i / u32(2) }",
+        "export { pixel }; fn pixel (i: u32) -> u32  { u32(f64(i) / f64(2.0)) }",
     )
     .unwrap();
     let output = run();
@@ -593,7 +593,7 @@ fn all_spirv_is_generated_before_shader_or_c_compilers_run() {
         r#"export { main };
         import { "$/gpu.resin" };
         @compute_shader fn good(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { i + u32(1) }; }
-        @compute_shader fn bad(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { i / u32(2) }; }
+        @compute_shader fn bad(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { u32(f64(i) / f64(2.0)) }; }
         fn main() -> (() | Err<_>)  {
             if (0 == 1) {
                 let mut gpu = gpu_new()?;
@@ -608,7 +608,7 @@ fn all_spirv_is_generated_before_shader_or_c_compilers_run() {
     let output = project.run();
     assert!(!output.status.success());
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("unsupported shader builtin"),
+        String::from_utf8_lossy(&output.stderr).contains("does not support type"),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );

@@ -519,7 +519,9 @@ pub(super) fn shader_builtin_instance(
             "+" | "-" | "*" | "&" | "|" | "^" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||",
             2,
         ) => true,
-        ("/", 2) | ("sqrt" | "sin" | "cos", 1) => operand == Ty::Float32,
+        ("/", 2) => operand == Ty::Float32 || operand.is_integer(),
+        ("%" | "<<" | ">>", 2) => operand.is_integer(),
+        ("sqrt" | "sin" | "cos", 1) => operand == Ty::Float32,
         _ => false,
     };
     if !supported || operand == Ty::Type {

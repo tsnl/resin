@@ -19,11 +19,11 @@ permits reassignment; `let` alone binds an immutable value. Numeric literals get
 their types from context; an unconstrained integer defaults to `i64`, and a float
 to `f64`. The `Complex<f32>` annotation chooses the recurrence's precision.
 
-`square:add(c)` uses a free function through UFCS: it means `add(square, c)`.
-The math helpers borrow `Ref<Complex<T>>` operands and return new values; they
-cannot mutate the inputs through those references. Ref arguments require initialized places, so the
-square is bound to a local before the next call. No user-visible pointer is
-created. See [references](../references.md) for the contract.
+`z:squared():add(c)` uses free functions through UFCS: it means
+`add(squared(z), c)`. The math helpers take ordinary values and return new values.
+`Complex<f32>` copies because both fields copy, so these calls leave their inputs
+unchanged and compose without intermediate locals. Assignment installs the new
+value in `z`. See [ownership](../lifetimes.md) for copying and move-only types.
 
 A function's final expression supplies its result without `return`; `return n`
 exits early. `assert(condition)` is a language construct. Booleans are `true` and

@@ -1,4 +1,5 @@
 pub mod frontend;
+pub mod integer_arithmetic;
 pub mod pipeline;
 pub mod project;
 pub mod service;

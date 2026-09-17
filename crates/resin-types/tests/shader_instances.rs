@@ -19,11 +19,11 @@ fn arithmetic_schemes_and_concrete_profiles_have_distinct_admission_rules() {
             .builtin_instance("/", &[Ty::UInt32, Ty::UInt32])
             .is_ok()
     );
-    assert!(
-        shader::builtin_instance(&typer, "/", &[Ty::UInt32, Ty::UInt32])
-            .unwrap_err()
-            .contains("unsupported shader builtin")
-    );
+    for ty in [Ty::UInt8, Ty::Int32, Ty::UInt32, Ty::Int64, Ty::UInt64] {
+        for operator in ["/", "%", "<<", ">>"] {
+            assert!(shader::builtin_instance(&typer, operator, &[ty.clone(), ty.clone()]).is_ok());
+        }
+    }
     assert!(shader::builtin_instance(&typer, "/", &[Ty::Float32, Ty::Float32]).is_ok());
     assert!(shader::builtin_instance(&typer, "+", &[Ty::UInt8, Ty::UInt8]).is_ok());
     assert!(

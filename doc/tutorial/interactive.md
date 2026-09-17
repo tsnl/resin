@@ -20,7 +20,7 @@ mode still uses the GPU to present the image.
 
 ## Keep one presentation path
 
-`Renderer` owns the GPU, pipelines, uploaded segment origins, pixel
+`Renderer` owns the GPU, pipelines, pixel
 buffer, and presentation image. It groups GPU resource management; the recurrence
 and color functions do not depend on it.
 
@@ -42,7 +42,7 @@ The event loop keeps a `dirty` flag: the view, dimensions, or iteration limit ch
 Wait for events, inspect input, render when dirty, then present. An unchanged view
 is presented without rerunning the solver.
 
-When the framebuffer changes size, recreate the pixel buffer, segment list, and
+When the framebuffer changes size, recreate the pixel buffer and
 image, update the plot dimensions, and mark the view dirty. A minimized window may
 have zero width or height: skip rendering until dimensions are nonzero. Held keys
 are paced by the event wait, while bracket/reset actions use key-press
