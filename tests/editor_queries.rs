@@ -65,7 +65,7 @@ fn captures(query: &str, source: &str) -> BTreeSet<(String, String)> {
 
 #[test]
 fn constants_and_sizeof_are_highlighted_and_outlined() {
-    let source = "const ( size = sizeof(int); next = iota; );";
+    let source = "const ( size = sizeof(i32); next = iota; );";
     for queries in [ZED_QUERIES, HELIX_QUERIES] {
         let highlighted = captures(queries[0].1, source);
         for (kind, text) in [
@@ -86,7 +86,7 @@ fn constants_and_sizeof_are_highlighted_and_outlined() {
 
 #[test]
 fn declaration_keywords_are_visible_in_outlines_and_struct_textobjects() {
-    let source = "struct Point { x: float32, y: float32, } type Position = Point;";
+    let source = "struct Point { x: f32, y: f32, } type Position = Point;";
     let outline = captures(ZED_QUERIES[3].1, source);
     for (kind, text) in [
         ("context", "struct"),
@@ -102,16 +102,16 @@ fn declaration_keywords_are_visible_in_outlines_and_struct_textobjects() {
     let objects = captures(ZED_QUERIES[5].1, source);
     assert!(objects.contains(&(
         "class.around".into(),
-        "struct Point { x: float32, y: float32, }".into()
+        "struct Point { x: f32, y: f32, }".into()
     )));
-    for field in ["x: float32", "y: float32"] {
+    for field in ["x: f32", "y: f32"] {
         assert!(objects.contains(&("class.inside".into(), field.into())));
     }
 }
 
 #[test]
 fn reserved_words_have_highlight_rules() {
-    let source = "export { f }; import { \"x.resin\" }; extern type Handle; struct S { value: int, } type T = S; fn f() -> (() | Err<Never>)  { let mut x: Span<Ptr<ubyte>>; free(x); while (0 < 1) { if (0 == 1) { () } else { () }; }; match (value) { ()(v) => { (v) }, Err(e) => { Err(e) } } }";
+    let source = "export { f }; import { \"x.resin\" }; extern type Handle; struct S { value: i32, } type T = S; fn f() -> (() | Err<Never>)  { let mut x: Span<Ptr<u8>>; free(x); while (0 < 1) { if (0 == 1) { () } else { () }; }; match (value) { ()(v) => { (v) }, Err(e) => { Err(e) } } }";
     let highlighted = captures(ZED_QUERIES[0].1, source);
     for word in [
         "export", "import", "extern", "type", "struct", "fn", "let", "mut", "if", "else", "while",
@@ -126,7 +126,7 @@ fn reserved_words_have_highlight_rules() {
 
 #[test]
 fn result_syntax_is_highlighted_and_structs_have_outlines() {
-    let source = "struct Broken { code: int, } fn fail() -> (int | Err<Never>)  { match (value) { int(n) => { (n?) }, Err(error) => { Err(error) } } }";
+    let source = "struct Broken { code: i32, } fn fail() -> (i32 | Err<Never>)  { match (value) { i32(n) => { (n?) }, Err(error) => { Err(error) } } }";
     let captured = captures(ZED_QUERIES[0].1, source);
     for (kind, text) in [
         ("keyword", "struct"),
@@ -146,7 +146,7 @@ fn result_syntax_is_highlighted_and_structs_have_outlines() {
 
 #[test]
 fn none_and_postfix_unwrapping_are_highlighted() {
-    let source = "fn f(o: int | None) -> int  { let mut empty: int | None; empty = None; o! }";
+    let source = "fn f(o: i32 | None) -> i32  { let mut empty: i32 | None; empty = None; o! }";
     let captured = captures(ZED_QUERIES[0].1, source);
     for (kind, text) in [("type.builtin", "None"), ("operator", "!")] {
         assert!(
@@ -158,7 +158,7 @@ fn none_and_postfix_unwrapping_are_highlighted() {
 
 #[test]
 fn inference_holes_are_highlighted_as_types() {
-    let source = "fn f(p: Ptr<int>) -> Ptr<_>  { let mut value: _; value = p; value }";
+    let source = "fn f(p: Ptr<i32>) -> Ptr<_>  { let mut value: _; value = p; value }";
     let captured = captures(ZED_QUERIES[0].1, source);
     assert!(captured.contains(&("type.builtin".into(), "_".into())));
 }
@@ -168,17 +168,17 @@ fn queries_capture_resin_constructs() {
     let source = r#"export { main, Number };
         extern {
             "lib.h": {
-                fn native (arg: int) -> int;
+                fn native (arg: i32) -> i32;
                 fn finish();
             },
         };
         import { "$/core.resin" };
         struct FieldsField<T0> { field: T0, }
 extern type Handle;
-        struct Number {field: int,}
+        struct Number {field: i32,}
         // a function
-        fn main (parameter: int) -> int  {
-            let mut local = FieldsField<_> {field = 2}; let mut pointer: Ptr<int>; let mut values = [1, 2];
+        fn main (parameter: i32) -> i32  {
+            let mut local = FieldsField<_> {field = 2}; let mut pointer: Ptr<i32>; let mut values = [1, 2];
             native(parameter) + local.field + pointer.*
         }
         fn reset()  {}
@@ -199,7 +199,7 @@ extern type Handle;
         ("highlights", "type", "Number"),
         ("highlights", "type", "Handle"),
         ("highlights", "type.builtin", "Ptr"),
-        ("highlights", "type.builtin", "int"),
+        ("highlights", "type.builtin", "i32"),
         ("highlights", "property", "field"),
         ("highlights", "keyword", "export"),
         ("highlights", "keyword", "fn"),
@@ -247,7 +247,7 @@ fn queries_run_on_examples_libraries_and_incomplete_code() {
         }
     }
     let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), ""));
-    let mut sources = vec!["fn main (argument: int) -> int = { pri".into()];
+    let mut sources = vec!["fn main (argument: i32) -> i32 = { pri".into()];
     visit(&root.join("examples"), &mut sources);
     visit(&root.join("resin"), &mut sources);
     for source in sources {
@@ -270,7 +270,7 @@ fn comparison_operators_are_not_type_brackets() {
 
 #[test]
 fn shader_decorators_are_highlighted_as_attributes() {
-    let source = "@compute_shader fn kernel(i: uint) -> uint  { i }";
+    let source = "@compute_shader fn kernel(i: u32) -> u32  { i }";
     let highlighted = captures(ZED_QUERIES[0].1, source);
     assert!(highlighted.contains(&("attribute".into(), "@".into())));
     assert!(highlighted.contains(&("attribute".into(), "compute_shader".into())));
@@ -278,7 +278,8 @@ fn shader_decorators_are_highlighted_as_attributes() {
 
 #[test]
 fn intrinsic_declarations_have_function_navigation_and_parameter_highlights() {
-    let source = r#"intrinsic "pointer_index" fn at<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;"#;
+    let source =
+        r#"intrinsic "pointer_index" fn at<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;"#;
     let highlights = captures(ZED_QUERIES[0].1, source);
     for (kind, text) in [
         ("keyword", "intrinsic"),
@@ -297,8 +298,8 @@ fn intrinsic_declarations_have_function_navigation_and_parameter_highlights() {
 fn helix_queries_capture_highlights_indentation_and_textobjects() {
     let source = r#"struct Cell<T> { value: T, }
         // increment
-        fn increment(value: int) -> int {
-            let cell = Cell<int> { value = 1 };
+        fn increment(value: i32) -> i32 {
+            let cell = Cell<i32> { value = 1 };
             let less = value < 10;
             cell.value + value
         }"#;
@@ -307,7 +308,7 @@ fn helix_queries_capture_highlights_indentation_and_textobjects() {
         ("keyword", "struct"),
         ("keyword", "fn"),
         ("type", "Cell"),
-        ("type.builtin", "int"),
+        ("type.builtin", "i32"),
         ("function", "increment"),
         ("variable.parameter", "value"),
         ("variable.other.member", "value"),
@@ -324,7 +325,7 @@ fn helix_queries_capture_highlights_indentation_and_textobjects() {
         assert!(indents.contains(&("outdent".into(), text.into())));
     }
     assert!(!indents.contains(&("outdent".into(), "<".into())));
-    let comparison = "fn compare(value: int) -> bool  { value > 10 }";
+    let comparison = "fn compare(value: i32) -> bool  { value > 10 }";
     assert!(!captures(HELIX_QUERIES[1].1, comparison).contains(&("outdent".into(), ">".into())));
     let objects = captures(HELIX_QUERIES[2].1, source);
     for (kind, text) in [
@@ -339,4 +340,17 @@ fn helix_queries_capture_highlights_indentation_and_textobjects() {
             .iter()
             .any(|(kind, text)| kind == "function.inside" && text.contains("cell.value"))
     );
+}
+
+#[test]
+fn documentation_comments_have_a_distinct_highlight() {
+    let source =
+        "//! Module.\n/// Item.\nstruct Item { /** Field. */ value: i32 }\n//// Ordinary.\n";
+    for queries in [ZED_QUERIES, HELIX_QUERIES] {
+        let captured = captures(queries[0].1, source);
+        for comment in ["//! Module.", "/// Item.", "/** Field. */"] {
+            assert!(captured.contains(&("comment.documentation".into(), comment.into())));
+        }
+        assert!(captured.contains(&("comment".into(), "//// Ordinary.".into())));
+    }
 }

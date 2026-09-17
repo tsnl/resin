@@ -170,13 +170,13 @@ pub enum Instr {
     /// `[count, initial] -> [StrongOwner | None]`: allocate repeated, implicitly copyable values.
     /// Installs the concrete element destructor; failed allocations publish no owner.
     OwnerAllocate { element: Ty },
-    /// `[Ptr<StrongOwner>] -> [Ptr<T>]`: borrow live payload storage.
+    /// `[Ref<StrongOwner>] -> [Ptr<T>]`: borrow live payload storage.
     OwnerData { pointee: Ty },
-    /// `[Ptr<StrongOwner>] -> [ulong]`: read the immutable element count.
+    /// `[Ref<StrongOwner>] -> [ulong]`: read the immutable element count.
     OwnerLength,
-    /// `[Ptr<StrongOwner>] -> [WeakOwner]`: acquire a weak reference.
+    /// `[Ref<StrongOwner>] -> [WeakOwner]`: acquire a weak reference.
     OwnerDowngrade,
-    /// `[Ptr<WeakOwner>] -> [StrongOwner | None]`: acquire a strong reference if live.
+    /// `[Ref<WeakOwner>] -> [StrongOwner | None]`: acquire a strong reference if live.
     OwnerUpgrade,
     /// `[] -> [WeakOwner]`: construct an empty weak reference.
     WeakEmpty,
@@ -212,8 +212,10 @@ pub enum Instr {
     PointerCast { ty: Ty },
     /// `[] -> [value]`: materialize an immediate; byte literals borrow static storage.
     Push { value: Value },
-    /// `[] -> [address]`: borrow a local's storage without reading or initializing it.
-    LocalAddress { local: LocalId },
+    /// `[] -> [Ref<T>]`: borrow a local's storage without reading or initializing it.
+    LocalRef { local: LocalId },
+    /// `[Ptr<T>] -> [Ref<T>]`: borrow a pointee, discarding pointer capabilities.
+    Borrow,
     /// `[aggregate or address] -> [child or address]`: project by declaration index.
     /// A value operand copies the child and destroys the aggregate; raw addresses borrow.
     AccessStatic { index: usize },
@@ -393,7 +395,13 @@ impl std::fmt::Display for Error {
             "lowering error at {}..{}: ",
             self.span.start, self.span.end
         )?;
-        match &self.kind {
+        self.kind.fmt(f)
+    }
+}
+
+impl std::fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
             ErrorKind::InvalidHir { message }
             | ErrorKind::InvalidInstance { message }
             | ErrorKind::UnsupportedProfile { message, .. } => f.write_str(message),

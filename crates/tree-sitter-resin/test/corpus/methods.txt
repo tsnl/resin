@@ -1,8 +1,8 @@
 ==================
 Method calls and function-valued field calls
 ==================
-struct Item { read: (int) -> int }
-fn read(item: Ref<Item>, value: int) -> int { value }
+struct Item { read: (i32) -> i32 }
+fn read(item: Ref<Item>, value: i32) -> i32 { value }
 fn calls(item: Ref<Item>) { item:read(1); (item.read)(1); read(item, 1); }
 
 ---

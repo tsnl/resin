@@ -1,12 +1,14 @@
+//! Read-only views of the process argument and environment snapshot.
+
 export { arguments, environment, argument, c_string, environment_get, EnvironmentVariableNotFound };
 
 extern {
 	"string.h": {
-		fn strlen(text: Ptr<ubyte>) -> ulong;
+		fn strlen(text: Ptr<u8>) -> u64;
 	},
 	"resin_runtime.h": {
-		fn resin_string_array_length(values: Ptr<Ptr<ubyte>>) -> ulong;
-		fn resin_environment_get(envp: Ptr<Ptr<ubyte>>, name: Ptr<ubyte>) -> Ptr<ubyte>;
+		fn resin_string_array_length(values: Ptr<Ptr<u8>>) -> u64;
+		fn resin_environment_get(envp: Ptr<Ptr<u8>>, name: Ptr<u8>) -> Ptr<u8>;
 	},
 };
 
@@ -15,28 +17,28 @@ import { "span.resin" };
 struct EnvironmentVariableNotFound {}
 
 // Views borrow the startup snapshot until process exit. Do not free their data.
-fn arguments(argc: int, argv: Ptr<Ptr<ubyte>>) -> Span<Ptr<ubyte>> {
-	Span<Ptr<ubyte>> { data = argv, length = ulong(argc) }
+fn arguments(argc: i32, argv: Ptr<Ptr<u8>>) -> Span<Ptr<u8>> {
+	Span<Ptr<u8>> { data = argv, length = u64(argc) }
 }
 
-fn environment(envp: Ptr<Ptr<ubyte>>) -> Span<Ptr<ubyte>> {
-	Span<Ptr<ubyte>> { data = envp, length = resin_string_array_length(envp) }
+fn environment(envp: Ptr<Ptr<u8>>) -> Span<Ptr<u8>> {
+	Span<Ptr<u8>> { data = envp, length = resin_string_array_length(envp) }
 }
 
 // NUL-terminated strings become length-delimited views without copying.
-fn c_string(text: Ptr<ubyte>) -> Span<ubyte> {
-	Span<ubyte> { data = text, length = strlen(text) }
+fn c_string(text: Ptr<u8>) -> Span<u8> {
+	Span<u8> { data = text, length = strlen(text) }
 }
 
-fn argument(args: Ref<Span<Ptr<ubyte>>>, index: ulong) -> Span<ubyte> {
+fn argument(args: Ref<Span<Ptr<u8>>>, index: u64) -> Span<u8> {
 	c_string(args:at(index))
 }
 
 // Exact case-sensitive name lookup in the frozen snapshot, including on Windows.
 // A present empty value succeeds with length zero; absence is a distinct error.
-fn environment_get(envp: Ptr<Ptr<ubyte>>, name: Ptr<ubyte>) -> (Span<ubyte> | Err<EnvironmentVariableNotFound>) {
+fn environment_get(envp: Ptr<Ptr<u8>>, name: Ptr<u8>) -> (Span<u8> | Err<EnvironmentVariableNotFound>) {
 	let mut value = resin_environment_get(envp, name);
-	if (ulong(value) == 0_ul) {
+	if (u64(value) == u64(0)) {
 		Err(EnvironmentVariableNotFound {})
 	} else {
 		(c_string(value))

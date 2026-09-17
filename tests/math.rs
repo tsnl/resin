@@ -5,19 +5,22 @@ fn complex_arithmetic_borrows_operands_and_preserves_float_width() {
     let module = support::module(
         r#"export { main }; import { "$/math.resin" };
         fn main() {
-            let a = complex(3.0_f, 4.0_f);
-            let b = complex(1.0_f, -2.0_f);
+            let a = complex(f32(3.0), f32(4.0));
+            let b = complex(f32(1.0), f32(-2.0));
             let sum = a:add(b);
-            assert(sum.real == 4.0_f && sum.imag == 2.0_f);
+            assert(sum.real == f32(4.0) && sum.imag == f32(2.0));
             let product = a:mul(b);
-            assert(product.real == 11.0_f && product.imag == -2.0_f);
+            assert(product.real == f32(11.0) && product.imag == f32(-2.0));
             let square = a:squared();
-            assert(square.real == -7.0_f && square.imag == 24.0_f);
-            assert(a:magnitude_squared() == 25.0_f);
-            let i = complex(0.0_d, 1.0_d);
-            let minus_one: Complex<float64> = i:squared();
-            assert(minus_one.real == -1.0_d && minus_one.imag == 0.0_d);
-            assert(i:magnitude_squared() == 1.0_d);
+            assert(square.real == f32(-7.0) && square.imag == f32(24.0));
+            assert(a:magnitude_squared() == f32(25.0));
+            assert(a.real == f32(3.0) && a.imag == f32(4.0));
+            assert(b.real == f32(1.0) && b.imag == f32(-2.0));
+            let i = complex(f64(0.0), f64(1.0));
+            let minus_one: Complex<f64> = i:squared();
+            assert(minus_one.real == f64(-1.0) && minus_one.imag == f64(0.0));
+            assert(i:magnitude_squared() == f64(1.0));
+            assert(i.real == f64(0.0) && i.imag == f64(1.0));
         }"#,
     );
     let output = support::project::Project::new(&module, Some("main"))
@@ -34,7 +37,7 @@ fn complex_arithmetic_borrows_operands_and_preserves_float_width() {
 fn complex_arithmetic_accepts_device_storage_in_shaders() {
     let module = support::module(
         r#"export { kernel }; import { "$/math.resin" };
-        @compute_shader fn kernel(index: ulong, value: Ptr<Complex<float32>>) {
+        @compute_shader fn kernel(index: u64, value: Ptr<Complex<f32>>) {
             let norm = value.*:magnitude_squared();
             let square = value.*:squared();
             value.real = square.real + norm;
@@ -49,12 +52,12 @@ fn complex_arithmetic_accepts_device_storage_in_shaders() {
 fn math_functions_preserve_float_width_and_use_radians() {
     let module = support::module(
         r#"export { main }; import { "$/math.resin" };
-        fn main() -> int  {
-            let mut root: float32 = sqrt(4.0);
-            let mut sine = sin(1.5707963267948966_d);
-            let mut cosine = cos(0.0_f);
-            let mut invalid = sqrt(-1.0_d);
-            if (root == 2.0_f && sine > 0.999999_d && cosine == 1.0_f && invalid != invalid) { 0 } else { 1 }
+        fn main() -> i32  {
+            let mut root: f32 = sqrt(4.0);
+            let mut sine = sin(f64(1.5707963267948966));
+            let mut cosine = cos(f32(0.0));
+            let mut invalid = sqrt(f64(-1.0));
+            if (root == f32(2.0) && sine > f64(0.999999) && cosine == f32(1.0) && invalid != invalid) { 0 } else { 1 }
         }"#,
     );
     let output = support::project::Project::new(&module, Some("main"))
@@ -85,7 +88,7 @@ fn math_rejects_non_float_arguments_during_specialization() {
 fn shader_math_emits_glsl_operations() {
     let module = support::module(
         r#"export { kernel }; import { "$/math.resin" };
-        @compute_shader fn kernel(index: ulong, value: Ptr<float32>)  {
+        @compute_shader fn kernel(index: u64, value: Ptr<f32>)  {
             value.* = sqrt(value.*) + sin(value.*) + cos(value.*);
         }"#,
     );

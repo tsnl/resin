@@ -52,8 +52,9 @@ initialization analysis.
 
 ## Places and references
 
-A place is addressable storage: a local, a field, or a dereferenced pointer.
-`&place` obtains a pointer; `pointer.*` exposes its pointee. A `Ref<T>` parameter
+A place denotes storage: a local, a field, or a dereferenced pointer.
+`pointer.*` exposes addressable storage; `&pointer.field` obtains a field pointer.
+Locals and `Ref` referents cannot have their addresses taken. A `Ref<T>` parameter
 aliases a place without consuming its value. Colon calls insert the receiver as
 the first ordinary argument.
 
@@ -116,7 +117,7 @@ reference counting does not synchronize payload access or validate raw aliases.
 
 ## Destruction
 
-A visible free `fn drop(value: Ptr<Item>) { ... }` is registered as the nominal
+A visible free `fn drop(value: Ref<Item>) { ... }` is registered as the nominal
 type's destruction hook. The hook runs before fields are destroyed in reverse
 order. Generic hooks bind their owning type's parameters. Hooks return unit and
 handle fallible cleanup locally. Calling `drop` directly is an ordinary call and

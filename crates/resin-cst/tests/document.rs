@@ -22,7 +22,7 @@ async fn incremental_edits_match_fresh_parsing_including_utf8_boundaries() {
         "fn main()  { print(\"ê🌳\") }",
         "fn main() { print(\"ê🌳\")",
         "fn main() { print(\"",
-        "fn main()  { let mut value: int = 4; value }",
+        "fn main()  { let mut value: i32 = 4; value }",
     ];
     for before in texts {
         let original = parse(before, None).await;
@@ -99,7 +99,7 @@ fn struct_fields_follow_delimiter_formatting() {
 
 #[tokio::test]
 async fn source_wrapper_names_preserve_token_queries_and_formatting() {
-    let source = "fn first(values: GpuSpan<uint>) -> GpuPtr<uint>  { values:at(0_ul) }";
+    let source = "fn first(values: GpuSpan<u32>) -> GpuPtr<u32>  { values:at(u64(0)) }";
     let document = parse(source, None).await;
     assert!(!document.tree().root_node().has_error());
     for former in ["GpuSpan", "GpuPtr"] {
@@ -109,8 +109,8 @@ async fn source_wrapper_names_preserve_token_queries_and_formatting() {
     }
     let formatted = resin_cst::format_source(source).unwrap();
     assert_eq!(resin_cst::format_source(&formatted).unwrap(), formatted);
-    assert!(formatted.contains("GpuSpan<uint>"));
-    assert!(formatted.contains("GpuPtr<uint>"));
+    assert!(formatted.contains("GpuSpan<u32>"));
+    assert!(formatted.contains("GpuPtr<u32>"));
 }
 
 #[tokio::test]
@@ -131,10 +131,10 @@ async fn gpu_pipeline_annotations_preserve_type_queries_and_formatting() {
 
 #[tokio::test]
 async fn associated_method_references_format_and_preserve_type_queries() {
-    let source = "fn main(){let mut f=select::<int, ulong>;let mut g=create::<Ptr<int>>;select::<int, ulong>(7,42);}";
+    let source = "fn main(){let mut f=select::<i32, u64>;let mut g=create::<Ptr<i32>>;select::<i32, u64>(7,42);}";
     let document = parse(source, None).await;
     assert!(!document.tree().root_node().has_error());
-    assert!(document.type_context(source.find("ulong").unwrap()));
+    assert!(document.type_context(source.find("u64").unwrap()));
     assert_eq!(
         document
             .token(source.find("select").unwrap())
@@ -143,8 +143,8 @@ async fn associated_method_references_format_and_preserve_type_queries() {
         "lid"
     );
     let formatted = resin_cst::format_source(source).unwrap();
-    assert!(formatted.contains("select::<int, ulong>"), "{formatted}");
-    assert!(formatted.contains("create::<Ptr<int>>"), "{formatted}");
+    assert!(formatted.contains("select::<i32, u64>"), "{formatted}");
+    assert!(formatted.contains("create::<Ptr<i32>>"), "{formatted}");
     assert_eq!(resin_cst::format_source(&formatted).unwrap(), formatted);
     assert!(!parse(formatted, None).await.tree().root_node().has_error());
 }
@@ -155,9 +155,9 @@ async fn editing_method_reference_arguments_matches_fresh_parsing() {
         "fn main() { let mut f = select",
         "fn main() { let mut f = select::",
         "fn main() { let mut f = select::<",
-        "fn main() { let mut f = select::<int, ulong",
-        "fn main()  { let mut f = select::<int, ulong>; }",
-        "fn main()  { let mut f = select::<int, ulong>(7, 42); }",
+        "fn main() { let mut f = select::<i32, u64",
+        "fn main()  { let mut f = select::<i32, u64>; }",
+        "fn main()  { let mut f = select::<i32, u64>(7, 42); }",
     ];
     for before in sources {
         let original = parse(before, None).await;

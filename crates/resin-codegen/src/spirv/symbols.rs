@@ -8,13 +8,14 @@ use rspirv::spirv::Word;
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct LocalAddress {
     pub root: Word,
+    pub root_type: Ty,
     pub indices: Vec<LocalIndex>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum LocalIndex {
     Static { index: u32 },
-    Dynamic { id: Word },
+    Dynamic { id: Word, ty: Ty },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -44,7 +45,7 @@ pub(super) fn agree(left: &[Slot], right: &[Slot]) -> Result<(), Error> {
         .zip(right)
         .any(|(a, b)| (a.symbolic() || b.symbolic()) && (a.local != b.local || a.id != b.id))
     {
-        return Err(Error(
+        return Err(Error::unsupported(
             "shader cannot merge distinct local addresses or function values".into(),
         ));
     }
@@ -57,7 +58,7 @@ pub(super) fn check(instruction: &Instr, args: &[Slot]) -> Result<(), Error> {
         .enumerate()
         .any(|(i, arg)| arg.local.is_some() && !permits_local_address(instruction, i))
     {
-        return Err(Error(
+        return Err(Error::unsupported(
             "shader-local addresses cannot escape through values, casts, or calls".into(),
         ));
     }

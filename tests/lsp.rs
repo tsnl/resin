@@ -197,7 +197,7 @@ fn explicit_inference_updates_hover_after_edits() {
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("inference.resin"));
     for (version, initializer, expected) in [
-        (1, "42", "long"),
+        (1, "42", "i64"),
         (2, "1 == 1", "bool"),
         (3, "\"text\"", "str"),
     ] {
@@ -374,7 +374,7 @@ fn dot_completion_updates_unsaved_receiver_types_and_uses_utf16_edits() {
     let uri = uri(&temp.path().join("fields.resin"));
     for (version, field, typed) in [(1, "count", ""), (2, "length", "le")] {
         let source = format!(
-            "struct Field {{ {field}: long, }} fn main ()  {{ let mut value = Field {{ {field} = 1 }}; /* 😀 */ value.{typed}; }}"
+            "struct Field {{ {field}: i64, }} fn main ()  {{ let mut value = Field {{ {field} = 1 }}; /* 😀 */ value.{typed}; }}"
         );
         if version == 1 {
             client.open(&uri, &source);
@@ -413,8 +413,8 @@ fn string_completions_distinguish_fields_operations_and_free_constructors() {
         (
             2,
             "\"text\":",
-            vec!["at", "print", "bytes"],
-            vec!["data", "length"],
+            vec!["at", "bytes"],
+            vec!["data", "length", "print"],
         ),
         (
             3,
@@ -458,7 +458,7 @@ fn dot_completes_fields_and_colon_completes_visible_operations() {
         (2, ":", vec!["alpha", "beta"], 3),
     ] {
         let source = format!(
-            "struct Record {{ zebra: int, middle: int }}\nfn beta(value: Ref<Record>) {{}}\nfn alpha(value: Ref<Record>) {{}}\nfn main() {{ let value = Record {{ zebra = 1, middle = 2 }}; value{separator}; }}"
+            "struct Record {{ zebra: i32, middle: i32 }}\nfn beta(value: Ref<Record>) {{}}\nfn alpha(value: Ref<Record>) {{}}\nfn main() {{ let value = Record {{ zebra = 1, middle = 2 }}; value{separator}; }}"
         );
         if version == 1 {
             client.open(&uri, &source);
@@ -495,7 +495,7 @@ fn unsaved_unicode_buffers_support_features_edits_and_clean_shutdown() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let uri = uri(&temp.path().join("new.resin"));
-    let source = "fn main (argument: int) -> int  {\r\n  // 😀\r\n  let mut value = argument + 1;\r\n  /* 😀 */ value\r\n}\r\n";
+    let source = "fn main (argument: i32) -> i32  {\r\n  // 😀\r\n  let mut value = argument + 1;\r\n  /* 😀 */ value\r\n}\r\n";
     client.open(&uri, source);
     client.diagnostics(&uri, Some(1), false);
     let hover = client.request("textDocument/hover", at(&uri, 3, 12));
@@ -503,7 +503,7 @@ fn unsaved_unicode_buffers_support_features_edits_and_clean_shutdown() {
         hover["contents"]["value"]
             .as_str()
             .unwrap()
-            .contains("value: int")
+            .contains("value: i32")
     );
     assert_eq!(hover["range"]["start"], json!({"line": 3, "character": 11}));
     let definition = client.request("textDocument/definition", at(&uri, 3, 12));
@@ -552,7 +552,7 @@ fn unsaved_unicode_buffers_support_features_edits_and_clean_shutdown() {
         client.request("textDocument/definition", at(&uri, 3, 12)),
         Value::Null
     );
-    let incomplete = "fn main (argument: int) -> int { arg";
+    let incomplete = "fn main (argument: i32) -> i32 { arg";
     client.change(&uri, 3, incomplete);
     client.diagnostics(&uri, Some(3), true);
     let completion = client.request(
@@ -581,13 +581,13 @@ fn dependency_overlays_close_and_disk_changes_refresh_consumers() {
     let library = root.join("lib.resin");
     std::fs::write(
         &library,
-        "export { answer }; fn answer () -> int  { 1 } fn private () -> int  { 2 }",
+        "export { answer }; fn answer () -> i32  { 1 } fn private () -> i32  { 2 }",
     )
     .unwrap();
     let mut client = Client::start(root, Value::Null);
     let main_uri = uri(&root.join("main.resin"));
     let lib_uri = uri(&resin_source::normalize_path(&library).unwrap());
-    let source = "import { \"lib.resin\" }; fn main () -> int  { answer() }";
+    let source = "import { \"lib.resin\" }; fn main () -> i32  { answer() }";
     let column = source.rfind("answer").unwrap() as u32;
     client.open(&main_uri, source);
     client.diagnostics(&main_uri, Some(1), false);
@@ -604,7 +604,7 @@ fn dependency_overlays_close_and_disk_changes_refresh_consumers() {
             .any(|item| item["label"] == "private")
     );
 
-    client.open(&lib_uri, "export { renamed }; fn renamed () -> int  { 2 }");
+    client.open(&lib_uri, "export { renamed }; fn renamed () -> i32  { 2 }");
     client.diagnostics(&main_uri, Some(1), true);
     assert_eq!(
         client.request("textDocument/definition", at(&main_uri, 0, column)),
@@ -620,13 +620,13 @@ fn dependency_overlays_close_and_disk_changes_refresh_consumers() {
         lib_uri
     );
 
-    std::fs::write(&library, "export { answer }; fn answer () -> int  { + }").unwrap();
+    std::fs::write(&library, "export { answer }; fn answer () -> i32  { + }").unwrap();
     client.notify(
         "workspace/didChangeWatchedFiles",
         json!({"changes": [{"uri": lib_uri, "type": 2}]}),
     );
     client.diagnostics(&lib_uri, None, true);
-    std::fs::write(&library, "export { answer }; fn answer () -> int  { 3 }").unwrap();
+    std::fs::write(&library, "export { answer }; fn answer () -> i32  { 3 }").unwrap();
     client.notify(
         "workspace/didChangeWatchedFiles",
         json!({"changes": [{"uri": lib_uri, "type": 2}]}),
@@ -637,7 +637,7 @@ fn dependency_overlays_close_and_disk_changes_refresh_consumers() {
         hover["contents"]["value"]
             .as_str()
             .unwrap()
-            .contains("fn answer () -> int")
+            .contains("fn answer () -> i32")
     );
     client.stop();
 }
@@ -711,14 +711,14 @@ fn managed_library_roots_are_selected_by_server_configuration() {
         std::fs::create_dir_all(library.join("math")).unwrap();
         std::fs::write(
             library.join("math/value.resin"),
-            format!("export {{ {function} }}; fn {function}() -> int  {{ 42 }}"),
+            format!("export {{ {function} }}; fn {function}() -> i32  {{ 42 }}"),
         )
         .unwrap();
         let mut client = Client::start_with_library_root(&project, Value::Null, Some(&library));
         let uri = uri(&project.join("main.resin"));
         client.open(
             &uri,
-            &format!("import {{ \"$/math/value.resin\" }}; fn main() -> int  {{ {function}() }}"),
+            &format!("import {{ \"$/math/value.resin\" }}; fn main() -> i32  {{ {function}() }}"),
         );
         client.diagnostics(&uri, Some(1), false);
     }
@@ -731,24 +731,24 @@ fn library_root_override_and_rapid_versions_use_the_latest_snapshot() {
     std::fs::create_dir(&library_root).unwrap();
     std::fs::write(
         library_root.join("custom.resin"),
-        "export { standard }; fn standard () -> int  { 1 }",
+        "export { standard }; fn standard () -> i32  { 1 }",
     )
     .unwrap();
     let mut client = Client::start_with_library_root(temp.path(), Value::Null, Some(&library_root));
     let uri = uri(&temp.path().join("main.resin"));
     client.open(
         &uri,
-        "import { \"$/custom.resin\" }; fn main () -> int  { standard() }",
+        "import { \"$/custom.resin\" }; fn main () -> i32  { standard() }",
     );
     client.diagnostics(&uri, Some(1), false);
     for version in 2..50 {
         client.change(
             &uri,
             version,
-            &format!("fn main () -> int  {{ let mut value{version} = missing; value{version} }}"),
+            &format!("fn main () -> i32  {{ let mut value{version} = missing; value{version} }}"),
         );
     }
-    let final_source = "fn main () -> int  { let mut final = 1; final }";
+    let final_source = "fn main () -> i32  { let mut final = 1; final }";
     client.change(&uri, 50, final_source);
     client.diagnostics(&uri, Some(50), false);
     let hover = client.request(
@@ -759,7 +759,7 @@ fn library_root_override_and_rapid_versions_use_the_latest_snapshot() {
         hover["contents"]["value"]
             .as_str()
             .unwrap()
-            .contains("final: int")
+            .contains("final: i32")
     );
     client.stop();
 }
@@ -786,7 +786,7 @@ fn holes_do_not_block_later_features_and_repair_clears_diagnostics() {
         hover["contents"]["value"]
             .as_str()
             .unwrap()
-            .contains("missing: long")
+            .contains("missing: i64")
     );
     let unknown = "fn main()  { let mut value = ; value.count; }";
     client.change(&uri, 3, unknown);
@@ -804,8 +804,8 @@ fn editor_builds_use_disk_and_preserve_dirty_buffers_across_saves() {
     let temp = TempDir::new().unwrap();
     let main_path = temp.path().join("main.resin");
     let helper_path = temp.path().join("helper.resin");
-    let main = "export { main }; import { \"helper.resin\" }; fn main() -> int  { value() }";
-    let helper = "export { value }; fn value() -> int  { 7 }";
+    let main = "export { main }; import { \"helper.resin\" }; fn main() -> i32  { value() }";
+    let helper = "export { value }; fn value() -> i32  { 7 }";
     std::fs::write(&main_path, main).unwrap();
     std::fs::write(&helper_path, helper).unwrap();
     let main_uri = uri(&main_path);
@@ -857,7 +857,7 @@ fn editor_builds_use_disk_and_preserve_dirty_buffers_across_saves() {
 fn editor_build_destinations_are_required_and_cannot_replace_inputs() {
     let temp = TempDir::new().unwrap();
     let path = temp.path().join("main.resin");
-    let source = "export { main }; fn main() -> int  { 0 }";
+    let source = "export { main }; fn main() -> i32  { 0 }";
     std::fs::write(&path, source).unwrap();
     let source_uri = uri(&path);
     let mut client = Client::start(temp.path(), Value::Null);
@@ -885,7 +885,7 @@ fn editor_queries_and_cancellation_stay_responsive_during_native_work() {
     use std::os::unix::fs::PermissionsExt;
     let temp = TempDir::new().unwrap();
     let path = temp.path().join("main.resin");
-    let source = "export { main }; fn main() -> int  { 7 }";
+    let source = "export { main }; fn main() -> i32  { 7 }";
     std::fs::write(&path, source).unwrap();
     let compiler = temp.path().join("compiler");
     let marker = temp.path().join("compiler-started");
@@ -932,7 +932,7 @@ fn editor_queries_and_cancellation_stay_responsive_during_native_work() {
         "textDocument/hover",
         at(&source_uri, 0, source.find("main()").unwrap() as u32),
     );
-    assert!(hover["contents"]["value"].as_str().unwrap().contains("int"));
+    assert!(hover["contents"]["value"].as_str().unwrap().contains("i32"));
     client.notify("$/cancelRequest", json!({"id": 900}));
     let cancelled = client.wait_for(
         |message| matches!(message, Message::Response(response) if response.id == 900.into()),
@@ -963,11 +963,11 @@ fn missing_parent_imports_recover_after_creation_deletion_and_alias_changes() {
     let entry = uri(&child.join("main.resin"));
     let library = temp.path().join("lib.resin");
     let library_uri = uri(&library);
-    let source = "import { \"../lib.resin\" }; fn main() -> int  { answer() }";
+    let source = "import { \"../lib.resin\" }; fn main() -> i32  { answer() }";
     let mut client = Client::start(&child, Value::Null);
     client.open(&entry, source);
     client.diagnostics(&entry, Some(1), true);
-    let library_text = "export { answer }; fn answer() -> int  { 7 }";
+    let library_text = "export { answer }; fn answer() -> i32  { 7 }";
     std::fs::write(&library, library_text).unwrap();
     client.notify(
         "workspace/didChangeWatchedFiles",
@@ -1006,9 +1006,9 @@ fn missing_parent_imports_recover_after_creation_deletion_and_alias_changes() {
 fn saved_editor_revision_is_a_cache_hit_for_an_independent_relocated_cli() {
     let editor_tree = TempDir::new().unwrap();
     let checkout = TempDir::new().unwrap();
-    let main = "export { main }; import { \"helper.resin\" }; fn main() -> int  { answer() }";
-    let old = "export { answer }; fn answer() -> int  { 3 }";
-    let edited = "export { answer }; fn answer() -> int  { 7 }";
+    let main = "export { main }; import { \"helper.resin\" }; fn main() -> i32  { answer() }";
+    let old = "export { answer }; fn answer() -> i32  { 3 }";
+    let edited = "export { answer }; fn answer() -> i32  { 7 }";
     std::fs::write(editor_tree.path().join("main.resin"), main).unwrap();
     std::fs::write(editor_tree.path().join("helper.resin"), old).unwrap();
     let mut client = Client::start(editor_tree.path(), Value::Null);
@@ -1090,9 +1090,9 @@ fn managed_definitions_open_as_readonly_files_and_query_their_managed_identity()
     let project = temp.path().join("project");
     std::fs::create_dir(&library).unwrap();
     std::fs::create_dir(&project).unwrap();
-    let managed = "export { answer }; fn answer() -> int  { 42 }";
+    let managed = "export { answer }; fn answer() -> i32  { 42 }";
     std::fs::write(library.join("answer.resin"), managed).unwrap();
-    let source = "import { \"$/answer.resin\" }; fn main() -> int  { answer() }";
+    let source = "import { \"$/answer.resin\" }; fn main() -> i32  { answer() }";
     let mut client = Client::start_with_library_root(&project, Value::Null, Some(&library));
     let main_uri = uri(&project.join("main.resin"));
     client.open(&main_uri, source);
@@ -1138,11 +1138,11 @@ fn restarted_service_refreshes_managed_queries_without_an_editor_change() {
     let project = temp.path().join("project");
     std::fs::create_dir(&library).unwrap();
     std::fs::create_dir(&project).unwrap();
-    let first = "export { answer }; fn answer() -> int  { 42 }";
+    let first = "export { answer }; fn answer() -> i32  { 42 }";
     let second = "export { answer }; fn answer() -> bool  { 1 == 1 }";
     let managed_path = library.join("answer.resin");
     std::fs::write(&managed_path, first).unwrap();
-    let source = "import { \"$/answer.resin\" }; fn main() -> int  { answer() }";
+    let source = "import { \"$/answer.resin\" }; fn main() -> i32  { answer() }";
     let mut client = Client::start_with_library_root(&project, Value::Null, Some(&library));
     let main_uri = uri(&project.join("main.resin"));
     client.open(&main_uri, source);
@@ -1178,12 +1178,37 @@ fn diagnostic_messages_are_single_line() {
     let temp = TempDir::new().unwrap();
     let mut client = Client::start(temp.path(), Value::Null);
     let file = uri(&temp.path().join("diagnostic.resin"));
-    client.open(&file, "fn main()  { let mut value: int = \"text\"; }");
+    client.open(&file, "fn main()  { let mut value: i32 = \"text\"; }");
     let diagnostics = client.diagnostics(&file, Some(1), true);
     for diagnostic in diagnostics.as_array().unwrap() {
         let message = diagnostic["message"].as_str().unwrap();
         assert!(!message.contains(['\n', '\r']), "{message}");
         assert!(!message.is_empty());
+    }
+    client.stop();
+}
+
+#[test]
+fn doc_comment_hover_keeps_markdown_separate_from_the_signature_and_tracks_edits() {
+    let temp = TempDir::new().unwrap();
+    let mut client = Client::start(temp.path(), Value::Null);
+    let uri = uri(&temp.path().join("docs.resin"));
+    for (version, wording) in [(1, "Original"), (2, "Updated")] {
+        let source = format!(
+            "/// {wording} **Markdown**.\nfn read(value: i32) -> i32 {{ value }}\nfn main() -> i32 {{ read(42) }}\n"
+        );
+        if version == 1 {
+            client.open(&uri, &source);
+        } else {
+            client.change(&uri, version, &source);
+        }
+        client.diagnostics(&uri, Some(version), false);
+        let hover = client.request("textDocument/hover", at(&uri, 2, 19));
+        let markdown = hover["contents"]["value"].as_str().unwrap();
+        assert!(
+            markdown.contains(&format!("```\n\n{wording} **Markdown**.")),
+            "{markdown}"
+        );
     }
     client.stop();
 }

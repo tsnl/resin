@@ -3,7 +3,7 @@ use crate::Error;
 use resin_types::prelude::*;
 
 pub(super) fn format(types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<String, Error> {
-    let invalid = || Error("format_bytes expects a byte pointer, length and tuple".into());
+    let invalid = || Error::invalid("format_bytes expects a byte pointer, length and tuple".into());
     let [data, length, arguments] = args else {
         return Err(invalid());
     };
@@ -40,10 +40,12 @@ pub(super) fn format(types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<St
 
 pub(super) fn from_bytes(_types: &Types<'_>, args: &[Slot], result: &Ty) -> Result<String, Error> {
     let [data, length] = args else {
-        return Err(Error("byte copy expects pointer and length".into()));
+        return Err(Error::invalid(
+            "byte copy expects pointer and length".into(),
+        ));
     };
     if result != &Ty::StrongOwner {
-        return Err(Error("byte copy produces an owner".into()));
+        return Err(Error::invalid("byte copy produces an owner".into()));
     }
     Ok(format!(
         "resin_string_from_str({}, {})",
@@ -55,7 +57,9 @@ pub(super) fn from_bytes(_types: &Types<'_>, args: &[Slot], result: &Ty) -> Resu
 fn bytes(ty: &Ty, expr: &str) -> Result<(String, String), Error> {
     match ty {
         Ty::Str | Ty::Record { .. } => Ok((format!("({expr}).f0"), format!("({expr}).f1"))),
-        _ => Err(Error("expected str or a structural byte view".into())),
+        _ => Err(Error::invalid(
+            "expected str or a structural byte view".into(),
+        )),
     }
 }
 

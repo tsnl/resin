@@ -7,11 +7,7 @@ use support::toolchain;
 #[test]
 fn a_loop_with_an_always_returning_body_has_a_valid_continue_target() {
     let mut module = support::module(
-        "export { kernel };
-        fn helper(x: uint) -> uint { x }
-        @compute_shader fn kernel(i: ulong, output: Ptr<uint>) {
-            output.* = helper(uint(i));
-        }",
+        "export { kernel };\n        fn helper(x: u32) -> u32 { x }\n        @compute_shader fn kernel(i: u64, output: Ptr<u32>) {\n            output.* = helper(u32(i));\n        }",
     );
     let helper = module
         .functions
@@ -66,18 +62,14 @@ fn elimination_ends_loop_conditions_and_selection_continuations() {
     let abort = "{ let mut value: None; value = None; let mut test: bool; test = value!; test }";
     let conditions = [
         abort.to_string(),
-        format!("if (i == 0_ul) {abort} else {abort}"),
-        format!("if (i == 0_ul) {abort} else {{ i < 4_ul }}"),
-        format!("{{ while ({abort}) {{ output.* = 1_ui; }}; i == 0_ul }}"),
-        format!("{{ let mut test = if (i == 0_ul) {abort} else {abort}; test }}"),
+        format!("if (i == u64(0)) {abort} else {abort}"),
+        format!("if (i == u64(0)) {abort} else {{ i < u64(4) }}"),
+        format!("{{ while ({abort}) {{ output.* = u32(1); }}; i == u64(0) }}"),
+        format!("{{ let mut test = if (i == u64(0)) {abort} else {abort}; test }}"),
     ];
     for condition in conditions {
         let module = support::module(&format!(
-            "export {{ kernel }};
-            @compute_shader fn kernel(i: ulong, output: Ptr<uint>) {{
-                while ({condition}) {{ output.* = 1_ui; }};
-                output.* = 2_ui;
-            }}"
+            "export {{ kernel }};\n            @compute_shader fn kernel(i: u64, output: Ptr<u32>) {{\n                while ({condition}) {{ output.* = u32(1); }};\n                output.* = u32(2);\n            }}"
         ));
         let project = support::project::Project::new(&module, None).unwrap();
         for shader in project.generated.shaders() {

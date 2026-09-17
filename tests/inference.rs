@@ -38,12 +38,12 @@ fn explicit_holes_are_not_editor_recovery_holes() {
 fn holes_compose_inside_pointers_spans_records_and_functions() {
     let m = module(
         r#"struct FieldsPointerNumberFlag<T0, T1, T2> { pointer: T0, number: T1, flag: T2, }
-        struct Span<T> { data: Ptr<T>, length: ulong, }
-        fn pointer(p: Ptr<Ptr<int>>) -> Ptr<Ptr<_>>  { p }
-        fn span(p: Span<Ptr<int>>) -> Span<Ptr<_>>  { p }
-        fn plus(n: int) -> int  { n + 1 }
-        fn function() -> (int) -> _  { plus }
-        fn record(p: Ptr<int>) -> FieldsPointerNumberFlag<Ptr<_>, _, _>  {
+        struct Span<T> { data: Ptr<T>, length: u64, }
+        fn pointer(p: Ptr<Ptr<i32>>) -> Ptr<Ptr<_>>  { p }
+        fn span(p: Span<Ptr<i32>>) -> Span<Ptr<_>>  { p }
+        fn plus(n: i32) -> i32  { n + 1 }
+        fn function() -> (i32) -> _  { plus }
+        fn record(p: Ptr<i32>) -> FieldsPointerNumberFlag<Ptr<_>, _, _>  {
             FieldsPointerNumberFlag<_, _, _> { flag = true, number = 7, pointer = p }
         }
         "#,
@@ -72,14 +72,14 @@ fn holes_compose_inside_pointers_spans_records_and_functions() {
 fn later_assignments_resolve_local_holes() {
     assert_eq!(
         result(
-            "fn answer() -> _  { let mut n: _; let mut p: Ptr<_>; p = &n; n = 42; p.* }",
+            "fn answer() -> _  { let mut n: _; let mut copied: _; n = 42; copied = n; copied }",
             "answer"
         ),
         Ty::Int64
     );
     assert_eq!(
         result(
-            "fn answer() -> _  { let mut n = 42; let mut p = Ptr<_>(&n); p.* }",
+            "fn answer() -> _  { let mut n = 42; let reference: Ref<_> = n; reference }",
             "answer"
         ),
         Ty::Int64
@@ -90,13 +90,13 @@ fn later_assignments_resolve_local_holes() {
 fn locally_inferred_function_types_are_monomorphic() {
     assert_eq!(
         result(
-            "fn next(n: int) -> int  { n + 1 } fn answer() -> _  { let mut f: (_) -> _; f = next; f(41) }",
+            "fn next(n: i32) -> i32  { n + 1 } fn answer() -> _  { let mut f: (_) -> _; f = next; f(41) }",
             "answer"
         ),
         Ty::Int32
     );
     rejects(
-        "fn next(n: int) -> int  { n + 1 } fn answer() -> _  { let mut f: (_) -> _; f = next; f(1 == 1) }",
+        "fn next(n: i32) -> i32  { n + 1 } fn answer() -> _  { let mut f: (_) -> _; f = next; f(1 == 1) }",
         "TypeMismatch",
     );
 }
@@ -111,11 +111,11 @@ fn shadowed_function_names_do_not_create_inference_dependencies() {
 #[test]
 fn casts_do_not_choose_an_unrelated_nominal_type_for_a_hole() {
     rejects(
-        "struct One { value: int, } struct Two { value: int, } fn value() -> _  { let mut v: _; v = One { value = 1 }; v = Two { value = 2 }; v }",
+        "struct One { value: i32, } struct Two { value: i32, } fn value() -> _  { let mut v: _; v = One { value = 1 }; v = Two { value = 2 }; v }",
         "TypeMismatch",
     );
     let m = module(
-        "struct One { value: int, } fn value() -> _  { let mut v = One { value = 1 }; _(v) }",
+        "struct One { value: i32, } fn value() -> _  { let mut v = One { value = 1 }; _(v) }",
     );
     assert_eq!(
         m.functions[0].result,
@@ -129,42 +129,42 @@ fn casts_do_not_choose_an_unrelated_nominal_type_for_a_hole() {
 fn numeric_choices_are_delayed_until_context_is_known() {
     assert_eq!(
         result(
-            "fn wide() -> _  { let mut n = 1; let mut p: Ptr<ulong>; p = &n; n }",
+            "fn wide() -> _  { let mut n = 1; let p: Ref<u64> = n; n }",
             "wide"
         ),
         Ty::UInt64
     );
     assert_eq!(
         result(
-            "fn wide() -> _  { let mut n: _; n = ulong(4294967297); n }",
+            "fn wide() -> _  { let mut n: _; n = u64(4294967297); n }",
             "wide"
         ),
         Ty::UInt64
     );
     assert_eq!(
-        result("fn small() -> _  { float32(1.5) }", "small"),
+        result("fn small() -> _  { f32(1.5) }", "small"),
         Ty::Float32
     );
     assert_eq!(
         result(
-            "fn value() -> _  { let mut n: long; n = -9223372036854775808; n }",
+            "fn value() -> _  { let mut n: i64; n = -9223372036854775808; n }",
             "value"
         ),
         Ty::Int64
     );
     rejects(
-        "fn value() -> _  { 1 } fn use() -> int  { value() }",
+        "fn value() -> _  { 1 } fn use() -> i32  { value() }",
         "TypeMismatch",
     );
 }
 
 #[test]
 fn recursive_groups_infer_from_bodies_not_callers() {
-    let source = "fn odd(n: int) -> _  { if (n == 0) { 0 } else { even(n - 1) } } fn even(n: int) -> _  { odd(n) }";
+    let source = "fn odd(n: i32) -> _  { if (n == 0) { 0 } else { even(n - 1) } } fn even(n: i32) -> _  { odd(n) }";
     assert_eq!(result(source, "odd"), Ty::Int64);
     assert_eq!(result(source, "even"), Ty::Int64);
     rejects(
-        "fn looped() -> _  { looped() } fn main() -> int  { looped() }",
+        "fn looped() -> _  { looped() } fn main() -> i32  { looped() }",
         "cannot infer",
     );
     rejects("fn a() -> _  { b() } fn b() -> _  { a() }", "cannot infer");
@@ -172,10 +172,10 @@ fn recursive_groups_infer_from_bodies_not_callers() {
 
 #[test]
 fn nominal_identity_and_local_type_definitions_survive_inference() {
-    let m = module("struct Meters { value: int, } fn make() -> _  { Meters { value = 42 } }");
+    let m = module("struct Meters { value: i32, } fn make() -> _  { Meters { value = 42 } }");
     assert!(matches!(m.functions[0].result, Ty::Defined { .. }));
     let m = module(
-        "fn main() -> _  { struct Meters { value: int, } let mut distance = Meters { value = 42 }; distance.value }",
+        "fn main() -> _  { struct Meters { value: i32, } let mut distance = Meters { value = 42 }; distance.value }",
     );
     assert_eq!(m.types.iter().filter(|d| d.name().is_some()).count(), 1);
     assert_eq!(m.functions[0].result, Ty::Int32);
@@ -185,7 +185,7 @@ fn nominal_identity_and_local_type_definitions_survive_inference() {
 fn ambiguous_infinite_and_forbidden_holes_are_diagnostics() {
     for source in [
         "fn main()  { let mut p: Ptr<_>; }",
-        "fn main()  { let mut p = Ptr<_>(ulong(0)); }",
+        "fn main()  { let mut p = Ptr<_>(u64(0)); }",
     ] {
         rejects(source, "cannot infer");
     }
@@ -209,7 +209,7 @@ fn ambiguous_infinite_and_forbidden_holes_are_diagnostics() {
 fn inference_preserves_unit_defaults_and_initialization_checks() {
     rejects("fn main()  { let mut n: _; n = 1; n }", "TypeMismatch");
     rejects(
-        "fn consume(n: long)  {} fn main() -> _  { let mut n: _; consume(n); n = 42; n }",
+        "fn consume(n: i64)  {} fn main() -> _  { let mut n: _; consume(n); n = 42; n }",
         "UninitializedValue",
     );
 }
@@ -236,7 +236,7 @@ fn distinct_nodes_with_identical_spans_do_not_share_inference_variables() {
 fn span_construction_and_indexing_infer_element_value_types() {
     assert_eq!(
         result(
-            "import { \"$/span.resin\" }; fn get(p: Ptr<int>) -> _  { let mut s = Span<_> { data = p, length = ulong(1) }; s:at(0) }",
+            "import { \"$/span.resin\" }; fn get(p: Ptr<i32>) -> _  { let mut s = Span<_> { data = p, length = u64(1) }; s:at(0) }",
             "get"
         ),
         Ty::Int32
@@ -247,7 +247,7 @@ fn span_construction_and_indexing_infer_element_value_types() {
     );
     assert_eq!(
         result(
-            "@compute_shader fn kernel(invocation: ulong, output: Ptr<uint>) -> _  { let mut i = uint(invocation); output.* = { i }; } fn reference() -> _  { kernel }",
+            "@compute_shader fn kernel(invocation: u64, output: Ptr<u32>) -> _  { let mut i = u32(invocation); output.* = { i }; } fn reference() -> _  { kernel }",
             "reference"
         ),
         Ty::Function {
@@ -263,60 +263,62 @@ fn span_construction_and_indexing_infer_element_value_types() {
 }
 
 #[test]
-fn numeric_suffixes_select_exact_types() {
-    for (literal, ty) in [
-        ("-128_b", Ty::Int8),
-        ("255_ub", Ty::UInt8),
-        ("-32768_h", Ty::Int16),
-        ("65535_uh", Ty::UInt16),
-        ("-2147483648_i", Ty::Int32),
-        ("4294967295_ui", Ty::UInt32),
-        ("-9223372036854775808_l", Ty::Int64),
-        ("18446744073709551615_ul", Ty::UInt64),
-        ("1.25_f", Ty::Float32),
-        ("1e2_d", Ty::Float64),
-        ("42_f", Ty::Float32),
-        ("42_d", Ty::Float64),
-        ("0xFFFF_FFFF_ul", Ty::UInt64),
-        ("0x7fff_l", Ty::Int64),
-        ("0xff", Ty::Int64),
-        ("0xAB", Ty::Int64),
-        ("0xdead", Ty::Int64),
+fn numeric_annotations_and_applications_select_exact_types() {
+    for (literal, name, ty) in [
+        ("-128", "i8", Ty::Int8),
+        ("255", "u8", Ty::UInt8),
+        ("-32768", "i16", Ty::Int16),
+        ("65535", "u16", Ty::UInt16),
+        ("-2147483648", "i32", Ty::Int32),
+        ("4294967295", "u32", Ty::UInt32),
+        ("-9223372036854775808", "i64", Ty::Int64),
+        ("18446744073709551615", "u64", Ty::UInt64),
+        ("1.25", "f32", Ty::Float32),
+        ("1e2", "f64", Ty::Float64),
+        ("42", "f32", Ty::Float32),
+        ("0xFFFF_FFFF", "u64", Ty::UInt64),
     ] {
-        assert_eq!(
-            result(&format!("fn value() -> _  {{ {literal} }}"), "value"),
-            ty
-        );
+        for source in [
+            format!("fn value() -> {name} {{ {literal} }}"),
+            format!("fn value() -> _ {{ {name}({literal}) }}"),
+            format!("fn value() -> _ {{ let n: {name} = {literal}; n }}"),
+        ] {
+            assert_eq!(result(&source, "value"), ty, "{source}");
+        }
     }
     for source in [
-        "fn value() -> long  { 42_ul }",
-        "fn value() -> _  { let mut n: long; n = 42_ul; n }",
-        "fn value() -> _  { 42_ul + 1_l }",
-        "fn value() -> float64  { 1.5_f }",
+        "fn value() -> i64 { u64(42) }",
+        "fn value() -> _ { u64(42) + i64(1) }",
+        "fn value() -> f64 { f32(1.5) }",
     ] {
         assert!(pipeline::generate(&parse(source)).is_err(), "{source}");
     }
 }
 
 #[test]
-fn suffixed_literals_reject_overflow_and_invalid_integer_forms() {
-    for literal in [
-        "128_b",
-        "256_ub",
-        "32768_h",
-        "65536_uh",
-        "2147483648_i",
-        "4294967296_ui",
-        "9223372036854775808_l",
-        "18446744073709551616_ul",
-        "-1_ul",
-        "-129_b",
-        "1.5_ul",
-        "1e3_ui",
-        "1e50_f",
-        "1e400_d",
+fn contextual_literals_reject_overflow_and_invalid_integer_forms() {
+    for (literal, ty) in [
+        ("128", "i8"),
+        ("256", "u8"),
+        ("32768", "i16"),
+        ("65536", "u16"),
+        ("2147483648", "i32"),
+        ("4294967296", "u32"),
+        ("9223372036854775808", "i64"),
+        ("18446744073709551616", "u64"),
+        ("-1", "u64"),
+        ("-129", "i8"),
+        ("1.5", "u64"),
+        ("1e3", "u32"),
+        ("1e50", "f32"),
+        ("1e400", "f64"),
     ] {
-        rejects(&format!("fn value() -> _  {{ {literal} }}"), "literal");
+        let message = if literal == "1.5" || literal == "1e3" {
+            "TypeMismatch"
+        } else {
+            "literal"
+        };
+        rejects(&format!("fn value() -> {ty} {{ {literal} }}"), message);
     }
 }
 
@@ -353,7 +355,7 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
         "let mut unused: _; unused = 1;",
     ] {
         let source = format!(
-            "fn consume(p: Ptr<ubyte>)  {{}} fn main()  {{ {marker} let mut value = 0; consume(&value); }}"
+            "fn consume(p: Ref<u8>)  {{}} fn main()  {{ {marker} let mut value = 0; consume(value); }}"
         );
         let module = pipeline::generate(&parse(&source)).unwrap();
         let value = module
@@ -365,7 +367,7 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
         assert_eq!(value.ty, Ty::UInt8, "{source}");
 
         let source = format!(
-            "fn consume(p: Ptr<ubyte>)  {{}} fn main()  {{ {marker} let mut value = 0_i; consume(&value); }}"
+            "fn consume(p: Ref<u8>)  {{}} fn main()  {{ {marker} let mut value: i32 = 0; consume(value); }}"
         );
         let error = pipeline::generate(&parse(&source)).unwrap_err();
         assert!(
@@ -379,7 +381,7 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
         );
 
         let source = format!(
-            "import {{ \"$/span.resin\" }}; fn main() -> int  {{ {marker} let mut values = [10, 20]; let mut data = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }}; data:at(1) }}"
+            "import {{ \"$/span.resin\" }}; fn main() -> i32  {{ {marker} let mut values = [10, 20]; let data: Ref<_> = values; data:at(1) }}"
         );
         pipeline::source_module(&source).unwrap();
     }
@@ -388,9 +390,9 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
 #[test]
 fn pointer_reinterpretation_does_not_narrow_source_storage() {
     for bindings in [
-        "let mut n = 300; let mut bytes = Ptr<ubyte>(&n);",
-        "let mut n: _; n = 300; let mut bytes = Ptr<ubyte>(&n);",
-        "let mut n: int; n = 300; let mut source: Ptr<int>; source = &n; let mut bytes = Ptr<ubyte>(source);",
+        "let mut n = Ptr<i64>(u64(300)); let mut bytes = Ptr<u8>(n);",
+        "let mut n: _; n = Ptr<i64>(u64(300)); let mut bytes = Ptr<u8>(n);",
+        "let mut n: Ptr<i32>; n = Ptr<i32>(u64(300)); let mut source: Ptr<i32>; source = n; let mut bytes = Ptr<u8>(source);",
     ] {
         for marker in ["", "{ let mut unused = (); };"] {
             let source = format!("export {{ main }}; fn main()  {{ {bindings} {marker} }}");
@@ -403,10 +405,12 @@ fn pointer_reinterpretation_does_not_narrow_source_storage() {
                 .unwrap();
             assert_eq!(
                 n.ty,
-                if bindings.contains("let mut n: int") {
-                    Ty::Int32
-                } else {
-                    Ty::Int64
+                Ty::Pointer {
+                    pointee: Box::new(if bindings.contains("let mut n: Ptr<i32>") {
+                        Ty::Int32
+                    } else {
+                        Ty::Int64
+                    })
                 },
                 "{source}"
             );
@@ -440,7 +444,7 @@ fn shared_layout_queries_reject_unsupported_or_unresolved_types() {
 
 #[test]
 fn numeric_conversions_do_not_choose_source_storage_types() {
-    let m = module("fn main()  { let mut n = 300; let mut byte = ubyte(n); }");
+    let m = module("fn main()  { let mut n = 300; let mut byte = u8(n); }");
     assert_eq!(
         m.functions[0]
             .locals
@@ -463,19 +467,19 @@ fn numeric_conversions_do_not_choose_source_storage_types() {
 fn never_elimination_requires_an_empty_input_and_resolved_context() {
     assert_eq!(
         result(
-            "fn impossible(n: Never) -> int  { absurd(n) }",
+            "fn impossible(n: Never) -> i32  { absurd(n) }",
             "impossible"
         ),
         Ty::Int32
     );
-    rejects("fn bad(n: int) -> int  { absurd(n) }", "TypeMismatch");
+    rejects("fn bad(n: i32) -> i32  { absurd(n) }", "TypeMismatch");
     rejects("fn ambiguous(n: Never) -> _  { absurd(n) }", "infer");
 }
 
 #[test]
 fn layout_operands_check_nested_declarations_without_emitting_them() {
     let m = module(
-        "fn effect() -> int  { 42 } fn measure() -> _  { size_of({ struct Local { n: int, } effect(); let mut value = Local { n = effect() }; value }) }",
+        "fn effect() -> i32  { 42 } fn measure() -> _  { size_of({ struct Local { n: i32, } effect(); let mut value = Local { n = effect() }; value }) }",
     );
     assert_eq!(
         m.types
@@ -504,7 +508,7 @@ fn layout_operands_check_nested_declarations_without_emitting_them() {
     );
 
     rejects(
-        "fn measure() -> _  { size_of({ let mut value: int; value = 1 == 1; value }) }",
+        "fn measure() -> _  { size_of({ let mut value: i32; value = 1 == 1; value }) }",
         "TypeMismatch",
     );
 }
@@ -513,13 +517,13 @@ fn layout_operands_check_nested_declarations_without_emitting_them() {
 fn layout_operands_do_not_read_or_initialize_runtime_locals() {
     assert_eq!(
         result(
-            "fn measure() -> _  { let mut n: int; size_of(n) }",
+            "fn measure() -> _  { let mut n: i32; size_of(n) }",
             "measure"
         ),
         Ty::UInt64
     );
     rejects(
-        "fn f() -> int  { let mut n: int; size_of({ n = 42; n }); n }",
+        "fn f() -> i32  { let mut n: i32; size_of({ n = 42; n }); n }",
         "UninitializedValue",
     );
 }
@@ -527,11 +531,11 @@ fn layout_operands_do_not_read_or_initialize_runtime_locals() {
 #[test]
 fn nested_record_annotations_reject_duplicate_field_names() {
     for source in [
-        "struct FieldsNN<T0, T1> { n: T0, n: T1, }\nfn f(x: FieldsNN<int, int>)  {}",
-        "struct FieldsNN<T0, T1> { n: T0, n: T1, }\nfn f()  { let mut x: Ptr<FieldsNN<int, int>>; }",
-        "fn f()  { struct Local { n: int, n: int, } }",
-        "struct FieldsNN<T0, T1> { n: T0, n: T1, }\nfn f()  { type Local = FieldsNN<int, int>; }",
-        "struct FieldsNN<T0, T1> { n: T0, n: T1, }\nfn f()  { { let mut x: FieldsNN<int, int>; }; }",
+        "struct FieldsNN<T0, T1> { n: T0, n: T1, }\nfn f(x: FieldsNN<i32, i32>)  {}",
+        "struct FieldsNN<T0, T1> { n: T0, n: T1, }\nfn f()  { let mut x: Ptr<FieldsNN<i32, i32>>; }",
+        "fn f()  { struct Local { n: i32, n: i32, } }",
+        "struct FieldsNN<T0, T1> { n: T0, n: T1, }\nfn f()  { type Local = FieldsNN<i32, i32>; }",
+        "struct FieldsNN<T0, T1> { n: T0, n: T1, }\nfn f()  { { let mut x: FieldsNN<i32, i32>; }; }",
     ] {
         rejects(source, "DuplicateField");
     }
@@ -540,8 +544,8 @@ fn nested_record_annotations_reject_duplicate_field_names() {
 #[test]
 fn numeric_defaults_stay_with_their_dependency_group() {
     let plain = "fn plain() -> _  { 1 }";
-    let wide = "fn wide() -> _  { let mut n = 1; let mut p: Ptr<ulong>; p = &n; n }";
-    let fraction = "fn fraction() -> _  { let mut n = 1.5; let mut p: Ptr<float32>; p = &n; n }";
+    let wide = "fn wide() -> _  { let mut n = 1; let p: Ref<u64> = n; n }";
+    let fraction = "fn fraction() -> _  { let mut n = 1.5; let p: Ref<f32> = n; n }";
     let caller = "fn caller() -> _  { wide() }";
     for declarations in [
         [plain, wide, fraction, caller],
@@ -570,68 +574,19 @@ fn numeric_defaults_stay_with_their_dependency_group() {
 }
 
 #[test]
-fn numeric_suffixes_ignore_case_and_accept_optional_separators() {
-    for (digits, suffix, ty) in [
-        ("127", "b", Ty::Int8),
-        ("255", "ub", Ty::UInt8),
-        ("32767", "h", Ty::Int16),
-        ("65535", "uh", Ty::UInt16),
-        ("2147483647", "i", Ty::Int32),
-        ("4294967295", "ui", Ty::UInt32),
-        ("9223372036854775807", "l", Ty::Int64),
-        ("18446744073709551615", "ul", Ty::UInt64),
-        ("1.25", "f", Ty::Float32),
-        ("1e2", "d", Ty::Float64),
-        ("0xFF", "ub", Ty::UInt8),
-        ("0x7FFF", "h", Ty::Int16),
-        ("0xFFFF", "uh", Ty::UInt16),
-        ("0x7FFF_FFFF", "i", Ty::Int32),
-        ("0xFFFF_FFFF", "ui", Ty::UInt32),
-        ("0x7FFF_FFFF_FFFF_FFFF", "l", Ty::Int64),
-        ("0xFFFF_FFFF_FFFF_FFFF", "ul", Ty::UInt64),
-    ] {
-        for mask in 0..(1 << suffix.len()) {
-            let suffix: String = suffix
-                .chars()
-                .enumerate()
-                .map(|(i, c)| {
-                    if mask & (1 << i) != 0 {
-                        c.to_ascii_uppercase()
-                    } else {
-                        c
-                    }
-                })
-                .collect();
-            for separator in ["", "_"] {
-                let literal = format!("{digits}{separator}{suffix}");
-                assert_eq!(
-                    result(&format!("fn value() -> _  {{ {literal} }}"), "value"),
-                    ty,
-                    "{literal}"
-                );
-            }
-        }
-    }
-    for (literal, ty) in [
-        ("0x7f_b", Ty::Int8),
-        ("0X7F_B", Ty::Int8),
-        ("-0x80_b", Ty::Int8),
-        ("0xAB", Ty::Int64),
-        ("0x1_d", Ty::Int64),
-        ("0x1_F", Ty::Int64),
-        ("-0xdead", Ty::Int64),
-        ("-0XFE", Ty::Int64),
+fn hexadecimal_letters_remain_digits() {
+    for literal in [
+        "0x7f_b", "0X7F_B", "-0x80_b", "0xAB", "0x1_d", "0x1_F", "-0xdead",
     ] {
         assert_eq!(
-            result(&format!("fn value() -> _  {{ {literal} }}"), "value"),
-            ty,
-            "{literal}"
+            result(&format!("fn value() -> _ {{ {literal} }}"), "value"),
+            Ty::Int64
         );
     }
 }
 
 #[test]
-fn unsuffixed_numbers_infer_from_uses_and_fall_back_to_64_bits() {
+fn numbers_infer_from_uses_and_fall_back_to_64_bits() {
     for (expression, ty) in [
         ("42", Ty::Int64),
         ("2147483648", Ty::Int64),
@@ -655,16 +610,16 @@ fn unsuffixed_numbers_infer_from_uses_and_fall_back_to_64_bits() {
         }
     }
     for (name, ty) in [
-        ("sbyte", Ty::Int8),
-        ("ubyte", Ty::UInt8),
-        ("short", Ty::Int16),
-        ("ushort", Ty::UInt16),
-        ("int", Ty::Int32),
-        ("uint", Ty::UInt32),
-        ("long", Ty::Int64),
-        ("ulong", Ty::UInt64),
-        ("float32", Ty::Float32),
-        ("float64", Ty::Float64),
+        ("i8", Ty::Int8),
+        ("u8", Ty::UInt8),
+        ("i16", Ty::Int16),
+        ("u16", Ty::UInt16),
+        ("i32", Ty::Int32),
+        ("u32", Ty::UInt32),
+        ("i64", Ty::Int64),
+        ("u64", Ty::UInt64),
+        ("f32", Ty::Float32),
+        ("f64", Ty::Float64),
     ] {
         let mut literals = vec!["42"];
         if ty == Ty::Float32 || ty == Ty::Float64 {
@@ -672,7 +627,7 @@ fn unsuffixed_numbers_infer_from_uses_and_fall_back_to_64_bits() {
         }
         for literal in literals {
             for body in [
-                format!("let mut n = {literal}; let mut p: Ptr<{name}>; p = &n; n"),
+                format!("let mut n = {literal}; let p: Ref<{name}> = n; n"),
                 format!("let mut n = {literal}; take(n)"),
                 format!("let mut n = {literal}; n + take(1)"),
                 format!("let mut n = {literal}; take(1) + n"),
@@ -686,7 +641,7 @@ fn unsuffixed_numbers_infer_from_uses_and_fall_back_to_64_bits() {
     for literal in ["9223372036854775808", "-9223372036854775809", "1e400"] {
         rejects(&format!("fn value() -> _  {{ {literal} }}"), "literal");
     }
-    rejects("fn value() -> ubyte  { 256 }", "literal");
-    rejects("fn value() -> float32  { 1e50 }", "literal");
-    rejects("fn value() -> int  { 1.5 }", "TypeMismatch");
+    rejects("fn value() -> u8  { 256 }", "literal");
+    rejects("fn value() -> f32  { 1e50 }", "literal");
+    rejects("fn value() -> i32  { 1.5 }", "TypeMismatch");
 }

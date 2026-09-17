@@ -50,16 +50,16 @@ const BOP_PREC = {
 const BUILTIN_TYPES = [
   "str",
   "bool",
-  "sbyte",
-  "short",
-  "int",
-  "long",
-  "ubyte",
-  "ushort",
-  "uint",
-  "ulong",
-  "float32",
-  "float64",
+  "i8",
+  "i16",
+  "i32",
+  "i64",
+  "u8",
+  "u16",
+  "u32",
+  "u64",
+  "f32",
+  "f64",
   "Never",
   "None",
   "GpuArguments",
@@ -588,10 +588,8 @@ export default grammar({
     number: () =>
       token(
         choice(
-          new RustRegex(
-            "[0-9][0-9_]*(\\.[0-9_]+)?([eE][+-]?[0-9_]+)?([uU]?[bBhHiIlL]|[fFdD])?",
-          ),
-          new RustRegex("0[xX][0-9a-fA-F_]+([hHiIlL]|[uU][bBhHiIlL])?"),
+          new RustRegex("[0-9][0-9_]*(\\.[0-9_]+)?([eE][+-]?[0-9_]+)?"),
+          new RustRegex("0[xX][0-9a-fA-F_]+"),
         ),
       ),
 
@@ -609,14 +607,33 @@ export default grammar({
         ),
       ),
 
-    comment: () =>
+    doc_comment: () =>
       token(
-        choice(
-          seq("//", new RustRegex(".*")),
-          seq("/*", new RustRegex("[^*]*\\*+([^/*][^*]*\\*+)*"), "/"),
+        prec(
+          2,
+          choice(
+            seq("///", new RustRegex(".*")),
+            seq("//!", new RustRegex(".*")),
+            seq("/**", new RustRegex("[^*]*\\*+([^/*][^*]*\\*+)*"), "/"),
+            seq("/*!", new RustRegex("[^*]*\\*+([^/*][^*]*\\*+)*"), "/"),
+          ),
         ),
+      ),
+
+    comment: () =>
+      choice(
+        token(seq("//", new RustRegex(".*"))),
+        token(prec(3, seq("////", new RustRegex(".*")))),
+        token(seq("/*", new RustRegex("[^*]*\\*+([^/*][^*]*\\*+)*"), "/")),
+        token(
+          prec(
+            3,
+            seq("/***", new RustRegex("[^*]*\\*+([^/*][^*]*\\*+)*"), "/"),
+          ),
+        ),
+        token(prec(3, choice("/**/", "/***/"))),
       ),
   },
 
-  extras: ($) => [new RustRegex("\\s"), $.comment],
+  extras: ($) => [new RustRegex("\\s"), $.comment, $.doc_comment],
 });

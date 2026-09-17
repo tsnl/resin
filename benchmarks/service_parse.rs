@@ -27,10 +27,10 @@ struct Config {
 fn fixture() -> Files {
     let mut files = Vec::new();
     for index in 0..16 {
-        let mut text = format!("export {{ value_{index} }}; fn value_{index}() -> int  {{ 42 }}\n");
+        let mut text = format!("export {{ value_{index} }}; fn value_{index}() -> i32  {{ 42 }}\n");
         for helper in 0..64 {
             text.push_str(&format!(
-                "fn helper_{helper}(value: int) -> int  {{ value + {helper} }}\n"
+                "fn helper_{helper}(value: i32) -> i32  {{ value + {helper} }}\n"
             ));
         }
         files.push((format!("file{index}.resin"), text));
@@ -45,7 +45,7 @@ fn fixture() -> Files {
         .join(" + ");
     files.push((
         "main.resin".into(),
-        format!("export {{ main }}; import {{ {imports} }}; fn main() -> int  {{ {calls} }}\n"),
+        format!("export {{ main }}; import {{ {imports} }}; fn main() -> i32  {{ {calls} }}\n"),
     ));
     files
 }

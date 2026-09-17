@@ -40,6 +40,7 @@ async fn unrelated_body_errors_do_not_invalidate_dependency_declarations() {
         "const broken = ;",
         "const unfinished =",
         "extern type Handle; fn main()  { missing( }",
+        "fn main() { missing( } extern type Handle;",
     ] {
         let document = parse(format!("{prefix}{body}"), None).await;
         assert!(document.tree().root_node().has_error(), "{body}");
@@ -123,11 +124,11 @@ async fn opaque_foreign_types_are_body_declarations() {
 
 #[test]
 fn grouped_foreign_functions_have_stable_multiline_formatting() {
-    let source = "extern{\"local.h\":{fn call(value:int)->int;},\"empty.h\":{},};";
+    let source = "extern{\"local.h\":{fn call(value:i32)->i32;},\"empty.h\":{},};";
     let formatted = resin_cst::format_source(source).unwrap();
     assert_eq!(
         formatted,
-        "extern {\n\t\"local.h\": {\n\t\tfn call(value: int) -> int;\n\t},\n\t\"empty.h\": {},\n};\n"
+        "extern {\n\t\"local.h\": {\n\t\tfn call(value: i32) -> i32;\n\t},\n\t\"empty.h\": {},\n};\n"
     );
     assert_eq!(resin_cst::format_source(&formatted).unwrap(), formatted);
 }

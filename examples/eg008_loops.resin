@@ -1,6 +1,6 @@
 export { main };
 
-import { "$/string.resin" };
+import { "$/string.resin", "$/stdio.resin" };
 
 fn main() {
 	let mut n = 1;
@@ -9,5 +9,6 @@ fn main() {
 		sum = sum + n;
 		n = n + 1;
 	};
-	print(fmt("sum(1..10) = {0}\n", (sum,)));
+	let text = fmt("sum(1..10) = {0}\n", (sum,));
+	print(text);
 }

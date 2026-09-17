@@ -132,7 +132,7 @@ fn lower_region(
                 stack.push(Slot {
                     ty: ty.clone(),
                     expr: name,
-                    live: if let Instr::LocalAddress { local } = instr
+                    live: if let Instr::LocalRef { local } = instr
                         && tracks_initialization(types, ty)
                     {
                         Some(format!("&r_live{}", local.index()))
@@ -193,7 +193,10 @@ fn lower_region(
 
 fn projects_value(types: &Types<'_>, instr: &Instr, args: &[Slot]) -> bool {
     match instr {
-        Instr::AccessStatic { .. } => !matches!(types.shape(&args[0].ty), Ty::Pointer { .. }),
+        Instr::AccessStatic { .. } => !matches!(
+            types.shape(&args[0].ty),
+            Ty::Pointer { .. } | Ty::Reference { .. }
+        ),
         Instr::AccessDynamic => matches!(types.shape(&args[0].ty), Ty::Array { .. }),
         _ => false,
     }
@@ -424,7 +427,7 @@ fn transfer(types: &Types<'_>, target: usize, stack: &[Slot]) -> String {
 }
 
 fn tracks_initialization(types: &Types<'_>, ty: &Ty) -> bool {
-    matches!(ty, Ty::Pointer { pointee } if pointee.needs_drop(&types.module.types))
+    matches!(ty, Ty::Pointer { pointee } | Ty::Reference { referent: pointee } if pointee.needs_drop(&types.module.types))
 }
 
 fn instruction(
@@ -547,7 +550,9 @@ fn instruction(
             widen(types, &args[0].ty, result.unwrap(), &args[0].expr)
         }
         Instr::IsVariant { tag } => {
-            let (ty, expr) = if let Ty::Pointer { pointee } = &args[0].ty {
+            let (ty, expr) = if let Ty::Pointer { pointee } | Ty::Reference { referent: pointee } =
+                &args[0].ty
+            {
                 (pointee.as_ref(), format!("*({})", args[0].expr))
             } else {
                 (&args[0].ty, args[0].expr.clone())
@@ -595,7 +600,8 @@ fn instruction(
         }
         Instr::PointerCast { ty } => format!("({})(uintptr_t)({})", types.name(ty), args[0].expr),
         Instr::Push { value } => literal(types, result.unwrap(), value),
-        Instr::LocalAddress { local } => format!("&r_l{}", local.index()),
+        Instr::Borrow => args[0].expr.clone(),
+        Instr::LocalRef { local } => format!("&r_l{}", local.index()),
         Instr::Load | Instr::TransferLoad => {
             format!("*({})", types.unwrap(&args[0].ty, args[0].expr.clone()))
         }
@@ -792,7 +798,7 @@ fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
 fn project(types: &Types<'_>, source: &Slot, index: &str, dynamic: bool) -> Result<String, Error> {
     let mut ty = types.shape(&source.ty);
     let mut expr = types.unwrap(&source.ty, source.expr.clone());
-    let pointer = if let Ty::Pointer { pointee } = ty {
+    let pointer = if let Ty::Pointer { pointee } | Ty::Reference { referent: pointee } = ty {
         expr = types.unwrap(pointee, format!("*({expr})"));
         ty = types.shape(pointee);
         true
@@ -814,7 +820,11 @@ fn project(types: &Types<'_>, source: &Slot, index: &str, dynamic: bool) -> Resu
             };
             format!("({expr}).items[{index}]")
         }
-        _ => return Err(Error(format!("unsupported projection through {ty:?}"))),
+        _ => {
+            return Err(Error::invalid(format!(
+                "unsupported projection through {ty:?}"
+            )));
+        }
     };
     Ok(if pointer { format!("&({expr})") } else { expr })
 }

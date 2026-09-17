@@ -28,19 +28,21 @@ fn foreign_functions_forward_separate_c_arguments() {
 
         extern {{
             "{header}": {{
-                fn answer () -> int;
-                fn assign (out: Ptr<int>, value: int);
+                fn answer () -> i32;
+                fn assign (out: Ptr<i32>, value: i32);
             }},
             "stdlib.h": {{
-                fn abs (n: int) -> int;
+                fn abs (n: i32) -> i32;
             }},
         }};
+import {{ "$/shared.resin" }};
 
-        fn call (f: () -> int) -> int  {{ f() }}
-        fn main () -> int  {{
-            let mut value = 0;
+
+        fn call (f: () -> i32) -> i32  {{ f() }}
+        fn main () -> i32 | Err<_> {{
+            let value_owner = arc_ptr_alloc(0)?; let value: Ref<_> = value_owner:get().*;
             let mut set = assign;
-            set(&value, call(answer));
+            set(value_owner:get(), call(answer));
             abs(-value)
         }}"#,
         header = header.to_string_lossy().replace('\\', "/")
@@ -57,17 +59,19 @@ fn foreign_functions_forward_separate_c_arguments() {
 #[test]
 fn pointers_roundtrip_and_address_expressions_evaluate_once() {
     let output = run(r#"export { main };
+import { "$/shared.resin" };
+
 
         struct FieldsValue<T0> { value: T0, }
-fn identity(p: Ptr<FieldsValue<int>>, calls: Ptr<int>) -> Ptr<FieldsValue<int>>  {
+fn identity(p: Ptr<FieldsValue<i32>>, calls: Ptr<i32>) -> Ptr<FieldsValue<i32>>  {
             calls.* = calls.* + 1;
             p
         }
-        fn main () -> int  {
-            let mut calls = 0;
-            let mut record = FieldsValue<_> { value = 1 };
-            let mut pointer = &identity(&record, &calls).value;
-            let mut copy = Ptr<int>(ulong(pointer));
+        fn main () -> i32 | Err<_> {
+            let calls_owner = arc_ptr_alloc(0)?; let calls: Ref<_> = calls_owner:get().*;
+            let record_owner = arc_ptr_alloc(FieldsValue<_> { value = 1 })?; let record: Ref<_> = record_owner:get().*;
+            let mut pointer = &identity(record_owner:get(), calls_owner:get()).value;
+            let mut copy = Ptr<i32>(u64(pointer));
             copy.* = 41;
             record.value + calls
         }
@@ -79,9 +83,9 @@ fn identity(p: Ptr<FieldsValue<int>>, calls: Ptr<int>) -> Ptr<FieldsValue<int>> 
 fn foreign_aggregate_values_and_implicit_pointer_casts_are_rejected() {
     for source in [
         "extern { \"native.h\": { fn consume (value: Native) -> (); } }; extern type Native;",
-        "extern { \"native.h\": { fn consume (value: FieldsX<int>) -> (); } }; struct FieldsX<T0> { x: T0, }",
-        "extern { \"native.h\": { fn produce () -> FieldsX<int>; } }; struct FieldsX<T0> { x: T0, }",
-        "extern { \"native.h\": { fn callback (f: () -> int) -> (); } };",
+        "extern { \"native.h\": { fn consume (value: FieldsX<i32>) -> (); } }; struct FieldsX<T0> { x: T0, }",
+        "extern { \"native.h\": { fn produce () -> FieldsX<i32>; } }; struct FieldsX<T0> { x: T0, }",
+        "extern { \"native.h\": { fn callback (f: () -> i32) -> (); } };",
     ] {
         assert!(
             error(source).contains("InvalidForeignSignature"),
@@ -89,7 +93,7 @@ fn foreign_aggregate_values_and_implicit_pointer_casts_are_rejected() {
         );
     }
     assert!(
-        error("extern { \"bad\\nheader\": { fn invalid () -> int; } };")
+        error("extern { \"bad\\nheader\": { fn invalid () -> i32; } };")
             .contains("InvalidForeignHeader")
     );
     for source in [
@@ -101,9 +105,9 @@ fn foreign_aggregate_values_and_implicit_pointer_casts_are_rejected() {
         assert!(error(source).contains("OpaqueValue"), "{source}");
     }
     for source in [
-        "export { main }; fn f (p: Ptr<int>) -> ()  {} fn main() -> ()  { let mut x = 0; f(ulong(0)); }",
-        "export { main }; fn f (p: Ptr<ubyte>) -> ()  {} fn main() -> ()  { let mut x: int; x = 0; f(&x); }",
-        "export { main }; fn main() -> ()  { let mut x = Ptr<int>(float32(0.0)); }",
+        "export { main }; fn f (p: Ptr<i32>) -> ()  {} fn main() -> ()  { let mut x = 0; f(u64(0)); }",
+        "export { main }; fn f (p: Ptr<u8>) -> ()  {} fn main() -> ()  { let mut x: i32; x = 0; f(&x); }",
+        "export { main }; fn main() -> ()  { let mut x = Ptr<i32>(f32(0.0)); }",
     ] {
         assert!(error(source).contains("TypeMismatch"), "{source}");
     }
@@ -120,7 +124,7 @@ fn imports_are_relative_deduplicated_and_checked_for_cycles() {
     fs::create_dir(&nested).unwrap();
     fs::write(
         temp.path().join("common.resin"),
-        "export { helper }; fn helper () -> int  { 42 }",
+        "export { helper }; fn helper () -> i32  { 42 }",
     )
     .unwrap();
     fs::write(
@@ -130,7 +134,7 @@ fn imports_are_relative_deduplicated_and_checked_for_cycles() {
     .unwrap();
     fs::write(
         &main,
-        "export { main }; import { \"nested/library.resin\", \"common.resin\" }; fn main () -> int  { helper() }",
+        "export { main }; import { \"nested/library.resin\", \"common.resin\" }; fn main () -> i32  { helper() }",
     )
     .unwrap();
     let module = pipeline::file_module(&main).unwrap();
@@ -158,14 +162,14 @@ fn imports_are_relative_deduplicated_and_checked_for_cycles() {
 #[test]
 fn shader_declarations_validate_signatures_and_do_not_expose_bytecode() {
     for source in [
-        "@compute_shader fn kernel(index: ulong, output: Ptr<uint>)  {} fn main()  { kernel.spirv; }",
-        "fn kernel(i: uint) -> uint  { i } fn main()  { let mut code = kernel.spirv; }",
-        "@geometry_shader fn kernel(i: uint) -> uint  { i }",
-        "@compute_shader @vertex_shader fn kernel(i: uint) -> uint  { i }",
-        "@compute_shader fn kernel(i: int) -> int  { i }",
-        "@compute_shader fn kernel(i: uint) -> uint  { i }",
-        "@compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { i }; } fn main()  { let mut alias = kernel; let mut code = alias.spirv; }",
-        "extern { \"stdlib.h\": { fn abs(i: int) -> int; } }; fn main()  { let mut code = abs.spirv; }",
+        "@compute_shader fn kernel(index: u64, output: Ptr<u32>)  {} fn main()  { kernel.spirv; }",
+        "fn kernel(i: u32) -> u32  { i } fn main()  { let mut code = kernel.spirv; }",
+        "@geometry_shader fn kernel(i: u32) -> u32  { i }",
+        "@compute_shader @vertex_shader fn kernel(i: u32) -> u32  { i }",
+        "@compute_shader fn kernel(i: i32) -> i32  { i }",
+        "@compute_shader fn kernel(i: u32) -> u32  { i }",
+        "@compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { i }; } fn main()  { let mut alias = kernel; let mut code = alias.spirv; }",
+        "extern { \"stdlib.h\": { fn abs(i: i32) -> i32; } }; fn main()  { let mut code = abs.spirv; }",
     ] {
         assert!(!error(source).is_empty(), "{source}");
     }
@@ -173,16 +177,16 @@ fn shader_declarations_validate_signatures_and_do_not_expose_bytecode() {
 
 #[test]
 fn shader_is_an_ordinary_available_function_name() {
-    module("fn shader(n: int) -> int  { n + 1 }");
+    module("fn shader(n: i32) -> i32  { n + 1 }");
 }
 
 #[test]
 fn compute_declarations_require_ulong_indices() {
-    for ty in ["uint", "int", "long"] {
+    for ty in ["u32", "i32", "i64"] {
         let source = format!(
-            "@compute_shader fn kernel(index: {ty}, output: Ptr<ulong>)  {{ output.* = ulong(index); }}"
+            "@compute_shader fn kernel(index: {ty}, output: Ptr<u64>)  {{ output.* = u64(index); }}"
         );
-        assert!(error(&source).contains("expected (ulong, Ptr<T>)"));
+        assert!(error(&source).contains("expected (u64, Ptr<T>)"));
     }
-    module("@compute_shader fn kernel(index: ulong, output: Ptr<ulong>)  { output.* = index; }");
+    module("@compute_shader fn kernel(index: u64, output: Ptr<u64>)  { output.* = index; }");
 }

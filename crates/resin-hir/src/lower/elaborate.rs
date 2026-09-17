@@ -124,12 +124,7 @@ impl Completion<'_> {
         }
         .clone();
         if matches!(target, crate::Type::Reference { .. }) {
-            if !reference_place(&term) {
-                return Err(GenerateError::inference(
-                    term.span,
-                    "reference binding requires an initialized place, not a temporary value",
-                ));
-            }
+            require_reference_place(&term)?;
         } else if !value_type.copies_implicitly() && reference_place(&term) {
             let span = term.span;
             let ty = term.ty.clone();
@@ -223,22 +218,6 @@ impl Completion<'_> {
             ty: self.solver.require_complete(&source.actual, source.span)?,
             kind: self.elaborate_kind(source)?,
         };
-        if let crate::Type::Reference { referent } = &target
-            && !reference_place(&term)
-        {
-            let value = self.consume(term, *referent.clone())?;
-            // Only argument passing materializes temporaries. Reference bindings
-            // and results still require a place; storage lowering owns this value
-            // until the enclosing full expression finishes.
-            return Ok(Term {
-                span: source.span,
-                ty: target,
-                kind: TermKind::Adapt {
-                    conversion: crate::ReceiverConversion::Address,
-                    arg: Box::new(value),
-                },
-            });
-        }
         self.consume(term, target)
     }
 
@@ -407,8 +386,17 @@ impl Completion<'_> {
             typed::TermKind::Assign { place, value } => self.assign(place, value)?,
             typed::TermKind::Address { place } => {
                 let place = self.place(place)?;
-                if owned_path(&place).is_some_and(|(_, path)| !path.is_empty()) {
-                    self.require_available(&place)?;
+                if reference_borrow(&place) {
+                    return Err(GenerateError::inference(
+                        source.span,
+                        "cannot take the address of a Ref; accept or return a Ptr when an address is required",
+                    ));
+                }
+                if local_address(&place) {
+                    return Err(GenerateError::inference(
+                        source.span,
+                        "cannot take the address of a local value; borrow it with Ref or use explicitly allocated storage",
+                    ));
                 }
                 TermKind::Address { place }
             }
@@ -962,18 +950,19 @@ impl Completion<'_> {
         let function_type = self.solver.require_complete(&func.ty, func.span)?;
         let receiver = match &function_type {
             crate::Type::Array { .. } => Some((
-                crate::Type::Pointer {
-                    pointee: Box::new(function_type.clone()),
+                crate::Type::Reference {
+                    referent: Box::new(function_type.clone()),
                 },
-                ReceiverConversion::Address,
+                ReceiverConversion::Borrow,
             )),
             crate::Type::Str => Some((function_type.clone(), ReceiverConversion::Value)),
             _ => None,
         };
         if let Some((ty, conversion)) = receiver {
-            let base = if conversion == ReceiverConversion::Address {
+            let base = if conversion == ReceiverConversion::Borrow {
                 let place = self.place(func)?;
                 self.require_available(&place)?;
+                require_reference_place(&place)?;
                 place
             } else {
                 self.boxed(func)?
@@ -1279,6 +1268,17 @@ fn constant_place(term: &typed::Term) -> bool {
     }
 }
 
+fn require_reference_place(term: &Term) -> Result<()> {
+    if reference_place(term) {
+        Ok(())
+    } else {
+        Err(GenerateError::inference(
+            term.span,
+            "reference binding requires an initialized place; bind the temporary to a local first",
+        ))
+    }
+}
+
 // A reference value already carries a location. Reading its referent preserves
 // a place until storage lowering reaches an actual value consumer.
 fn reference_place(term: &Term) -> bool {
@@ -1295,6 +1295,51 @@ fn reference_place(term: &Term) -> bool {
         TermKind::Use { arg } => reference_place(arg),
         TermKind::Field { base, .. } => {
             reference_place(base) || matches!(base.ty, crate::Type::Pointer { .. })
+        }
+        _ => false,
+    }
+}
+
+// A dependent field receiver might specialize to a pointer. Its address contract
+// is checked again during specialization, before references lose their distinction.
+fn known_value_receiver(ty: &crate::Type) -> bool {
+    use crate::Type;
+    !matches!(
+        ty,
+        Type::Pointer { .. }
+            | Type::Parameter { .. }
+            | Type::Member { .. }
+            | Type::Operation { .. }
+            | Type::Method { .. }
+            | Type::FunctionParameter { .. }
+            | Type::FunctionResult { .. }
+            | Type::Value { .. }
+    )
+}
+
+fn local_address(term: &Term) -> bool {
+    match &term.kind {
+        TermKind::Local { .. } => !matches!(term.ty, crate::Type::Reference { .. }),
+        TermKind::Use { arg } => local_address(arg),
+        TermKind::Field { base, .. } => known_value_receiver(&base.ty) && local_address(base),
+        _ => false,
+    }
+}
+
+// A reference grants access to its referent, but not its address. Dereferencing
+// a pointer read through a reference starts a new, independently addressable place.
+fn reference_borrow(term: &Term) -> bool {
+    if matches!(term.ty, crate::Type::Reference { .. }) {
+        return true;
+    }
+    match &term.kind {
+        TermKind::Use { arg } => reference_borrow(arg),
+        TermKind::Field { base, .. } => {
+            let ty = match &base.ty {
+                crate::Type::Reference { referent } => referent.as_ref(),
+                ty => ty,
+            };
+            known_value_receiver(ty) && reference_borrow(base)
         }
         _ => false,
     }

@@ -5,6 +5,7 @@ use crate::Error;
 use resin_types::prelude::*;
 use rspirv::{binary::Assemble, dr::Builder, spirv::*};
 
+mod calls;
 mod entry;
 mod function;
 mod ops;
@@ -20,19 +21,27 @@ pub(super) fn generate(
     let analysis = checked.analysis();
     let reachable = checked
         .shader_functions(entry)
-        .ok_or_else(|| Error("shader entry was not requested".into()))?;
-    let mut context = Context::new(module, &analysis.types);
+        .ok_or_else(|| Error::unsupported("shader entry was not requested".into()))?;
+    let mut context = Context::new(module, &analysis.types, &analysis.functions);
     for &function in reachable {
         let index = function.index();
         register_function_types(&mut context, index, &analysis.functions[index])?;
     }
     for &function in reachable {
         let index = function.index();
+        // A reference to a local-only type has no device-address ABI. Emit only
+        // its requested Function-storage specializations at the actual calls.
+        if module.functions[index].locals[..module.functions[index].parameter_count].iter().any(|parameter| {
+            matches!(&parameter.ty, Ty::Reference { referent } if resin_types::layout::layout(&module.types, referent).is_err())
+        }) { continue; }
+        let id = context.functions[index];
         let may_fail = function::lower(
             &mut context,
             &module.functions[index],
             &analysis.functions[index],
             index,
+            id,
+            &[],
         )?;
         context
             .fallibility
@@ -48,13 +57,16 @@ pub(super) fn generate(
         .collect())
 }
 
-/// All IDs and types belong to one shader module. LIR pointers are u64 device
-/// addresses; Function-storage pointers never escape the function that owns them.
+/// All IDs and types belong to one shader module. Local borrows retain their
+/// root and projection path; ordinary pointer values are u64 device addresses.
 struct Context<'a> {
     builder: Builder,
     module: &'a resin_lir::Module,
     table: &'a TypeTable,
     functions: Vec<Word>,
+    analysis: &'a [resin_lir::FunctionTypes],
+    local_functions: HashMap<calls::Signature, Word>,
+    local_call_depth: usize,
     // Emission completes each callee before its callers. Absence is not infallibility.
     fallibility: HashMap<Word, bool>,
     failed: Word,
@@ -67,7 +79,11 @@ struct Context<'a> {
 }
 
 impl<'a> Context<'a> {
-    fn new(module: &'a resin_lir::Module, table: &'a TypeTable) -> Self {
+    fn new(
+        module: &'a resin_lir::Module,
+        table: &'a TypeTable,
+        analysis: &'a [resin_lir::FunctionTypes],
+    ) -> Self {
         let mut builder = Builder::new();
         builder.set_version(1, 6);
         builder.capability(Capability::Shader);
@@ -89,6 +105,9 @@ impl<'a> Context<'a> {
             module,
             table,
             functions,
+            analysis,
+            local_functions: HashMap::new(),
+            local_call_depth: 0,
             fallibility: HashMap::new(),
             failed,
             glsl,
@@ -137,7 +156,9 @@ fn register_function_types(
     {
         match ty {
             Ty::Function { .. } => continue,
-            Ty::Pointer { pointee } => context.validate(pointee)?,
+            Ty::Pointer { pointee } | Ty::Reference { referent: pointee } => {
+                context.validate(pointee)?
+            }
             _ => context.validate(ty)?,
         }
         context.ty(ty)?;
@@ -146,12 +167,12 @@ fn register_function_types(
 }
 
 fn str_storage_error() -> Error {
-    Error(
-        "shader string literals need device-backed storage; pass a Span<ubyte> in the shader root"
+    Error::unsupported(
+        "shader string literals need device-backed storage; pass a Span<u8> in the shader root"
             .into(),
     )
 }
 
 fn build_error(error: rspirv::dr::Error) -> Error {
-    Error(format!("cannot construct SPIR-V: {error}"))
+    Error::invalid(format!("cannot construct SPIR-V: {error}"))
 }

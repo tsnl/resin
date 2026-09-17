@@ -17,6 +17,10 @@ use std::{fmt, sync::Arc};
 
 #[derive(Debug, Clone)]
 pub struct SourceFile {
+    /// Markdown for the containing file module.
+    pub module_documentation: Arc<str>,
+    /// Declaration-name spans paired with their attached Markdown.
+    pub documentation: Vec<Spanned<Arc<str>>>,
     pub exports: Vec<Ident>,
     /// Declared native dependencies, including header groups with no functions.
     pub foreign_headers: Vec<Spanned<Arc<str>>>,

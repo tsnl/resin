@@ -7,17 +7,31 @@ use resin_cst::Node;
 use super::*;
 
 pub fn document(source: &resin_cst::Document) -> Parsed {
-    let errors = AstGen::new(source.source())
+    let mut errors: Vec<_> = AstGen::new(source.source())
         .errors(source.tree().root_node())
         .into_iter()
         .map(|error| (error.span, error.to_string()))
         .collect();
-    let file = if let Some(repaired) = source.recovery() {
+    let mut file = if let Some(repaired) = source.recovery() {
         AstGen::bounded(repaired.source(), source.source().len())
             .source_file(repaired.tree().root_node())
     } else {
         AstGen::new(source.source()).source_file(source.tree().root_node())
     };
+    let documentation = source.documentation();
+    errors.extend(
+        documentation
+            .diagnostics
+            .into_iter()
+            .map(|error| (error.span, error.val)),
+    );
+    file.module_documentation = documentation.module.into();
+    file.documentation = documentation
+        .declarations
+        .into_iter()
+        .filter(|item| !item.markdown.is_empty())
+        .map(|item| Spanned::new(item.markdown.into(), item.name.span))
+        .collect();
     Parsed { file, errors }
 }
 
@@ -136,6 +150,8 @@ impl<'a> AstGen<'a> {
                     .collect()
             });
         SourceFile {
+            module_documentation: "".into(),
+            documentation: Vec::new(),
             exports,
             foreign_headers,
             imports,
@@ -772,7 +788,9 @@ impl<'a> AstGen<'a> {
         let mut next = node
             .child_by_field_name("name")
             .and_then(|name| name.next_sibling());
-        while next.is_some_and(|node| matches!(node.kind(), "comment" | "type_parameters")) {
+        while next.is_some_and(|node| {
+            matches!(node.kind(), "comment" | "doc_comment" | "type_parameters")
+        }) {
             next = next.and_then(|node| node.next_sibling());
         }
         if !next.is_some_and(|node| node.kind() == "(" && !node.is_missing()) {

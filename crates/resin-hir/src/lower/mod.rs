@@ -715,7 +715,7 @@ impl Generator {
         {
             return Err(GenerateError::inference(
                 name.span,
-                "@gpu_allocator requires (self, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | Err<E>)",
+                "@gpu_allocator requires (self, bytes: u64, alignment: u64, memory: i32) -> (GpuView | Err<E>)",
             ));
         }
         if self.typer.gpu_allocators.insert(owner, function).is_some() {
@@ -782,8 +782,8 @@ impl Generator {
     ) -> Result<(), GenerateError> {
         let signature = &self.function(function).signature;
         let owner_parameters = &self.typer.nominal_schemes[&owner].type_params;
-        let pointer = crate::Type::Pointer {
-            pointee: Box::new(crate::Type::Defined {
+        let reference = crate::Type::Reference {
+            referent: Box::new(crate::Type::Defined {
                 definition: owner,
                 arguments: owner_parameters
                     .iter()
@@ -799,12 +799,12 @@ impl Generator {
             .map(|parameter| parameter.id)
             .eq(owner_parameters.iter().map(|parameter| parameter.id))
             || signature.params.len() != 1
-            || signature.params[0].annotation.ty != pointer
+            || signature.params[0].annotation.ty != reference
             || signature.result.ty != crate::Type::Unit
         {
             return Err(GenerateError::inference(
                 name.span,
-                "drop must have signature drop(receiver: Ptr<T>) -> ()",
+                "drop must have signature drop(receiver: Ref<T>) -> ()",
             ));
         }
         self.typer.define_drop(owner, function);
@@ -1256,10 +1256,10 @@ mod extern_tests {
             r#"extern { "native.h": {
                 fn handle(value: Ptr<Handle>) -> Ptr<Handle>;
                 fn scalar(value: Scalar) -> Scalar;
-                fn cell(value: Ptr<Cell<int>>) -> Ptr<Cell<int>>;
+                fn cell(value: Ptr<Cell<i32>>) -> Ptr<Cell<i32>>;
             } };
             extern type Handle;
-            type Scalar = int;
+            type Scalar = i32;
             struct Cell<T> { value: T, }
         "#,
         );

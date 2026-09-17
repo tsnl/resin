@@ -1,7 +1,7 @@
 ==================
 Free destruction hooks and shared ownership
 ==================
-struct Item { value: int,
+struct Item { value: i32,
     
 }
 fn drop(self: Ptr<Item>)  {}

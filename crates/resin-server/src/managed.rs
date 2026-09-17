@@ -381,7 +381,7 @@ mod tests {
         let repository = directory.path().join("repository");
         std::fs::create_dir_all(repository.join("src")).unwrap();
         std::fs::create_dir(repository.join("include")).unwrap();
-        let text = "export { answer }; extern { \"native.h\": { fn native_answer() -> int; } }; fn answer() -> int  { native_answer() }\n";
+        let text = "export { answer }; extern { \"native.h\": { fn native_answer() -> i32; } }; fn answer() -> i32  { native_answer() }\n";
         std::fs::write(repository.join("src/value.resin"), text).unwrap();
         std::fs::write(
             repository.join("include/native.h"),

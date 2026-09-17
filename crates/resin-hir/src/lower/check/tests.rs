@@ -18,7 +18,7 @@ fn check(source: &str, generator: &mut Generator) -> CheckedFile {
 fn checking_resolves_types_in_earlier_expressions_and_annotations() {
     let mut generator = Generator::new();
     let checked = check(
-        "fn narrow(n: int) -> int  { n }\nfn value() -> _  {\nlet mut item = 42;\nlet mut pointer: Ptr<_>;\npointer = &item;\nnarrow(pointer.*)\n}",
+        "fn narrow(n: i32) -> i32  { n }\nfn value() -> _  {\nlet mut item = 42;\nlet mut copied: _;\ncopied = item;\nnarrow(copied)\n}",
         &mut generator,
     );
     assert!(checked.errors.is_empty(), "{:?}", checked.errors);
@@ -39,18 +39,13 @@ fn checking_resolves_types_in_earlier_expressions_and_annotations() {
     let Statement::Declare { ty, .. } = &stmts[1] else {
         panic!()
     };
-    assert_eq!(
-        ty.ty,
-        crate::Type::Pointer {
-            pointee: Box::new(crate::Type::Int32)
-        }
-    );
+    assert_eq!(ty.ty, crate::Type::Int32);
 }
 
 #[test]
 fn recovery_keeps_signatures_and_healthy_trees_without_lowering_failed_bodies() {
     let checked = check(
-        "fn bad() -> int  { missing() } fn healthy() -> _  { 42_i }",
+        "fn bad() -> i32  { missing() } fn healthy() -> _  { i32(42) }",
         &mut Generator::new(),
     );
     assert!(!checked.errors.is_empty());
@@ -73,7 +68,7 @@ fn recursive_groups_follow_dependencies() {
 fn completed_bodies_keep_shadowed_references_after_discarding_construction_state() {
     let mut generator = Generator::new();
     let mut checked = check(
-        "fn target(n: int) -> int  { n }\nfn caller(target: int) -> int  {\nlet mut outer = target;\n{ let mut target = outer + 1; target } + target\n}\nfn invoke() -> int  { target(7) }",
+        "fn target(n: i32) -> i32  { n }\nfn caller(target: i32) -> i32  {\nlet mut outer = target;\n{ let mut target = outer + 1; target } + target\n}\nfn invoke() -> i32  { target(7) }",
         &mut generator,
     );
     assert!(checked.errors.is_empty(), "{:?}", checked.errors);
@@ -124,7 +119,7 @@ fn completed_bodies_keep_shadowed_references_after_discarding_construction_state
 fn declaration_identities_do_not_depend_on_unique_source_spans() {
     use resin_source::prelude::*;
     let mut file = crate::lower::test_source(
-        "fn integer(value: int) -> _  { value }\nfn boolean(value: bool) -> _  { value }",
+        "fn integer(value: i32) -> _  { value }\nfn boolean(value: bool) -> _  { value }",
     )
     .file;
     for stmt in &mut file.stmts {

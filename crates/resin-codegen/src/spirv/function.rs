@@ -6,7 +6,9 @@ use super::{
 use crate::Error;
 use resin_lir::{BlockId, Function, FunctionTypes, Instr, Terminator};
 use resin_types::prelude::*;
-use rspirv::spirv::{FunctionControl, LoopControl, SelectionControl, StorageClass, Word};
+use rspirv::spirv::{
+    Decoration, FunctionControl, LoopControl, SelectionControl, StorageClass, Word,
+};
 use std::collections::HashMap;
 
 /// Emit a function and report whether it contains an invocation-failure exit.
@@ -15,26 +17,30 @@ pub(super) fn lower(
     function: &Function,
     flow: &FunctionTypes,
     index: usize,
+    id: Word,
+    local_parameters: &[Option<super::calls::LocalParameter>],
 ) -> Result<bool, Error> {
     let result = context.ty(&function.result)?;
     let parameters = function.locals[..function.parameter_count]
         .iter()
-        .map(|local| context.ty(&local.ty))
-        .collect::<Result<Vec<_>, _>>()?;
+        .enumerate()
+        .map(
+            |(index, local)| match local_parameters.get(index).and_then(Option::as_ref) {
+                Some(parameter) => parameter.types(context),
+                None => context.ty(&local.ty).map(|ty| vec![ty]),
+            },
+        )
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
     let signature = context.builder.type_function(result, parameters.clone());
     if let Some(name) = &function.name {
-        context
-            .builder
-            .name(context.functions[index], name.as_ref());
+        context.builder.name(id, name.as_ref());
     }
     context
         .builder
-        .begin_function(
-            result,
-            Some(context.functions[index]),
-            FunctionControl::NONE,
-            signature,
-        )
+        .begin_function(result, Some(id), FunctionControl::NONE, signature)
         .unwrap();
     let arguments = parameters
         .into_iter()
@@ -45,8 +51,20 @@ pub(super) fn lower(
     let stacks = region_outputs(function, flow);
     let destinations = destinations(context, flow, &stacks.outputs, &stacks.tests)?;
     let arrays = array_variables(context, function, flow)?;
-    for (local, argument) in locals.iter().zip(arguments) {
-        context.builder.store(*local, argument, None, []).unwrap();
+    let mut aliases = HashMap::new();
+    let mut arguments = arguments.into_iter();
+    for (index, local) in locals.iter().take(function.parameter_count).enumerate() {
+        if let Some(parameter) = local_parameters.get(index).and_then(Option::as_ref) {
+            aliases.insert(
+                *local,
+                parameter.argument(context, &mut arguments, function.locals[index].ty.clone()),
+            );
+        } else {
+            context
+                .builder
+                .store(*local, arguments.next().unwrap(), None, [])
+                .unwrap();
+        }
     }
     let mut lowering = FunctionLowering {
         context,
@@ -54,6 +72,7 @@ pub(super) fn lower(
         flow,
         index,
         locals,
+        aliases,
         arrays,
         destinations,
         has_loop_test: stacks.tests.iter().map(Option::is_some).collect(),
@@ -84,6 +103,9 @@ struct FunctionLowering<'a, 'm> {
     flow: &'a FunctionTypes,
     index: usize,
     locals: Vec<Word>,
+    // Ref bindings keep their symbolic local origin instead of storing logical
+    // pointers in integer-valued pointer slots. The source binding cannot rebind.
+    aliases: HashMap<Word, Slot>,
     arrays: HashMap<Ty, Word>,
     destinations: Vec<Destination>,
     has_loop_test: Vec<bool>,
@@ -93,9 +115,11 @@ struct FunctionLowering<'a, 'm> {
 
 fn variable(context: &mut Context<'_>, ty: &Ty, initial: Option<Word>) -> Result<Word, Error> {
     let pointer = context.pointer_type(StorageClass::Function, ty)?;
-    Ok(context
+    let variable = context
         .builder
-        .variable(pointer, None, StorageClass::Function, initial))
+        .variable(pointer, None, StorageClass::Function, initial);
+    context.builder.decorate(variable, Decoration::Aliased, []);
+    Ok(variable)
 }
 
 fn local_variables(context: &mut Context<'_>, function: &Function) -> Result<Vec<Word>, Error> {
@@ -226,7 +250,7 @@ impl FunctionLowering<'_, '_> {
                             self.context.module,
                             self.index,
                             Some((block, self.function.blocks[block].instrs.len())),
-                            Error("shader cannot return a local address".into()),
+                            Error::unsupported("shader cannot return a local address".into()),
                         ));
                     }
                     self.context.builder.ret_value(stack[0].id).unwrap();
@@ -266,6 +290,38 @@ impl FunctionLowering<'_, '_> {
         args: &[Slot],
         result: Option<&Ty>,
     ) -> Result<Option<Slot>, Error> {
+        if matches!(instruction, Instr::Call { .. }) && args.iter().any(|arg| arg.local.is_some()) {
+            let (value, callee) = super::calls::local_call(self.context, args, result.unwrap())?;
+            self.check_call_failure(callee)?;
+            return Ok(Some(value));
+        }
+        match instruction {
+            Instr::SetLocal { local } => {
+                let variable = self.locals[local.index()];
+                if args[0].local.is_some() {
+                    self.aliases.insert(variable, args[0].clone());
+                    return Ok(None);
+                }
+                self.aliases.remove(&variable);
+            }
+            Instr::ForgetLocal { local } => {
+                self.aliases.remove(&self.locals[local.index()]);
+            }
+            Instr::TakeLocal { local } => {
+                if let Some(value) = self.aliases.remove(&self.locals[local.index()]) {
+                    return Ok(Some(value));
+                }
+            }
+            Instr::Load | Instr::TransferLoad => {
+                if let Some(local) = &args[0].local
+                    && local.indices.is_empty()
+                    && let Some(value) = self.aliases.get(&local.root)
+                {
+                    return Ok(Some(value.clone()));
+                }
+            }
+            _ => {}
+        }
         symbols::check(instruction, args)?;
         if let Some(invalid) = ops::invalid(self.context, instruction, args)? {
             self.check(invalid, true)?;
@@ -276,13 +332,21 @@ impl FunctionLowering<'_, '_> {
             args,
             result,
             &self.locals,
+            self.function,
             &self.arrays,
         )?;
-        if matches!(instruction, Instr::Call { .. }) && self.context.function_may_fail(args[0].id) {
+        if matches!(instruction, Instr::Call { .. }) {
+            self.check_call_failure(args[0].id)?;
+        }
+        Ok(value)
+    }
+
+    fn check_call_failure(&mut self, callee: Word) -> Result<(), Error> {
+        if self.context.function_may_fail(callee) {
             let failed = ops::load(self.context, &Ty::Bool, self.context.failed)?;
             self.check(failed, false)?;
         }
-        Ok(value)
+        Ok(())
     }
 
     fn check(&mut self, condition: Word, mark_failed: bool) -> Result<(), Error> {

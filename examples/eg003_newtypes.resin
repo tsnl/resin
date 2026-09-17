@@ -1,13 +1,13 @@
 export { main };
 
-import { "$/string.resin" };
+import { "$/string.resin", "$/stdio.resin" };
 
 struct Meters {
-	value: int,
+	value: i32,
 }
 type Distance = Meters;
 
-fn to_meters(n: int) -> Meters {
+fn to_meters(n: i32) -> Meters {
 	Meters { value = n }
 }
 
@@ -15,11 +15,12 @@ fn to_distance(m: Meters) -> Distance {
 	m
 }
 
-fn to_int(d: Distance) -> int {
+fn to_int(d: Distance) -> i32 {
 	d.value
 }
 
 fn main() -> () {
 	let mut distance = to_distance(to_meters(42));
-	print(fmt("distance = {0}, as int = {1}\n", (distance.value, to_int(distance))));
+	let text = fmt("distance = {0}, as int = {1}\n", (distance.value, to_int(distance)));
+	print(text);
 }

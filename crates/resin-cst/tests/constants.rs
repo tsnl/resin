@@ -4,12 +4,12 @@ mod common;
 async fn every_constant_specification_requires_an_explicit_initializer() {
     for declaration in [
         "const value;",
-        "const value: int;",
+        "const value: i32;",
         "const _;",
         "const value =;",
         "const ( first; second = iota; );",
         "const ( first = iota; second; );",
-        "const ( first = iota; second: int; );",
+        "const ( first = iota; second: i32; );",
         "const ( first = iota; _; );",
         "const ( a, b = iota, iota; c, d; );",
         "const ( first = iota; second =; );",
@@ -28,7 +28,7 @@ async fn every_constant_specification_requires_an_explicit_initializer() {
 #[tokio::test]
 async fn explicit_initializers_allow_optional_types_and_discarded_names() {
     let declaration =
-        "const ( first: uint = iota; _ = iota; next = iota; a, b: uint = iota, iota + 10; );";
+        "const ( first: u32 = iota; _ = iota; next = iota; a, b: u32 = iota, iota + 10; );";
     for source in [
         declaration.to_owned(),
         format!("fn f()  {{ {declaration} }}"),

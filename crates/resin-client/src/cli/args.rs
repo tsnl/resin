@@ -15,6 +15,10 @@ pub enum Mode {
         output: PathBuf,
         symbol: String,
     },
+    Documentation {
+        input: PathBuf,
+        output: Option<PathBuf>,
+    },
     Formatter {
         paths: Vec<PathBuf>,
         check: bool,
@@ -32,7 +36,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>, environment: &Environment
 #[derive(clap::Parser)]
 #[command(name = "resin", version)]
 struct Cli {
-    /// A FILE[:ENTRY] to run/compile, paths to --format, or a directory for --lsp.
+    /// A FILE[:ENTRY] to run/compile, a file for --doc, paths to --format, or a directory for --lsp.
     #[arg(required_unless_present_any = ["format", "lsp", "embed"], value_name = "PATH")]
     paths: Vec<PathBuf>,
 
@@ -43,6 +47,10 @@ struct Cli {
     /// Format files in place; search directories recursively for .resin files.
     #[arg(short = 'f', long, conflicts_with_all = ["destination"])]
     format: bool,
+
+    /// Render exported declarations and doc comments as Markdown without a compiler service.
+    #[arg(long, conflicts_with_all = ["format", "lsp", "embed", "check", "program_args", "include_roots"])]
+    doc: bool,
 
     /// With --format, check without writing; exit 1 on differences or file/syntax errors.
     #[arg(long, requires = "format")]
@@ -91,6 +99,18 @@ impl Cli {
         }
         if self.format {
             return self.formatter(environment);
+        }
+        if self.doc {
+            let [input] = self.paths.as_slice() else {
+                return Err("--doc requires one Resin source file".into());
+            };
+            return Ok(Mode::Documentation {
+                input: environment.directory.join(input),
+                output: self
+                    .compile
+                    .destination
+                    .map(|path| environment.directory.join(path)),
+            });
         }
         self.build(environment)
     }

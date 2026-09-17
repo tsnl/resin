@@ -58,15 +58,15 @@ fn array_value_projections_copy_the_element_and_destroy_the_container() {
         let mut program = module(
             r#"export { main };
             import { "$/shared.resin" };
-            struct Resource { trace: Ptr<int>, digit: int,
+            struct Resource { trace: Ptr<i32>, digit: i32,
                 
             }
-fn drop(self: Ptr<Resource>)  {
+fn drop(self: Ref<Resource>)  {
                     if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; };
                 }
 
 
-            fn make(trace: Ptr<int>, digit: int) -> ArcPtr<Resource>  {
+            fn make(trace: Ptr<i32>, digit: i32) -> ArcPtr<Resource>  {
                 let mut optional: ArcPtr<Resource> | None;
                 optional = match (arc_ptr_alloc::<Resource>(Resource { trace = trace, digit = 0 })) {
                     ArcPtr<Resource>(value) => { value }, Err(error) => { None },
@@ -75,7 +75,7 @@ fn drop(self: Ptr<Resource>)  {
                 owner:get().digit = digit;
                 owner
             }
-            fn main() -> int  { 0 }
+            fn main() -> i32  { 0 }
         "#,
         );
         let make = FunctionId::from_index(
@@ -100,11 +100,17 @@ fn drop(self: Ptr<Resource>)  {
         let int = |value| Push {
             value: Value::Int32 { value },
         };
-        let mut instrs = vec![int(0), SetLocal { local: trace }];
+        let mut instrs = vec![
+            int(0),
+            OwnerCreate { element: Ty::Int32 },
+            ExcludeNone,
+            SetLocal { local: trace },
+        ];
         for digit in [1, 2] {
             instrs.extend([
                 Function { function: make },
-                LocalAddress { local: trace },
+                LocalRef { local: trace },
+                OwnerData { pointee: Ty::Int32 },
                 int(digit),
                 Call { arguments: 2 },
             ]);
@@ -116,13 +122,14 @@ fn drop(self: Ptr<Resource>)  {
         instrs.extend(projection);
         instrs.extend([
             SetLocal { local: selected },
-            LocalAddress { local: selected },
+            LocalRef { local: selected },
             AccessStatic { index: 0 },
             OwnerData { pointee: payload },
             AccessStatic { index: 1 },
             Load,
             DropLocal { local: selected },
-            LocalAddress { local: trace },
+            LocalRef { local: trace },
+            OwnerData { pointee: Ty::Int32 },
             Load,
             CallBuiltin {
                 name: "+".into(),
@@ -130,8 +137,9 @@ fn drop(self: Ptr<Resource>)  {
                 result: Ty::Int32,
             },
         ]);
+        instrs.push(DropLocal { local: trace });
         let main = &mut program.functions[program.entries["main"].index()];
-        main.locals = [Ty::Unit, Ty::Int32, element]
+        main.locals = [Ty::Unit, Ty::StrongOwner, element]
             .into_iter()
             .map(|ty| Local { name: None, ty })
             .collect();
@@ -164,19 +172,19 @@ fn runs(source: &str, code: i32) {
 #[test]
 fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
     runs(
-        "export { main }; struct E {} fn fail() -> (int | Err<E>)  { Err(E {}) } fn sum(a: int, b: int, c: int) -> int  { a + b + c } fn main() -> (int | Err<E>)  { (sum(1, fail()?, 3)) }",
+        "export { main }; struct E {} fn fail() -> (i32 | Err<E>)  { Err(E {}) } fn sum(a: i32, b: i32, c: i32) -> i32  { a + b + c } fn main() -> (i32 | Err<E>)  { (sum(1, fail()?, 3)) }",
         1,
     );
     runs(
-        "export { main }; struct Bad { code: int, } fn fail(counter: Ptr<int>) -> (int | Err<Bad>)  { counter.* = counter.* + 1; Err(Bad { code = 7 }) } fn work(counter: Ptr<int>) -> (int | Err<Bad>)  { ({ counter.* = counter.* + 10; counter.* } + fail(counter)? + { counter.* = 1000; counter.* }) } fn main() -> int  { let mut count = 0; let mut result = work(&count); match (result) { int(n) => { 99 }, Err(e) => { count + e.code } } }",
+        "export { main };\nimport { \"$/shared.resin\" };\n struct Bad { code: i32, } fn fail(counter: Ptr<i32>) -> (i32 | Err<Bad>)  { counter.* = counter.* + 1; Err(Bad { code = 7 }) } fn work(counter: Ptr<i32>) -> (i32 | Err<Bad>)  { ({ counter.* = counter.* + 10; counter.* } + fail(counter)? + { counter.* = 1000; counter.* }) } fn main() -> i32 | Err<_> { let count_owner = arc_ptr_alloc(0)?; let count: Ref<_> = count_owner:get().*; let mut result = work(count_owner:get()); match (result) { i32(n) => { 99 }, Err(e) => { count + e.code } } }",
         18,
     );
     runs(
-        "export { main }; struct A {} struct B { n: int, } struct C {} fn small() -> (int | Err<B>)  { Err(B { n = 42 }) } fn broad() -> (int | Err<A | B | C>)  { small() } fn main() -> int  { match (broad()) { int(n) => { n }, Err(e) => { match (e) { C(c) => { 3 }, B(b) => { b.n }, A(a) => { 1 } } } } }",
+        "export { main }; struct A {} struct B { n: i32, } struct C {} fn small() -> (i32 | Err<B>)  { Err(B { n = 42 }) } fn broad() -> (i32 | Err<A | B | C>)  { small() } fn main() -> i32  { match (broad()) { i32(n) => { n }, Err(e) => { match (e) { C(c) => { 3 }, B(b) => { b.n }, A(a) => { 1 } } } } }",
         42,
     );
     runs(
-        "export { main }; struct Inner { value: int | Err<Never>, } fn nested() -> Inner | Err<Never>  { Inner { value = 42 } } fn main() -> int | Err<_>  { let mut inner = nested()?; inner.value? }",
+        "export { main }; struct Inner { value: i32 | Err<Never>, } fn nested() -> Inner | Err<Never>  { Inner { value = 42 } } fn main() -> i32 | Err<_>  { let mut inner = nested()?; inner.value? }",
         42,
     );
     runs(
@@ -214,19 +222,19 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
 #[test]
 fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
     runs(
-        "export { main }; fn main() -> _  { let mut n: _; let mut p: Ptr<_>; n = 40_i; p = &n; p.* = p.* + 2; p.* }",
+        "export { main }; fn main() -> _  { let mut n: _; n = i32(40); let p: Ref<_> = n; p = p + 2; p }",
         42,
     );
     runs(
-        "export { main }; fn wide() -> _  { let mut n = 4294967297; let mut p: Ptr<ulong>; p = &n; p.* } fn main() -> int  { if (wide() == ulong(4294967297)) { 0 } else { 1 } }",
+        "export { main }; fn wide() -> _  { let mut n = 4294967297; let p: Ref<u64> = n; p } fn main() -> i32  { if (wide() == u64(4294967297)) { 0 } else { 1 } }",
         0,
     );
     runs(
-        "export { main }; struct FieldsAB<T0, T1> { a: T0, b: T1, }\nfn main() -> _  { let mut n = 0_i; let mut pair: FieldsAB<_, _>; pair = FieldsAB<_, _> { b = { n = n + 1; n }, a = { n = n + 1; n } }; pair.a * 10 + pair.b }",
+        "export { main }; struct FieldsAB<T0, T1> { a: T0, b: T1, }\nfn main() -> _  { let mut n: i32 = 0; let mut pair: FieldsAB<_, _>; pair = FieldsAB<_, _> { b = { n = n + 1; n }, a = { n = n + 1; n } }; pair.a * 10 + pair.b }",
         21,
     );
     runs(
-        "export { main }; fn add(n: int) -> int  { n + 1 } fn select() -> (int) -> _  { add } fn main() -> _  { select()(41) }",
+        "export { main }; fn add(n: i32) -> i32  { n + 1 } fn select() -> (i32) -> _  { add } fn main() -> _  { select()(41) }",
         42,
     );
 }
@@ -234,11 +242,11 @@ fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
 #[test]
 fn array_and_span_indexing_use_element_sizes() {
     runs(
-        "export { main }; import { \"$/span.resin\" }; fn main () -> int  { let mut values = [10, 20, 30]; let mut p = Span<int> { data = Ptr<int>(&values), length = ulong(3) }; p:at(1) = 7; let mut end = p:at(2); p:at(1) + values(0) + end }",
+        "export { main }; import { \"$/shared.resin\", \"$/span.resin\" }; fn main () -> i32 | Err<_> { let values_owner = arc_ptr_alloc([10, 20, 30])?; let values: Ref<_> = values_owner:get().*; let mut p = Span<i32> { data = Ptr<i32>(values_owner:get()), length = u64(3) }; p:at(1) = 7; let mut end = p:at(2); p:at(1) + values(0) + end }",
         47,
     );
     runs(
-        "export { main }; struct Payload { marker: uint, wide: ulong, amount: float32, } fn main () -> int  { let mut values = [Payload { marker = uint(1), wide = ulong(4294967297), amount = float32(0.5) }, Payload { marker = uint(2), wide = ulong(8589934593), amount = float32(1.5) }]; let p: Ref<Payload> = values:at(0); let q: Ref<Payload> = values:at(1); q.amount = q.amount + float32(2.0); if (q.wide == ulong(8589934593) && q.marker == uint(2) && q.amount == float32(3.5) && p.amount == float32(0.5)) { 0 } else { 1 } }",
+        "export { main }; struct Payload { marker: u32, wide: u64, amount: f32, } fn main () -> i32  { let mut values = [Payload { marker = u32(1), wide = u64(4294967297), amount = f32(0.5) }, Payload { marker = u32(2), wide = u64(8589934593), amount = f32(1.5) }]; let p: Ref<Payload> = values:at(0); let q: Ref<Payload> = values:at(1); q.amount = q.amount + f32(2.0); if (q.wide == u64(8589934593) && q.marker == u32(2) && q.amount == f32(3.5) && p.amount == f32(0.5)) { 0 } else { 1 } }",
         0,
     );
 }
@@ -274,7 +282,7 @@ fn numbered_examples_compile_as_strict_c11() {
 #[test]
 fn discarded_branch_results_compile_and_preserve_effects() {
     runs(
-        "export { main }; fn main () -> int  { let mut x = 0; if (1 == 1) { x = 1; () } else { () }; if (1 == 2) { (1, 2) } else { (3, 4) }; x }",
+        "export { main }; fn main () -> i32  { let mut x = 0; if (1 == 1) { x = 1; () } else { () }; if (1 == 2) { (1, 2) } else { (3, 4) }; x }",
         1,
     );
 }
@@ -282,19 +290,19 @@ fn discarded_branch_results_compile_and_preserve_effects() {
 #[test]
 fn while_rechecks_conditions_and_discards_body_values() {
     runs(
-        "export { main }; fn main () -> int  { let mut n = 0; let mut sum = 0; while ({ n = n + 1; n } <= 4) { sum = sum + n }; sum + n }",
+        "export { main }; fn main () -> i32  { let mut n = 0; let mut sum = 0; while ({ n = n + 1; n } <= 4) { sum = sum + n }; sum + n }",
         15,
     );
     runs(
-        "export { main }; fn main () -> int  { let mut n = 0; while (1 == 0) { n = 42; }; n }",
+        "export { main }; fn main () -> i32  { let mut n = 0; while (1 == 0) { n = 42; }; n }",
         0,
     );
     runs(
-        "export { main }; fn main () -> int  { let mut n: int; while ({ n = 7; n } == 0) {}; n }",
+        "export { main }; fn main () -> i32  { let mut n: i32; while ({ n = 7; n } == 0) {}; n }",
         7,
     );
     runs(
-        "export { main }; fn main () -> int  { let mut n = 0; while (n < 1000000) { n = n + 1; }; if (n == 1000000) { 0 } else { 1 } }",
+        "export { main }; fn main () -> i32  { let mut n = 0; while (n < 1000000) { n = n + 1; }; if (n == 1000000) { 0 } else { 1 } }",
         0,
     );
 }
@@ -302,19 +310,19 @@ fn while_rechecks_conditions_and_discards_body_values() {
 #[test]
 fn while_nests_with_branches_and_preserves_outer_values() {
     runs(
-        "export { main }; fn main () -> int  { let mut i = 0; let mut total = 0; while (i < 3) { let mut j = 0; while (j < 4) { if (j < 2) { total = total + 1 } else { total = total + 2 }; j = j + 1; }; i = i + 1; }; total }",
+        "export { main }; fn main () -> i32  { let mut i = 0; let mut total = 0; while (i < 3) { let mut j = 0; while (j < 4) { if (j < 2) { total = total + 1 } else { total = total + 2 }; j = j + 1; }; i = i + 1; }; total }",
         18,
     );
     runs(
-        "export { main }; fn main () -> int  { let mut n = 0; let mut x = 7; while (n < 3) { let mut x = 10; n = n + 1; x = 20; }; x + n }",
+        "export { main }; fn main () -> i32  { let mut n = 0; let mut x = 7; while (n < 3) { let mut x = 10; n = n + 1; x = 20; }; x + n }",
         10,
     );
     runs(
-        "export { main }; struct FieldsFirstBodyLast<T0, T1, T2> { first: T0, body: T1, last: T2, }\nfn main () -> int  { let mut n = 0; let mut r = FieldsFirstBodyLast<_, _, _> { first = 9, body = while (n < 3) { n = n + 1; }, last = n }; r.first + r.last }",
+        "export { main }; struct FieldsFirstBodyLast<T0, T1, T2> { first: T0, body: T1, last: T2, }\nfn main () -> i32  { let mut n = 0; let mut r = FieldsFirstBodyLast<_, _, _> { first = 9, body = while (n < 3) { n = n + 1; }, last = n }; r.first + r.last }",
         12,
     );
     runs(
-        "export { main }; fn main () -> int  { let mut n = 0; while (if (n < 3) { (1 == 1) && ({ n = n + 1; n } < 3) } else { 1 == 0 }) {}; n }",
+        "export { main }; fn main () -> i32  { let mut n = 0; while (if (n < 3) { (1 == 1) && ({ n = n + 1; n } < 3) } else { 1 == 0 }) {}; n }",
         3,
     );
 }
@@ -322,7 +330,7 @@ fn while_nests_with_branches_and_preserves_outer_values() {
 #[test]
 fn ordinary_functions_can_be_passed_and_selected() {
     runs(
-        "export { main }; fn add (x: int, y: int) -> int  { x + y } fn apply (f: (int, int) -> int, args: (int, int)) -> int  { f(args.0, args.1) } fn main () -> int  { let mut a = add; let mut b = if (1 == 1) { a } else { add }; apply(a, (10, 3)) + b(20, 4) }",
+        "export { main }; fn add (x: i32, y: i32) -> i32  { x + y } fn apply (f: (i32, i32) -> i32, args: (i32, i32)) -> i32  { f(args.0, args.1) } fn main () -> i32  { let mut a = add; let mut b = if (1 == 1) { a } else { add }; apply(a, (10, 3)) + b(20, 4) }",
         37,
     );
 }
@@ -330,7 +338,7 @@ fn ordinary_functions_can_be_passed_and_selected() {
 #[test]
 fn recursive_functions_receive_state_explicitly() {
     runs(
-        "export { main }; fn fact(n: int, offset: int) -> int  { if (n == 0) { offset } else { n * fact(n - 1, offset) } } fn main() -> int  { let mut offset = 2; fact(4, offset) }",
+        "export { main }; fn fact(n: i32, offset: i32) -> i32  { if (n == 0) { offset } else { n * fact(n - 1, offset) } } fn main() -> i32  { let mut offset = 2; fact(4, offset) }",
         48,
     );
 }
@@ -338,7 +346,7 @@ fn recursive_functions_receive_state_explicitly() {
 #[test]
 fn mutual_recursion_needs_no_forward_declaration() {
     runs(
-        "export { main }; fn f (n: int) -> int  { if (n == 0) { 7 } else { next(n - 1) } } fn next (m: int) -> int  { f(m) } fn main () -> int  { f(3) }",
+        "export { main }; fn f (n: i32) -> i32  { if (n == 0) { 7 } else { next(n - 1) } } fn next (m: i32) -> i32  { f(m) } fn main () -> i32  { f(3) }",
         7,
     );
 }
@@ -347,16 +355,16 @@ fn mutual_recursion_needs_no_forward_declaration() {
 fn calls_take_lists_and_tuples_are_explicit_values() {
     runs(
         r#"export { main };
-        fn zero() -> int  { 1 }
-        fn unit(value: ()) -> int  { 2 }
-        fn tuple(value: (int, int)) -> int  { value.0 + value.1 }
+        fn zero() -> i32  { 1 }
+        fn unit(value: ()) -> i32  { 2 }
+        fn tuple(value: (i32, i32)) -> i32  { value.0 + value.1 }
         fn add<T>(a: T, b: T) -> T  { a + b }
-        fn apply(f: (int, int) -> int, a: int, b: int) -> int  { f(a, b) }
-        fn main() -> int  {
-            let mut a: () -> int; a = zero;
-            let mut b: (()) -> int; b = unit;
-            let mut c: ((int, int)) -> int; c = tuple;
-            a() + b(()) + c((3, 4)) + apply(add::<int>, 5, 6)
+        fn apply(f: (i32, i32) -> i32, a: i32, b: i32) -> i32  { f(a, b) }
+        fn main() -> i32  {
+            let mut a: () -> i32; a = zero;
+            let mut b: (()) -> i32; b = unit;
+            let mut c: ((i32, i32)) -> i32; c = tuple;
+            a() + b(()) + c((3, 4)) + apply(add::<i32>, 5, 6)
         }
     "#,
         21,
@@ -367,12 +375,14 @@ fn calls_take_lists_and_tuples_are_explicit_values() {
 fn arguments_are_evaluated_left_to_right_after_the_callee() {
     runs(
         r#"export { main };
-        fn mark(trace: Ptr<int>, digit: int) -> int  { trace.* = trace.* * 10 + digit; trace.* }
-        fn consume(a: int, b: int)  {}
-        fn callee(trace: Ptr<int>) -> (int, int) -> ()  { mark(trace, 1); consume }
-        fn main() -> int  {
-            let mut trace = 0;
-            callee(&trace)(mark(&trace, 2), mark(&trace, 3));
+import { "$/shared.resin" };
+
+        fn mark(trace: Ptr<i32>, digit: i32) -> i32  { trace.* = trace.* * 10 + digit; trace.* }
+        fn consume(a: i32, b: i32)  {}
+        fn callee(trace: Ptr<i32>) -> (i32, i32) -> ()  { mark(trace, 1); consume }
+        fn main() -> i32 | Err<_> {
+            let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+            callee(trace_owner:get())(mark(trace_owner:get(), 2), mark(trace_owner:get(), 3));
             trace
         }
     "#,
@@ -391,14 +401,17 @@ fn expression_cleanup_preserves_scope_order_on_failure_and_success() {
             "[make(trace, 1), { let mut inner = make(trace, 2); fail()? }]",
             21,
         ),
-        ("[make(trace, 1), make(trace, 2):get():accept(fail()?)]", 21),
+        (
+            "[make(trace, 1), { let second = make(trace, 2); second:get():accept(fail()?) }]",
+            21,
+        ),
         (
             "consume(make(trace, 1), { let mut inner = make(trace, 2); owned_error(trace)? })",
             215,
         ),
         (
-            "last(make(trace, 1), if (make(trace, 3):get():truth()) { make(trace, 2) } else { make(trace, 4) }, fail()?)",
-            231,
+            "last(make(trace, 1), if ({ let condition = make(trace, 3); condition:get():truth() }) { make(trace, 2) } else { make(trace, 4) }, fail()?)",
+            321,
         ),
         (
             "consume(make(trace, 1), last(make(trace, 2), make(trace, 3), { let mut inner = make(trace, 4); succeed(trace)? }))",
@@ -407,12 +420,12 @@ fn expression_cleanup_preserves_scope_order_on_failure_and_success() {
     ] {
         let declarations = r#"export { main };
             import { "$/shared.resin" };
-            struct Resource { trace: Ptr<int>, digit: int,
+            struct Resource { trace: Ptr<i32>, digit: i32,
                 
                 
                 
             }
-fn drop(self: Ptr<Resource>)  { if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; }; }
+fn drop(self: Ref<Resource>)  { if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; }; }
 
 fn accept(self: Ptr<Resource>, other: ArcPtr<Resource>) -> ArcPtr<Resource>  { other }
 
@@ -420,7 +433,7 @@ fn truth(self: Ptr<Resource>) -> bool  { 1 == 1 }
 
             struct Failed {}
             struct OwnedFailed { value: ArcPtr<Resource>, }
-            fn make(trace: Ptr<int>, digit: int) -> ArcPtr<Resource>  {
+            fn make(trace: Ptr<i32>, digit: i32) -> ArcPtr<Resource>  {
                 let mut optional: ArcPtr<Resource> | None;
                 optional = match (arc_ptr_alloc::<Resource>(Resource { trace = trace, digit = 0 })) {
                     ArcPtr<Resource>(value) => { value }, Err(error) => { None },
@@ -432,17 +445,11 @@ fn truth(self: Ptr<Resource>) -> bool  { 1 == 1 }
             fn consume(a: ArcPtr<Resource>, b: ArcPtr<Resource>)  {}
             fn last(a: ArcPtr<Resource>, b: ArcPtr<Resource>, c: ArcPtr<Resource>) -> ArcPtr<Resource>  { c }
             fn fail() -> (ArcPtr<Resource> | Err<Failed>)  { Err(Failed {}) }
-            fn succeed(trace: Ptr<int>) -> (ArcPtr<Resource> | Err<Failed>)  { (make(trace, 5)) }
-            fn owned_error(trace: Ptr<int>) -> (ArcPtr<Resource> | Err<OwnedFailed>)  { Err(OwnedFailed { value = make(trace, 5) }) }
+            fn succeed(trace: Ptr<i32>) -> (ArcPtr<Resource> | Err<Failed>)  { (make(trace, 5)) }
+            fn owned_error(trace: Ptr<i32>) -> (ArcPtr<Resource> | Err<OwnedFailed>)  { Err(OwnedFailed { value = make(trace, 5) }) }
         "#;
         let source = format!(
-            "{declarations}
-            fn attempt(trace: Ptr<int>) -> () | Err<_> {{ {call}; () }}
-            fn main() -> int {{
-                let mut trace = 0;
-                attempt(&trace);
-                if (trace == {expected}) {{ 0 }} else {{ 1 }}
-            }}"
+            "{declarations}\n            fn attempt(trace: Ptr<i32>) -> () | Err<_> {{ {call}; () }}\n            fn main() -> i32 | Err<_> {{\n                let trace = arc_ptr_alloc(i32(0))?;\n                attempt(trace:get());\n                if (trace:get().* == {expected}) {{ 0 }} else {{ 1 }}\n            }}"
         );
         runs(&source, 0);
     }
@@ -452,10 +459,12 @@ fn truth(self: Ptr<Resource>) -> bool  { 1 == 1 }
 fn tuple_projection_preserves_places_and_nested_values() {
     runs(
         r#"export { main };
-        fn main() -> int  {
-            let mut pair = ((1, 2), 3);
+import { "$/shared.resin" };
+
+        fn main() -> i32 | Err<_> {
+            let pair_owner = arc_ptr_alloc(((1, 2), 3))?; let pair: Ref<_> = pair_owner:get().*;
             pair.0.1 = 20;
-            let mut pointer = &pair.1;
+            let mut pointer = &pair_owner:get().1;
             pointer.* = 21;
             pair.0.0 + pair.0.1 + pair.1
         }
@@ -467,7 +476,7 @@ fn tuple_projection_preserves_places_and_nested_values() {
 #[test]
 fn nominal_records_preserve_source_order_and_field_layout() {
     runs(
-        "export { main }; struct R { a: int, b: int, } fn main () -> int  { let mut x = 0; let mut r = R { b = { x = 1; x }, a = { x = 2; x } }; r.a * 10 + r.b + x }",
+        "export { main }; struct R { a: i32, b: i32, } fn main () -> i32  { let mut x = 0; let mut r = R { b = { x = 1; x }, a = { x = 2; x } }; r.a * 10 + r.b + x }",
         23,
     );
 }
@@ -475,7 +484,7 @@ fn nominal_records_preserve_source_order_and_field_layout() {
 #[test]
 fn loaded_values_do_not_change_after_later_stores() {
     runs(
-        "export { main }; fn main () -> int  { let mut x = 1; let mut old = x; x = 2; old * 10 + x }",
+        "export { main }; fn main () -> i32  { let mut x = 1; let mut old = x; x = 2; old * 10 + x }",
         12,
     );
 }
@@ -483,7 +492,7 @@ fn loaded_values_do_not_change_after_later_stores() {
 #[test]
 fn short_circuiting_and_joins_preserve_effects() {
     runs(
-        "export { main }; fn main () -> int  { let mut x = 0; let mut a = (1 == 2) && ({ x = 1; x } == 1); let mut b = (1 == 1) || ({ x = 2; x } == 2); let mut n = if (a || b) { 3 } else { 4 }; n + x }",
+        "export { main }; fn main () -> i32  { let mut x = 0; let mut a = (1 == 2) && ({ x = 1; x } == 1); let mut b = (1 == 1) || ({ x = 2; x } == 2); let mut n = if (a || b) { 3 } else { 4 }; n + x }",
         3,
     );
 }
@@ -491,11 +500,11 @@ fn short_circuiting_and_joins_preserve_effects() {
 #[test]
 fn aliases_preserve_function_types_and_numeric_operations() {
     runs(
-        "export { main }; type Meters = int; type F = (Meters) -> Meters; fn add (x: Meters) -> Meters  { x + Meters(2) } fn main () -> int  { let mut f = F(add); int(f(Meters(5))) }",
+        "export { main }; type Meters = i32; type F = (Meters) -> Meters; fn add (x: Meters) -> Meters  { x + Meters(2) } fn main () -> i32  { let mut f = F(add); i32(f(Meters(5))) }",
         7,
     );
     runs(
-        "export { main }; type Entry = () -> int; fn start() -> int  { 23 } fn main() -> int  { let mut entry = Entry(start); entry() }",
+        "export { main }; type Entry = () -> i32; fn start() -> i32  { 23 } fn main() -> i32  { let mut entry = Entry(start); entry() }",
         23,
     );
 }
@@ -503,7 +512,7 @@ fn aliases_preserve_function_types_and_numeric_operations() {
 #[test]
 fn integer_arithmetic_wraps_at_its_declared_width() {
     runs(
-        "export { main }; fn main () -> int  { let mut a = sbyte(127); let mut b = a + sbyte(1); let mut c = int(2147483647) + int(1); let mut d = long(-9223372036854775808) / long(-1); if (b == sbyte(-128) && c == int(-2147483648) && d == long(-9223372036854775808)) { 0 } else { 1 } }",
+        "export { main }; fn main () -> i32  { let mut a: i8 = 127; let mut b = a + i8(1); let mut c = i32(2147483647) + i32(1); let mut d = i64(-9223372036854775808) / i64(-1); if (b == i8(-128) && c == i32(-2147483648) && d == i64(-9223372036854775808)) { 0 } else { 1 } }",
         0,
     );
 }
@@ -511,7 +520,7 @@ fn integer_arithmetic_wraps_at_its_declared_width() {
 #[test]
 fn signed_right_shift_and_unsigned_multiplication_are_defined() {
     runs(
-        "export { main }; fn main () -> int  { let mut a = int(-8) >> int(2); let mut b = uint(4294967295) * uint(4294967295); if (a == int(-2) && b == uint(1)) { 0 } else { 1 } }",
+        "export { main }; fn main () -> i32  { let mut a = i32(-8) >> i32(2); let mut b = u32(4294967295) * u32(4294967295); if (a == i32(-2) && b == u32(1)) { 0 } else { 1 } }",
         0,
     );
 }
@@ -520,7 +529,7 @@ fn signed_right_shift_and_unsigned_multiplication_are_defined() {
 fn invalid_integer_operations_fail_at_runtime() {
     for expression in ["1 / 0", "1 % 0", "1 << 32", "1 >> -1"] {
         let result = run_module(&module(&format!(
-            "export {{ main }}; fn main () -> int  {{ {expression} }}"
+            "export {{ main }}; fn main () -> i32  {{ {expression} }}"
         )));
         assert_eq!(result.status.code(), Some(1));
         assert!(String::from_utf8_lossy(&result.stderr).contains("resin:"));
@@ -535,7 +544,7 @@ fn entry_selection_and_invalid_ir_have_distinct_boundaries() {
             .to_string()
             .contains("export { main }")
     );
-    let mut m = module("export { main }; fn main () -> int  { 0 }");
+    let mut m = module("export { main }; fn main () -> i32  { 0 }");
     m.functions[0].blocks[0]
         .instrs
         .insert(0, resin_lir::Instr::Discard);
@@ -550,7 +559,7 @@ fn entry_selection_and_invalid_ir_have_distinct_boundaries() {
 
 #[test]
 fn unused_functions_do_not_fail_strict_compilation() {
-    let mut m = module("export { main }; fn main () -> int  { 0 }");
+    let mut m = module("export { main }; fn main () -> i32  { 0 }");
     let mut spare = m.functions[0].clone();
     spare.name = Some("unused".into());
     m.functions.push(spare);
@@ -577,7 +586,7 @@ fn failed_compilation_preserves_existing_output() {
 #[test]
 fn loops_carry_typed_stack_values_between_iterations() {
     use resin_lir::{BasicBlock, BlockId, Instr::*, Local, Terminator::*};
-    let mut m = module("export { main }; fn main () -> int  { 0 }");
+    let mut m = module("export { main }; fn main () -> i32  { 0 }");
     let f = m
         .functions
         .iter_mut()
@@ -599,13 +608,7 @@ fn loops_carry_typed_stack_values_between_iterations() {
     f.blocks = vec![
         BasicBlock {
             name: None,
-            instrs: vec![
-                LocalAddress { local: counter },
-                int(3),
-                Store,
-                Discard,
-                int(0),
-            ],
+            instrs: vec![LocalRef { local: counter }, int(3), Store, Discard, int(0)],
             terminator: Loop {
                 condition: BlockId::from_index(1),
                 body: BlockId::from_index(2),
@@ -617,7 +620,7 @@ fn loops_carry_typed_stack_values_between_iterations() {
             instrs: vec![
                 int(10),
                 op("+", Ty::Int32),
-                LocalAddress { local: counter },
+                LocalRef { local: counter },
                 Load,
                 int(0),
                 op(">", Ty::Bool),
@@ -627,11 +630,11 @@ fn loops_carry_typed_stack_values_between_iterations() {
         BasicBlock {
             name: None,
             instrs: vec![
-                LocalAddress { local: counter },
+                LocalRef { local: counter },
                 Load,
                 op("+", Ty::Int32),
-                LocalAddress { local: counter },
-                LocalAddress { local: counter },
+                LocalRef { local: counter },
+                LocalRef { local: counter },
                 Load,
                 int(1),
                 op("-", Ty::Int32),
@@ -662,7 +665,7 @@ fn loops_carry_typed_stack_values_between_iterations() {
 #[test]
 fn array_addresses_and_dynamic_bounds_are_executable() {
     use resin_lir::{Instr::*, Local};
-    let mut m = module("export { main }; fn main () -> int  { 0 }");
+    let mut m = module("export { main }; fn main () -> i32  { 0 }");
     let f = m
         .functions
         .iter_mut()
@@ -677,7 +680,7 @@ fn array_addresses_and_dynamic_bounds_are_executable() {
         },
     });
     f.blocks[0].instrs = vec![
-        LocalAddress { local: array },
+        LocalRef { local: array },
         Push {
             value: Value::Int32 { value: 4 },
         },
@@ -690,7 +693,7 @@ fn array_addresses_and_dynamic_bounds_are_executable() {
         },
         Store,
         Discard,
-        LocalAddress { local: array },
+        LocalRef { local: array },
         Push {
             value: Value::Int32 { value: 1 },
         },
@@ -715,19 +718,20 @@ fn array_addresses_and_dynamic_bounds_are_executable() {
 fn indexing_addresses_evaluate_receiver_and_index_once() {
     runs(
         r#"export { main };
-        import { "$/span.resin" };
-        fn view(p: Ptr<int>, calls: Ptr<int>) -> Span<int>  {
+        import { "$/shared.resin", "$/span.resin" };
+        fn view(p: Ptr<i32>, calls: Ptr<i32>) -> Span<i32>  {
             calls.* = calls.* + 1;
-            Span<int> { data = p, length = ulong(3) }
+            Span<i32> { data = p, length = u64(3) }
         }
-        fn index(calls: Ptr<int>) -> int  { calls.* = calls.* + 1; 1 }
-        fn main() -> int  {
-            let mut values = [10_i, 20, 30]; let mut calls = 0;
-            let mut p: Ptr<int>; p = &view(Ptr<int>(&values), &calls):at(ulong(index(&calls)));
+        fn index(calls: Ptr<i32>) -> i32  { calls.* = calls.* + 1; 1 }
+        fn main() -> i32 | Err<_> {
+            let values_owner = arc_ptr_alloc([i32(10), 20, 30])?; let values: Ref<_> = values_owner:get().*; let calls_owner = arc_ptr_alloc(0)?; let calls: Ref<_> = calls_owner:get().*;
+            let span = view(Ptr<i32>(values_owner:get()), calls_owner:get());
+            let mut p: Ptr<i32>; p = span:lea(u64(index(calls_owner:get())));
             p.* = 42;
             let mut copied = values;
             copied(0) = 9;
-            let mut temporary = ([7, 8])(1);
+            let pair = [7, 8]; let mut temporary = pair(1);
             if (calls == 2 && values(1) == 42 && values(0) == 10 && copied(0) == 9 && temporary == 8) { 0 } else { 1 }
         }"#,
         0,
@@ -738,24 +742,24 @@ fn indexing_addresses_evaluate_receiver_and_index_once() {
 fn at_indexing_borrows_array_places_and_supports_field_receivers() {
     runs(
         r#"export { main };
-        import { "$/span.resin" };
+        import { "$/shared.resin", "$/span.resin" };
         struct FieldsValues<T0> { values: T0, }
-struct Holder { values: Span<int>, }
-        fn view(p: Ptr<int>, calls: Ptr<int>) -> Holder  {
+struct Holder { values: Span<i32>, }
+        fn view(p: Ptr<i32>, calls: Ptr<i32>) -> Holder  {
             calls.* = calls.* + 1;
-            Holder { values = Span<int> { data = p, length = 3_ul } }
+            Holder { values = Span<i32> { data = p, length = u64(3) } }
         }
-        fn index(calls: Ptr<int>) -> int  { calls.* = calls.* + 1; 1 }
-        fn element(s: Span<int>, i: ulong) -> Ref<int>  { s:at(i) }
-        fn main() -> int  {
-            let mut values = [10_i, 20, 30]; let mut calls = 0;
-            let mut p: Ref<int> = view(Ptr<int>(&values), &calls).values:at(ulong(index(&calls)));
+        fn index(calls: Ptr<i32>) -> i32  { calls.* = calls.* + 1; 1 }
+        fn element(s: Span<i32>, i: u64) -> Ref<i32>  { s:at(i) }
+        fn main() -> i32 | Err<_> {
+            let values_owner = arc_ptr_alloc([i32(10), 20, 30])?; let values: Ref<_> = values_owner:get().*; let calls_owner = arc_ptr_alloc(0)?; let calls: Ref<_> = calls_owner:get().*;
+            let mut p: Ref<i32> = { let borrowed = view(Ptr<i32>(values_owner:get()), calls_owner:get()).values; borrowed:at(u64(index(calls_owner:get()))) };
             p = 42;
             let mut record = FieldsValues<_> { values = [3, 4] };
             record.values:at(0) = 8;
-            let mut holder = view(Ptr<int>(&values), &calls);
+            let mut holder = view(Ptr<i32>(values_owner:get()), calls_owner:get());
             element(holder.values, 0) = 11;
-            let mut temporary = [7, 8]:at(1);
+            let mut temporary = { let borrowed = [7, 8]; borrowed:at(1) };
             if (calls == 3 && values:at(1) == 42 && values:at(0) == 11 && record.values:at(0) == 8 && temporary == 8) { 0 } else { 1 }
         }"#,
         0,
@@ -765,20 +769,20 @@ struct Holder { values: Span<int>, }
 #[test]
 fn at_indexing_checks_bounds_before_later_effects() {
     for receiver in ["values", "holder.values"] {
-        for index in ["2", "18446744073709551615_ul"] {
+        for index in ["2", "u64(18446744073709551615)"] {
             let output = run_module(&module(&format!(
                 r#"export {{ main }};
 
                 extern {{
                     "stdio.h": {{
-                        fn puts(text: Ptr<ubyte>) -> int;
+                        fn puts(text: Ptr<u8>) -> i32;
                     }},
                 }};
-                import {{ "$/span.resin" }};
+                import {{ "$/shared.resin", "$/span.resin" }};
                 struct FieldsValues<T0> {{ values: T0, }}
-fn main() -> int  {{
-                    let mut values = [1, 2];
-                    let mut holder = FieldsValues<_> {{ values = Span<int> {{ data = Ptr<int>(&values), length = 2_ul }} }};
+fn main() -> i32 | Err<_> {{
+                    let values_owner = arc_ptr_alloc([1, 2])?; let values: Ref<_> = values_owner:get().*;
+                    let mut holder = FieldsValues<_> {{ values = Span<i32> {{ data = Ptr<i32>(values_owner:get()), length = u64(2) }} }};
                     {receiver}:at({index}) = 9;
                     puts("after".data); 0
                 }}"#
@@ -793,10 +797,10 @@ fn main() -> int  {{
 #[test]
 fn array_and_span_indexing_fail_before_out_of_bounds_access() {
     for source in [
-        "export { main }; fn main() -> int  { let mut xs = [1, 2]; xs(-1) }",
-        "export { main }; fn main() -> int  { let mut xs = [1, 2]; xs(2) = 9; 0 }",
-        "export { main }; import { \"$/span.resin\" }; fn main() -> int  { let mut xs = [1, 2]; let mut s = Span<int> { data = Ptr<int>(&xs), length = ulong(2) }; s:at(18446744073709551615_ul) }",
-        "export { main }; import { \"$/span.resin\" }; fn main() -> int  { let mut s = Span<int> { data = Ptr<int>(ulong(0)), length = ulong(0) }; s:at(0) }",
+        "export { main }; fn main() -> i32  { let mut xs = [1, 2]; xs(-1) }",
+        "export { main }; fn main() -> i32  { let mut xs = [1, 2]; xs(2) = 9; 0 }",
+        "export { main }; import { \"$/shared.resin\", \"$/span.resin\" }; fn main() -> i32 | Err<_> { let xs_owner = arc_ptr_alloc([1, 2])?; let xs: Ref<_> = xs_owner:get().*; let mut s = Span<i32> { data = Ptr<i32>(xs_owner:get()), length = u64(2) }; s:at(u64(18446744073709551615)) }",
+        "export { main }; import { \"$/span.resin\" }; fn main() -> i32  { let mut s = Span<i32> { data = Ptr<i32>(u64(0)), length = u64(0) }; s:at(0) }",
     ] {
         let output = run_module(&module(source));
         assert!(!output.status.success());
@@ -812,9 +816,11 @@ fn array_and_span_indexing_fail_before_out_of_bounds_access() {
 fn decorated_functions_and_their_helpers_remain_host_callable() {
     runs(
         r#"export { main };
-        fn twice(i: uint) -> uint  { i * uint(2) }
-        @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { twice(i) }; }
-        fn main() -> int  { let mut f = kernel; let mut output = 0_ui; f(21_ul, &output); if (output == 42_ui) { 0 } else { 1 } }
+import { "$/shared.resin" };
+
+        fn twice(i: u32) -> u32  { i * u32(2) }
+        @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { twice(i) }; }
+        fn main() -> i32 | Err<_> { let mut f = kernel; let output_owner = arc_ptr_alloc(u32(0))?; let output: Ref<_> = output_owner:get().*; f(u64(21), output_owner:get()); if (output == u32(42)) { 0 } else { 1 } }
     "#,
         0,
     );
@@ -827,24 +833,26 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
     let file = std::sync::Arc::make_mut(&mut program.modules.last_mut().unwrap().file);
     file.stmts.retain(|s| !matches!(&s.val, resin_ast::StmtKind::Function { name, .. } if name.val.as_ref() == "main"));
     // Exercise random particle generation, camera math, and the shader bodies on
-    // stack-backed storage. GPU initialization stores these same generated values.
-    file.stmts.extend(support::parse(r#"fn main() -> int  {
-            let mut state = 12345_ui | 1_ui;
-            let mut particle = random_particle(&state);
-            let mut particles = Span<Particle> { data = &particle, length = 1_ul };
-            let mut first = particle;
-            state = 12345_ui | 1_ui;
-            particle = random_particle(&state);
+    // host allocations. GPU initialization stores these same generated values.
+    file.stmts.extend(support::parse(r#"
+import { "$/shared.resin" };
+fn main() -> i32 | Err<_> {
+            let state_owner = arc_ptr_alloc(u32(12345) | u32(1))?; let state: Ref<_> = state_owner:get().*;
+            let particle_owner = arc_ptr_alloc(random_particle(state))?; let particle: Ref<_> = particle_owner:get().*;
+            let mut particles = Span<Particle> { data = particle_owner:get(), length = u64(1) };
+            let first = Particle { x = particle.x, y = particle.y, z = particle.z, vx = particle.vx, vy = particle.vy, vz = particle.vz };
+            state = u32(12345) | u32(1);
+            particle = random_particle(state);
             let mut valid = particle.x == first.x && particle.vz == first.vz;
-            state = 54321_ui | 1_ui;
-            particle = random_particle(&state);
+            state = u32(54321) | u32(1);
+            particle = random_particle(state);
             valid = valid && particle.x != first.x && particle.vx != first.vx;
-            valid = valid && particle.x >= -24_f && particle.x < 24_f && particle.y >= -30_f && particle.y < 30_f && particle.z >= 0_f && particle.z < 50_f && particle.vx >= -6_f && particle.vx < 6_f && particle.vy >= -6_f && particle.vy < 6_f && particle.vz >= -6_f && particle.vz < 6_f;
-            let mut params = Params { dt = 0.005_f, yaw_cos = 1_f, yaw_sin = 0_f, pitch_cos = 1_f, pitch_sin = 0_f, zoom = 1_f, aspect = 0.625_f, radius = 0.0012_f, particles = particles };
+            valid = valid && particle.x >= f32(-24) && particle.x < f32(24) && particle.y >= f32(-30) && particle.y < f32(30) && particle.z >= f32(0) && particle.z < f32(50) && particle.vx >= f32(-6) && particle.vx < f32(6) && particle.vy >= f32(-6) && particle.vy < f32(6) && particle.vz >= f32(-6) && particle.vz < f32(6);
+            let params_owner = arc_ptr_alloc(Params { dt = f32(0.005), yaw_cos = f32(1), yaw_sin = f32(0), pitch_cos = f32(1), pitch_sin = f32(0), zoom = f32(1), aspect = f32(0.625), radius = f32(0.0012), particles = particles })?; let params: Ref<_> = params_owner:get().*;
             let mut steps = 0;
             while (steps < 2000) {
-                kernel(0_ul, &params);
-                valid = valid && particle.x > -100_f && particle.x < 100_f && particle.y > -100_f && particle.y < 100_f && particle.z > -100_f && particle.z < 100_f;
+                kernel(u64(0), params_owner:get());
+                valid = valid && particle.x > f32(-100) && particle.x < f32(100) && particle.y > f32(-100) && particle.y < f32(100) && particle.z > f32(-100) && particle.z < f32(100);
                 steps = steps + 1;
             };
             // Check every particle boundary, including float32 rounding above 2^24.
@@ -853,40 +861,40 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
                 valid = valid && particle_index(index * 24) == index && particle_index(index * 24 + 23) == index;
                 index = index + 1;
             };
-            particle = Particle { x = 0_f, y = -20_f, z = 25_f, vx = 0_f, vy = 0_f, vz = 0_f };
-            let mut near = vertex(0, &params);
-            let mut near_rim = vertex(1, &params);
-            particle.y = 20_f;
-            let mut far = vertex(0, &params);
-            let mut far_rim = vertex(1, &params);
+            particle = Particle { x = f32(0), y = f32(-20), z = f32(25), vx = f32(0), vy = f32(0), vz = f32(0) };
+            let mut near = vertex(0, params_owner:get());
+            let mut near_rim = vertex(1, params_owner:get());
+            particle.y = f32(20);
+            let mut far = vertex(0, params_owner:get());
+            let mut far_rim = vertex(1, params_owner:get());
             valid = valid && fragment(near.color).b > fragment(far.color:clone()).b;
             valid = valid && near_rim.position.x - near.position.x > far_rim.position.x - far.position.x;
             // Camera controls change the projection without changing the simulation.
-            let mut camera = Camera { yaw = 0_f, pitch = 0_f, zoom = 1_f };
-            apply_camera(camera, &params);
-            let mut before = vertex(1, &params);
-            camera.zoom = 2_f;
-            apply_camera(camera, &params);
-            let mut zoomed = vertex(1, &params);
-            valid = valid && zoomed.position.x == before.position.x * 2_f;
-            move_camera(&camera, 100_d, 50_d, 0_d);
-            apply_camera(camera, &params);
-            let mut orbited = vertex(0, &params);
-            valid = valid && orbited.position.x > 0_f && orbited.position.y < 0_f;
+            let camera_owner = arc_ptr_alloc(Camera { yaw = f32(0), pitch = f32(0), zoom = f32(1) })?; let camera: Ref<_> = camera_owner:get().*;
+            apply_camera(camera, params);
+            let mut before = vertex(1, params_owner:get());
+            camera.zoom = f32(2);
+            apply_camera(camera, params);
+            let mut zoomed = vertex(1, params_owner:get());
+            valid = valid && zoomed.position.x == before.position.x * f32(2);
+            move_camera(camera, f64(100), f64(50), f64(0));
+            apply_camera(camera, params);
+            let mut orbited = vertex(0, params_owner:get());
+            valid = valid && orbited.position.x > f32(0) && orbited.position.y < f32(0);
             let mut yaw_length = params.yaw_cos * params.yaw_cos + params.yaw_sin * params.yaw_sin;
             let mut pitch_length = params.pitch_cos * params.pitch_cos + params.pitch_sin * params.pitch_sin;
-            valid = valid && yaw_length > 0.999_f && yaw_length < 1.001_f && pitch_length > 0.999_f && pitch_length < 1.001_f;
-            move_camera(&camera, 0_d, 1000000_d, 1000000_d);
-            valid = valid && camera.pitch == 1.4_f && camera.zoom == 3_f;
-            move_camera(&camera, 0_d, -1000000_d, -1000000_d);
-            valid = valid && camera.pitch == -1.4_f && camera.zoom == 0.35_f;
+            valid = valid && yaw_length > f32(0.999) && yaw_length < f32(1.001) && pitch_length > f32(0.999) && pitch_length < f32(1.001);
+            move_camera(camera, f64(0), f64(1000000), f64(1000000));
+            valid = valid && camera.pitch == f32(1.4) && camera.zoom == f32(3);
+            move_camera(camera, f64(0), f64(-1000000), f64(-1000000));
+            valid = valid && camera.pitch == f32(-1.4) && camera.zoom == f32(0.35);
             camera = default_camera();
-            move_camera(&camera, 0_d, 0_d, 0.5_d);
-            valid = valid && camera.zoom > 1_f && camera.zoom < 1.1_f;
-            move_camera(&camera, 0_d, 0_d, -0.5_d);
-            valid = valid && camera.zoom > 0.999_f && camera.zoom < 1.001_f;
+            move_camera(camera, f64(0), f64(0), f64(0.5));
+            valid = valid && camera.zoom > f32(1) && camera.zoom < f32(1.1);
+            move_camera(camera, f64(0), f64(0), f64(-0.5));
+            valid = valid && camera.zoom > f32(0.999) && camera.zoom < f32(1.001);
             let mut color = fragment(far.color);
-            if (valid && particle.x != first.x && color.r >= 0_f && color.r <= 1_f && color.b >= 0_f && color.b <= 1_f) { 0 } else { 1 }
+            if (valid && particle.x != first.x && color.r >= f32(0) && color.r <= f32(1) && color.b >= f32(0) && color.b <= f32(1)) { 0 } else { 1 }
         }
     "#).stmts);
     let m = pipeline::generate_program(&program).unwrap();
@@ -897,19 +905,19 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
 #[test]
 fn spirv_is_only_special_on_function_declarations() {
     runs(
-        "export { main }; struct FieldsSpirv<T0> { spirv: T0, }\nfn main() -> int  { let mut record = FieldsSpirv<_> { spirv = 1 }; record.spirv = 2; record.spirv }",
+        "export { main }; struct FieldsSpirv<T0> { spirv: T0, }\nfn main() -> i32  { let mut record = FieldsSpirv<_> { spirv = 1 }; record.spirv = 2; record.spirv }",
         2,
     );
 }
 
 #[test]
-fn suffixed_literals_execute_with_their_selected_widths() {
+fn contextual_literals_execute_with_their_selected_widths() {
     runs(
-        r#"export { main }; fn main() -> int  {
-        let mut a = -128_b; let mut b = 255_ub; let mut c = -32768_h; let mut d = 65535_uh;
-        let mut e = -2147483648_i; let mut f = 4294967295_ui;
-        let mut g = -9223372036854775808_l; let mut h = 18446744073709551615_ul;
-        if (a < 0_b && b > 0_ub && c < 0_h && d > 0_uh && e < 0_i && f > 0_ui && g < 0_l && h == 0xffffffffffffffff_ul && 1.5_f + 2.5_f == 4_f && 1e2_d == 100_d && 1.0000000596046448_f > 1_f) { 0 } else { 1 }
+        r#"export { main }; fn main() -> i32  {
+        let mut a: i8 = -128; let mut b: u8 = 255; let mut c: i16 = -32768; let mut d: u16 = 65535;
+        let mut e: i32 = -2147483648; let mut f: u32 = 4294967295;
+        let mut g: i64 = -9223372036854775808; let mut h: u64 = 18446744073709551615;
+        if (a < i8(0) && b > u8(0) && c < i16(0) && d > u16(0) && e < i32(0) && f > u32(0) && g < i64(0) && h == u64(0xffffffffffffffff) && f32(1.5) + f32(2.5) == f32(4) && f64(1e2) == f64(100) && f32(1.0000000596046448) > f32(1)) { 0 } else { 1 }
     }"#,
         0,
     );
@@ -919,22 +927,24 @@ fn suffixed_literals_execute_with_their_selected_widths() {
 fn else_if_chains_select_one_branch_and_short_circuit_conditions() {
     runs(
         r#"export { main };
-    fn condition(calls: Ptr<int>, value: int, expected: int) -> bool  {
+import { "$/shared.resin" };
+
+    fn condition(calls: Ptr<i32>, value: i32, expected: i32) -> bool  {
         calls.* = calls.* + 1;
         value == expected
     }
-    fn classify(value: int, calls: Ptr<int>) -> int  {
+    fn classify(value: i32, calls: Ptr<i32>) -> i32  {
         if (condition(calls, value, 0)) { 10 }
         else if (condition(calls, value, 1)) { 20 }
         else if (condition(calls, value, 2)) { 30 }
         else { 40 }
     }
-    fn main() -> int  {
-        let mut calls = 0;
-        let mut a = classify(0, &calls);
-        let mut b = classify(1, &calls);
-        let mut c = classify(2, &calls);
-        let mut d = classify(3, &calls);
+    fn main() -> i32 | Err<_> {
+        let calls_owner = arc_ptr_alloc(0)?; let calls: Ref<_> = calls_owner:get().*;
+        let mut a = classify(0, calls_owner:get());
+        let mut b = classify(1, calls_owner:get());
+        let mut c = classify(2, calls_owner:get());
+        let mut d = classify(3, calls_owner:get());
         let mut value = 0;
         if (1 == 0) { value = 100; } else if (1 == 1) { value = value + 1; };
         if (1 == 0) { value = 100; } else if (1 == 0) { value = 100; };
@@ -948,16 +958,18 @@ fn else_if_chains_select_one_branch_and_short_circuit_conditions() {
 fn one_armed_if_evaluates_once_and_runs_branch_cleanup() {
     runs(
         r#"export { main };
-    struct Add { value: Ptr<int>,
+import { "$/shared.resin" };
+
+    struct Add { value: Ptr<i32>,
         
     }
-fn drop(self: Ptr<Add>)  { self.value.* = self.value.* + 10; }
+fn drop(self: Ref<Add>)  { self.value.* = self.value.* + 10; }
 
 
-    fn condition(calls: Ptr<int>) -> bool  { calls.* = calls.* + 1; 1 == 1 }
-    fn main() -> int  {
-        let mut calls = 0; let mut value = 0;
-        if (condition(&calls)) { let mut cleanup = Add { value = &value }; value = value + 1; };
+    fn condition(calls: Ptr<i32>) -> bool  { calls.* = calls.* + 1; 1 == 1 }
+    fn main() -> i32 | Err<_> {
+        let calls_owner = arc_ptr_alloc(0)?; let calls: Ref<_> = calls_owner:get().*; let value_owner = arc_ptr_alloc(0)?; let value: Ref<_> = value_owner:get().*;
+        if (condition(calls_owner:get())) { let mut cleanup = Add { value = value_owner:get() }; value = value + 1; };
         if (1 == 0) { value = 100; };
         if (1 == 1) { if (1 == 0) { value = 100; } else { value = value + 1; }; };
         if (calls == 1 && value == 12) { 0 } else { 1 }
@@ -972,27 +984,29 @@ fn dedicated_cleanup_bindings_retain_acquisitions_on_both_exits() {
         runs(
             &format!(
                 r#"export {{ main }};
+import {{ "$/shared.resin" }};
+
             struct E {{}}
-            struct Capture {{ resource: Ptr<int>, trace: Ptr<int>,
+            struct Capture {{ resource: Ptr<i32>, trace: Ptr<i32>,
                 
             }}
-fn drop(self: Ptr<Capture>)  {{ self.trace.* = self.trace.* * 10 + self.resource.*; }}
+fn drop(self: Ref<Capture>)  {{ self.trace.* = self.trace.* * 10 + self.resource.*; }}
 
 
-            fn work(trace: Ptr<int>, fail: bool) -> (() | Err<E>)  {{
-                let mut resource = 1;
-                let mut captured = resource;
-                let mut first = Capture {{ resource = &captured, trace = trace }};
-                let mut second = Capture {{ resource = &resource, trace = trace }};
-                resource = 2;
+            fn work(trace: Ptr<i32>, fail: bool) -> () | Err<_> {{
+                let resource = arc_ptr_alloc(i32(1))?;
+                let captured = arc_ptr_alloc(resource:get().*)?;
+                let mut first = Capture {{ resource = captured:get(), trace = trace }};
+                let mut second = Capture {{ resource = resource:get(), trace = trace }};
+                resource:get().* = 2;
                 {{ let mut captured = 9; }};
                 let mut result: (() | Err<E>); result = if (fail) {{ Err(E {{}}) }} else {{ (()) }};
                 result?;
                 (())
             }}
-            fn main() -> int  {{
-                let mut trace = 0;
-                match (work(&trace, {fail})) {{ ()(v) => {{}}, Err(e) => {{}} }};
+            fn main() -> i32 | Err<_> {{
+                let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+                match (work(trace_owner:get(), {fail})) {{ ()(v) => {{}}, Err(e) => {{}} }};
                 if (trace == 21) {{ 0 }} else {{ 1 }}
             }}
         "#
@@ -1006,20 +1020,22 @@ fn drop(self: Ptr<Capture>)  {{ self.trace.* = self.trace.* * 10 + self.resource
 fn byte_arrays_have_packed_storage_and_nested_stride() {
     runs(
         r#"export { main };
+import { "$/shared.resin" };
+
         struct FieldsBytesTail<T0, T1> { bytes: T0, tail: T1, }
-fn main() -> int  {
-            let mut binary = [65_ub, 66_ub];
+fn main() -> i32 | Err<_> {
+            let mut binary = [u8(65), u8(66)];
             let mut copied = binary;
-            let mut nested = [[1_ub, 2_ub], [3_ub, 4_ub]];
-            let mut embedded = [65_ub, 0_ub, 66_ub];
-            let mut record = FieldsBytesTail<_, _> { bytes = copied, tail = 255_ub };
-            binary:at(0) = 90_ub;
-            if (size_of(binary) == 2_ul && align_of(binary) == 1_ul &&
-                size_of(nested) == 4_ul && size_of(embedded) == 3_ul &&
-                ulong(&nested:at(1)) - ulong(&nested:at(0)) == 2_ul &&
-                size_of(record) == 3_ul && ulong(&record.tail) - ulong(&record.bytes) == 2_ul &&
-                copied:at(0) == 65_ub && copied:at(1) == 66_ub &&
-                record.tail == 255_ub && embedded:at(1) == 0_ub) { 0 } else { 1 }
+            let nested_owner = arc_ptr_alloc([[u8(1), u8(2)], [u8(3), u8(4)]])?; let nested: Ref<_> = nested_owner:get().*;
+            let mut embedded = [u8(65), u8(0), u8(66)];
+            let record_owner = arc_ptr_alloc(FieldsBytesTail<_, _> { bytes = copied, tail = u8(255) })?; let record: Ref<_> = record_owner:get().*;
+            binary:at(0) = u8(90);
+            if (size_of(binary) == u64(2) && align_of(binary) == u64(1) &&
+                size_of(nested) == u64(4) && size_of(embedded) == u64(3) &&
+                u64(nested_owner:get():lea(1)) - u64(nested_owner:get():lea(0)) == u64(2) &&
+                size_of(record) == u64(3) && u64(&record_owner:get().tail) - u64(&record_owner:get().bytes) == u64(2) &&
+                copied:at(0) == u8(65) && copied:at(1) == u8(66) &&
+                record.tail == u8(255) && embedded:at(1) == u8(0)) { 0 } else { 1 }
         }
     "#,
         0,
@@ -1036,14 +1052,14 @@ fn shared_layout_queries_follow_padding_and_do_not_evaluate_operands() {
     runs(
         r#"export { main };
         import { "$/span.resin" };
-        struct Inner { x: uint, y: ulong, z: float32, }
-        struct Outer { first: uint, inner: Inner, last: float32, }
-        fn main() -> int  {
-            let mut side = 0_ui;
-            let mut values = [1_ui, 2_ui, 3_ui];
-            if (size_of(uint) == 4_ul && align_of(ulong) == 8_ul && size_of(Outer) == 40_ul &&
-                align_of(Outer) == 8_ul && size_of(Span<uint>) == 16_ul &&
-                size_of(values) == 12_ul && size_of({ side = 1_ui; side }) == 4_ul && side == 0_ui) { 0 } else { 1 }
+        struct Inner { x: u32, y: u64, z: f32, }
+        struct Outer { first: u32, inner: Inner, last: f32, }
+        fn main() -> i32  {
+            let mut side: u32 = 0;
+            let mut values = [u32(1), u32(2), u32(3)];
+            if (size_of(u32) == u64(4) && align_of(u64) == u64(8) && size_of(Outer) == u64(40) &&
+                align_of(Outer) == u64(8) && size_of(Span<u32>) == u64(16) &&
+                size_of(values) == u64(12) && size_of({ side = u32(1); side }) == u64(4) && side == u32(0)) { 0 } else { 1 }
         }
     "#,
         0,
@@ -1054,23 +1070,23 @@ fn shared_layout_queries_follow_padding_and_do_not_evaluate_operands() {
 fn numeric_conversions_check_runtime_values_and_boundaries() {
     runs(include_str!("fixtures/numeric_conversions.resin"), 0);
     runs(
-        r#"export { main }; fn main() -> int  {
-        let mut n = 255_ui; let mut negative = -128_i; let mut wide = 18446744073709551615_ul;
-        let mut nan = float32(0.0_d / 0.0_d); let mut large = 1.0e100_d; let mut tiny = -1.0e-100_d;
-        if (ubyte(n) == 255_ub && sbyte(negative) == -128_b && ulong(wide) == wide &&
-            float64(n) == 255.0_d && float32(large) > 1.0e30_f && float32(tiny) == 0.0_f && nan != nan) { 0 } else { 1 }
+        r#"export { main }; fn main() -> i32  {
+        let mut n: u32 = 255; let mut negative: i32 = -128; let mut wide: u64 = 18446744073709551615;
+        let mut nan = f32(f64(0.0) / f64(0.0)); let mut large: f64 = 1.0e100; let mut tiny: f64 = -1.0e-100;
+        if (u8(n) == u8(255) && i8(negative) == i8(-128) && u64(wide) == wide &&
+            f64(n) == f64(255.0) && f32(large) > f32(1.0e30) && f32(tiny) == f32(0.0) && nan != nan) { 0 } else { 1 }
     }"#,
         0,
     );
     for expr in [
-        "ubyte(256_ui)",
-        "uint(-1_i)",
-        "int(2147483648_ui)",
-        "uint(4294967296.0_d)",
-        "long(9223372036854775808.0_d)",
-        "ulong(18446744073709551616.0_d)",
-        "int(0.0_d / 0.0_d)",
-        "int(1.0_d / 0.0_d)",
+        "u8(u32(256))",
+        "u32(i32(-1))",
+        "i32(u32(2147483648))",
+        "u32(f64(4294967296.0))",
+        "i64(f64(9223372036854775808.0))",
+        "u64(f64(18446744073709551616.0))",
+        "i32(f64(0.0) / f64(0.0))",
+        "i32(f64(1.0) / f64(0.0))",
     ] {
         let source = format!("export {{ main }}; fn main()  {{ {expr}; }}");
         let output = run_module(&module(&source));
@@ -1098,7 +1114,7 @@ fn interacting_features_execute_equivalently_on_cpu() {
     for marker in interactions::MARKERS {
         runs(
             &format!(
-                "export {{ main }}; fn main() -> int  {{ let mut n = 300; let mut bytes = Ptr<ubyte>(&n); {marker} n - 300 }}"
+                "export {{ main }};\nimport {{ \"$/shared.resin\" }};\n fn main() -> i32 | Err<_> {{ let n_owner = arc_ptr_alloc(300)?; let n: Ref<_> = n_owner:get().*; let mut bytes = Ptr<u8>(n_owner:get()); {marker} n - 300 }}"
             ),
             0,
         );
@@ -1108,7 +1124,7 @@ fn interacting_features_execute_equivalently_on_cpu() {
 #[test]
 fn compute_entry_preserves_ulong_indices_on_the_host() {
     runs(
-        "export { main }; @compute_shader fn kernel(index: ulong, output: Ptr<ulong>)  { output.* = index; } fn main() -> int  { let mut output = 0_ul; kernel(4294967297_ul, &output); if (output == 4294967297_ul) { 0 } else { 1 } }",
+        "export { main };\nimport { \"$/shared.resin\" };\n @compute_shader fn kernel(index: u64, output: Ptr<u64>)  { output.* = index; } fn main() -> i32 | Err<_> { let output_owner = arc_ptr_alloc(u64(0))?; let output: Ref<_> = output_owner:get().*; kernel(u64(4294967297), output_owner:get()); if (output == u64(4294967297)) { 0 } else { 1 } }",
         0,
     );
 }
@@ -1131,7 +1147,7 @@ fn structured_loops_propagate_errors_from_conditions_and_nested_bodies() {
 #[test]
 fn sequential_conditionals_and_error_propagation_keep_constant_nesting() {
     let mut source = String::from(
-        "export { main }; struct Failed {} fn step() -> (() | Err<Failed>)  { (()) } fn main() -> (int | Err<Failed>) { let mut value = 0; ",
+        "export { main }; struct Failed {} fn step() -> (() | Err<Failed>)  { (()) } fn main() -> (i32 | Err<Failed>) { let mut value = 0; ",
     );
     for _ in 0..512 {
         source.push_str("if (value == 0) { value = 1; } else { value = 0; }; step()?; ");

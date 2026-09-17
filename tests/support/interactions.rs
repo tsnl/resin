@@ -1,7 +1,7 @@
 pub const MARKERS: [&str; 4] = [
     "",
     "{ let mut unused = (); };",
-    "let unused: _; unused = 1_ui;",
+    "let unused: _; unused = u32(1);",
     "let unused: (() | Err<Never>); unused = (()); match (unused) { ()(v) => {}, Err(e) => { absurd(e) } };",
 ];
 

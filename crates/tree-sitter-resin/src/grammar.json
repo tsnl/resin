@@ -3705,43 +3705,43 @@
         },
         {
           "type": "STRING",
-          "value": "sbyte"
+          "value": "i8"
         },
         {
           "type": "STRING",
-          "value": "short"
+          "value": "i16"
         },
         {
           "type": "STRING",
-          "value": "int"
+          "value": "i32"
         },
         {
           "type": "STRING",
-          "value": "long"
+          "value": "i64"
         },
         {
           "type": "STRING",
-          "value": "ubyte"
+          "value": "u8"
         },
         {
           "type": "STRING",
-          "value": "ushort"
+          "value": "u16"
         },
         {
           "type": "STRING",
-          "value": "uint"
+          "value": "u32"
         },
         {
           "type": "STRING",
-          "value": "ulong"
+          "value": "u64"
         },
         {
           "type": "STRING",
-          "value": "float32"
+          "value": "f32"
         },
         {
           "type": "STRING",
-          "value": "float64"
+          "value": "f64"
         },
         {
           "type": "STRING",
@@ -3910,11 +3910,11 @@
         "members": [
           {
             "type": "PATTERN",
-            "value": "[0-9][0-9_]*(\\.[0-9_]+)?([eE][+-]?[0-9_]+)?([uU]?[bBhHiIlL]|[fFdD])?"
+            "value": "[0-9][0-9_]*(\\.[0-9_]+)?([eE][+-]?[0-9_]+)?"
           },
           {
             "type": "PATTERN",
-            "value": "0[xX][0-9a-fA-F_]+([hHiIlL]|[uU][bBhHiIlL])?"
+            "value": "0[xX][0-9a-fA-F_]+"
           }
         ]
       }
@@ -3985,12 +3985,84 @@
         ]
       }
     },
-    "comment": {
+    "doc_comment": {
       "type": "TOKEN",
       "content": {
-        "type": "CHOICE",
-        "members": [
-          {
+        "type": "PREC",
+        "value": 2,
+        "content": {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "///"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": ".*"
+                }
+              ]
+            },
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "//!"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": ".*"
+                }
+              ]
+            },
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "/**"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "[^*]*\\*+([^/*][^*]*\\*+)*"
+                },
+                {
+                  "type": "STRING",
+                  "value": "/"
+                }
+              ]
+            },
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "/*!"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "[^*]*\\*+([^/*][^*]*\\*+)*"
+                },
+                {
+                  "type": "STRING",
+                  "value": "/"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "comment": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "TOKEN",
+          "content": {
             "type": "SEQ",
             "members": [
               {
@@ -4002,8 +4074,31 @@
                 "value": ".*"
               }
             ]
-          },
-          {
+          }
+        },
+        {
+          "type": "TOKEN",
+          "content": {
+            "type": "PREC",
+            "value": 3,
+            "content": {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "////"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": ".*"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "TOKEN",
+          "content": {
             "type": "SEQ",
             "members": [
               {
@@ -4020,8 +4115,52 @@
               }
             ]
           }
-        ]
-      }
+        },
+        {
+          "type": "TOKEN",
+          "content": {
+            "type": "PREC",
+            "value": 3,
+            "content": {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "/***"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "[^*]*\\*+([^/*][^*]*\\*+)*"
+                },
+                {
+                  "type": "STRING",
+                  "value": "/"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "TOKEN",
+          "content": {
+            "type": "PREC",
+            "value": 3,
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "/**/"
+                },
+                {
+                  "type": "STRING",
+                  "value": "/***/"
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   },
   "extras": [
@@ -4032,6 +4171,10 @@
     {
       "type": "SYMBOL",
       "name": "comment"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "doc_comment"
     }
   ],
   "conflicts": [
@@ -4148,43 +4291,43 @@
       },
       {
         "type": "STRING",
-        "value": "sbyte"
+        "value": "i8"
       },
       {
         "type": "STRING",
-        "value": "short"
+        "value": "i16"
       },
       {
         "type": "STRING",
-        "value": "int"
+        "value": "i32"
       },
       {
         "type": "STRING",
-        "value": "long"
+        "value": "i64"
       },
       {
         "type": "STRING",
-        "value": "ubyte"
+        "value": "u8"
       },
       {
         "type": "STRING",
-        "value": "ushort"
+        "value": "u16"
       },
       {
         "type": "STRING",
-        "value": "uint"
+        "value": "u32"
       },
       {
         "type": "STRING",
-        "value": "ulong"
+        "value": "u64"
       },
       {
         "type": "STRING",
-        "value": "float32"
+        "value": "f32"
       },
       {
         "type": "STRING",
-        "value": "float64"
+        "value": "f64"
       },
       {
         "type": "STRING",

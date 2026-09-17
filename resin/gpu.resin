@@ -1,29 +1,32 @@
+//! GPU ownership, typed pipelines, allocations, and command recording.
+//! Submission waits for recorded work; borrowed shader views do not own host resources.
+
 export { Gpu, GpuPtr, GpuSpan, GpuComputePipeline, GpuGraphicsPipeline, GpuImage, GpuPipelineOwner, GpuCommands, memory_default, memory_gpu, memory_readback, ResinGpu, ResinGpuDeviceInfo, ResinImage, ResinPipeline, ResinCommandBuffer, load, store, replace, slice, read_only, write_only, at, copy_to, copy_from, native, compute_workgroup_size, gpu_device_count, gpu_enumerate_devices, gpu_new, gpu_new_at, gpu_new_for_window, create, alloc, alloc_in, malloc, create_compute_pipeline, create_graphics_pipeline, create_image, start_command_recording, present, width, height, context, dispatch, begin_rendering, end_rendering, draw, copy_image_to_buffer, submit, cancel, clone };
 
 extern {
 	"resin_runtime.h": {
-		fn resin_gpu_device_count(count: Ptr<uint>) -> int;
-		fn resin_gpu_enumerate_devices(infos: Ptr<ResinGpuDeviceInfo>, count: uint) -> int;
-		fn resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> int;
-		fn resin_gpu_create_at(index: uint, gpu: Ptr<Ptr<ResinGpu>>) -> int;
+		fn resin_gpu_device_count(count: Ptr<u32>) -> i32;
+		fn resin_gpu_enumerate_devices(infos: Ptr<ResinGpuDeviceInfo>, count: u32) -> i32;
+		fn resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> i32;
+		fn resin_gpu_create_at(index: u32, gpu: Ptr<Ptr<ResinGpu>>) -> i32;
 		fn resin_gpu_destroy(gpu: Ptr<ResinGpu>) -> ();
-		fn resin_gpu_compute_workgroup_size(gpu: Ptr<ResinGpu>) -> uint;
-		fn resin_gpu_create_compute_pipeline(gpu: Ptr<ResinGpu>, code: Ptr<ubyte>, length: ulong, pipeline: Ptr<Ptr<ResinPipeline>>) -> int;
-		fn resin_gpu_create_graphics_pipeline(gpu: Ptr<ResinGpu>, vertex: Ptr<ubyte>, vertex_length: ulong, fragment: Ptr<ubyte>, fragment_length: ulong, pipeline: Ptr<Ptr<ResinPipeline>>) -> int;
+		fn resin_gpu_compute_workgroup_size(gpu: Ptr<ResinGpu>) -> u32;
+		fn resin_gpu_create_compute_pipeline(gpu: Ptr<ResinGpu>, code: Ptr<u8>, length: u64, pipeline: Ptr<Ptr<ResinPipeline>>) -> i32;
+		fn resin_gpu_create_graphics_pipeline(gpu: Ptr<ResinGpu>, vertex: Ptr<u8>, vertex_length: u64, fragment: Ptr<u8>, fragment_length: u64, pipeline: Ptr<Ptr<ResinPipeline>>) -> i32;
 		fn resin_gpu_free_pipeline(gpu: Ptr<ResinGpu>, pipeline: Ptr<ResinPipeline>) -> ();
-		fn resin_gpu_create_image(gpu: Ptr<ResinGpu>, width: uint, height: uint, image: Ptr<Ptr<ResinImage>>) -> int;
+		fn resin_gpu_create_image(gpu: Ptr<ResinGpu>, width: u32, height: u32, image: Ptr<Ptr<ResinImage>>) -> i32;
 		fn resin_gpu_free_image(gpu: Ptr<ResinGpu>, image: Ptr<ResinImage>) -> ();
-		fn resin_image_width(image: Ptr<ResinImage>) -> uint;
-		fn resin_image_height(image: Ptr<ResinImage>) -> uint;
-		fn resin_gpu_start_command_recording(gpu: Ptr<ResinGpu>, commands: Ptr<Ptr<ResinCommandBuffer>>) -> int;
-		fn resin_gpu_set_pipeline(commands: Ptr<ResinCommandBuffer>, pipeline: Ptr<ResinPipeline>) -> int;
-		fn resin_gpu_begin_rendering(commands: Ptr<ResinCommandBuffer>, image: Ptr<ResinImage>, r: float32, g: float32, b: float32, a: float32) -> int;
-		fn resin_gpu_end_rendering(commands: Ptr<ResinCommandBuffer>) -> int;
-		fn resin_gpu_draw(commands: Ptr<ResinCommandBuffer>, root: ulong, count: uint) -> int;
-		fn resin_gpu_submit(gpu: Ptr<ResinGpu>, commands: Ptr<ResinCommandBuffer>) -> int;
+		fn resin_image_width(image: Ptr<ResinImage>) -> u32;
+		fn resin_image_height(image: Ptr<ResinImage>) -> u32;
+		fn resin_gpu_start_command_recording(gpu: Ptr<ResinGpu>, commands: Ptr<Ptr<ResinCommandBuffer>>) -> i32;
+		fn resin_gpu_set_pipeline(commands: Ptr<ResinCommandBuffer>, pipeline: Ptr<ResinPipeline>) -> i32;
+		fn resin_gpu_begin_rendering(commands: Ptr<ResinCommandBuffer>, image: Ptr<ResinImage>, r: f32, g: f32, b: f32, a: f32) -> i32;
+		fn resin_gpu_end_rendering(commands: Ptr<ResinCommandBuffer>) -> i32;
+		fn resin_gpu_draw(commands: Ptr<ResinCommandBuffer>, root: u64, count: u32) -> i32;
+		fn resin_gpu_submit(gpu: Ptr<ResinGpu>, commands: Ptr<ResinCommandBuffer>) -> i32;
 		fn resin_gpu_cancel_command_buffer(gpu: Ptr<ResinGpu>, commands: Ptr<ResinCommandBuffer>) -> ();
-		fn resin_gpu_create_for_window(window: Ptr<ResinWindow>, gpu: Ptr<Ptr<ResinGpu>>) -> int;
-		fn resin_gpu_present(gpu: Ptr<ResinGpu>, image: Ptr<ResinImage>) -> int;
+		fn resin_gpu_create_for_window(window: Ptr<ResinWindow>, gpu: Ptr<Ptr<ResinGpu>>) -> i32;
+		fn resin_gpu_present(gpu: Ptr<ResinGpu>, image: Ptr<ResinImage>) -> i32;
 	},
 };
 
@@ -31,19 +34,19 @@ import { "status.resin", "internal/status_codes.resin", "window.resin", "shared.
 
 // ResinMemory values from resin_runtime/gpu.h.
 const (
-	memory_default: int = iota;
-	memory_gpu: int = iota;
-	memory_readback: int = iota;
+	memory_default: i32 = iota;
+	memory_gpu: i32 = iota;
+	memory_readback: i32 = iota;
 );
 
 // Resin GPU view permissions from resin_runtime/gpu.h.
 const (
-	access_read: uint = 1 << iota;
-	access_write: uint = 1 << iota;
+	access_read: u32 = 1 << iota;
+	access_write: u32 = 1 << iota;
 );
-const max_allocation_bytes = ~0_ul;
+const max_allocation_bytes = ~u64(0);
 // A pointer view derives its available capacity from the retained allocation.
-const allocation_capacity = ~0_ul;
+const allocation_capacity = ~u64(0);
 
 extern type ResinGpu;
 extern type ResinGpuDeviceInfo;
@@ -67,7 +70,7 @@ fn replace<T>(self: Ref<GpuPtr<T>>, value: T) -> T {
 	gpu_view_replace(self.view, value)
 }
 
-fn slice<T>(self: Ref<GpuPtr<T>>, start: ulong, length: ulong) -> GpuSpan<T> {
+fn slice<T>(self: Ref<GpuPtr<T>>, start: u64, length: u64) -> GpuSpan<T> {
 	GpuSpan<T> {
 		data = GpuPtr<T> { view = gpu_view_range::<T>(self.view, allocation_capacity, start, length) },
 		length = length,
@@ -84,13 +87,13 @@ fn write_only<T>(self: Ref<GpuPtr<T>>) -> GpuPtr<T> {
 
 struct GpuSpan<T> {
 	data: GpuPtr<T>,
-	length: ulong,
+	length: u64,
 }
-fn at<T>(self: Ref<GpuSpan<T>>, index: ulong) -> GpuPtr<T> {
-	GpuPtr<T> { view = gpu_view_range::<T>(self.data.view, self.length, index, 1_ul) }
+fn at<T>(self: Ref<GpuSpan<T>>, index: u64) -> GpuPtr<T> {
+	GpuPtr<T> { view = gpu_view_range::<T>(self.data.view, self.length, index, u64(1)) }
 }
 
-fn slice<T>(self: Ref<GpuSpan<T>>, start: ulong, length: ulong) -> GpuSpan<T> {
+fn slice<T>(self: Ref<GpuSpan<T>>, start: u64, length: u64) -> GpuSpan<T> {
 	GpuSpan<T> {
 		data = GpuPtr<T> { view = gpu_view_range::<T>(self.data.view, self.length, start, length) },
 		length = length,
@@ -130,8 +133,8 @@ struct GpuOwner {
 	handle: Ptr<ResinGpu>,
 	window: Window | None,
 }
-fn drop(self: Ptr<GpuOwner>) {
-	if (ulong(self.handle) != 0_ul) {
+fn drop(self: Ref<GpuOwner>) {
+	if (u64(self.handle) != u64(0)) {
 		resin_gpu_destroy(self.handle);
 	};
 }
@@ -143,86 +146,86 @@ fn native(self: Ref<Gpu>) -> Ptr<ResinGpu> {
 	self.owner:get().handle
 }
 
-fn compute_workgroup_size(self: Ref<Gpu>) -> ulong {
-	ulong(resin_gpu_compute_workgroup_size(self:native()))
+fn compute_workgroup_size(self: Ref<Gpu>) -> u64 {
+	u64(resin_gpu_compute_workgroup_size(self:native()))
 }
 
-fn gpu_device_count() -> (uint | Err<RuntimeError>) {
-	let mut count = 0_ui;
-	runtime_status_from_code(resin_gpu_device_count(&count))?;
-	(count)
+fn gpu_device_count() -> (u32 | Err<RuntimeError>) {
+	let count = arc_ptr_alloc(u32(0))?;
+	runtime_status_from_code(resin_gpu_device_count(count:get()))?;
+	count:get().*
 }
 
-fn gpu_enumerate_devices(infos: Ptr<ResinGpuDeviceInfo>, count: uint) -> (() | Err<RuntimeError>) {
+fn gpu_enumerate_devices(infos: Ptr<ResinGpuDeviceInfo>, count: u32) -> (() | Err<RuntimeError>) {
 	runtime_status_from_code(resin_gpu_enumerate_devices(infos, count))
 }
 
 fn gpu_new() -> (Gpu | Err<RuntimeError>) {
-	let mut owner = arc_ptr_alloc::<GpuOwner>(GpuOwner { handle = Ptr<ResinGpu>(0_ul), window = None })?;
+	let mut owner = arc_ptr_alloc::<GpuOwner>(GpuOwner { handle = Ptr<ResinGpu>(u64(0)), window = None })?;
 	runtime_status_from_code(resin_gpu_create(&owner:get().handle))?;
 	(Gpu { owner = owner })
 }
 
-fn gpu_new_at(index: uint) -> (Gpu | Err<RuntimeError>) {
-	let mut owner = arc_ptr_alloc::<GpuOwner>(GpuOwner { handle = Ptr<ResinGpu>(0_ul), window = None })?;
+fn gpu_new_at(index: u32) -> (Gpu | Err<RuntimeError>) {
+	let mut owner = arc_ptr_alloc::<GpuOwner>(GpuOwner { handle = Ptr<ResinGpu>(u64(0)), window = None })?;
 	runtime_status_from_code(resin_gpu_create_at(index, &owner:get().handle))?;
 	(Gpu { owner = owner })
 }
 
 fn gpu_new_for_window(window: Ref<Window>) -> (Gpu | Err<RuntimeError>) {
-	let mut owner = arc_ptr_alloc::<GpuOwner>(GpuOwner { handle = Ptr<ResinGpu>(0_ul), window = window:clone() })?;
+	let mut owner = arc_ptr_alloc::<GpuOwner>(GpuOwner { handle = Ptr<ResinGpu>(u64(0)), window = window:clone() })?;
 	runtime_status_from_code(resin_gpu_create_for_window(window:native(), &owner:get().handle))?;
 	(Gpu { owner = owner })
 }
 
 fn create<T>(self: Ref<Gpu>, initial: T) -> (GpuPtr<T> | Err<RuntimeError>) {
-	let mut allocated = self:alloc::<T>(1_ul)?;
+	let mut allocated = self:alloc::<T>(u64(1))?;
 	allocated.data:store(initial);
 	(allocated.data)
 }
 
-fn alloc<T>(self: Ref<Gpu>, count: ulong) -> (GpuSpan<T> | Err<RuntimeError>) {
+fn alloc<T>(self: Ref<Gpu>, count: u64) -> (GpuSpan<T> | Err<RuntimeError>) {
 	self:alloc_in::<T>(count, memory_default)
 }
 
-fn alloc_in<T>(self: Ref<Gpu>, count: ulong, memory: int) -> (GpuSpan<T> | Err<RuntimeError>) {
+fn alloc_in<T>(self: Ref<Gpu>, count: u64, memory: i32) -> (GpuSpan<T> | Err<RuntimeError>) {
 	let mut size = size_of(T);
 	if (count > max_allocation_bytes / size) {
 		return Err(OutOfMemory {});
 	};
 	let mut view = self:malloc(count * size, align_of(T), memory)?;
-	(GpuSpan<T> { data = GpuPtr<T> { view = gpu_view_range::<T>(view, count, 0_ul, count) }, length = count })
+	(GpuSpan<T> { data = GpuPtr<T> { view = gpu_view_range::<T>(view, count, u64(0), count) }, length = count })
 }
 
 @gpu_allocator
-fn malloc(self: Ref<Gpu>, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | Err<RuntimeError>) {
+fn malloc(self: Ref<Gpu>, bytes: u64, alignment: u64, memory: i32) -> (GpuView | Err<RuntimeError>) {
 	let mut allocation = gpu_view_allocate(self:native(), self.owner.owner, bytes, alignment, memory);
 	runtime_status_from_code(allocation.1)?;
 	(allocation.0!)
 }
 
 @gpu_compute_pipeline
-fn create_compute_pipeline(self: Ref<Gpu>, code: (Ptr<ubyte>, ulong)) -> (GpuPipelineOwner | Err<RuntimeError>) {
-	let mut owner = arc_ptr_alloc::<PipelineOwner>(PipelineOwner { handle = Ptr<ResinPipeline>(0_ul), gpu = self:clone() })?;
+fn create_compute_pipeline(self: Ref<Gpu>, code: (Ptr<u8>, u64)) -> (GpuPipelineOwner | Err<RuntimeError>) {
+	let mut owner = arc_ptr_alloc::<PipelineOwner>(PipelineOwner { handle = Ptr<ResinPipeline>(u64(0)), gpu = self:clone() })?;
 	runtime_status_from_code(resin_gpu_create_compute_pipeline(self:native(), code.0, code.1, &owner:get().handle))?;
 	(GpuPipelineOwner { owner = owner })
 }
 
 @gpu_graphics_pipeline
-fn create_graphics_pipeline(self: Ref<Gpu>, vertex: (Ptr<ubyte>, ulong), fragment: (Ptr<ubyte>, ulong)) -> (GpuPipelineOwner | Err<RuntimeError>) {
-	let mut owner = arc_ptr_alloc::<PipelineOwner>(PipelineOwner { handle = Ptr<ResinPipeline>(0_ul), gpu = self:clone() })?;
+fn create_graphics_pipeline(self: Ref<Gpu>, vertex: (Ptr<u8>, u64), fragment: (Ptr<u8>, u64)) -> (GpuPipelineOwner | Err<RuntimeError>) {
+	let mut owner = arc_ptr_alloc::<PipelineOwner>(PipelineOwner { handle = Ptr<ResinPipeline>(u64(0)), gpu = self:clone() })?;
 	runtime_status_from_code(resin_gpu_create_graphics_pipeline(self:native(), vertex.0, vertex.1, fragment.0, fragment.1, &owner:get().handle))?;
 	(GpuPipelineOwner { owner = owner })
 }
 
-fn create_image(self: Ref<Gpu>, width: uint, height: uint) -> (GpuImage | Err<RuntimeError>) {
-	let mut owner = arc_ptr_alloc::<ImageOwner>(ImageOwner { handle = Ptr<ResinImage>(0_ul), gpu = self:clone() })?;
+fn create_image(self: Ref<Gpu>, width: u32, height: u32) -> (GpuImage | Err<RuntimeError>) {
+	let mut owner = arc_ptr_alloc::<ImageOwner>(ImageOwner { handle = Ptr<ResinImage>(u64(0)), gpu = self:clone() })?;
 	runtime_status_from_code(resin_gpu_create_image(self:native(), width, height, &owner:get().handle))?;
 	(GpuImage { owner = owner })
 }
 
 fn start_command_recording(self: Ref<Gpu>) -> (GpuCommands | Err<RuntimeError>) {
-	let mut owner = arc_ptr_alloc::<CommandsOwner>(CommandsOwner { handle = Ptr<ResinCommandBuffer>(0_ul), gpu = self:clone(), retained = None })?;
+	let mut owner = arc_ptr_alloc::<CommandsOwner>(CommandsOwner { handle = Ptr<ResinCommandBuffer>(u64(0)), gpu = self:clone(), retained = None })?;
 	runtime_status_from_code(resin_gpu_start_command_recording(self:native(), &owner:get().handle))?;
 	(GpuCommands { owner = owner })
 }
@@ -241,8 +244,8 @@ struct ImageOwner {
 	handle: Ptr<ResinImage>,
 	gpu: Gpu,
 }
-fn drop(self: Ptr<ImageOwner>) {
-	if (ulong(self.handle) != 0_ul) {
+fn drop(self: Ref<ImageOwner>) {
+	if (u64(self.handle) != u64(0)) {
 		resin_gpu_free_image(self.gpu:native(), self.handle);
 	};
 }
@@ -254,11 +257,11 @@ fn native(self: Ref<GpuImage>) -> Ptr<ResinImage> {
 	self.owner:get().handle
 }
 
-fn width(self: Ref<GpuImage>) -> uint {
+fn width(self: Ref<GpuImage>) -> u32 {
 	resin_image_width(self:native())
 }
 
-fn height(self: Ref<GpuImage>) -> uint {
+fn height(self: Ref<GpuImage>) -> u32 {
 	resin_image_height(self:native())
 }
 
@@ -266,8 +269,8 @@ struct PipelineOwner {
 	handle: Ptr<ResinPipeline>,
 	gpu: Gpu,
 }
-fn drop(self: Ptr<PipelineOwner>) {
-	if (ulong(self.handle) != 0_ul) {
+fn drop(self: Ref<PipelineOwner>) {
+	if (u64(self.handle) != u64(0)) {
 		resin_gpu_free_pipeline(self.gpu:native(), self.handle);
 	};
 }
@@ -296,13 +299,13 @@ struct CommandsOwner {
 	gpu: Gpu,
 	retained: ArcPtr<RecordedResources> | None,
 }
-fn drop(self: Ptr<CommandsOwner>) {
-	if (ulong(self.handle) != 0_ul) {
+fn drop(self: Ref<CommandsOwner>) {
+	if (u64(self.handle) != u64(0)) {
 		resin_gpu_cancel_command_buffer(self.gpu:native(), self.handle);
 	};
 }
 
-fn retain(self: Ref<CommandsOwner>, pipeline: GpuPipelineOwner | None, image: GpuImage | None) -> (() | Err<OutOfMemory>) {
+fn retain(self: Ptr<CommandsOwner>, pipeline: GpuPipelineOwner | None, image: GpuImage | None) -> (() | Err<OutOfMemory>) {
 	let node = arc_ptr_alloc::<RecordedResources>(RecordedResources { pipeline = pipeline, image = image, previous = None })?;
 	node:get().previous = replace(&self.retained, None);
 	self.retained = node;
@@ -317,14 +320,14 @@ fn native(self: Ref<GpuCommands>) -> Ptr<ResinCommandBuffer> {
 }
 
 @gpu_dispatch
-fn dispatch(self: Ref<GpuCommands>, pipeline: Ref<GpuPipelineOwner>, root: GpuArguments, x: uint, y: uint, z: uint) -> (() | Err<RuntimeError>) {
-	self.owner:get().*:retain(pipeline:clone(), None)?;
+fn dispatch(self: Ref<GpuCommands>, pipeline: Ref<GpuPipelineOwner>, root: GpuArguments, x: u32, y: u32, z: u32) -> (() | Err<RuntimeError>) {
+	self.owner:get():retain(pipeline:clone(), None)?;
 	runtime_status_from_code(resin_gpu_set_pipeline(self:native(), pipeline:native()))?;
-	runtime_status_from_code(root:dispatch_native(Ptr<ubyte>(self:native()), x, y, z))
+	runtime_status_from_code(root:dispatch_native(Ptr<u8>(self:native()), x, y, z))
 }
 
-fn begin_rendering(self: Ref<GpuCommands>, image: Ref<GpuImage>, r: float32, g: float32, b: float32, a: float32) -> (() | Err<RuntimeError>) {
-	self.owner:get().*:retain(None, image:clone())?;
+fn begin_rendering(self: Ref<GpuCommands>, image: Ref<GpuImage>, r: f32, g: f32, b: f32, a: f32) -> (() | Err<RuntimeError>) {
+	self.owner:get():retain(None, image:clone())?;
 	runtime_status_from_code(resin_gpu_begin_rendering(self:native(), image:native(), r, g, b, a))
 }
 
@@ -333,27 +336,27 @@ fn end_rendering(self: Ref<GpuCommands>) -> (() | Err<RuntimeError>) {
 }
 
 @gpu_draw
-fn draw(self: Ref<GpuCommands>, pipeline: Ref<GpuPipelineOwner>, root: GpuArguments | None, count: uint) -> (() | Err<RuntimeError>) {
-	self.owner:get().*:retain(pipeline:clone(), None)?;
+fn draw(self: Ref<GpuCommands>, pipeline: Ref<GpuPipelineOwner>, root: GpuArguments | None, count: u32) -> (() | Err<RuntimeError>) {
+	self.owner:get():retain(pipeline:clone(), None)?;
 	runtime_status_from_code(resin_gpu_set_pipeline(self:native(), pipeline:native()))?;
 	match (root) {
 		GpuArguments(arguments) => {
-			runtime_status_from_code(arguments:draw_native(Ptr<ubyte>(self:native()), count))
+			runtime_status_from_code(arguments:draw_native(Ptr<u8>(self:native()), count))
 		},
 		None => {
-			runtime_status_from_code(resin_gpu_draw(self:native(), 0_ul, count))
+			runtime_status_from_code(resin_gpu_draw(self:native(), u64(0), count))
 		},
 	}
 }
 
-fn copy_image_to_buffer(self: Ref<GpuCommands>, image: Ref<GpuImage>, buffer: Ref<GpuSpan<ubyte>>) -> (() | Err<RuntimeError>) {
-	self.owner:get().*:retain(None, image:clone())?;
-	runtime_status_from_code(gpu_view_copy_image(buffer.data.view, buffer.length, Ptr<ubyte>(self:native()), Ptr<ubyte>(image:native())))
+fn copy_image_to_buffer(self: Ref<GpuCommands>, image: Ref<GpuImage>, buffer: Ref<GpuSpan<u8>>) -> (() | Err<RuntimeError>) {
+	self.owner:get():retain(None, image:clone())?;
+	runtime_status_from_code(gpu_view_copy_image(buffer.data.view, buffer.length, Ptr<u8>(self:native()), Ptr<u8>(image:native())))
 }
 
 fn submit(self: Ref<GpuCommands>) -> (() | Err<RuntimeError>) {
 	let mut state = self.owner:get();
-	let mut recording = (&state.handle):replace(Ptr<ResinCommandBuffer>(0_ul));
+	let mut recording = (&state.handle):replace(Ptr<ResinCommandBuffer>(u64(0)));
 	let mut code = resin_gpu_submit(state.gpu:native(), recording);
 	state.retained = None;
 	runtime_status_from_code(code)
@@ -361,20 +364,20 @@ fn submit(self: Ref<GpuCommands>) -> (() | Err<RuntimeError>) {
 
 fn cancel(self: Ref<GpuCommands>) {
 	let mut state = self.owner:get();
-	let mut recording = (&state.handle):replace(Ptr<ResinCommandBuffer>(0_ul));
+	let mut recording = (&state.handle):replace(Ptr<ResinCommandBuffer>(u64(0)));
 	resin_gpu_cancel_command_buffer(state.gpu:native(), recording);
 	state.retained = None;
 }
 
-intrinsic "gpu_view_allocate" fn gpu_view_allocate<N>(gpu: Ptr<N>, owner: StrongOwner, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | None, int);
+intrinsic "gpu_view_allocate" fn gpu_view_allocate<N>(gpu: Ptr<N>, owner: StrongOwner, bytes: u64, alignment: u64, memory: i32) -> (GpuView | None, i32);
 intrinsic "gpu_view_load" fn gpu_view_load<T>(view: GpuView) -> T;
 intrinsic "gpu_view_store" fn gpu_view_store<T>(view: GpuView, value: T) -> ();
 intrinsic "gpu_view_replace" fn gpu_view_replace<T>(view: GpuView, value: T) -> T;
-intrinsic "gpu_view_range" fn gpu_view_range<T>(view: GpuView, capacity: ulong, start: ulong, length: ulong) -> GpuView;
-intrinsic "gpu_view_copy_to" fn gpu_view_copy_to<T>(view: GpuView, count: ulong, destination: Ptr<T>, capacity: ulong) -> ();
-intrinsic "gpu_view_restrict" fn gpu_view_restrict(view: GpuView, mask: uint) -> GpuView;
-intrinsic "gpu_view_copy_from" fn gpu_view_copy_from<T>(view: GpuView, capacity: ulong, source: Ptr<T>, count: ulong) -> ();
-intrinsic "gpu_view_copy_image" fn gpu_view_copy_image(view: GpuView, length: ulong, commands: Ptr<ubyte>, image: Ptr<ubyte>) -> int;
+intrinsic "gpu_view_range" fn gpu_view_range<T>(view: GpuView, capacity: u64, start: u64, length: u64) -> GpuView;
+intrinsic "gpu_view_copy_to" fn gpu_view_copy_to<T>(view: GpuView, count: u64, destination: Ptr<T>, capacity: u64) -> ();
+intrinsic "gpu_view_restrict" fn gpu_view_restrict(view: GpuView, mask: u32) -> GpuView;
+intrinsic "gpu_view_copy_from" fn gpu_view_copy_from<T>(view: GpuView, capacity: u64, source: Ptr<T>, count: u64) -> ();
+intrinsic "gpu_view_copy_image" fn gpu_view_copy_image(view: GpuView, length: u64, commands: Ptr<u8>, image: Ptr<u8>) -> i32;
 
 fn clone(value: Ref<Gpu>) -> Gpu {
 	Gpu { owner = value.owner:clone() }

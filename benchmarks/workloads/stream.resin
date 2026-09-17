@@ -2,29 +2,29 @@ export { Root, kernel, cpu };
 
 import { "$/span.resin" };
 
-intrinsic "pointer_index" fn device_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;
+intrinsic "pointer_index" fn device_index<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;
 
 struct Root {
-	count: uint,
-	iterations: uint,
-	input: Ptr<uint>,
-	output: Ptr<uint>,
+	count: u32,
+	iterations: u32,
+	input: Ptr<u32>,
+	output: Ptr<u32>,
 }
 
 // One read and one write per lane, with little arithmetic between them.
 @compute_shader
-fn kernel(index: ulong, root: Ptr<Root>) {
-	if (index < ulong(root.count)) {
-		let mut input = Span<uint> { data = root.input, length = ulong(root.count) };
-		let mut output = Span<uint> { data = root.output, length = ulong(root.count) };
-		device_index(output.data, output.length, index).* = device_index(input.data, input.length, index).* * 1664525_ui + uint(index);
+fn kernel(index: u64, root: Ptr<Root>) {
+	if (index < u64(root.count)) {
+		let mut input = Span<u32> { data = root.input, length = u64(root.count) };
+		let mut output = Span<u32> { data = root.output, length = u64(root.count) };
+		device_index(output.data, output.length, index).* = device_index(input.data, input.length, index).* * u32(1664525) + u32(index);
 	};
 }
 
 fn cpu(root: Ptr<Root>) {
-	let mut index = 0_ul;
-	while (index < ulong(root.count)) {
+	let mut index: u64 = 0;
+	while (index < u64(root.count)) {
 		kernel(index, root);
-		index = index + 1_ul;
+		index = index + u64(1);
 	};
 }

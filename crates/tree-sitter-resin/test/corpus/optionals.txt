@@ -1,11 +1,11 @@
 ==================
 None singleton and ordinary optional unions
 ==================
-type OptionalInt = int | None;
-fn choose(value: OptionalInt) -> int  {
-    match (value) { int(number) => { number }, None => { 0 } }
+type OptionalInt = i32 | None;
+fn choose(value: OptionalInt) -> i32  {
+    match (value) { i32(number) => { number }, None => { 0 } }
 }
-fn require(value: OptionalInt) -> int  { value! }
+fn require(value: OptionalInt) -> i32  { value! }
 fn empty() -> None  { None }
 
 ---

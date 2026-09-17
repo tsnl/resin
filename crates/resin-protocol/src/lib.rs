@@ -1,7 +1,7 @@
 //! Versioned compiler service messages. Names are logical identities, never server paths.
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 pub const METADATA_HEADER: &str = "resin-metadata";
 pub const MAX_METADATA_BYTES: usize = 4096;
 
@@ -134,6 +134,9 @@ pub struct RelatedDiagnostic {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Diagnostic {
+    pub code: Option<String>,
+    pub notes: Vec<String>,
+    pub help: Option<String>,
     pub severity: Severity,
     pub message: String,
     pub span: Option<Span>,

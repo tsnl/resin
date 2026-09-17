@@ -1,10 +1,10 @@
 export { Counter, next };
 
 struct Counter {
-	value: int,
+	value: i32,
 }
 
-fn next(counter: Ptr<Counter>) -> int {
+fn next(counter: Ref<Counter>) -> i32 {
 	counter.value = counter.value + 1;
 	counter.value
 }

@@ -18,10 +18,7 @@ fn tail(function: &resin_hir::Function) -> &Term {
 #[test]
 fn unary_and_binary_operators_resolve_to_ordinary_free_calls() {
     let module = hir_module(
-        "struct Number { value: int }
-         fn __neg__(value: Number) -> Number { Number { value = -value.value } }
-         fn __sub__(left: Number, right: int) -> int { left.value - right }
-         fn use(value: Number) -> int { -value - 2 }",
+        "struct Number { value: i32 }\n         fn __neg__(value: Number) -> Number { Number { value = -value.value } }\n         fn __sub__(left: Number, right: i32) -> i32 { left.value - right }\n         fn use(value: Number) -> i32 { -value - 2 }",
     )
     .unwrap();
     let function = module
@@ -70,10 +67,7 @@ fn generic_operators_retain_all_operand_types_until_specialization() {
 #[test]
 fn operators_support_borrowed_receivers_additional_binders_and_right_operand_dispatch() {
     hir_module(
-        "struct Number { value: int }
-         fn __add__<T>(left: Ref<Number>, right: T) -> T { right }
-         fn __add__(left: int, right: Ref<Number>) -> int { left + right.value }
-         fn sum(value: Number) -> int { value + 7 + (35 + value) }",
+        "struct Number { value: i32 }\n         fn __add__<T>(left: Ref<Number>, right: T) -> T { right }\n         fn __add__(left: i32, right: Ref<Number>) -> i32 { left + right.value }\n         fn sum(value: Number) -> i32 { value + 7 + (35 + value) }",
     )
     .unwrap();
 }
@@ -83,11 +77,11 @@ fn invalid_operator_calls_and_unused_body_errors_are_rejected() {
     for source in [
         "struct A {} fn __add__(a: A, b: A, c: A) -> A { a } fn use(a: A, b: A) -> A { a + b }",
         "struct A {} fn add(a: A, b: A) -> A { a + b }",
-        "struct A {} fn __add__(a: A, b: int) -> A { a } fn add(a: A) -> A { 2 + a }",
-        "struct A {} fn __add__(a: A, b: int) -> A { a } fn add(a: A) -> A { &a + 1 }",
+        "struct A {} fn __add__(a: A, b: i32) -> A { a } fn add(a: A) -> A { 2 + a }",
+        "struct A {} fn __add__(a: A, b: i32) -> A { a } fn add(a: A) -> A { &a + 1 }",
         "struct A {} fn __eq__(a: A, b: A) -> bool { true } fn compare(a: A) -> bool { a != a }",
         "struct A {} fn __add__<T>(a: A, b: T) -> A { missing }",
-        "struct A {} fn __add__(a: A, b: int) -> A { a } fn __add__(a: A, b: int) -> A { a } fn use(a: A) -> A { a + 1 }",
+        "struct A {} fn __add__(a: A, b: i32) -> A { a } fn __add__(a: A, b: i32) -> A { a } fn use(a: A) -> A { a + 1 }",
     ] {
         assert!(hir_module(source).is_err(), "{source}");
     }

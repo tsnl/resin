@@ -291,7 +291,11 @@ pub(super) async fn prepare_diagnostics(
                             }
                         }),
                         source: Some("resin".into()),
-                        message: diagnostic_message(&diagnostic.message),
+                        code: diagnostic
+                            .code
+                            .clone()
+                            .map(lsp_types::NumberOrString::String),
+                        message: diagnostic_text(diagnostic),
                         related_information: (!related.is_empty()).then_some(related),
                         ..Default::default()
                     };
@@ -470,4 +474,15 @@ fn diagnostic_message(message: &str) -> String {
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn diagnostic_text(diagnostic: &resin_protocol::Diagnostic) -> String {
+    let mut message = diagnostic_message(&diagnostic.message);
+    for note in &diagnostic.notes {
+        message.push_str(&format!(" Note: {}", diagnostic_message(note)));
+    }
+    if let Some(help) = &diagnostic.help {
+        message.push_str(&format!(" Help: {}", diagnostic_message(help)));
+    }
+    message
 }

@@ -330,6 +330,9 @@ fn absolute_spelling(spelling: &str) -> bool {
 
 fn diagnostic(declaration: Option<&Declaration>, message: String) -> Diagnostic {
     Diagnostic {
+        code: None,
+        notes: Vec::new(),
+        help: None,
         severity: Severity::Error,
         message,
         span: declaration.map(|declaration| declaration.span.clone()),

@@ -1,7 +1,7 @@
 ==================
 Generic intrinsic declaration
 ==================
-intrinsic "pointer_index" fn at<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;
+intrinsic "pointer_index" fn at<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;
 ---
 
 (source_file

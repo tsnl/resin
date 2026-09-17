@@ -178,7 +178,7 @@ mod tests {
         builder.result(Ty::Int32);
         assert_eq!(builder.local(Ty::Bool, Some("temporary".into())).index(), 1);
         let body = BlockId::from_index(0);
-        builder.emit(Instr::LocalAddress {
+        builder.emit(Instr::LocalRef {
             local: LocalId::from_index(0),
         });
         builder.emit(Instr::Load);

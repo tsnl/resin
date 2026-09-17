@@ -1,5 +1,6 @@
 //! Command-line argument parsing and mode dispatch.
 mod args;
+mod documentation;
 mod embed;
 mod format;
 pub(crate) mod request;
@@ -70,6 +71,10 @@ fn dispatch_by_mode(mode: Mode) -> Result<i32> {
             output,
             symbol,
         } => embed::run(&input, &output, &symbol),
+        Mode::Documentation { input, output } => tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?
+            .block_on(documentation::run(&input, output.as_deref())),
         Mode::Formatter { paths, check } => format::run(&paths, check),
         Mode::LanguageServer {
             directory,

@@ -18,7 +18,7 @@ pub(super) fn lower(
     let result = &function.result;
     let typer = TyperContext::from_definitions(context.module.types.clone());
     let interface = resin_types::shader::validate(&typer, &params, result, false, stage.name())
-        .map_err(Error)?;
+        .map_err(Error::unsupported)?;
     let variables = Variables::declare(context, &interface)?;
     let void = context.builder.type_void();
     let function_type = context.builder.type_function(void, []);

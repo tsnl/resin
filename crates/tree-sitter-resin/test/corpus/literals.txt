@@ -1,7 +1,7 @@
 ==================
-Numeric suffixes and one-armed if
+Numeric annotations and one-armed if
 ==================
-fn main()  { let mut a = 42_ul; let mut b = -42_l; let mut c = 1.5_f; let mut d = 0xff_ui; if (a > 0_ul) { if (b < 0_l) {} else {}; }; }
+fn main()  { let mut a: u64 = 42; let mut b: i64 = -42; let mut c: f32 = 1.5; let mut d: u32 = 0xff; if (a > u64(0)) { if (b < i64(0)) {} else {}; }; }
 ---
 
 (source_file
@@ -13,6 +13,12 @@ fn main()  { let mut a = 42_ul; let mut b = -42_l; let mut c = 1.5_f; let mut d 
           (local_define
             (binding_pattern
               (lid))
+            (type
+              (infix_type
+                (union_type
+                  (unary_type
+                    (primary_type
+                      (builtin_type))))))
             (term
               (assignment_term
                 (binary_term
@@ -25,6 +31,12 @@ fn main()  { let mut a = 42_ul; let mut b = -42_l; let mut c = 1.5_f; let mut d 
           (local_define
             (binding_pattern
               (lid))
+            (type
+              (infix_type
+                (union_type
+                  (unary_type
+                    (primary_type
+                      (builtin_type))))))
             (term
               (assignment_term
                 (binary_term
@@ -38,6 +50,12 @@ fn main()  { let mut a = 42_ul; let mut b = -42_l; let mut c = 1.5_f; let mut d 
           (local_define
             (binding_pattern
               (lid))
+            (type
+              (infix_type
+                (union_type
+                  (unary_type
+                    (primary_type
+                      (builtin_type))))))
             (term
               (assignment_term
                 (binary_term
@@ -50,6 +68,12 @@ fn main()  { let mut a = 42_ul; let mut b = -42_l; let mut c = 1.5_f; let mut d 
           (local_define
             (binding_pattern
               (lid))
+            (type
+              (infix_type
+                (union_type
+                  (unary_type
+                    (primary_type
+                      (builtin_type))))))
             (term
               (assignment_term
                 (binary_term
@@ -77,7 +101,17 @@ fn main()  { let mut a = 42_ul; let mut b = -42_l; let mut c = 1.5_f; let mut d 
                               (unary_term
                                 (postfix_term
                                   (primary_term
-                                    (number))))))))
+                                    (unary_type
+                                      (primary_type
+                                        (builtin_type))))
+                                  (arguments
+                                    (term
+                                      (assignment_term
+                                        (binary_term
+                                          (unary_term
+                                            (postfix_term
+                                              (primary_term
+                                                (number))))))))))))))
                       (closed_term
                         (chain_term
                           (statement
@@ -100,7 +134,17 @@ fn main()  { let mut a = 42_ul; let mut b = -42_l; let mut c = 1.5_f; let mut d 
                                                   (unary_term
                                                     (postfix_term
                                                       (primary_term
-                                                        (number))))))))
+                                                        (unary_type
+                                                          (primary_type
+                                                            (builtin_type))))
+                                                      (arguments
+                                                        (term
+                                                          (assignment_term
+                                                            (binary_term
+                                                              (unary_term
+                                                                (postfix_term
+                                                                  (primary_term
+                                                                    (number))))))))))))))
                                           (closed_term
                                             (unit_term))
                                           (closed_term
@@ -110,7 +154,7 @@ fn main()  { let mut a = 42_ul; let mut b = -42_l; let mut c = 1.5_f; let mut d 
 String literal type and explicit byte view
 ==================
 fn text(value: str) -> str  { value }
-fn view() -> Span<ubyte>  { bytes("hello") }
+fn view() -> Span<u8>  { bytes("hello") }
 ---
 
 (source_file

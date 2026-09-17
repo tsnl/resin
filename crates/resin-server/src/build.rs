@@ -129,6 +129,7 @@ pub(crate) async fn run(
         vec![key.clone()],
         |key| {
             let module = module.clone();
+            let hir = hir.clone();
             async move {
                 server
                     .caches
@@ -142,7 +143,7 @@ pub(crate) async fn run(
                     cancellation,
                 )
                 .await
-                .map_err(internal)?;
+                .map_err(|error| lir_failure(error, &hir))?;
                 resin_lir::VerifiedModule::build(lir, &server.execution, cancellation)
                     .await
                     .map(Arc::new)
@@ -153,7 +154,7 @@ pub(crate) async fn run(
         cancellation,
     )
     .await
-    .map_err(internal)?
+    .map_err(publication_failure)?
     .remove(&key)
     .expect("selected verified LIR");
     let generation_key = GenerationKey {
@@ -168,6 +169,7 @@ pub(crate) async fn run(
         vec![generation_key.clone()],
         |key| {
             let verified = verified.clone();
+            let hir = hir.clone();
             async move {
                 server
                     .caches
@@ -183,13 +185,14 @@ pub(crate) async fn run(
                 )
                 .await
                 .map(Arc::new)
+                .map_err(|error| generation_failure(error, &hir))
             }
         },
         &server.execution,
         cancellation,
     )
     .await
-    .map_err(internal)?
+    .map_err(publication_failure)?
     .remove(&generation_key)
     .expect("selected generated project");
     let profile = match request.contract.profile {
@@ -256,4 +259,121 @@ pub(crate) async fn run(
         },
         executable,
     })
+}
+
+fn publication_failure(error: resin_cache::UpdateError<Failure>) -> Failure {
+    match error {
+        resin_cache::UpdateError::Build { error } => error,
+        resin_cache::UpdateError::Cancelled => {
+            failure(ErrorCode::Cancelled, "compilation cancelled")
+        }
+    }
+}
+
+fn lir_failure(error: resin_lir::BuildError, hir: &resin_hir::Hir) -> Failure {
+    let resin_lir::BuildError::Diagnostics { errors } = error else {
+        return internal(error);
+    };
+    let internal_error = errors
+        .iter()
+        .any(|error| matches!(error.kind, resin_lir::ErrorKind::InvalidHir { .. }));
+    let diagnostics = errors
+        .into_iter()
+        .map(|error| {
+            let code = match error.kind {
+                resin_lir::ErrorKind::UnsupportedProfile { .. } => "unsupported-profile",
+                resin_lir::ErrorKind::MonomorphLimit { .. } => "specialization-limit",
+                resin_lir::ErrorKind::TypeExpansionLimit { .. }
+                | resin_lir::ErrorKind::TypeSizeLimit { .. } => "type-expansion-limit",
+                resin_lir::ErrorKind::InvalidHir { .. } => "invalid-hir",
+                _ => "invalid-specialization",
+            };
+            let mut diagnostic = Diagnostic {
+                code: Some(code.into()),
+                severity: Severity::Error,
+                message: error.kind.to_string(),
+                span: error.source.map(|source| {
+                    crate::analyze::location(&resin_source::SourceLocation {
+                        source,
+                        span: error.span,
+                    })
+                }),
+                related: Vec::new(),
+                notes: Vec::new(),
+                help: None,
+            };
+            for application in error.applications {
+                let message = format!(
+                    "while specializing {}<{}> for {:?}",
+                    application.function,
+                    application
+                        .arguments
+                        .iter()
+                        .map(AsRef::as_ref)
+                        .collect::<Vec<&str>>()
+                        .join(", "),
+                    application.profile
+                );
+                if let Some(location) = application.location {
+                    diagnostic.related.push(RelatedDiagnostic {
+                        message,
+                        span: crate::analyze::location(&location),
+                    });
+                } else {
+                    diagnostic.notes.push(message);
+                }
+            }
+            diagnostic
+        })
+        .collect();
+    diagnostic_failure(
+        if internal_error {
+            ErrorCode::Internal
+        } else {
+            ErrorCode::CompilationFailed
+        },
+        diagnostics,
+        hir,
+    )
+}
+
+fn generation_failure(error: resin_codegen::GenerationError, hir: &resin_hir::Hir) -> Failure {
+    let resin_codegen::GenerationError::Codegen { error } = error else {
+        return internal(error);
+    };
+    let (code, diagnostic_code) = match error.kind() {
+        resin_codegen::ErrorKind::UnsupportedTarget => {
+            (ErrorCode::CompilationFailed, "unsupported-target-feature")
+        }
+        resin_codegen::ErrorKind::InvalidProgram => (ErrorCode::CompilationFailed, "invalid-entry"),
+        resin_codegen::ErrorKind::InvalidLir => (ErrorCode::Internal, "invalid-target-input"),
+        resin_codegen::ErrorKind::Io => return internal(error),
+    };
+    diagnostic_failure(
+        code,
+        vec![Diagnostic {
+            code: Some(diagnostic_code.into()),
+            severity: Severity::Error,
+            message: error.message().into(),
+            span: error.location().map(crate::analyze::location),
+            related: Vec::new(),
+            notes: Vec::new(),
+            help: None,
+        }],
+        hir,
+    )
+}
+
+fn diagnostic_failure(
+    code: ErrorCode,
+    diagnostics: Vec<Diagnostic>,
+    hir: &resin_hir::Hir,
+) -> Failure {
+    let managed_sources = crate::analyze::managed_sources(hir, &diagnostics, &[]);
+    Failure {
+        code,
+        message: "compilation failed".into(),
+        diagnostics,
+        managed_sources,
+    }
 }

@@ -1,19 +1,20 @@
 export { main };
 
-import { "$/string.resin" };
+import { "$/string.resin", "$/stdio.resin" };
 
-fn add(x: int, y: int) -> int {
+fn add(x: i32, y: i32) -> i32 {
 	x + y
 }
 
-fn apply(f: (int, int) -> int, x: int, y: int) -> int {
+fn apply(f: (i32, i32) -> i32, x: i32, y: i32) -> i32 {
 	f(x, y)
 }
 
-fn inc(n: int) -> int {
+fn inc(n: i32) -> i32 {
 	apply(add, n, 1)
 }
 
 fn main() -> () {
-	print(fmt("inc(41) = {0}\n", (inc(41),)));
+	let text = fmt("inc(41) = {0}\n", (inc(41),));
+	print(text);
 }

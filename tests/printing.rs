@@ -39,25 +39,41 @@ fn prints(source: &str, expected: &[u8]) {
 #[test]
 fn print_is_an_ordinary_source_function_returning_unit() {
     prints(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn output(value: str)  { print(value) }
-        fn main()  { output("x = "); print(fmt("{0}\n", (42,))); }"#,
+        fn main()  { output("x = "); { let borrowed = fmt("{0}\n", (42,)); print(borrowed) }; }"#,
         b"x = 42\n",
     );
 }
 
 #[test]
+fn printing_and_string_construction_have_separate_module_exports() {
+    prints(
+        r#"export { main }; import { "$/stdio.resin" };
+        fn main() { print("hello\0world"); }"#,
+        b"hello\0world",
+    );
+    for source in [
+        r#"import { "$/string.resin" }; fn main() { print("unexpected"); }"#,
+        r#"import { "$/stdio.resin" }; fn main() { fmt("unexpected", ()); }"#,
+    ] {
+        let error = pipeline::source_module(source).unwrap_err();
+        assert!(error.to_string().contains("UnboundValue"), "{error}");
+    }
+}
+
+#[test]
 fn formats_are_length_delimited_and_do_not_add_newlines() {
     prints(
-        r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print(""); print("héllo\t\"\\\r\n\0%"); }"#,
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { print(""); print("héllo\t\"\\\r\n\0%"); }"#,
         "héllo\t\"\\\r\n\0%".as_bytes(),
     );
     prints(
-        r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print(fmt("{{{1}}}: {0}, {1}", ("{not a format}%\0", "世界"))); }"#,
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { let text = fmt("{{{1}}}: {0}, {1}", ("{not a format}%\0", "世界")); print(text); }"#,
         "{世界}: {not a format}%\0, 世界".as_bytes(),
     );
     prints(
-        r#"export { main }; import { "$/string.resin" }; fn main () -> ()  { let mut format_text = "{0}!"; print(fmt(format_text, ("",))); }"#,
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main () -> ()  { let mut format_text = "{0}!"; { let borrowed = fmt(format_text, ("",)); print(borrowed) }; }"#,
         b"!",
     );
 }
@@ -78,21 +94,21 @@ fn string_storage_is_terminated_without_changing_its_logical_length() {
 
         extern {
             "string.h": {
-                fn strlen(text: Ptr<ubyte>) -> ulong;
+                fn strlen(text: Ptr<u8>) -> u64;
             },
         };
-        import { "$/string.resin" };
+        import { "$/string.resin", "$/stdio.resin" };
 
         struct FieldsText<T0> { text: T0, }
-fn main() -> int  {
+fn main() -> i32  {
             let mut text = "héllo";
             let mut empty = "";
             let mut copy = text;
             let mut record = FieldsText<_> { text = copy };
             let mut pointer = record.text.data;
-            if (strlen(pointer) == ulong(6) && Ptr<ubyte>(ulong(pointer) + ulong(6)).* == ubyte(0)
-                && strlen(empty.data) == ulong(0)) {
-                print(fmt("{0}{1}", (text, empty)));
+            if (strlen(pointer) == u64(6) && Ptr<u8>(u64(pointer) + u64(6)).* == u8(0)
+                && strlen(empty.data) == u64(0)) {
+                { let borrowed = fmt("{0}{1}", (text, empty)); print(borrowed) };
                 0
             } else { 1 }
         }"#,
@@ -107,38 +123,38 @@ fn embedded_and_explicit_trailing_nuls_are_not_truncated() {
 
         extern {
             "string.h": {
-                fn strlen(text: Ptr<ubyte>) -> ulong;
+                fn strlen(text: Ptr<u8>) -> u64;
             },
         };
-        import { "$/string.resin" };
+        import { "$/string.resin", "$/stdio.resin" };
 
-        fn main() -> int  {
+        fn main() -> i32  {
             let mut text = "a\0b\0";
             let mut pointer = text.data;
-            if (strlen(pointer) == ulong(1) && Ptr<ubyte>(ulong(pointer) + ulong(2)).* == ubyte(98)
-                && Ptr<ubyte>(ulong(pointer) + ulong(3)).* == ubyte(0) && Ptr<ubyte>(ulong(pointer) + ulong(4)).* == ubyte(0)) {
-                print(fmt("before\0{0}after", (text,)));
+            if (strlen(pointer) == u64(1) && Ptr<u8>(u64(pointer) + u64(2)).* == u8(98)
+                && Ptr<u8>(u64(pointer) + u64(3)).* == u8(0) && Ptr<u8>(u64(pointer) + u64(4)).* == u8(0)) {
+                { let borrowed = fmt("before\0{0}after", (text,)); print(borrowed) };
                 0
             } else { 1 }
         }"#,
         b"before\0a\0b\0after",
     );
     prints(
-        r#"export { main }; import { "$/string.resin", "$/span.resin" }; fn main() -> ()  { let mut buffer = [ubyte(65), ubyte(0), ubyte(66), ubyte(0)]; print(fmt("{0}", (Span<ubyte> { data = Ptr<ubyte>(&buffer), length = 4_ul }:bytes(),))); }"#,
+        r#"export { main }; import { "$/shared.resin", "$/string.resin", "$/stdio.resin", "$/span.resin" }; fn main() -> () | Err<_> { let buffer_owner = arc_ptr_alloc([u8(65), u8(0), u8(66), u8(0)])?; let buffer: Ref<_> = buffer_owner:get().*; { let borrowed_1 = fmt("{0}", ({ let borrowed = Span<u8> { data = Ptr<u8>(buffer_owner:get()), length = u64(4) }; borrowed:bytes() },)); print(borrowed_1) }; }"#,
         b"A\0B\0",
     );
 }
 
 #[test]
 fn numeric_widths_and_scalar_types() {
-    prints(r#"export { main }; import { "$/string.resin" };
+    prints(r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
 
 fn main() -> ()  {
-    print(fmt("{0} {1} {2} {3} {4} {5} {6} {7}\n", (
-        sbyte(-128), short(-32768), int(-2147483648), long(-9223372036854775808),
-        ubyte(255), ushort(65535), uint(4294967295), ulong(18446744073709551615)
-    )));
-    print(fmt("{0} {1} {2} {3} {4}", (float32(1.2), float64(1.25), 1 == 1, 1 == 2, ())));
+    { let borrowed = fmt("{0} {1} {2} {3} {4} {5} {6} {7}\n", (
+        i8(-128), i16(-32768), i32(-2147483648), i64(-9223372036854775808),
+        u8(255), u16(65535), u32(4294967295), u64(18446744073709551615)
+    )); print(borrowed) };
+    { let borrowed = fmt("{0} {1} {2} {3} {4}", (f32(1.2), f64(1.25), 1 == 1, 1 == 2, ())); print(borrowed) };
 }"#,
     b"-128 -32768 -2147483648 -9223372036854775808 255 65535 4294967295 18446744073709551615\n1.2 1.25 true false ()");
 }
@@ -146,7 +162,7 @@ fn main() -> ()  {
 #[test]
 fn aliases_preserve_scalar_printing() {
     prints(
-        r#"export { main }; import { "$/string.resin" }; type Meters = int; type Distance = Meters; fn main() -> ()  { print(fmt("{0}", (Distance(Meters(42)),))); }"#,
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; type Meters = i32; type Distance = Meters; fn main() -> ()  { { let borrowed = fmt("{0}", (Distance(Meters(42)),)); print(borrowed) }; }"#,
         b"42",
     );
 }
@@ -154,7 +170,7 @@ fn aliases_preserve_scalar_printing() {
 #[test]
 fn arguments_evaluate_once_in_source_order_even_when_unused() {
     prints(
-        r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { let mut n = 0; print(fmt("{1} {0} {1}", ({ n = n + 1; n }, { n = n + 1; n }, { n = n + 1; n }))); print(fmt(" {0}", (n,))); }"#,
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { let mut n = 0; { let borrowed = fmt("{1} {0} {1}", ({ n = n + 1; n }, { n = n + 1; n }, { n = n + 1; n })); print(borrowed) }; { let borrowed = fmt(" {0}", (n,)); print(borrowed) }; }"#,
         b"2 1 2 3",
     );
 }
@@ -162,10 +178,10 @@ fn arguments_evaluate_once_in_source_order_even_when_unused() {
 #[test]
 fn ordinary_and_recursive_functions_can_print() {
     prints(
-        r#"export { main }; import { "$/string.resin" };
-        fn show (n: int) -> ()  { print(fmt("{0}", (n,))); }
-        fn countdown (n: int) -> int  { print(fmt("{0}", (n,))); if (n > 0) { countdown(n - 1) } else { 0 } }
-        fn main () -> int  {
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
+        fn show (n: i32) -> ()  { { let borrowed = fmt("{0}", (n,)); print(borrowed) }; }
+        fn countdown (n: i32) -> i32  { { let borrowed = fmt("{0}", (n,)); print(borrowed) }; if (n > 0) { countdown(n - 1) } else { 0 } }
+        fn main () -> i32  {
             let mut f = show;
             f(4);
             countdown(2)
@@ -177,14 +193,16 @@ fn ordinary_and_recursive_functions_can_print() {
 
 #[test]
 fn imported_print_can_be_shadowed_by_a_local_or_parameter() {
-    let output = run(r#"export { main }; import { "$/string.resin" };
-        fn increment(value: int) -> int  { value + 1 }
-        fn apply(print: (int) -> int) -> int  { print(41) }
-        fn main() -> int  {
+    let output = run(
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
+        fn increment(value: i32) -> i32  { value + 1 }
+        fn apply(print: (i32) -> i32) -> i32  { print(41) }
+        fn main() -> i32  {
             let mut print = 7;
             if (print == 7 && apply(increment) == 42) { 0 } else { 1 }
         }
-    "#);
+    "#,
+    );
     assert!(output.status.success());
     assert!(output.stdout.is_empty());
 }
@@ -201,14 +219,14 @@ fn invalid_formats_fail_before_writing() {
         "prefix {99999999999999999999999999}",
     ] {
         let output = run(&format!(
-            "export {{ main }}; import {{ \"$/string.resin\" }}; fn main() -> ()  {{ print(fmt({format:?}, (42,))); }}"
+            "export {{ main }}; import {{ \"$/string.resin\", \"$/stdio.resin\" }}; fn main() -> ()  {{ let text = fmt({format:?}, (42,)); print(text); }}"
         ));
         assert_eq!(output.status.code(), Some(1), "{format}");
         assert!(output.stdout.is_empty(), "{format}");
         assert!(String::from_utf8_lossy(&output.stderr).contains("resin:"));
     }
     assert_eq!(
-        run(r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print(fmt("{0}", ())); }"#)
+        run(r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { { let borrowed = fmt("{0}", ()); print(borrowed) }; }"#)
             .status
             .code(),
         Some(1)
@@ -219,19 +237,19 @@ fn invalid_formats_fail_before_writing() {
 fn invalid_print_types_are_rejected() {
     for (source, diagnostic) in [
         (
-            r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print(fmt("{0}", 1)); }"#,
+            r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { { let borrowed = fmt("{0}", 1); print(borrowed) }; }"#,
             "InvalidFormatArguments",
         ),
         (
-            r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print(fmt(1, (2,))); }"#,
+            r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { print(fmt(1, (2,))); }"#,
             "no overload of `fmt` matches",
         ),
         (
-            r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print(fmt("hello")); }"#,
+            r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { print(fmt("hello")); }"#,
             "no overload of `fmt` matches",
         ),
         (
-            r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print(fmt("{0}", (1,), (2,))); }"#,
+            r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { print(fmt("{0}", (1,), (2,))); }"#,
             "no overload of `fmt` matches",
         ),
     ] {
@@ -243,7 +261,7 @@ fn invalid_print_types_are_rejected() {
 #[test]
 fn shader_print_rejects_host_only_string_types() {
     let error = pipeline::shader_error(
-        r#"export { kernel }; import { "$/string.resin", "$/span.resin" }; @compute_shader fn kernel(invocation: ulong, text: Ptr<Span<ubyte>>)  { print(text.*); }"#,
+        r#"export { kernel }; import { "$/string.resin", "$/stdio.resin", "$/span.resin" }; @compute_shader fn kernel(invocation: u64, text: Ptr<Span<u8>>)  { print(text.*); }"#,
     );
     assert!(
         error.contains("shader cannot call foreign function resin_print"),
@@ -255,7 +273,7 @@ fn shader_print_rejects_host_only_string_types() {
 fn generated_c_uses_the_shared_runtime_header() {
     let project = support::project::Project::new(
         &module(
-            r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print("hello"); }"#,
+            r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { print("hello"); }"#,
         ),
         Some("main"),
     )
@@ -298,21 +316,23 @@ fn c_runtime_accepts_empty_buffers_and_pointer_values() {
 #[test]
 fn formatted_strings_retain_storage_and_release_the_last_owner() {
     prints(
-        r#"export { main }; import { "$/string.resin", "$/shared.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin", "$/shared.resin" };
         fn make() -> String  { fmt("{0}\0{1}", ("hi", 42)) }
-        fn main() -> int  {
-            let mut weak = weak_span_empty::<ubyte>();
+        fn main() -> i32  {
+            let mut weak = weak_span_empty::<u8>();
             {
                 let mut original = make();
                 weak = original.storage:downgrade();
                 let mut alias = original;
                 original = fmt("replacement", ());
                 print(alias);
-                print(fmt(fmt("{{0}} {0}", (7,)), (alias:bytes(),)));
+                let pattern = fmt("{{0}} {0}", (7,));
+                let text = fmt(pattern, (alias:bytes(),));
+                print(text);
             };
             match (weak:upgrade()) {
                 None => { 0 },
-                ArcSpan<ubyte>(live) => { 1 },
+                ArcSpan<u8>(live) => { 1 },
             }
         }
     "#,
@@ -327,16 +347,16 @@ fn literal_strings_survive_returns_and_keep_explicit_nuls() {
 
         extern {
             "string.h": {
-                fn strlen(p: Ptr<ubyte>) -> ulong;
+                fn strlen(p: Ptr<u8>) -> u64;
             },
         };
-        import { "$/string.resin" };
+        import { "$/string.resin", "$/stdio.resin" };
         fn literal() -> str  { "a\0b" }
-        fn main() -> int  {
+        fn main() -> i32  {
             let mut text = literal();
             let mut copy = text;
             print(copy);
-            if (text.length == 3_ul && strlen(text.data) == 1_ul && text:at(2_ul) == 98_ub) { 0 } else { 1 }
+            if (text.length == u64(3) && strlen(text.data) == u64(1) && text:at(u64(2)) == u8(98)) { 0 } else { 1 }
         }"#,
         b"a\0b",
     );
@@ -345,31 +365,31 @@ fn literal_strings_survive_returns_and_keep_explicit_nuls() {
 #[test]
 fn from_bytes_copies_unterminated_spans_verbatim_and_owns_the_result() {
     prints(
-        r#"export { main }; import { "$/string.resin", "$/span.resin", "$/shared.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin", "$/span.resin", "$/shared.resin" };
         type Caption = String;
-        fn copied() -> String  {
-            let mut source = [65_ub, 0_ub, 66_ub];
-            let mut result = string_from_bytes(Span<ubyte> { data = Ptr<ubyte>(&source), length = 3_ul });
-            source:at(0_ul) = 90_ub;
+        fn copied() -> String | Err<_> {
+            let source = arc_ptr_alloc([u8(65), u8(0), u8(66)])?;
+            let mut result = { let borrowed = Span<u8> { data = source:get():lea(u64(0)), length = u64(3) }; string_from_bytes(borrowed) };
+            source:get():at(u64(0)) = u8(90);
             result
         }
-        fn main() -> int  {
-            let mut weak = weak_span_empty::<ubyte>();
+        fn main() -> i32 | Err<_> {
+            let mut weak = weak_span_empty::<u8>();
             {
-                let mut text = copied();
+                let mut text = copied()?;
                 let alias = text:clone();
                 weak = text.storage:downgrade();
                 text = string_from_str("{0}} braces");
                 print(alias);
                 print(text);
-                let mut end = Ptr<ubyte>(ulong(alias:get().data) + 3_ul);
-                if (alias:get().length != 3_ul || end.* != 0_ub) { print("bad terminator"); };
-                let mut empty = string_from_bytes(Span<ubyte> { data = Ptr<ubyte>(0_ul), length = 0_ul });
-                if (empty:get().length != 0_ul || empty:get().data.* != 0_ub) { print("bad empty string"); };
+                let mut end = Ptr<u8>(u64(alias:get().data) + u64(3));
+                if (alias:get().length != u64(3) || end.* != u8(0)) { print("bad terminator"); };
+                let mut empty = { let borrowed = Span<u8> { data = Ptr<u8>(u64(0)), length = u64(0) }; string_from_bytes(borrowed) };
+                if (empty:get().length != u64(0) || empty:get().data.* != u8(0)) { print("bad empty string"); };
             };
             match (weak:upgrade()) {
                 None => { 0 },
-                ArcSpan<ubyte>(live) => { 1 },
+                ArcSpan<u8>(live) => { 1 },
             }
         }
     "#,
@@ -380,11 +400,11 @@ fn from_bytes_copies_unterminated_spans_verbatim_and_owns_the_result() {
 #[test]
 fn byte_spans_print_their_length_including_nuls_and_empty_views() {
     prints(
-        r#"export { main }; import { "$/string.resin", "$/span.resin" }; fn main()  {
-            let mut buffer = [65_ub, 0_ub, 66_ub, 67_ub];
-            let mut view = Span<ubyte> { data = &buffer:at(0), length = 3_ul };
-            let mut empty = Span<ubyte> { data = Ptr<ubyte>(0_ul), length = 0_ul };
-            print(fmt("[{0}][{1}]", (view:bytes(), empty:bytes())));
+        r#"export { main }; import { "$/shared.resin", "$/string.resin", "$/stdio.resin", "$/span.resin" }; fn main() -> () | Err<_> {
+            let buffer_owner = arc_ptr_alloc([u8(65), u8(0), u8(66), u8(67)])?; let buffer: Ref<_> = buffer_owner:get().*;
+            let mut view = Span<u8> { data = buffer_owner:get():lea(0), length = u64(3) };
+            let mut empty = Span<u8> { data = Ptr<u8>(u64(0)), length = u64(0) };
+            { let borrowed = fmt("[{0}][{1}]", (view:bytes(), empty:bytes())); print(borrowed) };
         }"#,
         b"[A\0B][]",
     );
@@ -393,7 +413,7 @@ fn byte_spans_print_their_length_including_nuls_and_empty_views() {
 #[test]
 fn literal_strings_have_a_distinct_type_and_require_explicit_byte_views() {
     let m = module(
-        r#"import { "$/span.resin" }; fn literal() -> str  { "bytes" } fn view() -> Span<ubyte>  { bytes("bytes") }"#,
+        r#"import { "$/span.resin" }; fn literal() -> str  { "bytes" } fn view() -> Span<u8>  { bytes("bytes") }"#,
     );
     let literal = m
         .functions
@@ -409,10 +429,10 @@ fn literal_strings_have_a_distinct_type_and_require_explicit_byte_views() {
     assert!(matches!(view.result, Ty::Defined { .. }));
     assert_ne!(m.types.id(&literal.result), m.types.id(&view.result));
     for source in [
-        r#"import { "$/string.resin", "$/span.resin" }; fn bad() -> Span<ubyte>  { "bytes" }"#,
-        r#"import { "$/string.resin", "$/span.resin" }; fn bad(bytes: Span<ubyte>) -> str  { str(bytes) }"#,
+        r#"import { "$/string.resin", "$/span.resin" }; fn bad() -> Span<u8>  { "bytes" }"#,
+        r#"import { "$/string.resin", "$/span.resin" }; fn bad(bytes: Span<u8>) -> str  { str(bytes) }"#,
         r#"import { "$/string.resin", "$/span.resin" }; fn bad() -> str  { str() }"#,
-        r#"import { "$/string.resin", "$/span.resin" }; fn bad() -> str  { str { data = "bytes".data, length = 5_ul } }"#,
+        r#"import { "$/string.resin", "$/span.resin" }; fn bad() -> str  { str { data = "bytes".data, length = u64(5) } }"#,
         r#"import { "$/string.resin", "$/span.resin" }; fn bad()  { string_from_str(bytes("bytes")); }"#,
         r#"import { "$/string.resin", "$/span.resin" }; fn bad()  { string_from_bytes("bytes"); }"#,
     ] {
@@ -423,19 +443,19 @@ fn literal_strings_have_a_distinct_type_and_require_explicit_byte_views() {
 #[test]
 fn literal_byte_views_preserve_storage_while_owned_strings_copy_it() {
     prints(
-        r#"export { main }; import { "$/string.resin", "$/span.resin" };
-        fn view(text: str) -> Span<ubyte>  { bytes(text) }
-        fn main() -> int  {
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin", "$/span.resin" };
+        fn view(text: str) -> Span<u8>  { bytes(text) }
+        fn main() -> i32  {
             let mut text = "hé\0";
             let mut buffer = view(text);
             let mut owned = string_from_str(text);
             let mut empty = string_from_str("");
-            if (text.length == 4_ul && buffer.length == text.length &&
-                ulong(buffer.data) == ulong(text.data) && text:at(1_ul) == 195_ub &&
-                ulong(owned:get().data) != ulong(text.data) && owned:get().length == 4_ul &&
-                Ptr<ubyte>(ulong(owned:get().data) + 4_ul).* == 0_ub &&
-                empty:get().length == 0_ul && empty:get().data.* == 0_ub) {
-                print(fmt(view("{0}{1}{2}"), (text, buffer:bytes(), owned:bytes())));
+            if (text.length == u64(4) && buffer.length == text.length &&
+                u64(buffer.data) == u64(text.data) && text:at(u64(1)) == u8(195) &&
+                u64(owned:get().data) != u64(text.data) && owned:get().length == u64(4) &&
+                Ptr<u8>(u64(owned:get().data) + u64(4)).* == u8(0) &&
+                empty:get().length == u64(0) && empty:get().data.* == u8(0)) {
+                { let borrowed_1 = { let borrowed = view("{0}{1}{2}"); fmt(borrowed, (text, buffer:bytes(), owned:bytes())) }; print(borrowed_1) };
                 0
             } else { 1 }
         }"#,
@@ -446,42 +466,42 @@ fn literal_byte_views_preserve_storage_while_owned_strings_copy_it() {
 #[test]
 fn raw_byte_views_and_owned_strings_preserve_non_utf8() {
     prints(
-        r#"export { main }; import { "$/string.resin", "$/span.resin" }; fn main()  {
-            let mut data = [255_ub, 0_ub, 254_ub];
-            let mut buffer = Span<ubyte> { data = &data:at(0_ul), length = 3_ul };
+        r#"export { main }; import { "$/shared.resin", "$/string.resin", "$/stdio.resin", "$/span.resin" }; fn main() -> () | Err<_> {
+            let data_owner = arc_ptr_alloc([u8(255), u8(0), u8(254)])?; let data: Ref<_> = data_owner:get().*;
+            let mut buffer = Span<u8> { data = data_owner:get():lea(u64(0)), length = u64(3) };
             let mut owned = string_from_bytes(buffer);
-            data:at(0_ul) = 65_ub;
+            data:at(u64(0)) = u8(65);
             print(buffer);
-            print(fmt("{0}", (owned:bytes(),)));
+            { let borrowed = fmt("{0}", (owned:bytes(),)); print(borrowed) };
         }"#,
         b"A\0\xfe\xff\0\xfe",
     );
 }
 
 #[test]
-fn formats_owned_temporary_results() {
+fn formats_owned_results_from_functions() {
     prints(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn text() -> String  { fmt("{0}+i{1}", (40, 85)) }
-        fn main()  { print(fmt("{0}\n", (text(),))); }"#,
+        fn main()  { { let borrowed = fmt("{0}\n", (text(),)); print(borrowed) }; }"#,
         b"40+i85\n",
     );
 }
 
 #[test]
 fn repr_renders_fields_arrays_tuples_and_active_union_payloads() {
-    prints(r#"export { main }; import { "$/string.resin" };
-        struct Complex { real: float64, imaginary: float64, }
+    prints(r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
+        struct Complex { real: f64, imaginary: f64, }
         struct Problem { message: str, detail: String, }
         fn main()  {
-            print(repr(Complex { real = -1.0, imaginary = 2.5 }));
+            { let borrowed = repr(Complex { real = -1.0, imaginary = 2.5 }); print(borrowed) };
             print("\n");
-            print(repr(([1, 2, 3], true, None, "a\n\0\"\\世界")));
+            { let borrowed = repr(([1, 2, 3], true, None, "a\n\0\"\\世界")); print(borrowed) };
             print("\n");
-            let mut problem: int | Problem = Problem { message = "bad", detail = string_from_str("input") };
-            print(repr(problem));
+            let mut problem: i32 | Problem = Problem { message = "bad", detail = string_from_str("input") };
+            { let borrowed = repr(problem); print(borrowed) };
             print("\n");
-            print(fmt("{0} {1}", ([4, 5], string_from_str("raw"))));
+            { let borrowed = fmt("{0} {1}", ([4, 5], string_from_str("raw"))); print(borrowed) };
         }"#,
         "Complex { real = -1, imaginary = 2.5 }\n([1, 2, 3], true, None, \"a\\n\\0\\\"\\\\世界\")\nProblem { message = \"bad\", detail = \"input\" }\n[4, 5] raw".as_bytes());
 }
@@ -489,7 +509,7 @@ fn repr_renders_fields_arrays_tuples_and_active_union_payloads() {
 #[test]
 fn entry_errors_display_owned_payload_contents() {
     let output = run(r#"export { main }; import { "$/string.resin" };
-        struct Problem { message: String, code: int, }
+        struct Problem { message: String, code: i32, }
         fn main() -> (() | Err<Problem>)  {
             Err(Problem { message = string_from_str("bad input"), code = 7 })
         }"#);
@@ -505,7 +525,7 @@ fn text_representation_hooks_require_a_borrowed_receiver_and_byte_view() {
     let error = pipeline::source_module(
         r#"export { main };
         struct Bad {  }
-fn repr_bytes(self: Bad) -> int  { 1 }
+fn repr_bytes(self: Bad) -> i32  { 1 }
 
         fn main()  { let mut bad = Bad {}; }"#,
     )
@@ -517,19 +537,19 @@ fn repr_bytes(self: Bad) -> int  { 1 }
 #[test]
 fn free_generic_text_hooks_format_values_and_print_borrows_owned_strings() {
     prints(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         struct Label<T> { text: str, value: T }
-        fn repr_bytes<T>(value: Ref<Label<T>>) -> (Ptr<ubyte>, ulong) {
+        fn repr_bytes<T>(value: Ref<Label<T>>) -> (Ptr<u8>, u64) {
             (value.text.data, value.text.length)
         }
         fn main() {
             let text = string_from_str("again");
             print(text);
             print(text);
-            print(fmt(" {0} {1}", (
-                Label<int> { text = "integer", value = 42 },
+            { let borrowed = fmt(" {0} {1}", (
+                Label<i32> { text = "integer", value = 42 },
                 Label<bool> { text = "boolean", value = true },
-            )));
+            )); print(borrowed) };
         }"#,
         b"againagain integer boolean",
     );
@@ -538,8 +558,8 @@ fn free_generic_text_hooks_format_values_and_print_borrows_owned_strings() {
 #[test]
 fn verifier_rejects_invalid_text_view_callbacks() {
     let mut module = module(
-        r#"export { main }; import { "$/string.resin" };
-        fn main()  { print(repr(string_from_str("x"))); }"#,
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
+        fn main()  { { let borrowed = repr(string_from_str("x")); print(borrowed) }; }"#,
     );
     let hook = *module.text_views.values().next().unwrap();
     module.functions[hook.index()].result = Ty::Unit;
@@ -553,8 +573,8 @@ fn verifier_rejects_invalid_text_view_callbacks() {
 #[test]
 fn repr_does_not_follow_pointers() {
     prints(
-        r#"export { main }; import { "$/string.resin" };
-        fn main()  { print(repr(Ptr<int>(1_ul))); }"#,
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
+        fn main()  { { let borrowed = repr(Ptr<i32>(u64(1))); print(borrowed) }; }"#,
         b"0x1",
     );
 }

@@ -101,6 +101,9 @@ pub(crate) fn diagnostics(hir: &resin_hir::Hir) -> Vec<Diagnostic> {
     hir.diagnostics()
         .iter()
         .map(|diagnostic| Diagnostic {
+            code: None,
+            notes: Vec::new(),
+            help: None,
             severity: Severity::Error,
             message: diagnostic.message.clone(),
             span: Some(location(&diagnostic.location)),
@@ -153,7 +156,7 @@ pub(crate) fn managed_sources(
         })
         .collect()
 }
-fn location(location: &SourceLocation) -> Span {
+pub(crate) fn location(location: &SourceLocation) -> Span {
     span(&location.source, location.span)
 }
 fn span(source: &Source, span: resin_source::Span) -> Span {
@@ -185,9 +188,14 @@ fn query_result(hir: &resin_hir::Hir, query: Query) -> Result<QueryResult, Failu
         Query::Hover { .. } => {
             let hover = hir.hover(source, offset);
             QueryResult::Hover {
-                markdown: hover
-                    .as_ref()
-                    .map(|hover| format!("```resin\n{}\n```", hover.text)),
+                markdown: hover.as_ref().map(|hover| {
+                    let mut markdown = format!("```resin\n{}\n```", hover.text);
+                    if !hover.documentation.is_empty() {
+                        markdown.push_str("\n\n");
+                        markdown.push_str(&hover.documentation);
+                    }
+                    markdown
+                }),
                 span: hover.map(|hover| span(source, hover.span)),
             }
         }

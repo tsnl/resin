@@ -38,19 +38,48 @@ fn success(output: &std::process::Output) {
 }
 
 #[test]
+fn slice_lea_returns_pointers_and_evaluates_the_index_once() {
+    success(&run(
+        r#"export { main };
+        import { "$/span.resin", "$/shared.resin" };
+        fn index(calls: Ref<i32>) -> u64 { calls = calls + 1; u64(1) }
+        fn first<T>(items: Ref<Span<T>>) -> Ptr<T> { items:lea(u64(0)) }
+        fn main() -> () | Err<_> {
+            let owner = arc_span_alloc::<i32>(u64(3), i32(0))?;
+            let mut calls: i32 = 0;
+            let pointer: Ptr<i32> = { let borrowed = owner:get(); borrowed:lea(index(calls)) };
+            pointer.* = 41;
+            { let borrowed = owner:get(); first(borrowed) }.* = 7;
+            assert(calls == 1 && { let borrowed = owner:get(); borrowed:at(u64(1)) } == 41);
+            assert({ let borrowed = owner:get(); borrowed:at(u64(0)) } == 7 && { let borrowed = owner:get(); borrowed:at(u64(2)) } == 0);
+            let array = arc_ptr_alloc([[i32(1), i32(2)], [i32(3), i32(4)]])?;
+            let row = array:get():lea(u64(1));
+            row:lea(u64(0)).* = 42;
+            let reference: Ref<i32> = row:at(u64(1));
+            reference = 19;
+            assert(array:get():at(u64(1)):at(u64(0)) == 42 && row:at(u64(1)) == 19);
+
+            assert("abc":lea(u64(1)).* == u8(98) && "abc"(u64(2)) == u8(99));
+        }
+        "#,
+        "",
+    ));
+}
+
+#[test]
 fn source_strings_format_explicit_byte_views_and_keep_the_terminator_outside_length() {
     let output = run(
         r#"export { main };
-        import { "$/span.resin", "$/shared.resin", "$/string.resin" };
-        fn main() -> int  {
-            let buffer = [65_ub, 0_ub, 66_ub];
-            let mut text = string_from_bytes(Span<ubyte> { data = &buffer:at(0), length = 3_ul });
+        import { "$/span.resin", "$/shared.resin", "$/string.resin", "$/stdio.resin" };
+        fn main() -> i32 | Err<_> {
+            let buffer_owner = arc_ptr_alloc([u8(65), u8(0), u8(66)])?; let buffer: Ref<_> = buffer_owner:get().*;
+            let mut text = { let borrowed = Span<u8> { data = buffer_owner:get():lea(0), length = u64(3) }; string_from_bytes(borrowed) };
             let mut weak = text.storage:downgrade();
             let mut formatted = fmt("{0}:{1}:{2}", (42, text:bytes(), "end"));
             let mut raw = formatted:get();
-            let mut terminated = Span<ubyte> { data = raw.data, length = raw.length + 1_ul };
+            let mut terminated = Span<u8> { data = raw.data, length = raw.length + u64(1) };
             print(formatted);
-            if (raw.length == 10_ul && terminated:at(raw.length) == 0_ub && weak:upgrade()!:get().length == 3_ul) { 0 } else { 1 }
+            if (raw.length == u64(10) && terminated:at(raw.length) == u8(0) && { let borrowed = weak:upgrade()!; borrowed:get() }.length == u64(3)) { 0 } else { 1 }
         }
     "#,
         "",
@@ -64,28 +93,28 @@ fn source_shared_elements_drop_in_reverse_and_unwind_on_allocation_failure() {
     success(&run(
         r#"export { main };
         import { "$/shared.resin", "$/span.resin", "$/status.resin" };
-        struct Item { trace: Ptr<int>, digit: int,
+        struct Item { trace: Ptr<i32>, digit: i32,
             
         }
-fn drop(self: Ptr<Item>)  {
+fn drop(self: Ref<Item>)  {
                 if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; };
             }
 
-        fn fail(trace: Ptr<int>) -> (() | Err<OutOfMemory>)  {
+        fn fail(trace: Ptr<i32>) -> (() | Err<OutOfMemory>)  {
             let mut owner = arc_ptr_alloc::<Item>(Item { trace = trace, digit = 0 })?;
             owner:get().digit = 4;
-            arc_span_alloc::<ulong>(0xffffffffffffffff_ul, 0_ul)?;
+            arc_span_alloc::<u64>(u64(0xffffffffffffffff), u64(0))?;
             (())
         }
-        fn main() -> (int | Err<_>)  {
-            let mut trace = 0;
+        fn main() -> (i32 | Err<_>)  {
+            let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
             {
-                let items = arc_ptr_alloc([Item { trace = &trace, digit = 0 }, Item { trace = &trace, digit = 0 }, Item { trace = &trace, digit = 0 }])?;
+                let items = arc_ptr_alloc([Item { trace = trace_owner:get(), digit = 0 }, Item { trace = trace_owner:get(), digit = 0 }, Item { trace = trace_owner:get(), digit = 0 }])?;
                 items:get().*:at(0).digit = 1;
                 items:get().*:at(1).digit = 2;
                 items:get().*:at(2).digit = 3;
             };
-            let mut failed = match (fail(&trace)) { ()(value) => { 1 == 0 }, Err(error) => { 1 == 1 } };
+            let mut failed = match (fail(trace_owner:get())) { ()(value) => { 1 == 0 }, Err(error) => { 1 == 1 } };
             (if (failed && trace == 3214) { 0 } else { 1 })
         }
     "#,
@@ -94,38 +123,43 @@ fn drop(self: Ptr<Item>)  {
 }
 
 #[test]
-fn source_owned_wrappers_retain_payloads_and_borrow_temporary_receivers() {
+fn source_owned_wrappers_retain_payloads_and_borrow_named_receivers() {
     success(&run(
         r#"export { main };
         import { "$/shared.resin", "$/span.resin", "$/status.resin" };
-        struct Item { trace: Ptr<int>, digit: int,
+        struct Item { trace: Ptr<i32>, digit: i32,
             
         }
-fn drop(self: Ptr<Item>)  {
+fn drop(self: Ref<Item>)  {
                 if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; };
             }
 
-        fn main() -> (int | Err<_>)  {
-            let mut trace = 0;
+        fn main() -> (i32 | Err<_>)  {
+            let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
             let mut weak = weak_ptr_empty::<Item>();
             let mut valid = 1 == 1;
             {
-                let mut owner = arc_ptr_alloc::<Item>(Item { trace = &trace, digit = 0 })?;
+                let mut owner = arc_ptr_alloc::<Item>(Item { trace = trace_owner:get(), digit = 0 })?;
                 owner:get().digit = 7;
                 weak = owner:downgrade();
                 let copy = owner:clone();
-                valid = valid && copy:get().digit == 7 && weak:upgrade()!:get().digit == 7;
-                let mut values = arc_span_alloc::<uint>(3, 42_ui)?;
-                values:get():at(2) = 9_ui;
-                valid = valid && values:get():at(0) == 42_ui && values:get():at(2) == 9_ui;
-                valid = valid && arc_span_alloc::<uint>(1, 13_ui)?:get():at(0) == 13_ui;
-                let mut empty = arc_span_alloc::<uint>(0, 0_ui)?;
-                valid = valid && empty:get().length == 0_ul;
+                valid = valid && copy:get().digit == 7 && { let borrowed = weak:upgrade()!; borrowed:get() }.digit == 7;
+                let mut values = arc_span_alloc::<u32>(3, u32(42))?;
+                let view = values:get();
+                view:at(2) = u32(9);
+                valid = valid && { let borrowed = values:get(); borrowed:at(0) } == u32(42) && { let borrowed = values:get(); borrowed:at(2) } == u32(9);
+                {
+                    let extra = arc_span_alloc::<u32>(1, u32(13))?;
+                    let view = extra:get();
+                    valid = valid && view:at(0) == u32(13);
+                };
+                let mut empty = arc_span_alloc::<u32>(0, u32(0))?;
+                valid = valid && empty:get().length == u64(0);
             };
             valid = valid && trace == 7;
             valid = valid && match (weak:upgrade()) { ArcPtr<Item>(live) => { 1 == 0 }, None => { 1 == 1 } };
-            valid = valid && match (arc_span_alloc::<uint>(0xffffffffffffffff_ul, 0_ui)) {
-                ArcSpan<uint>(owner) => { 1 == 0 }, Err(error) => { 1 == 1 },
+            valid = valid && match (arc_span_alloc::<u32>(u64(0xffffffffffffffff), u32(0))) {
+                ArcSpan<u32>(owner) => { 1 == 0 }, Err(error) => { 1 == 1 },
             };
             (if (valid) { 0 } else { 1 })
         }
@@ -140,38 +174,38 @@ fn source_owners_allocate_initialized_typed_storage_and_reports_overflow() {
         r#"export { main };
         import { "$/shared.resin", "$/span.resin", "$/status.resin" };
         type Empty = ();
-        fn main() -> (int | Err<_>)  {
-            let mut weak = weak_span_empty::<uint>();
+        fn main() -> (i32 | Err<_>)  {
+            let mut weak = weak_span_empty::<u32>();
             let mut valid = 1 == 1;
             {
-                let mut memory: ArcSpan<uint>;
-                memory = arc_span_alloc::<uint>(4, 7_ui)?;
+                let mut memory: ArcSpan<u32>;
+                memory = arc_span_alloc::<u32>(4, u32(7))?;
                 weak = memory:downgrade();
                 let alias = memory:clone();
                 let mut values = memory:get();
-                valid = valid && values.length == 4_ul && values:at(3) == 7_ui;
-                values:at(3) = 42_ui;
-                valid = valid && alias:get():at(3) == 42_ui;
-                valid = valid && values:as_bytes().length == 4_ul * size_of(uint);
+                valid = valid && values.length == u64(4) && values:at(3) == u32(7);
+                values:at(3) = u32(42);
+                valid = valid && { let borrowed = alias:get(); borrowed:at(3) } == u32(42);
+                valid = valid && values:as_bytes().length == u64(4) * size_of(u32);
                 let mut upgraded = weak:upgrade()!;
-                valid = valid && upgraded:get():at(3) == 42_ui;
-                let mut descriptor = arc_ptr_alloc::<Span<uint>>(values:clone())?;
-                let mut previous = descriptor:get():replace(Span<uint> { data = values.data, length = 2_ul });
-                valid = valid && previous.length == 4_ul && descriptor:get().length == 2_ul;
-                valid = valid && memory:get().length == 4_ul;
+                valid = valid && { let borrowed = upgraded:get(); borrowed:at(3) } == u32(42);
+                let mut descriptor = arc_ptr_alloc::<Span<u32>>(values:clone())?;
+                let mut previous = descriptor:get():replace(Span<u32> { data = values.data, length = u64(2) });
+                valid = valid && previous.length == u64(4) && descriptor:get().length == u64(2);
+                valid = valid && memory:get().length == u64(4);
             };
             let mut expired = match (weak:upgrade()) {
-                ArcSpan<uint>(owner) => { 1 == 0 },
+                ArcSpan<u32>(owner) => { 1 == 0 },
                 None => { 1 == 1 },
             };
-            let mut empty = arc_span_alloc::<uint>(0, 0_ui)?;
-            valid = valid && empty:get().length == 0_ul;
+            let mut empty = arc_span_alloc::<u32>(0, u32(0))?;
+            valid = valid && empty:get().length == u64(0);
             let mut empty_elements = arc_span_alloc::<Empty>(19, ())?;
-            valid = valid && empty_elements:get().length == 19_ul;
-            let mut failure: (ArcSpan<uint> | Err<OutOfMemory>);
-            failure = arc_span_alloc::<uint>(0xffffffffffffffff_ul, 0_ui);
+            valid = valid && empty_elements:get().length == u64(19);
+            let mut failure: (ArcSpan<u32> | Err<OutOfMemory>);
+            failure = arc_span_alloc::<u32>(u64(0xffffffffffffffff), u32(0));
             let mut failed = match (failure) {
-                ArcSpan<uint>(memory) => { 1 == 0 },
+                ArcSpan<u32>(memory) => { 1 == 0 },
                 Err(error) => { 1 == 1 },
             };
             (if (valid && expired && failed) { 0 } else { 1 })
@@ -186,7 +220,7 @@ fn source_owners_allocate_initialized_typed_storage_and_reports_overflow() {
         r#"export { main };
         import { "$/shared.resin" };
         fn main() -> (() | Err<_>)  {
-            arc_span_alloc::<uint>(0xffffffffffffffff_ul, 0_ui)?;
+            arc_span_alloc::<u32>(u64(0xffffffffffffffff), u32(0))?;
             (())
         }
         "#,
@@ -206,38 +240,38 @@ fn shared_arrays_release_managed_elements_on_success_and_error() {
         import { "$/shared.resin" };
         struct Failed {}
         struct Item {
-            trace: Ptr<int>,
-            digit: int,
+            trace: Ptr<i32>,
+            digit: i32,
             
         }
-fn drop(self: Ptr<Item>)  { if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; }; }
+fn drop(self: Ref<Item>)  { if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; }; }
 
-        fn item(trace: Ptr<int>, digit: int) -> (ArcPtr<Item> | Err<_>)  {
+        fn item(trace: Ptr<i32>, digit: i32) -> (ArcPtr<Item> | Err<_>)  {
             let mut owner = arc_ptr_alloc::<Item>(Item { trace = trace, digit = 0 })?;
             owner:get().digit = digit;
             (owner)
         }
-        fn work(trace: Ptr<int>, fail: bool) -> (() | Err<_>)  {
+        fn work(trace: Ptr<i32>, fail: bool) -> (() | Err<_>)  {
             let values = arc_ptr_alloc([item(trace, 1)?, item(trace, 2)?])?;
             let alias = values:clone();
             if (fail) { Err(Failed {}) } else { (()) }
         }
-        fn main() -> (int | Err<_>)  {
-            let mut trace = 0;
-            work(&trace, 1 == 0)?;
+        fn main() -> (i32 | Err<_>)  {
+            let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+            work(trace_owner:get(), 1 == 0)?;
             let mut valid = trace == 21;
             trace = 0;
-            let mut failed = match (work(&trace, 1 == 1)) {
+            let mut failed = match (work(trace_owner:get(), 1 == 1)) {
                 ()(value) => { 1 == 0 },
                 Err(error) => { 1 == 1 },
             };
             valid = valid && failed && trace == 21;
             trace = 0;
             let mut rejected = match ({
-                let owner = item(&trace, 3)?;
-                arc_span_alloc::<ulong>(0xffffffffffffffff_ul, 0_ul)
+                let owner = item(trace_owner:get(), 3)?;
+                arc_span_alloc::<u64>(u64(0xffffffffffffffff), u64(0))
             }) {
-                ArcSpan<ulong>(values) => { 1 == 0 },
+                ArcSpan<u64>(values) => { 1 == 0 },
                 Err(error) => { 1 == 1 },
             };
             (if (valid && rejected && trace == 3) { 0 } else { 1 })
@@ -254,10 +288,10 @@ fn generic_owned_span_methods_preserve_lifetimes_and_widened_results() {
         r#"export { main };
         import { "$/shared.resin", "$/span.resin", "$/status.resin" };
         struct Other {}
-        fn allocate<T>(count: ulong, initial: T) -> (ArcSpan<T> | Err<OutOfMemory | Other>)  {
+        fn allocate<T>(count: u64, initial: T) -> (ArcSpan<T> | Err<OutOfMemory | Other>)  {
             arc_span_alloc::<T>(count, initial)
         }
-        fn optional<T>(count: ulong, initial: T) -> ArcSpan<T> | None  {
+        fn optional<T>(count: u64, initial: T) -> ArcSpan<T> | None  {
             match (arc_span_alloc::<T>(count, initial)) { ArcSpan<T>(owner) => { owner }, Err(error) => { None } }
         }
         fn borrowed<T>(owner: Ref<ArcSpan<T>>) -> Span<T> { owner:get() }
@@ -265,33 +299,34 @@ fn generic_owned_span_methods_preserve_lifetimes_and_widened_results() {
         fn widen_upgrade<T>(weak: Ref<WeakSpan<T>>) -> ArcSpan<T> | None | Other  { weak:upgrade() }
         fn first<T>(initial: T) -> T  {
             let mut owner = optional(1, initial)!;
-            owner:get():at(0)
+            let view = owner:get();
+            view:at(0)
         }
-        fn main() -> (int | Err<_>)  {
-            let mut weak = weak_span_empty::<uint>();
+        fn main() -> (i32 | Err<_>)  {
+            let mut weak = weak_span_empty::<u32>();
             let mut valid = 1 == 1;
             {
-                let mut owner = allocate(2, 7_ui)?;
+                let mut owner = allocate(2, u32(7))?;
                 weak = weaken(owner);
                 let mut view = borrowed(owner);
-                view:at(1) = 42_ui;
-                valid = valid && view.length == 2_ul && owner:get():at(1) == 42_ui;
+                view:at(1) = u32(42);
+                valid = valid && view.length == u64(2) && { let borrowed = owner:get(); borrowed:at(1) } == u32(42);
                 valid = valid && match (widen_upgrade(weak)) {
-                    ArcSpan<uint>(live) => { live:get():at(1) == 42_ui },
+                    ArcSpan<u32>(live) => { { let borrowed = live:get(); borrowed:at(1) } == u32(42) },
                     None => { 1 == 0 },
                     Other(other) => { 1 == 0 },
                 };
-                let mut another = optional(3, 9_ui)!;
-                valid = valid && another:get().length == 3_ul && another:get():at(2) == 9_ui;
-                valid = valid && first(17_ui) == 17_ui;
+                let mut another = optional(3, u32(9))!;
+                valid = valid && another:get().length == u64(3) && { let borrowed = another:get(); borrowed:at(2) } == u32(9);
+                valid = valid && first(u32(17)) == u32(17);
             };
             valid = valid && match (widen_upgrade(weak)) {
-                ArcSpan<uint>(live) => { 1 == 0 },
+                ArcSpan<u32>(live) => { 1 == 0 },
                 None => { 1 == 1 },
                 Other(other) => { 1 == 0 },
             };
-            valid = valid && match (allocate(0xffffffffffffffff_ul, 0_ui)) {
-                ArcSpan<uint>(owner) => { 1 == 0 },
+            valid = valid && match (allocate(u64(0xffffffffffffffff), u32(0))) {
+                ArcSpan<u32>(owner) => { 1 == 0 },
                 Err(error) => {
                     match (error) {
                         OutOfMemory(error) => { 1 == 1 },
@@ -311,19 +346,19 @@ fn generic_owned_span_methods_preserve_lifetimes_and_widened_results() {
 fn borrowed_span_slices_preserve_aliases_and_accept_empty_null_views() {
     let output = run(
         r#"export { main }; import { "$/shared.resin", "$/span.resin" };
-        fn main() -> (int | Err<_>)  {
-            let mut values = arc_span_alloc::<uint>(4, 0_ui)?;
+        fn main() -> (i32 | Err<_>)  {
+            let mut values = arc_span_alloc::<u32>(4, u32(0))?;
             let mut view = values:get();
             let mut middle = view:slice(1, 2);
             let alias = middle:clone();
-            alias:at(1) = 42_ui;
-            let mut valid = middle.length == 2_ul && view:at(2) == 42_ui;
-            valid = valid && view:at(0) == 0_ui && view:at(3) == 0_ui;
+            alias:at(1) = u32(42);
+            let mut valid = middle.length == u64(2) && view:at(2) == u32(42);
+            valid = valid && view:at(0) == u32(0) && view:at(3) == u32(0);
             let mut end = view:slice(view.length, 0);
-            valid = valid && end.length == 0_ul;
-            let mut null_view = Span<uint> { data = Ptr<uint>(0_ul), length = 0_ul };
+            valid = valid && end.length == u64(0);
+            let mut null_view = Span<u32> { data = Ptr<u32>(u64(0)), length = u64(0) };
             let mut empty = null_view:slice(0, 0);
-            valid = valid && empty.length == 0_ul && ulong(empty.data) == 0_ul;
+            valid = valid && empty.length == u64(0) && u64(empty.data) == u64(0);
             (if (valid) { 0 } else { 1 })
         }
         "#,
@@ -335,15 +370,20 @@ fn borrowed_span_slices_preserve_aliases_and_accept_empty_null_views() {
 #[test]
 fn every_native_status_operation_has_a_public_result_wrapper() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let libraries = ["gpu", "window", "image", "console"];
-    let modules = libraries.map(|name| {
+    let libraries = [
+        ("gpu", "gpu"),
+        ("window", "window"),
+        ("image", "image"),
+        ("stdio", "console"),
+    ];
+    let modules = libraries.map(|(name, _)| {
         support::frontend::check_hir(
             &pipeline::load(&root.join(format!("resin/{name}.resin"))).unwrap(),
         )
         .into_module()
         .unwrap()
     });
-    for name in libraries {
+    for (_, name) in libraries {
         let header = fs::read_to_string(
             Path::new(resin_runtime::INCLUDE_DIR).join(format!("resin_runtime/{name}.h")),
         )
@@ -423,11 +463,11 @@ fn native_statuses_become_named_errors_and_keep_unknown_codes() {
 
         extern {
             "string.h": {
-                fn strcmp(a: Ptr<ubyte>, b: Ptr<ubyte>) -> int;
+                fn strcmp(a: Ptr<u8>, b: Ptr<u8>) -> i32;
             },
         };
        import { "$/status.resin" };
-        fn main() -> (int | Err<_>)  {
+        fn main() -> (i32 | Err<_>)  {
             runtime_status_from_code(0)?;
             let mut code = -1;
             let mut valid = 1 == 1;
@@ -475,19 +515,19 @@ fn native_statuses_become_named_errors_and_keep_unknown_codes() {
 fn png_wrappers_return_image_data_and_propagate_io_errors() {
     let output = run(
         r#"export { main };
-        import { "$/image.resin", "$/span.resin", "$/status.resin" };
-        fn main() -> (int | Err<_>)  {
+        import { "$/shared.resin", "$/image.resin", "$/span.resin", "$/status.resin" };
+        fn main() -> (i32 | Err<_>)  {
             let mut path = "pixel.png";
-            let mut buffer = [ubyte(1), ubyte(2), ubyte(3), ubyte(255)];
-            image_data_write_pixels(path.data, 1, 1, 4, Span<ubyte> { data = &buffer:at(0), length = 4_ul }, 0)?;
+            let buffer_owner = arc_ptr_alloc([u8(1), u8(2), u8(3), u8(255)])?; let buffer: Ref<_> = buffer_owner:get().*;
+            { let borrowed = Span<u8> { data = buffer_owner:get():lea(0), length = u64(4) }; image_data_write_pixels(path.data, 1, 1, 4, borrowed, 0) }?;
             let mut image = image_data_read_png(path.data, 0)?;
             let alias = image:clone();
             let mut copy_path = "copy.png";
             alias:write_png(copy_path.data)?;
             let mut copied = image_data_read_png(copy_path.data, 0)?;
             (if (copied:width() == image:width() && copied:height() == image:height() && copied:pixels().data.* == image:pixels().data.*
-                && image:width() == uint(1) && image:height() == uint(1) && image:channels() == uint(4)
-                && image:pixels().data.* == ubyte(1) && Ptr<ubyte>(ulong(image:pixels().data) + ulong(3)).* == ubyte(255)) { 0 } else { 1 })
+                && image:width() == u32(1) && image:height() == u32(1) && image:channels() == u32(4)
+                && image:pixels().data.* == u8(1) && Ptr<u8>(u64(image:pixels().data) + u64(3)).* == u8(255)) { 0 } else { 1 })
         }
         "#,
         "",
@@ -495,11 +535,11 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     success(&output);
     for call in [
         "image_data_read_png(path.data, 4)?",
-        "image_data_write_pixels(path.data, 1, 1, 4, Span<ubyte> { data = &buffer:at(0), length = 4_ul }, 0)?",
+        "let view = Span<u8> { data = buffer:get():lea(0), length = u64(4) }; image_data_write_pixels(path.data, 1, 1, 4, view, 0)?",
     ] {
         let output = run(
             &format!(
-                "export {{ main }}; import {{ \"$/image.resin\", \"$/span.resin\", \"$/string.resin\" }}; struct Cleanup {{  }}\nfn drop(self: Ptr<Cleanup>)  {{ print(fmt(\"cleanup\\n\", ())); }}\n  fn main() -> (() | Err<_>)  {{ let mut path = \"missing/pixel.png\"; let mut buffer = [0_ub, 0_ub, 0_ub, 0_ub]; let mut cleanup = Cleanup {{}}; {call}; (()) }}"
+                "export {{ main }}; import {{ \"$/shared.resin\", \"$/image.resin\", \"$/span.resin\", \"$/string.resin\", \"$/stdio.resin\" }}; struct Cleanup {{  }}\nfn drop(self: Ref<Cleanup>)  {{ print(\"cleanup\\n\"); }}\n  fn main() -> (() | Err<_>)  {{ let mut path = \"missing/pixel.png\"; let buffer = arc_ptr_alloc([u8(0), u8(0), u8(0), u8(0)])?; let mut cleanup = Cleanup {{}}; {call}; (()) }}"
             ),
             "",
         );
@@ -512,22 +552,22 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
 #[test]
 fn png_pixel_views_check_dimensions_padding_and_storage_before_native_access() {
     for (width, height, channels, length, stride) in [
-        (1, 1, 4, 3, "0_ul"),
-        (1, 2, 4, 8, "5_ul"),
-        (1, 1, 4, 4, "3_ul"),
-        (1, 2, 4, 4, "0xffffffffffffffff_ul"),
-        (0, 1, 4, 4, "0_ul"),
-        (1, 0, 4, 4, "0_ul"),
-        (1, 1, 0, 4, "0_ul"),
-        (1, 1, 5, 4, "0_ul"),
+        (1, 1, 4, 3, "u64(0)"),
+        (1, 2, 4, 8, "u64(5)"),
+        (1, 1, 4, 4, "u64(3)"),
+        (1, 2, 4, 4, "u64(0xffffffffffffffff)"),
+        (0, 1, 4, 4, "u64(0)"),
+        (1, 0, 4, 4, "u64(0)"),
+        (1, 1, 0, 4, "u64(0)"),
+        (1, 1, 5, 4, "u64(0)"),
     ] {
         let output = run(
             &format!(
                 r#"export {{ main }};
-                import {{ "$/image.resin", "$/span.resin", "$/status.resin" }};
-                fn main() -> int  {{
-                    let mut buffer = [0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub, 0_ub];
-                    let mut bytes = Span<ubyte> {{ data = &buffer:at(0), length = {length}_ul }};
+                import {{ "$/shared.resin", "$/image.resin", "$/span.resin", "$/status.resin" }};
+                fn main() -> i32 | Err<_> {{
+                    let buffer_owner = arc_ptr_alloc([u8(0), u8(0), u8(0), u8(0), u8(0), u8(0), u8(0), u8(0)])?; let buffer: Ref<_> = buffer_owner:get().*;
+                    let mut bytes = Span<u8> {{ data = buffer_owner:get():lea(0), length = {length} }};
                     match (image_data_write_pixels("missing/pixel.png".data, {width}, {height}, {channels}, bytes, {stride})) {{
                         ()(value) => {{ 1 }},
                         Err(error) => {{ if (runtime_status_code(error) == 1) {{ 0 }} else {{ 1 }} }},
@@ -542,17 +582,17 @@ fn png_pixel_views_check_dimensions_padding_and_storage_before_native_access() {
 
     let output = run(
         r#"export { main };
-        import { "$/image.resin", "$/span.resin" };
-        fn main() -> (int | Err<_>)  {
-            let mut buffer = [1_ub, 2_ub, 3_ub, 255_ub, 99_ub, 4_ub, 5_ub, 6_ub, 255_ub];
-            let mut bytes = Span<ubyte> { data = &buffer:at(0), length = 9_ul };
+        import { "$/shared.resin", "$/image.resin", "$/span.resin" };
+        fn main() -> (i32 | Err<_>)  {
+            let buffer_owner = arc_ptr_alloc([u8(1), u8(2), u8(3), u8(255), u8(99), u8(4), u8(5), u8(6), u8(255)])?; let buffer: Ref<_> = buffer_owner:get().*;
+            let mut bytes = Span<u8> { data = buffer_owner:get():lea(0), length = u64(9) };
             image_data_write_pixels("padded.png".data, 1, 2, 4, bytes, 5)?;
             let mut image = image_data_read_png("padded.png".data, 0)?;
             let mut loaded = image:pixels();
-            image_data_write_pixels("single.png".data, 1, 1, 4, bytes:slice(0, 4), 0xffffffffffffffff_ul)?;
+            { let borrowed = bytes:slice(0, 4); image_data_write_pixels("single.png".data, 1, 1, 4, borrowed, u64(0xffffffffffffffff)) }?;
             let mut single = image_data_read_png("single.png".data, 0)?;
-            (if (loaded:at(0) == 1_ub && loaded:at(4) == 4_ub
-                && single:height() == 1_ui && single:pixels():at(3) == 255_ub) { 0 } else { 1 })
+            (if (loaded:at(0) == u8(1) && loaded:at(4) == u8(4)
+                && single:height() == u32(1) && { let borrowed = single:pixels(); borrowed:at(3) } == u8(255)) { 0 } else { 1 })
         }
         "#,
         "",
@@ -570,15 +610,15 @@ fn gpu_cleanup_covers_acquisition_recording_and_submission_failures() {
 
         extern {
             "resin_runtime.h": {
-                fn test_mode(mode: int);
-                fn test_verify(code: int);
+                fn test_mode(mode: i32);
+                fn test_verify(code: i32);
             },
         };
        import { "$/gpu.resin", "$/graphics.resin", "$/status.resin" };
         @vertex_shader
-        fn vertex(index: int) -> Vertex  {
-            Vertex { position = Position { x = 0_f, y = 0_f, z = 0_f, w = 1_f },
-                color = Color { r = 1_f, g = 0_f, b = 0_f, a = 1_f } }
+        fn vertex(index: i32) -> Vertex  {
+            Vertex { position = Position { x = f32(0), y = f32(0), z = f32(0), w = f32(1) },
+                color = Color { r = f32(1), g = f32(0), b = f32(0), a = f32(1) } }
         }
         @fragment_shader
         fn fragment(color: Color) -> Color  { color }
@@ -690,9 +730,9 @@ fn presentation_distinguishes_skipped_frames_from_errors_without_opening_windows
     let output = run(
         r#"export { main };
         import { "$/gpu.resin", "$/window.resin", "$/status.resin" };
-        fn main() -> (int | Err<_>)  {
+        fn main() -> (i32 | Err<_>)  {
             let mut gpu = gpu_new()?;
-            let mut image = gpu:create_image(1_ui, 1_ui)?;
+            let mut image = gpu:create_image(u32(1), u32(1))?;
             let mut first = match (gpu:present(image)) { bool(shown) => { shown }, Err(e) => { 1 == 0 } };
             let mut second = match (gpu:present(image)) { bool(shown) => { !shown }, Err(e) => { 1 == 0 } };
             let mut third = match (gpu:present(image)) { bool(shown) => { 0 }, Err(e) => { runtime_status_code(e) } };
@@ -726,14 +766,14 @@ fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
     let output = run(
         r#"export { main };
         import { "$/gpu.resin", "$/window.resin", "$/status.resin", "$/string.resin" };
-        fn valid_size(width: uint, height: uint) -> bool  {
-            width == uint(640) && height == uint(480)
+        fn valid_size(width: u32, height: u32) -> bool  {
+            width == u32(640) && height == u32(480)
         }
-        fn main() -> (int | Err<_>)  {
-            let mut window = window_new(1_ui, 1_ui, string_from_str("queries"))?;
+        fn main() -> (i32 | Err<_>)  {
+            let mut window = { let borrowed = string_from_str("queries"); window_new(u32(1), u32(1), borrowed) }?;
             let mut count = gpu_device_count()?;
             let mut size = window:framebuffer_size()?;
-            let mut incomplete = match (gpu_enumerate_devices(Ptr<ResinGpuDeviceInfo>(ulong(0)), 0)) {
+            let mut incomplete = match (gpu_enumerate_devices(Ptr<ResinGpuDeviceInfo>(u64(0)), 0)) {
                 ()(value) => { 0 },
                 Err(error) => { runtime_status_code(error) },
             };
@@ -742,7 +782,7 @@ fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
             valid = valid && window:should_close();
             window:set_should_close(1 == 0)?;
             valid = valid && !window:should_close();
-            (if (valid && count == uint(2)
+            (if (valid && count == u32(2)
                 && valid_size(size.0, size.1) && incomplete == 7) { 0 } else { 1 })
         }
         "#,
@@ -790,11 +830,11 @@ fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
 fn byte_input_reports_stream_errors_instead_of_eof() {
     let output = run(
         r#"export { main };
-        import { "$/console.resin", "$/string.resin" };
+        import { "$/stdio.resin", "$/string.resin" };
         struct Cleanup {
             
         }
-fn drop(self: Ptr<Cleanup>)  { print("cleanup\n"); }
+fn drop(self: Ref<Cleanup>)  { print("cleanup\n"); }
 
 
         fn main() -> (() | Err<_>)  {
@@ -832,16 +872,16 @@ fn typed_pipeline_factories_embed_shaders_and_keep_shared_ownership() {
         };
        import { "$/gpu.resin", "$/graphics.resin", "$/status.resin" };
         @compute_shader
-        fn kernel(index: ulong, root: Ptr<int>)  { root.* = int(index); }
+        fn kernel(index: u64, root: Ptr<i32>)  { root.* = i32(index); }
         @vertex_shader
-        fn vertex(index: int) -> Vertex  {
-            Vertex { position = Position { x = 0_f, y = 0_f, z = 0_f, w = 1_f },
-                color = Color { r = 1_f, g = 0_f, b = 0_f, a = 1_f } }
+        fn vertex(index: i32) -> Vertex  {
+            Vertex { position = Position { x = f32(0), y = f32(0), z = f32(0), w = f32(1) },
+                color = Color { r = f32(1), g = f32(0), b = f32(0), a = f32(1) } }
         }
         @fragment_shader
         fn fragment(color: Color) -> Color  { color }
-        fn copy_pipeline(value: GpuComputePipeline<int, GpuPipelineOwner>) -> GpuComputePipeline<int, GpuPipelineOwner>  { value }
-        fn main() -> (int | Err<_>)  {
+        fn copy_pipeline(value: GpuComputePipeline<i32, GpuPipelineOwner>) -> GpuComputePipeline<i32, GpuPipelineOwner>  { value }
+        fn main() -> (i32 | Err<_>)  {
             let mut gpu = gpu_new()?;
             {
                 let mut compute = gpu:create_compute_pipeline(kernel)?;
@@ -851,7 +891,7 @@ fn typed_pipeline_factories_embed_shaders_and_keep_shared_ownership() {
             };
             test_fail();
             let mut compute_code = match (gpu:create_compute_pipeline(kernel)) {
-                GpuComputePipeline<int, GpuPipelineOwner>(pipeline) => { 0 }, Err(error) => { runtime_status_code(error) },
+                GpuComputePipeline<i32, GpuPipelineOwner>(pipeline) => { 0 }, Err(error) => { runtime_status_code(error) },
             };
             let mut graphics_code = match (gpu:create_graphics_pipeline(vertex, fragment)) {
                 GpuGraphicsPipeline<None, GpuPipelineOwner>(pipeline) => { 0 }, Err(error) => { runtime_status_code(error) },
@@ -912,9 +952,9 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
     let output = run(
         r#"export { main };
         import { "$/window.resin", "$/string.resin" };
-        fn coordinates(point: (float64, float64)) -> bool  { point.0 == 12.5_d && point.1 == -3.25_d }
-        fn main() -> (int | Err<_>)  {
-            let mut window = window_new(16_ui, 16_ui, string_from_str("input snapshot"))?;
+        fn coordinates(point: (f64, f64)) -> bool  { point.0 == f64(12.5) && point.1 == f64(-3.25) }
+        fn main() -> (i32 | Err<_>)  {
+            let mut window = { let borrowed = string_from_str("input snapshot"); window_new(u32(16), u32(16), borrowed) }?;
             let mut key = window:key_state(key_w);
             let mut mouse = window:mouse_button_state(mouse_button_left);
             let mut valid = !key.down && key.pressed && key.released && mouse.down && mouse.pressed && !mouse.released;
@@ -964,13 +1004,13 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
 #[test]
 fn gpu_views_do_not_expose_unowned_address_conversions() {
     for expression in [
-        "gpu.host_to_device_pointer(Ptr<ubyte>(0_ul))",
+        "gpu.host_to_device_pointer(Ptr<u8>(u64(0)))",
         "value.host_pointer()",
         "value.device_pointer()",
         "value.host",
         "value.owner",
-        "Ptr<int>(value)",
-        "ulong(value)",
+        "Ptr<i32>(value)",
+        "u64(value)",
     ] {
         let directory = TempDir::new().unwrap();
         let path = directory.path().join("main.resin");
@@ -980,7 +1020,7 @@ fn gpu_views_do_not_expose_unowned_address_conversions() {
                 r#"export {{ main }}; import {{ "$/gpu.resin" }};
             fn main() -> (() | Err<_>)  {{
                 let mut gpu = gpu_new()?;
-                let mut value = gpu:create(42_i)?;
+                let mut value = gpu:create(i32(42))?;
                 {expression};
                 (())
             }}"#
@@ -1004,18 +1044,18 @@ fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
 
         extern {
             "resin_runtime.h": {
-                fn test_mode(mode: int);
+                fn test_mode(mode: i32);
                 fn test_recorded();
-                fn test_code(code: int);
+                fn test_code(code: i32);
                 fn test_completed();
                 fn test_finished();
             },
         };
        import { "$/gpu.resin", "$/graphics.resin", "$/status.resin" };
         @vertex_shader
-        fn vertex(index: int) -> Vertex  {
-            Vertex { position = Position { x = 0_f, y = 0_f, z = 0_f, w = 1_f },
-                color = Color { r = 1_f, g = 0_f, b = 0_f, a = 1_f } }
+        fn vertex(index: i32) -> Vertex  {
+            Vertex { position = Position { x = f32(0), y = f32(0), z = f32(0), w = f32(1) },
+                color = Color { r = f32(1), g = f32(0), b = f32(0), a = f32(1) } }
         }
         @fragment_shader
         fn fragment(color: Color) -> Color  { color }
@@ -1028,7 +1068,7 @@ fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
                     let mut commands = {
                         let mut original = gpu:start_command_recording()?;
                         let mut pipeline = gpu:create_graphics_pipeline(vertex, fragment)?;
-                        original:begin_rendering(gpu:create_image(1_ui, 1_ui)?, 0_f, 0_f, 0_f, 1_f)?;
+                        { let borrowed = gpu:create_image(u32(1), u32(1))?; original:begin_rendering(borrowed, f32(0), f32(0), f32(0), f32(1)) }?;
                         let drawing = original:clone();
                         drawing:draw(pipeline, None, 7)?;
                         original:end_rendering()?;
@@ -1120,28 +1160,28 @@ fn commands_retain_resources_until_submit_cancel_or_last_alias_drop() {
 }
 
 #[test]
-fn window_constructor_accepts_owned_titles_until_the_native_call_returns() {
+fn window_constructor_borrows_owned_titles() {
     let output = run(
         r#"export { main };
 
         extern {
             "resin_runtime.h": {
-                fn window_counts() -> int;
+                fn window_counts() -> i32;
             },
         };
-       import { "$/window.resin", "$/shared.resin", "$/string.resin" };
-        fn main() -> (int | Err<_>)  {
-            let mut weak = weak_span_empty::<ubyte>();
+       import { "$/window.resin", "$/shared.resin", "$/string.resin", "$/stdio.resin" };
+        fn main() -> (i32 | Err<_>)  {
+            let mut weak = weak_span_empty::<u8>();
             {
                 let mut title = string_from_str("named {0}");
                 weak = title.storage:downgrade();
-                let mut a = window_new(32_ui, 24_ui, title)?;
-                let mut b = window_new(32_ui, 24_ui, string_from_str("temporary"))?;
+                let mut a = window_new(u32(32), u32(24), title)?;
+                let mut b = { let borrowed = string_from_str("temporary"); window_new(u32(32), u32(24), borrowed) }?;
                 print(title);
             };
             let mut released = match (weak:upgrade()) {
                 None => { 1 == 1 },
-                ArcSpan<ubyte>(live) => { 1 == 0 },
+                ArcSpan<u8>(live) => { 1 == 0 },
             };
             (if (released && window_counts() == 22) { 0 } else { 1 })
         }"#,
@@ -1173,24 +1213,24 @@ fn window_constructor_accepts_owned_titles_until_the_native_call_returns() {
 fn argparse_yields_aliases_values_and_duplicates_in_order() {
     success(&run(
         r#"export { main };
-        import { "$/argparse.resin", "$/span.resin", "$/string.resin" };
+        import { "$/shared.resin", "$/argparse.resin", "$/span.resin", "$/string.resin" };
         fn main() -> () | Err<_> {
-            let argv = ["app".data, "-v".data, "--count=12".data, "-o".data, "a path.png".data,
-                "--count".data, "4294967295".data, "--real".data, "-0.125".data, "--output=".data];
-            let parser = argparse(Span<Ptr<ubyte>> { data = &argv:at(0_ul), length = 10_ul },
-                "  --verbose|-v --count= --output|-o= --real= ");
+            let argv_owner = arc_ptr_alloc(["app".data, "-v".data, "--count=12".data, "-o".data, "a path.png".data,
+                "--count".data, "4294967295".data, "--real".data, "-0.125".data, "--output=".data])?; let argv: Ref<_> = argv_owner:get().*;
+            let parser = { let borrowed = Span<Ptr<u8>> { data = argv_owner:get():lea(u64(0)), length = u64(10) }; argparse(borrowed,
+                "  --verbose|-v --count= --output|-o= --real= ") };
             let flag = parser:next()?!;
-            assert(flag:named("--verbose") && flag.value.length == 0_ul);
+            assert(flag:named("--verbose") && flag.value.length == u64(0));
             let count = parser:next()?!;
-            assert(count:named("--count") && argument_integer(count.value)? == 12_ui);
+            assert(count:named("--count") && argument_integer(count.value)? == u32(12));
             let path = parser:next()?!;
-            assert(path:named("--output") && path.value.length == 10_ul);
+            assert(path:named("--output") && path.value.length == u64(10));
             let repeated = parser:next()?!;
-            assert(argument_integer(repeated.value)? == 4294967295_ui);
+            assert(argument_integer(repeated.value)? == u32(4294967295));
             let real = parser:next()?!;
-            assert(argument_number(real.value)? == -0.125_f);
+            assert(argument_number(real.value)? == f32(-0.125));
             let empty = parser:next()?!;
-            assert(empty:named("--output") && empty.value.length == 0_ul);
+            assert(empty:named("--output") && empty.value.length == u64(0));
             assert(match (parser:next()?) { None => { true }, Argument(item) => { false } });
         }
     "#,
@@ -1202,30 +1242,30 @@ fn argparse_yields_aliases_values_and_duplicates_in_order() {
 fn argparse_reports_errors_and_numeric_parsing_respects_span_bounds() {
     success(&run(
         r#"export { main };
-        import { "$/argparse.resin", "$/span.resin", "$/string.resin" };
-        fn rejected(option: str) {
-            let argv = ["app".data, option.data];
-            let parser = argparse(Span<Ptr<ubyte>> { data = &argv:at(0_ul), length = 2_ul }, "--flag --count=");
+        import { "$/shared.resin", "$/argparse.resin", "$/span.resin", "$/string.resin" };
+        fn rejected(option: str) -> () | Err<_> {
+            let argv = arc_ptr_alloc(["app".data, option.data])?;
+            let parser = { let borrowed = Span<Ptr<u8>> { data = argv:get():lea(u64(0)), length = u64(2) }; argparse(borrowed, "--flag --count=") };
             assert(match (parser:next()) {
-                Err(message) => { message:get().length > 0_ul },
+                Err(message) => { message:get().length > u64(0) },
                 Argument(item) => { false }, None => { false },
             });
         }
         fn bad_integer(text: str) {
-            assert(match (argument_integer(bytes(text))) { Err(message) => { true }, uint(value) => { false } });
+            assert(match ({ let borrowed = bytes(text); argument_integer(borrowed) }) { Err(message) => { true }, u32(value) => { false } });
         }
         fn bad_number(text: str) {
-            assert(match (argument_number(bytes(text))) { Err(message) => { true }, float32(value) => { false } });
+            assert(match ({ let borrowed = bytes(text); argument_number(borrowed) }) { Err(message) => { true }, f32(value) => { false } });
         }
         fn main() -> () | Err<_> {
-            rejected("--unknown"); rejected("--count"); rejected("--flag=yes"); rejected("positional");
+            rejected("--unknown")?; rejected("--count")?; rejected("--flag=yes")?; rejected("positional")?;
             bad_integer(""); bad_integer("4294967296"); bad_integer("-1"); bad_integer("1x");
             bad_number(""); bad_number("nan"); bad_number("inf"); bad_number("1e100"); bad_number("1.0junk");
-            let bounded = [49_ub, 46_ub, 50_ub, 53_ub, 57_ub];
-            assert(argument_number(Span<ubyte> { data = &bounded:at(0_ul), length = 4_ul })? == 1.25_f);
-            let embedded = [49_ub, 0_ub, 50_ub];
-            assert(match (argument_number(Span<ubyte> { data = &embedded:at(0_ul), length = 3_ul })) {
-                Err(message) => { true }, float32(value) => { false },
+            let bounded_owner = arc_ptr_alloc([u8(49), u8(46), u8(50), u8(53), u8(57)])?; let bounded: Ref<_> = bounded_owner:get().*;
+            assert({ let borrowed = Span<u8> { data = bounded_owner:get():lea(u64(0)), length = u64(4) }; argument_number(borrowed) }? == f32(1.25));
+            let embedded_owner = arc_ptr_alloc([u8(49), u8(0), u8(50)])?; let embedded: Ref<_> = embedded_owner:get().*;
+            assert(match ({ let borrowed = Span<u8> { data = embedded_owner:get():lea(u64(0)), length = u64(3) }; argument_number(borrowed) }) {
+                Err(message) => { true }, f32(value) => { false },
             });
         }
     "#,

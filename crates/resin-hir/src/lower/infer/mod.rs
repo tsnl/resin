@@ -239,6 +239,7 @@ impl From<Ty> for Type {
     fn from(ty: Ty) -> Self {
         match ty {
             Ty::Pointer { pointee } => Self::pointer((*pointee).into()),
+            Ty::Reference { referent } => Self::reference((*referent).into()),
             Ty::Array { element, length } => {
                 Self::Node(Head::Array(length), vec![(*element).into()])
             }
@@ -284,8 +285,10 @@ impl Head {
             | Self::FunctionParameter { .. }
             | Self::FunctionResult
             | Self::Nominal { .. }
-            | Self::Reference
             | Self::Value => return None,
+            Self::Reference => Ty::Reference {
+                referent: Box::new(children.next().unwrap()),
+            },
             Self::Atom(ty) => ty.clone(),
             Self::Union => Ty::union_of(children),
             Self::Pointer => Ty::Pointer {
@@ -507,16 +510,11 @@ impl Solver {
     }
 
     pub fn number(&mut self, text: &str) -> Type {
-        if let (_, Some(ty)) = resin_types::literal::split(text) {
-            return ty.into();
-        }
-        self.variable(
-            if resin_types::literal::unsuffixed_type(text).is_integer() {
-                Class::Number
-            } else {
-                Class::Float
-            },
-        )
+        self.variable(if resin_types::literal::default_type(text).is_integer() {
+            Class::Number
+        } else {
+            Class::Float
+        })
         .ty()
     }
 
@@ -1894,8 +1892,18 @@ impl Inference<'_> {
             // receiver shape is still unknown (for example record.values).
             return Ok(false);
         }
+        // Nominal receivers cannot acquire a builtin indexing operation when
+        // their type arguments specialize. A sole source overload can determine
+        // its result now, including the pointer returned by Span<T>:lea.
+        let nominal_receiver = args.and_then(|args| args.first()).is_some_and(|arg| {
+            let receiver = self.solver.head(&Type::value(arg.clone()));
+            matches!(
+                receiver,
+                Type::Node(Head::Nominal { .. } | Head::Atom(Ty::Defined { .. }), _)
+            )
+        });
         if let [candidate] = candidates.as_slice()
-            && primitive.is_none()
+            && (primitive.is_none() || nominal_receiver)
             && !self
                 .typer
                 .functions

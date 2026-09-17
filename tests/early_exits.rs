@@ -16,14 +16,14 @@ fn succeeds(source: &str) {
 fn returns_leave_nested_expressions_and_preserve_initialization() {
     succeeds(
         r#"export { main };
-        fn choose(flag: bool) -> int  {
-            let mut value: int;
+        fn choose(flag: bool) -> i32  {
+            let mut value: i32;
             if (flag) { return 42; } else { value = 7; };
             return value;
         }
-        fn both(flag: bool) -> int  { if (flag) { return 3; } else { return 4; }; }
-        fn nested() -> int  { 1 + { return 9; 2 } }
-        fn loop_return() -> int  { while (true) { return 5; }; 6 }
+        fn both(flag: bool) -> i32  { if (flag) { return 3; } else { return 4; }; }
+        fn nested() -> i32  { 1 + { return 9; 2 } }
+        fn loop_return() -> i32  { while (true) { return 5; }; 6 }
         fn main()  {
             assert(choose(true) == 42); assert(choose(false) == 7);
             assert(both(true) == 3); assert(both(false) == 4);
@@ -38,16 +38,18 @@ fn returns_leave_nested_expressions_and_preserve_initialization() {
 fn returns_drop_owners_once_in_reverse_order_and_preserve_the_result() {
     succeeds(
         r#"export { main };
-        struct Resource { trace: Ptr<int>, digit: int,
+import { "$/shared.resin" };
+
+        struct Resource { trace: Ptr<i32>, digit: i32,
             
         }
-fn drop(self: Ptr<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
+fn drop(self: Ref<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
 
-        fn leave(trace: Ptr<int>) -> int  {
+        fn leave(trace: Ptr<i32>) -> i32  {
             let mut first = Resource { trace = trace, digit = 1 };
             { let mut second = Resource { trace = trace, digit = 2 }; return 42; };
         }
-        fn main()  { let mut trace = 0_i; assert(leave(&trace) == 42); assert(trace == 21); }"#,
+        fn main() -> () | Err<_> { let trace_owner = arc_ptr_alloc(i32(0))?; let trace: Ref<_> = trace_owner:get().*; assert(leave(trace_owner:get()) == 42); assert(trace == 21); }"#,
     );
 }
 
@@ -55,18 +57,18 @@ fn drop(self: Ptr<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
 fn returning_arms_do_not_participate_in_match_initialization_joins() {
     succeeds(
         r#"export { main };
-        fn choose(value: int | None) -> int  {
-            let mut result: int;
-            match (value) { int(number) => { result = number; }, None => { return 7; } };
+        fn choose(value: i32 | None) -> i32  {
+            let mut result: i32;
+            match (value) { i32(number) => { result = number; }, None => { return 7; } };
             result
         }
-        fn main()  { assert(choose(42_i) == 42); assert(choose(None) == 7); }"#,
+        fn main()  { assert(choose(i32(42)) == 42); assert(choose(None) == 7); }"#,
     );
 }
 
 #[test]
 fn return_values_are_checked_even_in_unused_functions() {
-    let error = support::pipeline::source_module("fn unused() -> int  { return false; }")
+    let error = support::pipeline::source_module("fn unused() -> i32  { return false; }")
         .unwrap_err()
         .to_string();
     assert!(error.contains("TypeMismatch"), "{error}");
@@ -75,7 +77,7 @@ fn return_values_are_checked_even_in_unused_functions() {
 #[test]
 fn shader_returns_preserve_structured_selection_and_loops() {
     let module = support::module(
-        "export { kernel }; @compute_shader fn kernel(i: ulong, output: Ptr<uint>)  { if (i != 0_ul) { return; }; while (i == 0_ul) { output.* = 42_ui; return; }; }",
+        "export { kernel }; @compute_shader fn kernel(i: u64, output: Ptr<u32>)  { if (i != u64(0)) { return; }; while (i == u64(0)) { output.* = u32(42); return; }; }",
     );
     let project = support::project::Project::new(&module, None).unwrap();
     support::shaders::validate(project.generated.shaders()[0].unoptimized_spirv());
@@ -85,20 +87,22 @@ fn shader_returns_preserve_structured_selection_and_loops() {
 fn loop_exits_target_the_nearest_loop_and_drop_exited_scopes() {
     succeeds(
         r#"export { main };
-        struct Resource { trace: Ptr<int>, digit: int,
+import { "$/shared.resin" };
+
+        struct Resource { trace: Ptr<i32>, digit: i32,
             
         }
-fn drop(self: Ptr<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
+fn drop(self: Ref<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
 
-        fn main()  {
-            let mut trace = 0_i;
+        fn main() -> () | Err<_> {
+            let trace_owner = arc_ptr_alloc(i32(0))?; let trace: Ref<_> = trace_owner:get().*;
             let mut count = 0;
             while (true) {
-                let mut outer = Resource { trace = &trace, digit = 1 };
+                let mut outer = Resource { trace = trace_owner:get(), digit = 1 };
                 count = count + 1;
                 if (count == 1) { continue; };
                 while (true) {
-                    let mut inner = Resource { trace = &trace, digit = 2 };
+                    let mut inner = Resource { trace = trace_owner:get(), digit = 2 };
                     if (count == 2) { break; };
                     assert(false);
                 };
@@ -125,7 +129,7 @@ fn loop_exits_do_not_hide_initialization_errors_or_escape_conditions() {
         assert!(error.contains("loop body"), "{error}");
     }
     let error = support::pipeline::source_module(
-        "fn unused()  { let mut x: int; while (true) { x = 1; break; }; let mut y = x; }",
+        "fn unused()  { let mut x: i32; while (true) { x = 1; break; }; let mut y = x; }",
     )
     .unwrap_err()
     .to_string();
@@ -135,7 +139,7 @@ fn loop_exits_do_not_hide_initialization_errors_or_escape_conditions() {
 #[test]
 fn shader_loop_exits_preserve_structured_merges() {
     let module = support::module(
-        "export { kernel }; @compute_shader fn kernel(i: ulong, output: Ptr<uint>)  { let mut n = 0_ui; while (n < 8_ui) { n = n + 1_ui; if (n == 2_ui) { continue; }; while (true) { if (n == 4_ui) { break; }; break; }; if (n > 5_ui) { break; }; output.* = n; }; }",
+        "export { kernel }; @compute_shader fn kernel(i: u64, output: Ptr<u32>)  { let mut n: u32 = 0; while (n < u32(8)) { n = n + u32(1); if (n == u32(2)) { continue; }; while (true) { if (n == u32(4)) { break; }; break; }; if (n > u32(5)) { break; }; output.* = n; }; }",
     );
     let project = support::project::Project::new(&module, None).unwrap();
     support::shaders::validate(project.generated.shaders()[0].unoptimized_spirv());

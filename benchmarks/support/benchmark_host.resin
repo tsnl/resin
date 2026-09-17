@@ -2,42 +2,42 @@ export { main };
 
 extern {
 	"benchmark.h": {
-		fn benchmark_argument(argc: int, argv: Ptr<Ptr<ubyte>>, index: uint) -> ulong;
-		fn benchmark_prepare(input: Ptr<uint>, output: Ptr<uint>, count: uint, seed: uint);
-		fn benchmark_clock() -> ulong;
-		fn benchmark_report(start: ulong, end: ulong, output: Ptr<uint>, count: uint, measured: int);
+		fn benchmark_argument(argc: i32, argv: Ptr<Ptr<u8>>, index: u32) -> u64;
+		fn benchmark_prepare(input: Ptr<u32>, output: Ptr<u32>, count: u32, seed: u32);
+		fn benchmark_clock() -> u64;
+		fn benchmark_report(start: u64, end: u64, output: Ptr<u32>, count: u32, measured: i32);
 	},
 };
 
 import { "$/shared.resin", "@WORKLOAD@" };
 
-fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> (() | Err<_>) {
-	let mut count = uint(benchmark_argument(argc, argv, 1_ui));
-	let mut iterations = uint(benchmark_argument(argc, argv, 2_ui));
-	let mut samples = benchmark_argument(argc, argv, 3_ui);
-	let mut warmup = benchmark_argument(argc, argv, 4_ui);
-	let mut seed = uint(benchmark_argument(argc, argv, 5_ui));
-	let mut input_owner = arc_span_alloc::<uint>(ulong(count), 0_ui)?;
-	let mut output_owner = arc_span_alloc::<uint>(ulong(count), 0_ui)?;
+fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> (() | Err<_>) {
+	let mut count = u32(benchmark_argument(argc, argv, u32(1)));
+	let mut iterations = u32(benchmark_argument(argc, argv, u32(2)));
+	let mut samples = benchmark_argument(argc, argv, u32(3));
+	let mut warmup = benchmark_argument(argc, argv, u32(4));
+	let mut seed = u32(benchmark_argument(argc, argv, u32(5)));
+	let mut input_owner = arc_span_alloc::<u32>(u64(count), u32(0))?;
+	let mut output_owner = arc_span_alloc::<u32>(u64(count), u32(0))?;
 	let mut input = input_owner:get().data;
 	let mut output = output_owner:get().data;
 	benchmark_prepare(input, output, count, seed);
-	let mut root = Root { count = count, iterations = iterations, input = input, output = output };
-	let mut index = 0_ul;
+	let root = arc_ptr_alloc(Root { count = count, iterations = iterations, input = input, output = output })?;
+	let mut index: u64 = 0;
 	while (index < warmup) {
 		let mut start = benchmark_clock();
-		cpu(&root);
+		cpu(root:get());
 		let mut end = benchmark_clock();
-		benchmark_report(start, end, output, count, 0_i);
-		index = index + 1_ul;
+		benchmark_report(start, end, output, count, i32(0));
+		index = index + u64(1);
 	};
-	index = 0_ul;
+	index = u64(0);
 	while (index < samples) {
 		let mut start = benchmark_clock();
-		cpu(&root);
+		cpu(root:get());
 		let mut end = benchmark_clock();
-		benchmark_report(start, end, output, count, 1_i);
-		index = index + 1_ul;
+		benchmark_report(start, end, output, count, i32(1));
+		index = index + u64(1);
 	};
 	(())
 }

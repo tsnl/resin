@@ -107,8 +107,8 @@ pub(super) fn check_instr(
         Instr::OwnerData { pointee } => {
             check_type(&module.types, pointee, location)?;
             expect_type(
-                Ty::Pointer {
-                    pointee: Box::new(Ty::StrongOwner),
+                Ty::Reference {
+                    referent: Box::new(Ty::StrongOwner),
                 },
                 pop_one(stack, location)?,
                 location,
@@ -124,8 +124,8 @@ pub(super) fn check_instr(
                 Ty::StrongOwner
             };
             expect_type(
-                Ty::Pointer {
-                    pointee: Box::new(owner),
+                Ty::Reference {
+                    referent: Box::new(owner),
                 },
                 pop_one(stack, location)?,
                 location,
@@ -173,7 +173,7 @@ pub(super) fn check_instr(
         }
         Instr::IsVariant { tag } => {
             let from = pop_one(stack, location)?;
-            let from = if let Ty::Pointer { pointee } = from {
+            let from = if let Ty::Pointer { pointee } | Ty::Reference { referent: pointee } = from {
                 *pointee
             } else {
                 from
@@ -218,15 +218,22 @@ pub(super) fn check_instr(
             stack.push(ty.clone());
         }
         Instr::Push { value } => stack.push(immediate_ty(&module.types, value, location)?),
-        Instr::LocalAddress { local } => {
+        Instr::LocalRef { local } => {
             let local = function.locals.get(local.index()).ok_or_else(|| {
                 location.error(VerifyErrorKind::InvalidLocal {
                     local: local.index(),
                 })
             })?;
-            stack.push(Ty::Pointer {
-                pointee: Box::new(local.ty.clone()),
+            stack.push(Ty::Reference {
+                referent: Box::new(local.ty.clone()),
             });
+        }
+        Instr::Borrow => {
+            let source = pop_one(stack, location)?;
+            let Ty::Pointer { pointee } = source else {
+                return Err(location.error(VerifyErrorKind::ExpectedPointer { found: source }));
+            };
+            stack.push(Ty::Reference { referent: pointee });
         }
         Instr::AccessStatic { index } => {
             let source = pop_one(stack, location)?;
@@ -274,7 +281,7 @@ pub(super) fn check_instr(
         Instr::Load | Instr::TransferLoad => {
             let address = pop_one(stack, location)?;
             let shape = shape(&module.types, address.clone(), location)?;
-            let Ty::Pointer { pointee } = shape else {
+            let (Ty::Pointer { pointee } | Ty::Reference { referent: pointee }) = shape else {
                 return Err(location.error(VerifyErrorKind::ExpectedPointer { found: address }));
             };
             stack.push(*pointee);
@@ -283,7 +290,10 @@ pub(super) fn check_instr(
             let value = pop_one(stack, location)?;
             let address = pop_one(stack, location)?;
             let shape = shape(&module.types, address.clone(), location)?;
-            let Ty::Pointer { pointee } = shape else {
+            if matches!(instr, Instr::Replace) && !matches!(shape, Ty::Pointer { .. }) {
+                return Err(location.error(VerifyErrorKind::ExpectedPointer { found: address }));
+            }
+            let (Ty::Pointer { pointee } | Ty::Reference { referent: pointee }) = shape else {
                 return Err(location.error(VerifyErrorKind::ExpectedPointer { found: address }));
             };
             expect_type(*pointee, value.clone(), location)?;
@@ -426,6 +436,9 @@ fn project_static(
     location: Location,
 ) -> Result<Ty, VerifyError> {
     match source {
+        Ty::Reference { referent } => Ok(Ty::Reference {
+            referent: Box::new(project_static(table, *referent, index, location)?),
+        }),
         Ty::Pointer { pointee } => Ok(Ty::Pointer {
             pointee: Box::new(project_static(table, *pointee, index, location)?),
         }),
@@ -455,6 +468,10 @@ fn project_static(
 
 fn project_dynamic(table: &[TypeDef], source: Ty, location: Location) -> Result<Ty, VerifyError> {
     match source {
+        Ty::Reference { referent } => match shape(table, *referent, location)? {
+            Ty::Array { element, .. } => Ok(Ty::Reference { referent: element }),
+            found => Err(location.error(VerifyErrorKind::ExpectedArray { found })),
+        },
         Ty::Pointer { pointee } => match shape(table, *pointee, location)? {
             Ty::Array { element, .. } => Ok(Ty::Pointer { pointee: element }),
             found => Err(location.error(VerifyErrorKind::ExpectedArray { found })),

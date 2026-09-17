@@ -154,34 +154,103 @@ pub(crate) fn display_error(
         .diagnostics
         .iter()
         .map(|diagnostic| {
-            let location = diagnostic
-                .span
+            let (location, excerpt) =
+                diagnostic_context(diagnostic.span.as_ref(), captured, failure);
+            let code = diagnostic
+                .code
                 .as_ref()
-                .map(|span| {
-                    let local = captured.origins.get(&span.source);
-                    let name = local
-                        .map(|local| local.path.display().to_string())
-                        .unwrap_or_else(|| span.source.clone());
-                    let text = local.map(|local| local.source.text()).or_else(|| {
-                        failure
-                            .managed_sources
-                            .iter()
-                            .find(|source| source.name == span.source)
-                            .map(|source| source.text.as_str())
-                    });
-                    match text.and_then(|text| text.get(..usize::try_from(span.start).ok()?)) {
-                        Some(prefix) => format!(
-                            "{name}:{}:{}",
-                            prefix.bytes().filter(|byte| *byte == b'\n').count() + 1,
-                            prefix.rsplit('\n').next().unwrap().chars().count() + 1
-                        ),
-                        None => name,
-                    }
-                })
-                .unwrap_or_else(|| captured.inputs.entry.clone());
-            format!("{location}: {}", diagnostic.message)
+                .map(|code| format!("[{code}]"))
+                .unwrap_or_default();
+            let mut message = format!("{location}: error{code}: {}", diagnostic.message);
+            if let Some(excerpt) = excerpt {
+                message.push_str(&format!("\n{excerpt}"));
+            }
+            for note in &diagnostic.related {
+                let (location, _) = diagnostic_context(Some(&note.span), captured, failure);
+                message.push_str(&format!("\n  note: {location}: {}", note.message));
+            }
+            for note in &diagnostic.notes {
+                message.push_str(&format!("\n  note: {note}"));
+            }
+            if let Some(help) = &diagnostic.help {
+                message.push_str(&format!("\n  help: {help}"));
+            }
+            message
         })
         .collect::<Vec<_>>()
         .join("\n")
         .into()
+}
+
+fn diagnostic_context(
+    span: Option<&resin_protocol::Span>,
+    captured: &inputs::CapturedInputs,
+    failure: &resin_protocol::Failure,
+) -> (String, Option<String>) {
+    let Some(span) = span else {
+        return (captured.inputs.entry.clone(), None);
+    };
+    let local = captured.origins.get(&span.source);
+    let name = local
+        .map(|local| local.path.display().to_string())
+        .unwrap_or_else(|| span.source.clone());
+    let text = local.map(|local| local.source.text()).or_else(|| {
+        failure
+            .managed_sources
+            .iter()
+            .find(|source| source.name == span.source)
+            .map(|source| source.text.as_str())
+    });
+    let Some((line, column, excerpt)) =
+        text.and_then(|text| source_excerpt(text, span.start, span.end))
+    else {
+        return (name, None);
+    };
+    (format!("{name}:{line}:{column}"), Some(excerpt))
+}
+
+fn source_excerpt(text: &str, start: u64, end: u64) -> Option<(usize, usize, String)> {
+    let start = usize::try_from(start).ok()?;
+    let end = usize::try_from(end).ok()?;
+    let prefix = text.get(..start)?;
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+    let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
+    let line_end = text
+        .get(start..)?
+        .find('\n')
+        .map_or(text.len(), |index| start + index);
+    let before = text.get(line_start..start)?;
+    let column = before.chars().count() + 1;
+    let source = text.get(line_start..line_end)?.replace('\t', "    ");
+    let padding = before.replace('\t', "    ").chars().count();
+    let width = text
+        .get(start..end.min(line_end))?
+        .replace('\t', "    ")
+        .chars()
+        .count()
+        .max(1);
+    Some((
+        line,
+        column,
+        format!(
+            "  | {source}\n  | {}{}",
+            " ".repeat(padding),
+            "^".repeat(width)
+        ),
+    ))
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::source_excerpt;
+
+    #[test]
+    fn excerpts_preserve_unicode_columns_and_expand_tabs() {
+        assert_eq!(
+            source_excerpt("first\n\tα + β", 12, 14),
+            Some((2, 6, "  |     α + β\n  |         ^".into()))
+        );
+        assert!(source_excerpt("λ", 1, 2).is_none());
+        assert!(source_excerpt("x", 5, 6).is_none());
+    }
 }

@@ -1,22 +1,24 @@
+//! Host windows, input state, and event processing.
+
 export { Window, ResinWindow, ButtonState, key_unknown, key_space, key_apostrophe, key_comma, key_minus, key_period, key_slash, key_digit_0, key_digit_1, key_digit_2, key_digit_3, key_digit_4, key_digit_5, key_digit_6, key_digit_7, key_digit_8, key_digit_9, key_semicolon, key_equal, key_a, key_b, key_c, key_d, key_e, key_f, key_g, key_h, key_i, key_j, key_k, key_l, key_m, key_n, key_o, key_p, key_q, key_r, key_s, key_t, key_u, key_v, key_w, key_x, key_y, key_z, key_left_bracket, key_backslash, key_right_bracket, key_grave_accent, key_world_1, key_world_2, key_escape, key_enter, key_tab, key_backspace, key_insert, key_delete, key_right, key_left, key_down, key_up, key_page_up, key_page_down, key_home, key_end, key_caps_lock, key_scroll_lock, key_num_lock, key_print_screen, key_pause, key_f1, key_f2, key_f3, key_f4, key_f5, key_f6, key_f7, key_f8, key_f9, key_f10, key_f11, key_f12, key_f13, key_f14, key_f15, key_f16, key_f17, key_f18, key_f19, key_f20, key_f21, key_f22, key_f23, key_f24, key_f25, key_keypad_0, key_keypad_1, key_keypad_2, key_keypad_3, key_keypad_4, key_keypad_5, key_keypad_6, key_keypad_7, key_keypad_8, key_keypad_9, key_keypad_decimal, key_keypad_divide, key_keypad_multiply, key_keypad_subtract, key_keypad_add, key_keypad_enter, key_keypad_equal, key_left_shift, key_left_control, key_left_alt, key_left_super, key_right_shift, key_right_control, key_right_alt, key_right_super, key_menu, mouse_button_left, mouse_button_right, mouse_button_middle, mouse_button_4, mouse_button_5, mouse_button_6, mouse_button_7, mouse_button_8, native, window_new, poll_events, wait_events, should_close, set_should_close, framebuffer_size, set_size, key_pressed, key_state, mouse_button_state, cursor_position, scroll_delta, focused, capture_cursor, clone };
 
 extern {
 	"resin_runtime.h": {
-		fn resin_window_create(width: uint, height: uint, title: Ptr<ubyte>, window: Ptr<Ptr<ResinWindow>>) -> int;
+		fn resin_window_create(width: u32, height: u32, title: Ptr<u8>, window: Ptr<Ptr<ResinWindow>>) -> i32;
 		fn resin_window_destroy(window: Ptr<ResinWindow>) -> ();
-		fn resin_window_poll_events(window: Ptr<ResinWindow>) -> int;
-		fn resin_window_wait_events(window: Ptr<ResinWindow>, timeout: float64) -> int;
-		fn resin_window_should_close(window: Ptr<ResinWindow>) -> int;
-		fn resin_window_set_should_close(window: Ptr<ResinWindow>, close: int) -> int;
-		fn resin_window_framebuffer_size(window: Ptr<ResinWindow>, width: Ptr<uint>, height: Ptr<uint>) -> int;
-		fn resin_window_set_size(window: Ptr<ResinWindow>, width: uint, height: uint) -> int;
-		fn resin_window_key_pressed(window: Ptr<ResinWindow>, key: int) -> int;
-		fn resin_window_key_state(window: Ptr<ResinWindow>, key: int) -> uint;
-		fn resin_window_mouse_button_state(window: Ptr<ResinWindow>, button: int) -> uint;
-		fn resin_window_cursor_position(window: Ptr<ResinWindow>, x: Ptr<float64>, y: Ptr<float64>) -> int;
-		fn resin_window_scroll_delta(window: Ptr<ResinWindow>, x: Ptr<float64>, y: Ptr<float64>) -> int;
-		fn resin_window_focused(window: Ptr<ResinWindow>) -> int;
-		fn resin_window_capture_cursor(window: Ptr<ResinWindow>, capture: int) -> int;
+		fn resin_window_poll_events(window: Ptr<ResinWindow>) -> i32;
+		fn resin_window_wait_events(window: Ptr<ResinWindow>, timeout: f64) -> i32;
+		fn resin_window_should_close(window: Ptr<ResinWindow>) -> i32;
+		fn resin_window_set_should_close(window: Ptr<ResinWindow>, close: i32) -> i32;
+		fn resin_window_framebuffer_size(window: Ptr<ResinWindow>, width: Ptr<u32>, height: Ptr<u32>) -> i32;
+		fn resin_window_set_size(window: Ptr<ResinWindow>, width: u32, height: u32) -> i32;
+		fn resin_window_key_pressed(window: Ptr<ResinWindow>, key: i32) -> i32;
+		fn resin_window_key_state(window: Ptr<ResinWindow>, key: i32) -> u32;
+		fn resin_window_mouse_button_state(window: Ptr<ResinWindow>, button: i32) -> u32;
+		fn resin_window_cursor_position(window: Ptr<ResinWindow>, x: Ptr<f64>, y: Ptr<f64>) -> i32;
+		fn resin_window_scroll_delta(window: Ptr<ResinWindow>, x: Ptr<f64>, y: Ptr<f64>) -> i32;
+		fn resin_window_focused(window: Ptr<ResinWindow>) -> i32;
+		fn resin_window_capture_cursor(window: Ptr<ResinWindow>, capture: i32) -> i32;
 	},
 };
 
@@ -24,179 +26,179 @@ import { "status.resin", "shared.resin", "string.resin" };
 
 // GLFW physical key codes, independent of typed characters or keyboard layout.
 // Each range starts at its GLFW value; gaps are intentional.
-const key_unknown: int = -1;
+const key_unknown: i32 = -1;
 
-const key_space: int = 32;
+const key_space: i32 = 32;
 
-const key_apostrophe: int = 39;
+const key_apostrophe: i32 = 39;
 
 const (
-	key_comma: int = 44 + iota;
-	key_minus: int = 44 + iota;
-	key_period: int = 44 + iota;
-	key_slash: int = 44 + iota;
+	key_comma: i32 = 44 + iota;
+	key_minus: i32 = 44 + iota;
+	key_period: i32 = 44 + iota;
+	key_slash: i32 = 44 + iota;
 );
 
 const (
-	key_digit_0: int = 48 + iota;
-	key_digit_1: int = 48 + iota;
-	key_digit_2: int = 48 + iota;
-	key_digit_3: int = 48 + iota;
-	key_digit_4: int = 48 + iota;
-	key_digit_5: int = 48 + iota;
-	key_digit_6: int = 48 + iota;
-	key_digit_7: int = 48 + iota;
-	key_digit_8: int = 48 + iota;
-	key_digit_9: int = 48 + iota;
+	key_digit_0: i32 = 48 + iota;
+	key_digit_1: i32 = 48 + iota;
+	key_digit_2: i32 = 48 + iota;
+	key_digit_3: i32 = 48 + iota;
+	key_digit_4: i32 = 48 + iota;
+	key_digit_5: i32 = 48 + iota;
+	key_digit_6: i32 = 48 + iota;
+	key_digit_7: i32 = 48 + iota;
+	key_digit_8: i32 = 48 + iota;
+	key_digit_9: i32 = 48 + iota;
 );
 
-const key_semicolon: int = 59;
+const key_semicolon: i32 = 59;
 
-const key_equal: int = 61;
-
-const (
-	key_a: int = 65 + iota;
-	key_b: int = 65 + iota;
-	key_c: int = 65 + iota;
-	key_d: int = 65 + iota;
-	key_e: int = 65 + iota;
-	key_f: int = 65 + iota;
-	key_g: int = 65 + iota;
-	key_h: int = 65 + iota;
-	key_i: int = 65 + iota;
-	key_j: int = 65 + iota;
-	key_k: int = 65 + iota;
-	key_l: int = 65 + iota;
-	key_m: int = 65 + iota;
-	key_n: int = 65 + iota;
-	key_o: int = 65 + iota;
-	key_p: int = 65 + iota;
-	key_q: int = 65 + iota;
-	key_r: int = 65 + iota;
-	key_s: int = 65 + iota;
-	key_t: int = 65 + iota;
-	key_u: int = 65 + iota;
-	key_v: int = 65 + iota;
-	key_w: int = 65 + iota;
-	key_x: int = 65 + iota;
-	key_y: int = 65 + iota;
-	key_z: int = 65 + iota;
-);
+const key_equal: i32 = 61;
 
 const (
-	key_left_bracket: int = 91 + iota;
-	key_backslash: int = 91 + iota;
-	key_right_bracket: int = 91 + iota;
-);
-
-const key_grave_accent: int = 96;
-
-const (
-	key_world_1: int = 161 + iota;
-	key_world_2: int = 161 + iota;
+	key_a: i32 = 65 + iota;
+	key_b: i32 = 65 + iota;
+	key_c: i32 = 65 + iota;
+	key_d: i32 = 65 + iota;
+	key_e: i32 = 65 + iota;
+	key_f: i32 = 65 + iota;
+	key_g: i32 = 65 + iota;
+	key_h: i32 = 65 + iota;
+	key_i: i32 = 65 + iota;
+	key_j: i32 = 65 + iota;
+	key_k: i32 = 65 + iota;
+	key_l: i32 = 65 + iota;
+	key_m: i32 = 65 + iota;
+	key_n: i32 = 65 + iota;
+	key_o: i32 = 65 + iota;
+	key_p: i32 = 65 + iota;
+	key_q: i32 = 65 + iota;
+	key_r: i32 = 65 + iota;
+	key_s: i32 = 65 + iota;
+	key_t: i32 = 65 + iota;
+	key_u: i32 = 65 + iota;
+	key_v: i32 = 65 + iota;
+	key_w: i32 = 65 + iota;
+	key_x: i32 = 65 + iota;
+	key_y: i32 = 65 + iota;
+	key_z: i32 = 65 + iota;
 );
 
 const (
-	key_escape: int = 256 + iota;
-	key_enter: int = 256 + iota;
-	key_tab: int = 256 + iota;
-	key_backspace: int = 256 + iota;
-	key_insert: int = 256 + iota;
-	key_delete: int = 256 + iota;
-	key_right: int = 256 + iota;
-	key_left: int = 256 + iota;
-	key_down: int = 256 + iota;
-	key_up: int = 256 + iota;
-	key_page_up: int = 256 + iota;
-	key_page_down: int = 256 + iota;
-	key_home: int = 256 + iota;
-	key_end: int = 256 + iota;
+	key_left_bracket: i32 = 91 + iota;
+	key_backslash: i32 = 91 + iota;
+	key_right_bracket: i32 = 91 + iota;
+);
+
+const key_grave_accent: i32 = 96;
+
+const (
+	key_world_1: i32 = 161 + iota;
+	key_world_2: i32 = 161 + iota;
 );
 
 const (
-	key_caps_lock: int = 280 + iota;
-	key_scroll_lock: int = 280 + iota;
-	key_num_lock: int = 280 + iota;
-	key_print_screen: int = 280 + iota;
-	key_pause: int = 280 + iota;
+	key_escape: i32 = 256 + iota;
+	key_enter: i32 = 256 + iota;
+	key_tab: i32 = 256 + iota;
+	key_backspace: i32 = 256 + iota;
+	key_insert: i32 = 256 + iota;
+	key_delete: i32 = 256 + iota;
+	key_right: i32 = 256 + iota;
+	key_left: i32 = 256 + iota;
+	key_down: i32 = 256 + iota;
+	key_up: i32 = 256 + iota;
+	key_page_up: i32 = 256 + iota;
+	key_page_down: i32 = 256 + iota;
+	key_home: i32 = 256 + iota;
+	key_end: i32 = 256 + iota;
 );
 
 const (
-	key_f1: int = 290 + iota;
-	key_f2: int = 290 + iota;
-	key_f3: int = 290 + iota;
-	key_f4: int = 290 + iota;
-	key_f5: int = 290 + iota;
-	key_f6: int = 290 + iota;
-	key_f7: int = 290 + iota;
-	key_f8: int = 290 + iota;
-	key_f9: int = 290 + iota;
-	key_f10: int = 290 + iota;
-	key_f11: int = 290 + iota;
-	key_f12: int = 290 + iota;
-	key_f13: int = 290 + iota;
-	key_f14: int = 290 + iota;
-	key_f15: int = 290 + iota;
-	key_f16: int = 290 + iota;
-	key_f17: int = 290 + iota;
-	key_f18: int = 290 + iota;
-	key_f19: int = 290 + iota;
-	key_f20: int = 290 + iota;
-	key_f21: int = 290 + iota;
-	key_f22: int = 290 + iota;
-	key_f23: int = 290 + iota;
-	key_f24: int = 290 + iota;
-	key_f25: int = 290 + iota;
+	key_caps_lock: i32 = 280 + iota;
+	key_scroll_lock: i32 = 280 + iota;
+	key_num_lock: i32 = 280 + iota;
+	key_print_screen: i32 = 280 + iota;
+	key_pause: i32 = 280 + iota;
 );
 
 const (
-	key_keypad_0: int = 320 + iota;
-	key_keypad_1: int = 320 + iota;
-	key_keypad_2: int = 320 + iota;
-	key_keypad_3: int = 320 + iota;
-	key_keypad_4: int = 320 + iota;
-	key_keypad_5: int = 320 + iota;
-	key_keypad_6: int = 320 + iota;
-	key_keypad_7: int = 320 + iota;
-	key_keypad_8: int = 320 + iota;
-	key_keypad_9: int = 320 + iota;
-	key_keypad_decimal: int = 320 + iota;
-	key_keypad_divide: int = 320 + iota;
-	key_keypad_multiply: int = 320 + iota;
-	key_keypad_subtract: int = 320 + iota;
-	key_keypad_add: int = 320 + iota;
-	key_keypad_enter: int = 320 + iota;
-	key_keypad_equal: int = 320 + iota;
+	key_f1: i32 = 290 + iota;
+	key_f2: i32 = 290 + iota;
+	key_f3: i32 = 290 + iota;
+	key_f4: i32 = 290 + iota;
+	key_f5: i32 = 290 + iota;
+	key_f6: i32 = 290 + iota;
+	key_f7: i32 = 290 + iota;
+	key_f8: i32 = 290 + iota;
+	key_f9: i32 = 290 + iota;
+	key_f10: i32 = 290 + iota;
+	key_f11: i32 = 290 + iota;
+	key_f12: i32 = 290 + iota;
+	key_f13: i32 = 290 + iota;
+	key_f14: i32 = 290 + iota;
+	key_f15: i32 = 290 + iota;
+	key_f16: i32 = 290 + iota;
+	key_f17: i32 = 290 + iota;
+	key_f18: i32 = 290 + iota;
+	key_f19: i32 = 290 + iota;
+	key_f20: i32 = 290 + iota;
+	key_f21: i32 = 290 + iota;
+	key_f22: i32 = 290 + iota;
+	key_f23: i32 = 290 + iota;
+	key_f24: i32 = 290 + iota;
+	key_f25: i32 = 290 + iota;
 );
 
 const (
-	key_left_shift: int = 340 + iota;
-	key_left_control: int = 340 + iota;
-	key_left_alt: int = 340 + iota;
-	key_left_super: int = 340 + iota;
-	key_right_shift: int = 340 + iota;
-	key_right_control: int = 340 + iota;
-	key_right_alt: int = 340 + iota;
-	key_right_super: int = 340 + iota;
-	key_menu: int = 340 + iota;
+	key_keypad_0: i32 = 320 + iota;
+	key_keypad_1: i32 = 320 + iota;
+	key_keypad_2: i32 = 320 + iota;
+	key_keypad_3: i32 = 320 + iota;
+	key_keypad_4: i32 = 320 + iota;
+	key_keypad_5: i32 = 320 + iota;
+	key_keypad_6: i32 = 320 + iota;
+	key_keypad_7: i32 = 320 + iota;
+	key_keypad_8: i32 = 320 + iota;
+	key_keypad_9: i32 = 320 + iota;
+	key_keypad_decimal: i32 = 320 + iota;
+	key_keypad_divide: i32 = 320 + iota;
+	key_keypad_multiply: i32 = 320 + iota;
+	key_keypad_subtract: i32 = 320 + iota;
+	key_keypad_add: i32 = 320 + iota;
+	key_keypad_enter: i32 = 320 + iota;
+	key_keypad_equal: i32 = 320 + iota;
 );
 
 const (
-	mouse_button_left: int = iota;
-	mouse_button_right: int = iota;
-	mouse_button_middle: int = iota;
-	mouse_button_4: int = iota;
-	mouse_button_5: int = iota;
-	mouse_button_6: int = iota;
-	mouse_button_7: int = iota;
-	mouse_button_8: int = iota;
+	key_left_shift: i32 = 340 + iota;
+	key_left_control: i32 = 340 + iota;
+	key_left_alt: i32 = 340 + iota;
+	key_left_super: i32 = 340 + iota;
+	key_right_shift: i32 = 340 + iota;
+	key_right_control: i32 = 340 + iota;
+	key_right_alt: i32 = 340 + iota;
+	key_right_super: i32 = 340 + iota;
+	key_menu: i32 = 340 + iota;
+);
+
+const (
+	mouse_button_left: i32 = iota;
+	mouse_button_right: i32 = iota;
+	mouse_button_middle: i32 = iota;
+	mouse_button_4: i32 = iota;
+	mouse_button_5: i32 = iota;
+	mouse_button_6: i32 = iota;
+	mouse_button_7: i32 = iota;
+	mouse_button_8: i32 = iota;
 );
 
 // Resin input snapshot bits from resin_runtime/window.h.
 const (
-	input_down: uint = 1 << iota;
-	input_pressed: uint = 1 << iota;
-	input_released: uint = 1 << iota;
+	input_down: u32 = 1 << iota;
+	input_pressed: u32 = 1 << iota;
+	input_released: u32 = 1 << iota;
 );
 
 struct ButtonState {
@@ -205,16 +207,16 @@ struct ButtonState {
 	released: bool,
 }
 
-fn button_state(bits: uint) -> ButtonState {
-	ButtonState { down = (bits & input_down) != 0_ui, pressed = (bits & input_pressed) != 0_ui, released = (bits & input_released) != 0_ui }
+fn button_state(bits: u32) -> ButtonState {
+	ButtonState { down = (bits & input_down) != u32(0), pressed = (bits & input_pressed) != u32(0), released = (bits & input_released) != u32(0) }
 }
 
 extern type ResinWindow;
 struct WindowOwner {
 	handle: Ptr<ResinWindow>,
 }
-fn drop(self: Ptr<WindowOwner>) {
-	if (ulong(self.handle) != 0_ul) {
+fn drop(self: Ref<WindowOwner>) {
+	if (u64(self.handle) != u64(0)) {
 		resin_window_destroy(self.handle);
 	};
 }
@@ -226,8 +228,8 @@ fn native(self: Ref<Window>) -> Ptr<ResinWindow> {
 	self.owner:get().handle
 }
 
-fn window_new(width: uint, height: uint, title: Ref<String>) -> (Window | Err<RuntimeError>) {
-	let mut owner = arc_ptr_alloc::<WindowOwner>(WindowOwner { handle = Ptr<ResinWindow>(0_ul) })?;
+fn window_new(width: u32, height: u32, title: Ref<String>) -> (Window | Err<RuntimeError>) {
+	let mut owner = arc_ptr_alloc::<WindowOwner>(WindowOwner { handle = Ptr<ResinWindow>(u64(0)) })?;
 	runtime_status_from_code(resin_window_create(width, height, title:get().data, &owner:get().handle))?;
 	(Window { owner = owner })
 }
@@ -236,7 +238,7 @@ fn poll_events(self: Ref<Window>) -> (() | Err<RuntimeError>) {
 	runtime_status_from_code(resin_window_poll_events(self:native()))
 }
 
-fn wait_events(self: Ref<Window>, timeout: float64) -> () | Err<RuntimeError> {
+fn wait_events(self: Ref<Window>, timeout: f64) -> () | Err<RuntimeError> {
 	runtime_status_from_code(resin_window_wait_events(self:native(), timeout))
 }
 
@@ -257,41 +259,41 @@ fn set_should_close(self: Ref<Window>, close: bool) -> (() | Err<RuntimeError>) 
 	)
 }
 
-fn framebuffer_size(self: Ref<Window>) -> ((uint, uint) | Err<RuntimeError>) {
-	let mut width = uint(0);
-	let mut height = uint(0);
-	runtime_status_from_code(resin_window_framebuffer_size(self:native(), &width, &height))?;
-	((width, height))
+fn framebuffer_size(self: Ref<Window>) -> ((u32, u32) | Err<RuntimeError>) {
+	let output = arc_ptr_alloc((u32(0), u32(0)))?;
+	let values = output:get();
+	runtime_status_from_code(resin_window_framebuffer_size(self:native(), &values.0, &values.1))?;
+	((values.0, values.1))
 }
 
-fn set_size(self: Ref<Window>, width: uint, height: uint) -> (() | Err<RuntimeError>) {
+fn set_size(self: Ref<Window>, width: u32, height: u32) -> (() | Err<RuntimeError>) {
 	runtime_status_from_code(resin_window_set_size(self:native(), width, height))
 }
 
-fn key_pressed(self: Ref<Window>, key: int) -> bool {
+fn key_pressed(self: Ref<Window>, key: i32) -> bool {
 	resin_window_key_pressed(self:native(), key) != 0
 }
 
-fn key_state(self: Ref<Window>, key: int) -> ButtonState {
+fn key_state(self: Ref<Window>, key: i32) -> ButtonState {
 	button_state(resin_window_key_state(self:native(), key))
 }
 
-fn mouse_button_state(self: Ref<Window>, button: int) -> ButtonState {
+fn mouse_button_state(self: Ref<Window>, button: i32) -> ButtonState {
 	button_state(resin_window_mouse_button_state(self:native(), button))
 }
 
-fn cursor_position(self: Ref<Window>) -> ((float64, float64) | Err<RuntimeError>) {
-	let mut x = 0.0_d;
-	let mut y = 0.0_d;
-	runtime_status_from_code(resin_window_cursor_position(self:native(), &x, &y))?;
-	((x, y))
+fn cursor_position(self: Ref<Window>) -> ((f64, f64) | Err<RuntimeError>) {
+	let output = arc_ptr_alloc((f64(0.0), f64(0.0)))?;
+	let values = output:get();
+	runtime_status_from_code(resin_window_cursor_position(self:native(), &values.0, &values.1))?;
+	((values.0, values.1))
 }
 
-fn scroll_delta(self: Ref<Window>) -> ((float64, float64) | Err<RuntimeError>) {
-	let mut x = 0.0_d;
-	let mut y = 0.0_d;
-	runtime_status_from_code(resin_window_scroll_delta(self:native(), &x, &y))?;
-	((x, y))
+fn scroll_delta(self: Ref<Window>) -> ((f64, f64) | Err<RuntimeError>) {
+	let output = arc_ptr_alloc((f64(0.0), f64(0.0)))?;
+	let values = output:get();
+	runtime_status_from_code(resin_window_scroll_delta(self:native(), &values.0, &values.1))?;
+	((values.0, values.1))
 }
 
 fn focused(self: Ref<Window>) -> bool {

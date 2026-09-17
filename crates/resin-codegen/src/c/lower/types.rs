@@ -104,7 +104,7 @@ impl<'a> Types<'a> {
             let ty = &ty;
             let name = self.name(ty);
             match ty {
-                Ty::Pointer { .. } => {}
+                Ty::Pointer { .. } | Ty::Reference { .. } => {}
                 _ => {
                     if let Some(scalar) = scalar(ty) {
                         writeln!(out, "typedef {scalar} {name};").unwrap();
@@ -145,7 +145,7 @@ impl<'a> Types<'a> {
             return;
         }
         emitted[self.id(ty)] = true;
-        if let Ty::Pointer { pointee } = ty {
+        if let Ty::Pointer { pointee } | Ty::Reference { referent: pointee } = ty {
             self.pointer(pointee, emitted, out);
             writeln!(out, "typedef {} *{};", self.name(pointee), self.name(ty)).unwrap();
         }

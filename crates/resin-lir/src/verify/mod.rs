@@ -85,8 +85,9 @@ pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
         | Instr::TakeField { .. }
         | Instr::Push { .. }
         | Instr::Function { .. }
-        | Instr::LocalAddress { .. } => StackEffect { pops: 0, pushes: 1 },
-        Instr::TransferLoad
+        | Instr::LocalRef { .. } => StackEffect { pops: 0, pushes: 1 },
+        Instr::Borrow
+        | Instr::TransferLoad
         | Instr::OwnerData { .. }
         | Instr::OwnerLength
         | Instr::OwnerDowngrade

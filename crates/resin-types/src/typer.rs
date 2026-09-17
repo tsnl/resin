@@ -401,10 +401,10 @@ pub(super) fn validate_shader(
         Err(format!(
             "invalid @{stage}_shader signature: {}",
             match stage {
-                "compute" => "expected (ulong, Ptr<T>) -> ()",
-                "vertex" => "expected int or (int, Ptr<T>) returning a position/color record",
+                "compute" => "expected (u64, Ptr<T>) -> ()",
+                "vertex" => "expected i32 or (i32, Ptr<T>) returning a position/color record",
                 "fragment" =>
-                    "expected Color or (Color, Ptr<T>) returning Color with float32 r/g/b/a fields",
+                    "expected Color or (Color, Ptr<T>) returning Color with f32 r/g/b/a fields",
                 _ => "unknown shader stage",
             }
         ))
@@ -541,10 +541,11 @@ pub(super) fn shader_value_type(definitions: &[TypeDef], ty: &Ty) -> Result<(), 
         match ty {
             Ty::Unit | Ty::None | Ty::Bool | Ty::Int32 | Ty::UInt8 | Ty::UInt32
             | Ty::UInt64 | Ty::Int64 | Ty::Float32 | Ty::StrongOwner | Ty::WeakOwner => {},
-            Ty::Str => return Err("shader string literals need device-backed storage; pass a Span<ubyte> in the shader root".into()),
+            Ty::Str => return Err("shader string literals need device-backed storage; pass a Span<u8> in the shader root".into()),
             Ty::GpuPipelineContract | Ty::GpuView | Ty::GpuArguments => {
                 return Err("shader cannot consume a managed GPU view or projected arguments".into());
             }
+            Ty::Reference { referent } => pending.push(referent),
             Ty::Pointer { pointee: element } => {
                 crate::layout::layout(definitions, element).map_err(|error| error.to_string())?;
                 pending.push(element);

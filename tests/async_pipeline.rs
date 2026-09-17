@@ -27,12 +27,12 @@ async fn explicit_snapshot_pipeline_retains_editor_facts_and_owned_codegen() {
     let main = Source::with_identity(
         SourceId::new("package/main.resin"),
         "main.resin",
-        "export { main }; import { \"library.resin\" }; fn main() -> int  { answer() }",
+        "export { main }; import { \"library.resin\" }; fn main() -> i32  { answer() }",
     );
     let library = Source::with_identity(
         SourceId::new("package/library.resin"),
         "library.resin",
-        "export { answer }; fn answer() -> int  { 42 }",
+        "export { answer }; fn answer() -> i32  { 42 }",
     );
     let binding = ImportBinding {
         source: main.id(),
@@ -184,7 +184,7 @@ async fn cold_and_incremental_successors_match_without_changing_recovery_inputs(
     let cancellation = Cancellation::new();
     let original = Source::new(
         "editor/main.resin",
-        "export { main }; fn main() -> int  { 1 }",
+        "export { main }; fn main() -> i32  { 1 }",
     );
     let previous = resin_cst::build_cst(original.text(), None, &execution, &cancellation)
         .await
@@ -206,7 +206,7 @@ async fn cold_and_incremental_successors_match_without_changing_recovery_inputs(
     .unwrap();
     let cold_source = Source::with_identity(original.id(), original.name(), edited.text());
     assert_eq!(edited, cold_source);
-    let incomplete = original.with_text("export { main }; fn main() -> int = { 42");
+    let incomplete = original.with_text("export { main }; fn main() -> i32 = { 42");
     let (complete_tree, incomplete_tree) = tokio::join!(
         resin_cst::build_cst(edited.text(), Some(&previous), &execution, &cancellation),
         resin_cst::build_cst(

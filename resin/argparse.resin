@@ -1,3 +1,6 @@
+//! Streaming command-line parsing with aliases and required values.
+//! A specification such as `"--help|-h --count="` describes accepted options.
+
 // Streaming option parser. The specification lists spellings separated by spaces:
 // "--help|-h --verbose|-v --output|-o= --count=". A trailing '=' requires a value.
 // Values accept '--count 12' or '--count=12'; aliases return the first spelling.
@@ -8,63 +11,65 @@ export { ArgParser, Argument, argparse, next, named, argument_integer, argument_
 
 extern {
 	"stdlib.h": {
-		fn strtod(text: Ptr<ubyte>, end: Ptr<Ptr<ubyte>>) -> float64;
+		fn strtod(text: Ptr<u8>, end: Ptr<Ptr<u8>>) -> f64;
 	},
 };
 
-import { "process.resin", "span.resin", "string.resin" };
+import { "process.resin", "span.resin", "string.resin", "shared.resin" };
 
 struct ArgParser {
-	args: Span<Ptr<ubyte>>,
+	args: Span<Ptr<u8>>,
 	specification: str,
-	index: ulong,
+	index: u64,
 }
 
 struct Argument {
-	name: Span<ubyte>,
+	name: Span<u8>,
 	// Flags have an empty value. Values remain NUL-terminated views into argv.
-	value: Span<ubyte>,
+	value: Span<u8>,
 }
 
-fn argparse(args: Ref<Span<Ptr<ubyte>>>, specification: str) -> ArgParser {
-	ArgParser { args = args:clone(), specification = specification, index = 1_ul }
+fn argparse(args: Ref<Span<Ptr<u8>>>, specification: str) -> ArgParser {
+	ArgParser { args = args:clone(), specification = specification, index = u64(1) }
 }
 
-fn equal(left: Ref<Span<ubyte>>, right: Ref<Span<ubyte>>) -> bool {
+fn equal(left: Ref<Span<u8>>, right: Ref<Span<u8>>) -> bool {
 	if (left.length != right.length) {
 		return false;
 	};
-	let mut i = 0_ul;
+	let mut i: u64 = 0;
 	while (i < left.length) {
 		if (left:at(i) != right:at(i)) {
 			return false;
 		};
-		i = i + 1_ul;
+		i = i + u64(1);
 	};
 	true
 }
 
 fn named(self: Ref<Argument>, name: str) -> bool {
-	equal(self.name, bytes(name))
+	let view = bytes(name);
+	equal(self.name, view)
 }
 
-fn delimiter(text: Ref<Span<ubyte>>, start: ulong, byte: ubyte) -> ulong {
+fn delimiter(text: Ref<Span<u8>>, start: u64, byte: u8) -> u64 {
 	let mut i = start;
 	while (i < text.length && text:at(i) != byte) {
-		i = i + 1_ul;
+		i = i + u64(1);
 	};
 	i
 }
 
 // Find a spelling inside one specification token, excluding its trailing '='.
-fn matches(token: Ref<Span<ubyte>>, name: Ref<Span<ubyte>>) -> bool {
-	let mut start = 0_ul;
+fn matches(token: Ref<Span<u8>>, name: Ref<Span<u8>>) -> bool {
+	let mut start: u64 = 0;
 	while (start < token.length) {
-		let end = delimiter(token, start, 124_ub);
-		if (equal(token:slice(start, end - start), name)) {
+		let end = delimiter(token, start, u8(124));
+		let spelling = token:slice(start, end - start);
+		if (equal(spelling, name)) {
 			return true;
 		};
-		start = end + 1_ul;
+		start = end + u64(1);
 	};
 	false
 }
@@ -74,75 +79,75 @@ fn next(self: Ref<ArgParser>) -> Argument | None | Err<String> {
 		return None;
 	};
 	let text = argument(self.args, self.index);
-	self.index = self.index + 1_ul;
-	let separator = delimiter(text, 0_ul, 61_ub);
-	let name = text:slice(0_ul, separator);
+	self.index = self.index + u64(1);
+	let separator = delimiter(text, u64(0), u8(61));
+	let name = text:slice(u64(0), separator);
 	let spec = bytes(self.specification);
-	let mut start = 0_ul;
+	let mut start: u64 = 0;
 	while (start < spec.length) {
-		let end = delimiter(spec, start, 32_ub);
+		let end = delimiter(spec, start, u8(32));
 		if (end > start) {
-			let takes_value = spec:at(end - 1_ul) == 61_ub;
+			let takes_value = spec:at(end - u64(1)) == u8(61);
 			let length = end - start - if (takes_value) {
-				1_ul
+				u64(1)
 			} else {
-				0_ul
+				u64(0)
 			};
 			let token = spec:slice(start, length);
 			if (matches(token, name)) {
-				let canonical = token:slice(0_ul, delimiter(token, 0_ul, 124_ub));
+				let canonical = token:slice(u64(0), delimiter(token, u64(0), u8(124)));
 				let value = self:read_value(text, separator, takes_value)?;
 				return Argument { name = canonical, value = value };
 			};
 		};
-		start = end + 1_ul;
+		start = end + u64(1);
 	};
 	Err(fmt("Unknown option: {0}", (name:bytes(),)))
 }
 
-fn read_value(self: Ref<ArgParser>, text: Ref<Span<ubyte>>, separator: ulong, required: bool) -> Span<ubyte> | Err<String> {
+fn read_value(self: Ref<ArgParser>, text: Ref<Span<u8>>, separator: u64, required: bool) -> Span<u8> | Err<String> {
 	if (separator < text.length) {
 		if (!required) {
 			return Err(fmt("Flag does not take a value: {0}", (text:bytes(),)));
 		};
-		return text:slice(separator + 1_ul, text.length - separator - 1_ul);
+		return text:slice(separator + u64(1), text.length - separator - u64(1));
 	};
 	if (!required) {
-		return text:slice(text.length, 0_ul);
+		return text:slice(text.length, u64(0));
 	};
 	if (self.index == self.args.length) {
 		return Err(fmt("Missing value for {0}", (text:bytes(),)));
 	};
 	let value = argument(self.args, self.index);
-	self.index = self.index + 1_ul;
+	self.index = self.index + u64(1);
 	value
 }
 
-fn argument_integer(text: Ref<Span<ubyte>>) -> uint | Err<String> {
-	let mut value = 0_ui;
-	let mut i = 0_ul;
-	if (text.length == 0_ul) {
+fn argument_integer(text: Ref<Span<u8>>) -> u32 | Err<String> {
+	let mut value: u32 = 0;
+	let mut i: u64 = 0;
+	if (text.length == u64(0)) {
 		return Err(string_from_str("Expected an integer, got an empty value"));
 	};
 	while (i < text.length) {
 		let byte = text:at(i);
-		if (byte < 48_ub || byte > 57_ub || value > 429496729_ui || (value == 429496729_ui && byte > 53_ub)) {
+		if (byte < u8(48) || byte > u8(57) || value > u32(429496729) || (value == u32(429496729) && byte > u8(53))) {
 			return Err(fmt("Invalid integer: {0}", (text:bytes(),)));
 		};
-		value = value * 10_ui + uint(byte - 48_ub);
-		i = i + 1_ul;
+		value = value * u32(10) + u32(byte - u8(48));
+		i = i + u64(1);
 	};
 	value
 }
 
 // Copy exactly the bounded view before calling C; embedded NULs/trailing bytes fail.
-fn argument_number(text: Ref<Span<ubyte>>) -> float32 | Err<String> {
+fn argument_number(text: Ref<Span<u8>>) -> f32 | Err<_> {
 	let terminated = string_from_bytes(text);
 	let data = terminated:get().data;
-	let mut end = Ptr<ubyte>(0_ul);
-	let value = strtod(data, &end);
-	if (text.length == 0_ul || ulong(end) - ulong(data) != text.length || !(value >= -3.4e38_d && value <= 3.4e38_d)) {
+	let end = arc_ptr_alloc(Ptr<u8>(u64(0)))?;
+	let value = strtod(data, end:get());
+	if (text.length == u64(0) || u64(end:get().*) - u64(data) != text.length || !(value >= f64(-3.4e38) && value <= f64(3.4e38))) {
 		return Err(fmt("Invalid finite number: {0}", (text:bytes(),)));
 	};
-	float32(value)
+	f32(value)
 }

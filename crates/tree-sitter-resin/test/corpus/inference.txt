@@ -1,7 +1,7 @@
 ==================
 Nested explicit inference holes
 ==================
-fn choose(p: Ptr<int>) -> (Ptr<_>, (int) -> _)  {
+fn choose(p: Ptr<i32>) -> (Ptr<_>, (i32) -> _)  {
     let mut output: Ptr<Ptr<_>>;
     (p, f)
 }
@@ -99,7 +99,7 @@ fn choose(p: Ptr<int>) -> (Ptr<_>, (int) -> _)  {
 ==================
 Underscores in identifiers are not holes
 ==================
-type _Name = int;
+type _Name = i32;
 fn _name(_value: _Name) -> _Name  { _value }
 ---
 

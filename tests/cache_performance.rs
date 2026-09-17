@@ -159,10 +159,10 @@ fn fixture(changed: bool) -> SourceGraph {
     for index in 0..count {
         let value = if changed && index == 0 { 43 } else { 42 };
         let mut text =
-            format!("export {{ value_{index} }}; fn value_{index}() -> int  {{ {value} }}\n");
+            format!("export {{ value_{index} }}; fn value_{index}() -> i32  {{ {value} }}\n");
         for helper in 0..64 {
             text.push_str(&format!(
-                "fn helper_{helper}(value: int) -> int  {{ value + {helper} }}\n"
+                "fn helper_{helper}(value: i32) -> i32  {{ value + {helper} }}\n"
             ));
         }
         sources.push(Source::new(format!("file{index}.resin"), text));
@@ -177,7 +177,7 @@ fn fixture(changed: bool) -> SourceGraph {
         .join(" + ");
     let root = Source::new(
         "main.resin",
-        format!("export {{ main }}; import {{ {imports} }}; fn main() -> int  {{ {sum} }}"),
+        format!("export {{ main }}; import {{ {imports} }}; fn main() -> i32  {{ {sum} }}"),
     );
     let bindings: Vec<_> = sources
         .iter()

@@ -25,7 +25,7 @@ impl Context<'_> {
 
     pub(super) fn validate(&mut self, ty: &Ty) -> Result<(), Error> {
         if !self.validated.contains(ty) {
-            resin_types::shader::value_type(&self.module.types, ty).map_err(Error)?;
+            resin_types::shader::value_type(&self.module.types, ty).map_err(Error::unsupported)?;
             self.validated.insert(ty.clone());
         }
         Ok(())
@@ -58,9 +58,11 @@ impl Context<'_> {
                 self.builder.capability(Capability::StorageBuffer8BitAccess);
                 self.builder.type_int(8, 0)
             }
-            Ty::UInt64 | Ty::Pointer { .. } | Ty::StrongOwner | Ty::WeakOwner => {
-                self.builder.type_int(64, 0)
-            }
+            Ty::UInt64
+            | Ty::Pointer { .. }
+            | Ty::Reference { .. }
+            | Ty::StrongOwner
+            | Ty::WeakOwner => self.builder.type_int(64, 0),
             Ty::Float32 => self.builder.type_float(32, None),
             Ty::Error { payload } => self.type_id(payload, representation)?,
             Ty::Defined { definition } => {
@@ -100,7 +102,7 @@ impl Context<'_> {
                 let element_type = self.type_id(element, representation)?;
                 let count = self.constant_u32(
                     u32::try_from(*length)
-                        .map_err(|_| Error("shader array is too large".into()))?,
+                        .map_err(|_| Error::unsupported("shader array is too large".into()))?,
                 );
                 // Explicit IDs avoid accidentally sharing decorations with another
                 // structurally equal type that has a different storage contract.
@@ -108,8 +110,9 @@ impl Context<'_> {
                 self.builder.type_array_id(Some(id), element_type, count);
                 if representation == Representation::Buffer {
                     let layout = crate::layout::layout(self.module, element)?;
-                    let stride = u32::try_from(layout.size)
-                        .map_err(|_| Error("shader array stride is too large".into()))?;
+                    let stride = u32::try_from(layout.size).map_err(|_| {
+                        Error::unsupported("shader array stride is too large".into())
+                    })?;
                     self.builder.decorate(
                         id,
                         Decoration::ArrayStride,
@@ -120,7 +123,7 @@ impl Context<'_> {
             }
             Ty::Str => return Err(super::str_storage_error()),
             _ => {
-                return Err(Error(format!(
+                return Err(Error::unsupported(format!(
                     "shader profile does not support type {ty:?}"
                 )));
             }
@@ -141,7 +144,7 @@ impl Context<'_> {
             let layout = crate::layout::layout(self.module, ty)?;
             for (member, offset) in layout.offsets.into_iter().enumerate() {
                 let offset = u32::try_from(offset)
-                    .map_err(|_| Error("shader record offset is too large".into()))?;
+                    .map_err(|_| Error::unsupported("shader record offset is too large".into()))?;
                 self.builder.member_decorate(
                     id,
                     member as u32,

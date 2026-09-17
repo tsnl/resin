@@ -27,7 +27,7 @@ fn recovery_keeps_original_byte_spans_and_incomplete_function_bodies() {
 
 #[test]
 fn recovering_valid_syntax_matches_strict_generation() {
-    let source = "struct Point { x: int,  }\nfn get(self: Point) -> int  { self.x }\n ";
+    let source = "struct Point { x: i32,  }\nfn get(self: Point) -> i32  { self.x }\n ";
     let document = common::syntax(source);
     let recovered = common::ast(document.clone());
     let strict = common::ast(document.clone()).file;
@@ -67,7 +67,7 @@ fn source_locations_tolerate_editor_offsets_inside_utf8() {
 
 #[test]
 fn generic_wrapper_types_lower_with_their_element_annotations() {
-    let source = "fn first(values: GpuSpan<uint>) -> GpuPtr<_>  { values:at(0_ul) }";
+    let source = "fn first(values: GpuSpan<u32>) -> GpuPtr<_>  { values:at(u64(0)) }";
     let file = common::parse(source).file;
     let StmtKind::Function { params, result, .. } = &file.stmts[0].val else {
         panic!("expected function");
@@ -77,7 +77,7 @@ fn generic_wrapper_types_lower_with_their_element_annotations() {
     };
     assert_eq!(head.val.as_ref(), "GpuSpan");
     assert!(
-        matches!(&args[0].val, resin_ast::TypeKind::Atom { name } if name.val.as_ref() == "uint")
+        matches!(&args[0].val, resin_ast::TypeKind::Atom { name } if name.val.as_ref() == "u32")
     );
     let resin_ast::TypeKind::App { head, args } = &result.val else {
         panic!("expected GPU pointer type former");
@@ -115,7 +115,7 @@ fn generic_pipeline_annotations_keep_both_arguments() {
 
 #[test]
 fn recovery_retains_struct_fields_and_free_function_declarations() {
-    let source = "struct Item { value: int,  }\nfn read(self: Item) -> int  { self. }\n fn later() -> int  { 42 }";
+    let source = "struct Item { value: i32,  }\nfn read(self: Item) -> i32  { self. }\n fn later() -> i32  { 42 }";
     let document = common::syntax(source);
     let file = common::ast(document.clone()).file;
     let StmtKind::Struct { body, methods, .. } = &file.stmts[0].val else {
@@ -137,7 +137,7 @@ fn recovery_retains_struct_fields_and_free_function_declarations() {
 
 #[test]
 fn fields_must_precede_struct_methods() {
-    let source = "struct Item { def read() -> int = { 42 }, value: int, }";
+    let source = "struct Item { def read() -> i32 = { 42 }, value: i32, }";
     let document = common::syntax(source);
     assert!(!common::ast(document.clone()).errors.is_empty());
 }

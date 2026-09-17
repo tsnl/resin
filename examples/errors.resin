@@ -1,12 +1,12 @@
 export { main, failure };
 
-import { "$/string.resin", "$/status.resin" };
+import { "$/string.resin", "$/stdio.resin", "$/status.resin" };
 
 struct DivideByZero {}
 struct NegativeInput {
-	value: int,
+	value: i32,
 }
-type Number = int;
+type Number = i32;
 
 fn divide(n: Number, d: Number) -> (Number | Err<DivideByZero>) {
 	if (d == 0) {
@@ -16,7 +16,7 @@ fn divide(n: Number, d: Number) -> (Number | Err<DivideByZero>) {
 	}
 }
 
-fn calculate(n: int) -> (int | Err<_>) {
+fn calculate(n: i32) -> (i32 | Err<_>) {
 	if (n < 0) {
 		Err(NegativeInput { value = n })
 	} else {
@@ -27,10 +27,12 @@ fn calculate(n: int) -> (int | Err<_>) {
 fn main() -> (() | Err<_>) {
 	runtime_status_from_code(0)?;
 	let mut answer = calculate(84)?;
-	print(fmt("answer = {0}\n", (answer,)));
+	let text = fmt("answer = {0}\n", (answer,));
+	print(text);
 	match (calculate(-1)) {
-		int(value) => {
-			print(fmt("unexpected success: {0}\n", (value,)))
+		i32(value) => {
+			let text = fmt("unexpected success: {0}\n", (value,));
+			print(text)
 		},
 		Err(error) => {
 			match (error) {
@@ -38,7 +40,8 @@ fn main() -> (() | Err<_>) {
 					print("division by zero\n")
 				},
 				NegativeInput(negative) => {
-					print(fmt("negative input: {0}\n", (negative.value,)))
+					let text = fmt("negative input: {0}\n", (negative.value,));
+					print(text)
 				},
 			}
 		},

@@ -1,40 +1,52 @@
-export { Span, bytes, at, slice, as_bytes, clone };
+//! Borrowed views of contiguous elements.
+//! Keep the backing storage alive; a span does not retain its owner.
+
+export { Span, bytes, at, lea, slice, as_bytes, clone };
 
 // Borrowed storage. The caller keeps the allocation alive throughout each access.
+/// A nonowning pointer and element count. Bounds are checked on the host.
+/// Shader accesses are unchecked; keep indices within the declared length.
 struct Span<T> {
 	data: Ptr<T>,
-	length: ulong,
+	length: u64,
 
 	// Primitive byte transport for formatting and native interfaces.
 }
-fn at<T>(self: Ref<Span<T>>, index: ulong) -> Ref<T> {
-	pointer_index(self.data, self.length, index).*
+/// Borrow the element at `index` without granting an address.
+fn at<T>(self: Ref<Span<T>>, index: u64) -> Ref<T> {
+	self:lea(index).*
 }
 
-fn slice<T>(self: Ref<Span<T>>, start: ulong, length: ulong) -> Span<T> {
+/// Obtain a pointer to an element of the already pointer-backed span.
+fn lea<T>(self: Ref<Span<T>>, index: u64) -> Ptr<T> {
+	pointer_index(self.data, self.length, index)
+}
+
+fn slice<T>(self: Ref<Span<T>>, start: u64, length: u64) -> Span<T> {
 	Span<T> {
 		data = pointer_range(self.data, self.length, start, length),
 		length = length,
 	}
 }
 
-fn as_bytes<T>(self: Ref<Span<T>>) -> Span<ubyte> {
+fn as_bytes<T>(self: Ref<Span<T>>) -> Span<u8> {
 	let mut raw = self:bytes();
-	Span<ubyte> { data = raw.0, length = raw.1 }
+	Span<u8> { data = raw.0, length = raw.1 }
 }
 
-fn bytes<T>(self: Ref<Span<T>>) -> (Ptr<ubyte>, ulong) {
+fn bytes<T>(self: Ref<Span<T>>) -> (Ptr<u8>, u64) {
 	pointer_bytes(self.data, self.length)
 }
 
 // Literal length excludes the NUL terminator; borrowing never copies the bytes.
-fn bytes(text: str) -> Span<ubyte> {
-	Span<ubyte> { data = text.data, length = text.length }
+/// Borrow the bytes of a string literal, excluding its NUL terminator.
+fn bytes(text: str) -> Span<u8> {
+	Span<u8> { data = text.data, length = text.length }
 }
 
-intrinsic "pointer_index" fn pointer_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;
-intrinsic "pointer_range" fn pointer_range<T>(data: Ptr<T>, capacity: ulong, start: ulong, length: ulong) -> Ptr<T>;
-intrinsic "pointer_bytes" fn pointer_bytes<T>(data: Ptr<T>, length: ulong) -> (Ptr<ubyte>, ulong);
+intrinsic "pointer_index" fn pointer_index<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;
+intrinsic "pointer_range" fn pointer_range<T>(data: Ptr<T>, capacity: u64, start: u64, length: u64) -> Ptr<T>;
+intrinsic "pointer_bytes" fn pointer_bytes<T>(data: Ptr<T>, length: u64) -> (Ptr<u8>, u64);
 
 fn clone<T>(value: Ref<Span<T>>) -> Span<T> {
 	Span<T> { data = value.data, length = value.length }

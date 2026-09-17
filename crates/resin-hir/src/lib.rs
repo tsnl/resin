@@ -547,7 +547,7 @@ pub enum Statement {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReceiverConversion {
     Value,
-    Address,
+    Borrow,
     Load,
 }
 
@@ -652,7 +652,22 @@ impl Hir {
         self.semantics.definition(&self.syntax, source, offset)
     }
     pub fn hover(&self, source: &Source, offset: usize) -> Option<Hover> {
-        self.semantics.hover(&self.syntax, source, offset)
+        let mut hover = self.semantics.hover(&self.syntax, source, offset)?;
+        if let Some(origin) = self.definition(source, offset)
+            && let Some(document) = self.inputs.documents.get(&origin.source)
+        {
+            hover.documentation = if origin.span == (Span { start: 0, end: 0 }) {
+                document.file.module_documentation.to_string()
+            } else {
+                document
+                    .file
+                    .documentation
+                    .iter()
+                    .find(|doc| doc.span == origin.span)
+                    .map_or_else(String::new, |doc| doc.val.to_string())
+            };
+        }
+        Some(hover)
     }
     pub fn completions(&self, source: &Source, offset: usize) -> Vec<Completion> {
         self.semantics.completions(&self.syntax, source, offset)
@@ -709,6 +724,8 @@ impl CheckedProgram {
 pub struct Hover {
     pub span: Span,
     pub text: String,
+    /// Declaration Markdown, separate from the Resin signature.
+    pub documentation: String,
 }
 
 #[derive(Debug, Clone)]
@@ -747,6 +764,7 @@ impl Analysis {
         Some(Hover {
             span: resin_cst::span(token),
             text,
+            documentation: String::new(),
         })
     }
 
@@ -1248,12 +1266,12 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ),
     (
         "iota",
-        "iota\n\nZero-based const specification index. Its numeric type is inferred from the initializer, defaulting to long.",
+        "iota\n\nZero-based const specification index. Its numeric type is inferred from the initializer, defaulting to i64.",
         DefinitionKind::Constant,
     ),
     (
         "sizeof",
-        "sizeof(Type) -> ulong\n\nThe size in bytes of a type; accepts only a type operand.",
+        "sizeof(Type) -> u64\n\nThe size in bytes of a type; accepts only a type operand.",
         DefinitionKind::Function,
     ),
     (
@@ -1263,7 +1281,7 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ),
     (
         "str",
-        "str\n\nA string literal view with data: Ptr<ubyte> and length: ulong. Static storage has a trailing NUL excluded from length. Import $/span.resin and use bytes(text) to borrow its bytes. Host-only.",
+        "str\n\nA string literal view with data: Ptr<u8> and length: u64. Static storage has a trailing NUL excluded from length. Import $/span.resin and use bytes(text) to borrow its bytes. Host-only.",
         DefinitionKind::Type,
     ),
     (
@@ -1324,40 +1342,16 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ("true", "true — boolean literal", DefinitionKind::Keyword),
     ("false", "false — boolean literal", DefinitionKind::Keyword),
     ("bool", "bool", DefinitionKind::Type),
-    (
-        "sbyte",
-        "sbyte — signed 8-bit integer",
-        DefinitionKind::Type,
-    ),
-    (
-        "short",
-        "short — signed 16-bit integer",
-        DefinitionKind::Type,
-    ),
-    ("int", "int — signed 32-bit integer", DefinitionKind::Type),
-    ("long", "long — signed 64-bit integer", DefinitionKind::Type),
-    (
-        "ubyte",
-        "ubyte — unsigned 8-bit integer",
-        DefinitionKind::Type,
-    ),
-    (
-        "ushort",
-        "ushort — unsigned 16-bit integer",
-        DefinitionKind::Type,
-    ),
-    (
-        "uint",
-        "uint — unsigned 32-bit integer",
-        DefinitionKind::Type,
-    ),
-    (
-        "ulong",
-        "ulong — unsigned 64-bit integer",
-        DefinitionKind::Type,
-    ),
-    ("float32", "float32", DefinitionKind::Type),
-    ("float64", "float64", DefinitionKind::Type),
+    ("i8", "i8 — signed 8-bit integer", DefinitionKind::Type),
+    ("i16", "i16 — signed 16-bit integer", DefinitionKind::Type),
+    ("i32", "i32 — signed 32-bit integer", DefinitionKind::Type),
+    ("i64", "i64 — signed 64-bit integer", DefinitionKind::Type),
+    ("u8", "u8 — unsigned 8-bit integer", DefinitionKind::Type),
+    ("u16", "u16 — unsigned 16-bit integer", DefinitionKind::Type),
+    ("u32", "u32 — unsigned 32-bit integer", DefinitionKind::Type),
+    ("u64", "u64 — unsigned 64-bit integer", DefinitionKind::Type),
+    ("f32", "f32", DefinitionKind::Type),
+    ("f64", "f64", DefinitionKind::Type),
     ("export", "export { name };", DefinitionKind::Keyword),
     (
         "import",
@@ -1914,7 +1908,7 @@ pub struct OperationLookup {
     pub candidates: Vec<FunctionId>,
     pub type_args: Option<Vec<Type>>,
     pub arguments: Vec<Type>,
-    /// Unsuffixed numeric operands use the selected parameter type. Their entries
+    /// Numeric literal operands use the selected parameter type. Their entries
     /// in `arguments` retain the numeric fallback chosen during HIR construction.
     pub literal_arguments: Vec<usize>,
 }

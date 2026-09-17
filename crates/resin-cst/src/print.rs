@@ -1,4 +1,4 @@
-//! Canonical source formatting. Normalizes whitespace and numeric suffixes.
+//! Canonical source formatting. Normalizes whitespace and preserves literal text.
 //!
 //! Indentation uses hard tabs. A trailing comma forces a delimiter group onto
 //! multiple lines, except for singleton tuples. Invalid syntax is left alone;
@@ -46,7 +46,10 @@ pub fn format_source(source: &str) -> Option<String> {
             writer.indent -= 1;
             writer.newline();
         }
-        if node.kind() == "comment" && gap.contains('\n') && !writer.output.is_empty() {
+        if matches!(node.kind(), "comment" | "doc_comment")
+            && gap.contains('\n')
+            && !writer.output.is_empty()
+        {
             writer.newline();
         }
         // Keep a single intentional blank line between statements/items/comments.
@@ -63,11 +66,7 @@ pub fn format_source(source: &str) -> Option<String> {
         {
             writer.space();
         }
-        if node.kind() == "number" {
-            writer.write(&resin_types::literal::format(text));
-        } else {
-            writer.write(text);
-        }
+        writer.write(text);
         if closing {
             active.pop();
         }
@@ -85,7 +84,7 @@ pub fn format_source(source: &str) -> Option<String> {
         }
         let break_after = match node.kind() {
             "lid" if node.parent().is_some_and(|p| p.kind() == "decorator") => true,
-            "comment" => {
+            "comment" | "doc_comment" => {
                 text.starts_with("//")
                     || tokens.get(i + 1).is_some_and(|next| {
                         source[node.end_byte()..next.start_byte()].contains('\n')
@@ -171,10 +170,10 @@ fn finish_group(
         && body
             .iter()
             .rev()
-            .find(|n| n.kind() != "comment")
+            .find(|n| !matches!(n.kind(), "comment" | "doc_comment"))
             .is_some_and(|n| n.kind() == ",");
     let comments = body.iter().enumerate().any(|(i, n)| {
-        n.kind() == "comment"
+        matches!(n.kind(), "comment" | "doc_comment")
             && (source[n.byte_range()].starts_with("//")
                 || source[n.byte_range()].contains('\n')
                 || source[tokens[start].end_byte()..n.start_byte()].contains('\n')
@@ -189,7 +188,8 @@ fn finish_group(
 
 fn trailing_comment(source: &str, tokens: &[Node<'_>], i: usize) -> bool {
     tokens.get(i + 1).is_some_and(|next| {
-        next.kind() == "comment" && !source[tokens[i].end_byte()..next.start_byte()].contains('\n')
+        matches!(next.kind(), "comment" | "doc_comment")
+            && !source[tokens[i].end_byte()..next.start_byte()].contains('\n')
     })
 }
 
@@ -208,7 +208,7 @@ fn space_between(left: Node<'_>, right: Node<'_>) -> bool {
     ) {
         return false;
     }
-    if a == "comment" || b == "comment" {
+    if matches!(a, "comment" | "doc_comment") || matches!(b, "comment" | "doc_comment") {
         return true;
     }
     if a == "::" || b == "::" {

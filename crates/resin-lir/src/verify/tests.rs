@@ -77,10 +77,10 @@ fn store_returns_unit_so_numeric_assignment_cannot_be_chained() {
         blocks: vec![BasicBlock {
             name: None,
             instrs: vec![
-                Instr::LocalAddress {
+                Instr::LocalRef {
                     local: LocalId::from_index(0),
                 },
-                Instr::LocalAddress {
+                Instr::LocalRef {
                     local: LocalId::from_index(1),
                 },
                 Instr::Push {
@@ -182,7 +182,7 @@ fn indirect_calls_use_the_callee_on_the_stack() {
         blocks: vec![BasicBlock {
             name: None,
             instrs: vec![
-                Instr::LocalAddress {
+                Instr::LocalRef {
                     local: LocalId::from_index(0),
                 },
                 Instr::Load,
@@ -333,7 +333,7 @@ fn builtin_module(name: &str, params: &[Ty], result: Ty) -> Module {
         .enumerate()
         .flat_map(|(index, _)| {
             [
-                Instr::LocalAddress {
+                Instr::LocalRef {
                     local: LocalId::from_index(index + 1),
                 },
                 Instr::Load,
@@ -471,7 +471,7 @@ fn ascription_cannot_stand_in_for_cast_or_widen_instructions() {
             blocks: vec![BasicBlock {
                 name: None,
                 instrs: vec![
-                    Instr::LocalAddress {
+                    Instr::LocalRef {
                         local: LocalId::from_index(0),
                     },
                     Instr::Load,
@@ -501,7 +501,7 @@ fn ascription_cannot_stand_in_for_cast_or_widen_instructions() {
 }
 
 #[test]
-fn destruction_hooks_reference_a_function_with_the_nominal_pointer_signature() {
+fn destruction_hooks_require_the_nominal_reference_signature() {
     let mut definition = TypeDef::new("Resource", record());
     if let TypeDef::Nominal { drop, .. } = &mut definition {
         *drop = Some(FunctionId::from_index(0));
@@ -535,8 +535,8 @@ fn destruction_hooks_reference_a_function_with_the_nominal_pointer_signature() {
         verify(&module).unwrap_err().kind,
         VerifyErrorKind::InvalidDropHook
     );
-    module.functions[0].locals[0].ty = Ty::Pointer {
-        pointee: Box::new(Ty::Defined {
+    module.functions[0].locals[0].ty = Ty::Reference {
+        referent: Box::new(Ty::Defined {
             definition: TypeId::from_index(0),
         }),
     };
@@ -602,7 +602,7 @@ fn byte_views_cannot_be_ascribed_as_strings() {
 
 fn parameter_expression(param: Ty, result: Ty, instructions: Vec<Instr>) -> Module {
     let mut body = vec![
-        Instr::LocalAddress {
+        Instr::LocalRef {
             local: LocalId::from_index(0),
         },
         Instr::Load,
@@ -644,4 +644,85 @@ fn explicit_loop_exits_require_an_enclosing_body() {
             VerifyErrorKind::UnexpectedLoopExit
         );
     }
+}
+
+#[test]
+fn local_references_cannot_be_retyped_returned_or_passed_as_pointers() {
+    let reference = Ty::Reference {
+        referent: Box::new(Ty::Int32),
+    };
+    let pointer = Ty::Pointer {
+        pointee: Box::new(Ty::Int32),
+    };
+    let function = |result: Ty, instrs| Function {
+        name: None,
+        profile: crate::Profile::Host,
+        foreign: None,
+        result,
+        parameter_count: 1,
+        locals: vec![Local {
+            name: None,
+            ty: Ty::Int32,
+        }],
+        entry: BlockId::from_index(0),
+        blocks: vec![BasicBlock {
+            name: None,
+            instrs,
+            terminator: Terminator::Return,
+        }],
+    };
+    let local = Instr::LocalRef {
+        local: LocalId::from_index(0),
+    };
+    for conversion in [
+        Instr::PointerCast {
+            ty: pointer.clone(),
+        },
+        Instr::Ascribe {
+            ty: pointer.clone(),
+        },
+        Instr::Widen {
+            ty: pointer.clone(),
+        },
+    ] {
+        let module = Module {
+            functions: vec![function(pointer.clone(), vec![local.clone(), conversion])],
+            ..Default::default()
+        };
+        assert!(verify(&module).is_err());
+    }
+    let mut module = Module {
+        functions: vec![function(reference, vec![local.clone()])],
+        ..Default::default()
+    };
+    verify(&module).unwrap();
+    module.functions[0].result = pointer.clone();
+    assert!(matches!(
+        verify(&module).unwrap_err().kind,
+        VerifyErrorKind::InvalidReturnStack { .. }
+    ));
+    let mut callee = function(
+        Ty::Int32,
+        vec![Instr::Push {
+            value: Value::Int32 { value: 42 },
+        }],
+    );
+    callee.locals[0].ty = pointer;
+    module.functions = vec![
+        function(
+            Ty::Int32,
+            vec![
+                Instr::Function {
+                    function: FunctionId::from_index(1),
+                },
+                local,
+                Instr::Call { arguments: 1 },
+            ],
+        ),
+        callee,
+    ];
+    assert!(matches!(
+        verify(&module).unwrap_err().kind,
+        VerifyErrorKind::TypeMismatch { .. }
+    ));
 }

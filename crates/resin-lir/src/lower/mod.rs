@@ -118,7 +118,7 @@ impl FunctionLowering<'_> {
     }
 
     fn load_local(&mut self, local: LocalId) {
-        self.emit(Instr::LocalAddress { local });
+        self.emit(Instr::LocalRef { local });
         self.emit(Instr::Load);
     }
 

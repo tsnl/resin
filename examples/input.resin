@@ -1,6 +1,6 @@
 export { main };
 
-import { "$/console.resin", "$/string.resin" };
+import { "$/stdio.resin", "$/string.resin" };
 
 fn main() -> (() | Err<_>) {
 	print("What is your name? ");

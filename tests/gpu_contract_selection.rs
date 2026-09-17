@@ -14,13 +14,13 @@ struct Device {
     
 }
 @gpu_allocator
-    fn allocate(self: Device, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | Err<Failure>)  { Err(Failure {}) }
+    fn allocate(self: Device, bytes: u64, alignment: u64, memory: i32) -> (GpuView | Err<Failure>)  { Err(Failure {}) }
 
 @gpu_compute_pipeline
-    fn compute(self: Device, code: (Ptr<ubyte>, ulong)) -> (PipelineOwner | Err<Failure>)  { Err(Failure {}) }
+    fn compute(self: Device, code: (Ptr<u8>, u64)) -> (PipelineOwner | Err<Failure>)  { Err(Failure {}) }
 
 @gpu_graphics_pipeline
-    fn graphics(self: Device, vertex: (Ptr<ubyte>, ulong), fragment: (Ptr<ubyte>, ulong)) -> (PipelineOwner | Err<Failure>)  { Err(Failure {}) }
+    fn graphics(self: Device, vertex: (Ptr<u8>, u64), fragment: (Ptr<u8>, u64)) -> (PipelineOwner | Err<Failure>)  { Err(Failure {}) }
 
 struct PipelineOwner { owner: StrongOwner,
     
@@ -33,16 +33,16 @@ struct Commands {
     
 }
 @gpu_dispatch
-    fn dispatch(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments, x: uint, y: uint, z: uint) -> (() | Err<Failure>)  { (()) }
+    fn dispatch(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments, x: u32, y: u32, z: u32) -> (() | Err<Failure>)  { (()) }
 
 @gpu_draw
-    fn draw(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments | None, count: uint) -> (() | Err<Failure>)  { (()) }
+    fn draw(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments | None, count: u32) -> (() | Err<Failure>)  { (()) }
 
-struct Params { value: Ptr<int>, }
+struct Params { value: Ptr<i32>, }
 "#;
 
 const USE_PROJECTION: &str = r#"struct FieldsValue<T0> { value: T0, }
-fn record(commands: Commands, pipeline: ComputeProgram<Params, PipelineOwner>, value: Alpha<int>) -> (() | Err<Failure>)  {
+fn record(commands: Commands, pipeline: ComputeProgram<Params, PipelineOwner>, value: Alpha<i32>) -> (() | Err<Failure>)  {
     commands:dispatch(pipeline, FieldsValue<_> {value = value}, 1, 1, 1)
 }
 "#;

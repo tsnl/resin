@@ -48,7 +48,7 @@ when empty.
 
 Initialized locals receive automatic destruction in reverse scope order, including
 loop iterations and early returns through `?`. Return values are preserved before
-cleanup. Struct bodies contain only fields. A free `fn drop(value: Ptr<T>)`
+cleanup. Struct bodies contain only fields. A free `fn drop(value: Ref<T>)`
 declared alongside its type runs before its fields are released. Statement-only chain blocks yield unit.
 Process termination and traps do not unwind scopes.
 
@@ -71,10 +71,11 @@ GPU buffer elements use one shared host/device layout and cannot contain pointer
 managed owners. This boundary does not traverse pointer graphs or modify host
 records into device representations.
 
-Shader-local places remain distinct from device addresses in backend metadata.
-They may be read, written, and indexed but cannot escape through calls, return
-values, stored pointers, or reinterpretation. Shared helpers may take device pointers
-when compiled for a shader and host pointers when compiled for the CPU. Numeric
+References remain distinct from pointers through HIR, concrete types, and LIR.
+Local places may be borrowed by shared CPU/GPU helpers without granting pointer
+capabilities. The [reference contract](references.md) defines addressability,
+unchecked lifetimes, and current shader restrictions. Shared helpers may also
+take explicit device pointers in shaders and host pointers on the CPU. Numeric
 pointer casts preserve bits and do not translate addresses or confer ownership.
 
 Command recordings accept typed pipelines and matching host arguments, retain the

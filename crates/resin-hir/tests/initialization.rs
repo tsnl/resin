@@ -22,10 +22,10 @@ fn uninitialized(source: &str) {
 #[test]
 fn unused_definitions_still_require_initialized_reads() {
     uninitialized(
-        "export { main }; fn unused() -> int  { let mut value: int; value } fn main()  {}",
+        "export { main }; fn unused() -> i32  { let mut value: i32; value } fn main()  {}",
     );
     for expression in ["value + 1", "{ let mut pointer = &value; 1 }"] {
-        let source = format!("fn unused() -> int  {{ let mut value = {expression}; value }}");
+        let source = format!("fn unused() -> i32  {{ let mut value = {expression}; value }}");
         assert!(
             lower(&source)
                 .unwrap_err()
@@ -37,45 +37,43 @@ fn unused_definitions_still_require_initialized_reads() {
 }
 
 #[test]
-fn address_acquisition_and_whole_value_assignment_do_not_read_storage() {
-    valid(
-        "fn main() -> int  { let mut value: int; let mut pointer = &value; value = 42; pointer.* }",
-    );
-    uninitialized("struct R { value: int, } fn main()  { let mut record: R; record.value = 42; }");
+fn whole_value_assignment_initializes_storage() {
+    valid("fn main() -> i32  { let mut value: i32; value = 42; value }");
+    uninitialized("struct R { value: i32, } fn main()  { let mut record: R; record.value = 42; }");
     uninitialized(
-        "struct R { value: int, } fn main()  { let mut record: R; let mut address = &record.value; }",
+        "struct R { value: i32, } fn borrow(value: Ref<i32>) {} fn main() { let mut record: R; borrow(record.value); }",
     );
 }
 
 #[test]
 fn branching_requires_initialization_on_every_path() {
     valid(
-        "fn choose(flag: bool) -> int  { let mut value: int; if (flag) { value = 1; } else { value = 2; }; value }",
+        "fn choose(flag: bool) -> i32  { let mut value: i32; if (flag) { value = 1; } else { value = 2; }; value }",
     );
     uninitialized(
-        "fn choose(flag: bool) -> int  { let mut value: int; if (flag) { value = 1; }; value }",
+        "fn choose(flag: bool) -> i32  { let mut value: i32; if (flag) { value = 1; }; value }",
     );
     uninitialized(
-        "fn choose(flag: bool) -> int  { let mut value: int; if (flag) { value = 1; value } else { value } }",
+        "fn choose(flag: bool) -> i32  { let mut value: i32; if (flag) { value = 1; value } else { value } }",
     );
 }
 
 #[test]
 fn loop_conditions_execute_before_the_optional_body() {
-    valid("fn main() -> int  { let mut value: int; while ({ value = 1; value } == 0) {}; value }");
-    uninitialized("fn main() -> int  { let mut value: int; while (1 == 0) { value = 1; }; value }");
-    uninitialized("fn main()  { let mut value: int; while (value == 0) { value = 1; }; }");
+    valid("fn main() -> i32  { let mut value: i32; while ({ value = 1; value } == 0) {}; value }");
+    uninitialized("fn main() -> i32  { let mut value: i32; while (1 == 0) { value = 1; }; value }");
+    uninitialized("fn main()  { let mut value: i32; while (value == 0) { value = 1; }; }");
 }
 
 #[test]
 fn short_circuiting_obeys_evaluation_order_and_conditional_effects() {
-    valid("fn main() -> bool  { let mut value: int; ({ value = 1; value } == 1) && (value == 1) }");
+    valid("fn main() -> bool  { let mut value: i32; ({ value = 1; value } == 1) && (value == 1) }");
     uninitialized(
-        "fn main() -> bool  { let mut value: int; (value == 1) && ({ value = 1; value } == 1) }",
+        "fn main() -> bool  { let mut value: i32; (value == 1) && ({ value = 1; value } == 1) }",
     );
     for operator in ["&&", "||"] {
         uninitialized(&format!(
-            "fn main() -> int  {{ let mut value: int; (1 == 1) {operator}({{ value = 1; value }} == 1); value }}"
+            "fn main() -> i32  {{ let mut value: i32; (1 == 1) {operator}({{ value = 1; value }} == 1); value }}"
         ));
     }
 }
@@ -83,24 +81,24 @@ fn short_circuiting_obeys_evaluation_order_and_conditional_effects() {
 #[test]
 fn match_scrutinees_precede_arms_and_pattern_bindings_start_initialized() {
     valid(
-        "fn choose(option: int | None) -> int  { let mut value: int; match ({ value = 1; option }) { int(number) => { number + value }, None => { value } } }",
+        "fn choose(option: i32 | None) -> i32  { let mut value: i32; match ({ value = 1; option }) { i32(number) => { number + value }, None => { value } } }",
     );
     valid(
-        "fn choose(option: int | None) -> int  { let mut value: int; match (option) { int(number) => { value = number; }, None => { value = 0; } }; value }",
+        "fn choose(option: i32 | None) -> i32  { let mut value: i32; match (option) { i32(number) => { value = number; }, None => { value = 0; } }; value }",
     );
     uninitialized(
-        "fn choose(option: int | None) -> int  { let mut value: int; match (option) { int(number) => { value = number; }, None => {} }; value }",
+        "fn choose(option: i32 | None) -> i32  { let mut value: i32; match (option) { i32(number) => { value = number; }, None => {} }; value }",
     );
     uninitialized(
-        "fn choose(option: int | None) -> int  { let mut value: int; match (option) { int(number) => { value = number; value }, None => { value } } }",
+        "fn choose(option: i32 | None) -> i32  { let mut value: i32; match (option) { i32(number) => { value = number; value }, None => { value } } }",
     );
 }
 
 #[test]
 fn layout_queries_neither_read_nor_initialize_their_operands() {
-    valid("fn size() -> ulong  { let mut value: int; size_of(value) }");
-    valid("fn size() -> ulong  { let mut value = size_of(value); value }");
-    uninitialized("fn main() -> int  { let mut value: int; size_of({ value = 1; value }); value }");
+    valid("fn size() -> u64  { let mut value: i32; size_of(value) }");
+    valid("fn size() -> u64  { let mut value = size_of(value); value }");
+    uninitialized("fn main() -> i32  { let mut value: i32; size_of({ value = 1; value }); value }");
 }
 
 #[test]
@@ -118,6 +116,6 @@ fn eager_self_reference_is_rejected_before_its_type_is_known() {
             "{source}\n{error}"
         );
     }
-    valid("fn shadow() -> int  { let mut value = { let mut value = 42; value }; value }");
-    valid("fn size() -> ulong  { size_of({ let mut value: int = value + 1; 0_i }) }");
+    valid("fn shadow() -> i32  { let mut value = { let mut value = 42; value }; value }");
+    valid("fn size() -> u64  { size_of({ let mut value: i32 = value + 1; i32(0) }) }");
 }

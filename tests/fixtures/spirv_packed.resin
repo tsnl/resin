@@ -1,42 +1,61 @@
 export { kernel };
 import { "$/span.resin" };
 
-struct Bytes3 { a: ubyte, b: ubyte, c: ubyte, }
-struct Rows { first: Bytes3, second: Bytes3, }
-struct Sample { lead: ubyte, rows: Rows, marker: uint, wide: ulong, tail: ubyte, }
-struct Root { count: ulong, inputs: Ptr<Sample>, outputs: Ptr<Sample>, }
+struct Bytes3 {
+	a: u8,
+	b: u8,
+	c: u8,
+}
+struct Rows {
+	first: Bytes3,
+	second: Bytes3,
+}
+struct Sample {
+	lead: u8,
+	rows: Rows,
+	marker: u32,
+	wide: u64,
+	tail: u8,
+}
+struct Root {
+	count: u64,
+	inputs: Ptr<Sample>,
+	outputs: Ptr<Sample>,
+}
 
-fn update(output: Ptr<Sample>, index: ulong)  {
-	let mut row = if ((index & 1_ul) == 0_ul) {
+fn update(output: Ptr<Sample>, index: u64) {
+	let mut row = if ((index & u64(1)) == u64(0)) {
 		&output.rows.first
 	} else {
 		&output.rows.second
 	};
-	row.b = row.b + 1_ub;
+	row.b = row.b + u8(1);
 	let previous: Ref<Sample> = output.*;
 	output.* = Sample {
 		lead = previous.lead,
 		rows = Rows {
-            first = copy_bytes(previous.rows.first),
-            second = copy_bytes(previous.rows.second),
-        },
-		marker = previous.marker + 1_ui,
-		wide = previous.wide + 4294967297_ul,
+			first = copy_bytes(previous.rows.first),
+			second = copy_bytes(previous.rows.second),
+		},
+		marker = previous.marker + u32(1),
+		wide = previous.wide + u64(4294967297),
 		tail = previous.tail,
 	};
 }
 
 @compute_shader
-fn kernel(index: ulong, root: Ptr<Root>)  {
+fn kernel(index: u64, root: Ptr<Root>) {
 	if (index < root.count) {
 		let mut inputs = Span<Sample> { data = root.inputs, length = root.count };
 		let mut outputs = Span<Sample> { data = root.outputs, length = root.count };
-		let mut output: Ref<_> = fixture_index(outputs.data, outputs.length, index).*;
+		let output = outputs:lea(index);
 		let input: Ref<Sample> = fixture_index(inputs.data, inputs.length, index).*;
-        output = Sample { lead = input.lead, rows = Rows { first = copy_bytes(input.rows.first), second = copy_bytes(input.rows.second) }, marker = input.marker, wide = input.wide, tail = input.tail };
-		update(&output, index);
+		output.* = Sample { lead = input.lead, rows = Rows { first = copy_bytes(input.rows.first), second = copy_bytes(input.rows.second) }, marker = input.marker, wide = input.wide, tail = input.tail };
+		update(output, index);
 	};
 }
 
-fn copy_bytes(value: Ref<Bytes3>) -> Bytes3 { Bytes3 { a = value.a, b = value.b, c = value.c } }
-intrinsic "pointer_index" fn fixture_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;
+fn copy_bytes(value: Ref<Bytes3>) -> Bytes3 {
+	Bytes3 { a = value.a, b = value.b, c = value.c }
+}
+intrinsic "pointer_index" fn fixture_index<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;

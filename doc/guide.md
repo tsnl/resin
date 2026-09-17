@@ -480,10 +480,9 @@ fn next(n: int) -> _ {
 
 fn main() {
 	let mut value: _;
-	let mut pointer: Ptr<_>;
 	value = next(41);
-	pointer = &value;
-	print(fmt("value = {0}\n", (pointer.*,)));
+	let reference: Ref<_> = value;
+	print(fmt("value = {0}\n", (reference,)));
 }
 ```
 Holes can nest inside local annotations, local type ascriptions, and function
@@ -684,7 +683,7 @@ raw aliases.
 | Weak host | `WeakPtr<T>` | `WeakSpan<T>` |
 | GPU | `GpuPtr<T>` | `GpuSpan<T>` |
 
-A free `fn drop(value: Ptr<Item>) { ... }` declared alongside `Item` supplies its
+A free `fn drop(value: Ref<Item>) { ... }` declared alongside `Item` supplies its
 cleanup hook. It runs before fields are destroyed. Scope exit and early returns
 clean up owners in reverse order; moves suppress cleanup of the source. Custom
 destruction and reference counting remain host-only. See [lifetimes](lifetimes.md)
@@ -973,7 +972,7 @@ import { "$/status.resin", "$/shared.resin" };
 
 extern type ResinGpu;
 struct GpuOwner { handle: Ptr<ResinGpu> }
-fn drop(owner: Ptr<GpuOwner>) {
+fn drop(owner: Ref<GpuOwner>) {
 	if (ulong(owner.handle) != 0_ul) {
 		resin_gpu_destroy(owner.handle);
 	};
@@ -1010,7 +1009,8 @@ declarations name C structs and may only be used behind pointers; aggregates by 
 variadic calls, and C callbacks are not supported yet.
 
 This is an unchecked C boundary: declarations must match the header's ABI, and callers own
-pointer validity, lifetimes, buffer lengths, and synchronization. `&place` takes an address;
+pointer validity, lifetimes, buffer lengths, and synchronization. `&place` takes an address only for storage reached through a pointer;
+locals and `Ref` referents cannot expose their addresses.
 `pointer.*` dereferences it. On the host, explicit casts allow pointer-to-pointer and
 pointer-to-`ulong` roundtrips. There is no borrow checker; addresses of locals must not outlive their storage.
 Pointer arithmetic is forbidden. Use array or span indexing, or explicitly convert a pointer
@@ -1023,12 +1023,16 @@ The index parameter is `ulong` (unsigned 64-bit); unsuffixed literals infer this
 other integer values need an explicit conversion, such as `:at(ulong(i))`:
 
 ```resin
-let values = [10_i, 20, 30];
-values:at(1) = 42;
-let view = Span<int> { data = &values:at(0), length = 3_ul };
+let values = arc_ptr_alloc([10_i, 20, 30])?;
+values:get():at(1) = 42;
+let view = Span<int> { data = values:get():lea(0), length = 3_ul };
 let element = view:at(1);
 print(fmt("{0}\n", (element,)));
 ```
+Import `$/shared.resin` and `$/span.resin` for this allocated view.
+`:lea(index)` returns a pointer for pointers to arrays, spans, and `str`.
+Local arrays support `:at(index)` but cannot produce element pointers.
+
 Use `let element: Ref<int> = view:at(1);` to retain an alias instead of copying the
 value. Reference parameters and results expose the same place semantics in user
 functions; see [references](references.md) for binding, lifetime, and migration rules.

@@ -2,16 +2,16 @@ export {
 	main,
 };
 
-import { "$/string.resin" };
+import { "$/string.resin", "$/stdio.resin" };
 
 struct FibonacciMismatch {
-	index: ulong,
-	slow: ulong,
-	fast: ulong,
+	index: u64,
+	slow: u64,
+	fast: u64,
 }
 
-fn fibonacci(n: ulong) -> ulong {
-	if (n <= ulong(1)) {
+fn fibonacci(n: u64) -> u64 {
+	if (n <= u64(1)) {
 		n
 	} else {
 		let mut f0 = fibonacci(n - 2);
@@ -20,13 +20,13 @@ fn fibonacci(n: ulong) -> ulong {
 	}
 }
 
-fn fast_fibonacci(n: ulong) -> ulong {
-	if (n <= ulong(1)) {
+fn fast_fibonacci(n: u64) -> u64 {
+	if (n <= u64(1)) {
 		n
 	} else {
-		let mut f0 = ulong(0);
-		let mut f1 = ulong(1);
-		let mut i = ulong(1);
+		let mut f0: u64 = 0;
+		let mut f1: u64 = 1;
+		let mut i: u64 = 1;
 
 		while (i < n) {
 			// Compute new f0, f1:
@@ -44,7 +44,7 @@ fn fast_fibonacci(n: ulong) -> ulong {
 	}
 }
 
-fn compare_fibonacci(index: ulong, slow: ulong, fast: ulong) -> (() | Err<FibonacciMismatch>) {
+fn compare_fibonacci(index: u64, slow: u64, fast: u64) -> (() | Err<FibonacciMismatch>) {
 	if (slow == fast) {
 		(())
 	} else {
@@ -52,12 +52,13 @@ fn compare_fibonacci(index: ulong, slow: ulong, fast: ulong) -> (() | Err<Fibona
 	}
 }
 
-fn test_fibonacci(n: ulong) -> (() | Err<_>) {
-	let mut i = ulong(0);
+fn test_fibonacci(n: u64) -> (() | Err<_>) {
+	let mut i: u64 = 0;
 	while (i < n) {
 		let mut slow_f = fibonacci(i);
 		let mut fast_f = fast_fibonacci(i);
-		print(fmt("slow_fibonacci({0}) = {1}, fast_fibonacci({1}) = {2}\n", (i, slow_f, fast_f)));
+		let text = fmt("slow_fibonacci({0}) = {1}, fast_fibonacci({1}) = {2}\n", (i, slow_f, fast_f));
+		print(text);
 		compare_fibonacci(i, slow_f, fast_f)?;
 		i = i + 1;
 	};
@@ -67,7 +68,8 @@ fn test_fibonacci(n: ulong) -> (() | Err<_>) {
 fn main() -> (() | Err<_>) {
 	test_fibonacci(30)?;
 
-	let mut n = ulong(100);
-	print(fmt("fibonacci({0}) = {1}\n", (n, fast_fibonacci(n))));
+	let mut n: u64 = 100;
+	let text = fmt("fibonacci({0}) = {1}\n", (n, fast_fibonacci(n)));
+	print(text);
 	(())
 }

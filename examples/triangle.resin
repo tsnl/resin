@@ -1,52 +1,52 @@
 export { main, vertex, fragment };
 
-import { "$/string.resin", "$/gpu.resin", "$/graphics.resin", "$/shared.resin", "$/image.resin" };
+import { "$/string.resin", "$/stdio.resin", "$/gpu.resin", "$/graphics.resin", "$/shared.resin", "$/image.resin" };
 
 @vertex_shader
-fn vertex(index: int) -> Vertex {
+fn vertex(index: i32) -> Vertex {
 	if (index == 0) {
 		Vertex {
 			position = Position {
-				x = 0.0_f,
-				y = -0.75_f,
-				z = 0.0_f,
-				w = 1.0_f,
+				x = f32(0.0),
+				y = f32(-0.75),
+				z = f32(0.0),
+				w = f32(1.0),
 			},
 			color = Color {
-				r = 1.0_f,
-				g = 0.0_f,
-				b = 0.0_f,
-				a = 1.0_f,
+				r = f32(1.0),
+				g = f32(0.0),
+				b = f32(0.0),
+				a = f32(1.0),
 			},
 		}
 	} else if (index == 1) {
 		Vertex {
 			position = Position {
-				x = -0.7_f,
-				y = 0.6_f,
-				z = 0.0_f,
-				w = 1.0_f,
+				x = f32(-0.7),
+				y = f32(0.6),
+				z = f32(0.0),
+				w = f32(1.0),
 			},
 			color = Color {
-				r = 0.0_f,
-				g = 1.0_f,
-				b = 0.0_f,
-				a = 1.0_f,
+				r = f32(0.0),
+				g = f32(1.0),
+				b = f32(0.0),
+				a = f32(1.0),
 			},
 		}
 	} else {
 		Vertex {
 			position = Position {
-				x = 0.7_f,
-				y = 0.6_f,
-				z = 0.0_f,
-				w = 1.0_f,
+				x = f32(0.7),
+				y = f32(0.6),
+				z = f32(0.0),
+				w = f32(1.0),
 			},
 			color = Color {
-				r = 0.0_f,
-				g = 0.0_f,
-				b = 1.0_f,
-				a = 1.0_f,
+				r = f32(0.0),
+				g = f32(0.0),
+				b = f32(1.0),
+				a = f32(1.0),
 			},
 		}
 	}
@@ -64,7 +64,7 @@ fn main() -> (() | Err<_>) {
 
 	let mut image = gpu:create_image(256, 256)?;
 
-	let mut pixels = gpu:alloc::<ubyte>(262144)?;
+	let mut pixels = gpu:alloc::<u8>(262144)?;
 
 	let mut commands = gpu:start_command_recording()?;
 
@@ -75,9 +75,10 @@ fn main() -> (() | Err<_>) {
 	commands:submit()?;
 
 	let mut path = "triangle.png";
-	let mut host = arc_span_alloc::<ubyte>(pixels.length, 0_ub)?;
+	let mut host = arc_span_alloc::<u8>(pixels.length, u8(0))?;
 	pixels:copy_to(host:get());
-	image_data_write_pixels(path.data, 256, 256, 4, host:get(), 0)?;
+	let view = host:get();
+	image_data_write_pixels(path.data, 256, 256, 4, view, 0)?;
 	print("wrote triangle.png\n");
 	(())
 }

@@ -2,41 +2,41 @@ export { Root, kernel, cpu };
 
 import { "$/span.resin" };
 
-intrinsic "pointer_index" fn device_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;
+intrinsic "pointer_index" fn device_index<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;
 
 struct Root {
-	count: uint,
-	iterations: uint,
-	input: Ptr<uint>,
-	output: Ptr<uint>,
+	count: u32,
+	iterations: u32,
+	input: Ptr<u32>,
+	output: Ptr<u32>,
 }
 
 // Each lane follows a different, data-dependent branch on every iteration.
 // Keep this recurrence stable: it is the structured-control-flow baseline.
 @compute_shader
-fn kernel(index: ulong, root: Ptr<Root>) {
-	if (index < ulong(root.count)) {
-		let mut lane = uint(index);
-		let mut x = lane * 747796405_ui + 2891336453_ui;
-		let mut n = 0_ui;
+fn kernel(index: u64, root: Ptr<Root>) {
+	if (index < u64(root.count)) {
+		let mut lane = u32(index);
+		let mut x = lane * u32(747796405) + u32(2891336453);
+		let mut n: u32 = 0;
 		while (n < root.iterations) {
-			if (((x ^ lane) & 256_ui) == 0_ui) {
-				x = (x ^ (x * 8191_ui)) * 1664525_ui + n;
+			if (((x ^ lane) & u32(256)) == u32(0)) {
+				x = (x ^ (x * u32(8191))) * u32(1664525) + n;
 			} else {
-				x = (x ^ (x * 127_ui)) * 22695477_ui + lane;
+				x = (x ^ (x * u32(127))) * u32(22695477) + lane;
 			};
-			x = (x ^ (x * 65521_ui)) + 1013904223_ui;
-			n = n + 1_ui;
+			x = (x ^ (x * u32(65521))) + u32(1013904223);
+			n = n + u32(1);
 		};
-		let mut output = Span<uint> { data = root.output, length = ulong(root.count) };
+		let mut output = Span<u32> { data = root.output, length = u64(root.count) };
 		device_index(output.data, output.length, index).* = x;
 	};
 }
 
 fn cpu(root: Ptr<Root>) {
-	let mut index = 0_ul;
-	while (index < ulong(root.count)) {
+	let mut index: u64 = 0;
+	while (index < u64(root.count)) {
 		kernel(index, root);
-		index = index + 1_ul;
+		index = index + u64(1);
 	};
 }

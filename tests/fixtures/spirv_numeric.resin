@@ -1,35 +1,46 @@
 export { kernel };
 import { "$/span.resin" };
 
-struct Input { kind: uint, value: float32, wide: ulong, }
-struct Output { progress: uint, value: ulong, }
-struct Root { count: ulong, inputs: Ptr<Input>, outputs: Ptr<Output>, }
+struct Input {
+	kind: u32,
+	value: f32,
+	wide: u64,
+}
+struct Output {
+	progress: u32,
+	value: u64,
+}
+struct Root {
+	count: u64,
+	inputs: Ptr<Input>,
+	outputs: Ptr<Output>,
+}
 
-fn convert(input: Ref<Input>) -> ulong  {
-	if (input.kind == 0_ui) {
-		ulong(ubyte(input.value))
+fn convert(input: Ref<Input>) -> u64 {
+	if (input.kind == u32(0)) {
+		u64(u8(input.value))
 	} else {
-		if (input.kind == 1_ui) {
-			ulong(uint(input.value))
+		if (input.kind == u32(1)) {
+			u64(u32(input.value))
 		} else {
-			if (input.kind == 2_ui) {
-				let mut value = int(input.value);
-				if (value < 0_i) {
-					0_ul - ulong(-(value + 1_i)) - 1_ul
+			if (input.kind == u32(2)) {
+				let mut value = i32(input.value);
+				if (value < i32(0)) {
+					u64(0) - u64(-(value + i32(1))) - u64(1)
 				} else {
-					ulong(value)
+					u64(value)
 				}
 			} else {
-				if (input.kind == 3_ui) {
-					ulong(input.value)
+				if (input.kind == u32(3)) {
+					u64(input.value)
 				} else {
-					if (input.kind == 4_ui) {
-						ulong(ubyte(input.wide))
+					if (input.kind == u32(4)) {
+						u64(u8(input.wide))
 					} else {
-						if (input.kind == 5_ui) {
-							ulong(uint(input.wide))
+						if (input.kind == u32(5)) {
+							u64(u32(input.wide))
 						} else {
-							ulong(int(input.wide))
+							u64(i32(input.wide))
 						}
 					}
 				}
@@ -38,34 +49,34 @@ fn convert(input: Ref<Input>) -> ulong  {
 	}
 }
 
-fn ready(input: Ref<Input>, progress: Ptr<uint>) -> bool  {
-	progress.* = 2_ui;
+fn ready(input: Ref<Input>, progress: Ptr<u32>) -> bool {
+	progress.* = u32(2);
 	convert(input);
-	progress.* = 3_ui;
-	1_ui == 1_ui
+	progress.* = u32(3);
+	u32(1) == u32(1)
 }
 
-fn in_loop(input: Ref<Input>, progress: Ptr<uint>) -> ulong  {
-	let mut step = 0_ui;
-	let mut result = 0_ul;
-	while (step < 1_ui && ready(input, progress)) {
+fn in_loop(input: Ref<Input>, progress: Ptr<u32>) -> u64 {
+	let mut step: u32 = 0;
+	let mut result: u64 = 0;
+	while (step < u32(1) && ready(input, progress)) {
 		result = convert(input);
-		step = step + 1_ui;
+		step = step + u32(1);
 	};
 	result
 }
 
 @compute_shader
-fn kernel(index: ulong, root: Ptr<Root>)  {
+fn kernel(index: u64, root: Ptr<Root>) {
 	if (index < root.count) {
 		let mut inputs = Span<Input> { data = root.inputs, length = root.count };
 		let mut outputs = Span<Output> { data = root.outputs, length = root.count };
-		let mut output: Ref<Output> = fixture_index(outputs.data, outputs.length, index).*;
-		output.progress = 1_ui;
+		let output = outputs:lea(index);
+		output.progress = u32(1);
 		let mut value = in_loop(fixture_index(inputs.data, inputs.length, index).*, &output.progress);
 		output.value = value;
-		output.progress = 4_ui;
+		output.progress = u32(4);
 	};
 }
 
-intrinsic "pointer_index" fn fixture_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;
+intrinsic "pointer_index" fn fixture_index<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;

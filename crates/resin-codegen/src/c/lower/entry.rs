@@ -5,7 +5,7 @@ use resin_types::prelude::*;
 pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
     let module = types.module;
     let id = module.entries.get(entry)
-        .ok_or_else(|| Error(format!("entry function `{entry}` is not exported; add `export {{ {entry} }};` to the entry file")))?;
+        .ok_or_else(|| Error::program(format!("entry function `{entry}` is not exported; add `export {{ {entry} }};` to the entry file")))?;
     let function = &module.functions[id.index()];
     let parameters = &function.locals[..function.parameter_count];
     let process_inputs = matches!(parameters, [argc, argv, envp]
@@ -18,8 +18,8 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
             .iter()
             .all(|ty| matches!(ty, Ty::Unit | Ty::Int32 | Ty::Error { .. }))
     {
-        return Err(Error(format!(
-            "entry function `{entry}` must be a Resin function, take () or (int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>), and return int, (), or a union of those with Err<E>"
+        return Err(Error::program(format!(
+            "entry function `{entry}` must be a Resin function, take () or (i32, Ptr<Ptr<u8>>, Ptr<Ptr<u8>>), and return i32, (), or a union of those with Err<E>"
         )));
     }
     let setup = if process_inputs {

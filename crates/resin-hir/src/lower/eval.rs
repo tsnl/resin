@@ -126,6 +126,11 @@ pub(super) fn reference_type(
     span: Span,
 ) -> Result<(), GenerateError> {
     if let Type::Node(head, children) = solver.head(ty) {
+        if let Head::Atom(Ty::Union { variants }) = &head {
+            for variant in variants {
+                reference_type(solver, &variant.clone().into(), false, span)?;
+            }
+        }
         if head == Head::Reference && !binding {
             return Err(GenerateError::inference(
                 span,
@@ -150,16 +155,16 @@ fn builtin_ty(name: &str) -> Option<Ty> {
         "WeakOwner" => Ty::WeakOwner,
         "bool" => Ty::Bool,
         "str" => Ty::Str,
-        "sbyte" => Ty::Int8,
-        "short" => Ty::Int16,
-        "int" => Ty::Int32,
-        "long" => Ty::Int64,
-        "ubyte" => Ty::UInt8,
-        "ushort" => Ty::UInt16,
-        "uint" => Ty::UInt32,
-        "ulong" => Ty::UInt64,
-        "float32" => Ty::Float32,
-        "float64" => Ty::Float64,
+        "i8" => Ty::Int8,
+        "i16" => Ty::Int16,
+        "i32" => Ty::Int32,
+        "i64" => Ty::Int64,
+        "u8" => Ty::UInt8,
+        "u16" => Ty::UInt16,
+        "u32" => Ty::UInt32,
+        "u64" => Ty::UInt64,
+        "f32" => Ty::Float32,
+        "f64" => Ty::Float64,
         _ => return None,
     })
 }
@@ -190,9 +195,6 @@ fn numeric_type(
     text: &str,
     expected: Option<&Ty>,
 ) -> Result<Ty, GenerateError> {
-    if let (_, Some(ty)) = resin_types::literal::split(text) {
-        return Ok(ty);
-    }
     if let Some(expected) = expected {
         let shape = typer
             .body(expected)

@@ -1,11 +1,11 @@
 ==================
 Immutable and mutable identifier patterns
 ==================
-fn change(mut parameter: int, fixed: int | None) -> int {
+fn change(mut parameter: i32, fixed: i32 | None) -> i32 {
     let initial = parameter;
-    let mut result: int;
+    let mut result: i32;
     match (fixed) {
-        int(mut value) => { value = value + initial; result = value; },
+        i32(mut value) => { value = value + initial; result = value; },
         None => { result = 0; },
     };
     parameter = result;

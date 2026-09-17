@@ -33,6 +33,7 @@
 (number) @constant.numeric
 (string) @string
 (comment) @comment
+(doc_comment) @comment.documentation
 
 ["=" "->" "=>" "||" "&&" "|" "^" "&" "==" "!=" "<" "<=" ">" ">="
  "<<" ">>" "+" "-" "*" "/" "%" "!" "~"] @operator
