@@ -1,4 +1,4 @@
-//! Canonical source formatting. Normalizes whitespace and numeric suffixes.
+//! Canonical source formatting. Normalizes whitespace and preserves literal text.
 //!
 //! Indentation uses hard tabs. A trailing comma forces a delimiter group onto
 //! multiple lines, except for singleton tuples. Invalid syntax is left alone;
@@ -66,11 +66,7 @@ pub fn format_source(source: &str) -> Option<String> {
         {
             writer.space();
         }
-        if node.kind() == "number" {
-            writer.write(&resin_types::literal::format(text));
-        } else {
-            writer.write(text);
-        }
+        writer.write(text);
         if closing {
             active.pop();
         }

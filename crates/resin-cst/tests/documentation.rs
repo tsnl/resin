@@ -20,7 +20,7 @@ struct Item<T> {
  */
 fn read<T>(item: Ref<Item<T>>) -> T { item.value }
 /// Transparent alias.
-type Alias = Item<int>;
+type Alias = Item<i32>;
 /// Maximum count.
 const limit = 16;
 //// Ordinary comment.
@@ -87,15 +87,15 @@ fn hidden() {}
 async fn decorated_foreign_intrinsic_and_grouped_constant_declarations_keep_docs() {
     let source = r#"extern { "native.h": {
     /// Native function.
-    fn native(value: int) -> int;
+    fn native(value: i32) -> i32;
 }, };
 /// Opaque type.
 extern type Handle;
 /// Intrinsic function.
-intrinsic "pointer_index" fn index<T>(pointer: Ptr<T>, index: ulong) -> Ptr<T>;
+intrinsic "pointer_index" fn index<T>(pointer: Ptr<T>, index: u64) -> Ptr<T>;
 /// Shader entry.
 @compute_shader
-fn kernel(index: ulong, root: Ptr<int>) {}
+fn kernel(index: u64, root: Ptr<i32>) {}
 /// Group defaults.
 const (
     /// First member.
@@ -133,10 +133,10 @@ async fn misplaced_documentation_is_diagnosed_at_its_own_span() {
         "/// Orphan\n",
         "/// Cannot document imports\nimport { \"library.resin\" };",
         "fn f() {}\n//! Too late",
-        "struct Item { //! Not module scope\n value: int }",
+        "struct Item { //! Not module scope\n value: i32 }",
         "fn f() { /// Not a declaration\n 1; }",
-        "fn f(/// Not a field\nvalue: int) {}",
-        "struct Item { value: int, /// Dangling\n}",
+        "fn f(/// Not a field\nvalue: i32) {}",
+        "struct Item { value: i32, /// Dangling\n}",
     ] {
         let document = common::parse(source, None).await;
         let docs = document.documentation();
@@ -148,7 +148,7 @@ async fn misplaced_documentation_is_diagnosed_at_its_own_span() {
 
 #[tokio::test]
 async fn formatting_and_incremental_edits_preserve_markdown_and_attachment() {
-    let source = "//! Résumé 😀\r\nexport { read };\r\n/// First paragraph.\r\n///\r\n///     indented code\r\nfn read( value : int)->int{value}\r\n";
+    let source = "//! Résumé 😀\r\nexport { read };\r\n/// First paragraph.\r\n///\r\n///     indented code\r\nfn read( value : i32)->i32{value}\r\n";
     let before = common::parse(source, None).await;
     let formatted = resin_cst::format_source(source).unwrap();
     assert_eq!(resin_cst::format_source(&formatted).unwrap(), formatted);

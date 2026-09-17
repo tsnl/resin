@@ -32,10 +32,10 @@ fn explorer_builds_and_can_render_resize_and_close_in_both_modes() {
     let source = original.replace(
         "while (true) {",
         r#"
-        let mut frames = 0_i;
+        let mut frames: i32 = 0;
         while (true) {
             frames = frames + 1;
-            if (frames == 3) { plot:zoom(0.5_f); dirty = true; };
+            if (frames == 3) { plot:zoom(f32(0.5)); dirty = true; };
             if (frames == 4) { window:set_size(800, 500)?; };
             if (frames == 6) { window:set_should_close(true)?; };
     "#,
@@ -85,43 +85,42 @@ fn a_segment_writes_only_its_own_row_range() {
         fn segment_bounds() -> () | Err<_> {
             let plot = plot_new(35, 2);
             let segments = segments_new(plot.width, plot.height)?;
-            let count = ulong(plot.width) * ulong(plot.height) * 4_ul;
-            let pixels = arc_span_alloc::<ubyte>(count + 1_ul, 123_ub)?;
-            let lut = arc_ptr_alloc(halton_samples())?;
+            let count = u64(plot.width) * u64(plot.height) * u64(4);
+            let pixels = arc_span_alloc::<u8>(count + u64(1), u8(123))?;
+            let view = pixels:get();
             let root = Parameters { plot = plot:clone(), solver = mandelbrot_new(32),
-                samples = Span<Sample> { data = lut:get():lea(0_ul), length = 1_ul },
-                segments = segments:get(), pixels = pixels:get():slice(0_ul, count) };
-            assert(segments:get().length == 4_ul);
-            evaluate_segment(0_ul, root);
-            let mut i = 0_ul;
-            while (i < 32_ul) {
-                assert(pixels:get():at(i * 4_ul + 3_ul) == 255_ub);
-                i = i + 1_ul;
+                segments = segments:get(), pixels = view:slice(u64(0), count) };
+            assert(segments:get().length == u64(4));
+            evaluate_segment(u64(0), root);
+            let mut i: u64 = 0;
+            while (i < u64(32)) {
+                assert(view:at(i * u64(4) + u64(3)) == u8(255));
+                i = i + u64(1);
             };
-            i = 32_ul * 4_ul;
+            i = u64(32) * u64(4);
             while (i <= count) {
-                assert(pixels:get():at(i) == 123_ub);
-                i = i + 1_ul;
+                assert(view:at(i) == u8(123));
+                i = i + u64(1);
             };
-            evaluate_segment(1_ul, root);
-            i = 32_ul;
-            while (i < 35_ul) {
-                assert(pixels:get():at(i * 4_ul + 3_ul) == 255_ub);
-                i = i + 1_ul;
+            evaluate_segment(u64(1), root);
+            i = u64(32);
+            while (i < u64(35)) {
+                assert(view:at(i * u64(4) + u64(3)) == u8(255));
+                i = i + u64(1);
             };
-            i = 35_ul * 4_ul;
+            i = u64(35) * u64(4);
             while (i <= count) {
-                assert(pixels:get():at(i) == 123_ub);
-                i = i + 1_ul;
+                assert(view:at(i) == u8(123));
+                i = i + u64(1);
             };
             dispatch_host(root);
-            evaluate_segment(4_ul, root);
-            i = 0_ul;
-            while (i < 70_ul) {
-                assert(pixels:get():at(i * 4_ul + 3_ul) == 255_ub);
-                i = i + 1_ul;
+            evaluate_segment(u64(4), root);
+            i = u64(0);
+            while (i < u64(70)) {
+                assert(view:at(i * u64(4) + u64(3)) == u8(255));
+                i = i + u64(1);
             };
-            assert(pixels:get():at(count) == 123_ub);
+            assert(view:at(count) == u8(123));
         }
     "#,
     );
@@ -135,7 +134,7 @@ fn a_segment_writes_only_its_own_row_range() {
 }
 
 #[test]
-fn compute_matches_cpu_for_halton_prefixes_and_partial_segments() {
+fn compute_matches_cpu_for_partial_segments() {
     let mut source = std::fs::read_to_string(example())
         .unwrap()
         .replace("export { main, test };", "export { main, test, compare };");
@@ -147,39 +146,40 @@ fn compute_matches_cpu_for_halton_prefixes_and_partial_segments() {
             // Non-square, short row tails and an incomplete final workgroup.
             let plot = plot_new(37, 19);
             let solver = mandelbrot_new(32);
-            let count = ulong(plot.width) * ulong(plot.height) * 4_ul;
-            let pixels = gpu:alloc::<ubyte>(count + 1_ul)?;
-            let segments = upload(gpu, segments_new(plot.width, plot.height)?:get())?;
-            let lut = arc_ptr_alloc(halton_samples())?;
-            let positions = upload(gpu, Span<Sample> { data = lut:get():lea(0_ul), length = 16_ul })?;
+            let count = u64(plot.width) * u64(plot.height) * u64(4);
+            let pixels = gpu:alloc::<u8>(count + u64(1))?;
+            let host_segments = segments_new(plot.width, plot.height)?;
+            let segment_view = host_segments:get();
+            let segments = upload(gpu, segment_view)?;
             let group_size = gpu:compute_workgroup_size();
-            let mut samples = 1_i;
-            while (samples <= 16) {
-                pixels:at(count):store(123_ub);
+            {
+                let sentinel = pixels:at(count);
+                sentinel:store(u8(123));
                 let commands = gpu:start_command_recording()?;
                 // Two explicit slices exercise batch-local invocation indices.
                 let first = HostParameters {
                     plot = plot:clone(), solver = mandelbrot_new(solver.max_iters),
-                    samples = positions:slice(0_ul, ulong(samples)), segments = segments:slice(0_ul, 7_ul), pixels = pixels:clone(),
+                    segments = segments:slice(u64(0), u64(7)), pixels = pixels:clone(),
                 };
                 let second = HostParameters {
                     plot = plot:clone(), solver = mandelbrot_new(solver.max_iters),
-                    samples = positions:slice(0_ul, ulong(samples)), segments = segments:slice(7_ul, segments.length - 7_ul), pixels = pixels:clone(),
+                    segments = segments:slice(u64(7), segments.length - u64(7)), pixels = pixels:clone(),
                 };
-                commands:dispatch(pipeline, first, uint((7_ul + group_size - 1_ul) / group_size), 1, 1)?;
-                commands:dispatch(pipeline, second, uint((segments.length - 7_ul + group_size - 1_ul) / group_size), 1, 1)?;
+                commands:dispatch(pipeline, first, u32((u64(7) + group_size - u64(1)) / group_size), 1, 1)?;
+                commands:dispatch(pipeline, second, u32((segments.length - u64(7) + group_size - u64(1)) / group_size), 1, 1)?;
                 commands:submit()?;
-                let actual = arc_span_alloc::<ubyte>(count + 1_ul, 0_ub)?;
+                let actual = arc_span_alloc::<u8>(count + u64(1), u8(0))?;
                 pixels:copy_to(actual:get());
-                let expected = host_image(plot, solver, samples)?;
-                let mut i = 0_ul;
+                let expected = host_image(plot, solver)?;
+                let actual_view = actual:get();
+                let expected_view = expected:get();
+                let mut i: u64 = 0;
                 while (i < count) {
-                    let difference = int(actual:get():at(i)) - int(expected:get():at(i));
+                    let difference = i32(actual_view:at(i)) - i32(expected_view:at(i));
                     assert(difference >= -1 && difference <= 1);
-                    i = i + 1_ul;
+                    i = i + u64(1);
                 };
-                assert(actual:get():at(count) == 123_ub);
-                samples = samples + 1;
+                assert(actual_view:at(count) == u8(123));
             };
         }
     "#,
@@ -236,8 +236,8 @@ fn cli_validates_options_and_writes_headless_pngs() {
         assert!(String::from_utf8_lossy(&output.stderr).contains("Use --help"));
     }
     let mut images = Vec::new();
-    for samples in ["1", "4", "16"] {
-        let path = directory.path().join(format!("cpu {samples}.png"));
+    {
+        let path = directory.path().join("cpu.png");
         let output = cpu_command()
             .args([
                 "--cpu",
@@ -247,8 +247,6 @@ fn cli_validates_options_and_writes_headless_pngs() {
                 "19",
                 "--iterations",
                 "32",
-                "--samples",
-                samples,
                 "--output",
                 path.to_str().unwrap(),
             ])
@@ -264,10 +262,6 @@ fn cli_validates_options_and_writes_headless_pngs() {
         assert!(image.pixels.chunks_exact(4).all(|pixel| pixel[3] == 255));
         images.push(image);
     }
-    assert_ne!(
-        images[0].pixels, images[1].pixels,
-        "supersampling changes edge pixels"
-    );
     let zoomed_path = directory.path().join("zoomed.png");
     let output = cpu_command()
         .args([
@@ -295,7 +289,7 @@ fn cli_validates_options_and_writes_headless_pngs() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_ne!(
-        images[1].pixels,
+        images[0].pixels,
         resin_runtime::image_read_png(&zoomed_path, 4)
             .unwrap()
             .pixels
@@ -322,8 +316,8 @@ fn cli_validates_options_and_writes_headless_pngs() {
         return;
     }
     let _gpu = resin_runtime::testing::lock_gpu();
-    for (index, samples) in ["1", "4", "16"].into_iter().enumerate() {
-        let path = directory.path().join(format!("gpu {samples}.png"));
+    {
+        let path = directory.path().join("gpu.png");
         let output = Command::new(executable.path())
             .env_remove("DISPLAY")
             .env_remove("WAYLAND_DISPLAY")
@@ -336,8 +330,6 @@ fn cli_validates_options_and_writes_headless_pngs() {
                 "19",
                 "--iterations",
                 "32",
-                "--samples",
-                samples,
                 "--output",
                 path.to_str().unwrap(),
             ])
@@ -358,7 +350,7 @@ fn cli_validates_options_and_writes_headless_pngs() {
         );
         let image = resin_runtime::image_read_png(&path, 4).unwrap();
         assert_eq!((image.width, image.height), (37, 19));
-        for (actual, expected) in image.pixels.iter().zip(&images[index].pixels) {
+        for (actual, expected) in image.pixels.iter().zip(&images[0].pixels) {
             assert!(
                 actual.abs_diff(*expected) <= 1,
                 "GPU {actual} != CPU {expected}"

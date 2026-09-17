@@ -31,7 +31,7 @@ fn assertions_require_boolean_conditions_even_in_unused_functions() {
 #[test]
 fn shader_assertions_use_the_invocation_failure_path() {
     let module = support::module(
-        "export { kernel }; @compute_shader fn kernel(i: ulong, output: Ptr<uint>)  { assert(i == 0_ul); output.* = 42_ui; }",
+        "export { kernel }; @compute_shader fn kernel(i: u64, output: Ptr<u32>)  { assert(i == u64(0)); output.* = u32(42); }",
     );
     let project = support::project::Project::new(&module, None).unwrap();
     let path = project.generated.shaders()[0].unoptimized_spirv();

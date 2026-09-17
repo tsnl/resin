@@ -2059,19 +2059,35 @@
     "named": false
   },
   {
+    "type": "f32",
+    "named": false
+  },
+  {
+    "type": "f64",
+    "named": false
+  },
+  {
     "type": "false",
     "named": false
   },
   {
-    "type": "float32",
-    "named": false
-  },
-  {
-    "type": "float64",
-    "named": false
-  },
-  {
     "type": "fn",
+    "named": false
+  },
+  {
+    "type": "i16",
+    "named": false
+  },
+  {
+    "type": "i32",
+    "named": false
+  },
+  {
+    "type": "i64",
+    "named": false
+  },
+  {
+    "type": "i8",
     "named": false
   },
   {
@@ -2080,10 +2096,6 @@
   },
   {
     "type": "import",
-    "named": false
-  },
-  {
-    "type": "int",
     "named": false
   },
   {
@@ -2097,10 +2109,6 @@
   {
     "type": "lid",
     "named": true
-  },
-  {
-    "type": "long",
-    "named": false
   },
   {
     "type": "match",
@@ -2120,14 +2128,6 @@
   },
   {
     "type": "return",
-    "named": false
-  },
-  {
-    "type": "sbyte",
-    "named": false
-  },
-  {
-    "type": "short",
     "named": false
   },
   {
@@ -2163,24 +2163,24 @@
     "named": false
   },
   {
-    "type": "ubyte",
+    "type": "u16",
+    "named": false
+  },
+  {
+    "type": "u32",
+    "named": false
+  },
+  {
+    "type": "u64",
+    "named": false
+  },
+  {
+    "type": "u8",
     "named": false
   },
   {
     "type": "uid",
     "named": true
-  },
-  {
-    "type": "uint",
-    "named": false
-  },
-  {
-    "type": "ulong",
-    "named": false
-  },
-  {
-    "type": "ushort",
-    "named": false
   },
   {
     "type": "while",

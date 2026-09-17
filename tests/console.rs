@@ -76,10 +76,10 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
                 match (console_read_line()) {
                     InputLine(line) => {
 
-                        if (Ptr<ubyte>(ulong(line:get().data) + line:get().length).* != ubyte(0)) {
+                        if (Ptr<u8>(u64(line:get().data) + line:get().length).* != u8(0)) {
                             print("missing terminator");
                         } else {};
-                        print(fmt("[{0}:", (line:get().length,)));
+                        { let borrowed = fmt("[{0}:", (line:get().length,)); print(borrowed) };
                         console_print(line)?;
                         print("]");
                     },
@@ -136,11 +136,11 @@ fn byte_input_distinguishes_bytes_from_eof() {
     let program = Program::new(
         r#"export { main };
         import { "$/stdio.resin", "$/string.resin" };
-        fn main() -> (int | Err<_>)  {
+        fn main() -> (i32 | Err<_>)  {
             let mut zero = console_read_byte()?;
             let mut first = console_read_byte()?;
             let mut ended = match (console_read_byte()) {
-                ubyte(byte) => { 1 == 0 },
+                u8(byte) => { 1 == 0 },
                 Err(error) => {
                     match (error) {
                         EndOfInput(e) => { 1 == 1 },
@@ -148,7 +148,7 @@ fn byte_input_distinguishes_bytes_from_eof() {
                     }
                 },
             };
-            (if (zero == ubyte(0) && first == ubyte(255) && ended) { 0 } else { 1 })
+            (if (zero == u8(0) && first == u8(255) && ended) { 0 } else { 1 })
         }
     "#,
     );
@@ -188,18 +188,18 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
 
             extern {{
                 "{header}": {{
-                    fn console_test_mode() -> int;
-                    fn console_test_frees() -> int;
+                    fn console_test_mode() -> i32;
+                    fn console_test_frees() -> i32;
                 }},
             }};
            import {{ "$/stdio.resin" }};
-            fn exercise() -> int  {{
+            fn exercise() -> i32  {{
                 let mut mode = console_test_mode();
                 match (console_read_line()) {{
                     InputLine(line) => {{
 
                         match (console_print(line)) {{
-                            ()(unit) => {{ if (mode == 6 && line:get().length == ulong(300)) {{ 0 }} else {{ 1 }} }},
+                            ()(unit) => {{ if (mode == 6 && line:get().length == u64(300)) {{ 0 }} else {{ 1 }} }},
                             Err(error) => {{ if (mode == 4 || mode == 5) {{ 0 }} else {{ 2 }} }},
                         }}
                     }},
@@ -212,7 +212,7 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
                     }},
                 }}
             }}
-            fn main() -> int  {{
+            fn main() -> i32  {{
                 let mut result = exercise();
                 let mut expected = if (console_test_mode() == 0) {{ 0 }} else {{ 1 }};
                 if (console_test_frees() != expected) {{ 6 }} else {{ result }}
@@ -252,8 +252,8 @@ fn streams_write_literals_and_owned_strings_verbatim() {
             let copy = text:clone();
             out:write("raw {0}\0")?;
             out:write(copy)?;
-            out:write(bytes(" bytes"))?;
-            error:write(fmt("error: {0}\n", (text:bytes(),)))?;
+            { let borrowed = bytes(" bytes"); out:write(borrowed) }?;
+            { let borrowed = fmt("error: {0}\n", (text:bytes(),)); error:write(borrowed) }?;
             error:write(literal())?;
             (())
         }
@@ -271,7 +271,7 @@ fn stream_write_failure_propagates_as_a_library_error() {
         r#"export { main };
         import { "$/stdio.resin", "$/string.resin" };
         fn main() -> (() | Err<_>)  {
-            Output { stream = 99_ui }:write("unwritten")?;
+            { let borrowed = Output { stream = u32(99) }; borrowed:write("unwritten") }?;
             print("not reached");
             (())
         }

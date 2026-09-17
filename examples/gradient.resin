@@ -3,24 +3,24 @@ export { kernel, main };
 import { "$/span.resin", "$/string.resin", "$/stdio.resin", "$/gpu.resin", "$/shared.resin", "$/image.resin" };
 
 struct HostRoot {
-	width: uint,
-	height: uint,
-	pixels: GpuSpan<uint>,
+	width: u32,
+	height: u32,
+	pixels: GpuSpan<u32>,
 }
 struct Root {
-	width: uint,
-	height: uint,
-	pixels: Span<uint>,
+	width: u32,
+	height: u32,
+	pixels: Span<u32>,
 }
 
-fn pixel(index: uint) -> uint {
-	0xff400000_ui | (index & 0xffff_ui)
+fn pixel(index: u32) -> u32 {
+	u32(0xff400000) | (index & u32(0xffff))
 }
 
 @compute_shader
-fn kernel(index: ulong, root: Ptr<Root>) {
-	if (index < ulong(root.width) * ulong(root.height) && index < root.pixels.length) {
-		root.pixels:at(index) = pixel(uint(index));
+fn kernel(index: u64, root: Ptr<Root>) {
+	if (index < u64(root.width) * u64(root.height) && index < root.pixels.length) {
+		root.pixels:at(index) = pixel(u32(index));
 	};
 }
 
@@ -29,22 +29,24 @@ fn main() -> (() | Err<_>) {
 
 	let mut pipeline = gpu:create_compute_pipeline(kernel)?;
 
-	let mut width = 256_ui;
-	let mut height = 256_ui;
-	let mut count = ulong(width) * ulong(height);
-	let mut pixels = gpu:alloc::<uint>(count)?;
+	let mut width: u32 = 256;
+	let mut height: u32 = 256;
+	let mut count = u64(width) * u64(height);
+	let mut pixels = gpu:alloc::<u32>(count)?;
 	let mut root = HostRoot { width = width, height = height, pixels = pixels:clone() };
 	let mut commands = gpu:start_command_recording()?;
 
 	let mut workgroup_size = gpu:compute_workgroup_size();
-	let mut groups = uint((pixels.length + workgroup_size - 1_ul) / workgroup_size);
+	let mut groups = u32((pixels.length + workgroup_size - u64(1)) / workgroup_size);
 	commands:dispatch(pipeline, root, groups, 1, 1)?;
 	commands:submit()?;
 
 	let mut path = "gradient.png";
-	let mut host = arc_span_alloc::<uint>(count, 0_ui)?;
+	let mut host = arc_span_alloc::<u32>(count, u32(0))?;
 	pixels:copy_to(host:get());
-	image_data_write_pixels(path.data, width, height, 4, host:get():as_bytes(), 0)?;
+	let view = host:get();
+	let bytes = view:as_bytes();
+	image_data_write_pixels(path.data, width, height, 4, bytes, 0)?;
 	print("wrote gradient.png\n");
 	(())
 }

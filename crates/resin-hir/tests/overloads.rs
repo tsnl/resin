@@ -4,13 +4,13 @@ use common::hir_module;
 #[test]
 fn overloads_use_all_arguments_and_expected_results() {
     hir_module(
-        r#"fn combine(left: int, right: bool) -> int { left }
-        fn combine(left: int, right: int) -> int { left + right }
-        fn make() -> int { 1 }
+        r#"fn combine(left: i32, right: bool) -> i32 { left }
+        fn combine(left: i32, right: i32) -> i32 { left + right }
+        fn make() -> i32 { 1 }
         fn make() -> bool { 1 == 1 }
-        fn main() -> int {
+        fn main() -> i32 {
             let choice: bool = make();
-            combine(combine(1_i, 2_i), choice)
+            combine(combine(i32(1), i32(2)), choice)
         }
     "#,
     )
@@ -21,8 +21,8 @@ fn overloads_use_all_arguments_and_expected_results() {
 fn generic_overloads_substitute_signatures() {
     hir_module(
         r#"fn select<T>(value: T, flag: bool) -> T { value }
-        fn select<T>(value: T, count: int) -> T { value }
-        fn main() -> long { select::<long>(42, 1 == 1) }
+        fn select<T>(value: T, count: i32) -> T { value }
+        fn main() -> i64 { select::<i64>(42, 1 == 1) }
     "#,
     )
     .unwrap();
@@ -32,9 +32,9 @@ fn generic_overloads_substitute_signatures() {
 fn selected_body_errors_do_not_disappear() {
     assert!(
         hir_module(
-            r#"fn select(value: int) -> int { unknown }
+            r#"fn select(value: i32) -> i32 { unknown }
         fn select(value: bool) -> bool { value }
-        fn main() -> int { select(1_i) }
+        fn main() -> i32 { select(i32(1)) }
     "#
         )
         .is_err()
@@ -46,8 +46,8 @@ fn ambiguous_overloads_are_rejected() {
     assert!(
         hir_module(
             r#"fn select<T>(value: T) -> T { value }
-        fn select(value: int) -> int { value }
-        fn main() -> int { select(1_i) }
+        fn select(value: i32) -> i32 { value }
+        fn main() -> i32 { select(i32(1)) }
     "#
         )
         .is_err()
@@ -58,10 +58,10 @@ fn ambiguous_overloads_are_rejected() {
 fn receiver_calls_are_free_function_calls() {
     hir_module(
         r#"
-        struct Item { value: int, }
-        fn read(value: Ref<Item>) -> int { value.value }
-        fn read(value: int) -> int { value }
-        fn main() -> int { let value = Item { value= 21 }; value:read() + read(value) }
+        struct Item { value: i32, }
+        fn read(value: Ref<Item>) -> i32 { value.value }
+        fn read(value: i32) -> i32 { value }
+        fn main() -> i32 { let value = Item { value= 21 }; value:read() + read(value) }
     "#,
     )
     .unwrap();
@@ -69,11 +69,11 @@ fn receiver_calls_are_free_function_calls() {
 
 #[test]
 fn local_function_values_shadow_primitive_operations() {
-    hir_module("fn identity(value: int) -> int { value } fn main() -> int { let at = identity; let replace = identity; at(20) + 22:replace() }").unwrap();
+    hir_module("fn identity(value: i32) -> i32 { value } fn main() -> i32 { let at = identity; let replace = identity; at(20) + 22:replace() }").unwrap();
 }
 
 #[test]
 fn numeric_literals_receive_context_from_source_overloads_of_primitive_names() {
-    hir_module("fn replace(value: int) -> int { value + 1 } fn use() -> bool { replace(1) == 2 }")
+    hir_module("fn replace(value: i32) -> i32 { value + 1 } fn use() -> bool { replace(1) == 2 }")
         .unwrap();
 }

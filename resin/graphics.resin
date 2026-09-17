@@ -3,16 +3,16 @@
 export { Position, Color, Vertex };
 
 struct Position {
-	x: float32,
-	y: float32,
-	z: float32,
-	w: float32,
+	x: f32,
+	y: f32,
+	z: f32,
+	w: f32,
 }
 struct Color {
-	r: float32,
-	g: float32,
-	b: float32,
-	a: float32,
+	r: f32,
+	g: f32,
+	b: f32,
+	a: f32,
 }
 struct Vertex {
 	position: Position,

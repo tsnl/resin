@@ -15,10 +15,10 @@ fn constructors_and_nominal_arguments_infer_function_parameters() {
         fn make<T>(first: T, second: T) -> Pair<T>  {
             Pair<T> { first = first, second = second }
         }
-        fn main() -> int  {
-            let mut small = Pair<ubyte> { first = 250, second = 5 };
-            let mut large = make(4294967296_ul, 2_ul);
-            print(fmt("{0} {1}", (sum(small), sum(large))));
+        fn main() -> i32  {
+            let mut small = Pair<u8> { first = 250, second = 5 };
+            let mut large = make(u64(4294967296), u64(2));
+            { let borrowed = fmt("{0} {1}", (sum(small), sum(large))); print(borrowed) };
             0
         }
     "#,
@@ -42,8 +42,8 @@ import { "$/shared.resin" };
             cell.value = value;
             previous
         }
-        fn main() -> int | Err<_> {
-            let cell_owner = arc_ptr_alloc(Cell<int> { value = 7 })?; let cell: Ref<_> = cell_owner:get().*;
+        fn main() -> i32 | Err<_> {
+            let cell_owner = arc_ptr_alloc(Cell<i32> { value = 7 })?; let cell: Ref<_> = cell_owner:get().*;
             let mut previous = replace(cell_owner:get(), 35);
             previous + cell.value
         }
@@ -60,11 +60,11 @@ import { "$/shared.resin" };
 fn nongeneric_wrappers_can_nest_generic_nominal_storage() {
     let output = run(r#"export { main };
         struct Cell<T> { value: T, }
-        struct Wrapped { cell: Cell<int>, }
+        struct Wrapped { cell: Cell<i32>, }
         struct Outer { wrapped: Wrapped, }
-        fn main() -> int  {
+        fn main() -> i32  {
             let mut outer = Outer {
-                wrapped = Wrapped { cell = Cell<int> { value = 7 } }
+                wrapped = Wrapped { cell = Cell<i32> { value = 7 } }
             };
             outer.wrapped.cell.value = 42;
             outer.wrapped.cell.value
@@ -82,9 +82,9 @@ fn nongeneric_wrappers_can_nest_generic_nominal_storage() {
 fn nongeneric_wrapper_layout_queries_wait_for_nominal_specialization() {
     let output = run(r#"export { main };
         struct Cell<T> { value: T, }
-        struct Wrapped { cell: Cell<int>, }
+        struct Wrapped { cell: Cell<i32>, }
         struct Outer { wrapped: Wrapped, }
-        fn main() -> int  { int(size_of(Wrapped) + size_of(Outer) + align_of(Outer)) }
+        fn main() -> i32  { i32(size_of(Wrapped) + size_of(Outer) + align_of(Outer)) }
     "#);
     assert_eq!(
         output.status.code(),
@@ -101,15 +101,15 @@ fn array_and_span_index_calls_preserve_generic_field_places() {
         struct Cell<T> { value: T, }
         fn copy_through_array<T>(value: T) -> T  {
             let mut cells = [Cell<T> { value = value }];
-            cells(0_ul).value
+            cells(u64(0)).value
         }
-        fn main() -> int | Err<_> {
-            let cells_owner = arc_ptr_alloc([Cell<int> { value = 7 }, Cell<int> { value = 35 }])?; let cells: Ref<_> = cells_owner:get().*;
-            let mut view = Span<Cell<int>> {
-                data = Ptr<Cell<int>>(cells_owner:get()), length = 2
+        fn main() -> i32 | Err<_> {
+            let cells_owner = arc_ptr_alloc([Cell<i32> { value = 7 }, Cell<i32> { value = 35 }])?; let cells: Ref<_> = cells_owner:get().*;
+            let mut view = Span<Cell<i32>> {
+                data = Ptr<Cell<i32>>(cells_owner:get()), length = 2
             };
-            cells(0_ul).value = copy_through_array(cells(0_ul).value) + view:at(1_ul).value;
-            cells(0_ul).value
+            cells(u64(0)).value = copy_through_array(cells(u64(0)).value) + view:at(u64(1)).value;
+            cells(u64(0)).value
         }
     "#);
     assert_eq!(
@@ -127,9 +127,9 @@ import { "$/shared.resin" };
 
         struct Node<T> { value: T, next: Ptr<Node<T>>, }
         fn read<T>(node: Ptr<Node<T>>) -> T  { node.value }
-        fn main() -> int | Err<_> {
-            let tail_owner = arc_ptr_alloc(Node<int> { value = 35, next = Ptr<Node<int>>(0_ul) })?; let tail: Ref<_> = tail_owner:get().*;
-            let head_owner = arc_ptr_alloc(Node<int> { value = 7, next = tail_owner:get() })?; let head: Ref<_> = head_owner:get().*;
+        fn main() -> i32 | Err<_> {
+            let tail_owner = arc_ptr_alloc(Node<i32> { value = 35, next = Ptr<Node<i32>>(u64(0)) })?; let tail: Ref<_> = tail_owner:get().*;
+            let head_owner = arc_ptr_alloc(Node<i32> { value = 7, next = tail_owner:get() })?; let head: Ref<_> = head_owner:get().*;
             read(head_owner:get()) + read(head.next)
         }
     "#);
@@ -149,9 +149,9 @@ fn generic_nominal_error_types_keep_result_payloads() {
             Err(Failure<T> { value = value })
         }
         fn relay<T>(value: T) -> (T | Err<_>)  { (fail(value)?) }
-        fn main() -> int  {
-            match (relay(42_i)) {
-                int(value) => { 0 },
+        fn main() -> i32  {
+            match (relay(i32(42))) {
+                i32(value) => { 0 },
                 Err(error) => { error.value }
             }
         }
@@ -170,7 +170,7 @@ fn shader_fields_specialize_generic_nominal_storage() {
         r#"export { kernel };
         struct Cell<T> { value: T, }
         fn increment<T>(cell: Ptr<Cell<T>>)  { cell.value = cell.value + 1; }
-        @compute_shader fn kernel(index: ulong, root: Ptr<Cell<uint>>)  {
+        @compute_shader fn kernel(index: u64, root: Ptr<Cell<u32>>)  {
             increment(root);
         }
     "#,
@@ -197,9 +197,9 @@ fn imported_aliases_preserve_nominal_identity_and_instance_reuse() {
             r#"export { main };
             import { "pair.resin", "alias.resin" };
             fn first<T>(pair: Pair<T>) -> T  { pair.first }
-            fn main() -> int  {
-                first(Pair<int> { first = 20, second = 0 }) +
-                first(Renamed<int> { first = 22, second = 0 })
+            fn main() -> i32  {
+                first(Pair<i32> { first = 20, second = 0 }) +
+                first(Renamed<i32> { first = 22, second = 0 })
             }
         "#,
         ),
@@ -228,7 +228,7 @@ fn imported_aliases_preserve_nominal_identity_and_instance_reuse() {
 
 #[test]
 fn unused_generic_arguments_do_not_demand_recursive_layouts() {
-    let source = "struct Recursive<T> { next: Recursive<T>, } fn marker<T>() -> int  { 42 } fn main() -> int  { marker::<Recursive<int>>() }";
+    let source = "struct Recursive<T> { next: Recursive<T>, } fn marker<T>() -> i32  { 42 } fn main() -> i32  { marker::<Recursive<i32>>() }";
     let module = support::module(source);
     assert!(!module.types.iter().any(|definition| {
         definition
@@ -239,7 +239,7 @@ fn unused_generic_arguments_do_not_demand_recursive_layouts() {
 
 #[test]
 fn demanding_an_infinite_generic_layout_reports_the_application() {
-    let source = "struct Recursive<T> { next: Recursive<T>, } fn measure<T>() -> ulong  { size_of(T) } fn main() -> ulong  { measure::<Recursive<int>>() }";
+    let source = "struct Recursive<T> { next: Recursive<T>, } fn measure<T>() -> u64  { size_of(T) } fn main() -> u64  { measure::<Recursive<i32>>() }";
     let hir = support::hir(source);
     let error = support::frontend::lower(&hir, &[], &resin_lir::LoweringOptions::default())
         .unwrap_err()
@@ -249,14 +249,14 @@ fn demanding_an_infinite_generic_layout_reports_the_application() {
         error.applications.iter().any(|application| application
             .arguments
             .iter()
-            .any(|argument| argument.as_ref() == "Recursive<int>")),
+            .any(|argument| argument.as_ref() == "Recursive<i32>")),
         "{error:?}"
     );
 }
 
 #[test]
 fn generic_constructor_literals_are_range_checked_after_substitution() {
-    let source = "struct Cell<T> { value: T, } fn make<T>() -> Cell<T>  { Cell<T> { value = 256 } } fn main() -> Cell<ubyte>  { make() }";
+    let source = "struct Cell<T> { value: T, } fn make<T>() -> Cell<T>  { Cell<T> { value = 256 } } fn main() -> Cell<u8>  { make() }";
     let hir = support::hir(source);
     let error = support::frontend::lower(&hir, &[], &resin_lir::LoweringOptions::default())
         .unwrap_err()
@@ -271,16 +271,16 @@ fn local_structs_capture_outer_types_and_specialize_each_layout() {
         r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn pair<T>(value: T) -> _  {
             struct Local<U> { outer: T, inner: U, }
-            Local<int> { outer = value, inner = 35 }
+            Local<i32> { outer = value, inner = 35 }
         }
-        fn measure<T>(value: T) -> ulong  { size_of(T) }
-        fn main() -> int  {
-            let mut small = pair(7_i);
-            let mut large = pair(4294967296_ul);
-            print(fmt("{0} {1} {2} {3} {4} {5}", (
+        fn measure<T>(value: T) -> u64  { size_of(T) }
+        fn main() -> i32  {
+            let mut small = pair(i32(7));
+            let mut large = pair(u64(4294967296));
+            { let borrowed = fmt("{0} {1} {2} {3} {4} {5}", (
                 small.outer, large.outer, small.inner, large.inner,
                 measure(small), measure(large)
-            )));
+            )); print(borrowed) };
             0
         }
     "#,
@@ -298,7 +298,7 @@ fn optional_generic_structs_preserve_the_payload_after_unwrapping() {
     let output = run(r#"export { main };
         struct Cell<T> { value: T, }
         fn present<T>(value: T) -> Cell<T> | None  { Cell<T> { value = value } }
-        fn main() -> int  { present(42_i)!.value }
+        fn main() -> i32  { present(i32(42))!.value }
     "#);
     assert_eq!(
         output.status.code(),
@@ -312,15 +312,15 @@ fn optional_generic_structs_preserve_the_payload_after_unwrapping() {
 fn nongeneric_wrappers_copy_shared_generic_storage_and_destroy_it_once() {
     let output = run(r#"export { main };
         import { "$/shared.resin" };
-        struct Resource { trace: Ptr<int>, answer: int,
+        struct Resource { trace: Ptr<i32>, answer: i32,
             
         }
 fn drop(self: Ref<Resource>)  { if (self.answer != 0) { self.trace.* = self.trace.* + 1; }; }
 
         struct Cell<T> { value: T, }
         struct Envelope { owner: ArcPtr<Cell<Resource>>, }
-        fn main() -> int | Err<_> {
-            let trace_owner = arc_ptr_alloc(0_i)?; let trace: Ref<_> = trace_owner:get().*;
+        fn main() -> i32 | Err<_> {
+            let trace_owner = arc_ptr_alloc(i32(0))?; let trace: Ref<_> = trace_owner:get().*;
             {
                 let mut optional: ArcPtr<Cell<Resource>> | None;
                 optional = match (arc_ptr_alloc::<Cell<Resource>>(Cell<Resource> {
@@ -349,11 +349,11 @@ fn foreign_pointer_signatures_keep_generic_pointees() {
 
         extern {
             "stdlib.h": {
-                fn free(value: Ptr<Cell<int>>);
+                fn free(value: Ptr<Cell<i32>>);
             },
         };
         struct Cell<T> { value: T, }
-        fn main() -> int  { free(Ptr<Cell<int>>(0_ul)); 42 }"#);
+        fn main() -> i32  { free(Ptr<Cell<i32>>(u64(0))); 42 }"#);
     assert_eq!(
         output.status.code(),
         Some(42),

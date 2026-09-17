@@ -10,10 +10,10 @@ fn map<T, U>(self: Pair<T>, value: U) -> Pair<U>  { Pair<U> { first = value } }
 type Shared<T> = ArcPtr<Pair<T>>;
 fn identity<T>(value: T) -> _  { value }
 fn example()  {
-    let mut f = identity::<Ptr<int>>;
-    let mut output = gpu:alloc::<Pair<int>>(4);
-    create::<int, long>(1);
-    identity::<int>(1) < 2;
+    let mut f = identity::<Ptr<i32>>;
+    let mut output = gpu:alloc::<Pair<i32>>(4);
+    create::<i32, i64>(1);
+    identity::<i32>(1) < 2;
 }
 ---
 

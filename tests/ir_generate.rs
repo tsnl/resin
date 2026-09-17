@@ -9,7 +9,7 @@ use resin_types::prelude::*;
 use support::pipeline;
 
 const FIBONACCI: &str = r#"export { main };
-fn fibonacci(n: int) -> int  {
+fn fibonacci(n: i32) -> i32  {
     if (n <= 1) { n } else {
         let mut f0 = fibonacci(n - 1);
         let mut f1 = fibonacci(n - 2);
@@ -63,11 +63,11 @@ fn while_lowers_to_a_structured_loop_and_returns_unit() {
 #[test]
 fn while_does_not_assume_its_body_ran() {
     for source in [
-        "export { main }; fn main () -> int  { let mut x: int; while (1 == 0) { x = 1; }; x }",
-        "export { main }; fn main () -> ()  { let mut x: int; while (x < 3) { x = 1; }; }",
-        "export { main }; fn main () -> ()  { let mut x: int; while (1 == 0) { x = x + 1; }; }",
-        "export { main }; fn main () -> int  { let mut x: int; while ((1 == 0) && ({ x = 1; x } == 1)) {}; x }",
-        "export { main }; fn main () -> int  { let mut x: int; while (1 == 1) { x = 1; }; x }",
+        "export { main }; fn main () -> i32  { let mut x: i32; while (1 == 0) { x = 1; }; x }",
+        "export { main }; fn main () -> ()  { let mut x: i32; while (x < 3) { x = 1; }; }",
+        "export { main }; fn main () -> ()  { let mut x: i32; while (1 == 0) { x = x + 1; }; }",
+        "export { main }; fn main () -> i32  { let mut x: i32; while ((1 == 0) && ({ x = 1; x } == 1)) {}; x }",
+        "export { main }; fn main () -> i32  { let mut x: i32; while (1 == 1) { x = 1; }; x }",
     ] {
         assert!(
             matches!(
@@ -78,7 +78,7 @@ fn while_does_not_assume_its_body_ran() {
         );
     }
     compile(
-        "export { main }; fn main () -> int  { let mut x: int; while ({ x = 1; x } == 0) {}; x }",
+        "export { main }; fn main () -> i32  { let mut x: i32; while ({ x = 1; x } == 0) {}; x }",
     );
 }
 
@@ -90,12 +90,12 @@ fn while_requires_a_boolean_condition_and_keeps_body_bindings_local() {
     ));
     assert!(matches!(
         compile_err(
-            "export { main }; fn main () -> int  { while (1 == 0) { let mut inner = 1; }; inner }"
+            "export { main }; fn main () -> i32  { while (1 == 0) { let mut inner = 1; }; inner }"
         ),
         GenerateErrorKind::UnboundValue { .. }
     ));
     assert!(matches!(
-        compile_err("export { main }; fn main () -> int  { while (1 == 0) { 42 } }"),
+        compile_err("export { main }; fn main () -> i32  { while (1 == 0) { 42 } }"),
         GenerateErrorKind::Type {
             kind: TypeErrorKind::TypeMismatch { .. }
         }
@@ -140,7 +140,7 @@ fn ir_dump_is_an_s_expression_with_names() {
     assert!(dump.starts_with("(module"));
     assert!(dump.contains("main"));
     assert!(dump.contains("fibonacci"));
-    assert!(dump.contains("(local f0 int)"));
+    assert!(dump.contains("(local f0 i32)"));
     assert!(dump.contains("(local-ref n)"));
     assert!(dump.contains("(function-ref fibonacci)"));
     assert!(dump.contains("(block then"));
@@ -175,7 +175,7 @@ fn eager_recursion_is_rejected() {
 #[test]
 fn recursive_function_result_is_checked() {
     assert!(matches!(
-        compile_err("fn f (n: int) -> int  { if (n == 0) { () } else { f(n - 1) } }"),
+        compile_err("fn f (n: i32) -> i32  { if (n == 0) { () } else { f(n - 1) } }"),
         GenerateErrorKind::Type {
             kind: TypeErrorKind::TypeMismatch { .. }
         }
@@ -194,7 +194,7 @@ fn type_mismatch_is_a_type_error() {
 
 #[test]
 fn linked_list_type_is_finite_through_its_pointer() {
-    let module = compile("struct List { value: int, next: Ptr<List>, }");
+    let module = compile("struct List { value: i32, next: Ptr<List>, }");
     assert_eq!(
         module.types.iter().filter(|d| d.name().is_some()).count(),
         1
@@ -219,7 +219,7 @@ fn inline_recursive_type_is_rejected_during_generation() {
 #[test]
 fn function_values_do_not_capture_local_state() {
     let module = compile(
-        "fn add (x: int, y: int) -> int  { x + y } fn select () -> (int, int) -> int  { let mut local = add; local }",
+        "fn add (x: i32, y: i32) -> i32  { x + y } fn select () -> (i32, i32) -> i32  { let mut local = add; local }",
     );
     verify(&module).unwrap();
     assert!(
@@ -234,7 +234,7 @@ fn function_values_do_not_capture_local_state() {
 
 #[test]
 fn assignment_and_deref_store_through_an_address() {
-    let module = compile("fn f (p: Ptr<int>) -> int  { p.* = 1; p.* }");
+    let module = compile("fn f (p: Ptr<i32>) -> i32  { p.* = 1; p.* }");
     verify(&module).unwrap();
     let function = &module.functions[0];
     assert!(function.blocks.iter().any(|block| {
@@ -253,7 +253,7 @@ fn assignment_and_deref_store_through_an_address() {
 
 #[test]
 fn if_joins_then_and_else_values() {
-    let module = compile("fn f (c: int) -> int  { if (c == 0) { 1 } else { 2 } }");
+    let module = compile("fn f (c: i32) -> i32  { if (c == 0) { 1 } else { 2 } }");
     verify(&module).unwrap();
     let function = &module.functions[0];
     assert!(
@@ -268,9 +268,9 @@ fn if_joins_then_and_else_values() {
 #[test]
 fn nominal_ascription_wraps_and_unwraps_one_layer() {
     let module = compile(
-        r#"struct Meters { value: int, }
-fn to_meters (n: int) -> Meters  { Meters { value = n } }
-fn from_meters (m: Meters) -> int  { m.value }
+        r#"struct Meters { value: i32, }
+fn to_meters (n: i32) -> Meters  { Meters { value = n } }
+fn from_meters (m: Meters) -> i32  { m.value }
 "#,
     );
     verify(&module).unwrap();
@@ -297,8 +297,8 @@ fn from_meters (m: Meters) -> int  { m.value }
 fn field_access_autoderefs_a_named_pointer() {
     let module = compile(
         r#"struct FieldsX<T0> { x: T0, }
-type P = Ptr<FieldsX<int>>;
-fn f (p: P) -> int  { p.x }
+type P = Ptr<FieldsX<i32>>;
+fn f (p: P) -> i32  { p.x }
 "#,
     );
     verify(&module).unwrap();
@@ -318,8 +318,8 @@ fn f (p: P) -> int  { p.x }
 #[test]
 fn named_function_type_can_be_called() {
     let module = compile(
-        r#"type Handler = (int) -> int;
-fn f (h: Handler, n: int) -> int  { h(n) }
+        r#"type Handler = (i32) -> i32;
+fn f (h: Handler, n: i32) -> i32  { h(n) }
 "#,
     );
     verify(&module).unwrap();
@@ -332,7 +332,7 @@ fn nested_nominal_ascription_does_not_skip_a_layer() {
         compile_err(
             r#"export { main };
 
-struct Meters { value: int, }
+struct Meters { value: i32, }
 struct Distance { value: Meters, }
 
 fn main() -> ()  {
@@ -350,7 +350,7 @@ fn nested_nominal_ascription_wraps_the_defining_body() {
     let module = compile(
         r#"export { main };
 
-struct Meters { value: int, }
+struct Meters { value: i32, }
 struct Distance { value: Meters, }
 
 fn main() -> ()  {
@@ -384,7 +384,7 @@ fn main() -> ()  {
 #[test]
 fn nominal_record_ascription_wraps_the_representation() {
     let module = compile(
-        r#"struct List { value: int, next: Ptr<List>, }
+        r#"struct List { value: i32, next: Ptr<List>, }
 fn nil (p: Ptr<List>) -> List  { List { value = 0, next = p } }
 "#,
     );
@@ -434,8 +434,8 @@ fn span_and_literal_locals_are_typed() {
     let module = compile(
         r#"export { main };
 
-struct Span<T> { data: Ptr<T>, length: ulong, }
-type Buf = Span<int>;
+struct Span<T> { data: Ptr<T>, length: u64, }
+type Buf = Span<i32>;
 
 fn main() -> ()  {
     let mut x = 1;
@@ -455,7 +455,7 @@ fn main() -> ()  {
 
 #[test]
 fn short_circuit_and_compiles() {
-    let module = compile("fn f (a: int) -> bool  { (a == 0) && (a == 1) }");
+    let module = compile("fn f (a: i32) -> bool  { (a == 0) && (a == 1) }");
     verify(&module).unwrap();
     assert_eq!(module.functions[0].result, Ty::Bool);
 }
@@ -463,25 +463,25 @@ fn short_circuit_and_compiles() {
 #[test]
 fn pointers_cannot_be_used_in_arithmetic_and_indexing_is_explicit() {
     for body in ["p + 1", "p - 1", "p + p", "-p", "~p", "1 + p", "p(0)"] {
-        let source = format!("fn bad(p: Ptr<int>) -> Ptr<int>  {{ {body} }}");
+        let source = format!("fn bad(p: Ptr<i32>) -> Ptr<i32>  {{ {body} }}");
         assert!(generate(&parse(&source)).is_err(), "{source}");
     }
     for body in ["xs(0).* = 3", "xs(1.5)", "xs(0, 1)"] {
-        let source = format!("fn bad() -> int  {{ let mut xs = [1, 2]; {body} }}");
+        let source = format!("fn bad() -> i32  {{ let mut xs = [1, 2]; {body} }}");
         assert!(generate(&parse(&source)).is_err(), "{source}");
     }
-    compile("fn explicit(p: Ptr<int>) -> Ptr<int>  { Ptr<int>(ulong(p) + ulong(4)) }");
+    compile("fn explicit(p: Ptr<i32>) -> Ptr<i32>  { Ptr<i32>(u64(p) + u64(4)) }");
 }
 
 #[test]
 fn one_armed_if_preserves_conditional_initialization_and_scope() {
     for source in [
-        "fn main() -> int  { let mut x: int; if (1 == 1) { x = 1; }; x }",
-        "fn main() -> int  { if (1 == 1) { let mut x = 1; }; x }",
+        "fn main() -> i32  { let mut x: i32; if (1 == 1) { x = 1; }; x }",
+        "fn main() -> i32  { if (1 == 1) { let mut x = 1; }; x }",
         "fn main()  { if (1) {} }",
         "fn main()  { if (1 == 1) { 42 } }",
     ] {
         assert!(generate(&parse(source)).is_err(), "{source}");
     }
-    compile("fn main() -> int  { let mut x: int; if ({ x = 2; x } == 2) {}; x }");
+    compile("fn main() -> i32  { let mut x: i32; if ({ x = 2; x } == 2) {}; x }");
 }

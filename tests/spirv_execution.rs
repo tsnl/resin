@@ -34,7 +34,7 @@ fn execute<I: Copy, O: Copy>(source: &str, inputs: &[I], sentinel: O) -> Option<
     let _lock = lock_gpu();
     let mut gpu = gpu()?;
     let module = support::module(&format!(
-        r#"{source} intrinsic "pointer_index" fn device_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;"#
+        r#"{source} intrinsic "pointer_index" fn device_index<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;"#
     ));
     let project = support::project::Project::new(&module, None).unwrap();
     for shader in project.generated.shaders() {
@@ -91,27 +91,27 @@ fn execute<I: Copy, O: Copy>(source: &str, inputs: &[I], sentinel: O) -> Option<
 fn local_reference_helpers_preserve_aliases_fields_and_dynamic_elements() {
     let source = r#"
         export { kernel };
-        struct Root { count: ulong, inputs: Ptr<uint>, outputs: Ptr<uint> }
-        struct Pair { first: uint, second: uint }
-        fn add_both(left: Ref<uint>, right: Ref<uint>, amount: uint) {
+        struct Root { count: u64, inputs: Ptr<u32>, outputs: Ptr<u32> }
+        struct Pair { first: u32, second: u32 }
+        fn add_both(left: Ref<u32>, right: Ref<u32>, amount: u32) {
             left = left + amount;
             right = right + left;
         }
-        fn increment(value: Ref<uint>, amount: uint) {
-            let alias: Ref<uint> = value;
+        fn increment(value: Ref<u32>, amount: u32) {
+            let alias: Ref<u32> = value;
             add_both(value, alias, amount);
         }
         @compute_shader
-        fn kernel(index: ulong, root: Ptr<Root>) {
+        fn kernel(index: u64, root: Ptr<Root>) {
             if (index >= root.count) { return; };
             let input = device_index(root.inputs, root.count, index).*;
-            let mut pair = Pair { first = input, second = 100_ui };
-            increment(pair.first, 1_ui);
-            let mut values = [10_ui, 20_ui];
-            increment(values:at(index & 1_ul), 3_ui);
+            let mut pair = Pair { first = input, second = u32(100) };
+            increment(pair.first, u32(1));
+            let mut values = [u32(10), u32(20)];
+            increment(values:at(index & u64(1)), u32(3));
             let output = device_index(root.outputs, root.count, index);
-            output.* = pair.first + pair.second + values:at(0_ul) + values:at(1_ul);
-            increment(output.*, 4_ui);
+            output.* = pair.first + pair.second + values:at(u64(0)) + values:at(u64(1));
+            increment(output.*, u32(4));
         }
     "#;
     let inputs = (0..65).collect::<Vec<u32>>();
@@ -216,16 +216,16 @@ fn physical_byte_record_strides_preserve_neighboring_elements() {
     let Some(actual) = execute(
         r#"export { kernel };
         import { "$/span.resin" };
-        struct Bytes3 { a: ubyte, b: ubyte, c: ubyte, }
-        struct Root { count: ulong, inputs: Ptr<Bytes3>, outputs: Ptr<Bytes3>, }
-        @compute_shader fn kernel(index: ulong, root: Ptr<Root>)  {
+        struct Bytes3 { a: u8, b: u8, c: u8, }
+        struct Root { count: u64, inputs: Ptr<Bytes3>, outputs: Ptr<Bytes3>, }
+        @compute_shader fn kernel(index: u64, root: Ptr<Root>)  {
             if (index < root.count) {
                 let mut inputs = Span<Bytes3> { data = root.inputs, length = root.count };
                 let mut outputs = Span<Bytes3> { data = root.outputs, length = root.count };
                 let mut output: Ref<_> = device_index(outputs.data, outputs.length, index).*;
                 let input: Ref<Bytes3> = device_index(inputs.data, inputs.length, index).*;
                 output = Bytes3 { a = input.a, b = input.b, c = input.c };
-                output.b = output.b + 1_ub;
+                output.b = output.b + u8(1);
             };
         }
     "#,
@@ -327,7 +327,7 @@ fn mixed_record_copies_preserve_nested_byte_fields() {
 #[test]
 fn an_unconditionally_failing_nested_loop_condition_stops_before_caller_stores() {
     let source = r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: ulong, inputs: Ptr<uint>, outputs: Ptr<uint>, }
+        struct Root { count: u64, inputs: Ptr<u32>, outputs: Ptr<u32>, }
         fn fail() -> bool  {
             let mut value: None;
             value = None;
@@ -336,16 +336,16 @@ fn an_unconditionally_failing_nested_loop_condition_stops_before_caller_stores()
             test
         }
         fn condition() -> bool  { fail() }
-        @compute_shader fn kernel(index: ulong, root: Ptr<Root>)  {
+        @compute_shader fn kernel(index: u64, root: Ptr<Root>)  {
             if (index < root.count) {
-                let mut output = Span<uint> { data = root.outputs, length = root.count };
-                let mut step = 0_ui;
-                while (step < 1_ui) {
-                    while (condition()) { device_index(output.data, output.length, index).* = 1_ui; };
-                    device_index(output.data, output.length, index).* = 2_ui;
-                    step = step + 1_ui;
+                let mut output = Span<u32> { data = root.outputs, length = root.count };
+                let mut step: u32 = 0;
+                while (step < u32(1)) {
+                    while (condition()) { device_index(output.data, output.length, index).* = u32(1); };
+                    device_index(output.data, output.length, index).* = u32(2);
+                    step = step + u32(1);
                 };
-                device_index(output.data, output.length, index).* = 3_ui;
+                device_index(output.data, output.length, index).* = u32(3);
             };
         }"#;
     let sentinel = 0xabcd1234_u32;
@@ -358,24 +358,24 @@ fn an_unconditionally_failing_nested_loop_condition_stops_before_caller_stores()
 #[test]
 fn local_reference_calls_in_loops_propagate_failure_and_evaluate_indices_once() {
     let source = r#"export { kernel };
-        struct Root { count: ulong, inputs: Ptr<uint>, outputs: Ptr<uint> }
-        fn position(calls: Ref<uint>, index: ulong) -> ulong { calls = calls + 1; index }
-        fn increment(value: Ref<uint>, fail: bool) {
+        struct Root { count: u64, inputs: Ptr<u32>, outputs: Ptr<u32> }
+        fn position(calls: Ref<u32>, index: u64) -> u64 { calls = calls + 1; index }
+        fn increment(value: Ref<u32>, fail: bool) {
             assert(!fail);
             value = value + 1;
         }
-        @compute_shader fn kernel(index: ulong, root: Ptr<Root>) {
+        @compute_shader fn kernel(index: u64, root: Ptr<Root>) {
             if (index >= root.count) { return; };
-            let values = [10_ui, 20_ui];
-            let calls = 0_ui;
-            let mut step = 0_ui;
-            while (step < 3_ui) {
-                let selected: Ref<uint> = values:at(position(calls, index & 1_ul));
-                increment(selected, index == 1_ul && step == 1_ui);
+            let values = [u32(10), u32(20)];
+            let calls: u32 = 0;
+            let mut step: u32 = 0;
+            while (step < u32(3)) {
+                let selected: Ref<u32> = values:at(position(calls, index & u64(1)));
+                increment(selected, index == u64(1) && step == u32(1));
                 step = step + 1;
             };
-            assert(calls == 3_ui);
-            device_index(root.outputs, root.count, index).* = values:at(0_ul) + values:at(1_ul);
+            assert(calls == u32(3));
+            device_index(root.outputs, root.count, index).* = values:at(u64(0)) + values:at(u64(1));
         }
     "#;
     let sentinel = u32::MAX;
@@ -398,21 +398,21 @@ fn local_reference_calls_in_loops_propagate_failure_and_evaluate_indices_once() 
 fn boolean_local_references_work_in_helpers_without_device_storage_layout() {
     let source = r#"
         export { kernel };
-        struct Root { count: ulong, inputs: Ptr<uint>, outputs: Ptr<uint> }
+        struct Root { count: u64, inputs: Ptr<u32>, outputs: Ptr<u32> }
         struct Flags { first: bool, second: bool }
         fn toggle(value: Ref<bool>) { value = !value; }
-        fn update(value: Ref<Flags>, index: ulong) {
+        fn update(value: Ref<Flags>, index: u64) {
             toggle(value.first);
             let mut flags = [value.first, value.second];
-            toggle(flags:at(index & 1_ul));
-            value.second = flags:at(0_ul) && flags:at(1_ul);
+            toggle(flags:at(index & u64(1)));
+            value.second = flags:at(u64(0)) && flags:at(u64(1));
         }
         @compute_shader
-        fn kernel(index: ulong, root: Ptr<Root>) {
+        fn kernel(index: u64, root: Ptr<Root>) {
             if (index >= root.count) { return; };
             let mut flags = Flags { first = false, second = true };
             update(flags, index);
-            device_index(root.outputs, root.count, index).* = if (flags.first && !flags.second) { 42_ui } else { 0_ui };
+            device_index(root.outputs, root.count, index).* = if (flags.first && !flags.second) { u32(42) } else { u32(0) };
         }
     "#;
     let Some(actual) = execute(source, &[0_u32; 65], u32::MAX) else {

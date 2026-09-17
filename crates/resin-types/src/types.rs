@@ -383,16 +383,16 @@ pub(super) fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
         Ty::Unit => "()".into(),
         Ty::None => "None".into(),
         Ty::Bool => "bool".into(),
-        Ty::Int8 => "sbyte".into(),
-        Ty::Int16 => "short".into(),
-        Ty::Int32 => "int".into(),
-        Ty::Int64 => "long".into(),
-        Ty::UInt8 => "ubyte".into(),
-        Ty::UInt16 => "ushort".into(),
-        Ty::UInt32 => "uint".into(),
-        Ty::UInt64 => "ulong".into(),
-        Ty::Float32 => "float32".into(),
-        Ty::Float64 => "float64".into(),
+        Ty::Int8 => "i8".into(),
+        Ty::Int16 => "i16".into(),
+        Ty::Int32 => "i32".into(),
+        Ty::Int64 => "i64".into(),
+        Ty::UInt8 => "u8".into(),
+        Ty::UInt16 => "u16".into(),
+        Ty::UInt32 => "u32".into(),
+        Ty::UInt64 => "u64".into(),
+        Ty::Float32 => "f32".into(),
+        Ty::Float64 => "f64".into(),
         Ty::Str => "str".into(),
         Ty::Foreign { name } => name.to_string(),
         Ty::Defined { definition } => definitions
@@ -744,54 +744,7 @@ mod layout_tests {
 // Numeric literal spelling
 //
 
-pub(super) fn split_literal(text: &str) -> (&str, Option<Ty>) {
-    let hex = is_hex(text);
-    let Some(width) = text.as_bytes().last().map(u8::to_ascii_lowercase) else {
-        return (text, None);
-    };
-    let mut end = text.len() - 1;
-    let unsigned = end > 0 && text.as_bytes()[end - 1].eq_ignore_ascii_case(&b'u');
-    if unsigned {
-        end -= 1;
-    }
-    // Hex b/B is a digit unless an underscore or unsigned qualifier separates it.
-    // Hex d/D/f/F always remain digits; hexadecimal floats are unsupported.
-    let separated = end > 0 && text.as_bytes()[end - 1] == b'_';
-    let ty = match (width, unsigned) {
-        (b'b', false) if !hex || separated => Ty::Int8,
-        (b'b', true) => Ty::UInt8,
-        (b'h', false) => Ty::Int16,
-        (b'h', true) => Ty::UInt16,
-        (b'i', false) => Ty::Int32,
-        (b'i', true) => Ty::UInt32,
-        (b'l', false) => Ty::Int64,
-        (b'l', true) => Ty::UInt64,
-        (b'f', false) if !hex => Ty::Float32,
-        (b'd', false) if !hex => Ty::Float64,
-        _ => return (text, None),
-    };
-    (text[..end].trim_end_matches('_'), Some(ty))
-}
-
-pub(super) fn format_literal(text: &str) -> String {
-    let (digits, ty) = split_literal(text);
-    let suffix = match ty {
-        Some(Ty::Int8) => "b",
-        Some(Ty::UInt8) => "ub",
-        Some(Ty::Int16) => "h",
-        Some(Ty::UInt16) => "uh",
-        Some(Ty::Int32) => "i",
-        Some(Ty::UInt32) => "ui",
-        Some(Ty::Int64) => "l",
-        Some(Ty::UInt64) => "ul",
-        Some(Ty::Float32) => "f",
-        Some(Ty::Float64) => "d",
-        _ => return text.into(),
-    };
-    format!("{digits}_{suffix}")
-}
-
-pub(super) fn unsuffixed_literal_type(text: &str) -> Ty {
+pub(super) fn default_literal_type(text: &str) -> Ty {
     if text.contains('.') || (!is_hex(text) && text.contains(['e', 'E'])) {
         Ty::Float64
     } else {
@@ -810,19 +763,17 @@ mod literal_tests {
     use crate::prelude::*;
 
     #[test]
-    fn hex_digits_and_signs_do_not_change_suffix_or_exponent_rules() {
-        for (text, body, suffix, default) in [
-            ("-0xdead", "-0xdead", None, Ty::Int64),
-            ("0XAB", "0XAB", None, Ty::Int64),
-            ("-0xFF_ul", "-0xFF", Some(Ty::UInt64), Ty::Int64),
-            ("-12_b", "-12", Some(Ty::Int8), Ty::Int64),
-            ("12_ub", "12", Some(Ty::UInt8), Ty::Int64),
-            ("-1e2", "-1e2", None, Ty::Float64),
-            ("1E2_f", "1E2", Some(Ty::Float32), Ty::Float64),
-            ("-1.5_d", "-1.5", Some(Ty::Float64), Ty::Float64),
+    fn hex_digits_and_signs_do_not_change_exponent_rules() {
+        for (text, expected) in [
+            ("-0xdead", Ty::Int64),
+            ("0XAB", Ty::Int64),
+            ("0x7f_b", Ty::Int64),
+            ("-12", Ty::Int64),
+            ("-1e2", Ty::Float64),
+            ("1E2", Ty::Float64),
+            ("-1.5", Ty::Float64),
         ] {
-            assert_eq!(split(text), (body, suffix), "{text}");
-            assert_eq!(unsuffixed_type(body), default, "{text}");
+            assert_eq!(default_type(text), expected, "{text}");
         }
     }
 }
@@ -842,7 +793,7 @@ pub(super) fn parse_number(text: &str, ty: &Ty) -> Result<Value, String> {
                 .parse()
                 .map_err(|err| format!("invalid float literal: {err}"))?;
             if !value.is_finite() {
-                return Err("float literal out of range for float32".into());
+                return Err("float literal out of range for f32".into());
             }
             Ok(Value::Float32 { value })
         }
@@ -885,7 +836,7 @@ fn parse_float(text: &str) -> Result<f64, String> {
         .parse()
         .map_err(|err| format!("invalid float literal: {err}"))?;
     if !value.is_finite() {
-        return Err("float literal out of range for float64".into());
+        return Err("float literal out of range for f64".into());
     }
     Ok(value)
 }

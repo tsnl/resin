@@ -31,14 +31,20 @@ fn twice<T>(value: Ref<T>) -> _ {
 }
 
 fn main() {
-	let mut position = Vec2<int> { x = 1, y = 2 };
-	let mut velocity = Vec2<int> { x = 3, y = 4 };
-	let mut next = position + velocity * 2;
+	let mut position = Vec2<i32> { x = 1, y = 2 };
+	let mut velocity = Vec2<i32> { x = 3, y = 4 };
+	let scale = 2;
+	let step = velocity * scale;
+	let mut next = position + step;
 	let mut displacement = next - position;
 	let mut reverse = -velocity;
-	print(fmt("position = ({0}, {1}), displacement = ({2}, {3})\n", (next.x, next.y, displacement.x, displacement.y)));
-	print(fmt("reverse = ({0}, {1}), twice(21) = {2}\n", (reverse.x, reverse.y, twice(21))));
-	if (twice(velocity) == displacement) {
+	let position_text = fmt("position = ({0}, {1}), displacement = ({2}, {3})\n", (next.x, next.y, displacement.x, displacement.y));
+	print(position_text);
+	let number = 21;
+	let reverse_text = fmt("reverse = ({0}, {1}), twice(21) = {2}\n", (reverse.x, reverse.y, twice(number)));
+	print(reverse_text);
+	let doubled = twice(velocity);
+	if (doubled == displacement) {
 		print("generic vector addition agrees\n");
 	};
 }

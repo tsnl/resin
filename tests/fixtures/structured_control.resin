@@ -1,74 +1,74 @@
 export { kernel, main };
 import { "$/shared.resin", "$/span.resin" };
 struct Root {
-	count: uint,
-	pixels: Ptr<uint>,
+	count: u32,
+	pixels: Ptr<u32>,
 }
 struct Stop {
-	code: uint,
+	code: u32,
 }
 struct First {}
 struct Second {}
 struct Third {}
 
-fn checked(stop: bool, code: uint) -> (bool | Err<Stop>) {
+fn checked(stop: bool, code: u32) -> (bool | Err<Stop>) {
 	if (stop) {
 		Err(Stop { code = code })
 	} else {
-		(1_ui == 1_ui)
+		(u32(1) == u32(1))
 	}
 }
-fn tag(index: uint) -> First | Second | Third {
-	if (index == 0_ui) {
+fn tag(index: u32) -> First | Second | Third {
+	if (index == u32(0)) {
 		First {}
 	} else {
-		if (index == 1_ui) {
+		if (index == u32(1)) {
 			Second {}
 		} else {
 			Third {}
 		}
 	}
 }
-fn evaluate(index: uint) -> (uint | Err<Stop>) {
-	let mut limit = if (index == 0_ui) {
-		0_ui
+fn evaluate(index: u32) -> (u32 | Err<Stop>) {
+	let mut limit = if (index == u32(0)) {
+		u32(0)
 	} else {
-		3_ui
+		u32(3)
 	};
-	let mut outer = 0_ui;
-	let mut total = 0_ui;
-	while (outer < limit && checked(index == 1_ui && outer == 1_ui, 11_ui)?) {
+	let mut outer: u32 = 0;
+	let mut total: u32 = 0;
+	while (outer < limit && checked(index == u32(1) && outer == u32(1), u32(11))?) {
 		total = total + {
-			let mut sum = 0_ui;
-			let mut inner = 0_ui;
+			let mut sum: u32 = 0;
+			let mut inner: u32 = 0;
 			while (inner <= outer) {
-				checked(index == 2_ui && outer == 1_ui && inner == 0_ui, 22_ui)?;
+				checked(index == u32(2) && outer == u32(1) && inner == u32(0), u32(22))?;
 				sum = sum + match (tag(inner)) {
 					First(first) => {
-						1_ui
+						u32(1)
 					},
 					Second(second) => {
-						2_ui
+						u32(2)
 					},
 					Third(third) => {
-						3_ui
+						u32(3)
 					}
 				};
-				inner = inner + 1_ui;
+				inner = inner + u32(1);
 			};
 			sum
 		};
-		outer = outer + 1_ui;
+		outer = outer + u32(1);
 	};
 	(total + index)
 }
 @compute_shader
-fn kernel(invocation: ulong, root: Ptr<Root>) {
-	let mut index = uint(invocation);
+fn kernel(invocation: u64, root: Ptr<Root>) {
+	let mut index = u32(invocation);
 	if (index < root.count) {
-		let mut output = Span<uint> { data = root.pixels, length = ulong(root.count) };
+		let mut output = Span<u32> { data = root.pixels, length = u64(root.count) };
 		fixture_index(output.data, output.length, invocation).* = match (evaluate(index)) {
-			uint(value) => {
+			u32(value) => {
 				value
 			},
 			Err(error) => {
@@ -77,21 +77,21 @@ fn kernel(invocation: ulong, root: Ptr<Root>) {
 		};
 	};
 }
-fn main() -> int | Err<_> {
-	let values_owner = arc_ptr_alloc([0_ui, 0_ui, 0_ui, 0_ui])?;
+fn main() -> i32 | Err<_> {
+	let values_owner = arc_ptr_alloc([u32(0), u32(0), u32(0), u32(0)])?;
 	let values: Ref<_> = values_owner:get().*;
-	let root_owner = arc_ptr_alloc(Root { count = 4_ui, pixels = values_owner:get():lea(0_ul) })?;
+	let root_owner = arc_ptr_alloc(Root { count = u32(4), pixels = values_owner:get():lea(u64(0)) })?;
 	let root: Ref<_> = root_owner:get().*;
-	let mut index = 0_ul;
-	while (index < 4_ul) {
+	let mut index: u64 = 0;
+	while (index < u64(4)) {
 		kernel(index, root_owner:get());
-		index = index + 1_ul;
+		index = index + u64(1);
 	};
-	if (values:at(0_ul) == 0_ui && values:at(1_ul) == 11_ui && values:at(2_ul) == 22_ui && values:at(3_ul) == 13_ui) {
+	if (values:at(u64(0)) == u32(0) && values:at(u64(1)) == u32(11) && values:at(u64(2)) == u32(22) && values:at(u64(3)) == u32(13)) {
 		0
 	} else {
 		1
 	}
 }
 
-intrinsic "pointer_index" fn fixture_index<T>(data: Ptr<T>, length: ulong, index: ulong) -> Ptr<T>;
+intrinsic "pointer_index" fn fixture_index<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;

@@ -7,12 +7,12 @@ fn error_wrappers_preserve_identity_payloads_and_ownership() {
         r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn boxed<T>(value: T) -> Err<T>  { Err(value) }
         fn main()  {
-            let mut a: Err<int> = Err(42);
+            let mut a: Err<i32> = Err(42);
             let mut b = Err(Err("nested"));
             let owned = string_from_str("owned");
-            let c: int | Err<String> = boxed(owned:clone());
+            let c: i32 | Err<String> = boxed(owned:clone());
             let moved = c;
-            print(fmt("{0} {1} {2} {3}", (a, b, boxed(owned), moved)));
+            { let borrowed = fmt("{0} {1} {2} {3}", (a, b, boxed(owned), moved)); print(borrowed) };
         }"#,
     );
     let output = support::project::Project::new(&module, Some("main"))
@@ -31,7 +31,7 @@ fn error_wrappers_preserve_identity_payloads_and_ownership() {
 
 #[test]
 fn error_wrappers_cannot_hide_reference_payloads() {
-    let error = pipeline::source_module("struct Invalid { error: Err<Ref<int>>, } fn main()  {}")
+    let error = pipeline::source_module("struct Invalid { error: Err<Ref<i32>>, } fn main()  {}")
         .unwrap_err()
         .to_string();
     assert!(
@@ -44,9 +44,9 @@ fn error_wrappers_cannot_hide_reference_payloads() {
 fn error_wrappers_have_distinct_union_tags_and_payload_layouts() {
     let module = module(
         r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
-        fn show(value: int | Err<int>)  { match (value) {
-            int(value) => { print(repr(value)) },
-            Err<int>(error) => { print(repr(error)) },
+        fn show(value: i32 | Err<i32>)  { match (value) {
+            i32(value) => { { let borrowed = repr(value); print(borrowed) } },
+            Err<i32>(error) => { { let borrowed = repr(error); print(borrowed) } },
         } }
         fn main()  { show(7); print(" "); show(Err(7)); }"#,
     );
@@ -65,12 +65,12 @@ fn error_wrappers_have_distinct_union_tags_and_payload_layouts() {
 fn shaders_preserve_error_wrapper_identity() {
     let module = module(
         r#"export { kernel };
-        fn error(value: int) -> Err<int>  { Err(value) }
-        @compute_shader fn kernel(index: ulong, output: Ptr<int>)  {
-            let mut value: int | Err<int> = error(7);
+        fn error(value: i32) -> Err<i32>  { Err(value) }
+        @compute_shader fn kernel(index: u64, output: Ptr<i32>)  {
+            let mut value: i32 | Err<i32> = error(7);
             match (value) {
-                int(value) => { output.* = value; },
-                Err<int>(value) => { output.* = int(value); },
+                i32(value) => { output.* = value; },
+                Err<i32>(value) => { output.* = i32(value); },
             }
         }"#,
     );
@@ -82,12 +82,12 @@ fn shaders_preserve_error_wrapper_identity() {
 fn plain_success_values_and_builtin_errors_propagate() {
     let module = module(
         r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
-        fn read(fail: bool) -> int | Err<str>  { if (fail) { Err("bad input") } else { 42 } }
-        fn work(fail: bool) -> int | Err<_>  { read(fail)? + 1 }
-        fn main() -> int | Err<_>  {
+        fn read(fail: bool) -> i32 | Err<str>  { if (fail) { Err("bad input") } else { 42 } }
+        fn work(fail: bool) -> i32 | Err<_>  { read(fail)? + 1 }
+        fn main() -> i32 | Err<_>  {
             assert(work(false)? == 43);
             match (work(true)) {
-                int(_) => { Err("unexpected success") },
+                i32(_) => { Err("unexpected success") },
                 Err(message) => { print(message); 0 },
             }
         }"#,
@@ -107,11 +107,11 @@ fn plain_success_values_and_builtin_errors_propagate() {
 fn propagated_errors_widen_payloads_and_preserve_owned_values() {
     let module = module(
         r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
-        fn failure() -> int | Err<String>  { Err(string_from_str("owned")) }
-        fn wider() -> int | Err<str | String>  { failure()? }
-        fn main() -> int  { match (wider()) {
-            int(value) => { value },
-            Err(error) => { print(repr(error)); 0 },
+        fn failure() -> i32 | Err<String>  { Err(string_from_str("owned")) }
+        fn wider() -> i32 | Err<str | String>  { failure()? }
+        fn main() -> i32  { match (wider()) {
+            i32(value) => { value },
+            Err(error) => { { let borrowed = repr(error); print(borrowed) }; 0 },
         } }"#,
     );
     let output = support::project::Project::new(&module, Some("main"))
@@ -129,8 +129,8 @@ fn propagated_errors_widen_payloads_and_preserve_owned_values() {
 fn entry_point_reports_propagated_error_values() {
     let module = module(
         r#"export { main };
-        fn failure() -> int | Err<str>  { Err("broken") }
-        fn main() -> int | Err<_>  { failure()? }"#,
+        fn failure() -> i32 | Err<str>  { Err("broken") }
+        fn main() -> i32 | Err<_>  { failure()? }"#,
     );
     let output = support::project::Project::new(&module, Some("main"))
         .unwrap()
@@ -143,13 +143,13 @@ fn entry_point_reports_propagated_error_values() {
 fn inferred_errors_collect_across_plain_returns_and_propagation() {
     let module = module(
         r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
-        fn a() -> int | Err<str>  { Err("text") }
-        fn b() -> int | Err<int>  { Err(7) }
-        fn choose(flag: bool) -> int | Err<_>  { if (flag) { a() } else { b() } }
-        fn pass(flag: bool) -> int | Err<_>  { choose(flag)? }
-        fn main() -> int  { match (pass(false)) {
-            int(value) => { value },
-            Err(error) => { print(repr(error)); 0 },
+        fn a() -> i32 | Err<str>  { Err("text") }
+        fn b() -> i32 | Err<i32>  { Err(7) }
+        fn choose(flag: bool) -> i32 | Err<_>  { if (flag) { a() } else { b() } }
+        fn pass(flag: bool) -> i32 | Err<_>  { choose(flag)? }
+        fn main() -> i32  { match (pass(false)) {
+            i32(value) => { value },
+            Err(error) => { { let borrowed = repr(error); print(borrowed) }; 0 },
         } }"#,
     );
     let output = support::project::Project::new(&module, Some("main"))
@@ -169,24 +169,24 @@ fn question_mark_preserves_success_unions_and_destroys_exited_scopes() {
         r#"export { main };
 import { "$/shared.resin" };
 
-        struct Resource { trace: Ptr<int>, digit: int,
+        struct Resource { trace: Ptr<i32>, digit: i32,
             
         }
 fn drop(self: Ref<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
 
-        fn fail() -> int | Err<str>  { Err("failure") }
-        fn work(trace: Ptr<int>) -> int | Err<str>  {
+        fn fail() -> i32 | Err<str>  { Err("failure") }
+        fn work(trace: Ptr<i32>) -> i32 | Err<str>  {
             let mut first = Resource { trace = trace, digit = 1 };
             { let mut second = Resource { trace = trace, digit = 2 }; fail()?; };
             0
         }
-        fn choice() -> int | str | Err<str>  { "value" }
-        fn main() -> int | Err<_> {
-            let trace_owner = arc_ptr_alloc(0_i)?; let trace: Ref<_> = trace_owner:get().*;
-            match (work(trace_owner:get())) { int(_) => { assert(false); }, Err(_) => {} };
+        fn choice() -> i32 | str | Err<str>  { "value" }
+        fn main() -> i32 | Err<_> {
+            let trace_owner = arc_ptr_alloc(i32(0))?; let trace: Ref<_> = trace_owner:get().*;
+            match (work(trace_owner:get())) { i32(_) => { assert(false); }, Err(_) => {} };
             assert(trace == 21);
             let mut value = choice()?;
-            match (value) { int(_) => { 1 }, str(_) => { 0 } }
+            match (value) { i32(_) => { 1 }, str(_) => { 0 } }
         }"#,
     );
     let output = support::project::Project::new(&module, Some("main"))
@@ -203,10 +203,10 @@ fn drop(self: Ref<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
 fn one_error_pattern_handles_distinct_error_wrapper_members() {
     let module = module(
         r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
-        fn choice() -> int | Err<str> | Err<int>  { Err<int>(7) }
+        fn choice() -> i32 | Err<str> | Err<i32>  { Err<i32>(7) }
         fn main()  { match (choice()) {
-            Err(value) => { print(repr(value)) },
-            int(_) => {},
+            Err(value) => { { let borrowed = repr(value); print(borrowed) } },
+            i32(_) => {},
         } }"#,
     );
     let output = support::project::Project::new(&module, Some("main"))
@@ -224,12 +224,12 @@ fn one_error_pattern_handles_distinct_error_wrapper_members() {
 fn shaders_propagate_and_widen_error_payloads() {
     let module = module(
         r#"export { kernel };
-        fn failure() -> int | Err<int>  { Err(7) }
-        fn wider() -> int | Err<int | float32>  { failure()? }
-        @compute_shader fn kernel(index: ulong, output: Ptr<int>)  {
+        fn failure() -> i32 | Err<i32>  { Err(7) }
+        fn wider() -> i32 | Err<i32 | f32>  { failure()? }
+        @compute_shader fn kernel(index: u64, output: Ptr<i32>)  {
             match (wider()) {
-                int(value) => { output.* = value; },
-                Err(value) => { match (value) { int(code) => { output.* = code; }, float32(_) => {} } },
+                i32(value) => { output.* = value; },
+                Err(value) => { match (value) { i32(code) => { output.* = code; }, f32(_) => {} } },
             }
         }"#,
     );
@@ -240,11 +240,11 @@ fn shaders_propagate_and_widen_error_payloads() {
 #[test]
 fn propagation_checks_every_error_and_keeps_mutable_pointers_invariant() {
     for source in [
-        "fn fail() -> int | Err<str>  { Err(\"x\") } fn wrong() -> int  { fail()? }",
-        "fn fail() -> int | Err<str>  { Err(\"x\") } fn wrong() -> int | Err<int>  { fail()? }",
-        "fn wrong(value: Ptr<Err<str>>) -> Ptr<Err<str | int>>  { value }",
-        "fn wrong(value: int)  { match (value) { Err(_) => {} } }",
-        "fn wrong(value: int | Err<str>)  { match (value) { Err(_) => {}, Err(_) => {}, int(_) => {} } }",
+        "fn fail() -> i32 | Err<str>  { Err(\"x\") } fn wrong() -> i32  { fail()? }",
+        "fn fail() -> i32 | Err<str>  { Err(\"x\") } fn wrong() -> i32 | Err<i32>  { fail()? }",
+        "fn wrong(value: Ptr<Err<str>>) -> Ptr<Err<str | i32>>  { value }",
+        "fn wrong(value: i32)  { match (value) { Err(_) => {} } }",
+        "fn wrong(value: i32 | Err<str>)  { match (value) { Err(_) => {}, Err(_) => {}, i32(_) => {} } }",
     ] {
         assert!(pipeline::source_module(source).is_err(), "{source}");
     }
@@ -254,12 +254,12 @@ fn propagation_checks_every_error_and_keeps_mutable_pointers_invariant() {
 fn error_only_paths_and_recursive_error_sets_complete() {
     let module = module(
         r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
-        fn a(n: int) -> int | Err<_>  { if (n == 0) { Err(7_i) } else { b(n - 1)? } }
-        fn b(n: int) -> int | Err<_>  { if (n == 0) { Err("text") } else { a(n - 1)? } }
+        fn a(n: i32) -> i32 | Err<_>  { if (n == 0) { Err(i32(7)) } else { b(n - 1)? } }
+        fn b(n: i32) -> i32 | Err<_>  { if (n == 0) { Err("text") } else { a(n - 1)? } }
         fn always() -> Err<str>  { Err("always") }
         fn only() -> Err<str>  { always()? }
         fn main()  {
-            match (a(1)) { int(_) => {}, Err(value) => { print(repr(value)) } };
+            match (a(1)) { i32(_) => {}, Err(value) => { { let borrowed = repr(value); print(borrowed) } } };
             match (only()) { Err(value) => { print(value) } };
         }"#,
     );
@@ -283,10 +283,10 @@ fn generic_functions_infer_plain_values_and_error_parameters() {
         }
         fn combine<T, E, F>(a: T | Err<E>, b: T | Err<F>) -> T | Err<_>  { a?; b? }
         fn main()  {
-            let mut first: int | Err<str> = 7;
-            let mut second: int | Err<int> = Err(9);
-            assert(recover(propagate(first), 0_i) == 7);
-            assert(recover(combine(first, second), 35_i) == 35);
+            let mut first: i32 | Err<str> = 7;
+            let mut second: i32 | Err<i32> = Err(9);
+            assert(recover(propagate(first), i32(0)) == 7);
+            assert(recover(combine(first, second), i32(35)) == 35);
         }"#,
     );
     let output = support::project::Project::new(&module, Some("main"))
@@ -303,10 +303,10 @@ fn generic_functions_infer_plain_values_and_error_parameters() {
 fn propagation_and_union_conversions_preserve_success_inference() {
     let module = module(
         r#"export { main };
-        fn number() -> int | Err<str>  { 42 }
-        fn inferred() -> _  { number()?; 42_i }
+        fn number() -> i32 | Err<str>  { 42 }
+        fn inferred() -> _  { number()?; i32(42) }
         fn main() -> () | Err<_>  {
-            let mut explicit = (int | Err<str>)(7);
+            let mut explicit = (i32 | Err<str>)(7);
             assert((explicit?) == 7);
             assert(inferred()? == 42);
         }"#,

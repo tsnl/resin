@@ -11,7 +11,7 @@ fn rejects(source: &str, message: &str) {
 
 #[test]
 fn values_move_and_primitives_copy() {
-    accepts("fn f(value: int) -> int { value + value }");
+    accepts("fn f(value: i32) -> i32 { value + value }");
     rejects(
         "struct Item {} fn f(value: Item) { let other = value; value; }",
         "moved",
@@ -22,11 +22,11 @@ fn values_move_and_primitives_copy() {
 #[test]
 fn widening_copyable_values_does_not_move_them() {
     accepts(
-        "struct Item {} fn f(value: int) -> int | Item { let widened: int | Item = value; value }",
+        "struct Item {} fn f(value: i32) -> i32 | Item { let widened: i32 | Item = value; value }",
     );
-    accepts("struct Item {} fn f(value: Ref<int>) -> int | Item { value }");
+    accepts("struct Item {} fn f(value: Ref<i32>) -> i32 | Item { value }");
     rejects(
-        "struct Item {} fn f(value: Ref<Item>) -> int | Item { value }",
+        "struct Item {} fn f(value: Ref<Item>) -> i32 | Item { value }",
         "reference",
     );
 }
@@ -34,18 +34,18 @@ fn widening_copyable_values_does_not_move_them() {
 #[test]
 fn assignment_requires_mut_and_returns_unit() {
     rejects("fn f() { let value = 1; value = 2; }", "immutable");
-    rejects("fn f(value: int) { value = 2; }", "immutable");
-    accepts("fn f() { let value: int; value = 2; }");
+    rejects("fn f(value: i32) { value = 2; }", "immutable");
+    accepts("fn f() { let value: i32; value = 2; }");
     rejects(
-        "fn f(flag: bool) { let value: int; if (flag) { value = 2; }; value = 3; }",
+        "fn f(flag: bool) { let value: i32; if (flag) { value = 2; }; value = 3; }",
         "immutable",
     );
-    accepts("fn f(mut value: int) { value = 2 }");
+    accepts("fn f(mut value: i32) { value = 2 }");
     accepts(
-        "fn f(flag: bool) -> int { let value: int; if (flag) { value = 1; } else { value = 2; }; value }",
+        "fn f(flag: bool) -> i32 { let value: i32; if (flag) { value = 1; } else { value = 2; }; value }",
     );
     rejects(
-        "fn f(flag: bool) { let value: int; while (flag) { value = 1; }; }",
+        "fn f(flag: bool) { let value: i32; while (flag) { value = 1; }; }",
         "immutable",
     );
     rejects(
@@ -53,7 +53,7 @@ fn assignment_requires_mut_and_returns_unit() {
         "immutable",
     );
     rejects(
-        "struct Item { value: int } fn f(item: Item) { item.value = 2; }",
+        "struct Item { value: i32 } fn f(item: Item) { item.value = 2; }",
         "immutable",
     );
 }
@@ -61,11 +61,11 @@ fn assignment_requires_mut_and_returns_unit() {
 #[test]
 fn match_binders_are_immutable_unless_marked_mut() {
     rejects(
-        "fn f(value: int | None) { match (value) { int(number) => { number = 2; }, None => {} }; }",
+        "fn f(value: i32 | None) { match (value) { i32(number) => { number = 2; }, None => {} }; }",
         "immutable",
     );
     accepts(
-        "fn f(value: int | None) { match (value) { int(mut number) => { number = 2; }, None => {} }; }",
+        "fn f(value: i32 | None) { match (value) { i32(mut number) => { number = 2; }, None => {} }; }",
     );
 }
 
@@ -101,7 +101,7 @@ fn branches_and_loop_backedges_check_moves() {
 #[test]
 fn references_do_not_consume_their_referents() {
     accepts(
-        "struct Item { value: int, } fn inspect(value: Ref<Item>) -> int { value.value } fn f(value: Item) -> int { inspect(value) + inspect(value) }",
+        "struct Item { value: i32, } fn inspect(value: Ref<Item>) -> i32 { value.value } fn f(value: Item) -> i32 { inspect(value) + inspect(value) }",
     );
     rejects(
         "struct Item {} fn f(value: Ref<Item>) -> Item { value }",
@@ -143,5 +143,5 @@ fn error_union_payloads_preserve_move_rules() {
         "struct Item {} fn f(value: Err<Item>) { let other = value; value; }",
         "moved",
     );
-    accepts("fn f(value: Err<int>) { let other = value; value; }");
+    accepts("fn f(value: Err<i32>) { let other = value; value; }");
 }

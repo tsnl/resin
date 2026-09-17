@@ -206,9 +206,9 @@ impl Context {
                 let (_, pipeline) = self.source_pipeline_type(graphics)?;
                 let kind = &pipeline.name;
                 let dimensions = if graphics {
-                    "count: uint"
+                    "count: u32"
                 } else {
-                    "x: uint, y: uint, z: uint"
+                    "x: u32, y: u32, z: u32"
                 };
                 Some(format!(
                     "({receiver}pipeline: {kind}<T, {}>, arguments: _, {dimensions}) -> {}",

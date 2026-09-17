@@ -1266,12 +1266,12 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ),
     (
         "iota",
-        "iota\n\nZero-based const specification index. Its numeric type is inferred from the initializer, defaulting to long.",
+        "iota\n\nZero-based const specification index. Its numeric type is inferred from the initializer, defaulting to i64.",
         DefinitionKind::Constant,
     ),
     (
         "sizeof",
-        "sizeof(Type) -> ulong\n\nThe size in bytes of a type; accepts only a type operand.",
+        "sizeof(Type) -> u64\n\nThe size in bytes of a type; accepts only a type operand.",
         DefinitionKind::Function,
     ),
     (
@@ -1281,7 +1281,7 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ),
     (
         "str",
-        "str\n\nA string literal view with data: Ptr<ubyte> and length: ulong. Static storage has a trailing NUL excluded from length. Import $/span.resin and use bytes(text) to borrow its bytes. Host-only.",
+        "str\n\nA string literal view with data: Ptr<u8> and length: u64. Static storage has a trailing NUL excluded from length. Import $/span.resin and use bytes(text) to borrow its bytes. Host-only.",
         DefinitionKind::Type,
     ),
     (
@@ -1342,40 +1342,16 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ("true", "true — boolean literal", DefinitionKind::Keyword),
     ("false", "false — boolean literal", DefinitionKind::Keyword),
     ("bool", "bool", DefinitionKind::Type),
-    (
-        "sbyte",
-        "sbyte — signed 8-bit integer",
-        DefinitionKind::Type,
-    ),
-    (
-        "short",
-        "short — signed 16-bit integer",
-        DefinitionKind::Type,
-    ),
-    ("int", "int — signed 32-bit integer", DefinitionKind::Type),
-    ("long", "long — signed 64-bit integer", DefinitionKind::Type),
-    (
-        "ubyte",
-        "ubyte — unsigned 8-bit integer",
-        DefinitionKind::Type,
-    ),
-    (
-        "ushort",
-        "ushort — unsigned 16-bit integer",
-        DefinitionKind::Type,
-    ),
-    (
-        "uint",
-        "uint — unsigned 32-bit integer",
-        DefinitionKind::Type,
-    ),
-    (
-        "ulong",
-        "ulong — unsigned 64-bit integer",
-        DefinitionKind::Type,
-    ),
-    ("float32", "float32", DefinitionKind::Type),
-    ("float64", "float64", DefinitionKind::Type),
+    ("i8", "i8 — signed 8-bit integer", DefinitionKind::Type),
+    ("i16", "i16 — signed 16-bit integer", DefinitionKind::Type),
+    ("i32", "i32 — signed 32-bit integer", DefinitionKind::Type),
+    ("i64", "i64 — signed 64-bit integer", DefinitionKind::Type),
+    ("u8", "u8 — unsigned 8-bit integer", DefinitionKind::Type),
+    ("u16", "u16 — unsigned 16-bit integer", DefinitionKind::Type),
+    ("u32", "u32 — unsigned 32-bit integer", DefinitionKind::Type),
+    ("u64", "u64 — unsigned 64-bit integer", DefinitionKind::Type),
+    ("f32", "f32", DefinitionKind::Type),
+    ("f64", "f64", DefinitionKind::Type),
     ("export", "export { name };", DefinitionKind::Keyword),
     (
         "import",
@@ -1932,7 +1908,7 @@ pub struct OperationLookup {
     pub candidates: Vec<FunctionId>,
     pub type_args: Option<Vec<Type>>,
     pub arguments: Vec<Type>,
-    /// Unsuffixed numeric operands use the selected parameter type. Their entries
+    /// Numeric literal operands use the selected parameter type. Their entries
     /// in `arguments` retain the numeric fallback chosen during HIR construction.
     pub literal_arguments: Vec<usize>,
 }

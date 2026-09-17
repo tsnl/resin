@@ -4,7 +4,7 @@ export { RuntimeError, InvalidArgument, VulkanUnavailable, Unsupported, OutOfMem
 
 extern {
 	"resin_runtime.h": {
-		fn resin_status_string(status: int) -> Ptr<ubyte>;
+		fn resin_status_string(status: i32) -> Ptr<u8>;
 	},
 };
 
@@ -19,12 +19,12 @@ struct IoError {}
 struct Incomplete {}
 struct WindowUnavailable {}
 struct UnknownRuntimeError {
-	code: int,
+	code: i32,
 }
 type RuntimeError = InvalidArgument | VulkanUnavailable | Unsupported | OutOfMemory | VulkanError | IoError | Incomplete | WindowUnavailable | UnknownRuntimeError;
 
 struct RuntimeStatus {}
-fn runtime_status_from_code(code: int) -> (() | Err<RuntimeError>) {
+fn runtime_status_from_code(code: i32) -> (() | Err<RuntimeError>) {
 	if (code == status_invalid_argument) {
 		return Err(InvalidArgument {});
 	};
@@ -56,7 +56,7 @@ fn runtime_status_from_code(code: int) -> (() | Err<RuntimeError>) {
 	}
 }
 
-fn runtime_status_code(error: RuntimeError) -> int {
+fn runtime_status_code(error: RuntimeError) -> i32 {
 	match (error) {
 		InvalidArgument(error) => {
 			status_invalid_argument
@@ -88,6 +88,6 @@ fn runtime_status_code(error: RuntimeError) -> int {
 	}
 }
 
-fn runtime_status_message(error: RuntimeError) -> Ptr<ubyte> {
+fn runtime_status_message(error: RuntimeError) -> Ptr<u8> {
 	resin_status_string(runtime_status_code(error))
 }

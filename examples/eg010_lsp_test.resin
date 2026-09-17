@@ -3,12 +3,13 @@ export { main };
 import { "$/string.resin", "$/stdio.resin" };
 
 struct Point2f {
-	x: float32,
-	y: float32,
+	x: f32,
+	y: f32,
 }
 
 fn main() {
 	let mut p = Point2f { x = 42.5, y = 0.012 };
 	let mut a = p.x;
-	print(fmt("Hello, {0}, {1}\n", (p.x, p.y)));
+	let text = fmt("Hello, {0}, {1}\n", (p.x, p.y));
+	print(text);
 }

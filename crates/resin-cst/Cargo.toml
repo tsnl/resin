@@ -7,7 +7,6 @@ license.workspace = true
 
 [dependencies]
 resin-executor = { workspace = true }
-resin-types = { workspace = true }
 resin-source = { workspace = true }
 tree-sitter = { workspace = true }
 tree-sitter-resin = { workspace = true }

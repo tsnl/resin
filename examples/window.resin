@@ -9,50 +9,50 @@ import {
 };
 
 @vertex_shader
-fn vertex(index: int) -> Vertex {
+fn vertex(index: i32) -> Vertex {
 	if (index == 0) {
 		Vertex {
 			position = Position {
-				x = 0.0_f,
-				y = -0.75_f,
-				z = 0.0_f,
-				w = 1.0_f,
+				x = f32(0.0),
+				y = f32(-0.75),
+				z = f32(0.0),
+				w = f32(1.0),
 			},
 			color = Color {
-				r = 1.0_f,
-				g = 0.0_f,
-				b = 0.0_f,
-				a = 1.0_f,
+				r = f32(1.0),
+				g = f32(0.0),
+				b = f32(0.0),
+				a = f32(1.0),
 			},
 		}
 	} else if (index == 1) {
 		Vertex {
 			position = Position {
-				x = -0.7_f,
-				y = 0.6_f,
-				z = 0.0_f,
-				w = 1.0_f,
+				x = f32(-0.7),
+				y = f32(0.6),
+				z = f32(0.0),
+				w = f32(1.0),
 			},
 			color = Color {
-				r = 0.0_f,
-				g = 1.0_f,
-				b = 0.0_f,
-				a = 1.0_f,
+				r = f32(0.0),
+				g = f32(1.0),
+				b = f32(0.0),
+				a = f32(1.0),
 			},
 		}
 	} else {
 		Vertex {
 			position = Position {
-				x = 0.7_f,
-				y = 0.6_f,
-				z = 0.0_f,
-				w = 1.0_f,
+				x = f32(0.7),
+				y = f32(0.6),
+				z = f32(0.0),
+				w = f32(1.0),
 			},
 			color = Color {
-				r = 0.0_f,
-				g = 0.0_f,
-				b = 1.0_f,
-				a = 1.0_f,
+				r = f32(0.0),
+				g = f32(0.0),
+				b = f32(1.0),
+				a = f32(1.0),
 			},
 		}
 	}
@@ -65,7 +65,8 @@ fn fragment(color: Color) -> Color {
 
 fn main() -> (() | Err<_>) {
 	let mut title = "Resin triangle";
-	let mut window = window_new(640, 480, string_from_str(title))?;
+	let caption = string_from_str(title);
+	let mut window = window_new(640, 480, caption)?;
 
 	let mut gpu = gpu_new_for_window(window)?;
 

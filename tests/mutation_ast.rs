@@ -59,10 +59,10 @@ fn omitted_function_results_lower_to_unit() {
 
 #[test]
 fn definition_keywords_preserve_statement_and_field_spans() {
-    let source = r#"struct Pair { first: int, second: int, }
-        fn make(seed: int) -> Pair  {
+    let source = r#"struct Pair { first: i32, second: i32, }
+        fn make(seed: i32) -> Pair  {
             let mut first = seed;
-            let mut second: int;
+            let mut second: i32;
             second = seed + 1;
             Pair { first = first, second = { let mut next = second; next } }
         }
@@ -73,7 +73,7 @@ fn definition_keywords_preserve_statement_and_field_spans() {
     assert!(matches!(definition.val, StmtKind::Struct { .. }));
     assert_eq!(
         text(definition.span),
-        "struct Pair { first: int, second: int, }"
+        "struct Pair { first: i32, second: i32, }"
     );
     let function = &file.stmts[1];
     let StmtKind::Function {
@@ -91,7 +91,7 @@ fn definition_keywords_preserve_statement_and_field_spans() {
     assert!(matches!(stmts[0].val, StmtKind::Define { .. }));
     assert_eq!(text(stmts[0].span), "let mut first = seed;");
     assert!(matches!(stmts[1].val, StmtKind::Declare { .. }));
-    assert_eq!(text(stmts[1].span), "let mut second: int;");
+    assert_eq!(text(stmts[1].span), "let mut second: i32;");
     assert!(matches!(stmts[2].val, StmtKind::Expr { .. }));
     let TermKind::Call { args, .. } = &tail.val else {
         panic!("expected nominal conversion");
@@ -155,7 +155,7 @@ fn assignment_is_right_associative_and_deref_is_explicit() {
 
 #[test]
 fn assignment_can_be_sequenced_in_a_block() {
-    let file = parse("fn f (p: Ptr<int>) -> int  { p.* = 1; p.* }");
+    let file = parse("fn f (p: Ptr<i32>) -> i32  { p.* = 1; p.* }");
     let StmtKind::Function { body, .. } = &file.stmts[0].val else {
         panic!("expected function definition");
     };

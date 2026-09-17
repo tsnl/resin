@@ -73,7 +73,7 @@ fn build_run_and_lsp_require_an_explicit_reachable_server() {
     let directory = TempDir::new().unwrap();
     let source = directory.path().join("main.resin");
     let destination = directory.path().join("program");
-    let text = "export { main }; fn main() -> int  { 37 }";
+    let text = "export { main }; fn main() -> i32  { 37 }";
     fs::write(&source, text).unwrap();
     fs::write(&destination, "previous output").unwrap();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -137,7 +137,7 @@ fn omitted_unit_returns_run_and_reject_non_unit_tails() {
 #[test]
 fn destruction_runs_when_native_status_propagates_to_the_entry() {
     let output = cli(
-        "export { main }; import { \"$/string.resin\", \"$/stdio.resin\", \"$/status.resin\" }; struct Cleanup {  }\nfn drop(self: Ref<Cleanup>)  { print(fmt(\"cleanup\\n\", ())); }\n  fn main() -> (() | Err<_>)  { runtime_status_from_code(0)?; let mut cleanup = Cleanup {}; runtime_status_from_code(8)?; (()) }",
+        "export { main }; import { \"$/string.resin\", \"$/stdio.resin\", \"$/status.resin\" }; struct Cleanup {  }\nfn drop(self: Ref<Cleanup>)  { { let borrowed = fmt(\"cleanup\\n\", ()); print(borrowed) }; }\n  fn main() -> (() | Err<_>)  { runtime_status_from_code(0)?; let mut cleanup = Cleanup {}; runtime_status_from_code(8)?; (()) }",
         &[],
     );
     assert_eq!(output.status.code(), Some(1));
@@ -156,7 +156,7 @@ fn default_output_downloads_and_runs_without_a_client_build_directory() {
     let input = sources.join("hello world.resin");
     fs::write(
         &input,
-        r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main () -> int  { print("hello\n"); 7 }"#,
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main () -> i32  { print("hello\n"); 7 }"#,
     )
     .unwrap();
     let output = invoke(temp.path(), &input, &[]);
@@ -176,7 +176,7 @@ fn cached_programs_track_foreign_headers() {
     let header = temp.path().join("value header.h");
     fs::write(&header, "static inline int value(void) { return 41; }\n").unwrap();
     fs::write(&input, format!(
-        "export {{ main }}; extern {{ \"{}\": {{ fn value() -> int; }} }}; fn main() -> int  {{ value() }}",
+        "export {{ main }}; extern {{ \"{}\": {{ fn value() -> i32; }} }}; fn main() -> i32  {{ value() }}",
         header.to_string_lossy().replace('\\', "/")
     )).unwrap();
     assert_eq!(
@@ -212,16 +212,16 @@ fn strings_are_c_compatible_in_both_profiles() {
 
         extern {
             "string.h": {
-                fn strlen(text: Ptr<ubyte>) -> ulong;
+                fn strlen(text: Ptr<u8>) -> u64;
             },
         };
         import { "$/string.resin", "$/stdio.resin" };
-        fn main() -> int  {
+        fn main() -> i32  {
             let mut path = "triangle.png";
             let mut text = "a\0b";
-            if (strlen(path.data) == ulong(12)
-                && strlen(text.data) == ulong(1)) {
-                print(fmt("{0}:{1}", (path, text)));
+            if (strlen(path.data) == u64(12)
+                && strlen(text.data) == u64(1)) {
+                { let borrowed = fmt("{0}:{1}", (path, text)); print(borrowed) };
                 0
             } else { 1 }
         }"#;
@@ -247,7 +247,7 @@ fn executable_destination_builds_without_running() {
     let input = temp.path().join("source.resin");
     fs::write(
         &input,
-        r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main () -> int  { print("ran\n"); 7 }"#,
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main () -> i32  { print("ran\n"); 7 }"#,
     )
     .unwrap();
     let destination = format!("dist/custom program{}", std::env::consts::EXE_SUFFIX);
@@ -298,7 +298,7 @@ fn sources_with_the_same_name_keep_distinct_cached_results() {
         let input = directory.join("source.resin");
         fs::write(
             &input,
-            format!(r#"export {{ main }}; import {{ "$/string.resin", "$/stdio.resin" }}; fn main() -> ()  {{ print(fmt("{folder}", ())); }}"#),
+            format!(r#"export {{ main }}; import {{ "$/string.resin", "$/stdio.resin" }}; fn main() -> ()  {{ print("{folder}"); }}"#),
         )
         .unwrap();
         let output = invoke_with(&service, temp.path(), &input, &[]);
@@ -348,7 +348,7 @@ fn directory_outputs_cannot_overwrite_the_source() {
 
 #[test]
 fn run_returns_the_program_exit_status() {
-    let output = cli("export { main }; fn main () -> int  { 37 }", &[]);
+    let output = cli("export { main }; fn main () -> i32  { 37 }", &[]);
     assert_eq!(
         output.status.code(),
         Some(37),
@@ -360,7 +360,7 @@ fn run_returns_the_program_exit_status() {
 #[test]
 fn run_prints_program_output() {
     let output = cli(
-        r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { let mut n = 42; print(fmt("x = {0}\n", (n,))); }"#,
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { let mut n = 42; { let borrowed = fmt("x = {0}\n", (n,)); print(borrowed) }; }"#,
         &[],
     );
     success(&output);
@@ -372,7 +372,7 @@ fn one_file_can_have_multiple_exported_entry_points() {
     let source = r#"export { main, demo, status }; import { "$/string.resin", "$/stdio.resin" };
         fn main() -> ()  { print("main"); }
         fn demo() -> ()  { print("demo"); }
-        fn status() -> int  { 23 }
+        fn status() -> i32  { 23 }
     "#;
     for (entry, expected, code) in [
         (None, &b"main"[..], 0),
@@ -390,7 +390,7 @@ fn one_file_can_have_multiple_exported_entry_points() {
         assert_eq!(output.stdout, expected);
     }
     let output = selected(
-        "export { demo }; fn demo() -> int  { 42 }",
+        "export { demo }; fn demo() -> i32  { 42 }",
         Some("demo"),
         &[],
     );
@@ -412,17 +412,17 @@ fn selected_entries_must_be_exported_resin_functions_with_the_right_signature() 
             "not exported",
         ),
         (
-            "export { demo }; fn demo(n: int) -> int  { n }",
+            "export { demo }; fn demo(n: i32) -> i32  { n }",
             Some("demo"),
-            "take () or (int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>)",
+            "take () or (i32, Ptr<Ptr<u8>>, Ptr<Ptr<u8>>)",
         ),
         (
-            "export { demo }; fn demo() -> uint  { uint(0) }",
+            "export { demo }; fn demo() -> u32  { u32(0) }",
             Some("demo"),
-            "take () or (int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>)",
+            "take () or (i32, Ptr<Ptr<u8>>, Ptr<Ptr<u8>>)",
         ),
         (
-            "export { rand }; extern { \"stdlib.h\": { fn rand() -> int; } };",
+            "export { rand }; extern { \"stdlib.h\": { fn rand() -> i32; } };",
             Some("rand"),
             "Resin function",
         ),
@@ -448,7 +448,7 @@ fn selectors_work_with_output_paths_and_source_protection() {
     });
     fs::create_dir(&folder).unwrap();
     let input = folder.join("hello world.resin");
-    let source = "export { demo }; fn demo() -> int  { 19 }";
+    let source = "export { demo }; fn demo() -> i32  { 19 }";
     fs::write(&input, source).unwrap();
     let selected = selector(&input, Some("demo"));
     let output = invoke(temp.path(), &selected, &["-o", "dist/"]);
@@ -478,7 +478,7 @@ fn missing_runtime_preserves_existing_output() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("input.resin");
     let output = temp.path().join("program");
-    fs::write(&input, "export { main }; fn main () -> int  { 0 }").unwrap();
+    fs::write(&input, "export { main }; fn main () -> i32  { 0 }").unwrap();
     fs::write(&output, "keep me").unwrap();
     let service = Service::configured(|_, environment| {
         environment.variables.insert(
@@ -506,7 +506,7 @@ fn builds_and_executes_paths_with_spaces_and_shell_punctuation() {
         .path()
         .join(format!("program ; literal{}", std::env::consts::EXE_SUFFIX));
     let output = cli(
-        "export { main }; fn main () -> int  { 19 }",
+        "export { main }; fn main () -> i32  { 19 }",
         &["-o", executable.to_str().unwrap()],
     );
     success(&output);
@@ -517,7 +517,7 @@ fn builds_and_executes_paths_with_spaces_and_shell_punctuation() {
 fn bad_destinations_and_missing_compilers_preserve_files() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("input.resin");
-    let source = "export { main }; fn main () -> int  { 0 }";
+    let source = "export { main }; fn main () -> i32  { 0 }";
     fs::write(&input, source).unwrap();
     let service = Service::new();
     let output = service
@@ -578,7 +578,7 @@ fn decorated_host_calls_need_no_spirv_opt() {
     });
     let temp = TempDir::new().unwrap();
     let input = temp.path().join("host.resin");
-    fs::write(&input, "export { main };\nimport { \"$/shared.resin\" };\n @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { i }; } fn main() -> int | Err<_> { let output_owner = arc_ptr_alloc(0_ui)?; let output: Ref<_> = output_owner:get().*; kernel(7_ul, output_owner:get()); if (output == 7_ui) { 0 } else { 1 } }").unwrap();
+    fs::write(&input, "export { main };\nimport { \"$/shared.resin\" };\n @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { i }; } fn main() -> i32 | Err<_> { let output_owner = arc_ptr_alloc(u32(0))?; let output: Ref<_> = output_owner:get().*; kernel(u64(7), output_owner:get()); if (output == u32(7)) { 0 } else { 1 } }").unwrap();
     success(&invoke_with(&service, temp.path(), &input, &[]));
 }
 
@@ -591,11 +591,11 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
     let input = temp.path().join("stages.resin");
     fs::write(&input, r#"export { main };
         import { "$/graphics.resin", "$/gpu.resin" };
-        @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { i + 1_ui }; }
-        @vertex_shader fn vertex(i: int) -> Vertex  {
+        @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { i + u32(1) }; }
+        @vertex_shader fn vertex(i: i32) -> Vertex  {
             Vertex {
-                position = Position { x = 0.0_f, y = 0.0_f, z = 0.0_f, w = 1.0_f },
-                color = Color { r = 1.0_f, g = 0.0_f, b = 0.0_f, a = 1.0_f },
+                position = Position { x = f32(0.0), y = f32(0.0), z = f32(0.0), w = f32(1.0) },
+                color = Color { r = f32(1.0), g = f32(0.0), b = f32(0.0), a = f32(1.0) },
             }
         }
         @fragment_shader fn fragment(color: Color) -> Color  { color }
@@ -704,15 +704,17 @@ fn process_entries_receive_literal_arguments_in_run_and_compiled_modes() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("args.resin");
     fs::write(&input, r#"export { main }; import { "$/string.resin", "$/stdio.resin", "$/span.resin", "$/process.resin" };
-        fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> int  {
+        fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> i32  {
             let mut args = arguments(argc, argv);
             let mut with_sentinel = arguments(argc + 1, argv);
-            let mut index = 1_ul;
+            let mut index: u64 = 1;
             while (index < args.length) {
-                print(fmt("[{0}]\n", (argument(args, index):bytes(),)));
-                index = index + 1_ul;
+                let item = argument(args, index);
+                let text = fmt("[{0}]\n", (item:bytes(),));
+                print(text);
+                index = index + u64(1);
             };
-            if (argc == 6 && ulong(with_sentinel:at(ulong(argc))) == 0_ul && argument(args, 0_ul).length > 0_ul) { 0 } else { 1 }
+            if (argc == 6 && u64(with_sentinel:at(u64(argc))) == u64(0) && argument(args, u64(0)).length > u64(0)) { 0 } else { 1 }
         }
     "#).unwrap();
     let args = ["hello world", "", "--flag", "semi;$(literal)", "λ"];
@@ -781,14 +783,14 @@ fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
 
         extern {{
             "{header_path}": {{
-                fn mutate_environment() -> int;
+                fn mutate_environment() -> i32;
             }},
             "stdlib.h": {{
-                fn getenv(name: Ptr<ubyte>) -> Ptr<ubyte>;
+                fn getenv(name: Ptr<u8>) -> Ptr<u8>;
             }},
         }};
         import {{ "$/string.resin", "$/stdio.resin", "$/process.resin", "$/span.resin" }};
-        fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> (int | Err<_>)  {{
+        fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> (i32 | Err<_>)  {{
             let mut name = "RESIN_SNAPSHOT_TEST";
             let mut empty = "RESIN_SNAPSHOT_EMPTY";
             let mut missing = "RESIN_SNAPSHOT_MISSING";
@@ -796,12 +798,13 @@ fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
             let mut status = mutate_environment();
             let mut after = environment_get(envp, name.data)?;
             let mut live = c_string(getenv(name.data));
-            let mut absent = match (environment_get(envp, missing.data)) {{ Span<ubyte>(value) => {{ 1 == 0 }}, Err(error) => {{ 1 == 1 }} }};
+            let mut absent = match (environment_get(envp, missing.data)) {{ Span<u8>(value) => {{ 1 == 0 }}, Err(error) => {{ 1 == 1 }} }};
             let mut env = environment(envp);
-            let mut with_sentinel = Span<Ptr<ubyte>> {{ data = envp, length = env.length + 1_ul }};
-            print(fmt("{{0}}/{{1}}/{{2}}\n", (before:bytes(), after:bytes(), live:bytes())));
-            (if (status == 0 && absent && environment_get(envp, empty.data)?.length == 0_ul
-                && env.length >= 2_ul && ulong(with_sentinel:at(env.length)) == 0_ul) {{ 0 }} else {{ 1 }})
+            let mut with_sentinel = Span<Ptr<u8>> {{ data = envp, length = env.length + u64(1) }};
+            let text = fmt("{{0}}/{{1}}/{{2}}\n", (before:bytes(), after:bytes(), live:bytes()));
+            print(text);
+            (if (status == 0 && absent && environment_get(envp, empty.data)?.length == u64(0)
+                && env.length >= u64(2) && u64(with_sentinel:at(env.length)) == u64(0)) {{ 0 }} else {{ 1 }})
         }}"#)).unwrap();
     let output = service
         .command()
@@ -841,9 +844,9 @@ fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
 #[test]
 fn process_entry_signatures_results_and_argument_bounds_are_checked() {
     for signature in [
-        "argc: uint, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>",
-        "argc: int, argv: Ptr<ubyte>, envp: Ptr<Ptr<ubyte>>",
-        "argc: int, argv: Ptr<Ptr<ubyte>>",
+        "argc: u32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>",
+        "argc: i32, argv: Ptr<u8>, envp: Ptr<Ptr<u8>>",
+        "argc: i32, argv: Ptr<Ptr<u8>>",
     ] {
         let output = cli(
             &format!("export {{ main }}; fn main({signature})  {{}}"),
@@ -854,16 +857,16 @@ fn process_entry_signatures_results_and_argument_bounds_are_checked() {
     }
     for (result, body, code) in [
         ("()", "{}", 0),
-        ("(int | Err<E>)", "(7)", 7),
+        ("(i32 | Err<E>)", "(7)", 7),
         ("(() | Err<E>)", "Err(E {})", 1),
     ] {
         let source = format!(
-            "export {{ main }}; struct E {{}} fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> {result}  {{ {body} }}"
+            "export {{ main }}; struct E {{}} fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> {result}  {{ {body} }}"
         );
         assert_eq!(cli(&source, &[]).status.code(), Some(code));
     }
     let output = cli(
-        r#"export { main }; import { "$/process.resin" }; fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>)  { argument(arguments(argc, argv), ulong(argc)); }"#,
+        r#"export { main }; import { "$/process.resin" }; fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>)  { { let borrowed = arguments(argc, argv); argument(borrowed, u64(argc)) }; }"#,
         &[],
     );
     assert!(!output.status.success());
@@ -877,7 +880,7 @@ fn process_arguments_preserve_non_utf8_bytes() {
     let service = Service::new();
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let input = temp.path().join("bytes.resin");
-    fs::write(&input, r#"export { main }; import { "$/string.resin", "$/stdio.resin", "$/span.resin", "$/process.resin" }; fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>)  { print(fmt("{0}", (argument(arguments(argc, argv), 1_ul):bytes(),))); }"#).unwrap();
+    fs::write(&input, r#"export { main }; import { "$/string.resin", "$/stdio.resin", "$/span.resin", "$/process.resin" }; fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>)  { { let borrowed_2 = fmt("{0}", ({ let borrowed_1 = { let borrowed = arguments(argc, argv); argument(borrowed, u64(1)) }; borrowed_1:bytes() },)); print(borrowed_2) }; }"#).unwrap();
     let output = service
         .command()
         .current_dir(temp.path())
@@ -894,7 +897,7 @@ fn process_arguments_preserve_non_utf8_bytes() {
 fn output_long_option_builds_without_running() {
     let temp = TempDir::new_in(std::env::temp_dir()).unwrap();
     let source = temp.path().join("main.resin");
-    fs::write(&source, "export { main }; fn main() -> int  { 42 }").unwrap();
+    fs::write(&source, "export { main }; fn main() -> i32  { 42 }").unwrap();
     let destination = temp
         .path()
         .join(format!("published{}", std::env::consts::EXE_SUFFIX));
@@ -1002,9 +1005,9 @@ fn embedding_rejects_invalid_symbols_and_input_overwrites() {
 fn specialization_failures_keep_source_excerpts_and_application_notes() {
     let output = cli(
         r#"export { main };
-        struct Cell { value: int }
-        fn get(cell: Ref<Cell>) -> Ref<int> { cell.value }
-        fn address<T>(cell: Ref<T>) -> Ptr<int> { &cell:get() }
+        struct Cell { value: i32 }
+        fn get(cell: Ref<Cell>) -> Ref<i32> { cell.value }
+        fn address<T>(cell: Ref<T>) -> Ptr<i32> { &cell:get() }
         fn main() { let cell = Cell { value = 1 }; address(cell); }
     "#,
         &[],

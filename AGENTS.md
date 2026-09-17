@@ -183,7 +183,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   when concrete reuse justifies them; adopting this style does not require changing
   every enum variant into a separate struct or changing its allocation strategy.
 - Keep recursion under the translation's control. Scope extension, evaluation order,
-  short-circuiting, and cleanup may require different treatment of children. Use shared
+  i16-circuiting, and cleanup may require different treatment of children. Use shared
   walkers when traversal requirements actually agree. Dependency groups, constraint
   solving, and fixed-point worklists remain explicit algorithms inside their owning pass.
 - Private mutable state is compatible with a translation that returns completed data.
@@ -231,7 +231,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Examples import standard-library functionality through `$/` paths; imports without
   a leading `$` resolve relative to their importer. Each file has a private scope with
   explicit exports; do not reintroduce textual inclusion.
-- Host entries take no arguments or three parameters `(int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>)` for argc/argv/envp.
+- Host entries take no arguments or three parameters `(i32, Ptr<Ptr<u8>>, Ptr<Ptr<u8>>)` for argc/argv/envp.
   Startup inputs are deep-copied before Resin entry and borrowed until process exit; treat
   them as read-only. Keep environment lookups on the supplied snapshot, not live OS state.
   `--` separates run arguments from compiler options; execution arguments stay out of build requests.
@@ -324,7 +324,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   source functions from `$/shared.resin`, backed by non-generic `StrongOwner` and
   `WeakOwner` primitives. Initialize native handles inside an inert shared payload.
   Borrowed views do not retain the owner. Numeric spans expose exact element bytes
-  through `as_bytes()`. Image pixel writes accept bounded `Span<ubyte>` views.
+  through `as_bytes()`. Image pixel writes accept bounded `Span<u8>` views.
 - `Span`, shared/weak owners, GPU views, typed pipelines, and `String` are source structs.
   Keep only non-generic `StrongOwner`, `WeakOwner`, `GpuView`, and `GpuPipelineContract`
   handles in the compiler. Explicit intrinsic declarations register GPU wrapper projections;
@@ -333,36 +333,34 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Host GPU access uses `load`, `store`, and `replace`, with no raw host pointer escape.
   `gpu:create(initial)`, `gpu:alloc::<T>(count)`, and `gpu:alloc_in::<T>(count, memory)`
   are ordinary generic source functions. Shader-declaration factories keep explicit native bridges.
-- String literals have primitive type `str`, distinct from `Span<ubyte>` and the owned
+- String literals have primitive type `str`, distinct from `Span<u8>` and the owned
   nominal `String`. They expose `data` and `length` over static NUL-terminated bytes;
   length excludes the appended terminator. Literal storage may be shared; treat it as read-only.
   `bytes(text)` from `$/span.resin` explicitly borrows literal bytes; never implicitly convert a `str`
   to a span or construct a `str` from arbitrary bytes. `string_from_str(text)` copies a
   `str`, and `string_from_bytes(bytes)` copies a raw byte span. Both append a NUL outside
   their logical length. `fmt(format, arguments)` returns `String`, wrapping
-  `ArcSpan<ubyte>`; import `$/string.resin` for `String`, `fmt`, and `repr`.
+  `ArcSpan<u8>`; import `$/string.resin` for `String`, `fmt`, and `repr`.
   Import `$/stdio.resin` for `print`, standard-stream writes, and byte/line input.
   Formatting and reference counting are host-only. Format tuple arguments use
   `value:bytes()` for source String and span wrappers; the primitive accepts an
-  explicit `(Ptr<ubyte>, ulong)` byte view and does not recognize nominal wrapper names.
+  explicit `(Ptr<u8>, u64)` byte view and does not recognize nominal wrapper names.
   `print(text)` and the ordinary `io_stdout():write(text)` / `io_stderr():write(text)` methods
-  accept `str`, `Span<ubyte>`, and `String` and write bytes verbatim. Use `.data` when
+  accept `str`, `Span<u8>`, and `String` and write bytes verbatim. Use `.data` when
   passing literal storage to C. Ordinary byte arrays contain exactly their declared
   elements, without a sentinel; nested array stride follows the packed shared layout.
   Empty C byte arrays reserve a placeholder byte that is outside the logical array.
   Device-backed byte arrays and spans use 8-bit storage; shader literals need an addressable
   constant-storage implementation and are currently rejected explicitly.
-- Numeric suffixes are case insensitive: `b/h/i/l` select signed 8/16/32/64-bit integers,
-  `ub/uh/ui/ul` select unsigned widths, and `f/d` select float32/float64. The formatter
-  emits lowercase suffixes preceded by an underscore. Suffixes fix literal types and retain
-  range checking. Hex accepts integer suffixes; signed `b` requires an underscore so bare
-  `b/B` remains a digit, and hex `d/D/f/F` always remain digits. Unsuffixed numeric literals
-  infer their type from context, defaulting to `long` for integers and `float64` for floats.
+- Numeric primitives are `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`,
+  `f32`, and `f64`. Numeric literals have no suffixes. They infer their type from
+  context, defaulting to `i64` for integers and `f64` for floats. An annotation or
+  explicit type application such as `f32(1.0)` selects a width; range checks still apply.
   One-armed `if` is equivalent to an explicit `else {}` and requires a unit-valued body.
 - Function result annotations default to unit when omitted, including foreign functions.
   Named function parameters (`fn identity<T>(value: T) -> T`) bind rigid type variables.
   Each declaration reference deduces fresh type arguments from operands and expected results,
-  or accepts explicit `identity::<int>` arguments. Locals remain monomorphic. `_` introduces
+  or accepts explicit `identity::<i32>` arguments. Locals remain monomorphic. `_` introduces
   a weak monomorphic inference variable in local annotations, function results, and explicit
   applications, including nested positions; it may unify with a bound type variable. A caller
   cannot determine a definition's unresolved result hole. Keep parameters, type definitions,
@@ -372,7 +370,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Local aliases may capture enclosing type binders. Aliases resolve in declaration order;
   reject recursive expansion, and bound its depth and size independently of function instances.
   Structs may bind named type parameters; their fields retain those parameters in
-  HIR and constructors use explicit applications such as `Cell<int> { value = 1 }`.
+  HIR and constructors use explicit applications such as `Cell<i32> { value = 1 }`.
   Local field-only structs capture enclosing type binders in their nominal identity.
   Free operations declare their whole type-parameter list. Colon-call turbofish arguments
   supply those same parameters; signatures may infer them from every operand and result.
@@ -389,14 +387,14 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   before storage lowering. Diagnostics render source type names instead of private type IDs.
   keep inference solvers and deferred emission callbacks out of the lowering pass.
 - Shader entries use `@compute_shader`, `@vertex_shader`, or `@fragment_shader` decorators.
-  Compute entries take `(ulong, Ptr<T>)` and return unit; their index is the global X invocation
+  Compute entries take `(u64, Ptr<T>)` and return unit; their index is the global X invocation
   index. Their signatures are checked at declaration; helpers need no decoration and remain host-callable.
   Pipeline creation accepts decorated shader declarations directly and requests their compiled
   representation internally. Shader functions have no bytecode property. Runtime shader aliases
   remain unsupported. Keep shader definitions inline in examples.
 - Arrays, `Span<T>`, and `str` provide indexing with `items:at(index)`, returning `Ref<T>`
-  (`Ref<ubyte>` for `str`);
-  its index parameter is `ulong`, with explicit conversions for other integer types.
+  (`Ref<u8>` for `str`);
+  its index parameter is `u64`, with explicit conversions for other integer types.
   Use `items:at(index)` to read or write. Pointers to arrays, spans, and `str`
   also support `items:lea(index)` returning an element pointer. Local array values
   and references to arrays have no `lea` operation.
@@ -410,8 +408,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Assignment writes its referent even through an immutable reference binding.
   Locals, their inline fields, and `Ref` referents cannot have their addresses taken.
   A pointer dereference and its field projections remain addressable. Parameters and
-  results retain their Ref/Ptr contract through generic specialization. Ref parameters accept temporary arguments alive through the full
-  expression; escaping aliases do not retain them. HIR retains reference use;
+  results retain their Ref/Ptr contract through generic specialization. Ref parameters require initialized places: locals, fields, pointer dereferences,
+  or reference-valued results. Bind temporary values to explicit locals before borrowing. HIR retains reference use;
   specialization preserves distinct concrete Ref/Ptr types. LIR LocalRef and Borrow
   produce references, never pointers. Verification rejects reference-to-pointer
   conversions; only final target lowering chooses an address representation.
@@ -420,7 +418,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   storage pointers plus projection paths; returning or merging distinct local
   references remains unsupported.
   Spans have `data` and `length` fields. Pointer arithmetic
-  is forbidden; explicit pointer/`ulong` casts permit low-level byte arithmetic on the host.
+  is forbidden; explicit pointer/`u64` casts permit low-level byte arithmetic on the host.
   Shader pointer casts (including pointer reinterpretation) are rejected during LIR construction
   and verification; use typed pointers and indexing. The current Vulkan C ABI retains
   pointer/length pairs; language-facing pipeline creation accepts shader declarations.

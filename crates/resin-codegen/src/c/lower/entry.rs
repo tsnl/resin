@@ -19,7 +19,7 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
             .all(|ty| matches!(ty, Ty::Unit | Ty::Int32 | Ty::Error { .. }))
     {
         return Err(Error::program(format!(
-            "entry function `{entry}` must be a Resin function, take () or (int, Ptr<Ptr<ubyte>>, Ptr<Ptr<ubyte>>), and return int, (), or a union of those with Err<E>"
+            "entry function `{entry}` must be a Resin function, take () or (i32, Ptr<Ptr<u8>>, Ptr<Ptr<u8>>), and return i32, (), or a union of those with Err<E>"
         )));
     }
     let setup = if process_inputs {

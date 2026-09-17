@@ -2,10 +2,10 @@
 Free function references with explicit type arguments
 ==================
 fn example()  {
-    let mut first = select::<int, ulong>;
-    let mut second = create::<Ptr<int>>;
-    select::<int, ulong>(7, 42);
-    (select::<int, ulong>)(7, 42);
+    let mut first = select::<i32, u64>;
+    let mut second = create::<Ptr<i32>>;
+    select::<i32, u64>(7, 42);
+    (select::<i32, u64>)(7, 42);
 }
 ---
 

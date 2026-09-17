@@ -162,7 +162,7 @@ fn float32(name: &str, left: f32, right: Option<f32>) -> Result<Value, String> {
         _ => return Err(unsupported()),
     };
     if !value.is_finite() {
-        return Err("non-finite float32 constant".into());
+        return Err("non-finite f32 constant".into());
     }
     Ok(Value::Float32 { value })
 }
@@ -181,7 +181,7 @@ fn float64(name: &str, left: f64, right: Option<f64>) -> Result<Value, String> {
         _ => return Err(unsupported()),
     };
     if !value.is_finite() {
-        return Err("non-finite float64 constant".into());
+        return Err("non-finite f64 constant".into());
     }
     Ok(Value::Float64 { value })
 }

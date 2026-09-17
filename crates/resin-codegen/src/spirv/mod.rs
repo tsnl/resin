@@ -168,7 +168,7 @@ fn register_function_types(
 
 fn str_storage_error() -> Error {
     Error::unsupported(
-        "shader string literals need device-backed storage; pass a Span<ubyte> in the shader root"
+        "shader string literals need device-backed storage; pass a Span<u8> in the shader root"
             .into(),
     )
 }

@@ -2,7 +2,7 @@
 Shader decorator and function reference
 ==================
 @compute_shader
-fn kernel(i: uint) -> uint  { i }
+fn kernel(i: u32) -> u32  { i }
 fn main()  { let mut entry = kernel; }
 
 ---

@@ -719,7 +719,7 @@ impl TypeError {
 impl fmt::Display for TypeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.kind == TypeErrorKind::PointerArithmetic {
-            return f.write_str("pointer arithmetic is not allowed; index a Span or explicitly convert the pointer to ulong for byte arithmetic");
+            return f.write_str("pointer arithmetic is not allowed; index a Span or explicitly convert the pointer to u64 for byte arithmetic");
         }
         if matches!(self.kind, TypeErrorKind::UnwrapManaged { .. }) {
             return f.write_str("cannot unwrap a type with drop; access its fields through a pointer or use Ptr.replace");
@@ -898,9 +898,7 @@ pub struct BuiltinCall {
 
 impl TyperContext {
     pub fn type_num(&self, value: &str) -> Ty {
-        literal::split(value)
-            .1
-            .unwrap_or_else(|| literal::unsuffixed_type(value))
+        literal::default_type(value)
     }
 
     pub fn type_field(&self, base: &Ty, name: &str) -> Result<FieldAccess, TypeError> {
@@ -966,34 +964,19 @@ pub mod layout {
 //
 
 pub mod literal {
-    //! Numeric suffixes are case insensitive and select an exact primitive type.
+    //! Numeric text is interpreted only after contextual inference selects its type.
     use super::Ty;
 
-    pub fn split(text: &str) -> (&str, Option<Ty>) {
-        super::types::split_literal(text)
-    }
-
-    /// Normalize only the suffix; keep digit grouping and hexadecimal digit case.
-    pub fn format(text: &str) -> String {
-        super::types::format_literal(text)
-    }
-
-    /// The fallback type for an unsuffixed literal, before any contextual inference.
+    /// The fallback type before contextual inference: i64 or f64.
     /// Hexadecimal e/E digits are not decimal exponents.
-    pub fn unsuffixed_type(text: &str) -> Ty {
-        super::types::unsuffixed_literal_type(text)
+    pub fn default_type(text: &str) -> Ty {
+        super::types::default_literal_type(text)
     }
 
-    /// Parse into an already selected primitive type, checking suffix and range.
+    /// Parse into an already selected primitive type, checking its range.
     /// This operation never infers a type or applies a numeric default.
     pub fn parse(text: &str, ty: &Ty) -> Result<super::Value, String> {
-        let (digits, suffix) = split(text);
-        if suffix.as_ref().is_some_and(|suffix| suffix != ty) {
-            return Err(format!(
-                "numeric suffix does not match the selected type {ty:?}"
-            ));
-        }
-        super::types::parse_number(digits, ty)
+        super::types::parse_number(text, ty)
     }
 }
 

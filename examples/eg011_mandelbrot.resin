@@ -22,177 +22,136 @@ import {
 //
 
 struct Plot {
-	width: uint,
-	height: uint,
-	center: Complex<float32>,
-	span: float32,
+	width: u32,
+	height: u32,
+	center: Complex<f32>,
+	span: f32,
 }
 
-fn plot_new(width: uint, height: uint) -> Plot {
-	Plot { width = width, height = height, center = complex(-0.5_f, 0.0_f), span = 3.0_f }
+fn plot_new(width: u32, height: u32) -> Plot {
+	Plot { width = width, height = height, center = complex(-0.5, 0.0), span = 3.0 }
 }
 
 // Coordinates are in pixels; (x + 0.5, y + 0.5) is the pixel center.
 // Positive imaginary coordinates point upwards.
-fn at(self: Ref<Plot>, x: float32, y: float32) -> Complex<float32> {
+fn at(self: Ref<Plot>, x: f32, y: f32) -> Complex<f32> {
 	complex(
-		self.center.real + (x - 0.5_f * float32(self.width)) * self.span / float32(self.height),
-		self.center.imag + (0.5_f * float32(self.height) - y) * self.span / float32(self.height),
+		self.center.real + (x - 0.5 * f32(self.width)) * self.span / f32(self.height),
+		self.center.imag + (0.5 * f32(self.height) - y) * self.span / f32(self.height),
 	)
 }
 
 struct Mandelbrot {
-	max_iters: int,
+	max_iters: i32,
 }
 
-fn mandelbrot_new(max_iters: int) -> Mandelbrot {
+fn mandelbrot_new(max_iters: i32) -> Mandelbrot {
 	Mandelbrot { max_iters = max_iters }
 }
 
 // Zero means the orbit stayed inside the escape radius for this iteration budget;
 // it is not a proof of membership. Escape requires a magnitude strictly above two.
-fn escape_iterations(self: Ref<Mandelbrot>, c: Complex<float32>) -> int {
+fn escape_iterations(self: Ref<Mandelbrot>, c: Complex<f32>) -> i32 {
 	// Check the first iterate before the interior shortcut can overflow at large coordinates.
-	if (self.max_iters > 0 && c:magnitude_squared() > 4.0_f) {
+	if (self.max_iters > 0 && c:magnitude_squared() > 4.0) {
 		return 1;
 	};
 	// The main cardioid and period-two bulb are known interiors.
-	let x = c.real - 0.25_f;
+	let x = c.real - 0.25;
 	let y2 = c.imag * c.imag;
 	let q = x * x + y2;
-	if (q * (q + x) <= 0.25_f * y2 || (c.real + 1.0_f) * (c.real + 1.0_f) + y2 <= 0.0625_f) {
+	if (q * (q + x) <= 0.25 * y2 || (c.real + 1.0) * (c.real + 1.0) + y2 <= 0.0625) {
 		return 0;
 	};
-	let mut n = 0_i;
-	let mut a = complex(0.0_f, 0.0_f);
+	let mut n: i32 = 0;
+	let mut a: Complex<f32> = complex(0.0, 0.0);
 	while (n < self.max_iters) {
 		// The same Complex helpers borrow local values on host and shader.
-		a = a:squared():add(c);
+		let square = a:squared();
+		a = square:add(c);
 		n = n + 1;
-		if (a:magnitude_squared() > 4.0_f) {
+		if (a:magnitude_squared() > 4.0) {
 			return n;
 		};
 	};
 	0
 }
 
-fn escapes_ball(self: Ref<Mandelbrot>, c: Complex<float32>) -> bool {
+fn escapes_ball(self: Ref<Mandelbrot>, c: Complex<f32>) -> bool {
 	self:escape_iterations(c) != 0
 }
 
 //
-// Color evaluation and sampling
+// Color evaluation
 //
 
-fn palette(count: int) -> Color {
+fn palette(count: i32) -> Color {
 	if (count == 0) {
-		return Color { r = 0.0_f, g = 0.0_f, b = 0.0_f, a = 1.0_f };
+		return Color { r = 0.0, g = 0.0, b = 0.0, a = 1.0 };
 	};
 	// Repeating blue-to-gold bands; reserve black for bounded orbits.
-	let t = float32((count & 63) + 1) / 65.0_f;
-	let u = 1.0_f - t;
+	let t = f32((count & 63) + 1) / 65.0;
+	let u = 1.0 - t;
 	Color {
-		r = 9.0_f * u * t * t * t,
-		g = 15.0_f * u * u * t * t,
-		b = 8.5_f * u * u * u * t,
-		a = 1.0_f,
+		r = 9.0 * u * t * t * t,
+		g = 15.0 * u * u * t * t,
+		b = 8.5 * u * u * u * t,
+		a = 1.0,
 	}
 }
 
-// An incremental mean keeps coloring independent of sample placement.
-fn blend(accumulated: Color, sample: Color, weight: float32) -> Color {
-	Color {
-		r = accumulated.r + (sample.r - accumulated.r) * weight,
-		g = accumulated.g + (sample.g - accumulated.g) * weight,
-		b = accumulated.b + (sample.b - accumulated.b) * weight,
-		a = 1.0_f,
-	}
-}
-
-// Halton points 1..16, radical inverses in bases 2 and 3. Every quality level
-// uses a prefix of this LUT: https://pbr-book.org/4ed/Sampling_and_Reconstruction/Halton_Sampler
-fn halton_samples() -> _ {
-	[
-		(0.5_f, 1.0_f / 3.0_f),
-		(0.25_f, 2.0_f / 3.0_f),
-		(0.75_f, 1.0_f / 9.0_f),
-		(0.125_f, 4.0_f / 9.0_f),
-		(0.625_f, 7.0_f / 9.0_f),
-		(0.375_f, 2.0_f / 9.0_f),
-		(0.875_f, 5.0_f / 9.0_f),
-		(0.0625_f, 8.0_f / 9.0_f),
-		(0.5625_f, 1.0_f / 27.0_f),
-		(0.3125_f, 10.0_f / 27.0_f),
-		(0.8125_f, 19.0_f / 27.0_f),
-		(0.1875_f, 4.0_f / 27.0_f),
-		(0.6875_f, 13.0_f / 27.0_f),
-		(0.4375_f, 22.0_f / 27.0_f),
-		(0.9375_f, 7.0_f / 27.0_f),
-		(0.03125_f, 16.0_f / 27.0_f),
-	]
-}
-
-type Sample = (float32, float32);
-type SegmentOrigin = (uint, uint);
-const pixels_per_segment = 32_ui;
+type SegmentOrigin = (u32, u32);
+const pixels_per_segment: u32 = 32;
 
 struct Parameters {
 	plot: Plot,
 	solver: Mandelbrot,
-	samples: Span<Sample>,
 	segments: Span<SegmentOrigin>,
-	pixels: Span<ubyte>,
+	pixels: Span<u8>,
 }
 
-fn evaluate_pixel(root: Ref<Parameters>, x: uint, y: uint) -> Color {
-	let mut color = Color { r = 0.0_f, g = 0.0_f, b = 0.0_f, a = 1.0_f };
-	let mut i = 0_ul;
-	while (i < root.samples.length) {
-		let offset = root.samples:at(i);
-		let c = root.plot:at(float32(x) + offset.0, float32(y) + offset.1);
-		let count = root.solver:escape_iterations(c);
-		color = blend(color, palette(count), 1.0_f / float32(i + 1_ul));
-		i = i + 1_ul;
-	};
-	color
+fn evaluate_pixel(root: Ref<Parameters>, x: u32, y: u32) -> Color {
+	let c = root.plot:at(f32(x) + 0.5, f32(y) + 0.5);
+	palette(root.solver:escape_iterations(c))
 }
 
-fn channel(value: float32) -> ubyte {
-	ubyte(value * 255.0_f + 0.5_f)
+fn channel(value: f32) -> u8 {
+	u8(value * 255.0 + 0.5)
 }
 
-fn store_pixel(pixels: Ref<Span<ubyte>>, index: ulong, color: Color) {
-	pixels:at(index * 4_ul) = channel(color.r);
-	pixels:at(index * 4_ul + 1_ul) = channel(color.g);
-	pixels:at(index * 4_ul + 2_ul) = channel(color.b);
-	pixels:at(index * 4_ul + 3_ul) = 255_ub;
+fn store_pixel(pixels: Ref<Span<u8>>, index: u64, color: Color) {
+	pixels:at(index * 4) = channel(color.r);
+	pixels:at(index * 4 + 1) = channel(color.g);
+	pixels:at(index * 4 + 2) = channel(color.b);
+	pixels:at(index * 4 + 3) = 255;
 }
 
 // Each segment owns up to 32 adjacent pixels in one row. Segment origins come
 // from segments_new; the final segment in each row stops at the right edge.
-fn evaluate_segment(segment_index: ulong, root: Ref<Parameters>) {
+fn evaluate_segment(segment_index: u64, root: Ref<Parameters>) {
 	if (segment_index >= root.segments.length) {
 		return;
 	};
 	let origin = root.segments:at(segment_index);
 	let mut x = origin.0;
 	while (x < origin.0 + pixels_per_segment && x < root.plot.width) {
-		root.pixels:store_pixel(ulong(origin.1) * ulong(root.plot.width) + ulong(x), evaluate_pixel(root, x, origin.1));
+		root.pixels:store_pixel(u64(origin.1) * u64(root.plot.width) + u64(x), evaluate_pixel(root, x, origin.1));
 		x = x + 1;
 	};
 }
 
 // Explicit origins avoid shader integer division and make dispatch batches simple.
-fn segments_new(width: uint, height: uint) -> ArcSpan<SegmentOrigin> | Err<_> {
-	let columns = (ulong(width) + ulong(pixels_per_segment) - 1_ul) / ulong(pixels_per_segment);
-	let segments = arc_span_alloc::<SegmentOrigin>(columns * ulong(height), (0_ui, 0_ui))?;
-	let mut index = 0_ul;
-	let mut y = 0_ui;
+fn segments_new(width: u32, height: u32) -> ArcSpan<SegmentOrigin> | Err<_> {
+	let columns = (u64(width) + u64(pixels_per_segment) - 1) / u64(pixels_per_segment);
+	let segments = arc_span_alloc::<SegmentOrigin>(columns * u64(height), (0, 0))?;
+	let view = segments:get();
+	let mut index: u64 = 0;
+	let mut y: u32 = 0;
 	while (y < height) {
-		let mut x = 0_ui;
+		let mut x: u32 = 0;
 		while (x < width) {
-			segments:get():at(index) = (x, y);
-			index = index + 1_ul;
+			view:at(index) = (x, y);
+			index = index + 1;
 			x = x + pixels_per_segment;
 		};
 		y = y + 1;
@@ -206,18 +165,17 @@ fn clone(self: Ref<Plot>) -> Plot {
 
 // CPU execution calls the same evaluator as the shader wrapper.
 fn dispatch_host(root: Ref<Parameters>) {
-	let mut segment = 0_ul;
+	let mut segment: u64 = 0;
 	while (segment < root.segments.length) {
 		evaluate_segment(segment, root);
-		segment = segment + 1_ul;
+		segment = segment + 1;
 	};
 }
 
-fn host_image(plot: Ref<Plot>, solver: Ref<Mandelbrot>, samples: int) -> ArcSpan<ubyte> | Err<_> {
-	let pixels = arc_span_alloc::<ubyte>(ulong(plot.width) * ulong(plot.height) * 4_ul, 0_ub)?;
+fn host_image(plot: Ref<Plot>, solver: Ref<Mandelbrot>) -> ArcSpan<u8> | Err<_> {
+	let pixels = arc_span_alloc::<u8>(u64(plot.width) * u64(plot.height) * 4, 0)?;
 	let segments = segments_new(plot.width, plot.height)?;
-	let lut = arc_ptr_alloc(halton_samples())?;
-	let root = Parameters { plot = plot:clone(), solver = mandelbrot_new(solver.max_iters), samples = Span<Sample> { data = lut:get():lea(0_ul), length = ulong(samples) }, segments = segments:get(), pixels = pixels:get() };
+	let root = Parameters { plot = plot:clone(), solver = mandelbrot_new(solver.max_iters), segments = segments:get(), pixels = pixels:get() };
 	dispatch_host(root);
 	pixels
 }
@@ -229,44 +187,43 @@ fn host_image(plot: Ref<Plot>, solver: Ref<Mandelbrot>, samples: int) -> ArcSpan
 struct HostParameters {
 	plot: Plot,
 	solver: Mandelbrot,
-	samples: GpuSpan<Sample>,
 	segments: GpuSpan<SegmentOrigin>,
-	pixels: GpuSpan<ubyte>,
+	pixels: GpuSpan<u8>,
 }
 
 @compute_shader
-fn compute(segment_index: ulong, root: Ptr<Parameters>) {
+fn compute(segment_index: u64, root: Ptr<Parameters>) {
 	evaluate_segment(segment_index, root.*);
 }
 
 @vertex_shader
-fn vertex(index: int) -> Vertex {
-	let x = if (index == 1) {
-		3.0_f
+fn vertex(index: i32) -> Vertex {
+	let x: f32 = if (index == 1) {
+		3.0
 	} else {
-		-1.0_f
+		-1.0
 	};
-	let y = if (index == 2) {
-		3.0_f
+	let y: f32 = if (index == 2) {
+		3.0
 	} else {
-		-1.0_f
+		-1.0
 	};
 	Vertex {
-		position = Position { x = x, y = y, z = 0.0_f, w = 1.0_f },
-		color = Color { r = (x + 1.0_f) * 0.5_f, g = (y + 1.0_f) * 0.5_f, b = 0.0_f, a = 1.0_f },
+		position = Position { x = x, y = y, z = 0.0, w = 1.0 },
+		color = Color { r = (x + 1.0) * 0.5, g = (y + 1.0) * 0.5, b = 0.0, a = 1.0 },
 	}
 }
 
 @fragment_shader
 fn fragment(uv: Color, root: Ptr<Parameters>) -> Color {
-	let x = uint(uv.r * float32(root.plot.width));
-	let y = uint(uv.g * float32(root.plot.height));
-	let index = (ulong(y) * ulong(root.plot.width) + ulong(x)) * 4_ul;
+	let x = u32(uv.r * f32(root.plot.width));
+	let y = u32(uv.g * f32(root.plot.height));
+	let index = (u64(y) * u64(root.plot.width) + u64(x)) * 4;
 	Color {
-		r = float32(root.pixels:at(index)) / 255.0_f,
-		g = float32(root.pixels:at(index + 1_ul)) / 255.0_f,
-		b = float32(root.pixels:at(index + 2_ul)) / 255.0_f,
-		a = 1.0_f,
+		r = f32(root.pixels:at(index)) / 255.0,
+		g = f32(root.pixels:at(index + 1)) / 255.0,
+		b = f32(root.pixels:at(index + 2)) / 255.0,
+		a = 1.0,
 	}
 }
 
@@ -274,9 +231,8 @@ struct Renderer {
 	gpu: Gpu,
 	graphics: GpuGraphicsPipeline<Parameters, GpuPipelineOwner>,
 	compute: GpuComputePipeline<Parameters, GpuPipelineOwner>,
-	samples: GpuSpan<Sample>,
 	segments: GpuSpan<SegmentOrigin>,
-	pixels: GpuSpan<ubyte>,
+	pixels: GpuSpan<u8>,
 	image: GpuImage,
 }
 
@@ -286,31 +242,33 @@ fn upload<T>(gpu: Ref<Gpu>, source: Ref<Span<T>>) -> GpuSpan<T> | Err<_> {
 	buffer
 }
 
-fn renderer_new(gpu: Gpu, width: uint, height: uint) -> Renderer | Err<_> {
+fn renderer_new(gpu: Gpu, width: u32, height: u32) -> Renderer | Err<_> {
 	let graphics = gpu:create_graphics_pipeline(vertex, fragment)?;
 	let compute_pipeline = gpu:create_compute_pipeline(compute)?;
-	let lut = arc_ptr_alloc(halton_samples())?;
-	let samples = upload(gpu, Span<Sample> { data = lut:get():lea(0_ul), length = 16_ul })?;
-	let segments = upload(gpu, segments_new(width, height)?:get())?;
-	let pixels = gpu:alloc::<ubyte>(ulong(width) * ulong(height) * 4_ul)?;
+	let host_segments = segments_new(width, height)?;
+	let segment_view = host_segments:get();
+	let segments = upload(gpu, segment_view)?;
+	let pixels = gpu:alloc::<u8>(u64(width) * u64(height) * 4)?;
 	let image = gpu:create_image(width, height)?;
-	Renderer { gpu = gpu, graphics = graphics, compute = compute_pipeline, samples = samples, segments = segments, pixels = pixels, image = image }
+	Renderer { gpu = gpu, graphics = graphics, compute = compute_pipeline, segments = segments, pixels = pixels, image = image }
 }
 
-fn resize(self: Ref<Renderer>, width: uint, height: uint) -> () | Err<_> {
-	self.segments = upload(self.gpu, segments_new(width, height)?:get())?;
-	self.pixels = self.gpu:alloc::<ubyte>(ulong(width) * ulong(height) * 4_ul)?;
+fn resize(self: Ref<Renderer>, width: u32, height: u32) -> () | Err<_> {
+	let host_segments = segments_new(width, height)?;
+	let segment_view = host_segments:get();
+	self.segments = upload(self.gpu, segment_view)?;
+	self.pixels = self.gpu:alloc::<u8>(u64(width) * u64(height) * 4)?;
 	self.image = self.gpu:create_image(width, height)?;
 }
 
-fn parameters(self: Ref<Renderer>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, samples: int, start: ulong, count: ulong) -> HostParameters {
-	HostParameters { plot = plot:clone(), solver = mandelbrot_new(solver.max_iters), samples = self.samples:slice(0_ul, ulong(samples)), segments = self.segments:slice(start, count), pixels = self.pixels:clone() }
+fn parameters(self: Ref<Renderer>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, start: u64, count: u64) -> HostParameters {
+	HostParameters { plot = plot:clone(), solver = mandelbrot_new(solver.max_iters), segments = self.segments:slice(start, count), pixels = self.pixels:clone() }
 }
 
-fn dispatch_gpu(self: Ref<Renderer>, commands: Ref<GpuCommands>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, samples: int) -> () | Err<_> {
+fn dispatch_gpu(self: Ref<Renderer>, commands: Ref<GpuCommands>, plot: Ref<Plot>, solver: Ref<Mandelbrot>) -> () | Err<_> {
 	let group_size = self.gpu:compute_workgroup_size();
-	let capacity = 65535_ul * group_size;
-	let mut start = 0_ul;
+	let capacity = 65535 * group_size;
+	let mut start: u64 = 0;
 	while (start < self.segments.length) {
 		let remaining = self.segments.length - start;
 		let count = if (remaining < capacity) {
@@ -318,58 +276,63 @@ fn dispatch_gpu(self: Ref<Renderer>, commands: Ref<GpuCommands>, plot: Ref<Plot>
 		} else {
 			capacity
 		};
-		let groups = uint((count + group_size - 1_ul) / group_size);
-		commands:dispatch(self.compute, self:parameters(plot, solver, samples, start, count), groups, 1, 1)?;
+		let groups = u32((count + group_size - 1) / group_size);
+		commands:dispatch(self.compute, self:parameters(plot, solver, start, count), groups, 1, 1)?;
 		start = start + count;
 	};
 }
 
-fn render(self: Ref<Renderer>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, samples: int, use_gpu: bool) -> () | Err<_> {
+fn render(self: Ref<Renderer>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, use_gpu: bool) -> () | Err<_> {
 	if (!use_gpu) {
-		self.pixels:copy_from(host_image(plot, solver, samples)?:get());
+		let image = host_image(plot, solver)?;
+		let pixels = image:get();
+		self.pixels:copy_from(pixels);
 	};
 	let commands = self.gpu:start_command_recording()?;
 	if (use_gpu) {
-		self:dispatch_gpu(commands, plot, solver, samples)?;
+		self:dispatch_gpu(commands, plot, solver)?;
 	};
 	// Both execution modes reach the same buffer and presentation pipeline.
-	commands:begin_rendering(self.image, 0.0_f, 0.0_f, 0.0_f, 1.0_f)?;
-	commands:draw(self.graphics, self:parameters(plot, solver, samples, 0_ul, self.segments.length), 3)?;
+	commands:begin_rendering(self.image, 0.0, 0.0, 0.0, 1.0)?;
+	commands:draw(self.graphics, self:parameters(plot, solver, 0, self.segments.length), 3)?;
 	commands:end_rendering()?;
 	commands:submit()?;
 }
 
-fn save_png(path: Ptr<ubyte>, width: uint, height: uint, pixels: Ref<Span<ubyte>>) -> () | Err<_> {
+fn save_png(path: Ptr<u8>, width: u32, height: u32, pixels: Ref<Span<u8>>) -> () | Err<_> {
 	image_data_write_pixels(path, width, height, 4, pixels, 0)?;
-	print(fmt("Saved {0}\n", (c_string(path):bytes(),)));
+	let filename = c_string(path);
+	let message = fmt("Saved {0}\n", (filename:bytes(),));
+	print(message);
 }
 
 // Read the displayed image in one transfer, including the currently selected view.
-fn screenshot(renderer: Ref<Renderer>, path: Ptr<ubyte>) -> () | Err<_> {
+fn screenshot(renderer: Ref<Renderer>, path: Ptr<u8>) -> () | Err<_> {
 	let image_width = renderer.image:width();
 	let image_height = renderer.image:height();
-	let count = ulong(image_width) * ulong(image_height) * 4_ul;
-	let pixels = renderer.gpu:alloc_in::<ubyte>(count, memory_readback)?;
+	let count = u64(image_width) * u64(image_height) * 4;
+	let pixels = renderer.gpu:alloc_in::<u8>(count, memory_readback)?;
 	let commands = renderer.gpu:start_command_recording()?;
 	commands:copy_image_to_buffer(renderer.image, pixels)?;
 	commands:submit()?;
-	let host = arc_span_alloc::<ubyte>(count, 0_ub)?;
+	let host = arc_span_alloc::<u8>(count, 0)?;
+	let view = host:get();
 	pixels:copy_to(host:get());
-	save_png(path, image_width, image_height, host:get())?;
+	save_png(path, image_width, image_height, view)?;
 }
 
 //
 // Application and input
 //
 
-fn zoom(plot: Ref<Plot>, factor: float32) {
-	// Keep subpixel offsets distinguishable with float32 coordinates.
-	let minimum = float32(plot.height) * 1.0e-6_f;
+fn zoom(plot: Ref<Plot>, factor: f32) {
+	// Keep neighboring pixels distinguishable with f32 coordinates.
+	let minimum = f32(plot.height) * 1.0e-6;
 	let next = plot.span * factor;
 	plot.span = if (next < minimum) {
 		minimum
-	} else if (next > 8.0_f) {
-		8.0_f
+	} else if (next > 8.0) {
+		8.0
 	} else {
 		next
 	};
@@ -380,7 +343,7 @@ fn input(window: Ref<Window>, plot: Ref<Plot>, solver: Ref<Mandelbrot>) -> bool 
 		return false;
 	};
 	let mut changed = false;
-	let step = plot.span * 0.06_f;
+	let step = plot.span * 0.06;
 	if (window:key_pressed(key_left) || window:key_pressed(key_a)) {
 		plot.center.real = plot.center.real - step;
 		changed = true;
@@ -398,11 +361,11 @@ fn input(window: Ref<Window>, plot: Ref<Plot>, solver: Ref<Mandelbrot>) -> bool 
 		changed = true;
 	};
 	if (window:key_pressed(key_equal)) {
-		plot:zoom(0.85_f);
+		plot:zoom(0.85);
 		changed = true;
 	};
 	if (window:key_pressed(key_minus)) {
-		plot:zoom(1.0_f / 0.85_f);
+		plot:zoom(1.0 / 0.85);
 		changed = true;
 	};
 	if (window:key_state(key_right_bracket).pressed && solver.max_iters < 4096) {
@@ -424,34 +387,36 @@ fn input(window: Ref<Window>, plot: Ref<Plot>, solver: Ref<Mandelbrot>) -> bool 
 		changed = true;
 	};
 	if (window:key_state(key_r).pressed || window:key_state(key_home).pressed) {
-		plot.center.real = -0.5_f;
-		plot.center.imag = 0.0_f;
-		plot.span = 3.0_f;
+		plot.center.real = -0.5;
+		plot.center.imag = 0.0;
+		plot.span = 3.0;
 		solver.max_iters = 256;
 		changed = true;
 	};
 	changed
 }
 
-fn headless(options: Ref<Options>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, path: Ptr<ubyte>) -> () | Err<_> {
+fn headless(options: Ref<Options>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, path: Ptr<u8>) -> () | Err<_> {
 	if (options.use_gpu) {
 		let renderer = renderer_new(gpu_new()?, plot.width, plot.height)?;
-		renderer:render(plot, solver, options.samples, true)?;
+		renderer:render(plot, solver, true)?;
 		renderer:screenshot(path)?;
 	} else {
-		save_png(path, plot.width, plot.height, host_image(plot, solver, options.samples)?:get())?;
+		let image = host_image(plot, solver)?;
+		let pixels = image:get();
+		save_png(path, plot.width, plot.height, pixels)?;
 	};
 }
 
 fn interactive(options: Ref<Options>, mut plot: Plot, mut solver: Mandelbrot) -> () | Err<_> {
 	print("Arrows/WASD: pan | scroll/+/-: zoom | [/]: iterations | R: reset | P: screenshot | Esc: quit\n");
-	let window = window_new(plot.width, plot.height, string_from_str("Mandelbrot | arrows: pan | +/-: zoom | [/]: detail | P: screenshot"))?;
+	let title = string_from_str("Mandelbrot | arrows: pan | +/-: zoom | [/]: detail | P: screenshot");
+	let window = window_new(plot.width, plot.height, title)?;
 	let mut renderer = renderer_new(gpu_new_for_window(window)?, plot.width, plot.height)?;
 	let mut dirty = true;
-	let mut refine = false;
 	while (true) {
 		// Pace held keys even when presentation does not wait for a refresh.
-		window:wait_events(1.0_d / 60.0_d)?;
+		window:wait_events(1.0 / 60.0)?;
 		if (window:should_close() || window:key_state(key_escape).pressed) {
 			break;
 		};
@@ -462,7 +427,7 @@ fn interactive(options: Ref<Options>, mut plot: Plot, mut solver: Mandelbrot) ->
 		if (size.0 != plot.width || size.1 != plot.height) {
 			plot.width = size.0;
 			plot.height = size.1;
-			plot:zoom(1.0_f);
+			plot:zoom(1.0);
 			renderer:resize(size.0, size.1)?;
 			dirty = true;
 		};
@@ -471,29 +436,23 @@ fn interactive(options: Ref<Options>, mut plot: Plot, mut solver: Mandelbrot) ->
 			dirty = true;
 		};
 		if (solver.max_iters != previous_limit) {
-			print(fmt("Iteration limit: {0}\n", (solver.max_iters,)));
+			let message = fmt("Iteration limit: {0}\n", (solver.max_iters,));
+			print(message);
 		};
 		let scroll = window:scroll_delta()?;
-		if (window:focused() && scroll.1 != 0.0_d) {
+		if (window:focused() && scroll.1 != 0.0) {
 			plot:zoom(
-				if (scroll.1 > 0.0_d) {
-					1.0_f / (1.0_f + 0.2_f * float32(scroll.1))
+				if (scroll.1 > 0.0) {
+					1.0 / (1.0 + 0.2 * f32(scroll.1))
 				} else {
-					1.0_f - 0.2_f * float32(scroll.1)
+					1.0 - 0.2 * f32(scroll.1)
 				}
 			);
 			dirty = true;
 		};
 		let capture = window:focused() && window:key_state(key_p).pressed;
-		if (dirty || refine) {
-			// A screenshot gets the selected quality even while input is changing.
-			let samples = if (dirty && !capture) {
-				1_i
-			} else {
-				options.samples
-			};
-			renderer:render(plot, solver, samples, options.use_gpu)?;
-			refine = dirty && samples != options.samples;
+		if (dirty) {
+			renderer:render(plot, solver, options.use_gpu)?;
 			dirty = false;
 		};
 		if (capture) {
@@ -503,13 +462,16 @@ fn interactive(options: Ref<Options>, mut plot: Plot, mut solver: Mandelbrot) ->
 	};
 }
 
-fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> int | Err<_> {
-	let options = match (parse_options(arguments(argc, argv))) {
+fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> i32 | Err<_> {
+	let args = arguments(argc, argv);
+	let options = match (parse_options(args)) {
 		Options(options) => {
 			options
 		},
 		Err(message) => {
-			io_stderr():write(fmt("{0}\nUse --help for usage.\n", (message,)))?;
+			let text = fmt("{0}\nUse --help for usage.\n", (message,));
+			let stderr = io_stderr();
+			stderr:write(text)?;
 			return 2;
 		},
 	};
@@ -523,7 +485,7 @@ fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> int | Err<_>
 	plot.span = options.span;
 	let solver = mandelbrot_new(options.iterations);
 	match (options.output) {
-		Ptr<ubyte>(path) => {
+		Ptr<u8>(path) => {
 			headless(options, plot, solver, path)?;
 		},
 		None => {
@@ -539,13 +501,13 @@ fn main(argc: int, argv: Ptr<Ptr<ubyte>>, envp: Ptr<Ptr<ubyte>>) -> int | Err<_>
 
 fn test() -> () | Err<_> {
 	let mandelbrot = mandelbrot_new(128);
-	let zero = complex(0.0_f, 0.0_f);
-	let minus_one = complex(-1.0_f, 0.0_f);
-	let minus_two = complex(-2.0_f, 0.0_f);
-	let i = complex(0.0_f, 1.0_f);
-	let one = complex(1.0_f, 0.0_f);
-	let two = complex(2.0_f, 0.0_f);
-	let three = complex(3.0_f, 0.0_f);
+	let zero: Complex<f32> = complex(0.0, 0.0);
+	let minus_one: Complex<f32> = complex(-1.0, 0.0);
+	let minus_two: Complex<f32> = complex(-2.0, 0.0);
+	let i: Complex<f32> = complex(0.0, 1.0);
+	let one: Complex<f32> = complex(1.0, 0.0);
+	let two: Complex<f32> = complex(2.0, 0.0);
+	let three: Complex<f32> = complex(3.0, 0.0);
 	assert(!mandelbrot:escapes_ball(zero));
 	assert(!mandelbrot:escapes_ball(minus_one));
 	assert(!mandelbrot:escapes_ball(minus_two));
@@ -553,58 +515,36 @@ fn test() -> () | Err<_> {
 	assert(mandelbrot:escape_iterations(one) == 3);
 	assert(mandelbrot:escape_iterations(two) == 2);
 	assert(mandelbrot:escape_iterations(three) == 1);
-	assert(mandelbrot:escape_iterations(complex(1.0e30_f, 1.0e30_f)) == 1);
+	assert(mandelbrot:escape_iterations(complex(1.0e30, 1.0e30)) == 1);
 	let limited = mandelbrot_new(1);
-	assert(!limited:escapes_ball(complex(2.0_f, 0.0_f)));
-	let upper = complex(-0.75_f, 0.25_f);
-	let lower = complex(-0.75_f, -0.25_f);
+	assert(!limited:escapes_ball(complex(2.0, 0.0)));
+	let upper: Complex<f32> = complex(-0.75, 0.25);
+	let lower: Complex<f32> = complex(-0.75, -0.25);
 	assert(mandelbrot:escape_iterations(upper) == mandelbrot:escape_iterations(lower));
 	let mut plot = plot_new(4, 2);
-	let top_left = plot:at(0.5_f, 0.5_f);
-	let bottom_right = plot:at(3.5_f, 1.5_f);
-	assert(top_left.real == -2.75_f && top_left.imag == 0.75_f);
-	assert(bottom_right.real == 1.75_f && bottom_right.imag == -0.75_f);
-	plot:zoom(0.5_f);
-	assert(plot.span == 1.5_f && plot.center.real == -0.5_f);
-	plot:zoom(100.0_f);
-	assert(plot.span == 8.0_f);
-	plot:zoom(1.0e-15_f);
-	assert(plot.span == 2.0e-6_f);
-	let lut = arc_ptr_alloc(halton_samples())?;
-	let mut sample = 1_ul;
-	while (sample <= 16_ul) {
-		let point = lut:get():at(sample - 1_ul);
-		assert(point.0 == radical_inverse(sample, 2_ul));
-		assert(point.1 - radical_inverse(sample, 3_ul) < 0.000001_f);
-		assert(radical_inverse(sample, 3_ul) - point.1 < 0.000001_f);
-		sample = sample + 1_ul;
-	};
-	// The first four Halton samples in this pixel escape after 1, 2, 1, 2 iterations.
+	let top_left = plot:at(0.5, 0.5);
+	let bottom_right = plot:at(3.5, 1.5);
+	assert(top_left.real == -2.75 && top_left.imag == 0.75);
+	assert(bottom_right.real == 1.75 && bottom_right.imag == -0.75);
+	plot:zoom(0.5);
+	assert(plot.span == 1.5 && plot.center.real == -0.5);
+	plot:zoom(100.0);
+	assert(plot.span == 8.0);
+	plot:zoom(1.0e-15);
+	assert(plot.span == 2.0e-6);
+	// The pixel center is c = 2, which escapes after two iterations.
 	let mut edge = plot_new(1, 1);
-	edge.center.real = 2.0_f;
-	edge.span = 2.0_f;
-	let pixels = arc_ptr_alloc([0_ub, 0_ub, 0_ub, 0_ub, 123_ub])?;
-	let segments = arc_ptr_alloc([(0_ui, 0_ui)])?;
-	let root = Parameters { plot = edge, solver = mandelbrot_new(32), samples = Span<Sample> { data = lut:get():lea(0_ul), length = 4_ul }, segments = Span<SegmentOrigin> { data = segments:get():lea(0_ul), length = 1_ul }, pixels = Span<ubyte> { data = pixels:get():lea(0_ul), length = 4_ul } };
+	edge.center.real = 2.0;
+	edge.span = 2.0;
+	let pixels = arc_ptr_alloc([0, 0, 0, 0, 123])?;
+	let segments = arc_ptr_alloc([(0, 0)])?;
+	let root = Parameters { plot = edge, solver = mandelbrot_new(32), segments = Span<SegmentOrigin> { data = segments:get():lea(0), length = 1 }, pixels = Span<u8> { data = pixels:get():lea(0), length = 4 } };
 	dispatch_host(root);
-	evaluate_segment(1_ul, root);
-	let first = palette(1);
-	let second = palette(2);
-	assert(pixels:get():at(0_ul) == channel((first.r + second.r) * 0.5_f));
-	assert(pixels:get():at(1_ul) == channel((first.g + second.g) * 0.5_f));
-	assert(pixels:get():at(2_ul) == channel((first.b + second.b) * 0.5_f));
-	assert(pixels:get():at(3_ul) == 255_ub && pixels:get():at(4_ul) == 123_ub);
+	evaluate_segment(1, root);
+	let color = palette(2);
+	assert(pixels:get():at(0) == channel(color.r));
+	assert(pixels:get():at(1) == channel(color.g));
+	assert(pixels:get():at(2) == channel(color.b));
+	assert(pixels:get():at(3) == 255 && pixels:get():at(4) == 123);
 	print("Mandelbrot tests passed\n");
-}
-
-// Host-only reference for checking the fixed sampling table.
-fn radical_inverse(mut index: ulong, base: ulong) -> float32 {
-	let mut result = 0.0_f;
-	let mut place = 1.0_f / float32(base);
-	while (index > 0_ul) {
-		result = result + float32(index % base) * place;
-		index = index / base;
-		place = place / float32(base);
-	};
-	result
 }

@@ -119,7 +119,7 @@ fn bundle(path: &str, text: &str) -> HeaderBundle {
 async fn unread_artifact_stream_survives_eviction_of_its_generation() {
     let service = Service::start(TempDir::new().unwrap(), None).await;
     let client = reqwest::Client::new();
-    let mut inputs = service.inputs("large.resin", "export { main }; extern { \"large.h\": { fn retained_value() -> int; } }; fn main() -> int  { retained_value() }");
+    let mut inputs = service.inputs("large.resin", "export { main }; extern { \"large.h\": { fn retained_value() -> i32; } }; fn main() -> i32  { retained_value() }");
     // A tiny header creates a file larger than socket/HTTP buffering. The client
     // deliberately leaves its body unread while a different generation is built.
     let large = bundle(
@@ -177,7 +177,7 @@ async fn unread_artifact_stream_survives_eviction_of_its_generation() {
     );
 
     let other =
-        service.build(service.inputs("other.resin", "export { main }; fn main() -> int  { 3 }"));
+        service.build(service.inputs("other.resin", "export { main }; fn main() -> i32  { 3 }"));
     let other = tokio::time::timeout(
         Duration::from_secs(30),
         client.post(service.url("/v1/build")).json(&other).send(),
@@ -222,7 +222,7 @@ async fn disconnect_during_native_compilation_reaps_the_real_compiler_process() 
     let service = Service::start(directory, Some(&compiler)).await;
     let request = service.build(service.inputs(
         "cancelled.resin",
-        "export { main }; fn main() -> int  { 7 }",
+        "export { main }; fn main() -> i32  { 7 }",
     ));
     let bytes = serde_json::to_vec(&request).unwrap();
     let mut connection = TcpStream::connect(service.address).await.unwrap();
@@ -287,9 +287,9 @@ async fn disconnect_during_native_compilation_reaps_the_real_compiler_process() 
 async fn specialization_diagnostics_survive_cache_publication_and_http_transport() {
     let service = Service::start(TempDir::new().unwrap(), None).await;
     let source = r#"export { main };
-        struct Cell { value: int }
-        fn get(cell: Ref<Cell>) -> Ref<int> { cell.value }
-        fn address<T>(cell: Ref<T>) -> Ptr<int> { &cell:get() }
+        struct Cell { value: i32 }
+        fn get(cell: Ref<Cell>) -> Ref<i32> { cell.value }
+        fn address<T>(cell: Ref<T>) -> Ptr<i32> { &cell:get() }
         fn main() { let cell = Cell { value = 1 }; address(cell); }
     "#;
     let client = reqwest::Client::new();

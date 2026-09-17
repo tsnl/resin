@@ -7,49 +7,50 @@ import { "span.resin", "shared.resin" };
 
 // Logical bytes exclude the trailing NUL reserved for native string APIs.
 struct String {
-	storage: ArcSpan<ubyte>,
+	storage: ArcSpan<u8>,
 }
 fn string_from_str(text: str) -> String {
-	String { storage = ArcSpan<ubyte> { owner = string_from_bytes(text.data, text.length) } }
+	String { storage = ArcSpan<u8> { owner = string_from_bytes(text.data, text.length) } }
 }
 
-fn string_from_bytes(text: Ref<Span<ubyte>>) -> String {
-	String { storage = ArcSpan<ubyte> { owner = string_from_bytes(text.data, text.length) } }
+fn string_from_bytes(text: Ref<Span<u8>>) -> String {
+	String { storage = ArcSpan<u8> { owner = string_from_bytes(text.data, text.length) } }
 }
 
-fn get(self: Ref<String>) -> Span<ubyte> {
+fn get(self: Ref<String>) -> Span<u8> {
 	self.storage:get()
 }
 
 // A borrowed text view for repr and automatic formatting.
-fn repr_bytes(self: Ref<String>) -> (Ptr<ubyte>, ulong) {
+fn repr_bytes(self: Ref<String>) -> (Ptr<u8>, u64) {
 	self:bytes()
 }
 
 // Explicit transport for formatting tuple arguments.
-fn bytes(self: Ref<String>) -> (Ptr<ubyte>, ulong) {
+fn bytes(self: Ref<String>) -> (Ptr<u8>, u64) {
 	let view = self:get();
 	(view.data, view.length)
 }
 
 fn fmt<A>(format: str, arguments: A) -> String {
-	String { storage = ArcSpan<ubyte> { owner = format_bytes(format.data, format.length, arguments) } }
+	String { storage = ArcSpan<u8> { owner = format_bytes(format.data, format.length, arguments) } }
 }
 
-fn fmt<A>(format: Ref<Span<ubyte>>, arguments: A) -> String {
-	String { storage = ArcSpan<ubyte> { owner = format_bytes(format.data, format.length, arguments) } }
+fn fmt<A>(format: Ref<Span<u8>>, arguments: A) -> String {
+	String { storage = ArcSpan<u8> { owner = format_bytes(format.data, format.length, arguments) } }
 }
 
 fn fmt<A>(format: Ref<String>, arguments: A) -> String {
-	fmt(format:get(), arguments)
+	let view = format:get();
+	fmt(view, arguments)
 }
 
-intrinsic "string_from_bytes" fn string_from_bytes(data: Ptr<ubyte>, length: ulong) -> StrongOwner;
-intrinsic "format_bytes" fn format_bytes<A>(data: Ptr<ubyte>, length: ulong, arguments: A) -> StrongOwner;
+intrinsic "string_from_bytes" fn string_from_bytes(data: Ptr<u8>, length: u64) -> StrongOwner;
+intrinsic "format_bytes" fn format_bytes<A>(data: Ptr<u8>, length: u64, arguments: A) -> StrongOwner;
 
 // An owned, readable representation; strings are quoted and escaped.
 fn repr<T>(value: T) -> String {
-	String { storage = ArcSpan<ubyte> { owner = repr_value(value) } }
+	String { storage = ArcSpan<u8> { owner = repr_value(value) } }
 }
 intrinsic "repr" fn repr_value<T>(value: T) -> StrongOwner;
 

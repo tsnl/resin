@@ -9,7 +9,7 @@ fn compile(source: &str) -> Result<resin_hir::Module, resin_source::SourceError>
 
 #[test]
 fn operation_binders_are_independent_of_struct_binders() {
-    let module = compile("struct Cell<T> { value: T,  }\nfn choose<T, U>(self: Cell<T>, value: U) -> U  { value }\n fn main(cell: Cell<int>) -> ulong  { cell:choose::<_, ulong>(42) }").unwrap();
+    let module = compile("struct Cell<T> { value: T,  }\nfn choose<T, U>(self: Cell<T>, value: U) -> U  { value }\n fn main(cell: Cell<i32>) -> u64  { cell:choose::<_, u64>(42) }").unwrap();
     let owner = module
         .types
         .iter()
@@ -57,7 +57,7 @@ fn operation_binders_are_independent_of_struct_binders() {
 
 #[test]
 fn different_owner_applications_retain_one_polymorphic_method_body() {
-    let module = compile("struct Cell<T> { value: T,  }\nfn read<T>(self: Cell<T>) -> T  { self.value }\n fn small(value: Cell<int>) -> int  { value:read() } fn large(value: Cell<ulong>) -> ulong  { value:read() }").unwrap();
+    let module = compile("struct Cell<T> { value: T,  }\nfn read<T>(self: Cell<T>) -> T  { self.value }\n fn small(value: Cell<i32>) -> i32  { value:read() } fn large(value: Cell<u64>) -> u64  { value:read() }").unwrap();
     let owner = module
         .types
         .iter()
@@ -88,7 +88,7 @@ fn different_owner_applications_retain_one_polymorphic_method_body() {
 
 #[test]
 fn recursive_method_results_complete_against_their_own_rigid_binders() {
-    let module = compile("struct Cell<T> { value: T,  }\nfn choose<T, U>(self: Cell<T>, value: U, stop: bool) -> _  { if (stop) { value } else { self:choose(value, 1 == 1) } }\n fn main() -> int  { Cell<ulong> { value = 7 }:choose(42, 1 == 0) }").unwrap();
+    let module = compile("struct Cell<T> { value: T,  }\nfn choose<T, U>(self: Cell<T>, value: U, stop: bool) -> _  { if (stop) { value } else { self:choose(value, 1 == 1) } }\n fn main() -> i32  { Cell<u64> { value = 7 }:choose(42, 1 == 0) }").unwrap();
     let method = module
         .functions
         .iter()
@@ -134,10 +134,10 @@ fn drop_hooks_bind_only_their_owner_parameters() {
 #[test]
 fn explicit_operation_arguments_match_the_complete_signature() {
     for source in [
-        "struct Cell<T> { value: T,  }\nfn read<T>(self: Cell<T>) -> T  { self.value }\n fn main()  { Cell<int> { value = 1 }:read::<int, int>(); }",
-        "struct Cell<T> { value: T,  }\nfn choose<T, U>(self: Cell<T>, value: U) -> U  { value }\n fn main()  { Cell<int> { value = 1 }:choose::<ulong>(2); }",
-        "struct Cell<T> { value: T,  }\nfn read<T>(self: Cell<T>) -> T  { self.value }\n fn main()  { read::<int>(Cell<uint> { value = 1 }); }",
-        "struct Plain {  }\nfn read(self: Plain) -> int  { 42 }\n fn main()  { Plain {}:read::<int>(); }",
+        "struct Cell<T> { value: T,  }\nfn read<T>(self: Cell<T>) -> T  { self.value }\n fn main()  { Cell<i32> { value = 1 }:read::<i32, i32>(); }",
+        "struct Cell<T> { value: T,  }\nfn choose<T, U>(self: Cell<T>, value: U) -> U  { value }\n fn main()  { Cell<i32> { value = 1 }:choose::<u64>(2); }",
+        "struct Cell<T> { value: T,  }\nfn read<T>(self: Cell<T>) -> T  { self.value }\n fn main()  { read::<i32>(Cell<u32> { value = 1 }); }",
+        "struct Plain {  }\nfn read(self: Plain) -> i32  { 42 }\n fn main()  { Plain {}:read::<i32>(); }",
     ] {
         assert!(compile(source).is_err(), "{source}");
     }
@@ -148,8 +148,8 @@ fn invalid_method_binders_and_destructor_signatures_are_definition_errors() {
     for source in [
         "struct Cell<T> { value: T,  }\nfn choose<T, U, U>(self: Cell<T>, value: U) -> U  { value }\n",
         "struct Cell<T> { value: T,  }\nfn drop<T, U>(self: Ref<Cell<T>>)  {}\n",
-        "struct Cell<T> { value: T,  }\nfn drop<T>(self: Ref<Cell<int>>)  {}\n",
-        "struct Cell<T> { value: T,  }\nfn drop<T>(self: Ref<Cell<T>>) -> int  { 0 }\n",
+        "struct Cell<T> { value: T,  }\nfn drop<T>(self: Ref<Cell<i32>>)  {}\n",
+        "struct Cell<T> { value: T,  }\nfn drop<T>(self: Ref<Cell<T>>) -> i32  { 0 }\n",
         "struct Cell<T> { value: T,  }\nfn choose<T, U>(self: Cell<T>, value: U) -> U  { value }\n fn escaped(value: U)  {}",
     ] {
         assert!(compile(source).is_err(), "{source}");
@@ -195,17 +195,17 @@ fn rejects_local_and_imported_owner(declaration: &str, use_site: &str, expected:
 fn source_drop_hooks_reject_structural_unwrapping_before_and_after_importing() {
     for (declaration, owner) in [
         (
-            "struct Managed { _0: int,  }\nfn drop(self: Ref<Managed>)  {}\n",
+            "struct Managed { _0: i32,  }\nfn drop(self: Ref<Managed>)  {}\n",
             "Managed",
         ),
         (
             "struct Managed<T> { _0: T,  }\nfn drop<T>(self: Ref<Managed<T>>)  {}\n",
-            "Managed<int>",
+            "Managed<i32>",
         ),
     ] {
         rejects_local_and_imported_owner(
             declaration,
-            &format!("type Raw = (int,); fn unwrap(value: {owner}) -> Raw  {{ Raw(value) }}"),
+            &format!("type Raw = (i32,); fn unwrap(value: {owner}) -> Raw  {{ Raw(value) }}"),
             "UnwrapManaged",
         );
     }

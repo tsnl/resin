@@ -29,7 +29,7 @@ fn foreign_header_changes_rebuild_including_nested_dependencies() {
     fs::write(
         &project.input,
         format!(
-            "export {{ main }}; extern {{ \"{}\": {{ fn value () -> int; }} }}; import {{ \"$/string.resin\", \"$/stdio.resin\" }}; fn main() -> ()  {{ print(fmt(\"{{0}}\", (value(),))); }}",
+            "export {{ main }}; extern {{ \"{}\": {{ fn value () -> i32; }} }}; import {{ \"$/string.resin\", \"$/stdio.resin\" }}; fn main() -> ()  {{ let text = fmt(\"{{0}}\", (value(),)); print(text); }}",
             header.display()
         ),
     )
@@ -69,14 +69,14 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
     let helper = project.input.parent().unwrap().join("helper.resin");
     fs::write(
         &helper,
-        "export { pixel }; fn pixel (i: uint) -> uint  { i + uint(1) }",
+        "export { pixel }; fn pixel (i: u32) -> u32  { i + u32(1) }",
     )
     .unwrap();
     fs::write(
         &project.input,
         r#"export { main };
         import { "helper.resin", "$/string.resin", "$/stdio.resin", "$/gpu.resin" };
-        @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { pixel(i) }; }
+        @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { pixel(i) }; }
         fn main() -> (() | Err<_>)  {
             if (0 == 1) {
                 let mut gpu = gpu_new()?;
@@ -112,7 +112,7 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
     assert_eq!(project.calls(), 2);
     fs::write(
         &helper,
-        "export { pixel }; fn pixel (i: uint) -> uint  { i + uint(2) }",
+        "export { pixel }; fn pixel (i: u32) -> u32  { i + u32(2) }",
     )
     .unwrap();
     printed(&run(), b"true");
@@ -120,7 +120,7 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
     assert_eq!(project.calls(), 3);
     fs::write(
         &helper,
-        "export { pixel }; fn pixel (i: uint) -> uint  { i / uint(2) }",
+        "export { pixel }; fn pixel (i: u32) -> u32  { i / u32(2) }",
     )
     .unwrap();
     let output = run();
@@ -377,8 +377,8 @@ fn removed_shaders_disappear_from_the_cached_project() {
         &project.input,
         r#"export { main };
         import { "$/gpu.resin" };
-        @compute_shader fn kernel(index: ulong, output: Ptr<uint>)  {
-            output.* = uint(index);
+        @compute_shader fn kernel(index: u64, output: Ptr<u32>)  {
+            output.* = u32(index);
         }
         fn main() -> (() | Err<_>)  {
             if (0 == 1) { let gpu = gpu_new()?; gpu:create_compute_pipeline(kernel)?; };
@@ -592,8 +592,8 @@ fn all_spirv_is_generated_before_shader_or_c_compilers_run() {
         &project.input,
         r#"export { main };
         import { "$/gpu.resin" };
-        @compute_shader fn good(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { i + 1_ui }; }
-        @compute_shader fn bad(invocation: ulong, output: Ptr<uint>)  { let mut i = uint(invocation); output.* = { i / 2_ui }; }
+        @compute_shader fn good(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { i + u32(1) }; }
+        @compute_shader fn bad(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { i / u32(2) }; }
         fn main() -> (() | Err<_>)  {
             if (0 == 1) {
                 let mut gpu = gpu_new()?;

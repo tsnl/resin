@@ -780,14 +780,14 @@ mod tests {
             )
             .unwrap();
             std::os::unix::fs::symlink(&library, &alias).unwrap();
-            let supplied = "export { answer }; fn answer() -> int  { 7 }";
+            let supplied = "export { answer }; fn answer() -> i32  { 7 }";
             let canonical = document(&library, 1, 1, supplied);
             let aliased = document(&alias, 2, 1, supplied);
             let entry = document(
                 &main,
                 3,
                 1,
-                "import { \"lib.resin\" }; fn main() -> int  { answer() }",
+                "import { \"lib.resin\" }; fn main() -> i32  { answer() }",
             );
             let registered = register_editor(
                 empty(temp.path()),

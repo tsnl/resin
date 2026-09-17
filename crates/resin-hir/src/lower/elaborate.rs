@@ -124,12 +124,7 @@ impl Completion<'_> {
         }
         .clone();
         if matches!(target, crate::Type::Reference { .. }) {
-            if !reference_place(&term) {
-                return Err(GenerateError::inference(
-                    term.span,
-                    "reference binding requires an initialized place, not a temporary value",
-                ));
-            }
+            require_reference_place(&term)?;
         } else if !value_type.copies_implicitly() && reference_place(&term) {
             let span = term.span;
             let ty = term.ty.clone();
@@ -223,22 +218,6 @@ impl Completion<'_> {
             ty: self.solver.require_complete(&source.actual, source.span)?,
             kind: self.elaborate_kind(source)?,
         };
-        if let crate::Type::Reference { referent } = &target
-            && !reference_place(&term)
-        {
-            let value = self.consume(term, *referent.clone())?;
-            // Only argument passing materializes temporaries. Reference bindings
-            // and results still require a place; storage lowering owns this value
-            // until the enclosing full expression finishes.
-            return Ok(Term {
-                span: source.span,
-                ty: target,
-                kind: TermKind::Adapt {
-                    conversion: crate::ReceiverConversion::Borrow,
-                    arg: Box::new(value),
-                },
-            });
-        }
         self.consume(term, target)
     }
 
@@ -983,6 +962,7 @@ impl Completion<'_> {
             let base = if conversion == ReceiverConversion::Borrow {
                 let place = self.place(func)?;
                 self.require_available(&place)?;
+                require_reference_place(&place)?;
                 place
             } else {
                 self.boxed(func)?
@@ -1285,6 +1265,17 @@ fn constant_place(term: &typed::Term) -> bool {
         typed::TermKind::Constant { .. } => true,
         typed::TermKind::Field { base, .. } => constant_place(base),
         _ => false,
+    }
+}
+
+fn require_reference_place(term: &Term) -> Result<()> {
+    if reference_place(term) {
+        Ok(())
+    } else {
+        Err(GenerateError::inference(
+            term.span,
+            "reference binding requires an initialized place; bind the temporary to a local first",
+        ))
     }
 }
 

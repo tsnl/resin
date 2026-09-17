@@ -13,7 +13,7 @@ fn empty_header_groups_remain_native_dependencies() {
     )
     .unwrap();
     let source = format!(
-        "export {{ main }}; extern {{ {:?}: {{}} }}; fn main() -> int  {{ 42 }}",
+        "export {{ main }}; extern {{ {:?}: {{}} }}; fn main() -> i32  {{ 42 }}",
         header.to_string_lossy().replace('\\', "/")
     );
     let module = support::module(&source);
@@ -41,7 +41,7 @@ fn foreign_signatures_use_imported_types_and_keep_module_visibility() {
     .unwrap();
     fs::write(
         directory.path().join("types.resin"),
-        "export { CInt }; type CInt = int;",
+        "export { CInt }; type CInt = i32;",
     )
     .unwrap();
     fs::write(
@@ -50,7 +50,7 @@ fn foreign_signatures_use_imported_types_and_keep_module_visibility() {
             r#"export {{ call }};
             extern {{ {:?}: {{ fn answer(value: CInt) -> CInt; }}, }};
             import {{ "types.resin" }};
-            fn call() -> int  {{ answer(35) }}
+            fn call() -> i32  {{ answer(35) }}
             "#,
             header.to_string_lossy().replace('\\', "/")
         ),
@@ -59,7 +59,7 @@ fn foreign_signatures_use_imported_types_and_keep_module_visibility() {
     let entry = directory.path().join("main.resin");
     fs::write(
         &entry,
-        "export { main }; import { \"api.resin\" }; fn main() -> int  { call() }",
+        "export { main }; import { \"api.resin\" }; fn main() -> i32  { call() }",
     )
     .unwrap();
     let module = support::pipeline::file_module(&entry).unwrap();
@@ -70,7 +70,7 @@ fn foreign_signatures_use_imported_types_and_keep_module_visibility() {
 
     fs::write(
         &entry,
-        "export { main }; import { \"api.resin\" }; fn main() -> int  { answer(35) }",
+        "export { main }; import { \"api.resin\" }; fn main() -> i32  { answer(35) }",
     )
     .unwrap();
     let error = support::pipeline::file_module(&entry).unwrap_err();

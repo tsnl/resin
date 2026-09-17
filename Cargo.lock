@@ -1225,7 +1225,6 @@ version = "0.1.0"
 dependencies = [
  "resin-executor",
  "resin-source",
- "resin-types",
  "tokio",
  "tree-sitter",
  "tree-sitter-resin",

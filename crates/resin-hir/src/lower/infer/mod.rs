@@ -510,16 +510,11 @@ impl Solver {
     }
 
     pub fn number(&mut self, text: &str) -> Type {
-        if let (_, Some(ty)) = resin_types::literal::split(text) {
-            return ty.into();
-        }
-        self.variable(
-            if resin_types::literal::unsuffixed_type(text).is_integer() {
-                Class::Number
-            } else {
-                Class::Float
-            },
-        )
+        self.variable(if resin_types::literal::default_type(text).is_integer() {
+            Class::Number
+        } else {
+            Class::Float
+        })
         .ty()
     }
 

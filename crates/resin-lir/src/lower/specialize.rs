@@ -235,7 +235,7 @@ impl Specialization<'_, '_> {
             values: source
                 .values
                 .iter()
-                .map(|arg| self.call_argument(arg))
+                .map(|arg| self.term(arg))
                 .collect::<Result<_, _>>()?,
             params: source
                 .params
@@ -612,31 +612,11 @@ impl Specialization<'_, '_> {
             .iter()
             .zip(params)
             .map(|(source, param)| {
-                let value = self.call_argument(source)?;
+                let value = self.term(source)?;
                 self.require_assignable(&value.ty, param)?;
                 Ok(value)
             })
             .collect()
-    }
-
-    fn call_argument(&mut self, source: &resin_hir::Term) -> Result<concrete::Term, Error> {
-        // Dependent overload parameters can become references only after
-        // specialization. Apply the same temporary materialization as HIR's
-        // argument completion, without extending local reference bindings.
-        if let resin_hir::TermKind::Use { arg } = &source.kind
-            && let resin_hir::Type::Reference { referent } = self.argument(&source.ty)?
-            && self.argument(&arg.ty)? == *referent
-        {
-            return Ok(concrete::Term {
-                span: source.span,
-                ty: self.ty(&source.ty)?,
-                kind: concrete::TermKind::Adapt {
-                    conversion: concrete::ReceiverConversion::Borrow,
-                    arg: self.place(arg)?,
-                },
-            });
-        }
-        self.term(source)
     }
 
     fn record(
@@ -714,7 +694,7 @@ impl Specialization<'_, '_> {
             return Err(self.instance_error("method receiver does not match the first parameter"));
         };
         let argument = if conversion == ReceiverConversion::Borrow {
-            self.place(source)?
+            self.reference_place(source)?
         } else {
             self.boxed(source)?
         };
@@ -772,6 +752,16 @@ impl Specialization<'_, '_> {
         })
     }
 
+    fn reference_place(&mut self, source: &resin_hir::Term) -> Result<Box<concrete::Term>, Error> {
+        let place = self.place(source)?;
+        if !reference_place(&place) {
+            return Err(self.instance_error(
+                "reference binding requires an initialized place; bind the temporary to a local first",
+            ));
+        }
+        Ok(place)
+    }
+
     fn reference_use(
         &mut self,
         source: &resin_hir::Term,
@@ -793,12 +783,7 @@ impl Specialization<'_, '_> {
             if &from != referent.as_ref() {
                 return Err(self.instance_error("reference referent types must match exactly"));
             }
-            let place = self.place(source)?;
-            if !reference_place(&place) {
-                return Err(self.instance_error(
-                    "reference binding requires an initialized place, not a temporary value",
-                ));
-            }
+            let place = self.reference_place(source)?;
             return Ok(concrete::TermKind::Borrow { place });
         }
         let value = if let resin_hir::Type::Reference { referent } = from {
@@ -1133,7 +1118,7 @@ impl Specialization<'_, '_> {
             resin_hir::TermKind::Adapt { conversion, arg } => concrete::TermKind::Adapt {
                 conversion: self.receiver(*conversion),
                 arg: if *conversion == resin_hir::ReceiverConversion::Borrow {
-                    self.place(arg)?
+                    self.reference_place(arg)?
                 } else {
                     self.boxed(arg)?
                 },

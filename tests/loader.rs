@@ -13,12 +13,12 @@ fn unchanged_roots_follow_retargeted_import_symlinks_without_notifications() {
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
     fs::write(
         directory.path().join("first.resin"),
-        "export { answer }; fn answer() -> int  { 41 }",
+        "export { answer }; fn answer() -> i32  { 41 }",
     )
     .unwrap();
     fs::write(
         directory.path().join("second.resin"),
-        "export { answer }; fn answer() -> long  { 42 }",
+        "export { answer }; fn answer() -> i64  { 42 }",
     )
     .unwrap();
     let alias = directory.path().join("alias.resin");
@@ -58,14 +58,14 @@ fn unchanged_roots_retry_missing_transitive_imports_without_notifications() {
     let directory = TempDir::new_in(std::env::temp_dir()).unwrap();
     fs::write(
         directory.path().join("middle.resin"),
-        "export { answer }; import { \"leaf.resin\" }; fn answer() -> int  { leaf() }",
+        "export { answer }; import { \"leaf.resin\" }; fn answer() -> i32  { leaf() }",
     )
     .unwrap();
     let mut loader = Loader::new(directory.path().into());
     let source = loader
         .source_from_text(
             &directory.path().join("root.resin"),
-            "import { \"middle.resin\" }; fn value() -> int  { answer() }",
+            "import { \"middle.resin\" }; fn value() -> i32  { answer() }",
         )
         .unwrap();
     let missing = support::frontend::analyze(source.clone(), &mut loader, None);
@@ -77,7 +77,7 @@ fn unchanged_roots_retry_missing_transitive_imports_without_notifications() {
             .any(|diagnostic| diagnostic.message.contains("leaf.resin"))
     );
     let leaf = directory.path().join("leaf.resin");
-    fs::write(&leaf, "export { leaf }; fn leaf() -> int  { 42 }").unwrap();
+    fs::write(&leaf, "export { leaf }; fn leaf() -> i32  { 42 }").unwrap();
     let repaired = support::frontend::analyze(source.clone(), &mut loader, Some(&missing));
     assert!(
         repaired.diagnostics().is_empty(),
@@ -103,7 +103,7 @@ fn custom_library_root_edits_recompile_an_unchanged_entry() {
     let library_root = directory.path().join("custom-library");
     fs::create_dir(&library_root).unwrap();
     let library = library_root.join("math.resin");
-    fs::write(&library, "export { answer }; fn answer() -> int  { 41 }").unwrap();
+    fs::write(&library, "export { answer }; fn answer() -> i32  { 41 }").unwrap();
     let mut loader = Loader::new(library_root);
     let source = loader
         .source_from_text(
@@ -117,7 +117,7 @@ fn custom_library_root_edits_recompile_an_unchanged_entry() {
         "{:?}",
         before.diagnostics()
     );
-    fs::write(&library, "export { answer }; fn answer() -> long  { 42 }").unwrap();
+    fs::write(&library, "export { answer }; fn answer() -> i64  { 42 }").unwrap();
     let after = support::frontend::analyze(source, &mut loader, Some(&before));
     assert!(after.diagnostics().is_empty(), "{:?}", after.diagnostics());
     assert_eq!(before.source(), after.source());

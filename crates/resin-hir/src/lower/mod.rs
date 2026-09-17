@@ -715,7 +715,7 @@ impl Generator {
         {
             return Err(GenerateError::inference(
                 name.span,
-                "@gpu_allocator requires (self, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | Err<E>)",
+                "@gpu_allocator requires (self, bytes: u64, alignment: u64, memory: i32) -> (GpuView | Err<E>)",
             ));
         }
         if self.typer.gpu_allocators.insert(owner, function).is_some() {
@@ -1256,10 +1256,10 @@ mod extern_tests {
             r#"extern { "native.h": {
                 fn handle(value: Ptr<Handle>) -> Ptr<Handle>;
                 fn scalar(value: Scalar) -> Scalar;
-                fn cell(value: Ptr<Cell<int>>) -> Ptr<Cell<int>>;
+                fn cell(value: Ptr<Cell<i32>>) -> Ptr<Cell<i32>>;
             } };
             extern type Handle;
-            type Scalar = int;
+            type Scalar = i32;
             struct Cell<T> { value: T, }
         "#,
         );

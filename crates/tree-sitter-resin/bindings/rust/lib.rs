@@ -67,7 +67,7 @@ mod tests {
             "struct Point<T> { x: T y: T }",
             "struct Point<T> { x: T,, y: T }",
             "struct Point<T> { x = T, y = T }",
-            "struct Point { fn get() -> int { 0 } }",
+            "struct Point { fn get() -> i32 { 0 } }",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
         }
@@ -76,15 +76,15 @@ mod tests {
     #[test]
     fn records_require_named_structs() {
         for source in [
-            "type Point = { x: int, y: int };",
+            "type Point = { x: i32, y: i32 };",
             "fn value()  { let mut point = { x = 1, y = 2 }; }",
-            "fn value(point: { x: int })  {}",
+            "fn value(point: { x: i32 })  {}",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
         }
         for source in [
-            "struct Point { x: int, y: int, } fn value() -> Point  { Point { x = 1, y = 2 } }",
-            "fn pair() -> (int, bool)  { (1, true) }",
+            "struct Point { x: i32, y: i32, } fn value() -> Point  { Point { x = 1, y = 2 } }",
+            "fn pair() -> (i32, bool)  { (1, true) }",
             "fn empty() -> ()  {}",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
@@ -98,16 +98,15 @@ mod tests {
     }
 
     #[test]
-    fn numeric_suffixes_require_valid_widths_and_unsigned_qualifiers() {
+    fn numeric_literals_reject_suffixes() {
         for literal in [
-            "1u", "1_u", "1uf", "1_UD", "1_u_i", "1lu", "1_uuL", "0xffuf",
+            "1u", "1_u", "1uf", "1_UD", "1_u_i", "1lu", "1_uuL", "0xffuf", "1B", "1uB", "1_UB",
+            "1Uh", "1_UI", "1_uL", "1F", "1_D", "0xff_UB", "42_i32", "42_u64", "1.0_f32", "1f64",
         ] {
             let source = format!("fn main()  {{ let mut n = {literal}; }}");
             assert!(parse(&source).root_node().has_error(), "{literal}");
         }
-        for literal in [
-            "1B", "1uB", "1_UB", "1Uh", "1_UI", "1_uL", "1F", "1_D", "0x7f_b", "0xff_UB",
-        ] {
+        for literal in ["1", "1_000", "1.25", "1e3", "1.0E-2", "0x7f_b", "0xff_AB"] {
             let source = format!("fn main()  {{ let mut n = {literal}; }}");
             assert!(!parse(&source).root_node().has_error(), "{literal}");
         }
@@ -116,9 +115,9 @@ mod tests {
     #[test]
     fn parses_unit_and_tuple_function_types() {
         for source in [
-            "type F = () -> int; fn f () -> int  { 1 } fn main() -> ()  { let mut x = f(); }",
-            "type F = (int, int) -> int; fn f (a: int, b: int) -> int  { a + b } fn main() -> ()  { let mut x = f(1, 2); }",
-            "type F = ((int, int), ()) -> ();",
+            "type F = () -> i32; fn f () -> i32  { 1 } fn main() -> ()  { let mut x = f(); }",
+            "type F = (i32, i32) -> i32; fn f (a: i32, b: i32) -> i32  { a + b } fn main() -> ()  { let mut x = f(1, 2); }",
+            "type F = ((i32, i32), ()) -> ();",
             "type Unit = (); fn main() -> ()  { let mut x = Unit(()); }",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
@@ -134,12 +133,12 @@ mod tests {
     #[test]
     fn records_accept_only_value_members() {
         assert!(
-            parse("fn main() -> ()  { let mut x = Item { T = int }; }")
+            parse("fn main() -> ()  { let mut x = Item { T = i32 }; }")
                 .root_node()
                 .has_error()
         );
         assert!(
-            parse("fn main() -> ()  { let mut x = Item { a = 1, T = int }; }")
+            parse("fn main() -> ()  { let mut x = Item { a = 1, T = i32 }; }")
                 .root_node()
                 .has_error()
         );
@@ -149,7 +148,7 @@ mod tests {
                 .has_error()
         );
         assert!(
-            !parse("fn main() -> ()  { let mut x = { type T = int; T(1) }; }")
+            !parse("fn main() -> ()  { let mut x = { type T = i32; T(1) }; }")
                 .root_node()
                 .has_error()
         );
@@ -176,19 +175,19 @@ mod tests {
     #[test]
     fn parses_module_items_and_address_of() {
         for source in [
-            "export { Gpu, create }; extern { \"runtime.h\": { fn create (gpu: Ptr<Ptr<Gpu>>) -> int; } }; import { \"runtime.resin\" }; extern type Gpu;",
-            "fn empty () -> ()  {} fn identity (n: int) -> int  { n }",
+            "export { Gpu, create }; extern { \"runtime.h\": { fn create (gpu: Ptr<Ptr<Gpu>>) -> i32; } }; import { \"runtime.resin\" }; extern type Gpu;",
+            "fn empty () -> ()  {} fn identity (n: i32) -> i32  { n }",
             "fn main () -> ()  { let mut n = 0; let mut p = &n; p.* = 1; }",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
         for source in [
-            "fn main() -> ()  { let mut f = (n: int) => n; }",
-            "fn outer () -> int = { fn inner() -> int  { 1 } inner() };",
+            "fn main() -> ()  { let mut f = (n: i32) => n; }",
+            "fn outer () -> i32 = { fn inner() -> i32  { 1 } inner() };",
             "fn f (n)  { n }",
-            "fn f (n: int) -> int { n };",
-            "fn f (n: int): int  { n }",
-            "def f(n: int) -> int = { n };",
+            "fn f (n: i32) -> i32 { n };",
+            "fn f (n: i32): i32  { n }",
+            "def f(n: i32) -> i32 = { n };",
             "fn f () -> ()  { include \"runtime.resin\"; }",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
@@ -209,8 +208,8 @@ mod tests {
             "export {}; export {};",
             "import {}; import {};",
             "import {}; export {};",
-            "fn x() -> int  { 1 } export { x };",
-            "fn x() -> int  { 1 } import {};",
+            "fn x() -> i32  { 1 } export { x };",
+            "fn x() -> i32  { 1 } import {};",
             "export { \"f\" };",
             "import { foo };",
             "export { f f };",
@@ -229,7 +228,7 @@ mod tests {
     fn source_files_only_contain_declarations() {
         for statement in [
             "let x = 1;",
-            "let mut x: int;",
+            "let mut x: i32;",
             "x = 2;",
             "f();",
             "();",
@@ -240,7 +239,7 @@ mod tests {
             assert!(!parse(&body).root_node().has_error(), "{body}");
         }
         assert!(
-            !parse("export { main, demo }; type Item = int; fn main() -> ()  {} fn demo() -> int  { 42 }")
+            !parse("export { main, demo }; type Item = i32; fn main() -> ()  {} fn demo() -> i32  { 42 }")
                 .root_node()
                 .has_error()
         );
@@ -250,14 +249,13 @@ mod tests {
     fn keywords_are_reserved_but_intrinsics_remain_identifiers() {
         for keyword in [
             "export", "import", "extern", "type", "fn", "let", "mut", "if", "else", "while",
-            "bool", "sbyte", "short", "int", "long", "ubyte", "ushort", "uint", "ulong", "float32",
-            "float64",
+            "bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64",
         ] {
             for source in [
                 format!("fn main() -> ()  {{ let mut {keyword} = 1; }}"),
                 format!("fn {keyword} () -> ()  {{}}"),
-                format!("fn f ({keyword}: int) -> ()  {{}}"),
-                format!("struct R {{ {keyword}: int }}"),
+                format!("fn f ({keyword}: i32) -> ()  {{}}"),
+                format!("struct R {{ {keyword}: i32 }}"),
                 format!("fn main() -> ()  {{ let mut r = R {{ {keyword} = 1 }}; }}"),
                 format!("fn main() -> ()  {{ r.{keyword}; }}"),
                 format!("export {{ {keyword} }};"),
@@ -287,12 +285,12 @@ mod tests {
                 assert!(parse(&source).root_node().has_error(), "{source}");
             }
             let source =
-                format!("type {name}Value = int; fn main() -> ()  {{ type _{name} = int; }}");
+                format!("type {name}Value = i32; fn main() -> ()  {{ type _{name} = i32; }}");
             assert!(!parse(&source).root_node().has_error(), "{source}");
         }
         for source in [
             "fn main() -> ()  { let mut print = 1; let mut shader = 2; }",
-            "fn print (n: int) -> int  { n } fn shader () -> ()  {}",
+            "fn print (n: i32) -> i32  { n } fn shader () -> ()  {}",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
@@ -301,30 +299,30 @@ mod tests {
     #[test]
     fn type_formers_use_angle_brackets_without_conflicting_with_operators() {
         for source in [
-            "type P = Ptr<int>; type Pp = Ptr<Ptr<int>>; type S = Span<Ptr<int>>;",
-            "struct Span<T> { data: Ptr<T>, length: ulong, } struct ArcPtr<T> { owner: StrongOwner, } type GpuSpan<T> = Span<T>;",
-            "type P = GpuSpan<int, int>;",
-            "struct FieldsX<T0> { x: T0, }\ntype G = GpuPtr<int>; type S = GpuSpan<FieldsX<uint>>; type Nested = Ptr<GpuSpan<GpuPtr<int>>>;",
+            "type P = Ptr<i32>; type Pp = Ptr<Ptr<i32>>; type S = Span<Ptr<i32>>;",
+            "struct Span<T> { data: Ptr<T>, length: u64, } struct ArcPtr<T> { owner: StrongOwner, } type GpuSpan<T> = Span<T>;",
+            "type P = GpuSpan<i32, i32>;",
+            "struct FieldsX<T0> { x: T0, }\ntype G = GpuPtr<i32>; type S = GpuSpan<FieldsX<u32>>; type Nested = Ptr<GpuSpan<GpuPtr<i32>>>;",
             "fn launch(args: GpuArguments) -> GpuArguments  { args }",
-            "fn first(p: GpuSpan<int>) -> GpuPtr<int>  { p:at(0_ul) } fn make() -> GpuPtr<_>  { gpu:create::<int>(3_i) }",
-            "struct FieldsX<T0> { x: T0, }\ntype P = Ptr<()>; type S = Span<(int, int)>; type R = Ptr<FieldsX<int>>; type F = Ptr<(int) -> int>;",
-            "fn main() -> ()  { let mut p = Ptr<int>(ulong(0)); let mut x = ulong(p) > ulong(0); let mut y = 8 >> 1; let mut z = 1 < 2; }",
-            "fn main() -> ()  { let mut p = Ptr < Ptr < int > >(ulong(0)); }",
-            "fn fibonacci(n: int) -> int  { n } fn main() -> ()  { let mut x = fibonacci(2); let mut y = fibonacci(3); }",
+            "fn first(p: GpuSpan<i32>) -> GpuPtr<i32>  { p:at(u64(0)) } fn make() -> GpuPtr<_>  { gpu:create::<i32>(i32(3)) }",
+            "struct FieldsX<T0> { x: T0, }\ntype P = Ptr<()>; type S = Span<(i32, i32)>; type R = Ptr<FieldsX<i32>>; type F = Ptr<(i32) -> i32>;",
+            "fn main() -> ()  { let mut p = Ptr<i32>(u64(0)); let mut x = u64(p) > u64(0); let mut y = 8 >> 1; let mut z = 1 < 2; }",
+            "fn main() -> ()  { let mut p = Ptr < Ptr < i32 > >(u64(0)); }",
+            "fn fibonacci(n: i32) -> i32  { n } fn main() -> ()  { let mut x = fibonacci(2); let mut y = fibonacci(3); }",
             "fn main() -> ()  { let mut x = Name { value = 1 }; let mut y = Converter([1, 2]); }",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
         for source in [
-            "type P = Ptr(int);",
-            "type P = Span (int);",
-            "type P = Ptr int;",
+            "type P = Ptr(i32);",
+            "type P = Span (i32);",
+            "type P = Ptr i32;",
             "type P = Ptr<1>;",
             "type P = Ptr<>;",
-            "type P = Ptr<int, int>;",
-            "type P = Ptr<Ptr<int>;",
+            "type P = Ptr<i32, i32>;",
+            "type P = Ptr<Ptr<i32>;",
             "type P = GpuPtr<>;",
-            "type P = GpuPtr(int);",
+            "type P = GpuPtr(i32);",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
         }
@@ -333,32 +331,32 @@ mod tests {
     #[test]
     fn definition_keywords_belong_to_statements_not_fields_or_parameters() {
         for source in [
-            "struct FieldsXY<T0, T1> { x: T0, y: T1, }\ntype Point = FieldsXY<int, int>; fn make(x: int) -> Point  { let mut y: int; y = x + 1; Point { x = x, y = y } }",
+            "struct FieldsXY<T0, T1> { x: T0, y: T1, }\ntype Point = FieldsXY<i32, i32>; fn make(x: i32) -> Point  { let mut y: i32; y = x + 1; Point { x = x, y = y } }",
             "struct FieldsAB<T0, T1> { a: T0, b: T1, }\nstruct FieldsC<T0> { c: T0, }\nfn main() -> ()  { let mut record = FieldsAB<_, _> { a = { let mut x = 1; x }, b = FieldsC<_> { c = 2 } }; }",
-            "fn main() -> ()  { type T = int; let mut x = T(1); let mut callback = main; }",
-            "extern { \"stdlib.h\": { fn abs(n: int) -> int; } };",
+            "fn main() -> ()  { type T = i32; let mut x = T(1); let mut callback = main; }",
+            "extern { \"stdlib.h\": { fn abs(n: i32) -> i32; } };",
             "fn/* comment */main() -> ()  { let mut/* comment */n = 1; }",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
         for source in [
             "main() -> () = {};",
-            "Point = { x: int };",
-            "var Point = { x: int };",
-            "fn Point = { x: int };",
-            "type point = int;",
-            "fn main() -> ()  { x: int; }",
-            "fn main() -> ()  { let mut T = int; }",
-            "fn main() -> ()  { fn T = int; }",
+            "Point = { x: i32 };",
+            "var Point = { x: i32 };",
+            "fn Point = { x: i32 };",
+            "type point = i32;",
+            "fn main() -> ()  { x: i32; }",
+            "fn main() -> ()  { let mut T = i32; }",
+            "fn main() -> ()  { fn T = i32; }",
             "fn main() -> ()  { type x = 1; }",
             "fn main() -> ()  { let mut x := 1; }",
             "fn main() -> ()  { fn x = 1; }",
             "var main() -> () = {};",
-            "fn f(let mut x: int) -> int  { x }",
-            "type R = { let mut x: int };",
+            "fn f(let mut x: i32) -> i32  { x }",
+            "type R = { let mut x: i32 };",
             "fn main() -> ()  { let mut r = Item { let mut x = 1 }; }",
             "fn main() -> ()  { let mut r = { x = 1, let mut y = 2 }; }",
-            "extern { \"stdlib.h\": { abs(n: int) -> int; } };",
+            "extern { \"stdlib.h\": { abs(n: i32) -> i32; } };",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
         }
@@ -368,19 +366,19 @@ mod tests {
     fn function_results_can_be_omitted_but_not_incomplete() {
         for source in [
             "fn empty()  {} fn explicit() -> ()  { () }",
-            "fn greet(n: int)  { print(\"{0}\", (n,)); }",
-            "fn f(n: int)  { n }",
-            "extern { \"stdlib.h\": { fn free(p: Ptr<ubyte>); } };",
+            "fn greet(n: i32)  { print(\"{0}\", (n,)); }",
+            "fn f(n: i32)  { n }",
+            "extern { \"stdlib.h\": { fn free(p: Ptr<u8>); } };",
             "fn apply(f: () -> ())  { f() }",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
         for source in [
             "fn empty() ->  {}",
-            "extern { \"stdlib.h\": { fn free(p: Ptr<ubyte>) ->; } };",
+            "extern { \"stdlib.h\": { fn free(p: Ptr<u8>) ->; } };",
             "fn empty() {};",
             "def empty() = {};",
-            "type Callback = (int) ->;",
+            "type Callback = (i32) ->;",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
         }

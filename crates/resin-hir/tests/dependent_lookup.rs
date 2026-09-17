@@ -21,7 +21,7 @@ fn value(mut term: &Term) -> &Term {
 #[test]
 fn dependent_operations_retain_visible_candidates_and_determining_result() {
     let module = hir_module(
-        "struct A {} struct B {} fn read(value: Ref<A>) -> int { 1 } fn read(value: Ref<B>) -> bool { true } fn relay<T>(value: T) -> _ { value:read() }",
+        "struct A {} struct B {} fn read(value: Ref<A>) -> i32 { 1 } fn read(value: Ref<B>) -> bool { true } fn relay<T>(value: T) -> _ { value:read() }",
     )
     .unwrap();
     let relay = &module.functions[2];
@@ -53,14 +53,7 @@ fn dependent_operations_retain_visible_candidates_and_determining_result() {
 #[test]
 fn dependent_fields_and_operation_results_compose() {
     let module = hir_module(
-        "struct A { item: int } struct B { item: bool }
-         fn read(value: Ref<A>) -> B { B { item = true } }
-         fn read(value: Ref<B>) -> A { A { item = 1 } }
-         fn next(value: Ref<A>) -> int { value.item }
-         fn next(value: Ref<B>) -> bool { value.item }
-         fn field_operation<T>(value: T) -> _ { value.item:read() }
-         fn operation_field<T>(value: T) -> _ { value:read().item }
-         fn operation_operation<T>(value: T) -> _ { value:read():next() }",
+        "struct A { item: i32 } struct B { item: bool }\n         fn read(value: Ref<A>) -> B { B { item = true } }\n         fn read(value: Ref<B>) -> A { A { item = 1 } }\n         fn next(value: Ref<A>) -> i32 { value.item }\n         fn next(value: Ref<B>) -> bool { value.item }\n         fn field_operation<T>(value: T) -> _ { value.item:read() }\n         fn operation_field<T>(value: T) -> _ { value:read().item }\n         fn operation_operation<T>(value: T) -> _ { value:read():next() }",
     )
     .unwrap();
     assert!(matches!(

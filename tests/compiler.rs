@@ -39,7 +39,7 @@ fn compilation_uses_supplied_source_versions_and_explicit_profiles() {
         .variables
         .insert("SPIRV_OPT".into(), "/missing/spirv-opt".into());
     let path = temp.path().join("main.resin");
-    fs::write(&path, "export { main }; fn main() -> int  { 1 }").unwrap();
+    fs::write(&path, "export { main }; fn main() -> i32  { 1 }").unwrap();
     let mut loader =
         Loader::new(environment.path("RESIN_LIBRARY_ROOT", resin_source::library_root()));
     let mut previous = None;
@@ -52,7 +52,7 @@ fn compilation_uses_supplied_source_versions_and_explicit_profiles() {
         ),
         (CProfile::Release, None, 43, "release"),
     ] {
-        let source = loader.source_from_text(&path, format!("export {{ main }};\nimport {{ \"$/shared.resin\" }};\n @compute_shader fn kernel(invocation: ulong, output: Ptr<uint>)  {{ let mut i = uint(invocation); output.* = i; }} fn main() -> int | Err<_> {{ let output_owner = arc_ptr_alloc(0_ui)?; let output: Ref<_> = output_owner:get().*; kernel({code}_ul, output_owner:get()); if (output == {code}_ui) {{ {code} }} else {{ 0 }} }}")).unwrap();
+        let source = loader.source_from_text(&path, format!("export {{ main }};\nimport {{ \"$/shared.resin\" }};\n @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  {{ let mut i = u32(invocation); output.* = i; }} fn main() -> i32 | Err<_> {{ let output_owner = arc_ptr_alloc(u32(0))?; let output: Ref<_> = output_owner:get().*; kernel({code}, output_owner:get()); if (output == {code}) {{ {code} }} else {{ 0 }} }}")).unwrap();
         let compilation =
             support::frontend::analyze(source.clone(), &mut loader, previous.as_ref());
         let artifact = build(&compilation, &environment, profile);
@@ -80,7 +80,7 @@ fn compilation_uses_supplied_source_versions_and_explicit_profiles() {
     assert!(!environment.directory.join("build/shaders").exists());
     assert_eq!(
         fs::read_to_string(path).unwrap(),
-        "export { main }; fn main() -> int  { 1 }"
+        "export { main }; fn main() -> i32  { 1 }"
     );
 }
 
@@ -91,9 +91,9 @@ fn retained_compilations_build_their_own_source_version_after_later_edits() {
     environment.directory = temp.path().into();
     let mut loader = Loader::new(resin_source::library_root());
     let path = temp.path().join("main.resin");
-    fs::write(&path, "export { main }; fn main() -> int  { 41 }").unwrap();
+    fs::write(&path, "export { main }; fn main() -> i32  { 41 }").unwrap();
     let first = support::frontend::analyze(loader.load_file(&path).unwrap(), &mut loader, None);
-    fs::write(&path, "export { main }; fn main() -> int  { 42 }").unwrap();
+    fs::write(&path, "export { main }; fn main() -> i32  { 42 }").unwrap();
     let second =
         support::frontend::analyze(loader.load_file(&path).unwrap(), &mut loader, Some(&first));
     assert_eq!(first.source().id(), second.source().id());

@@ -1,10 +1,10 @@
 ==================
 Structs, aliases, unions, and Err wrappers
 ==================
-struct SomeInt { value: int, }
+struct SomeInt { value: i32, }
 struct NoneInt {}
 type OptionInt = SomeInt | NoneInt;
-fn read(value: (int | Err<NoneInt>)) -> (int | Err<_>)  {
+fn read(value: (i32 | Err<NoneInt>)) -> (i32 | Err<_>)  {
     let mut n = value?;
     (n)
 }
@@ -116,9 +116,9 @@ fn read(value: (int | Err<NoneInt>)) -> (int | Err<_>)  {
 ==================
 Match arms and chained propagation
 ==================
-fn nested(value: ((int | Err<Never>) | Err<Never>)) -> (int | Err<Never>)  {
+fn nested(value: ((i32 | Err<Never>) | Err<Never>)) -> (i32 | Err<Never>)  {
     match (value) {
-        int(inner) => { (inner?) },
+        i32(inner) => { (inner?) },
         Err(error) => { Err(error) },
     }
 }

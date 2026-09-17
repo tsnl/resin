@@ -21,18 +21,18 @@ fn constants_and_iota_execute_with_explicit_initializers_and_fixed_types() {
         result(
             r#"export { main };
         const (
-            first, second: uint = 1 << iota, 2 << iota;
+            first, second: u32 = 1 << iota, 2 << iota;
             _, _ = iota, iota;
-            third, fourth: uint = 1 << iota, 2 << iota;
+            third, fourth: u32 = 1 << iota, 2 << iota;
         );
         const reset = iota;
-        const answer: int = int(first + second + third + fourth) + 27;
-        fn main() -> int  {
+        const answer: i32 = i32(first + second + third + fourth) + 27;
+        fn main() -> i32  {
             const ( a = iota + 1; b = iota + 1; );
-            const half: float32 = 1.0 / 2.0;
+            const half: f32 = 1.0 / 2.0;
             const text = "ok";
-            const yes = answer == 42 && half == 0.5_f;
-            if (yes && text.length == 2_ul && reset == 0 && a == 1 && b == 2) { answer } else { 1 }
+            const yes = answer == 42 && half == f32(0.5);
+            if (yes && text.length == u64(2) && reset == 0 && a == 1 && b == 2) { answer } else { 1 }
         }
     "#
         ),
@@ -46,12 +46,12 @@ fn sizeof_matches_layout_after_generic_specialization() {
         result(
             r#"export { main };
         struct Pair<T> { first: T, second: T, }
-        struct Node { next: Ptr<Node>, value: int, }
-        const pair_bytes = sizeof(Pair<int>);
+        struct Node { next: Ptr<Node>, value: i32, }
+        const pair_bytes = sizeof(Pair<i32>);
         const node_bytes = sizeof(Node);
-        fn size<T>() -> ulong  { sizeof(T) }
-        fn main() -> int  {
-            if (pair_bytes == 8_ul && pair_bytes == size::<Pair<int>>() && node_bytes == size::<Node>()) { 42 } else { 1 }
+        fn size<T>() -> u64  { sizeof(T) }
+        fn main() -> i32  {
+            if (pair_bytes == u64(8) && pair_bytes == size::<Pair<i32>>() && node_bytes == size::<Node>()) { 42 } else { 1 }
         }
     "#
         ),
@@ -64,13 +64,13 @@ fn integer_boundaries_float_rounding_and_conversions_are_evaluated_at_declaratio
     assert_eq!(
         result(
             r#"export { main };
-        const maximum = ~0_ul;
+        const maximum = ~u64(0);
         const minimum = -9223372036854775808;
-        const rounded = (16777216_f + 1_f) - 16777216_f;
-        const truncated = int(4.75_d);
+        const rounded = (f32(16777216) + f32(1)) - f32(16777216);
+        const truncated = i32(f64(4.75));
         const shifted = -8 >> 2;
-        fn main() -> int  {
-            if (maximum == 18446744073709551615_ul && minimum < 0 && rounded == 0_f && truncated == 4 && shifted == -2) { 42 } else { 1 }
+        fn main() -> i32  {
+            if (maximum == u64(18446744073709551615) && minimum < 0 && rounded == f32(0) && truncated == 4 && shifted == -2) { 42 } else { 1 }
         }
     "#
         ),
@@ -105,20 +105,20 @@ fn sizeof_matches_native_c_representations() {
     .unwrap();
     let types = [
         "bool",
-        "sbyte",
-        "ushort",
-        "float64",
+        "i8",
+        "u16",
+        "f64",
         "str",
         "()",
         "None",
         "Never",
         "Record",
         "First | Second",
-        "(int | Err<Failure>)",
+        "(i32 | Err<Failure>)",
         "GpuView",
         "GpuPipelineContract",
         "GpuArguments",
-        "(int) -> int",
+        "(i32) -> i32",
     ];
     let declarations = types
         .iter()
@@ -129,19 +129,19 @@ fn sizeof_matches_native_c_representations() {
     let conditions = types
         .iter()
         .enumerate()
-        .map(|(i, ty)| format!("bytes_{i} == native_size({i}_ui) && sizeof({ty}) == bytes_{i}"))
+        .map(|(i, ty)| format!("bytes_{i} == native_size({i}) && sizeof({ty}) == bytes_{i}"))
         .collect::<Vec<_>>()
         .join(" && ");
     assert_eq!(
         result(&format!(
             r#"export {{ main }};
-        extern {{ "{}": {{ fn native_size(index: uint) -> ulong; }} }};
-        struct Record {{ a: sbyte, b: float64, c: ushort, }}
-        struct First {{ value: int, }}
-        struct Second {{ value: int, }}
-        struct Failure {{ value: int, }}
+        extern {{ "{}": {{ fn native_size(index: u32) -> u64; }} }};
+        struct Record {{ a: i8, b: f64, c: u16, }}
+        struct First {{ value: i32, }}
+        struct Second {{ value: i32, }}
+        struct Failure {{ value: i32, }}
         {declarations}
-        fn main() -> int  {{ if ({conditions}) {{ 42 }} else {{ 1 }} }}
+        fn main() -> i32  {{ if ({conditions}) {{ 42 }} else {{ 1 }} }}
     "#,
             header.display()
         )),
@@ -153,11 +153,11 @@ fn sizeof_matches_native_c_representations() {
 fn constants_lower_to_shader_literals_without_runtime_arithmetic() {
     let module = support::module(
         r#"export { kernel };
-        const ( first: uint = 1 << iota; second: uint = 1 << iota; );
-        const answer: uint = (first + second) * 14;
-        @compute_shader fn kernel(index: ulong, output: Ptr<uint>)  {
-            const bytes = sizeof(float64);
-            let mut native_bytes = sizeof(float64);
+        const ( first: u32 = 1 << iota; second: u32 = 1 << iota; );
+        const answer: u32 = (first + second) * 14;
+        @compute_shader fn kernel(index: u64, output: Ptr<u32>)  {
+            const bytes = sizeof(f64);
+            let mut native_bytes = sizeof(f64);
             output.* = answer;
         }
     "#,
@@ -188,7 +188,7 @@ fn boolean_literals_work_in_constants_and_runtime_control_flow() {
         const yes: bool = true;
         const no = false;
         fn invert(value: bool) -> bool  { !value }
-        fn main() -> int  {
+        fn main() -> i32  {
             let mut running = true;
             let mut count = 0;
             while (running) { count = count + 1; running = false; };

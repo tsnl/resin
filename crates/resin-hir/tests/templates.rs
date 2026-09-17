@@ -9,7 +9,7 @@ fn compile(source: &str) -> Result<resin_hir::Module, resin_source::SourceError>
 
 #[test]
 fn named_functions_keep_one_polymorphic_body_and_complete_weak_results() {
-    let module = compile("fn identity<T>(value: T) -> _  { value } fn main() -> int  { identity(1) } fn other() -> bool  { identity::<bool>(1 == 1) }").unwrap();
+    let module = compile("fn identity<T>(value: T) -> _  { value } fn main() -> i32  { identity(1) } fn other() -> bool  { identity::<bool>(1 == 1) }").unwrap();
     let identity = &module.functions[0];
     assert_eq!(identity.signature.type_params.len(), 1);
     assert_eq!(
@@ -20,13 +20,13 @@ fn named_functions_keep_one_polymorphic_body_and_complete_weak_results() {
     );
     assert_eq!(module.functions.len(), 3);
     let printed = resin_hir::format_module(&module);
-    assert!(printed.contains("(apply fn0 \"int\")"), "{printed}");
+    assert!(printed.contains("(apply fn0 \"i32\")"), "{printed}");
     assert!(printed.contains("(apply fn0 \"bool\")"), "{printed}");
 }
 
 #[test]
 fn arithmetic_and_literals_remain_polymorphic_and_enclosing_binders_are_preserved() {
-    let module = compile("fn increment<T>(value: T) -> T  { value + 1 } fn twice<U>(value: U) -> U  { increment(increment(value)) } fn main() -> uint  { twice(2) }").unwrap();
+    let module = compile("fn increment<T>(value: T) -> T  { value + 1 } fn twice<U>(value: U) -> U  { increment(increment(value)) } fn main() -> u32  { twice(2) }").unwrap();
     assert_eq!(module.functions.len(), 3);
     let TermKind::Block { tail, .. } = &module.functions[0].body.as_ref().unwrap().kind else {
         panic!("block");
@@ -52,7 +52,7 @@ fn arithmetic_and_literals_remain_polymorphic_and_enclosing_binders_are_preserve
 #[test]
 fn members_and_layout_queries_retain_determining_types() {
     let module = compile(
-        "fn read<T>(value: Ptr<T>) -> _  { value.member } fn measure<T>() -> ulong  { size_of(T) }",
+        "fn read<T>(value: Ptr<T>) -> _  { value.member } fn measure<T>() -> u64  { size_of(T) }",
     )
     .unwrap();
     assert!(matches!(
@@ -73,7 +73,7 @@ fn members_and_layout_queries_retain_determining_types() {
 
 #[test]
 fn recursive_groups_complete_results_without_equating_distinct_binders() {
-    let module = compile("fn left<T>(value: T, stop: bool) -> _  { if (stop) { value } else { right(value, 1 == 1) } } fn right<U>(value: U, stop: bool) -> _  { if (stop) { value } else { left(value, 1 == 1) } } fn main() -> int  { left(1, 1 == 1) }").unwrap();
+    let module = compile("fn left<T>(value: T, stop: bool) -> _  { if (stop) { value } else { right(value, 1 == 1) } } fn right<U>(value: U, stop: bool) -> _  { if (stop) { value } else { left(value, 1 == 1) } } fn main() -> i32  { left(1, 1 == 1) }").unwrap();
     for function in &module.functions[..2] {
         assert_eq!(
             function.signature.result.ty,
@@ -91,7 +91,7 @@ fn recursive_groups_complete_results_without_equating_distinct_binders() {
 #[test]
 fn unresolved_results_and_undetermined_arguments_require_annotations() {
     for source in [
-        "fn looped<T>() -> _  { looped::<T>() } fn main() -> int  { looped::<int>() }",
+        "fn looped<T>() -> _  { looped::<T>() } fn main() -> i32  { looped::<i32>() }",
         "fn create<T>() -> T  { 0 } fn main()  { create(); }",
         "fn marker<T>()  {} fn main()  { marker(); }",
     ] {
@@ -103,10 +103,10 @@ fn unresolved_results_and_undetermined_arguments_require_annotations() {
 #[test]
 fn applications_do_not_generalize_local_storage_or_discard_explicit_arity() {
     for source in [
-        "fn identity<T>(value: T) -> T  { value } fn main()  { identity::<int, int>(1); }",
-        "fn identity(value: int) -> int  { value } fn main()  { identity::<int>(1); }",
+        "fn identity<T>(value: T) -> T  { value } fn main()  { identity::<i32, i32>(1); }",
+        "fn identity(value: i32) -> i32  { value } fn main()  { identity::<i32>(1); }",
         "fn identity<T>(value: T) -> T  { value } fn main()  { let mut f = identity; f(1); f(1 == 1); }",
-        "fn pair<T>(a: T, b: T) -> T  { a } fn main()  { pair(1_i, 2_l); }",
+        "fn pair<T>(a: T, b: T) -> T  { a } fn main()  { pair(i32(1), i64(2)); }",
     ] {
         assert!(compile(source).is_err(), "{source}");
     }

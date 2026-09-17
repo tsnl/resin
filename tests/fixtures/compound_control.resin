@@ -2,69 +2,69 @@ export { kernel, main };
 import { "$/shared.resin" };
 
 struct State {
-	counter: uint,
-	result: uint,
+	counter: u32,
+	result: u32,
 }
 struct Pair {
-	a: uint,
-	b: uint,
+	a: u32,
+	b: u32,
 }
-fn touch(p: Ptr<State>) -> uint {
+fn touch(p: Ptr<State>) -> u32 {
 	let mut old = p.counter;
-	p.counter = old + 1_ui;
+	p.counter = old + u32(1);
 	old
 }
-fn choose(p: Ptr<State>) -> Ptr<uint> {
+fn choose(p: Ptr<State>) -> Ptr<u32> {
 	touch(p);
 	&p.result
 }
-fn identity(n: uint) -> uint {
+fn identity(n: u32) -> u32 {
 	n
 }
 @compute_shader
-fn kernel(i: ulong, root: Ptr<State>) {
-	if (i == 0_ul) {
-		let mut x = 0_ui;
-		x = if (i == 0_ul) {
-			7_ui
+fn kernel(i: u64, root: Ptr<State>) {
+	if (i == u64(0)) {
+		let mut x: u32 = 0;
+		x = if (i == u64(0)) {
+			u32(7)
 		} else {
-			8_ui
+			u32(8)
 		};
-		let mut flag = 1_i == 2;
-		flag = i == 0_ul && touch(root) == 0_ui;
-		let mut values = [0_ui, 0_ui];
-		values(touch(root) - 1_ui) = if (flag) {
-			touch(root) + 9_ui
+		let mut flag = i32(1) == 2;
+		flag = i == u64(0) && touch(root) == u32(0);
+		let mut values = [u32(0), u32(0)];
+		values(touch(root) - u32(1)) = if (flag) {
+			touch(root) + u32(9)
 		} else {
-			12_ui
+			u32(12)
 		};
 		let mut pair = Pair {
 			b = if (flag) {
 				touch(root)
 			} else {
-				99_ui
+				u32(99)
 			},
 			a = touch(root)
 		};
 		choose(root).* = identity(
 			if (flag) {
-				touch(root) + 14_ui
+				touch(root) + u32(14)
 			} else {
-				99_ui
+				u32(99)
 			}
 		);
-		root.result = if (x == 7_ui && flag && values(0_ul) == 11_ui && pair.a == 4_ui && pair.b == 3_ui && root.counter == 7_ui && root.result == 20_ui) {
-			42_ui
+		root.result = if (x == u32(7) && flag && values(u64(0)) == u32(11) && pair.a == u32(4) && pair.b == u32(3) && root.counter == u32(7) && root.result == u32(20)) {
+			u32(42)
 		} else {
-			99_ui
+			u32(99)
 		};
 	};
 }
-fn main() -> int | Err<_> {
-	let root_owner = arc_ptr_alloc(State { counter = 0_ui, result = 0_ui })?;
+fn main() -> i32 | Err<_> {
+	let root_owner = arc_ptr_alloc(State { counter = u32(0), result = u32(0) })?;
 	let root: Ref<_> = root_owner:get().*;
-	kernel(0_ul, root_owner:get());
-	if (root.result == 42_ui) {
+	kernel(u64(0), root_owner:get());
+	if (root.result == u32(42)) {
 		0
 	} else {
 		1

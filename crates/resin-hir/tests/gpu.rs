@@ -9,17 +9,17 @@ fn generate(source: &str) -> Result<Module, resin_source::SourceError> {
 
 #[test]
 fn compute_workgroup_size_is_an_ordinary_source_name() {
-    let error = generate("fn size() -> ulong  { compute_workgroup_size }").unwrap_err();
+    let error = generate("fn size() -> u64  { compute_workgroup_size }").unwrap_err();
     assert!(error.to_string().contains("UnboundValue"), "{error}");
-    generate("fn compute_workgroup_size() -> ulong  { 1_ul } fn size() -> ulong  { let mut compute_workgroup_size = 1_ul; compute_workgroup_size = 2_ul; compute_workgroup_size }").unwrap();
+    generate("fn compute_workgroup_size() -> u64  { u64(1) } fn size() -> u64  { let mut compute_workgroup_size: u64 = 1; compute_workgroup_size = u64(2); compute_workgroup_size }").unwrap();
 }
 
 // These names deliberately differ from the library. Contracts are explicit
 // declarations; no compiler type or method is selected from a public spelling.
 const PIPELINES: &str = r#"struct Failure {}
 struct DeviceReference<T> { allocation: GpuView, }
-struct HostRange<T> { data: Ptr<T>, length: ulong, }
-struct DeviceRange<T> { data: DeviceReference<T>, length: ulong, }
+struct HostRange<T> { data: Ptr<T>, length: u64, }
+struct DeviceRange<T> { data: DeviceReference<T>, length: u64, }
 intrinsic "gpu_pointer_projection" fn pointer_projection<T>(value: DeviceReference<T>) -> Ptr<T>;
 intrinsic "gpu_span_projection" fn span_projection<T>(value: DeviceRange<T>) -> HostRange<T>;
 struct ComputeProgram<Root, Owner> { contract: GpuPipelineContract, }
@@ -32,13 +32,13 @@ struct Device {
     
 }
 @gpu_allocator
-    fn malloc(self: Device, bytes: ulong, alignment: ulong, memory: int) -> (GpuView | Err<Failure>)  { Err(Failure {}) }
+    fn malloc(self: Device, bytes: u64, alignment: u64, memory: i32) -> (GpuView | Err<Failure>)  { Err(Failure {}) }
 
 @gpu_compute_pipeline
-    fn compute(self: Device, code: (Ptr<ubyte>, ulong)) -> (PipelineOwner | Err<Failure>)  { Err(Failure {}) }
+    fn compute(self: Device, code: (Ptr<u8>, u64)) -> (PipelineOwner | Err<Failure>)  { Err(Failure {}) }
 
 @gpu_graphics_pipeline
-    fn graphics(self: Device, vertex: (Ptr<ubyte>, ulong), fragment: (Ptr<ubyte>, ulong)) -> (PipelineOwner | Err<Failure>)  { Err(Failure {}) }
+    fn graphics(self: Device, vertex: (Ptr<u8>, u64), fragment: (Ptr<u8>, u64)) -> (PipelineOwner | Err<Failure>)  { Err(Failure {}) }
 
 struct PipelineOwner { owner: StrongOwner,
     
@@ -51,15 +51,15 @@ struct Commands {
     
 }
 @gpu_dispatch
-    fn dispatch(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments, x: uint, y: uint, z: uint) -> (() | Err<Failure>)  { (()) }
+    fn dispatch(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments, x: u32, y: u32, z: u32) -> (() | Err<Failure>)  { (()) }
 
 @gpu_draw
-    fn draw(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments | None, count: uint) -> (() | Err<Failure>)  { (()) }
+    fn draw(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments | None, count: u32) -> (() | Err<Failure>)  { (()) }
 
-struct HostParams<T> { scale: float32, values: T, }
-struct WrongParams<T> { scale: float32, wrong: T, }
-struct Params { scale: float32, values: HostRange<int>, }
-@compute_shader fn kernel(index: ulong, root: Ptr<Params>)  {}
+struct HostParams<T> { scale: f32, values: T, }
+struct WrongParams<T> { scale: f32, wrong: T, }
+struct Params { scale: f32, values: HostRange<i32>, }
+@compute_shader fn kernel(index: u64, root: Ptr<Params>)  {}
 "#;
 
 fn pipelines(source: &str) -> Result<Module, resin_source::SourceError> {
@@ -76,7 +76,7 @@ fn contract_declarations_may_follow_their_users_and_dependencies() {
     generate(&format!(
         r#"{declarations}
         struct FieldsScaleValues<T0, T1> {{ scale: T0, values: T1, }}
-fn main(values: DeviceRange<int>) -> (() | Err<Failure>) {{
+fn main(values: DeviceRange<i32>) -> (() | Err<Failure>) {{
             let mut pipeline = Device {{}}:compute(kernel)?;
             Commands {{}}:dispatch(pipeline, FieldsScaleValues<_, _> {{ scale = 2.0, values = values }}, 1, 1, 1)
         }}
@@ -95,7 +95,7 @@ fn gpu_ptr_new<T>(value: T) -> GpuPtr<T>  { GpuPtr<T> { value = value } }
         struct GpuSpan<T> { value: T, }
         struct GpuComputePipeline<T> { value: T, }
         struct GpuGraphicsPipeline<T> { value: T, }
-        fn main() -> int  { gpu_ptr_new::<int>(42).value }
+        fn main() -> i32  { gpu_ptr_new::<i32>(42).value }
     "#,
     )
     .unwrap();
@@ -111,8 +111,8 @@ fn allocator_registration_does_not_synthesize_constructor_methods() {
 fn opaque_gpu_views_cannot_be_dereferenced_or_cast_to_raw_addresses() {
     for (body, expected) in [
         ("value.*", "dereference requires a pointer"),
-        ("Ptr<int>(value)", "TypeMismatch"),
-        ("ulong(value)", "TypeMismatch"),
+        ("Ptr<i32>(value)", "TypeMismatch"),
+        ("u64(value)", "TypeMismatch"),
         ("value.data", "field access requires a record"),
     ] {
         let error = generate(&format!("fn invalid(value: GpuView)  {{ {body}; }}")).unwrap_err();
@@ -124,7 +124,7 @@ fn opaque_gpu_views_cannot_be_dereferenced_or_cast_to_raw_addresses() {
 fn dispatch_infers_source_host_fields_from_the_pipeline_root() {
     let module = pipelines(
         r#"struct FieldsScaleValues<T0, T1> { scale: T0, values: T1, }
-fn main(values: DeviceRange<int>) -> (() | Err<Failure>)  {
+fn main(values: DeviceRange<i32>) -> (() | Err<Failure>)  {
             let mut pipeline = Device {}:compute(kernel)?;
             Commands {}:dispatch(pipeline, FieldsScaleValues<_, _> { scale = 2.0, values = values }, 1, 1, 1)
         }
@@ -164,8 +164,8 @@ fn main(values: DeviceRange<int>) -> (() | Err<Failure>)  {
 fn pipeline_types_cross_functions_and_accept_precomputed_arguments() {
     pipelines(r#"struct FieldsScaleValues<T0, T1> { scale: T0, values: T1, }
 fn create(gpu: Device) -> (ComputeProgram<Params, PipelineOwner> | Err<Failure>)  { gpu:compute(kernel) }
-        fn dispatch(pipeline: ComputeProgram<Params, PipelineOwner>, values: DeviceRange<int>) -> (() | Err<Failure>)  {
-            let mut arguments = (pipeline, FieldsScaleValues<_, _> { scale = 1.0_f, values = values }, 1_ui, 1_ui, 1_ui);
+        fn dispatch(pipeline: ComputeProgram<Params, PipelineOwner>, values: DeviceRange<i32>) -> (() | Err<Failure>)  {
+            let mut arguments = (pipeline, FieldsScaleValues<_, _> { scale = f32(1.0), values = values }, u32(1), u32(1), u32(1));
             Commands {}:dispatch(arguments.0, arguments.1, arguments.2, arguments.3, arguments.4)
         }
         fn associated(gpu: Device) -> _  { compute(gpu, kernel) }
@@ -176,7 +176,7 @@ fn create(gpu: Device) -> (ComputeProgram<Params, PipelineOwner> | Err<Failure>)
 fn creation_requires_direct_decorated_shader_declarations() {
     for (expression, expected) in [
         (
-            "gpu:compute((Ptr<ubyte>(0_ul), 0_ul))",
+            "gpu:compute((Ptr<u8>(u64(0)), u64(0)))",
             "requires decorated shader declarations",
         ),
         ("gpu:compute(alias)", "requires direct shader declarations"),
@@ -190,8 +190,8 @@ fn creation_requires_direct_decorated_shader_declarations() {
         ),
     ] {
         let error = pipelines(&format!(
-            r#"fn ordinary(index: ulong, root: Ptr<Params>)  {{}}
-            fn choose() -> (ulong, Ptr<Params>) -> ()  {{ kernel }}
+            r#"fn ordinary(index: u64, root: Ptr<Params>)  {{}}
+            fn choose() -> (u64, Ptr<Params>) -> ()  {{ kernel }}
             fn main(gpu: Device) -> _  {{ let mut alias = kernel; {expression} }}
         "#
         ))
@@ -207,15 +207,15 @@ fn creation_requires_direct_decorated_shader_declarations() {
 fn dispatch_rejects_raw_views_wrong_fields_and_incompatible_stages() {
     for (tail, expected) in [
         (
-            "Commands {}:dispatch(pipeline, HostParams<_> { scale = 1.0_f, values = raw }, 1, 1, 1)",
+            "Commands {}:dispatch(pipeline, HostParams<_> { scale = f32(1.0), values = raw }, 1, 1, 1)",
             "incompatible inferred types",
         ),
         (
-            "Commands {}:dispatch(pipeline, WrongParams<_> { scale = 1.0_f, wrong = values }, 1, 1, 1)",
+            "Commands {}:dispatch(pipeline, WrongParams<_> { scale = f32(1.0), wrong = values }, 1, 1, 1)",
             "must match the shader root",
         ),
         (
-            "Commands {}:draw(pipeline, HostParams<_> { scale = 1.0_f, values = values }, 3)",
+            "Commands {}:draw(pipeline, HostParams<_> { scale = f32(1.0), values = values }, 3)",
             "draw requires a graphics pipeline",
         ),
         (
@@ -223,10 +223,10 @@ fn dispatch_rejects_raw_views_wrong_fields_and_incompatible_stages() {
             "incompatible inferred types",
         ),
     ] {
-        let error = pipelines(&format!("fn main(gpu: Device, values: DeviceRange<int>, raw: HostRange<int>) -> _  {{ let mut pipeline = gpu:compute(kernel)?; {tail} }}")).unwrap_err();
+        let error = pipelines(&format!("fn main(gpu: Device, values: DeviceRange<i32>, raw: HostRange<i32>) -> _  {{ let mut pipeline = gpu:compute(kernel)?; {tail} }}")).unwrap_err();
         assert!(error.to_string().contains(expected), "{tail}: {error}");
     }
-    let error = pipelines("fn create(gpu: Device) -> (ComputeProgram<int, PipelineOwner> | Err<Failure>)  { gpu:compute(kernel) }").unwrap_err();
+    let error = pipelines("fn create(gpu: Device) -> (ComputeProgram<i32, PipelineOwner> | Err<Failure>)  { gpu:compute(kernel) }").unwrap_err();
     assert!(error.to_string().contains("destination union"), "{error}");
 }
 

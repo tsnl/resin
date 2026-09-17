@@ -699,7 +699,7 @@ fn nominal_arguments_have_identity_without_demanding_their_layout() {
         .unwrap_err()
         .remove(0);
     assert!(
-        matches!(error.kind, ErrorKind::MonomorphLimit { arguments, .. } if arguments == [std::sync::Arc::from("Node<long>")])
+        matches!(error.kind, ErrorKind::MonomorphLimit { arguments, .. } if arguments == [std::sync::Arc::from("Node<i64>")])
     );
     measure_parameter(&mut hir);
     assert!(support::build_lir(&hir, &requests, &options(2)).is_err());
@@ -739,8 +739,8 @@ fn nominal_instances_substitute_fields_and_close_recursive_edges() {
             }
         );
     }
-    assert_eq!(lir.types[0].name().unwrap().as_ref(), "Node<int>");
-    assert_eq!(lir.types[1].name().unwrap().as_ref(), "Node<long>");
+    assert_eq!(lir.types[0].name().unwrap().as_ref(), "Node<i32>");
+    assert_eq!(lir.types[1].name().unwrap().as_ref(), "Node<i64>");
 }
 
 #[test]
@@ -969,10 +969,10 @@ fn numeric_representation_and_layout_follow_the_selected_argument() {
 }
 
 #[test]
-fn numeric_specialization_checks_range_suffix_and_type_without_defaulting() {
+fn numeric_specialization_checks_range_spelling_and_type_without_defaulting() {
     for (text, argument, message) in [
         ("256", Type::UInt8, "out of range"),
-        ("7_ui", Type::UInt8, "suffix does not match"),
+        ("7_u8", Type::UInt8, "invalid integer literal"),
         ("7", Type::Bool, "cannot use numeric literal"),
         ("1.5", Type::Int32, "invalid integer literal"),
     ] {

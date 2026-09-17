@@ -354,7 +354,7 @@ impl Checker<'_> {
                         if hook == "drop" {
                             "drop must have signature fn drop<T>(value: Ref<Owner<T>>) with only the owner's type parameters"
                         } else {
-                            "repr_bytes must take Ref<Owner<T>> and return (Ptr<ubyte>, ulong), with only the owner's type parameters"
+                            "repr_bytes must take Ref<Owner<T>> and return (Ptr<u8>, u64), with only the owner's type parameters"
                         },
                     )
                 };

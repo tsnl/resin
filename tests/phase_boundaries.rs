@@ -25,15 +25,15 @@ fn tail(function: &resin_hir::Function) -> &resin_hir::Term {
 
 #[test]
 fn hir_resolves_calls_and_preserves_type_dependent_operations_for_lir() {
-    let module = hir(r#"struct Item { value: int,
+    let module = hir(r#"struct Item { value: i32,
             
         }
-fn read(item: Item) -> int  { item.value }
+fn read(item: Item) -> i32  { item.value }
 
 
-        fn relay(item: Item) -> int { item:read() }
+        fn relay(item: Item) -> i32 { item:read() }
         fn both(a: bool, b: bool) -> bool  { a && b }
-        fn measure() -> ulong  { size_of(int) }
+        fn measure() -> u64  { size_of(i32) }
     "#);
     let read = function(&module, "relay");
     let resin_hir::TermKind::Call { func, args } = &tail(read).kind else {
@@ -70,7 +70,7 @@ fn read(item: Item) -> int  { item.value }
 #[test]
 fn lir_lowering_needs_only_the_resolved_tree() {
     let mut module = hir(r#"export { main };
-        fn narrow(n: int) -> int  { n }
+        fn narrow(n: i32) -> i32  { n }
         fn main() -> _  {
             let mut item = 42;
             let reference: Ref<_> = item;
@@ -99,8 +99,8 @@ fn lir_lowering_needs_only_the_resolved_tree() {
 #[test]
 fn generated_files_outlive_lir_and_its_verification_certificate() {
     let module = hir(r#"export { main, kernel };
-        @compute_shader fn kernel(i: ulong, output: Ptr<ulong>)  { output.* = i; }
-        fn main() -> int  { 42 }
+        @compute_shader fn kernel(i: u64, output: Ptr<u64>)  { output.* = i; }
+        fn main() -> i32  { 42 }
     "#);
     let checked = resin_lir::VerifiedModule::new(
         support::frontend::lower(&module, &[], &resin_lir::LoweringOptions::default()).unwrap(),
@@ -165,7 +165,7 @@ fn a_later_phase_error_preserves_earlier_compilation_products() {
 
 #[test]
 fn unsupported_concrete_operations_fail_during_lir_construction() {
-    let source = "export { main }; fn main() -> int { let mut r = (1,); r + r; 0 }";
+    let source = "export { main }; fn main() -> i32 { let mut r = (1,); r + r; 0 }";
     let hir = hir(source);
     let error = support::frontend::lower(&hir, &[], &resin_lir::LoweringOptions::default())
         .unwrap_err()

@@ -5,21 +5,21 @@ export { print, Io, Output, WriteError, write, io_stdout, io_stderr, Console, In
 
 extern {
 	"resin_runtime/print.h": {
-		fn resin_print(data: Ptr<ubyte>, length: ulong);
-		fn resin_stream_write(stream: uint, data: Ptr<ubyte>, length: ulong) -> int;
+		fn resin_print(data: Ptr<u8>, length: u64);
+		fn resin_stream_write(stream: u32, data: Ptr<u8>, length: u64) -> i32;
 	},
 	"stdio.h": {
-		fn getchar() -> int;
+		fn getchar() -> i32;
 	},
 	"resin_runtime/console.h": {
-		fn resin_console_byte(byte: int) -> ubyte;
-		fn resin_console_putchar(byte: ubyte) -> int;
-		fn resin_stdin_error() -> int;
-		fn resin_stdout_flush() -> int;
+		fn resin_console_byte(byte: i32) -> u8;
+		fn resin_console_putchar(byte: u8) -> i32;
+		fn resin_stdin_error() -> i32;
+		fn resin_stdout_flush() -> i32;
 	},
 	"stdlib.h": {
-		fn realloc(memory: Ptr<ubyte>, bytes: ulong) -> Ptr<ubyte>;
-		fn free(memory: Ptr<ubyte>);
+		fn realloc(memory: Ptr<u8>, bytes: u64) -> Ptr<u8>;
+		fn free(memory: Ptr<u8>);
 	},
 };
 
@@ -30,42 +30,45 @@ import { "span.resin", "shared.resin", "string.resin" };
 //
 
 /// Write literal bytes to stdout, flush, and add no newline.
-/// A write failure terminates the program; use `io_stdout():write(text)` to handle errors.
+/// A write failure terminates the program; use an output stream’s `write` operation to handle errors.
 fn print(text: str) {
 	resin_print(text.data, text.length)
 }
 
 /// Write a borrowed byte span to stdout without formatting or adding a newline.
-fn print(text: Ref<Span<ubyte>>) {
+fn print(text: Ref<Span<u8>>) {
 	resin_print(text.data, text.length)
 }
 
 /// Write an owned string to stdout while borrowing its storage.
 fn print(text: Ref<String>) {
-	print(text:get())
+	let view = text:get();
+	print(view)
 }
 
 // Native stream selectors for resin_stream_write.
 const (
-	stream_stdout: uint = iota;
-	stream_stderr: uint = iota;
+	stream_stdout: u32 = iota;
+	stream_stderr: u32 = iota;
 );
 
 struct WriteError {}
 struct Output {
-	stream: uint,
+	stream: u32,
 }
 
 // Writes bytes verbatim and flushes. No formatting or newline is added.
 fn write(self: Ref<Output>, text: str) -> () | Err<WriteError> {
-	write(self, bytes(text))
+	let view = bytes(text);
+	write(self, view)
 }
 
 fn write(self: Ref<Output>, text: Ref<String>) -> () | Err<WriteError> {
-	write(self, text:get())
+	let view = text:get();
+	write(self, view)
 }
 
-fn write(self: Ref<Output>, text: Ref<Span<ubyte>>) -> () | Err<WriteError> {
+fn write(self: Ref<Output>, text: Ref<Span<u8>>) -> () | Err<WriteError> {
 	let status = resin_stream_write(self.stream, text.data, text.length);
 	if (status == 0) {
 		()
@@ -87,18 +90,18 @@ fn io_stderr() -> Output {
 // Standard input
 //
 
-const initial_input_capacity = 128_ul;
-const max_input_capacity = ~0_ul;
-const line_feed: int = 10;
-const carriage_return: ubyte = 13;
+const initial_input_capacity: u64 = 128;
+const max_input_capacity = ~u64(0);
+const line_feed: i32 = 10;
+const carriage_return: u8 = 13;
 
 // Owns length bytes followed by a NUL. The final shared owner frees the allocation.
 struct InputLineOwner {
-	data: Ptr<ubyte>,
-	length: ulong,
+	data: Ptr<u8>,
+	length: u64,
 }
 fn drop(self: Ref<InputLineOwner>) {
-	if (ulong(self.data) != 0_ul) {
+	if (u64(self.data) != u64(0)) {
 		free(self.data);
 	};
 }
@@ -106,12 +109,12 @@ fn drop(self: Ref<InputLineOwner>) {
 struct InputLine {
 	owner: ArcPtr<InputLineOwner>,
 }
-fn get(self: Ref<InputLine>) -> Span<ubyte> {
+fn get(self: Ref<InputLine>) -> Span<u8> {
 	let mut data = self.owner:get();
-	Span<ubyte> { data = data.data, length = data.length }
+	Span<u8> { data = data.data, length = data.length }
 }
 
-fn bytes(self: Ref<InputLine>) -> (Ptr<ubyte>, ulong) {
+fn bytes(self: Ref<InputLine>) -> (Ptr<u8>, u64) {
 	let mut view = self:get();
 	(view.data, view.length)
 }
@@ -122,20 +125,20 @@ struct InputOutOfMemory {}
 struct InputWriteError {}
 type InputError = EndOfInput | InputReadError | InputOutOfMemory;
 
-fn resize_input(memory: Ptr<ubyte>, capacity: ulong) -> (Ptr<ubyte> | Err<InputOutOfMemory>) {
+fn resize_input(memory: Ptr<u8>, capacity: u64) -> (Ptr<u8> | Err<InputOutOfMemory>) {
 	let mut resized = realloc(memory, capacity);
-	if (ulong(resized) == 0_ul) {
+	if (u64(resized) == u64(0)) {
 		Err(InputOutOfMemory {})
 	} else {
 		(resized)
 	}
 }
 
-fn check_input_end(byte: int, length: ulong) -> (() | Err<EndOfInput | InputReadError>) {
+fn check_input_end(byte: i32, length: u64) -> (() | Err<EndOfInput | InputReadError>) {
 	if (byte < 0 && resin_stdin_error() != 0) {
 		Err(InputReadError {})
 	} else {
-		if (byte < 0 && length == 0_ul) {
+		if (byte < 0 && length == u64(0)) {
 			Err(EndOfInput {})
 		} else {
 			(())
@@ -147,11 +150,11 @@ struct Console {}
 /// Write a borrowed input line verbatim to stdout, flush, and report write failures.
 fn console_print(line: Ref<InputLine>) -> (() | Err<InputWriteError>) {
 	let mut bytes = line:get();
-	let mut index = 0_ul;
+	let mut index: u64 = 0;
 	let mut written = 0;
 	while (index < bytes.length && written >= 0) {
 		written = resin_console_putchar(bytes:at(index));
-		index = index + 1_ul;
+		index = index + u64(1);
 	};
 	let mut flushed = resin_stdout_flush();
 	if (written < 0 || flushed != 0) {
@@ -162,16 +165,16 @@ fn console_print(line: Ref<InputLine>) -> (() | Err<InputWriteError>) {
 }
 
 /// Read one byte, distinguishing EOF from a stream failure.
-fn console_read_byte() -> (ubyte | Err<EndOfInput | InputReadError>) {
+fn console_read_byte() -> (u8 | Err<EndOfInput | InputReadError>) {
 	let mut byte = getchar();
-	check_input_end(byte, 0_ul)?;
+	check_input_end(byte, u64(0))?;
 	(resin_console_byte(byte))
 }
 
 /// Read through LF or EOF, stripping the LF and an immediately preceding CR.
 /// The returned owner retains all other bytes and a trailing NUL outside its length.
 fn console_read_line() -> (InputLine | Err<InputError>) {
-	let mut owner = match (arc_ptr_alloc::<InputLineOwner>(InputLineOwner { data = Ptr<ubyte>(0_ul), length = 0_ul })) {
+	let mut owner = match (arc_ptr_alloc::<InputLineOwner>(InputLineOwner { data = Ptr<u8>(u64(0)), length = u64(0) })) {
 		ArcPtr<InputLineOwner>(value) => {
 			(value)
 		},
@@ -180,34 +183,36 @@ fn console_read_line() -> (InputLine | Err<InputError>) {
 		},
 	};
 	let mut storage = owner:get();
-	storage.data = resize_input(Ptr<ubyte>(0_ul), initial_input_capacity)?;
+	storage.data = resize_input(Ptr<u8>(u64(0)), initial_input_capacity)?;
 	storage.length = initial_input_capacity;
-	let mut length = 0_ul;
+	let mut length: u64 = 0;
 	let mut byte = getchar();
 	while (byte >= 0 && byte != line_feed) {
-		if (length == storage.length - 1_ul) {
+		if (length == storage.length - u64(1)) {
 			// Reserve the terminator and reject growth that would wrap.
-			let mut grown: (ulong | Err<InputOutOfMemory>);
-			grown = if (storage.length > max_input_capacity / 2_ul) {
+			let mut grown: (u64 | Err<InputOutOfMemory>);
+			grown = if (storage.length > max_input_capacity / u64(2)) {
 				Err(InputOutOfMemory {})
 			} else {
-				(storage.length * 2_ul)
+				(storage.length * u64(2))
 			};
 			let mut capacity = grown?;
 			storage.data = resize_input(storage.data, capacity)?;
 			storage.length = capacity;
 		};
-		Span<ubyte> { data = storage.data, length = storage.length }:at(length) = resin_console_byte(byte);
-		length = length + 1_ul;
+		let view = Span<u8> { data = storage.data, length = storage.length };
+		view:at(length) = resin_console_byte(byte);
+		length = length + u64(1);
 		byte = getchar();
 	};
 	check_input_end(byte, length)?;
-	if (byte == line_feed && length > 0_ul) {
-		if (Span<ubyte> { data = storage.data, length = storage.length }:at(length - 1_ul) == carriage_return) {
-			length = length - 1_ul;
+	let view = Span<u8> { data = storage.data, length = storage.length };
+	if (byte == line_feed && length > u64(0)) {
+		if (view:at(length - u64(1)) == carriage_return) {
+			length = length - u64(1);
 		};
 	};
-	Span<ubyte> { data = storage.data, length = storage.length }:at(length) = 0_ub;
+	view:at(length) = u8(0);
 	storage.length = length;
 	(InputLine { owner = owner })
 }

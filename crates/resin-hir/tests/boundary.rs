@@ -50,7 +50,7 @@ fn checking_rejects_unresolved_imports() {
 fn resolved_program_infers_through_an_import_and_exposes_only_root_exports() {
     let library = module(
         "library.resin",
-        "export { narrow }; fn narrow(value: int) -> int  { value }",
+        "export { narrow }; fn narrow(value: i32) -> i32  { value }",
     );
     let mut entry = module(
         "entry.resin",
@@ -78,7 +78,7 @@ fn syntax(sources: &[Source]) -> BTreeMap<Source, Arc<Document>> {
 #[test]
 fn analysis_keeps_editor_queries_after_an_unrelated_type_error() {
     let source =
-        "// é🌲\nfn broken() -> int  { missing() } fn healthy(value: int) -> int  { value }";
+        "// é🌲\nfn broken() -> i32  { missing() } fn healthy(value: i32) -> i32  { value }";
     let entry = module("entry.resin", source);
     let input = entry.source.clone();
     let syntax = syntax(std::slice::from_ref(&input));
@@ -100,7 +100,7 @@ fn analysis_keeps_editor_queries_after_an_unrelated_type_error() {
             .hover(&syntax, &input, offset)
             .unwrap()
             .text
-            .contains("int")
+            .contains("i32")
     );
     for invalid in [4, 6, source.len() + 1, usize::MAX] {
         assert!(
@@ -124,7 +124,7 @@ fn sources_with_equal_names_have_distinct_editor_facts() {
     let integer = Source::with_identity(
         SourceId::new("integer"),
         "memory",
-        "fn local(value: int) -> int  { value }",
+        "fn local(value: i32) -> i32  { value }",
     );
     let boolean = Source::with_identity(
         SourceId::new("boolean"),
@@ -140,7 +140,7 @@ fn sources_with_equal_names_have_distinct_editor_facts() {
     };
     let analysis = common::check(program.clone());
     assert!(analysis.module.is_some(), "{:?}", analysis.diagnostics);
-    for (source, expected) in [(integer, "value: int"), (boolean, "value: bool")] {
+    for (source, expected) in [(integer, "value: i32"), (boolean, "value: bool")] {
         let offset = source.text().rfind("value").unwrap();
         let definition = analysis
             .semantics
@@ -161,7 +161,7 @@ fn sources_with_equal_names_have_distinct_editor_facts() {
 
 #[test]
 fn revised_source_cannot_borrow_editor_facts_from_its_previous_version() {
-    let original = Source::new("memory", "fn local(value: int) -> int  { value }");
+    let original = Source::new("memory", "fn local(value: i32) -> i32  { value }");
     let revised = original.with_text("fn local(value: bool) -> bool  { value }");
     let syntax = syntax(&[original.clone(), revised.clone()]);
     let analysis = common::check(Program {
@@ -188,7 +188,7 @@ fn revised_source_cannot_borrow_editor_facts_from_its_previous_version() {
             .hover(&syntax, &original, offset)
             .unwrap()
             .text,
-        "value: int"
+        "value: i32"
     );
 }
 
@@ -196,7 +196,7 @@ fn revised_source_cannot_borrow_editor_facts_from_its_previous_version() {
 fn nominal_declarations_retain_fields_and_drop_hooks_while_operations_are_free() {
     let source = module(
         "owner.resin",
-        "struct Owner { value: int,   }\nfn read(self: Owner) -> int  { self.value }\n\nfn drop(self: Ref<Owner>)  {}\n type Alias = Owner;",
+        "struct Owner { value: i32,   }\nfn read(self: Owner) -> i32  { self.value }\n\nfn drop(self: Ref<Owner>)  {}\n type Alias = Owner;",
     );
     let hir = common::check(Program {
         modules: vec![source],

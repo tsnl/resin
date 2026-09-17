@@ -3,10 +3,10 @@ export { main };
 import { "$/string.resin", "$/stdio.resin" };
 
 struct Pair {
-	a: int,
-	b: int,
+	a: i32,
+	b: i32,
 }
-fn clamp(n: int, lo: int, hi: int) -> int {
+fn clamp(n: i32, lo: i32, hi: i32) -> i32 {
 	if ((n < lo) || (n > hi)) {
 		lo
 	} else {
@@ -14,20 +14,19 @@ fn clamp(n: int, lo: int, hi: int) -> int {
 	}
 }
 
-fn both(a: int, b: int) -> bool {
+fn both(a: i32, b: i32) -> bool {
 	(a != 0) && (b != 0)
 }
 
-fn pair(a: int, b: int) -> Pair {
+fn pair(a: i32, b: i32) -> Pair {
 	Pair { a = a, b = b }
 }
 
 fn main() -> () {
 	let mut xs = [1, 2, 3];
-	print(
-		fmt(
-			"clamp(5, 0, 10) = {0}, both(1, 2) = {1}, pair(3, 4).a = {2}\n",
-			(clamp(5, 0, 10), both(1, 2), pair(3, 4).a),
-		)
+	let text = fmt(
+		"clamp(5, 0, 10) = {0}, both(1, 2) = {1}, pair(3, 4).a = {2}\n",
+		(clamp(5, 0, 10), both(1, 2), pair(3, 4).a),
 	);
+	print(text);
 }

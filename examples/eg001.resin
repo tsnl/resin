@@ -2,7 +2,7 @@ export { main };
 
 import { "$/string.resin", "$/stdio.resin" };
 
-fn fibonacci(n: int) -> int {
+fn fibonacci(n: i32) -> i32 {
 	if (n <= 1) {
 		n
 	} else {
@@ -13,5 +13,6 @@ fn fibonacci(n: int) -> int {
 }
 
 fn main() -> () {
-	print(fmt("fibonacci(10) = {0}\n", (fibonacci(10),)));
+	let text = fmt("fibonacci(10) = {0}\n", (fibonacci(10),));
+	print(text);
 }

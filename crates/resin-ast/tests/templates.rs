@@ -63,7 +63,7 @@ fn type_and_function_binders_remain_separate_from_weak_variables() {
 #[test]
 fn function_applications_and_method_arguments_have_explicit_ast_forms() {
     let file = parse(
-        "fn example()  { let mut f = identity::<Ptr<int>>; f(1); gpu:alloc::<Pair<int, long>>(4); create::<int, long, ubyte>(7); }",
+        "fn example()  { let mut f = identity::<Ptr<i32>>; f(1); gpu:alloc::<Pair<i32, i64>>(4); create::<i32, i64, u8>(7); }",
     );
     let StmtKind::Function { body, .. } = &file.stmts[0].val else {
         panic!()
@@ -93,18 +93,18 @@ fn function_applications_and_method_arguments_have_explicit_ast_forms() {
 #[test]
 fn type_arguments_do_not_consume_comparisons_or_shifts() {
     parse(
-        "fn f<T>(value: T) -> T  { value } fn main()  { let mut n = f::<int>(1); let mut less = n < 2; let mut more = n > 0; let mut shifted = n >> 1; }",
+        "fn f<T>(value: T) -> T  { value } fn main()  { let mut n = f::<i32>(1); let mut less = n < 2; let mut more = n > 0; let mut shifted = n >> 1; }",
     );
 }
 
 #[test]
 fn template_lists_require_named_parameters_and_nonempty_arguments() {
     for source in [
-        "fn f<_>(x: int) -> int  { x }",
+        "fn f<_>(x: i32) -> i32  { x }",
         "fn f<>()  {}",
         "fn f()  { identity::<>(1); }",
         "extern { \"test.h\": { fn native<T>(x: T) -> T; } };",
-        "type Empty<> = int;",
+        "type Empty<> = i32;",
     ] {
         assert!(!common::parse(source).errors.is_empty(), "{source}");
     }
@@ -112,7 +112,7 @@ fn template_lists_require_named_parameters_and_nonempty_arguments() {
 
 #[test]
 fn free_function_references_keep_explicit_arguments_without_a_call() {
-    let source = "fn example()  { let mut first = select::<int, ulong>; let mut second = create::<Ptr<int>>; select::<int, ulong>(7, 42); (select::<int, ulong>)(7, 42); }";
+    let source = "fn example()  { let mut first = select::<i32, u64>; let mut second = create::<Ptr<i32>>; select::<i32, u64>(7, 42); (select::<i32, u64>)(7, 42); }";
     let file = parse(source);
     let StmtKind::Function { body, .. } = &file.stmts[0].val else {
         panic!("function")

@@ -22,9 +22,9 @@ fn valid(compilation: &Hir) {
 async fn unchanged_graph_reuses_the_completed_result_after_resolving_imports() {
     let entry = Source::new(
         "entry",
-        "import { \"dependency\" }; fn main() -> int  { value() }",
+        "import { \"dependency\" }; fn main() -> i32  { value() }",
     );
-    let dependency = Source::new("dependency", "export { value }; fn value() -> int  { 1 }");
+    let dependency = Source::new("dependency", "export { value }; fn value() -> i32  { 1 }");
     let mut loader = Loader::new(resin_source::library_root());
     let cache = Cache::new(16);
     loader
@@ -51,13 +51,13 @@ async fn unchanged_graph_reuses_the_completed_result_after_resolving_imports() {
 async fn changing_a_transitive_source_invalidates_an_unchanged_entry() {
     let entry = Source::new(
         "entry",
-        "import { \"middle\" }; fn main() -> int  { value() }",
+        "import { \"middle\" }; fn main() -> i32  { value() }",
     );
     let middle = Source::new(
         "middle",
-        "export { value }; import { \"leaf\" }; fn value() -> int  { leaf() }",
+        "export { value }; import { \"leaf\" }; fn value() -> i32  { leaf() }",
     );
-    let leaf = Source::new("leaf", "export { leaf }; fn leaf() -> int  { 1 }");
+    let leaf = Source::new("leaf", "export { leaf }; fn leaf() -> i32  { 1 }");
     let mut loader = Loader::new(resin_source::library_root());
     let cache = Cache::new(16);
     loader.set_import(&entry, "middle", middle.clone()).unwrap();
@@ -102,17 +102,17 @@ async fn a_missing_transitive_import_recovers_without_notifications() {
 async fn changed_import_edges_invalidate_cache_even_with_the_same_source_set() {
     let entry = Source::new(
         "entry",
-        "import { \"first\", \"second\" }; fn main() -> int  { first() }",
+        "import { \"first\", \"second\" }; fn main() -> i32  { first() }",
     );
     let first = Source::new(
         "first",
-        "export { first }; import { \"value\" }; fn first() -> int  { value() }",
+        "export { first }; import { \"value\" }; fn first() -> i32  { value() }",
     );
     let second = Source::new(
         "second",
         "export { second }; import { \"value\" }; fn second() -> bool  { value() }",
     );
-    let integer = Source::new("integer", "export { value }; fn value() -> int  { 1 }");
+    let integer = Source::new("integer", "export { value }; fn value() -> i32  { 1 }");
     let boolean = Source::new(
         "boolean",
         "export { value }; fn value() -> bool  { 1 == 1 }",
@@ -141,8 +141,8 @@ async fn changed_import_edges_invalidate_cache_even_with_the_same_source_set() {
 #[tokio::test]
 async fn inconsistent_versions_of_one_logical_source_are_diagnosed() {
     let entry = Source::new("entry", "import { \"first\", \"second\" };");
-    let first = Source::new("module", "fn value() -> int  { 1 }");
-    let second = first.with_text("fn value() -> int  { 2 }");
+    let first = Source::new("module", "fn value() -> i32  { 1 }");
+    let second = first.with_text("fn value() -> i32  { 2 }");
     assert_eq!(first.id(), second.id());
     assert_ne!(first, second);
     let mut loader = Loader::new(resin_source::library_root());
@@ -178,7 +178,7 @@ async fn identical_diagnostic_names_do_not_merge_distinct_sources() {
     let first = Source::with_identity(
         SourceId::new("first"),
         "generated",
-        "fn first() -> int  { 1 == 1 }",
+        "fn first() -> i32  { 1 == 1 }",
     );
     let second = Source::with_identity(
         SourceId::new("second"),
@@ -207,7 +207,7 @@ async fn identical_diagnostic_names_do_not_merge_distinct_sources() {
 async fn retained_compilations_keep_their_own_source_versions_and_editor_queries() {
     let before = Source::new(
         "editor",
-        "fn value() -> int  { 1 } fn main() -> int  { value() }",
+        "fn value() -> i32  { 1 } fn main() -> i32  { value() }",
     );
     let mut loader = Loader::new(resin_source::library_root());
     let cache = Cache::new(16);
@@ -218,7 +218,7 @@ async fn retained_compilations_keep_their_own_source_versions_and_editor_queries
     valid(&new);
     assert_eq!(before.id(), after.id());
     assert!(!Arc::ptr_eq(&old, &new));
-    for (result, source, ty) in [(&old, &before, "int"), (&new, &after, "bool")] {
+    for (result, source, ty) in [(&old, &before, "i32"), (&new, &after, "bool")] {
         let offset = source.text().rfind("value").unwrap();
         assert_eq!(result.definition(source, offset).unwrap().source, *source);
         assert!(result.hover(source, offset).unwrap().text.contains(ty));
@@ -239,14 +239,14 @@ async fn retained_compilations_keep_their_own_source_versions_and_editor_queries
 async fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
     let source = Source::new(
         "entry",
-        "export { first, second }; fn first() -> bool { (1 == 1) + (1 == 1) } fn second() -> int { let mut r = (1,); r + r; 0 }",
+        "export { first, second }; fn first() -> bool { (1 == 1) + (1 == 1) } fn second() -> i32 { let mut r = (1,); r + r; 0 }",
     );
     let mut loader = Loader::new(resin_source::library_root());
     let cache = Cache::new(16);
     let (cache, lowered) = request(&cache, source.clone(), &mut loader).await.unwrap();
     assert!(lowered.program().is_ok());
     assert!(lowered.hir().is_ok());
-    let typed_source = source.with_text("fn main() -> int  { 1 == 2 }");
+    let typed_source = source.with_text("fn main() -> i32  { 1 == 2 }");
     let (cache, typed) = request(&cache, typed_source, &mut loader).await.unwrap();
     assert!(typed.program().is_ok());
     assert!(typed.hir().is_err());
@@ -262,11 +262,11 @@ async fn later_errors_preserve_completed_earlier_passes_and_recovered_syntax() {
 async fn imported_initialization_errors_keep_the_dependency_source_version() {
     let entry = Source::new(
         "entry",
-        "import { \"dependency\" }; fn main() -> int  { value() }",
+        "import { \"dependency\" }; fn main() -> i32  { value() }",
     );
     let dependency = Source::new(
         "dependency",
-        "export { value }; fn value() -> int  { let mut n: int; n }",
+        "export { value }; fn value() -> i32  { let mut n: i32; n }",
     );
     let read = dependency.text().rfind("n }").unwrap();
     let mut loader = Loader::new(resin_source::library_root());
@@ -291,7 +291,7 @@ async fn imported_initialization_errors_keep_the_dependency_source_version() {
     let call = entry.text().rfind("value").unwrap();
     assert_eq!(failed.definition(&entry, call).unwrap().source, dependency);
 
-    let repaired = dependency.with_text("export { value }; fn value() -> int  { 7 }");
+    let repaired = dependency.with_text("export { value }; fn value() -> i32  { 7 }");
     loader.set_import(&entry, "dependency", repaired).unwrap();
     let (_, repaired) = request(&cache, entry, &mut loader).await.unwrap();
     valid(&repaired);
@@ -308,8 +308,8 @@ async fn imported_initialization_errors_keep_the_dependency_source_version() {
 #[tokio::test]
 async fn conflicting_versions_cannot_publish_a_partial_cache_generation() {
     let entry = Source::new("entry", "import { \"first\", \"conflict\", \"original\" };");
-    let original = Source::new("module", "fn value() -> int  { 1 }");
-    let conflict = original.with_text("fn value() -> int  { 2 }");
+    let original = Source::new("module", "fn value() -> i32  { 1 }");
+    let conflict = original.with_text("fn value() -> i32  { 2 }");
     let mut loader = Loader::new(resin_source::library_root());
     let cache = Cache::new(16);
     loader

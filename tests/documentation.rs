@@ -14,12 +14,12 @@ export { Item, read, marker };
 /// Public item.
 struct Item {
     /// Value in units.
-    value: int,
+    value: i32,
 }
 /// Read an item.
-fn read(item: Ref<Item>) -> int { item.value }
+fn read(item: Ref<Item>) -> i32 { item.value }
 /// Read an integer.
-fn read(value: int) -> int { value }
+fn read(value: i32) -> i32 { value }
 /// Fenced text stays in the signature.
 const marker = "```";
 /// Private documentation.

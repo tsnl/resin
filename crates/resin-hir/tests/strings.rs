@@ -38,8 +38,8 @@ fn string_views_support_fields_and_indexing() {
     let module = generate(
         r#"fn data(value: str) -> _  { value.data }
         fn length(value: str) -> _  { value.length }
-        fn byte(value: str) -> _  { value:at(0_ul) }
-        fn legacy(value: str) -> _  { value(0_ul) }
+        fn byte(value: str) -> _  { value:at(u64(0)) }
+        fn legacy(value: str) -> _  { value(u64(0)) }
         "#,
     )
     .unwrap();
@@ -58,7 +58,7 @@ fn string_views_support_fields_and_indexing() {
 #[test]
 fn owned_strings_are_ordinary_source_declarations() {
     let module = generate(
-        r#"intrinsic "string_from_bytes" fn copy(data: Ptr<ubyte>, length: ulong) -> StrongOwner;
+        r#"intrinsic "string_from_bytes" fn copy(data: Ptr<u8>, length: u64) -> StrongOwner;
         struct String { owner: StrongOwner,
             
         }
@@ -72,17 +72,17 @@ fn string_from_str(text: str) -> String  { String { owner = copy(text.data, text
     assert_eq!(result(&module, "text"), Type::Str);
     assert!(matches!(result(&module, "owned"), Type::Defined { .. }));
     // The spelling carries no compiler representation or privileged methods.
-    generate("struct String { count: uint, } fn make() -> String  { String { count = 7_ui } }")
+    generate("struct String { count: u32, } fn make() -> String  { String { count = u32(7) } }")
         .unwrap();
 }
 
 #[test]
 fn string_literals_cannot_be_forged_from_arbitrary_storage() {
     for source in [
-        r#"struct Bytes (Ptr<ubyte>, ulong); fn bad() -> Bytes  { "text" }"#,
+        r#"struct Bytes (Ptr<u8>, u64); fn bad() -> Bytes  { "text" }"#,
         r#"struct String { owner: StrongOwner, } fn bad() -> String  { "text" }"#,
-        r#"struct Bytes (Ptr<ubyte>, ulong); fn bad(bytes: Bytes) -> str  { str(bytes) }"#,
-        r#"fn bad(data: Ptr<ubyte>) -> str  { str { data = data, length = 1_ul } }"#,
+        r#"struct Bytes (Ptr<u8>, u64); fn bad(bytes: Bytes) -> str  { str(bytes) }"#,
+        r#"fn bad(data: Ptr<u8>) -> str  { str { data = data, length = u64(1) } }"#,
         r#"fn bad() -> _  { "text".unknown }"#,
     ] {
         assert!(generate(source).is_err(), "accepted {source}");

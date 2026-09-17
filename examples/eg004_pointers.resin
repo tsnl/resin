@@ -2,29 +2,30 @@ export { main };
 
 import { "$/string.resin", "$/stdio.resin", "$/shared.resin" };
 
-fn set(p: Ptr<int>) -> int {
+fn set(p: Ptr<i32>) -> i32 {
 	p.* = 1;
 	p.*
 }
 
 struct Point {
-	x: int,
-	y: int,
+	x: i32,
+	y: i32,
 }
 
-fn get_x(p: Ptr<Point>) -> int {
+fn get_x(p: Ptr<Point>) -> i32 {
 	p.x
 }
 
-fn set_x(p: Ptr<Point>, n: int) -> int {
+fn set_x(p: Ptr<Point>, n: i32) -> i32 {
 	p.x = n;
 	p.x
 }
 
 fn main() -> () | Err<_> {
-	let n = arc_ptr_alloc(0_i)?;
+	let n = arc_ptr_alloc(i32(0))?;
 	let point = arc_ptr_alloc(Point { x = 0, y = 2 })?;
 	set(n:get());
 	set_x(point:get(), 42);
-	print(fmt("n = {0}, point.x = {1}\n", (n:get().*, get_x(point:get()))));
+	let text = fmt("n = {0}, point.x = {1}\n", (n:get().*, get_x(point:get())));
+	print(text);
 }

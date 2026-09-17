@@ -2,19 +2,20 @@ export { main };
 import { "$/string.resin", "$/stdio.resin" };
 
 const (
-	read: uint = 1 << iota;
-	write: uint = 1 << iota;
+	can_read: u32 = 1 << iota;
+	can_write: u32 = 1 << iota;
 	_ = iota;
-	execute: uint = 1 << iota;
+	can_execute: u32 = 1 << iota;
 );
 
 struct Pair<T> {
 	first: T,
 	second: T,
 }
-const pair_bytes = sizeof(Pair<int>);
+const pair_bytes = sizeof(Pair<i32>);
 
 fn main() {
-	const permissions = read | write;
-	print(fmt("read/write = {0}, execute = {1}, pair bytes = {2}\n", (permissions, execute, pair_bytes)));
+	const permissions = can_read | can_write;
+	let message = fmt("read/write = {0}, execute = {1}, pair bytes = {2}\n", (permissions, can_execute, pair_bytes));
+	print(message);
 }

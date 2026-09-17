@@ -2,8 +2,8 @@
 References and initialized binding annotations
 ==================
 fn identity<T>(value: Ref<T>) -> Ref<T>  { value }
-fn example() -> int  {
-    let mut value: int = 1;
+fn example() -> i32  {
+    let mut value: i32 = 1;
     let alias: Ref<_> = identity(value);
     alias = 42;
     value

@@ -8,7 +8,7 @@ fn header_groups_retain_dependencies_and_flatten_module_declarations() {
         extern {
             "empty.h": {},
             "native.h": {
-                fn first(value: int) -> int;
+                fn first(value: i32) -> i32;
                 fn second();
             },
         };
@@ -55,7 +55,7 @@ fn header_groups_retain_dependencies_and_flatten_module_declarations() {
 #[test]
 fn foreign_declarations_survive_unrelated_body_errors() {
     let source =
-        r#"extern { "native.h": { fn native() -> int; } }; fn broken()  { let mut x = ; }"#;
+        r#"extern { "native.h": { fn native() -> i32; } }; fn broken()  { let mut x = ; }"#;
     let parsed = common::parse(source);
     assert!(!parsed.errors.is_empty());
     assert_eq!(parsed.file.foreign_headers[0].val.as_ref(), "native.h");
