@@ -16,11 +16,16 @@ impl FunctionLowering<'_> {
             ReceiverConversion::Value => {
                 self.gen_term(receiver, Some(to))?;
             }
-            ReceiverConversion::Address => match self.gen_operand(receiver)? {
-                super::places::Operand::Place { .. } => {}
+            ReceiverConversion::Borrow => match self.gen_operand(receiver)? {
+                super::places::Operand::Place {
+                    addressable: true, ..
+                } => self.emit(Instr::Borrow),
+                super::places::Operand::Place {
+                    addressable: false, ..
+                } => {}
                 super::places::Operand::Value(ty) => {
                     let local = self.save_top(&ty);
-                    self.emit(Instr::LocalAddress { local });
+                    self.emit(Instr::LocalRef { local });
                 }
             },
             ReceiverConversion::Load => {

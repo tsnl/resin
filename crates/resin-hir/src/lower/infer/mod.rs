@@ -239,6 +239,7 @@ impl From<Ty> for Type {
     fn from(ty: Ty) -> Self {
         match ty {
             Ty::Pointer { pointee } => Self::pointer((*pointee).into()),
+            Ty::Reference { referent } => Self::reference((*referent).into()),
             Ty::Array { element, length } => {
                 Self::Node(Head::Array(length), vec![(*element).into()])
             }
@@ -284,8 +285,10 @@ impl Head {
             | Self::FunctionParameter { .. }
             | Self::FunctionResult
             | Self::Nominal { .. }
-            | Self::Reference
             | Self::Value => return None,
+            Self::Reference => Ty::Reference {
+                referent: Box::new(children.next().unwrap()),
+            },
             Self::Atom(ty) => ty.clone(),
             Self::Union => Ty::union_of(children),
             Self::Pointer => Ty::Pointer {

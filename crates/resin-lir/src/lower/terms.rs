@@ -42,7 +42,7 @@ impl FunctionLowering<'_> {
                 self.gen_term(value, Some(&field.ty))?;
                 self.emit(Instr::SetLocal { local });
             } else {
-                self.emit(Instr::LocalAddress { local });
+                self.emit(Instr::LocalRef { local });
                 self.gen_term(value, Some(&field.ty))?;
                 self.emit(Instr::Store);
                 self.emit(Instr::Discard);

@@ -100,7 +100,8 @@ impl FunctionLowering<'_> {
                 });
             }
             TermKind::Assign { place, value } => return self.gen_assign(place, value),
-            TermKind::Address { place } => return self.gen_place(place),
+            TermKind::Address { place } => return self.gen_address(place),
+            TermKind::Borrow { place } => return self.gen_borrow(place),
             TermKind::Deref { pointer } => {
                 self.gen_term(pointer, None)?;
                 self.emit(Instr::Load);
@@ -197,7 +198,14 @@ impl FunctionLowering<'_> {
             Intrinsic::PointerIndex => self.emit(Instr::PointerIndex),
             Intrinsic::PointerRange => self.emit(Instr::PointerRange),
             Intrinsic::PointerBytes => self.emit(Instr::PointerBytes),
-            Intrinsic::Index => self.emit(Instr::AccessDynamic),
+            Intrinsic::Index => {
+                self.emit(Instr::AccessDynamic);
+                if matches!(result, Ty::Reference { .. })
+                    && !matches!(args.params[0], Ty::Reference { .. })
+                {
+                    self.emit(Instr::Borrow);
+                }
+            }
             Intrinsic::GpuArgumentsDispatch => self.emit(Instr::GpuArgumentsDispatch),
             Intrinsic::GpuArgumentsDraw => self.emit(Instr::GpuArgumentsDraw),
             Intrinsic::OwnerCreate => self.emit(Instr::OwnerCreate {

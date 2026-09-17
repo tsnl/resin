@@ -282,3 +282,44 @@ async fn disconnect_during_native_compilation_reaps_the_real_compiler_process() 
     );
     service.finish().await;
 }
+
+#[tokio::test]
+async fn specialization_diagnostics_survive_cache_publication_and_http_transport() {
+    let service = Service::start(TempDir::new().unwrap(), None).await;
+    let source = r#"export { main };
+        struct Cell { value: int }
+        fn get(cell: Ref<Cell>) -> Ref<int> { cell.value }
+        fn address<T>(cell: Ref<T>) -> Ptr<int> { &cell:get() }
+        fn main() { let cell = Cell { value = 1 }; address(cell); }
+    "#;
+    let client = reqwest::Client::new();
+    for _ in 0..2 {
+        let request = service.build(service.inputs("main.resin", source));
+        let response = client
+            .post(service.url("/v1/build"))
+            .json(&request)
+            .send()
+            .await
+            .unwrap();
+        assert!(!response.status().is_success());
+        let failure = response.json::<Failure>().await.unwrap();
+        assert_eq!(failure.code, ErrorCode::CompilationFailed, "{failure:?}");
+        let diagnostic = &failure.diagnostics[0];
+        assert_eq!(diagnostic.code.as_deref(), Some("invalid-specialization"));
+        assert!(
+            diagnostic
+                .message
+                .contains("cannot take the address of a Ref")
+        );
+        let span = diagnostic.span.as_ref().unwrap();
+        assert_eq!(span.source, "main.resin");
+        assert!(source[span.start as usize..span.end as usize].contains("&cell:get()"));
+        assert!(
+            diagnostic
+                .related
+                .iter()
+                .any(|note| note.message.contains("while specializing address"))
+        );
+    }
+    service.finish().await;
+}

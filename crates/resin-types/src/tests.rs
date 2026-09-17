@@ -693,3 +693,23 @@ fn graphics_pipeline_roots_and_varyings_keep_nominal_type_identity() {
         .is_err()
     );
 }
+
+#[test]
+fn references_preserve_access_without_pointer_conversions_or_shared_layout() {
+    let reference = Ty::Reference {
+        referent: Box::new(Ty::Bool),
+    };
+    let pointer = Ty::Pointer {
+        pointee: Box::new(Ty::Bool),
+    };
+    let context = TyperContext::new();
+    for other in [pointer, Ty::UInt64] {
+        assert!(context.explicit_conversion(&reference, &other).is_err());
+        assert!(context.explicit_conversion(&other, &reference).is_err());
+        assert!(!reference.widens_to(&other));
+    }
+    assert!(crate::shader::value_type(&[], &reference).is_ok());
+    assert!(layout::layout(&[], &reference).is_err());
+    assert!(!reference.gpu_element(&[]));
+    assert_eq!(crate::format_type(&reference, &[]), "Ref<bool>");
+}

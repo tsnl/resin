@@ -227,19 +227,12 @@ impl Context {
         source_result: &crate::Type,
     ) -> bool {
         let solver = super::infer::Solver::default();
-        let abi = |ty: &crate::Type| {
-            if let crate::Type::Reference { referent } = ty {
-                solver
-                    .resolve(&super::infer::Type::from_hir(referent))
-                    .map(|pointee| Ty::Pointer {
-                        pointee: Box::new(pointee),
-                    })
-            } else {
-                solver.resolve(&super::infer::Type::from_hir(ty))
-            }
-        };
-        let params = source_params.iter().map(abi).collect::<Option<Vec<_>>>();
-        let (Some(params), Some(result)) = (params, abi(source_result)) else {
+        let concrete = |ty: &crate::Type| solver.resolve(&super::infer::Type::from_hir(ty));
+        let params = source_params
+            .iter()
+            .map(concrete)
+            .collect::<Option<Vec<_>>>();
+        let (Some(params), Some(result)) = (params, concrete(source_result)) else {
             return false;
         };
         self.functions.entry(function).or_insert(FunctionDecl {
@@ -314,9 +307,9 @@ impl ReceiverConversion {
     pub(crate) fn between(from: &Ty, to: &Ty) -> Option<Self> {
         if from == to {
             Some(Self::Value)
-        } else if matches!(to, Ty::Pointer { pointee } if pointee.as_ref() == from) {
-            Some(Self::Address)
-        } else if matches!(from, Ty::Pointer { pointee } if pointee.as_ref() == to) {
+        } else if matches!(to, Ty::Reference { referent } if referent.as_ref() == from) {
+            Some(Self::Borrow)
+        } else if matches!(from, Ty::Reference { referent } if referent.as_ref() == to) {
             Some(Self::Load)
         } else {
             None
@@ -415,7 +408,14 @@ pub(crate) fn intrinsic_methods(
         base = solver.head(&parts[0]);
     }
     let index = match &base {
-        Type::Node(Head::Array(_), parts) => Some((Type::pointer(base.clone()), parts[0].clone())),
+        Type::Node(Head::Array(_), parts) => Some((
+            if pointer_receiver {
+                Type::pointer(base.clone())
+            } else {
+                Type::reference(base.clone())
+            },
+            parts[0].clone(),
+        )),
         Type::Node(Head::Atom(Ty::Str), _) => Some((base.clone(), Ty::UInt8.into())),
         _ => None,
     };

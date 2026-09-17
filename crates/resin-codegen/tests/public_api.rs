@@ -203,30 +203,38 @@ async fn lowering_failure_leaves_existing_outputs_untouched() {
         .unwrap_err();
     assert!(error.to_string().contains("not exported"));
     let mut bad = embedded_module();
-    // The language permits pointers, but this backend representation cannot store a
-    // shader-local address in a physical pointer value. This remains a target-lowering error.
-    bad.functions[1].locals.extend([
-        Local {
-            name: None,
-            ty: Ty::UInt64,
+    // Returning a borrowed local is valid LIR with unchecked lifetimes, but has
+    // no supported shader representation. Failure must preserve the earlier files.
+    let mut helper = constant_function(
+        vec![],
+        Ty::Reference {
+            referent: Box::new(Ty::UInt64),
         },
-        Local {
-            name: None,
-            ty: Ty::Pointer {
-                pointee: Box::new(Ty::UInt64),
-            },
-        },
-    ]);
+        Value::Unit,
+    );
+    helper.profile = resin_lir::Profile::Shader;
+    helper.locals.push(Local {
+        name: None,
+        ty: Ty::UInt64,
+    });
+    helper.blocks[0].instrs = vec![Instr::LocalRef {
+        local: LocalId::from_index(0),
+    }];
+    bad.functions.push(helper);
+    let origin = SourceLocation {
+        source: Source::new("local.resin", "return local"),
+        span: Span { start: 0, end: 12 },
+    };
+    bad.origins
+        .functions
+        .insert(FunctionId::from_index(2), origin.clone());
     bad.functions[1].blocks[0].instrs.splice(
         0..0,
         [
-            Instr::LocalAddress {
-                local: LocalId::from_index(3),
+            Instr::Function {
+                function: FunctionId::from_index(2),
             },
-            Instr::LocalAddress {
-                local: LocalId::from_index(2),
-            },
-            Instr::Store,
+            Instr::Call { arguments: 0 },
             Instr::Discard,
         ],
     );
@@ -234,7 +242,12 @@ async fn lowering_failure_leaves_existing_outputs_untouched() {
     let error = generate(&checked, Some("main"), directory.path())
         .await
         .unwrap_err();
-    assert!(error.to_string().contains("shader-local addresses"));
+    let resin_codegen::GenerationError::Codegen { error } = error else {
+        panic!("target diagnostic");
+    };
+    assert_eq!(error.kind(), resin_codegen::ErrorKind::UnsupportedTarget);
+    assert_eq!(error.location(), Some(&origin));
+    assert!(error.message().contains("cannot return a local address"));
     assert_eq!(fs::read(project.c_source().unwrap()).unwrap(), before_c);
     assert_eq!(
         fs::read(project.shaders()[0].unoptimized_spirv()).unwrap(),

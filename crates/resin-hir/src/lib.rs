@@ -547,7 +547,7 @@ pub enum Statement {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReceiverConversion {
     Value,
-    Address,
+    Borrow,
     Load,
 }
 

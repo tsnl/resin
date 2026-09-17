@@ -21,7 +21,7 @@ pub(super) fn generate(
     let analysis = checked.analysis();
     let reachable = checked
         .shader_functions(entry)
-        .ok_or_else(|| Error("shader entry was not requested".into()))?;
+        .ok_or_else(|| Error::unsupported("shader entry was not requested".into()))?;
     let mut context = Context::new(module, &analysis.types, &analysis.functions);
     for &function in reachable {
         let index = function.index();
@@ -29,6 +29,11 @@ pub(super) fn generate(
     }
     for &function in reachable {
         let index = function.index();
+        // A reference to a local-only type has no device-address ABI. Emit only
+        // its requested Function-storage specializations at the actual calls.
+        if module.functions[index].locals[..module.functions[index].parameter_count].iter().any(|parameter| {
+            matches!(&parameter.ty, Ty::Reference { referent } if resin_types::layout::layout(&module.types, referent).is_err())
+        }) { continue; }
         let id = context.functions[index];
         let may_fail = function::lower(
             &mut context,
@@ -151,7 +156,9 @@ fn register_function_types(
     {
         match ty {
             Ty::Function { .. } => continue,
-            Ty::Pointer { pointee } => context.validate(pointee)?,
+            Ty::Pointer { pointee } | Ty::Reference { referent: pointee } => {
+                context.validate(pointee)?
+            }
             _ => context.validate(ty)?,
         }
         context.ty(ty)?;
@@ -160,12 +167,12 @@ fn register_function_types(
 }
 
 fn str_storage_error() -> Error {
-    Error(
+    Error::unsupported(
         "shader string literals need device-backed storage; pass a Span<ubyte> in the shader root"
             .into(),
     )
 }
 
 fn build_error(error: rspirv::dr::Error) -> Error {
-    Error(format!("cannot construct SPIR-V: {error}"))
+    Error::invalid(format!("cannot construct SPIR-V: {error}"))
 }

@@ -355,7 +355,7 @@ impl Specialization<'_, '_> {
     fn receiver(&self, source: resin_hir::ReceiverConversion) -> concrete::ReceiverConversion {
         match source {
             resin_hir::ReceiverConversion::Value => concrete::ReceiverConversion::Value,
-            resin_hir::ReceiverConversion::Address => concrete::ReceiverConversion::Address,
+            resin_hir::ReceiverConversion::Borrow => concrete::ReceiverConversion::Borrow,
             resin_hir::ReceiverConversion::Load => concrete::ReceiverConversion::Load,
         }
     }
@@ -631,7 +631,7 @@ impl Specialization<'_, '_> {
                 span: source.span,
                 ty: self.ty(&source.ty)?,
                 kind: concrete::TermKind::Adapt {
-                    conversion: concrete::ReceiverConversion::Address,
+                    conversion: concrete::ReceiverConversion::Borrow,
                     arg: self.place(arg)?,
                 },
             });
@@ -706,14 +706,14 @@ impl Specialization<'_, '_> {
         let from = self.ty(&source.ty)?;
         let conversion = if &from == to {
             ReceiverConversion::Value
-        } else if matches!(to, Ty::Pointer { pointee } if **pointee == from) {
-            ReceiverConversion::Address
-        } else if matches!(&from, Ty::Pointer { pointee } if pointee.as_ref() == to) {
+        } else if matches!(to, Ty::Reference { referent } if **referent == from) {
+            ReceiverConversion::Borrow
+        } else if matches!(&from, Ty::Reference { referent } if referent.as_ref() == to) {
             ReceiverConversion::Load
         } else {
             return Err(self.instance_error("method receiver does not match the first parameter"));
         };
-        let argument = if conversion == ReceiverConversion::Address {
+        let argument = if conversion == ReceiverConversion::Borrow {
             self.place(source)?
         } else {
             self.boxed(source)?
@@ -799,7 +799,7 @@ impl Specialization<'_, '_> {
                     "reference binding requires an initialized place, not a temporary value",
                 ));
             }
-            return Ok(concrete::TermKind::Address { place });
+            return Ok(concrete::TermKind::Borrow { place });
         }
         let value = if let resin_hir::Type::Reference { referent } = from {
             if access == Access::Value && !referent.copies_implicitly() {
@@ -833,7 +833,7 @@ impl Specialization<'_, '_> {
     }
 
     // Generic operation results acquire their final reference contract here.
-    // Check before Ref and Ptr share the host pointer representation.
+    // Preserve the same source capability after resolving dependent signatures.
     fn require_addressable(&mut self, source: &resin_hir::Term) -> Result<(), Error> {
         if matches!(
             self.argument(&source.ty)?,
@@ -1132,7 +1132,7 @@ impl Specialization<'_, '_> {
             } => self.intrinsic(*op, type_args, args)?,
             resin_hir::TermKind::Adapt { conversion, arg } => concrete::TermKind::Adapt {
                 conversion: self.receiver(*conversion),
-                arg: if *conversion == resin_hir::ReceiverConversion::Address {
+                arg: if *conversion == resin_hir::ReceiverConversion::Borrow {
                     self.place(arg)?
                 } else {
                     self.boxed(arg)?

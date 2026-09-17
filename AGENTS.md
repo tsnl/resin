@@ -411,7 +411,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   A pointer dereference and its field projections remain addressable. Parameters and
   results retain their Ref/Ptr contract through generic specialization. Ref parameters accept temporary arguments alive through the full
   expression; escaping aliases do not retain them. HIR retains reference use;
-  specialization translates it to address/read operations and the existing pointer ABI.
+  specialization preserves distinct concrete Ref/Ptr types. LIR LocalRef and Borrow
+  produce references, never pointers. Verification rejects reference-to-pointer
+  conversions; only final target lowering chooses an address representation.
   Reject direct reference aggregate payloads, nested references, and reference-valued
   generic arguments. Shader-local references can cross helper calls using Function
   storage pointers plus projection paths; returning or merging distinct local

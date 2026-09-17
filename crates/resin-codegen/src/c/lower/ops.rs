@@ -26,7 +26,7 @@ pub(super) fn builtin(
         return super::formatting::format(types, args, result);
     }
     let unsupported = || {
-        Error(format!(
+        Error::invalid(format!(
             "unsupported builtin {name:?}: {:?} -> {result:?}",
             args.iter().map(|a| &a.ty).collect::<Vec<_>>()
         ))

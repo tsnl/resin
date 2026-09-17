@@ -64,7 +64,7 @@ impl FunctionLowering<'_> {
         for (index, member) in members.iter().enumerate() {
             let case = Case::Type(member.clone());
             let next = if index + 1 < members.len() {
-                self.emit(Instr::LocalAddress { local: saved });
+                self.emit(Instr::LocalRef { local: saved });
                 self.emit(Instr::IsVariant { tag: case.clone() });
                 let body = self.new_block("try.member", height, 0);
                 let next = self.new_block("try.remaining", height, 0);
@@ -118,7 +118,7 @@ impl FunctionLowering<'_> {
         for (i, arm) in arms.iter().enumerate() {
             let tag = &arm.tag;
             let next = if i + 1 < arms.len() {
-                self.emit(Instr::LocalAddress { local: saved });
+                self.emit(Instr::LocalRef { local: saved });
                 self.emit(Instr::IsVariant { tag: tag.clone() });
                 let body = self.new_block("match.arm", height, 0);
                 let next = self.new_block("match.next", height, 0);

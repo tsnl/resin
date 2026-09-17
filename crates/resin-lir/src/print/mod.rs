@@ -225,11 +225,12 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
         Instr::NumericCast { ty } => list("numeric-cast", vec![sexp_ty(names, ty)]),
         Instr::PointerCast { ty } => list("pointer-cast", vec![sexp_ty(names, ty)]),
         Instr::Push { value } => list("push", vec![sexp_value(names, value)]),
-        Instr::LocalAddress { local } => list(
-            "local-addr",
+        Instr::LocalRef { local } => list(
+            "local-ref",
             vec![symbol(fn_names.locals[local.index()].as_ref())],
         ),
         Instr::AccessStatic { index } => list("access-static", vec![symbol(index.to_string())]),
+        Instr::Borrow => symbol("borrow"),
         Instr::PointerIndex => symbol("pointer-index"),
         Instr::PointerRange => symbol("pointer-range"),
         Instr::PointerBytes => symbol("pointer-bytes"),
@@ -425,6 +426,7 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
             .get(definition.index())
             .map(|name| symbol(name.as_ref()))
             .unwrap_or_else(|| symbol(format!("type.{}", definition.index()))),
+        Ty::Reference { referent } => list("ref", vec![sexp_ty(names, referent)]),
         Ty::Pointer { pointee } => list("ptr", vec![sexp_ty(names, pointee)]),
         Ty::GpuView => symbol("GpuView"),
         Ty::GpuPipelineContract => symbol("GpuPipelineContract"),

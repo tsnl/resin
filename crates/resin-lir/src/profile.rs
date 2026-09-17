@@ -85,7 +85,9 @@ pub(crate) fn expression_type(typer: &TyperContext, ty: &Ty) -> Result<(), Strin
             }
             resin_types::shader::value_type(typer.definitions(), result)
         }
-        Ty::Pointer { pointee } => resin_types::shader::value_type(typer.definitions(), pointee),
+        Ty::Reference { referent: pointee } => {
+            resin_types::shader::value_type(typer.definitions(), pointee)
+        }
         _ => resin_types::shader::value_type(typer.definitions(), ty),
     }
 }
@@ -99,8 +101,8 @@ fn instruction(typer: &TyperContext, op: &Instr) -> Result<(), String> {
         Instr::Push { value } => literal(value),
         Instr::PointerCast { .. } => Err("shader pointer casts are unsupported; use typed pointers and indexing instead".into()),
         Instr::ForgetLocal { .. } | Instr::Discard | Instr::TakeLocal { .. }
-        | Instr::SetLocal { .. } | Instr::LocalAddress { .. } | Instr::Function { .. }
-        | Instr::Call { .. } | Instr::TransferLoad | Instr::Load
+        | Instr::SetLocal { .. } | Instr::LocalRef { .. } | Instr::Function { .. }
+        | Instr::Borrow | Instr::Call { .. } | Instr::TransferLoad | Instr::Load
         | Instr::TakeField { .. } | Instr::SetField { .. } | Instr::Store | Instr::Replace | Instr::MakeVariant { .. } | Instr::IsVariant { .. }
         | Instr::VariantPayload { .. } | Instr::ExcludeNone | Instr::Widen { .. }
         | Instr::NumericCast { .. } | Instr::Ascribe { .. }

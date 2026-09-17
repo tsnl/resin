@@ -264,20 +264,68 @@ impl std::error::Error for GenerationError {
     }
 }
 
+/// A target failure, retaining source context independently of terminal rendering.
 #[derive(Debug)]
-pub struct Error(String);
+pub struct Error {
+    kind: ErrorKind,
+    message: String,
+    location: Option<resin_source::SourceLocation>,
+    context: Option<String>,
+}
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorKind {
+    UnsupportedTarget,
+    InvalidProgram,
+    InvalidLir,
+    Io,
+}
+
+impl Error {
+    pub fn kind(&self) -> ErrorKind {
+        self.kind
+    }
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+    pub fn location(&self) -> Option<&resin_source::SourceLocation> {
+        self.location.as_ref()
+    }
+
+    fn new(kind: ErrorKind, message: String) -> Self {
+        Self {
+            kind,
+            message,
+            location: None,
+            context: None,
+        }
+    }
+    fn unsupported(message: String) -> Self {
+        Self::new(ErrorKind::UnsupportedTarget, message)
+    }
+    fn invalid(message: String) -> Self {
+        Self::new(ErrorKind::InvalidLir, message)
+    }
+    fn program(message: String) -> Self {
+        Self::new(ErrorKind::InvalidProgram, message)
     }
 }
 
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(origin) = &self.location {
+            write!(f, "{}: ", error::source_context(origin))?;
+        }
+        if let Some(context) = &self.context {
+            write!(f, "{context}: ")?;
+        }
+        f.write_str(&self.message)
+    }
+}
 impl std::error::Error for Error {}
-
 impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Self {
-        Self(error.to_string())
+        Self::new(ErrorKind::Io, error.to_string())
     }
 }
 
@@ -291,7 +339,7 @@ fn describe_project(
     directory: Arc<TempDir>,
 ) -> Result<GeneratedProject, Error> {
     if entry.is_none() && module.shaders.is_empty() {
-        return Err(Error("no shader entries were requested".into()));
+        return Err(Error::invalid("no shader entries were requested".into()));
     }
     let shaders = module
         .shaders
@@ -332,7 +380,7 @@ fn describe_shader(
 ) -> Result<GeneratedShader, Error> {
     Ok(GeneratedShader {
         function,
-        stage: stage.parse().map_err(Error)?,
+        stage: stage.parse().map_err(Error::unsupported)?,
         unoptimized_spirv: directory.join(format!("shader_{}.unoptimized.spv", function.index())),
         spirv: directory.join(format!("shader_{}.spv", function.index())),
         header: directory.join(shader_header(function)),
@@ -412,7 +460,7 @@ fn write_source(path: &Path, source: &[u8]) -> Result<(), Error> {
         .create_new(true)
         .open(path)
         .and_then(|mut file| file.write_all(source))
-        .map_err(|error| Error(format!("{}: {error}", path.display())))
+        .map_err(|error| Error::new(ErrorKind::Io, format!("{}: {error}", path.display())))
 }
 
 fn stage_directory(root: &Path, path: &str, created: &mut BTreeSet<String>) -> Result<(), Error> {
@@ -425,8 +473,9 @@ fn stage_directory(root: &Path, path: &str, created: &mut BTreeSet<String>) -> R
         if created.insert(prefix.to_owned()) {
             // A pre-existing differently-spelled directory is an actual filesystem
             // alias (including Unicode case folding); reject it rather than merge.
-            fs::create_dir(root.join(prefix))
-                .map_err(|error| Error(format!("native directory {prefix}: {error}")))?;
+            fs::create_dir(root.join(prefix)).map_err(|error| {
+                Error::new(ErrorKind::Io, format!("native directory {prefix}: {error}"))
+            })?;
         }
     }
     Ok(())
@@ -481,7 +530,9 @@ fn validate_headers(headers: &NativeHeaders) -> Result<(), Error> {
                 .chars()
                 .any(|ch| ch.is_control() || "\\:\"<>|?*".contains(ch))
         {
-            return Err(Error(format!("invalid staged native path: {path}")));
+            return Err(Error::invalid(format!(
+                "invalid staged native path: {path}"
+            )));
         }
         Ok(())
     }
@@ -508,7 +559,7 @@ fn validate_headers(headers: &NativeHeaders) -> Result<(), Error> {
                 .insert(prefix.to_ascii_lowercase(), prefix.to_owned())
                 .is_some_and(|old| old != prefix)
             {
-                return Err(Error(
+                return Err(Error::invalid(
                     "native paths collide under ASCII case folding".into(),
                 ));
             }
@@ -519,11 +570,13 @@ fn validate_headers(headers: &NativeHeaders) -> Result<(), Error> {
             NativeInclude::Staged { path } => {
                 staged(path)?;
                 if !headers.files.contains_key(path) {
-                    return Err(Error(format!("missing staged native header: {path}")));
+                    return Err(Error::invalid(format!(
+                        "missing staged native header: {path}"
+                    )));
                 }
             }
             NativeInclude::System { spelling } if !resin_types::Foreign::valid_header(spelling) => {
-                return Err(Error(format!("invalid system header: {spelling}")));
+                return Err(Error::invalid(format!("invalid system header: {spelling}")));
             }
             NativeInclude::System { .. } => {}
         }
@@ -532,7 +585,9 @@ fn validate_headers(headers: &NativeHeaders) -> Result<(), Error> {
         let mut prefix = path.as_ref();
         while let Some((parent, _)) = prefix.rsplit_once('/') {
             if headers.files.contains_key(parent) {
-                return Err(Error(format!("native file/directory conflict: {parent}")));
+                return Err(Error::invalid(format!(
+                    "native file/directory conflict: {parent}"
+                )));
             }
             prefix = parent;
         }

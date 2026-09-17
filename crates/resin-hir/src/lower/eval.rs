@@ -126,6 +126,11 @@ pub(super) fn reference_type(
     span: Span,
 ) -> Result<(), GenerateError> {
     if let Type::Node(head, children) = solver.head(ty) {
+        if let Head::Atom(Ty::Union { variants }) = &head {
+            for variant in variants {
+                reference_type(solver, &variant.clone().into(), false, span)?;
+            }
+        }
         if head == Head::Reference && !binding {
             return Err(GenerateError::inference(
                 span,

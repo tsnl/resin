@@ -250,7 +250,7 @@ impl FunctionLowering<'_, '_> {
                             self.context.module,
                             self.index,
                             Some((block, self.function.blocks[block].instrs.len())),
-                            Error("shader cannot return a local address".into()),
+                            Error::unsupported("shader cannot return a local address".into()),
                         ));
                     }
                     self.context.builder.ret_value(stack[0].id).unwrap();

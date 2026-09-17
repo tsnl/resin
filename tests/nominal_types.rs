@@ -70,7 +70,7 @@ fn a_linked_list_is_finite_through_its_next_pointer() {
         blocks: vec![BasicBlock {
             name: None,
             instrs: vec![
-                Instr::LocalAddress {
+                Instr::LocalRef {
                     local: LocalId::from_index(0),
                 },
                 Instr::AccessStatic { index: 0 },

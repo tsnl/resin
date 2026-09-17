@@ -234,7 +234,7 @@ impl Completion<'_> {
                 span: source.span,
                 ty: target,
                 kind: TermKind::Adapt {
-                    conversion: crate::ReceiverConversion::Address,
+                    conversion: crate::ReceiverConversion::Borrow,
                     arg: Box::new(value),
                 },
             });
@@ -971,16 +971,16 @@ impl Completion<'_> {
         let function_type = self.solver.require_complete(&func.ty, func.span)?;
         let receiver = match &function_type {
             crate::Type::Array { .. } => Some((
-                crate::Type::Pointer {
-                    pointee: Box::new(function_type.clone()),
+                crate::Type::Reference {
+                    referent: Box::new(function_type.clone()),
                 },
-                ReceiverConversion::Address,
+                ReceiverConversion::Borrow,
             )),
             crate::Type::Str => Some((function_type.clone(), ReceiverConversion::Value)),
             _ => None,
         };
         if let Some((ty, conversion)) = receiver {
-            let base = if conversion == ReceiverConversion::Address {
+            let base = if conversion == ReceiverConversion::Borrow {
                 let place = self.place(func)?;
                 self.require_available(&place)?;
                 place

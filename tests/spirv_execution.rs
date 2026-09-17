@@ -393,3 +393,31 @@ fn local_reference_calls_in_loops_propagate_failure_and_evaluate_indices_once() 
         );
     }
 }
+
+#[test]
+fn boolean_local_references_work_in_helpers_without_device_storage_layout() {
+    let source = r#"
+        export { kernel };
+        struct Root { count: ulong, inputs: Ptr<uint>, outputs: Ptr<uint> }
+        struct Flags { first: bool, second: bool }
+        fn toggle(value: Ref<bool>) { value = !value; }
+        fn update(value: Ref<Flags>, index: ulong) {
+            toggle(value.first);
+            let mut flags = [value.first, value.second];
+            toggle(flags:at(index & 1_ul));
+            value.second = flags:at(0_ul) && flags:at(1_ul);
+        }
+        @compute_shader
+        fn kernel(index: ulong, root: Ptr<Root>) {
+            if (index >= root.count) { return; };
+            let mut flags = Flags { first = false, second = true };
+            update(flags, index);
+            device_index(root.outputs, root.count, index).* = if (flags.first && !flags.second) { 42_ui } else { 0_ui };
+        }
+    "#;
+    let Some(actual) = execute(source, &[0_u32; 65], u32::MAX) else {
+        return;
+    };
+    assert_eq!(&actual[..65], &[42; 65]);
+    assert_eq!(actual[65], u32::MAX);
+}

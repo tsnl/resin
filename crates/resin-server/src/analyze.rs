@@ -101,6 +101,9 @@ pub(crate) fn diagnostics(hir: &resin_hir::Hir) -> Vec<Diagnostic> {
     hir.diagnostics()
         .iter()
         .map(|diagnostic| Diagnostic {
+            code: None,
+            notes: Vec::new(),
+            help: None,
             severity: Severity::Error,
             message: diagnostic.message.clone(),
             span: Some(location(&diagnostic.location)),
@@ -153,7 +156,7 @@ pub(crate) fn managed_sources(
         })
         .collect()
 }
-fn location(location: &SourceLocation) -> Span {
+pub(crate) fn location(location: &SourceLocation) -> Span {
     span(&location.source, location.span)
 }
 fn span(source: &Source, span: resin_source::Span) -> Span {

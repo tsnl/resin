@@ -997,3 +997,29 @@ fn embedding_rejects_invalid_symbols_and_input_overwrites() {
     assert!(!result.status.success());
     assert_eq!(fs::read(input).unwrap(), [1, 2, 3]);
 }
+
+#[test]
+fn specialization_failures_keep_source_excerpts_and_application_notes() {
+    let output = cli(
+        r#"export { main };
+        struct Cell { value: int }
+        fn get(cell: Ref<Cell>) -> Ref<int> { cell.value }
+        fn address<T>(cell: Ref<T>) -> Ptr<int> { &cell:get() }
+        fn main() { let cell = Cell { value = 1 }; address(cell); }
+    "#,
+        &[],
+    );
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("error[invalid-specialization]"), "{error}");
+    assert!(
+        error.contains("cannot take the address of a Ref"),
+        "{error}"
+    );
+    assert!(
+        error.contains("&cell:get()") && error.contains('^'),
+        "{error}"
+    );
+    assert!(error.contains("while specializing address"), "{error}");
+    assert!(!error.contains("cache entry failed"), "{error}");
+}

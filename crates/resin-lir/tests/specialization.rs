@@ -314,8 +314,8 @@ fn implicit_drop_references_use_concrete_function_identities() {
             val: "self".into(),
             span: SPAN,
         },
-        annotation: annotation(Type::Pointer {
-            pointee: Box::new(Type::Defined {
+        annotation: annotation(Type::Reference {
+            referent: Box::new(Type::Defined {
                 arguments: vec![],
                 definition: TypeId::from_index(0),
             }),
@@ -757,8 +757,8 @@ fn nominal_hooks_receive_owner_arguments_before_storage_lowering() {
     drop.signature.params.push(Parameter {
         name: Ident::new("self".into(), SPAN),
         binding: Some(0),
-        annotation: annotation(Type::Pointer {
-            pointee: Box::new(nominal(Type::Parameter { parameter: U })),
+        annotation: annotation(Type::Reference {
+            referent: Box::new(nominal(Type::Parameter { parameter: U })),
         }),
     });
     hir.types[0].drop = Some(FunctionId::from_index(hir.functions.len()));
@@ -770,8 +770,8 @@ fn nominal_hooks_receive_owner_arguments_before_storage_lowering() {
         let hook = definition.drop_hook().unwrap();
         assert_eq!(
             lir.functions[hook.index()].locals[0].ty,
-            Ty::Pointer {
-                pointee: Box::new(Ty::Defined {
+            Ty::Reference {
+                referent: Box::new(Ty::Defined {
                     definition: TypeId::from_index(index)
                 })
             }

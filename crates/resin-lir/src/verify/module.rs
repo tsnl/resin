@@ -104,8 +104,8 @@ fn check_drop_hooks(module: &Module) -> Result<(), VerifyError> {
 fn check_drop_hook(module: &Module, ty: TypeId, hook: FunctionId) -> Result<(), VerifyError> {
     let error = || Location::type_definition(ty).error(VerifyErrorKind::InvalidDropHook);
     let function = module.functions.get(hook.index()).ok_or_else(error)?;
-    let pointer = Ty::Pointer {
-        pointee: Box::new(Ty::Defined { definition: ty }),
+    let pointer = Ty::Reference {
+        referent: Box::new(Ty::Defined { definition: ty }),
     };
     if function.profile != crate::Profile::Host
         || function.parameter_count != 1
@@ -212,8 +212,8 @@ fn check_text_views(module: &Module) -> Result<(), VerifyError> {
     for (&id, &hook) in &module.text_views {
         let error = || Location::type_definition(id).error(VerifyErrorKind::InvalidTextView);
         let function = module.functions.get(hook.index()).ok_or_else(error)?;
-        let receiver = Ty::Pointer {
-            pointee: Box::new(Ty::Defined { definition: id }),
+        let receiver = Ty::Reference {
+            referent: Box::new(Ty::Defined { definition: id }),
         };
         if !matches!(module.types.get(id.index()), Some(TypeDef::Nominal { .. }))
             || function.profile != crate::Profile::Host

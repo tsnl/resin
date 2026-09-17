@@ -100,11 +100,17 @@ fn drop(self: Ref<Resource>)  {
         let int = |value| Push {
             value: Value::Int32 { value },
         };
-        let mut instrs = vec![int(0), SetLocal { local: trace }];
+        let mut instrs = vec![
+            int(0),
+            OwnerCreate { element: Ty::Int32 },
+            ExcludeNone,
+            SetLocal { local: trace },
+        ];
         for digit in [1, 2] {
             instrs.extend([
                 Function { function: make },
-                LocalAddress { local: trace },
+                LocalRef { local: trace },
+                OwnerData { pointee: Ty::Int32 },
                 int(digit),
                 Call { arguments: 2 },
             ]);
@@ -116,13 +122,14 @@ fn drop(self: Ref<Resource>)  {
         instrs.extend(projection);
         instrs.extend([
             SetLocal { local: selected },
-            LocalAddress { local: selected },
+            LocalRef { local: selected },
             AccessStatic { index: 0 },
             OwnerData { pointee: payload },
             AccessStatic { index: 1 },
             Load,
             DropLocal { local: selected },
-            LocalAddress { local: trace },
+            LocalRef { local: trace },
+            OwnerData { pointee: Ty::Int32 },
             Load,
             CallBuiltin {
                 name: "+".into(),
@@ -130,8 +137,9 @@ fn drop(self: Ref<Resource>)  {
                 result: Ty::Int32,
             },
         ]);
+        instrs.push(DropLocal { local: trace });
         let main = &mut program.functions[program.entries["main"].index()];
-        main.locals = [Ty::Unit, Ty::Int32, element]
+        main.locals = [Ty::Unit, Ty::StrongOwner, element]
             .into_iter()
             .map(|ty| Local { name: None, ty })
             .collect();
@@ -603,13 +611,7 @@ fn loops_carry_typed_stack_values_between_iterations() {
     f.blocks = vec![
         BasicBlock {
             name: None,
-            instrs: vec![
-                LocalAddress { local: counter },
-                int(3),
-                Store,
-                Discard,
-                int(0),
-            ],
+            instrs: vec![LocalRef { local: counter }, int(3), Store, Discard, int(0)],
             terminator: Loop {
                 condition: BlockId::from_index(1),
                 body: BlockId::from_index(2),
@@ -621,7 +623,7 @@ fn loops_carry_typed_stack_values_between_iterations() {
             instrs: vec![
                 int(10),
                 op("+", Ty::Int32),
-                LocalAddress { local: counter },
+                LocalRef { local: counter },
                 Load,
                 int(0),
                 op(">", Ty::Bool),
@@ -631,11 +633,11 @@ fn loops_carry_typed_stack_values_between_iterations() {
         BasicBlock {
             name: None,
             instrs: vec![
-                LocalAddress { local: counter },
+                LocalRef { local: counter },
                 Load,
                 op("+", Ty::Int32),
-                LocalAddress { local: counter },
-                LocalAddress { local: counter },
+                LocalRef { local: counter },
+                LocalRef { local: counter },
                 Load,
                 int(1),
                 op("-", Ty::Int32),
@@ -681,7 +683,7 @@ fn array_addresses_and_dynamic_bounds_are_executable() {
         },
     });
     f.blocks[0].instrs = vec![
-        LocalAddress { local: array },
+        LocalRef { local: array },
         Push {
             value: Value::Int32 { value: 4 },
         },
@@ -694,7 +696,7 @@ fn array_addresses_and_dynamic_bounds_are_executable() {
         },
         Store,
         Discard,
-        LocalAddress { local: array },
+        LocalRef { local: array },
         Push {
             value: Value::Int32 { value: 1 },
         },

@@ -31,8 +31,8 @@ pub(super) fn instruction(
                 &args[0].ty
             };
             let address = Slot {
-                ty: Ty::Pointer {
-                    pointee: Box::new(pointee.clone()),
+                ty: Ty::Reference {
+                    referent: Box::new(pointee.clone()),
                 },
                 id: locals[local.index()],
                 local: Some(LocalAddress {
@@ -59,7 +59,7 @@ pub(super) fn instruction(
                 .unwrap();
             return Ok(None);
         }
-        Instr::LocalAddress { local } => {
+        Instr::LocalRef { local } => {
             return Ok(Some(Slot {
                 ty: result.unwrap().clone(),
                 id: locals[local.index()],
@@ -68,6 +68,12 @@ pub(super) fn instruction(
                     root_type: function.locals[local.index()].ty.clone(),
                     indices: vec![],
                 }),
+            }));
+        }
+        Instr::Borrow => {
+            return Ok(Some(Slot {
+                ty: result.unwrap().clone(),
+                ..args[0].clone()
             }));
         }
         Instr::Function { function } => context.functions[function.index()],
@@ -95,7 +101,7 @@ pub(super) fn instruction(
         }
         Instr::MakeVariant { ty, tag } => variant(context, ty, tag, args[0].id)?,
         Instr::IsVariant { tag } => {
-            if let Ty::Pointer { pointee } = &args[0].ty {
+            if let Ty::Pointer { pointee } | Ty::Reference { referent: pointee } = &args[0].ty {
                 let value = dereference(context, &args[0])?;
                 is_variant(context, pointee, tag, value)?
             } else {
@@ -129,7 +135,11 @@ pub(super) fn instruction(
             return index(context, &args[0], &args[1], result.unwrap(), arrays).map(Some);
         }
         Instr::CallBuiltin { name, result, .. } => builtin(context, name, args, result)?,
-        _ => return Err(Error(format!("shader profile does not support {instr:?}"))),
+        _ => {
+            return Err(Error::unsupported(format!(
+                "shader profile does not support {instr:?}"
+            )));
+        }
     };
     Ok(result.map(|ty| Slot::value(ty.clone(), id)))
 }
@@ -186,7 +196,7 @@ fn local_pointer(
 }
 
 fn dereference(context: &mut Context<'_>, slot: &Slot) -> Result<Word, Error> {
-    let Ty::Pointer { pointee } = &slot.ty else {
+    let (Ty::Pointer { pointee } | Ty::Reference { referent: pointee }) = &slot.ty else {
         unreachable!()
     };
     if let Some(local) = &slot.local {
@@ -198,7 +208,7 @@ fn dereference(context: &mut Context<'_>, slot: &Slot) -> Result<Word, Error> {
 }
 
 fn store(context: &mut Context<'_>, slot: &Slot, value: Word) -> Result<(), Error> {
-    let Ty::Pointer { pointee } = &slot.ty else {
+    let (Ty::Pointer { pointee } | Ty::Reference { referent: pointee }) = &slot.ty else {
         unreachable!()
     };
     if let Some(local) = &slot.local {
@@ -245,7 +255,7 @@ fn project(
             local: Some(local),
         });
     }
-    let id = if let Ty::Pointer { pointee } = &base.ty {
+    let id = if let Ty::Pointer { pointee } | Ty::Reference { referent: pointee } = &base.ty {
         let offset = crate::layout::layout(context.module, pointee)?.offsets[index];
         let offset = context.constant_u64(offset as u64);
         emit(context, Op::IAdd, &Ty::UInt64, &[base.id, offset])?
@@ -274,9 +284,9 @@ fn index(
         });
     }
     let (address, element) = match context.shape(&base.ty).clone() {
-        Ty::Pointer { pointee } => {
+        Ty::Pointer { pointee } | Ty::Reference { referent: pointee } => {
             let Ty::Array { element, .. } = context.shape(&pointee).clone() else {
-                return Err(Error("array pointer required".into()));
+                return Err(Error::unsupported("array pointer required".into()));
             };
             (base.id, element)
         }
@@ -294,7 +304,7 @@ fn index(
             let pointer = local_pointer(context, result, &local)?;
             return Ok(Slot::value(result.clone(), load(context, result, pointer)?));
         }
-        _ => return Err(Error("array required".into())),
+        _ => return Err(Error::unsupported("array required".into())),
     };
     let size = crate::layout::layout(context.module, &element)?.size;
     let size = context.constant_u64(size as u64);
@@ -419,7 +429,7 @@ fn ascribe(context: &mut Context<'_>, from: &Ty, to: &Ty, value: Word) -> Result
     }
     let fields: Vec<_> = match context.shape(to) {
         Ty::Record { fields } => fields.iter().map(|field| field.ty.clone()).collect(),
-        _ => return Err(Error("unsupported shader ascription".into())),
+        _ => return Err(Error::unsupported("unsupported shader ascription".into())),
     };
     let mut values = Vec::new();
     for (index, ty) in fields.iter().enumerate() {
@@ -437,7 +447,7 @@ fn builtin(
     if name == "assert" {
         return context.zero(&Ty::Unit);
     }
-    let unsupported = || Error(format!("unsupported shader builtin {name:?}"));
+    let unsupported = || Error::unsupported(format!("unsupported shader builtin {name:?}"));
     let Some(first) = args.first() else {
         return Err(unsupported());
     };
@@ -502,7 +512,11 @@ fn builtin(
         ("&", 2) if ty.is_integer() => Op::BitwiseAnd,
         ("|", 2) if ty.is_integer() => Op::BitwiseOr,
         ("^", 2) if ty.is_integer() => Op::BitwiseXor,
-        ("==", 2) if ty.is_numeric() || boolean || matches!(ty, Ty::Pointer { .. }) => {
+        ("==", 2)
+            if ty.is_numeric()
+                || boolean
+                || matches!(ty, Ty::Pointer { .. } | Ty::Reference { .. }) =>
+        {
             if float {
                 Op::FOrdEqual
             } else if boolean {
@@ -511,7 +525,11 @@ fn builtin(
                 Op::IEqual
             }
         }
-        ("!=", 2) if ty.is_numeric() || boolean || matches!(ty, Ty::Pointer { .. }) => {
+        ("!=", 2)
+            if ty.is_numeric()
+                || boolean
+                || matches!(ty, Ty::Pointer { .. } | Ty::Reference { .. }) =>
+        {
             if float {
                 Op::FUnordNotEqual
             } else if boolean {
@@ -587,7 +605,7 @@ fn literal(context: &mut Context<'_>, ty: &Ty, value: &Value) -> Result<Word, Er
             construct(context, ty, values)?
         }
         Value::Str { .. } => return Err(super::str_storage_error()),
-        _ => return Err(Error("unsupported shader literal".into())),
+        _ => return Err(Error::unsupported("unsupported shader literal".into())),
     })
 }
 
@@ -636,7 +654,11 @@ fn numeric_cast(context: &mut Context<'_>, from: &Ty, to: &Ty, value: Word) -> R
         (Some((_, false)), None) => Op::ConvertUToF,
         (None, Some((_, true))) => Op::ConvertFToS,
         (None, Some((_, false))) => Op::ConvertFToU,
-        _ => return Err(Error("unsupported shader numeric conversion".into())),
+        _ => {
+            return Err(Error::unsupported(
+                "unsupported shader numeric conversion".into(),
+            ));
+        }
     };
     emit(context, op, to, &[value])
 }

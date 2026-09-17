@@ -7,7 +7,7 @@ impl Error {
         module: &resin_lir::Module,
         function: usize,
         instruction: Option<(usize, usize)>,
-        error: Self,
+        mut error: Self,
     ) -> Self {
         use resin_lir::BlockId;
         let id = FunctionId::from_index(function);
@@ -27,15 +27,16 @@ impl Error {
             || format!("function {name}"),
             |(b, i)| format!("function {name}, block {b}, instruction {i}"),
         );
-        let Some(origin) = origin else {
-            return Self(format!("{internal}: {error}"));
-        };
-        let location = source_context(origin);
-        Self(format!("{location} ({internal}): {error}"))
+        // Nested helper failures keep the innermost source location.
+        if error.location.is_none() {
+            error.location = origin.cloned();
+            error.context = Some(internal);
+        }
+        error
     }
 }
 
-fn source_context(origin: &SourceLocation) -> String {
+pub(super) fn source_context(origin: &SourceLocation) -> String {
     let source = origin.source.text();
     let prefix = source.get(..origin.span.start).unwrap_or("");
     let line = prefix.bytes().filter(|b| *b == b'\n').count() + 1;

@@ -141,7 +141,7 @@ fn ir_dump_is_an_s_expression_with_names() {
     assert!(dump.contains("main"));
     assert!(dump.contains("fibonacci"));
     assert!(dump.contains("(local f0 int)"));
-    assert!(dump.contains("(local-addr n)"));
+    assert!(dump.contains("(local-ref n)"));
     assert!(dump.contains("(function-ref fibonacci)"));
     assert!(dump.contains("(block then"));
     let compact = dump.split_whitespace().collect::<Vec<_>>().join(" ");

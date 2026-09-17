@@ -59,7 +59,9 @@ pub(super) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), D
             }
         }
         Ty::Error { payload } => check_references(definitions, payload)?,
-        Ty::Pointer { pointee } => check_references(definitions, pointee)?,
+        Ty::Pointer { pointee } | Ty::Reference { referent: pointee } => {
+            check_references(definitions, pointee)?
+        }
         Ty::Array { element, .. } => check_references(definitions, element)?,
         Ty::Record { fields } => {
             for field in fields {
@@ -338,7 +340,7 @@ impl TypeTable {
             Ty::Error { payload } => {
                 self.intern(payload);
             }
-            Ty::Pointer { pointee } => {
+            Ty::Pointer { pointee } | Ty::Reference { referent: pointee } => {
                 self.intern(pointee);
             }
             Ty::Array { element, .. } => {
@@ -398,6 +400,7 @@ pub(super) fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
             .and_then(|d| d.name())
             .map(ToString::to_string)
             .unwrap_or_else(|| "?".into()),
+        Ty::Reference { referent } => format!("Ref<{}>", format_type(referent, definitions)),
         Ty::Pointer { pointee } => format!("Ptr<{}>", format_type(pointee, definitions)),
         Ty::GpuView => "GpuView".into(),
         Ty::GpuPipelineContract => "GpuPipelineContract".into(),
@@ -525,6 +528,7 @@ pub(super) fn value_layout(
         | Ty::UInt64
         | Ty::Float64
         | Ty::Pointer { .. }
+        | Ty::Reference { .. }
         | Ty::Function { .. }
         | Ty::StrongOwner
         | Ty::WeakOwner

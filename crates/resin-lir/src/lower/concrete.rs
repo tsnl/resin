@@ -131,6 +131,9 @@ pub(super) enum TermKind {
     Address {
         place: Box<Term>,
     },
+    Borrow {
+        place: Box<Term>,
+    },
     Deref {
         pointer: Box<Term>,
     },
@@ -183,7 +186,7 @@ pub(super) enum Statement {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ReceiverConversion {
     Value,
-    Address,
+    Borrow,
     Load,
 }
 
@@ -215,7 +218,7 @@ impl Term {
             TermKind::Adapt { arg, .. }
             | TermKind::Convert { arg, .. }
             | TermKind::Absurd { arg } => arg.exits(),
-            TermKind::Address { place } => place.exits(),
+            TermKind::Address { place } | TermKind::Borrow { place } => place.exits(),
             TermKind::Deref { pointer } => pointer.exits(),
             TermKind::Field { base, .. } => base.exits(),
             _ => false,

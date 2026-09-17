@@ -120,17 +120,22 @@ The low-level `pointer_index` intrinsic returns a pointer. `ArcPtr<T>:get()` als
 returns a pointer. Host `GpuSpan<T>:at()` returns an owning `GpuPtr<T>` supporting
 `load`, `store`, and `replace`.
 
-HIR retains reference types and explicit use relations. LIR specialization chooses
-address and read operations after resolving dependent signatures. References use the existing pointer ABI in C. In SPIR-V, device references use
+HIR, specialization, and LIR retain distinct reference and pointer types.
+`LocalRef` borrows a local; `Borrow` turns access through an existing pointer into
+a reference. There is no reverse operation. Loads, stores, and projections preserve
+these capabilities, and verification rejects references passed or returned as
+pointers, pointer casts of references, and pointer-only indexing on references.
+C emission uses pointer representations for references without granting Resin
+pointer operations. In SPIR-V, device references use
 physical pointers. Helpers receiving local references are specialized for their
 root object and field/index path; dynamic indices are passed separately. This
 preserves aliases without copying a field in and out. Shader-local references
 can cross helper calls and bind local aliases, but returning them from a helper
 or selecting distinct local referents across branches remains unsupported.
-The current LIR pointer representation also requires reference referents to have
-a shared host/device layout; shader-local types such as `bool` cannot yet be
-borrowed across calls. Local projection specialization has a 16,384-variant
-budget and a 128-call nesting guard.
+Local reference referents require shader value support, independently of device
+buffer layout. Helpers can borrow local `bool` values, boolean arrays, and records
+containing booleans. Explicit device pointers still require a shared storage layout. Local projection specialization has a 16,384-variant
+budget and a 32-call nesting guard.
 
 References are limited to bindings and function signatures. Reference fields,
 array elements, union members, error payloads, nested references, `Ptr<Ref<T>>`, and

@@ -79,7 +79,7 @@ pub(super) fn local_call(
         .functions
         .iter()
         .position(|id| *id == args[0].id)
-        .ok_or_else(|| Error("shader calls require a named function".into()))?;
+        .ok_or_else(|| Error::unsupported("shader calls require a named function".into()))?;
     let signature = Signature {
         function,
         parameters: args[1..]
@@ -128,9 +128,9 @@ fn specialize(context: &mut Context<'_>, signature: Signature) -> Result<Word, E
     // Local projection specializations are backend representations of already
     // verified, acyclic calls. Bound their additional work and emission stack.
     if context.local_functions.len() + context.local_call_depth >= 16_384
-        || context.local_call_depth >= 128
+        || context.local_call_depth >= 32
     {
-        return Err(Error(
+        return Err(Error::unsupported(
             "shader local-reference specialization limit exceeded".into(),
         ));
     }

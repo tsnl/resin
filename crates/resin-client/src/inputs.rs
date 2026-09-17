@@ -141,6 +141,9 @@ pub(crate) async fn capture(
     let mut acquisition_diagnostics: Vec<_> = errors
         .into_iter()
         .map(|error| Diagnostic {
+            code: None,
+            notes: Vec::new(),
+            help: None,
             severity: Severity::Error,
             message: error.message,
             span: Some(wire_span(

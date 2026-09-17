@@ -151,6 +151,7 @@ A free `fn drop(value: Ref<Item>) { ... }` declared with its nominal type suppli
 its destruction hook. A generic hook binds the owner's parameters. Direct calls
 remain ordinary calls; see [ownership and cleanup](lifetimes.md).
 
-Free functions may be shader entries or helpers. Shader-local addresses still
-cannot escape into a callee, and reference counting and custom destruction remain
-host-only. Free operations do not relax these backend restrictions.
+Free functions may be shader entries or helpers. Helpers can borrow shader-local
+values using `Ref<T>`; see the [reference contract](references.md) for supported
+operations and current target limitations. Reference counting and custom destruction
+remain host-only.

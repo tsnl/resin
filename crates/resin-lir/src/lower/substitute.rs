@@ -652,11 +652,12 @@ fn materialize(
         resin_hir::Type::GpuPipelineContract => Ty::GpuPipelineContract,
         resin_hir::Type::GpuArguments => Ty::GpuArguments,
         resin_hir::Type::Foreign { name } => Ty::Foreign { name: name.clone() },
-        resin_hir::Type::Reference { referent: pointee } | resin_hir::Type::Pointer { pointee } => {
-            Ty::Pointer {
-                pointee: Box::new(materialize(pointee, instances)?),
-            }
-        }
+        resin_hir::Type::Reference { referent } => Ty::Reference {
+            referent: Box::new(materialize(referent, instances)?),
+        },
+        resin_hir::Type::Pointer { pointee } => Ty::Pointer {
+            pointee: Box::new(materialize(pointee, instances)?),
+        },
         resin_hir::Type::StrongOwner => Ty::StrongOwner,
         resin_hir::Type::WeakOwner => Ty::WeakOwner,
         resin_hir::Type::Function { params, result } => Ty::Function {
@@ -716,6 +717,9 @@ fn expression(source: &Ty, instances: &super::instances::Instances<'_>) -> resin
         Ty::GpuPipelineContract => resin_hir::Type::GpuPipelineContract,
         Ty::GpuArguments => resin_hir::Type::GpuArguments,
         Ty::Foreign { name } => resin_hir::Type::Foreign { name: name.clone() },
+        Ty::Reference { referent } => resin_hir::Type::Reference {
+            referent: Box::new(expression(referent, instances)),
+        },
         Ty::Pointer { pointee } => resin_hir::Type::Pointer {
             pointee: Box::new(expression(pointee, instances)),
         },
