@@ -13,8 +13,8 @@ mdbook serve --open
 The result in `target/manual/` is a portable static site: copy that directory to
 any static HTTP server or download the `resin-manual` artifact from the Manual CI
 workflow. No Resin service or application backend is needed to serve it. MathJax
-for mathematical notation is loaded from a CDN. The Manual workflow can also publish
-the checked site to GitHub Pages on request.
+for mathematical notation is loaded from a CDN. The Manual workflow publishes the
+checked site to GitHub Pages after successful builds on `main` and on request.
 
 The book lives in `doc/`; `doc/SUMMARY.md` owns navigation. Generated HTML belongs
 in `target/manual/`. Markdown remains readable in the repository; the library index links to source there
@@ -80,17 +80,24 @@ that changes behavior.
 
 The documentation workflow builds HTML and checks local links, anchors, and assets
 on Linux. It uses mdBook 0.5.4; `scripts/manual.py` requires Python 3.12 or later. Its artifact can be reviewed
-as a portable static site. Pushes and pull requests only build and check the book.
+as a portable static site. Pull requests build and check the book; successful builds
+on pushes to `main` also publish it.
 
 ## Publishing to GitHub Pages
 
-After the workflow is merged, a repository administrator must select **Settings →
+A repository administrator must select **Settings →
 Pages → Build and deployment → Source → GitHub Actions** once. In **Settings →
 Environments → github-pages**, allow deployments from the default branch (normally
 `main`). No personal access token or repository secret is needed.
 
-Open **Actions → Manual → Run workflow**, select the default branch, check
-**Publish the latest default-branch manual to this repository's GitHub Pages**,
+When a PR merges into `main`, the Manual workflow builds, checks, and automatically
+publishes the book if the changes match its existing path filters (book sources,
+compiler/library/example sources, Cargo manifests, manual scripts, or the workflow).
+The deployment uploads the already-built `target/manual/` site; it does not build
+the book again. Failed builds or link checks prevent publishing.
+
+To republish manually, open **Actions → Manual → Run workflow**, select the default
+branch, check **Publish the latest default-branch manual to this repository's GitHub Pages**,
 and run it. Equivalently, for this repository:
 
 ```sh
@@ -100,8 +107,9 @@ gh workflow run manual.yml --repo tsnl/resin --ref main -f deploy=true
 The workflow checks out the latest default branch, builds the book and its generated
 reference and illustration, checks links and assets, then deploys the Pages artifact.
 Deployment requests from other branches are skipped. Leave the checkbox unchecked
-to build a downloadable preview without publishing. Deployments are serialized and
-are not cancelled by ordinary book builds.
+on a manual run to build a downloadable preview without publishing. Automatic and
+manual deployments share one concurrency group and are not interrupted by new runs.
+Pull-request builds and manual previews can still cancel older previews of the same ref.
 
 The deployment job reports the published URL; for `tsnl/resin` without a custom
 domain it is <https://tsnl.github.io/resin/>. The workflow reads the current
