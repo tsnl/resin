@@ -25,6 +25,22 @@ Division and remainder turn the segment index into a row and column, so no origi
 buffer is needed. Each dispatch supplies a starting segment and count; the CPU
 uses the same indexing. Measure a different partition before treating it as faster.
 
+## Share the parameter shape
+
+The algorithm and the host launch use one generic record:
+
+```resin
+{{#include ../../examples/eg011_mandelbrot.resin:parameters}}
+```
+
+`Parameters<Span<u8>>` contains a borrowed pixel view for CPU or shader execution.
+`Parameters<GpuSpan<u8>>` contains an owning GPU handle for a host launch. The
+ordinary fields have one definition; the buffer type expresses how the pixels
+are accessed. `Parameters<_> { ... }` infers that type from the pixel field.
+Dispatch checks the pipeline's parameter type and projects the owning GPU handle
+into a device-accessible span. Generics share the record definition without
+making the two buffer types interchangeable.
+
 ## Keep the shader entry small
 
 ```resin
@@ -33,7 +49,7 @@ uses the same indexing. Measure a different partition before treating it as fast
 
 `@compute_shader` supplies the global X invocation index and a pointer to the
 parameter block. Dereferencing `root` supplies the place borrowed by the
-`Ref<Parameters>` helper parameter. There is no reference-to-pointer conversion.
+`Ref<Parameters<Span<u8>>>` helper parameter. There is no reference-to-pointer conversion.
 
 The CPU entry calls exactly that same evaluator:
 
@@ -45,6 +61,11 @@ Both eventually call `evaluate_pixel`, `escape_iterations`, and `palette`.
 There is no second `solve_cpu` to keep synchronized. The compiler specializes
 ordinary helpers for the selected execution target. Calls remain source-level
 calls; the helpers need no shader annotation.
+
+`Plot` and `Mandelbrot` are small numerical values. Read-only operations take
+them by value, so a call such as `mandelbrot_new(256):escape_iterations(c)` works
+directly. The parameter block is borrowed to share its fields across helpers.
+Operations that update application state, such as `zoom`, take `RefMut<Plot>`.
 
 ## What references promise
 
@@ -90,10 +111,7 @@ See [references](../references.md) for the complete indexing rules.
 
 ## Allocation and target limits
 
-The host's `HostParameters` contains owning `GpuSpan` handles. The shader's
-`Parameters` contains borrowed `Span` descriptors. Dispatch validates the pipeline
-contract and projects the handles into device-accessible descriptors. This
-allocation, upload, and dispatch machinery lives in the GPU helper section.
+Allocation, upload, and dispatch machinery lives in the GPU helper section.
 It is overhead around the algorithm that can be measured and improved separately.
 
 Local shader references may cross helper calls, including references to fields

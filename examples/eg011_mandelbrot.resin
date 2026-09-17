@@ -34,7 +34,7 @@ fn plot_new(width: u32, height: u32) -> Plot {
 
 // Coordinates are in pixels; (x + 0.5, y + 0.5) is the pixel center.
 // Positive imaginary coordinates point upwards.
-fn at(self: Ref<Plot>, x: f32, y: f32) -> Complex<f32> {
+fn at(self: Plot, x: f32, y: f32) -> Complex<f32> {
 	complex(
 		self.center.real + (x - 0.5 * f32(self.width)) * self.span / f32(self.height),
 		self.center.imag + (0.5 * f32(self.height) - y) * self.span / f32(self.height),
@@ -51,7 +51,7 @@ fn mandelbrot_new(max_iters: i32) -> Mandelbrot {
 
 // Zero means the orbit stayed inside the escape radius for this iteration budget;
 // it is not a proof of membership. Escape requires a magnitude strictly above two.
-fn escape_iterations(self: Ref<Mandelbrot>, c: Complex<f32>) -> i32 {
+fn escape_iterations(self: Mandelbrot, c: Complex<f32>) -> i32 {
 	// Check the first iterate before the interior shortcut can overflow at large coordinates.
 	if (self.max_iters > 0 && c:magnitude_squared() > 4.0) {
 		return 1;
@@ -76,7 +76,7 @@ fn escape_iterations(self: Ref<Mandelbrot>, c: Complex<f32>) -> i32 {
 	0
 }
 
-fn escapes_ball(self: Ref<Mandelbrot>, c: Complex<f32>) -> bool {
+fn escapes_ball(self: Mandelbrot, c: Complex<f32>) -> bool {
 	self:escape_iterations(c) != 0
 }
 
@@ -101,15 +101,17 @@ fn palette(count: i32) -> Color {
 
 const pixels_per_segment: u32 = 32;
 
-struct Parameters {
+// ANCHOR: parameters
+struct Parameters<Buffer> {
 	plot: Plot,
 	solver: Mandelbrot,
 	start_segment: u64,
 	segment_count: u64,
-	pixels: Span<u8>,
+	pixels: Buffer,
 }
+// ANCHOR_END: parameters
 
-fn evaluate_pixel(root: Ref<Parameters>, x: u32, y: u32) -> Color {
+fn evaluate_pixel(root: Ref<Parameters<Span<u8>>>, x: u32, y: u32) -> Color {
 	let c = root.plot:at(f32(x) + 0.5, f32(y) + 0.5);
 	palette(root.solver:escape_iterations(c))
 }
@@ -118,7 +120,7 @@ fn channel(value: f32) -> u8 {
 	u8(value * 255.0 + 0.5)
 }
 
-fn store_pixel(pixels: Ref<Span<u8>>, index: u64, color: Color) {
+fn store_pixel(pixels: Span<u8>, index: u64, color: Color) {
 	pixels:at_mut(index * 4) = channel(color.r);
 	pixels:at_mut(index * 4 + 1) = channel(color.g);
 	pixels:at_mut(index * 4 + 2) = channel(color.b);
@@ -128,7 +130,7 @@ fn store_pixel(pixels: Ref<Span<u8>>, index: u64, color: Color) {
 // Each segment owns up to 32 adjacent pixels in one row. Integer division and
 // remainder recover its origin; the last segment stops at the right edge.
 // ANCHOR: evaluate_segment
-fn evaluate_segment(segment_index: u64, root: Ref<Parameters>) {
+fn evaluate_segment(segment_index: u64, root: Ref<Parameters<Span<u8>>>) {
 	if (segment_index >= root.segment_count) {
 		return;
 	};
@@ -144,17 +146,17 @@ fn evaluate_segment(segment_index: u64, root: Ref<Parameters>) {
 }
 // ANCHOR_END: evaluate_segment
 
-fn segments_per_row(plot: Ref<Plot>) -> u64 {
+fn segments_per_row(plot: Plot) -> u64 {
 	(u64(plot.width) + u64(pixels_per_segment) - 1) / u64(pixels_per_segment)
 }
 
-fn segment_count(plot: Ref<Plot>) -> u64 {
+fn segment_count(plot: Plot) -> u64 {
 	plot:segments_per_row() * u64(plot.height)
 }
 
 // CPU execution calls the same evaluator as the shader wrapper.
 // ANCHOR: dispatch_host
-fn dispatch_host(root: Ref<Parameters>) {
+fn dispatch_host(root: Ref<Parameters<Span<u8>>>) {
 	let mut segment: u64 = 0;
 	while (segment < root.segment_count) {
 		evaluate_segment(segment, root);
@@ -163,9 +165,9 @@ fn dispatch_host(root: Ref<Parameters>) {
 }
 // ANCHOR_END: dispatch_host
 
-fn host_image(plot: Ref<Plot>, solver: Ref<Mandelbrot>) -> ArcSpan<u8> | Err<_> {
+fn host_image(plot: Plot, solver: Mandelbrot) -> ArcSpan<u8> | Err<_> {
 	let pixels = arc_span_alloc::<u8>(u64(plot.width) * u64(plot.height) * 4, 0)?;
-	let root = Parameters { plot = plot, solver = solver, start_segment = 0, segment_count = plot:segment_count(), pixels = pixels:get() };
+	let root = Parameters<_> { plot = plot, solver = solver, start_segment = 0, segment_count = plot:segment_count(), pixels = pixels:get() };
 	dispatch_host(root);
 	pixels
 }
@@ -174,17 +176,9 @@ fn host_image(plot: Ref<Plot>, solver: Ref<Mandelbrot>) -> ArcSpan<u8> | Err<_> 
 // GPU execution and presentation helpers
 //
 
-struct HostParameters {
-	plot: Plot,
-	solver: Mandelbrot,
-	start_segment: u64,
-	segment_count: u64,
-	pixels: GpuSpan<u8>,
-}
-
 // ANCHOR: compute
 @compute_shader
-fn compute(segment_index: u64, root: Ptr<Parameters>) {
+fn compute(segment_index: u64, root: Ptr<Parameters<Span<u8>>>) {
 	evaluate_segment(segment_index, root.*);
 }
 // ANCHOR_END: compute
@@ -208,7 +202,7 @@ fn vertex(index: i32) -> Vertex {
 }
 
 @fragment_shader
-fn fragment(uv: Color, root: Ptr<Parameters>) -> Color {
+fn fragment(uv: Color, root: Ptr<Parameters<Span<u8>>>) -> Color {
 	let x = u32(uv.r * f32(root.plot.width));
 	let y = u32(uv.g * f32(root.plot.height));
 	let index = (u64(y) * u64(root.plot.width) + u64(x)) * 4;
@@ -222,8 +216,8 @@ fn fragment(uv: Color, root: Ptr<Parameters>) -> Color {
 
 struct Renderer {
 	gpu: Gpu,
-	graphics: GpuGraphicsPipeline<Parameters, GpuPipelineOwner>,
-	compute: GpuComputePipeline<Parameters, GpuPipelineOwner>,
+	graphics: GpuGraphicsPipeline<Parameters<Span<u8>>, GpuPipelineOwner>,
+	compute: GpuComputePipeline<Parameters<Span<u8>>, GpuPipelineOwner>,
 	pixels: GpuSpan<u8>,
 	image: GpuImage,
 }
@@ -241,11 +235,11 @@ fn resize(self: RefMut<Renderer>, width: u32, height: u32) -> () | Err<_> {
 	self.image = self.gpu:create_image(width, height)?;
 }
 
-fn parameters(self: Ref<Renderer>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, start: u64, count: u64) -> HostParameters {
-	HostParameters { plot = plot, solver = solver, start_segment = start, segment_count = count, pixels = self.pixels }
+fn parameters(self: Ref<Renderer>, plot: Plot, solver: Mandelbrot, start: u64, count: u64) -> Parameters<GpuSpan<u8>> {
+	Parameters<_> { plot = plot, solver = solver, start_segment = start, segment_count = count, pixels = self.pixels }
 }
 
-fn dispatch_gpu(self: Ref<Renderer>, commands: Ref<GpuCommands>, plot: Ref<Plot>, solver: Ref<Mandelbrot>) -> () | Err<_> {
+fn dispatch_gpu(self: Ref<Renderer>, commands: Ref<GpuCommands>, plot: Plot, solver: Mandelbrot) -> () | Err<_> {
 	let group_size = self.gpu:compute_workgroup_size();
 	let capacity = 65535 * group_size;
 	let total = plot:segment_count();
@@ -264,7 +258,7 @@ fn dispatch_gpu(self: Ref<Renderer>, commands: Ref<GpuCommands>, plot: Ref<Plot>
 }
 
 // ANCHOR: render
-fn render(self: Ref<Renderer>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, use_gpu: bool) -> () | Err<_> {
+fn render(self: Ref<Renderer>, plot: Plot, solver: Mandelbrot, use_gpu: bool) -> () | Err<_> {
 	if (!use_gpu) {
 		let image = host_image(plot, solver)?;
 		let pixels = image:get();
@@ -282,7 +276,7 @@ fn render(self: Ref<Renderer>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, use_gpu
 }
 // ANCHOR_END: render
 
-fn save_png(path: Ptr<u8>, width: u32, height: u32, pixels: Ref<Span<u8>>) -> () | Err<_> {
+fn save_png(path: Ptr<u8>, width: u32, height: u32, pixels: Span<u8>) -> () | Err<_> {
 	image_data_write_pixels(path, width, height, 4, pixels, 0)?;
 	let filename = c_string(path);
 	let message = fmt("Saved {0}\n", (filename:bytes(),));
@@ -381,7 +375,7 @@ fn input(window: Ref<Window>, plot: RefMut<Plot>, solver: RefMut<Mandelbrot>) ->
 	changed
 }
 
-fn headless(options: Ref<Options>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, path: Ptr<u8>) -> () | Err<_> {
+fn headless(options: Ref<Options>, plot: Plot, solver: Mandelbrot, path: Ptr<u8>) -> () | Err<_> {
 	if (options.use_gpu) {
 		let renderer = renderer_new(gpu_new()?, plot.width, plot.height)?;
 		renderer:render(plot, solver, true)?;
@@ -503,8 +497,7 @@ fn test() -> () | Err<_> {
 	assert(mandelbrot:escape_iterations(two) == 2);
 	assert(mandelbrot:escape_iterations(three) == 1);
 	assert(mandelbrot:escape_iterations(complex(1.0e30, 1.0e30)) == 1);
-	let limited = mandelbrot_new(1);
-	assert(!limited:escapes_ball(complex(2.0, 0.0)));
+	assert(!mandelbrot_new(1):escapes_ball(complex(2.0, 0.0)));
 	let upper: Complex<f32> = complex(-0.75, 0.25);
 	let lower: Complex<f32> = complex(-0.75, -0.25);
 	assert(mandelbrot:escape_iterations(upper) == mandelbrot:escape_iterations(lower));
@@ -524,7 +517,7 @@ fn test() -> () | Err<_> {
 	edge.center.real = 2.0;
 	edge.span = 2.0;
 	let pixels = arc_ptr_alloc([0, 0, 0, 0, 123])?;
-	let root = Parameters { plot = edge, solver = mandelbrot_new(32), start_segment = 0, segment_count = 1, pixels = Span<u8> { data = pixels:get():lea(0), length = 4 } };
+	let root = Parameters<_> { plot = edge, solver = mandelbrot_new(32), start_segment = 0, segment_count = 1, pixels = Span<u8> { data = pixels:get():lea(0), length = 4 } };
 	dispatch_host(root);
 	evaluate_segment(1, root);
 	let color = palette(2);
