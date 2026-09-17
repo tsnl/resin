@@ -9,6 +9,9 @@
                     "--run",
                     "cargo run --quiet --manifest-path Cargo.toml -- --lsp",
                 ],
+                "env": {
+                    "RESIN_SERVER": "http://localhost:7412",
+                },
             },
         },
     },
