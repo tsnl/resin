@@ -1,0 +1,45 @@
+export { kernel };
+
+type Integer = i64;
+struct Input { left: Integer, right: Integer, operation: u32 }
+struct Output { value: Integer, progress: u32 }
+struct Root { count: u64, inputs: Ptr<Input>, outputs: Ptr<Output> }
+
+intrinsic "pointer_index" fn fixture_index<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;
+
+fn arithmetic<T>(left: T, right: T, operation: u32) -> T {
+	if (operation == 0) {
+		return left / right;
+	};
+	if (operation == 1) {
+		return left % right;
+	};
+	if (operation == 2) {
+		return left << right;
+	};
+	left >> right
+}
+
+fn ready(input: Input, value: RefMut<Integer>) -> bool {
+	value = arithmetic(input.left, input.right, input.operation);
+	true
+}
+
+fn evaluate(input: Input, output: RefMut<Output>) {
+	output.progress = 1;
+	let mut value: Integer = 0;
+	while (ready(input, value)) {
+		output.progress = 2;
+		output.value = value;
+		break;
+	};
+	output.progress = 3;
+}
+
+@compute_shader
+fn kernel(index: u64, root: Ptr<Root>) {
+	if (index >= root.count) {
+		return;
+	};
+	evaluate(fixture_index(root.inputs, root.count, index).*, fixture_index(root.outputs, root.count, index).*);
+}

@@ -198,7 +198,7 @@ fn demanded_nominals_retain_field_conversions_and_real_drop_identities() {
 fn unsupported_shader_operations_fail_during_compilation_with_application_notes() {
     let source = Source::new(
         "entry",
-        "export { main, kernel }; fn main() -> i32  { 42 } @compute_shader fn kernel(i: u64, out: Ptr<u32>)  { out.* = u32(i) / u32(2); }",
+        "export { main, kernel }; fn main() -> i32  { 42 } @compute_shader fn kernel(i: u64, out: Ptr<u32>)  { out.* = u32(f64(i) / f64(2.0)); }",
     );
     let mut loader = loader();
     let output = support::frontend::analyze(source.clone(), &mut loader, None);
@@ -207,9 +207,9 @@ fn unsupported_shader_operations_fail_during_compilation_with_application_notes(
     let errors = failed(&output, &[shader("kernel")]);
     assert!(output.hir().is_ok());
     let error = &errors[0];
-    assert!(error.diagnostic.contains("unsupported shader builtin"));
+    assert!(error.diagnostic.contains("does not support type"));
     let span = error.span.expect("operation span");
-    assert_eq!(&source.text()[span.start..span.end], "u32(i) / u32(2)");
+    assert_eq!(&source.text()[span.start..span.end], "f64(i) / f64(2.0)");
     assert!(
         error
             .related

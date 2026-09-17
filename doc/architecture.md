@@ -192,8 +192,14 @@ restores the destination; types with custom drop hooks forbid partial moves.
 
 Completion follows runtime evaluation order, intersects reachable branch states,
 and checks loop backedges, `continue`, `break`, and returns. Layout queries retain
-no operand effects. Completed HIR records ownership transfers with `Move` and
-retains generic borrowed reads for concrete checking. Reference arguments
+no operand effects. Completed HIR records definite transfers with `Move` and
+generic owned reads with `ReadOwned`. When a later use overlaps an earlier
+potential move, completion records a `CopyRequirement` on the source type and its
+consumer type. `RequireCopy` retains the deduplicated requirements around the
+body. Specialization skips requirements for consumers that become references,
+checks concrete value copyability, and turns `ReadOwned` into a copy or transfer.
+This selects already-established ownership relations without repeating flow
+analysis. Generic borrowed reads remain subject to concrete checking. Reference arguments
 require places, checked again after dependent signatures specialize. References and raw pointers
 have no static lifetime or aliasing checks.
 

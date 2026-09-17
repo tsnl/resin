@@ -172,6 +172,20 @@ impl Printer {
                     .chain(args.iter().map(|arg| self.term(arg)))
                     .collect(),
             ),
+            TermKind::RequireCopy { requirements, body } => list(
+                "require-copy",
+                requirements
+                    .iter()
+                    .map(|requirement| {
+                        list(
+                            "value-use",
+                            vec![self.ty(&requirement.source), self.ty(&requirement.target)],
+                        )
+                    })
+                    .chain([self.term(body)])
+                    .collect(),
+            ),
+            TermKind::ReadOwned { place } => list("read-owned", vec![self.term(place)]),
             TermKind::Read { place } => list("read", vec![self.term(place)]),
             TermKind::Move { place } => list("move", vec![self.term(place)]),
             TermKind::Constant { value } => list("constant", vec![quoted(format!("{value:?}"))]),

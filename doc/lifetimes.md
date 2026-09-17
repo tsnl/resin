@@ -64,15 +64,19 @@ At branches, a value must be available on every reachable incoming path. Loop
 backedges and `continue` paths must restore values needed on another iteration;
 `break` and early returns contribute only to their reachable destinations.
 Generic bodies retain operation and type relations until specialization.
-Unconstrained type parameters cannot assume implicit copying inside a generic
-body: consuming `T` still moves it there. A known wrapper such as `ArcPtr<T>`
-can copy for every `T`, because its stored owner handle copies. A `Cell<T>` with
-a stored `T` field copies only when that field is known to copy. `Ref<T>` allows
-generic code to borrow repeatedly; reading its value is checked for copyability
-after specialization.
+Using a generic value once can move it. Reusing it infers a copy requirement,
+checked against the concrete type during specialization. For example,
+`fn twice<T>(value: T) -> (T, T) { (value, value) }` requires a copyable `T`, while
+`fn identity<T>(value: T) -> T { value }` also accepts move-only types.
+`ArcPtr<T>` copies for every `T`, because its stored owner handle copies;
+`Cell<T>` with a stored `T` copies only when that field copies. Requirements also
+retain the consumer's type: a generic callback that specializes to a reference
+parameter borrows the value and needs no copy. Reading a borrowed value still
+requires copyability. Body requirements do not participate in overload selection.
 
-Completed HIR records moves explicitly. LIR specialization resolves concrete
-operations and rejects noncopyable reads through pointers or references. Storage
+Completed HIR records definite moves, conditional owned reads, and inferred copy
+requirements. LIR specialization selects copies or transfers, resolves concrete
+operations, and rejects noncopyable reads through pointers or references. Storage
 lowering emits transfers and cleanup, including partial-field cleanup; the LIR
 verifier independently checks those storage operations. LIR does not repeat source
 initialization analysis.

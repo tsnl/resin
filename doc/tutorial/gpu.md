@@ -16,14 +16,14 @@ One invocation evaluates a horizontal segment of up to 32 pixels:
 
 A segment owns disjoint output bytes. Its final pixel may reach the right edge
 of the image, so the loop checks both the segment length and image width. An
-invocation beyond the segment list returns immediately; dispatch rounds up to a
+invocation beyond the batch's segment count returns immediately; dispatch rounds up to a
 whole workgroup.
 
 Thirty-two pixels is an application choice, not a language requirement or a
-claim of optimal GPU scheduling. One invocation per pixel is also possible. The
-current example supplies segment origins in a buffer to avoid shader integer
-division and to make dispatch batches explicit. This trades another buffer for
-simple indexing. Measure a different partition before treating it as faster.
+claim of optimal GPU scheduling. One invocation per pixel is also possible.
+Division and remainder turn the segment index into a row and column, so no origin
+buffer is needed. Each dispatch supplies a starting segment and count; the CPU
+uses the same indexing. Measure a different partition before treating it as faster.
 
 ## Keep the shader entry small
 

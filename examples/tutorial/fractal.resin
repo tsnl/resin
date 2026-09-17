@@ -7,8 +7,7 @@ fn escape_iterations(c: Complex<f32>, limit: i32) -> i32 {
 	let mut z: Complex<f32> = complex(0.0, 0.0);
 	let mut n: i32 = 0;
 	while (n < limit) {
-		let square = z:squared();
-		z = square:add(c);
+		z = z:squared():add(c);
 		n = n + 1;
 		if (z:magnitude_squared() > 4.0) {
 			return n;

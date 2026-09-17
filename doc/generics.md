@@ -96,6 +96,32 @@ concrete, signature substitution selects one applicable operation. Ambiguity is
 an error; a failing body is never used to discard a candidate. Caller imports do
 not change the definition's candidate set. See [function overloads](overloads.md).
 
+## Copying generic values
+
+Value parameters follow the concrete type's ownership rules. A single use can
+transfer a move-only value, as in `identity` above. Repeated uses infer a copy
+requirement:
+
+```resin
+fn twice<T>(value: T) -> (T, T) {
+	(value, value)
+}
+fn example() -> i32 {
+	let pair = twice(i32(21));
+	pair.0 + pair.1
+}
+```
+
+`twice` accepts numbers, structs whose fields copy, and shared handles such as
+`ArcPtr<T>`. A move-only argument produces an error at the use that needs copying.
+No trait annotation is needed. The compiler also considers branches, loops, and
+moves of individual fields; assigning a replacement restores availability.
+
+Requirements apply to value uses. A generic callback that specializes to a
+`Ref<T>` or `RefMut<T>` parameter borrows its argument and may be called repeatedly
+with a move-only local. A failed copy requirement is a body error, so it does not
+trigger overload fallback. See [ownership](lifetimes.md) for the complete rules.
+
 Next, [function overloads and SFINAE](overloads.md) explain how substitution chooses
 an operation. [Inference](inference.md) then explains which annotations and type
 arguments can be omitted.

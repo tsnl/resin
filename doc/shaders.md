@@ -127,11 +127,23 @@ projection is the host-to-device address conversion boundary. GPU buffer element
 must have a shared layout without pointers, spans, owners, or drop hooks.
 
 Shader bodies support `u8`, 32-bit numbers, `i64`, `u64`, booleans, records, nominal types, local mutation,
-branches, loops, and direct calls to named Resin helpers. Foreign calls, recursion,
-indirect calls, and integer division/remainder/shifts are rejected. Arrays and spans support
-unchecked `:at()` indexing. Local addresses
-may only be used directly for loads, stores, indexing, and field access; they cannot be stored, passed,
-returned, or carried across control-flow edges. Device addresses can. `fmt` and `print` are host-only.
+branches, loops, and direct calls to named Resin helpers. Integer `/`, `%`, `<<`,
+and `>>` work for `u8`, `i32`, `u32`, `i64`, and `u64`. Signed division truncates
+toward zero; remainder follows the dividend's sign. `MIN / -1` wraps to `MIN` and
+`MIN % -1` yields zero. Right shift is arithmetic for signed integers and logical
+for unsigned integers. Left shift discards bits beyond the type's width.
+
+Division or remainder by zero and shifts outside `0..width` fail the invocation
+before executing the invalid operation. Failure propagates through helper calls;
+earlier stores remain visible and later stores do not run. These cases trap on
+the CPU. Neither target unwinds destructors on a trap.
+
+Foreign calls, recursion, and indirect calls are rejected in shaders. Arrays and
+spans support unchecked `:at()` and `:at_mut()` indexing. Local `Ref` and `RefMut`
+arguments can cross helper calls, including references to fields and indexed
+elements. Returning local references or selecting different local referents
+across control-flow edges remains unsupported. Local references cannot produce
+pointers. `fmt` and `print` are host-only.
 
 Invocations must avoid racing on shared buffers. Workgroup-local storage, shader barriers, and
 atomics are not exposed yet. For multi-pass algorithms, record separate dispatches: the runtime
@@ -152,6 +164,10 @@ triangle lists, one sample, and no blending or depth/stencil testing.
 
 A Vulkan 1.3 device must support graphics and compute, buffer device addresses, 64-bit shader
 integers, timeline semaphores, synchronization2, dynamic rendering, and maintenance4.
+`VK_KHR_maintenance8` and its `maintenance8` feature are also required and enabled
+when creating the device. This makes signed shader remainder well-defined for
+negative operands. Devices missing the extension or feature are reported as
+unsuitable; GPU creation returns `unsupported` if no suitable device is available.
 Shader objects, map_memory2, maintenance5, and maintenance6 are not required. Optional memory-priority and pageable-memory features are enabled when supported.
 Shader capabilities are limited to the profile Resin emits; externally supplied SPIR-V must
 fit that profile too. The emitted byte profile additionally enables supported `storageBuffer8BitAccess` and `shaderInt8` features.

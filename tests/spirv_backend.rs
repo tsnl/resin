@@ -361,10 +361,6 @@ fn unsupported_shader_features_are_diagnosed() {
             "recursive shader call graph",
         ),
         (
-            "export { kernel }; @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { i / u32(2) }; }",
-            "unsupported shader builtin",
-        ),
-        (
             "export { kernel }; extern { \"stdlib.h\": { fn abs (i: i32) -> i32; } }; @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { abs(1); i }; }",
             "foreign",
         ),

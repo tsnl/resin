@@ -167,8 +167,9 @@ impl Specialization<'_, '_> {
     }
 
     fn place(&mut self, source: &resin_hir::Term) -> Result<Box<concrete::Term>, Error> {
-        if let resin_hir::TermKind::Read { place } | resin_hir::TermKind::Move { place } =
-            &source.kind
+        if let resin_hir::TermKind::Read { place }
+        | resin_hir::TermKind::Move { place }
+        | resin_hir::TermKind::ReadOwned { place } = &source.kind
         {
             return self.place(place);
         }
@@ -905,6 +906,32 @@ impl Specialization<'_, '_> {
         Ok(concrete::TermKind::Field { base, access })
     }
 
+    // A dependent receiver may specialize to a pointer or a type with a drop
+    // hook. Resolve those boundaries before storage lowering sees a Move.
+    fn require_owned_move(&self, place: &concrete::Term) -> Result<(), Error> {
+        match &place.kind {
+            concrete::TermKind::Local { .. } if !matches!(place.ty, Ty::Reference { .. }) => Ok(()),
+            concrete::TermKind::Field { base, access }
+                if !matches!(base.ty, Ty::Pointer { .. } | Ty::Reference { .. })
+                    && !access.steps.iter().any(|step| matches!(step, Conv::Deref)) =>
+            {
+                if let Ty::Defined { definition } = &base.ty
+                    && self.instances.typer().definitions()[definition.index()]
+                        .drop_hook()
+                        .is_some()
+                {
+                    return Err(
+                        self.instance_error("cannot move a field out of a type with a drop hook")
+                    );
+                }
+                self.require_owned_move(base)
+            }
+            _ => Err(self.instance_error(
+                "cannot move a value through a reference or pointer; replace its contents instead",
+            )),
+        }
+    }
+
     fn builtin(
         &mut self,
         name: &std::sync::Arc<str>,
@@ -1055,6 +1082,36 @@ impl Specialization<'_, '_> {
         Ok(match source {
             resin_hir::TermKind::OperationCall { lookup, args } => {
                 self.operation_call(lookup, args, expected)?
+            }
+            resin_hir::TermKind::RequireCopy { requirements, body } => {
+                for requirement in requirements {
+                    self.span = requirement.span;
+                    if matches!(
+                        self.argument(&requirement.target)?,
+                        resin_hir::Type::Reference { .. }
+                    ) {
+                        continue;
+                    }
+                    let ty = self.ty(&requirement.source)?;
+                    if !ty.copies_implicitly(self.instances.typer().definitions()) {
+                        let name =
+                            resin_types::format_type(&ty, self.instances.typer().definitions());
+                        return Err(self.instance_error(format!("this use requires `{name}` to be implicitly copyable; the type is move-only")));
+                    }
+                }
+                self.term(body)?.kind
+            }
+            resin_hir::TermKind::ReadOwned { place } => {
+                let place = self.place(place)?;
+                if place
+                    .ty
+                    .copies_implicitly(self.instances.typer().definitions())
+                {
+                    place.kind
+                } else {
+                    self.require_owned_move(&place)?;
+                    concrete::TermKind::Move { place }
+                }
             }
             resin_hir::TermKind::Read { place } => {
                 let source = self.argument(&place.ty)?;

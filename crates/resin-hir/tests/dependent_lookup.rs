@@ -12,7 +12,9 @@ fn value(mut term: &Term) -> &Term {
         term = match &term.kind {
             TermKind::Block { tail, .. } => tail,
             TermKind::Use { arg } | TermKind::Convert { arg } => arg,
-            TermKind::Read { place } | TermKind::Move { place } => place,
+            TermKind::Read { place } | TermKind::Move { place } | TermKind::ReadOwned { place } => {
+                place
+            }
             _ => return term,
         };
     }

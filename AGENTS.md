@@ -307,8 +307,12 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Shared and weak handle copies retain ownership. `PhantomBox` in `$/ownership.resin`
   opts out through an empty drop hook. Ownership completion in HIR checks initialization,
   partial moves, immutable assignment, branch joins, and loop exits/backedges, including
-  unused definitions. Moving an immutable owner is allowed. Completed HIR makes moves
-  explicit; LIR specializes borrowed reads and emits transfer/cleanup operations.
+  unused definitions. Moving an immutable owner is allowed. Generic value reuse infers
+  copy requirements, retaining consumer types so dependent reference parameters borrow
+  without imposing copying. Completed HIR retains these requirements and distinguishes
+  definite moves from conditional owned reads. LIR specialization checks requirements
+  and selects concrete copies/transfers without repeating flow analysis; body failures
+  never supply overload fallback. Storage lowering emits transfer/cleanup operations.
   References and raw pointers retain unchecked lifetimes and aliasing. `Ref` is read-only,
   while `RefMut` permits writes without exclusivity; there is
   no borrow checker. `pointer:replace(replacement)` transfers a referent while leaving

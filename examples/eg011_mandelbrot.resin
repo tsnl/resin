@@ -66,9 +66,8 @@ fn escape_iterations(self: Ref<Mandelbrot>, c: Complex<f32>) -> i32 {
 	let mut n: i32 = 0;
 	let mut a: Complex<f32> = complex(0.0, 0.0);
 	while (n < self.max_iters) {
-		// The same Complex helpers borrow local values on host and shader.
-		let square = a:squared();
-		a = square:add(c);
+		// Value operations compose the same way on host and shader.
+		a = a:squared():add(c);
 		n = n + 1;
 		if (a:magnitude_squared() > 4.0) {
 			return n;
@@ -100,13 +99,13 @@ fn palette(count: i32) -> Color {
 	}
 }
 
-type SegmentOrigin = (u32, u32);
 const pixels_per_segment: u32 = 32;
 
 struct Parameters {
 	plot: Plot,
 	solver: Mandelbrot,
-	segments: Span<SegmentOrigin>,
+	start_segment: u64,
+	segment_count: u64,
 	pixels: Span<u8>,
 }
 
@@ -126,50 +125,38 @@ fn store_pixel(pixels: Ref<Span<u8>>, index: u64, color: Color) {
 	pixels:at_mut(index * 4 + 3) = 255;
 }
 
-// Each segment owns up to 32 adjacent pixels in one row. Segment origins come
-// from segments_new; the final segment in each row stops at the right edge.
+// Each segment owns up to 32 adjacent pixels in one row. Integer division and
+// remainder recover its origin; the last segment stops at the right edge.
 // ANCHOR: evaluate_segment
 fn evaluate_segment(segment_index: u64, root: Ref<Parameters>) {
-	if (segment_index >= root.segments.length) {
+	if (segment_index >= root.segment_count) {
 		return;
 	};
-	let origin = root.segments:at(segment_index);
-	let mut x = origin.0;
-	while (x < origin.0 + pixels_per_segment && x < root.plot.width) {
-		root.pixels:store_pixel(u64(origin.1) * u64(root.plot.width) + u64(x), evaluate_pixel(root, x, origin.1));
+	let columns = root.plot:segments_per_row();
+	let segment = root.start_segment + segment_index;
+	let first_x = u32(segment % columns) * pixels_per_segment;
+	let y = u32(segment / columns);
+	let mut x = first_x;
+	while (x < first_x + pixels_per_segment && x < root.plot.width) {
+		root.pixels:store_pixel(u64(y) * u64(root.plot.width) + u64(x), evaluate_pixel(root, x, y));
 		x = x + 1;
 	};
 }
 // ANCHOR_END: evaluate_segment
 
-// Explicit origins avoid shader integer division and make dispatch batches simple.
-fn segments_new(width: u32, height: u32) -> ArcSpan<SegmentOrigin> | Err<_> {
-	let columns = (u64(width) + u64(pixels_per_segment) - 1) / u64(pixels_per_segment);
-	let segments = arc_span_alloc::<SegmentOrigin>(columns * u64(height), (0, 0))?;
-	let view = segments:get();
-	let mut index: u64 = 0;
-	let mut y: u32 = 0;
-	while (y < height) {
-		let mut x: u32 = 0;
-		while (x < width) {
-			view:at_mut(index) = (x, y);
-			index = index + 1;
-			x = x + pixels_per_segment;
-		};
-		y = y + 1;
-	};
-	segments
+fn segments_per_row(plot: Ref<Plot>) -> u64 {
+	(u64(plot.width) + u64(pixels_per_segment) - 1) / u64(pixels_per_segment)
 }
 
-fn clone(self: Ref<Plot>) -> Plot {
-	Plot { width = self.width, height = self.height, center = complex(self.center.real, self.center.imag), span = self.span }
+fn segment_count(plot: Ref<Plot>) -> u64 {
+	plot:segments_per_row() * u64(plot.height)
 }
 
 // CPU execution calls the same evaluator as the shader wrapper.
 // ANCHOR: dispatch_host
 fn dispatch_host(root: Ref<Parameters>) {
 	let mut segment: u64 = 0;
-	while (segment < root.segments.length) {
+	while (segment < root.segment_count) {
 		evaluate_segment(segment, root);
 		segment = segment + 1;
 	};
@@ -178,8 +165,7 @@ fn dispatch_host(root: Ref<Parameters>) {
 
 fn host_image(plot: Ref<Plot>, solver: Ref<Mandelbrot>) -> ArcSpan<u8> | Err<_> {
 	let pixels = arc_span_alloc::<u8>(u64(plot.width) * u64(plot.height) * 4, 0)?;
-	let segments = segments_new(plot.width, plot.height)?;
-	let root = Parameters { plot = plot:clone(), solver = mandelbrot_new(solver.max_iters), segments = segments:get(), pixels = pixels:get() };
+	let root = Parameters { plot = plot, solver = solver, start_segment = 0, segment_count = plot:segment_count(), pixels = pixels:get() };
 	dispatch_host(root);
 	pixels
 }
@@ -191,7 +177,8 @@ fn host_image(plot: Ref<Plot>, solver: Ref<Mandelbrot>) -> ArcSpan<u8> | Err<_> 
 struct HostParameters {
 	plot: Plot,
 	solver: Mandelbrot,
-	segments: GpuSpan<SegmentOrigin>,
+	start_segment: u64,
+	segment_count: u64,
 	pixels: GpuSpan<u8>,
 }
 
@@ -237,46 +224,34 @@ struct Renderer {
 	gpu: Gpu,
 	graphics: GpuGraphicsPipeline<Parameters, GpuPipelineOwner>,
 	compute: GpuComputePipeline<Parameters, GpuPipelineOwner>,
-	segments: GpuSpan<SegmentOrigin>,
 	pixels: GpuSpan<u8>,
 	image: GpuImage,
-}
-
-fn upload<T>(gpu: Ref<Gpu>, source: Ref<Span<T>>) -> GpuSpan<T> | Err<_> {
-	let buffer = gpu:alloc::<T>(source.length)?;
-	buffer:copy_from(source);
-	buffer
 }
 
 fn renderer_new(gpu: Gpu, width: u32, height: u32) -> Renderer | Err<_> {
 	let graphics = gpu:create_graphics_pipeline(vertex, fragment)?;
 	let compute_pipeline = gpu:create_compute_pipeline(compute)?;
-	let host_segments = segments_new(width, height)?;
-	let segment_view = host_segments:get();
-	let segments = upload(gpu, segment_view)?;
 	let pixels = gpu:alloc::<u8>(u64(width) * u64(height) * 4)?;
 	let image = gpu:create_image(width, height)?;
-	Renderer { gpu = gpu, graphics = graphics, compute = compute_pipeline, segments = segments, pixels = pixels, image = image }
+	Renderer { gpu = gpu, graphics = graphics, compute = compute_pipeline, pixels = pixels, image = image }
 }
 
 fn resize(self: RefMut<Renderer>, width: u32, height: u32) -> () | Err<_> {
-	let host_segments = segments_new(width, height)?;
-	let segment_view = host_segments:get();
-	self.segments = upload(self.gpu, segment_view)?;
 	self.pixels = self.gpu:alloc::<u8>(u64(width) * u64(height) * 4)?;
 	self.image = self.gpu:create_image(width, height)?;
 }
 
 fn parameters(self: Ref<Renderer>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, start: u64, count: u64) -> HostParameters {
-	HostParameters { plot = plot:clone(), solver = mandelbrot_new(solver.max_iters), segments = self.segments:slice(start, count), pixels = self.pixels:clone() }
+	HostParameters { plot = plot, solver = solver, start_segment = start, segment_count = count, pixels = self.pixels }
 }
 
 fn dispatch_gpu(self: Ref<Renderer>, commands: Ref<GpuCommands>, plot: Ref<Plot>, solver: Ref<Mandelbrot>) -> () | Err<_> {
 	let group_size = self.gpu:compute_workgroup_size();
 	let capacity = 65535 * group_size;
+	let total = plot:segment_count();
 	let mut start: u64 = 0;
-	while (start < self.segments.length) {
-		let remaining = self.segments.length - start;
+	while (start < total) {
+		let remaining = total - start;
 		let count = if (remaining < capacity) {
 			remaining
 		} else {
@@ -301,7 +276,7 @@ fn render(self: Ref<Renderer>, plot: Ref<Plot>, solver: Ref<Mandelbrot>, use_gpu
 	};
 	// Both execution modes reach the same buffer and presentation pipeline.
 	commands:begin_rendering(self.image, 0.0, 0.0, 0.0, 1.0)?;
-	commands:draw(self.graphics, self:parameters(plot, solver, 0, self.segments.length), 3)?;
+	commands:draw(self.graphics, self:parameters(plot, solver, 0, plot:segment_count()), 3)?;
 	commands:end_rendering()?;
 	commands:submit()?;
 }
@@ -549,8 +524,7 @@ fn test() -> () | Err<_> {
 	edge.center.real = 2.0;
 	edge.span = 2.0;
 	let pixels = arc_ptr_alloc([0, 0, 0, 0, 123])?;
-	let segments = arc_ptr_alloc([(0, 0)])?;
-	let root = Parameters { plot = edge, solver = mandelbrot_new(32), segments = Span<SegmentOrigin> { data = segments:get():lea(0), length = 1 }, pixels = Span<u8> { data = pixels:get():lea(0), length = 4 } };
+	let root = Parameters { plot = edge, solver = mandelbrot_new(32), start_segment = 0, segment_count = 1, pixels = Span<u8> { data = pixels:get():lea(0), length = 4 } };
 	dispatch_host(root);
 	evaluate_segment(1, root);
 	let color = palette(2);

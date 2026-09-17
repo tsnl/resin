@@ -28,6 +28,68 @@ fn gpu() -> Option<ResinGpu> {
     }
 }
 
+#[test]
+fn integer_arithmetic_matches_cpu_results_and_propagates_invocation_failure() {
+    macro_rules! check {
+        ($ty:ty) => {{
+            #[repr(C)]
+            #[derive(Clone, Copy, Debug)]
+            struct Input {
+                left: $ty,
+                right: $ty,
+                operation: u32,
+            }
+            #[repr(C)]
+            #[derive(Clone, Copy, Debug, PartialEq)]
+            struct Output {
+                value: $ty,
+                progress: u32,
+            }
+            let cases = support::integer_arithmetic::cases(stringify!($ty));
+            let inputs = cases
+                .iter()
+                .map(|&(left, right, operation, _)| Input {
+                    left: left as $ty,
+                    right: right as $ty,
+                    operation,
+                })
+                .collect::<Vec<_>>();
+            let sentinel = Output {
+                value: <$ty>::MAX,
+                progress: 0,
+            };
+            let source = support::integer_arithmetic::source(stringify!($ty));
+            if let Some(actual) = execute(&source, &inputs, sentinel) {
+                for (index, &(_, _, _, value)) in cases.iter().enumerate() {
+                    let expected = value.map_or(
+                        Output {
+                            progress: 1,
+                            ..sentinel
+                        },
+                        |value| Output {
+                            value: value as $ty,
+                            progress: 3,
+                        },
+                    );
+                    assert_eq!(
+                        actual[index],
+                        expected,
+                        "{} case {:?}",
+                        stringify!($ty),
+                        inputs[index]
+                    );
+                }
+                assert_eq!(actual[inputs.len()], sentinel);
+            }
+        }};
+    }
+    check!(u8);
+    check!(i32);
+    check!(u32);
+    check!(i64);
+    check!(u64);
+}
+
 fn execute<I: Copy, O: Copy>(source: &str, inputs: &[I], sentinel: O) -> Option<Vec<O>> {
     let optimizer = shaders::optimizer()?;
     // Keep the same GPU-before-build lock order as the other GPU suites.

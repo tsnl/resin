@@ -6,7 +6,7 @@ comments at this manual's revision; each page also links to its source.
 
 | Module | Main operations | Lifetime and target contract |
 | --- | --- | --- |
-| [`$/math.resin`](../resin/math.resin) | `Complex<T>`, `complex`, `add`, `mul`, `squared`, `magnitude_squared`, `sqrt`, `sin`, `cos` | Arithmetic helpers borrow inputs. Shader transcendental operations currently use `f32`. |
+| [`$/math.resin`](../resin/math.resin) | `Complex<T>`, `complex`, `add`, `mul`, `squared`, `magnitude_squared`, `sqrt`, `sin`, `cos` | Arithmetic helpers take values and return new values. Shader transcendental operations currently use `f32`. |
 | [`$/span.resin`](../resin/span.resin) | `Span<T>`, `at`, `lea`, `slice`, `bytes`, `as_bytes` | Borrowed pointer/length view; keep the backing storage alive. CPU and shader indexing have different bounds-check behavior. |
 | [`$/ownership.resin`](../resin/ownership.resin) | `PhantomBox` | Marker field for move-only values; owns no allocation. |
 | [`$/shared.resin`](../resin/shared.resin) | `arc_ptr_alloc`, `arc_span_alloc`, `get`, `clone`, `downgrade`, `upgrade` | Host allocation and ownership; borrowed views do not retain an owner. |

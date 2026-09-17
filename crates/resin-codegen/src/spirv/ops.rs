@@ -529,6 +529,12 @@ fn builtin(
             }
         }
         ("/", 2) if float => Op::FDiv,
+        ("/" | "%", 2) if ty.is_integer() => {
+            return integer_division(context, name, result, &args);
+        }
+        ("<<", 2) if ty.is_integer() => Op::ShiftLeftLogical,
+        (">>", 2) if signed => Op::ShiftRightArithmetic,
+        (">>", 2) if ty.is_integer() => Op::ShiftRightLogical,
         ("&", 2) if ty.is_integer() => Op::BitwiseAnd,
         ("|", 2) if ty.is_integer() => Op::BitwiseOr,
         ("^", 2) if ty.is_integer() => Op::BitwiseXor,
@@ -683,6 +689,58 @@ fn numeric_cast(context: &mut Context<'_>, from: &Ty, to: &Ty, value: Word) -> R
     emit(context, op, to, &[value])
 }
 
+fn integer_division(
+    context: &mut Context<'_>,
+    name: &str,
+    ty: &Ty,
+    args: &[Word],
+) -> Result<Word, Error> {
+    let (bits, signed) = integer(context.shape(ty)).expect("checked integer operation");
+    if !signed {
+        let op = if name == "/" { Op::UDiv } else { Op::UMod };
+        return emit(context, op, ty, args);
+    }
+    let divisor = signed_divisor(context, ty, bits, args)?;
+    // The runtime requires maintenance8, which defines SRem for negative operands.
+    let op = if name == "/" { Op::SDiv } else { Op::SRem };
+    emit(context, op, ty, &[args[0], divisor])
+}
+
+// SPIR-V signed division is undefined for MIN / -1. Replacing that divisor
+// with 1 produces Resin's wrapping quotient and zero remainder.
+fn signed_divisor(
+    context: &mut Context<'_>,
+    ty: &Ty,
+    bits: u32,
+    args: &[Word],
+) -> Result<Word, Error> {
+    let minimum = integer_constant(context, ty, -(1_i128 << (bits - 1)))?;
+    let minus_one = integer_constant(context, ty, -1)?;
+    let first = emit(context, Op::IEqual, &Ty::Bool, &[args[0], minimum])?;
+    let second = emit(context, Op::IEqual, &Ty::Bool, &[args[1], minus_one])?;
+    let overflow = emit(context, Op::LogicalAnd, &Ty::Bool, &[first, second])?;
+    let one = integer_constant(context, ty, 1)?;
+    select(context, ty, overflow, one, args[1])
+}
+
+fn invalid_integer_operation(
+    context: &mut Context<'_>,
+    name: &str,
+    args: &[Slot],
+) -> Result<Option<Word>, Error> {
+    let Some((bits, _)) = integer(context.shape(&args[0].ty)) else {
+        return Ok(None);
+    };
+    let (op, bound) = match name {
+        "/" | "%" => (Op::IEqual, 0),
+        // Unsigned comparison also rejects negative signed shift counts.
+        "<<" | ">>" => (Op::UGreaterThanEqual, i128::from(bits)),
+        _ => return Ok(None),
+    };
+    let bound = integer_constant(context, &args[1].ty, bound)?;
+    emit(context, op, &Ty::Bool, &[args[1].id, bound]).map(Some)
+}
+
 /// Return a predicate that must abort this invocation before the instruction.
 pub(super) fn invalid(
     context: &mut Context<'_>,
@@ -693,6 +751,7 @@ pub(super) fn invalid(
         Instr::CallBuiltin { name, .. } if name.as_ref() == "assert" => {
             emit(context, Op::LogicalNot, &Ty::Bool, &[args[0].id]).map(Some)
         }
+        Instr::CallBuiltin { name, .. } => invalid_integer_operation(context, name, args),
         Instr::ExcludeNone => {
             is_variant(context, &args[0].ty, &Case::Type(Ty::None), args[0].id).map(Some)
         }

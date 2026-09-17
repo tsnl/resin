@@ -1,6 +1,6 @@
 //! Vulkan 1.3 device selection and feature negotiation.
 
-use std::ffi::{CStr, c_char};
+use std::ffi::{CStr, c_char, c_void};
 use std::slice;
 
 use ash::{Device, Entry, Instance, vk};
@@ -8,6 +8,8 @@ use ash::{Device, Entry, Instance, vk};
 use crate::{ResinStatus, ResinWindow, window::Surface};
 
 use super::{ResinGpuDeviceInfo, ResinGpuDeviceType, vk_status};
+
+const KHR_MAINTENANCE8_NAME: &CStr = c"VK_KHR_maintenance8";
 
 pub struct DeviceContext {
     pub entry: Entry,
@@ -128,6 +130,7 @@ fn finish_device(
         .queue_priorities(&queue_priorities);
 
     let mut enabled_extensions = selected.optional_extensions.clone();
+    enabled_extensions.push(KHR_MAINTENANCE8_NAME.as_ptr());
     if surface.is_some() {
         enabled_extensions.extend([
             vk::KHR_SWAPCHAIN_NAME.as_ptr(),
@@ -137,6 +140,7 @@ fn finish_device(
 
     let mut vulkan12 = selected.vulkan12;
     let mut vulkan13 = selected.vulkan13;
+    let mut maintenance8 = PhysicalDeviceMaintenance8FeaturesKHR::new(true);
     let mut memory_priority = selected.memory_priority;
     let mut pageable = selected.pageable;
     let mut swapchain =
@@ -145,7 +149,8 @@ fn finish_device(
     let mut features2 = vk::PhysicalDeviceFeatures2::default()
         .features(selected.features10)
         .push_next(&mut vulkan12)
-        .push_next(&mut vulkan13);
+        .push_next(&mut vulkan13)
+        .push_next(&mut maintenance8);
     if selected.memory_priority_enabled {
         features2 = features2.push_next(&mut memory_priority);
         if selected.pageable_enabled {
@@ -305,11 +310,15 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
     }
 
     let extensions = unsafe { instance.enumerate_device_extension_properties(physical) }.ok()?;
+    if !has_extension(&extensions, KHR_MAINTENANCE8_NAME) {
+        return None;
+    }
 
     let queue_family = graphics_compute_queue_family(instance, physical)?;
 
     let mut vulkan12 = vk::PhysicalDeviceVulkan12Features::default();
     let mut vulkan13 = vk::PhysicalDeviceVulkan13Features::default();
+    let mut maintenance8 = PhysicalDeviceMaintenance8FeaturesKHR::new(false);
     let mut memory_priority = vk::PhysicalDeviceMemoryPriorityFeaturesEXT::default();
     let mut pageable = vk::PhysicalDevicePageableDeviceLocalMemoryFeaturesEXT::default();
 
@@ -320,7 +329,8 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
     let shader_int64 = {
         let mut features2 = vk::PhysicalDeviceFeatures2::default()
             .push_next(&mut vulkan12)
-            .push_next(&mut vulkan13);
+            .push_next(&mut vulkan13)
+            .push_next(&mut maintenance8);
         if has_memory_priority {
             features2 = features2.push_next(&mut memory_priority);
             if has_pageable {
@@ -337,6 +347,7 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
         || vulkan13.synchronization2 != vk::TRUE
         || vulkan13.maintenance4 != vk::TRUE
         || vulkan13.dynamic_rendering != vk::TRUE
+        || maintenance8.maintenance8 != vk::TRUE
     {
         return None;
     }
@@ -453,6 +464,30 @@ fn has_extension(extensions: &[vk::ExtensionProperties], name: &CStr) -> bool {
         .iter()
         .any(|extension| extension.extension_name_as_c_str() == Ok(name))
 }
+
+// Ash 0.38 predates maintenance8. Keep this private ABI binding until Ash
+// provides it: VkPhysicalDeviceMaintenance8FeaturesKHR, structure type 1000574000.
+// https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceMaintenance8FeaturesKHR.html
+#[repr(C)]
+struct PhysicalDeviceMaintenance8FeaturesKHR {
+    s_type: vk::StructureType,
+    p_next: *mut c_void,
+    maintenance8: vk::Bool32,
+}
+
+impl PhysicalDeviceMaintenance8FeaturesKHR {
+    fn new(enabled: bool) -> Self {
+        Self {
+            s_type: vk::StructureType::from_raw(1_000_574_000),
+            p_next: std::ptr::null_mut(),
+            maintenance8: enabled.into(),
+        }
+    }
+}
+
+// SAFETY: The C layout starts with the Vulkan chain header, and maintenance8
+// explicitly permits this structure in the PhysicalDeviceFeatures2 chain.
+unsafe impl vk::ExtendsPhysicalDeviceFeatures2 for PhysicalDeviceMaintenance8FeaturesKHR {}
 
 #[cfg(test)]
 mod tests {

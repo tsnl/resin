@@ -84,13 +84,12 @@ fn a_segment_writes_only_its_own_row_range() {
         r#"
         fn segment_bounds() -> () | Err<_> {
             let plot = plot_new(35, 2);
-            let segments = segments_new(plot.width, plot.height)?;
             let count = u64(plot.width) * u64(plot.height) * u64(4);
             let pixels = arc_span_alloc::<u8>(count + u64(1), u8(123))?;
             let view = pixels:get();
-            let root = Parameters { plot = plot:clone(), solver = mandelbrot_new(32),
-                segments = segments:get(), pixels = view:slice(u64(0), count) };
-            assert(segments:get().length == u64(4));
+            let root = Parameters { plot = plot, solver = mandelbrot_new(32),
+                start_segment = 0, segment_count = plot:segment_count(), pixels = view:slice(u64(0), count) };
+            assert(plot:segment_count() == u64(4));
             evaluate_segment(u64(0), root);
             let mut i: u64 = 0;
             while (i < u64(32)) {
@@ -148,25 +147,23 @@ fn compute_matches_cpu_for_partial_segments() {
             let solver = mandelbrot_new(32);
             let count = u64(plot.width) * u64(plot.height) * u64(4);
             let pixels = gpu:alloc::<u8>(count + u64(1))?;
-            let host_segments = segments_new(plot.width, plot.height)?;
-            let segment_view = host_segments:get();
-            let segments = upload(gpu, segment_view)?;
+            let segments = plot:segment_count();
             let group_size = gpu:compute_workgroup_size();
             {
                 let sentinel = pixels:at(count);
                 sentinel:store(u8(123));
                 let commands = gpu:start_command_recording()?;
-                // Two explicit slices exercise batch-local invocation indices.
+                // Two explicit ranges exercise batch-local invocation indices.
                 let first = HostParameters {
-                    plot = plot:clone(), solver = mandelbrot_new(solver.max_iters),
-                    segments = segments:slice(u64(0), u64(7)), pixels = pixels:clone(),
+                    plot = plot, solver = solver,
+                    start_segment = 0, segment_count = 7, pixels = pixels,
                 };
                 let second = HostParameters {
-                    plot = plot:clone(), solver = mandelbrot_new(solver.max_iters),
-                    segments = segments:slice(u64(7), segments.length - u64(7)), pixels = pixels:clone(),
+                    plot = plot, solver = solver,
+                    start_segment = 7, segment_count = segments - 7, pixels = pixels,
                 };
                 commands:dispatch(pipeline, first, u32((u64(7) + group_size - u64(1)) / group_size), 1, 1)?;
-                commands:dispatch(pipeline, second, u32((segments.length - u64(7) + group_size - u64(1)) / group_size), 1, 1)?;
+                commands:dispatch(pipeline, second, u32((segments - u64(7) + group_size - u64(1)) / group_size), 1, 1)?;
                 commands:submit()?;
                 let actual = arc_span_alloc::<u8>(count + u64(1), u8(0))?;
                 pixels:copy_to(actual:get());

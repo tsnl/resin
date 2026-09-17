@@ -372,8 +372,26 @@ pub struct Term {
     pub kind: TermKind,
 }
 
+/// A value use needs copying when the selected parameter/result consumes a value.
+/// A reference target borrows instead and does not impose a copy requirement.
+#[derive(Debug, Clone)]
+pub struct CopyRequirement {
+    pub source: Type,
+    pub target: Type,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone)]
 pub enum TermKind {
+    /// Inferred ownership requirements, checked after substitution before this body is lowered.
+    RequireCopy {
+        requirements: Vec<CopyRequirement>,
+        body: Box<Term>,
+    },
+    /// Read owned storage: copy if its specialized type permits it, otherwise transfer it.
+    ReadOwned {
+        place: Box<Term>,
+    },
     Break,
     Continue,
     Return {
