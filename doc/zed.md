@@ -32,7 +32,7 @@ Rebuild it from Zed's Extensions view after changing the adapter or queries.
 Restarting `resin --lsp` alone does not reload highlighting queries or the pinned
 Tree-sitter grammar. If `struct`, `match`, or `fn` still look like ordinary
 identifiers, rebuild/reinstall the dev extension from this checkout's `editors/zed/`.
-An `Error loading highlights query` with `Invalid node type "::"` means the
+An `Error loading highlights query` with `Invalid node type "RefMut"` means the
 queries require a newer parser than the extension's grammar pin. Update the
 checkout to include the corrected pin, then rebuild/reinstall the dev extension.
 See [Zed's extension development guide](https://zed.dev/docs/extensions/developing-extensions).
@@ -113,16 +113,21 @@ load a native library, check the inherited development environment and restart Z
 
 ```sh
 cargo build --manifest-path editors/zed/Cargo.toml --release --target wasm32-wasip2
+cargo test -p tree-sitter-resin --test editor_queries --locked
 cargo test -p resin --test editor_queries
+python scripts/check-zed-grammar.py
 ```
 
 The extension is an independent Cargo workspace depending only on
 `zed_extension_api` 0.7. Its grammar pin points to a Resin commit with
 `path = "crates/tree-sitter-resin"`. After a grammar change, commit the regenerated
-parser in Resin and update that pin. Query tests compile every query and check
-captures against representative syntax, examples, and standard-library files.
-These tests use the local parser, so also verify that the pinned commit contains
-the parser changes required by the queries. The grammar supports free functions and UFCS colon calls, field-only structs,
+parser in Resin, push that commit, and update the pin to it in a following commit.
+The Linux Grammar checks job requires the pinned grammar source and generated
+files to match the checkout, and discovers and compiles every Zed and Helix `.scm`
+file against that parser. The pin check needs the pinned commit in local Git
+history; fetch it first when using a shallow checkout. The full query suite also
+checks captures against representative syntax, examples, and standard-library
+files. The grammar supports free functions and UFCS colon calls, field-only structs,
 generic type parameters, explicit `::<T>` applications, checked `intrinsic`
 declarations, `Err` and `None` unions, and documentation comments.
 
