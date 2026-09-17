@@ -1,4 +1,4 @@
-// Cut holes in a rasterized surface
+// Discard fragments
 //
 // Draw a blue gradient, then an orange checkerboard. Transparent squares return
 // None from the fragment shader and leave the earlier drawing untouched.
@@ -6,8 +6,8 @@
 // opaque. Blended translucency needs a different rendering strategy.
 //
 // With the compiler service running and RESIN_SERVER set (see Getting started):
-//   cargo run -- examples/alpha_mask.resin
-// This writes alpha-mask.png at 512 x 512. It needs a Vulkan GPU but no window.
+//   cargo run -- examples/discard_fragments.resin
+// This writes discard-fragments.png at 512 x 512. It needs a Vulkan GPU but no window.
 export { main };
 import { "$/gpu.resin", "$/graphics.resin", "$/image.resin", "$/shared.resin", "$/span.resin" };
 
@@ -97,6 +97,6 @@ fn main() -> () | Err<_> {
 	let host = arc_span_alloc::<u8>(pixels.length, u8(0))?;
 	pixels:copy_to(host:get());
 	let view = host:get();
-	image_data_write_pixels("alpha-mask.png".data, 512, 512, 4, view, 0)?;
+	image_data_write_pixels("discard-fragments.png".data, 512, 512, 4, view, 0)?;
 	(())
 }

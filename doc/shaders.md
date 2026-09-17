@@ -90,7 +90,7 @@ The entry interfaces are:
 Use an optional fragment result for binary alpha masking: return `None` when the
 sampled alpha is below the cutoff, otherwise return the output color. Equality
 with the cutoff survives, as in glTF's `MASK` mode. See
-[Cut holes in a rasterized surface](alpha-masking.md) for a complete example.
+[Discard fragments](discard-fragments.md) for a complete example.
 It samples a small alpha image stored in a buffer; sampled-image objects are not
 exposed yet.
 

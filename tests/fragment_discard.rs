@@ -210,12 +210,12 @@ fn discard_preserves_background_while_zero_alpha_and_recovered_none_write_color(
 
 #[cfg(feature = "gpu")]
 #[test]
-fn alpha_mask_example_projects_its_buffer_and_preserves_the_previous_draw() {
+fn discard_fragments_example_projects_its_buffer_and_preserves_the_previous_draw() {
     let _lock = resin_runtime::testing::lock_gpu();
     let Some(gpu) = gpu() else { return };
     drop(gpu);
     let module = pipeline::host_entry(
-        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/alpha_mask.resin"),
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/discard_fragments.resin"),
         "main",
     )
     .unwrap();
@@ -231,7 +231,8 @@ fn alpha_mask_example_projects_its_buffer_and_preserves_the_previous_draw() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let image = resin_runtime::image_read_png(directory.path().join("alpha-mask.png"), 4).unwrap();
+    let image =
+        resin_runtime::image_read_png(directory.path().join("discard-fragments.png"), 4).unwrap();
     assert_eq!((image.width, image.height, image.channels), (512, 512, 4));
     for y in 0..8 {
         for x in 0..8 {

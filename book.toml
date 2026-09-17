@@ -22,6 +22,7 @@ command = "python3 scripts/manual.py"
 after = ["links"]
 
 [output.html.redirect]
+"alpha-masking.html" = "discard-fragments.html"
 "guide.html" = "getting-started.html"
 "methods.html" = "overloads.html"
 "operators.html" = "overloads.html#operator-overloading"

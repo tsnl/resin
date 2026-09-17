@@ -7,7 +7,7 @@
   - [Your first Resin program](tutorial/basics.md)
   - [Build a Mandelbrot explorer](tutorial/index.md)
   - [Ray tracing with a fisheye camera](ray-tracing.md)
-  - [Cut holes in a rasterized surface](alpha-masking.md)
+  - [Discard fragments](discard-fragments.md)
 - [Language reference](language.md)
   - [Functions, values, and control flow](syntax.md)
   - [Types and generics](generics.md)
