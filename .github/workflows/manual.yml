@@ -30,21 +30,38 @@ on:
       - 'scripts/render-mandelbrot.py'
       - '.github/workflows/manual.yml'
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: Publish the latest default-branch manual to this repository's GitHub Pages
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: manual-${{ github.ref }}
-  cancel-in-progress: true
+  group: manual-${{ inputs.deploy && 'pages' || github.ref }}
+  cancel-in-progress: ${{ !inputs.deploy }}
 
 jobs:
   build:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    if: >-
+      (github.event_name != 'pull_request' || !github.event.pull_request.draft) &&
+      (!inputs.deploy || github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: read
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Deployment always builds the latest default branch, not an old artifact.
+          ref: ${{ inputs.deploy && github.event.repository.default_branch || '' }}
+      - name: Read this repository's Pages configuration
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy
+        id: pages
+        uses: actions/configure-pages@v6
       - name: Install native build dependencies
         run: |
           sudo apt-get update
@@ -59,6 +76,9 @@ jobs:
           key: manual
           cache-bin: false
       - name: Build the manual
+        env:
+          # An absolute site URL also fixes assets on nested Pages 404 routes.
+          MDBOOK_OUTPUT__HTML__SITE_URL: ${{ inputs.deploy && format('{0}/', steps.pages.outputs.base_url) || '/' }}
         run: mdbook build
       - name: Check links and assets
         run: python3 scripts/check-manual.py
@@ -68,3 +88,26 @@ jobs:
           name: resin-manual
           path: target/manual
           retention-days: 7
+      - name: Upload the Pages site
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: target/manual
+
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.deploy &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy the manual
+        id: deployment
+        uses: actions/deploy-pages@v5
