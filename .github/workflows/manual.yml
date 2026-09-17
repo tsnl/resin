@@ -40,8 +40,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: manual-${{ inputs.deploy && 'pages' || github.ref }}
-  cancel-in-progress: ${{ !inputs.deploy }}
+  # Serialize automatic and manual publishing without interrupting a deployment.
+  group: manual-${{ (github.event_name == 'push' || inputs.deploy) && 'pages' || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' && !inputs.deploy }}
 
 jobs:
   build:
@@ -57,9 +58,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           # Deployment always builds the latest default branch, not an old artifact.
-          ref: ${{ inputs.deploy && github.event.repository.default_branch || '' }}
+          ref: ${{ (github.event_name == 'push' || inputs.deploy) && github.event.repository.default_branch || '' }}
       - name: Read this repository's Pages configuration
-        if: github.event_name == 'workflow_dispatch' && inputs.deploy
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy)
         id: pages
         uses: actions/configure-pages@v6
       - name: Install native build dependencies
@@ -78,7 +79,7 @@ jobs:
       - name: Build the manual
         env:
           # An absolute site URL also fixes assets on nested Pages 404 routes.
-          MDBOOK_OUTPUT__HTML__SITE_URL: ${{ inputs.deploy && format('{0}/', steps.pages.outputs.base_url) || '/' }}
+          MDBOOK_OUTPUT__HTML__SITE_URL: ${{ (github.event_name == 'push' || inputs.deploy) && format('{0}/', steps.pages.outputs.base_url) || '/' }}
         run: mdbook build
       - name: Check links and assets
         run: python3 scripts/check-manual.py
@@ -89,14 +90,14 @@ jobs:
           path: target/manual
           retention-days: 7
       - name: Upload the Pages site
-        if: github.event_name == 'workflow_dispatch' && inputs.deploy
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy)
         uses: actions/upload-pages-artifact@v5
         with:
           path: target/manual
 
   deploy:
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.deploy &&
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy)) &&
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     needs: build
     runs-on: ubuntu-24.04
