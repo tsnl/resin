@@ -199,52 +199,61 @@ fn inferred_shader_results_lower_without_backend_inference() {
 }
 
 #[test]
-fn all_example_stages_emit_deterministically() {
-    for (name, stage) in [
-        ("gradient.resin", Stage::Compute),
-        ("triangle.resin", Stage::Vertex),
-        ("triangle.resin", Stage::Fragment),
-        ("particles.resin", Stage::Compute),
-        ("particles.resin", Stage::Vertex),
-        ("particles.resin", Stage::Fragment),
+fn all_example_stages_emit_deterministically_and_compile_to_spirv() {
+    let optimizer = shaders::optimizer();
+    for (name, stages) in [
+        ("gradient.resin", &[Stage::Compute][..]),
+        ("triangle.resin", &[Stage::Vertex, Stage::Fragment][..]),
+        (
+            "particles.resin",
+            &[Stage::Compute, Stage::Vertex, Stage::Fragment][..],
+        ),
     ] {
         let m = example(name);
+        // Generation and native builds already include every stage in the module.
         let first_project = support::project::Project::new(&m, None).unwrap();
-        let first_shader = first_project
-            .generated
-            .shaders()
-            .iter()
-            .find(|shader| shader.stage() == stage)
-            .unwrap();
-        let first = std::fs::read(first_shader.unoptimized_spirv()).unwrap();
-        assert_eq!(&first[..4], &[3, 2, 35, 7]);
-        assert_eq!(instructions(&first, 15).count(), 1, "one OpEntryPoint");
         let second_project = support::project::Project::new(&m, None).unwrap();
-        let second_shader = second_project
-            .generated
-            .shaders()
-            .iter()
-            .find(|shader| shader.stage() == stage)
-            .unwrap();
-        assert_eq!(
-            first,
-            std::fs::read(second_shader.unoptimized_spirv()).unwrap()
-        );
+        assert_eq!(first_project.generated.shaders().len(), stages.len());
+        assert_eq!(second_project.generated.shaders().len(), stages.len());
+        for &stage in stages {
+            let first_shader = first_project
+                .generated
+                .shaders()
+                .iter()
+                .find(|shader| shader.stage() == stage)
+                .unwrap();
+            let second_shader = second_project
+                .generated
+                .shaders()
+                .iter()
+                .find(|shader| shader.stage() == stage)
+                .unwrap();
+            let first = std::fs::read(first_shader.unoptimized_spirv()).unwrap();
+            assert_eq!(&first[..4], &[3, 2, 35, 7]);
+            assert_eq!(instructions(&first, 15).count(), 1, "one OpEntryPoint");
+            assert_eq!(
+                first,
+                std::fs::read(second_shader.unoptimized_spirv()).unwrap(),
+                "{name}: {stage:?}"
+            );
+        }
+        if let Some(optimizer) = &optimizer {
+            let built = first_project.build(&toolchain::spirv(optimizer)).unwrap();
+            for shader in first_project.generated.shaders() {
+                let bytes = std::fs::read(built.path(shader.spirv().file_name().unwrap())).unwrap();
+                assert_eq!(&bytes[..4], &[3, 2, 35, 7]);
+                assert_eq!(bytes.len() % 4, 0);
+            }
+        }
     }
 }
 
 #[test]
-fn examples_helpers_and_control_flow_compile_to_spirv() {
+fn helpers_and_control_flow_compile_to_spirv() {
     let Some(frontend) = shaders::optimizer() else {
         return;
     };
     let modules = [
-        (example("gradient.resin"), Stage::Compute),
-        (example("triangle.resin"), Stage::Vertex),
-        (example("triangle.resin"), Stage::Fragment),
-        (example("particles.resin"), Stage::Compute),
-        (example("particles.resin"), Stage::Vertex),
-        (example("particles.resin"), Stage::Fragment),
         (
             module(
                 "export { kernel }; @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { let mut x = i; x = x + u32(2); if (x < u32(4)) { x } else { x * u32(2) } }; }",
@@ -600,15 +609,8 @@ fn structured_loop_conditions_and_early_returns_compile_to_spirv() {
 
 #[test]
 fn sequential_conditionals_and_error_propagation_preserve_structured_control() {
-    let mut source = String::from(
-        "export { kernel }; struct Failed {} fn step() -> (() | Err<Failed>)  { (()) } fn helper(value: u32) -> (u32 | Err<Failed>) { let mut result = value; ",
-    );
-    for _ in 0..512 {
-        source.push_str(
-            "if (result == u32(0)) { result = u32(1); } else { result = u32(0); }; step()?; ",
-        );
-    }
-    source.push_str("(result) } @compute_shader fn kernel(i: u64, output: Ptr<u32>)  { output.* = match (helper(u32(i))) { u32(value) => { value }, Err(error) => { u32(99) } }; }");
+    // Exercise repeated selection merges without making spirv-opt a stress test.
+    let source = support::control::shader_source(32);
     let project = support::project::Project::new(&module(&source), None).unwrap();
     let source = std::fs::read(project.generated.shaders()[0].unoptimized_spirv()).unwrap();
     assert_eq!(

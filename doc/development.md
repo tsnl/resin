@@ -78,6 +78,10 @@ separation; Nextest also overlaps work across test binaries. Each GPU pointer te
 retains a lazily initialized GPU singleton to establish device availability.
 CI omits Rust debug symbols to reduce compile and native-link work while retaining debug
 assertions and overflow checks. Local Cargo profile defaults are unchanged.
+Large compiler stress cases and cache measurements run in the nightly/manual
+[compiler benchmarks](../benchmarks/README.md). Ordinary CI retains small regression
+fixtures. Shader example checks generate each complete module twice for determinism
+and optimize it once, covering all stages without repeating whole-module builds.
 CI sets `RESIN_TEST_PARTICLE_COUNT=10000` for the particle compute/render test.
 Its default remains one million particles for local stress testing; the particle example
 also keeps its one-million default. The smaller test spans the same cloud volume and

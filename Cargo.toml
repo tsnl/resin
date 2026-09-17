@@ -23,6 +23,12 @@ name = "service-parse"
 path = "benchmarks/service_parse.rs"
 harness = false
 
+[[bench]]
+name = "compiler"
+path = "benchmarks/compiler.rs"
+harness = false
+test = false
+
 [dependencies]
 resin-client = { workspace = true }
 

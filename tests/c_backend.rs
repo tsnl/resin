@@ -269,7 +269,8 @@ fn numbered_examples_compile_as_strict_c11() {
                 .to_string_lossy()
                 .starts_with("eg")
         {
-            let module = pipeline::file_module(&path).unwrap();
+            // Match a real build's entry selection; ir_generate checks all roots.
+            let module = pipeline::host_entry(&path, "main").unwrap();
             let project = support::project::Project::new(&module, Some("main")).unwrap();
             // GPU execution is covered by ray_tracing.rs; this test also runs
             // on hosts with no Vulkan device or loader.
@@ -1156,13 +1157,8 @@ fn structured_loops_propagate_errors_from_conditions_and_nested_bodies() {
 
 #[test]
 fn sequential_conditionals_and_error_propagation_keep_constant_nesting() {
-    let mut source = String::from(
-        "export { main }; struct Failed {} fn step() -> (() | Err<Failed>)  { (()) } fn main() -> (i32 | Err<Failed>) { let mut value = 0; ",
-    );
-    for _ in 0..512 {
-        source.push_str("if (value == 0) { value = 1; } else { value = 0; }; step()?; ");
-    }
-    source.push_str("(value) }");
+    // Enough branches to exceed the indentation bound if continuations nest.
+    let source = support::control::host_source(32);
     let project = support::project::Project::new(&module(&source), Some("main")).unwrap();
     let c = fs::read_to_string(project.generated.c_source().unwrap()).unwrap();
     assert!(
