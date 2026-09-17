@@ -1,5 +1,8 @@
 # Resin
 
+> **WARNING: Resin is a work in progress (WIP).** The language, APIs, and tooling
+> are evolving and may change without notice.
+
 **One language for CPU and GPU programming.**
 
 Resin is a systems programming language for graphics, simulation, machine learning,
