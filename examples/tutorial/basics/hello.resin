@@ -1,0 +1,8 @@
+// ANCHOR: hello
+export { main };
+import { "$/string.resin" };
+
+fn main() {
+	print("Hello, Resin!\n");
+}
+// ANCHOR_END: hello

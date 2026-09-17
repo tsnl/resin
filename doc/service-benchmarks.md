@@ -2,7 +2,7 @@
 
 These benchmarks measure the compiler and its clients, including source acquisition,
 HTTP requests, editor diagnostics, and native builds. They are separate from the
-[CPU/GPU workload benchmarks](README.md), which measure generated programs.
+[CPU/GPU workload benchmarks](benchmarks.md), which measure generated programs.
 
 ## Run
 
@@ -10,15 +10,15 @@ Build optimized client and server binaries, then run the Python standard-library
 harness from the repository root in the development environment:
 
 ```sh
-nix-shell --run 'cargo build --locked --release -p resin -p resin-server'
-nix-shell --run 'python3 benchmarks/service.py --output build/service-benchmark'
+cargo build --locked --release -p resin -p resin-server
+python3 benchmarks/service.py --output build/service-benchmark
 ```
 
 The harness starts its own loopback service with a fresh temporary native cache for
 each trial. It terminates the processes it starts. It never uses an existing
 `RESIN_SERVER`. No GPU or display is required. Python 3 is required in addition to
 the development toolchain. On Windows, use the development PowerShell described in
-the [guide](../doc/guide.md#development).
+the [guide](development.md#development).
 
 The default binary directory is `$CARGO_TARGET_DIR/release`, or `target/release`.
 Use `--bin-dir PATH` to select another build. `--suite http`, `--suite lsp`, and
@@ -34,7 +34,7 @@ source directories or under `build/`.
 For a quick correctness check of the harness:
 
 ```sh
-nix-shell --run 'python3 benchmarks/service.py --trials 1 --samples 2 --edit-samples 2 --build-samples 2 --build-edit-samples 2 --output build/service-benchmark-smoke'
+python3 benchmarks/service.py --trials 1 --samples 2 --edit-samples 2 --build-samples 2 --build-edit-samples 2 --output build/service-benchmark-smoke
 ```
 
 There are no timing thresholds and no automatic performance CI jobs. Keep other
@@ -75,7 +75,7 @@ includes allocator overhead and retained generations, and is not a cache byte bu
 ## Isolate local parsing
 
 ```sh
-nix-shell --run 'cargo bench --bench service-parse'
+cargo bench --bench service-parse
 ```
 
 This uses the same default synthetic source shape, parses each complete source
@@ -88,7 +88,7 @@ Use `--samples COUNT` and `--warmup COUNT` after Cargo's `--` to control samplin
 To parse the exact fixture written by the HTTP harness instead:
 
 ```sh
-nix-shell --run 'cargo bench --bench service-parse -- --directory build/service-benchmark/fixture --samples 30 --warmup 1'
+cargo bench --bench service-parse -- --directory build/service-benchmark/fixture --samples 30 --warmup 1
 ```
 
 This is an estimate of parsing work, not a measurement of the complete acquisition
@@ -101,7 +101,7 @@ Use identical compiler profiles, fixtures, native toolchains, sample settings, a
 hardware for before/after comparisons. Preserve raw samples and repeat runs; small
 differences can reflect scheduling, filesystem state, and CPU frequency changes.
 Do not compare these optimized HTTP timings directly with the earlier unoptimized
-compiler-only measurements in [the implementation validation record](../doc/compiler-service-validation.md).
+compiler-only measurements in [the implementation validation record](compiler-service-validation.md).
 
 Current cache reuse is per-file for CST/AST and per complete source graph for HIR.
 A source edit therefore still rebuilds whole-graph semantic analysis. Warm builds
@@ -112,7 +112,7 @@ can keep dependencies alive after eviction from the current cache.
 
 ## Recorded Linux run — 2026-09-15
 
-[Raw samples and metadata](results/service-linux-2026-09-15.json) record optimized
+[Raw samples and metadata](../benchmarks/results/service-linux-2026-09-15.json) record optimized
 compiler binaries from `9a84be2c`, running on an Intel Core Ultra 7 270K Plus with
 24 logical CPUs, in `shell.nix`. The run used the default sample counts and a
 loopback service. The file also identifies both benchmark sources by SHA-256.

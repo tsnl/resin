@@ -1,4 +1,4 @@
-# Unions and errors
+# Unions, optionals, and errors
 
 Unions are structural sets of value types: `A | B`, `B | A`, and `A | B | A`
 are the same type. Aliases preserve the identities of their targets. A variant's u32
@@ -6,6 +6,70 @@ tag identifies its member type throughout a compiled program; it is not its posi
 particular union. Tags are not persistent IDs across separate builds.
 `Never` is the empty union. Structs and aliases are declared in source order;
 a struct can refer to itself through a pointer, but aliases cannot introduce cycles.
+
+## Optional values
+
+`None` is a builtin singleton: it names both a type and its only value. An optional
+integer is the ordinary structural union `int | None`. Any integer widens into that
+union directly; `None` represents absence.
+
+```resin
+type OptionalInt = int | None;
+
+fn choose(value: OptionalInt) -> int  {
+    match (value) { int(number) => { number }, None => { 0 } }
+}
+```
+
+`match` covers every member exactly once. A type pattern binds the value of that
+type; the singleton case can be written `None => { ... }` without a binding.
+There is no user-defined singleton declaration syntax yet.
+
+Union members may be primitive, nominal, or structural types. Aliases are
+transparent, nesting flattens, and repeated members collapse: `OptionalInt | None`
+is the same type as `int | None`. A union does not distinguish two occurrences of
+`None`; use a wrapper struct if those cases need different meanings.
+
+Postfix `!` removes `None` from the operand's possible types:
+
+```resin
+fn require_number(value: int | None) -> int  { value! }
+fn require_choice(value: int | bool | None) -> int | bool  { value! }
+```
+
+The operand is evaluated once. If it is `None`, the host traps with
+`cannot unwrap None`. Otherwise the value keeps its member type; the result can
+then widen into a larger union at its consumer. Mutable pointer and Span element
+types remain invariant: `Ptr<int> | None` does not become `Ptr<int | None>`.
+
+In a shader, failure stops the invocation and propagates through shader callers,
+preserving prior writes, as for numeric-conversion traps. This does not
+report a panic to the host or roll back a dispatch. Traps do not unwind cleanup.
+Prefer `match` when absence is expected. Shader-local unions support only payloads
+supported by the shader backend; union buffer layouts are not part of this change.
+
+Postfix operations compose from left to right: `optional_record!.field` excludes
+`None` before selecting a field. Prefix `!` still negates a Boolean. A second
+postfix `!` is invalid once no `None` remains.
+
+`T | Err<E>` distinguishes success from failure even when `T` and `E` overlap:
+`int` and `Err<int>` are different types. In `int | Err<E> | None`, postfix `!`
+removes only `None`; postfix `?` propagates only `Err` and preserves `None`.
+Use `match` to handle either explicitly. Both use the same ordinary union tags.
+
+Every nominal, primitive, and structural type is interned in one module-wide
+vector of type definitions. A type's ID is its index in that vector; an ordinary
+union's u32 tag is exactly its active payload's type ID. The host and GPU use the
+same table. Aliases share their underlying type's entry, while separate nominal
+structs retain distinct entries even when their fields are identical.
+
+For example, `int` has the same tag in
+`int | None` and `int | bool | None`, on both the host and the GPU. Widening
+preserves that tag. A union type has a table entry, but is never itself a payload:
+`(int | None) | bool` is flattened to `int | None | bool` before lowering.
+Numeric tag values are local to the compiled program; they are not a stable
+serialization format or ABI between separate builds. `Err<E>` has its own type ID, like every other union member.
+## Errors and propagation
 
 ```resin
 struct DivideByZero {}
@@ -77,3 +141,7 @@ Standard-library resources release themselves on scope exit, including early ret
 through `?`. Explicit clones retain shared ownership.
 
 See [Ownership and cleanup](lifetimes.md) for copying, moves, and destruction.
+
+In a `match`, `Variant(_)` ignores the payload. A final `_ => { ... }` arm covers
+all remaining variants. Duplicate, unreachable, and non-final wildcard arms are
+rejected. Assertions and early returns are covered under [control flow](syntax.md).

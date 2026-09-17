@@ -58,32 +58,17 @@ fn main()  {
 ```
 
 Shader entry points use `@compute_shader`, `@vertex_shader`, or `@fragment_shader`;
-shared helpers need no decorator. The [CPU and GPU benchmarks](benchmarks/README.md)
+shared helpers need no decorator. The [CPU and GPU benchmarks](doc/benchmarks.md)
 exercise the same kernels on both processors. The [particle demo](examples/particles.resin)
 combines a million-particle GPU simulation, rendering, and interactive camera controls
 in one Resin program.
 
 ## Try it
 
-From a checkout on Linux or macOS, use the development shell:
-
-```sh
-nix-shell
-cargo build -p resin -p resin-server -p resin-runtime
-./target/debug/resin-server --listen 127.0.0.1:7412
-```
-
-In a second development shell, select that service explicitly:
-
-```sh
-export RESIN_SERVER=http://127.0.0.1:7412
-cargo run -- examples/eg001.resin
-```
-
-The service compiles uploaded sources; `resin` downloads and runs the executable
-locally. Build/run and editor sessions require `RESIN_SERVER`; formatting stays local.
-See the [compiler service guide](doc/compiler-service.md) for configuration, native
-tool requirements, pinned dependencies, Docker, and manual systemd setup.
+Start with the [setup and first-program guide](doc/getting-started.md). Resin
+consists of a compiler service with shared compilation and editor-analysis caches,
+and a CLI that submits source and runs the resulting executable locally. The guide
+explains dependencies, optional Nix setup, and starting the service.
 
 With a compatible Vulkan GPU and a desktop display on the client, try the particle demo:
 
@@ -94,8 +79,8 @@ cargo run -- examples/particles.resin
 Read the [Resin Manual](doc/index.md) for setup, language and library references,
 and GPU programming. The [Mandelbrot tutorial](doc/tutorial/index.md) builds from
 one orbit to a shared CPU/GPU explorer. Preview the searchable manual locally with
-`nix-shell --run 'mdbook serve --open'`. [Zed](editors/zed/README.md) and
-[Helix](editors/helix/README.md) support includes diagnostics, completion,
+`mdbook serve --open`. [Zed](doc/zed.md) and
+[Helix](doc/helix.md) support includes diagnostics, completion,
 navigation, and formatting.
 
 The compiler phases are reusable async Rust libraries with immutable source graphs,
@@ -104,7 +89,7 @@ explicitly and shares results across independent CLI and editor callers. The cli
 local source capture, formatting, stdio LSP, and execution of verified downloads.
 Native build outputs retain independent lifetimes across later builds.
 See the [compiler architecture](doc/architecture.md) for APIs and ownership guarantees,
-and the [repository tour](TOUR.md) for the code layout.
+and the [repository tour](doc/repository-tour.md) for the code layout.
 
 ## License
 

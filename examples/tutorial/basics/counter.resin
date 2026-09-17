@@ -1,0 +1,48 @@
+export { main };
+import { "$/string.resin" };
+
+// ANCHOR: counter
+struct Counter {
+	value: int,
+}
+
+fn add(counter: Ref<Counter>, amount: int) {
+	counter.value = counter.value + amount;
+}
+
+fn read(counter: Ref<Counter>) -> int {
+	counter.value
+}
+// ANCHOR_END: counter
+
+// ANCHOR: control
+fn sum_to(limit: int) -> int {
+	if (limit <= 0) {
+		return 0;
+	};
+	let counter = Counter { value = 0 };
+	let mut next = 1_i;
+	while (next <= limit) {
+		counter:add(next);
+		next = next + 1;
+	};
+	counter:read()
+}
+// ANCHOR_END: control
+
+// ANCHOR: counter_main
+fn main() {
+	let counter = Counter { value = 40 };
+	add(counter, 1);
+	counter:add(1);
+	assert(read(counter) == counter:read());
+	assert(counter:read() == 42);
+	assert(sum_to(10) == 55);
+	let description = if (counter:read() == 42) {
+		"ready"
+	} else {
+		"waiting"
+	};
+	print(fmt("counter = {0}, sum = {1}: {2}\n", (counter:read(), sum_to(10), description)));
+}
+// ANCHOR_END: counter_main

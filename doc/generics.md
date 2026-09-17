@@ -1,50 +1,56 @@
-# Types and inference
+# Types and generics
 
-## Type inference
+Resin is statically typed: every expression has a type determined before execution,
+and the compiler checks that operations receive the kinds of values they require.
+A type describes both a set of possible values and the operations available on them.
+A value is a particular inhabitant, such as `42_i` of type `int`.
 
-Write `_` to request a concrete type inferred from the surrounding code:
+## Primitive and compound types
+
+Primitive types include fixed-width numbers (`int`, `ulong`, `float32`), `bool`,
+and the string-literal type `str`. The unit type `()` has one value, also written
+`()`. Its empty result is useful for operations such as printing. Numeric widths
+are fixed across supported targets; conversions between already typed numeric
+values are explicit, for example `float32(count)`.
+
+Combine types into tuples, arrays, function types, or named structs. A tuple such
+as `(int, bool)` is identified by its structure. A named struct introduces a new
+identity: two structs with the same fields are still different types. An alias
+introduces another spelling for an existing type, without a new identity.
 
 ```resin
-export { main };
-import { "$/string.resin" };
+struct Point { x: int, y: int }
+struct Size { x: int, y: int }
+type Position = Point;
 
-fn next(n: int) -> _ {
-	n + 1
+fn origin() -> Position {
+    Point { x = 0, y = 0 }
 }
-
-fn main() {
-	let mut value: _;
-	value = next(41);
-	let reference: Ref<_> = value;
-	print(fmt("value = {0}\n", (reference,)));
+fn coordinates(point: Ref<Point>) -> (int, int) {
+    (point.x, point.y)
 }
 ```
-Holes can nest inside local annotations, local type ascriptions, and function
-return annotations: `Ptr<Ptr<_>>`, `Span<_>`, `(_, Ptr<_>)`, and `(int) -> _`
-all use the same inference mechanism. Each `_` is independent. Local constraints
-can come from later assignments or uses; numeric literals default to `long` or
-`float64` only after those constraints have been considered.
 
-Every function uses the same checker, including functions with no explicit holes.
-Later uses can constrain unsuffixed local literals; use an annotation or suffix to fix
-a local’s type independently of those uses.
+`Position` and `Point` are interchangeable; `Size` is a distinct type. Tuple members
+are selected with `.0`, `.1`, and so on. An array literal such as `[1_i, 2_i, 3_i]`
+has a fixed length and one element type. Function types describe their parameter
+sequence and result: `(int, int) -> int` takes two integers and returns an integer.
 
-Function results are inferred from bodies in dependency order, checking mutually
-recursive groups together. Callers outside a group cannot determine its return
-types. A recursive group without enough information is an error, not a generic
-function. Parameters, aliases, struct fields, and
-foreign signatures remain fully explicit. Unresolved or infinitely recursive
-inferred types are errors; `_` is not a wildcard, unit, or a dynamic type.
+`Ptr<T>` describes an existing pointer to a `T`; `Ref<T>` grants access to a place
+containing a `T` without promising its address. Standard-library constructors such
+as `Span<T>` and `ArcPtr<T>` are ordinary generic structs. [References](references.md)
+and [ownership](lifetimes.md) explain the different access and lifetime contracts.
 
-Omitting a function result annotation still means unit; inference is opt-in.
-Types are fully resolved before IR generation, so C and SPIR-V share the same
-inference behavior. Run `cargo run -- examples/inference.resin` for an example.
+## Generic definitions and applications
 
+A generic definition describes a family of concrete definitions. In `Pair<T>`,
+`T` stands for a type chosen when `Pair` is used; it is not a runtime value or a
+dynamic type tag. Substitution replaces that parameter consistently throughout
+the definition. `Pair<int>` and `Pair<bool>` are different concrete types.
 
-## Generic functions and structs
-
-Named type parameters bind one type throughout a definition. Calls infer their
-arguments from values and expected results; explicit function arguments use `::<T>`:
+Named type parameters bind one type throughout a definition. Each application
+substitutes concrete types for those parameters; explicit function arguments use
+`::<T>`:
 
 ```resin
 struct Pair<T> { left: T, right: T }
@@ -88,12 +94,8 @@ fn example() -> int {
 Generic bodies retain their visible overload candidates. Once operand types are
 concrete, signature substitution selects one applicable operation. Ambiguity is
 an error; a failing body is never used to discard a candidate. Caller imports do
-not change the definition's candidate set. See [free operations](methods.md).
+not change the definition's candidate set. See [function overloads](overloads.md).
 
-`_` is a weak inference variable in local annotations, function results, and
-explicit applications. It may resolve to a named parameter but never creates
-another generic parameter. Unsuffixed literals follow expected types before
-falling back to the ordinary integer/float defaults. Template bodies retain their
-type relationships; unsupported concrete operations and layouts fail when an
-application is required. Specialization substitutes these relations and selects concrete operations; it does
-not reopen source inference or use function bodies to deduce signature parameters.
+Next, [function overloads and SFINAE](overloads.md) explain how substitution chooses
+an operation. [Inference](inference.md) then explains which annotations and type
+arguments can be omitted.

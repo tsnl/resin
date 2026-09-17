@@ -83,7 +83,7 @@ and shaders stop the invocation if invalid external memory somehow supplies a `N
 This defensive trap does not unwind cleanup. Reachable success and `?` paths retain normal
 scope destruction. Matches over inhabited variants still require exhaustive, unique arms.
 
-[`T | None`](options.md) supports direct widening, exhaustive matching,
+[`T | None`](errors.md#optional-values) supports direct widening, exhaustive matching,
 and postfix `!` to exclude `None` or trap.
 
-Operations are [visible free functions](methods.md); struct bodies contain only fields.
+Operations are [visible free functions](overloads.md); struct bodies contain only fields.

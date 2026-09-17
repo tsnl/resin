@@ -25,6 +25,7 @@ pkgs.mkShell (
         rustup
         helix
         mdbook # Build the language manual and tutorial.
+        python3 # Generate API chapters and check the static manual.
         shaderc # Handwritten GLSL fixtures in the runtime tests.
         spirv-tools
         nodejs_26

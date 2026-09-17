@@ -3,8 +3,8 @@
 ## Windowing
 
 ```sh
-nix-shell --run 'cargo run -- examples/window.resin'
-nix-shell --run 'cargo run -- examples/particles.resin'
+cargo run -- examples/window.resin
+cargo run -- examples/particles.resin
 ```
 The demo renders a triangle until Escape or the close button is pressed. It uses a `while`
 event loop and defines its decorated shader functions inline, as does the headless triangle demo.

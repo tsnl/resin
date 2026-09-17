@@ -1,0 +1,17 @@
+export { main };
+import { "$/string.resin" };
+
+// ANCHOR: functions
+fn add(left: int, right: int) -> int {
+	left + right
+}
+
+fn main() {
+	let initial: int = 20;
+	let answer = add(initial, 22);
+	let mut doubled = answer;
+	doubled = doubled * 2;
+	assert(answer == 42);
+	print(fmt("answer = {0}, doubled = {1}\n", (answer, doubled)));
+}
+// ANCHOR_END: functions

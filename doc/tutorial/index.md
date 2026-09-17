@@ -11,6 +11,7 @@ All shell commands run from the repository root with `RESIN_SERVER` set.
 
 | Checkpoint | Result | Resin concepts |
 | --- | --- | --- |
+| [Theory](theory.md) | A recurrence, escape rule, and test table | Complex arithmetic and finite iteration |
 | [One orbit](orbit.md) | Known escape counts | Functions, local mutation, `Ref`, assertions |
 | [An image](image.md) | A PNG on disk | Structs, spans, ownership, `Err` and `?` |
 | [Sampling](sampling.md) | Smoother edges | Arrays, tuples, a lookup table |
@@ -18,11 +19,12 @@ All shell commands run from the repository root with `RESIN_SERVER` set.
 | [Interaction](interactive.md) | Pan, zoom, resize | Resource ownership, event-driven rendering |
 | [Application](application.md) | CLI options and screenshots | Parsing, error reporting, headless execution |
 
-The first three chapters have small executable checkpoints in
+Chapters one through three have small executable checkpoints in
 [`examples/tutorial/`](../../examples/tutorial/). Chapters four through six walk
 through the [complete explorer](../../examples/eg011_mandelbrot.resin), including
 its allocation and presentation helpers. Its CPU and GPU paths call the same
 solver. Snippets are included from the source files that tests compile; the manual
 does not maintain a second copy of that application.
 
-Start with [one orbit](orbit.md).
+Start with [Mandelbrot theory](theory.md). If the syntax is new, first work through
+[Your first Resin program](basics.md).

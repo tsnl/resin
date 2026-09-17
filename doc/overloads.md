@@ -1,36 +1,27 @@
-# Free operations and colon calls
+# Function overloads and SFINAE
 
-Structs contain fields only. Operations are ordinary functions, declared and
-exported independently of the types they use. There are no method namespaces,
-inheritance, user-defined traits, or implicit `self` parameters.
+An **overload set** contains the visible functions with a particular name. A call
+selects a single applicable signature. **SFINAE** means “substitution failure is
+not an error”: if substituting the call's types makes a candidate signature
+inapplicable, that candidate is removed from consideration.
+
+For example, a generic `choose<T>(left: T, right: T)` cannot accept an `int` and a
+`bool` together: they cannot both determine the same `T`. A separate
+`choose(left: int, right: bool)` can remain applicable:
 
 ```resin
-struct Counter { value: int }
-fn read(counter: Ref<Counter>) -> int {
-	counter.value
-}
-fn increment(counter: Ref<Counter>) {
-	counter.value = counter.value + 1;
-}
-
-fn example() -> int {
-	let counter = Counter { value = 41 };
-	counter:increment();
-	counter:read()
-}
+fn choose<T>(left: T, right: T) -> T { left }
+fn choose(left: int, right: bool) -> int { if (right) { left } else { 0 } }
+fn example() -> int { choose(42_i, true) }
 ```
 
-`counter:read()` calls `read(counter)`. The receiver is the first ordinary
-argument, and its parameter can have any name. A `Ref<T>` parameter borrows
-storage; a value parameter moves a noncopyable argument. References permit
-unchecked mutation even through an immutable binding; `mut` controls direct
-assignment to the binding, not access through an alias. See [references](references.md).
+If no candidate remains, the call fails; if several remain, it is ambiguous. There
+is no “best overload” ranking.
 
-A dot selects a field: `(value.callback)(argument)` calls a function stored in a
-field. A colon selects a visible function: `value:callback(argument)` passes the
-value as its first argument. Colon calls do not search a type-owned namespace.
-A temporary can bind to a reference parameter and stays alive through the full
-expression, so `values:at(index):store(value)` is supported.
+This rule concerns the signature. Once a candidate is selected, an error in its
+body is an error in the program. The compiler does not try another overload to
+make that body work. Caller imports also cannot add candidates to a generic body
+that was defined in a different lexical scope.
 
 ## Overload resolution
 
@@ -138,20 +129,5 @@ no special meaning. Assignment, address-of, dereference, indexing, postfix `!`
 and `?`, and short-circuit `&&` / `||` keep their built-in behavior. Constant
 expressions do not execute source operator functions.
 
-## Indexing and destruction
 
-Arrays and `str` have primitive `at` operations; `Span<T>` supplies an ordinary
-free overload from `$/span.resin`. `items:at(index)` takes a `ulong` and returns
-`Ref<T>` (`Ref<ubyte>` for `str`). Write an element with `items:at(index) = value`
-and obtain a pointer with `items:lea(index)` on a pointer to an array, a span,
-or `str`. Local arrays support `at` only. Arrays also retain `items(index)`.
-Host indexing checks the declared length; shader indexing is unchecked.
-
-A free `fn drop(value: Ref<Item>) { ... }` declared with its nominal type supplies
-its destruction hook. A generic hook binds the owner's parameters. Direct calls
-remain ordinary calls; see [ownership and cleanup](lifetimes.md).
-
-Free functions may be shader entries or helpers. Helpers can borrow shader-local
-values using `Ref<T>`; see the [reference contract](references.md) for supported
-operations and current target limitations. Reference counting and custom destruction
-remain host-only.
+Continue with [type inference](inference.md) for omitted annotations and type arguments.

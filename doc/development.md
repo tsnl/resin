@@ -5,7 +5,7 @@
 Builds target 64-bit Linux, macOS, and Windows. GPU execution requires a compatible Vulkan
 driver; host-only programs do not require Vulkan or a GPU.
 
-New to the implementation? Start with the [guided repository tour](../TOUR.md) and the
+New to the implementation? Start with the [guided repository tour](repository-tour.md) and the
 [compiler architecture](architecture.md), including the phase crates and their public APIs.
 
 The root is both the `resin` CLI package and a Cargo workspace. Reusable libraries
@@ -110,7 +110,7 @@ The development shell supplies the Vulkan loader and window-system libraries thr
 `LD_LIBRARY_PATH`.
 `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation` enables installed validation layers.
 
-Dedicated [CPU and GPU benchmarks](../benchmarks/README.md) live under `benchmarks/`.
+Dedicated [CPU and GPU benchmarks](benchmarks.md) live under `benchmarks/`.
 Run them separately with `cargo bench --bench cpu` and `cargo bench --bench gpu`
 inside the development environment. Both measure compiled Resin workloads, validate
 their outputs, and can save raw timings and hardware metadata with `-- --json PATH`.

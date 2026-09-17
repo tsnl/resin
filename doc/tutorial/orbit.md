@@ -1,32 +1,8 @@
 # 1. Follow one orbit
 
-For each complex coordinate \\(c\\), start a fresh sequence:
-
-\\[
-z_0 = 0, \qquad z_{n+1} = z_n^2 + c.
-\\]
-
-The Mandelbrot set contains the coordinates whose sequences stay bounded. The
-constant added at every step is **the original coordinate `c`**. It does not change
-with `z`. Different pixels usually have unrelated sequences; there is no useful
-general-purpose dynamic-programming table shared between their iterations.
-
-## A finite test
-
-An orbit that reaches \\(|z_n| > 2\\) will diverge. Compare the squared magnitude
-against four to avoid a square root. Use strict `>`, not `>=`: for `c = -2`, the
-orbit is `0, -2, 2, 2, ...` and never escapes.
-
-Why does the radius work? If \\(|c| \leq 2\\), the reverse triangle inequality gives
-\\(|z^2+c| \geq |z|^2-2\\). Above two, this is greater than \\(|z|\\); the excess
-above two grows, so the orbit cannot settle at a finite limit. If \\(|c|>2\\), the
-first iterate already has magnitude \\(|c|\\), and
-\\(|z^2+c| \geq |z|^2-|c| \geq |z|(|z|-1)\\) once \\(|z|\geq|c|\\), giving growth
-by a factor greater than one. These statements concern exact arithmetic; our
-floating-point computation is an approximation.
-
-Choose an iteration budget. Return the first escape iteration, or zero when no
-escape was found within that budget:
+The [theory chapter](theory.md) established the recurrence and strict escape test.
+Now implement that test: return the first escape iteration, or zero when no escape
+was found within the chosen budget.
 
 ```resin
 {{#include ../../examples/tutorial/fractal.resin:orbit}}

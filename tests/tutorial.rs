@@ -75,3 +75,34 @@ fn tutorial_reference_rejections_remain_language_errors() {
         "keep both documented reference restrictions checked"
     );
 }
+
+#[test]
+fn introductory_checkpoints_teach_values_functions_and_ufcs() {
+    for (program, expected) in [
+        ("basics/hello.resin", "Hello, Resin!\n"),
+        ("basics/functions.resin", "answer = 42, doubled = 84\n"),
+        ("basics/counter.resin", "counter = 42, sum = 55: ready\n"),
+    ] {
+        let (_project, executable) = checkpoint(program);
+        let output = Command::new(executable.path()).output().unwrap();
+        assert!(output.status.success(), "{program}: {output:?}");
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), expected);
+    }
+}
+
+#[test]
+fn type_reference_examples_compile() {
+    for name in ["generics.md", "overloads.md", "inference.md"] {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("doc")
+            .join(name);
+        let chapter = std::fs::read_to_string(path).unwrap();
+        let examples: Vec<_> = chapter.split("```resin\n").skip(1).collect();
+        assert!(!examples.is_empty(), "{name} has no examples");
+        for (index, snippet) in examples.iter().enumerate() {
+            let source = snippet.split("```").next().unwrap();
+            support::pipeline::source_module(source)
+                .unwrap_or_else(|error| panic!("{name}, example {}: {error}", index + 1));
+        }
+    }
+}

@@ -123,11 +123,11 @@ dynamic array indexes fail with a diagnostic. There is no optimizer or stable ge
 
 ## Editor support
 
-The [Zed extension](../editors/zed/README.md) and
-[Helix configuration](../editors/helix/README.md) provide Resin syntax support and launch
+The [Zed extension](zed.md) and
+[Helix configuration](helix.md) provide Resin syntax support and launch
 `resin --lsp DIR` for diagnostics, hover, go-to-definition, completion, and formatting.
-Build the client with `nix-shell --run 'cargo build -p resin'`. Launch the editor
-with `RESIN_SERVER` set to a running compatible service. The [client/editor guide](../crates/resin-client/README.md)
+Build the client with `cargo build -p resin`. Launch the editor
+with `RESIN_SERVER` set to a running compatible service. The [client/editor guide](editor-client.md)
 describes local formatting, buffer ownership, navigation, and `resin.build`.
 Initialization negotiates service capabilities before reporting success.
 
@@ -154,10 +154,10 @@ The CLI and the language server in `resin --lsp DIR` use the same canonical form
 
 ```sh
 # Format every .resin file under examples/, including examples/lib/.
-nix-shell --run 'cargo run --quiet -- --format examples'
+cargo run --quiet -- --format examples
 
 # CI/lint: list files needing formatting without modifying anything.
-nix-shell --run 'cargo run --quiet -- --format --check examples'
+cargo run --quiet -- --format --check examples
 ```
 
 With an installed binary, use `resin --format examples` and
@@ -182,5 +182,5 @@ such as `(x,)` and `(int,)`, force multiline
 lists; add one to keep long calls or records readable. Comments and literal
 contents are preserved, and repeated blank lines collapse to one. Keep one blank
 line between example functions and between logical sections inside a function.
-The [full formatting rules](../crates/resin-client/README.md#formatting) also apply to the CLI.
+The [full formatting rules](editor-client.md#formatting) also apply to the CLI.
 CI checks the examples with `--format --check` on Linux, macOS, and Windows.

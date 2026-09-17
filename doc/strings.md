@@ -39,8 +39,7 @@ fn main() -> (() | Err<_>) {
 The format accepts `str`, `Span<ubyte>`, or `String`. In the argument tuple,
 use `view:bytes()` or `message:bytes()` for span and String values. These methods
 provide an explicit structural byte view to the formatting primitive. Literal
-`str` arguments work directly. Other supported arguments are numbers, booleans,
-unit, and pointer addresses. The argument tuple is explicit, including the
+`str` arguments work directly. Other host values use their representation, described below. The argument tuple is explicit, including the
 trailing comma for a single argument. `{0}`, `{1}`, etc. are zero-based and may repeat;
 `{{` and `}}` escape braces. Arguments evaluate once in source order, including unused arguments.
 Malformed formats and invalid indices terminate with a diagnostic before any formatted output
@@ -78,8 +77,38 @@ fn main() -> (() | Err<_>) {
 }
 ```
 
-The result is a shared `InputLine` owner; `line:get()` borrows its `Span<ubyte>` view.
-Explicit clones retain its allocation; the final owner frees it. `console_print(line)` prints the bytes without adding a newline. Empty lines succeed, EOF before any
-bytes returns `EndOfInput`, and a final line without a newline succeeds. Read and allocation
-failures are also explicit errors. See [the console API](../resin/README.md#console-input) for
-ownership and byte semantics, or run `cargo run -- examples/input.resin`.
+The result is a shared `InputLine` owner; `line:get()` borrows its `Span<ubyte>`
+view. Explicit clones retain the allocation; the final owner frees it. Raw pointers
+and spans do not keep it alive. The allocation has a trailing NUL outside `length`.
+Empty lines succeed, EOF before any bytes returns `EndOfInput`, and a final nonempty
+line without a newline succeeds. Read and allocation failures return `InputReadError`
+and `InputOutOfMemory`; they free any partial buffer without restoring consumed input.
+
+LF and CRLF endings are removed. Other bytes, including whitespace, embedded NULs,
+and a lone CR, are preserved as delivered by C. UTF-8 is not decoded or validated.
+Windows streams use the CRT's default text mode, including newline and EOF translation.
+
+`console_print(line)` writes all bytes, adds no newline, flushes stdout, and returns
+`(() | Err<InputWriteError>)`. `print` does not directly accept an `InputLine`; pass
+its borrowed byte span or use `console_print`. A prompt written with `print` is
+flushed before input blocks.
+
+`console_read_byte()` returns `ubyte | Err<EndOfInput | InputReadError>` and preserves
+all byte values, including NUL and 255, while distinguishing EOF from stream failure.
+These functions run on the host. Try `cargo run -- examples/input.resin`.
+
+## Value representations
+
+Import `repr` from `$/string.resin` to obtain an owned `String` describing any
+host value. Records show their names and fields, arrays and tuples show their
+elements, and unions show their active payload. Strings are quoted and escaped;
+pointers show addresses and opaque handles show their type. `fmt` accepts these
+values too, while direct string arguments retain their verbatim text behavior.
+Unhandled entry-point errors include this representation before cleanup.
+
+A struct may provide `repr_bytes(self: Ref<Self>)` returning the primitive
+`(Ptr<ubyte>, ulong)` byte view. Use the actual struct name in
+place of `Self`. The view must remain readable while its receiver is alive;
+the hook borrows its receiver and must not invalidate it. `String` uses this
+hook so formatting and nested representations show its text. Representation
+is a host operation and limits nested output to 128 levels.

@@ -20,3 +20,10 @@ runnable = false
 [preprocessor.source-links]
 command = "python3 scripts/manual.py"
 after = ["links"]
+
+[output.html.redirect]
+"guide.html" = "getting-started.html"
+"methods.html" = "overloads.html"
+"operators.html" = "overloads.html#operator-overloading"
+"options.html" = "errors.html#optional-values"
+"resources.html" = "syntax.html"

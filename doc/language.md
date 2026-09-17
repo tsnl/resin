@@ -3,13 +3,15 @@
 The reference describes the current language. Each topic owns its semantic rules;
 the tutorial links here when a worked example depends on them.
 
-- [Functions and control flow](syntax.md): declarations, bindings, expressions, loops.
-- [Types and generics](generics.md): numeric inference, holes, aliases, specialization.
-- [Unions and errors](errors.md) and [optional values](options.md): `None`, `Err<E>`, `match`, `?`, and `!`.
-- [References and pointers](references.md): places, `Ref<T>`, `Ptr<T>`, `:at`, `:lea`.
-- [Ownership](lifetimes.md): moves, copying, explicit cloning, cleanup, and unchecked lifetimes.
-- [Operations](methods.md) and [operators](operators.md): free functions, colon calls, overloads.
-- [Modules](modules.md), [foreign functions](ffi.md), and [representation](representation.md).
+- [Functions and control flow](syntax.md): bindings, UFCS, expressions, loops, assertions, and returns.
+- [Types and generics](generics.md): primitives, structural and nominal types, aliases, and type parameters.
+- [Overloads and SFINAE](overloads.md): candidate selection and substitution failure.
+- [Inference](inference.md): contextual types, generic arguments, and explicit holes.
+- [Unions, optionals, and errors](errors.md): `None`, `Err<E>`, `match`, `?`, and `!`.
+- [References and pointers](references.md): places, `Ref<T>`, `Ptr<T>`, `:at`, and `:lea`.
+- [Ownership](lifetimes.md): moves, copying, cloning, cleanup, and unchecked lifetimes.
+- [Modules](modules.md), [documentation comments](documentation-comments.md),
+  [foreign functions](ffi.md), and [representation](representation.md).
 
 ## Guarantees and responsibilities
 

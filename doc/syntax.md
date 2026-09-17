@@ -37,7 +37,7 @@ callee first, followed by arguments from left to right.
 
 Files contain only function, foreign, type, and constant declarations, after their export/import clauses.
 There are no global variables or executable top-level statements. Values and mutable state
-belong inside functions and are passed explicitly to helpers, by value or pointer.
+belong inside functions and are passed explicitly to helpers by value, reference, or pointer.
 Local bindings use `let name = value;`, or `let name: Type;` to reserve uninitialized storage.
 Use `let mut name = value;` for direct reassignment. Assignment uses `name = value` and returns unit. `struct Point { x: int, y: int }` creates a nominal type;
 `type Position = Point;` is a transparent alias for that same type. Only `struct` creates
@@ -51,7 +51,41 @@ its dedicated `Name { field = value }` syntax. Anonymous record types and values
 are not supported; use a named `struct` or a tuple.
 See `examples/` for functions, recursion, records, pointers, and linked lists.
 
-### Constants and `iota`
+## Uniform function call syntax (UFCS)
+
+Structs contain fields only. Operations are ordinary functions, declared and
+exported independently of the types they use. There are no method namespaces,
+inheritance, user-defined traits, or implicit `self` parameters.
+
+```resin
+struct Counter { value: int }
+fn read(counter: Ref<Counter>) -> int {
+	counter.value
+}
+fn increment(counter: Ref<Counter>) {
+	counter.value = counter.value + 1;
+}
+
+fn example() -> int {
+	let counter = Counter { value = 41 };
+	counter:increment();
+	counter:read()
+}
+```
+
+`counter:read()` calls `read(counter)`. The receiver is the first ordinary
+argument, and its parameter can have any name. A `Ref<T>` parameter borrows
+storage; a value parameter moves a noncopyable argument. References permit
+unchecked mutation even through an immutable binding; `mut` controls direct
+assignment to the binding, not access through an alias. See [references](references.md).
+
+A dot selects a field: `(value.callback)(argument)` calls a function stored in a
+field. A colon selects a visible function: `value:callback(argument)` passes the
+value as its first argument. Colon calls do not search a type-owned namespace.
+A temporary can bind to a reference parameter and stays alive through the full
+expression, including when a call returns a reference used by another call.
+
+## Constants and `iota`
 
 `const` declares a compile-time numeric, `bool`, or `str` value at module or local scope.
 Constants have no mutable storage: assignment, address-taking, and reference binding are errors.
@@ -84,7 +118,7 @@ and aggregate initializers are not constant expressions. Integer overflow, zero 
 non-finite floating-point results, and shifts outside the operand width are compile errors,
 including in unused declarations. Floating-point operations round at their declared precision.
 
-### Type sizes
+## Type sizes
 
 `sizeof(Type)` returns the native value size in bytes as `ulong`, including padding:
 
@@ -103,6 +137,8 @@ unit/empty records, an element placeholder for empty arrays, and union tags. Opa
 types and `Ref<T>` bindings have no queryable value layout.
 The existing `size_of` and `align_of` builtins retain their narrower shared CPU/GPU storage
 layout contract. `sizeof` does not imply that a type supports GPU storage.
+
+## Numeric literals
 
 Numeric suffixes are case insensitive and fix the literal's primitive type. Prefix an
 integer width with `u` for unsigned values. The formatter writes lowercase suffixes with
@@ -130,6 +166,12 @@ suffixes require integer notation. Hexadecimal literals accept integer suffixes,
 otherwise `b/B` remains a hex digit. Hex `d/D/f/F` always remain digits.
 Use an explicit supported width for otherwise unconstrained shader literals, such as
 `let mut step = 0_i;`: the shader profile supports `ubyte`, `int`, `uint`, `ulong`, and `float32`.
+
+## Conditionals
+
+`if (condition) { ... } else { ... }` is an expression. Its condition must be a
+`bool`, and both branches must produce compatible result types. Only the selected
+branch is evaluated.
 
 An `if` without `else` has an implicit unit branch, so its body must also yield unit:
 
@@ -171,3 +213,16 @@ The body may run zero times, so initializing a variable only in the body does no
 definitely initialized afterward. `break;` exits the nearest loop; `continue;` starts its next iteration. Both
 are valid inside a loop body, including nested branches, and destroy exited
 scope owners before transferring control. Loop conditions cannot contain these exits.
+
+
+## Early returns
+
+`return value;` leaves the current function. `return;` returns unit. The value is
+preserved before locals and unfinished operands are destroyed in reverse order.
+Only paths that continue participate in definite-initialization checks.
+
+## Assertions
+
+`assert(condition);` evaluates a `bool` once and returns unit. False traps with
+`assertion failed` on the host, or stops the current shader invocation through
+the shader failure path. Assertions remain enabled in optimized builds.
