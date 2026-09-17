@@ -7,11 +7,20 @@ use rspirv::{dr::Operand, spirv::*};
 #[derive(Clone)]
 pub(super) struct Interface {
     push: Word,
-    payload: Option<(Ty, Word)>,
+    payload: Option<Payload>,
     launch: Option<Word>,
     size: Option<Word>,
     hit: Vec<Word>,
     variables: Vec<Word>,
+}
+
+// Private storage belongs to one shader invocation. Carry failure across the
+// ray-stage boundary alongside the source payload, then resume ordinary unwinding.
+#[derive(Clone)]
+struct Payload {
+    ty: Ty,
+    interface_type: Word,
+    variable: Word,
 }
 
 fn variable(context: &mut Context<'_>, ty: Word, storage: StorageClass) -> Word {
@@ -83,17 +92,23 @@ pub(super) fn declare(
     };
     if let Some(payload) = payload {
         let ty = context.ty(&payload)?;
+        let boolean = context.ty(&Ty::Bool)?;
+        let interface_type = context.builder.type_struct([ty, boolean]);
         let storage = if stage == Stage::RayGeneration {
             StorageClass::RayPayloadKHR
         } else {
             StorageClass::IncomingRayPayloadKHR
         };
-        let id = variable(context, ty, storage);
+        let id = variable(context, interface_type, storage);
         context
             .builder
             .decorate(id, Decoration::Location, [Operand::LiteralBit32(0)]);
         interface.variables.push(id);
-        interface.payload = Some((payload, id));
+        interface.payload = Some(Payload {
+            ty: payload,
+            interface_type,
+            variable: id,
+        });
     }
     if stage == Stage::RayGeneration {
         let uint = context.ty(&Ty::UInt32)?;
@@ -142,15 +157,20 @@ fn push_value(context: &mut Context<'_>, index: u32) -> Result<Word, Error> {
 }
 
 pub(super) fn trace(context: &mut Context<'_>, args: &[Slot], payload: &Ty) -> Result<Word, Error> {
-    let (_, target) = context
+    let target = context
         .ray
         .as_ref()
         .and_then(|ray| ray.payload.as_ref())
         .ok_or_else(|| Error::unsupported("missing ray payload".into()))?
         .clone();
+    let initial_failure = context.constant_bool(false);
+    let initial = context
+        .builder
+        .composite_construct(target.interface_type, None, [args[8].id, initial_failure])
+        .map_err(build_error)?;
     context
         .builder
-        .store(target, args[8].id, None, [])
+        .store(target.variable, initial, None, [])
         .map_err(build_error)?;
     let address = push_value(context, 1)?;
     let acceleration_type = context.builder.type_acceleration_structure_khr();
@@ -184,13 +204,26 @@ pub(super) fn trace(context: &mut Context<'_>, args: &[Slot], payload: &Ty) -> R
             args[6].id,
             direction,
             args[7].id,
-            target,
+            target.variable,
         )
+        .map_err(build_error)?;
+    let returned = context
+        .builder
+        .load(target.interface_type, None, target.variable, None, [])
+        .map_err(build_error)?;
+    let boolean = context.ty(&Ty::Bool)?;
+    let failed = context
+        .builder
+        .composite_extract(boolean, None, returned, [1])
+        .map_err(build_error)?;
+    context
+        .builder
+        .store(context.failed, failed, None, [])
         .map_err(build_error)?;
     let ty = context.ty(payload)?;
     context
         .builder
-        .load(ty, None, target, None, [])
+        .composite_extract(ty, None, returned, [0])
         .map_err(build_error)
 }
 
@@ -284,11 +317,15 @@ pub(super) fn entry(
             .i_add(word, None, offset, coordinates[0])
             .map_err(build_error)?
     } else {
-        let (ty, payload) = interface.payload.as_ref().unwrap();
-        let ty = context.ty(ty)?;
+        let payload = interface.payload.as_ref().unwrap();
+        let incoming = context
+            .builder
+            .load(payload.interface_type, None, payload.variable, None, [])
+            .map_err(build_error)?;
+        let ty = context.ty(&payload.ty)?;
         context
             .builder
-            .load(ty, None, *payload, None, [])
+            .composite_extract(ty, None, incoming, [0])
             .map_err(build_error)?
     };
     let root = push_value(context, 0)?;
@@ -304,9 +341,15 @@ pub(super) fn entry(
         )
         .map_err(build_error)?;
     if stage != Stage::RayGeneration {
+        let payload = interface.payload.as_ref().unwrap();
+        let failed = super::ops::load(context, &Ty::Bool, context.failed)?;
+        let returned = context
+            .builder
+            .composite_construct(payload.interface_type, None, [value, failed])
+            .map_err(build_error)?;
         context
             .builder
-            .store(interface.payload.unwrap().1, value, None, [])
+            .store(payload.variable, returned, None, [])
             .map_err(build_error)?;
     }
     context.builder.ret().map_err(build_error)?;

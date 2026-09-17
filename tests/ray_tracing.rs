@@ -233,6 +233,87 @@ fn source_example_projects_and_retains_output_through_submission() {
     assert!(counts[3] > 1000, "{counts:?}");
 }
 
+#[cfg(feature = "gpu")]
+#[test]
+fn ray_stage_failures_unwind_helpers_and_loops_without_stopping_other_rays() {
+    let _lock = resin_runtime::testing::lock_gpu();
+    let source = r#"
+        export { main };
+        import { "$/gpu.resin", "$/shared.resin", "$/span.resin", "$/stdio.resin" };
+        struct Root<Output> { output: Output, fail_stage: u32, }
+        struct Payload { value: f32, }
+        fn trace_once(x: f32, value: f32) -> Payload {
+            trace_ray(x, f32(0), f32(-1), f32(0), f32(0), f32(1), f32(0), f32(100), Payload { value = value })
+        }
+        fn shade(payload: Payload, fail: bool) -> Payload {
+            assert(!(fail && payload.value == 1));
+            Payload { value = payload.value + 1 }
+        }
+        @ray_generation_shader
+        fn generation(index: u64, root: Ptr<Root<Span<f32>>>) {
+            let mut value: f32 = 0;
+            let mut step = 0;
+            while (step < 2) {
+                value = trace_once(f32(index % 2) * 4, value).value;
+                root.output:at_mut(index) = value;
+                step = step + 1;
+            };
+        }
+        @miss_shader
+        fn miss(payload: Payload, root: Ptr<Root<Span<f32>>>) -> Payload {
+            shade(payload, root.fail_stage == 2)
+        }
+        @closest_hit_shader
+        fn closest(payload: Payload, root: Ptr<Root<Span<f32>>>) -> Payload {
+            shade(payload, root.fail_stage == 1)
+        }
+        fn main() -> i32 | Err<_> {
+            let gpu = gpu_new()?;
+            if (!gpu:supports_ray_tracing()) { return 0; };
+            let vertices = arc_ptr_alloc([f32(-1), -1, 0, 1, -1, 0, 0, 1, 0])?;
+            let transform = arc_ptr_alloc([f32(1), 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0])?;
+            let scene = gpu:create_ray_scene(Span<f32> { data = vertices:get():lea(0), length = 9 }, Span<f32> { data = transform:get():lea(0), length = 12 })?;
+            let pipeline = scene:create_ray_tracing_pipeline(generation, miss, closest)?;
+            let output = gpu:alloc::<f32>(9)?;
+            let mut stage: u32 = 0;
+            while (stage < 3) {
+                let mut i: u64 = 0;
+                while (i < 9) { let element = output:at(i); element:store(f32(42)); i = i + 1; };
+                let commands = gpu:start_command_recording()?;
+                commands:trace_rays(pipeline, Root<GpuSpan<f32>> { output = output:clone(), fail_stage = stage }, 2, 2, 2)?;
+                commands:submit()?;
+                i = 0;
+                while (i < 8) {
+                    let failed = (stage == 1 && i % 2 == 0) || (stage == 2 && i % 2 == 1);
+                    let expected: f32 = if (failed) { f32(1) } else { f32(2) };
+                    let element = output:at(i);
+                    assert(element:load() == expected);
+                    i = i + 1;
+                };
+                let sentinel = output:at(8);
+                assert(sentinel:load() == f32(42));
+                stage = stage + 1;
+            };
+            print("ray failure checks passed\n");
+            0
+        }
+    "#;
+    let directory = tempfile::TempDir::new().unwrap();
+    let path = directory.path().join("failures.resin");
+    std::fs::write(&path, source).unwrap();
+    let module = support::pipeline::host_entry(&path, "main").unwrap();
+    let project = support::project::Project::new(&module, Some("main")).unwrap();
+    let output = project.run();
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("VUID-"),
+        "{output:?}"
+    );
+    if std::env::var("RESIN_REQUIRE_RAY_TRACING").as_deref() == Ok("1") {
+        assert_eq!(output.stdout, b"ray failure checks passed\n");
+    }
+}
+
 // Independent f64 reference: bisect the forward lens model, intersect the Z=2
 // plane analytically, and locate the point within each translated triangle.
 #[cfg(feature = "gpu")]

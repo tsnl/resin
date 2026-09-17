@@ -192,6 +192,9 @@ parameter `t`. Every instance is visible to every ray in this initial API.
 `trace_ray` is available only from ray generation and its helpers. Sequential
 traces in a loop are supported; tracing from miss or closest-hit is rejected.
 This keeps Vulkan's maximum pipeline ray recursion depth at one.
+Checked failures, such as a failed assertion in a hit or miss shader, propagate
+through `trace_ray` and stop its calling ray-generation invocation. Earlier writes
+remain visible; other launch invocations continue independently.
 
 `ray_hit_info()` is available only from closest-hit and its helpers. It returns
 `(f32, u32, u32, f32, f32)`: hit distance, primitive index, instance index, and

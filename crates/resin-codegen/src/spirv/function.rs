@@ -338,6 +338,10 @@ impl FunctionLowering<'_, '_> {
         if matches!(instruction, Instr::Call { .. }) {
             self.check_call_failure(args[0].id)?;
         }
+        if matches!(instruction, Instr::TraceRay { .. }) {
+            let failed = ops::load(self.context, &Ty::Bool, self.context.failed)?;
+            self.check(failed, false)?;
+        }
         Ok(value)
     }
 
