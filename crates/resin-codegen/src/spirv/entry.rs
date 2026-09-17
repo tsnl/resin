@@ -315,8 +315,16 @@ impl Variables {
                     self.store_vector(context, self.outputs[index], value)?;
                 }
             }
-            Interface::Fragment { .. } => {
-                debug_assert!(matches!(context.shape(result), Ty::Record { .. }));
+            Interface::Fragment {
+                output: color,
+                may_discard,
+                ..
+            } => {
+                let output = if *may_discard {
+                    discard_absent_fragment(context, result, color, output)?
+                } else {
+                    output
+                };
                 self.store_vector(context, self.outputs[0], output)?;
             }
             Interface::Compute { .. } => unreachable!(),
@@ -358,6 +366,40 @@ impl Variables {
     }
 }
 
+// Optional values stay ordinary values inside Resin functions. Only the stage
+// wrapper interprets None as zero fragment coverage, before writing attachments.
+fn discard_absent_fragment(
+    context: &mut Context<'_>,
+    result: &Ty,
+    color: &Ty,
+    output: Word,
+) -> Result<Word, Error> {
+    let absent = super::ops::is_variant(context, result, &Case::Type(Ty::None), output)?;
+    let discard = context.builder.id();
+    let keep = context.builder.id();
+    context
+        .builder
+        .selection_merge(keep, SelectionControl::NONE)
+        .map_err(build_error)?;
+    context
+        .builder
+        .branch_conditional(absent, discard, keep, [])
+        .map_err(build_error)?;
+    context
+        .builder
+        .begin_block(Some(discard))
+        .map_err(build_error)?;
+    context
+        .builder
+        .terminate_invocation()
+        .map_err(build_error)?;
+    context
+        .builder
+        .begin_block(Some(keep))
+        .map_err(build_error)?;
+    super::ops::payload(context, result, &Case::Type(color.clone()), output)
+}
+
 fn declare_entry(context: &mut Context<'_>, entry: Word, stage: Stage, variables: &Variables) {
     let model = match stage {
         Stage::RayGeneration | Stage::Miss | Stage::ClosestHit => unreachable!("ray entry"),
@@ -379,6 +421,8 @@ fn declare_entry(context: &mut Context<'_>, entry: Word, stage: Stage, variables
                 .execution_mode_id(entry, ExecutionMode::LocalSizeId, [width, one, one]);
         }
         Stage::Fragment => {
+            // Do not force EarlyFragmentTests: optional returns must discard before
+            // depth/stencil writes. Drivers may still perform safe early rejection.
             context
                 .builder
                 .execution_mode(entry, ExecutionMode::OriginUpperLeft, [])

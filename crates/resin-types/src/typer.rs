@@ -343,10 +343,6 @@ pub(super) fn validate_shader(
     foreign: bool,
     stage: &str,
 ) -> Result<shader::Interface, String> {
-    fn vector(typer: &TyperContext, ty: &Ty, names: &[&str]) -> bool {
-        matches!(shader_shape(typer, ty), Ok(Ty::Record { fields }) if fields.len() == names.len()
-                && fields.iter().zip(names).all(|(field, name)| field.name.as_ref() == *name && field.ty == Ty::Float32))
-    }
     if foreign {
         return Err("foreign functions cannot be shader entries".into());
     }
@@ -383,8 +379,8 @@ pub(super) fn validate_shader(
                 if fields.len() == 2
                     && fields[0].name.as_ref() == "position"
                     && fields[1].name.as_ref() == "color"
-                    && vector(typer, &fields[0].ty, &["x", "y", "z", "w"])
-                    && vector(typer, &fields[1].ty, &["r", "g", "b", "a"]) =>
+                    && shader_vector(typer, &fields[0].ty, &["x", "y", "z", "w"])
+                    && shader_vector(typer, &fields[1].ty, &["r", "g", "b", "a"]) =>
             {
                 Some(shader::Interface::Vertex {
                     index: input.clone(),
@@ -395,13 +391,14 @@ pub(super) fn validate_shader(
             }
             _ => None,
         },
-        "fragment"
-            if vector(typer, input, &["r", "g", "b", "a"])
-                && vector(typer, &result, &["r", "g", "b", "a"]) =>
-        {
-            Some(shader::Interface::Fragment {
-                color: input.clone(),
-                root,
+        "fragment" if shader_vector(typer, input, &["r", "g", "b", "a"]) => {
+            fragment_output(typer, &result).map(|(output, may_discard)| {
+                shader::Interface::Fragment {
+                    color: input.clone(),
+                    root,
+                    output,
+                    may_discard,
+                }
             })
         }
         _ => None,
@@ -415,11 +412,26 @@ pub(super) fn validate_shader(
                 "compute" => "expected (u64, Ptr<T>) -> ()",
                 "vertex" => "expected i32 or (i32, Ptr<T>) returning a position/color record",
                 "fragment" =>
-                    "expected Color or (Color, Ptr<T>) returning Color with f32 r/g/b/a fields",
+                    "expected Color or (Color, Ptr<T>) returning Color or Color | None with f32 r/g/b/a fields",
                 _ => "unknown shader stage",
             }
         ))
     }
+}
+
+fn fragment_output(typer: &TyperContext, result: &Ty) -> Option<(Ty, bool)> {
+    let (output, may_discard) = match result {
+        Ty::Union { variants } if variants.len() == 2 && variants.contains(&Ty::None) => {
+            (variants.iter().find(|ty| **ty != Ty::None)?, true)
+        }
+        _ => (result, false),
+    };
+    shader_vector(typer, output, &["r", "g", "b", "a"]).then(|| (output.clone(), may_discard))
+}
+
+fn shader_vector(typer: &TyperContext, ty: &Ty, names: &[&str]) -> bool {
+    matches!(shader_shape(typer, ty), Ok(Ty::Record { fields }) if fields.len() == names.len()
+        && fields.iter().zip(names).all(|(field, name)| field.name.as_ref() == *name && field.ty == Ty::Float32))
 }
 
 fn shader_shape(typer: &TyperContext, ty: &Ty) -> Result<Ty, String> {
@@ -500,6 +512,7 @@ fn graphics_root(
     let shader::Interface::Fragment {
         root: fragment_root,
         color: fragment_color,
+        ..
     } = validate_shader(
         typer,
         fragment_parameter,

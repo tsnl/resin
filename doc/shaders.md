@@ -81,7 +81,37 @@ The entry interfaces are:
 - Vertex takes an `i32` vertex index, optionally paired with `Ptr<T>`, and returns
   `Vertex` with `position: Position` and `color: Color` fields.
   Position has `f32` fields `x, y, z, w`; Color has `r, g, b, a`, in those orders.
-- Fragment takes Color, optionally paired with `Ptr<T>`, and returns Color.
+- Fragment takes Color, optionally paired with `Ptr<T>`, and returns `Color` or
+  `Color | None`. Returning `None` discards the whole fragment; returning `Color`
+  writes the attachment, even when its alpha is zero.
+
+### Alpha masking and discard
+
+Use an optional fragment result for binary alpha masking: return `None` when the
+sampled alpha is below the cutoff, otherwise return the output color. Equality
+with the cutoff survives, as in glTF's `MASK` mode. See
+[Cut holes in a rasterized surface](alpha-masking.md) for a complete example.
+It samples a small alpha image stored in a buffer; sampled-image objects are not
+exposed yet.
+
+`None` means zero coverage for that fragment: it contributes no color or
+depth/stencil attachment updates. It does not undo earlier buffer writes.
+Only the fragment entry boundary interprets `None` this way. Helpers and ordinary
+host calls to the decorated function keep normal optional-value semantics.
+
+The Vulkan backend terminates discarded invocations with `OpTerminateInvocation`.
+It does not force `EarlyFragmentTests`, which could commit depth/stencil writes
+before the shader decides to discard. Drivers can still reject hidden fragments
+early when safe. With future depth testing, drawing opaque and masked geometry
+front to back can reduce shading work; correctness does not depend on sorting
+masked surfaces. Returning an infinite depth is not a substitute for discard.
+
+The current graphics API still has one color attachment and no depth/stencil
+testing. Arbitrary attachments, depth/stencil controls, blending, and alpha-to-coverage
+are separate additions. An optional result applies to the whole fragment, which
+also leaves room for future attachment records and a Metal discard implementation.
+
+### Shader arguments and memory
 
 Allocate typed GPU storage with `gpu:create(value)?` (an inferred `GpuPtr<T>`) or
 `gpu:alloc::<T>(count)?`. A host launch record replaces shader `Ptr<T>`
@@ -164,6 +194,8 @@ triangle lists, one sample, and no blending or depth/stencil testing.
 
 A Vulkan 1.3 device must support graphics and compute, buffer device addresses, 64-bit shader
 integers, timeline semaphores, synchronization2, dynamic rendering, and maintenance4.
+The runtime also enables `shaderTerminateInvocation`, a required Vulkan 1.3 feature,
+for optional fragment returns.
 `VK_KHR_maintenance8` and its `maintenance8` feature are also required and enabled
 when creating the device. This makes signed shader remainder well-defined for
 negative operands. Devices missing the extension or feature are reported as

@@ -350,7 +350,12 @@ pub(super) fn is_variant(
     emit(context, Op::IEqual, &Ty::Bool, &[tag, expected])
 }
 
-fn payload(context: &mut Context<'_>, ty: &Ty, case: &Case, value: Word) -> Result<Word, Error> {
+pub(super) fn payload(
+    context: &mut Context<'_>,
+    ty: &Ty,
+    case: &Case,
+    value: Word,
+) -> Result<Word, Error> {
     if matches!(case, Case::Type(member) if member == ty) {
         return Ok(value);
     }
