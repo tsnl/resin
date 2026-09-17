@@ -183,7 +183,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   when concrete reuse justifies them; adopting this style does not require changing
   every enum variant into a separate struct or changing its allocation strategy.
 - Keep recursion under the translation's control. Scope extension, evaluation order,
-  i16-circuiting, and cleanup may require different treatment of children. Use shared
+  short-circuiting, and cleanup may require different treatment of children. Use shared
   walkers when traversal requirements actually agree. Dependency groups, constraint
   solving, and fixed-point worklists remain explicit algorithms inside their owning pass.
 - Private mutable state is compatible with a translation that returns completed data.
@@ -345,8 +345,9 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Formatting and reference counting are host-only. Format tuple arguments use
   `value:bytes()` for source String and span wrappers; the primitive accepts an
   explicit `(Ptr<u8>, u64)` byte view and does not recognize nominal wrapper names.
-  `print(text)` and the ordinary `io_stdout():write(text)` / `io_stderr():write(text)` methods
-  accept `str`, `Span<u8>`, and `String` and write bytes verbatim. Use `.data` when
+  `print(text)` and standard-stream `write(stream, text)` operations accept `str`,
+  `Span<u8>`, and `String` and write bytes verbatim. Bind `io_stdout()` or
+  `io_stderr()` to a local before borrowing the stream for a write. Use `.data` when
   passing literal storage to C. Ordinary byte arrays contain exactly their declared
   elements, without a sentinel; nested array stride follows the packed shared layout.
   Empty C byte arrays reserve a placeholder byte that is outside the logical array.
