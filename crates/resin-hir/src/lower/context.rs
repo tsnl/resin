@@ -659,13 +659,26 @@ pub(super) fn primitive_signature(
             vec![pointer(Type::UInt8, false), Type::UInt64],
             Type::StrongOwner,
         ),
-        ("sqrt" | "sin" | "cos", [element]) => (
+        (
+            "sqrt" | "sin" | "cos" | "floor" | "exp" | "acos" | "log" | "atan2" | "pow",
+            [element],
+        ) => (
             match operation {
+                "floor" => Intrinsic::Floor,
+                "exp" => Intrinsic::Exp,
+                "acos" => Intrinsic::Acos,
+                "log" => Intrinsic::Log,
+                "atan2" => Intrinsic::Atan2,
+                "pow" => Intrinsic::Pow,
                 "sqrt" => Intrinsic::Sqrt,
                 "sin" => Intrinsic::Sin,
                 _ => Intrinsic::Cos,
             },
-            vec![element.clone()],
+            if matches!(operation, "atan2" | "pow") {
+                vec![element.clone(), element.clone()]
+            } else {
+                vec![element.clone()]
+            },
             element.clone(),
         ),
         ("repr", [value]) => (Intrinsic::Repr, vec![value.clone()], Type::StrongOwner),

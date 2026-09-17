@@ -374,14 +374,23 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
         ("gpu", "gpu"),
         ("window", "window"),
         ("image", "image"),
+        ("gltf", "gltf"),
         ("stdio", "console"),
     ];
     let modules = libraries.map(|(name, _)| {
-        support::frontend::check_hir(
-            &pipeline::load(&root.join(format!("resin/{name}.resin"))).unwrap(),
-        )
-        .into_module()
-        .unwrap()
+        let program = pipeline::load(&root.join(format!("resin/{name}.resin"))).unwrap();
+        let entry = program.modules.last().unwrap();
+        let exports = entry
+            .file
+            .exports
+            .iter()
+            .map(|name| name.val.clone())
+            .collect::<Vec<_>>();
+        let source = entry.source.clone();
+        let module = support::frontend::check_hir(&program)
+            .into_module()
+            .unwrap();
+        (module, exports, source)
     });
     for (_, name) in libraries {
         let header = fs::read_to_string(
@@ -402,6 +411,10 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
                 "gpu_create_for_window" => "gpu_new_for_window",
                 "window_create" => "window_new",
                 "image_read_png" => "image_data_read_png",
+                "image_read_exr" => "image_data_read_exr",
+                "image_read_hdr" => "image_data_read_hdr",
+                "image_write_exr" => "image_data_write_exr_pixels",
+                "gltf_load" => "gltf_load",
                 "image_write_png" => "image_data_write_pixels",
                 // These raw native operations have been replaced by owning
                 // views and compiler-generated projection in Resin source.
@@ -413,14 +426,16 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
                 // gpu_mapping.rs checks their public result and permission contracts.
                 "gpu_ptr_address" => continue,
                 "gpu_create_compute_pipeline" => "create_compute_pipeline",
-                "gpu_create_graphics_pipeline" => "create_graphics_pipeline",
+                "gpu_create_graphics_pipeline" | "gpu_create_graphics_pipeline_format" => {
+                    "create_graphics_pipeline"
+                }
                 "gpu_create_ray_scene" => "create_ray_scene",
                 "gpu_create_ray_pipeline" => "create_ray_tracing_pipeline",
                 "gpu_trace_rays" | "gpu_projected_trace_rays" => "trace_rays",
-                "gpu_create_image" => "create_image",
+                "gpu_create_image" | "gpu_create_image_format" => "create_image",
                 "gpu_start_command_recording" => "start_command_recording",
                 "gpu_projected_dispatch" => "dispatch",
-                "gpu_begin_rendering" => "begin_rendering",
+                "gpu_begin_rendering" | "gpu_begin_rendering_depth" => "begin_rendering",
                 "gpu_end_rendering" => "end_rendering",
                 "gpu_draw" | "gpu_projected_draw" => "draw",
                 "gpu_copy_image_to_span" => "copy_image_to_buffer",
@@ -442,20 +457,32 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
                 "gpu_present" => "present",
                 _ => panic!("missing operation mapping for native operation: {name}"),
             };
-            let function = modules
+            // Entry names intentionally exclude overload sets. Audit every
+            // source overload after checking its module's explicit export list.
+            let functions = modules
                 .iter()
-                .find_map(|module| {
-                    module
-                        .entries
-                        .get(operation)
-                        .map(|id| &module.functions[id.index()])
+                .flat_map(|(module, exports, source)| {
+                    module.functions.iter().filter(move |function| {
+                        exports.iter().any(|export| export.as_ref() == operation)
+                            && function.name.as_ref() == operation
+                            && function
+                                .location
+                                .as_ref()
+                                .is_some_and(|location| &location.source == source)
+                    })
                 })
-                .unwrap_or_else(|| panic!("missing exported operation {operation}"));
-            assert!(function.foreign_header.is_none(), "{name}");
+                .collect::<Vec<_>>();
             assert!(
-                matches!(function.signature.result.ty, resin_hir::Type::Union { .. }),
-                "{name}"
+                !functions.is_empty(),
+                "missing exported operation {operation}"
             );
+            for function in functions {
+                assert!(function.foreign_header.is_none(), "{name}");
+                assert!(
+                    matches!(function.signature.result.ty, resin_hir::Type::Union { .. }),
+                    "{name}"
+                );
+            }
             checked += 1;
         }
         assert!(checked > 0 || name == "console");

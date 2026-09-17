@@ -1,0 +1,230 @@
+//! Upload and sample glTF resources. Shaders share one immutable triangle table.
+export { SceneData, ShaderScene, DeviceScene, ResourcePack, resource_pack, Surface, surface_at, accepts_surface, upload, Environment, ShaderEnvironment, DeviceEnvironment, environment, environment_value, environment_pdf, environment_sample, DirectionSample };
+import { "../gpu.resin", "../gltf.resin", "../linalg.resin", "../math.resin", "../image.resin", "../span.resin", "../shared.resin", "../status.resin" };
+
+struct SceneData<V, M, T, P> { vertices: V, materials: M, textures: T, pixels: P }
+type ShaderScene = SceneData<Span<GltfVertex>, Span<GltfMaterial>, Span<GltfTexture>, Span<u8>>;
+type DeviceScene = SceneData<GpuSpan<GltfVertex>, GpuSpan<GltfMaterial>, GpuSpan<GltfTexture>, GpuSpan<u8>>;
+struct ResourcePack { scene: DeviceScene, acceleration: GpuRayScene, vertex_count: u32 }
+fn upload<T>(gpu: Ref<Gpu>, data: Ref<Span<T>>) -> GpuSpan<T> | Err<RuntimeError> {
+	let result = gpu:alloc::<T>(data.length)?;
+	result:copy_from(data);
+	result
+}
+/// Static geometry is baked once by the loader, then reused by raster and RT.
+fn resource_pack(gpu: Ref<Gpu>, scene: Ref<GltfScene>) -> ResourcePack | Err<RuntimeError> {
+	let mesh = scene:vertices();
+	let surfaces = scene:materials();
+	let maps = scene:textures();
+	let texels = scene:texture_pixels();
+	// Triangle IDs travel through one f32 varying. Integers through 2^24 are exact.
+	if (mesh.length == 0 || mesh.length / 3 >= 16777216) {
+		return Err(InvalidArgument {});
+	};
+	let positions = arc_span_alloc(mesh.length * 3, f32(0))?;
+	let coordinates = positions:get();
+	let mut i: u64 = 0;
+	while (i < mesh.length) {
+		let p = mesh:at(i).position;
+		coordinates:at_mut(i * 3) = p.x;
+		coordinates:at_mut(i * 3 + 1) = p.y;
+		coordinates:at_mut(i * 3 + 2) = p.z;
+		i = i + 1;
+	};
+	let transforms = arc_ptr_alloc([f32(1), 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0])?;
+	let acceleration = gpu:create_ray_scene(coordinates, Span<f32> { data = transforms:get():lea(0), length = 12 })?;
+	ResourcePack { scene = DeviceScene { vertices = upload(gpu, mesh)?, materials = upload(gpu, surfaces)?, textures = upload(gpu, maps)?, pixels = upload(gpu, texels)? }, acceleration = acceleration, vertex_count = u32(mesh.length) }
+}
+
+fn wrapped(index: i32, size: u32, mode: u32) -> u64 {
+	let n = i32(size);
+	if (mode == 33071) {
+		return u64(
+			if (index < 0) {
+				0
+			} else {
+				if (index >= n) {
+					n - 1
+				} else {
+					index
+				}
+			}
+		);
+	};
+	let period = if (mode == 33648) {
+		n * 2
+	} else {
+		n
+	};
+	let x = ((index % period) + period) % period;
+	u64(
+		if (x >= n) {
+			period - 1 - x
+		} else {
+			x
+		}
+	)
+}
+fn texel(scene: ShaderScene, map: GltfTexture, x: i32, y: i32) -> Vec4 {
+	let offset = map.first_byte + (wrapped(y, map.height, map.wrap_t) * u64(map.width) + wrapped(x, map.width, map.wrap_s)) * 4;
+	vec4(f32(scene.pixels:at(offset)) / 255, f32(scene.pixels:at(offset + 1)) / 255, f32(scene.pixels:at(offset + 2)) / 255, f32(scene.pixels:at(offset + 3)) / 255)
+}
+fn srgb(value: f32) -> f32 {
+	if (value <= 0.04045) {
+		value / 12.92
+	} else {
+		pow((value + 0.055) / 1.055, f32(2.4))
+	}
+}
+fn decode(value: Vec4, linearize: bool) -> Vec4 {
+	if (linearize) {
+		vec4(srgb(value.x), srgb(value.y), srgb(value.z), value.w)
+	} else {
+		value
+	}
+}
+fn texture(scene: ShaderScene, index: u32, uv: Vec2, linearize: bool) -> Vec4 {
+	if (index == ~u32(0)) {
+		return vec4(1, 1, 1, 1);
+	};
+	let map = scene.textures:at(u64(index));
+	let x = uv.x * f32(map.width);
+	let y = uv.y * f32(map.height);
+	if (map.nearest != 0) {
+		return decode(texel(scene, map, i32(floor(x)), i32(floor(y))), linearize);
+	};
+	let left = floor(x - 0.5);
+	let top = floor(y - 0.5);
+	let u = x - 0.5 - left;
+	let v = y - 0.5 - top;
+	let a = decode(texel(scene, map, i32(left), i32(top)), linearize);
+	let b = decode(texel(scene, map, i32(left) + 1, i32(top)), linearize);
+	let c = decode(texel(scene, map, i32(left), i32(top) + 1), linearize);
+	let d = decode(texel(scene, map, i32(left) + 1, i32(top) + 1), linearize);
+	add(mul(add(mul(a, 1 - u), mul(b, u)), 1 - v), mul(add(mul(c, 1 - u), mul(d, u)), v))
+}
+struct Surface { position: Vec3, geometric: Vec3, normal: Vec3, albedo: Vec3, emission: Vec3, metallic: f32, roughness: f32, alpha: f32, cutoff: f32, flags: u32 }
+fn surface_at(scene: ShaderScene, triangle: u32, u: f32, v: f32) -> Surface {
+	let a = scene.vertices:at(u64(triangle) * 3);
+	let b = scene.vertices:at(u64(triangle) * 3 + 1);
+	let c = scene.vertices:at(u64(triangle) * 3 + 2);
+	let w = 1 - u - v;
+	let material = scene.materials:at(u64(a.material));
+	let uv = add(add(mul(a.uv, w), mul(b.uv, u)), mul(c.uv, v));
+	let rgba = mul(mul(material.albedo, texture(scene, material.albedo_texture, uv, true)), add(add(mul(a.color, w), mul(b.color, u)), mul(c.color, v)));
+	let mr = texture(scene, material.metallic_roughness_texture, uv, false);
+	let geometric = normalized(cross(sub(b.position, a.position), sub(c.position, a.position)));
+	let mut n = normalized(add(add(mul(a.normal, w), mul(b.normal, u)), mul(c.normal, v)));
+	if (dot(n, n) < 0.5) {
+		n = geometric;
+	};
+	if (material.normal_texture != ~u32(0)) {
+		let tangent = add(add(mul(a.tangent, w), mul(b.tangent, u)), mul(c.tangent, v));
+		let t = normalized(sub(xyz(tangent), mul(n, dot(n, xyz(tangent)))));
+		let bitangent = mul(
+			cross(n, t),
+			if (tangent.w < 0) {
+				f32(-1)
+			} else {
+				f32(1)
+			}
+		);
+		let map = sub(mul(xyz(texture(scene, material.normal_texture, uv, false)), 2), vec3(1, 1, 1));
+		n = normalized(add(add(mul(t, map.x * material.normal_scale), mul(bitangent, map.y * material.normal_scale)), mul(n, map.z)));
+	};
+	Surface { position = add(add(mul(a.position, w), mul(b.position, u)), mul(c.position, v)), geometric = geometric, normal = n, albedo = xyz(rgba), emission = mul(material.emissive, xyz(texture(scene, material.emissive_texture, uv, true))), metallic = material.metallic * mr.z, roughness = clamp(material.roughness * mr.y, 0.04, 1), alpha = clamp(rgba.w, 0, 1), cutoff = material.alpha_cutoff, flags = material.flags }
+}
+fn accepts_surface(surface: Surface) -> bool {
+	(surface.flags & 1) == 0 || surface.alpha >= surface.cutoff
+}
+
+struct Environment<P, C> { pixels: P, cdf: C, width: u32, height: u32, yaw: f32, tint: Vec3 }
+type ShaderEnvironment = Environment<Span<Vec4>, Span<f32>>;
+type DeviceEnvironment = Environment<GpuSpan<Vec4>, GpuSpan<f32>>;
+/// Build a luminance × solid-angle CDF. Sampling within a texel is uniform in
+/// solid angle, including polar rows. A black map falls back to a uniform sphere.
+fn environment(gpu: Ref<Gpu>, image: Ref<FloatImageData>) -> DeviceEnvironment | Err<RuntimeError> {
+	let w = image:width();
+	let h = image:height();
+	let values = image:pixels();
+	let count = u64(w) * u64(h);
+	let colors = arc_span_alloc(count, vec4(0, 0, 0, 1))?;
+	let weights = arc_span_alloc(count + 1, f32(0))?;
+	let color_data = colors:get();
+	let cdf_data = weights:get();
+	let mut sum: f32 = 0;
+	let mut i: u64 = 0;
+	while (i < count) {
+		let rgb = vec4(max(values:at(i * 4), 0), max(values:at(i * 4 + 1), 0), max(values:at(i * 4 + 2), 0), 1);
+		color_data:at_mut(i) = rgb;
+		sum = sum + luminance(xyz(rgb)) * solid_angle(w, h, u32(i / u64(w)));
+		cdf_data:at_mut(i + 1) = sum;
+		i = i + 1;
+	};
+	if (!(sum >= 0) || sum > 1000000000000000000000000000000) {
+		return Err(InvalidArgument {});
+	};
+	i = 0;
+	if (sum == 0) {
+		while (i < count) {
+			sum = sum + solid_angle(w, h, u32(i / u64(w)));
+			cdf_data:at_mut(i + 1) = sum;
+			i = i + 1;
+		};
+	};
+	i = 1;
+	while (i <= count) {
+		cdf_data:at_mut(i) = cdf_data:at(i) / sum;
+		i = i + 1;
+	};
+	cdf_data:at_mut(count) = 1;
+	DeviceEnvironment { pixels = upload(gpu, color_data)?, cdf = upload(gpu, cdf_data)?, width = w, height = h, yaw = 0, tint = vec3(1, 1, 1) }
+}
+const pi: f32 = 3.141592653589793;
+fn solid_angle(w: u32, h: u32, y: u32) -> f32 {
+	(4 * pi / f32(w)) * sin(pi * (f32(y) + 0.5) / f32(h)) * sin(pi / (2 * f32(h)))
+}
+fn environment_uv(env: ShaderEnvironment, direction: Vec3) -> Vec2 {
+	let phi = (
+		if (abs(direction.x) + abs(direction.z) > 0.00000001) {
+			atan2(direction.z, direction.x)
+		} else {
+			f32(0)
+		}
+	) - env.yaw;
+	let u = phi / (2 * pi);
+	vec2(u - floor(u), acos(clamp(direction.y, -1, 1)) / pi)
+}
+fn environment_value(env: ShaderEnvironment, direction: Vec3) -> Vec3 {
+	let uv = environment_uv(env, direction);
+	let x = min(floor(uv.x * f32(env.width)), f32(env.width - 1));
+	let y = min(floor(uv.y * f32(env.height)), f32(env.height - 1));
+	mul(xyz(env.pixels:at(u64(y) * u64(env.width) + u64(x))), env.tint)
+}
+fn environment_pdf(env: ShaderEnvironment, direction: Vec3) -> f32 {
+	let uv = environment_uv(env, direction);
+	let y = u32(min(floor(uv.y * f32(env.height)), f32(env.height - 1)));
+	let i = u64(y) * u64(env.width) + u64(min(floor(uv.x * f32(env.width)), f32(env.width - 1)));
+	(env.cdf:at(i + 1) - env.cdf:at(i)) / solid_angle(env.width, env.height, y)
+}
+struct DirectionSample { direction: Vec3, pdf: f32 }
+fn environment_sample(env: ShaderEnvironment, choose: f32, u: f32, v: f32) -> DirectionSample {
+	let mut low: u64 = 0;
+	let mut high = u64(env.width) * u64(env.height);
+	while (low + 1 < high) {
+		let middle = (low + high) / 2;
+		if (env.cdf:at(middle) <= choose) {
+			low = middle;
+		} else {
+			high = middle;
+		};
+	};
+	let x = u32(low % u64(env.width));
+	let y = u32(low / u64(env.width));
+	let phi = 2 * pi * (f32(x) + u) / f32(env.width) + env.yaw;
+	let top = cos(pi * f32(y) / f32(env.height));
+	let bottom = cos(pi * f32(y + 1) / f32(env.height));
+	let cosine = top + (bottom - top) * v;
+	let sine = sqrt(max(0, 1 - cosine * cosine));
+	DirectionSample { direction = vec3(cos(phi) * sine, cosine, sin(phi) * sine), pdf = (env.cdf:at(low + 1) - env.cdf:at(low)) / solid_angle(env.width, env.height, y) }
+}

@@ -19,7 +19,7 @@ use std::time::Duration;
 use ash::{Device, Entry, Instance, vk};
 
 use crate::allocator::RangeAllocator;
-use crate::{ResinMemory, ResinStatus, ResinWindow};
+use crate::{ResinImageFormat, ResinMemory, ResinStatus, ResinWindow};
 
 use device::{create_device, create_device_at};
 
@@ -105,6 +105,7 @@ pub struct ResinImage {
     memory: vk::DeviceMemory,
     width: u32,
     height: u32,
+    format: ResinImageFormat,
     layout: Rc<Cell<vk::ImageLayout>>,
 }
 
@@ -117,6 +118,8 @@ pub struct ResinCommandBuffer {
     pipeline_bound: bool,
     graphics: bool,
     rendering: bool,
+    pipeline_format: Option<(ResinImageFormat, bool)>,
+    rendering_format: Option<(ResinImageFormat, bool)>,
     submitted: bool,
     timestamp_pool: vk::QueryPool,
     layouts: ImageLayouts,
@@ -307,6 +310,9 @@ impl ResinGpu {
         if !alignment.is_power_of_two() {
             return Err(ResinStatus::InvalidArgument);
         }
+        // Every allocation can receive an RGBA32F image copy, whose texel block
+        // requires 16-byte offsets even when the source language record aligns to 4.
+        let alignment = alignment.max(DEFAULT_ALIGNMENT);
 
         let heap = heap_index(memory);
         for block_index in 0..self.heaps[heap].len() {
@@ -482,14 +488,30 @@ impl ResinGpu {
     /// # Safety
     /// The dimensions must satisfy the device limits. The GPU must outlive the image and all commands using it.
     pub unsafe fn create_image(&self, width: u32, height: u32) -> Result<ResinImage, ResinStatus> {
+        unsafe { self.create_image_with_format(width, height, ResinImageFormat::Rgba8) }
+    }
+
+    /// # Safety
+    /// Dimensions satisfy device limits; the GPU outlives the image and its commands.
+    pub unsafe fn create_image_with_format(
+        &self,
+        width: u32,
+        height: u32,
+        format: ResinImageFormat,
+    ) -> Result<ResinImage, ResinStatus> {
         if width == 0 || height == 0 {
             return Err(ResinStatus::InvalidArgument);
         }
-        let (image, view, memory) = self.create_color_image(
+        let (image, view, memory) = self.create_attachment_image(
             width,
             height,
             vk::SampleCountFlags::TYPE_1,
-            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC,
+            (if format == ResinImageFormat::Depth32 {
+                vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+            } else {
+                vk::ImageUsageFlags::COLOR_ATTACHMENT
+            }) | vk::ImageUsageFlags::TRANSFER_SRC,
+            format,
         )?;
         Ok(ResinImage {
             device: self.device.clone(),
@@ -498,20 +520,22 @@ impl ResinGpu {
             memory,
             width,
             height,
+            format,
             layout: Rc::new(Cell::new(vk::ImageLayout::UNDEFINED)),
         })
     }
 
-    fn create_color_image(
+    fn create_attachment_image(
         &self,
         width: u32,
         height: u32,
         samples: vk::SampleCountFlags,
         usage: vk::ImageUsageFlags,
+        format: ResinImageFormat,
     ) -> Result<(vk::Image, vk::ImageView, vk::DeviceMemory), ResinStatus> {
         let image_info = vk::ImageCreateInfo::default()
             .image_type(vk::ImageType::TYPE_2D)
-            .format(COLOR_FORMAT)
+            .format(format.vulkan())
             .extent(vk::Extent3D {
                 width,
                 height,
@@ -584,10 +608,10 @@ impl ResinGpu {
         let view_info = vk::ImageViewCreateInfo::default()
             .image(image)
             .view_type(vk::ImageViewType::TYPE_2D)
-            .format(COLOR_FORMAT)
+            .format(format.vulkan())
             .subresource_range(
                 vk::ImageSubresourceRange::default()
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .aspect_mask(format.aspect())
                     .level_count(1)
                     .layer_count(1),
             );
@@ -632,6 +656,8 @@ impl ResinGpu {
             pipeline_bound: false,
             graphics: false,
             rendering: false,
+            pipeline_format: None,
+            rendering_format: None,
             submitted: false,
             timestamp_pool: vk::QueryPool::null(),
             layouts: ImageLayouts::default(),
@@ -793,7 +819,31 @@ impl ResinAllocation {
     }
 }
 
+impl ResinImageFormat {
+    fn vulkan(self) -> vk::Format {
+        match self {
+            Self::Rgba8 => COLOR_FORMAT,
+            Self::Rgba32Float => vk::Format::R32G32B32A32_SFLOAT,
+            Self::Depth32 => vk::Format::D32_SFLOAT,
+        }
+    }
+    fn aspect(self) -> vk::ImageAspectFlags {
+        if self == Self::Depth32 {
+            vk::ImageAspectFlags::DEPTH
+        } else {
+            vk::ImageAspectFlags::COLOR
+        }
+    }
+}
 impl ResinImage {
+    pub(crate) fn bytes_per_pixel(&self) -> usize {
+        if self.format == ResinImageFormat::Rgba32Float {
+            16
+        } else {
+            4
+        }
+    }
+
     pub(crate) fn belongs_to_gpu(&self, gpu: &ResinGpu) -> bool {
         self.device.handle() == gpu.device.handle()
     }
@@ -832,6 +882,7 @@ impl ResinCommandBuffer {
         }
         self.ray = pipeline.ray.clone();
         self.graphics = graphics;
+        self.pipeline_format = pipeline.graphics_format;
         self.pipeline_bound = true;
         Ok(())
     }
@@ -843,9 +894,31 @@ impl ResinCommandBuffer {
         image: &mut ResinImage,
         clear: [f32; 4],
     ) -> Result<(), ResinStatus> {
-        if self.rendering {
+        unsafe { self.begin_rendering_with_depth(image, None, clear) }
+    }
+
+    /// Begin a color pass, optionally clearing/testing/writing a Depth32 attachment.
+    /// # Safety
+    /// Images belong to this GPU, are distinct, and outlive command completion.
+    pub unsafe fn begin_rendering_with_depth(
+        &mut self,
+        image: &mut ResinImage,
+        depth: Option<&mut ResinImage>,
+        clear: [f32; 4],
+    ) -> Result<(), ResinStatus> {
+        if self.rendering
+            || image.device.handle() != self.device.handle()
+            || image.format == ResinImageFormat::Depth32
+            || depth.as_ref().is_some_and(|depth| {
+                depth.device.handle() != self.device.handle()
+                    || depth.format != ResinImageFormat::Depth32
+                    || depth.width != image.width
+                    || depth.height != image.height
+            })
+        {
             return Err(ResinStatus::InvalidArgument);
         }
+        let has_depth = depth.is_some();
         // BDA resources can alias: order all earlier accesses before graphics.
         cmd_memory_barrier(&self.device, self.handle);
         let old_layout = self
@@ -887,7 +960,38 @@ impl ResinCommandBuffer {
             .load_op(vk::AttachmentLoadOp::CLEAR)
             .store_op(vk::AttachmentStoreOp::STORE)
             .clear_value(clear_value);
-        let rendering = vk::RenderingInfo::default()
+        let depth_attachment = depth.map(|depth| {
+            let old = self.layouts.transition(
+                &depth.layout,
+                vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            );
+            cmd_image_barrier_aspect(
+                &self.device,
+                self.handle,
+                depth.image,
+                old,
+                vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                vk::PipelineStageFlags2::ALL_COMMANDS,
+                vk::AccessFlags2::MEMORY_READ | vk::AccessFlags2::MEMORY_WRITE,
+                vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
+                    | vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+                vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_READ
+                    | vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                vk::ImageAspectFlags::DEPTH,
+            );
+            vk::RenderingAttachmentInfo::default()
+                .image_view(depth.view)
+                .image_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .clear_value(vk::ClearValue {
+                    depth_stencil: vk::ClearDepthStencilValue {
+                        depth: 1.0,
+                        stencil: 0,
+                    },
+                })
+        });
+        let mut rendering = vk::RenderingInfo::default()
             .render_area(vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
                 extent: vk::Extent2D {
@@ -897,6 +1001,10 @@ impl ResinCommandBuffer {
             })
             .layer_count(1)
             .color_attachments(slice::from_ref(&attachment));
+        if let Some(depth) = &depth_attachment {
+            rendering = rendering.depth_attachment(depth);
+        }
+        self.rendering_format = Some((image.format, has_depth));
         unsafe {
             self.device.cmd_begin_rendering(self.handle, &rendering);
         }
@@ -915,13 +1023,18 @@ impl ResinCommandBuffer {
             self.device.cmd_end_rendering(self.handle);
         }
         self.rendering = false;
+        self.rendering_format = None;
         Ok(())
     }
 
     /// # Safety
     /// The root address and every shader-accessed address must be valid for the bound shaders. All resources must remain live through completion.
     pub unsafe fn draw(&mut self, root_data: u64, vertex_count: u32) -> Result<(), ResinStatus> {
-        if !self.pipeline_bound || !self.graphics || !self.rendering {
+        if !self.pipeline_bound
+            || !self.graphics
+            || !self.rendering
+            || self.pipeline_format != self.rendering_format
+        {
             return Err(ResinStatus::InvalidArgument);
         }
         if vertex_count == 0 {
@@ -955,7 +1068,7 @@ impl ResinCommandBuffer {
         }
         let bytes = (image.width as usize)
             .checked_mul(image.height as usize)
-            .and_then(|pixels| pixels.checked_mul(4))
+            .and_then(|pixels| pixels.checked_mul(image.bytes_per_pixel()))
             .ok_or(ResinStatus::InvalidArgument)?;
         if offset > dst.size || bytes > dst.size - offset {
             return Err(ResinStatus::InvalidArgument);
@@ -964,14 +1077,14 @@ impl ResinCommandBuffer {
             .buffer_offset
             .checked_add(offset as u64)
             .ok_or(ResinStatus::InvalidArgument)?;
-        if !buffer_offset.is_multiple_of(4) {
+        if !buffer_offset.is_multiple_of(image.bytes_per_pixel() as u64) {
             return Err(ResinStatus::InvalidArgument);
         }
         cmd_memory_barrier(&self.device, self.handle);
         let old_layout = self
             .layouts
             .transition(&image.layout, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
-        cmd_image_barrier(
+        cmd_image_barrier_aspect(
             &self.device,
             self.handle,
             image.image,
@@ -981,12 +1094,13 @@ impl ResinCommandBuffer {
             vk::AccessFlags2::MEMORY_READ | vk::AccessFlags2::MEMORY_WRITE,
             vk::PipelineStageFlags2::COPY,
             vk::AccessFlags2::TRANSFER_READ,
+            image.format.aspect(),
         );
         let region = vk::BufferImageCopy::default()
             .buffer_offset(buffer_offset)
             .image_subresource(
                 vk::ImageSubresourceLayers::default()
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .aspect_mask(image.format.aspect())
                     .layer_count(1),
             )
             .image_extent(vk::Extent3D {
@@ -1306,6 +1420,33 @@ fn cmd_image_barrier(
     dst_stage: vk::PipelineStageFlags2,
     dst_access: vk::AccessFlags2,
 ) {
+    cmd_image_barrier_aspect(
+        device,
+        cmd,
+        image,
+        old_layout,
+        new_layout,
+        src_stage,
+        src_access,
+        dst_stage,
+        dst_access,
+        vk::ImageAspectFlags::COLOR,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_image_barrier_aspect(
+    device: &Device,
+    cmd: vk::CommandBuffer,
+    image: vk::Image,
+    old_layout: vk::ImageLayout,
+    new_layout: vk::ImageLayout,
+    src_stage: vk::PipelineStageFlags2,
+    src_access: vk::AccessFlags2,
+    dst_stage: vk::PipelineStageFlags2,
+    dst_access: vk::AccessFlags2,
+    aspect: vk::ImageAspectFlags,
+) {
     let barrier = vk::ImageMemoryBarrier2::default()
         .src_stage_mask(src_stage)
         .src_access_mask(src_access)
@@ -1316,7 +1457,7 @@ fn cmd_image_barrier(
         .image(image)
         .subresource_range(
             vk::ImageSubresourceRange::default()
-                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                .aspect_mask(aspect)
                 .level_count(1)
                 .layer_count(1),
         );

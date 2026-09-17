@@ -1,0 +1,89 @@
+// Render a glTF scene with Arris
+//
+// Primary visibility is rasterized, including glTF MASK alpha discard and depth.
+// A ray tracing pipeline samples indirect diffuse/glossy light and an HDR
+// environment. SVGF uses world positions and normals to denoise successive frames.
+// All rendering code lives in reusable libraries; this file only loads and drives it.
+//
+// Start the Resin compiler service and set RESIN_SERVER, then run from the repo:
+//   cargo run -- examples/arris.resin
+// Or provide a static glTF/GLB and an equirectangular OpenEXR environment:
+//   cargo run -- examples/arris.resin -- scene.glb environment.exr
+// The environment suffix selects .hdr (Radiance) or .exr (OpenEXR).
+// Writes arris.png (tone mapped) and arris.exr (linear HDR), without opening a window.
+// Needs Vulkan ray tracing pipelines. It never uses ray queries.
+export { main };
+import { "$/renderer.resin", "$/gltf.resin", "$/image.resin", "$/gpu.resin", "$/linalg.resin", "$/span.resin", "$/string.resin", "$/stdio.resin", "$/status.resin", "$/process.resin" };
+fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> () | Err<_> {
+	if (argc != 1 && argc != 3) {
+		print("Usage: arris [scene.gltf|scene.glb environment.hdr|environment.exr]\n");
+		return Err(InvalidArgument {});
+	};
+	let args = Span<Ptr<u8>> { data = argv, length = u64(argc) };
+	let scene_path = if (argc > 1) {
+		args:at(1)
+	} else {
+		"examples/assets/arris/scene.gltf".data
+	};
+	let env_path = if (argc > 2) {
+		args:at(2)
+	} else {
+		"examples/assets/arris/studio.hdr".data
+	};
+	let gpu = gpu_new()?;
+	if (!gpu:supports_ray_tracing()) {
+		print("Arris requires a GPU with ray tracing pipeline support.\n");
+		return Err(Unsupported {});
+	};
+	let scene = gltf_load(scene_path)?;
+	let name = c_string(env_path);
+	let hdr = has_suffix(name, ".hdr");
+	let lighting = if (hdr) {
+		image_data_read_hdr(env_path)?
+	} else {
+		image_data_read_exr(env_path)?
+	};
+	let resources = resource_pack(gpu, scene)?;
+	let sky = environment(gpu, lighting)?;
+
+	// GPU resources and acceleration structures persist across render calls.
+	// Change this camera to frame your own scene; it looks down local -Z.
+	let width: u32 = 640;
+	let height: u32 = 480;
+	let view = camera(look_at(vec3(3, 2.2, 4.5), vec3(0, 0.65, 0), vec3(0, 1, 0)), f32(width) / f32(height));
+	let mut renderer = renderer_create(gpu, resources, sky, width, height, Quality { samples_per_frame = 2, max_bounces = 4, denoise = true })?;
+	// Each frame has new random samples. SVGF reprojects previous history; a camera
+	// cut or lighting edit should call renderer:reset(). Disable denoise and raise
+	// samples_per_frame for a reference image without temporal/spatial filtering.
+	let mut frame: u32 = 0;
+	while (frame < 16) {
+		let image = renderer:render(view)?;
+		if (frame == 15) {
+			image:write_png("arris.png".data)?;
+			image:write_exr("arris.exr".data)?;
+		};
+		frame = frame + 1;
+		let message = fmt("rendered frame {0} / 16\n", (frame,));
+		print(message);
+	};
+	// RenderFrame exposes retained GpuSpan<Vec4> radiance/position/normal buffers
+	// and an RGBA8 pixel buffer for downstream GPU work. The next render reuses
+	// their storage; copy it if you need to preserve a frame.
+	print("wrote arris.png and arris.exr\n");
+}
+
+// Paths are borrowed NUL-terminated process strings. Compare their bounded byte
+// views to choose a decoder without copying the filename.
+fn has_suffix(text: Ref<Span<u8>>, suffix: str) -> bool {
+	if (text.length < suffix.length) {
+		return false;
+	};
+	let mut index: u64 = 0;
+	while (index < suffix.length) {
+		if (text:at(text.length - suffix.length + index) != suffix:at(index)) {
+			return false;
+		};
+		index = index + 1;
+	};
+	true
+}

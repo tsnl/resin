@@ -137,7 +137,7 @@ pub unsafe extern "C" fn resin_image_read_png(
 }
 
 /// # Safety
-/// `pixels` must be null or a pointer from [`resin_image_read_png`].
+/// `pixels` must be null or a pointer from a successful PNG, EXR, or HDR image read.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn resin_image_free(pixels: *mut c_void) {
     if !pixels.is_null() {

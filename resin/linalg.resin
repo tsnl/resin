@@ -1,0 +1,162 @@
+//! Small float32 vectors and row-major affine transforms shared by graphics libraries.
+//! Matrices multiply column vectors; translation is the last column. Angles are radians.
+export { Vec2, Vec3, Vec4, Mat4, vec2, vec3, vec4, xyz, add, sub, mul, dot, cross, length, normalized, identity_transform, translation, transform_point, transform_direction, transform_normal, look_at, inverse_rigid, perspective, clamp, min, max, abs, luminance };
+import { "math.resin" };
+
+struct Vec2 { x: f32, y: f32 }
+struct Vec3 { x: f32, y: f32, z: f32 }
+struct Vec4 { x: f32, y: f32, z: f32, w: f32 }
+struct Mat4 { r0: Vec4, r1: Vec4, r2: Vec4, r3: Vec4 }
+
+fn vec2(x: f32, y: f32) -> Vec2 {
+	Vec2 { x = x, y = y }
+}
+fn vec3(x: f32, y: f32, z: f32) -> Vec3 {
+	Vec3 { x = x, y = y, z = z }
+}
+fn vec4(x: f32, y: f32, z: f32, w: f32) -> Vec4 {
+	Vec4 { x = x, y = y, z = z, w = w }
+}
+fn xyz(v: Vec4) -> Vec3 {
+	vec3(v.x, v.y, v.z)
+}
+fn add(a: Vec2, b: Vec2) -> Vec2 {
+	vec2(a.x + b.x, a.y + b.y)
+}
+fn sub(a: Vec2, b: Vec2) -> Vec2 {
+	vec2(a.x - b.x, a.y - b.y)
+}
+fn mul(a: Vec2, b: f32) -> Vec2 {
+	vec2(a.x * b, a.y * b)
+}
+fn add(a: Vec3, b: Vec3) -> Vec3 {
+	vec3(a.x + b.x, a.y + b.y, a.z + b.z)
+}
+fn sub(a: Vec3, b: Vec3) -> Vec3 {
+	vec3(a.x - b.x, a.y - b.y, a.z - b.z)
+}
+fn mul(a: Vec3, b: f32) -> Vec3 {
+	vec3(a.x * b, a.y * b, a.z * b)
+}
+fn mul(a: Vec3, b: Vec3) -> Vec3 {
+	vec3(a.x * b.x, a.y * b.y, a.z * b.z)
+}
+fn add(a: Vec4, b: Vec4) -> Vec4 {
+	vec4(a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w)
+}
+fn sub(a: Vec4, b: Vec4) -> Vec4 {
+	vec4(a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w)
+}
+fn mul(a: Vec4, b: f32) -> Vec4 {
+	vec4(a.x * b, a.y * b, a.z * b, a.w * b)
+}
+fn mul(a: Vec4, b: Vec4) -> Vec4 {
+	vec4(a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w)
+}
+fn dot(a: Vec3, b: Vec3) -> f32 {
+	a.x * b.x + a.y * b.y + a.z * b.z
+}
+fn dot(a: Vec4, b: Vec4) -> f32 {
+	a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w
+}
+fn cross(a: Vec3, b: Vec3) -> Vec3 {
+	vec3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
+}
+fn length(v: Vec3) -> f32 {
+	sqrt(dot(v, v))
+}
+fn normalized(v: Vec3) -> Vec3 {
+	let squared = dot(v, v);
+	if (squared > 0.000000000001) {
+		mul(v, 1 / sqrt(squared))
+	} else {
+		vec3(0, 0, 0)
+	}
+}
+fn min(a: f32, b: f32) -> f32 {
+	if (a < b) {
+		a
+	} else {
+		b
+	}
+}
+fn max(a: f32, b: f32) -> f32 {
+	if (a > b) {
+		a
+	} else {
+		b
+	}
+}
+fn abs(a: f32) -> f32 {
+	if (a < 0) {
+		-a
+	} else {
+		a
+	}
+}
+fn clamp(a: f32, low: f32, high: f32) -> f32 {
+	min(max(a, low), high)
+}
+fn luminance(v: Vec3) -> f32 {
+	dot(v, vec3(0.2126, 0.7152, 0.0722))
+}
+
+fn identity_transform() -> Mat4 {
+	Mat4 { r0 = vec4(1, 0, 0, 0), r1 = vec4(0, 1, 0, 0), r2 = vec4(0, 0, 1, 0), r3 = vec4(0, 0, 0, 1) }
+}
+fn translation(offset: Vec3) -> Mat4 {
+	Mat4 { r0 = vec4(1, 0, 0, offset.x), r1 = vec4(0, 1, 0, offset.y), r2 = vec4(0, 0, 1, offset.z), r3 = vec4(0, 0, 0, 1) }
+}
+fn mul(m: Mat4, v: Vec4) -> Vec4 {
+	vec4(dot(m.r0, v), dot(m.r1, v), dot(m.r2, v), dot(m.r3, v))
+}
+fn mul_row(v: Vec4, m: Mat4) -> Vec4 {
+	add(add(mul(m.r0, v.x), mul(m.r1, v.y)), add(mul(m.r2, v.z), mul(m.r3, v.w)))
+}
+fn mul(a: Mat4, b: Mat4) -> Mat4 {
+	Mat4 { r0 = mul_row(a.r0, b), r1 = mul_row(a.r1, b), r2 = mul_row(a.r2, b), r3 = mul_row(a.r3, b) }
+}
+fn transform_point(m: Mat4, p: Vec3) -> Vec3 {
+	xyz(mul(m, vec4(p.x, p.y, p.z, 1)))
+}
+fn transform_direction(m: Mat4, p: Vec3) -> Vec3 {
+	xyz(mul(m, vec4(p.x, p.y, p.z, 0)))
+}
+fn transform_normal(m: Mat4, n: Vec3) -> Vec3 {
+	let a = vec3(m.r0.x, m.r1.x, m.r2.x);
+	let b = vec3(m.r0.y, m.r1.y, m.r2.y);
+	let c = vec3(m.r0.z, m.r1.z, m.r2.z);
+	let determinant = dot(a, cross(b, c));
+	let cofactor = add(add(mul(cross(b, c), n.x), mul(cross(c, a), n.y)), mul(cross(a, b), n.z));
+	if (abs(determinant) > 0.000000000001) {
+		normalized(mul(cofactor, 1 / determinant))
+	} else {
+		vec3(0, 0, 0)
+	}
+}
+
+/// Camera-to-world transform: right, up, and backward axes in its columns.
+fn look_at(eye: Vec3, target: Vec3, up: Vec3) -> Mat4 {
+	let backward = normalized(sub(eye, target));
+	let right = normalized(cross(up, backward));
+	let vertical = cross(backward, right);
+	Mat4 {
+		r0 = vec4(right.x, vertical.x, backward.x, eye.x),
+		r1 = vec4(right.y, vertical.y, backward.y, eye.y),
+		r2 = vec4(right.z, vertical.z, backward.z, eye.z),
+		r3 = vec4(0, 0, 0, 1),
+	}
+}
+/// Invert a rigid transform, such as a camera from look_at (no scale or shear).
+fn inverse_rigid(m: Mat4) -> Mat4 {
+	let position = vec3(m.r0.w, m.r1.w, m.r2.w);
+	let x = vec3(m.r0.x, m.r1.x, m.r2.x);
+	let y = vec3(m.r0.y, m.r1.y, m.r2.y);
+	let z = vec3(m.r0.z, m.r1.z, m.r2.z);
+	Mat4 { r0 = vec4(x.x, x.y, x.z, -dot(x, position)), r1 = vec4(y.x, y.y, y.z, -dot(y, position)), r2 = vec4(z.x, z.y, z.z, -dot(z, position)), r3 = vec4(0, 0, 0, 1) }
+}
+/// Vulkan zero-to-one depth, looking along camera -Z. Positive viewport height
+/// makes image Y point down; the projection flips Y to preserve camera-up.
+fn perspective(focal_length: f32, sensor_size: Vec2, near: f32, far: f32) -> Mat4 {
+	Mat4 { r0 = vec4(2 * focal_length / sensor_size.x, 0, 0, 0), r1 = vec4(0, -2 * focal_length / sensor_size.y, 0, 0), r2 = vec4(0, 0, far / (near - far), near * far / (near - far)), r3 = vec4(0, 0, -1, 0) }
+}

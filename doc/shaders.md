@@ -111,13 +111,13 @@ host calls to the decorated function keep normal optional-value semantics.
 The Vulkan backend terminates discarded invocations with `OpTerminateInvocation`.
 It does not force `EarlyFragmentTests`, which could commit depth/stencil writes
 before the shader decides to discard. Drivers can still reject hidden fragments
-early when safe. With future depth testing, drawing opaque and masked geometry
+early when safe. With depth testing, drawing opaque and masked geometry
 front to back can reduce shading work; correctness does not depend on sorting
 masked surfaces. Returning an infinite depth is not a substitute for discard.
 
-The current graphics API still has one color attachment and no depth/stencil
-testing. Arbitrary attachments, depth/stencil controls, blending, and alpha-to-coverage
-are separate additions. An optional result applies to the whole fragment, which
+The graphics API has one color attachment and optional LESS depth testing.
+Arbitrary attachment records, additional depth/stencil controls, blending, and
+alpha-to-coverage are separate additions. An optional result applies to the whole fragment, which
 also leaves room for future attachment records and a Metal discard implementation.
 
 ### Shader arguments and memory
@@ -183,8 +183,9 @@ inside its module does not require exporting that shader. `resin-server --spirv-
 ## GPU requirements
 
 The runtime uses conventional Vulkan compute and graphics pipelines, with dynamic rendering
-and a dynamic viewport/scissor. Graphics currently target one RGBA8 UNORM color attachment,
-triangle lists, one sample, and no blending or depth/stencil testing.
+and a dynamic viewport/scissor. Graphics target one RGBA8 UNORM or RGBA32 float
+color attachment, optionally with a D32 float depth attachment and LESS depth
+testing. They use triangle lists, one sample, and no blending or stencil testing.
 
 A Vulkan 1.3 device must support graphics and compute, buffer device addresses, 64-bit shader
 integers, timeline semaphores, synchronization2, dynamic rendering, and maintenance4.
@@ -203,3 +204,21 @@ For background on the graphics API direction, see Sebastian Aaltonen’s
 
 For triangle acceleration structures and ray-generation/miss/closest-hit stages,
 see [Ray tracing pipelines](ray-tracing-pipelines.md).
+
+## Float color and depth attachments
+
+`gpu:create_image(width, height, image_rgba32f)` creates an RGBA32 float color
+attachment. `image_depth32` creates a D32 float depth attachment; `image_rgba8`
+is the existing default. A graphics configuration selects matching formats:
+
+```resin
+let config = gpu:graphics_config(image_rgba32f, true);
+let pipeline = config:create_graphics_pipeline(vertex, fragment)?;
+```
+
+The final boolean enables LESS depth testing and depth writes. Begin with
+`commands:begin_rendering(color, depth, r, g, b, a)`; this clears depth to one.
+The existing overload without depth remains available. Pipeline and pass formats
+must match. Returning `None` from a fragment shader discards color and depth.
+`copy_image_to_buffer` accepts typed GPU spans, including `Vec4` for RGBA32 float
+and `f32` for depth, and checks their byte capacity. Presentation accepts RGBA8.

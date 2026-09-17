@@ -505,8 +505,16 @@ fn builtin(
     let boolean = *ty == Ty::Bool;
     let args: Vec<_> = args.iter().map(|arg| arg.id).collect();
     let op = match (name, args.len()) {
-        ("sqrt" | "sin" | "cos", 1) if float => {
+        ("sqrt" | "sin" | "cos" | "floor" | "exp" | "acos" | "log", 1) | ("atan2" | "pow", 2)
+            if float =>
+        {
             let op = match name {
+                "floor" => GlslStd450Op::Floor,
+                "exp" => GlslStd450Op::Exp,
+                "acos" => GlslStd450Op::Acos,
+                "log" => GlslStd450Op::Log,
+                "atan2" => GlslStd450Op::Atan2,
+                "pow" => GlslStd450Op::Pow,
                 "sqrt" => GlslStd450Op::Sqrt,
                 "sin" => GlslStd450Op::Sin,
                 _ => GlslStd450Op::Cos,
@@ -514,7 +522,13 @@ fn builtin(
             let ty = context.ty(result)?;
             return Ok(context
                 .builder
-                .ext_inst(ty, None, context.glsl, op as u32, [Operand::IdRef(args[0])])
+                .ext_inst(
+                    ty,
+                    None,
+                    context.glsl,
+                    op as u32,
+                    args.iter().copied().map(Operand::IdRef),
+                )
                 .unwrap());
         }
         ("+", 1) if ty.is_numeric() => return Ok(args[0]),

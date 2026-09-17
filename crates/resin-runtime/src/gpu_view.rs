@@ -456,7 +456,7 @@ pub(crate) unsafe fn copy_image_to_span(
     };
     let bytes = (image.width() as usize)
         .checked_mul(image.height() as usize)
-        .and_then(|pixels| pixels.checked_mul(4));
+        .and_then(|pixels| pixels.checked_mul(image.bytes_per_pixel()));
     if !commands.belongs_to_gpu(unsafe { &*owner.gpu })
         || !image.belongs_to_gpu(unsafe { &*owner.gpu })
         || bytes.is_none_or(|bytes| bytes > destination.length)

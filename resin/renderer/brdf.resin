@@ -1,0 +1,118 @@
+//! Lambert + isotropic GGX, sampled with the same mixture used by the PDF.
+//! GGX visible-normal sampling follows Heitz (2018), as in Arris main-v1.
+//! https://jcgt.org/published/0007/04/01/
+export { random, BsdfSample, bsdf_sample, bsdf_value, bsdf_pdf, power_heuristic };
+import { "scene.resin", "../linalg.resin", "../math.resin" };
+const pi: f32 = 3.141592653589793;
+fn random(state: RefMut<u32>) -> f32 {
+	state = state * 747796405 + 2891336453;
+	let word = ((state >> ((state >> 28) + 4)) ^ state) * 277803737;
+	f32(((word >> 22) ^ word) >> 8) * (1 / f32(16777216))
+}
+fn power_heuristic(a: f32, b: f32) -> f32 {
+	let aa = a * a;
+	let bb = b * b;
+	if (aa + bb > 0) {
+		aa / (aa + bb)
+	} else {
+		0
+	}
+}
+fn tangent(n: Vec3) -> Vec3 {
+	normalized(
+		cross(
+			if (abs(n.z) < 0.999) {
+				vec3(0, 0, 1)
+			} else {
+				vec3(0, 1, 0)
+			},
+			n
+		)
+	)
+}
+fn local(n: Vec3, v: Vec3) -> Vec3 {
+	let t = tangent(n);
+	vec3(dot(v, t), dot(v, cross(n, t)), dot(v, n))
+}
+fn world(n: Vec3, v: Vec3) -> Vec3 {
+	let t = tangent(n);
+	add(add(mul(t, v.x), mul(cross(n, t), v.y)), mul(n, v.z))
+}
+fn alpha(surface: Surface) -> f32 {
+	surface.roughness * surface.roughness
+}
+fn distribution(a: f32, nh: f32) -> f32 {
+	let q = nh * nh * (a * a - 1) + 1;
+	a * a / (pi * q * q)
+}
+fn masking(a: f32, nv: f32) -> f32 {
+	if (nv <= 0) {
+		0
+	} else {
+		2 * nv / (nv + sqrt(a * a + (1 - a * a) * nv * nv))
+	}
+}
+fn fresnel(surface: Surface, vh: f32) -> Vec3 {
+	let f0 = add(mul(vec3(0.04, 0.04, 0.04), 1 - surface.metallic), mul(surface.albedo, surface.metallic));
+	let x = clamp(1 - vh, 0, 1);
+	add(f0, mul(sub(vec3(1, 1, 1), f0), x * x * x * x * x))
+}
+fn specular_probability(surface: Surface) -> f32 {
+	0.5 + 0.5 * surface.metallic
+}
+fn bsdf_value(surface: Surface, outgoing: Vec3, incoming: Vec3) -> Vec3 {
+	let nv = dot(surface.normal, outgoing);
+	let nl = dot(surface.normal, incoming);
+	if (nv <= 0 || nl <= 0 || dot(surface.geometric, incoming) <= 0) {
+		return vec3(0, 0, 0);
+	};
+	let h = normalized(add(outgoing, incoming));
+	let a = alpha(surface);
+	let f = fresnel(surface, max(0, dot(outgoing, h)));
+	let specular = mul(f, distribution(a, max(0, dot(surface.normal, h))) * masking(a, nv) * masking(a, nl) / (4 * nv * nl));
+	let diffuse = mul(mul(sub(vec3(1, 1, 1), f), surface.albedo), (1 - surface.metallic) / pi);
+	add(diffuse, specular)
+}
+fn bsdf_pdf(surface: Surface, outgoing: Vec3, incoming: Vec3) -> f32 {
+	let nv = dot(surface.normal, outgoing);
+	let nl = dot(surface.normal, incoming);
+	if (nv <= 0 || nl <= 0) {
+		return 0;
+	};
+	let h = normalized(add(outgoing, incoming));
+	let a = alpha(surface);
+	let p = specular_probability(surface);
+	p * distribution(a, max(0, dot(surface.normal, h))) * masking(a, nv) / (4 * nv) + (1 - p) * nl / pi
+}
+struct BsdfSample { direction: Vec3, weight: Vec3, pdf: f32 }
+fn bsdf_sample(surface: Surface, outgoing: Vec3, choose: f32, u: f32, v: f32) -> BsdfSample {
+	let a = alpha(surface);
+	let view = local(surface.normal, outgoing);
+	let radius = sqrt(u);
+	let phi = 2 * pi * v;
+	let mut incoming = vec3(radius * cos(phi), radius * sin(phi), sqrt(max(0, 1 - u)));
+	if (choose < specular_probability(surface)) {
+		let vh = normalized(vec3(a * view.x, a * view.y, view.z));
+		let lensq = vh.x * vh.x + vh.y * vh.y;
+		let t1 = if (lensq > 0) {
+			mul(vec3(-vh.y, vh.x, 0), 1 / sqrt(lensq))
+		} else {
+			vec3(1, 0, 0)
+		};
+		let t2 = cross(vh, t1);
+		let x = radius * cos(phi);
+		let s = 0.5 * (1 + vh.z);
+		let y = (1 - s) * sqrt(max(0, 1 - x * x)) + s * radius * sin(phi);
+		let nh = add(add(mul(t1, x), mul(t2, y)), mul(vh, sqrt(max(0, 1 - x * x - y * y))));
+		let h = normalized(vec3(a * nh.x, a * nh.y, max(0, nh.z)));
+		incoming = sub(mul(h, 2 * dot(view, h)), view);
+	};
+	let direction = normalized(world(surface.normal, incoming));
+	let pdf = bsdf_pdf(surface, outgoing, direction);
+	let weight = if (pdf > 0.00000001) {
+		mul(bsdf_value(surface, outgoing, direction), max(0, dot(surface.normal, direction)) / pdf)
+	} else {
+		vec3(0, 0, 0)
+	};
+	BsdfSample { direction = direction, weight = weight, pdf = pdf }
+}

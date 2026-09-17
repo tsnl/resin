@@ -14,8 +14,10 @@
 compile_error!("resin-runtime requires 64-bit Linux, macOS, or Windows");
 
 mod allocator;
+mod gltf;
 mod gpu;
 mod gpu_view;
+mod hdr;
 mod host;
 mod image;
 mod print;
@@ -103,6 +105,36 @@ pub mod testing {
     }
 }
 pub use image::{PngImage, image_read_png, image_write_png};
+
+/// Packed, top-left-origin RGBA float32 samples. RGB remains linear and unclamped;
+/// alpha is unpremultiplied. A file without alpha supplies one.
+#[derive(Debug, PartialEq)]
+pub struct FloatImage {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<f32>,
+}
+
+/// Decode the first RGB(A) layer of an OpenEXR file, retaining HDR values.
+pub fn image_read_exr(path: impl AsRef<std::path::Path>) -> Result<FloatImage, ResinStatus> {
+    hdr::read_exr(path.as_ref())
+}
+
+/// Decode a Radiance RGBE environment image into linear RGBA float32 samples.
+pub fn image_read_hdr(path: impl AsRef<std::path::Path>) -> Result<FloatImage, ResinStatus> {
+    hdr::read_hdr(path.as_ref())
+}
+
+/// Write packed RGBA float32 samples as OpenEXR, without tone mapping or clamping.
+/// Invalid dimensions or sample counts leave an existing file untouched.
+pub fn image_write_exr(
+    path: impl AsRef<std::path::Path>,
+    width: u32,
+    height: u32,
+    pixels: &[f32],
+) -> Result<(), ResinStatus> {
+    hdr::write_exr(path.as_ref(), width, height, pixels)
+}
 pub use window::ResinWindow;
 pub use window::ffi::{
     resin_gpu_create_for_window, resin_gpu_present, resin_window_capture_cursor,
@@ -1517,4 +1549,194 @@ pub unsafe extern "C" fn resin_gpu_trace_rays(
         Ok(()) => ResinStatus::Success,
         Err(error) => error,
     }
+}
+
+//
+// Static glTF scenes
+//
+
+/// One world-space triangle vertex. Consecutive triples form independent
+/// triangles; material indices address the scene's material table.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GltfVertex {
+    pub position: [f32; 3],
+    pub normal: [f32; 3],
+    pub uv: [f32; 2],
+    pub tangent: [f32; 4],
+    pub color: [f32; 4],
+    pub material: u32,
+}
+
+/// glTF metallic/roughness material. A missing texture is u32::MAX.
+/// Flags: 1 = MASK, 2 = BLEND, 4 = double-sided.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct GltfMaterial {
+    pub albedo: [f32; 4],
+    pub emissive: [f32; 3],
+    pub metallic: f32,
+    pub roughness: f32,
+    pub albedo_texture: u32,
+    pub metallic_roughness_texture: u32,
+    pub emissive_texture: u32,
+    pub normal_texture: u32,
+    pub normal_scale: f32,
+    pub alpha_cutoff: f32,
+    pub flags: u32,
+}
+
+/// Texture pixels are packed linear-addressed RGBA8, retaining the file's
+/// transfer function. Decode sRGB when sampling albedo or emissive textures.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct GltfTexture {
+    pub first_byte: u64,
+    pub width: u32,
+    pub height: u32,
+    /// glTF sampler enums (10497 repeat, 33071 clamp, 33648 mirrored repeat).
+    pub wrap_s: u32,
+    pub wrap_t: u32,
+    pub nearest: u32,
+    pub reserved: u32,
+}
+
+/// An immutable, flattened static scene. Native ownership keeps borrowed tables
+/// alive. Skins, morph targets and required unsupported extensions are rejected.
+pub struct GltfScene {
+    vertices: Vec<GltfVertex>,
+    materials: Vec<GltfMaterial>,
+    textures: Vec<GltfTexture>,
+    pixels: Vec<u8>,
+}
+impl GltfScene {
+    /// Load the default scene, or the first scene if no default was selected.
+    pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, ResinStatus> {
+        gltf::load(path.as_ref())
+    }
+    pub fn vertices(&self) -> &[GltfVertex] {
+        &self.vertices
+    }
+    pub fn materials(&self) -> &[GltfMaterial] {
+        &self.materials
+    }
+    pub fn textures(&self) -> &[GltfTexture] {
+        &self.textures
+    }
+    pub fn pixels(&self) -> &[u8] {
+        &self.pixels
+    }
+}
+
+//
+// Raster attachment formats
+//
+
+/// Explicit image storage. Depth32 is a depth attachment; the other formats are color.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResinImageFormat {
+    Rgba8 = 0,
+    Rgba32Float = 1,
+    Depth32 = 2,
+}
+impl TryFrom<u32> for ResinImageFormat {
+    type Error = ResinStatus;
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Rgba8),
+            1 => Ok(Self::Rgba32Float),
+            2 => Ok(Self::Depth32),
+            _ => Err(ResinStatus::InvalidArgument),
+        }
+    }
+}
+
+/// # Safety
+/// GPU is live, output is writable. The GPU must outlive the image.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_create_image_format(
+    gpu: *mut ResinGpu,
+    width: u32,
+    height: u32,
+    format: u32,
+    output: *mut *mut ResinImage,
+) -> ResinStatus {
+    if gpu.is_null() || output.is_null() {
+        return ResinStatus::InvalidArgument;
+    }
+    unsafe {
+        *output = ptr::null_mut();
+    }
+    let format = match ResinImageFormat::try_from(format) {
+        Ok(value) => value,
+        Err(status) => return status,
+    };
+    unsafe {
+        write_owned_result(
+            (&*gpu).create_image_with_format(width, height, format),
+            &mut *output,
+        )
+    }
+}
+/// # Safety
+/// GPU is live, shader bytes valid, output writable. GPU outlives the pipeline.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_create_graphics_pipeline_format(
+    gpu: *mut ResinGpu,
+    vertex: *const u8,
+    vertex_length: usize,
+    fragment: *const u8,
+    fragment_length: usize,
+    format: u32,
+    depth: u32,
+    output: *mut *mut ResinPipeline,
+) -> ResinStatus {
+    if gpu.is_null()
+        || vertex.is_null()
+        || fragment.is_null()
+        || output.is_null()
+        || vertex_length > isize::MAX as usize
+        || fragment_length > isize::MAX as usize
+        || depth > 1
+    {
+        return ResinStatus::InvalidArgument;
+    }
+    unsafe {
+        *output = ptr::null_mut();
+    }
+    let format = match ResinImageFormat::try_from(format) {
+        Ok(value) => value,
+        Err(status) => return status,
+    };
+    unsafe {
+        write_owned_result(
+            (&*gpu).create_graphics_pipeline_with_format(
+                std::slice::from_raw_parts(vertex, vertex_length),
+                std::slice::from_raw_parts(fragment, fragment_length),
+                format,
+                depth != 0,
+            ),
+            &mut *output,
+        )
+    }
+}
+/// # Safety
+/// All objects are live, resources outlive command completion, and no aliases are active.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_begin_rendering_depth(
+    commands: *mut ResinCommandBuffer,
+    color: *mut ResinImage,
+    depth: *mut ResinImage,
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+) -> ResinStatus {
+    if commands.is_null() || color.is_null() || depth.is_null() || color == depth {
+        return ResinStatus::InvalidArgument;
+    }
+    ResinStatus::from_result(unsafe {
+        (&mut *commands).begin_rendering_with_depth(&mut *color, Some(&mut *depth), [r, g, b, a])
+    })
 }

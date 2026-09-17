@@ -1,0 +1,97 @@
+//! Arris: reusable headless hybrid rendering. Rasterize primary visibility, trace
+//! importance-sampled secondary rays, filter linear radiance, then tone map.
+//! Static ResourcePacks are reusable. Each Renderer owns camera-sized buffers and
+//! denoiser history; submit is synchronous. Output handles retain GPU allocation
+//! lifetime, but the next render reuses their contents.
+export { Renderer, RenderFrame, ResourcePack, resource_pack, DeviceEnvironment, environment, Camera, camera, Quality, quality, renderer_create, render, reset, write_png, write_exr };
+import { "renderer/scene.resin", "renderer/passes.resin", "svgf.resin", "gpu.resin", "gltf.resin", "image.resin", "linalg.resin", "span.resin", "shared.resin", "status.resin" };
+
+type DeviceTrace = TraceRoot<DeviceScene, DeviceEnvironment, GpuSpan<Vec4>, GpuSpan<Vec4>>;
+type ShaderTrace = TraceRoot<ShaderScene, ShaderEnvironment, Span<Vec4>, Span<Vec4>>;
+struct Renderer {
+	gpu: Gpu,
+	resources: ResourcePack,
+	environment: DeviceEnvironment,
+	width: u32,
+	height: u32,
+	quality: Quality,
+	frame: u32,
+	visibility_image: GpuImage,
+	depth_image: GpuImage,
+	visibility: GpuSpan<Vec4>,
+	radiance: GpuSpan<Vec4>,
+	positions: GpuSpan<Vec4>,
+	normals: GpuSpan<Vec4>,
+	pixels: GpuSpan<u8>,
+	raster: GpuGraphicsPipeline<RasterRoot<ShaderScene>, GpuPipelineOwner>,
+	tracing: GpuRayTracingPipeline<ShaderTrace, GpuPipelineOwner>,
+	tone_mapping: GpuComputePipeline<ToneRoot<Span<Vec4>, Span<u8>>, GpuPipelineOwner>,
+	denoiser: Svgf,
+}
+struct RenderFrame { width: u32, height: u32, radiance: GpuSpan<Vec4>, positions: GpuSpan<Vec4>, normals: GpuSpan<Vec4>, pixels: GpuSpan<u8> }
+fn renderer_create(gpu: Ref<Gpu>, resources: ResourcePack, environment: DeviceEnvironment, width: u32, height: u32, quality: Quality) -> Renderer | Err<RuntimeError> {
+	if (!gpu:supports_ray_tracing()) {
+		return Err(Unsupported {});
+	};
+	let count = u64(width) * u64(height);
+	if (width == 0 || height == 0 || count > 65535 * gpu:compute_workgroup_size() || quality.samples_per_frame == 0 || quality.samples_per_frame > 4096 || quality.max_bounces == 0 || quality.max_bounces > 32) {
+		return Err(InvalidArgument {});
+	};
+	let config = gpu:graphics_config(image_rgba32f, true);
+	let raster = config:create_graphics_pipeline(primary_vertex, primary_fragment)?;
+	let tracing = resources.acceleration:create_ray_tracing_pipeline(generation, miss, closest)?;
+	Renderer { gpu = gpu:clone(), resources = resources, environment = environment, width = width, height = height, quality = quality, frame = 0, visibility_image = gpu:create_image(width, height, image_rgba32f)?, depth_image = gpu:create_image(width, height, image_depth32)?, visibility = gpu:alloc::<Vec4>(count)?, radiance = gpu:alloc::<Vec4>(count)?, positions = gpu:alloc::<Vec4>(count)?, normals = gpu:alloc::<Vec4>(count)?, pixels = gpu:alloc::<u8>(count * 4)?, raster = raster, tracing = tracing, tone_mapping = gpu:create_compute_pipeline(tone_map)?, denoiser = svgf_create(gpu, width, height)? }
+}
+/// Invalidate history after changing geometry, materials, lighting, or camera cuts.
+fn reset(self: RefMut<Renderer>) {
+	self.denoiser:reset();
+	self.frame = 0;
+}
+fn render(self: RefMut<Renderer>, view: Camera) -> RenderFrame | Err<RuntimeError> {
+	if (!(view.near > 0 && view.far > view.near && view.focal_length > 0 && view.sensor_size.x > 0 && view.sensor_size.y > 0 && view.gamma > 0 && view.exposure >= 0)) {
+		return Err(InvalidArgument {});
+	};
+	let view_projection = mul(perspective(view.focal_length, view.sensor_size, view.near, view.far), inverse_rigid(view.transform));
+	let eye = vec3(view.transform.r0.w, view.transform.r1.w, view.transform.r2.w);
+	let raster_root = RasterRoot<DeviceScene> { scene = self.resources.scene, view_projection = view_projection, eye = eye };
+	let trace_root = DeviceTrace { scene = self.resources.scene, environment = self.environment, visibility = self.visibility:clone(), radiance = self.radiance:clone(), positions = self.positions:clone(), normals = self.normals:clone(), camera = view, width = self.width, height = self.height, frame = self.frame, samples_per_frame = self.quality.samples_per_frame, max_bounces = self.quality.max_bounces };
+	let commands = self.gpu:start_command_recording()?;
+	commands:begin_rendering(self.visibility_image, self.depth_image, 0, 0, 0, 0)?;
+	commands:draw(self.raster, raster_root, self.resources.vertex_count)?;
+	commands:end_rendering()?;
+	commands:copy_image_to_buffer(self.visibility_image, self.visibility)?;
+	commands:trace_rays(self.tracing, trace_root, self.width, self.height, 1)?;
+	commands:submit()?;
+	let filtered = if (self.quality.denoise) {
+		self.denoiser:filter(self.radiance, self.positions, self.normals, view_projection)?
+	} else {
+		self.denoiser:reset();
+		self.radiance:clone()
+	};
+	let tone_root = ToneRoot<GpuSpan<Vec4>, GpuSpan<u8>> { input = filtered:clone(), pixels = self.pixels:clone(), count = u64(self.width) * u64(self.height), exposure = view.exposure, gamma = view.gamma };
+	let display = self.gpu:start_command_recording()?;
+	let groups = u32((tone_root.count + self.gpu:compute_workgroup_size() - 1) / self.gpu:compute_workgroup_size());
+	display:dispatch(self.tone_mapping, tone_root, groups, 1, 1)?;
+	display:submit()?;
+	self.frame = self.frame + 1;
+	RenderFrame { width = self.width, height = self.height, radiance = filtered, positions = self.positions:clone(), normals = self.normals:clone(), pixels = self.pixels:clone() }
+}
+fn write_png(frame: Ref<RenderFrame>, path: Ptr<u8>) -> () | Err<RuntimeError> {
+	let host = arc_span_alloc(u64(frame.width) * u64(frame.height) * 4, u8(0))?;
+	frame.pixels:copy_to(host:get());
+	let data = host:get();
+	image_data_write_pixels(path, frame.width, frame.height, 4, data, 0)
+}
+fn write_exr(frame: Ref<RenderFrame>, path: Ptr<u8>) -> () | Err<RuntimeError> {
+	let count = u64(frame.width) * u64(frame.height);
+	let host = arc_span_alloc(count, vec4(0, 0, 0, 1))?;
+	frame.radiance:copy_to(host:get());
+	let data = host:get();
+	let mut i: u64 = 0;
+	while (i < count) {
+		data:at_mut(i).w = 1;
+		i = i + 1;
+	};
+	let floats = Span<f32> { data = Ptr<f32>(data.data), length = count * 4 };
+	image_data_write_exr_pixels(path, frame.width, frame.height, floats)
+}

@@ -62,8 +62,8 @@ fn masked(uv: Color, mask: PtrMut<Mask<SpanMut<u8>>>) -> Color | None {
 // Helpers can return, match, or recover optional values normally. Returning a
 // Color with a = 0 still writes color: alpha alone does not request discard.
 // Discard also does not undo any buffer writes made before the return.
-// Future depth/stencil attachments must preserve this zero-coverage behavior;
-// the current graphics API has one color attachment and no depth/stencil test.
+// With a depth attachment, discarded fragments leave depth unchanged too;
+// the Arris example uses this to rasterize alpha-masked primary visibility.
 
 fn main() -> () | Err<_> {
 	let gpu = gpu_new()?;

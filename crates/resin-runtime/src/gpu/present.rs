@@ -30,7 +30,8 @@ impl ResinGpu {
     /// Call on the main thread. The initialized image must belong to this GPU;
     /// all GPU, window, and image operations must be externally synchronized.
     pub unsafe fn present(&mut self, image: &mut ResinImage) -> Result<(), ResinStatus> {
-        if image.device.handle() != self.device.handle()
+        if image.format != crate::ResinImageFormat::Rgba8
+            || image.device.handle() != self.device.handle()
             || image.layout.get() == vk::ImageLayout::UNDEFINED
         {
             return Err(ResinStatus::InvalidArgument);

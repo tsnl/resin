@@ -1,12 +1,19 @@
 //! Complex arithmetic and scalar mathematical functions.
 //! Angles are radians. Shader transcendental functions use `f32`.
 
-export { sqrt, sin, cos, Complex, complex, add, mul, squared, magnitude_squared };
+export { floor, exp, acos, log, atan2, pow, sqrt, sin, cos, Complex, complex, add, mul, squared, magnitude_squared };
 
 // Host: f32 and f64. Shaders: f32. Angles are in radians.
 intrinsic "sqrt" fn sqrt<T>(value: T) -> T;
 intrinsic "sin" fn sin<T>(value: T) -> T;
 intrinsic "cos" fn cos<T>(value: T) -> T;
+
+intrinsic "floor" fn floor<T>(a: T) -> T;
+intrinsic "exp" fn exp<T>(a: T) -> T;
+intrinsic "acos" fn acos<T>(a: T) -> T;
+intrinsic "log" fn log<T>(a: T) -> T;
+intrinsic "atan2" fn atan2<T>(a: T, b: T) -> T;
+intrinsic "pow" fn pow<T>(a: T, b: T) -> T;
 
 /// A complex number with real and imaginary components.
 struct Complex<T> {
