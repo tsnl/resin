@@ -23,6 +23,7 @@ pub(super) fn token(document: &Document, offset: usize) -> Option<Node<'_>> {
                         | "doc_comment"
                         | "Ptr"
                         | "Ref"
+                        | "RefMut"
                         | "sizeof"
                 ))
         {

@@ -8,7 +8,7 @@ the tutorial links here when a worked example depends on them.
 - [Overloads and SFINAE](overloads.md): candidate selection and substitution failure.
 - [Inference](inference.md): contextual types, generic arguments, and explicit holes.
 - [Unions, optionals, and errors](errors.md): `None`, `Err<E>`, `match`, `?`, and `!`.
-- [References and pointers](references.md): places, `Ref<T>`, `Ptr<T>`, `:at`, and `:lea`.
+- [References and pointers](references.md): places, `Ref<T>`, `RefMut<T>`, `Ptr<T>`, and indexing.
 - [Ownership](lifetimes.md): moves, copying, cloning, cleanup, and unchecked lifetimes.
 - [Modules](modules.md), [documentation comments](documentation-comments.md),
   [foreign functions](ffi.md), and [representation](representation.md).

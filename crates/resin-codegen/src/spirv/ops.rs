@@ -32,6 +32,7 @@ pub(super) fn instruction(
             };
             let address = Slot {
                 ty: Ty::Reference {
+                    mutable: true,
                     referent: Box::new(pointee.clone()),
                 },
                 id: locals[local.index()],
@@ -70,7 +71,7 @@ pub(super) fn instruction(
                 }),
             }));
         }
-        Instr::Borrow => {
+        Instr::Borrow | Instr::ReadOnly => {
             return Ok(Some(Slot {
                 ty: result.unwrap().clone(),
                 ..args[0].clone()
@@ -101,7 +102,11 @@ pub(super) fn instruction(
         }
         Instr::MakeVariant { ty, tag } => variant(context, ty, tag, args[0].id)?,
         Instr::IsVariant { tag } => {
-            if let Ty::Pointer { pointee } | Ty::Reference { referent: pointee } = &args[0].ty {
+            if let Ty::Pointer { pointee }
+            | Ty::Reference {
+                referent: pointee, ..
+            } = &args[0].ty
+            {
                 let value = dereference(context, &args[0])?;
                 is_variant(context, pointee, tag, value)?
             } else {
@@ -196,7 +201,11 @@ fn local_pointer(
 }
 
 fn dereference(context: &mut Context<'_>, slot: &Slot) -> Result<Word, Error> {
-    let (Ty::Pointer { pointee } | Ty::Reference { referent: pointee }) = &slot.ty else {
+    let (Ty::Pointer { pointee }
+    | Ty::Reference {
+        referent: pointee, ..
+    }) = &slot.ty
+    else {
         unreachable!()
     };
     if let Some(local) = &slot.local {
@@ -208,7 +217,11 @@ fn dereference(context: &mut Context<'_>, slot: &Slot) -> Result<Word, Error> {
 }
 
 fn store(context: &mut Context<'_>, slot: &Slot, value: Word) -> Result<(), Error> {
-    let (Ty::Pointer { pointee } | Ty::Reference { referent: pointee }) = &slot.ty else {
+    let (Ty::Pointer { pointee }
+    | Ty::Reference {
+        referent: pointee, ..
+    }) = &slot.ty
+    else {
         unreachable!()
     };
     if let Some(local) = &slot.local {
@@ -255,7 +268,11 @@ fn project(
             local: Some(local),
         });
     }
-    let id = if let Ty::Pointer { pointee } | Ty::Reference { referent: pointee } = &base.ty {
+    let id = if let Ty::Pointer { pointee }
+    | Ty::Reference {
+        referent: pointee, ..
+    } = &base.ty
+    {
         let offset = crate::layout::layout(context.module, pointee)?.offsets[index];
         let offset = context.constant_u64(offset as u64);
         emit(context, Op::IAdd, &Ty::UInt64, &[base.id, offset])?
@@ -284,7 +301,10 @@ fn index(
         });
     }
     let (address, element) = match context.shape(&base.ty).clone() {
-        Ty::Pointer { pointee } | Ty::Reference { referent: pointee } => {
+        Ty::Pointer { pointee }
+        | Ty::Reference {
+            referent: pointee, ..
+        } => {
             let Ty::Array { element, .. } = context.shape(&pointee).clone() else {
                 return Err(Error::unsupported("array pointer required".into()));
             };

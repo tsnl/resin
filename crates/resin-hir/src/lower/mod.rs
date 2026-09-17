@@ -783,6 +783,7 @@ impl Generator {
         let signature = &self.function(function).signature;
         let owner_parameters = &self.typer.nominal_schemes[&owner].type_params;
         let reference = crate::Type::Reference {
+            mutable: true,
             referent: Box::new(crate::Type::Defined {
                 definition: owner,
                 arguments: owner_parameters
@@ -804,7 +805,7 @@ impl Generator {
         {
             return Err(GenerateError::inference(
                 name.span,
-                "drop must have signature drop(receiver: Ref<T>) -> ()",
+                "drop must have signature drop(receiver: RefMut<T>) -> ()",
             ));
         }
         self.typer.define_drop(owner, function);

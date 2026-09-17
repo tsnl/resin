@@ -100,7 +100,7 @@ struct InputLineOwner {
 	data: Ptr<u8>,
 	length: u64,
 }
-fn drop(self: Ref<InputLineOwner>) {
+fn drop(self: RefMut<InputLineOwner>) {
 	if (u64(self.data) != u64(0)) {
 		free(self.data);
 	};
@@ -201,7 +201,7 @@ fn console_read_line() -> (InputLine | Err<InputError>) {
 			storage.length = capacity;
 		};
 		let view = Span<u8> { data = storage.data, length = storage.length };
-		view:at(length) = resin_console_byte(byte);
+		view:at_mut(length) = resin_console_byte(byte);
 		length = length + u64(1);
 		byte = getchar();
 	};
@@ -212,7 +212,7 @@ fn console_read_line() -> (InputLine | Err<InputError>) {
 			length = length - u64(1);
 		};
 	};
-	view:at(length) = u8(0);
+	view:at_mut(length) = u8(0);
 	storage.length = length;
 	(InputLine { owner = owner })
 }

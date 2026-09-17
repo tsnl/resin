@@ -11,7 +11,7 @@ fn get(self: Ref<Allocation>) -> Span<i32> {
 	self.data:get()
 }
 
-fn drop(self: Ref<Allocation>) {
+fn drop(self: RefMut<Allocation>) {
 	// The owned elements are released automatically after this hook.
 	print("releasing allocation\n");
 }
@@ -31,7 +31,7 @@ fn fail_if(fail: bool) -> (() | Err<Failed>) {
 fn work(fail: bool) -> (i32 | Err<_>) {
 	let mut value = allocate()?;
 	let mut data = value:get();
-	data:at(0) = 42;
+	data:at_mut(0) = 42;
 	fail_if(fail)?;
 	(data:at(0))
 }

@@ -196,7 +196,7 @@ fn revised_source_cannot_borrow_editor_facts_from_its_previous_version() {
 fn nominal_declarations_retain_fields_and_drop_hooks_while_operations_are_free() {
     let source = module(
         "owner.resin",
-        "struct Owner { value: i32,   }\nfn read(self: Owner) -> i32  { self.value }\n\nfn drop(self: Ref<Owner>)  {}\n type Alias = Owner;",
+        "struct Owner { value: i32,   }\nfn read(self: Owner) -> i32  { self.value }\n\nfn drop(self: RefMut<Owner>)  {}\n type Alias = Owner;",
     );
     let hir = common::check(Program {
         modules: vec![source],

@@ -135,7 +135,7 @@ fn tracked_make<T>(trace: Ptr<u64>, value: T) -> Tracked<T>  {
 
 fn read<T>(self: Ref<Tracked<T>>) -> T  { self.value }
 
-fn drop<T>(self: Ref<Tracked<T>>)  {
+fn drop<T>(self: RefMut<Tracked<T>>)  {
                 self.trace.* = self.trace.* * 10 + size_of(T);
             }
 
@@ -166,7 +166,7 @@ import { "$/shared.resin" };
         struct Tracked<T> { trace: Ptr<u64>, value: T,
             
         }
-fn drop<T>(self: Ref<Tracked<T>>)  {
+fn drop<T>(self: RefMut<Tracked<T>>)  {
                 self.trace.* = self.trace.* * 10 + size_of(T);
             }
 

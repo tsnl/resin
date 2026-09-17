@@ -251,7 +251,7 @@ fn operator_borrows_and_results_use_ordinary_owner_cleanup() {
         struct Payload { drops: Ptr<i32>,
             
         }
-fn drop(self: Ref<Payload>)  { self.drops.* = self.drops.* + 1; }
+fn drop(self: RefMut<Payload>)  { self.drops.* = self.drops.* + 1; }
 
         struct Value { owner: ArcPtr<Payload>, value: i32,
             

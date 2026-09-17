@@ -96,7 +96,7 @@ fn source_shared_elements_drop_in_reverse_and_unwind_on_allocation_failure() {
         struct Item { trace: Ptr<i32>, digit: i32,
             
         }
-fn drop(self: Ref<Item>)  {
+fn drop(self: RefMut<Item>)  {
                 if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; };
             }
 
@@ -130,7 +130,7 @@ fn source_owned_wrappers_retain_payloads_and_borrow_named_receivers() {
         struct Item { trace: Ptr<i32>, digit: i32,
             
         }
-fn drop(self: Ref<Item>)  {
+fn drop(self: RefMut<Item>)  {
                 if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; };
             }
 
@@ -146,7 +146,7 @@ fn drop(self: Ref<Item>)  {
                 valid = valid && copy:get().digit == 7 && { let borrowed = weak:upgrade()!; borrowed:get() }.digit == 7;
                 let mut values = arc_span_alloc::<u32>(3, u32(42))?;
                 let view = values:get();
-                view:at(2) = u32(9);
+                view:at_mut(2) = u32(9);
                 valid = valid && { let borrowed = values:get(); borrowed:at(0) } == u32(42) && { let borrowed = values:get(); borrowed:at(2) } == u32(9);
                 {
                     let extra = arc_span_alloc::<u32>(1, u32(13))?;
@@ -184,7 +184,7 @@ fn source_owners_allocate_initialized_typed_storage_and_reports_overflow() {
                 let alias = memory:clone();
                 let mut values = memory:get();
                 valid = valid && values.length == u64(4) && values:at(3) == u32(7);
-                values:at(3) = u32(42);
+                values:at_mut(3) = u32(42);
                 valid = valid && { let borrowed = alias:get(); borrowed:at(3) } == u32(42);
                 valid = valid && values:as_bytes().length == u64(4) * size_of(u32);
                 let mut upgraded = weak:upgrade()!;
@@ -244,7 +244,7 @@ fn shared_arrays_release_managed_elements_on_success_and_error() {
             digit: i32,
             
         }
-fn drop(self: Ref<Item>)  { if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; }; }
+fn drop(self: RefMut<Item>)  { if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; }; }
 
         fn item(trace: Ptr<i32>, digit: i32) -> (ArcPtr<Item> | Err<_>)  {
             let mut owner = arc_ptr_alloc::<Item>(Item { trace = trace, digit = 0 })?;
@@ -309,7 +309,7 @@ fn generic_owned_span_methods_preserve_lifetimes_and_widened_results() {
                 let mut owner = allocate(2, u32(7))?;
                 weak = weaken(owner);
                 let mut view = borrowed(owner);
-                view:at(1) = u32(42);
+                view:at_mut(1) = u32(42);
                 valid = valid && view.length == u64(2) && { let borrowed = owner:get(); borrowed:at(1) } == u32(42);
                 valid = valid && match (widen_upgrade(weak)) {
                     ArcSpan<u32>(live) => { { let borrowed = live:get(); borrowed:at(1) } == u32(42) },
@@ -351,7 +351,7 @@ fn borrowed_span_slices_preserve_aliases_and_accept_empty_null_views() {
             let mut view = values:get();
             let mut middle = view:slice(1, 2);
             let alias = middle:clone();
-            alias:at(1) = u32(42);
+            alias:at_mut(1) = u32(42);
             let mut valid = middle.length == u64(2) && view:at(2) == u32(42);
             valid = valid && view:at(0) == u32(0) && view:at(3) == u32(0);
             let mut end = view:slice(view.length, 0);
@@ -539,7 +539,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     ] {
         let output = run(
             &format!(
-                "export {{ main }}; import {{ \"$/shared.resin\", \"$/image.resin\", \"$/span.resin\", \"$/string.resin\", \"$/stdio.resin\" }}; struct Cleanup {{  }}\nfn drop(self: Ref<Cleanup>)  {{ print(\"cleanup\\n\"); }}\n  fn main() -> (() | Err<_>)  {{ let mut path = \"missing/pixel.png\"; let buffer = arc_ptr_alloc([u8(0), u8(0), u8(0), u8(0)])?; let mut cleanup = Cleanup {{}}; {call}; (()) }}"
+                "export {{ main }}; import {{ \"$/shared.resin\", \"$/image.resin\", \"$/span.resin\", \"$/string.resin\", \"$/stdio.resin\" }}; struct Cleanup {{  }}\nfn drop(self: RefMut<Cleanup>)  {{ print(\"cleanup\\n\"); }}\n  fn main() -> (() | Err<_>)  {{ let mut path = \"missing/pixel.png\"; let buffer = arc_ptr_alloc([u8(0), u8(0), u8(0), u8(0)])?; let mut cleanup = Cleanup {{}}; {call}; (()) }}"
             ),
             "",
         );
@@ -834,7 +834,7 @@ fn byte_input_reports_stream_errors_instead_of_eof() {
         struct Cleanup {
             
         }
-fn drop(self: Ref<Cleanup>)  { print("cleanup\n"); }
+fn drop(self: RefMut<Cleanup>)  { print("cleanup\n"); }
 
 
         fn main() -> (() | Err<_>)  {

@@ -153,11 +153,11 @@ fn pipeline_type_contracts_reject_invalid_storage_and_direct_calls() {
 fn source_drop_hooks_reject_gpu_elements_before_and_after_importing() {
     for (declaration, owner) in [
         (
-            "struct Managed { value: i32,  }\nfn drop(self: Ref<Managed>)  {}\n",
+            "struct Managed { value: i32,  }\nfn drop(self: RefMut<Managed>)  {}\n",
             "Managed",
         ),
         (
-            "struct Managed<T> { value: T,  }\nfn drop<T>(self: Ref<Managed<T>>)  {}\n",
+            "struct Managed<T> { value: T,  }\nfn drop<T>(self: RefMut<Managed<T>>)  {}\n",
             "Managed<i32>",
         ),
     ] {

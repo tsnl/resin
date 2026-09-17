@@ -215,7 +215,7 @@ extern type ResinWindow;
 struct WindowOwner {
 	handle: Ptr<ResinWindow>,
 }
-fn drop(self: Ref<WindowOwner>) {
+fn drop(self: RefMut<WindowOwner>) {
 	if (u64(self.handle) != u64(0)) {
 		resin_window_destroy(self.handle);
 	};

@@ -231,6 +231,7 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
         ),
         Instr::AccessStatic { index } => list("access-static", vec![symbol(index.to_string())]),
         Instr::Borrow => symbol("borrow"),
+        Instr::ReadOnly => symbol("read-only"),
         Instr::PointerIndex => symbol("pointer-index"),
         Instr::PointerRange => symbol("pointer-range"),
         Instr::PointerBytes => symbol("pointer-bytes"),
@@ -426,7 +427,10 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
             .get(definition.index())
             .map(|name| symbol(name.as_ref()))
             .unwrap_or_else(|| symbol(format!("type.{}", definition.index()))),
-        Ty::Reference { referent } => list("ref", vec![sexp_ty(names, referent)]),
+        Ty::Reference { referent, mutable } => list(
+            if *mutable { "ref-mut" } else { "ref" },
+            vec![sexp_ty(names, referent)],
+        ),
         Ty::Pointer { pointee } => list("ptr", vec![sexp_ty(names, pointee)]),
         Ty::GpuView => symbol("GpuView"),
         Ty::GpuPipelineContract => symbol("GpuPipelineContract"),

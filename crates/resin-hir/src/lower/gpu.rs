@@ -109,7 +109,7 @@ impl Context {
 
 fn source_value(ty: &crate::Type) -> &crate::Type {
     match ty {
-        crate::Type::Reference { referent } => referent,
+        crate::Type::Reference { referent, .. } => referent,
         _ => ty,
     }
 }
@@ -394,6 +394,7 @@ impl Context {
         };
         let pipeline = if matches!(native.source_params[1], Type::Reference { .. }) {
             Type::Reference {
+                mutable: false,
                 referent: Box::new(pipeline.clone()),
             }
         } else {

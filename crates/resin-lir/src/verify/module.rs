@@ -105,6 +105,7 @@ fn check_drop_hook(module: &Module, ty: TypeId, hook: FunctionId) -> Result<(), 
     let error = || Location::type_definition(ty).error(VerifyErrorKind::InvalidDropHook);
     let function = module.functions.get(hook.index()).ok_or_else(error)?;
     let pointer = Ty::Reference {
+        mutable: true,
         referent: Box::new(Ty::Defined { definition: ty }),
     };
     if function.profile != crate::Profile::Host
@@ -213,6 +214,7 @@ fn check_text_views(module: &Module) -> Result<(), VerifyError> {
         let error = || Location::type_definition(id).error(VerifyErrorKind::InvalidTextView);
         let function = module.functions.get(hook.index()).ok_or_else(error)?;
         let receiver = Ty::Reference {
+            mutable: false,
             referent: Box::new(Ty::Defined { definition: id }),
         };
         if !matches!(module.types.get(id.index()), Some(TypeDef::Nominal { .. }))

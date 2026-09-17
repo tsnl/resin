@@ -93,12 +93,12 @@ fn local_reference_helpers_preserve_aliases_fields_and_dynamic_elements() {
         export { kernel };
         struct Root { count: u64, inputs: Ptr<u32>, outputs: Ptr<u32> }
         struct Pair { first: u32, second: u32 }
-        fn add_both(left: Ref<u32>, right: Ref<u32>, amount: u32) {
+        fn add_both(left: RefMut<u32>, right: RefMut<u32>, amount: u32) {
             left = left + amount;
             right = right + left;
         }
-        fn increment(value: Ref<u32>, amount: u32) {
-            let alias: Ref<u32> = value;
+        fn increment(value: RefMut<u32>, amount: u32) {
+            let alias: RefMut<u32> = value;
             add_both(value, alias, amount);
         }
         @compute_shader
@@ -108,7 +108,7 @@ fn local_reference_helpers_preserve_aliases_fields_and_dynamic_elements() {
             let mut pair = Pair { first = input, second = u32(100) };
             increment(pair.first, u32(1));
             let mut values = [u32(10), u32(20)];
-            increment(values:at(index & u64(1)), u32(3));
+            increment(values:at_mut(index & u64(1)), u32(3));
             let output = device_index(root.outputs, root.count, index);
             output.* = pair.first + pair.second + values:at(u64(0)) + values:at(u64(1));
             increment(output.*, u32(4));
@@ -222,7 +222,7 @@ fn physical_byte_record_strides_preserve_neighboring_elements() {
             if (index < root.count) {
                 let mut inputs = Span<Bytes3> { data = root.inputs, length = root.count };
                 let mut outputs = Span<Bytes3> { data = root.outputs, length = root.count };
-                let mut output: Ref<_> = device_index(outputs.data, outputs.length, index).*;
+                let output: RefMut<_> = device_index(outputs.data, outputs.length, index).*;
                 let input: Ref<Bytes3> = device_index(inputs.data, inputs.length, index).*;
                 output = Bytes3 { a = input.a, b = input.b, c = input.c };
                 output.b = output.b + u8(1);
@@ -359,18 +359,18 @@ fn an_unconditionally_failing_nested_loop_condition_stops_before_caller_stores()
 fn local_reference_calls_in_loops_propagate_failure_and_evaluate_indices_once() {
     let source = r#"export { kernel };
         struct Root { count: u64, inputs: Ptr<u32>, outputs: Ptr<u32> }
-        fn position(calls: Ref<u32>, index: u64) -> u64 { calls = calls + 1; index }
-        fn increment(value: Ref<u32>, fail: bool) {
+        fn position(calls: RefMut<u32>, index: u64) -> u64 { calls = calls + 1; index }
+        fn increment(value: RefMut<u32>, fail: bool) {
             assert(!fail);
             value = value + 1;
         }
         @compute_shader fn kernel(index: u64, root: Ptr<Root>) {
             if (index >= root.count) { return; };
-            let values = [u32(10), u32(20)];
-            let calls: u32 = 0;
+            let mut values = [u32(10), u32(20)];
+            let mut calls: u32 = 0;
             let mut step: u32 = 0;
             while (step < u32(3)) {
-                let selected: Ref<u32> = values:at(position(calls, index & u64(1)));
+                let selected: RefMut<u32> = values:at_mut(position(calls, index & u64(1)));
                 increment(selected, index == u64(1) && step == u32(1));
                 step = step + 1;
             };
@@ -400,11 +400,11 @@ fn boolean_local_references_work_in_helpers_without_device_storage_layout() {
         export { kernel };
         struct Root { count: u64, inputs: Ptr<u32>, outputs: Ptr<u32> }
         struct Flags { first: bool, second: bool }
-        fn toggle(value: Ref<bool>) { value = !value; }
-        fn update(value: Ref<Flags>, index: u64) {
+        fn toggle(value: RefMut<bool>) { value = !value; }
+        fn update(value: RefMut<Flags>, index: u64) {
             toggle(value.first);
             let mut flags = [value.first, value.second];
-            toggle(flags:at(index & u64(1)));
+            toggle(flags:at_mut(index & u64(1)));
             value.second = flags:at(u64(0)) && flags:at(u64(1));
         }
         @compute_shader

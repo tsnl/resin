@@ -172,7 +172,7 @@ import { "$/shared.resin" };
         struct Resource { trace: Ptr<i32>, digit: i32,
             
         }
-fn drop(self: Ref<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
+fn drop(self: RefMut<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
 
         fn fail() -> i32 | Err<str>  { Err("failure") }
         fn work(trace: Ptr<i32>) -> i32 | Err<str>  {

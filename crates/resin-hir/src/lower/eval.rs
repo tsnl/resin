@@ -64,7 +64,8 @@ impl Decoder<'_> {
                     .collect::<Result<Vec<_>, _>>()?;
                 let builtin = match head.val.as_ref() {
                     "Ptr" => Some(Head::Pointer),
-                    "Ref" => Some(Head::Reference),
+                    "Ref" => Some(Head::Reference { mutable: false }),
+                    "RefMut" => Some(Head::Reference { mutable: true }),
                     "Err" => Some(Head::Error),
                     _ => None,
                 };
@@ -131,10 +132,10 @@ pub(super) fn reference_type(
                 reference_type(solver, &variant.clone().into(), false, span)?;
             }
         }
-        if head == Head::Reference && !binding {
+        if matches!(head, Head::Reference { .. }) && !binding {
             return Err(GenerateError::inference(
                 span,
-                "Ref<T> is allowed only in bindings, parameters, and function results",
+                "Ref<T> and RefMut<T> are allowed only in bindings, parameters, and function results",
             ));
         }
         for child in children {

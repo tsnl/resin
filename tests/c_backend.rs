@@ -61,7 +61,7 @@ fn array_value_projections_copy_the_element_and_destroy_the_container() {
             struct Resource { trace: Ptr<i32>, digit: i32,
                 
             }
-fn drop(self: Ref<Resource>)  {
+fn drop(self: RefMut<Resource>)  {
                     if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; };
                 }
 
@@ -222,7 +222,7 @@ fn results_propagate_handle_payloads_and_widen_without_reordering_effects() {
 #[test]
 fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
     runs(
-        "export { main }; fn main() -> _  { let mut n: _; n = i32(40); let p: Ref<_> = n; p = p + 2; p }",
+        "export { main }; fn main() -> _  { let mut n: _; n = i32(40); let p: RefMut<_> = n; p = p + 2; p }",
         42,
     );
     runs(
@@ -242,11 +242,11 @@ fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
 #[test]
 fn array_and_span_indexing_use_element_sizes() {
     runs(
-        "export { main }; import { \"$/shared.resin\", \"$/span.resin\" }; fn main () -> i32 | Err<_> { let values_owner = arc_ptr_alloc([10, 20, 30])?; let values: Ref<_> = values_owner:get().*; let mut p = Span<i32> { data = Ptr<i32>(values_owner:get()), length = u64(3) }; p:at(1) = 7; let mut end = p:at(2); p:at(1) + values(0) + end }",
+        "export { main }; import { \"$/shared.resin\", \"$/span.resin\" }; fn main () -> i32 | Err<_> { let values_owner = arc_ptr_alloc([10, 20, 30])?; let values: Ref<_> = values_owner:get().*; let mut p = Span<i32> { data = Ptr<i32>(values_owner:get()), length = u64(3) }; p:at_mut(1) = 7; let mut end = p:at(2); p:at(1) + values(0) + end }",
         47,
     );
     runs(
-        "export { main }; struct Payload { marker: u32, wide: u64, amount: f32, } fn main () -> i32  { let mut values = [Payload { marker = u32(1), wide = u64(4294967297), amount = f32(0.5) }, Payload { marker = u32(2), wide = u64(8589934593), amount = f32(1.5) }]; let p: Ref<Payload> = values:at(0); let q: Ref<Payload> = values:at(1); q.amount = q.amount + f32(2.0); if (q.wide == u64(8589934593) && q.marker == u32(2) && q.amount == f32(3.5) && p.amount == f32(0.5)) { 0 } else { 1 } }",
+        "export { main }; struct Payload { marker: u32, wide: u64, amount: f32, } fn main () -> i32  { let mut values = [Payload { marker = u32(1), wide = u64(4294967297), amount = f32(0.5) }, Payload { marker = u32(2), wide = u64(8589934593), amount = f32(1.5) }]; let p: Ref<Payload> = values:at(0); let q: RefMut<Payload> = values:at_mut(1); q.amount = q.amount + f32(2.0); if (q.wide == u64(8589934593) && q.marker == u32(2) && q.amount == f32(3.5) && p.amount == f32(0.5)) { 0 } else { 1 } }",
         0,
     );
 }
@@ -425,7 +425,7 @@ fn expression_cleanup_preserves_scope_order_on_failure_and_success() {
                 
                 
             }
-fn drop(self: Ref<Resource>)  { if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; }; }
+fn drop(self: RefMut<Resource>)  { if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; }; }
 
 fn accept(self: Ptr<Resource>, other: ArcPtr<Resource>) -> ArcPtr<Resource>  { other }
 
@@ -750,13 +750,13 @@ struct Holder { values: Span<i32>, }
             Holder { values = Span<i32> { data = p, length = u64(3) } }
         }
         fn index(calls: Ptr<i32>) -> i32  { calls.* = calls.* + 1; 1 }
-        fn element(s: Span<i32>, i: u64) -> Ref<i32>  { s:at(i) }
+        fn element(s: Span<i32>, i: u64) -> RefMut<i32>  { s:at_mut(i) }
         fn main() -> i32 | Err<_> {
             let values_owner = arc_ptr_alloc([i32(10), 20, 30])?; let values: Ref<_> = values_owner:get().*; let calls_owner = arc_ptr_alloc(0)?; let calls: Ref<_> = calls_owner:get().*;
-            let mut p: Ref<i32> = { let borrowed = view(Ptr<i32>(values_owner:get()), calls_owner:get()).values; borrowed:at(u64(index(calls_owner:get()))) };
+            let p: RefMut<i32> = { let borrowed = view(Ptr<i32>(values_owner:get()), calls_owner:get()).values; borrowed:at_mut(u64(index(calls_owner:get()))) };
             p = 42;
             let mut record = FieldsValues<_> { values = [3, 4] };
-            record.values:at(0) = 8;
+            record.values:at_mut(0) = 8;
             let mut holder = view(Ptr<i32>(values_owner:get()), calls_owner:get());
             element(holder.values, 0) = 11;
             let mut temporary = { let borrowed = [7, 8]; borrowed:at(1) };
@@ -783,7 +783,7 @@ fn at_indexing_checks_bounds_before_later_effects() {
 fn main() -> i32 | Err<_> {{
                     let values_owner = arc_ptr_alloc([1, 2])?; let values: Ref<_> = values_owner:get().*;
                     let mut holder = FieldsValues<_> {{ values = Span<i32> {{ data = Ptr<i32>(values_owner:get()), length = u64(2) }} }};
-                    {receiver}:at({index}) = 9;
+                    {receiver}:at_mut({index}) = 9;
                     puts("after".data); 0
                 }}"#
             )));
@@ -837,7 +837,7 @@ fn inlined_particle_functions_execute_on_the_cpu_with_host_spans() {
     file.stmts.extend(support::parse(r#"
 import { "$/shared.resin" };
 fn main() -> i32 | Err<_> {
-            let state_owner = arc_ptr_alloc(u32(12345) | u32(1))?; let state: Ref<_> = state_owner:get().*;
+            let state_owner = arc_ptr_alloc(u32(12345) | u32(1))?; let state: RefMut<_> = state_owner:get().*;
             let particle_owner = arc_ptr_alloc(random_particle(state))?; let particle: Ref<_> = particle_owner:get().*;
             let mut particles = Span<Particle> { data = particle_owner:get(), length = u64(1) };
             let first = Particle { x = particle.x, y = particle.y, z = particle.z, vx = particle.vx, vy = particle.vy, vz = particle.vz };
@@ -848,7 +848,7 @@ fn main() -> i32 | Err<_> {
             particle = random_particle(state);
             valid = valid && particle.x != first.x && particle.vx != first.vx;
             valid = valid && particle.x >= f32(-24) && particle.x < f32(24) && particle.y >= f32(-30) && particle.y < f32(30) && particle.z >= f32(0) && particle.z < f32(50) && particle.vx >= f32(-6) && particle.vx < f32(6) && particle.vy >= f32(-6) && particle.vy < f32(6) && particle.vz >= f32(-6) && particle.vz < f32(6);
-            let params_owner = arc_ptr_alloc(Params { dt = f32(0.005), yaw_cos = f32(1), yaw_sin = f32(0), pitch_cos = f32(1), pitch_sin = f32(0), zoom = f32(1), aspect = f32(0.625), radius = f32(0.0012), particles = particles })?; let params: Ref<_> = params_owner:get().*;
+            let params_owner = arc_ptr_alloc(Params { dt = f32(0.005), yaw_cos = f32(1), yaw_sin = f32(0), pitch_cos = f32(1), pitch_sin = f32(0), zoom = f32(1), aspect = f32(0.625), radius = f32(0.0012), particles = particles })?; let params: RefMut<_> = params_owner:get().*;
             let mut steps = 0;
             while (steps < 2000) {
                 kernel(u64(0), params_owner:get());
@@ -870,7 +870,7 @@ fn main() -> i32 | Err<_> {
             valid = valid && fragment(near.color).b > fragment(far.color:clone()).b;
             valid = valid && near_rim.position.x - near.position.x > far_rim.position.x - far.position.x;
             // Camera controls change the projection without changing the simulation.
-            let camera_owner = arc_ptr_alloc(Camera { yaw = f32(0), pitch = f32(0), zoom = f32(1) })?; let camera: Ref<_> = camera_owner:get().*;
+            let camera_owner = arc_ptr_alloc(Camera { yaw = f32(0), pitch = f32(0), zoom = f32(1) })?; let camera: RefMut<_> = camera_owner:get().*;
             apply_camera(camera, params);
             let mut before = vertex(1, params_owner:get());
             camera.zoom = f32(2);
@@ -963,7 +963,7 @@ import { "$/shared.resin" };
     struct Add { value: Ptr<i32>,
         
     }
-fn drop(self: Ref<Add>)  { self.value.* = self.value.* + 10; }
+fn drop(self: RefMut<Add>)  { self.value.* = self.value.* + 10; }
 
 
     fn condition(calls: Ptr<i32>) -> bool  { calls.* = calls.* + 1; 1 == 1 }
@@ -990,7 +990,7 @@ import {{ "$/shared.resin" }};
             struct Capture {{ resource: Ptr<i32>, trace: Ptr<i32>,
                 
             }}
-fn drop(self: Ref<Capture>)  {{ self.trace.* = self.trace.* * 10 + self.resource.*; }}
+fn drop(self: RefMut<Capture>)  {{ self.trace.* = self.trace.* * 10 + self.resource.*; }}
 
 
             fn work(trace: Ptr<i32>, fail: bool) -> () | Err<_> {{
@@ -1029,7 +1029,7 @@ fn main() -> i32 | Err<_> {
             let nested_owner = arc_ptr_alloc([[u8(1), u8(2)], [u8(3), u8(4)]])?; let nested: Ref<_> = nested_owner:get().*;
             let mut embedded = [u8(65), u8(0), u8(66)];
             let record_owner = arc_ptr_alloc(FieldsBytesTail<_, _> { bytes = copied, tail = u8(255) })?; let record: Ref<_> = record_owner:get().*;
-            binary:at(0) = u8(90);
+            binary:at_mut(0) = u8(90);
             if (size_of(binary) == u64(2) && align_of(binary) == u64(1) &&
                 size_of(nested) == u64(4) && size_of(embedded) == u64(3) &&
                 u64(nested_owner:get():lea(1)) - u64(nested_owner:get():lea(0)) == u64(2) &&

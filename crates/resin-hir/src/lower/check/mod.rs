@@ -352,7 +352,7 @@ impl Checker<'_> {
                     GenerateError::inference(
                         declaration.name.span,
                         if hook == "drop" {
-                            "drop must have signature fn drop<T>(value: Ref<Owner<T>>) with only the owner's type parameters"
+                            "drop must have signature fn drop<T>(value: RefMut<Owner<T>>) with only the owner's type parameters"
                         } else {
                             "repr_bytes must take Ref<Owner<T>> and return (Ptr<u8>, u64), with only the owner's type parameters"
                         },
@@ -362,10 +362,20 @@ impl Checker<'_> {
                     return Err(invalid());
                 };
                 let (pointee, result) = match (hook, &parameter.ty) {
-                    ("drop", crate::Type::Reference { referent }) => (referent, crate::Type::Unit),
-                    ("repr_bytes", crate::Type::Reference { referent }) => {
-                        (referent, super::types::ty(&Ty::byte_span()))
-                    }
+                    (
+                        "drop",
+                        crate::Type::Reference {
+                            referent,
+                            mutable: true,
+                        },
+                    ) => (referent, crate::Type::Unit),
+                    (
+                        "repr_bytes",
+                        crate::Type::Reference {
+                            referent,
+                            mutable: false,
+                        },
+                    ) => (referent, super::types::ty(&Ty::byte_span())),
                     _ => return Err(invalid()),
                 };
                 let crate::Type::Defined {

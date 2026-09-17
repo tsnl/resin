@@ -697,6 +697,7 @@ fn graphics_pipeline_roots_and_varyings_keep_nominal_type_identity() {
 #[test]
 fn references_preserve_access_without_pointer_conversions_or_shared_layout() {
     let reference = Ty::Reference {
+        mutable: false,
         referent: Box::new(Ty::Bool),
     };
     let pointer = Ty::Pointer {

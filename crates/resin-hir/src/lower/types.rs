@@ -27,7 +27,8 @@ pub(super) fn ty(source: &Ty) -> crate::Type {
             arguments: vec![],
             definition: *definition,
         },
-        Ty::Reference { referent } => crate::Type::Reference {
+        Ty::Reference { referent, mutable } => crate::Type::Reference {
+            mutable: *mutable,
             referent: Box::new(ty(referent)),
         },
         Ty::Pointer { pointee } => crate::Type::Pointer {

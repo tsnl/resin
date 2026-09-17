@@ -240,6 +240,7 @@ fn retries_discard_failed_method_choices_and_preserve_completed_groups() {
     assert!(!inference.methods.contains_key(&failed));
     for (rule, ty) in [(earlier, first), (healthy, good)] {
         let reference = crate::Type::Reference {
+            mutable: false,
             referent: Box::new(crate::Type::UInt8),
         };
         let infer::ResolvedMethod::Intrinsic { signature, .. } = &inference.methods[&rule] else {

@@ -46,9 +46,9 @@ There is no second `solve_cpu` to keep synchronized. The compiler specializes
 ordinary helpers for the selected execution target. Calls remain source-level
 calls; the helpers need no shader annotation.
 
-## What `Ref` promises
+## What references promise
 
-A `Ref<T>` permits access to a `T`; it does **not** promise that a pointer can be
+A `Ref<T>` permits read-only access to a `T`; it does **not** promise that a pointer can be
 materialized. That contract is the same for a local, a field, and a value reached
 through a device pointer. A reference-returning helper does not hand its caller
 permission to take an address either.

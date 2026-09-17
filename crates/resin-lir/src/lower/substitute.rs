@@ -204,7 +204,7 @@ impl Substitution {
                         .collect::<Result<Vec<_>, _>>()?;
                     for (index, (param, arg)) in params.iter().zip(&args).enumerate() {
                         let (target, source) = match param {
-                            resin_hir::Type::Reference { referent } => {
+                            resin_hir::Type::Reference { referent, .. } => {
                                 (referent.as_ref(), value_type(arg))
                             }
                             _ => (param, value_type(arg)),
@@ -554,12 +554,13 @@ impl Substitution {
             resin_hir::Type::GpuPipelineContract => resin_hir::Type::GpuPipelineContract,
             resin_hir::Type::GpuArguments => resin_hir::Type::GpuArguments,
             resin_hir::Type::Foreign { name } => resin_hir::Type::Foreign { name: name.clone() },
-            resin_hir::Type::Reference { referent } => resin_hir::Type::Reference {
+            resin_hir::Type::Reference { referent, mutable } => resin_hir::Type::Reference {
+                mutable: *mutable,
                 referent: Box::new(self.normalize_at(referent, depth + 1, state, instances)?),
             },
             resin_hir::Type::Value { of } => {
                 match self.normalize_at(of, depth + 1, state, instances)? {
-                    resin_hir::Type::Reference { referent } => *referent,
+                    resin_hir::Type::Reference { referent, .. } => *referent,
                     value => value,
                 }
             }
@@ -652,7 +653,8 @@ fn materialize(
         resin_hir::Type::GpuPipelineContract => Ty::GpuPipelineContract,
         resin_hir::Type::GpuArguments => Ty::GpuArguments,
         resin_hir::Type::Foreign { name } => Ty::Foreign { name: name.clone() },
-        resin_hir::Type::Reference { referent } => Ty::Reference {
+        resin_hir::Type::Reference { referent, mutable } => Ty::Reference {
+            mutable: *mutable,
             referent: Box::new(materialize(referent, instances)?),
         },
         resin_hir::Type::Pointer { pointee } => Ty::Pointer {
@@ -717,7 +719,8 @@ fn expression(source: &Ty, instances: &super::instances::Instances<'_>) -> resin
         Ty::GpuPipelineContract => resin_hir::Type::GpuPipelineContract,
         Ty::GpuArguments => resin_hir::Type::GpuArguments,
         Ty::Foreign { name } => resin_hir::Type::Foreign { name: name.clone() },
-        Ty::Reference { referent } => resin_hir::Type::Reference {
+        Ty::Reference { referent, mutable } => resin_hir::Type::Reference {
+            mutable: *mutable,
             referent: Box::new(expression(referent, instances)),
         },
         Ty::Pointer { pointee } => resin_hir::Type::Pointer {
@@ -807,9 +810,10 @@ fn check_size(
         | resin_hir::Type::Value { .. } => {
             unreachable!("normalized argument")
         }
-        resin_hir::Type::Reference { referent: pointee } | resin_hir::Type::Pointer { pointee } => {
-            check_size(pointee, depth + 1, remaining)?
+        resin_hir::Type::Reference {
+            referent: pointee, ..
         }
+        | resin_hir::Type::Pointer { pointee } => check_size(pointee, depth + 1, remaining)?,
         resin_hir::Type::Function { params, result } => {
             for param in params {
                 check_size(param, depth + 1, remaining)?;
@@ -880,7 +884,7 @@ fn operation_error(message: impl Into<std::sync::Arc<str>>) -> super::LowerError
 }
 
 fn value_type(ty: &resin_hir::Type) -> &resin_hir::Type {
-    if let resin_hir::Type::Reference { referent } = ty {
+    if let resin_hir::Type::Reference { referent, .. } = ty {
         referent
     } else {
         ty
@@ -899,6 +903,32 @@ fn match_parameter(
     if depth >= TYPE_DEPTH_LIMIT {
         return false;
     }
+    if depth > 0
+        && (matches!(pattern, Type::Reference { .. }) || matches!(value, Type::Reference { .. }))
+    {
+        return match (pattern, value) {
+            (
+                Type::Reference {
+                    mutable: a,
+                    referent: p,
+                },
+                Type::Reference {
+                    mutable: b,
+                    referent: v,
+                },
+            ) if a == b => match_parameter(p, v, arguments, depth + 1),
+            _ => false,
+        };
+    }
+    if matches!(
+        (pattern, value),
+        (
+            Type::Reference { mutable: true, .. },
+            Type::Reference { mutable: false, .. }
+        )
+    ) {
+        return false;
+    }
     let value = value_type(value);
     match pattern {
         Type::Parameter { parameter } => match arguments.get(parameter) {
@@ -908,7 +938,7 @@ fn match_parameter(
                 true
             }
         },
-        Type::Reference { referent } => match_parameter(referent, value, arguments, depth + 1),
+        Type::Reference { referent, .. } => match_parameter(referent, value, arguments, depth + 1),
         Type::Defined {
             definition,
             arguments: params,
@@ -950,19 +980,21 @@ fn primitive_operation(name: &str, arguments: &[resin_hir::Type]) -> Option<Reso
             vec![first.clone(), *pointee.clone()],
             *pointee.clone(),
         ),
-        ("at", Type::Array { element, .. }) => (
+        ("at" | "at_mut", Type::Array { element, .. }) => (
             Intrinsic::Index,
             vec![
                 Type::Reference {
+                    mutable: name == "at_mut",
                     referent: Box::new(first.clone()),
                 },
                 Type::UInt64,
             ],
             Type::Reference {
+                mutable: name == "at_mut",
                 referent: element.clone(),
             },
         ),
-        ("at" | "lea", Type::Pointer { pointee })
+        ("at" | "at_mut" | "lea", Type::Pointer { pointee })
             if matches!(pointee.as_ref(), Type::Array { .. }) =>
         {
             let Type::Array { element, .. } = pointee.as_ref() else {
@@ -977,6 +1009,7 @@ fn primitive_operation(name: &str, arguments: &[resin_hir::Type]) -> Option<Reso
                     }
                 } else {
                     Type::Reference {
+                        mutable: name == "at_mut",
                         referent: element.clone(),
                     }
                 },
@@ -991,6 +1024,7 @@ fn primitive_operation(name: &str, arguments: &[resin_hir::Type]) -> Option<Reso
                 }
             } else {
                 Type::Reference {
+                    mutable: false,
                     referent: Box::new(Type::UInt8),
                 }
             },

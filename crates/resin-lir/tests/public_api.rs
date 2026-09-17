@@ -217,6 +217,7 @@ fn failed_functions_keep_their_own_bindings_cleanup_and_error_origins() {
                 span: missing_span,
                 ty: Type::Int32,
                 kind: TermKind::Local {
+                    mutable: true,
                     binding: 1,
                     name: Ident {
                         val: "missing".into(),
@@ -232,6 +233,7 @@ fn failed_functions_keep_their_own_bindings_cleanup_and_error_origins() {
         span: detached_span,
         ty: Type::Int32,
         kind: TermKind::Local {
+            mutable: true,
             binding: 0,
             name: Ident {
                 span: detached_span,
@@ -296,6 +298,7 @@ fn parameter_function(types: &[Type], foreign: bool) -> Function {
             span,
             ty: Type::Int32,
             kind: TermKind::Local {
+                mutable: true,
                 binding: parameter.binding.unwrap(),
                 name: parameter.name.clone(),
             },

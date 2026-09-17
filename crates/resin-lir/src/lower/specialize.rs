@@ -355,6 +355,7 @@ impl Specialization<'_, '_> {
     fn receiver(&self, source: resin_hir::ReceiverConversion) -> concrete::ReceiverConversion {
         match source {
             resin_hir::ReceiverConversion::Value => concrete::ReceiverConversion::Value,
+            resin_hir::ReceiverConversion::ReadOnly => concrete::ReceiverConversion::ReadOnly,
             resin_hir::ReceiverConversion::Borrow => concrete::ReceiverConversion::Borrow,
             resin_hir::ReceiverConversion::Load => concrete::ReceiverConversion::Load,
         }
@@ -686,15 +687,18 @@ impl Specialization<'_, '_> {
         let from = self.ty(&source.ty)?;
         let conversion = if &from == to {
             ReceiverConversion::Value
-        } else if matches!(to, Ty::Reference { referent } if **referent == from) {
+        } else if matches!((&from, to), (Ty::Reference { mutable: true, referent: a }, Ty::Reference { mutable: false, referent: b }) if a == b)
+        {
+            ReceiverConversion::ReadOnly
+        } else if matches!(to, Ty::Reference { referent, .. } if **referent == from) {
             ReceiverConversion::Borrow
-        } else if matches!(&from, Ty::Reference { referent } if referent.as_ref() == to) {
+        } else if matches!(&from, Ty::Reference { referent, .. } if referent.as_ref() == to) {
             ReceiverConversion::Load
         } else {
             return Err(self.instance_error("method receiver does not match the first parameter"));
         };
         let argument = if conversion == ReceiverConversion::Borrow {
-            self.reference_place(source)?
+            self.reference_place(source, matches!(to, Ty::Reference { mutable: true, .. }))?
         } else {
             self.boxed(source)?
         };
@@ -752,12 +756,19 @@ impl Specialization<'_, '_> {
         })
     }
 
-    fn reference_place(&mut self, source: &resin_hir::Term) -> Result<Box<concrete::Term>, Error> {
+    fn reference_place(
+        &mut self,
+        source: &resin_hir::Term,
+        mutable: bool,
+    ) -> Result<Box<concrete::Term>, Error> {
         let place = self.place(source)?;
         if !reference_place(&place) {
             return Err(self.instance_error(
                 "reference binding requires an initialized place; bind the temporary to a local first",
             ));
+        }
+        if mutable && !mutable_place(&place) {
+            return Err(self.instance_error("writable access requires RefMut or a mutable place; declare local storage with `let mut`"));
         }
         Ok(place)
     }
@@ -770,23 +781,35 @@ impl Specialization<'_, '_> {
     ) -> Result<concrete::TermKind, Error> {
         let from = self.argument(&source.ty)?;
         let target = self.argument(expected)?;
-        if let resin_hir::Type::Reference { referent } = &target {
+        if let resin_hir::Type::Reference { referent, mutable } = &target {
             if let resin_hir::Type::Reference {
                 referent: source_type,
+                mutable: source_mutable,
             } = &from
             {
                 if source_type != referent {
                     return Err(self.instance_error("reference referent types must match exactly"));
                 }
-                return Ok(self.term(source)?.kind);
+                if *mutable && !source_mutable {
+                    return Err(self.instance_error("cannot obtain RefMut from a read-only Ref"));
+                }
+                let source = self.boxed(source)?;
+                return Ok(if source_mutable == mutable {
+                    source.kind
+                } else {
+                    concrete::TermKind::Adapt {
+                        conversion: concrete::ReceiverConversion::ReadOnly,
+                        arg: source,
+                    }
+                });
             }
             if &from != referent.as_ref() {
                 return Err(self.instance_error("reference referent types must match exactly"));
             }
-            let place = self.reference_place(source)?;
+            let place = self.reference_place(source, *mutable)?;
             return Ok(concrete::TermKind::Borrow { place });
         }
-        let value = if let resin_hir::Type::Reference { referent } = from {
+        let value = if let resin_hir::Type::Reference { referent, .. } = from {
             if access == Access::Value && !referent.copies_implicitly() {
                 return Err(self.instance_error("cannot move a value through a reference or pointer; replace its contents instead"));
             }
@@ -836,7 +859,7 @@ impl Specialization<'_, '_> {
             resin_hir::TermKind::Field { base, .. } => {
                 let ty = self.argument(&base.ty)?;
                 let ty = match &ty {
-                    resin_hir::Type::Reference { referent } => referent.as_ref(),
+                    resin_hir::Type::Reference { referent, .. } => referent.as_ref(),
                     ty => ty,
                 };
                 if matches!(ty, resin_hir::Type::Pointer { .. }) {
@@ -1054,9 +1077,14 @@ impl Specialization<'_, '_> {
                     },
                 }
             }
-            resin_hir::TermKind::Local { binding, name } => concrete::TermKind::Local {
+            resin_hir::TermKind::Local {
+                binding,
+                name,
+                mutable,
+            } => concrete::TermKind::Local {
                 binding: *binding,
                 name: name.clone(),
+                mutable: *mutable,
             },
             resin_hir::TermKind::Function {
                 function,
@@ -1118,7 +1146,13 @@ impl Specialization<'_, '_> {
             resin_hir::TermKind::Adapt { conversion, arg } => concrete::TermKind::Adapt {
                 conversion: self.receiver(*conversion),
                 arg: if *conversion == resin_hir::ReceiverConversion::Borrow {
-                    self.reference_place(arg)?
+                    {
+                        let mutable = matches!(
+                            self.argument(expected)?,
+                            resin_hir::Type::Reference { mutable: true, .. }
+                        );
+                        self.reference_place(arg, mutable)?
+                    }
                 } else {
                     self.boxed(arg)?
                 },
@@ -1177,10 +1211,19 @@ impl Specialization<'_, '_> {
             resin_hir::TermKind::Absurd { arg } => concrete::TermKind::Absurd {
                 arg: self.boxed(arg)?,
             },
-            resin_hir::TermKind::Assign { place, value } => concrete::TermKind::Assign {
-                place: self.place(place)?,
-                value: self.boxed(value)?,
-            },
+            resin_hir::TermKind::Assign { place, value } => {
+                let place = self.place(place)?;
+                if !matches!(place.kind, concrete::TermKind::Local { .. }) && !mutable_place(&place)
+                {
+                    return Err(self.instance_error(
+                        "cannot assign through a read-only Ref; use RefMut for writable access",
+                    ));
+                }
+                concrete::TermKind::Assign {
+                    place,
+                    value: self.boxed(value)?,
+                }
+            }
             resin_hir::TermKind::Address { place } => {
                 self.require_addressable(place)?;
                 concrete::TermKind::Address {
@@ -1204,5 +1247,27 @@ fn reference_place(term: &concrete::Term) -> bool {
             matches!(base.ty, Ty::Pointer { .. }) || reference_place(base)
         }
         _ => false,
+    }
+}
+
+fn mutable_place(term: &concrete::Term) -> bool {
+    if let Ty::Reference { mutable, .. } = &term.ty {
+        return *mutable;
+    }
+    match &term.kind {
+        concrete::TermKind::Local { mutable, .. } => *mutable,
+        concrete::TermKind::Deref { pointer } => mutable_access(&pointer.ty).unwrap_or(false),
+        concrete::TermKind::Field { base, .. } => {
+            mutable_access(&base.ty).unwrap_or_else(|| mutable_place(base))
+        }
+        _ => false,
+    }
+}
+
+fn mutable_access(ty: &Ty) -> Option<bool> {
+    match ty {
+        Ty::Pointer { pointee } => Some(mutable_access(pointee).unwrap_or(true)),
+        Ty::Reference { referent, mutable } => Some(mutable_access(referent).unwrap_or(*mutable)),
+        _ => None,
     }
 }

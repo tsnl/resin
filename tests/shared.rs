@@ -7,7 +7,7 @@ struct Resource { trace: Ptr<i32>, digit: i32,
     
     
 }
-fn drop(dying: Ref<Resource>)  {
+fn drop(dying: RefMut<Resource>)  {
         if (dying.digit != 0) { dying.trace.* = dying.trace.* * 10 + dying.digit; };
     }
 
@@ -61,7 +61,7 @@ fn main() -> i32 | Err<_> {
             let mut holder = FieldsValues<_> { values = [shared_resource(trace_owner:get(), 1)] };
             weak = holder.values:at(0):downgrade();
             let saved = holder.values:at(0):clone();
-            holder.values:at(0) = shared_resource(trace_owner:get(), 2);
+            holder.values:at_mut(0) = shared_resource(trace_owner:get(), 2);
             if (saved:get().*:read() != 1 || holder.values:at(0):get().*:read() != 2 || trace != 0) { trace = 9; };
         };
         let mut expired = match (weak:upgrade()) { ArcPtr<Resource>(owner) => { 1 == 0 }, None => { 1 == 1 } };
@@ -76,7 +76,7 @@ fn assignment_branches_preserve_initialization_and_overwrite_cleanup() {
 struct Tracked { drops: Ptr<i32>, value: i32,
         
     }
-fn drop(self: Ref<Tracked>)  { self.drops.* = self.drops.* + 1; }
+fn drop(self: RefMut<Tracked>)  { self.drops.* = self.drops.* + 1; }
 
 
     fn main() -> i32 | Err<_> {
@@ -144,7 +144,7 @@ fn temporary_projection_keeps_nominal_and_nested_destructors() {
 struct Outer { trace: Ptr<i32>, inner: ArcPtr<Resource>,
         
     }
-fn drop(self: Ref<Outer>)  { self.trace.* = self.trace.* * 10 + 2; }
+fn drop(self: RefMut<Outer>)  { self.trace.* = self.trace.* * 10 + 2; }
 
 
     fn make(trace: Ptr<i32>) -> Outer  { Outer { trace = trace, inner = shared_resource(trace, 3) } }
@@ -353,7 +353,7 @@ fn destruction_preserves_results_and_runs_per_scope_and_iteration() {
 struct Set { target: Ptr<i32>, value: i32,
         
     }
-fn drop(self: Ref<Set>)  { self.target.* = self.value; }
+fn drop(self: RefMut<Set>)  { self.target.* = self.value; }
 
 
     fn result_before_cleanup() -> i32 | Err<_> {
@@ -397,7 +397,7 @@ fn weak_cycles_and_nested_pointer_handle_access() {
 struct Node { trace: Ptr<i32>, live: bool, parent: WeakPtr<Node>,
         
     }
-fn drop(self: Ref<Node>)  { if (self.live) { self.trace.* = self.trace.* + 1; }; }
+fn drop(self: RefMut<Node>)  { if (self.live) { self.trace.* = self.trace.* + 1; }; }
 
 
     fn main() -> i32 | Err<_> {
@@ -484,7 +484,7 @@ fn destruction_hooks_are_ordinary_calls_and_remain_automatic() {
 struct Manual { trace: Ptr<i32>, digit: i32,
         
     }
-fn drop(self: Ref<Manual>)  {
+fn drop(self: RefMut<Manual>)  {
             if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; };
             self.digit = 0;
         }
@@ -534,7 +534,7 @@ fn named_single_and_array_owners_keep_borrowed_views_alive_through_error_cleanup
         struct Marker { trace: Ptr<i32>, digit: i32,
             
         }
-fn drop(self: Ref<Marker>)  {
+fn drop(self: RefMut<Marker>)  {
                 if (self.digit != i32(0)) { self.trace.* = self.trace.* * i32(10) + self.digit; };
             }
 

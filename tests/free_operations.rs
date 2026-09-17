@@ -13,7 +13,7 @@ import { "$/shared.resin" };
             let mut values = [i32(19), i32(23)];
             let item_owner = arc_ptr_alloc(Item { value = 42 })?; let item: Ref<_> = item_owner:get().*;
             at(values, u64(0)) = i32(20);
-            values:at(u64(1)) = i32(22);
+            values:at_mut(u64(1)) = i32(22);
             at(item, u64(0)) = first(values) + values:at(u64(1));
             let old = replace(&item_owner:get().value, i32(0));
             assert(old == 42 && item.value == 0);

@@ -9,7 +9,7 @@ fn read(self: Ptr<Tracked>) -> i32 {
 	self.value
 }
 
-fn drop(self: Ref<Tracked>) {
+fn drop(self: RefMut<Tracked>) {
 	if (self.value != i32(0)) {
 		let text = fmt("released {0}\n", (self.value,));
 		print(text);

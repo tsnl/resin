@@ -116,7 +116,7 @@ fn nested_host_owners_and_explicit_gpu_loads_preserve_allocation_lifetimes() {
             
             
         }
-fn increment(self: Ref<Item>)  { self.value = self.value + i32(1); }
+fn increment(self: RefMut<Item>)  { self.value = self.value + i32(1); }
 
 fn read(self: Ref<Item>) -> i32  { self.value }
 
@@ -214,7 +214,7 @@ fn clone<A, B>(value: Ref<FieldsIncrementValues<A, B>>) -> FieldsIncrementValues
 }
     @compute_shader fn kernel(index: u64, root: Ptr<Parameters>)  {
         if (index < root.values.length) {
-            let mut item: Ref<u32> = root.values:at(index);
+            let mut item: RefMut<u32> = root.values:at_mut(index);
             item = item + root.increment;
         };
     }
@@ -263,7 +263,7 @@ fn __add__<T>(a: Cell<T>, b: Cell<T>) -> Cell<T>  { Cell<T> { value = a.value + 
         fn add<T>(a: T, b: T) -> _  { a + b }
         @compute_shader fn kernel(index: u64, root: Ptr<Parameters>)  {
             if (index < root.values.length) {
-                let mut cell: Ref<Cell<u32>> = root.values:at(index);
+                let mut cell: RefMut<Cell<u32>> = root.values:at_mut(index);
                 cell = add(Cell<u32> { value = cell.value }, Cell<u32> { value = 40 });
             };
         }
@@ -294,7 +294,7 @@ fn source_sequences_project_offsets_and_retain_resources_through_submit() {
         struct FieldsValuesScalar<T0, T1> { values: T0, scalar: T1, }
 struct Root { values: Span<u32>, scalar: Ptr<u32>, }
         @compute_shader fn kernel(index: u64, root: Ptr<Root>)  {
-            if (index < root.values.length) { root.values:at(index) = root.values:at(index) + u32(10); };
+            if (index < root.values.length) { root.values:at_mut(index) = root.values:at(index) + u32(10); };
             if (index == u64(0)) { root.scalar.* = u32(42); };
         }
         fn main() -> (i32 | Err<_>)  {
@@ -435,7 +435,7 @@ struct Parameters { value: Ptr<i64>, values: Span<i64>, increment: i64, }
         @compute_shader fn kernel(index: u64, root: Ptr<Parameters>)  {
             if (index == u64(0) && root.value.* < i64(0)) {
                 root.value.* = -root.value.* + root.increment;
-                root.values:at(u64(0)) = root.value.* * i64(2);
+                root.values:at_mut(u64(0)) = root.value.* * i64(2);
             };
         }
         fn allocation(gpu: Gpu, calls: Ptr<i32>) -> (Gpu, u64)  {
@@ -474,7 +474,7 @@ fn returned_typed_pipelines_and_recordings_keep_scoped_resources_alive() {
 struct FieldsValues<T0> { values: T0, }
 struct Parameters { values: Span<u32>, }
         @compute_shader fn kernel(index: u64, root: Ptr<Parameters>)  {
-            if (index < root.values.length) { root.values:at(index) = u32(42); };
+            if (index < root.values.length) { root.values:at_mut(index) = u32(42); };
         }
         fn make_pipeline(gpu: Ref<Gpu>) -> (GpuComputePipeline<Parameters, GpuPipelineOwner> | Err<_>)  {
             gpu:create_compute_pipeline(kernel)

@@ -7,9 +7,9 @@ struct Counter {
 	value: i32,
 }
 
-// Functions live beside their types. Ref borrows the caller's existing value.
+// Functions live beside their types. Ref reads the caller's value; RefMut permits mutation.
 // This operation changes the counter; the name makes that mutation explicit.
-fn increment(counter: Ref<Counter>, amount: i32) {
+fn increment(counter: RefMut<Counter>, amount: i32) {
 	counter.value = counter.value + amount;
 }
 
@@ -36,7 +36,7 @@ fn sum_to(limit: i32) -> i32 {
 // No result annotation means unit, (). A semicolon discards an expression's result.
 fn main() {
 	// Initializers use field = value; a dot selects a field.
-	let counter = Counter { value = 40 };
+	let mut counter = Counter { value = 40 };
 	increment(counter, 1);
 	// Uniform function call syntax (UFCS): x:f(y) means f(x, y).
 	counter:increment(1);

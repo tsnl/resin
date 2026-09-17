@@ -1149,7 +1149,7 @@ impl<'a> AstGen<'a> {
         let text = if node.is_missing()
             || !matches!(
                 node.kind(),
-                "lid" | "tuple_index" | "uid" | "builtin_type" | "Ptr" | "Ref" | "Err"
+                "lid" | "tuple_index" | "uid" | "builtin_type" | "Ptr" | "Ref" | "RefMut" | "Err"
             ) {
             ""
         } else {

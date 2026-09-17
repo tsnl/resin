@@ -69,8 +69,8 @@ fn example() -> i32 {
 }
 ```
 
-References and pointers have unchecked lifetimes and permit unchecked mutable
-aliasing. They cannot transfer a noncopyable referent by reading it. Use
+References and pointers have unchecked lifetimes and permit aliasing. `Ref<T>`
+is read-only; `RefMut<T>` grants writable access without exclusivity. They cannot transfer a noncopyable referent by reading it. Use
 `replace(pointer, replacement)` to return the old value and leave a new one in
 initialized storage, without destroying the returned value. This is also available
 as `pointer:replace(replacement)`.
@@ -116,7 +116,7 @@ reference counting does not synchronize payload access or validate raw aliases.
 
 ## Destruction
 
-A visible free `fn drop(value: Ref<Item>) { ... }` is registered as the nominal
+A visible free `fn drop(value: RefMut<Item>) { ... }` is registered as the nominal
 type's destruction hook. The hook runs before fields are destroyed in reverse
 order. Generic hooks bind their owning type's parameters. Hooks return unit and
 handle fallible cleanup locally. Calling `drop` directly is an ordinary call and

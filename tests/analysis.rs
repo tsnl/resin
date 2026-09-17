@@ -793,7 +793,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
     for receiver in ["values", "holder.values"] {
         for tail in ["", " values:;", " holder.values:;", " holder.values:at(; "] {
             let source = format!(
-                "import {{ \"$/span.resin\" }}; struct FieldsValues<T0> {{ values: T0, }}\nfn main()  {{ let mut values = [i32(1), i32(2)]; let mut holder = FieldsValues<_> {{ values = Span<i32> {{ data = Ptr<i32>(u64(0)), length = u64(2) }} }}; {receiver}:at(0) = 3;{tail} }}"
+                "import {{ \"$/span.resin\" }}; struct FieldsValues<T0> {{ values: T0, }}\nfn main()  {{ let mut values = [i32(1), i32(2)]; let mut holder = FieldsValues<_> {{ values = Span<i32> {{ data = Ptr<i32>(u64(0)), length = u64(2) }} }}; {receiver}:at_mut(0) = 3;{tail} }}"
             );
             let project = Project::new(&[("main.resin", &source)]);
             let analysis = project.build_hir();
@@ -834,7 +834,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
 
 #[test]
 fn shared_receiver_completion_and_navigation_include_ordinary_drop_methods() {
-    let library = "export { Counter , drop, read }; struct Counter { count: i32,   }\nfn drop(self: Ref<Counter>)  {}\n\nfn read(self: Ref<Counter>) -> i32  { self.count }\n ";
+    let library = "export { Counter , drop, read }; struct Counter { count: i32,   }\nfn drop(self: RefMut<Counter>)  {}\n\nfn read(self: Ref<Counter>) -> i32  { self.count }\n ";
     for tail in ["", "c:get().*:;"] {
         let source = format!(
             "import {{ \"lib.resin\", \"$/shared.resin\" }}; fn f(c: ArcPtr<Counter>)  {{ c:get().*:read(); {tail} }}"
@@ -960,7 +960,7 @@ fn field_completion_before_existing_statements() {
         ("root.pixels", vec!["data", "length"]),
     ] {
         for following in [
-            "if (index < u64(root.width)) { root.pixels:at(index) = u32(0); };",
+            "if (index < u64(root.width)) { root.pixels:at_mut(index) = u32(0); };",
             "let mut later = root.width; later;",
             "while (false) { root.width; };",
             "root.width;",
@@ -1781,7 +1781,7 @@ fn editor_analysis_tolerates_truncation_and_deleted_tokens() {
         "export { main }; struct Point { x: i32, } fn main(arg: Ptr<Point>)  { let mut value = arg.x + 1; print(fmt(\"{}\", value)); }",
         "struct FieldsLeftRight<T0, T1> { left: T0, right: T1, }\nfn main(arg: i32) -> i32  { let mut pair = FieldsLeftRight<_, _> { left = arg, right = 1 }; if (arg == 0) (pair.left) else (pair.right) }",
         "fn main()  { let mut values = [1, 2]; while (1 == 1) { let mut missing: Ptr<i32>; }; }",
-        "struct Cleanup { value: Ptr<i32>,  }\nfn drop(self: Ref<Cleanup>)  { self.value.* = 42; }\n  fn main()  { let mut n = 0; let mut cleanup = Cleanup { value = &n }; }",
+        "struct Cleanup { value: Ptr<i32>,  }\nfn drop(self: RefMut<Cleanup>)  { self.value.* = 42; }\n  fn main()  { let mut n = 0; let mut cleanup = Cleanup { value = &n }; }",
         "struct Item { value: i32, } fn main()  { let mut owner = ArcPtr<Item> { value = 42 }; let mut weak = owner:downgrade(); match (weak:upgrade()) { ArcPtr<Item>(item) => { item.value; }, None => {} }; }",
     ] {
         for end in 0..=source.len() {

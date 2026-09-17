@@ -370,7 +370,7 @@ fn from_bytes_copies_unterminated_spans_verbatim_and_owns_the_result() {
         fn copied() -> String | Err<_> {
             let source = arc_ptr_alloc([u8(65), u8(0), u8(66)])?;
             let mut result = { let borrowed = Span<u8> { data = source:get():lea(u64(0)), length = u64(3) }; string_from_bytes(borrowed) };
-            source:get():at(u64(0)) = u8(90);
+            source:get():at_mut(u64(0)) = u8(90);
             result
         }
         fn main() -> i32 | Err<_> {
@@ -470,7 +470,7 @@ fn raw_byte_views_and_owned_strings_preserve_non_utf8() {
             let data_owner = arc_ptr_alloc([u8(255), u8(0), u8(254)])?; let data: Ref<_> = data_owner:get().*;
             let mut buffer = Span<u8> { data = data_owner:get():lea(u64(0)), length = u64(3) };
             let mut owned = string_from_bytes(buffer);
-            data:at(u64(0)) = u8(65);
+            data:at_mut(u64(0)) = u8(65);
             print(buffer);
             { let borrowed = fmt("{0}", (owned:bytes(),)); print(borrowed) };
         }"#,

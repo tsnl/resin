@@ -60,6 +60,7 @@ pub(super) fn body(function: &mut Function, op: crate::Intrinsic) {
                 kind: TermKind::Local {
                     binding,
                     name: parameter.name.clone(),
+                    mutable: false,
                 },
             };
             if place.ty.copies_implicitly() {

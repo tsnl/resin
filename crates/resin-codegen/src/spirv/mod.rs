@@ -32,7 +32,7 @@ pub(super) fn generate(
         // A reference to a local-only type has no device-address ABI. Emit only
         // its requested Function-storage specializations at the actual calls.
         if module.functions[index].locals[..module.functions[index].parameter_count].iter().any(|parameter| {
-            matches!(&parameter.ty, Ty::Reference { referent } if resin_types::layout::layout(&module.types, referent).is_err())
+            matches!(&parameter.ty, Ty::Reference { referent, .. } if resin_types::layout::layout(&module.types, referent).is_err())
         }) { continue; }
         let id = context.functions[index];
         let may_fail = function::lower(
@@ -156,9 +156,10 @@ fn register_function_types(
     {
         match ty {
             Ty::Function { .. } => continue,
-            Ty::Pointer { pointee } | Ty::Reference { referent: pointee } => {
-                context.validate(pointee)?
-            }
+            Ty::Pointer { pointee }
+            | Ty::Reference {
+                referent: pointee, ..
+            } => context.validate(pointee)?,
             _ => context.validate(ty)?,
         }
         context.ty(ty)?;

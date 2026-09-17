@@ -63,12 +63,12 @@ struct Counter { value: i32 }
 fn read(counter: Ref<Counter>) -> i32 {
 	counter.value
 }
-fn increment(counter: Ref<Counter>) {
+fn increment(counter: RefMut<Counter>) {
 	counter.value = counter.value + 1;
 }
 
 fn example() -> i32 {
-	let counter = Counter { value = 41 };
+	let mut counter = Counter { value = 41 };
 	counter:increment();
 	counter:read()
 }

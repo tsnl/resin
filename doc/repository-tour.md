@@ -49,7 +49,7 @@ A few language choices explain much of the implementation:
 - Named structs move; primitives and aggregates containing only copyable values
   copy. HIR checks moves and definite initialization. Structs contain fields only;
   ordinary free functions supply operations, called directly or through UFCS colon
-  syntax. A free `drop(value: Ref<T>)` function supplies a destruction hook.
+  syntax. A free `drop(value: RefMut<T>)` function supplies a destruction hook.
 - `ArcPtr<T>` shares single values, and `ArcSpan<T>` shares fixed-length sequences.
   Weak owners observe them without keeping their payloads alive.
   `arc_span_alloc(count, initial)?` allocates initialized owned elements;

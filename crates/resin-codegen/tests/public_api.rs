@@ -208,6 +208,7 @@ async fn lowering_failure_leaves_existing_outputs_untouched() {
     let mut helper = constant_function(
         vec![],
         Ty::Reference {
+            mutable: true,
             referent: Box::new(Ty::UInt64),
         },
         Value::Unit,

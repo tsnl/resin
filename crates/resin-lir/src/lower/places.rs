@@ -7,13 +7,17 @@ use super::FunctionLowering;
 
 pub(super) enum Operand {
     Value(Ty),
-    Place { ty: Ty, addressable: bool },
+    Place {
+        ty: Ty,
+        addressable: bool,
+        mutable: bool,
+    },
 }
 
 impl FunctionLowering<'_> {
     fn local_path(&self, term: &Term) -> Result<Option<(LocalId, Vec<usize>)>, LowerError> {
         match &term.kind {
-            TermKind::Local { binding, name } => {
+            TermKind::Local { binding, name, .. } => {
                 Ok(Some((self.resolve_binding(*binding, name)?.local, vec![])))
             }
             TermKind::Field { base, access }
@@ -82,12 +86,17 @@ impl FunctionLowering<'_> {
 
     pub(super) fn gen_place(&mut self, term: &Term) -> Result<Ty, LowerError> {
         match self.gen_operand(term)? {
-            Operand::Place { ty, addressable } => Ok(if addressable {
+            Operand::Place {
+                ty,
+                addressable,
+                mutable,
+            } => Ok(if addressable {
                 Ty::Pointer {
                     pointee: Box::new(ty),
                 }
             } else {
                 Ty::Reference {
+                    mutable,
                     referent: Box::new(ty),
                 }
             }),
@@ -98,14 +107,32 @@ impl FunctionLowering<'_> {
         }
     }
 
-    pub(super) fn gen_borrow(&mut self, term: &Term) -> Result<Ty, LowerError> {
+    pub(super) fn gen_borrow(&mut self, term: &Term, target: &Ty) -> Result<Ty, LowerError> {
         let place = self.gen_place(term)?;
-        if let Ty::Pointer { pointee } = place {
-            self.emit(Instr::Borrow);
-            Ok(Ty::Reference { referent: pointee })
-        } else {
-            Ok(place)
+        let (referent, source_mutable) = match place {
+            Ty::Pointer { pointee } => {
+                self.emit(Instr::Borrow);
+                (pointee, true)
+            }
+            Ty::Reference { referent, mutable } => (referent, mutable),
+            _ => unreachable!("place has an address"),
+        };
+        let Ty::Reference { mutable, .. } = target else {
+            unreachable!("borrow target is a reference")
+        };
+        if *mutable && !source_mutable {
+            return Err(LowerError::invalid_hir(
+                term.span,
+                "cannot obtain RefMut from a read-only Ref",
+            ));
         }
+        if source_mutable && !mutable {
+            self.emit(Instr::ReadOnly);
+        }
+        Ok(Ty::Reference {
+            mutable: *mutable,
+            referent,
+        })
     }
 
     pub(super) fn gen_address(&mut self, term: &Term) -> Result<Ty, LowerError> {
@@ -124,7 +151,9 @@ impl FunctionLowering<'_> {
     // a place and then retrying as a value can evaluate side effects twice.
     pub(super) fn gen_operand(&mut self, term: &Term) -> Result<Operand, LowerError> {
         match &term.kind {
-            TermKind::Local { binding: id, name } => {
+            TermKind::Local {
+                binding: id, name, ..
+            } => {
                 let binding = self.resolve_binding(*id, name)?;
                 let ty = binding.ty;
                 self.emit(Instr::LocalRef {
@@ -133,6 +162,7 @@ impl FunctionLowering<'_> {
                 Ok(Operand::Place {
                     ty,
                     addressable: false,
+                    mutable: true,
                 })
             }
             TermKind::Field { base, access } => {
@@ -145,6 +175,7 @@ impl FunctionLowering<'_> {
                 Ok(Operand::Place {
                     ty: pointee,
                     addressable: matches!(pointer.ty, Ty::Pointer { .. }),
+                    mutable: !matches!(pointer.ty, Ty::Reference { mutable: false, .. }),
                 })
             }
             _ => self.gen_term(term, None).map(Operand::Value),
@@ -156,14 +187,19 @@ impl FunctionLowering<'_> {
         base: Operand,
         access: &FieldAccess,
     ) -> Result<Operand, LowerError> {
-        let (mut base_ty, mut is_place, mut addressable) = match base {
-            Operand::Value(ty) => (ty, false, false),
-            Operand::Place { ty, addressable } => (ty, true, addressable),
+        let (mut base_ty, mut is_place, mut addressable, mut mutable) = match base {
+            Operand::Value(ty) => (ty, false, false, false),
+            Operand::Place {
+                ty,
+                addressable,
+                mutable,
+            } => (ty, true, addressable, mutable),
         };
         loop {
             if let Some(pointee) = base_ty.deref_target() {
                 let pointee = pointee.clone();
                 addressable = matches!(base_ty, Ty::Pointer { .. });
+                mutable = !matches!(base_ty, Ty::Reference { mutable: false, .. });
                 if is_place {
                     self.emit(Instr::Load);
                 }
@@ -193,6 +229,7 @@ impl FunctionLowering<'_> {
             Operand::Place {
                 ty: access.ty.clone(),
                 addressable,
+                mutable,
             }
         } else {
             Operand::Value(access.ty.clone())

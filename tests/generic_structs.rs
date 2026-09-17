@@ -315,7 +315,7 @@ fn nongeneric_wrappers_copy_shared_generic_storage_and_destroy_it_once() {
         struct Resource { trace: Ptr<i32>, answer: i32,
             
         }
-fn drop(self: Ref<Resource>)  { if (self.answer != 0) { self.trace.* = self.trace.* + 1; }; }
+fn drop(self: RefMut<Resource>)  { if (self.answer != 0) { self.trace.* = self.trace.* + 1; }; }
 
         struct Cell<T> { value: T, }
         struct Envelope { owner: ArcPtr<Cell<Resource>>, }

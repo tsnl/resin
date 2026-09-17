@@ -1,7 +1,7 @@
 //! Borrowed views of contiguous elements.
 //! Keep the backing storage alive; a span does not retain its owner.
 
-export { Span, bytes, at, lea, slice, as_bytes, clone };
+export { Span, bytes, at, at_mut, lea, slice, as_bytes, clone };
 
 // Borrowed storage. The caller keeps the allocation alive throughout each access.
 /// A nonowning pointer and element count. Bounds are checked on the host.
@@ -14,6 +14,11 @@ struct Span<T> {
 }
 /// Borrow the element at `index` without granting an address.
 fn at<T>(self: Ref<Span<T>>, index: u64) -> Ref<T> {
+	self:lea(index).*
+}
+
+/// Borrow a writable element; the span descriptor itself is only read.
+fn at_mut<T>(self: Ref<Span<T>>, index: u64) -> RefMut<T> {
 	self:lea(index).*
 }
 

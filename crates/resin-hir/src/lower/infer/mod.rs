@@ -42,7 +42,9 @@ pub(crate) enum Head {
         definition: TypeId,
     },
     Pointer,
-    Reference,
+    Reference {
+        mutable: bool,
+    },
     Value,
     Array(usize),
     Record(Vec<Arc<str>>),
@@ -96,7 +98,10 @@ impl Type {
     }
 
     pub fn reference(referent: Type) -> Self {
-        Self::Node(Head::Reference, vec![referent])
+        Self::borrow(referent, false)
+    }
+    pub fn borrow(referent: Type, mutable: bool) -> Self {
+        Self::Node(Head::Reference { mutable }, vec![referent])
     }
     pub fn value(of: Type) -> Self {
         Self::Node(Head::Value, vec![of])
@@ -197,7 +202,9 @@ impl Type {
             crate::Type::FunctionResult { function } => {
                 Self::function_result(Self::from_hir(function))
             }
-            crate::Type::Reference { referent } => Self::reference(Self::from_hir(referent)),
+            crate::Type::Reference { referent, mutable } => {
+                Self::borrow(Self::from_hir(referent), *mutable)
+            }
             crate::Type::Value { of } => Self::value(Self::from_hir(of)),
             crate::Type::Pointer { pointee } => {
                 Self::Node(Head::Pointer, vec![Self::from_hir(pointee)])
@@ -239,7 +246,7 @@ impl From<Ty> for Type {
     fn from(ty: Ty) -> Self {
         match ty {
             Ty::Pointer { pointee } => Self::pointer((*pointee).into()),
-            Ty::Reference { referent } => Self::reference((*referent).into()),
+            Ty::Reference { referent, mutable } => Self::borrow((*referent).into(), mutable),
             Ty::Array { element, length } => {
                 Self::Node(Head::Array(length), vec![(*element).into()])
             }
@@ -286,7 +293,8 @@ impl Head {
             | Self::FunctionResult
             | Self::Nominal { .. }
             | Self::Value => return None,
-            Self::Reference => Ty::Reference {
+            Self::Reference { mutable } => Ty::Reference {
+                mutable: *mutable,
                 referent: Box::new(children.next().unwrap()),
             },
             Self::Atom(ty) => ty.clone(),
@@ -397,7 +405,8 @@ impl Head {
             Self::FunctionResult => crate::Type::FunctionResult {
                 function: Box::new(children.next().unwrap()),
             },
-            Self::Reference => crate::Type::Reference {
+            Self::Reference { mutable } => crate::Type::Reference {
+                mutable: *mutable,
                 referent: Box::new(children.next().unwrap()),
             },
             Self::Value => crate::Type::Value {
@@ -546,7 +555,7 @@ impl Solver {
                 }
                 Ok(())
             }
-            Type::Node(head, _) if head != Head::Reference => Ok(()),
+            Type::Node(head, _) if !matches!(head, Head::Reference { .. }) => Ok(()),
             _ => Err(error(span, "error payloads must be value types")),
         }
     }
@@ -586,7 +595,7 @@ impl Solver {
                 }
                 Ok(Some(result))
             }
-            Type::Node(head, children) if head != Head::Reference => {
+            Type::Node(head, children) if !matches!(head, Head::Reference { .. }) => {
                 Ok(Some(vec![Type::Node(head, children)]))
             }
             _ => Err(error(span, "error payloads must be value types")),
@@ -676,7 +685,15 @@ impl Solver {
         // Reference use is invariant. Every other consumer reads a value, even
         // when a dependent call's result will only be known at specialization.
         let value = Type::value(from.clone());
-        if let Type::Node(Head::Reference, parts) = self.head(to) {
+        if let Type::Node(Head::Reference { mutable }, parts) = self.head(to) {
+            if mutable
+                && matches!(
+                    self.head(from),
+                    Type::Node(Head::Reference { mutable: false }, _)
+                )
+            {
+                return Err(error(span, "cannot obtain RefMut from a read-only Ref"));
+            }
             return self.unify(&value, &parts[0], span);
         }
         let from = &value;
@@ -880,7 +897,7 @@ impl Solver {
         }
         if let Type::Node(Head::Value, parts) = ty {
             return match self.head(&parts[0]) {
-                Type::Node(Head::Reference, parts) => self.head(&parts[0]),
+                Type::Node(Head::Reference { .. }, parts) => self.head(&parts[0]),
                 Type::Node(head, parts)
                     if !head.projection()
                         || matches!(head, Head::Member { .. } | Head::Method { .. }) =>

@@ -545,7 +545,7 @@ pub(super) fn shader_value_type(definitions: &[TypeDef], ty: &Ty) -> Result<(), 
             Ty::GpuPipelineContract | Ty::GpuView | Ty::GpuArguments => {
                 return Err("shader cannot consume a managed GPU view or projected arguments".into());
             }
-            Ty::Reference { referent } => pending.push(referent),
+            Ty::Reference { referent, .. } => pending.push(referent),
             Ty::Pointer { pointee: element } => {
                 crate::layout::layout(definitions, element).map_err(|error| error.to_string())?;
                 pending.push(element);

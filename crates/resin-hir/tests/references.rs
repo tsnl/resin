@@ -6,8 +6,8 @@ fn reference_parameters_results_and_initialized_annotations_complete() {
     for source in [
         "fn identity<T>(value: Ref<T>) -> Ref<T>  { value }",
         "fn refer<T>(value: Ptr<T>) -> Ref<T>  { value.* }",
-        "fn main() -> i32  { let mut x: i32 = 1; let mut r: Ref<i32> = x; r = 2; let mut copy = r; copy }",
-        "fn id(value: Ref<i32>) -> Ref<i32>  { value } fn main() -> i32  { let mut x: i32 = 1; id(x) = 2; x }",
+        "fn main() -> i32  { let mut x: i32 = 1; let r: RefMut<i32> = x; r = 2; let mut copy = r; copy }",
+        "fn id(value: RefMut<i32>) -> RefMut<i32>  { value } fn main() -> i32  { let mut x: i32 = 1; id(x) = 2; x }",
         "fn choose(a: Ref<i32>, b: Ref<i32>, flag: bool) -> Ref<i32>  { if (flag) { a } else { b } }",
     ] {
         hir_module(source).unwrap_or_else(|error| panic!("{source}\n{error}"));
@@ -139,6 +139,65 @@ fn local_storage_has_no_pointer_capability() {
         assert!(
             hir_module(source).is_err(),
             "accepted local address: {source}"
+        );
+    }
+}
+
+#[test]
+fn mutable_references_require_writable_places() {
+    for source in [
+        "fn bad(value: Ref<i32>) { value = 2; }",
+        "struct Cell { value: i32 } fn bad(cell: Ref<Cell>) { cell.value = 2; }",
+        "fn bad(value: Ref<i32>) -> RefMut<i32> { value }",
+        "fn bad(value: Ref<i32>) { let alias: RefMut<i32> = value; }",
+        "fn change(value: RefMut<i32>) {} fn bad(value: Ref<i32>) { change(value); }",
+        "fn bad() { let value: i32 = 1; let alias: RefMut<i32> = value; }",
+        "struct Cell { value: i32 } fn bad() { let cell = Cell { value = 1 }; let alias: RefMut<i32> = cell.value; }",
+        "fn change(value: RefMut<i32>) {} fn bad(value: i32) { change(value); }",
+        "fn bad(values: Ref<[i32; 2]>) { values:at_mut(0) = 2; }",
+        "fn bad() { let values = [i32(1), i32(2)]; values:at_mut(0) = 2; }",
+        "fn bad() { let mut values = [i32(1), i32(2)]; values:at(0) = 2; }",
+        "fn bad() { let mut value: RefMut<i32> = i32(1); }",
+        "fn bad() { let mut values = [i32(1)]; &values:at_mut(0); }",
+        "fn bad(value: RefMut<i32>) -> Ptr<i32> { &value }",
+    ] {
+        assert!(
+            hir_module(source).is_err(),
+            "accepted invalid writable access: {source}"
+        );
+    }
+}
+
+#[test]
+fn mutable_references_weaken_and_preserve_pointer_field_capabilities() {
+    for source in [
+        "fn read(value: Ref<i32>) -> i32 { value } fn use(value: RefMut<i32>) -> i32 { read(value) }",
+        "fn read(value: RefMut<i32>) -> Ref<i32> { value }",
+        "fn change(value: RefMut<i32>) { value = 42; } fn main() { let mut value: i32 = 0; change(value); }",
+        "fn change(mut value: i32) { let alias: RefMut<i32> = value; alias = 42; }",
+        "fn change(pointer: Ref<Ptr<i32>>) { pointer.* = 42; }",
+        "struct Cell { value: i32 } struct Handle { pointer: Ptr<Cell> } fn change(handle: Ref<Handle>) { handle.pointer.value = 42; }",
+        "fn change() { let mut values = [i32(1), i32(2)]; let item: RefMut<i32> = values:at_mut(0); item = 42; }",
+        "fn read() -> i32 { let values = [i32(1), i32(2)]; values:at(0) }",
+    ] {
+        hir_module(source).unwrap_or_else(|error| panic!("{source}\n{error}"));
+    }
+}
+
+#[test]
+fn mutable_references_share_reference_storage_restrictions() {
+    for source in [
+        "struct Invalid { value: RefMut<i32> }",
+        "fn invalid(value: Ptr<RefMut<i32>>) {}",
+        "fn invalid(value: Ref<RefMut<i32>>) {}",
+        "fn invalid(value: RefMut<Ref<i32>>) {}",
+        "fn invalid(value: RefMut<i32> | None) {}",
+        "fn invalid() { let reference: RefMut<i32>; }",
+        "extern { \"test.h\": { fn invalid(value: RefMut<i32>); } };",
+    ] {
+        assert!(
+            hir_module(source).is_err(),
+            "accepted unsupported reference storage: {source}"
         );
     }
 }
