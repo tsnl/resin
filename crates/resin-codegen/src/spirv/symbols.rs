@@ -71,6 +71,7 @@ fn permits_local_address(instruction: &Instr, operand: usize) -> bool {
             && matches!(
                 instruction,
                 Instr::Load
+                    | Instr::ReadOnly
                     | Instr::TransferLoad
                     | Instr::IsVariant { .. }
                     | Instr::Store

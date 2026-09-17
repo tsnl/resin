@@ -154,7 +154,7 @@ fn mutable_references_require_writable_places() {
         "fn bad() { let value: i32 = 1; let alias: RefMut<i32> = value; }",
         "struct Cell { value: i32 } fn bad() { let cell = Cell { value = 1 }; let alias: RefMut<i32> = cell.value; }",
         "fn change(value: RefMut<i32>) {} fn bad(value: i32) { change(value); }",
-        "fn bad(values: Ref<[i32; 2]>) { values:at_mut(0) = 2; }",
+        "fn bad() { let mut items = [i32(1), i32(2)]; let values: Ref<_> = items; values:at_mut(0) = 2; }",
         "fn bad() { let values = [i32(1), i32(2)]; values:at_mut(0) = 2; }",
         "fn bad() { let mut values = [i32(1), i32(2)]; values:at(0) = 2; }",
         "fn bad() { let mut value: RefMut<i32> = i32(1); }",

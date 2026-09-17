@@ -260,7 +260,7 @@ fn __add__(a: Ref<Value>, b: Ref<Value>) -> Value  { Value { owner = a.owner:clo
 
         fn add<T>(a: Ref<T>, b: Ref<T>) -> _  { a + b }
         fn main() -> i32 | Err<_>  {
-            let drops_owner = arc_ptr_alloc(i32(0))?; let drops: Ref<_> = drops_owner:get().*;
+            let drops_owner = arc_ptr_alloc(i32(0))?; let drops: RefMut<_> = drops_owner:get().*;
             let mut answer: i32 = 0;
             {
                 let mut owner = arc_ptr_alloc::<Payload>(Payload { drops = drops_owner:get() })?;

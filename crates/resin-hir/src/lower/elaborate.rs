@@ -508,6 +508,12 @@ impl Completion<'_> {
         let place = self.place(place)?;
         let destination = owned_path(&place);
         if destination.is_none() {
+            if !reference_place(&place) {
+                return Err(GenerateError {
+                    span: place.span,
+                    kind: GenerateErrorKind::NotAPlace,
+                });
+            }
             require_mutable_place(&place)?;
         }
         if let Some((binding, path)) = &destination {

@@ -641,7 +641,7 @@ fn local_reference_specialization_bounds_nested_emission() {
         ));
     }
     source.push_str("fn helper_130(value: RefMut<u32>) { value = u32(42); } ");
-    source.push_str("@compute_shader fn kernel(index: u64, output: Ptr<u32>) { let value: u32 = 0; helper_0(value); output.* = value; }");
+    source.push_str("@compute_shader fn kernel(index: u64, output: Ptr<u32>) { let mut value: u32 = 0; helper_0(value); output.* = value; }");
     let error = pipeline::shader_error(&source);
     assert!(
         error

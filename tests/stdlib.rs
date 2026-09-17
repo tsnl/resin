@@ -107,12 +107,12 @@ fn drop(self: RefMut<Item>)  {
             (())
         }
         fn main() -> (i32 | Err<_>)  {
-            let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+            let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
             {
                 let items = arc_ptr_alloc([Item { trace = trace_owner:get(), digit = 0 }, Item { trace = trace_owner:get(), digit = 0 }, Item { trace = trace_owner:get(), digit = 0 }])?;
-                items:get().*:at(0).digit = 1;
-                items:get().*:at(1).digit = 2;
-                items:get().*:at(2).digit = 3;
+                items:get().*:at_mut(0).digit = 1;
+                items:get().*:at_mut(1).digit = 2;
+                items:get().*:at_mut(2).digit = 3;
             };
             let mut failed = match (fail(trace_owner:get())) { ()(value) => { 1 == 0 }, Err(error) => { 1 == 1 } };
             (if (failed && trace == 3214) { 0 } else { 1 })
@@ -135,7 +135,7 @@ fn drop(self: RefMut<Item>)  {
             }
 
         fn main() -> (i32 | Err<_>)  {
-            let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+            let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
             let mut weak = weak_ptr_empty::<Item>();
             let mut valid = 1 == 1;
             {
@@ -257,7 +257,7 @@ fn drop(self: RefMut<Item>)  { if (self.digit != 0) { self.trace.* = self.trace.
             if (fail) { Err(Failed {}) } else { (()) }
         }
         fn main() -> (i32 | Err<_>)  {
-            let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+            let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
             work(trace_owner:get(), 1 == 0)?;
             let mut valid = trace == 21;
             trace = 0;
@@ -1217,7 +1217,7 @@ fn argparse_yields_aliases_values_and_duplicates_in_order() {
         fn main() -> () | Err<_> {
             let argv_owner = arc_ptr_alloc(["app".data, "-v".data, "--count=12".data, "-o".data, "a path.png".data,
                 "--count".data, "4294967295".data, "--real".data, "-0.125".data, "--output=".data])?; let argv: Ref<_> = argv_owner:get().*;
-            let parser = { let borrowed = Span<Ptr<u8>> { data = argv_owner:get():lea(u64(0)), length = u64(10) }; argparse(borrowed,
+            let mut parser = { let borrowed = Span<Ptr<u8>> { data = argv_owner:get():lea(u64(0)), length = u64(10) }; argparse(borrowed,
                 "  --verbose|-v --count= --output|-o= --real= ") };
             let flag = parser:next()?!;
             assert(flag:named("--verbose") && flag.value.length == u64(0));
@@ -1245,7 +1245,7 @@ fn argparse_reports_errors_and_numeric_parsing_respects_span_bounds() {
         import { "$/shared.resin", "$/argparse.resin", "$/span.resin", "$/string.resin" };
         fn rejected(option: str) -> () | Err<_> {
             let argv = arc_ptr_alloc(["app".data, option.data])?;
-            let parser = { let borrowed = Span<Ptr<u8>> { data = argv:get():lea(u64(0)), length = u64(2) }; argparse(borrowed, "--flag --count=") };
+            let mut parser = { let borrowed = Span<Ptr<u8>> { data = argv:get():lea(u64(0)), length = u64(2) }; argparse(borrowed, "--flag --count=") };
             assert(match (parser:next()) {
                 Err(message) => { message:get().length > u64(0) },
                 Argument(item) => { false }, None => { false },

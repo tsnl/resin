@@ -45,8 +45,9 @@ while using the view.
 {{#include ../../examples/tutorial/fractal.resin:render}}
 ```
 
-`view:at_mut(index)` returns `RefMut<u8>` and assignment writes that element. It does
-not move the buffer or produce a pointer. Host indexing checks bounds before
+`view:at_mut(index)` returns `RefMut<u8>` and assignment writes that element.
+The span descriptor is borrowed read-only; its stored pointer supplies writable
+access to the pixels. Indexing keeps ownership of the buffer with its owner. Host indexing checks bounds before
 returning the reference. The channel index is `4 * (y * width + x)`; multiply after
 converting dimensions to `u64` to avoid doing the arithmetic at `u32` width.
 

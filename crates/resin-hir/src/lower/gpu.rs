@@ -392,9 +392,9 @@ impl Context {
         } else {
             self.source_projection(&root, 0)?
         };
-        let pipeline = if matches!(native.source_params[1], Type::Reference { .. }) {
+        let pipeline = if let Type::Reference { mutable, .. } = &native.source_params[1] {
             Type::Reference {
-                mutable: false,
+                mutable: *mutable,
                 referent: Box::new(pipeline.clone()),
             }
         } else {

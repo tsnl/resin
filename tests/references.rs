@@ -307,6 +307,7 @@ fn generic_mutators_reject_readonly_arguments_and_immutable_locals() {
         "fn change(value: RefMut<i32>) {} fn call<F>(function: F, value: Ref<i32>) { function(value); } fn main() { let value: i32 = 1; call(change, value); }",
         "fn main() { let mut value: i32 = 1; let reference: Ref<i32> = value; let mut alias = reference; alias = 2; let writable: RefMut<i32> = reference; }",
         "fn change(value: RefMut<i32>) {} fn main() { let function: (Ref<i32>) -> () = change; }",
+        "fn change(value: RefMut<i32>) {} fn call<F>(function: F) { let value: i32 = 1; function(value); } fn main() { call(change); }",
     ] {
         let source = format!("export {{ main }}; {source}");
         assert!(
@@ -322,13 +323,31 @@ fn readonly_array_access_and_mutable_element_access_share_storage() {
         result(
             r#"export { main };
         fn increment(value: RefMut<i32>) { value = value + 1; }
-        fn read(values: Ref<[i32; 2]>) -> i32 { values:at(0) + values:at(1) }
+        fn read<A>(values: Ref<A>) -> i32 { values:at(0) + values:at(1) }
         fn main() -> i32 {
             let mut values = [i32(20), i32(20)];
             increment(values:at_mut(0));
             increment(values:at_mut(1));
             read(values)
         }
+    "#
+        ),
+        42
+    );
+}
+
+#[test]
+fn dependent_function_parameters_can_borrow_mutable_locals() {
+    assert_eq!(
+        result(
+            r#"export { main };
+        fn increment(value: RefMut<i32>) { value = value + 1; }
+        fn apply<F>(function: F) -> i32 {
+            let mut value: i32 = 41;
+            function(value);
+            value
+        }
+        fn main() -> i32 { apply(increment) }
     "#
         ),
         42

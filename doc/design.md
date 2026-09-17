@@ -1,6 +1,6 @@
 # Resin design
 
-The [reference specification](references.md) describes `Ref<T>`, fixed reference
+The [reference specification](references.md) describes read-only `Ref<T>`, writable `RefMut<T>`, fixed reference
 bindings, and reference-returning indexing.
 
 The [ownership specification](lifetimes.md) describes `ArcPtr<T>`, `ArcSpan<T>`,

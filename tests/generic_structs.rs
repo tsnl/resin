@@ -104,11 +104,11 @@ fn array_and_span_index_calls_preserve_generic_field_places() {
             cells(u64(0)).value
         }
         fn main() -> i32 | Err<_> {
-            let cells_owner = arc_ptr_alloc([Cell<i32> { value = 7 }, Cell<i32> { value = 35 }])?; let cells: Ref<_> = cells_owner:get().*;
+            let cells_owner = arc_ptr_alloc([Cell<i32> { value = 7 }, Cell<i32> { value = 35 }])?; let cells: RefMut<_> = cells_owner:get().*;
             let mut view = Span<Cell<i32>> {
                 data = Ptr<Cell<i32>>(cells_owner:get()), length = 2
             };
-            cells(u64(0)).value = copy_through_array(cells(u64(0)).value) + view:at(u64(1)).value;
+            cells:at_mut(u64(0)).value = copy_through_array(cells(u64(0)).value) + view:at(u64(1)).value;
             cells(u64(0)).value
         }
     "#);
@@ -320,7 +320,7 @@ fn drop(self: RefMut<Resource>)  { if (self.answer != 0) { self.trace.* = self.t
         struct Cell<T> { value: T, }
         struct Envelope { owner: ArcPtr<Cell<Resource>>, }
         fn main() -> i32 | Err<_> {
-            let trace_owner = arc_ptr_alloc(i32(0))?; let trace: Ref<_> = trace_owner:get().*;
+            let trace_owner = arc_ptr_alloc(i32(0))?; let trace: RefMut<_> = trace_owner:get().*;
             {
                 let mut optional: ArcPtr<Cell<Resource>> | None;
                 optional = match (arc_ptr_alloc::<Cell<Resource>>(Cell<Resource> {

@@ -56,7 +56,7 @@ fn at_indexing_preserves_shared_array_owners_and_overwrite_cleanup() {
     run(r#"
 struct FieldsValues<T0> { values: T0, }
 fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*; let mut weak = weak_ptr_empty::<Resource>();
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*; let mut weak = weak_ptr_empty::<Resource>();
         {
             let mut holder = FieldsValues<_> { values = [shared_resource(trace_owner:get(), 1)] };
             weak = holder.values:at(0):downgrade();
@@ -100,7 +100,7 @@ fn drop(self: RefMut<Tracked>)  { self.drops.* = self.drops.* + 1; }
 fn shared_assignment_branches_release_every_owner() {
     run(r#"
 fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*; let mut weak = weak_ptr_empty::<Resource>();
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*; let mut weak = weak_ptr_empty::<Resource>();
         {
             let mut value: ArcPtr<Resource>;
             value = if (trace == 0) { shared_resource(trace_owner:get(), 1) } else { shared_resource(trace_owner:get(), 9) };
@@ -130,7 +130,7 @@ struct Failed {}
         (())
     }
     fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         let mut succeeded = match (work(trace_owner:get(), 1 == 0)) { ()(n) => { 1 == 1 }, Err(e) => { 1 == 0 } };
         let mut failed = match (work(trace_owner:get(), 1 == 1)) { ()(n) => { 1 == 0 }, Err(e) => { 1 == 1 } };
         if (succeeded && failed && trace == 211) { 0 } else { 1 }
@@ -149,7 +149,7 @@ fn drop(self: RefMut<Outer>)  { self.trace.* = self.trace.* * 10 + 2; }
 
     fn make(trace: Ptr<i32>) -> Outer  { Outer { trace = trace, inner = shared_resource(trace, 3) } }
     fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         let mut number = resource_make(trace_owner:get(), 1).digit;
         let mut valid = number == 1 && trace == 1;
         {
@@ -180,7 +180,7 @@ fn all_applications_consume_fresh_arguments_without_an_extra_drop() {
 fn consume(value: Resource) -> i32  { value.digit }
     fn consume_pair(first: Resource, second: Resource)  {}
     fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         consume(resource_make(trace_owner:get(), 1));
         consume(Resource(resource_make(trace_owner:get(), 2)));
         { let mut value = resource_make(trace_owner:get(), 3); };
@@ -209,7 +209,7 @@ struct Pair<T> { first: T, second: T, }
         })
     }
     fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         let mut ordered = match (build(shared_resource, trace_owner:get(), 1 == 0)) {
             Pair<ArcPtr<Resource>>(pair) => { pair.first:get().digit == 1 && pair.second:get().digit == 2 },
             Err(error) => { 1 == 0 },
@@ -229,7 +229,7 @@ fn named_values_move_and_are_destroyed_once() {
     run(r#"
 fn consume(value: Resource)  {}
     fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         {
             let mut original = resource_make(trace_owner:get(), 1);
             { let moved = original; consume(moved); };
@@ -245,7 +245,7 @@ fn shared_copies_reassignment_weak_upgrade_and_expiration() {
     run(r#"
 struct Shared { value: ArcPtr<Resource>, }
     fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         let mut weak = weak_ptr_empty::<Resource>();
         {
             let mut a = shared_resource(trace_owner:get(), 1);
@@ -271,7 +271,7 @@ fn move(value: Ptr<Resource>) -> Resource  {
         Resource { trace = value.trace, digit = (&value.digit):replace(0) }
     }
     fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         {
             let value_owner = arc_ptr_alloc(resource_make(trace_owner:get(), 1))?; let value: Ref<_> = value_owner:get().*;
             {
@@ -297,7 +297,7 @@ struct Failed {}
         (resource_make(trace, 3))
     }
     fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         let mut failed = match (work(trace_owner:get())) { Resource(owner) => { 1 == 0 }, Err(error) => { 1 == 1 } };
         if (failed && trace == 21) { 0 } else { 1 }
     }
@@ -315,7 +315,7 @@ fn consume(self: Ref<Sink>, a: Resource, b: Resource)  {}
 
 
     fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         {
             let mut pair = Pair { value = resource_make(trace_owner:get(), 1) };
             let mut array = [resource_make(trace_owner:get(), 2), resource_make(trace_owner:get(), 3)];
@@ -334,7 +334,7 @@ fn consume(self: Ref<Sink>, a: Resource, b: Resource)  {}
 fn indexing_borrows_array_storage_and_replace_transfers_elements() {
     run(r#"
 fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         {
             let array_owner = arc_ptr_alloc([resource_make(trace_owner:get(), 1), resource_make(trace_owner:get(), 2)])?; let array: Ref<_> = array_owner:get().*;
             let mut element: Ref<Resource> = array(0);
@@ -362,7 +362,7 @@ fn drop(self: RefMut<Set>)  { self.target.* = self.value; }
         value:get().*
     }
     fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         let mut index = 1;
         while (index < 4) {
             let mut outer = resource_make(trace_owner:get(), index);
@@ -384,7 +384,7 @@ fn former_defer_keyword_can_name_an_ordinary_immediate_call() {
     run(r#"
 fn defer(trace: Ptr<i32>)  { trace.* = trace.* + 1; }
     fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         defer(trace_owner:get());
         if (trace == 1) { 0 } else { 1 }
     }
@@ -401,7 +401,7 @@ fn drop(self: RefMut<Node>)  { if (self.live) { self.trace.* = self.trace.* + 1;
 
 
     fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         let mut weak = {
             let mut optional: ArcPtr<Node> | None;
             optional = match (arc_ptr_alloc::<Node>(Node { trace = trace_owner:get(), live = 1 == 0, parent = weak_ptr_empty::<Node>() })) {
@@ -425,7 +425,7 @@ fn drop(self: RefMut<Node>)  { if (self.live) { self.trace.* = self.trace.* + 1;
 fn source_allocation_transfers_explicit_shared_clones_without_cloning_payloads() {
     run(r#"
 fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         {
             let mut original = shared_resource(trace_owner:get(), 1);
             {
@@ -459,7 +459,7 @@ fn methods_require_a_compatible_receiver_and_valid_destructor() {
 fn option_unwrap_moves_fresh_and_named_payloads() {
     run(r#"
 fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         { let mut unwrapped = optional_resource(trace_owner:get(), 1)!; };
         {
             let mut named = optional_resource(trace_owner:get(), 2);
@@ -491,7 +491,7 @@ fn drop(self: RefMut<Manual>)  {
 
 
     fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         {
             let a_owner = arc_ptr_alloc(Manual { trace = trace_owner:get(), digit = 1 })?; let a: Ref<_> = a_owner:get().*;
             let b_owner = arc_ptr_alloc(Manual { trace = trace_owner:get(), digit = 2 })?; let b: Ref<_> = b_owner:get().*;
@@ -508,7 +508,7 @@ fn drop(self: RefMut<Manual>)  {
 fn source_methods_use_ordinary_calls_and_borrow_named_receivers() {
     run(r#"
 fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         {
             let first = shared_resource(trace_owner:get(), 1);
             let pointer = first:get();
@@ -561,7 +561,7 @@ fn drop(self: RefMut<Marker>)  {
             (pointer.digit + span:at(u64(0)).digit + span:at(u64(1)).digit)
         }
         fn main() -> (i32 | Err<_>)  {
-            let trace_owner = arc_ptr_alloc(i32(0))?; let trace: Ref<_> = trace_owner:get().*;
+            let trace_owner = arc_ptr_alloc(i32(0))?; let trace: RefMut<_> = trace_owner:get().*;
             let mut value = read(trace_owner:get(), 1 == 0)?;
             let mut valid = value == i32(6) && trace == i32(213);
             trace = i32(0);
@@ -598,7 +598,7 @@ fn weak_payloads_require_upgrade_before_dereference_or_field_access() {
     run(r#"
 fn read(value: WeakPtr<Resource>) -> i32 { let owner = value:upgrade()!; owner:get().digit }
         fn main() -> i32 | Err<_> {
-            let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+            let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
             let mut value = shared_resource(trace_owner:get(), 1);
             if (read(value:downgrade()) == 1) { 0 } else { 1 }
         }
@@ -610,7 +610,7 @@ fn pointer_replace_transfers_managed_values_and_leaves_ordinary_names_available(
     run(r#"
 fn replace(value: i32) -> i32  { value + 1 }
     fn main() -> i32 | Err<_> {
-        let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+        let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         {
             let value_owner = arc_ptr_alloc(resource_make(trace_owner:get(), 1))?; let value: Ref<_> = value_owner:get().*;
             { let mut old = (value_owner:get()):replace(resource_make(trace_owner:get(), 2)); };

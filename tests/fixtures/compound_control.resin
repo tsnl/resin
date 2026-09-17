@@ -33,7 +33,7 @@ fn kernel(i: u64, root: Ptr<State>) {
 		let mut flag = i32(1) == 2;
 		flag = i == u64(0) && touch(root) == u32(0);
 		let mut values = [u32(0), u32(0)];
-		values(touch(root) - u32(1)) = if (flag) {
+		values:at_mut(u64(touch(root) - u32(1))) = if (flag) {
 			touch(root) + u32(9)
 		} else {
 			u32(12)

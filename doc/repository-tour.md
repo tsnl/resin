@@ -384,7 +384,7 @@ Inside the runtime, the useful landmarks are:
 
 Buffers make the host/device boundary concrete. The source `Span<T>` pairs a
 borrowed address with an element count. Arrays and spans return element references
-through `:at(index)` for reads or writes. A pointer-backed span or pointer to an
+through `:at(index)` for reads and `:at_mut(index)` for writes. A pointer-backed span or pointer to an
 array can provide an element pointer through `:lea(index)`; a local array cannot.
 Host indexing checks bounds, while shader indexing is unchecked.
 Host `GpuPtr<T>` and `GpuSpan<T>` retain their allocation and expose checked

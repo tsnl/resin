@@ -140,7 +140,7 @@ fn drop<T>(self: RefMut<Tracked<T>>)  {
             }
 
         fn main() -> i32 | Err<_> {
-            let trace_owner = arc_ptr_alloc(u64(0))?; let trace: Ref<_> = trace_owner:get().*;
+            let trace_owner = arc_ptr_alloc(u64(0))?; let trace: RefMut<_> = trace_owner:get().*;
             {
                 let mut first = tracked_make::<i32>(trace_owner:get(), 7);
                 let mut second = tracked_make::<u64>(trace_owner:get(), 35);

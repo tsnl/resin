@@ -793,7 +793,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
     for receiver in ["values", "holder.values"] {
         for tail in ["", " values:;", " holder.values:;", " holder.values:at(; "] {
             let source = format!(
-                "import {{ \"$/span.resin\" }}; struct FieldsValues<T0> {{ values: T0, }}\nfn main()  {{ let mut values = [i32(1), i32(2)]; let mut holder = FieldsValues<_> {{ values = Span<i32> {{ data = Ptr<i32>(u64(0)), length = u64(2) }} }}; {receiver}:at_mut(0) = 3;{tail} }}"
+                "import {{ \"$/span.resin\" }}; struct FieldsValues<T0> {{ values: T0, }}\nfn main()  {{ let mut values = [i32(1), i32(2)]; let mut holder = FieldsValues<_> {{ values = Span<i32> {{ data = Ptr<i32>(u64(0)), length = u64(2) }} }}; {receiver}:at(0); {receiver}:at_mut(0) = 3;{tail} }}"
             );
             let project = Project::new(&[("main.resin", &source)]);
             let analysis = project.build_hir();
@@ -813,13 +813,22 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
                     "at: (Ref<Span<i32>>, u64) -> Ref<i32>"
                 }
             );
-            let items = analysis.completions(&input, offset);
-            assert!(
-                items
-                    .iter()
-                    .any(|item| item.name == "at"
-                        && item.kind == resin_hir::DefinitionKind::Function)
+            let mutable_offset = source.find(":at_mut(0)").unwrap() + 1;
+            assert_eq!(
+                analysis.hover(&input, mutable_offset).unwrap().text,
+                if receiver == "values" {
+                    "at_mut: (RefMut<[i32; 2]>, u64) -> RefMut<i32>"
+                } else {
+                    "at_mut: (Ref<Span<i32>>, u64) -> RefMut<i32>"
+                }
             );
+            let items = analysis.completions(&input, offset);
+            for name in ["at", "at_mut"] {
+                assert!(
+                    items.iter().any(|item| item.name == name
+                        && item.kind == resin_hir::DefinitionKind::Function)
+                );
+            }
             if !tail.is_empty() {
                 let offset = source.rfind(":;").or_else(|| source.rfind(":at(")).unwrap() + 1;
                 let items = analysis.completions(&input, offset);
