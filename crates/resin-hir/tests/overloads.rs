@@ -42,19 +42,6 @@ fn selected_body_errors_do_not_disappear() {
 }
 
 #[test]
-fn ambiguous_overloads_are_rejected() {
-    assert!(
-        hir_module(
-            r#"fn select<T>(value: T) -> T { value }
-        fn select(value: i32) -> i32 { value }
-        fn main() -> i32 { select(i32(1)) }
-    "#
-        )
-        .is_err()
-    );
-}
-
-#[test]
 fn receiver_calls_are_free_function_calls() {
     hir_module(
         r#"
@@ -76,4 +63,33 @@ fn local_function_values_shadow_primitive_operations() {
 fn numeric_literals_receive_context_from_source_overloads_of_primitive_names() {
     hir_module("fn replace(value: i32) -> i32 { value + 1 } fn use() -> bool { replace(1) == 2 }")
         .unwrap();
+}
+
+#[test]
+fn rejected_candidates_do_not_constrain_later_trials() {
+    let candidates = [
+        "fn choose(value: i64, flag: bool) -> i64 { value }",
+        "fn choose(value: i32, count: i32) -> i32 { value + count }",
+    ];
+    for order in [[0, 1], [1, 0]] {
+        hir_module(&format!(
+            "{} {} fn main() -> i32 {{ choose(20, i32(22)) }}",
+            candidates[order[0]], candidates[order[1]],
+        ))
+        .unwrap();
+    }
+}
+
+#[test]
+fn unresolved_overloads_report_ambiguity_at_the_solver_fixed_point() {
+    let error = hir_module(
+        "fn choose<T>(value: T) -> T { value }
+         fn choose(value: i32) -> i32 { value }
+         fn main() -> i32 { choose(i32(1)) }",
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("ambiguous overload of `choose`"),
+        "{error}"
+    );
 }

@@ -1929,6 +1929,8 @@ impl GenerateError {
 /// A signature query over the overload set visible where the operation was written.
 /// Substitution selects one signature; importing more operations at a caller does
 /// not change this set. No source lookup or function-body probing is deferred.
+/// Deferred selection uses operand types and explicit type arguments, without an
+/// expected result. The selected result is checked by the consuming expression.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OperationLookup {
     pub primitive: Option<Arc<str>>,
