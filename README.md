@@ -24,19 +24,16 @@ easier to reuse:
 
 - **Graphics middleware.** GPU radix sorting, prefix scans, and other building
   blocks should be libraries you can bring into your renderer or simulation.
-- **Computational primitives across CPU and GPU.** BVHs, raycasting, and spatial
-  queries using structures such as BSP trees belong in reusable libraries too.
-  Share the functions and data types, then choose where the work runs.
-- **Portability across backends.** Vulkan today, with Metal and eventually WebGPU
-  as future directions. The aim is to carry useful libraries across graphics APIs.
+- **Portability across backends.** Vulkan today, with Metal as a future direction.
+  The aim is to carry useful libraries across graphics APIs.
 - **A language you enjoy using every day.** Type inference, methods, operator
   overloading, `Err` and `?`, automatic resource cleanup, C interop, a formatter,
   and editor support make room for application code and tools alongside the
   graphics work. Systems programming should feel direct, ergonomic, and fun.
 
 Resin is early and evolving. CPU compilation and Vulkan compute and rendering work
-today; the middleware ecosystem above is a goal, and native Metal and WebGPU
-backends are not implemented. Host builds target 64-bit Linux, macOS, and Windows
+today; the middleware ecosystem above is a goal, and a native Metal backend is
+not implemented. Host builds target 64-bit Linux, macOS, and Windows
 and run without Vulkan or a GPU. GPU programs need a compatible
 [Vulkan device](doc/shaders.md#gpu-requirements); macOS GPU compatibility is still limited.
 
